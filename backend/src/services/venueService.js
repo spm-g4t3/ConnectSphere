@@ -9,13 +9,15 @@
  * failure partway through would leave a half-built venue. A function body is a
  * single transaction, which removes that whole class of problem.
  *
- * Input validation belongs to SCRUM-94. For now the database constraints from
- * 002_venues.sql are the backstop, and this module translates the resulting
- * Postgres error codes into something a caller can act on.
+ * Input is validated before any network call (SCRUM-94). The database
+ * constraints in 002_venues.sql remain the backstop for anything validation
+ * deliberately does not check -- unknown lookup codes, and writes made outside
+ * this service -- and translateError turns those into typed errors.
  */
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
+import { validateCreateVenue, validateUpdateVenue } from '../validation/venueValidation.js';
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -71,14 +73,17 @@ function translateError(error) {
  * @returns {Promise<object>} the created venue, fully populated
  */
 export async function createVenue(input, userId = null) {
+  // Throws before any network call, listing every problem at once.
+  const venue = validateCreateVenue(input);
+
   const { data, error } = await supabase.rpc('create_venue', {
-    p_name: input.name,
-    p_location: input.location,
-    p_max_capacity: input.maxCapacity,
-    p_layouts: input.layouts ?? [],
-    p_accessibility: input.accessibility ?? [],
-    p_facilities: input.facilities ?? [],
-    p_hours: input.hours ?? [],
+    p_name: venue.name,
+    p_location: venue.location,
+    p_max_capacity: venue.maxCapacity,
+    p_layouts: venue.layouts ?? [],
+    p_accessibility: venue.accessibility ?? [],
+    p_facilities: venue.facilities ?? [],
+    p_hours: venue.hours ?? [],
     p_user_id: userId,
   });
 
@@ -100,15 +105,17 @@ export async function createVenue(input, userId = null) {
  * @returns {Promise<object>} the updated venue
  */
 export async function updateVenue(id, changes, userId = null) {
+  const update = validateUpdateVenue(changes);
+
   const { error } = await supabase.rpc('update_venue', {
     p_id: id,
-    p_name: changes.name ?? null,
-    p_location: changes.location ?? null,
-    p_max_capacity: changes.maxCapacity ?? null,
-    p_layouts: changes.layouts ?? null,
-    p_accessibility: changes.accessibility ?? null,
-    p_facilities: changes.facilities ?? null,
-    p_hours: changes.hours ?? null,
+    p_name: update.name ?? null,
+    p_location: update.location ?? null,
+    p_max_capacity: update.maxCapacity ?? null,
+    p_layouts: update.layouts ?? null,
+    p_accessibility: update.accessibility ?? null,
+    p_facilities: update.facilities ?? null,
+    p_hours: update.hours ?? null,
     p_user_id: userId,
   });
 

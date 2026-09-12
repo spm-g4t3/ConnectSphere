@@ -14,10 +14,17 @@ export class AppError extends Error {
   }
 }
 
-/** Input the database or the domain rules refused. */
+/**
+ * Input the database or the domain rules refused.
+ *
+ * `details` lists every problem found, as [{ field, message }], so a caller
+ * can fix a whole form in one pass instead of resubmitting to discover the
+ * next fault. It defaults to [] for errors that are not field-specific.
+ */
 export class ValidationError extends AppError {
-  constructor(message) {
+  constructor(message, details = []) {
     super(message, 400);
+    this.details = details;
   }
 }
 
