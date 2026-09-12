@@ -7,7 +7,8 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:check": "node scripts/check-db.js"
+    "db:check": "node scripts/check-db.js",
+    "venue:check": "node scripts/check-venue-service.js"
   },
   "devDependencies": {
     "vitest": "^5.0.0"
