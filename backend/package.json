@@ -1,9 +1,19 @@
 {
-  "name": "backend",
-  "version": "1.0.0",
+  "name": "connectsphere-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ConnectSphere API server",
+  "type": "module",
   "scripts": {
-    "start": "node app.js",
-    "dev": "nodemon app.js"
+    "start": "node src/app.js",
+    "dev": "node --watch src/app.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:check": "node scripts/check-db.js",
+    "venue:check": "node scripts/check-venue-service.js"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.0"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
