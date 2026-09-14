@@ -1,0 +1,214 @@
+/**
+ * Event request status vocabulary.
+ *
+ * SCRUM-44: Define and map event request status stages.
+ *
+ * The database (001_event_requests.sql) decides which statuses are *storable*.
+ * This module decides what they *mean*: what an Event Organiser sees, and which
+ * status changes are legal.
+ *
+ * Deliberately free of imports, database calls and framework code. It is pure
+ * data and pure functions, so it can be tested in isolation and reasoned about
+ * without running anything else.
+ */
+
+
+/**
+ * The ten statuses, spelled exactly as the Postgres enum `event_request_status`.
+ *
+ * These two lists must stay identical. If they drift, the database rejects the
+ * write at runtime -- so a test asserts the match rather than leaving it to
+ * whoever edits one file to remember the other.
+ */
+export const STATUS = Object.freeze({
+  DRAFT: 'draft',
+  SUBMITTED: 'submitted',
+  UNDER_REVIEW: 'under_review',
+  PENDING_CLARIFICATION: 'pending_clarification',
+  APPROVED: 'approved',
+  PLANNING: 'planning',
+  CONFIRMED: 'confirmed',
+  COMPLETED: 'completed',
+  REJECTED: 'rejected',
+  CANCELLED: 'cancelled',
+});
+
+
+/**
+ * Organiser-facing groups.
+ *
+ * Why a second layer on top of STATUS: groups are the *stable* contract, while
+ * statuses are internal detail that will grow. When the team later adds, say,
+ * 'postponed', it maps into an existing group and the UI needs no change.
+ * React also styles on the group, so colours and icons do not churn either.
+ *
+ * AWAITING_REVIEW and ACTION_REQUIRED are the two halves of what AC3 calls
+ * "awaiting action". Splitting them is the most useful thing the status page
+ * does: it tells the Organiser whether to wait or to go and do something.
+ */
+export const STATUS_GROUP = Object.freeze({
+  DRAFT: 'DRAFT',
+  AWAITING_REVIEW: 'AWAITING_REVIEW',   // waiting on ConnectSphere
+  UNDER_REVIEW: 'UNDER_REVIEW',
+  ACTION_REQUIRED: 'ACTION_REQUIRED',   // waiting on the Organiser
+  APPROVED: 'APPROVED',
+  CONFIRMED: 'CONFIRMED',
+  COMPLETED: 'COMPLETED',
+  REJECTED: 'REJECTED',
+  CANCELLED: 'CANCELLED',
+});
+
+
+/**
+ * What the Organiser sees for each status.
+ *
+ * Descriptions are written in the second person because they are shown to the
+ * Organiser directly, and the customer brief asks that the system "not assume
+ * that users understand ConnectSphere's internal processes".
+ *
+ * Object.freeze is shallow, so each entry is frozen too.
+ */
+export const STATUS_DISPLAY = Object.freeze({
+  [STATUS.DRAFT]: Object.freeze({
+    label: 'Draft',
+    group: STATUS_GROUP.DRAFT,
+    description: 'Not yet submitted to ConnectSphere. You can keep editing it.',
+  }),
+  [STATUS.SUBMITTED]: Object.freeze({
+    label: 'Submitted',
+    group: STATUS_GROUP.AWAITING_REVIEW,
+    description: 'Received by ConnectSphere and waiting to be picked up by a Coordinator.',
+  }),
+  [STATUS.UNDER_REVIEW]: Object.freeze({
+    label: 'Under Review',
+    group: STATUS_GROUP.UNDER_REVIEW,
+    description: 'A Coordinator is assessing your request.',
+  }),
+  [STATUS.PENDING_CLARIFICATION]: Object.freeze({
+    label: 'Action Needed',
+    group: STATUS_GROUP.ACTION_REQUIRED,
+    description: 'A Coordinator needs more information from you before this can move forward.',
+  }),
+  [STATUS.APPROVED]: Object.freeze({
+    label: 'Approved',
+    group: STATUS_GROUP.APPROVED,
+    description: 'Your request has been accepted. Arrangements will now begin.',
+  }),
+  [STATUS.PLANNING]: Object.freeze({
+    label: 'In Planning',
+    group: STATUS_GROUP.APPROVED,
+    description: 'Venue and equipment arrangements are being made.',
+  }),
+  [STATUS.CONFIRMED]: Object.freeze({
+    label: 'Confirmed',
+    group: STATUS_GROUP.CONFIRMED,
+    description: 'All arrangements are complete. Your event is going ahead.',
+  }),
+  [STATUS.COMPLETED]: Object.freeze({
+    label: 'Completed',
+    group: STATUS_GROUP.COMPLETED,
+    description: 'This event has taken place.',
+  }),
+  [STATUS.REJECTED]: Object.freeze({
+    label: 'Rejected',
+    group: STATUS_GROUP.REJECTED,
+    description: 'This request was not accepted. See the Coordinator notes for the reason.',
+  }),
+  [STATUS.CANCELLED]: Object.freeze({
+    label: 'Cancelled',
+    group: STATUS_GROUP.CANCELLED,
+    description: 'This event was called off.',
+  }),
+});
+
+
+/**
+ * Which status changes are legal.
+ *
+ * Two rules worth spelling out:
+ *
+ *  - pending_clarification goes back to under_review, not to submitted. The
+ *    Coordinator already holds the request; the Organiser is answering them,
+ *    not re-joining the queue.
+ *
+ *  - cancelled is reachable from every live status including confirmed. The
+ *    customer brief has Organisers postponing or cancelling "due to unforeseen
+ *    circumstances" with no stage limit, and real events are cancelled late.
+ *
+ * completed, rejected and cancelled are terminal: nothing leads out of them, so
+ * a rejected request can never quietly become confirmed.
+ */
+export const ALLOWED_TRANSITIONS = Object.freeze({
+  [STATUS.DRAFT]: Object.freeze([
+    STATUS.SUBMITTED,
+    STATUS.CANCELLED,
+  ]),
+  [STATUS.SUBMITTED]: Object.freeze([
+    STATUS.UNDER_REVIEW,
+    STATUS.CANCELLED,
+  ]),
+  [STATUS.UNDER_REVIEW]: Object.freeze([
+    STATUS.PENDING_CLARIFICATION,
+    STATUS.APPROVED,
+    STATUS.REJECTED,
+    STATUS.CANCELLED,
+  ]),
+  [STATUS.PENDING_CLARIFICATION]: Object.freeze([
+    STATUS.UNDER_REVIEW,
+    STATUS.CANCELLED,
+  ]),
+  [STATUS.APPROVED]: Object.freeze([
+    STATUS.PLANNING,
+    STATUS.CANCELLED,
+  ]),
+  [STATUS.PLANNING]: Object.freeze([
+    STATUS.CONFIRMED,
+    STATUS.CANCELLED,
+  ]),
+  [STATUS.CONFIRMED]: Object.freeze([
+    STATUS.COMPLETED,
+    STATUS.CANCELLED,
+  ]),
+  [STATUS.COMPLETED]: Object.freeze([]),
+  [STATUS.REJECTED]: Object.freeze([]),
+  [STATUS.CANCELLED]: Object.freeze([]),
+});
+
+
+/**
+ * Is moving from one status to another allowed?
+ *
+ * SCRUM-45 enforces this before writing a status change.
+ *
+ * Object.hasOwn rather than a plain lookup: `ALLOWED_TRANSITIONS['constructor']`
+ * would otherwise find an inherited property and blow up on .includes(). Reading
+ * only the object's own keys makes any unrecognised input simply false.
+ *
+ * @param {string} from - current status
+ * @param {string} to   - proposed status
+ * @returns {boolean}
+ */
+export function canTransition(from, to) {
+  if (!Object.hasOwn(ALLOWED_TRANSITIONS, from)) return false;
+  return ALLOWED_TRANSITIONS[from].includes(to);
+}
+
+
+/**
+ * The Organiser-facing view of a status.
+ *
+ * Returns the exact shape the API sends to React, so the frontend keeps no
+ * copy of the status list and the two can never disagree.
+ *
+ * Returns undefined for an unrecognised status. SCRUM-47 replaces that with a
+ * safe fallback so the UI can never be handed nothing.
+ *
+ * @param {string} status
+ * @returns {{status: string, label: string, group: string, description: string}|undefined}
+ */
+export function getStatusDisplay(status) {
+  if (!Object.hasOwn(STATUS_DISPLAY, status)) return undefined;
+
+  const { label, group, description } = STATUS_DISPLAY[status];
+  return Object.freeze({ status, label, group, description });
+}
