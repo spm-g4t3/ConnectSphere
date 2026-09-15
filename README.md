@@ -94,3 +94,21 @@ test(SCRUM-14): cover status transition edge cases
 ### Definition of Done
 
 A story is done when its acceptance criteria are met, it has tests, it has been reviewed and merged to `dev`, and the Jira ticket has been moved to Done.
+
+## Testing
+
+| Command | What it proves | Needs credentials |
+|---|---|---|
+| `npm test` | The unit suite. Run on every pull request by CI. | No |
+| `npm run db:check` | The migrations were applied and the seed data landed. | Yes |
+| `npm run venue:check` | The venue service end to end: the transactional RPCs, the schema constraints, the audit trigger and retirement, against a real database. | Yes |
+
+Run all three from `backend/`.
+
+Test files live in `backend/tests/`, mirroring `backend/src/`. Each `describe` block is named after the acceptance criterion it proves, so a requirement traces to the test that covers it without a separate document to keep in step.
+
+Tests that would otherwise reach Supabase replace the client with a mock, which is what lets the suite run in CI with no `.env`. The one exception is deliberate: `backend/tests/config/supabaseClient.test.js` re-imports the real module to prove it refuses a half-configured environment.
+
+### Why the migrations have no unit tests
+
+`backend/db/migrations/` is DDL that only Postgres can execute. Testing it means running it, which needs a live database and a secret key — and that key bypasses row level security entirely, so it does not belong in CI. The two check scripts above are the proof instead, run by hand before opening a pull request. `backend/tests/domain/eventRequestStatus.test.js` covers the one part that can be checked statically: it reads the status enum out of `001_event_requests.sql` and asserts the JavaScript vocabulary still matches it.
