@@ -19,11 +19,17 @@ import {
   ConflictError,
 } from '../src/errors.js';
 
-/** Every concrete error, with the status Express must send for it. */
+/**
+ * Every concrete error, with the status Express must send for it.
+ *
+ * Objects rather than tuples so the titles can name fields ($name, $status)
+ * instead of relying on positional printf placeholders, which silently print
+ * the wrong element when the shape changes.
+ */
 const TYPED_ERRORS = [
-  ['ValidationError', ValidationError, 400],
-  ['NotFoundError', NotFoundError, 404],
-  ['ConflictError', ConflictError, 409],
+  { name: 'ValidationError', Err: ValidationError, status: 400 },
+  { name: 'NotFoundError', Err: NotFoundError, status: 404 },
+  { name: 'ConflictError', Err: ConflictError, status: 409 },
 ];
 
 
@@ -31,7 +37,7 @@ const TYPED_ERRORS = [
 // The status is the whole point of these classes
 // ---------------------------------------------------------------------------
 describe('each error carries the status Express should send', () => {
-  it.each(TYPED_ERRORS)('%s reports %i', (_name, Err, status) => {
+  it.each(TYPED_ERRORS)('$name reports $status', ({ Err, status }) => {
     expect(new Err('something went wrong').status).toBe(status);
   });
 
@@ -39,7 +45,7 @@ describe('each error carries the status Express should send', () => {
     expect(new AppError('teapot', 418).status).toBe(418);
   });
 
-  it.each(TYPED_ERRORS)('%s keeps the message it was given', (_name, Err) => {
+  it.each(TYPED_ERRORS)('$name keeps the message it was given', ({ Err }) => {
     expect(new Err('venue 42 not found').message).toBe('venue 42 not found');
   });
 });
@@ -49,23 +55,23 @@ describe('each error carries the status Express should send', () => {
 // One catch block has to be able to handle all of them
 // ---------------------------------------------------------------------------
 describe('the error hierarchy', () => {
-  it.each(TYPED_ERRORS)('%s is an AppError', (_name, Err) => {
+  it.each(TYPED_ERRORS)('$name is an AppError', ({ Err }) => {
     expect(new Err('x')).toBeInstanceOf(AppError);
   });
 
-  it.each(TYPED_ERRORS)('%s is still an Error', (_name, Err) => {
+  it.each(TYPED_ERRORS)('$name is still an Error', ({ Err }) => {
     // So it survives anything that only understands built-in errors --
     // console.error, a test runner's diff, an unhandled rejection handler.
     expect(new Err('x')).toBeInstanceOf(Error);
   });
 
-  it.each(TYPED_ERRORS)('%s names itself, rather than reporting "Error"', (name, Err) => {
+  it.each(TYPED_ERRORS)('$name names itself, rather than reporting "Error"', ({ name, Err }) => {
     // errors.js sets this.name from the constructor, so a log line says which
     // kind of failure it was without anyone having to inspect the status.
     expect(new Err('x').name).toBe(name);
   });
 
-  it.each(TYPED_ERRORS)('%s produces a usable stack trace', (_name, Err) => {
+  it.each(TYPED_ERRORS)('$name produces a usable stack trace', ({ Err }) => {
     expect(typeof new Err('x').stack).toBe('string');
   });
 
