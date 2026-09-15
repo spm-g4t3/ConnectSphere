@@ -1,14 +1,27 @@
 /**
- * Shared Supabase client for the ConnectSphere API.
+ * Shared Supabase clients for the ConnectSphere API.
  *
- * This is the only place the database connection is created. Everything that
- * touches Supabase imports this client rather than constructing its own, so
- * there is a single place to change configuration.
+ * This is the only place database/auth connections are created. Everything
+ * that touches Supabase imports from here rather than constructing its own
+ * client, so there is a single place to change configuration.
  *
- * SECURITY: this holds the secret key, which bypasses row level security
- * completely. It is server-only and must never be imported from frontend code.
- * That is why it lives under backend/src/ -- the boundary is structural rather
- * than a rule someone has to remember.
+ * SECURITY: supabaseAdmin holds the secret key, which bypasses row level
+ * security completely. It is server-only and must never be imported from
+ * frontend code. PLS READ
+ *
+ * Two clients, not one:
+ * supabaseAuth handles sign-in and sign-out. supabaseAdmin handles privileged
+ * data queries. They must stay separate: calling signInWithPassword() (or
+ * signOut()) on a client sets that client's in-memory auth state to the
+ * affected user for the rest of the request, overriding its API key. If the
+ * same client were then used for a privileged query, that query would run as
+ * the logged-in user, subject to row level security, instead of the secret
+ * key RLS is meant to bypass, and would silently return zero rows.
+ *
+ * persistSession/autoRefreshToken are off on both: this is a single
+ * long-lived server process shared by every caller, not a browser. There is
+ * no storage to persist a session into, and no per-user session that should
+ * carry over between unrelated requests.
  */
 
 import 'dotenv/config';
@@ -32,14 +45,19 @@ if (!SUPABASE_SECRET_KEY) {
   );
 }
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
+// Used for sign-in and sign-out — never used for privileged queries
+export const supabaseAuth = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
   auth: {
-    // This is a server, not a browser. There is no storage to persist a session
-    // into and no signed-in user whose token needs refreshing -- every request
-    // authenticates with the secret key.
     persistSession: false,
     autoRefreshToken: false,
   },
 });
 
-export default supabase;
+// Used for privileged data queries only — always bypasses RLS, never used
+// for sign-in/sign-out
+export const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+  },
+});
