@@ -23,6 +23,10 @@ import { ValidationError } from '../errors.js';
 /** HH:MM or HH:MM:SS, with real hour and minute ranges. */
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)(:([0-5]\d))?$/;
 
+/** The shape gen_random_uuid() produces, which is what venues.id holds. */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const ATTRIBUTE_FIELDS = ['layouts', 'accessibility', 'facilities'];
 
 /** 'HH:MM' -> 'HH:MM:SS', so two times are always compared in the same shape. */
@@ -76,22 +80,25 @@ function checkRequiredText(errors, field, value) {
  *
  * Strict about type on purpose. "40" is rejected rather than coerced, so a
  * caller sending strings finds out here instead of the bug surfacing later.
+ *
+ * Takes the field name because the same rule guards two different fields: a
+ * venue's maxCapacity, and the minCapacity a search filters by.
  */
-function checkCapacity(errors, value) {
+function checkCapacity(errors, field, value) {
   if (value === undefined || value === null) {
-    errors.add('maxCapacity', 'is required');
+    errors.add(field, 'is required');
     return null;
   }
   if (typeof value !== 'number' || Number.isNaN(value)) {
-    errors.add('maxCapacity', 'must be a number');
+    errors.add(field, 'must be a number');
     return null;
   }
   if (!Number.isInteger(value)) {
-    errors.add('maxCapacity', 'must be a whole number');
+    errors.add(field, 'must be a whole number');
     return null;
   }
   if (value <= 0) {
-    errors.add('maxCapacity', 'must be greater than zero');
+    errors.add(field, 'must be greater than zero');
     return null;
   }
   return value;
@@ -195,7 +202,7 @@ export function validateCreateVenue(input) {
 
   normalised.name = checkRequiredText(errors, 'name', input.name);
   normalised.location = checkRequiredText(errors, 'location', input.location);
-  normalised.maxCapacity = checkCapacity(errors, input.maxCapacity);
+  normalised.maxCapacity = checkCapacity(errors, 'maxCapacity', input.maxCapacity);
 
   for (const field of ATTRIBUTE_FIELDS) {
     if (input[field] !== undefined) {
@@ -247,7 +254,7 @@ export function validateUpdateVenue(changes) {
   }
 
   if (changes.maxCapacity !== undefined) {
-    normalised.maxCapacity = checkCapacity(errors, changes.maxCapacity);
+    normalised.maxCapacity = checkCapacity(errors, 'maxCapacity', changes.maxCapacity);
   }
 
   for (const field of ATTRIBUTE_FIELDS) {
@@ -258,6 +265,81 @@ export function validateUpdateVenue(changes) {
 
   if (changes.hours !== undefined) {
     normalised.hours = checkHours(errors, changes.hours);
+  }
+
+  throwIfInvalid(errors);
+  return normalised;
+}
+
+/**
+ * Validate a venue id before it reaches the database.
+ *
+ * SCRUM-110. Retirement is the only destructive operation on the catalogue, so
+ * a malformed id is refused here rather than sent to Postgres and returned as
+ * a driver-level cast error that names no field.
+ *
+ * @param {string} id
+ * @returns {string} the id, unchanged
+ * @throws {ValidationError}
+ */
+export function validateVenueId(id) {
+  const errors = createErrorCollector();
+
+  if (typeof id !== 'string' || !UUID_PATTERN.test(id)) {
+    errors.add('id', 'must be a venue id');
+  }
+
+  throwIfInvalid(errors);
+  return id;
+}
+
+/**
+ * An unfilled search box is not a filter.
+ *
+ * This is the one place blankness is forgiven rather than reported. On create
+ * and update a blank name is a mistake worth naming; on a search it is just a
+ * field the user did not fill in, and rejecting it would make an empty form
+ * unsubmittable.
+ */
+function isUnset(value) {
+  return (
+    value === undefined ||
+    value === null ||
+    (typeof value === 'string' && value.trim() === '')
+  );
+}
+
+/**
+ * Validate the filters a venue search may be narrowed by.
+ *
+ * SCRUM-111. Every filter is optional and, unlike validateUpdateVenue, an
+ * empty object is valid -- "show me everything" is a legitimate search rather
+ * than a caller bug.
+ *
+ * Retirement is deliberately not a filter. AC3 makes active-only the rule for
+ * every search, not an option a caller can switch off, so searchVenues applies
+ * it unconditionally and no filter here can reach a retired venue.
+ *
+ * @param {object} [filters]
+ * @param {string} [filters.location]     matched as a substring, case-insensitively
+ * @param {number} [filters.minCapacity]  venues that seat at least this many
+ * @returns {object} a normalised copy holding only the filters actually supplied
+ * @throws {ValidationError}
+ */
+export function validateSearchFilters(filters = {}) {
+  if (typeof filters !== 'object' || filters === null || Array.isArray(filters)) {
+    throw new ValidationError('Invalid venue search -- expected an object');
+  }
+
+  const errors = createErrorCollector();
+  const normalised = {};
+
+  if (!isUnset(filters.location)) {
+    normalised.location = checkRequiredText(errors, 'location', filters.location);
+  }
+
+  if (!isUnset(filters.minCapacity)) {
+    normalised.minCapacity = checkCapacity(errors, 'minCapacity', filters.minCapacity);
   }
 
   throwIfInvalid(errors);

@@ -17,7 +17,12 @@
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
-import { validateCreateVenue, validateUpdateVenue } from '../validation/venueValidation.js';
+import {
+  validateCreateVenue,
+  validateUpdateVenue,
+  validateVenueId,
+  validateSearchFilters,
+} from '../validation/venueValidation.js';
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -37,8 +42,14 @@ function translateError(error) {
     return new ValidationError(`A value was rejected by the database: ${detail}`);
   }
 
-  // foreign key: a layout / facility / accessibility code that does not exist
+  // foreign key. Two very different causes, so read the constraint name out of
+  // the message rather than blaming the lookup tables for both.
   if (code === '23503') {
+    if (/last_modified_by/.test(detail)) {
+      return new ValidationError(
+        `The editing user does not exist: ${detail}`,
+      );
+    }
     return new ValidationError(
       `Unknown code referenced. Check the value exists in room_layouts, ` +
       `accessibility_features or facilities: ${detail}`,
@@ -50,7 +61,12 @@ function translateError(error) {
     return new ConflictError(`That record already exists: ${detail}`);
   }
 
-  // raised by update_venue when the id matches nothing
+  // raised by retire_venue when the venue has already been retired (005)
+  if (code === 'PT409') {
+    return new ConflictError(detail);
+  }
+
+  // raised by update_venue and retire_venue when the id matches nothing
   if (code === 'P0002' || /not found/i.test(detail)) {
     return new NotFoundError(detail || 'Venue not found');
   }
@@ -169,4 +185,87 @@ export async function getVenueById(id) {
       .map(({ day_of_week, opens_at, closes_at }) => ({ day_of_week, opens_at, closes_at }))
       .sort((a, b) => a.day_of_week - b.day_of_week),
   };
+}
+
+/**
+ * Retire a venue.
+ *
+ * SCRUM-110. AC3: a retired venue no longer appears in searches, while its
+ * past bookings remain viewable. This is a soft delete -- retire_venue (005)
+ * stamps retired_at and never removes the row, so getVenueById still finds it
+ * and anything referencing it keeps resolving.
+ *
+ * The editing user matters beyond bookkeeping: retire_venue writes it in the
+ * same statement as retired_at so the audit trigger in 003 attributes the
+ * retirement to the right Venue Staff member rather than to whoever happened
+ * to edit the venue last.
+ *
+ * @param {string} id
+ * @param {string|null} userId  the Venue Staff member retiring it
+ * @returns {Promise<object>} the venue, with retiredAt now set
+ * @throws {NotFoundError} no venue with that id
+ * @throws {ConflictError} it was already retired
+ */
+export async function retireVenue(id, userId = null) {
+  // Throws before any network call, so a malformed id never reaches Postgres
+  // to come back as a cast error that names no field.
+  validateVenueId(id);
+
+  const { error } = await supabase.rpc('retire_venue', {
+    p_id: id,
+    p_user_id: userId,
+  });
+
+  if (error) throw translateError(error);
+
+  // Read back rather than trusting the write: retired_at is set by the
+  // database clock, so this is the only way to report the real timestamp.
+  return getVenueById(id);
+}
+
+/**
+ * Search the venue catalogue.
+ *
+ * SCRUM-111. AC3 again, from the other side: retired venues must not appear
+ * here. The filter is applied once, server-side, by .is('retired_at', null) --
+ * the two partial indexes in 002 exist for exactly this predicate. There is
+ * deliberately no second filter over the returned rows: a duplicated rule is a
+ * rule that can disagree with itself, and the caller cannot opt out of this
+ * one anyway.
+ *
+ * Attribute filters (facilities, layouts, accessibility) are not supported
+ * yet. Those live in join tables and turn this into a multi-way join, which is
+ * the known cost of the lookup-table design and a change worth its own ticket.
+ *
+ * @param {object} [filters]
+ * @param {string} [filters.location]     matched as a substring, case-insensitively
+ * @param {number} [filters.minCapacity]  venues that seat at least this many
+ * @returns {Promise<object[]>} active venues, ordered by name
+ */
+export async function searchVenues(filters = {}) {
+  const search = validateSearchFilters(filters);
+
+  let query = supabase
+    .from('venues')
+    .select('id, name, location, max_capacity')
+    .is('retired_at', null);
+
+  if (search.location !== undefined) {
+    query = query.ilike('location', `%${search.location}%`);
+  }
+
+  if (search.minCapacity !== undefined) {
+    query = query.gte('max_capacity', search.minCapacity);
+  }
+
+  const { data, error } = await query.order('name');
+
+  if (error) throw translateError(error);
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    location: row.location,
+    maxCapacity: row.max_capacity,
+  }));
 }

@@ -1,19 +1,31 @@
 /**
- * End-to-end proof for the venue service (SCRUM-106).
+ * End-to-end proof for the venue service (SCRUM-106, SCRUM-110, SCRUM-111).
  *
  * Run with: npm run venue:check
  *
  * Exercises the whole stack in one go -- service, the transactional RPC,
- * the schema constraints from 002, and the audit trigger from 003 -- then
- * removes everything it created.
+ * the schema constraints from 002, the audit trigger from 003 and retirement
+ * from 005 -- then removes everything it created.
+ *
+ * This is the counterpart to tests/services/venueService.test.js, which mocks
+ * the database. Only this script can show that Postgres really raises the
+ * codes the service claims to translate, so it is what proves PT409 and the
+ * retirement audit row actually happen.
  *
  * Exits non-zero on any failure.
  */
 
 import { supabase } from '../src/config/supabaseClient.js';
-import { createVenue, updateVenue, getVenueById } from '../src/services/venueService.js';
+import {
+  createVenue,
+  updateVenue,
+  getVenueById,
+  retireVenue,
+  searchVenues,
+} from '../src/services/venueService.js';
 
 const NAME = `__check_venue_${Date.now()}`;
+const LOCATION = 'Level 2, SCIS';
 
 let created = null;
 let failures = 0;
@@ -36,7 +48,7 @@ async function main() {
   // --- create, with attributes across all four child tables ---------------
   created = await createVenue({
     name: NAME,
-    location: 'Level 2, SCIS',
+    location: LOCATION,
     maxCapacity: 40,
     layouts: ['classroom', 'theatre'],
     facilities: ['projector', 'wifi'],
@@ -112,6 +124,69 @@ async function main() {
     notFound = err.status === 404;
   }
   check('missing venue raises NotFoundError', notFound);
+
+  // --- search sees it while it is active (SCRUM-111) -----------------------
+  const activeBefore = await searchVenues({ location: LOCATION });
+  check(
+    'active venue appears in search',
+    activeBefore.some((venue) => venue.id === created.id),
+    `${activeBefore.length} active here`,
+  );
+
+  // --- retirement (SCRUM-110) ---------------------------------------------
+  // last_modified_by is the only column retire_venue writes and it is a
+  // foreign key to auth.users, so an unknown user has to be named as such
+  // rather than blamed on the lookup tables.
+  let badUser = '';
+  try {
+    await retireVenue(created.id, '00000000-0000-0000-0000-000000000000');
+  } catch (err) {
+    badUser = err.message;
+  }
+  check('unknown editing user rejected', /editing user/i.test(badUser), badUser.slice(0, 48));
+
+  const retired = await retireVenue(created.id, null);
+  check('retiredAt stamped', Boolean(retired.retiredAt), String(retired.retiredAt));
+
+  const activeAfter = await searchVenues({ location: LOCATION });
+  check(
+    'retired venue gone from search',
+    !activeAfter.some((venue) => venue.id === created.id),
+    `${activeAfter.length} active here`,
+  );
+
+  // AC3: gone from searches, but its past bookings -- and so the venue they
+  // point at -- stay viewable.
+  const stillReadable = await getVenueById(created.id);
+  check('retired venue still readable by id', stillReadable.id === created.id);
+
+  // AC4: the retirement is a change, so it belongs in the history.
+  const { data: retireHistory } = await supabase
+    .from('venue_change_history')
+    .select('old_values, new_values, changed_by')
+    .eq('venue_id', created.id)
+    .order('changed_at', { ascending: false })
+    .limit(1);
+
+  check(
+    'retirement recorded as a change from active',
+    JSON.stringify(retireHistory?.[0]?.old_values) === '{"retired_at":null}',
+    JSON.stringify(retireHistory?.[0]?.old_values),
+  );
+  check(
+    'retirement recorded the timestamp',
+    Boolean(retireHistory?.[0]?.new_values?.retired_at),
+    JSON.stringify(retireHistory?.[0]?.new_values),
+  );
+
+  // Retiring twice is the conflict PT409 exists for.
+  let conflictStatus = 0;
+  try {
+    await retireVenue(created.id, null);
+  } catch (err) {
+    conflictStatus = err.status;
+  }
+  check('retiring twice raises ConflictError', conflictStatus === 409, `status ${conflictStatus}`);
 }
 
 async function countVenues() {
@@ -130,5 +205,5 @@ main()
       console.error(`\n${failures} check(s) failed.\n`);
       process.exit(1);
     }
-    console.log('\nAll checks passed. Created, updated, audited, rolled back, cleaned up.\n');
+    console.log('\nAll checks passed. Created, updated, audited, searched, retired, cleaned up.\n');
   });
