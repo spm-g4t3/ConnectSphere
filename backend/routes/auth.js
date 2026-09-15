@@ -44,4 +44,21 @@ router.post('/login', async (req, res) => {
   });
 });
 
+router.post('/logout', async (req, res) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'No active session' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  const { error } = await supabaseAuth.auth.admin.signOut(token);
+
+  if (error) {
+    return res.status(500).json({ error: 'Failed to log out' });
+  }
+
+  res.status(200).json({ message: 'Logged out successfully' });
+});
+
 module.exports = router;
