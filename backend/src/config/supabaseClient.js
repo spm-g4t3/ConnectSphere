@@ -1,27 +1,9 @@
 /**
- * Shared Supabase clients for the ConnectSphere API.
- *
- * This is the only place database/auth connections are created. Everything
- * that touches Supabase imports from here rather than constructing its own
- * client, so there is a single place to change configuration.
- *
- * SECURITY: supabaseAdmin holds the secret key, which bypasses row level
- * security completely. It is server-only and must never be imported from
- * frontend code. PLS READ
- *
- * Two clients, not one:
- * supabaseAuth handles sign-in and sign-out. supabaseAdmin handles privileged
- * data queries. They must stay separate: calling signInWithPassword() (or
- * signOut()) on a client sets that client's in-memory auth state to the
- * affected user for the rest of the request, overriding its API key. If the
- * same client were then used for a privileged query, that query would run as
- * the logged-in user, subject to row level security, instead of the secret
- * key RLS is meant to bypass, and would silently return zero rows.
- *
- * persistSession/autoRefreshToken are off on both: this is a single
- * long-lived server process shared by every caller, not a browser. There is
- * no storage to persist a session into, and no per-user session that should
- * carry over between unrelated requests.
+ * Shared Supabase clients. supabaseAuth handles sign-in/sign-out,
+ * supabaseAdmin handles privileged queries. Kept separate because
+ * signInWithPassword()/signOut() override a client's API key with the
+ * affected user's session, which would break RLS-bypassing queries if
+ * run on the same client afterward.
  */
 
 import 'dotenv/config';
