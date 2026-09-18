@@ -1,10 +1,10 @@
 // AuthContext.jsx
 //
-// Matches the CURRENT backend: only POST /api/auth/login exists.
-// There is no GET /api/auth/me yet, so session restore on page reload
-// trusts what's in sessionStorage rather than re-validating server-side.
-// Ask your backend teammate to add a /me route that checks the Supabase
-// session token — this is a stopgap, not the final version.
+// POST /api/auth/login and POST /api/auth/logout both exist now (SCRUM-96,
+// SCRUM-105). There is still no GET /api/auth/me, so session restore on page
+// reload trusts what's in sessionStorage rather than re-validating
+// server-side. Ask your backend teammate to add a /me route that checks the
+// Supabase session token — this is a stopgap, not the final version.
 //
 
 // make sure Dashboard.jsx / Navigation.jsx key off the same values.
@@ -23,7 +23,7 @@ export function AuthProvider({ children }) {
 
   // Restore from sessionStorage on load. This is a stopgap: it trusts
   // client-side storage rather than asking the server to re-validate the
-  // token, because there's no /me endpoint yet.
+  // token, because there's no /me endpoint yet. THIS IS IMPORTANT TO DO #Important
   useEffect(() => {
     const stored = sessionStorage.getItem(STORAGE_KEY);
     if (stored) {
@@ -60,10 +60,21 @@ export function AuthProvider({ children }) {
     }
   }
 
-  function logout() {
-    // No server-side /logout route yet — this only clears local state.
-    // Ask backend whether Supabase's session should also be invalidated
-    // server-side (supabaseAuth.auth.signOut()).
+  async function logout() {
+    // Revoke the session server-side first (SCRUM-105), then clear local
+    // state regardless of whether the request succeeded — a failed revoke
+    // shouldn't leave the user stuck looking logged in.
+    try {
+      await apiClient.post(
+        "/auth/logout",
+        {},
+        { headers: { Authorization: `Bearer ${session?.access_token}` } },
+      );
+    } catch (err) {
+      const message = err.response?.data?.error || "Failed to log out.";
+      console.error("Logout request failed:", message);
+    }
+
     sessionStorage.removeItem(STORAGE_KEY);
     setUser(null);
     setSession(null);
