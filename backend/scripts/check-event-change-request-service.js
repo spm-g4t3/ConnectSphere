@@ -1,5 +1,5 @@
 /**
- * End-to-end proof for the event change request service (SCRUM-11).
+ * End-to-end proof for the event change request service (SCRUM-11, SCRUM-33).
  *
  * Run with: npm run change-request:check
  *
@@ -144,6 +144,41 @@ async function main() {
     badField = err.status === 400;
   }
   check('invalid changeField rejected', badField);
+
+  // --- SCRUM-33: a malformed event id is rejected without a network call ----
+  let malformedIdRejected = false;
+  try {
+    await createChangeRequest(
+      { eventRequestId: 'not-a-real-id', changeField: 'purpose', requestedChange: 'x' },
+      organiserId,
+    );
+  } catch (err) {
+    malformedIdRejected = err.status === 400;
+  }
+  check('malformed eventRequestId rejected', malformedIdRejected);
+
+  // --- SCRUM-33: requestedChange must be usable for its changeField --------
+  let badAttendanceRejected = false;
+  try {
+    await createChangeRequest(
+      { eventRequestId: eventId, changeField: 'expected_attendance', requestedChange: 'lots' },
+      organiserId,
+    );
+  } catch (err) {
+    badAttendanceRejected = err.status === 400;
+  }
+  check('non-numeric expected_attendance rejected', badAttendanceRejected);
+
+  let badDateRejected = false;
+  try {
+    await createChangeRequest(
+      { eventRequestId: eventId, changeField: 'proposed_start', requestedChange: 'next tuesday' },
+      organiserId,
+    );
+  } catch (err) {
+    badDateRejected = err.status === 400;
+  }
+  check('unparseable proposed_start rejected', badDateRejected);
 }
 
 main()

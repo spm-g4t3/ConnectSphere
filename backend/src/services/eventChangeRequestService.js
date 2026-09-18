@@ -5,6 +5,12 @@
  * already submitted, and record which piece of information or arrangement
  * the change is about (AC1, AC2, AC3).
  *
+ * SCRUM-33: the "correct event" half of validation lives here rather than in
+ * eventChangeRequestValidation.js, because confirming an event exists and
+ * belongs to the caller needs the database. The shape checks that do not --
+ * is this even id-shaped, is this value usable for this field -- are already
+ * done by the time input reaches this function.
+ *
  * Input is validated before any network call (eventChangeRequestValidation.js).
  * The database (005_event_change_requests.sql) remains the backstop for
  * anything validation deliberately does not check -- an event_request_id
@@ -38,6 +44,13 @@ function translateError(error) {
   // foreign key: event_request_id or requested_by does not exist
   if (code === '23503') {
     return new ValidationError(`Referenced record does not exist: ${detail}`);
+  }
+
+  // malformed uuid: a backstop for callers that bypass validateCreateChangeRequest
+  // (SCRUM-33 rejects this earlier, in words an Organiser can read, but a
+  // direct caller of the service should not get a raw driver message either)
+  if (code === '22P02') {
+    return new ValidationError(`Invalid id format: ${detail}`);
   }
 
   return new Error(detail || 'Unexpected database error');
