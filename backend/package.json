@@ -5,7 +5,9 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:check": "node scripts/check-db.js",
+    "venue:check": "node scripts/check-venue-service.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

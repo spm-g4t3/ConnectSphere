@@ -10,7 +10,7 @@
  * Exits non-zero on any failure.
  */
 
-import { supabase } from '../src/config/supabaseClient.js';
+import { supabaseAdmin } from '../src/config/supabaseClient.js';
 import { createVenue, updateVenue, getVenueById } from '../src/services/venueService.js';
 
 const NAME = `__check_venue_${Date.now()}`;
@@ -26,8 +26,8 @@ function check(label, passed, detail = '') {
 async function cleanup() {
   if (!created) return;
   // History first: ON DELETE RESTRICT blocks deleting a venue that has any.
-  await supabase.from('venue_change_history').delete().eq('venue_id', created.id);
-  await supabase.from('venues').delete().eq('id', created.id);
+  await supabaseAdmin.from('venue_change_history').delete().eq('venue_id', created.id);
+  await supabaseAdmin.from('venues').delete().eq('id', created.id);
 }
 
 async function main() {
@@ -65,7 +65,7 @@ async function main() {
   );
 
   // --- the audit trigger from SCRUM-108 -----------------------------------
-  const { data: history } = await supabase
+  const { data: history } = await supabaseAdmin
     .from('venue_change_history')
     .select('old_values, new_values')
     .eq('venue_id', created.id);
@@ -115,7 +115,7 @@ async function main() {
 }
 
 async function countVenues() {
-  const { count } = await supabase.from('venues').select('*', { count: 'exact', head: true });
+  const { count } = await supabaseAdmin.from('venues').select('*', { count: 'exact', head: true });
   return count ?? 0;
 }
 

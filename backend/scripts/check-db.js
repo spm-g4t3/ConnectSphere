@@ -11,7 +11,7 @@
  * Exits non-zero on any failure so it can be dropped into CI later.
  */
 
-import { supabase } from '../src/config/supabaseClient.js';
+import { supabaseAdmin } from '../src/config/supabaseClient.js';
 
 /** Tables to probe, with the row count expected from the migrations. */
 const TABLES = [
@@ -26,7 +26,7 @@ const TABLES = [
 
 /** head: true asks for the count without transferring any rows. */
 async function countRows(table) {
-  const { count, error } = await supabase
+  const { count, error } = await supabaseAdmin
     .from(table)
     .select('*', { count: 'exact', head: true });
 

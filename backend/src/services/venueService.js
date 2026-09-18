@@ -15,7 +15,7 @@
  * this service -- and translateError turns those into typed errors.
  */
 
-import { supabase } from '../config/supabaseClient.js';
+import { supabaseAdmin } from '../config/supabaseClient.js';
 import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
 import { validateCreateVenue, validateUpdateVenue } from '../validation/venueValidation.js';
 
@@ -76,7 +76,7 @@ export async function createVenue(input, userId = null) {
   // Throws before any network call, listing every problem at once.
   const venue = validateCreateVenue(input);
 
-  const { data, error } = await supabase.rpc('create_venue', {
+  const { data, error } = await supabaseAdmin.rpc('create_venue', {
     p_name: venue.name,
     p_location: venue.location,
     p_max_capacity: venue.maxCapacity,
@@ -107,7 +107,7 @@ export async function createVenue(input, userId = null) {
 export async function updateVenue(id, changes, userId = null) {
   const update = validateUpdateVenue(changes);
 
-  const { error } = await supabase.rpc('update_venue', {
+  const { error } = await supabaseAdmin.rpc('update_venue', {
     p_id: id,
     p_name: update.name ?? null,
     p_location: update.location ?? null,
@@ -134,7 +134,7 @@ export async function updateVenue(id, changes, userId = null) {
  * @returns {Promise<object>}
  */
 export async function getVenueById(id) {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('venues')
     .select(`
       id, name, location, max_capacity, retired_at,
