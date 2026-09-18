@@ -284,6 +284,149 @@ describe('AC4: a supplied timestamp must be a well-formed instant', () => {
     expect(fieldsIn(endErr)).toContain('proposedEnd');
   });
 
+  it('SCRUM10_AC4_refuses_a_date_only_proposed_start', () => {
+    // '2026-06-01' is valid ISO 8601 and parses without complaint, which is
+    // exactly what makes it dangerous: it becomes midnight UTC, 08:00 in
+    // Singapore where ConnectSphere operates, and the Coordinator is handed a
+    // venue search for a period nobody chose. The fault is a silently invented
+    // time of day rather than a parse failure, so nothing downstream can spot
+    // it -- Step 6 searches by date and time and gets a plausible-looking lie.
+    const createErr = errorFrom(() =>
+      validateCreateEventRequest({ ...DRAFT, proposedStart: '2026-06-01' }),
+    );
+    expect(createErr).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(createErr)).toContain('proposedStart');
+
+    // Structural, so it holds at submission too. A draft carrying a guessed
+    // start is not a fact worth storing either.
+    const submitErr = errorFrom(() =>
+      validateSubmitEventRequest(
+        { ...SUBMITTABLE, proposedStart: '2026-06-01' },
+        { now: NOW },
+      ),
+    );
+    expect(fieldsIn(submitErr)).toContain('proposedStart');
+  });
+
+  it('SCRUM10_AC4_refuses_a_date_only_proposed_end', () => {
+    // The same invented default at the other end of the period, where it
+    // shortens the event instead of moving it -- and Setup/Turnaround Time
+    // computes on the end. '2026-06-02' is used rather than the start's own
+    // date so the value is genuinely after the start, leaving the missing time
+    // of day as the only thing left to complain about.
+    const createErr = errorFrom(() =>
+      validateCreateEventRequest({
+        ...DRAFT,
+        proposedStart: '2026-06-01T09:00:00.000Z',
+        proposedEnd: '2026-06-02',
+      }),
+    );
+    expect(createErr).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(createErr)).toContain('proposedEnd');
+
+    const submitErr = errorFrom(() =>
+      validateSubmitEventRequest(
+        { ...SUBMITTABLE, proposedEnd: '2026-06-02' },
+        { now: NOW },
+      ),
+    );
+    expect(fieldsIn(submitErr)).toContain('proposedEnd');
+  });
+
+  it('SCRUM10_AC4_says_a_time_of_day_is_required', () => {
+    // The Organiser has to be told what to change. A message like "must be a
+    // valid timestamp" would send them hunting for a typo in a date that is
+    // already well formed, because the date is not what is wrong with it.
+    const startErr = errorFrom(() =>
+      validateCreateEventRequest({ ...DRAFT, proposedStart: '2026-06-01' }),
+    );
+    expect(messageFor(startErr, 'proposedStart')).toMatch(/time of day/i);
+
+    const endErr = errorFrom(() =>
+      validateCreateEventRequest({ ...DRAFT, proposedEnd: '2026-06-01' }),
+    );
+    expect(messageFor(endErr, 'proposedEnd')).toMatch(/time of day/i);
+  });
+
+  it('SCRUM10_AC4_refuses_a_datetime_with_no_offset', () => {
+    // Closes the local-time ambiguity. ECMAScript parses a date-time with no
+    // offset as LOCAL time, while it parses a date-only value as UTC -- so
+    // '2026-06-01T09:00:00' means a different instant on a developer's laptop,
+    // on Supabase and in CI, and the same stored request would describe three
+    // different periods depending on which machine read it in. The Organiser
+    // did state a time of day here, so the previous rule is satisfied; what is
+    // missing is which nine o'clock they meant.
+    const createErr = errorFrom(() =>
+      validateCreateEventRequest({ ...DRAFT, proposedStart: '2026-06-01T09:00:00' }),
+    );
+    expect(createErr).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(createErr)).toContain('proposedStart');
+    expect(messageFor(createErr, 'proposedStart')).toMatch(/offset/i);
+
+    const submitErr = errorFrom(() =>
+      validateSubmitEventRequest(
+        { ...SUBMITTABLE, proposedStart: '2026-06-01T09:00:00' },
+        { now: NOW },
+      ),
+    );
+    expect(fieldsIn(submitErr)).toContain('proposedStart');
+  });
+
+  it('SCRUM10_AC2_accepts_a_datetime_with_a_numeric_utc_offset', () => {
+    // ConnectSphere operates in Singapore, so a client is entitled to send
+    // '+08:00' rather than converting to Z itself. Refusing the offset form
+    // would push that conversion onto every caller, and a caller that got it
+    // wrong would produce the same eight-hour error this rule exists to stop.
+    // The instant is asserted, not the encoding, so the offset must be read
+    // rather than ignored: 09:00+08:00 is 01:00Z, not 09:00Z.
+    const result = validateCreateEventRequest({
+      ...DRAFT,
+      proposedStart: '2026-06-01T09:00:00+08:00',
+      proposedEnd: '2026-06-01T17:00:00+08:00',
+    });
+
+    expect(instantOf(result.proposedStart)).toBe(instantOf('2026-06-01T01:00:00.000Z'));
+    expect(instantOf(result.proposedEnd)).toBe(instantOf('2026-06-01T09:00:00.000Z'));
+  });
+
+  it('SCRUM10_AC2_accepts_a_datetime_with_no_fractional_seconds', () => {
+    // Every other timestamp fixture in this file carries '.000Z', so a pattern
+    // written to match them could come to demand milliseconds without anyone
+    // noticing. No Organiser types milliseconds, and a form sending whole
+    // seconds is well formed: the rule is about a missing time of day, not
+    // about precision.
+    const result = validateCreateEventRequest({
+      ...DRAFT,
+      proposedStart: '2026-06-01T09:00:00Z',
+      proposedEnd: '2026-06-01T17:00:00Z',
+    });
+
+    expect(instantOf(result.proposedStart)).toBe(instantOf('2026-06-01T09:00:00.000Z'));
+    expect(instantOf(result.proposedEnd)).toBe(instantOf('2026-06-01T17:00:00.000Z'));
+  });
+
+  it('SCRUM10_AC2_accepts_an_explicit_midnight_start', () => {
+    // The guard that forces the rule to be judged on the string's shape rather
+    // than the parsed instant. A deliberate midnight event and the date-only
+    // '2026-06-01' resolve to exactly the same instant, so any implementation
+    // that infers the rule from the parsed value -- rejecting when hours,
+    // minutes and seconds are all zero -- would refuse a real event that starts
+    // at midnight while still passing every other test in this block. Checking
+    // the string first is what tells the two apart.
+    const result = validateCreateEventRequest({
+      ...DRAFT,
+      proposedStart: '2026-06-01T00:00:00Z',
+      proposedEnd: '2026-06-01T17:00:00Z',
+    });
+    expect(instantOf(result.proposedStart)).toBe(instantOf('2026-06-01T00:00:00.000Z'));
+
+    const submitted = validateSubmitEventRequest(
+      { ...SUBMITTABLE, proposedStart: '2026-06-01T00:00:00Z' },
+      { now: NOW },
+    );
+    expect(instantOf(submitted.proposedStart)).toBe(instantOf('2026-06-01T00:00:00.000Z'));
+  });
+
   it('SCRUM10_AC4_refuses_a_proposed_end_before_the_proposed_start', () => {
     // Mirrors event_requests_dates_ordered in 001. The database is the
     // guarantee; this layer exists to say it in words the Organiser can act on.
