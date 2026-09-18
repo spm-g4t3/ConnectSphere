@@ -268,7 +268,7 @@ describe('AC4: a supplied timestamp must be a well-formed instant', () => {
   it.each([
     ['not a date at all', 'not-a-date'],
     ['an empty string', ''],
-    ['an impossible calendar date', '2026-13-45T00:00:00.000Z'],
+    ['outside the real month and day ranges', '2026-13-45T00:00:00.000Z'],
     ['epoch milliseconds rather than an ISO string', 1780000000000],
   ])('SCRUM10_AC4_refuses_a_timestamp_that_is_%s', (_label, value) => {
     // Structural, so it is checked at creation and not only at submission: an
@@ -370,6 +370,44 @@ describe('AC4: a supplied timestamp must be a well-formed instant', () => {
       ),
     );
     expect(fieldsIn(submitErr)).toContain('proposedStart');
+  });
+
+  it('SCRUM10_AC4_refuses_an_impossible_calendar_day', () => {
+    // The last line of defence, and the only branch that catches this. The
+    // shape regex is satisfied -- '30' is a plausible day and passes any
+    // sensible day range -- and new Date() does not refuse it either: it rolls
+    // '2026-02-30T09:00:00Z' forward to 2026-03-02 and reports success. So an
+    // Organiser who typed 30 February would be handed an event two days later
+    // without being told, which is the same silently invented value the
+    // time-of-day and offset rules exist to stop.
+    //
+    // The '2026-13-45...' row in the table above does not reach this branch:
+    // month 13 fails the pattern's month range, so it is refused at the shape
+    // step and proves nothing about the calendar.
+    const createErr = errorFrom(() =>
+      validateCreateEventRequest({ ...DRAFT, proposedStart: '2026-02-30T09:00:00Z' }),
+    );
+    expect(createErr).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(createErr)).toContain('proposedStart');
+
+    const submitErr = errorFrom(() =>
+      validateSubmitEventRequest(
+        { ...SUBMITTABLE, proposedStart: '2026-02-30T09:00:00Z' },
+        { now: NOW },
+      ),
+    );
+    expect(submitErr).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(submitErr)).toContain('proposedStart');
+
+    // The companion case, so the day check has to know the length of a real
+    // month rather than assume 28: 2028 is a leap year and this is a date. A
+    // fixed-28 shortcut would refuse it, and a rollover bug would move it to
+    // 1 March, so the instant is asserted and not merely the absence of a throw.
+    const leapYear = validateCreateEventRequest({
+      ...DRAFT,
+      proposedStart: '2028-02-29T09:00:00Z',
+    });
+    expect(instantOf(leapYear.proposedStart)).toBe(instantOf('2028-02-29T09:00:00.000Z'));
   });
 
   it('SCRUM10_AC2_accepts_a_datetime_with_a_numeric_utc_offset', () => {
