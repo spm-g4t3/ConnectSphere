@@ -14,6 +14,16 @@
  * stage is the event itself at" (draft, under review, confirmed, ...); this
  * is "has this one request for a change to it been dealt with yet". Both
  * being called "status" is exactly why they should not share a module.
+ *
+ * SCRUM-37: CHANGE_REQUEST_DECISION lives here too, not in a third module,
+ * because it answers a closely related question about the same row --
+ * "processed" says a decision has been made; "decision" says which one. It
+ * mirrors the Postgres enum `change_request_decision` in
+ * 008_event_change_request_decision.sql, kept as its own enum rather than
+ * folded into change_request_status for the reason 008's own comment gives:
+ * the three-state status is a public contract the Organiser's status list
+ * already displays, and an approved or rejected request both still read as
+ * "Processed" there.
  */
 
 export const CHANGE_REQUEST_STATUS = Object.freeze({
@@ -43,4 +53,30 @@ export const CHANGE_REQUEST_STATUS_LABEL = Object.freeze({
  */
 export function isValidChangeRequestStatus(value) {
   return typeof value === 'string' && CHANGE_REQUEST_STATUSES.includes(value);
+}
+
+
+/** The two outcomes a processed change request can have (SCRUM-37, AC5). */
+export const CHANGE_REQUEST_DECISION = Object.freeze({
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+});
+
+/** Every value CHANGE_REQUEST_DECISION holds, for checking a value against the vocabulary. */
+export const CHANGE_REQUEST_DECISIONS = Object.freeze(Object.values(CHANGE_REQUEST_DECISION));
+
+/** What a reviewer sees for each decision. */
+export const CHANGE_REQUEST_DECISION_LABEL = Object.freeze({
+  [CHANGE_REQUEST_DECISION.APPROVED]: 'Approved',
+  [CHANGE_REQUEST_DECISION.REJECTED]: 'Rejected',
+});
+
+/**
+ * Is this a value the database will accept for a change request's decision?
+ *
+ * @param {*} value
+ * @returns {boolean}
+ */
+export function isValidChangeRequestDecision(value) {
+  return typeof value === 'string' && CHANGE_REQUEST_DECISIONS.includes(value);
 }

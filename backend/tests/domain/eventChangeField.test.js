@@ -17,6 +17,8 @@ import {
   CHANGE_FIELDS,
   CHANGE_FIELD_LABEL,
   isValidChangeField,
+  EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD,
+  hasEventRequestColumn,
 } from '../../src/domain/eventChangeField.js';
 
 
@@ -106,4 +108,60 @@ describe('SCRUM-34: every change field has a label an Organiser can read', () =>
   it('has no labels for values outside the vocabulary', () => {
     expect(Object.keys(CHANGE_FIELD_LABEL).sort()).toEqual([...CHANGE_FIELDS].sort());
   });
+});
+
+
+describe('SCRUM-37: EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD mirrors process_change_request', () => {
+  /**
+   * Pull the changeField -> column pairs straight out of
+   * process_change_request's branches: each is written as one line of the
+   * form `... change_field = 'x' then update event_requests set y = ...`
+   * specifically so this test can parse it without re-implementing a SQL
+   * parser.
+   */
+  function columnsAppliedInSql() {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const sql = readFileSync(
+      resolve(here, '../../db/migrations/009_event_change_request_functions.sql'),
+      'utf8',
+    );
+
+    const pairs = [...sql.matchAll(
+      /change_field = '([a-z_]+)'\s+then\s+update\s+event_requests\s+set\s+([a-z_]+)\s*=/g,
+    )];
+    if (pairs.length === 0) throw new Error('could not find any change_field branches in the migration');
+
+    return Object.fromEntries(pairs.map((m) => [m[1], m[2]]));
+  }
+
+  it('applies every structured field to exactly the column the SQL function applies it to', () => {
+    // If this fails, EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD and
+    // process_change_request's branches have drifted apart -- one names a
+    // field or column the other does not.
+    expect(EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD).toEqual(columnsAppliedInSql());
+  });
+
+  it('has no entry for fields with no column on event_requests', () => {
+    expect(EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD).not.toHaveProperty(CHANGE_FIELD.VENUE);
+    expect(EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD).not.toHaveProperty(CHANGE_FIELD.EQUIPMENT);
+    expect(EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD).not.toHaveProperty(CHANGE_FIELD.OTHER);
+  });
+
+  it.each([
+    CHANGE_FIELD.EVENT_NAME,
+    CHANGE_FIELD.DESCRIPTION,
+    CHANGE_FIELD.PURPOSE,
+    CHANGE_FIELD.PROPOSED_START,
+    CHANGE_FIELD.PROPOSED_END,
+    CHANGE_FIELD.EXPECTED_ATTENDANCE,
+  ])('hasEventRequestColumn(%s) is true', (field) => {
+    expect(hasEventRequestColumn(field)).toBe(true);
+  });
+
+  it.each([CHANGE_FIELD.VENUE, CHANGE_FIELD.EQUIPMENT, CHANGE_FIELD.OTHER])(
+    'hasEventRequestColumn(%s) is false',
+    (field) => {
+      expect(hasEventRequestColumn(field)).toBe(false);
+    },
+  );
 });

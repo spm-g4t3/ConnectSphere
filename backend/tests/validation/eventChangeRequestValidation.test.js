@@ -13,8 +13,13 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { validateCreateChangeRequest } from '../../src/validation/eventChangeRequestValidation.js';
+import {
+  validateCreateChangeRequest,
+  validateProcessChangeRequest,
+  isPlausibleId,
+} from '../../src/validation/eventChangeRequestValidation.js';
 import { CHANGE_FIELD, CHANGE_FIELDS } from '../../src/domain/eventChangeField.js';
+import { CHANGE_REQUEST_DECISION } from '../../src/domain/changeRequestStatus.js';
 import { ValidationError } from '../../src/errors.js';
 
 /** A minimal input that should always be accepted. */
@@ -233,6 +238,136 @@ describe('input shape', () => {
     ['a string', 'not an object'],
   ])('rejects input that is %s', (_label, value) => {
     expect(() => validateCreateChangeRequest(value)).toThrow(ValidationError);
+  });
+});
+
+
+describe('SCRUM-35: isPlausibleId, reused to reject a malformed changeRequestId early', () => {
+  it('accepts a well-formed id', () => {
+    expect(isPlausibleId('11111111-1111-1111-1111-111111111111')).toBe(true);
+  });
+
+  it('accepts an id with surrounding whitespace', () => {
+    expect(isPlausibleId('  11111111-1111-1111-1111-111111111111  ')).toBe(true);
+  });
+
+  it.each([
+    ['not id-shaped at all', 'my-change-request'],
+    ['missing dashes', '11111111111111111111111111111111'],
+    ['too short', '11111111-1111-1111-1111-1111'],
+    ['empty string', ''],
+    ['null', null],
+    ['undefined', undefined],
+    ['a number', 42],
+  ])('rejects %s', (_label, value) => {
+    expect(isPlausibleId(value)).toBe(false);
+  });
+});
+
+
+describe('SCRUM-37: validateProcessChangeRequest', () => {
+  const VALID_APPROVAL = Object.freeze({
+    changeRequestId: '22222222-2222-2222-2222-222222222222',
+    decision: 'approved',
+  });
+
+  it('accepts a bare approval with no notes', () => {
+    const result = validateProcessChangeRequest(VALID_APPROVAL);
+    expect(result).toEqual({ ...VALID_APPROVAL, decisionNotes: null });
+  });
+
+  it('accepts an approval with notes too', () => {
+    const result = validateProcessChangeRequest({ ...VALID_APPROVAL, decisionNotes: 'Looks fine' });
+    expect(result.decisionNotes).toBe('Looks fine');
+  });
+
+  it('accepts a rejection with a reason', () => {
+    const result = validateProcessChangeRequest({
+      ...VALID_APPROVAL,
+      decision: 'rejected',
+      decisionNotes: 'The venue is already booked that day',
+    });
+    expect(result.decision).toBe('rejected');
+    expect(result.decisionNotes).toBe('The venue is already booked that day');
+  });
+
+  it('trims surrounding whitespace from decisionNotes', () => {
+    const result = validateProcessChangeRequest({ ...VALID_APPROVAL, decisionNotes: '  Looks fine  ' });
+    expect(result.decisionNotes).toBe('Looks fine');
+  });
+
+  it('rejects a rejection with no reason', () => {
+    const err = errorFrom(() => validateProcessChangeRequest({ ...VALID_APPROVAL, decision: 'rejected' }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toContain('decisionNotes');
+  });
+
+  it.each(['', '   '])('rejects a rejection with a blank reason (%j)', (decisionNotes) => {
+    const err = errorFrom(() => validateProcessChangeRequest({
+      ...VALID_APPROVAL,
+      decision: 'rejected',
+      decisionNotes,
+    }));
+    expect(fieldsIn(err)).toContain('decisionNotes');
+  });
+
+  it('rejects decisionNotes that is not text', () => {
+    const err = errorFrom(() => validateProcessChangeRequest({ ...VALID_APPROVAL, decisionNotes: 42 }));
+    expect(fieldsIn(err)).toContain('decisionNotes');
+  });
+
+  it.each(Object.values(CHANGE_REQUEST_DECISION))('accepts decision %s', (decision) => {
+    const notes = decision === CHANGE_REQUEST_DECISION.REJECTED ? 'a reason' : undefined;
+    const result = validateProcessChangeRequest({ ...VALID_APPROVAL, decision, decisionNotes: notes });
+    expect(result.decision).toBe(decision);
+  });
+
+  it('rejects a missing decision', () => {
+    const input = { ...VALID_APPROVAL };
+    delete input.decision;
+
+    const err = errorFrom(() => validateProcessChangeRequest(input));
+    expect(fieldsIn(err)).toContain('decision');
+  });
+
+  it('rejects a decision outside approved/rejected', () => {
+    const err = errorFrom(() => validateProcessChangeRequest({ ...VALID_APPROVAL, decision: 'processed' }));
+    expect(fieldsIn(err)).toContain('decision');
+  });
+
+  it('rejects a missing changeRequestId', () => {
+    const input = { ...VALID_APPROVAL };
+    delete input.changeRequestId;
+
+    const err = errorFrom(() => validateProcessChangeRequest(input));
+    expect(fieldsIn(err)).toContain('changeRequestId');
+  });
+
+  it.each([
+    ['not id-shaped at all', 'my-change-request'],
+    ['an event name typed into the wrong box', 'Graduation Dinner 2026'],
+    ['whitespace only', '   '],
+  ])('rejects a changeRequestId that is %s', (_label, value) => {
+    const err = errorFrom(() => validateProcessChangeRequest({ ...VALID_APPROVAL, changeRequestId: value }));
+    expect(fieldsIn(err)).toContain('changeRequestId');
+  });
+
+  it('reports every problem at once, not just the first', () => {
+    const err = errorFrom(() => validateProcessChangeRequest({ decision: 'rejected' }));
+    expect(fieldsIn(err).sort()).toEqual(['changeRequestId', 'decisionNotes'].sort());
+  });
+
+  it('reports a 400 status for Express to use', () => {
+    const err = errorFrom(() => validateProcessChangeRequest({}));
+    expect(err.status).toBe(400);
+  });
+
+  it.each([
+    ['null', null],
+    ['an array', []],
+    ['a string', 'not an object'],
+  ])('rejects input that is %s', (_label, value) => {
+    expect(() => validateProcessChangeRequest(value)).toThrow(ValidationError);
   });
 });
 

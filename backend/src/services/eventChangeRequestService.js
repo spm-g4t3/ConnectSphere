@@ -14,6 +14,28 @@
  * SCRUM-34 (AC4): getChangeRequestsForEvent lets an Organiser see whether
  * each of their requests is outstanding, in progress, or processed.
  *
+ * SCRUM-35: persisting a change request linked to its event (AC3) is already
+ * what createChangeRequest's insert does -- event_request_id is a foreign
+ * key, not a loose reference, so the link cannot outlive the event or point
+ * at one that never existed. What SCRUM-35 adds is getChangeRequestById:
+ * being "tracked and reviewed later" means a single request must be
+ * addressable on its own, not only reachable by first listing its event's
+ * requests and finding it in the page.
+ *
+ * SCRUM-37 (AC5): processChangeRequest decides a change request -- approve
+ * or reject -- and, only on approval, applies it back onto the event
+ * record. The decision and the application happen together inside a single
+ * Postgres transaction (process_change_request in
+ * 009_event_change_request_functions.sql), the same reasoning createVenue
+ * and updateVenue in venueService.js already rely on: two separate
+ * supabase-js calls are two separate HTTP requests with no shared
+ * transaction, so a rejected write to event_requests could otherwise leave
+ * a change request marked processed for a change that was never actually
+ * made. There is no Coordinator-facing route or frontend yet to match a
+ * wire shape against, unlike createChangeRequestFromClient below, so this
+ * function is not paired with a *FromClient adapter -- that can be added
+ * once one exists to match.
+ *
  * Frontend/backend contract fix: createChangeRequestFromClient accepts the
  * wire shape frontend/changeRequestService.js already sends -- POST
  * /event-requests/:id/change-requests with body { field, details } and the
@@ -26,15 +48,20 @@
  *
  * Input is validated before any network call (eventChangeRequestValidation.js).
  * The database (005_event_change_requests.sql, 006_event_change_request_status.sql,
- * 007_event_change_field_venue_equipment.sql) remains the backstop for
- * anything validation deliberately does not check -- an event_request_id
- * that does not exist, for instance -- and translateError turns that into a
- * typed error, the same division venueService.js uses.
+ * 007_event_change_field_venue_equipment.sql, 008_event_change_request_decision.sql,
+ * 009_event_change_request_functions.sql) remains the backstop for anything
+ * validation deliberately does not check -- an event_request_id that does
+ * not exist, for instance -- and translateError turns that into a typed
+ * error, the same division venueService.js uses.
  */
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError, NotFoundError } from '../errors.js';
-import { validateCreateChangeRequest } from '../validation/eventChangeRequestValidation.js';
+import {
+  validateCreateChangeRequest,
+  validateProcessChangeRequest,
+  isPlausibleId,
+} from '../validation/eventChangeRequestValidation.js';
 import { STATUS } from '../domain/eventRequestStatus.js';
 import { CHANGE_FIELD_LABEL } from '../domain/eventChangeField.js';
 
@@ -51,7 +78,9 @@ function translateError(error) {
   const code = error.code;
   const detail = error.message ?? '';
 
-  // check constraint: blank requested_change slipping past validation
+  // check constraint: blank requested_change slipping past validation, or an
+  // approved change process_change_request could not apply (e.g. a new
+  // proposed_start that would now fall after proposed_end)
   if (code === '23514') {
     return new ValidationError(`A value was rejected by the database: ${detail}`);
   }
@@ -68,6 +97,16 @@ function translateError(error) {
     return new ValidationError(`Invalid id format: ${detail}`);
   }
 
+  // raised by process_change_request when the id matches nothing
+  if (code === 'P0002' || /not found/i.test(detail)) {
+    return new NotFoundError(detail || 'Change request not found');
+  }
+
+  // raised by process_change_request when the request has already been decided
+  if (/already been processed/i.test(detail)) {
+    return new ValidationError(detail);
+  }
+
   return new Error(detail || 'Unexpected database error');
 }
 
@@ -80,6 +119,10 @@ function toChangeRequest(row) {
     changeField: row.change_field,
     requestedChange: row.requested_change,
     status: row.status,
+    decision: row.decision ?? null,
+    decisionNotes: row.decision_notes ?? null,
+    processedBy: row.processed_by ?? null,
+    processedAt: row.processed_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -238,4 +281,105 @@ export async function getChangeRequestsForEvent(eventRequestId, organiserId) {
   if (error) throw translateError(error);
 
   return data.map(toOrganiserView);
+}
+
+/**
+ * Fetch one change request by its own id, so it can be opened and reviewed
+ * directly -- from a link, a notification, or a status list -- rather than
+ * only by listing every request for its event and finding it in the page
+ * (SCRUM-35: "tracked and reviewed later").
+ *
+ * The event is not known in advance here, unlike getChangeRequestsForEvent,
+ * so ownership is checked by joining to event_requests through the foreign
+ * key event_change_requests.event_request_id already enforces -- the same
+ * link that makes AC3 ("recorded against the relevant event") more than a
+ * loose reference in the first place.
+ *
+ * @param {string} changeRequestId
+ * @param {string} organiserId  the Organiser asking to see it
+ * @returns {Promise<object>} same shape as an item from getChangeRequestsForEvent
+ * @throws {ValidationError} organiserId missing, changeRequestId not
+ *   id-shaped, or the request belongs to someone else's event
+ * @throws {NotFoundError} no change request exists with that id
+ */
+export async function getChangeRequestById(changeRequestId, organiserId) {
+  if (typeof organiserId !== 'string' || organiserId.trim() === '') {
+    throw new ValidationError('organiserId is required');
+  }
+
+  // Rejected before the network call for the same reason SCRUM-33 rejects a
+  // malformed eventRequestId early: a value that is not id-shaped at all can
+  // never name a real change request, so there is nothing a query can add.
+  if (!isPlausibleId(changeRequestId)) {
+    throw new ValidationError('changeRequestId must be a valid id');
+  }
+
+  // event_requests is embedded through the event_request_id foreign key so
+  // ownership can be checked in the same round trip, the same technique
+  // venueService.js uses to pull in a venue's attribute tables.
+  const { data, error } = await supabase
+    .from('event_change_requests')
+    .select('*, event_requests ( organiser_id )')
+    .eq('id', changeRequestId)
+    .maybeSingle();
+
+  if (error) throw translateError(error);
+  if (!data) throw new NotFoundError(`Change request ${changeRequestId} not found`);
+
+  if (data.event_requests.organiser_id !== organiserId) {
+    throw new ValidationError('Only the event organiser may view this change request');
+  }
+
+  return toOrganiserView(data);
+}
+
+/**
+ * Decide a change request -- approve or reject it -- and, only on approval,
+ * apply it back onto the event record (SCRUM-37, AC5).
+ *
+ * Deciding and applying happen together inside process_change_request
+ * (009_event_change_request_functions.sql), a single Postgres transaction:
+ * if applying the change to event_requests fails -- a rejected
+ * proposed_start that would now fall after proposed_end, for instance --
+ * the decision itself is rolled back too, so a change request can never be
+ * left marked processed for a change that was never actually made.
+ *
+ * There is no role system yet to check that processedBy actually names a
+ * Coordinator rather than, say, the Organiser who filed the request in the
+ * first place -- the same gap requestedBy already has against the Organiser
+ * role in createChangeRequest. This only guarantees processedBy names a
+ * real user, via the foreign key in 008_event_change_request_decision.sql.
+ *
+ * @param {string} changeRequestId
+ * @param {object} decisionInput
+ * @param {string} decisionInput.decision        'approved' | 'rejected'
+ * @param {string} [decisionInput.decisionNotes]  required when rejecting
+ * @param {string} processedBy  who is deciding
+ * @returns {Promise<object>} the change request, updated with its outcome
+ * @throws {ValidationError} bad input, an already-processed request, or a
+ *   missing rejection reason
+ * @throws {NotFoundError} no change request exists with that id
+ */
+export async function processChangeRequest(changeRequestId, decisionInput, processedBy) {
+  if (typeof processedBy !== 'string' || processedBy.trim() === '') {
+    // Not part of decisionInput -- this comes from the caller's own
+    // identity, so a missing value is the caller's bug, not the reviewer's.
+    throw new ValidationError('processedBy is required');
+  }
+
+  const decision = validateProcessChangeRequest({
+    changeRequestId,
+    ...(decisionInput && typeof decisionInput === 'object' ? decisionInput : {}),
+  });
+
+  const { data, error } = await supabase.rpc('process_change_request', {
+    p_change_request_id: decision.changeRequestId,
+    p_decision: decision.decision,
+    p_decision_notes: decision.decisionNotes,
+    p_processed_by: processedBy,
+  });
+
+  if (error) throw translateError(error);
+
+  return toOrganiserView(data);
 }

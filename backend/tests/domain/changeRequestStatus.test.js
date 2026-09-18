@@ -18,6 +18,10 @@ import {
   CHANGE_REQUEST_STATUSES,
   CHANGE_REQUEST_STATUS_LABEL,
   isValidChangeRequestStatus,
+  CHANGE_REQUEST_DECISION,
+  CHANGE_REQUEST_DECISIONS,
+  CHANGE_REQUEST_DECISION_LABEL,
+  isValidChangeRequestDecision,
 } from '../../src/domain/changeRequestStatus.js';
 
 
@@ -71,5 +75,57 @@ describe('AC4: an Organiser can tell outstanding, in progress and processed apar
     ['a number', 1],
   ])('rejects %s', (_label, value) => {
     expect(isValidChangeRequestStatus(value)).toBe(false);
+  });
+});
+
+
+describe('CHANGE_REQUEST_DECISION mirrors the database enum', () => {
+  /** Pull the enum values straight out of the migration, comments stripped. */
+  function decisionsDeclaredInSql() {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const sql = readFileSync(
+      resolve(here, '../../db/migrations/008_event_change_request_decision.sql'),
+      'utf8',
+    );
+
+    const block = sql.match(
+      /create type change_request_decision as enum \(([\s\S]*?)\);/i,
+    );
+    if (!block) throw new Error('could not find the enum in the migration');
+
+    return [...block[1].replace(/--[^\n]*/g, '').matchAll(/'([a-z_]+)'/g)]
+      .map((m) => m[1]);
+  }
+
+  it('declares exactly the same values as the SQL migration', () => {
+    expect([...CHANGE_REQUEST_DECISIONS].sort()).toEqual(decisionsDeclaredInSql().sort());
+  });
+});
+
+
+describe('SCRUM-37: a processed change request can be told approved from rejected', () => {
+  it('exposes exactly the two outcomes processing can have', () => {
+    expect([...CHANGE_REQUEST_DECISIONS].sort()).toEqual(['approved', 'rejected'].sort());
+  });
+
+  it('gives every decision a human-readable label', () => {
+    for (const decision of CHANGE_REQUEST_DECISIONS) {
+      expect(CHANGE_REQUEST_DECISION_LABEL[decision]).toBeTypeOf('string');
+      expect(CHANGE_REQUEST_DECISION_LABEL[decision].length).toBeGreaterThan(0);
+    }
+  });
+
+  it.each(Object.values(CHANGE_REQUEST_DECISION))('accepts %s as a valid decision', (value) => {
+    expect(isValidChangeRequestDecision(value)).toBe(true);
+  });
+
+  it.each([
+    ['an unknown string', 'outstanding'],
+    ['empty string', ''],
+    ['null', null],
+    ['undefined', undefined],
+    ['a number', 1],
+  ])('rejects %s', (_label, value) => {
+    expect(isValidChangeRequestDecision(value)).toBe(false);
   });
 });

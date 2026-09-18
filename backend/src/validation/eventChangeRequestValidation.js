@@ -31,10 +31,18 @@
  * on whichever of the two the event does not have a pending change for --
  * data only the service has. That comparison belongs to whichever subtask
  * applies an approved change back onto the event record (AC5).
+ *
+ * SCRUM-37: validateProcessChangeRequest checks the shape of a decision --
+ * approve or reject a change request -- before it reaches the service.
+ * Whether the change request named still exists, and whether it has already
+ * been processed, both need the database and stay in
+ * eventChangeRequestService.js, the same split as everywhere else in this
+ * module.
  */
 
 import { ValidationError } from '../errors.js';
 import { CHANGE_FIELD, CHANGE_FIELDS } from '../domain/eventChangeField.js';
+import { CHANGE_REQUEST_DECISION, CHANGE_REQUEST_DECISIONS } from '../domain/changeRequestStatus.js';
 
 /** Loose enough to accept any real UUID (v1-v5) without pinning to Postgres's v4 default. */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -128,6 +136,22 @@ function checkEventRequestId(errors, value) {
 }
 
 /**
+ * SCRUM-35: is this value at least shaped like an id?
+ *
+ * Exported so eventChangeRequestService.js can apply the same "not
+ * id-shaped at all" rejection to a changeRequestId before spending a network
+ * round trip on it, the same reasoning checkEventRequestId already applies
+ * to eventRequestId -- without a second copy of the pattern it checks
+ * against.
+ *
+ * @param {*} value
+ * @returns {boolean}
+ */
+export function isPlausibleId(value) {
+  return typeof value === 'string' && UUID_PATTERN.test(value.trim());
+}
+
+/**
  * SCRUM-33: requestedChange must be usable for the changeField it is paired
  * with, not merely present.
  *
@@ -179,6 +203,92 @@ export function validateCreateChangeRequest(input) {
   normalised.eventRequestId = checkEventRequestId(errors, input.eventRequestId);
   normalised.changeField = checkChangeField(errors, input.changeField);
   normalised.requestedChange = checkRequestedChange(errors, normalised.changeField, input.requestedChange);
+
+  throwIfInvalid(errors);
+  return normalised;
+}
+
+/**
+ * SCRUM-37: which change request a decision is about must at least be
+ * shaped like an id, the same reasoning checkEventRequestId already applies
+ * to eventRequestId -- reuses isPlausibleId rather than a second copy of the
+ * pattern it checks against.
+ */
+function checkChangeRequestId(errors, value) {
+  const trimmed = checkRequiredText(errors, 'changeRequestId', value);
+  if (trimmed === null) return null;
+
+  if (!isPlausibleId(trimmed)) {
+    errors.add('changeRequestId', 'must be a valid change request id');
+    return null;
+  }
+  return trimmed;
+}
+
+/** Must be one of the two outcomes a change request can be given. */
+function checkDecision(errors, value) {
+  if (value === undefined || value === null) {
+    errors.add('decision', 'is required');
+    return null;
+  }
+  if (typeof value !== 'string' || !CHANGE_REQUEST_DECISIONS.includes(value)) {
+    errors.add('decision', `must be one of: ${CHANGE_REQUEST_DECISIONS.join(', ')}`);
+    return null;
+  }
+  return value;
+}
+
+/**
+ * Optional for an approval; required for a rejection, so a rejected request
+ * always carries a reason the Organiser can act on -- an approval, by
+ * contrast, speaks for itself once the event record reflects it.
+ *
+ * decision may already be invalid (or absent) by the time this runs; in that
+ * case the "required when rejecting" rule cannot fire, so this never adds a
+ * second, confusing error about a decision the caller has already been told
+ * is wrong.
+ */
+function checkDecisionNotes(errors, decision, value) {
+  const isBlank = value === undefined || value === null
+    || (typeof value === 'string' && value.trim() === '');
+
+  if (isBlank) {
+    if (decision === CHANGE_REQUEST_DECISION.REJECTED) {
+      errors.add('decisionNotes', 'is required when rejecting a change request');
+    }
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    errors.add('decisionNotes', 'must be text');
+    return null;
+  }
+
+  return value.trim();
+}
+
+/**
+ * Validate input for deciding a change request -- approving or rejecting it.
+ *
+ * @param {object} input
+ * @param {string} input.changeRequestId
+ * @param {string} input.decision        'approved' | 'rejected'
+ * @param {string} [input.decisionNotes] required when rejecting
+ * @returns {object} a normalised copy: { changeRequestId, decision, decisionNotes }
+ *   -- decisionNotes is null, never undefined, when none was given
+ * @throws {ValidationError} listing every problem found, not just the first
+ */
+export function validateProcessChangeRequest(input) {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new ValidationError('Invalid change request decision -- expected an object');
+  }
+
+  const errors = createErrorCollector();
+  const normalised = {};
+
+  normalised.changeRequestId = checkChangeRequestId(errors, input.changeRequestId);
+  normalised.decision = checkDecision(errors, input.decision);
+  normalised.decisionNotes = checkDecisionNotes(errors, normalised.decision, input.decisionNotes);
 
   throwIfInvalid(errors);
   return normalised;
