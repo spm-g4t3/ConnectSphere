@@ -35,3 +35,25 @@ export async function getVenueDetails(venueId) {
   const response = await apiClient.get(`/venues/${venueId}`);
   return response.data;
 }
+
+// --- STUBS below: no backend endpoint exists yet for these -----------------
+// They exist purely so imports in EventCoordinatorDashboard.jsx and
+// VenueStaffDashboard.jsx resolve and the app can actually run.
+
+/** @returns {Promise<Array>} always empty for now */
+export async function getPendingVenueBookings() {
+  console.warn("getPendingVenueBookings: not implemented yet — no backend endpoint exists.");
+  return [];
+}
+
+/** @returns {Promise<Array>} always empty for now */
+export async function getPendingBookingRequests() {
+  console.warn("getPendingBookingRequests: not implemented yet — no backend endpoint exists.");
+  return [];
+}
+
+/** @returns {Promise<Array>} always empty for now */
+export async function getVenueCatalogue() {
+  console.warn("getVenueCatalogue: not implemented yet — no backend endpoint exists.");
+  return [];
+}
