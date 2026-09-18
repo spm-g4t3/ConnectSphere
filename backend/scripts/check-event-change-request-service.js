@@ -1,5 +1,5 @@
 /**
- * End-to-end proof for the event change request service (SCRUM-11, SCRUM-33).
+ * End-to-end proof for the event change request service (SCRUM-11, SCRUM-33, SCRUM-34).
  *
  * Run with: npm run change-request:check
  *
@@ -14,7 +14,11 @@
  */
 
 import { supabase } from '../src/config/supabaseClient.js';
-import { createChangeRequest } from '../src/services/eventChangeRequestService.js';
+import {
+  createChangeRequest,
+  createChangeRequestFromClient,
+  getChangeRequestsForEvent,
+} from '../src/services/eventChangeRequestService.js';
 
 const STAMP = Date.now();
 
@@ -90,6 +94,62 @@ async function main() {
     .select('*')
     .eq('event_request_id', eventId);
   check('stored against the event', stored?.length === 1, `${stored?.length ?? 0} rows`);
+
+  // --- AC4: the Organiser can see whether each request is outstanding, in
+  // progress, or processed ---------------------------------------------------
+  const second = await createChangeRequest(
+    {
+      eventRequestId: eventId,
+      changeField: 'purpose',
+      requestedChange: 'Team offsite, not a client pitch',
+    },
+    organiserId,
+  );
+
+  const list = await getChangeRequestsForEvent(eventId, organiserId);
+
+  check('lists every change request for the event', list.length === 2, `${list.length} items`);
+  check('newest first', list[0]?.id === second.id);
+  check('new requests default to outstanding', list.every((r) => r.status === 'outstanding'));
+  check(
+    'shaped for the frontend status list (fieldLabel/details)',
+    list.every((r) => typeof r.fieldLabel === 'string'
+      && r.fieldLabel.length > 0
+      && r.details === r.requestedChange),
+  );
+
+  let listRejectedForOtherOrganiser = false;
+  try {
+    await getChangeRequestsForEvent(eventId, otherOrganiserId);
+  } catch (err) {
+    listRejectedForOtherOrganiser = err.status === 400;
+  }
+  check('a different organiser cannot list them', listRejectedForOtherOrganiser);
+
+  let listNotFound = false;
+  try {
+    await getChangeRequestsForEvent('00000000-0000-0000-0000-000000000000', organiserId);
+  } catch (err) {
+    listNotFound = err.status === 404;
+  }
+  check('listing a missing event raises NotFoundError', listNotFound);
+
+  // --- frontend/backend contract fix: the exact wire shape the form sends ---
+  const third = await createChangeRequestFromClient(
+    eventId,
+    { field: 'venue', details: 'Move to the larger hall on Level 3' },
+    organiserId,
+  );
+  check('accepts the client wire shape { field, details }', Boolean(third.id));
+  check('maps field -> changeField', third.changeField === 'venue');
+  check('maps details -> requestedChange', third.requestedChange === 'Move to the larger hall on Level 3');
+
+  // --- frontend/backend contract fix: venue and equipment are now valid ----
+  const equipmentRequest = await createChangeRequest(
+    { eventRequestId: eventId, changeField: 'equipment', requestedChange: 'Add two extra microphones' },
+    organiserId,
+  );
+  check('equipment is now a valid changeField', equipmentRequest.changeField === 'equipment');
 
   // --- AC1: a draft event cannot have a change requested against it --------
   await supabase.from('event_requests').update({ status: 'draft' }).eq('id', eventId);

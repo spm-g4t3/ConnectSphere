@@ -34,6 +34,8 @@ const VALID_REQUESTED_CHANGE = Object.freeze({
   [CHANGE_FIELD.PROPOSED_START]: '2026-10-15T09:00:00Z',
   [CHANGE_FIELD.PROPOSED_END]: '2026-10-15T17:00:00Z',
   [CHANGE_FIELD.EXPECTED_ATTENDANCE]: '120',
+  [CHANGE_FIELD.VENUE]: 'Move to the larger hall on Level 3',
+  [CHANGE_FIELD.EQUIPMENT]: 'Add two extra microphones',
   [CHANGE_FIELD.OTHER]: 'Something else that needs to change',
 });
 
@@ -68,7 +70,7 @@ describe('AC2: the Organiser specifies which event field is changing', () => {
   });
 
   it('rejects a changeField outside the fixed vocabulary', () => {
-    const err = errorFrom(() => validateCreateChangeRequest({ ...VALID, changeField: 'venue' }));
+    const err = errorFrom(() => validateCreateChangeRequest({ ...VALID, changeField: 'accessibility' }));
     expect(err).toBeInstanceOf(ValidationError);
     expect(fieldsIn(err)).toContain('changeField');
   });
@@ -198,14 +200,17 @@ describe('SCRUM-33: the organiser has provided usable details for the change', (
     },
   );
 
-  it('does not impose a format on free-text fields beyond being non-blank', () => {
-    const result = validateCreateChangeRequest({
-      ...VALID,
-      changeField: CHANGE_FIELD.OTHER,
-      requestedChange: 'Please also add a wheelchair ramp at the side entrance',
-    });
-    expect(result.requestedChange).toBe('Please also add a wheelchair ramp at the side entrance');
-  });
+  it.each([CHANGE_FIELD.OTHER, CHANGE_FIELD.VENUE, CHANGE_FIELD.EQUIPMENT])(
+    'does not impose a format on the free-text field %s beyond being non-blank',
+    (changeField) => {
+      const result = validateCreateChangeRequest({
+        ...VALID,
+        changeField,
+        requestedChange: 'Please also add a wheelchair ramp at the side entrance',
+      });
+      expect(result.requestedChange).toBe('Please also add a wheelchair ramp at the side entrance');
+    },
+  );
 
   it('reports every problem at once, not just the first', () => {
     const err = errorFrom(() => validateCreateChangeRequest({}));
