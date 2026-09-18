@@ -5,22 +5,22 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
 const NAV_LINKS_BY_ROLE = {
-  event_organiser: [
+  EVENT_ORGANISER: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/events", label: "My Events" },
     { to: "/venue-search", label: "Find a Venue" },
   ],
-  event_coordinator: [
+  EVENT_COORDINATOR: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/events", label: "Events" },
     { to: "/venue-search", label: "Venue Bookings" },
   ],
-  venue_staff: [
+  VENUE_STAFF: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/venue-catalogue", label: "Venue Catalogue" },
     { to: "/booking-requests", label: "Booking Requests" },
   ],
-  technical_support: [
+  TECHNICAL_SUPPORT: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/tickets", label: "Support Tickets" },
     { to: "/equipment", label: "Equipment Requests" },
