@@ -8,7 +8,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:check": "node scripts/check-db.js",
-    "venue:check": "node scripts/check-venue-service.js"
+    "venue:check": "node scripts/check-venue-service.js",
+    "change-request:check": "node scripts/check-event-change-request-service.js"
   },
   "devDependencies": {
     "vitest": "^5.0.0"
