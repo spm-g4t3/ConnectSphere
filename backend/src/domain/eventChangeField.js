@@ -3,9 +3,8 @@
  *
  * SCRUM-11: what an Organiser may say a change request is about (AC2).
  *
- * Mirrors the Postgres enum `event_change_field` exactly -- created in
- * 006_event_change_requests.sql and extended in
- * 008_event_change_field_venue_equipment.sql -- the same relationship
+ * Mirrors the Postgres enum `event_change_field` exactly -- defined in
+ * 006_event_change_requests.sql -- the same relationship
  * STATUS in eventRequestStatus.js has to `event_request_status`. These two
  * lists must stay identical -- a test asserts the match rather than leaving
  * it to whoever edits one file to remember the other.
@@ -69,7 +68,7 @@ export function isValidChangeField(value) {
  * record, because nowhere yet exists to put it.
  *
  * Mirrors the field-by-field branches process_change_request applies in
- * 010_event_change_request_functions.sql -- the actual write happens there,
+ * 006_event_change_requests.sql -- the actual write happens there,
  * inside the same transaction as the decision, not from this module or from
  * JavaScript at all. This map exists so that mapping is documented and
  * testable in one place rather than only readable out of a SQL function

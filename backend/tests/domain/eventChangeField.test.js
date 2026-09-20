@@ -23,36 +23,21 @@ import {
 
 
 describe('CHANGE_FIELD mirrors the database enum', () => {
-  /**
-   * Pull every enum value straight out of the migrations, comments stripped:
-   * the values 006 created it with, plus any 008 (or a later migration)
-   * added afterwards via `alter type ... add value`.
-   */
+  /** Pull every enum value straight out of the migration, comments stripped. */
   function changeFieldsDeclaredInSql() {
     const here = dirname(fileURLToPath(import.meta.url));
     const migrationsDir = resolve(here, '../../db/migrations');
     const strip = (sql) => sql.replace(/--[^\n]*/g, '');
 
-    const created = strip(
+    const sql = strip(
       readFileSync(resolve(migrationsDir, '006_event_change_requests.sql'), 'utf8'),
     );
-    const createdBlock = created.match(
+    const block = sql.match(
       /create type event_change_field as enum \(([\s\S]*?)\);/i,
     );
-    if (!createdBlock) throw new Error('could not find the enum in 006_event_change_requests.sql');
-    const initial = [...createdBlock[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+    if (!block) throw new Error('could not find the enum in 006_event_change_requests.sql');
 
-    const extended = strip(
-      readFileSync(
-        resolve(migrationsDir, '008_event_change_field_venue_equipment.sql'),
-        'utf8',
-      ),
-    );
-    const added = [
-      ...extended.matchAll(/alter type event_change_field add value(?: if not exists)? '([a-z_]+)'/gi),
-    ].map((m) => m[1]);
-
-    return [...initial, ...added];
+    return [...block[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
   }
 
   it('declares exactly the same values as the SQL migrations', () => {
@@ -122,7 +107,7 @@ describe('SCRUM-37: EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD mirrors process_change_
   function columnsAppliedInSql() {
     const here = dirname(fileURLToPath(import.meta.url));
     const sql = readFileSync(
-      resolve(here, '../../db/migrations/010_event_change_request_functions.sql'),
+      resolve(here, '../../db/migrations/006_event_change_requests.sql'),
       'utf8',
     );
 

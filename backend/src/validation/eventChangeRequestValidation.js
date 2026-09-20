@@ -14,6 +14,7 @@
  * check, and this layer exists to say what went wrong in words an Organiser
  * can act on.
  *
+ *
  * "Associated with the correct event" is checked in two places, deliberately
  * split by what a plain object can and cannot know:
  *   - here: eventRequestId is at least shaped like an id. A value that could
