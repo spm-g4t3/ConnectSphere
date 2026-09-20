@@ -5,7 +5,7 @@ Setup and startup instructions for running the frontend locally.
 ## Prerequisites
 
 - Node.js installed
-- The backend running (see backend's own README/setup) — the frontend needs it available at `http://localhost:5000` by default
+- The backend running (see backend's own README/setup) — the frontend needs it available at `http://localhost:5050` by default
 - A test user set up in Supabase Auth, with a matching row in the `profiles` table (see "Test user setup" below)
 
 ## First-time setup
@@ -19,7 +19,7 @@ Setup and startup instructions for running the frontend locally.
 2. **Create a `.env` file** in this folder (same level as `package.json`):
 
    ```
-   VITE_API_BASE_URL=http://localhost:5000/api
+   VITE_API_BASE_URL=http://localhost:5050/api
    ```
 
    Adjust the port if your backend runs somewhere else.
@@ -57,7 +57,7 @@ Setup and startup instructions for running the frontend locally.
    npm run dev
    ```
 
-   Confirm you see `Server running on port 5000` with no errors.
+   Confirm you see `Server running on port 5050` with no errors.
 
 2. **Start the frontend**, in a separate terminal (from this folder):
 
