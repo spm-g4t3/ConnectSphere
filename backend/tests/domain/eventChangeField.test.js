@@ -25,7 +25,7 @@ import {
 describe('CHANGE_FIELD mirrors the database enum', () => {
   /**
    * Pull every enum value straight out of the migrations, comments stripped:
-   * the values 005 created it with, plus any 007 (or a later migration)
+   * the values 006 created it with, plus any 008 (or a later migration)
    * added afterwards via `alter type ... add value`.
    */
   function changeFieldsDeclaredInSql() {
@@ -34,17 +34,17 @@ describe('CHANGE_FIELD mirrors the database enum', () => {
     const strip = (sql) => sql.replace(/--[^\n]*/g, '');
 
     const created = strip(
-      readFileSync(resolve(migrationsDir, '005_event_change_requests.sql'), 'utf8'),
+      readFileSync(resolve(migrationsDir, '006_event_change_requests.sql'), 'utf8'),
     );
     const createdBlock = created.match(
       /create type event_change_field as enum \(([\s\S]*?)\);/i,
     );
-    if (!createdBlock) throw new Error('could not find the enum in 005_event_change_requests.sql');
+    if (!createdBlock) throw new Error('could not find the enum in 006_event_change_requests.sql');
     const initial = [...createdBlock[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 
     const extended = strip(
       readFileSync(
-        resolve(migrationsDir, '007_event_change_field_venue_equipment.sql'),
+        resolve(migrationsDir, '008_event_change_field_venue_equipment.sql'),
         'utf8',
       ),
     );
@@ -122,7 +122,7 @@ describe('SCRUM-37: EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD mirrors process_change_
   function columnsAppliedInSql() {
     const here = dirname(fileURLToPath(import.meta.url));
     const sql = readFileSync(
-      resolve(here, '../../db/migrations/009_event_change_request_functions.sql'),
+      resolve(here, '../../db/migrations/010_event_change_request_functions.sql'),
       'utf8',
     );
 

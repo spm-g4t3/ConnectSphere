@@ -1,11 +1,11 @@
--- 008_event_change_request_decision.sql
+-- 009_event_change_request_decision.sql
 -- SCRUM-37 (AC5): record the outcome of processing a change request, so an
 -- approved one can be told apart from a rejected one when it comes time to
 -- apply it back onto the event record.
 --
--- Builds on 006_event_change_request_status.sql -- run after it.
+-- Builds on 007_event_change_request_status.sql -- run after it.
 --
--- 006 deliberately left 'processed' unable to say which outcome it was (see
+-- 007 deliberately left 'processed' unable to say which outcome it was (see
 -- its own comment). This migration is that promised follow-up: it adds the
 -- outcome as its own column rather than splitting 'processed' into
 -- 'approved'/'rejected' within change_request_status, because the
@@ -97,5 +97,5 @@ create trigger event_change_requests_set_processed_at
 -- 4. Row level security
 -- ---------------------------------------------------------------------
 -- No change needed -- event_change_requests already has RLS enabled with no
--- policies from 005, and new columns on an existing table do not alter that
+-- policies from 006, and new columns on an existing table do not alter that
 -- posture.

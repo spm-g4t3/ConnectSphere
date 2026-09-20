@@ -1,4 +1,4 @@
--- 005_event_change_requests.sql
+-- 006_event_change_requests.sql
 -- SCRUM-11: Request changes to a submitted event
 --
 -- Lets an Event Organiser ask for a change to an event they have already

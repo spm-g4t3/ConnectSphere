@@ -1,12 +1,12 @@
--- 006_event_change_request_status.sql
+-- 007_event_change_request_status.sql
 -- SCRUM-34 (AC4): show whether each change request is outstanding, in
 -- progress, or processed, so an Organiser can track it.
 --
--- Builds on 005_event_change_requests.sql -- run after it.
+-- Builds on 006_event_change_requests.sql -- run after it.
 --
--- Kept as its own migration rather than folded into 005, the same way 003
+-- Kept as its own migration rather than folded into 006, the same way 003
 -- added last_modified_by to venues after 002 shipped rather than reopening
--- it: 005 is already out, and an environment that ran it should not need to
+-- it: 006 is already out, and an environment that ran it should not need to
 -- re-run it to pick up a later, separate decision.
 
 
@@ -40,7 +40,7 @@ $$;
 -- 2. The column
 -- ---------------------------------------------------------------------
 -- Every row that already exists becomes 'outstanding' via the column
--- default, which is the correct backfill: 005 shipped with no status
+-- default, which is the correct backfill: 006 shipped with no status
 -- concept at all, so anything already in the table is, by definition, still
 -- waiting on someone.
 
@@ -52,5 +52,5 @@ alter table event_change_requests
 -- 3. Row level security
 -- ---------------------------------------------------------------------
 -- No change needed -- event_change_requests already has RLS enabled with no
--- policies from 005, and a new column on an existing table does not alter
+-- policies from 006, and a new column on an existing table does not alter
 -- that posture.

@@ -5,7 +5,7 @@
  * progress, or processed, so an Organiser can track it.
  *
  * Mirrors the Postgres enum `change_request_status` in
- * 006_event_change_request_status.sql exactly, the same relationship STATUS
+ * 007_event_change_request_status.sql exactly, the same relationship STATUS
  * in eventRequestStatus.js has to `event_request_status`. These two lists
  * must stay identical -- a test asserts the match.
  *
@@ -19,8 +19,8 @@
  * because it answers a closely related question about the same row --
  * "processed" says a decision has been made; "decision" says which one. It
  * mirrors the Postgres enum `change_request_decision` in
- * 008_event_change_request_decision.sql, kept as its own enum rather than
- * folded into change_request_status for the reason 008's own comment gives:
+ * 009_event_change_request_decision.sql, kept as its own enum rather than
+ * folded into change_request_status for the reason 009's own comment gives:
  * the three-state status is a public contract the Organiser's status list
  * already displays, and an approved or rejected request both still read as
  * "Processed" there.

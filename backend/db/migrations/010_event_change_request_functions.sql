@@ -1,9 +1,9 @@
--- 009_event_change_request_functions.sql
+-- 010_event_change_request_functions.sql
 -- SCRUM-37 (AC5): apply an approved change back onto the event record once
 -- a change request has been processed.
 --
 -- Part of SCRUM-11 "Save/edit request". Run this once in the Supabase SQL
--- Editor, after 008_event_change_request_decision.sql.
+-- Editor, after 009_event_change_request_decision.sql.
 --
 -- Why this is a Postgres function rather than two separate updates from
 -- JavaScript: deciding a change request and applying it to event_requests
@@ -30,7 +30,7 @@
 --
 -- venue, equipment and other have no branch: event_requests has no column
 -- for any of them yet (see the comment on 'other' in
--- 005_event_change_requests.sql). Approving one of those is still a valid,
+-- 006_event_change_requests.sql). Approving one of those is still a valid,
 -- recorded decision -- it is only not reflected anywhere on the event
 -- record, because nowhere yet exists to put it.
 --

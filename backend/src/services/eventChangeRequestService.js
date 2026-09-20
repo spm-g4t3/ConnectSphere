@@ -26,7 +26,7 @@
  * or reject -- and, only on approval, applies it back onto the event
  * record. The decision and the application happen together inside a single
  * Postgres transaction (process_change_request in
- * 009_event_change_request_functions.sql), the same reasoning createVenue
+ * 010_event_change_request_functions.sql), the same reasoning createVenue
  * and updateVenue in venueService.js already rely on: two separate
  * supabase-js calls are two separate HTTP requests with no shared
  * transaction, so a rejected write to event_requests could otherwise leave
@@ -47,9 +47,9 @@
  * vocabulary.
  *
  * Input is validated before any network call (eventChangeRequestValidation.js).
- * The database (005_event_change_requests.sql, 006_event_change_request_status.sql,
- * 007_event_change_field_venue_equipment.sql, 008_event_change_request_decision.sql,
- * 009_event_change_request_functions.sql) remains the backstop for anything
+ * The database (006_event_change_requests.sql, 007_event_change_request_status.sql,
+ * 008_event_change_field_venue_equipment.sql, 009_event_change_request_decision.sql,
+ * 010_event_change_request_functions.sql) remains the backstop for anything
  * validation deliberately does not check -- an event_request_id that does
  * not exist, for instance -- and translateError turns that into a typed
  * error, the same division venueService.js uses.
@@ -338,7 +338,7 @@ export async function getChangeRequestById(changeRequestId, organiserId) {
  * apply it back onto the event record (SCRUM-37, AC5).
  *
  * Deciding and applying happen together inside process_change_request
- * (009_event_change_request_functions.sql), a single Postgres transaction:
+ * (010_event_change_request_functions.sql), a single Postgres transaction:
  * if applying the change to event_requests fails -- a rejected
  * proposed_start that would now fall after proposed_end, for instance --
  * the decision itself is rolled back too, so a change request can never be
@@ -348,7 +348,7 @@ export async function getChangeRequestById(changeRequestId, organiserId) {
  * Coordinator rather than, say, the Organiser who filed the request in the
  * first place -- the same gap requestedBy already has against the Organiser
  * role in createChangeRequest. This only guarantees processedBy names a
- * real user, via the foreign key in 008_event_change_request_decision.sql.
+ * real user, via the foreign key in 009_event_change_request_decision.sql.
  *
  * @param {string} changeRequestId
  * @param {object} decisionInput

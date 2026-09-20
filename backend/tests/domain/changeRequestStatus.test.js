@@ -30,7 +30,7 @@ describe('CHANGE_REQUEST_STATUS mirrors the database enum', () => {
   function statusesDeclaredInSql() {
     const here = dirname(fileURLToPath(import.meta.url));
     const sql = readFileSync(
-      resolve(here, '../../db/migrations/006_event_change_request_status.sql'),
+      resolve(here, '../../db/migrations/007_event_change_request_status.sql'),
       'utf8',
     );
 
@@ -84,7 +84,7 @@ describe('CHANGE_REQUEST_DECISION mirrors the database enum', () => {
   function decisionsDeclaredInSql() {
     const here = dirname(fileURLToPath(import.meta.url));
     const sql = readFileSync(
-      resolve(here, '../../db/migrations/008_event_change_request_decision.sql'),
+      resolve(here, '../../db/migrations/009_event_change_request_decision.sql'),
       'utf8',
     );
 

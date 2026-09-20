@@ -10,7 +10,7 @@
  * Pure and synchronous, the same posture as venueValidation.js: no database,
  * no imports beyond the error type and the change-field vocabulary. That
  * keeps it unit-testable without credentials -- the database
- * (005_event_change_requests.sql) is the backstop for anything this does not
+ * (006_event_change_requests.sql) is the backstop for anything this does not
  * check, and this layer exists to say what went wrong in words an Organiser
  * can act on.
  *
