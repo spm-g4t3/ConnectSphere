@@ -102,8 +102,9 @@ A story is done when its acceptance criteria are met, it has tests, it has been 
 | `npm test` | The unit suite. Run on every pull request by CI. | No |
 | `npm run db:check` | The migrations were applied and the seed data landed. | Yes |
 | `npm run venue:check` | The venue service end to end: the transactional RPCs, the schema constraints, the audit trigger and retirement, against a real database. | Yes |
+| `npm run routes:check` | The event request routes end to end: a real Supabase token through the auth middleware, ownership scoping against row level security, and a status change reaching the client. | Yes |
 
-Run all three from `backend/`.
+Run them all from `backend/`.
 
 Test files live in `backend/tests/`, mirroring `backend/src/`. Each `describe` block is named after the acceptance criterion it proves, so a requirement traces to the test that covers it without a separate document to keep in step.
 

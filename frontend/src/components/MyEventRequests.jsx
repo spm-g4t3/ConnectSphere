@@ -11,7 +11,10 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { getMyEventRequests } from "../services/eventRequestService";
-import { getStatusDisplay } from "../services/eventRequestStatusDisplay";
+import {
+  readStatusDisplay,
+  statusClassName,
+} from "../services/eventRequestStatusDisplay";
 import EventRequestForm from "./EventRequestForm";
 import ChangeRequestForm from "./ChangeRequestForm";
 import ChangeRequestStatusList from "./ChangeRequestStatusList";
@@ -40,6 +43,30 @@ export default function MyEventRequests() {
 
   useEffect(() => {
     fetchRequests();
+  }, [fetchRequests]);
+
+  // AC4: the displayed status is updated when the event request changes.
+  //
+  // Refetch on view rather than polling on a timer or subscribing to a live
+  // feed. A Coordinator moving a request is not something the Organiser is
+  // sitting and watching for -- they come back to the page to find out. So the
+  // moment worth re-reading on is the moment they look at it, which costs one
+  // request per visit instead of one every few seconds per open tab.
+  //
+  // handleSaved already refetches after an edit, so changes made in this app
+  // are covered; this covers changes made anywhere else.
+  useEffect(() => {
+    function refetchIfVisible() {
+      if (document.visibilityState === "visible") fetchRequests();
+    }
+
+    window.addEventListener("focus", refetchIfVisible);
+    document.addEventListener("visibilitychange", refetchIfVisible);
+
+    return () => {
+      window.removeEventListener("focus", refetchIfVisible);
+      document.removeEventListener("visibilitychange", refetchIfVisible);
+    };
   }, [fetchRequests]);
 
   function handleSaved() {
@@ -97,12 +124,14 @@ export default function MyEventRequests() {
 
       <ul className="my-event-requests__list">
         {requests.map((req) => {
-          const display = getStatusDisplay(req.status);
+          // The labels and descriptions come from the API now (SCRUM-42), so
+          // this component no longer interprets a status itself.
+          const display = readStatusDisplay(req);
           return (
             <li key={req.id} className="my-event-requests__item">
               <div className="my-event-requests__item-main">
                 <strong>{req.eventName}</strong>
-                <span className={`status-badge ${display.className}`}>
+                <span className={`status-badge ${statusClassName(display.group)}`}>
                   {display.label}
                 </span>
               </div>

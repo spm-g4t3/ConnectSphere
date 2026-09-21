@@ -375,3 +375,87 @@ export async function submitEventRequest(id, { client, now = new Date() } = {}) 
 
   return toEventRequest(data);
 }
+
+
+/**
+ * Every event request belonging to one Organiser, most recently changed first.
+ *
+ * SCRUM-42, a subtask of SCRUM-14 (Track Event Request Status).
+ *
+ * The ordering is the acceptance criterion, not a cosmetic default. AC4 asks
+ * that the displayed status keep up with changes to the request, and updated_at
+ * is maintained by the event_requests_set_updated_at trigger (001), so the
+ * request whose status just moved sorts to the top of the Organiser's list. The
+ * secondary sort on id exists because a bulk update writes the same now() to
+ * several rows, and an undefined tiebreak would let the list reshuffle between
+ * two refetches that read identical data.
+ *
+ * No new index is needed: idx_event_requests_organiser_status (001) leads on
+ * organiser_id and its own comment names SCRUM-14 as the reason it exists.
+ *
+ * @param {string} organiserId  from the JWT, via requireAuth -- never from the client
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object[]>} possibly empty, in camelCase
+ * @throws {ValidationError} when no organiser was supplied, before any round trip
+ */
+export async function listEventRequestsForOrganiser(organiserId, { client } = {}) {
+  assertOrganiser(organiserId);
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db
+    .from('event_requests')
+    .select(COLUMNS)
+    .eq('organiser_id', organiserId)
+    .order('updated_at', { ascending: false })
+    .order('id', { ascending: false });
+
+  if (error) throw translateError(error);
+
+  // An Organiser with no requests is an ordinary state -- a new client who has
+  // not raised one yet -- so it is an empty list, not a NotFoundError. The ??
+  // guards the shape PostgREST returns for an empty result set.
+  return (data ?? []).map(toEventRequest);
+}
+
+
+/**
+ * One event request, but only if it belongs to this Organiser.
+ *
+ * SCRUM-42. AC1 says the Organiser can view the status of *their* request, so
+ * the ownership test lives here beside the read rather than in the route: a
+ * second caller cannot then forget it, which is the same reasoning
+ * eventChangeRequestService.getChangeRequestsForEvent already follows.
+ *
+ * Someone else's request is a NotFoundError, not a ForbiddenError. A 403 would
+ * confirm the id exists, which turns this endpoint into an enumeration oracle
+ * over a table whose row level security is deny-all specifically so that the
+ * API can be the only gate.
+ *
+ * Reads through getEventRequestById rather than repeating the query, so there
+ * is one definition of what a stored request looks like -- the same reason
+ * submitEventRequest gives for doing it.
+ *
+ * @param {string} id
+ * @param {string} organiserId  from the JWT, via requireAuth
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the stored request, in camelCase
+ * @throws {ValidationError} when no organiser was supplied
+ * @throws {NotFoundError}   when no such request exists, or it is someone else's
+ */
+export async function getEventRequestForOrganiser(id, organiserId, { client } = {}) {
+  assertOrganiser(organiserId);
+
+  const request = await getEventRequestById(id, { client });
+
+  if (request.organiserId !== organiserId) {
+    // Deliberately the same message getEventRequestById raises for an id that
+    // does not exist. Two different messages would be the same oracle the
+    // status code avoids.
+    throw new NotFoundError(`Event request ${id} not found`);
+  }
+
+  return request;
+}

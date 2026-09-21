@@ -103,10 +103,21 @@ describe('the configured client', () => {
     expect(createClient.mock.calls[0][2].auth.autoRefreshToken).toBe(false);
   });
 
-  it('is created exactly once, however it is imported', async () => {
+  it('creates one client per role, however it is imported', async () => {
     const module = await importFresh();
 
-    expect(createClient).toHaveBeenCalledTimes(1);
+    // Two, not one: supabaseAuth for sign-in and sign-out, supabaseAdmin for
+    // privileged queries (SCRUM-96/SCRUM-105). They must stay separate --
+    // signInWithPassword sets a client's in-memory auth state to that user for
+    // the rest of the process, so a shared client would run later privileged
+    // queries as the logged-in user, subject to the row level security the
+    // secret key exists to bypass, and silently return nothing.
+    expect(createClient).toHaveBeenCalledTimes(2);
+
+    // What "exactly once" was really guarding: importing the module twice does
+    // not build a second pair, and the `supabase` alias is not a third client.
     expect(module.supabase).toBe(module.default);
+    expect(module.supabase).toBe(module.supabaseAdmin);
+    expect(module.supabaseAdmin).not.toBe(module.supabaseAuth);
   });
 });

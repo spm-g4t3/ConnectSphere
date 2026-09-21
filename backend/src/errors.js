@@ -41,3 +41,21 @@ export class ConflictError extends AppError {
     super(message, 409);
   }
 }
+
+/**
+ * The caller is not signed in, or their token is no longer good.
+ *
+ * SCRUM-42. Added alongside the other three so a 401 has a home in the same
+ * taxonomy, even though requireAuth currently answers directly rather than
+ * throwing -- there is no app-level error handler for it to throw into yet.
+ *
+ * There is deliberately no ForbiddenError. Asking for a request that belongs
+ * to another Organiser answers 404, not 403, because a 403 would confirm the
+ * id exists and turn the endpoint into an enumeration oracle over a table
+ * whose row level security is deny-all precisely so the API can be the gate.
+ */
+export class UnauthorizedError extends AppError {
+  constructor(message) {
+    super(message, 401);
+  }
+}

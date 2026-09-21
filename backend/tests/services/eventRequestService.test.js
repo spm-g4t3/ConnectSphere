@@ -42,6 +42,8 @@ import {
   createEventRequest,
   submitEventRequest,
   getEventRequestById,
+  listEventRequestsForOrganiser,
+  getEventRequestForOrganiser,
 } from '../../src/services/eventRequestService.js';
 import { ValidationError, NotFoundError, ConflictError } from '../../src/errors.js';
 import { STATUS, canTransition } from '../../src/domain/eventRequestStatus.js';
@@ -101,8 +103,20 @@ function createFakeClient(results = []) {
         call.filters.push([column, value]);
         return chain;
       },
+      // SCRUM-42. Recorded in call order, because which column is sorted on
+      // first is the whole of AC4's "most recently changed first".
+      order(column, options) {
+        call.order.push([column, options]);
+        return chain;
+      },
       single: () => settle(call),
       maybeSingle: () => settle(call),
+
+      // SCRUM-42. A list query ends at .order() with no .single(), so the
+      // builder itself is what gets awaited. Making the chain thenable is how
+      // supabase-js behaves too, and it keeps the list path using the same
+      // queue and the same recorded call as every other test here.
+      then: (resolve, reject) => settle(call).then(resolve, reject),
     };
     return chain;
   }
@@ -116,6 +130,7 @@ function createFakeClient(results = []) {
         payload: null,
         select: null,
         filters: [],
+        order: [],
       };
       calls.push(call);
       return builder(call);
@@ -662,6 +677,176 @@ describe('AC3: the service is usable without credentials', () => {
 
     const client = createFakeClient([ok(storedRow())]);
     await getEventRequestById(REQUEST_ID, { client });
+
+    expect(client.calls).toHaveLength(1);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-42 -- retrieving an Organiser's requests and their statuses
+// ---------------------------------------------------------------------------
+const OTHER_ORGANISER_ID = '33333333-3333-4333-8333-333333333333';
+
+describe("AC1: an Organiser sees their own requests and no one else's", () => {
+  it('SCRUM14_AC1_filters_the_query_on_the_organiser', async () => {
+    const client = createFakeClient([ok([storedRow()])]);
+
+    await listEventRequestsForOrganiser(ORGANISER_ID, { client });
+
+    const [call] = client.calls;
+    expect(call.table).toBe('event_requests');
+    expect(call.operation).toBe('select');
+
+    // The filter is the entire access control on this endpoint: there is no id
+    // in the path, so nothing else narrows the table.
+    expect(call.filters).toEqual([['organiser_id', ORGANISER_ID]]);
+  });
+
+  it('SCRUM14_AC1_returns_an_empty_list_rather_than_an_error_when_there_are_none', async () => {
+    const client = createFakeClient([ok([])]);
+
+    // A new client who has not raised a request yet is an ordinary state, not
+    // a 404. The distinction matters at the route: MyEventRequests renders an
+    // empty list as "no requests yet" and a 404 as a failure.
+    await expect(listEventRequestsForOrganiser(ORGANISER_ID, { client })).resolves.toEqual([]);
+  });
+
+  it('SCRUM14_AC1_survives_a_null_data_payload', async () => {
+    // PostgREST can answer an empty result set with null rather than [].
+    const client = createFakeClient([ok(null)]);
+
+    await expect(listEventRequestsForOrganiser(ORGANISER_ID, { client })).resolves.toEqual([]);
+  });
+
+  it('SCRUM14_AC1_maps_every_row_into_camelCase', async () => {
+    const client = createFakeClient([
+      ok([
+        storedRow({ id: 'a', status: STATUS.SUBMITTED }),
+        storedRow({ id: 'b', status: STATUS.UNDER_REVIEW }),
+      ]),
+    ]);
+
+    const requests = await listEventRequestsForOrganiser(ORGANISER_ID, { client });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toMatchObject({
+      id: 'a',
+      organiserId: ORGANISER_ID,
+      eventName: 'IS212 Industry Night',
+      status: STATUS.SUBMITTED,
+    });
+
+    // No snake_case key leaks upward on any element, not just the first.
+    for (const request of requests) {
+      expect(Object.keys(request).some((key) => key.includes('_'))).toBe(false);
+    }
+  });
+
+  it('SCRUM14_AC1_refuses_to_query_at_all_without_an_organiser', async () => {
+    const client = createFakeClient([ok([storedRow()])]);
+
+    const err = await errorFrom(listEventRequestsForOrganiser(undefined, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toEqual(['organiserId']);
+
+    // The point of the assertion: a missing organiser must not reach the
+    // database as an unfiltered read of the whole table.
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM14_AC1_translates_a_database_failure_rather_than_leaking_it', async () => {
+    const client = createFakeClient([dbError('42P01', 'relation does not exist')]);
+
+    const err = await errorFrom(listEventRequestsForOrganiser(ORGANISER_ID, { client }));
+
+    // An unrecognised code stays untyped, so it cannot reach the API dressed as
+    // a 400 telling an Organiser to correct a form they filled in correctly.
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err.status).toBeUndefined();
+  });
+
+  it('SCRUM14_AC1_returns_the_request_when_the_organiser_matches', async () => {
+    const client = createFakeClient([ok(storedRow({ status: STATUS.UNDER_REVIEW }))]);
+
+    const request = await getEventRequestForOrganiser(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(request).toMatchObject({ id: REQUEST_ID, status: STATUS.UNDER_REVIEW });
+  });
+
+  it("SCRUM14_AC1_hides_another_organisers_request_behind_a_not_found", async () => {
+    const client = createFakeClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
+
+    const err = await errorFrom(getEventRequestForOrganiser(REQUEST_ID, ORGANISER_ID, { client }));
+
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.status).toBe(404);
+  });
+
+  it('SCRUM14_AC1_answers_a_foreign_request_exactly_as_it_answers_a_missing_one', async () => {
+    const foreign = createFakeClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
+    const missing = createFakeClient([ok(null)]);
+
+    const foreignErr = await errorFrom(
+      getEventRequestForOrganiser(REQUEST_ID, ORGANISER_ID, { client: foreign }),
+    );
+    const missingErr = await errorFrom(
+      getEventRequestForOrganiser(REQUEST_ID, ORGANISER_ID, { client: missing }),
+    );
+
+    // Identical down to the message. A different wording for "exists but is not
+    // yours" would be the same enumeration oracle the 404 status code avoids.
+    expect(foreignErr.message).toBe(missingErr.message);
+  });
+
+  it('SCRUM14_AC1_refuses_a_single_read_without_an_organiser', async () => {
+    const client = createFakeClient([ok(storedRow())]);
+
+    const err = await errorFrom(getEventRequestForOrganiser(REQUEST_ID, '', { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+
+describe('AC4: the most recently changed request is listed first', () => {
+  it('SCRUM14_AC4_orders_by_updated_at_descending', async () => {
+    const client = createFakeClient([ok([storedRow()])]);
+
+    await listEventRequestsForOrganiser(ORGANISER_ID, { client });
+
+    // updated_at is maintained by the event_requests_set_updated_at trigger
+    // (001), so a status change moves the request to the top of the list. That
+    // is AC4 expressed as an ordering rather than as a push.
+    expect(client.calls[0].order[0]).toEqual(['updated_at', { ascending: false }]);
+  });
+
+  it('SCRUM14_AC4_breaks_ties_deterministically', async () => {
+    const client = createFakeClient([ok([storedRow()])]);
+
+    await listEventRequestsForOrganiser(ORGANISER_ID, { client });
+
+    // A bulk update writes the same now() to several rows. Without this the
+    // list can reshuffle between two refetches that read identical data, which
+    // reads as movement where nothing happened.
+    expect(client.calls[0].order[1]).toEqual(['id', { ascending: false }]);
+  });
+});
+
+
+describe('AC1: the list is usable without credentials', () => {
+  it('SCRUM14_AC1_lists_with_no_credentials_configured', async () => {
+    // Mirrors the SCRUM-10 test above: a supplied client is genuinely used in
+    // place of the default one, so no real Supabase client is ever constructed
+    // and the suite keeps running in CI with no .env.
+    expect(typeof listEventRequestsForOrganiser).toBe('function');
+    expect(typeof getEventRequestForOrganiser).toBe('function');
+
+    const client = createFakeClient([ok([storedRow()])]);
+    await listEventRequestsForOrganiser(ORGANISER_ID, { client });
 
     expect(client.calls).toHaveLength(1);
   });
