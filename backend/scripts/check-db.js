@@ -22,6 +22,7 @@ const TABLES = [
   { name: 'accessibility_features', migration: '002', expected: 5 },
   { name: 'facilities', migration: '002', expected: 8 },
   { name: 'venue_change_history', migration: '003', expected: null },
+  { name: 'event_change_requests', migration: '005', expected: null },
 ];
 
 /** head: true asks for the count without transferring any rows. */

@@ -1,0 +1,311 @@
+/**
+ * End-to-end proof for the event request service (SCRUM-31).
+ *
+ * Run with: npm run request:check
+ *
+ * The 35 unit tests in tests/services/eventRequestService.test.js run against a
+ * hand-rolled fake, which answers whatever it was told to answer. Everything
+ * below is what a fake cannot prove: that the enum accepts 'draft' and
+ * 'submitted', that the not null and check constraints in 001 fire, that the
+ * four columns added by 005 exist and hold data, that
+ * event_requests_submitted_at_matches_status does what its comment claims, that
+ * organiser_id really is a foreign key into auth.users, and that the
+ * event_requests_set_updated_at trigger maintains updated_at without the
+ * service ever setting it.
+ *
+ * It is also the first exercise of the service's lazy client. The unit tests
+ * always supply a fake, so the default branch -- the dynamic import of
+ * supabaseClient.js -- is never taken there. Every service call below omits the
+ * client on purpose, so the path production will use is the path being tested.
+ * supabase is imported here only for the raw operations a service method has no
+ * business exposing: listing users, bypassing the service to attack a
+ * constraint directly, counting, and cleaning up.
+ *
+ * Exits non-zero on any failure.
+ */
+
+import { supabase } from '../src/config/supabaseClient.js';
+import {
+  createEventRequest,
+  submitEventRequest,
+  getEventRequestById,
+} from '../src/services/eventRequestService.js';
+import { ValidationError, NotFoundError, ConflictError } from '../src/errors.js';
+
+const NAME = `__check_request_${Date.now()}`;
+
+const DAY = 24 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
+
+// Real future instants, not fixed literals. Submission requires a start that is
+// still ahead of now, so a hardcoded date would quietly start failing the day
+// it passed -- the exact trap the injectable `now` exists to avoid in tests.
+const START = new Date(Date.now() + 30 * DAY).toISOString();
+const END = new Date(Date.now() + 30 * DAY + 8 * HOUR).toISOString();
+
+const createdIds = [];
+let rowsBefore = null;
+let failures = 0;
+
+function check(label, passed, detail = '') {
+  console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
+  if (!passed) failures += 1;
+}
+
+/** Remember a row so cleanup can remove it, whatever happens afterwards. */
+function track(record) {
+  createdIds.push(record.id);
+  return record;
+}
+
+/** Await a rejection and hand back the error, or null if it resolved. */
+async function failureFrom(promise) {
+  try {
+    await promise;
+    return null;
+  } catch (err) {
+    return err;
+  }
+}
+
+async function cleanup() {
+  if (createdIds.length === 0) return;
+  // No child tables and no ON DELETE RESTRICT to work around: an event request
+  // is a single row, so one delete removes everything this run created.
+  await supabase.from('event_requests').delete().in('id', createdIds);
+}
+
+async function countRequests() {
+  const { count } = await supabase
+    .from('event_requests')
+    .select('*', { count: 'exact', head: true });
+  return count ?? 0;
+}
+
+async function main() {
+  console.log('\nEvent request service check\n');
+
+  rowsBefore = await countRequests();
+
+  // --- the Organiser ------------------------------------------------------
+  // Read rather than hardcoded. organiser_id references auth.users, so an id
+  // invented here would fail with a foreign key violation that looks like a bug
+  // in the service rather than an empty user table.
+  const { data, error } = await supabase.auth.admin.listUsers();
+  if (error) throw new Error(`could not list auth users: ${error.message}`);
+
+  const organiser = data?.users?.[0];
+  if (!organiser) {
+    throw new Error(
+      'no users in auth.users -- create one in the Supabase dashboard first. ' +
+      'Every insert below would otherwise fail on the foreign key.',
+    );
+  }
+
+  const organiserId = organiser.id;
+  console.log(`  organiser:   ${organiser.email ?? '(no email)'}  ${organiserId}`);
+  console.log(`  rows before: ${rowsBefore}\n`);
+
+  // --- 1. a minimal draft -------------------------------------------------
+  // Proves the permissive half of the design against the real schema: a request
+  // with nothing but a name is storable. The fake could not show that the enum
+  // accepts 'draft', that event_name's length(trim(...)) > 0 check passes, or
+  // that created_at and updated_at defaults fire without the service sending them.
+  const minimal = track(await createEventRequest({ eventName: NAME }, organiserId));
+
+  check('minimal draft created', Boolean(minimal.id), minimal.id);
+  check('status is draft', minimal.status === 'draft', minimal.status);
+  check('organiser recorded', minimal.organiserId === organiserId, minimal.organiserId);
+  check('submitted_at still null', minimal.submittedAt === null, String(minimal.submittedAt));
+  check('created_at set by the database', Boolean(minimal.createdAt), minimal.createdAt);
+
+  // --- 2. a complete draft ------------------------------------------------
+  // The three requirement columns from 005 have never held data -- the table was
+  // empty before this run. A typo in COLUMN_BY_FIELD would be silent, because
+  // PostgREST ignores a key no column matches, so the only way to know the
+  // mapping is right is to write a value and read it back.
+  const completeInput = {
+    eventName: `${NAME}_complete`,
+    purpose: 'Connect final-year students with industry partners.',
+    description: 'An evening of short talks followed by networking.',
+    proposedStart: START,
+    proposedEnd: END,
+    expectedAttendance: 120,
+    venueRequirements: 'A large room, ideally tiered seating.',
+    accessibilityRequirements: 'Step-free access to the stage.',
+    equipmentRequirements: 'Two handheld microphones and a projector.',
+  };
+
+  const complete = track(await createEventRequest(completeInput, organiserId));
+
+  // Kept for the trigger check at the end, before anything updates the row.
+  const createdAtAtInsert = complete.createdAt;
+  const updatedAtAtInsert = complete.updatedAt;
+
+  check('complete draft created', Boolean(complete.id), complete.id);
+  check('purpose stored', complete.purpose === completeInput.purpose);
+  check('description stored', complete.description === completeInput.description);
+  check('attendance stored', complete.expectedAttendance === 120, String(complete.expectedAttendance));
+  check(
+    'venue requirements stored (005)',
+    complete.venueRequirements === completeInput.venueRequirements,
+    complete.venueRequirements,
+  );
+  check(
+    'accessibility requirements stored (005)',
+    complete.accessibilityRequirements === completeInput.accessibilityRequirements,
+    complete.accessibilityRequirements,
+  );
+  check(
+    'equipment requirements stored (005)',
+    complete.equipmentRequirements === completeInput.equipmentRequirements,
+    complete.equipmentRequirements,
+  );
+  check(
+    'proposed start round-trips as the same instant',
+    new Date(complete.proposedStart).getTime() === new Date(START).getTime(),
+    complete.proposedStart,
+  );
+  check(
+    'proposed end round-trips as the same instant',
+    new Date(complete.proposedEnd).getTime() === new Date(END).getTime(),
+    complete.proposedEnd,
+  );
+
+  // --- 3. reading it back -------------------------------------------------
+  // A separate round trip, so this reads what Postgres stored rather than what
+  // the insert echoed back.
+  const readBack = await getEventRequestById(complete.id);
+
+  check('read back by id', readBack.id === complete.id);
+  check('event name matches', readBack.eventName === completeInput.eventName);
+  check('requirements survive a re-read', readBack.equipmentRequirements === completeInput.equipmentRequirements);
+  check(
+    'keys are camelCase, not column names',
+    'eventName' in readBack && !('event_name' in readBack) && !('organiser_id' in readBack),
+    Object.keys(readBack).filter((k) => k.includes('_')).join(',') || 'no snake_case keys',
+  );
+
+  // --- 4. submitting ------------------------------------------------------
+  // The draft -> submitted move against the real enum and the real constraint.
+  // Note no `now` is injected: this is the production path, judged against the
+  // server's own clock.
+  const beforeSubmit = Date.now();
+  const submitted = await submitEventRequest(complete.id);
+
+  check('status becomes submitted', submitted.status === 'submitted', submitted.status);
+  check('submitted_at recorded', Boolean(submitted.submittedAt), submitted.submittedAt);
+
+  const skew = Math.abs(new Date(submitted.submittedAt).getTime() - beforeSubmit);
+  check('submitted_at is close to now', skew < 60_000, `${skew} ms from the local clock`);
+
+  // --- 5. the constraint from 005 is real ---------------------------------
+  // Deliberately bypasses the service and attacks the table directly, which is
+  // the only way to prove the constraint rather than the code in front of it.
+  // The minimal request is still a draft, so setting submitted_at on it must be
+  // refused by event_requests_submitted_at_matches_status. If this check ever
+  // fails, 005's header comment is describing a guarantee that is not there.
+  const { error: constraintError } = await supabase
+    .from('event_requests')
+    .update({ submitted_at: new Date().toISOString() })
+    .eq('id', minimal.id);
+
+  check(
+    'database refuses submitted_at on a draft',
+    Boolean(constraintError),
+    constraintError ? constraintError.code : 'the update was ACCEPTED',
+  );
+  check(
+    'the refusal names the constraint from 005',
+    /event_requests_submitted_at_matches_status/.test(constraintError?.message ?? ''),
+    constraintError?.message ?? '(no error)',
+  );
+
+  // --- 6. an incomplete draft cannot be submitted -------------------------
+  // The minimal request has a name and nothing else, which is exactly what
+  // SCRUM-11 needs to stay savable. Submission re-reads the stored row and
+  // refuses it, listing every gap so the Organiser fixes the form in one pass.
+  const incomplete = await failureFrom(submitEventRequest(minimal.id));
+
+  check('incomplete draft refused', incomplete instanceof ValidationError, incomplete?.name ?? 'no error');
+  check('reported as 400', incomplete?.status === 400, String(incomplete?.status));
+
+  const gaps = (incomplete?.details ?? []).map((d) => d.field).sort();
+  check('every gap listed, not just the first', gaps.length === 4, gaps.join(',') || 'none');
+
+  // --- 7. submitting twice ------------------------------------------------
+  // The complete request is already 'submitted' from step 4, so canTransition
+  // refuses it. This is the sequential case; the concurrent one is covered by
+  // the guard on the update, which a single-threaded script cannot provoke.
+  const again = await failureFrom(submitEventRequest(complete.id));
+
+  check('second submit refused', again instanceof ConflictError, again?.name ?? 'no error');
+  check('reported as 409', again?.status === 409, String(again?.status));
+  check('message names the current status', /submitted/i.test(again?.message ?? ''), again?.message ?? '');
+
+  // --- 8. submitting something absent -------------------------------------
+  const missing = await failureFrom(
+    submitEventRequest('00000000-0000-0000-0000-000000000000'),
+  );
+
+  check('absent request raises NotFoundError', missing instanceof NotFoundError, missing?.name ?? 'no error');
+  check('reported as 404', missing?.status === 404, String(missing?.status));
+
+  // --- 9. an organiser who does not exist ---------------------------------
+  // The 23503 path, and the likeliest real failure in production: a stale token
+  // or a deleted account. A fake can be told to return the code; only the real
+  // database proves the foreign key is actually there to raise it.
+  //
+  // Wrapped in try/catch rather than failureFrom so that an unexpected success
+  // still tracks the row for cleanup.
+  let ghostError = null;
+  try {
+    track(await createEventRequest({ eventName: `${NAME}_ghost` }, '99999999-9999-4999-8999-999999999999'));
+  } catch (err) {
+    ghostError = err;
+  }
+
+  check('unknown organiser refused', ghostError !== null, ghostError?.name ?? 'the insert was ACCEPTED');
+  check('translated, not a raw driver error', ghostError instanceof ValidationError, ghostError?.name ?? '');
+  check('message names the organiser', /organiser/i.test(ghostError?.message ?? ''), ghostError?.message ?? '');
+
+  // --- 10. the updated_at trigger -----------------------------------------
+  // The service never sets updated_at on insert or on submit -- grep it. So if
+  // the column has moved since step 2, only event_requests_set_updated_at can
+  // have moved it. created_at must not have budged: a trigger that touched both
+  // would destroy the distinction submitted_at depends on.
+  const afterSubmit = await getEventRequestById(complete.id);
+
+  check(
+    'updated_at advanced after the submit',
+    new Date(afterSubmit.updatedAt).getTime() > new Date(updatedAtAtInsert).getTime(),
+    `${updatedAtAtInsert} -> ${afterSubmit.updatedAt}`,
+  );
+  check(
+    'created_at did not move',
+    afterSubmit.createdAt === createdAtAtInsert,
+    afterSubmit.createdAt,
+  );
+}
+
+main()
+  .catch((err) => {
+    console.error(`\nFailed: ${err.message}`);
+    failures += 1;
+  })
+  .finally(async () => {
+    await cleanup();
+
+    // Counted after cleanup so the script proves it left the table as it found
+    // it, rather than asserting it and hoping.
+    if (rowsBefore !== null) {
+      const rowsAfter = await countRequests();
+      check('nothing left behind', rowsAfter === rowsBefore, `${rowsBefore} -> ${rowsAfter}`);
+    }
+
+    if (failures > 0) {
+      console.error(`\n${failures} check(s) failed.\n`);
+      process.exit(1);
+    }
+    console.log('\nAll checks passed. Created, read, submitted, refused, cleaned up.\n');
+  });
