@@ -13,7 +13,8 @@
     "venue:check": "node scripts/check-venue-service.js",
     "request:check": "node scripts/check-event-request-service.js",
     "change-request:check": "node scripts/check-event-change-request-service.js",
-    "routes:check": "node scripts/check-event-request-routes.js"
+    "routes:check": "node scripts/check-event-request-routes.js",
+    "venue-routes:check": "node scripts/check-venue-routes.js"
   },
   "devDependencies": {
     "nodemon": "^3.1.0",

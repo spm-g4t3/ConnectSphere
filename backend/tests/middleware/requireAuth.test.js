@@ -20,6 +20,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { createRequireAuth } from '../../src/middleware/requireAuth.js';
+import { ROLE } from '../../src/domain/userRole.js';
 
 
 // ---------------------------------------------------------------------------
@@ -61,6 +62,25 @@ function createFakeVerifier(user) {
   return { verifyToken, tokens };
 }
 
+/**
+ * A role loader that answers with one role, and records who it was asked about.
+ *
+ * Injected everywhere below so no test reaches the real profiles lookup, which
+ * is what keeps this suite runnable with no .env -- the same reason the
+ * verifier is injected.
+ */
+function createFakeRoleLoader(role = ROLE.EVENT_ORGANISER) {
+  const userIds = [];
+  const loadRole = async (userId) => {
+    userIds.push(userId);
+    return role;
+  };
+  return { loadRole, userIds };
+}
+
+/** The options every test passes unless it is specifically testing one of them. */
+const withRole = (role) => ({ loadRole: createFakeRoleLoader(role).loadRole });
+
 
 describe('AC1: only a signed-in caller reaches the data', () => {
   it('SCRUM14_AC1_refuses_a_request_with_no_authorization_header', async () => {
@@ -68,7 +88,7 @@ describe('AC1: only a signed-in caller reaches the data', () => {
     const res = createFakeResponse();
     const next = vi.fn();
 
-    await createRequireAuth({ verifyToken })(req(), res, next);
+    await createRequireAuth({ verifyToken, ...withRole() })(req(), res, next);
 
     expect(res.statusCode).toBe(401);
     expect(res.body).toEqual({ error: 'Authentication required' });
@@ -85,7 +105,7 @@ describe('AC1: only a signed-in caller reaches the data', () => {
     const res = createFakeResponse();
     const next = vi.fn();
 
-    await createRequireAuth({ verifyToken })(
+    await createRequireAuth({ verifyToken, ...withRole() })(
       req({ authorization: 'Basic dXNlcjpwYXNz' }),
       res,
       next,
@@ -101,7 +121,7 @@ describe('AC1: only a signed-in caller reaches the data', () => {
     const res = createFakeResponse();
     const next = vi.fn();
 
-    await createRequireAuth({ verifyToken })(
+    await createRequireAuth({ verifyToken, ...withRole() })(
       req({ authorization: 'Bearer    ' }),
       res,
       next,
@@ -118,7 +138,7 @@ describe('AC1: only a signed-in caller reaches the data', () => {
 
     // The verifier answering null is how "Supabase looked and said no" arrives:
     // an expired session, a signed-out token, or a forgery.
-    await createRequireAuth({ verifyToken: async () => null })(
+    await createRequireAuth({ verifyToken: async () => null, ...withRole() })(
       req({ authorization: 'Bearer expired.token.here' }),
       res,
       next,
@@ -133,8 +153,8 @@ describe('AC1: only a signed-in caller reaches the data', () => {
     const absent = createFakeResponse();
     const rejected = createFakeResponse();
 
-    await createRequireAuth({ verifyToken: async () => null })(req(), absent, vi.fn());
-    await createRequireAuth({ verifyToken: async () => null })(
+    await createRequireAuth({ verifyToken: async () => null, ...withRole() })(req(), absent, vi.fn());
+    await createRequireAuth({ verifyToken: async () => null, ...withRole() })(
       req({ authorization: 'Bearer expired.token.here' }),
       rejected,
       vi.fn(),
@@ -156,12 +176,16 @@ describe('AC1: only a signed-in caller reaches the data', () => {
     const res = createFakeResponse();
     const next = vi.fn();
 
-    await createRequireAuth({ verifyToken })(request, res, next);
+    await createRequireAuth({ verifyToken, ...withRole() })(request, res, next);
 
     expect(next).toHaveBeenCalledTimes(1);
     expect(next).toHaveBeenCalledWith();
     expect(res.statusCode).toBeNull();
-    expect(request.user).toEqual({ id: 'organiser-1', email: 'organiser@example.com' });
+    expect(request.user).toEqual({
+      id: 'organiser-1',
+      email: 'organiser@example.com',
+      role: ROLE.EVENT_ORGANISER,
+    });
 
     // The scheme is stripped, so the verifier receives a token and not a header.
     expect(tokens).toEqual(['good.token.here']);
@@ -176,12 +200,12 @@ describe('AC1: only a signed-in caller reaches the data', () => {
     });
     const request = req({ authorization: 'Bearer good.token.here' });
 
-    await createRequireAuth({ verifyToken })(request, createFakeResponse(), vi.fn());
+    await createRequireAuth({ verifyToken, ...withRole() })(request, createFakeResponse(), vi.fn());
 
     // Not the whole Supabase user object. Routes should not be able to reach
     // for a field this middleware never promised, and metadata is the caller's
     // to change -- putting it on req.user invites someone to authorise on it.
-    expect(Object.keys(request.user).sort()).toEqual(['email', 'id']);
+    expect(Object.keys(request.user).sort()).toEqual(['email', 'id', 'role']);
   });
 
   it('SCRUM14_AC1_never_trusts_a_user_id_sent_in_the_body_or_query', async () => {
@@ -194,7 +218,7 @@ describe('AC1: only a signed-in caller reaches the data', () => {
       },
     );
 
-    await createRequireAuth({ verifyToken })(request, createFakeResponse(), vi.fn());
+    await createRequireAuth({ verifyToken, ...withRole() })(request, createFakeResponse(), vi.fn());
 
     // The whole point of the middleware. A client may say whatever it likes;
     // identity comes from the token and nowhere else.
@@ -214,6 +238,7 @@ describe('AC1: only a signed-in caller reaches the data', () => {
       verifyToken: async () => {
         throw new Error('network is unreachable');
       },
+      ...withRole(),
     })(req({ authorization: 'Bearer good.token.here' }), res, next);
 
     expect(res.statusCode).toBe(500);
@@ -223,6 +248,80 @@ describe('AC1: only a signed-in caller reaches the data', () => {
     // The driver message is logged for whoever is on call, never returned.
     expect(JSON.stringify(res.body)).not.toMatch(/unreachable/);
     expect(consoleError).toHaveBeenCalled();
+
+    consoleError.mockRestore();
+  });
+});
+
+
+describe('SCRUM-15 AC2: the caller\'s role is established here, from profiles', () => {
+  it('SCRUM15_AC2_puts_the_role_on_the_request', async () => {
+    const { verifyToken } = createFakeVerifier({ id: 'staff-1', email: 'staff@example.com' });
+    const { loadRole, userIds } = createFakeRoleLoader(ROLE.VENUE_STAFF);
+    const request = req({ authorization: 'Bearer good.token.here' });
+    const next = vi.fn();
+
+    await createRequireAuth({ verifyToken, loadRole })(request, createFakeResponse(), next);
+
+    expect(request.user.role).toBe(ROLE.VENUE_STAFF);
+    expect(next).toHaveBeenCalledTimes(1);
+
+    // Looked up by the id the token resolved to, never by anything else.
+    expect(userIds).toEqual(['staff-1']);
+  });
+
+  it('SCRUM15_AC2_refuses_an_account_with_no_profile_row_as_403', async () => {
+    const { verifyToken } = createFakeVerifier({ id: 'ghost', email: 'ghost@example.com' });
+    const res = createFakeResponse();
+    const next = vi.fn();
+
+    await createRequireAuth({ verifyToken, loadRole: async () => null })(
+      req({ authorization: 'Bearer good.token.here' }), res, next,
+    );
+
+    // 403, not 401: the account authenticated fine, it is simply not
+    // provisioned. A 401 would clear their session client-side over a gap they
+    // cannot fix by signing in again.
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Your account has no role assigned' });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM15_AC2_never_takes_the_role_from_anything_the_client_sent', async () => {
+    const { verifyToken } = createFakeVerifier({
+      id: 'u1',
+      email: 'u1@example.com',
+      // A client-writable field on the Supabase user. If the role were read
+      // from here, anyone could promote themselves.
+      user_metadata: { role: ROLE.VENUE_STAFF },
+      app_metadata: { role: ROLE.VENUE_STAFF },
+    });
+    const request = req(
+      { authorization: 'Bearer good.token.here' },
+      { body: { role: ROLE.VENUE_STAFF }, query: { role: ROLE.VENUE_STAFF } },
+    );
+
+    await createRequireAuth({
+      verifyToken,
+      loadRole: async () => ROLE.ATTENDEE,
+    })(request, createFakeResponse(), vi.fn());
+
+    expect(request.user.role).toBe(ROLE.ATTENDEE);
+  });
+
+  it('SCRUM15_AC2_answers_500_when_the_role_lookup_itself_fails', async () => {
+    const { verifyToken } = createFakeVerifier({ id: 'u1', email: 'u1@example.com' });
+    const res = createFakeResponse();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await createRequireAuth({
+      verifyToken,
+      loadRole: async () => { throw new Error('profiles table is on fire'); },
+    })(req({ authorization: 'Bearer good.token.here' }), res, vi.fn());
+
+    // The database being unreachable is not the caller lacking a role.
+    expect(res.statusCode).toBe(500);
+    expect(JSON.stringify(res.body)).not.toMatch(/on fire/);
 
     consoleError.mockRestore();
   });

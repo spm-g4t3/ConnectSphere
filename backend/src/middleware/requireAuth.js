@@ -15,11 +15,16 @@
  * explicit understanding that the API authorises instead. That is not a stub;
  * it is a working way to read every event request in the system.
  *
+ * It also carries the caller's role, because SCRUM-15 AC2 ("an *authorised*
+ * change") needs one and a route cannot check a role that never reached it.
+ * Deciding what a role may do is still somewhere else -- see requireRole.js.
+ *
  * Deliberately NOT done here:
  *
- *  - No role lookup. profiles.role is read at login (src/routes/auth.js) and
- *    role gating is a separate concern with its own stories. This middleware
- *    answers "who", not "what may they do".
+ *  - No authorisation decision. This middleware establishes the role; it never
+ *    refuses a caller for having the wrong one. That is requireRole's job, so
+ *    that a route's permissions are visible where the route is declared rather
+ *    than buried in a shared middleware.
  *  - No ownership check. Whether this user may see a particular request is a
  *    question about that request, so it lives in the service alongside the
  *    query, where a second caller cannot forget it.
@@ -64,17 +69,52 @@ async function defaultVerifyToken(token) {
 
 
 /**
- * Build the middleware, optionally over an injected verifier.
+ * Read a verified user's role out of the profiles table.
  *
- * A factory rather than a bare function so tests can supply a verifier instead
- * of a network call, which is the same seam the service layer uses for its
- * client. The default export is the instance routes actually mount.
+ * A second round trip per authenticated request, on a primary-key lookup. The
+ * alternative -- a custom JWT claim set by a Supabase auth hook -- would avoid
+ * it, but puts the role inside a token that stays valid until it expires, so a
+ * role revoked at 10:00 would keep working until then. Reading it per request
+ * means a change takes effect on the next call.
+ *
+ * Dynamically imported for the same reason as the verifier below.
+ *
+ * @param {string} userId
+ * @returns {Promise<string|null>} the role, or null when there is no profile
+ */
+async function defaultLoadRole(userId) {
+  const { supabaseAdmin } = await import('../config/supabaseClient.js');
+
+  const { data, error } = await supabaseAdmin
+    .from('profiles')
+    .select('role')
+    .eq('id', userId)
+    .maybeSingle();
+
+  // maybeSingle rather than single: a missing profile is a real state the
+  // caller below has an answer for, not an error to throw over.
+  if (error) throw error;
+
+  return data?.role ?? null;
+}
+
+
+/**
+ * Build the middleware, optionally over an injected verifier and role loader.
+ *
+ * A factory rather than a bare function so tests can supply both instead of
+ * network calls, which is the same seam the service layer uses for its client.
+ * The default export is the instance routes actually mount.
  *
  * @param {object} [options]
  * @param {(token: string) => Promise<object|null>} [options.verifyToken]
+ * @param {(userId: string) => Promise<string|null>} [options.loadRole]
  * @returns {(req, res, next) => Promise<void>}
  */
-export function createRequireAuth({ verifyToken = defaultVerifyToken } = {}) {
+export function createRequireAuth({
+  verifyToken = defaultVerifyToken,
+  loadRole = defaultLoadRole,
+} = {}) {
   return async function requireAuth(req, res, next) {
     const header = req.headers?.authorization ?? '';
 
@@ -102,11 +142,23 @@ export function createRequireAuth({ verifyToken = defaultVerifyToken } = {}) {
         return res.status(401).json({ error: 'Your session is no longer valid' });
       }
 
-      // Only the two fields routes are promised. Copying the whole Supabase
+      const role = await loadRole(user.id);
+
+      // 403, not 500 and not 401. The account authenticated perfectly well; it
+      // simply has no profile row, so nothing can say what it may do. Signing
+      // in again would not help, which is what rules out 401 -- and the
+      // frontend clears its session on a 401, so using one would log them out
+      // over a provisioning gap they cannot fix themselves.
+      if (!role) {
+        return res.status(403).json({ error: 'Your account has no role assigned' });
+      }
+
+      // Only the three fields routes are promised. Copying the whole Supabase
       // user would put app_metadata and user_metadata within reach, and
       // user_metadata is client-writable -- an invitation to authorise on a
-      // value the caller controls.
-      req.user = { id: user.id, email: user.email };
+      // value the caller controls. The role comes from profiles for exactly
+      // that reason: it is the one copy a client cannot write.
+      req.user = { id: user.id, email: user.email, role };
 
       return next();
     } catch (err) {

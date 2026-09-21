@@ -269,3 +269,88 @@ export async function searchVenues(filters = {}) {
     maxCapacity: row.max_capacity,
   }));
 }
+
+
+/**
+ * A venue's change history, newest first.
+ *
+ * SCRUM-15 AC4: "every change records the editing user, a timestamp, and the
+ * previous values." The trigger in 003 and the functions in 008 write those
+ * rows; without this they could not be read back, which left the last third of
+ * AC4 -- being able to see the previous values at all -- unmet.
+ *
+ * The venue is deliberately not checked for existence first. A venue with no
+ * history and a venue that never existed both answer with an empty list: a
+ * NotFoundError here would need an extra round trip to say something the
+ * caller can already tell from GET /venues/:id.
+ *
+ * old_values and new_values are returned as they were stored. They hold only
+ * the fields that differed, so their shape varies row to row by design -- an
+ * attribute change carries arrays, a scalar change carries scalars, and a
+ * creation carries an empty old_values.
+ *
+ * @param {string} venueId
+ * @returns {Promise<object[]>} possibly empty, in camelCase
+ * @throws {ValidationError} when the id is malformed, before any network call
+ */
+export async function getVenueHistory(venueId) {
+  validateVenueId(venueId);
+
+  const { data, error } = await supabase
+    .from('venue_change_history')
+    .select('id, venue_id, changed_by, changed_at, old_values, new_values')
+    .eq('venue_id', venueId)
+    .order('changed_at', { ascending: false })
+    .order('id', { ascending: false });
+
+  if (error) throw translateError(error);
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    venueId: row.venue_id,
+    changedBy: row.changed_by,
+    changedAt: row.changed_at,
+    oldValues: row.old_values,
+    newValues: row.new_values,
+  }));
+}
+
+
+/**
+ * The bookings held against a venue, most recent first.
+ *
+ * SCRUM-15 AC3, the half that retirement alone cannot demonstrate: "a venue
+ * can be retired ... while its past bookings remain viewable."
+ *
+ * There is deliberately no filter on the venue's retired_at. That is the whole
+ * point -- a retired venue's bookings must still be readable, or retirement
+ * would be a delete wearing a different name. The same reasoning is why
+ * getVenueById returns retired venues.
+ *
+ * Reads the provisional bookings table from 009. The booking story owns that
+ * table and this function will grow with it.
+ *
+ * @param {string} venueId
+ * @returns {Promise<object[]>} possibly empty, in camelCase
+ * @throws {ValidationError} when the id is malformed, before any network call
+ */
+export async function getBookingsForVenue(venueId) {
+  validateVenueId(venueId);
+
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('id, venue_id, event_request_id, starts_at, ends_at, created_at')
+    .eq('venue_id', venueId)
+    .order('starts_at', { ascending: false });
+
+  if (error) throw translateError(error);
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    venueId: row.venue_id,
+    eventRequestId: row.event_request_id,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    createdAt: row.created_at,
+  }));
+}

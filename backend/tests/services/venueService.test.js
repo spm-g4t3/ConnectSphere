@@ -25,6 +25,8 @@ import {
   getVenueById,
   retireVenue,
   searchVenues,
+  getVenueHistory,
+  getBookingsForVenue,
 } from '../../src/services/venueService.js';
 import { ValidationError, NotFoundError, ConflictError } from '../../src/errors.js';
 
@@ -826,5 +828,127 @@ describe('AC4: every write records who made it', () => {
     await call();
 
     expect(rpcArgs().p_user_id).toBe(STAFF_ID);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// AC4 -- reading the audit trail back
+// ---------------------------------------------------------------------------
+describe('AC4: the previous values can be read back', () => {
+  it('SCRUM15_AC4_reads_one_venues_history_newest_first', async () => {
+    const stub = queryStub({ data: [], error: null });
+    from.mockReturnValueOnce(stub);
+
+    await getVenueHistory(VENUE_ID);
+
+    expect(from).toHaveBeenCalledWith('venue_change_history');
+    expect(stub.args('eq')).toEqual(['venue_id', VENUE_ID]);
+    expect(stub.args('order')).toEqual(['changed_at', { ascending: false }]);
+  });
+
+  it('SCRUM15_AC4_maps_the_row_into_camelCase_but_leaves_the_values_alone', async () => {
+    from.mockReturnValueOnce(queryStub({ data: [{
+      id: 'h1',
+      venue_id: VENUE_ID,
+      changed_by: STAFF_ID,
+      changed_at: '2026-09-15T10:00:00+00:00',
+      old_values: { max_capacity: 40 },
+      new_values: { max_capacity: 60 },
+    }], error: null }));
+
+    const [entry] = await getVenueHistory(VENUE_ID);
+
+    expect(entry).toEqual({
+      id: 'h1',
+      venueId: VENUE_ID,
+      changedBy: STAFF_ID,
+      changedAt: '2026-09-15T10:00:00+00:00',
+      oldValues: { max_capacity: 40 },
+      newValues: { max_capacity: 60 },
+    });
+
+    // The jsonb payloads keep the column names the database recorded. They are
+    // a record of what changed, not an API shape to be rewritten -- and an
+    // attribute change, a scalar change and a creation all carry different
+    // keys by design.
+    expect(Object.keys(entry.oldValues)).toEqual(['max_capacity']);
+  });
+
+  it('SCRUM15_AC4_returns_an_empty_list_for_a_venue_with_no_history', async () => {
+    from.mockReturnValueOnce(queryStub({ data: [], error: null }));
+
+    await expect(getVenueHistory(VENUE_ID)).resolves.toEqual([]);
+  });
+
+  it('SCRUM15_AC4_rejects_a_malformed_id_before_any_network_call', async () => {
+    const err = await errorFromAsync(() => getVenueHistory('not-a-uuid'));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// AC3 -- "while its past bookings remain viewable"
+// ---------------------------------------------------------------------------
+describe('AC3: a retired venue keeps its bookings', () => {
+  it('SCRUM15_AC3_reads_one_venues_bookings_most_recent_first', async () => {
+    const stub = queryStub({ data: [], error: null });
+    from.mockReturnValueOnce(stub);
+
+    await getBookingsForVenue(VENUE_ID);
+
+    expect(from).toHaveBeenCalledWith('bookings');
+    expect(stub.args('eq')).toEqual(['venue_id', VENUE_ID]);
+    expect(stub.args('order')).toEqual(['starts_at', { ascending: false }]);
+  });
+
+  it('SCRUM15_AC3_does_not_filter_on_the_venue_being_active', async () => {
+    const stub = queryStub({ data: [], error: null });
+    from.mockReturnValueOnce(stub);
+
+    await getBookingsForVenue(VENUE_ID);
+
+    // The whole point of AC3's second clause. Applying .is('retired_at', null)
+    // here -- as searchVenues correctly does -- would hide exactly the rows
+    // retirement is supposed to preserve.
+    expect(stub.called('is')).toBe(false);
+  });
+
+  it('SCRUM15_AC3_maps_a_booking_into_camelCase', async () => {
+    from.mockReturnValueOnce(queryStub({ data: [{
+      id: 'b1',
+      venue_id: VENUE_ID,
+      event_request_id: '22222222-2222-4222-8222-222222222222',
+      starts_at: '2026-06-01T09:00:00+00:00',
+      ends_at: '2026-06-01T17:00:00+00:00',
+      created_at: '2026-05-01T09:00:00+00:00',
+    }], error: null }));
+
+    const [booking] = await getBookingsForVenue(VENUE_ID);
+
+    expect(booking).toEqual({
+      id: 'b1',
+      venueId: VENUE_ID,
+      eventRequestId: '22222222-2222-4222-8222-222222222222',
+      startsAt: '2026-06-01T09:00:00+00:00',
+      endsAt: '2026-06-01T17:00:00+00:00',
+      createdAt: '2026-05-01T09:00:00+00:00',
+    });
+  });
+
+  it('SCRUM15_AC3_returns_an_empty_list_rather_than_an_error', async () => {
+    from.mockReturnValueOnce(queryStub({ data: [], error: null }));
+
+    await expect(getBookingsForVenue(VENUE_ID)).resolves.toEqual([]);
+  });
+
+  it('SCRUM15_AC3_rejects_a_malformed_id_before_any_network_call', async () => {
+    const err = await errorFromAsync(() => getBookingsForVenue('not-a-uuid'));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(from).not.toHaveBeenCalled();
   });
 });

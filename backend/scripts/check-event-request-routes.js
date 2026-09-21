@@ -61,6 +61,17 @@ async function createTestUser(label) {
     email_confirm: true,
   });
   if (error) throw new Error(`could not create test user (${label}): ${error.message}`);
+
+  // requireAuth now resolves the caller's role from profiles (007_user_roles.sql)
+  // and answers 403 when there is no row, so a throwaway user needs one or every
+  // authenticated check below fails for the wrong reason.
+  const { error: profileError } = await supabaseAdmin
+    .from('profiles')
+    .insert({ id: data.user.id, role: 'event_organiser', full_name: `Check ${label}` });
+  if (profileError) {
+    throw new Error(`could not create profile (${label}): ${profileError.message}`);
+  }
+
   return data.user;
 }
 
@@ -81,8 +92,15 @@ async function cleanup() {
   // deleting the user first fails and leaves both behind.
   if (eventId) await supabase.from('event_requests').delete().eq('id', eventId);
   if (otherEventId) await supabase.from('event_requests').delete().eq('id', otherEventId);
-  if (organiserId) await supabase.auth.admin.deleteUser(organiserId);
-  if (otherOrganiserId) await supabase.auth.admin.deleteUser(otherOrganiserId);
+
+  // profiles cascades from auth.users, so deleting the user is enough -- but it
+  // is deleted explicitly here so a failure shows up as its own error rather
+  // than as a confusing FK refusal on the user delete.
+  for (const id of [organiserId, otherOrganiserId]) {
+    if (!id) continue;
+    await supabase.from('profiles').delete().eq('id', id);
+    await supabase.auth.admin.deleteUser(id);
+  }
 }
 
 async function main() {

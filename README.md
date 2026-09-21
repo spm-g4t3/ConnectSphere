@@ -46,14 +46,39 @@ The frontend never queries the database directly. All data access goes through t
 ```
 ConnectSphere/
 ├── frontend/    # React (Vite, JS) — client application
-└── backend/     # Node.js + Express (JS) — API server
+├── backend/     # Node.js + Express (JS) — API server
+└── package.json # dev scripts that run both together
 ```
 
 ## Getting started
 
 **Prerequisites:** Node.js 22+ and npm 10+.
 
-Full install and run instructions will be added here once the application scaffold lands. Environment variables will be documented in an `.env.example` in each of `frontend/` and `backend/`; real `.env` files are gitignored and must never be committed.
+```bash
+git clone https://github.com/spm-g4t3/ConnectSphere.git
+cd ConnectSphere
+npm run install:all      # installs root, backend and frontend
+```
+
+Copy `backend/.env.example` to `backend/.env` and fill in the real values. Real `.env` files are gitignored and must never be committed. The frontend needs no `.env`: it defaults to `http://localhost:5000/api`, and `VITE_API_BASE_URL` overrides that if you need it to.
+
+Then, from the repository root:
+
+```bash
+npm run dev
+```
+
+That starts both servers at once — the API on **http://localhost:5000** and the client on **http://localhost:5173** — with each line of output labelled `backend` or `frontend`. Ctrl+C stops both, and if either exits with a failure the other is stopped too, so you never end up talking to half a system.
+
+| Command | Runs |
+|---|---|
+| `npm run dev` | Both servers together. The usual one. |
+| `npm run dev:backend` | The API alone, on port 5000. |
+| `npm run dev:frontend` | The client alone, on port 5173. |
+| `npm run install:all` | Installs dependencies in all three packages. |
+| `npm test` | The backend unit suite, same as CI runs. |
+
+Each package can still be driven on its own from inside its own directory; the root scripts are a convenience, not a new layer.
 
 ## Development workflow
 
@@ -103,6 +128,7 @@ A story is done when its acceptance criteria are met, it has tests, it has been 
 | `npm run db:check` | The migrations were applied and the seed data landed. | Yes |
 | `npm run venue:check` | The venue service end to end: the transactional RPCs, the schema constraints, the audit trigger and retirement, against a real database. | Yes |
 | `npm run routes:check` | The event request routes end to end: a real Supabase token through the auth middleware, ownership scoping against row level security, and a status change reaching the client. | Yes |
+| `npm run venue-routes:check` | The venue catalogue routes end to end, one block per SCRUM-15 acceptance criterion: creation, an authorised change reaching the search, retirement leaving the search while its bookings survive, and the audit trail naming the editing user. | Yes |
 
 Run them all from `backend/`.
 

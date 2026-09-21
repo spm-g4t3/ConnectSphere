@@ -76,27 +76,67 @@ async function main() {
     updated.facilities.join(','),
   );
 
-  // --- the audit trigger from SCRUM-108 -----------------------------------
+  // --- the audit trail from SCRUM-108, completed by 008 -------------------
+  //
+  // Row counts changed with 008_venue_audit_completion.sql. Creating a venue
+  // used to write nothing, so this block asserted "exactly one audit row" --
+  // meaning the update. There are now two: the creation, and the capacity
+  // change. Rows are matched on what they contain rather than by position,
+  // because two rows written moments apart have no reliable order.
   const { data: history } = await supabase
     .from('venue_change_history')
     .select('old_values, new_values')
     .eq('venue_id', created.id);
 
-  check('exactly one audit row', history?.length === 1, `${history?.length ?? 0} rows`);
+  check('two audit rows: the creation and the update', history?.length === 2,
+    `${history?.length ?? 0} rows`);
+
+  const creationRow = history?.find((h) => Object.keys(h.old_values).length === 0);
+  check('creating a venue is recorded (008)', Boolean(creationRow),
+    JSON.stringify(creationRow?.new_values ?? null));
+  check(
+    'the creation row carries the venue as it was first stored',
+    creationRow?.new_values?.max_capacity === 40,
+    JSON.stringify(creationRow?.new_values?.max_capacity ?? null),
+  );
+
+  const capacityRow = history?.find((h) => h.old_values?.max_capacity !== undefined);
   check(
     'audit recorded only the changed field',
-    JSON.stringify(history?.[0]?.old_values) === '{"max_capacity":40}',
-    JSON.stringify(history?.[0]?.old_values),
+    JSON.stringify(capacityRow?.old_values) === '{"max_capacity":40}',
+    JSON.stringify(capacityRow?.old_values),
   );
   check(
     'audit recorded the new value',
-    JSON.stringify(history?.[0]?.new_values) === '{"max_capacity":80}',
-    JSON.stringify(history?.[0]?.new_values),
+    JSON.stringify(capacityRow?.new_values) === '{"max_capacity":80}',
+    JSON.stringify(capacityRow?.new_values),
   );
 
   // --- replacing an attribute set -----------------------------------------
   const cleared = await updateVenue(created.id, { facilities: [] }, null);
   check('empty array clears facilities', cleared.facilities.length === 0, `${cleared.facilities.length} left`);
+
+  // Before 008 this produced no audit row at all: the trigger fires on venues
+  // and diffs its columns, while facilities live in a join table. Clearing
+  // every facility on a venue was invisible to the trail.
+  const { data: attributeHistory } = await supabase
+    .from('venue_change_history')
+    .select('old_values, new_values')
+    .eq('venue_id', created.id);
+
+  const facilitiesRow = attributeHistory?.find((h) => h.old_values?.facilities !== undefined);
+  check('an attribute-only change is recorded (008)', Boolean(facilitiesRow),
+    JSON.stringify(facilitiesRow?.old_values ?? null));
+  check(
+    'it records the facilities the venue used to have',
+    JSON.stringify(facilitiesRow?.old_values?.facilities) === '["projector","wifi"]',
+    JSON.stringify(facilitiesRow?.old_values?.facilities ?? null),
+  );
+  check(
+    'and that they are now empty',
+    JSON.stringify(facilitiesRow?.new_values?.facilities) === '[]',
+    JSON.stringify(facilitiesRow?.new_values?.facilities ?? null),
+  );
 
   // --- rollback: the whole reason these writes go through an RPC ----------
   const before = await countVenues();
