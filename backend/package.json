@@ -12,11 +12,14 @@
     "db:check": "node scripts/check-db.js",
     "venue:check": "node scripts/check-venue-service.js",
     "request:check": "node scripts/check-event-request-service.js",
-    "change-request:check": "node scripts/check-event-change-request-service.js"
+    "change-request:check": "node scripts/check-event-change-request-service.js",
+    "routes:check": "node scripts/check-event-request-routes.js",
+    "venue-routes:check": "node scripts/check-venue-routes.js"
   },
   "devDependencies": {
-    "vitest": "^5.0.0",
-    "nodemon": "^3.1.0"
+    "nodemon": "^3.1.0",
+    "supertest": "^7.2.2",
+    "vitest": "^5.0.0"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

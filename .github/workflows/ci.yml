@@ -1,0 +1,48 @@
+# Continuous integration for ConnectSphere.
+#
+# Runs the unit test suite on every pull request into dev or main, and on every
+# push to those branches. The Definition of Done in the README says a story is
+# done when "it has tests" -- this is what checks that claim rather than
+# trusting it.
+#
+# No secrets, by design. Everything here must pass without a database: the
+# service tests replace the Supabase client with a mock precisely so they can.
+# The credentialed checks -- npm run db:check and npm run venue:check -- prove
+# the SQL layer and are run by hand before opening a pull request.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Check out the branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Matches the version the README requires for local development.
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        # ci, not install: installs exactly what package-lock.json pins, and
+        # fails if the lockfile and package.json have drifted apart.
+        run: npm ci
+
+      - name: Run tests
+        run: npm test

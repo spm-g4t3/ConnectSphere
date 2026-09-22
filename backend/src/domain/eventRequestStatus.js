@@ -56,6 +56,13 @@ export const STATUS_GROUP = Object.freeze({
   COMPLETED: 'COMPLETED',
   REJECTED: 'REJECTED',
   CANCELLED: 'CANCELLED',
+
+  // SCRUM-47. Not stages of the planning process -- these say the status
+  // itself could not be shown. They live here because React styles on the
+  // group, and a fallback the UI cannot style is a fallback that renders
+  // as an unstyled gap.
+  UNAVAILABLE: 'UNAVAILABLE',   // nothing usable was supplied
+  UNKNOWN: 'UNKNOWN',           // a value arrived, but not one we know
 });
 
 
@@ -195,20 +202,92 @@ export function canTransition(from, to) {
 
 
 /**
+ * What the Organiser sees when the status itself cannot be shown.
+ *
+ * SCRUM-47: handle unavailable or unknown request status states.
+ *
+ * Two cases, kept apart because they mean different things to the person
+ * reading the page and call for different actions:
+ *
+ *   UNAVAILABLE -- nothing usable arrived. The request exists but its status
+ *                  did not reach us, so the honest answer is "we cannot tell
+ *                  you right now", and refreshing may fix it.
+ *   UNKNOWN     -- a value arrived that this build does not recognise. Almost
+ *                  always a deployed frontend older than the status list.
+ *                  Refreshing will not help; a human will.
+ *
+ * Collapsing them into one message would tell an Organiser to retry something
+ * that cannot succeed, or to give up on something that would have worked.
+ */
+export const STATUS_FALLBACK = Object.freeze({
+  UNAVAILABLE: Object.freeze({
+    label: 'Status Unavailable',
+    group: STATUS_GROUP.UNAVAILABLE,
+    description:
+      'We could not read the status of this request. Please refresh the page, ' +
+      'and contact your Event Coordinator if it keeps happening.',
+  }),
+  UNKNOWN: Object.freeze({
+    label: 'Unknown Status',
+    group: STATUS_GROUP.UNKNOWN,
+    description:
+      'This request is at a stage this page does not recognise. Your Event ' +
+      'Coordinator can tell you where it stands.',
+  }),
+});
+
+
+/**
  * The Organiser-facing view of a status.
  *
  * Returns the exact shape the API sends to React, so the frontend keeps no
  * copy of the status list and the two can never disagree.
  *
- * Returns undefined for an unrecognised status. SCRUM-47 replaces that with a
- * safe fallback so the UI can never be handed nothing.
+ * SCRUM-47: never returns undefined. AC1 says the Organiser can view the
+ * status of their request, and a screen showing nothing at all meets that
+ * worse than a screen saying the status could not be read. Every caller gets
+ * the same four fields, so the UI has one code path rather than a rendering
+ * path and a null-guarding path.
+ *
+ * A non-empty string that is not in the vocabulary is UNKNOWN; anything else
+ * -- null, undefined, blank, or not a string at all -- is UNAVAILABLE, because
+ * no value arrived that could have been a status in the first place.
  *
  * @param {string} status
- * @returns {{status: string, label: string, group: string, description: string}|undefined}
+ * @returns {{status: string|null, label: string, group: string, description: string}}
  */
 export function getStatusDisplay(status) {
-  if (!Object.hasOwn(STATUS_DISPLAY, status)) return undefined;
+  if (Object.hasOwn(STATUS_DISPLAY, status)) {
+    const { label, group, description } = STATUS_DISPLAY[status];
+    return Object.freeze({ status, label, group, description });
+  }
 
-  const { label, group, description } = STATUS_DISPLAY[status];
-  return Object.freeze({ status, label, group, description });
+  const supplied = typeof status === 'string' && status.trim() !== '';
+  const fallback = supplied ? STATUS_FALLBACK.UNKNOWN : STATUS_FALLBACK.UNAVAILABLE;
+
+  // Echo the offending value only when it was a string. Putting an object or
+  // a number in the payload under a field the frontend treats as a status
+  // code would just move the problem downstream.
+  return Object.freeze({
+    status: supplied ? status : null,
+    label: fallback.label,
+    group: fallback.group,
+    description: fallback.description,
+  });
+}
+
+
+/**
+ * Is this a status the system actually knows?
+ *
+ * SCRUM-47. getStatusDisplay always returns something renderable, which is
+ * right for the UI but means a caller can no longer tell a real status from a
+ * fallback by checking for undefined. This is how they ask that directly --
+ * for deciding whether to offer an action, not for deciding what to render.
+ *
+ * @param {string} status
+ * @returns {boolean}
+ */
+export function isKnownStatus(status) {
+  return Object.hasOwn(STATUS_DISPLAY, status);
 }

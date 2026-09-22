@@ -2,6 +2,8 @@
  * Tests for venue input validation.
  *
  * SCRUM-94: validate venue creation and update input.
+ * SCRUM-110: the venue id retirement is given.
+ * SCRUM-111: the filters a venue search may be narrowed by.
  *
  * Describe blocks are named after the acceptance criteria they cover, so a
  * requirement traces to the test proving it.
@@ -12,6 +14,8 @@ import { describe, it, expect } from 'vitest';
 import {
   validateCreateVenue,
   validateUpdateVenue,
+  validateVenueId,
+  validateSearchFilters,
 } from '../../src/validation/venueValidation.js';
 import { ValidationError } from '../../src/errors.js';
 
@@ -288,5 +292,124 @@ describe('bad input shapes', () => {
   it('always provides a details array, even when not field-specific', () => {
     const err = errorFrom(() => validateCreateVenue(null));
     expect(Array.isArray(err.details)).toBe(true);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-110: the id retirement is given
+// ---------------------------------------------------------------------------
+describe('venue ids', () => {
+  const VALID_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+
+  it('accepts a uuid and hands it back unchanged', () => {
+    expect(validateVenueId(VALID_ID)).toBe(VALID_ID);
+  });
+
+  it('accepts a uuid in upper case', () => {
+    expect(validateVenueId(VALID_ID.toUpperCase())).toBe(VALID_ID.toUpperCase());
+  });
+
+  it.each([
+    ['empty string', ''],
+    ['whitespace only', '   '],
+    ['prose', 'not-a-uuid'],
+    ['a bare number as text', '42'],
+    ['a uuid missing a block', '3f2504e0-4f89-41d3-0305e82c3301'],
+    ['a uuid with a non-hex character', '3f2504e0-4f89-41d3-9a0c-0305e82c330g'],
+    ['null', null],
+    ['undefined', undefined],
+    ['a number', 42],
+    ['an object', {}],
+  ])('rejects %s', (_label, value) => {
+    const err = errorFrom(() => validateVenueId(value));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toContain('id');
+  });
+
+  it('reports a 400 status for Express to use', () => {
+    const err = errorFrom(() => validateVenueId('nonsense'));
+    expect(err.status).toBe(400);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-111: the filters a search may be narrowed by
+// ---------------------------------------------------------------------------
+describe('venue search filters', () => {
+  it('accepts no filters at all -- "show me everything" is a real search', () => {
+    // Deliberately unlike validateUpdateVenue, which rejects an empty object.
+    expect(validateSearchFilters()).toEqual({});
+    expect(validateSearchFilters({})).toEqual({});
+  });
+
+  it('trims a location', () => {
+    expect(validateSearchFilters({ location: '  SCIS  ' })).toEqual({ location: 'SCIS' });
+  });
+
+  it('keeps a valid minimum capacity', () => {
+    expect(validateSearchFilters({ minCapacity: 40 })).toEqual({ minCapacity: 40 });
+  });
+
+  it('keeps both filters when both are given', () => {
+    expect(validateSearchFilters({ location: 'SCIS', minCapacity: 40 }))
+      .toEqual({ location: 'SCIS', minCapacity: 40 });
+  });
+
+  it.each([
+    ['an empty string', ''],
+    ['whitespace only', '   '],
+    ['null', null],
+    ['undefined', undefined],
+  ])('drops a location that is %s rather than failing the search', (_label, value) => {
+    // An unfilled search box is not a filter. On create the same blankness is
+    // an error, because there it means a mandatory field was left out.
+    expect(validateSearchFilters({ location: value })).toEqual({});
+  });
+
+  it.each([
+    ['an empty string', ''],
+    ['null', null],
+    ['undefined', undefined],
+  ])('drops a minimum capacity that is %s', (_label, value) => {
+    expect(validateSearchFilters({ minCapacity: value })).toEqual({});
+  });
+
+  it.each([
+    ['zero', 0],
+    ['negative', -10],
+    ['fractional', 12.5],
+    ['text that looks like a number', '40'],
+  ])('rejects a minimum capacity that is %s', (_label, value) => {
+    const err = errorFrom(() => validateSearchFilters({ minCapacity: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toContain('minCapacity');
+  });
+
+  it('names minCapacity, not maxCapacity, when the capacity filter is wrong', () => {
+    // The two fields share one rule; they must not share one error message.
+    const err = errorFrom(() => validateSearchFilters({ minCapacity: 0 }));
+    expect(fieldsIn(err)).toEqual(['minCapacity']);
+  });
+
+  it('rejects a location that is not text', () => {
+    const err = errorFrom(() => validateSearchFilters({ location: 42 }));
+    expect(fieldsIn(err)).toContain('location');
+  });
+
+  it.each([
+    ['null', null],
+    ['an array', []],
+    ['a string', 'SCIS'],
+  ])('rejects filters that are %s rather than an object', (_label, value) => {
+    const err = errorFrom(() => validateSearchFilters(value));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toMatch(/expected an object/i);
+  });
+
+  it('collects both faults rather than stopping at the first', () => {
+    const err = errorFrom(() => validateSearchFilters({ location: 42, minCapacity: -1 }));
+    expect(fieldsIn(err)).toEqual(['location', 'minCapacity']);
   });
 });

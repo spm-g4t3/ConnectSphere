@@ -19,11 +19,14 @@
 //     (SCRUM-10 AC8) — this service doesn't pass an organiserId; the
 //     Express layer derives it from the authenticated session.
 //
-// NOTE: I don't have the actual Express routes for any of this — only the
-// service layer's behaviour, inferred from the check script. Route paths
-// below (/event-requests, /event-requests/:id/submit) are my best guess at
-// convention; confirm the real paths with your backend teammate once routes
-// exist.
+// ROUTES (updated by SCRUM-42): the three GET paths below are now real and
+// mounted at /api/event-requests in backend/src/app.js, and every response
+// carries `statusDisplay` — the Organiser-facing label, group and description,
+// produced by the backend so this app keeps no copy of the status vocabulary.
+//
+// POST /event-requests, PATCH /event-requests/:id and POST /:id/submit are
+// still unmounted: the backend service supports all three, but their routes
+// belong to SCRUM-29 and SCRUM-11. They will 404 until those land.
 
 import { apiClient } from "./apiClient";
 
@@ -92,5 +95,22 @@ export async function getEventRequestById(id) {
  */
 export async function getMyEventRequests() {
   const response = await apiClient.get("/event-requests");
+  return response.data;
+}
+
+/**
+ * Fetches just the status of one request (SCRUM-42).
+ *
+ * Deliberately narrower than getEventRequestById: it returns the status
+ * display and the timestamps and nothing else, so a view that only wants to
+ * know whether anything moved does not re-download the whole request. Used by
+ * the single-request view in SCRUM-40; the list refetches through
+ * getMyEventRequests instead, which already carries every row's status.
+ *
+ * @param {string} id
+ * @returns {Promise<{id, status, label, group, description, updatedAt, submittedAt}>}
+ */
+export async function getEventRequestStatus(id) {
+  const response = await apiClient.get(`/event-requests/${id}/status`);
   return response.data;
 }
