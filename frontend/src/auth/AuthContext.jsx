@@ -16,11 +16,17 @@ import { apiClient } from "../services/apiClient"; // <-- replace with your actu
 const AuthContext = createContext(null);
 
 const STORAGE_KEY = "connectsphere_auth"; // stores { user, session }
+const LOGIN_ERROR_MESSAGES = {
+  400: "Email and password are required",
+  401: "Invalid email or password",
+  500: "Unable to retrieve user role",
+};
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [logoutMessage, setLogoutMessage] = useState(null);
 
   // Restore from sessionStorage on load. This is a stopgap: it trusts
   // client-side storage rather than asking the server to re-validate the
@@ -40,6 +46,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   async function login(email, password) {
+    setLogoutMessage(null);
     try {
       const res = await apiClient.post("/auth/login", { email, password });
       const { user: loggedInUser, session: newSession } = res.data;
@@ -51,12 +58,10 @@ export function AuthProvider({ children }) {
       setUser(loggedInUser);
       setSession(newSession);
 
-      return { success: true };
+      return { success: true, user: loggedInUser };
     } catch (err) {
-      // Backend already returns a generic message for bad credentials
-      // (SCRUM-92 AC: no leaking whether it was the email or password).
-      const message =
-        err.response?.data?.error || "Invalid email or password.";
+      const message = LOGIN_ERROR_MESSAGES[err.response?.status]
+        || "Unable to log in right now. Please try again.";
       return { success: false, error: message };
     }
   }
@@ -65,28 +70,37 @@ export function AuthProvider({ children }) {
     // POST /api/auth/logout now exists (SCRUM-105) — it takes the access
     // token as a Bearer header and invalidates the session server-side via
     // supabaseAuth.auth.admin.signOut(token).
-    if (session?.access_token) {
-      try {
-        await apiClient.post(
-          "/auth/logout",
-          {},
-          { headers: { Authorization: `Bearer ${session.access_token}` } },
-        );
-      } catch (err) {
-        // Even if the server-side call fails (e.g. token already expired),
-        // still clear local state below — a stuck "logged in" UI is worse
-        // than a session that lingers server-side a little longer.
-        console.error("Server-side logout failed:", err);
-      }
+    try {
+      await apiClient.post(
+        "/auth/logout",
+        {},
+        session?.access_token
+          ? { headers: { Authorization: `Bearer ${session.access_token}` } }
+          : undefined,
+      );
+    } catch (err) {
+      const message = err.response?.status === 401
+        ? "No active session"
+        : err.response?.status === 500
+          ? "Failed to log out"
+          : "We could not log you out. Please try again.";
+      return { success: false, error: message };
     }
 
     sessionStorage.removeItem(STORAGE_KEY);
     setUser(null);
     setSession(null);
+    const message = "Logged out successfully";
+    setLogoutMessage(message);
+    return { success: true, message };
+  }
+
+  function clearLogoutMessage() {
+    setLogoutMessage(null);
   }
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, session, loading, login, logout, logoutMessage, clearLogoutMessage }}>
       {children}
     </AuthContext.Provider>
   );

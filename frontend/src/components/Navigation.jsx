@@ -1,6 +1,7 @@
 // Navigation.jsx
 // Renders only the nav links relevant to the logged-in user's role.
 
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
@@ -29,6 +30,8 @@ const NAV_LINKS_BY_ROLE = {
 
 export default function Navigation() {
   const { user, logout } = useAuth();
+  const [logoutError, setLogoutError] = useState(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   if (!user) return null;
 
@@ -38,6 +41,14 @@ export default function Navigation() {
     .replace(/[\s-]+/g, "_")
     .replace("ORGANIZER", "ORGANISER");
   const links = NAV_LINKS_BY_ROLE[role] || [];
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    setLogoutError(null);
+    const result = await logout();
+    setLoggingOut(false);
+    if (!result.success) setLogoutError(result.error);
+  }
 
   return (
     <nav className="app-nav">
@@ -50,8 +61,11 @@ export default function Navigation() {
       </ul>
       <div className="app-nav__user">
         <span>{user.name} ({user.role})</span>
-        <button onClick={logout}>Log out</button>
+        <button onClick={handleLogout} disabled={loggingOut}>
+          {loggingOut ? "Logging out..." : "Log out"}
+        </button>
       </div>
+      {logoutError && <p className="app-nav__error" role="alert">{logoutError}</p>}
     </nav>
   );
 }

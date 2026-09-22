@@ -20,6 +20,13 @@ button { cursor: pointer; }
 .app-nav__user { align-items: center; display: flex; gap: 16px; font-size: 0.84rem; color: var(--muted); }
 .app-nav button, .dashboard button, .login-form button { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 16px; }
 .app-nav button:hover, .dashboard button:hover, .login-form button:hover { background: var(--teal-dark); }
+.app-nav button:disabled, .login-form button:disabled { cursor: wait; opacity: 0.65; }
+.app-nav__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
+.auth-success { animation: auth-success-fade 3.5s ease-in-out forwards; background: #e8f7f1; border: 1px solid #b9e2d1; border-radius: 6px; color: #17684f; margin: 18px auto 0; max-width: 1080px; padding: 10px 14px; }
+@keyframes auth-success-fade {
+  0%, 100% { opacity: 0; transform: translateY(-6px); }
+  10%, 80% { opacity: 1; transform: translateY(0); }
+}
 .login-form, .placeholder-page, .dashboard { margin: 0 auto; max-width: 1080px; padding: clamp(42px, 8vw, 88px) 24px; }
 .login-form { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); margin-top: 9vh; max-width: 440px; padding: 38px; }
 .login-form h1, .placeholder-page h1, .dashboard h1 { color: var(--ink); font-size: clamp(2rem, 4vw, 3.25rem); letter-spacing: -0.05em; margin: 0 0 12px; }

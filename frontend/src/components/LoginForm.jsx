@@ -14,6 +14,13 @@ export default function LoginForm() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+
+    if (!email || !password) {
+      setPassword("");
+      setError("Email and password are required");
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
 
@@ -22,6 +29,7 @@ export default function LoginForm() {
     setSubmitting(false);
 
     if (!result.success) {
+      setPassword("");
       setError(result.error);
       return;
     }
@@ -32,7 +40,7 @@ export default function LoginForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="login-form">
+    <form onSubmit={handleSubmit} className="login-form" noValidate>
       <h1>Log in</h1>
 
       <label>
@@ -40,7 +48,7 @@ export default function LoginForm() {
         <input
           type="email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => { setEmail(e.target.value); setError(null); }}
           required
         />
       </label>
@@ -50,7 +58,7 @@ export default function LoginForm() {
         <input
           type="password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => { setPassword(e.target.value); setError(null); }}
           required
         />
       </label>
