@@ -11,6 +11,7 @@
     "test": "npm --prefix backend test"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "supertest": "^7.2.2"
   }
 }
