@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { useEffect } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import Navigation from "./components/Navigation";
@@ -22,13 +23,21 @@ function PagePlaceholder({ title, description }) {
 }
 
 function AppRoutes() {
-  const { loading } = useAuth();
+  const { loading, logoutMessage, clearLogoutMessage } = useAuth();
+
+  useEffect(() => {
+    if (!logoutMessage) return undefined;
+
+    const timeout = setTimeout(clearLogoutMessage, 3500);
+    return () => clearTimeout(timeout);
+  }, [logoutMessage, clearLogoutMessage]);
 
   if (loading) return <LoadingScreen />;
 
   return (
     <>
       <Navigation />
+      {logoutMessage && <p className="auth-success" role="status">{logoutMessage}</p>}
       <Routes>
         <Route path="/login" element={<LoginForm />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />

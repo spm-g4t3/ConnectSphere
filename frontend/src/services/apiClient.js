@@ -45,18 +45,9 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Central place to react to auth failures. A 401 from any endpoint means
-// the session is no longer valid server-side (expired, revoked, etc.) —
-// clearing local storage here means the next render sees a logged-out user
-// rather than a UI that looks logged in but every request quietly fails.
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      sessionStorage.removeItem("connectsphere_auth");
-    }
-    return Promise.reject(error);
-  },
+  (error) => Promise.reject(error),
 );
 
 export default apiClient;
