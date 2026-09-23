@@ -56,7 +56,7 @@ export default function VenueSearch() {
       });
       setResults(venues);
       setSearched(true);
-    } catch (err) {
+    } catch {
       setError("Could not load venues. Please try again.");
     } finally {
       setLoading(false);

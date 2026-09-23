@@ -1,9 +1,9 @@
 # Continuous integration for ConnectSphere.
 #
-# Runs the unit test suite on every pull request into dev or main, and on every
-# push to those branches. The Definition of Done in the README says a story is
-# done when "it has tests" -- this is what checks that claim rather than
-# trusting it.
+# Runs the backend and frontend checks on every pull request into dev or
+# main, and on every push to those branches. The Definition of Done in the
+# README says a story is done when "it has tests" -- this is what checks
+# that claim rather than trusting it.
 #
 # No secrets, by design. Everything here must pass without a database: the
 # service tests replace the Supabase client with a mock precisely so they can.
@@ -19,8 +19,10 @@ on:
     branches: [dev, main]
 
 jobs:
+  # The job id stays `test` so any branch-protection rule that requires it
+  # keeps matching; only the display name says which half it covers.
   test:
-    name: Unit tests
+    name: Backend unit tests
     runs-on: ubuntu-latest
 
     defaults:
@@ -46,3 +48,37 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  # SCRUM-123: the frontend had no checks at all. Lint, the Vitest suite, and a
+  # production build -- the build catches a broken import that lint and tests
+  # can both miss. Like the backend job, it needs no secrets.
+  frontend:
+    name: Frontend lint, tests and build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Check out the branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

@@ -34,7 +34,7 @@ export default function MyEventRequests() {
       const data = await getMyEventRequests();
       setRequests(data);
       setError(null);
-    } catch (err) {
+    } catch {
       setError("Could not load your event requests.");
     } finally {
       setLoading(false);
