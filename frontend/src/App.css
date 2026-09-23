@@ -21,6 +21,13 @@ button { cursor: pointer; }
 .app-nav button, .dashboard button, .login-form button { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 16px; }
 .app-nav button:hover, .dashboard button:hover, .login-form button:hover { background: var(--teal-dark); }
 .app-nav button:disabled, .login-form button:disabled { cursor: wait; opacity: 0.65; }
+/* SCRUM-110: .dashboard was missing from the rule above, so "Retiring...",
+   the disabled Cancel and a retired row's Edit rendered full-strength teal --
+   indistinguishable from a live button, when that disabled state is the only
+   affordance the retire flow has. Its own rule rather than appended to that
+   one: cursor: wait is right for a login in flight, but a permanently
+   disabled Edit is not-allowed, not a wait. */
+.dashboard button:disabled { cursor: not-allowed; opacity: 0.65; }
 .app-nav__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
 .auth-success { animation: auth-success-fade 3.5s ease-in-out forwards; background: #e8f7f1; border: 1px solid #b9e2d1; border-radius: 6px; color: #17684f; margin: 18px auto 0; max-width: 1080px; padding: 10px 14px; }
 @keyframes auth-success-fade {
@@ -46,6 +53,19 @@ button { cursor: pointer; }
 .dashboard li:first-child { border-top: 0; }
 .dashboard li button { font-size: 0.84rem; padding: 7px 11px; }
 .dashboard p { color: var(--muted); }
+/* status-badge / status--* have no base rule anywhere in this stylesheet, so
+   without these the badge is bare text. Scoped to the venue staff dashboard
+   deliberately: the same class names are already on SCRUM-14's and SCRUM-34's
+   screens, and defining the unscoped base belongs to whoever owns the design
+   system -- this is blast-radius control, not a style opinion. Active reuses
+   the .auth-success green so it reads as the same green as everywhere else. */
+.dashboard--venue-staff .status-badge { border-radius: 999px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-left: 10px; padding: 3px 10px; text-transform: uppercase; }
+.dashboard--venue-staff .status--active { background: #e8f7f1; color: #17684f; }
+.dashboard--venue-staff .status--retired { background: #eef2f1; color: var(--muted); }
+/* The rule above makes every .dashboard p muted grey, which would render a
+   failed retire in exactly the same voice as the empty-state text. Same
+   colour pair as .app-nav__error. */
+.dashboard .venue-catalogue__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 @media (max-width: 720px) {
   .app-nav { align-items: flex-start; flex-wrap: wrap; gap: 14px; }
   .app-nav__links { order: 3; overflow-x: auto; width: 100%; }

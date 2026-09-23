@@ -11,11 +11,15 @@
  *
  * Who may do what, and why:
  *
- *   reads   any authenticated user. The customer briefing has Event
- *           Coordinators searching for venues ("Event Coordinators can search
- *           for potential venues using requirements such as date, time,
- *           attendance..."), so restricting search to Venue Staff would break
- *           the feature it exists to serve.
+ *   reads   search and read-by-id: any authenticated user. The customer
+ *           briefing has Event Coordinators searching for venues ("Event
+ *           Coordinators can search for potential venues using requirements
+ *           such as date, time, attendance..."), so restricting those to
+ *           Venue Staff would break the feature they exist to serve.
+ *           The full catalogue listing is the one exception -- Venue Staff
+ *           only (SCRUM-110), because it is the only read that returns
+ *           retired venues, and SCRUM-111's invariant is that a retired one
+ *           never reaches a list a non-staff caller can obtain.
  *   writes  Venue Staff only. AC2 says an *authorised* change, and the story
  *           is written from the Venue Staff member's seat.
  *   history Venue Staff only. It is an audit trail, and it names who changed
@@ -28,6 +32,7 @@ import {
   createVenue,
   updateVenue,
   getVenueById,
+  listVenues,
   retireVenue,
   searchVenues,
   getVenueHistory,
@@ -138,6 +143,33 @@ export function createVenueRouter({
   // Every route below needs to know who is calling -- reads to prove they are
   // signed in, writes to attribute the change.
   router.use(requireAuth);
+
+  /**
+   * SCRUM-110, AC3 from the staff side: the whole catalogue, retired included.
+   *
+   * venueStaffOnly, and here the gate is the feature rather than a reflex.
+   * This is the only list in the API that contains retired venues, so leaving
+   * it open to any authenticated user would hand an Event Coordinator a back
+   * door straight around SCRUM-111's invariant that a retired venue never
+   * appears in a venue list. The role check is what keeps /search the only
+   * venue list a non-staff caller can obtain.
+   *
+   * Declared first is convention, not correctness. Unlike /search against
+   * /:id below -- where declaration order genuinely is load-bearing -- /:id
+   * cannot match an empty segment, so nothing breaks if this moves. It sits
+   * here so read order follows the resource: / then /search then /:id then
+   * /:id/bookings then /:id/history, and the writes after.
+   *
+   * Nothing is read off the request -- no path param, no body, no query
+   * string -- so there is nothing here to validate or sanitise.
+   */
+  router.get('/', venueStaffOnly, async (req, res) => {
+    try {
+      res.status(200).json(await listVenues());
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
 
   /**
    * AC2 and AC3, the read half: search only ever returns active venues.

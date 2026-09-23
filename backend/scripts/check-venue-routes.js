@@ -225,6 +225,17 @@ async function main() {
   if (bookingError) throw new Error(`could not create test booking: ${bookingError.message}`);
   bookingId = booking.id;
 
+  // Before retiring, so the pair of checks after it means something. Assert
+  // membership by id, never by length: this hits the real catalogue and the
+  // seeded venues are in it too.
+  const catalogueBefore = await (await call(staffToken, '')).json();
+  const listedBefore = catalogueBefore.find((v) => v.id === venueId);
+  check('the staff catalogue lists an active venue, with retiredAt null',
+    listedBefore !== undefined && listedBefore.retiredAt === null,
+    // null, not merely absent: the dashboard badge turns on the value, so an
+    // omitted key would render as undefined and badge everything the same.
+    listedBefore === undefined ? 'not listed' : `retiredAt ${JSON.stringify(listedBefore.retiredAt)}`);
+
   const retired = await call(staffToken, `/${venueId}/retire`, { method: 'POST' });
   const retiredBody = await retired.json();
   check('Venue Staff can retire a venue', retired.status === 200, `status ${retired.status}`);
@@ -233,6 +244,17 @@ async function main() {
   const afterRetire = await (await call(staffToken, '/search')).json();
   check('a retired venue no longer appears in searches',
     !afterRetire.some((v) => v.id === venueId), `${afterRetire.length} row(s)`);
+
+  // The other half of the same sentence, immediately after it: retirement
+  // takes the venue out of search without taking it away from the people who
+  // retired it. GET / has no .is('retired_at', null) on it, and this is the
+  // only check that proves that against a live database.
+  const catalogueAfter = await (await call(staffToken, '')).json();
+  const listedAfter = catalogueAfter.find((v) => v.id === venueId);
+  check('but the staff catalogue still lists it', listedAfter !== undefined,
+    listedAfter === undefined ? 'missing from the catalogue' : 'present');
+  check('and marks it retired', Boolean(listedAfter?.retiredAt),
+    listedAfter?.retiredAt ?? 'no retiredAt on the listed row');
 
   const stillReadable = await call(staffToken, `/${venueId}`);
   check('a retired venue is still readable by id', stillReadable.status === 200, `status ${stillReadable.status}`);
@@ -248,6 +270,14 @@ async function main() {
 
   const alreadyRetired = await call(staffToken, `/${venueId}/retire`, { method: 'POST' });
   check('retiring twice is a conflict', alreadyRetired.status === 409, `status ${alreadyRetired.status}`);
+
+  // The gate that makes the whole arrangement safe. GET / is the only list in
+  // the API carrying retired venues, so if an Organiser could read it,
+  // SCRUM-111's invariant -- a retired venue never reaches a list a non-staff
+  // caller can obtain -- would be met by /search and broken by this.
+  const organiserCatalogue = await call(organiserToken, '');
+  check('an Event Organiser may not list the whole catalogue',
+    organiserCatalogue.status === 403, `status ${organiserCatalogue.status}`);
 
   // -- AC4 ------------------------------------------------------------------
   console.log('\n  AC4 -- the editing user, the timestamp, the previous values\n');
@@ -306,5 +336,5 @@ main()
       console.error(`\n${failures} check(s) failed.\n`);
       process.exit(1);
     }
-    console.log('\nAll checks passed. Created, changed, searched, retired, audited, cleaned up.\n');
+    console.log('\nAll checks passed. Created, changed, searched, retired, still listed, audited, cleaned up.\n');
   });
