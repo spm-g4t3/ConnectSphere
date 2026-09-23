@@ -21,12 +21,20 @@
  *  - Whether the venue exists, or is retired. That needs the database, and
  *    create_venue_block answers it under a row lock so it cannot go stale
  *    between the check and the insert.
- *  - Overlap with another block, or with approved bookings. The first is the
- *    RPC's job for the same reason; the second is SCRUM-125.
+ *  - Overlap with another block, or with approved bookings. Both need the
+ *    database, and create_venue_block (012) answers them under locks. What
+ *    this module does check, for SCRUM-125, is the SHAPE of the override the
+ *    caller sends: confirmOverride and acknowledgedBookingIds.
  *  - Whether the start is in the past. A block may start in the past -- staff
  *    record a closure that has already begun -- so only the end has to be
  *    ahead of now.
  *  - Unknown keys. They are ignored silently, as both existing validators do.
+ *
+ * SCRUM-125 (AC3) adds the override fields. A block over approved bookings is
+ * created only when the caller sets confirmOverride AND lists the bookings it
+ * is overriding, so the two travel together: an override with no bookings
+ * named, or bookings named with no override, is refused as malformed rather
+ * than quietly treated as one or the other.
  */
 
 import { ValidationError } from '../errors.js';
@@ -41,6 +49,12 @@ const TIMESTAMP_FIELDS = ['startsAt', 'endsAt'];
 
 /** Mirrors venue_blocks_notes_length in 010. */
 const NOTES_MAX_LENGTH = 1000;
+
+/**
+ * The most bookings one override may acknowledge. Far beyond any real period,
+ * and it keeps an arbitrarily large array out of the RPC call.
+ */
+const ACKNOWLEDGED_MAX = 500;
 
 /** Built from the vocabulary, so a new reason cannot leave the message stale. */
 const REASON_MESSAGE = `must be one of: ${Object.values(BLOCK_REASON).join(', ')}`;
@@ -107,6 +121,59 @@ function checkNotes(errors, value) {
 
 
 /**
+ * Optional confirmOverride: a real boolean, defaulting to false.
+ *
+ * No coercion -- "true" or 1 is refused, because an override is the one field
+ * here whose meaning is "yes, flag those bookings", and a guessed yes is worse
+ * than a readable fault.
+ *
+ * @returns {boolean|null} null when refused
+ */
+function checkConfirmOverride(errors, value) {
+  if (value === undefined || value === null) return false;
+  if (typeof value !== 'boolean') {
+    errors.add('confirmOverride', 'must be true or false');
+    return null;
+  }
+  return value;
+}
+
+/**
+ * Optional acknowledgedBookingIds: an array of booking uuids.
+ *
+ * Lowercased, because Postgres prints uuids in lower case and the frontend
+ * compares what it sent against what came back; de-duplicated keeping
+ * first-seen order, so the RPC gets each id once. A non-uuid is reported once
+ * however many there are -- one fault, one message.
+ *
+ * @returns {string[]|null} null when refused
+ */
+function checkAcknowledgedIds(errors, value) {
+  if (value === undefined || value === null) return [];
+
+  if (!Array.isArray(value)) {
+    errors.add('acknowledgedBookingIds', 'must be a list of booking ids');
+    return null;
+  }
+
+  let ok = true;
+
+  if (value.some((id) => typeof id !== 'string' || !UUID_PATTERN.test(id))) {
+    errors.add('acknowledgedBookingIds', 'must contain only booking ids');
+    ok = false;
+  }
+
+  if (value.length > ACKNOWLEDGED_MAX) {
+    errors.add('acknowledgedBookingIds', `must list ${ACKNOWLEDGED_MAX} bookings or fewer`);
+    ok = false;
+  }
+
+  if (!ok) return null;
+
+  return [...new Set(value.map((id) => id.toLowerCase()))];
+}
+
+/**
  * Validate input for creating a venue block.
  *
  * `now` is injected so the future-end rule is deterministic. A check written
@@ -118,9 +185,14 @@ function checkNotes(errors, value) {
  * @param {string} input.endsAt    ISO 8601 with an offset
  * @param {string} input.reason    one of BLOCK_REASON
  * @param {string} [input.notes]   required when reason is 'other'
+ * @param {boolean} [input.confirmOverride]  SCRUM-125: override approved
+ *                                  bookings; requires acknowledgedBookingIds
+ * @param {string[]} [input.acknowledgedBookingIds]  SCRUM-125: the bookings
+ *                                  being overridden; requires confirmOverride
  * @param {object} [options]
  * @param {Date} [options.now]     the instant to judge "future" against
- * @returns {{startsAt: string, endsAt: string, reason: string, notes: string|null}}
+ * @returns {{startsAt: string, endsAt: string, reason: string, notes: string|null,
+ *            confirmOverride: boolean, acknowledgedBookingIds: string[]}}
  * @throws {ValidationError} listing every problem found, not just the first
  */
 export function validateCreateBlock(input, { now = new Date() } = {}) {
@@ -186,6 +258,22 @@ export function validateCreateBlock(input, { now = new Date() } = {}) {
   if (normalised.reason === BLOCK_REASON.OTHER && notes === null && wasText) {
     errors.add('notes', 'is required when the reason is other');
   }
+
+  // SCRUM-125. The pairing rules run only when both fields were themselves
+  // well formed, so a single fault is not reported twice.
+  const confirmOverride = checkConfirmOverride(errors, input.confirmOverride);
+  const acknowledgedBookingIds = checkAcknowledgedIds(errors, input.acknowledgedBookingIds);
+
+  if (confirmOverride !== null && acknowledgedBookingIds !== null) {
+    if (confirmOverride && acknowledgedBookingIds.length === 0) {
+      errors.add('acknowledgedBookingIds', 'must list the bookings being overridden');
+    } else if (!confirmOverride && acknowledgedBookingIds.length > 0) {
+      errors.add('acknowledgedBookingIds', 'can only be sent with confirmOverride');
+    }
+  }
+
+  normalised.confirmOverride = confirmOverride ?? false;
+  normalised.acknowledgedBookingIds = acknowledgedBookingIds ?? [];
 
   throwIfInvalid(errors);
   return normalised;

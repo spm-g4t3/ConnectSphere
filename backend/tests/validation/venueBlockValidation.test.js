@@ -61,6 +61,8 @@ describe('SCRUM17_AC1 a valid block', () => {
       endsAt: '2026-10-01T17:00:00+08:00',
       reason: 'maintenance',
       notes: 'Replacing the projector',
+      confirmOverride: false,
+      acknowledgedBookingIds: [],
     });
   });
 
@@ -76,12 +78,16 @@ describe('SCRUM17_AC1 a valid block', () => {
     },
   );
 
-  it('ignores unknown keys such as confirmOverride', () => {
-    const result = validateCreateBlock(
-      validBlock({ confirmOverride: true, venueId: 'x' }),
-      { now: NOW },
-    );
-    expect(Object.keys(result).sort()).toEqual(['endsAt', 'notes', 'reason', 'startsAt']);
+  it('ignores unknown keys such as venueId', () => {
+    const result = validateCreateBlock(validBlock({ venueId: 'x' }), { now: NOW });
+    expect(Object.keys(result).sort()).toEqual([
+      'acknowledgedBookingIds',
+      'confirmOverride',
+      'endsAt',
+      'notes',
+      'reason',
+      'startsAt',
+    ]);
   });
 });
 
@@ -294,6 +300,192 @@ describe('the whole form is reported at once', () => {
     const err = errorFrom(input);
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toBe('Invalid venue block details -- expected an object');
+  });
+});
+
+
+describe('SCRUM17_AC3 override fields', () => {
+  const ID_A = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+  const ID_B = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
+  const ID_C = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
+
+  function uuidN(n) {
+    return `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  }
+
+  it.each([
+    ['missing', {}],
+    ['null', { confirmOverride: null, acknowledgedBookingIds: null }],
+  ])('SCRUM17_AC3_override_fields_default_to_false_and_empty (%s)', (_label, extra) => {
+    const result = validateCreateBlock(validBlock(extra), { now: NOW });
+    expect(result.confirmOverride).toBe(false);
+    expect(result.acknowledgedBookingIds).toEqual([]);
+  });
+
+  it('accepts confirmOverride false with an empty list', () => {
+    const result = validateCreateBlock(
+      validBlock({ confirmOverride: false, acknowledgedBookingIds: [] }),
+      { now: NOW },
+    );
+    expect(result.confirmOverride).toBe(false);
+    expect(result.acknowledgedBookingIds).toEqual([]);
+  });
+
+  it('accepts an override with the acknowledged ids', () => {
+    const result = validateCreateBlock(
+      validBlock({ confirmOverride: true, acknowledgedBookingIds: [ID_A, ID_B] }),
+      { now: NOW },
+    );
+    expect(result.confirmOverride).toBe(true);
+    expect(result.acknowledgedBookingIds).toEqual([ID_A, ID_B]);
+  });
+
+  it.each(['true', 1, 0, 'false', {}, []])(
+    'SCRUM17_AC3_confirmOverride_must_be_boolean (%s)',
+    (confirmOverride) => {
+      expect(detailsFrom(validBlock({ confirmOverride }))).toEqual([
+        { field: 'confirmOverride', message: 'must be true or false' },
+      ]);
+    },
+  );
+
+  it.each([ID_A, 'x', 42, {}, true])(
+    'SCRUM17_AC3_acknowledged_ids_must_be_an_array (%s)',
+    (acknowledgedBookingIds) => {
+      expect(
+        detailsFrom(validBlock({ confirmOverride: true, acknowledgedBookingIds })),
+      ).toEqual([{ field: 'acknowledgedBookingIds', message: 'must be a list of booking ids' }]);
+    },
+  );
+
+  it('SCRUM17_AC3_acknowledged_ids_must_be_uuids (reported once)', () => {
+    expect(
+      detailsFrom(
+        validBlock({
+          confirmOverride: true,
+          acknowledgedBookingIds: [ID_A, 'not-a-uuid', 42, null, `${ID_B}x`],
+        }),
+      ),
+    ).toEqual([{ field: 'acknowledgedBookingIds', message: 'must contain only booking ids' }]);
+  });
+
+  it('SCRUM17_AC3_acknowledged_ids_are_deduped_and_lowercased', () => {
+    const result = validateCreateBlock(
+      validBlock({
+        confirmOverride: true,
+        acknowledgedBookingIds: [ID_B.toUpperCase(), ID_A, ID_B, ID_C, ID_A.toUpperCase()],
+      }),
+      { now: NOW },
+    );
+    expect(result.acknowledgedBookingIds).toEqual([ID_B, ID_A, ID_C]);
+  });
+
+  it('SCRUM17_AC3_override_requires_acknowledged_ids', () => {
+    for (const extra of [
+      { confirmOverride: true },
+      { confirmOverride: true, acknowledgedBookingIds: [] },
+      { confirmOverride: true, acknowledgedBookingIds: null },
+    ]) {
+      expect(detailsFrom(validBlock(extra))).toEqual([
+        { field: 'acknowledgedBookingIds', message: 'must list the bookings being overridden' },
+      ]);
+    }
+  });
+
+  it('SCRUM17_AC3_acknowledged_ids_require_override', () => {
+    for (const extra of [
+      { acknowledgedBookingIds: [ID_A] },
+      { confirmOverride: false, acknowledgedBookingIds: [ID_A] },
+      { confirmOverride: null, acknowledgedBookingIds: [ID_A] },
+    ]) {
+      expect(detailsFrom(validBlock(extra))).toEqual([
+        { field: 'acknowledgedBookingIds', message: 'can only be sent with confirmOverride' },
+      ]);
+    }
+  });
+
+  it('SCRUM17_AC3_acknowledged_ids_capped_at_500', () => {
+    const five00 = Array.from({ length: 500 }, (_, i) => uuidN(i));
+    expect(
+      validateCreateBlock(
+        validBlock({ confirmOverride: true, acknowledgedBookingIds: five00 }),
+        { now: NOW },
+      ).acknowledgedBookingIds,
+    ).toHaveLength(500);
+
+    const five01 = Array.from({ length: 501 }, (_, i) => uuidN(i));
+    expect(
+      detailsFrom(validBlock({ confirmOverride: true, acknowledgedBookingIds: five01 })),
+    ).toEqual([{ field: 'acknowledgedBookingIds', message: 'must list 500 bookings or fewer' }]);
+  });
+
+  it('counts the cap before de-duplicating', () => {
+    const repeated = Array.from({ length: 501 }, () => ID_A);
+    expect(
+      detailsFrom(validBlock({ confirmOverride: true, acknowledgedBookingIds: repeated })),
+    ).toEqual([{ field: 'acknowledgedBookingIds', message: 'must list 500 bookings or fewer' }]);
+  });
+
+  it('reports a non-uuid and the cap together', () => {
+    const ids = [...Array.from({ length: 500 }, (_, i) => uuidN(i)), 'bad'];
+    expect(
+      detailsFrom(validBlock({ confirmOverride: true, acknowledgedBookingIds: ids })),
+    ).toEqual([
+      { field: 'acknowledgedBookingIds', message: 'must contain only booking ids' },
+      { field: 'acknowledgedBookingIds', message: 'must list 500 bookings or fewer' },
+    ]);
+  });
+
+  it('skips the pairing rules when a field is malformed', () => {
+    // A bad flag beside a list: only the bad flag is named.
+    expect(
+      detailsFrom(validBlock({ confirmOverride: 'yes', acknowledgedBookingIds: [ID_A] })),
+    ).toEqual([{ field: 'confirmOverride', message: 'must be true or false' }]);
+
+    // An override beside a bad list: only the bad list is named.
+    expect(
+      detailsFrom(validBlock({ confirmOverride: true, acknowledgedBookingIds: ['nope'] })),
+    ).toEqual([{ field: 'acknowledgedBookingIds', message: 'must contain only booking ids' }]);
+
+    // Both malformed: each named once.
+    expect(detailsFrom(validBlock({ confirmOverride: 1, acknowledgedBookingIds: 'x' }))).toEqual([
+      { field: 'confirmOverride', message: 'must be true or false' },
+      { field: 'acknowledgedBookingIds', message: 'must be a list of booking ids' },
+    ]);
+  });
+
+  it('SCRUM17_AC3_override_faults_reported_with_other_faults', () => {
+    const err = errorFrom({
+      startsAt: '2026-10-01',
+      reason: 'holiday',
+      confirmOverride: 'true',
+      acknowledgedBookingIds: ['nope'],
+    });
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(err.details).toEqual([
+      { field: 'startsAt', message: 'must include a time of day, not a date on its own' },
+      { field: 'endsAt', message: 'is required' },
+      { field: 'reason', message: REASON_MESSAGE },
+      { field: 'confirmOverride', message: 'must be true or false' },
+      { field: 'acknowledgedBookingIds', message: 'must contain only booking ids' },
+    ]);
+    expect(err.message).toBe(
+      'Invalid venue block details -- ' +
+        'startsAt: must include a time of day, not a date on its own; ' +
+        'endsAt: is required; ' +
+        `reason: ${REASON_MESSAGE}; ` +
+        'confirmOverride: must be true or false; ' +
+        'acknowledgedBookingIds: must contain only booking ids',
+    );
+  });
+
+  it('reports a pairing fault beside other faults', () => {
+    expect(detailsFrom(validBlock({ reason: 'holiday', confirmOverride: true }))).toEqual([
+      { field: 'reason', message: REASON_MESSAGE },
+      { field: 'acknowledgedBookingIds', message: 'must list the bookings being overridden' },
+    ]);
   });
 });
 

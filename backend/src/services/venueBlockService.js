@@ -14,6 +14,12 @@
  * costs a round trip. The function and the table constraints in 010 remain
  * the backstop, and translateError turns what they raise into typed errors.
  *
+ * SCRUM-125 (AC3) adds booking conflicts. create_venue_block is redefined in
+ * 012_venue_block_booking_conflicts.sql: a block over approved bookings is
+ * created only when the caller confirms the override and acknowledges every
+ * booking that still conflicts. Otherwise the RPC answers with the conflict
+ * list, which this service raises as a ConflictError, BLOCK_BOOKING_CONFLICT.
+ *
  * No routes call this yet; SCRUM-127 adds them.
  */
 
@@ -26,6 +32,10 @@ import { validateCreateBlock, validateBlockId } from '../validation/venueBlockVa
 const BLOCK_COLUMNS =
   'id, venue_id, starts_at, ends_at, reason, notes, created_by, last_modified_by, ' +
   'created_at, updated_at, removed_at, removed_by';
+
+/** The shape gen_random_uuid() produces; what a clashing block's id looks like. */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Postgres codes that mean "the input was wrong", whoever caught it. */
 const VALIDATION_CODES = new Set([
@@ -71,9 +81,18 @@ function translateError(error) {
   }
 
   // raised by create_venue_block: VENUE_RETIRED or BLOCK_OVERLAPS_BLOCK, carried
-  // in the hint so a client can tell them apart without reading prose
+  // in the hint so a client can tell them apart without reading prose.
+  //
+  // BLOCK_OVERLAPS_BLOCK carries the clashing block's id in DETAIL, which
+  // PostgREST passes through as error.details. It becomes the conflict list,
+  // so a client can point at the block rather than just say one exists. Only
+  // a uuid is trusted there; anything else leaves the list empty.
   if (code === 'PT409') {
-    return new ConflictError(detail, { code: error.hint ?? null });
+    const hint = error.hint ?? null;
+    const blockId = typeof error.details === 'string' ? error.details.trim() : '';
+    const conflicts =
+      hint === 'BLOCK_OVERLAPS_BLOCK' && UUID_PATTERN.test(blockId) ? [{ blockId }] : [];
+    return new ConflictError(detail, { code: hint, conflicts });
   }
 
   // venue_blocks_no_overlap in 010. Reached only if a concurrent write beat
@@ -114,18 +133,49 @@ export function toBlock(row) {
 }
 
 /**
+ * One overlapping approved booking, as create_venue_block reports it, in
+ * camelCase.
+ *
+ * Exported so the conflict list and SCRUM-128's flagged bookings -- the same
+ * rows, from the same helper -- come back in exactly the same shape.
+ *
+ * @param {object} row  snake_case, from venue_block_booking_conflicts (012)
+ * @returns {{bookingId: string, eventRequestId: string, eventName: string,
+ *            startsAt: string, endsAt: string}}
+ */
+export function toBookingConflict(row) {
+  return {
+    bookingId: row.booking_id,
+    eventRequestId: row.event_request_id,
+    eventName: row.event_name,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+  };
+}
+
+/**
  * Block a venue for a period.
  *
  * @param {string} venueId
- * @param {object} input            see validateCreateBlock
+ * @param {object} input            see validateCreateBlock; includes the
+ *                                  SCRUM-125 confirmOverride and
+ *                                  acknowledgedBookingIds
  * @param {string|null} userId      the Venue Staff member creating the block
  * @param {object} [options]
  * @param {Date} [options.now]      injected for tests; see validateCreateBlock
- * @returns {Promise<object>} the created block
+ * @returns {Promise<{block: object, flaggedBookings: object[]}>} the created
+ *          block, and the approved bookings the override covered (shaped by
+ *          toBookingConflict; [] when there were none). Flagging those
+ *          bookings for review and notifying their Event Coordinators lands in
+ *          SCRUM-128 -- until then the list names them without changing them.
  * @throws {ValidationError} bad input, before any network call
  * @throws {NotFoundError}   no venue with that id
- * @throws {ConflictError}   venue retired (VENUE_RETIRED) or the period
- *                           overlaps another block (BLOCK_OVERLAPS_BLOCK)
+ * @throws {ConflictError}   venue retired (VENUE_RETIRED); the period overlaps
+ *                           another block (BLOCK_OVERLAPS_BLOCK, conflicts
+ *                           [{blockId}]); or it overlaps approved bookings
+ *                           that were not all acknowledged
+ *                           (BLOCK_BOOKING_CONFLICT, conflicts shaped by
+ *                           toBookingConflict)
  */
 export async function createVenueBlock(venueId, input, userId = null, { now } = {}) {
   validateVenueId(venueId);
@@ -139,17 +189,36 @@ export async function createVenueBlock(venueId, input, userId = null, { now } = 
     p_reason: block.reason,
     p_notes: block.notes,
     p_user_id: userId,
+    p_confirm_override: block.confirmOverride,
+    p_acknowledged_booking_ids: block.acknowledgedBookingIds,
   });
 
   if (error) throw translateError(error);
 
-  // Anything but 'created' is an outcome this build does not know -- SCRUM-125
-  // adds some. Failing loudly beats reporting a block that may not exist.
+  // Approved bookings overlap and were not all acknowledged; nothing was
+  // written. If the caller had already confirmed, the list it confirmed is
+  // stale -- a booking entered the period since -- and saying so tells the
+  // Venue Staff member why they are being asked again.
+  if (data?.outcome === 'conflict') {
+    const message = block.confirmOverride
+      ? 'The overlapping bookings have changed since you confirmed; review them again'
+      : 'This period overlaps approved bookings';
+    throw new ConflictError(message, {
+      code: 'BLOCK_BOOKING_CONFLICT',
+      conflicts: (data.conflicts ?? []).map(toBookingConflict),
+    });
+  }
+
+  // Anything else is an outcome this build does not know. Failing loudly
+  // beats reporting a block that may not exist.
   if (data?.outcome !== 'created') {
     throw new Error(`Unexpected outcome from create_venue_block: ${data?.outcome}`);
   }
 
-  return toBlock(data.block);
+  return {
+    block: toBlock(data.block),
+    flaggedBookings: (data.affected_bookings ?? []).map(toBookingConflict),
+  };
 }
 
 /**

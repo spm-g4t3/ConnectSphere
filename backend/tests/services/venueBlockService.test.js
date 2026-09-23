@@ -18,6 +18,7 @@ import {
   listVenueBlocks,
   getVenueBlock,
   toBlock,
+  toBookingConflict,
 } from '../../src/services/venueBlockService.js';
 import { ValidationError, NotFoundError, ConflictError } from '../../src/errors.js';
 
@@ -154,6 +155,8 @@ describe('SCRUM17_AC1 createVenueBlock', () => {
       p_reason: 'maintenance',
       p_notes: 'Deep clean',
       p_user_id: STAFF_ID,
+      p_confirm_override: false,
+      p_acknowledged_booking_ids: [],
     });
   });
 
@@ -168,9 +171,10 @@ describe('SCRUM17_AC1 createVenueBlock', () => {
   it('SCRUM17_AC1_create_returns_a_camelCase_block', async () => {
     rpc.mockResolvedValue({ data: { outcome: 'created', block: blockRow() }, error: null });
 
-    await expect(createVenueBlock(VENUE_ID, validInput(), STAFF_ID, { now: NOW })).resolves.toEqual(
-      CAMEL_BLOCK,
-    );
+    await expect(createVenueBlock(VENUE_ID, validInput(), STAFF_ID, { now: NOW })).resolves.toEqual({
+      block: CAMEL_BLOCK,
+      flaggedBookings: [],
+    });
   });
 
   it('SCRUM17_AC1_invalid_input_makes_no_rpc_call', async () => {
@@ -323,6 +327,266 @@ describe('database errors become typed errors', () => {
     expect(err).not.toBeInstanceOf(NotFoundError);
     expect(err).not.toBeInstanceOf(ConflictError);
     expect(err.message).toBe('relation not found');
+  });
+});
+
+
+describe('SCRUM17_AC3 booking conflicts and the override', () => {
+  const BOOKING_A = 'a1b2c3d4-0000-4000-8000-000000000001';
+  const BOOKING_B = 'a1b2c3d4-0000-4000-8000-000000000002';
+  const EVENT_A = 'e1b2c3d4-0000-4000-8000-000000000001';
+  const EVENT_B = 'e1b2c3d4-0000-4000-8000-000000000002';
+
+  const conflictRows = [
+    {
+      booking_id: BOOKING_A,
+      event_request_id: EVENT_A,
+      event_name: 'Tech Talk',
+      starts_at: '2026-10-01T02:00:00+00:00',
+      ends_at: '2026-10-01T04:00:00+00:00',
+    },
+    {
+      booking_id: BOOKING_B,
+      event_request_id: EVENT_B,
+      event_name: 'Career Fair',
+      starts_at: '2026-10-01T05:00:00+00:00',
+      ends_at: '2026-10-01T08:00:00+00:00',
+    },
+  ];
+
+  const camelConflicts = [
+    {
+      bookingId: BOOKING_A,
+      eventRequestId: EVENT_A,
+      eventName: 'Tech Talk',
+      startsAt: '2026-10-01T02:00:00+00:00',
+      endsAt: '2026-10-01T04:00:00+00:00',
+    },
+    {
+      bookingId: BOOKING_B,
+      eventRequestId: EVENT_B,
+      eventName: 'Career Fair',
+      startsAt: '2026-10-01T05:00:00+00:00',
+      endsAt: '2026-10-01T08:00:00+00:00',
+    },
+  ];
+
+  const override = (ids = [BOOKING_A, BOOKING_B]) =>
+    validInput({ confirmOverride: true, acknowledgedBookingIds: ids });
+
+  it('SCRUM17_AC3_create_passes_override_and_acknowledged_ids_to_rpc', async () => {
+    rpc.mockResolvedValue({ data: { outcome: 'created', block: blockRow() }, error: null });
+
+    await createVenueBlock(
+      VENUE_ID,
+      override([BOOKING_A.toUpperCase(), BOOKING_B, BOOKING_A]),
+      STAFF_ID,
+      { now: NOW },
+    );
+
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith('create_venue_block', {
+      p_venue_id: VENUE_ID,
+      p_starts_at: '2026-10-01T09:00:00+08:00',
+      p_ends_at: '2026-10-01T17:00:00+08:00',
+      p_reason: 'maintenance',
+      p_notes: null,
+      p_user_id: STAFF_ID,
+      p_confirm_override: true,
+      p_acknowledged_booking_ids: [BOOKING_A, BOOKING_B],
+    });
+  });
+
+  it('SCRUM17_AC3_conflict_outcome_throws_BLOCK_BOOKING_CONFLICT_with_camelCase_conflicts', async () => {
+    rpc.mockResolvedValue({
+      data: { outcome: 'conflict', conflicts: conflictRows },
+      error: null,
+    });
+
+    const err = await errorFromAsync(() =>
+      createVenueBlock(VENUE_ID, validInput(), STAFF_ID, { now: NOW }),
+    );
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.status).toBe(409);
+    expect(err.code).toBe('BLOCK_BOOKING_CONFLICT');
+    expect(err.message).toBe('This period overlaps approved bookings');
+    expect(err.conflicts).toEqual(camelConflicts);
+  });
+
+  it('a conflict outcome with no list gives an empty conflicts list', async () => {
+    rpc.mockResolvedValue({ data: { outcome: 'conflict' }, error: null });
+
+    const err = await errorFromAsync(() =>
+      createVenueBlock(VENUE_ID, validInput(), STAFF_ID, { now: NOW }),
+    );
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.code).toBe('BLOCK_BOOKING_CONFLICT');
+    expect(err.conflicts).toEqual([]);
+  });
+
+  it('SCRUM17_AC3_stale_override_conflict_says_bookings_changed', async () => {
+    rpc.mockResolvedValue({
+      data: { outcome: 'conflict', conflicts: conflictRows },
+      error: null,
+    });
+
+    const err = await errorFromAsync(() =>
+      createVenueBlock(VENUE_ID, override([BOOKING_A]), STAFF_ID, { now: NOW }),
+    );
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.status).toBe(409);
+    expect(err.code).toBe('BLOCK_BOOKING_CONFLICT');
+    expect(err.message).toBe(
+      'The overlapping bookings have changed since you confirmed; review them again',
+    );
+    expect(err.conflicts).toEqual(camelConflicts);
+  });
+
+  it('SCRUM17_AC3_created_returns_block_and_flagged_bookings', async () => {
+    rpc.mockResolvedValue({
+      data: { outcome: 'created', block: blockRow(), affected_bookings: conflictRows },
+      error: null,
+    });
+
+    await expect(
+      createVenueBlock(VENUE_ID, override(), STAFF_ID, { now: NOW }),
+    ).resolves.toEqual({ block: CAMEL_BLOCK, flaggedBookings: camelConflicts });
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['empty', []],
+  ])(
+    'SCRUM17_AC3_created_without_affected_bookings_returns_empty_list (%s)',
+    async (_label, affected) => {
+      const data = { outcome: 'created', block: blockRow() };
+      if (affected !== undefined) data.affected_bookings = affected;
+      rpc.mockResolvedValue({ data, error: null });
+
+      await expect(
+        createVenueBlock(VENUE_ID, validInput(), STAFF_ID, { now: NOW }),
+      ).resolves.toEqual({ block: CAMEL_BLOCK, flaggedBookings: [] });
+    },
+  );
+
+  it.each([
+    [
+      'a non-boolean confirmOverride',
+      { confirmOverride: 'true' },
+      [{ field: 'confirmOverride', message: 'must be true or false' }],
+    ],
+    [
+      'an override with no ids',
+      { confirmOverride: true },
+      [{ field: 'acknowledgedBookingIds', message: 'must list the bookings being overridden' }],
+    ],
+    [
+      'ids with no override',
+      { acknowledgedBookingIds: [BOOKING_A] },
+      [{ field: 'acknowledgedBookingIds', message: 'can only be sent with confirmOverride' }],
+    ],
+    [
+      'a non-uuid id',
+      { confirmOverride: true, acknowledgedBookingIds: ['nope'] },
+      [{ field: 'acknowledgedBookingIds', message: 'must contain only booking ids' }],
+    ],
+  ])('SCRUM17_AC3_invalid_override_input_makes_no_rpc_call (%s)', async (_label, extra, details) => {
+    const err = await errorFromAsync(() =>
+      createVenueBlock(VENUE_ID, validInput(extra), STAFF_ID, { now: NOW }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(err.details).toEqual(details);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('SCRUM17_AC1 BLOCK_OVERLAPS_BLOCK names the clashing block', () => {
+  async function overlapWithDetails(details) {
+    rpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: 'PT409',
+        message: `this period overlaps another block on venue ${VENUE_ID}`,
+        hint: 'BLOCK_OVERLAPS_BLOCK',
+        details,
+      },
+    });
+    return errorFromAsync(() => createVenueBlock(VENUE_ID, validInput(), STAFF_ID, { now: NOW }));
+  }
+
+  it('SCRUM17_AC1_BLOCK_OVERLAPS_BLOCK_conflicts_carry_the_block_id', async () => {
+    const err = await overlapWithDetails(OTHER_BLOCK_ID);
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.status).toBe(409);
+    expect(err.code).toBe('BLOCK_OVERLAPS_BLOCK');
+    expect(err.message).toBe(`this period overlaps another block on venue ${VENUE_ID}`);
+    expect(err.conflicts).toEqual([{ blockId: OTHER_BLOCK_ID }]);
+  });
+
+  it('trims the id and accepts it in upper case', async () => {
+    const upper = OTHER_BLOCK_ID.toUpperCase();
+    const err = await overlapWithDetails(`  ${upper}\n`);
+    expect(err.conflicts).toEqual([{ blockId: upper }]);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['empty', ''],
+    ['not a uuid', 'Key (venue_id) overlaps'],
+    ['a uuid inside prose', `block ${OTHER_BLOCK_ID} overlaps`],
+    ['not a string', 42],
+  ])('gives [] when details are %s', async (_label, details) => {
+    const err = await overlapWithDetails(details);
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.code).toBe('BLOCK_OVERLAPS_BLOCK');
+    expect(err.conflicts).toEqual([]);
+  });
+
+  it('VENUE_RETIRED carries no conflicts even when details hold a uuid', async () => {
+    rpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: 'PT409',
+        message: 'venue is retired',
+        hint: 'VENUE_RETIRED',
+        details: OTHER_BLOCK_ID,
+      },
+    });
+    const err = await errorFromAsync(() =>
+      createVenueBlock(VENUE_ID, validInput(), STAFF_ID, { now: NOW }),
+    );
+    expect(err.code).toBe('VENUE_RETIRED');
+    expect(err.conflicts).toEqual([]);
+  });
+});
+
+
+describe('toBookingConflict', () => {
+  it('maps every column to camelCase', () => {
+    expect(
+      toBookingConflict({
+        booking_id: 'b',
+        event_request_id: 'e',
+        event_name: 'Name',
+        starts_at: '2026-10-01T02:00:00+00:00',
+        ends_at: '2026-10-01T04:00:00+00:00',
+      }),
+    ).toEqual({
+      bookingId: 'b',
+      eventRequestId: 'e',
+      eventName: 'Name',
+      startsAt: '2026-10-01T02:00:00+00:00',
+      endsAt: '2026-10-01T04:00:00+00:00',
+    });
   });
 });
 

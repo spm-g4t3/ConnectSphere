@@ -39,10 +39,21 @@ export class NotFoundError extends AppError {
  * The request conflicts with data already stored.
  *
  * SCRUM-126 added the options. `code` is a machine-readable reason, such as
- * VENUE_RETIRED or BLOCK_OVERLAPS_BLOCK, so a client can react to one kind of
- * conflict without matching on prose. `conflicts` lists the records that
- * clashed, for SCRUM-125's booking conflicts. Both are optional, so every
- * one-argument caller is unaffected.
+ * VENUE_RETIRED, BLOCK_OVERLAPS_BLOCK or BLOCK_BOOKING_CONFLICT, so a client
+ * can react to one kind of conflict without matching on prose. `conflicts`
+ * lists the records that clashed. Both are optional, so every one-argument
+ * caller is unaffected.
+ *
+ * `conflicts` takes one of two shapes, depending on `code`:
+ *
+ *  - BLOCK_OVERLAPS_BLOCK: [{ blockId }], the other active block the period
+ *    overlaps -- or [] when the database did not name it (the 23P01 race).
+ *  - BLOCK_BOOKING_CONFLICT (SCRUM-125): the approved bookings the period
+ *    overlaps, as [{ bookingId, eventRequestId, eventName, startsAt, endsAt }].
+ *    The caller may resend with confirmOverride and those booking ids to
+ *    override them.
+ *
+ * Every other code carries [].
  *
  * `conflicts` rather than `details` on purpose: `details` means field faults
  * and only ValidationError carries it, which errors.test.js asserts.
