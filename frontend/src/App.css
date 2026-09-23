@@ -65,7 +65,7 @@ button { cursor: pointer; }
 /* The rule above makes every .dashboard p muted grey, which would render a
    failed retire in exactly the same voice as the empty-state text. Same
    colour pair as .app-nav__error. */
-.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .venue-block-form__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 /* NECESSARY, not cosmetic. .dashboard li above forces flex with
    justify-content: space-between, which on a checkbox row throws the box to
    one edge of the card and its label to the other with the whole width
@@ -73,6 +73,25 @@ button { cursor: pointer; }
    bug SCRUM-110 fixed at :24-30. Scoped to .venue-form so the catalogue's
    own rows keep the spread layout they want. */
 .dashboard--venue-staff .venue-form li { border-top: 0; display: block; padding: 4px 0; }
+/* SCRUM-126. The block form, scoped like .venue-form above. The label grid is
+   the same shape as .venue-form > label; the start and end sit side by side on
+   a __row, which collapses to one column on a phone. Field errors are red
+   rather than the muted .dashboard p grey, so a fault under a control is not
+   mistaken for help text. */
+.dashboard--venue-staff .venue-block-form label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0 0; }
+.dashboard--venue-staff .venue-block-form__row { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dashboard--venue-staff .venue-block-form input, .dashboard--venue-staff .venue-block-form select, .dashboard--venue-staff .venue-block-form textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
+.dashboard--venue-staff .venue-block-form textarea { resize: vertical; }
+.dashboard--venue-staff .venue-block-form [aria-invalid="true"] { border-color: #a43c32; }
+.dashboard--venue-staff .venue-block-form__field-error { color: #a43c32; font-size: 0.84rem; margin: 6px 0 0; }
+.dashboard--venue-staff .venue-block-form__hint, .dashboard--venue-staff .venue-block-form__help { color: var(--muted); font-size: 0.84rem; margin: 6px 0 0; }
+.dashboard--venue-staff .venue-block-form button { margin: 20px 10px 0 0; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above, here on the field-error lists and the alert's list. */
+.dashboard--venue-staff .venue-block-form li { border-top: 0; display: block; padding: 2px 0; }
+@media (max-width: 720px) {
+  .dashboard--venue-staff .venue-block-form__row { grid-template-columns: 1fr; }
+}
 /* History values are raw jsonb turned into text: long joined code lists, a
    whole week of opening hours, a JSON.stringify of last resort. Without
    these they overflow the card rather than wrapping, and the <pre> fallback

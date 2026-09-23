@@ -35,10 +35,26 @@ export class NotFoundError extends AppError {
   }
 }
 
-/** The request conflicts with data already stored. */
+/**
+ * The request conflicts with data already stored.
+ *
+ * SCRUM-126 added the options. `code` is a machine-readable reason, such as
+ * VENUE_RETIRED or BLOCK_OVERLAPS_BLOCK, so a client can react to one kind of
+ * conflict without matching on prose. `conflicts` lists the records that
+ * clashed, for SCRUM-125's booking conflicts. Both are optional, so every
+ * one-argument caller is unaffected.
+ *
+ * `conflicts` rather than `details` on purpose: `details` means field faults
+ * and only ValidationError carries it, which errors.test.js asserts.
+ *
+ * Note for SCRUM-127: handleError must serialise `code` and `conflicts` too,
+ * or a client never sees them.
+ */
 export class ConflictError extends AppError {
-  constructor(message) {
+  constructor(message, { code = null, conflicts = [] } = {}) {
     super(message, 409);
+    this.code = code;
+    this.conflicts = conflicts;
   }
 }
 
