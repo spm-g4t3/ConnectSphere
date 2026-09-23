@@ -9,28 +9,27 @@
 
 import { useState } from "react";
 import { submitChangeRequest } from "../services/changeRequestService";
-
-// What an Organiser might reasonably want to change, matching the real
-// event_requests columns (001 + 005 migrations).
-const CHANGEABLE_FIELDS = [
-  { value: "eventName", label: "Event name" },
-  { value: "purpose", label: "Purpose" },
-  { value: "description", label: "Description" },
-  { value: "proposedStart", label: "Proposed start date/time" },
-  { value: "proposedEnd", label: "Proposed end date/time" },
-  { value: "expectedAttendance", label: "Expected attendance" },
-  { value: "venueRequirements", label: "Venue requirements" },
-  { value: "accessibilityRequirements", label: "Accessibility requirements" },
-  { value: "equipmentRequirements", label: "Equipment requirements" },
-  { value: "other", label: "Something else" },
-];
+import {
+  CHANGE_FIELD_OPTIONS,
+  toChangeField,
+} from "../services/eventChangeFields";
 
 export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
   const [field, setField] = useState("");
   const [details, setDetails] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  // The backend reports a rejected value as [{ field, message }] -- notably
+  // for expected_attendance, where checkRequestedChange refuses anything
+  // non-numeric. Kept separate from `error` so "about 200 people" produces
+  // the sentence that explains itself instead of a generic retry message the
+  // Organiser could read forever without learning what to do.
+  const [detailErrors, setDetailErrors] = useState([]);
   const [success, setSuccess] = useState(false);
+
+  // Which enum member this choice will travel as. Read during render too, for
+  // the notice below, so it is computed once here rather than twice.
+  const changeField = toChangeField(field);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -46,10 +45,15 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
 
     setSubmitting(true);
     setError(null);
+    setDetailErrors([]);
 
     try {
+      // Mapped exactly once, here. The dropdown's values are the form's own
+      // vocabulary; `field` on the wire is the Postgres enum
+      // event_change_field. Sending the option value straight through -- which
+      // is what this used to do -- was a 400 on every single choice.
       await submitChangeRequest(eventRequestId, {
-        field,
+        field: changeField,
         details: details.trim(),
       });
       setSuccess(true);
@@ -57,7 +61,15 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
       setDetails("");
       onSubmitted?.();
     } catch (err) {
-      setError("Could not submit your change request. Please try again.");
+      const problems = err.response?.data?.details;
+      if (Array.isArray(problems) && problems.length > 0) {
+        setDetailErrors(problems);
+      } else {
+        setError(
+          err.response?.data?.error ||
+            "Could not submit your change request. Please try again.",
+        );
+      }
     } finally {
       setSubmitting(false);
     }
@@ -82,13 +94,28 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
           <option value="" disabled>
             Select an option
           </option>
-          {CHANGEABLE_FIELDS.map((opt) => (
+          {CHANGE_FIELD_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>
           ))}
         </select>
       </label>
+
+      {/*
+        Shown when the choice has no enum member of its own and travels as
+        "Something else" -- accessibility today, and anything added later that
+        the database has no heading for. Said out loud rather than done
+        silently: the Coordinator's list will show this request as "Something
+        else", and an Organiser who expected to see "Accessibility" there
+        would otherwise think it had gone to the wrong place.
+      */}
+      {changeField === "other" && field !== "other" && (
+        <p className="change-request-form__notice">
+          This will be recorded as "Something else" — there is no separate
+          category for it yet, so please describe it fully below.
+        </p>
+      )}
 
       <label>
         Describe the change
@@ -102,6 +129,26 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
       </label>
 
       {error && <p className="change-request-form__error" role="alert">{error}</p>}
+
+      {/*
+        The same renderer EventRequestForm uses for a submit's details[], and
+        the same reasoning: the backend already names every fault precisely,
+        so flattening them into one generic sentence throws away the only
+        thing that tells the Organiser what to type instead.
+      */}
+      {detailErrors.length > 0 && (
+        <div className="change-request-form__details-errors" role="alert">
+          <p>Your change request can't be submitted yet:</p>
+          <ul>
+            {detailErrors.map((problem, i) => (
+              <li key={i}>
+                {problem.field ? `${problem.field}: ` : ""}
+                {problem.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <button type="submit" disabled={submitting}>
         {submitting ? "Submitting..." : "Submit change request"}

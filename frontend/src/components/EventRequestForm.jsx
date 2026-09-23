@@ -22,11 +22,11 @@ import {
   updateEventRequest,
   submitEventRequest,
 } from "../services/eventRequestService";
-
-function toDatetimeLocal(isoString) {
-  if (!isoString) return "";
-  return isoString.slice(0, 16);
-}
+import {
+  toDatetimeLocalValue,
+  toOffsetIsoString,
+  deviceTimeZoneLabel,
+} from "../services/datetimeFormat";
 
 export default function EventRequestForm({ existingRequest = null, onSaved }) {
   const [requestId, setRequestId] = useState(existingRequest?.id ?? null);
@@ -36,8 +36,13 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
     eventName: existingRequest?.eventName ?? "",
     purpose: existingRequest?.purpose ?? "",
     description: existingRequest?.description ?? "",
-    proposedStart: toDatetimeLocal(existingRequest?.proposedStart),
-    proposedEnd: toDatetimeLocal(existingRequest?.proposedEnd),
+    // toDatetimeLocalValue, not the isoString.slice(0, 16) this used to do.
+    // The slice took the first sixteen characters of a UTC-normalised string
+    // and handed them to a control that renders local time, so a request
+    // stored as 01:00+00:00 prefilled as 01:00 for a +08 Organiser instead of
+    // 09:00 -- and saving the form then moved their event eight hours.
+    proposedStart: toDatetimeLocalValue(existingRequest?.proposedStart),
+    proposedEnd: toDatetimeLocalValue(existingRequest?.proposedEnd),
     expectedAttendance: existingRequest?.expectedAttendance ?? "",
     venueRequirements: existingRequest?.venueRequirements ?? "",
     accessibilityRequirements: existingRequest?.accessibilityRequirements ?? "",
@@ -61,8 +66,13 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
       eventName: form.eventName.trim(),
       purpose: form.purpose.trim() || undefined,
       description: form.description.trim() || undefined,
-      proposedStart: form.proposedStart || undefined,
-      proposedEnd: form.proposedEnd || undefined,
+      // An <input type="datetime-local"> emits "2026-06-01T09:00" with no
+      // offset, and the backend's TIMESTAMP_PATTERN requires one -- so these
+      // two fields 400'd every save that had a date in it. toOffsetIsoString
+      // stamps the device's real offset for that instant and returns
+      // undefined for "", which is the `|| undefined` this replaces.
+      proposedStart: toOffsetIsoString(form.proposedStart),
+      proposedEnd: toOffsetIsoString(form.proposedEnd),
       expectedAttendance: form.expectedAttendance
         ? Number(form.expectedAttendance)
         : undefined,
@@ -209,6 +219,16 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
           />
         </label>
       </div>
+
+      {/*
+        Disclosure, not a picker. The times above are sent with whatever
+        offset this device is on, so the Organiser is told which one that is
+        rather than left to assume. A real picker would need a venue to anchor
+        the choice to, and no venue is attached to a request at draft time.
+      */}
+      <p className="event-request-form__hint">
+        Times are in your device's time zone ({deviceTimeZoneLabel()}).
+      </p>
 
       <label>
         Expected attendance

@@ -18,15 +18,24 @@
  *
  * Deliberately NOT done here:
  *
- *  - No authorisation and no ownership check. Nothing below asks whether the
- *    caller is the Organiser named on the request. That needs the caller's role
- *    and their relationship to the event, both of which arrive with the JWT, so
- *    it belongs in middleware. A service that quietly enforced half of it would
- *    make the other half look unnecessary.
- *  - No saving or editing of an existing draft. That is SCRUM-11, which shares
- *    this table and will add its own function here.
+ *  - No authorisation, and no ownership check except where a function is
+ *    handed an organiserId and says so in its name or signature. The rule is
+ *    worth stating precisely, because it decides what a route still has to do:
+ *    getEventRequestForOrganiser and updateEventRequest take the Organiser and
+ *    enforce it; createEventRequest stamps one; getEventRequestById,
+ *    submitEventRequest and listEventRequestsForReview take none and check
+ *    none, so a route calling any of those must prove the caller's right to
+ *    read or write itself first. For the first two that proof is ownership;
+ *    for listEventRequestsForReview it is a role gate, because the whole point
+ *    of a review queue is that it crosses every Organiser. Role, and the
+ *    caller's relationship to an event, arrive with the JWT and belong in
+ *    middleware. A service that quietly enforced half of it would make the
+ *    other half look unnecessary.
  *  - No status logic of its own. Which moves are legal is answered by
  *    canTransition in src/domain/eventRequestStatus.js; this module asks.
+ *    updateEventRequest is the one exception and says why at its own guard:
+ *    editing is not a transition, so the transition table has nothing to say
+ *    about it.
  *  - No minimum notice before a proposed start, and no timezone conversion.
  *    The first is a business rule the customer has not given; the second would
  *    reinterpret a value the timestamptz column already understands.
@@ -35,9 +44,14 @@
 import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
 import {
   validateCreateEventRequest,
+  validateUpdateEventRequest,
   validateSubmitEventRequest,
 } from '../validation/eventRequestValidation.js';
-import { STATUS, canTransition } from '../domain/eventRequestStatus.js';
+import {
+  STATUS,
+  canTransition,
+  COORDINATOR_QUEUE_STATUSES,
+} from '../domain/eventRequestStatus.js';
 
 
 /** The columns a caller ever reads, named rather than selected with '*'. */
@@ -376,6 +390,100 @@ export async function submitEventRequest(id, { client, now = new Date() } = {}) 
   return toEventRequest(data);
 }
 
+/**
+ * Save an Organiser's edits to their own draft.
+ *
+ * SCRUM-11. Positional order matches venueService.updateVenue(id, changes,
+ * userId), with this module's options bag appended, so the two update
+ * functions on this codebase read the same way round.
+ *
+ * Both validations run before any round trip: a bad body costs nothing, and
+ * the Organiser gets a message about their form rather than a driver message
+ * about a constraint. Existence and ownership are then answered in one call by
+ * getEventRequestForOrganiser, which raises the same NotFoundError for a
+ * request that does not exist and one that belongs to someone else -- see the
+ * note in errors.js on why that is 404 and not 403.
+ *
+ * Three guards, and each is doing separate work:
+ *
+ *  - the status check below turns "the body was fine, the row's state was not"
+ *    into a 409. Asked of the status directly and deliberately NOT routed
+ *    through canTransition: editing is not a transition, the row does not
+ *    move, and ALLOWED_TRANSITIONS therefore has nothing to say about it.
+ *    Asking anyway would be a category error dressed as reuse.
+ *  - .eq('status', 'draft') on the write is the one that matters. The read
+ *    above and this write are two round trips with no transaction spanning
+ *    them, so a submit landing in the gap would otherwise let this write
+ *    mutate a request the Coordinator is already reading. Filtering on the old
+ *    status makes the write itself the check -- the loser matches no row.
+ *  - .eq('organiser_id', ...) can never fire, because organiser_id never
+ *    changes and ownership was proved a moment ago. It is there so the
+ *    statement sent to a deny-all table is *structurally* incapable of
+ *    touching a foreign row, rather than safe only because of a check made
+ *    earlier in a different round trip.
+ *
+ * updated_at and submitted_at are safe by construction rather than by
+ * discipline, which is worth stating so nobody has to re-derive it nervously:
+ * toColumns iterates COLUMN_BY_FIELD, a frozen allow-list of exactly nine
+ * columns. updated_at, submitted_at, status, organiser_id and id are not in
+ * it and no request body can put them there. So the trigger stays the sole
+ * authority on updated_at, and event_requests_submitted_at_matches_status
+ * cannot be violated from here.
+ *
+ * @param {string} id
+ * @param {object} changes      any subset of the request's fields
+ * @param {string} organiserId  from the JWT, via requireAuth -- never the body
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the updated request, in camelCase -- byte for
+ *                            byte the shape create, submit and both reads return
+ * @throws {ValidationError} bad input, an empty change set, or no organiser
+ * @throws {NotFoundError}   no such request, or it is someone else's
+ * @throws {ConflictError}   the request is no longer a draft, whether that was
+ *                           already true or became true mid-flight
+ */
+export async function updateEventRequest(id, changes, organiserId, { client } = {}) {
+  assertOrganiser(organiserId);
+
+  const validated = validateUpdateEventRequest(changes);
+
+  const db = await resolveClient(client);
+
+  const current = await getEventRequestForOrganiser(id, organiserId, { client: db });
+
+  if (current.status !== STATUS.DRAFT) {
+    throw new ConflictError(
+      `An event request with status '${current.status}' can no longer be edited ` +
+      `directly. Request a change against it instead.`,
+    );
+  }
+
+  const { data, error } = await db
+    .from('event_requests')
+    .update(toColumns(validated))
+    .eq('id', id)
+    .eq('organiser_id', organiserId)
+    .eq('status', STATUS.DRAFT)
+    .select()
+    .single();
+
+  // PGRST116 here is the draft guard firing, not a missing request: the row was
+  // read successfully a moment ago and its ownership proved, so the only filter
+  // that can have stopped matching is the status one. Handled at this site
+  // rather than in translateError, which cannot tell this case from an ordinary
+  // empty read -- its own comment says so.
+  if (error?.code === 'PGRST116') {
+    throw new ConflictError(
+      `This event request is no longer a draft -- it was most likely submitted ` +
+      `a moment ago. Reload it before editing again.`,
+    );
+  }
+
+  if (error) throw translateError(error);
+
+  return toEventRequest(data);
+}
+
 
 /**
  * Every event request belonging to one Organiser, most recently changed first.
@@ -458,4 +566,79 @@ export async function getEventRequestForOrganiser(id, organiserId, { client } = 
   }
 
   return request;
+}
+
+
+/**
+ * Every event request awaiting a decision, oldest waiting first.
+ *
+ * SCRUM-45. The Event Coordinator's review queue, and the fix for the reported
+ * bug that a submitted request never appears on the Coordinator side: until
+ * now every read in this module was scoped to one organiser_id, so a second
+ * person could not see the row at all.
+ *
+ * No organiserId, and assertOrganiser is deliberately NOT called. That is the
+ * rule this module's header states rather than an exception to it: a function
+ * taking no organiser checks none, and the caller proves the right to read.
+ * Here the proof is the role gate on the route, which is the only proof
+ * available -- a queue that crosses every Organiser is precisely a read that
+ * no ownership check could scope.
+ *
+ * Which statuses count is not decided here. COORDINATOR_QUEUE_STATUSES owns
+ * that, and its docstring carries the argument -- including that excluding
+ * `draft` is the access control for a queue every Coordinator can see.
+ *
+ * Four choices worth defending:
+ *
+ *  - The same COLUMNS every other read uses, so a queue row is byte-identical
+ *    in shape to the row GET /:id returns. That is what lets the Coordinator UI
+ *    render a full detail panel from a row it already holds instead of paying
+ *    for a second route.
+ *
+ *  - submitted_at ASC -- oldest waiting first. updated_at DESC, which the
+ *    organiser list uses above, would be actively wrong here: it is maintained
+ *    by a trigger, so a Coordinator merely touching a request would bounce it
+ *    back to the top of their own queue and bury whatever has actually been
+ *    waiting longest.
+ *
+ *  - nullsFirst: false is mandatory, not a default spelled out. 005's check
+ *    constrains submitted_at on drafts only, so a non-draft row may legitimately
+ *    carry a null one, and Postgres sorts nulls first on ASC. "No recorded
+ *    submission time" must go to the back rather than jump a queue ordered by
+ *    how long people have waited.
+ *
+ *  - The id tiebreak is the same one listEventRequestsForOrganiser gives its
+ *    own reason for: a bulk update writes a single now() across many rows, and
+ *    an undefined tiebreak lets two refetches of identical data come back in
+ *    different orders.
+ *
+ * No join to profiles, so organiser_id comes back as a bare uuid with no name
+ * attached. That is the established answer on this codebase (venueService's
+ * changedBy and eventRequestId do the same) and it is also the privacy floor
+ * of the shared queue: a Coordinator learns what was asked for, not who to
+ * contact about it. Render it as an identifier.
+ *
+ * Unpaginated, like every other list in this API. Bounded in practice by the
+ * status filter -- a decided request drops out -- but say it rather than
+ * discover it.
+ *
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object[]>} possibly empty, in camelCase, across all Organisers
+ */
+export async function listEventRequestsForReview({ client } = {}) {
+  const db = await resolveClient(client);
+
+  const { data, error } = await db
+    .from('event_requests')
+    .select(COLUMNS)
+    .in('status', COORDINATOR_QUEUE_STATUSES)
+    .order('submitted_at', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true });
+
+  if (error) throw translateError(error);
+
+  // An empty queue is the good state, not a missing resource: it means nothing
+  // is waiting on a Coordinator. 200 [] all the way up, never a NotFoundError.
+  return (data ?? []).map(toEventRequest);
 }

@@ -7,6 +7,7 @@
 
 import { Navigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
+import { normaliseRole } from "./normaliseRole";
 
 export default function ProtectedRoute({ children, allowedRoles }) {
   const { user, loading } = useAuth();
@@ -19,7 +20,13 @@ export default function ProtectedRoute({ children, allowedRoles }) {
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
+  // Both sides are normalised, and that is a bug fix rather than tidying. The
+  // token carries `venue_staff`; the usage this file's own docblock advertises
+  // writes `allowedRoles={["VENUE_STAFF"]}`. A raw === between those two is
+  // always false, so the first real allowedRoles usage would have bounced
+  // every genuine Venue Staff member to /unauthorized. Comparing canonical
+  // keys means a call site may spell the role however reads best.
+  if (allowedRoles && !allowedRoles.map(normaliseRole).includes(normaliseRole(user.role))) {
     return <Navigate to="/unauthorized" replace />;
   }
 

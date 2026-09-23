@@ -23,6 +23,7 @@ import {
   createVenue,
   updateVenue,
   getVenueById,
+  listVenues,
   retireVenue,
   searchVenues,
   getVenueHistory,
@@ -161,6 +162,21 @@ function givenRetirementSucceeds(row = retiredVenueRow()) {
 
 /** Wire the client up for a search returning these rows. */
 function givenSearchReturns(rows) {
+  const query = queryStub({ data: rows, error: null });
+  from.mockReturnValue(query);
+  return query;
+}
+
+/**
+ * Wire the client up for a catalogue listing returning these rows.
+ *
+ * Identical in body to givenSearchReturns and deliberately not shared with it:
+ * the two reads are the pair this story is about, and a single helper named
+ * after neither would make the tests below look like search tests. Named
+ * separately, the diff between the two blocks is the diff between the two
+ * queries, which is the whole point.
+ */
+function givenCatalogueReturns(rows) {
   const query = queryStub({ data: rows, error: null });
   from.mockReturnValue(query);
   return query;
@@ -459,6 +475,138 @@ describe('AC3: searches return only active venues', () => {
 
     expect(err).toBeInstanceOf(ValidationError);
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-110
+// AC3: "A venue can be retired so it no longer appears in searches, while its
+//       past bookings remain viewable."
+//
+// The other half of that sentence. Retirement hides a venue from searches, so
+// the people who retire them need one list that still shows them -- otherwise
+// a venue vanishes from the only view its owners have the moment they retire
+// it, and they can never tell a retirement from a deletion.
+// ---------------------------------------------------------------------------
+describe('AC3: the staff catalogue lists retired venues too', () => {
+  /** A second venue, so the shape test can carry one of each. */
+  const RETIRED_VENUE_ID = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
+
+  it('asks the database for every venue, retired or not', async () => {
+    const query = givenCatalogueReturns([]);
+
+    await listVenues();
+
+    // Same table as the search above, so a typo here would read an empty or
+    // nonexistent relation and every other assertion in this block would be
+    // about nothing.
+    expect(from).toHaveBeenCalledWith('venues');
+
+    // The assertion this whole story turns on, and the exact inverse of the
+    // search block's `expect(query.args('is')).toEqual(['retired_at', null])`.
+    // Without it, nothing stops someone reimplementing this on top of
+    // searchVenues or copying its filter across "for consistency": the call
+    // would still return rows, the shape test below would still pass, and the
+    // catalogue would silently lose exactly the venues it exists to show.
+    expect(query.called('is')).toBe(false);
+  });
+
+  it('selects retired_at, so a caller can tell which are retired', async () => {
+    const query = givenCatalogueReturns([]);
+
+    await listVenues();
+
+    // searchVenues' select omits retired_at entirely. Without this column the
+    // rows come back indistinguishable from one another, and the dashboard
+    // could not badge one Active and the next Retired however faithfully it
+    // renders what it is given -- so listing retired venues would be pointless.
+    expect(query.args('select')[0]).toMatch(/retired_at/);
+  });
+
+  it('orders results by name', async () => {
+    const query = givenCatalogueReturns([]);
+
+    await listVenues();
+
+    // Ordering is the server's rule, matching searchVenues. Drop it and rows
+    // arrive in whatever order Postgres finds them, so the catalogue reshuffles
+    // between loads and the row a staff member is about to click moves.
+    expect(query.args('order')).toEqual(['name']);
+  });
+
+  it('returns the shape the dashboard renders', async () => {
+    givenCatalogueReturns([
+      {
+        id: VENUE_ID,
+        name: 'Seminar Room 2-1',
+        location: 'Level 2, SCIS',
+        max_capacity: 40,
+        retired_at: null,
+      },
+      {
+        id: RETIRED_VENUE_ID,
+        name: 'Seminar Room 3-1',
+        location: 'Level 3, SCIS',
+        max_capacity: 30,
+        retired_at: RETIRED_AT,
+      },
+    ]);
+
+    // Both cases in one assertion on purpose: an active venue must carry
+    // retiredAt: null rather than omitting the key, because the badge turns on
+    // the value and `undefined` would render every venue as active. And the
+    // snake_case max_capacity must not leak through -- every other read in
+    // this service hands React camelCase, and one that did not would be a
+    // silent `undefined` in the UI rather than an error anyone would see.
+    await expect(listVenues()).resolves.toEqual([
+      {
+        id: VENUE_ID,
+        name: 'Seminar Room 2-1',
+        location: 'Level 2, SCIS',
+        maxCapacity: 40,
+        retiredAt: null,
+      },
+      {
+        id: RETIRED_VENUE_ID,
+        name: 'Seminar Room 3-1',
+        location: 'Level 3, SCIS',
+        maxCapacity: 30,
+        retiredAt: RETIRED_AT,
+      },
+    ]);
+  });
+
+  it('returns an empty list for an empty catalogue, rather than throwing', async () => {
+    givenCatalogueReturns([]);
+
+    await expect(listVenues()).resolves.toEqual([]);
+
+    // And the same for a null body. The `data ?? []` guard is the only thing
+    // between a driver that answers null and `null.map(...)`, which the route
+    // would turn into a 500 for what is simply a deployment with no venues in
+    // it yet -- the state every new environment starts in.
+    givenCatalogueReturns(null);
+
+    await expect(listVenues()).resolves.toEqual([]);
+  });
+
+  it('translates a database error rather than leaking the driver message', async () => {
+    const query = queryStub({
+      data: null,
+      error: { code: '42P01', message: 'relation "venues" does not exist' },
+    });
+    from.mockReturnValue(query);
+
+    const err = await errorFromAsync(() => listVenues());
+
+    // 42P01 is nobody's bad input, so mislabelling it a ValidationError would
+    // answer 400 and tell a staff member to correct a form they never filled
+    // in. Untyped means status undefined, which handleError turns into a 500 --
+    // the honest answer for a broken deployment.
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err.status).toBeUndefined();
   });
 });
 

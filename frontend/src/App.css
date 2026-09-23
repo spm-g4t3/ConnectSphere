@@ -18,19 +18,26 @@ button { cursor: pointer; }
 .app-nav a { color: var(--muted); padding: 8px 12px; text-decoration: none; }
 .app-nav a:hover { color: var(--teal); }
 .app-nav__user { align-items: center; display: flex; gap: 16px; font-size: 0.84rem; color: var(--muted); }
-.app-nav button, .dashboard button, .login-form button { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 16px; }
-.app-nav button:hover, .dashboard button:hover, .login-form button:hover { background: var(--teal-dark); }
+.app-nav button, .dashboard button, .login-form button, .venue-search button { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 16px; }
+.app-nav button:hover, .dashboard button:hover, .login-form button:hover, .venue-search button:hover { background: var(--teal-dark); }
 .app-nav button:disabled, .login-form button:disabled { cursor: wait; opacity: 0.65; }
-.app-nav__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
+/* SCRUM-110: .dashboard was missing from the rule above, so "Retiring...",
+   the disabled Cancel and a retired row's Edit rendered full-strength teal --
+   indistinguishable from a live button, when that disabled state is the only
+   affordance the retire flow has. Its own rule rather than appended to that
+   one: cursor: wait is right for a login in flight, but a permanently
+   disabled Edit is not-allowed, not a wait. */
+.dashboard button:disabled { cursor: not-allowed; opacity: 0.65; }
+.app-nav__error, .venue-search__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
 .auth-success { animation: auth-success-fade 3.5s ease-in-out forwards; background: #e8f7f1; border: 1px solid #b9e2d1; border-radius: 6px; color: #17684f; margin: 18px auto 0; max-width: 1080px; padding: 10px 14px; }
 @keyframes auth-success-fade {
   0%, 100% { opacity: 0; transform: translateY(-6px); }
   10%, 80% { opacity: 1; transform: translateY(0); }
 }
-.login-form, .placeholder-page, .dashboard { margin: 0 auto; max-width: 1080px; padding: clamp(42px, 8vw, 88px) 24px; }
+.login-form, .placeholder-page, .dashboard, .venue-search { margin: 0 auto; max-width: 1080px; padding: clamp(42px, 8vw, 88px) 24px; }
 .login-form { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); margin-top: 9vh; max-width: 440px; padding: 38px; }
 .login-form h1, .placeholder-page h1, .dashboard h1 { color: var(--ink); font-size: clamp(2rem, 4vw, 3.25rem); letter-spacing: -0.05em; margin: 0 0 12px; }
-.login-form label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0; }
+.login-form label, .dashboard--venue-staff .venue-form > label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0; }
 .login-form input { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); padding: 12px; }
 .login-form input:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .login-form button { width: 100%; }
@@ -46,6 +53,62 @@ button { cursor: pointer; }
 .dashboard li:first-child { border-top: 0; }
 .dashboard li button { font-size: 0.84rem; padding: 7px 11px; }
 .dashboard p { color: var(--muted); }
+/* status-badge / status--* have no base rule anywhere in this stylesheet, so
+   without these the badge is bare text. Scoped to the venue staff dashboard
+   deliberately: the same class names are already on SCRUM-14's and SCRUM-34's
+   screens, and defining the unscoped base belongs to whoever owns the design
+   system -- this is blast-radius control, not a style opinion. Active reuses
+   the .auth-success green so it reads as the same green as everywhere else. */
+.dashboard--venue-staff .status-badge { border-radius: 999px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-left: 10px; padding: 3px 10px; text-transform: uppercase; }
+.dashboard--venue-staff .status--active { background: #e8f7f1; color: #17684f; }
+.dashboard--venue-staff .status--retired { background: #eef2f1; color: var(--muted); }
+/* The rule above makes every .dashboard p muted grey, which would render a
+   failed retire in exactly the same voice as the empty-state text. Same
+   colour pair as .app-nav__error. */
+.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+/* NECESSARY, not cosmetic. .dashboard li above forces flex with
+   justify-content: space-between, which on a checkbox row throws the box to
+   one edge of the card and its label to the other with the whole width
+   between them -- unreadable, and unclickable as a pair. The same class of
+   bug SCRUM-110 fixed at :24-30. Scoped to .venue-form so the catalogue's
+   own rows keep the spread layout they want. */
+.dashboard--venue-staff .venue-form li { border-top: 0; display: block; padding: 4px 0; }
+/* History values are raw jsonb turned into text: long joined code lists, a
+   whole week of opening hours, a JSON.stringify of last resort. Without
+   these they overflow the card rather than wrapping, and the <pre> fallback
+   would keep its monospace default and scroll sideways. */
+.dashboard--venue-staff .venue-history__value { color: var(--ink); font-size: 0.86rem; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* changedBy and eventRequestId are unjoined uuids -- no endpoint resolves
+   either to a name, so they are rendered as identifiers and need to read as
+   one rather than as prose. */
+.dashboard--venue-staff code { background: #eef2f1; border-radius: 4px; color: var(--muted); font-size: 0.78rem; padding: 2px 6px; }
+/* SCRUM-45. A COPY of the badge rules above, not an unscoping of them. The
+   comment at :56-61 says in as many words that scoping them to one dashboard
+   is blast-radius control and that defining the unscoped base belongs to
+   whoever owns the design system -- so the Coordinator's queue takes its own
+   scope rather than quietly making that decision for three other screens.
+   The groups listed are the only ones a queue row can carry (submitted,
+   under_review, pending_clarification) plus SCRUM-47's two fallbacks, which
+   are styled for the reason SCRUM-47 exists: a fallback the UI cannot style
+   renders as an unstyled gap. */
+.dashboard--coordinator .status-badge { border-radius: 999px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-left: 10px; padding: 3px 10px; text-transform: uppercase; }
+.dashboard--coordinator .status--awaiting-review { background: #fff6e5; color: #8a5a00; }
+.dashboard--coordinator .status--under-review { background: #e9f1fb; color: #2b5285; }
+.dashboard--coordinator .status--action-required { background: #fff0ee; color: #a43c32; }
+.dashboard--coordinator .status--unavailable, .dashboard--coordinator .status--unknown { background: #eef2f1; color: var(--muted); }
+/* NECESSARY, not cosmetic, and the same class of bug .venue-form li fixes
+   above. .dashboard li forces flex with justify-content: space-between, which
+   on a label/value row throws "Purpose" to one edge of the card and the
+   answer to the other with the whole width between them. Scoped to the detail
+   panel only -- the queue's own rows genuinely want the spread layout, since
+   that is what puts the Review button on the right. */
+.dashboard--coordinator .coordinator-request-detail li { border-top: 0; display: block; padding: 4px 0; }
+/* The handoff banner on venue search. Needs a rule of its own because
+   .venue-search has no card styling at all -- it is a bare filter bar -- so
+   without one the context reads as a stray sentence above the inputs rather
+   than as "you arrived here from somewhere". */
+.venue-search__context { background: var(--paper); border: 1px solid var(--line); border-left: 3px solid var(--teal); border-radius: 8px; margin-bottom: 18px; padding: 12px 16px; }
+.venue-search__context p { color: var(--muted); margin: 4px 0; }
 @media (max-width: 720px) {
   .app-nav { align-items: flex-start; flex-wrap: wrap; gap: 14px; }
   .app-nav__links { order: 3; overflow-x: auto; width: 100%; }

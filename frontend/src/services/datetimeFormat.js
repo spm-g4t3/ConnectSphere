@@ -1,0 +1,138 @@
+// datetimeFormat.js
+//
+// The frontend's half of the backend's timestamp contract, in the same spirit
+// as eventRequestStatusDisplay.js beside it: a pure module whose only job is
+// to speak the wire format the API already defined, so no component has to
+// carry a second opinion about what a date means.
+//
+// The contract is TIMESTAMP_PATTERN in
+// backend/src/validation/eventRequestValidation.js. It requires a date, a time
+// of day AND an explicit UTC offset, and its own comment explains why the
+// offset is not optional: ECMAScript reads an offset-less date-time as local
+// time but an offset-less date as UTC, so the same stored string would name a
+// different instant on a laptop, on Supabase and in CI.
+//
+// An <input type="datetime-local"> emits exactly the value that pattern
+// refuses — "2026-06-01T09:00", wall-clock with no offset — so something has
+// to add one. That something is here and not in the validator: the validator
+// is pinned by a test that refuses an offset-less value, and loosening it
+// would throw away the guarantee above for every caller in order to
+// accommodate one input element.
+//
+// The reverse direction matters just as much. The code this replaces did
+// `isoString.slice(0, 16)`, which takes the first sixteen characters of a
+// UTC-normalised string and calls them local time. A request stored as
+// 2026-06-01T01:00:00+00:00 prefilled as 01:00 for a +08 organiser instead of
+// 09:00, and saving the form then moved the event eight hours. Reading the
+// value through the local getters is the fix.
+//
+// Invariant worth keeping true: toOffsetIsoString(toDatetimeLocalValue(x))
+// names the same instant as x, to the minute.
+
+/** Two-digit zero padding, because every field of an ISO string is fixed width. */
+function pad(value, width = 2) {
+  return String(value).padStart(width, "0");
+}
+
+/**
+ * The value an <input type="datetime-local"> wants, in the device's own zone.
+ *
+ * Uses getFullYear/getMonth/getHours and not their getUTC* counterparts. That
+ * single choice is the whole difference between this and the slice() it
+ * replaces: the input element renders whatever string it is given as local
+ * wall-clock, so handing it UTC digits silently relabels the instant.
+ *
+ * An unreadable value becomes "" rather than propagating NaN into the DOM.
+ * There is no useful message to show here — the string came from our own API,
+ * so a bad one is our bug, not the Organiser's, and an empty field they can
+ * fill in beats a control React refuses to render.
+ *
+ * @param {string} [isoString]  an instant from the API, with or without offset
+ * @returns {string} "YYYY-MM-DDTHH:mm" in the device's zone, or ""
+ */
+export function toDatetimeLocalValue(isoString) {
+  if (!isoString) return "";
+
+  const instant = new Date(isoString);
+  if (Number.isNaN(instant.getTime())) return "";
+
+  return (
+    `${pad(instant.getFullYear(), 4)}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}` +
+    `T${pad(instant.getHours())}:${pad(instant.getMinutes())}`
+  );
+}
+
+/**
+ * Stamp the device's UTC offset onto a wall-clock value, for the wire.
+ *
+ * Three decisions in here, each of which has a wrong-looking alternative:
+ *
+ * 1. The offset is computed from the *target* instant, not from `new Date()`.
+ *    A zone's offset is a property of a moment, not of a place: an organiser
+ *    who books a January event from a July DST zone would otherwise stamp the
+ *    summer offset onto a winter date and move their own event by an hour.
+ *
+ * 2. Nothing is hard-coded, and UTC is not assumed. "Southeast Asia" is not
+ *    one offset — Jakarta and Bangkok are +07 while Singapore, KL and Manila
+ *    are +08 — so a constant would be quietly wrong for a third of the region
+ *    rather than loudly wrong for everyone.
+ *
+ * 3. The suffix is appended to the raw input string rather than rebuilt by
+ *    re-serialising through Date. "2026-06-01T09:00" + ":00" + "+08:00" is
+ *    already exactly the shape TIMESTAMP_PATTERN accepts, and it cannot drift
+ *    from what the Organiser actually typed — no rounding, no renormalising,
+ *    no chance of a round trip through UTC putting a different date on it.
+ *
+ * On anything it cannot read, the value is returned unchanged. The backend
+ * then names the fault as a { field, message } the form already knows how to
+ * render, which beats inventing a competing client-side message that would
+ * have to be kept in step with the validator's wording by hand.
+ *
+ * Returns undefined for an empty value, so a caller can drop the key from the
+ * payload entirely — the validator distinguishes "not answered" from
+ * "cleared", and an absent key is the former.
+ *
+ * @param {string} [localValue]  "YYYY-MM-DDTHH:mm" from a datetime-local input
+ * @returns {string|undefined} the same wall-clock with an explicit offset
+ */
+export function toOffsetIsoString(localValue) {
+  if (!localValue) return undefined;
+
+  // Already carries an offset (or a Z): it is not a datetime-local value at
+  // all, and appending a second offset would corrupt a string that is already
+  // correct. Same "do not mangle, let the backend judge" rule as below.
+  if (/(Z|[+-]\d{2}:\d{2})$/.test(localValue)) return localValue;
+
+  // Parsed with no offset, which ECMAScript reads as device-local time -- the
+  // same reading the input element itself intends.
+  const instant = new Date(localValue);
+  if (Number.isNaN(instant.getTime())) return localValue;
+
+  // getTimezoneOffset counts minutes to ADD to local time to reach UTC, so it
+  // is the sign-flipped version of what an ISO suffix states: +08:00 comes
+  // back as -480.
+  const minutes = -instant.getTimezoneOffset();
+  const magnitude = Math.abs(minutes);
+  const offset =
+    `${minutes < 0 ? "-" : "+"}${pad(Math.floor(magnitude / 60))}:${pad(magnitude % 60)}`;
+
+  // Seconds are optional in TIMESTAMP_PATTERN but not in most inputs' output,
+  // so they are added only when absent rather than assumed either way.
+  const seconds = /T\d{2}:\d{2}:\d{2}/.test(localValue) ? "" : ":00";
+
+  return `${localValue}${seconds}${offset}`;
+}
+
+/**
+ * The IANA name of the zone the browser is set to, e.g. "Asia/Singapore".
+ *
+ * Shown to the Organiser next to the date fields. Disclosure, not a picker:
+ * a picker needs something to anchor the choice to and no venue is attached
+ * to a request at draft time, so offering one would be asking a question the
+ * app cannot yet act on.
+ *
+ * @returns {string}
+ */
+export function deviceTimeZoneLabel() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}

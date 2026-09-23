@@ -67,6 +67,26 @@ function venueRow(overrides = {}) {
   };
 }
 
+/**
+ * The row shape listVenues selects: flat, no join tables, plus retired_at.
+ *
+ * Deliberately not venueRow with the joins deleted. listVenues reads a
+ * narrower select than getVenueById on purpose (four join tables per venue
+ * across the whole catalogue is a far heavier query for data no listing row
+ * renders), so a fixture that carried them would let a listing accidentally
+ * built on getVenueById's select pass these tests.
+ */
+function catalogueRow(overrides = {}) {
+  return {
+    id: VENUE_ID,
+    name: 'Seminar Room 2-1',
+    location: 'Level 2, SCIS',
+    max_capacity: 40,
+    retired_at: null,
+    ...overrides,
+  };
+}
+
 /** The same thenable query stub the service tests use. */
 function queryStub(result) {
   const calls = [];
@@ -325,6 +345,113 @@ describe('AC3: a venue can be retired, leaves search, and keeps its bookings', (
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
+
+  // SCRUM-110. The last clause of AC3 read from the staff side: retirement
+  // takes a venue out of search, so the people who retire them need one list
+  // that still holds it. GET /api/venues is that list, and it is the only
+  // read in this API that returns a retired venue -- which is why every test
+  // below is as much about the role gate as about the rows.
+
+  it('SCRUM15_AC3_the_staff_catalogue_lists_retired_and_active_venues_together', async () => {
+    const ARCHIVED_ID = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
+    from.mockReturnValueOnce(queryStub(ok([
+      catalogueRow(),
+      catalogueRow({
+        id: ARCHIVED_ID,
+        name: 'Seminar Room 3-1',
+        location: 'Level 3, SCIS',
+        max_capacity: 30,
+        retired_at: RETIRED_AT,
+      }),
+    ])));
+
+    const res = await request(appWith()).get('/api/venues');
+
+    expect(res.status).toBe(200);
+
+    // Both rows, over the wire, in camelCase. The retired one being present
+    // is the feature; the active one carrying `retiredAt: null` rather than
+    // omitting the key is what lets the dashboard badge it Active instead of
+    // reading undefined and guessing.
+    expect(res.body).toEqual([
+      {
+        id: VENUE_ID,
+        name: 'Seminar Room 2-1',
+        location: 'Level 2, SCIS',
+        maxCapacity: 40,
+        retiredAt: null,
+      },
+      {
+        id: ARCHIVED_ID,
+        name: 'Seminar Room 3-1',
+        location: 'Level 3, SCIS',
+        maxCapacity: 30,
+        retiredAt: RETIRED_AT,
+      },
+    ]);
+  });
+
+  it('SCRUM15_AC3_the_catalogue_never_filters_on_retired_at', async () => {
+    const stub = queryStub(ok([catalogueRow({ retired_at: RETIRED_AT })]));
+    from.mockReturnValueOnce(stub);
+
+    const res = await request(appWith()).get('/api/venues');
+
+    expect(res.status).toBe(200);
+
+    // The assertion the story turns on, asserted again here at the transport
+    // layer rather than trusted from the service tests: this route is the one
+    // place a later change could quietly swap listVenues for searchVenues --
+    // both return an array of venues and the status would stay 200 -- and the
+    // catalogue would lose exactly the rows it exists to show. `is` is what
+    // searchVenues uses for .is('retired_at', null), so its absence is the
+    // proof no such filter was applied.
+    expect(stub.called('is')).toBe(false);
+  });
+
+  it('SCRUM15_AC3_the_staff_catalogue_is_restricted_to_venue_staff', async () => {
+    const res = await request(appWith(signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID)))
+      .get('/api/venues');
+
+    // SCRUM-111's invariant is that a retired venue never reaches a list a
+    // non-staff caller can obtain. This route returns retired venues, so
+    // without the gate it is a back door straight around that invariant and
+    // /search stops being the only venue list an Organiser can get.
+    expect(res.status).toBe(403);
+
+    // And the gate must bite before the query, not after it: a 403 served
+    // from a response that was fetched anyway still ran the read, and the
+    // rows would be one logging or error-handling change away from leaking.
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM15_AC3_an_empty_catalogue_answers_an_empty_list', async () => {
+    from.mockReturnValueOnce(queryStub(ok([])));
+
+    const res = await request(appWith()).get('/api/venues');
+
+    // A deployment with no venues is a normal state, not an error, and the
+    // dashboard renders its own empty message from [] -- a 404 or a null body
+    // here would turn a fresh environment into a broken-looking one.
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM15_AC3_listing_is_a_collection_read_not_a_read_by_id', async () => {
+    const stub = queryStub(ok([catalogueRow()]));
+    from.mockReturnValueOnce(stub);
+
+    const res = await request(appWith()).get('/api/venues');
+
+    expect(res.status).toBe(200);
+
+    // GET / is declared above GET /:id, and this proves the request did not
+    // fall through to it: /:id ends in .maybeSingle(), which would have made
+    // this a single-venue read with id === '' -- a uuid cast error and a 500,
+    // or worse a 200 carrying one object where the client expects an array.
+    expect(stub.called('maybeSingle')).toBe(false);
+    expect(Array.isArray(res.body)).toBe(true);
+  });
 });
 
 
@@ -476,6 +603,7 @@ describe('routing and query handling', () => {
     const app = appWith(signedOut);
 
     for (const [method, path] of [
+      ['get', '/api/venues'],
       ['get', '/api/venues/search'],
       ['get', `/api/venues/${VENUE_ID}`],
       ['get', `/api/venues/${VENUE_ID}/bookings`],

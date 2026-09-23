@@ -1,0 +1,301 @@
+// VenueDetail.jsx
+//
+// One venue's bookings and its change history, side by side.
+//
+// SCRUM-110 AC3's second clause -- "while its past bookings remain viewable"
+// -- has had a backend since 005 and no seat to be read from. This is it, and
+// it is why the catalogue's "View bookings & history" button is NOT disabled
+// on a retired venue: a retired venue whose bookings you cannot see is a
+// delete wearing a different name.
+//
+// SCRUM-15 AC4 -- "every change records the editing user, a timestamp, and
+// the previous values" -- is the history half.
+
+import { useCallback, useEffect, useState } from "react";
+import { getVenueBookings, getVenueHistory } from "../services/venueService";
+
+const BOOKINGS_ERROR_MESSAGES = {
+  400: "That venue id was not recognised. Please go back and refresh.",
+  401: "Your session has expired. Please sign in again.",
+  // Not a lie, and not a shrug either. 009_bookings.sql is a hand-run
+  // migration; in an environment where it was never run, the missing-table
+  // error falls past every branch of venueService.translateError and arrives
+  // as a bare 500. Rendering that as "something went wrong" would send
+  // somebody debugging a system that is working exactly as built.
+  500: "Bookings are not available yet. The booking feature is still being built.",
+};
+
+const HISTORY_ERROR_MESSAGES = {
+  400: "That venue id was not recognised. Please go back and refresh.",
+  401: "Your session has expired. Please sign in again.",
+  403: "Only Venue Staff can see a venue's change history.",
+  500: "The change history could not be loaded. Please try again.",
+};
+
+// Every key the three history triggers can emit. record_venue_change
+// (003:65-97) diffs the columns of `venues` minus updated_at and
+// last_modified_by; record_venue_creation (008:40-57) writes the same column
+// set on insert; record_venue_attribute_change (008:104-136) writes the four
+// keys venue_attribute_snapshot builds (008:75-97) -- note they are the JOIN
+// TABLE names, not the camelCase the read API uses, so `room_layouts` here is
+// `layouts` in getVenueDetails.
+const HISTORY_FIELD_LABELS = {
+  id: "Venue id",
+  name: "Name",
+  location: "Location",
+  max_capacity: "Maximum capacity",
+  retired_at: "Retired at",
+  created_at: "Created at",
+  room_layouts: "Room layouts",
+  accessibility_features: "Accessibility features",
+  facilities: "Facilities",
+  operating_hours: "Opening hours",
+};
+
+const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** The raw key when the label table has not heard of it -- never blank. */
+function fieldLabel(key) {
+  return HISTORY_FIELD_LABELS[key] ?? key;
+}
+
+/** First segment of a uuid, for display. The full value goes in a title. */
+function shortId(id) {
+  return typeof id === "string" ? id.slice(0, 8) : String(id);
+}
+
+/** A timestamp in the reader's locale, or the raw string if it will not parse. */
+function formatTimestamp(value) {
+  if (!value) return "unknown";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+/**
+ * One history value, rendered.
+ *
+ * This runs over raw jsonb written by three different database triggers, on
+ * rows that may predate any given shape. IT MUST NOT THROW -- a single
+ * unexpected value would otherwise blank the whole history panel, which is
+ * the one place a Venue Staff member can find out what happened to a venue.
+ * Hence the outermost try/catch and the String() of last resort.
+ */
+function fmt(value) {
+  try {
+    if (value === null || value === undefined) return "not set";
+
+    if (Array.isArray(value)) {
+      if (value.length === 0) return "none";
+
+      // operating_hours: [{day_of_week, opens_at, closes_at}, ...]
+      if (value.every((entry) => entry && typeof entry === "object")) {
+        return value
+          .map((entry) => {
+            const { day_of_week: day, opens_at: opens, closes_at: closes } = entry;
+            if (opens === undefined || closes === undefined) return JSON.stringify(entry);
+            const name = SHORT_DAYS[day] ?? `Day ${day}`;
+            return `${name} ${String(opens).slice(0, 5)}–${String(closes).slice(0, 5)}`;
+          })
+          .join("; ");
+      }
+
+      // The code arrays: layouts, accessibility features, facilities.
+      return value.join(", ");
+    }
+
+    if (typeof value === "object") return JSON.stringify(value);
+
+    return String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+export default function VenueDetail({ venue }) {
+  const venueId = venue.id;
+
+  // Two fetchers, two error states, two loading flags -- on purpose. History
+  // is Venue Staff only and bookings are open to any authenticated user, so a
+  // 403 on one must not blank the other. One combined fetch with a single
+  // catch would throw away the half that succeeded.
+  const [bookings, setBookings] = useState([]);
+  const [loadingBookings, setLoadingBookings] = useState(true);
+  const [bookingsError, setBookingsError] = useState(null);
+
+  const [history, setHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [historyError, setHistoryError] = useState(null);
+
+  const fetchBookings = useCallback(async () => {
+    try {
+      setBookings(await getVenueBookings(venueId));
+      setBookingsError(null);
+    } catch (err) {
+      setBookingsError(
+        BOOKINGS_ERROR_MESSAGES[err.response?.status] ||
+          "Could not load this venue's bookings. Please try again.",
+      );
+    } finally {
+      setLoadingBookings(false);
+    }
+  }, [venueId]);
+
+  const fetchHistory = useCallback(async () => {
+    try {
+      setHistory(await getVenueHistory(venueId));
+      setHistoryError(null);
+    } catch (err) {
+      setHistoryError(
+        HISTORY_ERROR_MESSAGES[err.response?.status] ||
+          "Could not load this venue's change history. Please try again.",
+      );
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [venueId]);
+
+  useEffect(() => {
+    fetchBookings();
+  }, [fetchBookings]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  return (
+    <div className="venue-detail">
+      <h2>
+        {venue.name} &mdash; {venue.location}
+      </h2>
+
+      <section>
+        <h3>Bookings</h3>
+        {/* No filter on retirement, here or server-side. A retired venue's
+            bookings are exactly what this section exists to show. */}
+
+        {loadingBookings && <p>Loading...</p>}
+        {bookingsError && (
+          <p className="venue-detail__error" role="alert">
+            {bookingsError}
+          </p>
+        )}
+        {!loadingBookings && !bookingsError && bookings.length === 0 && (
+          <p>No bookings have been made against this venue.</p>
+        )}
+
+        {bookings.length > 0 && (
+          <>
+            {/* 009_bookings.sql joins nothing and the service selects six
+                columns, none of them a name, so there is no event title to
+                show. The id is rendered as an identifier rather than dressed
+                up as a label it is not. */}
+            <p className="venue-detail__help">
+              Event names are not shown &mdash; the API records the event request's
+              id only.
+            </p>
+            <ul>
+              {bookings.map((booking) => (
+                <li key={booking.id}>
+                  <span>
+                    {formatTimestamp(booking.startsAt)} &ndash;{" "}
+                    {formatTimestamp(booking.endsAt)}
+                  </span>
+                  <code title={booking.eventRequestId ?? undefined}>
+                    {booking.eventRequestId ? shortId(booking.eventRequestId) : "no event"}
+                  </code>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
+
+      <section>
+        <h3>Change history</h3>
+
+        {loadingHistory && <p>Loading...</p>}
+        {historyError && (
+          <p className="venue-detail__error" role="alert">
+            {historyError}
+          </p>
+        )}
+        {!loadingHistory && !historyError && history.length === 0 && (
+          <p>No changes have been recorded for this venue.</p>
+        )}
+
+        {history.length > 0 && (
+          <>
+            <p className="venue-detail__help">
+              Names are not shown &mdash; the API records the editing user's id only.
+            </p>
+            <ul>
+              {history.map((entry) => {
+                const oldValues = entry.oldValues;
+                const newValues = entry.newValues;
+                const valuesAreObjects =
+                  oldValues && typeof oldValues === "object" && !Array.isArray(oldValues) &&
+                  newValues && typeof newValues === "object" && !Array.isArray(newValues);
+
+                // 008:34's convention: an empty old_values means "this did not
+                // exist before". Rendering it field by field would produce ten
+                // rows all reading "not set -> x", which says the same thing
+                // ten times and buries it.
+                const isCreation =
+                  valuesAreObjects && Object.keys(oldValues).length === 0;
+
+                const keys = valuesAreObjects
+                  ? [...new Set([...Object.keys(newValues), ...Object.keys(oldValues)])]
+                  : [];
+
+                return (
+                  <li key={entry.id}>
+                    <div className="venue-history__meta">
+                      <strong>{formatTimestamp(entry.changedAt)}</strong>
+                      {entry.changedBy ? (
+                        <span>
+                          by{" "}
+                          <code title={entry.changedBy}>{shortId(entry.changedBy)}</code>
+                        </span>
+                      ) : (
+                        // 008:14-15: changed_by NULL means the row was written
+                        // by something that was not this API -- a hand edit in
+                        // the SQL editor. Saying "unknown user" would imply we
+                        // lost the name; we never had one.
+                        <span>Changed outside the app</span>
+                      )}
+                    </div>
+
+                    {isCreation && <p className="venue-history__value">Venue created</p>}
+
+                    {!isCreation && valuesAreObjects && (
+                      <ul>
+                        {keys.map((key) => (
+                          <li key={key}>
+                            <span>{fieldLabel(key)}</span>
+                            <span className="venue-history__value">
+                              {fmt(oldValues[key])} &rarr; {fmt(newValues[key])}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {/* Last resort. If a row's values are not objects at all
+                        -- a shape no current trigger produces -- show them raw
+                        rather than rendering nothing. An audit trail that
+                        quietly omits an entry is worse than an ugly one. */}
+                    {!valuesAreObjects && (
+                      <pre className="venue-history__value">
+                        {fmt(oldValues)} &rarr; {fmt(newValues)}
+                      </pre>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}

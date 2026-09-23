@@ -2,6 +2,7 @@
  * Venue catalogue service.
  *
  * SCRUM-106: create and update venue records.
+ * SCRUM-110: retire a venue, and list the catalogue including retired ones.
  *
  * Writes go through the Postgres functions in 004_venue_functions.sql rather
  * than direct table calls. One venue spans five tables, and PostgREST gives
@@ -267,6 +268,55 @@ export async function searchVenues(filters = {}) {
     name: row.name,
     location: row.location,
     maxCapacity: row.max_capacity,
+  }));
+}
+
+
+/**
+ * The whole venue catalogue, retired venues included.
+ *
+ * SCRUM-110. AC3 from the staff side: searchVenues directly above is the same
+ * read with .is('retired_at', null) on it, and this one deliberately has no
+ * such filter. The people who retire venues are the one audience that still
+ * needs to see them -- without this list a venue would vanish from the only
+ * view its owners have the moment they retired it, and they could never tell
+ * a retirement from a deletion.
+ *
+ * That missing filter is precisely why the route over this function is Venue
+ * Staff only. SCRUM-111's invariant is that a retired venue never reaches a
+ * list a non-staff caller can obtain, and the role gate is what keeps
+ * /venues/search the only such list.
+ *
+ * No parameters and no validation, on purpose. There is no path param, no
+ * body and no query string to check. Filters here would mean calling
+ * SCRUM-111's validateSearchFilters and would leave two filtered reads over
+ * the same table that a caller could mistake for one another, so
+ * venueValidation.js is untouched by this story.
+ *
+ * The select is searchVenues' shape plus the one column that is the point,
+ * not getVenueById's join select: four join tables per venue across the whole
+ * catalogue is a far heavier query for data no row in a listing renders.
+ *
+ * There is no pagination. The whole table comes back, which is fine at the
+ * scale this runs at today and is its own ticket when it stops being.
+ *
+ * @returns {Promise<object[]>} every venue, active and retired, ordered by
+ *                              name; retiredAt is null on an active one
+ */
+export async function listVenues() {
+  const { data, error } = await supabase
+    .from('venues')
+    .select('id, name, location, max_capacity, retired_at')
+    .order('name');
+
+  if (error) throw translateError(error);
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    location: row.location,
+    maxCapacity: row.max_capacity,
+    retiredAt: row.retired_at,
   }));
 }
 

@@ -19,14 +19,20 @@
 //     (SCRUM-10 AC8) — this service doesn't pass an organiserId; the
 //     Express layer derives it from the authenticated session.
 //
-// ROUTES (updated by SCRUM-42): the three GET paths below are now real and
-// mounted at /api/event-requests in backend/src/app.js, and every response
-// carries `statusDisplay` — the Organiser-facing label, group and description,
-// produced by the backend so this app keeps no copy of the status vocabulary.
+// ROUTES: every function in this file now resolves to a real route mounted at
+// /api/event-requests in backend/src/app.js, and every request-shaped response
+// carries `statusDisplay` — the label, group and description, produced by the
+// backend so this app keeps no copy of the status vocabulary.
 //
-// POST /event-requests, PATCH /event-requests/:id and POST /:id/submit are
-// still unmounted: the backend service supports all three, but their routes
-// belong to SCRUM-29 and SCRUM-11. They will 404 until those land.
+// This note used to say that POST /event-requests, PATCH /event-requests/:id
+// and POST /:id/submit were unmounted and would 404. That stopped being true
+// when SCRUM-29 and SCRUM-11's routes landed, and a stale warning about a 404
+// is worse than none: it sends the next reader looking for a backend gap that
+// is already closed.
+//
+// getEventRequestQueue is the one call here that is not the Organiser's own
+// data (SCRUM-45). It is gated on the Event Coordinator role server-side, so
+// a 403 from it is an ordinary outcome for any other role rather than a fault.
 
 import { apiClient } from "./apiClient";
 
@@ -112,5 +118,31 @@ export async function getMyEventRequests() {
  */
 export async function getEventRequestStatus(id) {
   const response = await apiClient.get(`/event-requests/${id}/status`);
+  return response.data;
+}
+
+/**
+ * Every event request awaiting a decision, oldest waiting first (SCRUM-45).
+ *
+ * The Event Coordinator's review queue, and the only read in this file that
+ * crosses Organisers: the backend gates it on the event_coordinator role
+ * rather than scoping it to the caller, because a queue nobody owns is
+ * exactly the thing an ownership check cannot narrow. A 403 therefore means
+ * "not a Coordinator", not "something went wrong" — handle it as a message,
+ * not as a failure.
+ *
+ * Rows are the same shape getMyEventRequests returns, `statusDisplay`
+ * included, so readStatusDisplay and statusClassName work on them unchanged
+ * and the queue needs no status vocabulary of its own. They are also complete:
+ * the backend selects the same columns GET /:id does, which is why the detail
+ * panel renders from the row already in hand and there is no second fetch.
+ *
+ * organiserId arrives as a bare uuid. No endpoint resolves it to a name —
+ * that is deliberate, not missing — so render it as an identifier.
+ *
+ * @returns {Promise<Array>} possibly empty; an empty queue is the good state
+ */
+export async function getEventRequestQueue() {
+  const response = await apiClient.get("/event-requests/queue");
   return response.data;
 }

@@ -1,36 +1,52 @@
 // EventCoordinatorDashboard.jsx
-// Example role-specific view. Copy this structure for EventOrganiserDashboard,
-// VenueStaffDashboard, and TechnicalSupportDashboard, swapping in the
-// widgets/data relevant to each role.
+//
+// The Event Coordinator's landing page: a greeting, the review queue, and the
+// pending-bookings stub.
+//
+// SCRUM-45 replaced the first section wholesale. It used to call
+// getEventsNeedingAttention — a stub that console.warn'd and returned [], and
+// did not even accept the user.id it was handed — which was the visible half
+// of the reported bug: an Organiser submitted a request and nobody on the
+// Coordinator side ever saw it. The queue now reads a real endpoint, and
+// lives in ReviewQueue.jsx rather than inline here because it is the only
+// part of this screen with a route of its own (/review-queue). Same move, and
+// the same reason, as VenueCatalogue leaving VenueStaffDashboard.
+//
+// The pending-bookings section below stays a stub deliberately. Steps 4 and 5
+// of the workflow — asking for a specific venue, and Venue Staff approving it
+// — are out of this story's scope because 009_bookings.sql has no status,
+// approval or requester columns to drive them. The section is the seat that
+// work lands in; deleting it now just means re-adding it then.
 
 import { useEffect, useState } from "react";
-import { getEventsNeedingAttention } from "../services/eventService";
 import { getPendingVenueBookings } from "../services/venueService";
+import ReviewQueue from "./ReviewQueue";
 
 export default function EventCoordinatorDashboard({ user }) {
-  const [pendingEvents, setPendingEvents] = useState([]);
   const [pendingBookings, setPendingBookings] = useState([]);
 
+  // Still a stub with no endpoint behind it, so it resolves to [] rather than
+  // rejecting. The .catch is here for the same reason VenueStaffDashboard's
+  // is: the day that stops being true should show up as an empty section
+  // rather than as an unhandled rejection in the console.
   useEffect(() => {
-    getEventsNeedingAttention(user.id).then(setPendingEvents);
-    getPendingVenueBookings(user.id).then(setPendingBookings);
-  }, [user.id]);
+    getPendingVenueBookings()
+      .then(setPendingBookings)
+      .catch(() => setPendingBookings([]));
+  }, []);
 
   return (
     <div className="dashboard dashboard--coordinator">
-      <h1>Welcome, {user.name}</h1>
+      {/* user.name does not exist: auth.js returns { id, email, role } and
+          never selects profiles.full_name, so this rendered "Welcome, " with
+          nothing after it. Same honest fallback VenueStaffDashboard uses; the
+          real fix is server-side and has its own ticket. */}
+      <h1>Welcome, {user.name ?? user.email}</h1>
 
-      <section>
-        <h2>Events needing attention</h2>
-        <ul>
-          {pendingEvents.map((event) => (
-            <li key={event.id}>
-              {event.name} — {event.status}
-            </li>
-          ))}
-          {pendingEvents.length === 0 && <p>Nothing outstanding right now.</p>}
-        </ul>
-      </section>
+      {/* A direct child of .dashboard so its <section> root picks up the
+          `.dashboard > section` card styling, exactly as VenueCatalogue does
+          on the Venue Staff dashboard. */}
+      <ReviewQueue />
 
       <section>
         <h2>Pending venue bookings</h2>
