@@ -678,3 +678,247 @@ describe('AC4: a submitted event must still be ahead of us', () => {
     expect(fieldsIn(err)).toContain('proposedEnd');
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-11 -- saving edits to an existing draft
+// ---------------------------------------------------------------------------
+/**
+ * Imported here rather than added to the import block at the top of the file,
+ * and that is deliberate rather than untidy. The rest of this suite is the
+ * regression gate for SCRUM-10 and SCRUM-30, and the one thing that must be
+ * provable at a glance is that nothing above this line moved -- including an
+ * import line, which is the only part of a file an append can otherwise
+ * disturb. An ESM import declaration is hoisted wherever it is written, so
+ * this binds exactly as it would at the top and costs nothing at runtime.
+ */
+import { validateUpdateEventRequest } from '../../src/validation/eventRequestValidation.js';
+
+
+describe('SCRUM-11: an update accepts only the fields the Organiser changed', () => {
+  it('SCRUM11_AC1_accepts_a_change_to_a_single_field', () => {
+    // The whole point of a PATCH. If this needed the rest of the request back
+    // as well, the form could only ever save everything it holds -- which is
+    // how a stale tab silently reverts a field somebody else just fixed.
+    expect(validateUpdateEventRequest({ purpose: 'Careers, not canapes.' }))
+      .toEqual({ purpose: 'Careers, not canapes.' });
+  });
+
+  it('SCRUM11_AC1_does_not_require_the_event_name_to_be_resent', () => {
+    // The difference from validateCreateEventRequest, and the only rule the
+    // third mandatory list exists to change. eventName is required to create a
+    // request and not required to edit one, because an edit that does not
+    // mention it is not an edit that removes it.
+    const err = errorFrom(() =>
+      validateUpdateEventRequest({ description: 'Short talks, then networking.' }),
+    );
+
+    expect(err).toBeNull();
+  });
+
+  it('SCRUM11_AC1_returns_only_the_fields_that_were_supplied', () => {
+    const normalised = validateUpdateEventRequest({ expectedAttendance: 200 });
+
+    // Not merely "contains expectedAttendance". A validator that helpfully
+    // filled in the rest -- as nulls, or as defaults -- would have the service
+    // write those columns too, wiping answers the Organiser never touched.
+    expect(Object.keys(normalised)).toEqual(['expectedAttendance']);
+  });
+
+  it('SCRUM11_AC1_trims_the_text_it_accepts', () => {
+    const normalised = validateUpdateEventRequest({ eventName: '  IS212 Industry Night  ' });
+
+    // Same normalisation the create path applies, so a value does not change
+    // shape depending on which endpoint stored it.
+    expect(normalised.eventName).toBe('IS212 Industry Night');
+  });
+
+  it('SCRUM11_AC1_does_not_require_the_proposed_start_to_be_in_the_future', () => {
+    // The rule that must NOT be copied from submission, and the reason this
+    // test is worth more than the ones around it. Future-dating is a rule
+    // about the draft -> submitted transition: a Coordinator cannot plan an
+    // event that has already happened. Applying it to every save would make a
+    // draft unsaveable the moment its own date passed -- the Organiser could
+    // not even correct the date, because the correction would be refused for
+    // carrying the stale one alongside it.
+    const err = errorFrom(() =>
+      validateUpdateEventRequest({
+        proposedStart: '2020-06-01T09:00:00+08:00',
+        proposedEnd: '2020-06-01T17:00:00+08:00',
+      }),
+    );
+
+    expect(err).toBeNull();
+  });
+
+  it('SCRUM11_AC1_still_refuses_a_datetime_with_no_offset', () => {
+    // Every rule the create path applies still applies. This one in
+    // particular: ECMAScript parses an offset-less date-time as local time,
+    // so the same stored string would describe a different instant on a
+    // developer's machine, on Supabase and in CI.
+    const err = errorFrom(() =>
+      validateUpdateEventRequest({ proposedStart: '2026-06-01T09:00' }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(messageFor(err, 'proposedStart')).toMatch(/offset/i);
+  });
+
+  it('SCRUM11_AC1_still_refuses_a_period_that_runs_backwards', () => {
+    // Structural, and checked on an edit for the same reason it is checked on
+    // creation: event_requests_dates_ordered would refuse the write anyway,
+    // but a round trip later and with a message naming a constraint.
+    const err = errorFrom(() =>
+      validateUpdateEventRequest({
+        proposedStart: '2026-06-01T17:00:00+08:00',
+        proposedEnd: '2026-06-01T09:00:00+08:00',
+      }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toContain('proposedEnd');
+  });
+
+  it('SCRUM11_AC1_still_refuses_an_attendance_that_is_not_a_whole_number', () => {
+    const err = errorFrom(() => validateUpdateEventRequest({ expectedAttendance: 12.5 }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(messageFor(err, 'expectedAttendance')).toMatch(/whole number/i);
+  });
+
+  it('SCRUM11_AC1_refuses_an_event_name_cleared_with_a_blank_string', () => {
+    // 001 makes event_name not null, and a request the Organiser cannot find
+    // in their own list is worse than one they never saved. Refused here
+    // rather than by the column, so the message names the field rather than
+    // the constraint.
+    const err = errorFrom(() => validateUpdateEventRequest({ eventName: '   ' }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toContain('eventName');
+
+    // And it says what to do instead, which is the part an error code cannot
+    // carry: omitting the field leaves the name alone.
+    expect(messageFor(err, 'eventName')).toMatch(/omit it/i);
+  });
+
+  it('SCRUM11_AC1_refuses_an_event_name_cleared_with_an_explicit_null', () => {
+    // The other clearing form, and the one a form sends when a controlled
+    // input is emptied and coerced. It has to be caught on the RAW value:
+    // collectEventRequest treats null as "not answered" and leaves the key
+    // off the normalised copy entirely, so by the time the copy exists there
+    // is nothing left to notice.
+    const err = errorFrom(() => validateUpdateEventRequest({ eventName: null }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toContain('eventName');
+  });
+
+  it('SCRUM11_AC1_does_not_add_a_second_contradictory_message_for_a_non_text_name', () => {
+    // Why the clearing rule tests the raw value for exactly two shapes rather
+    // than testing the normalised one for null. checkText already returns null
+    // for { eventName: 42 } having recorded "must be text"; a rule written
+    // against the normalised copy would pile "cannot be blank" on top and tell
+    // the Organiser two different things about one mistake.
+    const err = errorFrom(() => validateUpdateEventRequest({ eventName: 42 }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toEqual(['eventName']);
+    expect(messageFor(err, 'eventName')).toMatch(/must be text/i);
+    expect(messageFor(err, 'eventName')).not.toMatch(/blank/i);
+  });
+
+  it('SCRUM11_AC1_refuses_an_empty_change_set', () => {
+    // Not pedantry. toColumns({}) is {}, so the service would issue
+    // .update({}), whose PostgREST behaviour is unspecified and untranslated
+    // -- an ambiguous 500 where a precise 400 was available. It costs the real
+    // client nothing, because the form always sends eventName, so it only ever
+    // catches a caller bug.
+    const err = errorFrom(() => validateUpdateEventRequest({}));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toMatch(/no changes supplied/i);
+  });
+
+  it('SCRUM11_AC1_treats_a_change_set_of_only_unrecognised_keys_as_empty', () => {
+    // Counted on the normalised copy rather than the raw keys, which is the
+    // whole reason this case is distinguishable from the one above. An
+    // unrecognised key is not a change: toColumns would drop it and the write
+    // would be empty, so accepting it would send the same unspecified
+    // .update({}) with a caller convinced they had asked for something.
+    const err = errorFrom(() => validateUpdateEventRequest({ somethingUnknown: 1 }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toMatch(/no changes supplied/i);
+  });
+
+  it('SCRUM11_AC1_treats_a_field_cleared_with_null_as_no_change_at_all', () => {
+    // The KNOWN LIMITATION, pinned so it is a recorded decision rather than a
+    // surprise: a PATCH cannot *clear* an optional field, because
+    // collectEventRequest reads an explicit null as "not answered" and leaves
+    // the key off. If someone later gives "clear this" a wire representation,
+    // this test is what tells them they are changing documented behaviour
+    // rather than fixing a bug.
+    const err = errorFrom(() => validateUpdateEventRequest({ purpose: null }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toMatch(/no changes supplied/i);
+  });
+
+  it('SCRUM11_AC1_reports_what_is_wrong_with_a_change_before_saying_nothing_changed', () => {
+    // The ordering decision, and it is deliberately the opposite of
+    // validateUpdateVenue, which checks the empty set first. A caller sending
+    // { expectedAttendance: 'lots' } HAS supplied a change; the useful answer
+    // is what is wrong with it. "No changes supplied" would be technically
+    // true -- nothing survived normalisation -- and completely unhelpful.
+    const err = errorFrom(() => validateUpdateEventRequest({ expectedAttendance: 'lots' }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toEqual(['expectedAttendance']);
+    expect(err.message).not.toMatch(/no changes supplied/i);
+  });
+
+  it('SCRUM11_AC1_reports_every_fault_in_one_pass', () => {
+    // Same contract as the create and submit paths: an Organiser fixes the
+    // whole form once instead of discovering the next fault on each retry.
+    const err = errorFrom(() =>
+      validateUpdateEventRequest({
+        eventName: '',
+        proposedStart: '2026-06-01',
+        expectedAttendance: -5,
+      }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err).sort()).toEqual([
+      'eventName',
+      'expectedAttendance',
+      'proposedStart',
+    ]);
+  });
+
+  it('SCRUM11_AC1_refuses_a_change_set_that_is_not_an_object', () => {
+    // An array parses as JSON and would survive a bare typeof check. There is
+    // nothing to enumerate field by field, so details stays empty -- but it
+    // still exists, so no caller has to guard against its absence.
+    for (const notAnObject of [null, 'eventName', 42, ['eventName']]) {
+      const err = errorFrom(() => validateUpdateEventRequest(notAnObject));
+
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.message).toMatch(/expected an object/i);
+      expect(err.details).toEqual([]);
+    }
+  });
+
+  it('SCRUM11_AC1_never_mutates_the_change_set_it_was_given', () => {
+    // The normalised copy is a copy. A validator that trimmed in place would
+    // leave the caller's object and the stored row disagreeing about what was
+    // sent, which is exactly the kind of difference that only shows up in a
+    // log three weeks later.
+    const changes = { eventName: '  IS212 Industry Night  ', expectedAttendance: 200 };
+    const before = JSON.stringify(changes);
+
+    validateUpdateEventRequest(changes);
+
+    expect(JSON.stringify(changes)).toBe(before);
+  });
+});

@@ -38,6 +38,13 @@ let organiserId = null;
 let otherOrganiserId = null;
 let eventId = null;
 let otherEventId = null;
+
+// The request the write section creates through POST / rather than through the
+// admin client. Tracked separately because it is the only row here whose whole
+// life -- created, edited, submitted, changed -- happens over HTTP, and because
+// cleanup() has to find it even if the run fails halfway through that life.
+let draftEventId = null;
+
 let server = null;
 let failures = 0;
 
@@ -88,10 +95,22 @@ async function createEventRequest(ownerId, name, status) {
 async function cleanup() {
   if (server) await new Promise((resolve) => server.close(resolve));
 
+  // Change requests before event requests, for the same reason event requests
+  // come before users: event_change_requests.event_request_id references the
+  // row being deleted, so deleting the event first fails and leaves both
+  // behind -- and the failure surfaces as a confusing FK refusal on a delete
+  // nobody was thinking about. requested_by references auth.users too, so this
+  // has to run before the user deletes below as well.
+  for (const id of [draftEventId, eventId, otherEventId]) {
+    if (!id) continue;
+    await supabase.from('event_change_requests').delete().eq('event_request_id', id);
+  }
+
   // Event requests before users: organiser_id is ON DELETE RESTRICT, so
   // deleting the user first fails and leaves both behind.
   if (eventId) await supabase.from('event_requests').delete().eq('id', eventId);
   if (otherEventId) await supabase.from('event_requests').delete().eq('id', otherEventId);
+  if (draftEventId) await supabase.from('event_requests').delete().eq('id', draftEventId);
 
   // profiles cascades from auth.users, so deleting the user is enough -- but it
   // is deleted explicitly here so a failure shows up as its own error rather
@@ -135,6 +154,32 @@ async function main() {
 
   const authed = (path = '') =>
     fetch(`${base}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+
+  /**
+   * The same real token, for the routes that send a body.
+   *
+   * Separate from authed rather than folded into it with optional arguments,
+   * because the Content-Type header is not optional: express.json() only
+   * parses a body that declares itself as JSON, and a POST without it arrives
+   * as {} -- which for POST / looks exactly like a missing eventName and
+   * would fail this script with a 400 that says nothing about what is wrong.
+   */
+  const authedWrite = (method, path, body) =>
+    fetch(`${base}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+
+  /** A proposed period safely ahead of the real clock, with a real offset. */
+  const futurePeriod = () => {
+    const start = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+    const end = new Date(start.getTime() + 8 * 60 * 60 * 1000);
+    return { proposedStart: start.toISOString(), proposedEnd: end.toISOString() };
+  };
 
   // -- the middleware, against a real token ---------------------------------
   const anonymous = await fetch(base);
@@ -232,6 +277,310 @@ async function main() {
     `first row ${relisted[0]?.id}`,
   );
 
+  // -- SCRUM-29: a request is created over HTTP ------------------------------
+  //
+  // Everything from here down exercises the five routes that used to 404. The
+  // unit suite proves each of them against a fake client; what it cannot prove
+  // is the half that only a live database has -- the updated_at trigger, the
+  // 005 submitted_at constraint, the foreign key from event_change_requests,
+  // and row level security on a real write.
+  const created = await authedWrite('POST', '', {
+    eventName: `__check_routes_created_${STAMP}`,
+
+    // Both named in the body on purpose. The organiser must come from the
+    // token and the status must be 'draft' whatever the caller asks for, and
+    // the read-back below is what proves it rather than the response echoing
+    // what it was sent.
+    organiserId: otherOrganiserId,
+    status: 'approved',
+  });
+  const createdBody = await created.json();
+  check('creating a request answers 201', created.status === 201, `status ${created.status}`);
+
+  draftEventId = createdBody.id ?? null;
+  if (!draftEventId) {
+    throw new Error(`POST / returned no id: ${JSON.stringify(createdBody)}`);
+  }
+
+  check(
+    'a created request carries its status display',
+    createdBody.statusDisplay?.label === 'Draft',
+    JSON.stringify(createdBody.statusDisplay),
+  );
+
+  const { data: createdRow, error: createdReadError } = await supabaseAdmin
+    .from('event_requests')
+    .select('organiser_id, status, submitted_at')
+    .eq('id', draftEventId)
+    .single();
+  check(
+    'the stored owner is the signed-in organiser, not the one named in the body',
+    !createdReadError && createdRow?.organiser_id === organiserId,
+    createdRow?.organiser_id,
+  );
+  check(
+    'the stored status is draft, not the one named in the body',
+    createdRow?.status === 'draft',
+    createdRow?.status,
+  );
+  check(
+    'submitted_at is null on a draft, as the 005 constraint requires',
+    createdRow?.submitted_at === null,
+    String(createdRow?.submitted_at),
+  );
+
+  // -- SCRUM-11: a draft is edited in place ----------------------------------
+  const beforePatch = await (await authed(`/${draftEventId}`)).json();
+
+  const patched = await authedWrite('PATCH', `/${draftEventId}`, {
+    purpose: 'Connect final-year students with industry partners.',
+  });
+  const patchedBody = await patched.json();
+  check('saving an edit to a draft answers 200', patched.status === 200, `status ${patched.status}`);
+  check(
+    'the field the edit named was saved',
+    patchedBody.purpose === 'Connect final-year students with industry partners.',
+    patchedBody.purpose,
+  );
+  check(
+    'the field the edit did not mention is unchanged',
+    patchedBody.eventName === `__check_routes_created_${STAMP}`,
+    patchedBody.eventName,
+  );
+
+  // The one thing no unit test can prove. updated_at is maintained by the
+  // event_requests_set_updated_at trigger and the service deliberately never
+  // sends it, so a fake client can only ever hand back whatever was queued.
+  check(
+    'updated_at advanced, which only the trigger can have done',
+    new Date(patchedBody.updatedAt).getTime() > new Date(beforePatch.updatedAt).getTime(),
+    `${beforePatch.updatedAt} -> ${patchedBody.updatedAt}`,
+  );
+
+  const { data: foreignBefore } = await supabaseAdmin
+    .from('event_requests')
+    .select('event_name, status, updated_at')
+    .eq('id', otherEventId)
+    .single();
+
+  const foreignPatch = await authedWrite('PATCH', `/${otherEventId}`, {
+    eventName: `__check_routes_renamed_by_a_stranger_${STAMP}`,
+  });
+  check(
+    "another organiser's request answers 404 to an edit",
+    foreignPatch.status === 404,
+    `status ${foreignPatch.status}`,
+  );
+
+  const { data: foreignAfter } = await supabaseAdmin
+    .from('event_requests')
+    .select('event_name, status, updated_at')
+    .eq('id', otherEventId)
+    .single();
+  check(
+    'and the foreign row is byte-for-byte untouched',
+    foreignAfter?.event_name === foreignBefore?.event_name
+      && foreignAfter?.updated_at === foreignBefore?.updated_at,
+    `${foreignBefore?.event_name} / ${foreignAfter?.event_name}`,
+  );
+
+  // eventId was moved to 'under_review' by the AC4 section above, so it is the
+  // ready-made case for "the body was fine, the row's state was not".
+  const patchMoved = await authedWrite('PATCH', `/${eventId}`, {
+    eventName: `__check_routes_too_late_${STAMP}`,
+  });
+  check(
+    'a request that is no longer a draft answers 409 to an edit',
+    patchMoved.status === 409,
+    `status ${patchMoved.status}`,
+  );
+
+  // A PATCH racing a submit cannot be provoked deterministically from a
+  // single-threaded script -- there is no way to hold the read open across the
+  // write from here, and a Promise.all of two requests would prove only that
+  // one of them won. So the .eq('status','draft') guard is proved by the
+  // PGRST116 unit test and by the filter being present in the statement, and
+  // that limit is stated here rather than simulated with something that looks
+  // like a race and is not. Same honesty as the SCRUM-47 note below.
+
+  // -- SCRUM-10: a draft is submitted for review -----------------------------
+  const incomplete = await authedWrite('POST', `/${draftEventId}/submit`);
+  const incompleteBody = await incomplete.json();
+  check(
+    'an incomplete draft cannot be submitted',
+    incomplete.status === 400,
+    `status ${incomplete.status}`,
+  );
+  check(
+    'and every gap is listed at once, not one per retry',
+    Array.isArray(incompleteBody.details) && incompleteBody.details.length > 1,
+    `${incompleteBody.details?.length} gap(s): ${incompleteBody.details?.map((d) => d.field).join(', ')}`,
+  );
+
+  const completed = await authedWrite('PATCH', `/${draftEventId}`, {
+    ...futurePeriod(),
+    expectedAttendance: 120,
+  });
+  check(
+    'the remaining gaps can be filled in one PATCH',
+    completed.status === 200,
+    `status ${completed.status}`,
+  );
+
+  const submitted = await authedWrite('POST', `/${draftEventId}/submit`);
+  const submittedBody = await submitted.json();
+  check('a complete draft is submitted', submitted.status === 200, `status ${submitted.status}`);
+  check('the response reports the new status', submittedBody.status === 'submitted', submittedBody.status);
+
+  // The 005 constraint, event_requests_submitted_at_matches_status, satisfied
+  // by a real write rather than asserted against a fake's queued row.
+  const { data: submittedRow } = await supabaseAdmin
+    .from('event_requests')
+    .select('status, submitted_at')
+    .eq('id', draftEventId)
+    .single();
+  check(
+    'submitted_at was stamped alongside the status, satisfying the 005 constraint',
+    submittedRow?.status === 'submitted' && typeof submittedRow?.submitted_at === 'string',
+    `${submittedRow?.status} / ${submittedRow?.submitted_at}`,
+  );
+
+  const submittedTwice = await authedWrite('POST', `/${draftEventId}/submit`);
+  check(
+    'a submitted request cannot be submitted again',
+    submittedTwice.status === 409,
+    `status ${submittedTwice.status}`,
+  );
+
+  // The ownership hole, proved live. otherEventId is made a complete draft
+  // first, because a request that could not be submitted anyway would answer
+  // 404 for the wrong reason and the check would pass with the pre-check
+  // deleted. With the row genuinely submittable, the ONLY thing standing
+  // between this call and a foreign submit is the route's pre-check --
+  // submitEventRequest takes no organiserId and checks nothing.
+  const foreignPeriod = futurePeriod();
+  const { error: makeDraftError } = await supabaseAdmin
+    .from('event_requests')
+    .update({
+      status: 'draft',
+      submitted_at: null,
+      purpose: 'A complete draft belonging to somebody else.',
+      proposed_start: foreignPeriod.proposedStart,
+      proposed_end: foreignPeriod.proposedEnd,
+      expected_attendance: 50,
+    })
+    .eq('id', otherEventId);
+  if (makeDraftError) {
+    throw new Error(`could not prepare the foreign draft: ${makeDraftError.message}`);
+  }
+
+  const foreignSubmit = await authedWrite('POST', `/${otherEventId}/submit`);
+  check(
+    "another organiser's submittable draft answers 404, not 200",
+    foreignSubmit.status === 404,
+    `status ${foreignSubmit.status}`,
+  );
+
+  const { data: foreignSubmitAfter } = await supabaseAdmin
+    .from('event_requests')
+    .select('status, submitted_at')
+    .eq('id', otherEventId)
+    .single();
+  check(
+    'and it is still a draft with no submitted_at',
+    foreignSubmitAfter?.status === 'draft' && foreignSubmitAfter?.submitted_at === null,
+    `${foreignSubmitAfter?.status} / ${foreignSubmitAfter?.submitted_at}`,
+  );
+
+  // -- SCRUM-32 / SCRUM-34: change requests ----------------------------------
+  const changeOne = await authedWrite('POST', `/${draftEventId}/change-requests`, {
+    field: 'venue',
+    details: 'A larger room, the RSVPs have doubled.',
+  });
+  const changeOneBody = await changeOne.json();
+  check(
+    'a change request against a submitted event answers 201',
+    changeOne.status === 201,
+    `status ${changeOne.status}`,
+  );
+  check(
+    'it is recorded against the right event, by the signed-in organiser',
+    changeOneBody.eventRequestId === draftEventId && changeOneBody.requestedBy === organiserId,
+    `${changeOneBody.eventRequestId} / ${changeOneBody.requestedBy}`,
+  );
+  check(
+    'the 201 body carries no fieldLabel -- that shape belongs to the list',
+    changeOneBody.fieldLabel === undefined,
+    String(changeOneBody.fieldLabel),
+  );
+
+  const changeTwo = await authedWrite('POST', `/${draftEventId}/change-requests`, {
+    field: 'equipment',
+    details: 'Two handheld microphones and a projector.',
+  });
+  check('a second change request is accepted', changeTwo.status === 201, `status ${changeTwo.status}`);
+
+  const listed = await authed(`/${draftEventId}/change-requests`);
+  const listedBody = await listed.json();
+  check('the change request list answers 200', listed.status === 200, `status ${listed.status}`);
+  check(
+    'it is a bare array carrying both requests',
+    Array.isArray(listedBody) && listedBody.length === 2,
+    `${Array.isArray(listedBody) ? listedBody.length : typeof listedBody}`,
+  );
+
+  // Asserted as an ordering rather than by index, so a coarse clock that gave
+  // both rows the same created_at reports a tie honestly instead of failing
+  // with a misleading "wrong row first".
+  const createdTimes = (listedBody ?? []).map((row) => new Date(row.createdAt).getTime());
+  check(
+    'the list is newest first',
+    createdTimes.every((time, i) => i === 0 || createdTimes[i - 1] >= time),
+    createdTimes.join(' >= '),
+  );
+
+  const venueRow = (listedBody ?? []).find((row) => row.changeField === 'venue');
+  check(
+    "the venue row carries the label the Organiser's list renders",
+    venueRow?.fieldLabel === 'Venue',
+    venueRow?.fieldLabel,
+  );
+
+  const emptyList = await authed(`/${eventId}/change-requests`);
+  const emptyListBody = await emptyList.json();
+  check(
+    'an event nobody has asked to change answers 200 and an empty array',
+    emptyList.status === 200 && Array.isArray(emptyListBody) && emptyListBody.length === 0,
+    `status ${emptyList.status}, body ${JSON.stringify(emptyListBody)}`,
+  );
+
+  // The reason the route pre-checks ownership rather than trusting the
+  // service: getChangeRequestsForEvent answers 400 for a foreign event and 404
+  // for a missing one, which is an enumeration oracle. This extends the
+  // indistinguishability check already made on GET /:id above to the route
+  // that would otherwise reintroduce it.
+  const foreignList = await authed(`/${otherEventId}/change-requests`);
+  const foreignListBody = await foreignList.json();
+  check(
+    "another organiser's change request list answers 404, not the service's 400",
+    foreignList.status === 404,
+    `status ${foreignList.status}`,
+  );
+
+  const missingList = await authed('/00000000-0000-4000-8000-000000000000/change-requests');
+  const missingListBody = await missingList.json();
+  check(
+    'a change request list for an id that does not exist answers 404',
+    missingList.status === 404,
+    `status ${missingList.status}`,
+  );
+  check(
+    'and those two 404s are indistinguishable, so ids cannot be enumerated here either',
+    withoutId(foreignListBody, otherEventId)
+      === withoutId(missingListBody, '00000000-0000-4000-8000-000000000000'),
+    `${withoutId(foreignListBody, otherEventId)} / ${withoutId(missingListBody, '00000000-0000-4000-8000-000000000000')}`,
+  );
+
   // -- SCRUM-47, and the honest limit of what can be proved here -------------
   //
   // event_requests.status is a not-null Postgres enum, so neither fallback is
@@ -257,7 +606,12 @@ async function main() {
     .from('event_requests')
     .select('id', { count: 'exact', head: true })
     .like('event_name', `__check_routes_%_${STAMP}`);
-  check('only this run\'s two test rows exist, ready for cleanup', count === 2, `${count} row(s)`);
+  // Three, not two, since the SCRUM-29 section above creates a third row
+  // through POST / rather than through the admin client. Flagged in review
+  // because changing a number in an existing assertion looks like editing a
+  // test: this is a hand-run check script, not part of the vitest suite, and
+  // the plan sanctions this one line explicitly.
+  check('only this run\'s three test rows exist, ready for cleanup', count === 3, `${count} row(s)`);
 }
 
 main()

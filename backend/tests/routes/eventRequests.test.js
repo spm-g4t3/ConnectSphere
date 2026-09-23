@@ -565,3 +565,836 @@ describe('service errors are translated into HTTP status codes', () => {
     consoleError.mockRestore();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-29 / SCRUM-11 / SCRUM-10 / SCRUM-32 / SCRUM-34 -- the five routes that
+// used to 404
+// ---------------------------------------------------------------------------
+/**
+ * A writable stand-in for the supabase-js query builder.
+ *
+ * Declared separately rather than by extending createFakeClient above, and the
+ * separation is deliberate: four describe blocks are already written against
+ * that fake's exact behaviour, and it has no insert/update on purpose because
+ * nothing it was written for writes. Adding them there would change a fixture
+ * the existing suite depends on; adding them here changes nothing that already
+ * passes.
+ *
+ * Copied from tests/services/eventRequestService.test.js so the two stay in
+ * step -- a second, subtly different fake would let a route test pass against
+ * behaviour the service never had. Running out of queued results throws loudly
+ * rather than returning undefined, so a route that makes an unexpected extra
+ * round trip fails with a legible message instead of a null dereference three
+ * frames down.
+ */
+function createWritableFakeClient(results = []) {
+  const queue = [...results];
+  const calls = [];
+
+  function settle(call) {
+    if (queue.length === 0) {
+      throw new Error(
+        `fake client: no result queued for ${call.operation} on ${call.table}`,
+      );
+    }
+    return Promise.resolve(queue.shift());
+  }
+
+  function builder(call) {
+    const chain = {
+      insert(payload) {
+        call.operation = 'insert';
+        call.payload = payload;
+        return chain;
+      },
+      update(payload) {
+        call.operation = 'update';
+        call.payload = payload;
+        return chain;
+      },
+      select(columns = '*') {
+        call.select = columns;
+        return chain;
+      },
+      eq(column, value) {
+        call.filters.push([column, value]);
+        return chain;
+      },
+      order(column, options) {
+        call.order.push([column, options]);
+        return chain;
+      },
+      single: () => settle(call),
+      maybeSingle: () => settle(call),
+      then: (resolve, reject) => settle(call).then(resolve, reject),
+    };
+    return chain;
+  }
+
+  return {
+    calls,
+    from(table) {
+      const call = {
+        table,
+        operation: 'select',
+        payload: null,
+        select: null,
+        filters: [],
+        order: [],
+      };
+      calls.push(call);
+      return builder(call);
+    },
+  };
+}
+
+/** A Postgres failure, shaped as supabase-js surfaces it. */
+const dbFailure = (code, message) => ({ data: null, error: { code, message } });
+
+/**
+ * A stored draft whose proposed period is always ahead of the real clock.
+ *
+ * The shared storedRow fixture above pins 2026-06-01, which is fine for every
+ * read: nothing on a read path looks at the clock. Submission does --
+ * validateSubmitEventRequest refuses a start that is not in the future -- and
+ * `now` is NOT injectable through the route, because submitEventRequest
+ * defaults it and the handler passes only { client }. So a fixed date here
+ * would make these tests pass until that date arrived and then start failing
+ * for a reason with nothing to do with the router. Computed a year out
+ * instead, which is the only form of determinism available on this side of
+ * the wire; the service tests pin the boundary with an injected `now`.
+ */
+function submittableRow(overrides = {}) {
+  const start = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+  const end = new Date(start.getTime() + 8 * 60 * 60 * 1000);
+
+  return storedRow({
+    status: STATUS.DRAFT,
+    proposed_start: start.toISOString(),
+    proposed_end: end.toISOString(),
+    ...overrides,
+  });
+}
+
+/** A stored change request row, as PostgREST returns it. */
+function storedChangeRequestRow(overrides = {}) {
+  return {
+    id: '44444444-4444-4444-8444-444444444444',
+    event_request_id: REQUEST_ID,
+    requested_by: ORGANISER_ID,
+    change_field: 'venue',
+    requested_change: 'A larger room, the RSVPs have doubled.',
+    status: 'outstanding',
+    decision: null,
+    decision_notes: null,
+    processed_by: null,
+    processed_at: null,
+    created_at: '2026-01-12T03:00:00+00:00',
+    updated_at: '2026-01-12T03:00:00+00:00',
+    ...overrides,
+  };
+}
+
+
+describe('SCRUM-29: an Organiser creates a request over HTTP', () => {
+  it('SCRUM29_AC3_returns_201_and_the_created_request_with_its_status_display', async () => {
+    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+
+    const res = await request(appWith({ client }))
+      .post('/api/event-requests')
+      .send({ eventName: 'IS212 Industry Night' });
+
+    // 201 and a body, not 204. EventRequestForm reads saved.id and saved.status
+    // straight off this response; a bodiless answer would force a refetch to
+    // learn what was just created.
+    expect(res.status).toBe(201);
+    expect(res.body.id).toBe(REQUEST_ID);
+    expect(res.body.status).toBe(STATUS.DRAFT);
+
+    // The same statusDisplay projection every other event-shaped response
+    // carries, so the form renders a badge without a second request.
+    expect(res.body.statusDisplay).toEqual({
+      status: STATUS.DRAFT,
+      label: STATUS_DISPLAY[STATUS.DRAFT].label,
+      group: STATUS_DISPLAY[STATUS.DRAFT].group,
+      description: STATUS_DISPLAY[STATUS.DRAFT].description,
+    });
+  });
+
+  it('SCRUM29_AC3_stamps_the_organiser_from_the_token_not_the_body', async () => {
+    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+
+    await request(appWith({ client }))
+      .post('/api/event-requests')
+      .send({ eventName: 'IS212 Industry Night', organiserId: OTHER_ORGANISER_ID });
+
+    // Mass assignment, closed. The body names another Organiser and the write
+    // must still belong to the signed-in one. Without this assertion someone
+    // "simplifying" toColumns into a spread of the request body would hand any
+    // caller the ability to create rows owned by anybody, and every test above
+    // would still pass because none of them post anything.
+    expect(client.calls[0].operation).toBe('insert');
+    expect(client.calls[0].payload.organiser_id).toBe(ORGANISER_ID);
+    expect(client.calls[0].payload.organiser_id).not.toBe(OTHER_ORGANISER_ID);
+
+    // And the camelCase key is not carried through as a column of its own --
+    // PostgREST ignores keys no column matches, so it would vanish silently.
+    expect(client.calls[0].payload).not.toHaveProperty('organiserId');
+  });
+
+  it('SCRUM29_AC3_drops_a_status_a_caller_tried_to_set', async () => {
+    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+
+    await request(appWith({ client }))
+      .post('/api/event-requests')
+      .send({
+        eventName: 'IS212 Industry Night',
+        status: STATUS.APPROVED,
+        id: 'a-chosen-id',
+        submittedAt: '2026-01-01T00:00:00+00:00',
+      });
+
+    // A request is born a draft whatever the body says. A caller who could
+    // choose their own status would skip the Coordinator entirely; one who
+    // could choose their own id would collide with, or overwrite, someone
+    // else's row. The allow-list in toColumns is what stops both, and this is
+    // the only test that would notice if it stopped being one.
+    expect(client.calls[0].payload.status).toBe(STATUS.DRAFT);
+    expect(client.calls[0].payload.id).toBeUndefined();
+    expect(client.calls[0].payload.submitted_at).toBeUndefined();
+    expect(client.calls[0].payload).not.toHaveProperty('submittedAt');
+  });
+
+  it('SCRUM29_AC3_returns_400_and_never_queries_without_an_event_name', async () => {
+    const client = createWritableFakeClient([ok(storedRow())]);
+
+    const res = await request(appWith({ client })).post('/api/event-requests').send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'eventName', message: 'is required' }]);
+
+    // The gate has to bite before the query, not after. Validation runs before
+    // the client is even resolved, so a bad form costs no round trip and the
+    // Organiser gets a message about their form rather than a driver message
+    // about a not-null constraint.
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM29_AC3_returns_400_and_never_queries_for_a_body_that_is_not_an_object', async () => {
+    const client = createWritableFakeClient([ok(storedRow())]);
+
+    const res = await request(appWith({ client }))
+      .post('/api/event-requests')
+      .set('Content-Type', 'application/json')
+      .send('[1, 2, 3]');
+
+    // An array parses as JSON and would survive a bare typeof check, so it is
+    // worth its own case: there is nothing to enumerate field by field, and
+    // the refusal names the shape rather than a field the caller never sent.
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/expected an object/i);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM29_AC3_returns_401_and_never_queries_without_a_token', async () => {
+    const client = createWritableFakeClient([ok(storedRow())]);
+
+    const res = await request(appWith({ client, requireAuth: signedOut }))
+      .post('/api/event-requests')
+      .send({ eventName: 'IS212 Industry Night' });
+
+    expect(res.status).toBe(401);
+
+    // Refused by the middleware before the handler runs. An unauthenticated
+    // POST that reached the service would have no organiser to stamp.
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+
+describe('SCRUM-11: an Organiser saves edits to their own draft over HTTP', () => {
+  it('SCRUM11_AC1_returns_200_and_the_saved_request', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.DRAFT })),
+      ok(storedRow({ status: STATUS.DRAFT, event_name: 'IS212 Industry Evening' })),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .patch(`/api/event-requests/${REQUEST_ID}`)
+      .send({ eventName: 'IS212 Industry Evening' });
+
+    // 200 with the whole request rather than 204, for the same reason POST /
+    // returns a body: the form reads saved.id and saved.status back off it.
+    expect(res.status).toBe(200);
+    expect(res.body.eventName).toBe('IS212 Industry Evening');
+    expect(res.body.statusDisplay.status).toBe(STATUS.DRAFT);
+
+    // Read then write, in that order, and only the field that changed is sent.
+    expect(client.calls).toHaveLength(2);
+    expect(client.calls[1].operation).toBe('update');
+    expect(client.calls[1].payload).toEqual({ event_name: 'IS212 Industry Evening' });
+  });
+
+  it('SCRUM11_AC1_guards_the_write_on_id_owner_and_draft_status', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.DRAFT })),
+      ok(storedRow({ status: STATUS.DRAFT })),
+    ]);
+
+    await request(appWith({ client }))
+      .patch(`/api/event-requests/${REQUEST_ID}`)
+      .send({ purpose: 'Connect final-year students with industry partners.' });
+
+    // All three filters, in order, asserted as a whole rather than with
+    // toContainEqual: each is doing separate work and dropping any one of them
+    // is a different bug. The status filter is what stops a submit landing
+    // between the read and the write from being silently overwritten; the
+    // organiser filter can never fire, and exists so the statement sent to a
+    // deny-all table is structurally incapable of touching a foreign row
+    // rather than safe only because of a check made in an earlier round trip.
+    expect(client.calls[1].filters).toEqual([
+      ['id', REQUEST_ID],
+      ['organiser_id', ORGANISER_ID],
+      ['status', STATUS.DRAFT],
+    ]);
+  });
+
+  it('SCRUM11_AC1_returns_409_when_a_submit_wins_the_race', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.DRAFT })),
+      dbFailure('PGRST116', 'JSON object requested, multiple (or no) rows returned'),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .patch(`/api/event-requests/${REQUEST_ID}`)
+      .send({ eventName: 'IS212 Industry Evening' });
+
+    // The read saw a draft and the write matched nothing, which can only mean
+    // the status moved in between. 409, not 404: the row is certainly there,
+    // and ownership was proved a moment ago, so there is no id to protect.
+    // Translating this as a 404 would tell the Organiser their own request had
+    // vanished; as a 500 it would tell them nothing at all.
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/no longer a draft/i);
+    expect(res.body.error).toMatch(/reload/i);
+  });
+
+  it('SCRUM11_AC1_returns_409_for_a_request_that_is_already_submitted', async () => {
+    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.SUBMITTED }))]);
+
+    const res = await request(appWith({ client }))
+      .patch(`/api/event-requests/${REQUEST_ID}`)
+      .send({ eventName: 'IS212 Industry Evening' });
+
+    expect(res.status).toBe(409);
+
+    // The distinction the message has to carry: editing is closed, but asking
+    // for a change is not. Without it an Organiser reads "conflict" and has no
+    // idea what to do next.
+    expect(res.body.error).toMatch(/request a change/i);
+
+    // And the write was never attempted -- the status check is a gate, not a
+    // filter that happens to match nothing.
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].operation).toBe('select');
+  });
+
+  it('SCRUM11_AC1_returns_404_for_another_organisers_event_rather_than_400', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ organiser_id: OTHER_ORGANISER_ID, status: STATUS.DRAFT })),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .patch(`/api/event-requests/${REQUEST_ID}`)
+      .send({ eventName: 'Not mine to rename' });
+
+    // Named for the reason and not just the number, so it survives a refactor
+    // that "tidies" the ownership check into something answering 400 or 403.
+    // Both would confirm the id exists, which is exactly the enumeration
+    // oracle errors.js refuses to build.
+    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(400);
+    expect(res.status).not.toBe(403);
+
+    // The read happened, the write did not.
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM11_AC1_returns_400_and_never_queries_for_an_empty_change_set', async () => {
+    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+
+    const res = await request(appWith({ client }))
+      .patch(`/api/event-requests/${REQUEST_ID}`)
+      .send({});
+
+    // A precise 400 instead of an ambiguous 500. toColumns({}) is {}, so the
+    // service would otherwise issue .update({}), whose PostgREST behaviour is
+    // unspecified and untranslated.
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/no changes supplied/i);
+
+    // Refused before the client is resolved, so an empty PATCH costs nothing.
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM11_AC1_returns_400_and_never_queries_for_an_attempt_to_clear_the_name', async () => {
+    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+
+    const res = await request(appWith({ client }))
+      .patch(`/api/event-requests/${REQUEST_ID}`)
+      .send({ eventName: '   ' });
+
+    // event_name is not null in 001, so a cleared name would be bounced by the
+    // column constraint a round trip later with a driver message naming a
+    // column. Refusing it here names the field the Organiser can actually fix.
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toContain('eventName');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM11_AC1_returns_401_and_never_queries_without_a_token', async () => {
+    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+
+    const res = await request(appWith({ client, requireAuth: signedOut }))
+      .patch(`/api/event-requests/${REQUEST_ID}`)
+      .send({ eventName: 'IS212 Industry Evening' });
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+
+describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
+  it('SCRUM10_AC5_returns_200_and_the_submitted_request', async () => {
+    const client = createWritableFakeClient([
+      // The route's ownership pre-check.
+      ok(submittableRow()),
+      // submitEventRequest's own read.
+      ok(submittableRow()),
+      // The guarded write.
+      ok(submittableRow({ status: STATUS.SUBMITTED, submitted_at: '2026-01-15T09:00:00+00:00' })),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/submit`)
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe(STATUS.SUBMITTED);
+    expect(res.body.statusDisplay.group).toBe('AWAITING_REVIEW');
+
+    // Only that it is there and is a string. `now` is not injectable through
+    // the route -- submitEventRequest defaults it to the real clock -- so
+    // asserting a value here would either assert the fixture back to itself or
+    // pin a timestamp that moves on every run.
+    expect(res.body).toHaveProperty('submittedAt');
+    expect(typeof res.body.submittedAt).toBe('string');
+
+    // That the write stamped one at all is the half of the contract the
+    // fixture cannot prove: the row comes back with whatever was queued.
+    expect(client.calls[2].operation).toBe('update');
+    expect(typeof client.calls[2].payload.submitted_at).toBe('string');
+    expect(Number.isNaN(new Date(client.calls[2].payload.submitted_at).getTime())).toBe(false);
+  });
+
+  it('SCRUM10_AC5_returns_404_for_another_organisers_draft', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ organiser_id: OTHER_ORGANISER_ID, status: STATUS.DRAFT })),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/submit`)
+      .send({});
+
+    // The single most important test in this file. submitEventRequest takes no
+    // organiserId and checks nothing -- its own header says ownership belongs
+    // to the caller -- so this route's pre-check is the only thing standing
+    // between any authenticated Organiser and submitting somebody else's draft
+    // by guessing its id. Delete the pre-check and every other test here still
+    // passes; this one does not.
+    expect(res.status).toBe(404);
+
+    // Exactly one round trip: the pre-check refused, so the service was never
+    // reached and no write was attempted against a foreign row.
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM10_AC5_returns_404_for_an_id_that_does_not_exist', async () => {
+    const client = createWritableFakeClient([ok(null)]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/submit`)
+      .send({});
+
+    // Answered identically to the foreign case above, so the pair cannot be
+    // used to learn which ids are real.
+    expect(res.status).toBe(404);
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM10_AC4_returns_400_listing_every_gap_at_once', async () => {
+    const incomplete = storedRow({
+      status: STATUS.DRAFT,
+      purpose: null,
+      proposed_start: null,
+      proposed_end: null,
+      expected_attendance: null,
+    });
+    const client = createWritableFakeClient([ok(incomplete), ok(incomplete)]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/submit`)
+      .send({});
+
+    expect(res.status).toBe(400);
+
+    // The whole of AC4: every gap in one answer, so the Organiser fixes the
+    // form in a single pass instead of discovering the next missing field on
+    // each retry. The form renders details[] as a list.
+    expect(res.body.details.map((d) => d.field).sort()).toEqual([
+      'expectedAttendance',
+      'proposedEnd',
+      'proposedStart',
+      'purpose',
+    ]);
+
+    // Refused before the write. An incomplete request must not reach the
+    // Coordinator's queue at all.
+    expect(client.calls).toHaveLength(2);
+    expect(client.calls.every((call) => call.operation === 'select')).toBe(true);
+  });
+
+  it('SCRUM10_AC6_returns_409_for_a_request_that_is_already_submitted', async () => {
+    // Complete and future-dated, so the only thing left to refuse is the
+    // status. A past-dated fixture here would 400 on the dates and this test
+    // would be proving nothing about "once and only once".
+    const submitted = submittableRow({ status: STATUS.SUBMITTED });
+    const client = createWritableFakeClient([ok(submitted), ok(submitted)]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/submit`)
+      .send({});
+
+    // 409 and not 400: the input was never the problem, the row's state was.
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/cannot be submitted/i);
+
+    // And no second write landed, which is the whole of "once and only once".
+    expect(client.calls).toHaveLength(2);
+    expect(client.calls.every((call) => call.operation === 'select')).toBe(true);
+  });
+
+  it('SCRUM10_AC6_returns_409_when_a_second_submit_wins_the_race', async () => {
+    const client = createWritableFakeClient([
+      ok(submittableRow()),
+      ok(submittableRow()),
+      dbFailure('PGRST116', 'JSON object requested, multiple (or no) rows returned'),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/submit`)
+      .send({});
+
+    // Both callers read a draft; the first write moved it and the second
+    // matched no row. Without the .eq('status','draft') guard both writes
+    // would land and submitted_at would be overwritten with the later instant,
+    // measuring review turnaround from the wrong moment.
+    expect(res.status).toBe(409);
+    expect(client.calls[2].filters).toContainEqual(['status', STATUS.DRAFT]);
+  });
+
+  it('SCRUM10_AC5_returns_401_and_never_queries_without_a_token', async () => {
+    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+
+    const res = await request(appWith({ client, requireAuth: signedOut }))
+      .post(`/api/event-requests/${REQUEST_ID}/submit`)
+      .send({});
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+
+describe('SCRUM-32: a change request is raised against a submitted event over HTTP', () => {
+  it('SCRUM32_AC1_returns_201_and_the_created_change_request', async () => {
+    const client = createWritableFakeClient([
+      // The route's ownership pre-check.
+      ok(storedRow({ status: STATUS.SUBMITTED })),
+      // createChangeRequest reloads the event for its own status/ownership check.
+      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
+      ok(storedChangeRequestRow()),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/change-requests`)
+      .send({ field: 'venue', details: 'A larger room, the RSVPs have doubled.' });
+
+    expect(res.status).toBe(201);
+
+    // The wire shape the form sends ({ field, details }) is translated into
+    // the service's own names on the way in -- neither the route nor the
+    // frontend has to learn the other's vocabulary.
+    expect(client.calls[2].operation).toBe('insert');
+    expect(client.calls[2].payload).toMatchObject({
+      event_request_id: REQUEST_ID,
+      requested_by: ORGANISER_ID,
+      change_field: 'venue',
+      requested_change: 'A larger room, the RSVPs have doubled.',
+    });
+    expect(res.body.changeField).toBe('venue');
+  });
+
+  it('SCRUM32_AC1_stamps_the_requester_from_the_token_not_the_body', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.SUBMITTED })),
+      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
+      ok(storedChangeRequestRow()),
+    ]);
+
+    await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/change-requests`)
+      .send({
+        field: 'venue',
+        details: 'A larger room, the RSVPs have doubled.',
+        requestedBy: OTHER_ORGANISER_ID,
+        eventRequestId: '99999999-9999-4999-8999-999999999999',
+      });
+
+    // Two mass-assignment holes closed at once: who asked, and which event it
+    // is against. The id comes from the path and the requester from the token,
+    // so a body naming either is ignored.
+    expect(client.calls[2].payload.requested_by).toBe(ORGANISER_ID);
+    expect(client.calls[2].payload.event_request_id).toBe(REQUEST_ID);
+  });
+
+  it('SCRUM32_AC1_does_not_label_a_change_request_with_the_event_status_vocabulary', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.SUBMITTED })),
+      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
+      ok(storedChangeRequestRow({ status: 'outstanding' })),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/change-requests`)
+      .send({ field: 'venue', details: 'A larger room, the RSVPs have doubled.' });
+
+    // withStatusDisplay speaks the *event* vocabulary. A change request's
+    // statuses are its own -- 'outstanding', 'in_progress', 'processed' -- so
+    // running this response through it would stamp every row UNKNOWN and look
+    // like corrupt data rather than the wrong helper.
+    expect(res.body).not.toHaveProperty('statusDisplay');
+    expect(res.body.status).toBe('outstanding');
+  });
+
+  it('SCRUM32_AC1_returns_404_for_another_organisers_event_rather_than_400', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ organiser_id: OTHER_ORGANISER_ID, status: STATUS.SUBMITTED })),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/change-requests`)
+      .send({ field: 'venue', details: 'A larger room.' });
+
+    // Named for the reason. createChangeRequest answers 400 for a foreign
+    // event and 404 for one that does not exist, which tells a caller the
+    // difference -- an enumeration oracle sitting in the same router as three
+    // routes built not to be one. The pre-check settles it at 404 on the way
+    // in; the service's own check stays as defence in depth.
+    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(400);
+
+    // And the insert never happened.
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM32_AC2_returns_400_for_a_field_outside_the_vocabulary', async () => {
+    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.SUBMITTED }))]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/change-requests`)
+      .send({ field: 'accessibilityRequirements', details: 'Step-free access.' });
+
+    // The enum has no accessibility member and is not getting one -- the
+    // frontend maps that option to 'other' before it leaves the browser. A
+    // camelCase option name arriving here is a client that skipped the map,
+    // and it must be refused rather than stored as an unreadable change_field.
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toContain('changeField');
+
+    // One round trip, the ownership pre-check, and no insert. The pre-check is
+    // deliberately ahead of validation: it is what makes a foreign event
+    // indistinguishable from a missing one whatever the body says.
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls.every((call) => call.operation === 'select')).toBe(true);
+  });
+
+  it('SCRUM32_AC1_returns_400_for_a_change_requested_against_a_draft', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.DRAFT })),
+      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID, status: STATUS.DRAFT }),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/change-requests`)
+      .send({ field: 'venue', details: 'A larger room.' });
+
+    // AC1's boundary: a draft is edited directly through the PATCH above.
+    // Allowing a change request against one would give the same edit two
+    // competing representations and fill the Coordinator's queue with requests
+    // nobody needed to make.
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/draft/i);
+    expect(client.calls).toHaveLength(2);
+    expect(client.calls.every((call) => call.operation === 'select')).toBe(true);
+  });
+
+  it('SCRUM32_AC1_returns_401_and_never_queries_without_a_token', async () => {
+    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.SUBMITTED }))]);
+
+    const res = await request(appWith({ client, requireAuth: signedOut }))
+      .post(`/api/event-requests/${REQUEST_ID}/change-requests`)
+      .send({ field: 'venue', details: 'A larger room.' });
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+
+describe('SCRUM-34: the change requests for one event are listed over HTTP', () => {
+  it('SCRUM34_AC4_returns_200_and_a_bare_array', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.SUBMITTED })),
+      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID }),
+      ok([
+        storedChangeRequestRow({ id: 'newer', created_at: '2026-01-13T03:00:00+00:00' }),
+        storedChangeRequestRow({ id: 'older', created_at: '2026-01-12T03:00:00+00:00' }),
+      ]),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .get(`/api/event-requests/${REQUEST_ID}/change-requests`);
+
+    expect(res.status).toBe(200);
+
+    // A bare array, like GET / above: ChangeRequestStatusList maps the
+    // response directly, so a { items: [...] } wrapper would cost a frontend
+    // change and buy nothing. This is also the call that was polling a 404
+    // every fifteen seconds before the route existed.
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(2);
+
+    // Newest first, asked of the database rather than sorted in JS, and scoped
+    // to this event rather than filtered after the fact.
+    expect(client.calls[2].order[0]).toEqual(['created_at', { ascending: false }]);
+    expect(client.calls[2].filters).toEqual([['event_request_id', REQUEST_ID]]);
+  });
+
+  it('SCRUM34_AC4_carries_the_field_label_the_list_renders', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.SUBMITTED })),
+      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID }),
+      ok([storedChangeRequestRow({ change_field: 'venue' })]),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .get(`/api/event-requests/${REQUEST_ID}/change-requests`);
+
+    // The list is the only place fieldLabel and details appear -- the POST
+    // response is toChangeRequest and carries neither, which is why the
+    // frontend refetches after creating one instead of splicing the response
+    // into the list it already has.
+    expect(res.body[0].fieldLabel).toBe('Venue');
+    expect(res.body[0].details).toBe('A larger room, the RSVPs have doubled.');
+
+    // And the internal names survive alongside them, so nothing already
+    // reading changeField breaks.
+    expect(res.body[0].changeField).toBe('venue');
+  });
+
+  it('SCRUM34_AC4_does_not_label_the_rows_with_the_event_status_vocabulary', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.SUBMITTED })),
+      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID }),
+      ok([storedChangeRequestRow({ status: 'outstanding' })]),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .get(`/api/event-requests/${REQUEST_ID}/change-requests`);
+
+    // 'outstanding' is not an event status, so withStatusDisplay would render
+    // it as UNKNOWN on every row of a perfectly healthy list.
+    expect(res.body[0]).not.toHaveProperty('statusDisplay');
+    expect(res.body[0].status).toBe('outstanding');
+  });
+
+  it('SCRUM34_AC4_returns_200_and_an_empty_array_when_there_are_none', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.SUBMITTED })),
+      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID }),
+      ok([]),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .get(`/api/event-requests/${REQUEST_ID}/change-requests`);
+
+    // "None yet" is the ordinary state of a request nobody has needed to
+    // change. A 404 here would make the poll render an error on every healthy
+    // event, which is the worst possible reading of an empty list.
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM34_AC4_returns_404_for_another_organisers_event_rather_than_400', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ organiser_id: OTHER_ORGANISER_ID, status: STATUS.SUBMITTED })),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .get(`/api/event-requests/${REQUEST_ID}/change-requests`);
+
+    // getChangeRequestsForEvent answers 400 for a foreign event and 404 for a
+    // missing one. Named for the reason rather than the number so a later
+    // refactor that "simplifies" the pre-check away is caught by a test that
+    // says why it was there.
+    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(400);
+
+    // One round trip, and the change request table was never read.
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].table).toBe('event_requests');
+  });
+
+  it('SCRUM34_AC4_answers_a_foreign_event_identically_to_a_missing_one', async () => {
+    const foreign = await request(
+      appWith({
+        client: createWritableFakeClient([
+          ok(storedRow({ organiser_id: OTHER_ORGANISER_ID, status: STATUS.SUBMITTED })),
+        ]),
+      }),
+    ).get(`/api/event-requests/${REQUEST_ID}/change-requests`);
+
+    const missing = await request(
+      appWith({ client: createWritableFakeClient([ok(null)]) }),
+    ).get(`/api/event-requests/${REQUEST_ID}/change-requests`);
+
+    // The same indistinguishability GET /:id already proves, restated for the
+    // route that would otherwise leak it -- a caller who can tell the two
+    // apart can enumerate which event ids exist.
+    expect(foreign.status).toBe(missing.status);
+    expect(foreign.body).toEqual(missing.body);
+  });
+
+  it('SCRUM34_AC4_returns_401_and_never_queries_without_a_token', async () => {
+    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.SUBMITTED }))]);
+
+    const res = await request(appWith({ client, requireAuth: signedOut }))
+      .get(`/api/event-requests/${REQUEST_ID}/change-requests`);
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+});

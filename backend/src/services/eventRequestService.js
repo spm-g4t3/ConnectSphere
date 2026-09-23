@@ -18,15 +18,21 @@
  *
  * Deliberately NOT done here:
  *
- *  - No authorisation and no ownership check. Nothing below asks whether the
- *    caller is the Organiser named on the request. That needs the caller's role
- *    and their relationship to the event, both of which arrive with the JWT, so
- *    it belongs in middleware. A service that quietly enforced half of it would
- *    make the other half look unnecessary.
- *  - No saving or editing of an existing draft. That is SCRUM-11, which shares
- *    this table and will add its own function here.
+ *  - No authorisation, and no ownership check except where a function is
+ *    handed an organiserId and says so in its name or signature. The rule is
+ *    worth stating precisely, because it decides what a route still has to do:
+ *    getEventRequestForOrganiser and updateEventRequest take the Organiser and
+ *    enforce it; createEventRequest stamps one; getEventRequestById and
+ *    submitEventRequest take none and check none, so a route calling either of
+ *    those must prove ownership itself first. Role, and the caller's
+ *    relationship to an event, arrive with the JWT and belong in middleware.
+ *    A service that quietly enforced half of it would make the other half look
+ *    unnecessary.
  *  - No status logic of its own. Which moves are legal is answered by
  *    canTransition in src/domain/eventRequestStatus.js; this module asks.
+ *    updateEventRequest is the one exception and says why at its own guard:
+ *    editing is not a transition, so the transition table has nothing to say
+ *    about it.
  *  - No minimum notice before a proposed start, and no timezone conversion.
  *    The first is a business rule the customer has not given; the second would
  *    reinterpret a value the timestamptz column already understands.
@@ -35,6 +41,7 @@
 import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
 import {
   validateCreateEventRequest,
+  validateUpdateEventRequest,
   validateSubmitEventRequest,
 } from '../validation/eventRequestValidation.js';
 import { STATUS, canTransition } from '../domain/eventRequestStatus.js';
@@ -368,6 +375,100 @@ export async function submitEventRequest(id, { client, now = new Date() } = {}) 
     throw new ConflictError(
       `This event request is no longer a draft -- it was most likely ` +
       `submitted by another request a moment ago.`,
+    );
+  }
+
+  if (error) throw translateError(error);
+
+  return toEventRequest(data);
+}
+
+/**
+ * Save an Organiser's edits to their own draft.
+ *
+ * SCRUM-11. Positional order matches venueService.updateVenue(id, changes,
+ * userId), with this module's options bag appended, so the two update
+ * functions on this codebase read the same way round.
+ *
+ * Both validations run before any round trip: a bad body costs nothing, and
+ * the Organiser gets a message about their form rather than a driver message
+ * about a constraint. Existence and ownership are then answered in one call by
+ * getEventRequestForOrganiser, which raises the same NotFoundError for a
+ * request that does not exist and one that belongs to someone else -- see the
+ * note in errors.js on why that is 404 and not 403.
+ *
+ * Three guards, and each is doing separate work:
+ *
+ *  - the status check below turns "the body was fine, the row's state was not"
+ *    into a 409. Asked of the status directly and deliberately NOT routed
+ *    through canTransition: editing is not a transition, the row does not
+ *    move, and ALLOWED_TRANSITIONS therefore has nothing to say about it.
+ *    Asking anyway would be a category error dressed as reuse.
+ *  - .eq('status', 'draft') on the write is the one that matters. The read
+ *    above and this write are two round trips with no transaction spanning
+ *    them, so a submit landing in the gap would otherwise let this write
+ *    mutate a request the Coordinator is already reading. Filtering on the old
+ *    status makes the write itself the check -- the loser matches no row.
+ *  - .eq('organiser_id', ...) can never fire, because organiser_id never
+ *    changes and ownership was proved a moment ago. It is there so the
+ *    statement sent to a deny-all table is *structurally* incapable of
+ *    touching a foreign row, rather than safe only because of a check made
+ *    earlier in a different round trip.
+ *
+ * updated_at and submitted_at are safe by construction rather than by
+ * discipline, which is worth stating so nobody has to re-derive it nervously:
+ * toColumns iterates COLUMN_BY_FIELD, a frozen allow-list of exactly nine
+ * columns. updated_at, submitted_at, status, organiser_id and id are not in
+ * it and no request body can put them there. So the trigger stays the sole
+ * authority on updated_at, and event_requests_submitted_at_matches_status
+ * cannot be violated from here.
+ *
+ * @param {string} id
+ * @param {object} changes      any subset of the request's fields
+ * @param {string} organiserId  from the JWT, via requireAuth -- never the body
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the updated request, in camelCase -- byte for
+ *                            byte the shape create, submit and both reads return
+ * @throws {ValidationError} bad input, an empty change set, or no organiser
+ * @throws {NotFoundError}   no such request, or it is someone else's
+ * @throws {ConflictError}   the request is no longer a draft, whether that was
+ *                           already true or became true mid-flight
+ */
+export async function updateEventRequest(id, changes, organiserId, { client } = {}) {
+  assertOrganiser(organiserId);
+
+  const validated = validateUpdateEventRequest(changes);
+
+  const db = await resolveClient(client);
+
+  const current = await getEventRequestForOrganiser(id, organiserId, { client: db });
+
+  if (current.status !== STATUS.DRAFT) {
+    throw new ConflictError(
+      `An event request with status '${current.status}' can no longer be edited ` +
+      `directly. Request a change against it instead.`,
+    );
+  }
+
+  const { data, error } = await db
+    .from('event_requests')
+    .update(toColumns(validated))
+    .eq('id', id)
+    .eq('organiser_id', organiserId)
+    .eq('status', STATUS.DRAFT)
+    .select()
+    .single();
+
+  // PGRST116 here is the draft guard firing, not a missing request: the row was
+  // read successfully a moment ago and its ownership proved, so the only filter
+  // that can have stopped matching is the status one. Handled at this site
+  // rather than in translateError, which cannot tell this case from an ordinary
+  // empty read -- its own comment says so.
+  if (error?.code === 'PGRST116') {
+    throw new ConflictError(
+      `This event request is no longer a draft -- it was most likely submitted ` +
+      `a moment ago. Reload it before editing again.`,
     );
   }
 

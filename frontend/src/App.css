@@ -18,8 +18,8 @@ button { cursor: pointer; }
 .app-nav a { color: var(--muted); padding: 8px 12px; text-decoration: none; }
 .app-nav a:hover { color: var(--teal); }
 .app-nav__user { align-items: center; display: flex; gap: 16px; font-size: 0.84rem; color: var(--muted); }
-.app-nav button, .dashboard button, .login-form button { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 16px; }
-.app-nav button:hover, .dashboard button:hover, .login-form button:hover { background: var(--teal-dark); }
+.app-nav button, .dashboard button, .login-form button, .venue-search button { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 16px; }
+.app-nav button:hover, .dashboard button:hover, .login-form button:hover, .venue-search button:hover { background: var(--teal-dark); }
 .app-nav button:disabled, .login-form button:disabled { cursor: wait; opacity: 0.65; }
 /* SCRUM-110: .dashboard was missing from the rule above, so "Retiring...",
    the disabled Cancel and a retired row's Edit rendered full-strength teal --
@@ -28,16 +28,16 @@ button { cursor: pointer; }
    one: cursor: wait is right for a login in flight, but a permanently
    disabled Edit is not-allowed, not a wait. */
 .dashboard button:disabled { cursor: not-allowed; opacity: 0.65; }
-.app-nav__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
+.app-nav__error, .venue-search__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
 .auth-success { animation: auth-success-fade 3.5s ease-in-out forwards; background: #e8f7f1; border: 1px solid #b9e2d1; border-radius: 6px; color: #17684f; margin: 18px auto 0; max-width: 1080px; padding: 10px 14px; }
 @keyframes auth-success-fade {
   0%, 100% { opacity: 0; transform: translateY(-6px); }
   10%, 80% { opacity: 1; transform: translateY(0); }
 }
-.login-form, .placeholder-page, .dashboard { margin: 0 auto; max-width: 1080px; padding: clamp(42px, 8vw, 88px) 24px; }
+.login-form, .placeholder-page, .dashboard, .venue-search { margin: 0 auto; max-width: 1080px; padding: clamp(42px, 8vw, 88px) 24px; }
 .login-form { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); margin-top: 9vh; max-width: 440px; padding: 38px; }
 .login-form h1, .placeholder-page h1, .dashboard h1 { color: var(--ink); font-size: clamp(2rem, 4vw, 3.25rem); letter-spacing: -0.05em; margin: 0 0 12px; }
-.login-form label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0; }
+.login-form label, .dashboard--venue-staff .venue-form > label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0; }
 .login-form input { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); padding: 12px; }
 .login-form input:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .login-form button { width: 100%; }
@@ -65,7 +65,23 @@ button { cursor: pointer; }
 /* The rule above makes every .dashboard p muted grey, which would render a
    failed retire in exactly the same voice as the empty-state text. Same
    colour pair as .app-nav__error. */
-.dashboard .venue-catalogue__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+/* NECESSARY, not cosmetic. .dashboard li above forces flex with
+   justify-content: space-between, which on a checkbox row throws the box to
+   one edge of the card and its label to the other with the whole width
+   between them -- unreadable, and unclickable as a pair. The same class of
+   bug SCRUM-110 fixed at :24-30. Scoped to .venue-form so the catalogue's
+   own rows keep the spread layout they want. */
+.dashboard--venue-staff .venue-form li { border-top: 0; display: block; padding: 4px 0; }
+/* History values are raw jsonb turned into text: long joined code lists, a
+   whole week of opening hours, a JSON.stringify of last resort. Without
+   these they overflow the card rather than wrapping, and the <pre> fallback
+   would keep its monospace default and scroll sideways. */
+.dashboard--venue-staff .venue-history__value { color: var(--ink); font-size: 0.86rem; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* changedBy and eventRequestId are unjoined uuids -- no endpoint resolves
+   either to a name, so they are rendered as identifiers and need to read as
+   one rather than as prose. */
+.dashboard--venue-staff code { background: #eef2f1; border-radius: 4px; color: var(--muted); font-size: 0.78rem; padding: 2px 6px; }
 @media (max-width: 720px) {
   .app-nav { align-items: flex-start; flex-wrap: wrap; gap: 14px; }
   .app-nav__links { order: 3; overflow-x: auto; width: 100%; }

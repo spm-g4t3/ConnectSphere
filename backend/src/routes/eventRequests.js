@@ -1,10 +1,12 @@
 /**
  * Event request routes.
  *
- * SCRUM-42, a subtask of SCRUM-14 (Track Event Request Status).
+ * SCRUM-42 (track a request), SCRUM-29 (create one), SCRUM-11 (edit a draft,
+ * and request a change once it is no longer one).
  *
- * The three reads an Event Organiser needs to track a request. Thin wrappers
- * around src/services/eventRequestService.js, with one job of their own:
+ * Everything an Event Organiser does with their own requests. Thin wrappers
+ * around src/services/eventRequestService.js and
+ * src/services/eventChangeRequestService.js, with one job of their own:
  * attaching the Organiser-facing status payload from src/domain/
  * eventRequestStatus.js so the frontend keeps no copy of the status vocabulary.
  *
@@ -21,12 +23,37 @@
  * Both derive from the same getStatusDisplay() call, so there is no second
  * definition to keep in step.
  *
- * Deliberately NOT here: POST /, PATCH /:id and POST /:id/submit. The service
- * already supports create and submit, and frontend/src/services/
- * eventRequestService.js already calls all three -- but they are the route work
- * of SCRUM-29 and SCRUM-11, not of this sub-task. They 404 today and they will
- * 404 after this lands; naming them here is so the omission reads as a decision
- * rather than an oversight.
+ * POST /, PATCH /:id, POST /:id/submit and both change-request paths used to
+ * be listed here as deliberate omissions. They are now mounted: every call
+ * frontend/src/services/eventRequestService.js and changeRequestService.js
+ * make resolves to a real route, and the change-request list that was polling
+ * a 404 every fifteen seconds is served.
+ *
+ * Deliberately NOT here, so each omission still reads as a decision:
+ *
+ *  - No role gate on any route. Every one is scoped by req.user.id against
+ *    organiser_id, so a role check removes no capability ownership has not
+ *    already removed. That is the difference from routes/venues.js, whose gate
+ *    exists because listVenues and getVenueHistory return rows no ownership
+ *    check could scope -- there is no such route here. It would also not be
+ *    free: createEventRequestRouter has no requireRole option and the tests'
+ *    fake authenticator sets no role, so a gate defaulted on would 403
+ *    everything. Residual, named rather than hidden: any authenticated user
+ *    can POST / and own the draft they create. Low harm; if the team wants it
+ *    closed the gate belongs on POST / alone, alongside the requireRole
+ *    option SCRUM-45 will need anyway.
+ *  - No Coordinator-facing routes. Deciding a change request
+ *    (processChangeRequest) and moving a request through the later statuses
+ *    are a different audience with a different gate, and belong with the
+ *    story that adds one.
+ *
+ * Ownership is proved by this router, not assumed from the service. Three of
+ * the routes below open with an explicit getEventRequestForOrganiser call and
+ * each says why at the call site; the short version is that the two services
+ * disagree about what a foreign event is worth -- eventRequestService answers
+ * 404 for both missing and foreign, eventChangeRequestService answers 404 for
+ * missing but 400 for foreign, and 400 is an enumeration oracle. This router
+ * settles it at 404 on the way in.
  */
 
 import express from 'express';
@@ -34,7 +61,14 @@ import express from 'express';
 import {
   listEventRequestsForOrganiser,
   getEventRequestForOrganiser,
+  createEventRequest,
+  updateEventRequest,
+  submitEventRequest,
 } from '../services/eventRequestService.js';
+import {
+  createChangeRequestFromClient,
+  getChangeRequestsForEvent,
+} from '../services/eventChangeRequestService.js';
 import { getStatusDisplay } from '../domain/eventRequestStatus.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { AppError } from '../errors.js';
@@ -151,11 +185,167 @@ export function createEventRequestRouter({
     }
   });
 
+  /**
+   * SCRUM-34 AC4: which of this event's change requests are outstanding, in
+   * progress or processed.
+   *
+   * A bare array, like GET / above, because ChangeRequestStatusList maps over
+   * the response directly. An event with no change requests is 200 [] and not
+   * a 404 -- "none yet" is the ordinary state of a request nobody has needed
+   * to change.
+   *
+   * Deliberately NOT wrapped in withStatusDisplay. That helper speaks the
+   * *event* status vocabulary, and a change request's statuses are its own
+   * ('outstanding', 'in_progress', 'processed'), so it would label every row
+   * UNKNOWN and look like a bug in the data.
+   *
+   * The ownership pre-check is not belt-and-braces. getChangeRequestsForEvent
+   * answers 404 for an event that does not exist but 400 for one belonging to
+   * another Organiser, which tells a caller the difference -- exactly the
+   * enumeration oracle the three routes around it are built to avoid, in the
+   * same router. Fixing it in the service is not available: a hand-run check
+   * script asserts that 400. So it is fixed here and the service's own check
+   * stays as defence in depth.
+   *
+   * Declared before GET /:id for the same reason /:id/status is: the two
+   * cannot actually collide, since /:id matches one segment and this matches
+   * two, but the ordering is what someone adding a route later will copy.
+   */
+  router.get('/:id/change-requests', async (req, res) => {
+    try {
+      await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+
+      const changeRequests = await getChangeRequestsForEvent(
+        req.params.id,
+        req.user.id,
+        { client },
+      );
+
+      res.status(200).json(changeRequests);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
   /** AC1: one request in full, with its status. */
   router.get('/:id', async (req, res) => {
     try {
       const request = await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
       res.status(200).json(withStatusDisplay(request));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  // Writes below the reads, mirroring routes/venues.js. Declaration order is
+  // not load-bearing anywhere in this router -- /:id is one segment and every
+  // /:id/... path is two, so none of them can swallow another, and the two
+  // paths that do coincide differ by method. Worth saying out loud, because
+  // the comment on /:id/status above explains an ordering that *is* copied
+  // deliberately, and a reader could reasonably assume it applies here too.
+
+  /**
+   * SCRUM-29: create a request. It is born a draft; submitting is a separate
+   * call, because SCRUM-10 AC3 says a draft may be saved incomplete.
+   *
+   * 201 with the full request, including statusDisplay, because
+   * EventRequestForm reads saved.id and saved.status straight off the
+   * response and would otherwise have to refetch to learn what it just made.
+   *
+   * The body is passed raw -- no changeSet()-style strip, unlike
+   * routes/venues.js, and the difference is worth naming because a reader
+   * coming from that file will look for one. toColumns in the service is an
+   * allow-list of nine columns built from COLUMN_BY_FIELD, so a body carrying
+   * organiserId, status or id matches nothing and is dropped on the floor.
+   * The organiser is stamped from the token, never from the body.
+   */
+  router.post('/', async (req, res) => {
+    try {
+      const created = await createEventRequest(req.body, req.user.id, { client });
+      res.status(201).json(withStatusDisplay(created));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-11: save edits to a draft.
+   *
+   * 200 and the whole request rather than 204, for the same reason POST /
+   * returns a body: the form reads saved.id and saved.status back.
+   *
+   * No ownership pre-check here, and that is not an inconsistency with the
+   * three routes that have one -- updateEventRequest takes the organiserId
+   * and enforces it itself, answering the same 404 for a missing request and
+   * a foreign one. A 409 means the body was fine but the row is no longer a
+   * draft, either because it was submitted earlier or because a submit landed
+   * between the service's read and its write.
+   */
+  router.patch('/:id', async (req, res) => {
+    try {
+      const saved = await updateEventRequest(
+        req.params.id,
+        req.body,
+        req.user.id,
+        { client },
+      );
+
+      res.status(200).json(withStatusDisplay(saved));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-10 AC4-AC7: submit a draft for review.
+   *
+   * The pre-check is mandatory, not defensive. submitEventRequest takes no
+   * organiserId and checks nothing -- its own header says ownership belongs to
+   * the caller -- so without this line any authenticated Organiser could
+   * submit any other Organiser's draft by guessing its id. It costs a third
+   * round trip, and that is accepted over adding an organiserId parameter to a
+   * service whose header argues at length that it should hold none and against
+   * which 36 tests are written.
+   *
+   * A 400 from here carries details[] listing every gap at once, which is the
+   * whole of AC4; the form renders them as a list.
+   */
+  router.post('/:id/submit', async (req, res) => {
+    try {
+      await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+
+      const submitted = await submitEventRequest(req.params.id, { client });
+      res.status(200).json(withStatusDisplay(submitted));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-32 AC1/AC2: ask for a change to an event already submitted.
+   *
+   * Same ownership pre-check as the GET, for the same reason and against the
+   * same service: createChangeRequest answers 400 for a foreign event and 404
+   * for one that does not exist, so the pre-check is what makes the two
+   * indistinguishable from outside.
+   *
+   * 201, and deliberately without withStatusDisplay -- see the GET above; the
+   * event vocabulary does not describe a change request. The response is
+   * toChangeRequest, which carries no fieldLabel, so the frontend refetches
+   * the list rather than splicing this into it.
+   */
+  router.post('/:id/change-requests', async (req, res) => {
+    try {
+      await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+
+      const created = await createChangeRequestFromClient(
+        req.params.id,
+        req.body,
+        req.user.id,
+        { client },
+      );
+
+      res.status(201).json(created);
     } catch (err) {
       handleError(err, res);
     }

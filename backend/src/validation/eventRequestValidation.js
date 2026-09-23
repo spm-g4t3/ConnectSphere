@@ -80,6 +80,20 @@ const SUBMIT_MANDATORY = [
   'expectedAttendance',
 ];
 
+/**
+ * Nothing at all, and that is the rule rather than an unfinished list.
+ *
+ * SCRUM-11 edits a draft, and an edit says only "change these fields". A field
+ * the Organiser did not touch is not missing from the edit, it is simply not
+ * part of it -- demanding it back on every save would mean a form could never
+ * PATCH one field, which is the only thing a PATCH is for.
+ *
+ * Empty and not simply reusing CREATE_MANDATORY: eventName still may not be
+ * *cleared*, but that is a rule about a value that arrived, not about one that
+ * has to arrive, and it is enforced separately below for exactly that reason.
+ */
+const UPDATE_MANDATORY = [];
+
 
 /** A date with no time of day at all. Checked first so it can be named. */
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -384,6 +398,72 @@ export function validateCreateEventRequest(input) {
   const { normalised } = collectEventRequest(errors, input, CREATE_MANDATORY);
 
   throwIfInvalid(errors);
+  return normalised;
+}
+
+/**
+ * Validate input for saving changes to an existing draft.
+ *
+ * SCRUM-11. The third mandatory list is the entire extension -- everything
+ * else is the same collection pass creation and submission already share,
+ * which is this module's thesis at the top of the file. Sitting between
+ * create and submit here because create / update / submit is the order a
+ * request actually moves through.
+ *
+ * Every field is optional, so the two rules beyond the create path are both
+ * about what an edit may *not* say:
+ *
+ *  - eventName may be changed but not removed. 001 makes event_name not null
+ *    and a request still has to be findable in the Organiser's own list, so
+ *    an edit that empties it is refused rather than written and bounced by
+ *    the column constraint a round trip later.
+ *  - an edit that changes nothing is refused, matching validateUpdateVenue.
+ *    It is not pedantry: toColumns({}) is {}, so the service would issue
+ *    .update({}), whose PostgREST behaviour is unspecified and untranslated
+ *    -- an ambiguous 500 where a precise 400 was available. It costs the real
+ *    client nothing, because EventRequestForm always sends eventName, so it
+ *    only ever catches a caller bug.
+ *
+ * KNOWN LIMITATION, recorded rather than accidental: a PATCH cannot *clear*
+ * an optional field. collectEventRequest treats an explicit null as "not
+ * answered" and leaves the key off the copy entirely, which is the same
+ * semantics the create path documents and depends on. Giving "clear this" a
+ * wire representation of its own is a later decision -- the frontend sends
+ * undefined for an untouched field anyway, so nothing is blocked on it today.
+ *
+ * @param {object} changes  any subset of validateCreateEventRequest's fields
+ * @returns {object} a normalised copy containing only the supplied fields
+ * @throws {ValidationError} listing every problem found, not just the first
+ */
+export function validateUpdateEventRequest(changes) {
+  assertObject(changes);
+
+  const errors = createErrorCollector();
+  const { normalised } = collectEventRequest(errors, changes, UPDATE_MANDATORY);
+
+  // Tested against the RAW value, not the normalised one, and only for the two
+  // shapes that actually mean "clear this": an explicit null, and a string
+  // that trims to nothing. Normalised would be the wrong thing to test --
+  // checkText already returns null for { eventName: 42 } having recorded "must
+  // be text", so this would pile a contradictory second message onto a fault
+  // that has already been named correctly.
+  const rawName = changes.eventName;
+  if (rawName === null || (typeof rawName === 'string' && rawName.trim() === '')) {
+    errors.add('eventName', 'cannot be blank -- omit it to leave the name unchanged');
+  }
+
+  throwIfInvalid(errors);
+
+  // Deliberately after the field faults, unlike validateUpdateVenue which
+  // checks first. A caller sending { expectedAttendance: 'lots' } has supplied
+  // a change; the useful answer is what is wrong with it, not that there was
+  // nothing there. Counted on the normalised copy rather than the raw keys so
+  // that { somethingUnknown: 1 } is caught too -- an unrecognised key is not a
+  // change, because toColumns would drop it and the write would be empty.
+  if (Object.keys(normalised).length === 0) {
+    throw new ValidationError('Invalid event request details -- no changes supplied');
+  }
+
   return normalised;
 }
 

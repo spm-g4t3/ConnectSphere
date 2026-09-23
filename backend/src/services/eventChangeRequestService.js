@@ -53,7 +53,6 @@
  * typed error, the same division venueService.js uses.
  */
 
-import { supabase } from '../config/supabaseClient.js';
 import { ValidationError, NotFoundError } from '../errors.js';
 import {
   validateCreateChangeRequest,
@@ -62,6 +61,38 @@ import {
 } from '../validation/eventChangeRequestValidation.js';
 import { STATUS } from '../domain/eventRequestStatus.js';
 import { CHANGE_FIELD_LABEL } from '../domain/eventChangeField.js';
+
+/**
+ * Resolve the Supabase client, importing the default one only if needed.
+ *
+ * Deliberately character-identical to resolveClient in eventRequestService.js,
+ * and here for the same reason: src/config/supabaseClient.js throws at import
+ * time when SUPABASE_URL or SUPABASE_SECRET_KEY is missing -- on purpose, so a
+ * misconfigured server fails at startup rather than on its first query. This
+ * module used to import it statically, which meant that any module importing
+ * this one inherited that throw. That was survivable while nothing did; it
+ * stops being survivable the moment a router imports this service, because an
+ * import-time throw fails the whole test *file* at collection rather than
+ * failing one test, and takes every unrelated case in it down too.
+ *
+ * Deferring to a dynamic import reached only when no client was supplied keeps
+ * production behaviour identical: ESM caches the module, so what comes back is
+ * the same object identity the static import produced, one resolution on the
+ * first call and nothing afterwards. The only observable difference is *when* a
+ * missing-.env throw fires -- import time becomes first call.
+ *
+ * The seam is for testing, not for configuration. There is still exactly one
+ * real client, and it is still created in exactly one place.
+ *
+ * @param {object} [client] a client supplied by the caller, usually a test
+ * @returns {Promise<object>} that client, or the shared default one
+ */
+async function resolveClient(client) {
+  if (client) return client;
+
+  const { supabase } = await import('../config/supabaseClient.js');
+  return supabase;
+}
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -156,11 +187,13 @@ function toOrganiserView(row) {
  * @param {string} input.changeField
  * @param {string} input.requestedChange
  * @param {string} organiserId  the Organiser making the request
+ * @param {object} [options]
+ * @param {object} [options.client]  Supabase client; the shared one by default
  * @returns {Promise<object>} the created change request
  * @throws {ValidationError} bad input, a draft event, or someone else's event
  * @throws {NotFoundError} the event does not exist
  */
-export async function createChangeRequest(input, organiserId) {
+export async function createChangeRequest(input, organiserId, { client } = {}) {
   if (typeof organiserId !== 'string' || organiserId.trim() === '') {
     // Not part of the request body -- this comes from the caller's own
     // identity, so a missing value is the caller's bug, not the Organiser's.
@@ -169,10 +202,14 @@ export async function createChangeRequest(input, organiserId) {
 
   const request = validateCreateChangeRequest(input);
 
+  // Resolved after the cheap local guards, not before, so a bad body still
+  // costs no client resolution and no round trip.
+  const db = await resolveClient(client);
+
   // Loaded fresh rather than trusted from the caller: status and ownership
   // are exactly what is being checked, so they have to come from what is
   // actually stored.
-  const { data: event, error: fetchError } = await supabase
+  const { data: event, error: fetchError } = await db
     .from('event_requests')
     .select('id, organiser_id, status')
     .eq('id', request.eventRequestId)
@@ -189,7 +226,7 @@ export async function createChangeRequest(input, organiserId) {
     throw new ValidationError('Only the event organiser may request a change to this event');
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('event_change_requests')
     .insert({
       event_request_id: request.eventRequestId,
@@ -222,16 +259,28 @@ export async function createChangeRequest(input, organiserId) {
  * @param {string} payload.field    which piece of info/arrangement changes
  * @param {string} payload.details  the new value, or a description of the change
  * @param {string} organiserId  the Organiser making the request
+ * @param {object} [options]
+ * @param {object} [options.client]  forwarded verbatim to createChangeRequest
  * @returns {Promise<object>} same shape as createChangeRequest
  * @throws {ValidationError} bad input, a draft event, or someone else's event
  * @throws {NotFoundError} the event does not exist
  */
-export async function createChangeRequestFromClient(eventRequestId, payload, organiserId) {
+export async function createChangeRequestFromClient(
+  eventRequestId,
+  payload,
+  organiserId,
+  { client } = {},
+) {
   const { field, details } = payload && typeof payload === 'object' ? payload : {};
 
+  // Forwarded rather than resolved here. This function makes no query of its
+  // own, so resolving would mean resolving twice -- and, worse, a caller that
+  // supplied a client would find it silently ignored by the one function most
+  // likely to be reached from a route.
   return createChangeRequest(
     { eventRequestId, changeField: field, requestedChange: details },
     organiserId,
+    { client },
   );
 }
 
@@ -244,20 +293,24 @@ export async function createChangeRequestFromClient(eventRequestId, payload, org
  *
  * @param {string} eventRequestId
  * @param {string} organiserId  the Organiser asking to see them
+ * @param {object} [options]
+ * @param {object} [options.client]  Supabase client; the shared one by default
  * @returns {Promise<object[]>} each item usable either by its internal
  *   names (changeField, requestedChange) or the Organiser-facing ones
  *   (fieldLabel, details, status) -- see toOrganiserView
  * @throws {ValidationError} organiserId missing, or the event belongs to someone else
  * @throws {NotFoundError} the event does not exist
  */
-export async function getChangeRequestsForEvent(eventRequestId, organiserId) {
+export async function getChangeRequestsForEvent(eventRequestId, organiserId, { client } = {}) {
   if (typeof organiserId !== 'string' || organiserId.trim() === '') {
     throw new ValidationError('organiserId is required');
   }
 
+  const db = await resolveClient(client);
+
   // Same "load it fresh, do not trust the caller" reasoning as
   // createChangeRequest: ownership is exactly what is being checked.
-  const { data: event, error: fetchError } = await supabase
+  const { data: event, error: fetchError } = await db
     .from('event_requests')
     .select('id, organiser_id')
     .eq('id', eventRequestId)
@@ -270,7 +323,7 @@ export async function getChangeRequestsForEvent(eventRequestId, organiserId) {
     throw new ValidationError('Only the event organiser may view its change requests');
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('event_change_requests')
     .select('*')
     .eq('event_request_id', eventRequestId)
@@ -295,12 +348,14 @@ export async function getChangeRequestsForEvent(eventRequestId, organiserId) {
  *
  * @param {string} changeRequestId
  * @param {string} organiserId  the Organiser asking to see it
+ * @param {object} [options]
+ * @param {object} [options.client]  Supabase client; the shared one by default
  * @returns {Promise<object>} same shape as an item from getChangeRequestsForEvent
  * @throws {ValidationError} organiserId missing, changeRequestId not
  *   id-shaped, or the request belongs to someone else's event
  * @throws {NotFoundError} no change request exists with that id
  */
-export async function getChangeRequestById(changeRequestId, organiserId) {
+export async function getChangeRequestById(changeRequestId, organiserId, { client } = {}) {
   if (typeof organiserId !== 'string' || organiserId.trim() === '') {
     throw new ValidationError('organiserId is required');
   }
@@ -312,10 +367,12 @@ export async function getChangeRequestById(changeRequestId, organiserId) {
     throw new ValidationError('changeRequestId must be a valid id');
   }
 
+  const db = await resolveClient(client);
+
   // event_requests is embedded through the event_request_id foreign key so
   // ownership can be checked in the same round trip, the same technique
   // venueService.js uses to pull in a venue's attribute tables.
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('event_change_requests')
     .select('*, event_requests ( organiser_id )')
     .eq('id', changeRequestId)
@@ -353,12 +410,19 @@ export async function getChangeRequestById(changeRequestId, organiserId) {
  * @param {string} decisionInput.decision        'approved' | 'rejected'
  * @param {string} [decisionInput.decisionNotes]  required when rejecting
  * @param {string} processedBy  who is deciding
+ * @param {object} [options]
+ * @param {object} [options.client]  Supabase client; the shared one by default
  * @returns {Promise<object>} the change request, updated with its outcome
  * @throws {ValidationError} bad input, an already-processed request, or a
  *   missing rejection reason
  * @throws {NotFoundError} no change request exists with that id
  */
-export async function processChangeRequest(changeRequestId, decisionInput, processedBy) {
+export async function processChangeRequest(
+  changeRequestId,
+  decisionInput,
+  processedBy,
+  { client } = {},
+) {
   if (typeof processedBy !== 'string' || processedBy.trim() === '') {
     // Not part of decisionInput -- this comes from the caller's own
     // identity, so a missing value is the caller's bug, not the reviewer's.
@@ -370,7 +434,9 @@ export async function processChangeRequest(changeRequestId, decisionInput, proce
     ...(decisionInput && typeof decisionInput === 'object' ? decisionInput : {}),
   });
 
-  const { data, error } = await supabase.rpc('process_change_request', {
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('process_change_request', {
     p_change_request_id: decision.changeRequestId,
     p_decision: decision.decision,
     p_decision_notes: decision.decisionNotes,

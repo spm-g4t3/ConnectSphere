@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { normaliseRole } from "../auth/normaliseRole";
 
 const NAV_LINKS_BY_ROLE = {
   EVENT_ORGANISER: [
@@ -14,14 +15,21 @@ const NAV_LINKS_BY_ROLE = {
   EVENT_COORDINATOR: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/events", label: "Events" },
-    { to: "/venue-search", label: "Venue Bookings" },
+    // "Find a Venue", not "Venue Bookings". The route resolves to VenueSearch,
+    // which searches active venues — there is no venue-booking feature behind
+    // it, so the old label promised something that does not exist. Same target
+    // and same label as the Organiser's link, because it is the same page.
+    { to: "/venue-search", label: "Find a Venue" },
   ],
   VENUE_STAFF: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/venue-catalogue", label: "Venue Catalogue" },
     { to: "/booking-requests", label: "Booking Requests" },
   ],
-  TECHNICAL_SUPPORT: [
+  // TECHNICAL_SUPPORT_STAFF, not TECHNICAL_SUPPORT. normaliseRole yields the
+  // full role name from the token, so the short key matched nothing and this
+  // whole block never rendered — a Technical Support user saw no nav at all.
+  TECHNICAL_SUPPORT_STAFF: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/tickets", label: "Support Tickets" },
     { to: "/equipment", label: "Equipment Requests" },
@@ -35,12 +43,7 @@ export default function Navigation() {
 
   if (!user) return null;
 
-  const role = String(user.role || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, "_")
-    .replace("ORGANIZER", "ORGANISER");
-  const links = NAV_LINKS_BY_ROLE[role] || [];
+  const links = NAV_LINKS_BY_ROLE[normaliseRole(user.role)] || [];
 
   async function handleLogout() {
     setLoggingOut(true);

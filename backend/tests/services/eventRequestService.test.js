@@ -851,3 +851,394 @@ describe('AC1: the list is usable without credentials', () => {
     expect(client.calls).toHaveLength(1);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-11 -- saving an Organiser's edits to their own draft
+// ---------------------------------------------------------------------------
+/**
+ * Both bindings are imported here rather than added to the import block at the
+ * top of the file, and that is deliberate rather than untidy. The rest of this
+ * suite is the regression gate for SCRUM-10, SCRUM-31 and SCRUM-42, and the
+ * one thing that must be provable at a glance is that nothing above this line
+ * moved -- including an import line, which is the only part of a file an
+ * append can otherwise disturb. An ESM import declaration is hoisted wherever
+ * it is written, so these bind exactly as they would at the top.
+ *
+ * The second import is not for any test to call. It IS the test: see the seam
+ * guard at the bottom of this file.
+ */
+import { updateEventRequest } from '../../src/services/eventRequestService.js';
+import * as eventChangeRequestService from '../../src/services/eventChangeRequestService.js';
+
+
+describe('SCRUM-11: a draft is updated in place', () => {
+  it('SCRUM11_AC1_writes_only_the_columns_the_organiser_changed', async () => {
+    const client = createFakeClient([
+      ok(storedRow()),
+      ok(storedRow({ event_name: 'IS212 Industry Evening' })),
+    ]);
+
+    const saved = await updateEventRequest(
+      REQUEST_ID,
+      { eventName: 'IS212 Industry Evening' },
+      ORGANISER_ID,
+      { client },
+    );
+
+    // Exactly one column, not nine. A PATCH that resent every field would let
+    // a stale tab silently revert an answer somebody else had just corrected,
+    // and would make the empty-change-set rule pointless.
+    expect(client.calls[1].operation).toBe('update');
+    expect(client.calls[1].payload).toEqual({ event_name: 'IS212 Industry Evening' });
+    expect(saved.eventName).toBe('IS212 Industry Evening');
+  });
+
+  it('SCRUM11_AC1_reads_for_ownership_before_it_writes', async () => {
+    const client = createFakeClient([ok(storedRow()), ok(storedRow())]);
+
+    await updateEventRequest(REQUEST_ID, { purpose: 'Careers.' }, ORGANISER_ID, { client });
+
+    // Two round trips, in this order. The read is what answers existence and
+    // ownership together with the non-oracle 404; without it the write would
+    // be the first thing that touched the row, and a miss would be reported
+    // as a conflict rather than a not-found.
+    expect(client.calls).toHaveLength(2);
+    expect(client.calls[0].operation).toBe('select');
+    expect(client.calls[0].filters).toEqual([['id', REQUEST_ID]]);
+    expect(client.calls[1].operation).toBe('update');
+  });
+
+  it('SCRUM11_AC1_guards_the_write_on_id_owner_and_draft_status', async () => {
+    const client = createFakeClient([ok(storedRow()), ok(storedRow())]);
+
+    await updateEventRequest(REQUEST_ID, { purpose: 'Careers.' }, ORGANISER_ID, { client });
+
+    // Asserted as a whole rather than with toContainEqual, because each filter
+    // is doing separate work and dropping any one of them is a different bug.
+    //
+    //  - id narrows to the row.
+    //  - organiser_id can never fire, because organiser_id never changes and
+    //    ownership was proved a moment ago. It is there so the statement sent
+    //    to a deny-all table is structurally incapable of touching a foreign
+    //    row, rather than safe only because of a check made in an earlier
+    //    round trip.
+    //  - status is the one that matters. The read above and this write are two
+    //    round trips with no transaction spanning them, so a submit landing in
+    //    the gap would otherwise let this write mutate a request a Coordinator
+    //    is already reading.
+    expect(client.calls[1].filters).toEqual([
+      ['id', REQUEST_ID],
+      ['organiser_id', ORGANISER_ID],
+      ['status', STATUS.DRAFT],
+    ]);
+  });
+
+  it('SCRUM11_AC1_returns_the_same_shape_create_and_submit_return', async () => {
+    const client = createFakeClient([ok(storedRow()), ok(storedRow())]);
+
+    const saved = await updateEventRequest(
+      REQUEST_ID,
+      { eventName: 'IS212 Industry Night' },
+      ORGANISER_ID,
+      { client },
+    );
+
+    // No new shape enters the system. A route can hand this to the same
+    // withStatusDisplay projection it uses for every other event-shaped
+    // response, and the form reads saved.id and saved.status off it.
+    expect(saved).toMatchObject({
+      id: REQUEST_ID,
+      organiserId: ORGANISER_ID,
+      status: STATUS.DRAFT,
+    });
+    expect(Object.keys(saved).some((key) => key.includes('_'))).toBe(false);
+  });
+
+  it('SCRUM11_AC1_cannot_be_made_to_write_status_or_the_timestamp_columns', async () => {
+    const client = createFakeClient([ok(storedRow()), ok(storedRow())]);
+
+    await updateEventRequest(
+      REQUEST_ID,
+      {
+        eventName: 'IS212 Industry Night',
+        status: STATUS.APPROVED,
+        organiserId: OTHER_ORGANISER_ID,
+        id: 'a-chosen-id',
+        submittedAt: '2026-01-01T00:00:00+00:00',
+        updatedAt: '2026-01-01T00:00:00+00:00',
+      },
+      ORGANISER_ID,
+      { client },
+    );
+
+    // Safe by construction rather than by discipline, and worth pinning so
+    // nobody has to re-derive it nervously: toColumns iterates COLUMN_BY_FIELD,
+    // a frozen allow-list of exactly nine columns, and none of these is in it.
+    // So the trigger stays sole authority on updated_at, and
+    // event_requests_submitted_at_matches_status cannot be violated from here.
+    // If someone ever "simplifies" toColumns into a spread, this is the test
+    // that fails.
+    expect(client.calls[1].payload).toEqual({ event_name: 'IS212 Industry Night' });
+  });
+
+  it('SCRUM11_AC1_hides_another_organisers_draft_behind_a_not_found', async () => {
+    const client = createFakeClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
+
+    const err = await errorFrom(
+      updateEventRequest(REQUEST_ID, { eventName: 'Not mine' }, ORGANISER_ID, { client }),
+    );
+
+    // 404 and not 403. A 403 would confirm the id exists, which turns this
+    // into an enumeration oracle over a table whose row level security is
+    // deny-all specifically so that the API can be the only gate.
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.status).toBe(404);
+
+    // The read happened and the write did not. This is the assertion that
+    // matters: a foreign row must not be written to and then rolled back in
+    // the caller's imagination.
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].operation).toBe('select');
+  });
+
+  it('SCRUM11_AC1_answers_a_foreign_draft_exactly_as_it_answers_a_missing_one', async () => {
+    const foreign = createFakeClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
+    const missing = createFakeClient([ok(null)]);
+
+    const foreignErr = await errorFrom(
+      updateEventRequest(REQUEST_ID, { eventName: 'x' }, ORGANISER_ID, { client: foreign }),
+    );
+    const missingErr = await errorFrom(
+      updateEventRequest(REQUEST_ID, { eventName: 'x' }, ORGANISER_ID, { client: missing }),
+    );
+
+    // Identical down to the message. A different wording for "exists but is
+    // not yours" would be the same oracle the status code avoids.
+    expect(foreignErr.message).toBe(missingErr.message);
+    expect(foreignErr.status).toBe(missingErr.status);
+  });
+
+  it('SCRUM11_AC1_refuses_to_edit_a_request_that_is_no_longer_a_draft', async () => {
+    const client = createFakeClient([ok(storedRow({ status: STATUS.UNDER_REVIEW }))]);
+
+    const err = await errorFrom(
+      updateEventRequest(REQUEST_ID, { eventName: 'Renamed' }, ORGANISER_ID, { client }),
+    );
+
+    // ConflictError, not ValidationError: the body was fine, the row's state
+    // was not, and ownership is already proved so there is no id to protect.
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.status).toBe(409);
+
+    // The message has to carry the way out, which no status code can: editing
+    // is closed, but requesting a change is not.
+    expect(err.message).toMatch(/request a change/i);
+
+    // And it is a gate, not a filter that happens to match nothing.
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM11_AC1_does_not_ask_the_transition_table_whether_an_edit_is_legal', async () => {
+    // The status check is written as `status !== 'draft'` and deliberately NOT
+    // routed through canTransition. Editing is not a transition -- the row
+    // does not move -- so ALLOWED_TRANSITIONS has nothing to say about it, and
+    // asking anyway would be a category error dressed as reuse.
+    //
+    // This is what that costs if it were done: draft -> draft is not an
+    // allowed transition, so a canTransition-based guard would refuse every
+    // single edit to every single draft. The assertion below is the proof that
+    // the rule was not reused, rather than a comment claiming it was not.
+    expect(canTransition(STATUS.DRAFT, STATUS.DRAFT)).toBe(false);
+
+    const client = createFakeClient([ok(storedRow()), ok(storedRow())]);
+
+    await expect(
+      updateEventRequest(REQUEST_ID, { eventName: 'Renamed' }, ORGANISER_ID, { client }),
+    ).resolves.toMatchObject({ id: REQUEST_ID });
+  });
+
+  it('SCRUM11_AC1_turns_a_guard_that_matched_no_row_into_a_conflict', async () => {
+    const client = createFakeClient([
+      ok(storedRow()),
+      dbError('PGRST116', 'JSON object requested, multiple (or no) rows returned'),
+    ]);
+
+    const err = await errorFrom(
+      updateEventRequest(REQUEST_ID, { eventName: 'Renamed' }, ORGANISER_ID, { client }),
+    );
+
+    // The race, and the case that makes the status filter meaningful rather
+    // than decorative. The row was read successfully a moment ago and its
+    // ownership proved, so the only filter that can have stopped matching is
+    // the status one -- a submit landed in the gap. 409, and the message tells
+    // the Organiser to reload, because their copy of the request is now stale
+    // in a way no retry of the same PATCH would fix.
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.status).toBe(409);
+    expect(err.message).toMatch(/no longer/i);
+    expect(err.message).toMatch(/reload/i);
+
+    // Handled at the call site and not in translateError, which cannot tell a
+    // fired guard from an ordinary empty read -- its own comment says so. If
+    // it were translated centrally this would arrive as a 404 telling the
+    // Organiser their own request had vanished.
+    expect(err).not.toBeInstanceOf(NotFoundError);
+  });
+
+  it('SCRUM11_AC1_refuses_to_query_at_all_without_an_organiser', async () => {
+    const client = createFakeClient([ok(storedRow()), ok(storedRow())]);
+
+    const err = await errorFrom(
+      updateEventRequest(REQUEST_ID, { eventName: 'Renamed' }, undefined, { client }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toEqual(['organiserId']);
+
+    // The point of the assertion: a missing organiser must not reach the
+    // database as an update whose only remaining filters are id and status.
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM11_AC1_refuses_to_query_at_all_for_an_empty_change_set', async () => {
+    const client = createFakeClient([ok(storedRow()), ok(storedRow())]);
+
+    const err = await errorFrom(
+      updateEventRequest(REQUEST_ID, {}, ORGANISER_ID, { client }),
+    );
+
+    // toColumns({}) is {}, so without this the service would issue
+    // .update({}), whose PostgREST behaviour is unspecified and untranslated
+    // -- an ambiguous 500 where a precise 400 was available.
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM11_AC1_refuses_to_query_at_all_for_a_field_fault', async () => {
+    const client = createFakeClient([ok(storedRow()), ok(storedRow())]);
+
+    const err = await errorFrom(
+      updateEventRequest(
+        REQUEST_ID,
+        { proposedStart: '2026-06-01T09:00' },
+        ORGANISER_ID,
+        { client },
+      ),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toContain('proposedStart');
+
+    // Both validations run before the client is even resolved, so a bad body
+    // costs no round trip and the Organiser gets a message about their form
+    // rather than a driver message about a constraint.
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM11_AC1_translates_a_check_constraint_failure_into_a_validation_error', async () => {
+    const client = createFakeClient([
+      ok(storedRow()),
+      dbError('23514', 'new row violates check constraint "event_requests_dates_ordered"'),
+    ]);
+
+    const err = await errorFrom(
+      updateEventRequest(
+        REQUEST_ID,
+        { proposedEnd: '2026-06-02T17:00:00+08:00' },
+        ORGANISER_ID,
+        { client },
+      ),
+    );
+
+    // The constraints in 001 and 005 stay the backstop for anything validation
+    // deliberately does not check -- here, an end time compared against a
+    // start the caller never sent. Untranslated it would reach the API as a
+    // 500 carrying a driver message naming a constraint.
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+  });
+
+  it('SCRUM11_AC1_leaves_an_unrecognised_database_failure_untyped', async () => {
+    const client = createFakeClient([
+      ok(storedRow()),
+      dbError('42P01', 'relation "event_requests" does not exist'),
+    ]);
+
+    const err = await errorFrom(
+      updateEventRequest(REQUEST_ID, { eventName: 'Renamed' }, ORGANISER_ID, { client }),
+    );
+
+    // An unrecognised code is not the caller's fault and there is nothing for
+    // them to correct, so it must not reach the API dressed as a 400 telling
+    // an Organiser to fix a form they filled in correctly.
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err).not.toBeInstanceOf(ConflictError);
+    expect(err.status).toBeUndefined();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// The change request service's client seam
+// ---------------------------------------------------------------------------
+/**
+ * A sibling to "AC3: the service is usable without credentials" above, and the
+ * cheapest insurance in this suite.
+ *
+ * eventChangeRequestService.js used to import { supabase } statically, and
+ * src/config/supabaseClient.js throws at import time without a .env. Because
+ * src/routes/eventRequests.js now imports that service, a return to the static
+ * import would take down every route test in this repository -- not by failing
+ * an assertion, but by failing to collect the file at all, which is the
+ * confusing kind of red.
+ *
+ * The static import at the top of this block IS the assertion. It runs when
+ * this file is loaded, before any test body, so if the seam is ever undone
+ * this suite stops collecting and says so in one line. The expectations below
+ * are only there to give the failure somewhere to be reported from, and to
+ * catch the narrower regression of an export being dropped or renamed.
+ */
+describe('SCRUM-11: the change request service is usable without credentials', () => {
+  it('SCRUM11_AC1_loads_the_change_request_service_with_no_credentials_configured', () => {
+    // All five, not just the two the routes call. One surviving `supabase`
+    // reference anywhere in that module keeps the static import alive and the
+    // seam buys nothing, so the guard has to name the whole surface.
+    expect(typeof eventChangeRequestService.createChangeRequest).toBe('function');
+    expect(typeof eventChangeRequestService.createChangeRequestFromClient).toBe('function');
+    expect(typeof eventChangeRequestService.getChangeRequestsForEvent).toBe('function');
+    expect(typeof eventChangeRequestService.getChangeRequestById).toBe('function');
+    expect(typeof eventChangeRequestService.processChangeRequest).toBe('function');
+  });
+
+  it('SCRUM11_AC1_exports_nothing_from_the_change_request_service_but_functions', () => {
+    // A module-level `const supabase = createClient(...)` re-exported by
+    // accident would be an object, not a function, and would drag the same
+    // import-time throw back in by a different route. Checking the whole
+    // namespace rather than a list keeps this true for exports added later.
+    const exported = Object.entries(eventChangeRequestService)
+      .filter(([, value]) => typeof value !== 'function');
+
+    expect(exported).toEqual([]);
+  });
+
+  it('SCRUM11_AC1_uses_a_supplied_client_rather_than_resolving_the_default_one', async () => {
+    // The other half of the seam: resolveClient must return the caller's
+    // client without reaching for supabaseClient.js at all. If it fell through
+    // to the dynamic import this call would throw for a missing SUPABASE_URL
+    // rather than recording a round trip against the fake.
+    const client = createFakeClient([ok(null)]);
+
+    const err = await errorFrom(
+      eventChangeRequestService.getChangeRequestsForEvent(REQUEST_ID, ORGANISER_ID, { client }),
+    );
+
+    // A missing event, which is this fake's answer -- the point is that the
+    // query reached the fake at all.
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].table).toBe('event_requests');
+  });
+});
