@@ -1242,3 +1242,250 @@ describe('SCRUM-11: the change request service is usable without credentials', (
     expect(client.calls[0].table).toBe('event_requests');
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-45 -- the Event Coordinator's review queue
+// ---------------------------------------------------------------------------
+/**
+ * A third fake, and a deliberate one.
+ *
+ * createFakeClient above has no .in(), and neither do the equivalents in
+ * tests/routes/eventRequests.test.js or tests/routes/venues.test.js, because
+ * nothing they were written for uses it. Adding .in() there would change a
+ * fixture that dozens of passing tests are written against; adding it here
+ * changes nothing that already passes. That is the same reasoning
+ * createWritableFakeClient gives for existing beside the read-only fake in the
+ * route suite.
+ *
+ * It records .in() into its own field rather than into `filters`, which is
+ * what lets the first test below assert two things at once: that the status
+ * IN list is present, and that `filters` -- the list every other read in this
+ * module fills with an organiser_id -- is empty. The absence is the bug being
+ * fixed, so it has to be observable, not merely unmentioned.
+ *
+ * .eq() is kept so that one fake can serve both listEventRequestsForReview and
+ * listEventRequestsForOrganiser, which is how the column comparison below runs
+ * them against the same builder instead of copying COLUMNS into a test.
+ *
+ * The imports are appended for the reason the SCRUM-11 block above gives for
+ * its own: an ESM import is hoisted wherever it is written, and nothing above
+ * this line may move.
+ */
+import { listEventRequestsForReview } from '../../src/services/eventRequestService.js';
+import { COORDINATOR_QUEUE_STATUSES } from '../../src/domain/eventRequestStatus.js';
+
+
+function createQueueFakeClient(results = []) {
+  const queue = [...results];
+  const calls = [];
+
+  function settle(call) {
+    if (queue.length === 0) {
+      throw new Error(
+        `fake client: no result queued for ${call.operation} on ${call.table}`,
+      );
+    }
+    return Promise.resolve(queue.shift());
+  }
+
+  function builder(call) {
+    const chain = {
+      select(columns = '*') {
+        call.select = columns;
+        return chain;
+      },
+      eq(column, value) {
+        call.filters.push([column, value]);
+        return chain;
+      },
+      in(column, values) {
+        // Recorded as its own list, not appended to filters: a test has to be
+        // able to say "there is an IN on status AND there is no eq at all".
+        call.inFilters.push([column, values]);
+        return chain;
+      },
+      order(column, options) {
+        call.order.push([column, options]);
+        return chain;
+      },
+      single: () => settle(call),
+      maybeSingle: () => settle(call),
+      then: (resolve, reject) => settle(call).then(resolve, reject),
+    };
+    return chain;
+  }
+
+  return {
+    calls,
+    from(table) {
+      const call = {
+        table,
+        operation: 'select',
+        payload: null,
+        select: null,
+        filters: [],
+        inFilters: [],
+        order: [],
+      };
+      calls.push(call);
+      return builder(call);
+    },
+  };
+}
+
+
+describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers', () => {
+  it('SCRUM45_AC1_filters_on_the_three_review_statuses_and_nothing_else', async () => {
+    const client = createQueueFakeClient([ok([storedRow({ status: STATUS.SUBMITTED })])]);
+
+    await listEventRequestsForReview({ client });
+
+    const [call] = client.calls;
+    expect(call.table).toBe('event_requests');
+    expect(call.operation).toBe('select');
+
+    // Half one: the status filter is present, and it is the domain's list
+    // rather than three literals copied into the service.
+    expect(call.inFilters).toEqual([['status', COORDINATOR_QUEUE_STATUSES]]);
+
+    // Half two, and the more important half: there is no organiser filter at
+    // all. Every other read in this module narrows to one organiser_id, and
+    // that is precisely the reported bug -- a submitted request never reached
+    // the Coordinator side because no read existed that was not owner-scoped.
+    // An empty `filters` is what "this query crosses every Organiser" looks
+    // like at the seam.
+    expect(call.filters).toEqual([]);
+  });
+
+  it('SCRUM45_AC1_selects_the_same_columns_as_the_organisers_own_list', async () => {
+    const client = createQueueFakeClient([
+      ok([storedRow({ status: STATUS.SUBMITTED })]),
+      ok([storedRow()]),
+    ]);
+
+    await listEventRequestsForReview({ client });
+    await listEventRequestsForOrganiser(ORGANISER_ID, { client });
+
+    const [queueCall, organiserCall] = client.calls;
+
+    // Both run against one fake and their column lists are compared, rather
+    // than COLUMNS being copied into this file where it could drift. A queue
+    // row being byte-identical in shape to an organiser row is what lets the
+    // Coordinator UI render a full detail panel from a row it already holds,
+    // instead of paying for a second route -- so it is a decision worth
+    // pinning, not an implementation detail.
+    expect(queueCall.select).toBe(organiserCall.select);
+    expect(queueCall.select).toMatch(/organiser_id/);
+    expect(queueCall.select).not.toBe('*');
+  });
+
+  it('SCRUM45_AC1_returns_requests_belonging_to_more_than_one_organiser', async () => {
+    const client = createQueueFakeClient([
+      ok([
+        storedRow({ id: 'a', organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
+        storedRow({ id: 'b', organiser_id: OTHER_ORGANISER_ID, status: STATUS.UNDER_REVIEW }),
+      ]),
+    ]);
+
+    const requests = await listEventRequestsForReview({ client });
+
+    // The whole point of the queue, and the inverse of the assertion
+    // SCRUM14_AC1_filters_the_query_on_the_organiser makes about the list
+    // beside it. Nothing here drops a row for belonging to someone else.
+    expect(requests.map((r) => r.organiserId))
+      .toEqual([ORGANISER_ID, OTHER_ORGANISER_ID]);
+  });
+
+  it('SCRUM45_AC1_maps_every_row_into_camelCase', async () => {
+    const client = createQueueFakeClient([
+      ok([
+        storedRow({ id: 'a', status: STATUS.SUBMITTED }),
+        storedRow({ id: 'b', status: STATUS.PENDING_CLARIFICATION }),
+      ]),
+    ]);
+
+    const requests = await listEventRequestsForReview({ client });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toMatchObject({
+      id: 'a',
+      organiserId: ORGANISER_ID,
+      eventName: 'IS212 Industry Night',
+      status: STATUS.SUBMITTED,
+    });
+
+    // On every element, not just the first: the Coordinator dashboard reads
+    // these keys directly and a snake_case leak would render as blank fields.
+    for (const request of requests) {
+      expect(Object.keys(request).some((key) => key.includes('_'))).toBe(false);
+    }
+  });
+
+  it('SCRUM45_AC1_orders_by_oldest_waiting_first_with_nulls_last', async () => {
+    const client = createQueueFakeClient([ok([storedRow({ status: STATUS.SUBMITTED })])]);
+
+    await listEventRequestsForReview({ client });
+
+    // submitted_at ASC, not updated_at DESC. updated_at is maintained by the
+    // event_requests_set_updated_at trigger, so on this screen it would be
+    // actively wrong: a Coordinator merely touching a request would bounce it
+    // to the top of their own queue and bury whatever has waited longest.
+    //
+    // nullsFirst: false is asserted as part of the options object rather than
+    // left implicit. 005 constrains submitted_at on drafts only, so a
+    // non-draft row may legitimately carry a null one, and Postgres sorts
+    // nulls first on ASC -- which would put "no recorded submission time" at
+    // the head of a queue ordered by how long people have waited.
+    expect(client.calls[0].order).toEqual([
+      ['submitted_at', { ascending: true, nullsFirst: false }],
+      ['id', { ascending: true }],
+    ]);
+  });
+
+  it('SCRUM45_AC1_answers_an_empty_queue_and_a_null_payload_with_an_empty_list', async () => {
+    // Nothing waiting is the good state of this screen, not a missing
+    // resource, so it is [] and never a NotFoundError. The null case is the
+    // shape PostgREST can return for an empty result set.
+    await expect(listEventRequestsForReview({ client: createQueueFakeClient([ok([])]) }))
+      .resolves.toEqual([]);
+    await expect(listEventRequestsForReview({ client: createQueueFakeClient([ok(null)]) }))
+      .resolves.toEqual([]);
+  });
+
+  it('SCRUM45_AC1_takes_no_organiser_and_asserts_none', async () => {
+    const client = createQueueFakeClient([ok([storedRow({ status: STATUS.SUBMITTED })])]);
+
+    // Called with no organiser at all, and both the call and the signature
+    // are checked. The missing parameter is not an oversight: the module
+    // header's rule is that a function taking no organiser checks none, and
+    // the caller proves the right to read. Here the proof is the role gate on
+    // the route -- the only proof available, since a queue that crosses every
+    // Organiser is exactly the read no ownership check could scope. If
+    // assertOrganiser were ever added here the queue would throw a
+    // ValidationError on every call and the Coordinator's screen would show
+    // a 400 for a request that named nothing wrong.
+    await expect(listEventRequestsForReview({ client })).resolves.toHaveLength(1);
+    expect(client.calls).toHaveLength(1);
+
+    // No required positional parameter: the single argument is a destructured
+    // options object with a default, so .length is 0.
+    expect(listEventRequestsForReview.length).toBe(0);
+  });
+
+  it('SCRUM45_AC1_leaves_an_unrecognised_database_failure_untyped', async () => {
+    const client = createQueueFakeClient([dbError('42P01', 'relation does not exist')]);
+
+    const err = await errorFrom(listEventRequestsForReview({ client }));
+
+    // Untyped means the route's handleError falls through to a 500 with a
+    // generic message. Anything typed here would reach a Coordinator dressed
+    // as a 400 or a 404 and tell them to fix something that is not theirs to
+    // fix -- and a 404 in particular would read as "the queue is empty".
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err).not.toBeInstanceOf(NotFoundError);
+    expect(err).not.toBeInstanceOf(ConflictError);
+    expect(err.status).toBeUndefined();
+  });
+});

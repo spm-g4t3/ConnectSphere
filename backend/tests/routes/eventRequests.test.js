@@ -1398,3 +1398,331 @@ describe('SCRUM-34: the change requests for one event are listed over HTTP', () 
     expect(client.calls).toHaveLength(0);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-45 -- GET /api/event-requests/queue, the Event Coordinator's queue
+// ---------------------------------------------------------------------------
+/**
+ * A third fake and a second auth stub, both appended rather than folded into
+ * the ones above.
+ *
+ * Neither createFakeClient nor createWritableFakeClient has an .in(), because
+ * nothing they were written for uses one, and both are fixtures that dozens of
+ * passing tests are written against. Adding a method there would change a
+ * shared fixture to serve one new describe block; adding one here changes
+ * nothing that already passes. That is exactly the argument
+ * createWritableFakeClient makes for its own existence a few hundred lines up.
+ *
+ * .in() is recorded into its own list rather than into `filters`, so a test
+ * can assert both that the status IN list is there and that no organiser_id
+ * eq() is -- the absence being the whole of the reported bug.
+ *
+ * signedInWithRole sits beside signedInAs rather than replacing it, and that
+ * is load-bearing rather than tidy: signedInAs sets no role at all, and the
+ * fact that every other test in this file keeps using it is what proves the
+ * coordinator gate never leaked onto the Organiser's own routes. Widening the
+ * existing stub would quietly destroy that evidence. The two-stub shape is
+ * copied from tests/routes/venues.test.js, which has had a role-carrying stub
+ * since SCRUM-15.
+ *
+ * Imports are appended for the same reason the service suite appends its own:
+ * an ESM import declaration is hoisted wherever it is written, and nothing
+ * above this line may move.
+ *
+ * Acceptance criteria carried in the names:
+ *   AC1 -- a Coordinator sees every request that is awaiting a decision
+ *   AC2 -- and nobody else can
+ */
+import { ROLE } from '../../src/domain/userRole.js';
+import { COORDINATOR_QUEUE_STATUSES } from '../../src/domain/eventRequestStatus.js';
+
+
+const COORDINATOR_ID = '55555555-5555-4555-8555-555555555555';
+
+function createQueueFakeClient(results = []) {
+  const queue = [...results];
+  const calls = [];
+
+  function settle(call) {
+    if (queue.length === 0) {
+      throw new Error(`fake client: no result queued for ${call.operation} on ${call.table}`);
+    }
+    return Promise.resolve(queue.shift());
+  }
+
+  function builder(call) {
+    const chain = {
+      select(columns = '*') {
+        call.select = columns;
+        return chain;
+      },
+      eq(column, value) {
+        call.filters.push([column, value]);
+        return chain;
+      },
+      in(column, values) {
+        call.inFilters.push([column, values]);
+        return chain;
+      },
+      order(column, options) {
+        call.order.push([column, options]);
+        return chain;
+      },
+      single: () => settle(call),
+      maybeSingle: () => settle(call),
+      then: (resolve, reject) => settle(call).then(resolve, reject),
+    };
+    return chain;
+  }
+
+  return {
+    calls,
+    from(table) {
+      const call = {
+        table,
+        operation: 'select',
+        select: null,
+        filters: [],
+        inFilters: [],
+        order: [],
+      };
+      calls.push(call);
+      return builder(call);
+    },
+  };
+}
+
+/** Stands in for a verified session that also carries a role. */
+const signedInWithRole = (role, id = COORDINATOR_ID) => (req, _res, next) => {
+  req.user = { id, email: 'coordinator@example.com', role };
+  next();
+};
+
+/** A queue as PostgREST would hand it back: two Organisers, three statuses. */
+const queueRows = () => [
+  storedRow({
+    id: 'queue-1',
+    organiser_id: ORGANISER_ID,
+    status: STATUS.SUBMITTED,
+    submitted_at: '2026-01-11T03:00:00+00:00',
+  }),
+  storedRow({
+    id: 'queue-2',
+    organiser_id: OTHER_ORGANISER_ID,
+    status: STATUS.UNDER_REVIEW,
+    submitted_at: '2026-01-12T03:00:00+00:00',
+  }),
+  storedRow({
+    id: 'queue-3',
+    organiser_id: OTHER_ORGANISER_ID,
+    status: STATUS.PENDING_CLARIFICATION,
+    submitted_at: null,
+  }),
+];
+
+
+describe('SCRUM-45 AC1: a Coordinator reads the review queue over HTTP', () => {
+  it('SCRUM45_AC1_returns_200_and_a_bare_array_for_a_coordinator', async () => {
+    const client = createQueueFakeClient([ok(queueRows())]);
+
+    const res = await request(
+      appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }),
+    ).get('/api/event-requests/queue');
+
+    expect(res.status).toBe(200);
+
+    // A bare array, not { items: [...] }, matching GET / above: the
+    // Coordinator dashboard maps the response directly.
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(3);
+  });
+
+  it('SCRUM45_AC1_carries_the_status_display_on_every_row', async () => {
+    const client = createQueueFakeClient([ok(queueRows())]);
+
+    const res = await request(
+      appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }),
+    ).get('/api/event-requests/queue');
+
+    // One status vocabulary for both screens. The Coordinator's badge is
+    // rendered by the same frontend helper the Organiser's list uses, so a
+    // row arriving without statusDisplay would render as a blank badge rather
+    // than as an error anyone would notice.
+    for (const row of res.body) {
+      expect(row.statusDisplay).toBeDefined();
+      expect(row.statusDisplay.status).toBe(row.status);
+      expect(row.statusDisplay.label).toBe(STATUS_DISPLAY[row.status].label);
+      expect(row.statusDisplay.group).toBe(STATUS_DISPLAY[row.status].group);
+    }
+
+    // And none of them fell through to a fallback, which is what a status the
+    // queue admits but the vocabulary does not would look like.
+    expect(res.body.map((row) => row.statusDisplay.label))
+      .not.toContain(STATUS_FALLBACK.UNKNOWN.label);
+  });
+
+  it('SCRUM45_AC1_returns_a_request_belonging_to_another_organiser', async () => {
+    const client = createQueueFakeClient([ok(queueRows())]);
+
+    const res = await request(
+      appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }),
+    ).get('/api/event-requests/queue');
+
+    // The reported bug, asserted end to end: an Organiser submits a request
+    // and it never appears on the Coordinator side. Every other route in this
+    // file answers 404 for a row belonging to somebody else -- deliberately,
+    // and there are tests above that say so. This one must not, and the
+    // signed-in caller owning none of these rows is the point.
+    const owners = res.body.map((row) => row.organiserId);
+    expect(owners).toContain(ORGANISER_ID);
+    expect(owners).toContain(OTHER_ORGANISER_ID);
+    expect(owners).not.toContain(COORDINATOR_ID);
+
+    // And no eq() narrowed the read to the caller on the way out.
+    expect(client.calls[0].filters).toEqual([]);
+  });
+
+  it('SCRUM45_AC1_answers_an_empty_queue_with_200_and_not_404', async () => {
+    const client = createQueueFakeClient([ok([])]);
+
+    const res = await request(
+      appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }),
+    ).get('/api/event-requests/queue');
+
+    // Nothing waiting is the good state of this screen, not a missing
+    // resource. A 404 would make the dashboard render an error every time the
+    // team was caught up.
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM45_AC1_does_not_read_the_queue_path_as_a_request_id', async () => {
+    const client = createQueueFakeClient([ok(queueRows())]);
+
+    const res = await request(
+      appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }),
+    ).get('/api/event-requests/queue');
+
+    // Declaration order in the router is genuinely load-bearing here, unlike
+    // everywhere else in that file: '/queue' and '/:id' both match a single
+    // segment, so declared after GET /:id Express would match this with
+    // id === 'queue', hand Postgres a uuid comparison against a word, and
+    // answer 500 out of an unrecognised 22P02. The symptom is asserted from
+    // the outside -- one status-filtered read, no id filter, and not a 500.
+    expect(res.status).toBe(200);
+    expect(res.status).not.toBe(500);
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].inFilters).toEqual([['status', COORDINATOR_QUEUE_STATUSES]]);
+    expect(client.calls[0].filters).not.toContainEqual(['id', 'queue']);
+  });
+
+  it('SCRUM45_AC1_answers_a_server_fault_with_500_and_leaks_nothing', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const client = createQueueFakeClient([
+      dbFailure('42P01', 'relation "event_requests" does not exist'),
+    ]);
+
+    const res = await request(
+      appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }),
+    ).get('/api/event-requests/queue');
+
+    expect(res.status).toBe(500);
+
+    // The driver message goes to the log, never to the Coordinator, and a
+    // fault must not be dressed up as an empty queue either.
+    expect(JSON.stringify(res.body)).not.toMatch(/relation/);
+    expect(res.body).not.toEqual([]);
+    expect(consoleError).toHaveBeenCalled();
+
+    consoleError.mockRestore();
+  });
+});
+
+
+describe('SCRUM-45 AC2: the queue is restricted, and the restriction stays put', () => {
+  it('SCRUM45_AC2_refuses_an_organiser_with_403_and_never_queries', async () => {
+    const client = createQueueFakeClient([ok(queueRows())]);
+
+    const res = await request(
+      appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID) }),
+    ).get('/api/event-requests/queue');
+
+    expect(res.status).toBe(403);
+
+    // Refused before the database is touched. A gate that queried first and
+    // discarded the rows would still be a gate, but it would put every
+    // Organiser's request through a read that nothing narrows.
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM45_AC2_refuses_a_caller_with_no_role_at_all', async () => {
+    const client = createQueueFakeClient([ok(queueRows())]);
+
+    // signedInAs -- the stub the rest of this file uses -- sets no role, which
+    // is also what requireAuth resolves for an authenticated account with no
+    // profiles row. Closed by default, and pinned here rather than left to
+    // the middleware's own suite, because this is the one path in this router
+    // where it decides whether somebody sees other people's requests.
+    const res = await request(appWith({ client, requireAuth: signedInAs(ORGANISER_ID) }))
+      .get('/api/event-requests/queue');
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM45_AC2_names_event_coordinators_in_the_403', async () => {
+    const res = await request(
+      appWith({
+        client: createQueueFakeClient([]),
+        requireAuth: signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID),
+      }),
+    ).get('/api/event-requests/queue');
+
+    // The message names the role that would work rather than the one the
+    // caller has: "you are an Event Organiser" is not actionable, "this is
+    // restricted to Event Coordinators" tells them who to ask.
+    expect(res.body.error).toMatch(/Event Coordinators/);
+  });
+
+  it('SCRUM45_AC2_returns_401_without_a_token_and_never_queries', async () => {
+    const client = createQueueFakeClient([ok(queueRows())]);
+
+    const res = await request(appWith({ client, requireAuth: signedOut }))
+      .get('/api/event-requests/queue');
+
+    // 401 and not 403: a missing token is something the caller can fix by
+    // signing in, and requireAuth runs first because it is mounted on the
+    // router while the role gate is a per-route argument.
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM45_AC2_the_role_gate_does_not_reach_the_organisers_own_routes', async () => {
+    const client = createQueueFakeClient([ok([storedRow()])]);
+
+    // The regression guard for every other test in this repository, and the
+    // reason it is written as its own case rather than trusted to the ones
+    // above. Nothing in the production file pins that coordinatorOnly is a
+    // per-route argument: moving it to router.use would read as a tidy-up,
+    // would keep the queue working, and would make all eight Organiser routes
+    // answer 403 at once -- because the fake authenticator this suite uses
+    // sets no role, and neither does requireAuth for an account whose
+    // profiles row has not been written yet.
+    //
+    // Deliberately uses signedInAs, the role-less stub, on the Organiser's
+    // own list. If this ever fails with a 403, the gate has been mounted
+    // router-wide; nothing else can produce that result.
+    const res = await request(appWith({ client, requireAuth: signedInAs(ORGANISER_ID) }))
+      .get('/api/event-requests');
+
+    expect(res.status).toBe(200);
+    expect(res.status).not.toBe(403);
+    expect(Array.isArray(res.body)).toBe(true);
+
+    // And the read really happened, scoped to the caller as it always was --
+    // so this is passing because the route ran, not because something short
+    // circuited into an empty 200.
+    expect(client.calls[0].filters).toEqual([['organiser_id', ORGANISER_ID]]);
+  });
+});

@@ -31,21 +31,25 @@
  *
  * Deliberately NOT here, so each omission still reads as a decision:
  *
- *  - No role gate on any route. Every one is scoped by req.user.id against
- *    organiser_id, so a role check removes no capability ownership has not
- *    already removed. That is the difference from routes/venues.js, whose gate
- *    exists because listVenues and getVenueHistory return rows no ownership
- *    check could scope -- there is no such route here. It would also not be
- *    free: createEventRequestRouter has no requireRole option and the tests'
- *    fake authenticator sets no role, so a gate defaulted on would 403
- *    everything. Residual, named rather than hidden: any authenticated user
- *    can POST / and own the draft they create. Low harm; if the team wants it
- *    closed the gate belongs on POST / alone, alongside the requireRole
- *    option SCRUM-45 will need anyway.
- *  - No Coordinator-facing routes. Deciding a change request
+ *  - No role gate on the Organiser's routes. Every one of them is scoped by
+ *    req.user.id against organiser_id, so a role check removes no capability
+ *    ownership has not already removed. GET /queue is the single exception,
+ *    and it is one because it meets the criterion routes/venues.js already
+ *    sets at its own :36-39: a gate is earned when a route returns rows no
+ *    ownership check could scope. A review queue crosses every Organiser by
+ *    definition, so there is nothing for req.user.id to narrow it to and the
+ *    role is the only thing left that can decide who may read it.
+ *    The gate is therefore a second argument on that one router.get and is
+ *    NEVER mounted with router.use: the tests' fake authenticator sets no
+ *    role, so a router-wide gate would 403 every route in this file at once.
+ *    Residual, named rather than hidden: any authenticated user can POST /
+ *    and own the draft they create. Low harm; if the team wants it closed the
+ *    gate belongs on POST / alone, using the same requireRole option.
+ *  - No Coordinator write routes. Deciding a change request
  *    (processChangeRequest) and moving a request through the later statuses
  *    are a different audience with a different gate, and belong with the
- *    story that adds one.
+ *    story that adds one. Reading the queue is here; acting on what you read
+ *    is not.
  *
  * Ownership is proved by this router, not assumed from the service. Three of
  * the routes below open with an explicit getEventRequestForOrganiser call and
@@ -61,6 +65,7 @@ import express from 'express';
 import {
   listEventRequestsForOrganiser,
   getEventRequestForOrganiser,
+  listEventRequestsForReview,
   createEventRequest,
   updateEventRequest,
   submitEventRequest,
@@ -71,6 +76,15 @@ import {
 } from '../services/eventChangeRequestService.js';
 import { getStatusDisplay } from '../domain/eventRequestStatus.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
+// Both of these are credential-free on purpose, and that is worth knowing
+// before adding a third: this router's tests do not mock config/
+// supabaseClient.js -- they rely on the service's lazy resolveClient -- so any
+// import that reaches that module would throw at collection time and take the
+// whole test file down with it. middleware/requireRole.js imports only
+// domain/userRole.js, which imports nothing at all. services/venueService.js,
+// by contrast, imports the client statically; never pull it in here.
+import { createRequireRole } from '../middleware/requireRole.js';
+import { ROLE } from '../domain/userRole.js';
 import { AppError } from '../errors.js';
 
 
@@ -105,9 +119,13 @@ function handleError(err, res) {
  * describing their status, silently and only for some statuses.
  *
  * Done here rather than in the service's toEventRequest, whose docstring calls
- * itself "the camelCase view of a stored row". This is a derived projection for
- * one audience, and the check scripts and future Coordinator flows have no use
- * for it.
+ * itself "the camelCase view of a stored row". This is a derived projection,
+ * and the check scripts have no use for it.
+ *
+ * It is no longer for one audience only. GET /queue applies it too, so a
+ * Coordinator's row carries exactly the same statusDisplay a row on the
+ * Organiser's own list does -- one status vocabulary, rendered by one frontend
+ * helper, for both screens.
  */
 function withStatusDisplay(request) {
   return { ...request, statusDisplay: getStatusDisplay(request.status) };
@@ -125,17 +143,28 @@ function withStatusDisplay(request) {
  * @param {object} [options]
  * @param {object} [options.client]       Supabase client, for tests
  * @param {Function} [options.requireAuth] authentication middleware, for tests
+ * @param {Function} [options.requireRole] a factory, mirroring createVenueRouter,
+ *                                         so a test can widen or narrow the one
+ *                                         gated route without rebuilding it
  * @returns {import('express').Router}
  */
 export function createEventRequestRouter({
   client,
   requireAuth = defaultRequireAuth,
+  requireRole = createRequireRole,
 } = {}) {
   const router = express.Router();
 
-  // Applied to the whole router rather than per route. Every read below is
-  // scoped to req.user.id, so a route reachable without it would not merely be
-  // unauthenticated -- it would have no idea whose requests to return.
+  // Built once here, applied to exactly one route below. Calling the factory
+  // at build time is safe: createRequireRole only throws when handed zero
+  // roles, and with one it just closes over the list.
+  const coordinatorOnly = requireRole(ROLE.EVENT_COORDINATOR);
+
+  // Authentication is applied to the whole router rather than per route.
+  // Every Organiser read below is scoped to req.user.id, so a route reachable
+  // without it would not merely be unauthenticated -- it would have no idea
+  // whose requests to return. Authorisation is the opposite and stays off the
+  // router: see coordinatorOnly's single use on GET /queue.
   router.use(requireAuth);
 
   /**
@@ -148,6 +177,47 @@ export function createEventRequestRouter({
   router.get('/', async (req, res) => {
     try {
       const requests = await listEventRequestsForOrganiser(req.user.id, { client });
+      res.status(200).json(requests.map(withStatusDisplay));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-45: everything awaiting a decision, for an Event Coordinator.
+   *
+   * The one route in this file that is not scoped to req.user.id, and the fix
+   * for the reported bug that a submitted request never reached the
+   * Coordinator side. Which rows qualify is decided by
+   * COORDINATOR_QUEUE_STATUSES in the domain -- notably, a draft never appears
+   * here, which is what keeps a shared queue from exposing an Organiser's
+   * private working copy.
+   *
+   * DECLARATION ORDER HERE IS LOAD-BEARING, and this is the one place in this
+   * router where that is literally true. Every other ordering note in this
+   * file -- on /:id/status below, and above the writes -- carefully explains
+   * that the paths cannot actually collide because /:id is one segment and
+   * /:id/... is two. This one can and does: '/queue' is also one segment, so
+   * declared after GET /:id Express would match it with id === 'queue', hand
+   * Postgres a uuid comparison against a word, and return a 500 built out of
+   * an unrecognised 22P02. Do not move it below /:id.
+   *
+   * coordinatorOnly is passed as a per-route argument and must stay one. See
+   * the factory above.
+   *
+   * A bare array, like GET / above, and for the same reason: the Coordinator
+   * dashboard maps over the response directly. An empty queue is 200 [] and
+   * never a 404 -- nothing waiting is the good state, not a missing resource.
+   *
+   * Statuses: 200, 401 from requireAuth, 403 for the wrong role (or for an
+   * authenticated account with no profiles row, which requireAuth resolves to
+   * a null role), 500 for anything untyped. No 400: nothing is read off the
+   * request -- no param, no body, no query string -- so there is nothing here
+   * to validate, the same stance routes/venues.js takes on GET /.
+   */
+  router.get('/queue', coordinatorOnly, async (req, res) => {
+    try {
+      const requests = await listEventRequestsForReview({ client });
       res.status(200).json(requests.map(withStatusDisplay));
     } catch (err) {
       handleError(err, res);

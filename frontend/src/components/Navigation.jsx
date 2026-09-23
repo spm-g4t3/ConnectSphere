@@ -14,7 +14,14 @@ const NAV_LINKS_BY_ROLE = {
   ],
   EVENT_COORDINATOR: [
     { to: "/dashboard", label: "Dashboard" },
-    { to: "/events", label: "Events" },
+    // "/review-queue", not "/events" (SCRUM-45). /events renders
+    // MyEventRequests, which reads the organiser-scoped endpoint, so this
+    // link used to promise a Coordinator "Events" and hand them "You haven't
+    // created any event requests yet." forever — the second face of the
+    // reported bug, and probably the screen that got reported. The label
+    // changes with the target: a Coordinator's relationship to an event
+    // request is that they review it, not that they own it.
+    { to: "/review-queue", label: "Review Queue" },
     // "Find a Venue", not "Venue Bookings". The route resolves to VenueSearch,
     // which searches active venues — there is no venue-booking feature behind
     // it, so the old label promised something that does not exist. Same target

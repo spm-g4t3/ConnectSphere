@@ -412,3 +412,78 @@ describe('isKnownStatus', () => {
     expect(isKnownStatus('postponed')).toBe(false);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-45 -- the statuses that make up the Event Coordinator's review queue
+// ---------------------------------------------------------------------------
+/**
+ * Appended rather than folded into the blocks above, and the import below is
+ * appended rather than added to the block at the top of the file, for the
+ * reason tests/services/eventRequestService.test.js already states at its own
+ * mid-file import: everything above this line is the regression gate for
+ * SCRUM-44 and SCRUM-47, and the one thing that must be provable at a glance
+ * is that not a character of it moved. An ESM import declaration is hoisted
+ * wherever it is written, so this binds exactly as it would at the top.
+ *
+ * Acceptance criteria carried in the names:
+ *   AC1 -- a Coordinator sees every request that is awaiting a decision
+ *   AC2 -- and nothing they were never meant to see
+ */
+import { COORDINATOR_QUEUE_STATUSES } from '../../src/domain/eventRequestStatus.js';
+
+
+describe('SCRUM-45: the review queue is a set of statuses, named in the domain', () => {
+  it('SCRUM45_AC1_is_exactly_submitted_under_review_and_pending_clarification', () => {
+    // Asserted as an ordered array rather than as a set, because this value is
+    // handed straight to .in() and a reader comparing the service query with
+    // this file should see the same three words in the same order. The order
+    // itself is the order a request travels through them.
+    expect(COORDINATOR_QUEUE_STATUSES).toEqual([
+      STATUS.SUBMITTED,
+      STATUS.UNDER_REVIEW,
+      STATUS.PENDING_CLARIFICATION,
+    ]);
+  });
+
+  it('SCRUM45_AC1_names_only_statuses_the_database_can_store', () => {
+    // A typo here would not throw. It would be sent to Postgres inside an
+    // IN list, match no row, and quietly shorten the queue -- which looks
+    // exactly like "nothing is waiting" and is the hardest possible bug to
+    // notice on a screen whose healthy state is often empty.
+    for (const status of COORDINATOR_QUEUE_STATUSES) {
+      expect(isKnownStatus(status)).toBe(true);
+      expect(ALL_STATUSES).toContain(status);
+    }
+  });
+
+  it('SCRUM45_AC2_never_admits_a_draft', () => {
+    // Asserted, not assumed. There is no coordinator_id on event_requests and
+    // no assignment model, so every Coordinator sees every row this list
+    // admits: excluding draft IS the access control that keeps an Organiser's
+    // private working copy private. Widening this array is what would breach
+    // it, so the boundary gets a test of its own rather than riding along on
+    // the equality check above.
+    expect(COORDINATOR_QUEUE_STATUSES).not.toContain(STATUS.DRAFT);
+  });
+
+  it('SCRUM45_AC1_admits_no_status_a_decision_has_already_closed', () => {
+    // A queue containing completed, rejected or cancelled work would never
+    // empty, and "what is waiting for me" would stop being answerable by
+    // looking at it. What a Coordinator does with a request after a decision
+    // is a post-decision worklist, and whoever builds that screen owns its
+    // own list.
+    for (const status of TERMINAL) {
+      expect(COORDINATOR_QUEUE_STATUSES).not.toContain(status);
+    }
+  });
+
+  it('SCRUM45_AC1_cannot_be_widened_at_runtime', () => {
+    // Frozen for the same reason STATUS and ALLOWED_TRANSITIONS are, with one
+    // extra: this array is a privacy boundary, so a push() from anywhere in
+    // the process would silently enlarge what every Coordinator can read.
+    expect(Object.isFrozen(COORDINATOR_QUEUE_STATUSES)).toBe(true);
+    expect(() => { COORDINATOR_QUEUE_STATUSES.push(STATUS.DRAFT); }).toThrow();
+    expect(COORDINATOR_QUEUE_STATUSES).toHaveLength(3);
+  });
+});

@@ -183,6 +183,45 @@ export const ALLOWED_TRANSITIONS = Object.freeze({
 
 
 /**
+ * The statuses that put a request in the Event Coordinator's review queue.
+ *
+ * SCRUM-45. This lives in the domain and not in the service because *which
+ * statuses constitute the queue* is a meaning, not a query detail: the service
+ * hands this array to .in() and would otherwise be the only place the team's
+ * definition of "waiting for a decision" was written down.
+ *
+ * Each of the three earns its place, and so does each omission:
+ *
+ *  - pending_clarification IS in the queue. It looks like the Organiser's turn,
+ *    but ALLOWED_TRANSITIONS[PENDING_CLARIFICATION] leads back to under_review
+ *    and nowhere else forward -- the Coordinator never let go of it, they asked
+ *    a question. Dropping it out of the queue would mean the only way back to
+ *    a request you yourself paused is to remember its id.
+ *
+ *  - draft is OUT, and that exclusion is not an oversight -- it is the privacy
+ *    boundary of the whole shared-queue design. There is no coordinator_id on
+ *    event_requests and no assignment model, so every Coordinator sees every
+ *    row this list admits. A draft is an Organiser's private working copy that
+ *    they have not chosen to show anyone, so the status filter IS the access
+ *    control, and widening this array is what would breach it.
+ *
+ *  - approved, planning, confirmed, completed, rejected and cancelled are out
+ *    because a decision has been made. What a Coordinator does with a request
+ *    afterwards is a post-decision worklist, and whoever builds that screen
+ *    owns its own list rather than inheriting a queue that would never empty.
+ *
+ * Order is load-bearing only in the weak sense that a test pins it; .in() does
+ * not care. It reads submitted -> under_review -> pending_clarification because
+ * that is the order a request travels through them.
+ */
+export const COORDINATOR_QUEUE_STATUSES = Object.freeze([
+  STATUS.SUBMITTED,
+  STATUS.UNDER_REVIEW,
+  STATUS.PENDING_CLARIFICATION,
+]);
+
+
+/**
  * Is moving from one status to another allowed?
  *
  * SCRUM-45 enforces this before writing a status change.

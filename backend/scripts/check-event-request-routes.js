@@ -10,9 +10,10 @@
  * ownership really scopes against a live table whose row level security is
  * deny-all. This script is that proof.
  *
- * It creates two throwaway Organisers with passwords, signs one of them in for
- * a real token, raises an event request for each, drives the routes over HTTP
- * against a server on an ephemeral port, then removes everything it created.
+ * It creates two throwaway Organisers and, since SCRUM-45, one throwaway Event
+ * Coordinator, all with passwords; signs them in for real tokens, raises an
+ * event request for each Organiser, drives the routes over HTTP against a
+ * server on an ephemeral port, then removes everything it created.
  *
  * Exits non-zero on any failure.
  */
@@ -36,6 +37,10 @@ const PASSWORD = `Check-${STAMP}-Aa1!`;
 
 let organiserId = null;
 let otherOrganiserId = null;
+
+// SCRUM-45. The throwaway Event Coordinator. Tracked exactly like the two
+// Organisers so cleanup() removes it even when a check above throws.
+let coordinatorId = null;
 let eventId = null;
 let otherEventId = null;
 
@@ -60,8 +65,14 @@ function check(label, passed, detail = '') {
  * never signs in as them. This script must, so that it gets a genuine access
  * token rather than one it minted itself -- which would prove nothing about
  * the middleware.
+ *
+ * SCRUM-45 added the role, as a defaulted parameter rather than a required
+ * one, so that both existing call sites below read exactly as they did. Only
+ * the queue check needs anything other than an Organiser, and requireAuth
+ * resolves the role from this profiles row -- so passing the wrong one here
+ * would show up as a 403 on a route that has nothing to do with roles.
  */
-async function createTestUser(label) {
+async function createTestUser(label, role = 'event_organiser') {
   const { data, error } = await supabase.auth.admin.createUser({
     email: `__check_routes_${label}_${STAMP}@example.invalid`,
     password: PASSWORD,
@@ -74,7 +85,7 @@ async function createTestUser(label) {
   // authenticated check below fails for the wrong reason.
   const { error: profileError } = await supabaseAdmin
     .from('profiles')
-    .insert({ id: data.user.id, role: 'event_organiser', full_name: `Check ${label}` });
+    .insert({ id: data.user.id, role, full_name: `Check ${label}` });
   if (profileError) {
     throw new Error(`could not create profile (${label}): ${profileError.message}`);
   }
@@ -115,7 +126,7 @@ async function cleanup() {
   // profiles cascades from auth.users, so deleting the user is enough -- but it
   // is deleted explicitly here so a failure shows up as its own error rather
   // than as a confusing FK refusal on the user delete.
-  for (const id of [organiserId, otherOrganiserId]) {
+  for (const id of [organiserId, otherOrganiserId, coordinatorId]) {
     if (!id) continue;
     await supabase.from('profiles').delete().eq('id', id);
     await supabase.auth.admin.deleteUser(id);
@@ -129,6 +140,13 @@ async function main() {
   organiserId = organiser.id;
   const other = await createTestUser('other');
   otherOrganiserId = other.id;
+
+  // SCRUM-45. GET /queue is the first route in this file behind a role gate,
+  // and a gate is the one thing a fake authenticator cannot prove: the unit
+  // suite hands the router a req.user it wrote itself. This user's role comes
+  // from a real profiles row, read by the real middleware out of a real JWT.
+  const coordinator = await createTestUser('coordinator', 'event_coordinator');
+  coordinatorId = coordinator.id;
 
   eventId = await createEventRequest(organiserId, `__check_routes_mine_${STAMP}`, 'submitted');
   otherEventId = await createEventRequest(otherOrganiserId, `__check_routes_theirs_${STAMP}`, 'submitted');
@@ -329,6 +347,132 @@ async function main() {
     String(createdRow?.submitted_at),
   );
 
+  // -- SCRUM-45: the Coordinator's review queue -----------------------------
+  //
+  // Placed here, before the edit section below, because draftEventId is still
+  // a draft at this point -- and "a draft never reaches the queue" is the
+  // privacy boundary of the entire shared-queue design. There is no
+  // coordinator_id on event_requests and no assignment model, so the status
+  // filter IS the access control, and this is the only place it can be proved
+  // against a live table.
+  //
+  // It is also the first exercise anywhere in this codebase of PostgREST's
+  // .in() operator: no other query uses one, so until this runs the status
+  // filter is untested against the real driver rather than a hand-rolled fake.
+  //
+  // State at this moment: eventId is under_review (the AC4 section moved it),
+  // otherEventId is submitted and belongs to the OTHER Organiser, and
+  // draftEventId is a draft belonging to this one.
+  //
+  // Nothing in this section or the second queue read below inserts an
+  // event_requests row, so the count === 3 assertion at the tail of this
+  // script is deliberately left untouched.
+
+  // A second real sign-in, and the hazard this file's header spends eight
+  // lines on is live again: signInWithPassword mutates supabaseAuth's
+  // in-memory auth state, which now belongs to the coordinator. So the very
+  // next thing checked is that the Organiser's already-issued token still
+  // works. A token is a string minted once; it does not care who the client
+  // signed in as afterwards -- but proving that rather than assuming it is
+  // exactly what this script exists for.
+  const { data: coordSession, error: coordSignInError } =
+    await supabaseAuth.auth.signInWithPassword({
+      email: coordinator.email,
+      password: PASSWORD,
+    });
+  if (coordSignInError) {
+    throw new Error(`could not sign in as the test coordinator: ${coordSignInError.message}`);
+  }
+  const coordinatorToken = coordSession.session.access_token;
+
+  /** The same shape as authed(), with the Coordinator's token instead. */
+  const asCoordinator = (path = '') =>
+    fetch(`${base}${path}`, { headers: { Authorization: `Bearer ${coordinatorToken}` } });
+
+  const organiserStillWorks = await authed();
+  check(
+    "signing a second user in did not invalidate the organiser's token",
+    organiserStillWorks.status === 200,
+    `status ${organiserStillWorks.status}`,
+  );
+
+  const queueAsOrganiser = await authed('/queue');
+  const queueAsOrganiserBody = await queueAsOrganiser.json();
+  check(
+    'an Event Organiser is refused the queue',
+    queueAsOrganiser.status === 403,
+    `status ${queueAsOrganiser.status}`,
+  );
+  check(
+    'and the 403 names the role that would work, not the one they have',
+    /Event Coordinators/.test(queueAsOrganiserBody.error ?? ''),
+    queueAsOrganiserBody.error,
+  );
+
+  const queueAnonymous = await fetch(`${base}/queue`);
+  check(
+    'an unauthenticated request for the queue answers 401, not 403',
+    queueAnonymous.status === 401,
+    `status ${queueAnonymous.status}`,
+  );
+
+  const queueOne = await asCoordinator('/queue');
+  const queueOneBody = await queueOne.json();
+  check('a coordinator reads the queue', queueOne.status === 200, `status ${queueOne.status}`);
+  check(
+    'the queue is a bare array',
+    Array.isArray(queueOneBody),
+    Array.isArray(queueOneBody) ? `${queueOneBody.length} row(s)` : typeof queueOneBody,
+  );
+
+  const queued = Array.isArray(queueOneBody) ? queueOneBody : [];
+
+  // The reported bug, proved end to end: a request read by a second person,
+  // through the real middleware, against a table whose row level security is
+  // deny-all. Every other route in this script answers 404 for a row the
+  // caller does not own; this one must not.
+  check(
+    'the queue contains a request the coordinator does not own',
+    queued.some((r) => r.id === eventId)
+      && queued.every((r) => r.organiserId !== coordinatorId),
+    `${queued.length} row(s)`,
+  );
+  check(
+    'and it spans more than one organiser',
+    queued.some((r) => r.organiserId === organiserId)
+      && queued.some((r) => r.organiserId === otherOrganiserId),
+    `${new Set(queued.map((r) => r.organiserId)).size} distinct organiser(s)`,
+  );
+  check(
+    'every row carries its status display',
+    queued.length > 0 && queued.every((r) => typeof r.statusDisplay?.label === 'string'),
+    queued.map((r) => r.statusDisplay?.label).join(', '),
+  );
+
+  check(
+    'a draft never reaches the queue',
+    !queued.some((r) => r.id === draftEventId) && !queued.some((r) => r.status === 'draft'),
+    queued.map((r) => r.status).join(', '),
+  );
+
+  // Oldest waiting first, asserted as a monotonic sequence rather than by
+  // index. The rows this script inserts through the admin client carry no
+  // submitted_at -- 005 constrains that column on drafts only -- so several
+  // of them tie legitimately, and a "wrong row first" failure would be
+  // misleading. The actual regression this guards is nullsFirst: false being
+  // dropped, which would sort "never recorded" to the head of a queue ordered
+  // by how long people have waited; treating null as +Infinity is what
+  // catches it.
+  const waitedSince = (row) =>
+    row.submittedAt === null || row.submittedAt === undefined
+      ? Number.POSITIVE_INFINITY
+      : new Date(row.submittedAt).getTime();
+  check(
+    'the queue is ordered oldest waiting first, with no submission time last',
+    queued.every((row, i) => i === 0 || waitedSince(queued[i - 1]) <= waitedSince(row)),
+    queued.map((r) => r.submittedAt ?? 'null').join(' <= '),
+  );
+
   // -- SCRUM-11: a draft is edited in place ----------------------------------
   const beforePatch = await (await authed(`/${draftEventId}`)).json();
 
@@ -450,6 +594,28 @@ async function main() {
     'a submitted request cannot be submitted again',
     submittedTwice.status === 409,
     `status ${submittedTwice.status}`,
+  );
+
+  // -- SCRUM-45: a request submitted over HTTP joins the queue ---------------
+  //
+  // The half of the queue proof that closes the loop on the reported bug.
+  // draftEventId was created, edited and submitted entirely over HTTP by an
+  // Organiser, and a moment ago the queue correctly refused to show it while
+  // it was a draft. Nothing has happened to it since but the status change,
+  // so this is the reported journey end to end: an Organiser submits, and a
+  // Coordinator sees it.
+  const queueTwo = await asCoordinator('/queue');
+  const queueTwoBody = await queueTwo.json();
+  const requeued = Array.isArray(queueTwoBody) ? queueTwoBody : [];
+  check(
+    'a request submitted over HTTP joins the queue',
+    queueTwo.status === 200 && requeued.some((r) => r.id === draftEventId),
+    `status ${queueTwo.status}, ${requeued.length} row(s)`,
+  );
+  check(
+    'and it arrives carrying the status the submit gave it',
+    requeued.find((r) => r.id === draftEventId)?.statusDisplay?.label === 'Submitted',
+    requeued.find((r) => r.id === draftEventId)?.statusDisplay?.label,
   );
 
   // The ownership hole, proved live. otherEventId is made a complete draft

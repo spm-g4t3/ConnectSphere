@@ -8,6 +8,7 @@ import LoginForm from "./components/LoginForm";
 import MyEventRequests from "./components/MyEventRequests";
 import VenueSearch from "./components/VenueSearch";
 import VenueCatalogue from "./components/VenueCatalogue";
+import ReviewQueue from "./components/ReviewQueue";
 import "./App.css";
 
 function LoadingScreen() {
@@ -59,6 +60,30 @@ function AppRoutes() {
             <ProtectedRoute allowedRoles={["venue_staff"]}>
               <div className="dashboard dashboard--venue-staff">
                 <VenueCatalogue />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* SCRUM-45. The Coordinator's nav link points here rather than at /events,
+            which renders MyEventRequests over the organiser-scoped endpoint and so
+            told every Coordinator "You haven't created any event requests yet."
+
+            allowedRoles is belt to the backend's braces, not the gate itself:
+            GET /event-requests/queue is role-checked server-side and would answer
+            403 regardless. What this buys is the failure mode — an Organiser who
+            follows a link here lands on /unauthorized instead of on a page whose
+            only content is an error message.
+
+            The `dashboard dashboard--coordinator` wrapper is not decoration, for
+            the same reason /venue-catalogue's is not: App.css scopes .status-badge
+            and the .status--* colours to a dashboard class deliberately, so
+            without the wrapper every badge in the queue renders as bare text. */}
+        <Route
+          path="/review-queue"
+          element={
+            <ProtectedRoute allowedRoles={["event_coordinator"]}>
+              <div className="dashboard dashboard--coordinator">
+                <ReviewQueue />
               </div>
             </ProtectedRoute>
           }
