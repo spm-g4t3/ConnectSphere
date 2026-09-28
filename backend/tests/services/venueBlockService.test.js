@@ -447,7 +447,12 @@ describe('SCRUM17_AC3 booking conflicts and the override', () => {
 
   it('SCRUM17_AC3_created_returns_block_and_flagged_bookings', async () => {
     rpc.mockResolvedValue({
-      data: { outcome: 'created', block: blockRow(), affected_bookings: conflictRows },
+      data: {
+        outcome: 'created',
+        block: blockRow(),
+        affected_bookings: conflictRows,
+        flagged_bookings: conflictRows,
+      },
       error: null,
     });
 
@@ -456,15 +461,46 @@ describe('SCRUM17_AC3 booking conflicts and the override', () => {
     ).resolves.toEqual({ block: CAMEL_BLOCK, flaggedBookings: camelConflicts });
   });
 
+  it('SCRUM17_AC3_flagged_bookings_come_from_flagged_bookings_not_affected_bookings', async () => {
+    // affected_bookings is what was acknowledged; flagged_bookings is what the
+    // database changed. Only the second is reported.
+    rpc.mockResolvedValue({
+      data: {
+        outcome: 'created',
+        block: blockRow(),
+        affected_bookings: conflictRows,
+        flagged_bookings: [conflictRows[1]],
+      },
+      error: null,
+    });
+
+    await expect(
+      createVenueBlock(VENUE_ID, override(), STAFF_ID, { now: NOW }),
+    ).resolves.toEqual({ block: CAMEL_BLOCK, flaggedBookings: [camelConflicts[1]] });
+  });
+
+  it('SCRUM17_AC3_created_with_affected_but_no_flagged_bookings_does_not_fall_back', async () => {
+    // A database without 013 answers with affected_bookings only. Nothing was
+    // flagged there, so the honest answer is an empty list.
+    rpc.mockResolvedValue({
+      data: { outcome: 'created', block: blockRow(), affected_bookings: conflictRows },
+      error: null,
+    });
+
+    await expect(
+      createVenueBlock(VENUE_ID, override(), STAFF_ID, { now: NOW }),
+    ).resolves.toEqual({ block: CAMEL_BLOCK, flaggedBookings: [] });
+  });
+
   it.each([
     ['missing', undefined],
     ['null', null],
     ['empty', []],
   ])(
-    'SCRUM17_AC3_created_without_affected_bookings_returns_empty_list (%s)',
-    async (_label, affected) => {
+    'SCRUM17_AC3_created_without_flagged_bookings_returns_empty_list (%s)',
+    async (_label, flagged) => {
       const data = { outcome: 'created', block: blockRow() };
-      if (affected !== undefined) data.affected_bookings = affected;
+      if (flagged !== undefined) data.flagged_bookings = flagged;
       rpc.mockResolvedValue({ data, error: null });
 
       await expect(

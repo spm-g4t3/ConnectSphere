@@ -20,6 +20,12 @@
  * booking that still conflicts. Otherwise the RPC answers with the conflict
  * list, which this service raises as a ConflictError, BLOCK_BOOKING_CONFLICT.
  *
+ * SCRUM-128 (AC3) completes the override. create_venue_block is redefined
+ * again in 013_booking_review_notifications.sql: in the same transaction as
+ * the insert, each overridden booking is set to flagged_for_review and every
+ * Event Coordinator is notified. The created outcome now reports the bookings
+ * actually flagged, which this service returns as flaggedBookings.
+ *
  * No routes call this yet; SCRUM-127 adds them.
  */
 
@@ -136,10 +142,12 @@ export function toBlock(row) {
  * One overlapping approved booking, as create_venue_block reports it, in
  * camelCase.
  *
- * Exported so the conflict list and SCRUM-128's flagged bookings -- the same
- * rows, from the same helper -- come back in exactly the same shape.
+ * Exported so the conflict list and SCRUM-128's flagged bookings come back in
+ * exactly the same shape: flag_bookings_for_block (013) returns the same
+ * columns as venue_block_booking_conflicts (012) for that reason.
  *
  * @param {object} row  snake_case, from venue_block_booking_conflicts (012)
+ *                      or flag_bookings_for_block (013)
  * @returns {{bookingId: string, eventRequestId: string, eventName: string,
  *            startsAt: string, endsAt: string}}
  */
@@ -164,10 +172,10 @@ export function toBookingConflict(row) {
  * @param {object} [options]
  * @param {Date} [options.now]      injected for tests; see validateCreateBlock
  * @returns {Promise<{block: object, flaggedBookings: object[]}>} the created
- *          block, and the approved bookings the override covered (shaped by
- *          toBookingConflict; [] when there were none). Flagging those
- *          bookings for review and notifying their Event Coordinators lands in
- *          SCRUM-128 -- until then the list names them without changing them.
+ *          block, and the bookings the override flagged for review (shaped by
+ *          toBookingConflict; [] when there were none). By the time this
+ *          resolves those bookings are flagged_for_review and every Event
+ *          Coordinator has a notification for each (013).
  * @throws {ValidationError} bad input, before any network call
  * @throws {NotFoundError}   no venue with that id
  * @throws {ConflictError}   venue retired (VENUE_RETIRED); the period overlaps
@@ -215,9 +223,14 @@ export async function createVenueBlock(venueId, input, userId = null, { now } = 
     throw new Error(`Unexpected outcome from create_venue_block: ${data?.outcome}`);
   }
 
+  // flagged_bookings, not affected_bookings, and deliberately no fallback to
+  // it. affected_bookings is the list the caller acknowledged; flagged_bookings
+  // is what the database actually changed. Falling back would report bookings
+  // as flagged against a database where 013 has not been applied and nothing
+  // was flagged at all -- an empty list is the honest answer there.
   return {
     block: toBlock(data.block),
-    flaggedBookings: (data.affected_bookings ?? []).map(toBookingConflict),
+    flaggedBookings: (data.flagged_bookings ?? []).map(toBookingConflict),
   };
 }
 

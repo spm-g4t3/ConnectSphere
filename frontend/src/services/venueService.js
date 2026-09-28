@@ -223,15 +223,10 @@ export async function getVenueHistory(venueId) {
   return response.data;
 }
 
-// --- STUBS below: no backend endpoint exists yet for these -----------------
-// They exist purely so imports in EventCoordinatorDashboard.jsx and
-// VenueStaffDashboard.jsx resolve and the app can actually run.
-
-/** @returns {Promise<Array>} always empty for now */
-export async function getPendingVenueBookings() {
-  console.warn("getPendingVenueBookings: not implemented yet — no backend endpoint exists.");
-  return [];
-}
+// --- STUB below: no backend endpoint exists yet for this ------------------
+// It exists purely so the import in VenueStaffDashboard.jsx resolves and the
+// app can actually run. Its Coordinator twin was removed by SCRUM-128, when
+// CoordinatorNotifications took the section that called it.
 
 /** @returns {Promise<Array>} always empty for now */
 export async function getPendingBookingRequests() {

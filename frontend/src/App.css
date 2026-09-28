@@ -65,7 +65,7 @@ button { cursor: pointer; }
 /* The rule above makes every .dashboard p muted grey, which would render a
    failed retire in exactly the same voice as the empty-state text. Same
    colour pair as .app-nav__error. */
-.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .venue-block-form__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .venue-block-form__error, .dashboard .coordinator-notifications__error, .dashboard .coordinator-notifications__row-error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 /* NECESSARY, not cosmetic. .dashboard li above forces flex with
    justify-content: space-between, which on a checkbox row throws the box to
    one edge of the card and its label to the other with the whole width
@@ -134,6 +134,22 @@ button { cursor: pointer; }
    panel only -- the queue's own rows genuinely want the spread layout, since
    that is what puts the Review button on the right. */
 .dashboard--coordinator .coordinator-request-detail li { border-top: 0; display: block; padding: 4px 0; }
+/* SCRUM-128. The Coordinator's notifications card. The row keeps the shared
+   .dashboard li flex -- it is what puts "Mark as read" on the right, as the
+   queue's Review button is -- but align-items: center would float the button
+   against the middle of a three-line body, so it is pinned to the top, and
+   the body is allowed to take the width. Unread rows get a teal edge and a
+   "New" pill; read rows are muted rather than hidden, so they stay readable
+   without competing with what still needs attention. */
+.dashboard--coordinator .coordinator-notifications li { align-items: flex-start; }
+.dashboard--coordinator .coordinator-notifications__body { flex: 1; min-width: 0; }
+.dashboard--coordinator .coordinator-notifications__body p { margin: 0 0 4px; }
+.dashboard--coordinator .coordinator-notifications__headline strong { color: var(--ink); }
+.dashboard--coordinator .coordinator-notifications__detail { overflow-wrap: anywhere; }
+.dashboard--coordinator .coordinator-notifications__time { font-size: 0.8rem; }
+.dashboard--coordinator .coordinator-notifications__item--unread { border-left: 3px solid var(--teal); padding-left: 12px; }
+.dashboard--coordinator .coordinator-notifications__item--read { opacity: 0.7; }
+.dashboard--coordinator .coordinator-notifications__new { background: #e8f7f1; border-radius: 999px; color: #17684f; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-left: 10px; padding: 3px 10px; text-transform: uppercase; }
 /* The handoff banner on venue search. Needs a rule of its own because
    .venue-search has no card styling at all -- it is a bare filter bar -- so
    without one the context reads as a stray sentence above the inputs rather

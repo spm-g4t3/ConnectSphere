@@ -14,7 +14,7 @@
 // EventCoordinatorDashboard, for the reason VenueCatalogue was: this is the
 // only part of that screen with a route of its own (/review-queue), and
 // inline it would mean that route rendering a second copy of the greeting and
-// the pending-bookings stub.
+// the notifications card.
 //
 // It renders a <section> and NOT the `dashboard dashboard--coordinator`
 // wrapper, so the card styling and the badge rules both come from whichever
