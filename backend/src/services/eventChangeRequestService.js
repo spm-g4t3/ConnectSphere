@@ -31,10 +31,9 @@
  * supabase-js calls are two separate HTTP requests with no shared
  * transaction, so a rejected write to event_requests could otherwise leave
  * a change request marked processed for a change that was never actually
- * made. There is no Coordinator-facing route or frontend yet to match a
- * wire shape against, unlike createChangeRequestFromClient below, so this
- * function is not paired with a *FromClient adapter -- that can be added
- * once one exists to match.
+ * made. The Coordinator route calls this service with the decision payload
+ * directly; unlike createChangeRequestFromClient below, it needs no separate
+ * adapter because its wire and service shapes already match.
  *
  * Frontend/backend contract fix: createChangeRequestFromClient accepts the
  * wire shape frontend/changeRequestService.js already sends -- POST
@@ -334,6 +333,19 @@ export async function getChangeRequestsForEvent(eventRequestId, organiserId, { c
   return data.map(toOrganiserView);
 }
 
+/** List one event's organiser-submitted change requests for Coordinator review. */
+export async function getChangeRequestsForCoordinator(eventRequestId, { client } = {}) {
+  const db = await resolveClient(client);
+  const { data, error } = await db
+    .from('event_change_requests')
+    .select('*')
+    .eq('event_request_id', eventRequestId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw translateError(error);
+  return (data ?? []).map(toOrganiserView);
+}
+
 /**
  * Fetch one change request by its own id, so it can be opened and reviewed
  * directly -- from a link, a notification, or a status list -- rather than
@@ -399,11 +411,9 @@ export async function getChangeRequestById(changeRequestId, organiserId, { clien
  * the decision itself is rolled back too, so a change request can never be
  * left marked processed for a change that was never actually made.
  *
- * There is no role system yet to check that processedBy actually names a
- * Coordinator rather than, say, the Organiser who filed the request in the
- * first place -- the same gap requestedBy already has against the Organiser
- * role in createChangeRequest. This only guarantees processedBy names a
- * real user, via the foreign key in 006_event_change_requests.sql.
+ * Coordinator authorization is enforced by the API route. This service also
+ * relies on the foreign key in 006_event_change_requests.sql to ensure the
+ * deciding user exists.
  *
  * @param {string} changeRequestId
  * @param {object} decisionInput

@@ -965,6 +965,146 @@ describe('SCRUM-11: an Organiser saves edits to their own draft over HTTP', () =
   });
 });
 
+describe('SCRUM-46: clarification returns between Coordinator and Organiser', () => {
+  const coordinatorAuth = (req, _res, next) => {
+    req.user = { id: OTHER_ORGANISER_ID, role: 'event_coordinator' };
+    next();
+  };
+
+  it('allows a Coordinator to request clarification with a required note', async () => {
+    const note = 'Please clarify the proposed event purpose.';
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.SUBMITTED })),
+      ok(storedRow({ status: STATUS.PENDING_CLARIFICATION, clarification_note: note })),
+    ]);
+
+    const res = await request(appWith({ client, requireAuth: coordinatorAuth }))
+      .post(`/api/event-requests/${REQUEST_ID}/clarification`)
+      .send({ note });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe(STATUS.PENDING_CLARIFICATION);
+    expect(res.body.clarificationNote).toBe(note);
+  });
+
+  it('refuses clarification requests from non-Coordinators before database access', async () => {
+    const client = createWritableFakeClient([]);
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/clarification`)
+      .send({ note: 'Please clarify.' });
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('allows only the owning Organiser to send amendments for review', async () => {
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.PENDING_CLARIFICATION, clarification_note: 'Clarify purpose.' })),
+      ok(storedRow({
+        status: STATUS.UNDER_REVIEW,
+        clarification_note: null,
+        description: 'Updated description.',
+      })),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .patch(`/api/event-requests/${REQUEST_ID}/clarification-response`)
+      .send({ description: 'Updated description.' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe(STATUS.UNDER_REVIEW);
+    expect(res.body.description).toBe('Updated description.');
+    expect(res.body.clarificationNote).toBeNull();
+    expect(client.calls[1].filters).toContainEqual(['organiser_id', ORGANISER_ID]);
+  });
+});
+
+describe('SCRUM-46: Coordinators can read organiser change requests', () => {
+  const coordinatorAuth = (req, _res, next) => {
+    req.user = { id: OTHER_ORGANISER_ID, role: 'event_coordinator' };
+    next();
+  };
+
+  it('returns the change field, requested value, and status to Coordinators', async () => {
+    const client = createFakeClient([ok([storedChangeRequestRow()])]);
+    const res = await request(appWith({ client, requireAuth: coordinatorAuth }))
+      .get(`/api/event-requests/${REQUEST_ID}/change-requests/review`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject([{
+      fieldLabel: 'Venue',
+      details: 'A larger room, the RSVPs have doubled.',
+      status: 'outstanding',
+    }]);
+    expect(client.calls[0].table).toBe('event_change_requests');
+    expect(client.calls[0].filters).toContainEqual(['event_request_id', REQUEST_ID]);
+  });
+
+  it('denies the Coordinator review endpoint to non-Coordinator roles', async () => {
+    const client = createFakeClient([]);
+    const res = await request(appWith({ client }))
+      .get(`/api/event-requests/${REQUEST_ID}/change-requests/review`);
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+describe('SCRUM-47: Coordinators decide organiser change requests', () => {
+  const coordinatorAuth = (req, _res, next) => {
+    req.user = { id: OTHER_ORGANISER_ID, role: 'event_coordinator' };
+    next();
+  };
+
+  it('passes approval to the atomic database function', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: storedChangeRequestRow({
+        status: 'processed',
+        decision: 'approved',
+        processed_by: OTHER_ORGANISER_ID,
+      }),
+      error: null,
+    });
+    const res = await request(appWith({ client: { rpc }, requireAuth: coordinatorAuth }))
+      .post('/api/event-requests/change-requests/44444444-4444-4444-8444-444444444444/decision')
+      .send({ decision: 'approved' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('processed');
+    expect(res.body.decision).toBe('approved');
+    expect(rpc).toHaveBeenCalledWith('process_change_request', {
+      p_change_request_id: '44444444-4444-4444-8444-444444444444',
+      p_decision: 'approved',
+      p_decision_notes: null,
+      p_processed_by: OTHER_ORGANISER_ID,
+    });
+  });
+
+  it('requires a rejection reason before reaching the database', async () => {
+    const rpc = vi.fn();
+    const res = await request(appWith({ client: { rpc }, requireAuth: coordinatorAuth }))
+      .post('/api/event-requests/change-requests/44444444-4444-4444-8444-444444444444/decision')
+      .send({ decision: 'rejected' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toContainEqual({
+      field: 'decisionNotes',
+      message: 'is required when rejecting a change request',
+    });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('denies decisions from non-Coordinator roles', async () => {
+    const rpc = vi.fn();
+    const res = await request(appWith({ client: { rpc } }))
+      .post('/api/event-requests/change-requests/44444444-4444-4444-8444-444444444444/decision')
+      .send({ decision: 'approved' });
+
+    expect(res.status).toBe(403);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+});
+
 
 describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
   it('SCRUM10_AC5_returns_200_and_the_submitted_request', async () => {

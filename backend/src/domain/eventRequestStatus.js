@@ -152,6 +152,7 @@ export const ALLOWED_TRANSITIONS = Object.freeze({
   ]),
   [STATUS.SUBMITTED]: Object.freeze([
     STATUS.UNDER_REVIEW,
+    STATUS.PENDING_CLARIFICATION,
     STATUS.CANCELLED,
   ]),
   [STATUS.UNDER_REVIEW]: Object.freeze([

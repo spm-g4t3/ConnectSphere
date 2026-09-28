@@ -162,6 +162,7 @@ describe('only legal status transitions are permitted', () => {
   it.each([
     [STATUS.DRAFT, STATUS.SUBMITTED],
     [STATUS.SUBMITTED, STATUS.UNDER_REVIEW],
+    [STATUS.SUBMITTED, STATUS.PENDING_CLARIFICATION],
     [STATUS.UNDER_REVIEW, STATUS.APPROVED],
     [STATUS.UNDER_REVIEW, STATUS.REJECTED],
     [STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION],
@@ -180,7 +181,6 @@ describe('only legal status transitions are permitted', () => {
     // nothing escapes a finished or abandoned request
     [STATUS.COMPLETED, STATUS.CANCELLED],
     [STATUS.CANCELLED, STATUS.DRAFT],
-    // no skipping the review step
     [STATUS.SUBMITTED, STATUS.APPROVED],
     [STATUS.DRAFT, STATUS.CONFIRMED],
     // planning cannot run backwards

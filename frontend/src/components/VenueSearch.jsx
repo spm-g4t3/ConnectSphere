@@ -21,12 +21,13 @@
 //     correctly. The filters are the contract; the banner is decoration.
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { searchActiveVenues } from "../services/venueService";
 
 export default function VenueSearch() {
   const [searchParams] = useSearchParams();
   const location = useLocation();
+  const navigate = useNavigate();
 
   // The banner's copy, or undefined on an ordinary visit. Router state, so it
   // is gone after a reload by design — see the header.
@@ -87,6 +88,15 @@ export default function VenueSearch() {
     <div className="venue-search">
       {context && (
         <div className="venue-search__context">
+          {location.state?.returnToReview && (
+            <button
+              type="button"
+              className="venue-search__back"
+              onClick={() => navigate("/review-queue", { state: location.state.returnToReview })}
+            >
+              Back to event review
+            </button>
+          )}
           <p>
             Finding a venue for <strong>{context.eventName}</strong>.
           </p>

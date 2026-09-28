@@ -21,6 +21,7 @@ import {
   createEventRequest,
   updateEventRequest,
   submitEventRequest,
+  respondToEventClarification,
 } from "../services/eventRequestService";
 import {
   toDatetimeLocalValue,
@@ -28,7 +29,11 @@ import {
   deviceTimeZoneLabel,
 } from "../services/datetimeFormat";
 
-export default function EventRequestForm({ existingRequest = null, onSaved }) {
+export default function EventRequestForm({
+  existingRequest = null,
+  onSaved,
+  clarificationResponse = false,
+}) {
   const [requestId, setRequestId] = useState(existingRequest?.id ?? null);
   const [status, setStatus] = useState(existingRequest?.status ?? "draft");
 
@@ -52,6 +57,7 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
   const [savingDraft, setSavingDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [saveError, setSaveError] = useState(null);
+  const [draftSavedMessage, setDraftSavedMessage] = useState(null);
   // Submission errors are field-specific (AC4: every gap at once), so this
   // is an array of { field, message } rather than a single string.
   const [submitErrors, setSubmitErrors] = useState([]);
@@ -92,6 +98,7 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
 
     setSavingDraft(true);
     setSaveError(null);
+    setDraftSavedMessage(null);
 
     try {
       const saved = requestId
@@ -100,6 +107,7 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
 
       setRequestId(saved.id);
       setStatus(saved.status);
+      setDraftSavedMessage("Draft saved. You can submit it when you're ready.");
       onSaved?.(saved);
     } catch (err) {
       setSaveError(
@@ -118,9 +126,12 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
 
     setSubmitting(true);
     setSubmitErrors([]);
+    setDraftSavedMessage(null);
 
     try {
-      const result = await submitEventRequest(requestId);
+      const result = clarificationResponse
+        ? await respondToEventClarification(requestId, buildPayload())
+        : await submitEventRequest(requestId);
       setStatus(result.status);
       setConfirmation(result);
       onSaved?.(result);
@@ -142,23 +153,43 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
   if (confirmation) {
     return (
       <div className="event-request-form__confirmation">
-        <h1>Request submitted</h1>
+        <h1>{clarificationResponse ? "Updates sent for review" : "Request submitted"}</h1>
         <p>
-          Your event request has been received. Your reference number is:
+          {clarificationResponse
+            ? "Your amendments have been sent back to the Event Coordinator."
+            : "Your event request has been received. Your reference number is:"}
         </p>
-        <p className="event-request-form__reference">{confirmation.id}</p>
-        <p>Keep this reference for tracking your request's status.</p>
+        {!clarificationResponse && (
+          <>
+            <p className="event-request-form__reference">{confirmation.id}</p>
+            <p>Keep this reference for tracking your request's status.</p>
+          </>
+        )}
       </div>
     );
   }
 
   const isDraft = status === "draft";
+  const isEditable = isDraft || clarificationResponse;
 
   return (
     <form className="event-request-form">
-      <h1>{requestId ? "Edit draft request" : "Create event request"}</h1>
+      <h1>
+        {clarificationResponse
+          ? "Amend your event request"
+          : requestId
+            ? "Edit draft request"
+            : "Create event request"}
+      </h1>
 
-      {!isDraft && requestId && (
+      {clarificationResponse && existingRequest?.clarificationNote && (
+        <div className="event-request-form__notice" role="status">
+          <strong>Clarification requested by the Event Coordinator</strong>
+          <p>{existingRequest.clarificationNote}</p>
+        </div>
+      )}
+
+      {!isEditable && requestId && (
         <p className="event-request-form__notice">
           This request has already been submitted. To change it now, use
           "Request a change" instead of editing directly.
@@ -171,7 +202,7 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
           type="text"
           value={form.eventName}
           onChange={(e) => updateField("eventName", e.target.value)}
-          disabled={!isDraft}
+          disabled={!isEditable}
           required
         />
       </label>
@@ -182,7 +213,7 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
           value={form.purpose}
           onChange={(e) => updateField("purpose", e.target.value)}
           rows={2}
-          disabled={!isDraft}
+          disabled={!isEditable}
           placeholder="Why is this event happening?"
         />
       </label>
@@ -193,7 +224,7 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
           value={form.description}
           onChange={(e) => updateField("description", e.target.value)}
           rows={3}
-          disabled={!isDraft}
+          disabled={!isEditable}
           placeholder="General description of the event"
         />
       </label>
@@ -205,7 +236,7 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
             type="datetime-local"
             value={form.proposedStart}
             onChange={(e) => updateField("proposedStart", e.target.value)}
-            disabled={!isDraft}
+            disabled={!isEditable}
           />
         </label>
 
@@ -215,7 +246,7 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
             type="datetime-local"
             value={form.proposedEnd}
             onChange={(e) => updateField("proposedEnd", e.target.value)}
-            disabled={!isDraft}
+            disabled={!isEditable}
           />
         </label>
       </div>
@@ -237,7 +268,7 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
           min="1"
           value={form.expectedAttendance}
           onChange={(e) => updateField("expectedAttendance", e.target.value)}
-          disabled={!isDraft}
+          disabled={!isEditable}
         />
       </label>
 
@@ -247,7 +278,7 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
           value={form.venueRequirements}
           onChange={(e) => updateField("venueRequirements", e.target.value)}
           rows={3}
-          disabled={!isDraft}
+          disabled={!isEditable}
           placeholder="Size, layout, location, timing, anything else the space needs to support"
         />
       </label>
@@ -258,7 +289,7 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
           value={form.accessibilityRequirements}
           onChange={(e) => updateField("accessibilityRequirements", e.target.value)}
           rows={2}
-          disabled={!isDraft}
+          disabled={!isEditable}
           placeholder="Step-free access, hearing loop, etc."
         />
       </label>
@@ -269,12 +300,13 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
           value={form.equipmentRequirements}
           onChange={(e) => updateField("equipmentRequirements", e.target.value)}
           rows={2}
-          disabled={!isDraft}
+          disabled={!isEditable}
           placeholder="Microphones, projector, staging, catering hookups, etc."
         />
       </label>
 
       {saveError && <p className="event-request-form__error" role="alert">{saveError}</p>}
+      {draftSavedMessage && <p className="event-request-form__notice" role="status">{draftSavedMessage}</p>}
 
       {submitErrors.length > 0 && (
         <div className="event-request-form__submit-errors" role="alert">
@@ -303,6 +335,19 @@ export default function EventRequestForm({ existingRequest = null, onSaved }) {
             title={!requestId ? "Save the draft first" : undefined}
           >
             {submitting ? "Submitting..." : "Submit request"}
+          </button>
+          {!requestId && (
+            <p className="event-request-form__submit-hint" role="status">
+              Save the draft first to enable submission.
+            </p>
+          )}
+        </div>
+      )}
+
+      {clarificationResponse && (
+        <div className="event-request-form__actions">
+          <button type="button" onClick={handleSubmit} disabled={submitting}>
+            {submitting ? "Sending updates..." : "Send updates to Coordinator"}
           </button>
         </div>
       )}
