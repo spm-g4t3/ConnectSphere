@@ -312,3 +312,5 @@ begin
   return v_request;
 end;
 $$;
+
+notify pgrst, 'reload schema';

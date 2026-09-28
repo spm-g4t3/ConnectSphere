@@ -9,7 +9,8 @@
 // there's no client-side filtering by organiser id, since the frontend
 // should never be trusted to enforce that boundary itself.
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { getMyEventRequests } from "../services/eventRequestService";
 import {
   readStatusDisplay,
@@ -19,20 +20,50 @@ import EventRequestForm from "./EventRequestForm";
 import ChangeRequestForm from "./ChangeRequestForm";
 import ChangeRequestStatusList from "./ChangeRequestStatusList";
 
+function formatEventDate(value) {
+  if (!value) return "Not specified";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
 export default function MyEventRequests() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   // Which panel is open, if any: { mode: "create" } | { mode: "edit", request }
   // | { mode: "change-request", request } | null
-  const [activePanel, setActivePanel] = useState(null);
+  const [activePanel, setActivePanel] = useState(() =>
+    location.state?.openNewEventRequest ? { mode: "create" } : null,
+  );
+  const pendingClarificationId = useRef(location.state?.openClarificationRequestId ?? null);
+
+  useEffect(() => {
+    if (location.state?.openNewEventRequest || location.state?.openClarificationRequestId) {
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.pathname, location.state, navigate]);
 
   const fetchRequests = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getMyEventRequests();
       setRequests(data);
+      const requestedEvent = pendingClarificationId.current
+        ? data.find((item) => item.id === pendingClarificationId.current)
+        : null;
+      if (requestedEvent?.status === "pending_clarification") {
+        setActivePanel({ mode: "clarification-response", request: requestedEvent });
+      }
+      pendingClarificationId.current = null;
       setError(null);
     } catch (err) {
       setError("Could not load your event requests.");
@@ -77,8 +108,13 @@ export default function MyEventRequests() {
   if (activePanel?.mode === "create") {
     return (
       <div className="my-event-requests">
-        <button onClick={() => setActivePanel(null)}>&larr; Back to my requests</button>
-        <EventRequestForm onSaved={handleSaved} />
+        <button className="my-event-requests__back" onClick={() => setActivePanel(null)}>&larr; Back to my requests</button>
+        <EventRequestForm
+          onSaved={(saved) => {
+            fetchRequests();
+            if (saved.status !== "draft") setActivePanel(null);
+          }}
+        />
       </div>
     );
   }
@@ -86,8 +122,21 @@ export default function MyEventRequests() {
   if (activePanel?.mode === "edit") {
     return (
       <div className="my-event-requests">
-        <button onClick={() => setActivePanel(null)}>&larr; Back to my requests</button>
+        <button className="my-event-requests__back" onClick={() => setActivePanel(null)}>&larr; Back to my requests</button>
         <EventRequestForm existingRequest={activePanel.request} onSaved={handleSaved} />
+      </div>
+    );
+  }
+
+  if (activePanel?.mode === "clarification-response") {
+    return (
+      <div className="my-event-requests">
+        <button className="my-event-requests__back" onClick={handleSaved}>&larr; Back to my requests</button>
+        <EventRequestForm
+          existingRequest={activePanel.request}
+          clarificationResponse
+          onSaved={handleSaved}
+        />
       </div>
     );
   }
@@ -95,11 +144,11 @@ export default function MyEventRequests() {
   if (activePanel?.mode === "change-request") {
     return (
       <div className="my-event-requests">
-        <button onClick={() => setActivePanel(null)}>&larr; Back to my requests</button>
+        <button className="my-event-requests__back" onClick={handleSaved}>&larr; Back to my requests</button>
         <h2>{activePanel.request.eventName}</h2>
         <ChangeRequestForm
           eventRequestId={activePanel.request.id}
-          onSubmitted={() => setActivePanel(null)}
+          onSubmitted={handleSaved}
         />
         <ChangeRequestStatusList eventRequestId={activePanel.request.id} />
       </div>
@@ -139,6 +188,34 @@ export default function MyEventRequests() {
                 {display.description}
               </p>
 
+              {req.status === "pending_clarification" && req.clarificationNote && (
+                <p className="my-event-requests__clarification" role="alert">
+                  <strong>Coordinator clarification:</strong> {req.clarificationNote}
+                </p>
+              )}
+
+              <details className="my-event-requests__details">
+                <summary>Current event details</summary>
+                <dl>
+                  <dt>Purpose</dt>
+                  <dd>{req.purpose || "Not specified"}</dd>
+                  <dt>Description</dt>
+                  <dd>{req.description || "Not specified"}</dd>
+                  <dt>Proposed start</dt>
+                  <dd>{formatEventDate(req.proposedStart)}</dd>
+                  <dt>Proposed end</dt>
+                  <dd>{formatEventDate(req.proposedEnd)}</dd>
+                  <dt>Expected attendance</dt>
+                  <dd>{req.expectedAttendance ?? "Not specified"}</dd>
+                  <dt>Venue requirements</dt>
+                  <dd>{req.venueRequirements || "Not specified"}</dd>
+                  <dt>Accessibility requirements</dt>
+                  <dd>{req.accessibilityRequirements || "Not specified"}</dd>
+                  <dt>Equipment requirements</dt>
+                  <dd>{req.equipmentRequirements || "Not specified"}</dd>
+                </dl>
+              </details>
+
               <div className="my-event-requests__item-actions">
                 {req.status === "draft" && (
                   <button onClick={() => setActivePanel({ mode: "edit", request: req })}>
@@ -146,7 +223,17 @@ export default function MyEventRequests() {
                   </button>
                 )}
 
-                {req.status !== "draft" && (
+                {req.status === "pending_clarification" && (
+                  <button
+                    onClick={() =>
+                      setActivePanel({ mode: "clarification-response", request: req })
+                    }
+                  >
+                    Respond to clarification
+                  </button>
+                )}
+
+                {req.status !== "draft" && req.status !== "pending_clarification" && (
                   <button
                     onClick={() => setActivePanel({ mode: "change-request", request: req })}
                   >

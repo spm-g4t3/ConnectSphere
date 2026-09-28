@@ -14,6 +14,8 @@ import {
   toChangeField,
 } from "../services/eventChangeFields";
 
+const DATE_CHANGE_FIELDS = new Set(["proposed_start", "proposed_end"]);
+
 export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
   const [field, setField] = useState("");
   const [details, setDetails] = useState("");
@@ -48,13 +50,17 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
     setDetailErrors([]);
 
     try {
+      const requestedChange = DATE_CHANGE_FIELDS.has(changeField)
+        ? new Date(details).toISOString()
+        : details.trim();
+
       // Mapped exactly once, here. The dropdown's values are the form's own
       // vocabulary; `field` on the wire is the Postgres enum
       // event_change_field. Sending the option value straight through -- which
       // is what this used to do -- was a 400 on every single choice.
       await submitChangeRequest(eventRequestId, {
         field: changeField,
-        details: details.trim(),
+        details: requestedChange,
       });
       setSuccess(true);
       setField("");
@@ -90,7 +96,16 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
 
       <label>
         What needs to change?
-        <select value={field} onChange={(e) => setField(e.target.value)} required>
+        <select
+          value={field}
+          onChange={(e) => {
+            setField(e.target.value);
+            setDetails("");
+            setError(null);
+            setDetailErrors([]);
+          }}
+          required
+        >
           <option value="" disabled>
             Select an option
           </option>
@@ -119,13 +134,31 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
 
       <label>
         Describe the change
-        <textarea
-          value={details}
-          onChange={(e) => setDetails(e.target.value)}
-          rows={4}
-          placeholder="e.g. Move the event from 10am to 2pm on the same day"
-          required
-        />
+        {DATE_CHANGE_FIELDS.has(changeField) ? (
+          <input
+            type="datetime-local"
+            value={details}
+            onChange={(e) => setDetails(e.target.value)}
+            required
+          />
+        ) : changeField === "expected_attendance" ? (
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={details}
+            onChange={(e) => setDetails(e.target.value)}
+            required
+          />
+        ) : (
+          <textarea
+            value={details}
+            onChange={(e) => setDetails(e.target.value)}
+            rows={4}
+            placeholder="Describe the new value or arrangement"
+            required
+          />
+        )}
       </label>
 
       {error && <p className="change-request-form__error" role="alert">{error}</p>}

@@ -44,6 +44,8 @@ import {
   getEventRequestById,
   listEventRequestsForOrganiser,
   getEventRequestForOrganiser,
+  requestEventClarification,
+  respondToEventClarification,
 } from '../../src/services/eventRequestService.js';
 import { ValidationError, NotFoundError, ConflictError } from '../../src/errors.js';
 import { STATUS, canTransition } from '../../src/domain/eventRequestStatus.js';
@@ -189,6 +191,7 @@ function storedRow(overrides = {}) {
     accessibility_requirements: null,
     equipment_requirements: null,
     status: STATUS.DRAFT,
+    clarification_note: null,
     created_at: '2026-01-10T03:00:00+00:00',
     updated_at: '2026-01-10T03:00:00+00:00',
     submitted_at: null,
@@ -1180,6 +1183,65 @@ describe('SCRUM-11: a draft is updated in place', () => {
   });
 });
 
+describe('SCRUM-46: Coordinator clarification and Organiser response', () => {
+  it('moves a submitted request to pending clarification and stores the note', async () => {
+    const note = 'Please clarify the accessibility arrangements.';
+    const client = createFakeClient([
+      ok(storedRow({ status: STATUS.SUBMITTED })),
+      ok(storedRow({ status: STATUS.PENDING_CLARIFICATION, clarification_note: note })),
+    ]);
+
+    const result = await requestEventClarification(REQUEST_ID, note, ORGANISER_ID, { client });
+
+    expect(result.status).toBe(STATUS.PENDING_CLARIFICATION);
+    expect(result.clarificationNote).toBe(note);
+    expect(client.calls[1].payload).toEqual({
+      status: STATUS.PENDING_CLARIFICATION,
+      clarification_note: note,
+    });
+    expect(client.calls[1].filters).toContainEqual(['status', STATUS.SUBMITTED]);
+  });
+
+  it('rejects a blank clarification note before querying', async () => {
+    const client = createFakeClient([]);
+    const err = await errorFrom(
+      requestEventClarification(REQUEST_ID, '  ', ORGANISER_ID, { client }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('saves an organiser amendment and returns the request to review', async () => {
+    const client = createFakeClient([
+      ok(storedRow({ status: STATUS.PENDING_CLARIFICATION, clarification_note: 'Clarify purpose.' })),
+      ok(storedRow({
+        status: STATUS.UNDER_REVIEW,
+        clarification_note: null,
+        description: 'Updated event description.',
+      })),
+    ]);
+
+    const result = await respondToEventClarification(
+      REQUEST_ID,
+      { description: 'Updated event description.' },
+      ORGANISER_ID,
+      { client },
+    );
+
+    expect(result.status).toBe(STATUS.UNDER_REVIEW);
+    expect(result.description).toBe('Updated event description.');
+    expect(result.clarificationNote).toBeNull();
+    expect(client.calls[1].payload).toMatchObject({
+      description: 'Updated event description.',
+      status: STATUS.UNDER_REVIEW,
+      clarification_note: null,
+    });
+    expect(client.calls[1].filters).toContainEqual(['organiser_id', ORGANISER_ID]);
+    expect(client.calls[1].filters).toContainEqual(['status', STATUS.PENDING_CLARIFICATION]);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // The change request service's client seam

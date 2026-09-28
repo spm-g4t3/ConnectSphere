@@ -45,11 +45,10 @@
  *    Residual, named rather than hidden: any authenticated user can POST /
  *    and own the draft they create. Low harm; if the team wants it closed the
  *    gate belongs on POST / alone, using the same requireRole option.
- *  - No Coordinator write routes. Deciding a change request
- *    (processChangeRequest) and moving a request through the later statuses
- *    are a different audience with a different gate, and belong with the
- *    story that adds one. Reading the queue is here; acting on what you read
- *    is not.
+ *  - Coordinator writes are role-gated per route. Clarification is the one
+ *    review action in this workflow; deciding organiser-submitted change
+ *    requests and moving requests through later planning statuses remain
+ *    separate workflows.
  *
  * Ownership is proved by this router, not assumed from the service. Three of
  * the routes below open with an explicit getEventRequestForOrganiser call and
@@ -69,10 +68,14 @@ import {
   createEventRequest,
   updateEventRequest,
   submitEventRequest,
+  requestEventClarification,
+  respondToEventClarification,
 } from '../services/eventRequestService.js';
 import {
   createChangeRequestFromClient,
+  getChangeRequestsForCoordinator,
   getChangeRequestsForEvent,
+  processChangeRequest,
 } from '../services/eventChangeRequestService.js';
 import { getStatusDisplay } from '../domain/eventRequestStatus.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
@@ -297,6 +300,15 @@ export function createEventRequestRouter({
     }
   });
 
+  router.get('/:id/change-requests/review', coordinatorOnly, async (req, res) => {
+    try {
+      const changeRequests = await getChangeRequestsForCoordinator(req.params.id, { client });
+      res.status(200).json(changeRequests);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
   /** AC1: one request in full, with its status. */
   router.get('/:id', async (req, res) => {
     try {
@@ -391,6 +403,34 @@ export function createEventRequestRouter({
     }
   });
 
+  router.post('/:id/clarification', coordinatorOnly, async (req, res) => {
+    try {
+      const updated = await requestEventClarification(
+        req.params.id,
+        req.body?.note,
+        req.user.id,
+        { client },
+      );
+      res.status(200).json(withStatusDisplay(updated));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  router.patch('/:id/clarification-response', async (req, res) => {
+    try {
+      const updated = await respondToEventClarification(
+        req.params.id,
+        req.body,
+        req.user.id,
+        { client },
+      );
+      res.status(200).json(withStatusDisplay(updated));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
   /**
    * SCRUM-32 AC1/AC2: ask for a change to an event already submitted.
    *
@@ -416,6 +456,20 @@ export function createEventRequestRouter({
       );
 
       res.status(201).json(created);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  router.post('/change-requests/:changeRequestId/decision', coordinatorOnly, async (req, res) => {
+    try {
+      const processed = await processChangeRequest(
+        req.params.changeRequestId,
+        req.body,
+        req.user.id,
+        { client },
+      );
+      res.status(200).json(processed);
     } catch (err) {
       handleError(err, res);
     }

@@ -84,6 +84,34 @@ export async function submitEventRequest(id) {
   return response.data;
 }
 
+export async function requestEventClarification(id, note) {
+  const response = await apiClient.post(`/event-requests/${id}/clarification`, { note });
+  return response.data;
+}
+
+export async function respondToEventClarification(id, updates) {
+  const response = await apiClient.patch(
+    `/event-requests/${id}/clarification-response`,
+    updates,
+  );
+  return response.data;
+}
+
+export async function getCoordinatorChangeRequests(eventRequestId) {
+  const response = await apiClient.get(
+    `/event-requests/${eventRequestId}/change-requests/review`,
+  );
+  return response.data;
+}
+
+export async function processCoordinatorChangeRequest(changeRequestId, decision) {
+  const response = await apiClient.post(
+    `/event-requests/change-requests/${changeRequestId}/decision`,
+    decision,
+  );
+  return response.data;
+}
+
 /**
  * Fetches one event request by id.
  */

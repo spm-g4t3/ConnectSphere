@@ -59,7 +59,7 @@ const COLUMNS = `
   id, organiser_id, event_name, purpose, description,
   proposed_start, proposed_end, expected_attendance,
   venue_requirements, accessibility_requirements, equipment_requirements,
-  status, created_at, updated_at, submitted_at
+  status, clarification_note, created_at, updated_at, submitted_at
 `;
 
 /**
@@ -181,6 +181,7 @@ function toEventRequest(row) {
     accessibilityRequirements: row.accessibility_requirements,
     equipmentRequirements: row.equipment_requirements,
     status: row.status,
+    clarificationNote: row.clarification_note ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     submittedAt: row.submitted_at,
@@ -481,6 +482,73 @@ export async function updateEventRequest(id, changes, organiserId, { client } = 
 
   if (error) throw translateError(error);
 
+  return toEventRequest(data);
+}
+
+/** Ask an Organiser for clarification while reviewing their request. */
+export async function requestEventClarification(id, note, coordinatorId, { client } = {}) {
+  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
+    throw new ValidationError('coordinatorId is required');
+  }
+  if (typeof note !== 'string' || note.trim() === '') {
+    throw new ValidationError('clarification note is required');
+  }
+  const clarificationNote = note.trim();
+  if (clarificationNote.length > 2000) {
+    throw new ValidationError('clarification note must be 2000 characters or fewer');
+  }
+
+  const db = await resolveClient(client);
+  const current = await getEventRequestById(id, { client: db });
+  if (!canTransition(current.status, STATUS.PENDING_CLARIFICATION)) {
+    throw new ConflictError(
+      `An event request with status '${current.status}' cannot be sent for clarification.`,
+    );
+  }
+
+  const { data, error } = await db
+    .from('event_requests')
+    .update({ status: STATUS.PENDING_CLARIFICATION, clarification_note: clarificationNote })
+    .eq('id', id)
+    .eq('status', current.status)
+    .select()
+    .single();
+
+  if (error?.code === 'PGRST116') {
+    throw new ConflictError('The request changed while clarification was being sent. Refresh and try again.');
+  }
+  if (error) throw translateError(error);
+  return toEventRequest(data);
+}
+
+/** Save the Organiser's amendments and return the request to Coordinator review. */
+export async function respondToEventClarification(id, changes, organiserId, { client } = {}) {
+  assertOrganiser(organiserId);
+  const validated = validateUpdateEventRequest(changes);
+  const db = await resolveClient(client);
+  const current = await getEventRequestForOrganiser(id, organiserId, { client: db });
+
+  if (current.status !== STATUS.PENDING_CLARIFICATION) {
+    throw new ConflictError('This request is not waiting for clarification. Refresh before editing.');
+  }
+
+  const { data, error } = await db
+    .from('event_requests')
+    .update({
+      ...toColumns(validated),
+      status: STATUS.UNDER_REVIEW,
+      clarification_note: null,
+    })
+    .eq('id', id)
+    .eq('organiser_id', organiserId)
+    .eq('status', STATUS.PENDING_CLARIFICATION)
+    .select()
+    .single();
+
+  if (error?.code === 'PGRST116') {
+    throw new ConflictError('This request is no longer waiting for clarification. Refresh before editing.');
+  }
+  if (error) throw translateError(error);
   return toEventRequest(data);
 }
 
