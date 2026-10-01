@@ -4,7 +4,7 @@
  * SCRUM-17 (AC1): a block records why the venue is unavailable -- one of
  * maintenance, renovation, safety, internal activity, or other.
  *
- * Mirrors the Postgres enum `venue_block_reason` in 010_venue_blocks.sql
+ * Mirrors the Postgres enum `venue_block_reason` in 011_venue_blocks.sql
  * exactly, in the same order. These two lists must stay identical -- a test
  * asserts the match.
  *

@@ -13,6 +13,8 @@ import {
   validateBlockId,
 } from '../../src/validation/venueBlockValidation.js';
 import { ValidationError } from '../../src/errors.js';
+// SCRUM-127: a separate import so the existing one is left as it was.
+import { validateUpdateBlock } from '../../src/validation/venueBlockValidation.js';
 
 const NOW = new Date('2026-09-23T00:00:00Z');
 
@@ -511,4 +513,298 @@ describe('validateBlockId', () => {
       expect(err.message).toBe('Invalid venue block details -- blockId: must be a block id');
     },
   );
+});
+
+
+describe('SCRUM17_AC4 validateUpdateBlock', () => {
+  const ID_A = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+  const ID_B = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
+
+  /** Run validateUpdateBlock and return the thrown error, or null. */
+  function updateErrorFrom(input, options = { now: NOW }) {
+    try {
+      validateUpdateBlock(input, options);
+      return null;
+    } catch (err) {
+      return err;
+    }
+  }
+
+  function updateDetailsFrom(input, options) {
+    const err = updateErrorFrom(input, options);
+    expect(err).toBeInstanceOf(ValidationError);
+    return err.details;
+  }
+
+  const update = (input) => validateUpdateBlock(input, { now: NOW });
+
+  describe('nothing to amend', () => {
+    it.each([
+      ['empty', {}],
+      ['override only', { confirmOverride: true, acknowledgedBookingIds: [ID_A] }],
+      ['confirmOverride false only', { confirmOverride: false }],
+      ['unknown keys only', { userId: 'x' }],
+      ['several unknown keys', { userId: 'x', venueId: ID_A, removedAt: null }],
+    ])('SCRUM17_AC4_refuses_a_patch_with_no_fields (%s)', (_label, input) => {
+      const err = updateErrorFrom(input);
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.message).toBe('Invalid venue block details -- no changes supplied');
+    });
+
+    it.each([
+      ['null', null],
+      ['undefined', undefined],
+      ['a string', 'startsAt'],
+      ['a number', 42],
+      ['an array', [{ reason: 'maintenance' }]],
+      ['an empty array', []],
+    ])('SCRUM17_AC4_refuses_a_non_object (%s)', (_label, input) => {
+      const err = updateErrorFrom(input);
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.message).toBe('Invalid venue block details -- expected an object');
+    });
+  });
+
+  describe('fields that cannot be cleared', () => {
+    it.each(['startsAt', 'endsAt', 'reason'])(
+      'SCRUM17_AC4_null_%s_is_refused_as_cannot_be_cleared',
+      (field) => {
+        expect(updateDetailsFrom({ [field]: null })).toEqual([
+          { field, message: 'cannot be cleared' },
+        ]);
+      },
+    );
+  });
+
+  describe('a single field', () => {
+    it('SCRUM17_AC4_startsAt_alone_is_accepted_and_the_rest_keep', () => {
+      expect(update({ startsAt: ' 2026-10-01T08:00:00+08:00 ' })).toEqual({
+        startsAt: '2026-10-01T08:00:00+08:00',
+        endsAt: null,
+        reason: null,
+        notes: null,
+        notesSupplied: false,
+        confirmOverride: false,
+        acknowledgedBookingIds: [],
+      });
+    });
+
+    it('SCRUM17_AC4_endsAt_alone_is_accepted', () => {
+      const result = update({ endsAt: '2026-10-02T17:00:00+08:00' });
+      expect(result.endsAt).toBe('2026-10-02T17:00:00+08:00');
+      expect(result.startsAt).toBeNull();
+      expect(result.reason).toBeNull();
+      expect(result.notesSupplied).toBe(false);
+    });
+
+    it('SCRUM17_AC4_reason_alone_is_accepted', () => {
+      const result = update({ reason: 'renovation' });
+      expect(result.reason).toBe('renovation');
+      expect(result.startsAt).toBeNull();
+      expect(result.endsAt).toBeNull();
+      expect(result.notesSupplied).toBe(false);
+    });
+
+    it('refuses an unknown reason with the vocabulary message', () => {
+      expect(updateDetailsFrom({ reason: 'party' })).toEqual([
+        { field: 'reason', message: REASON_MESSAGE },
+      ]);
+    });
+
+    it('a start in the past is accepted, as on create', () => {
+      expect(update({ startsAt: '2026-01-01T00:00:00Z' }).startsAt).toBe('2026-01-01T00:00:00Z');
+    });
+
+    it('unknown keys beside a real field are ignored', () => {
+      const result = update({ reason: 'safety', userId: 'x' });
+      expect(result).not.toHaveProperty('userId');
+      expect(result.reason).toBe('safety');
+    });
+  });
+
+  describe('notes', () => {
+    it.each([
+      ['null', null],
+      ['empty', ''],
+      ['blank', '   '],
+    ])('SCRUM17_AC4_notes_%s_clears_them', (_label, notes) => {
+      const result = update({ notes });
+      expect(result.notesSupplied).toBe(true);
+      expect(result.notes).toBeNull();
+    });
+
+    it('SCRUM17_AC4_omitted_notes_are_kept', () => {
+      const result = update({ reason: 'maintenance' });
+      expect(result.notesSupplied).toBe(false);
+      expect(result.notes).toBeNull();
+    });
+
+    it('SCRUM17_AC4_notes_text_is_trimmed_and_supplied', () => {
+      const result = update({ notes: '  New projector  ' });
+      expect(result.notesSupplied).toBe(true);
+      expect(result.notes).toBe('New projector');
+    });
+
+    it('SCRUM17_AC4_notes_over_1000_code_points_are_refused', () => {
+      expect(update({ notes: 'a'.repeat(1000) }).notes).toHaveLength(1000);
+      expect(updateDetailsFrom({ notes: 'a'.repeat(1001) })).toEqual([
+        { field: 'notes', message: 'must be 1000 characters or fewer' },
+      ]);
+    });
+
+    it('SCRUM17_AC4_an_emoji_counts_as_one_character', () => {
+      const thousandEmoji = '\u{1F600}'.repeat(1000);
+      expect(thousandEmoji.length).toBe(2000);
+      expect(update({ notes: thousandEmoji }).notes).toBe(thousandEmoji);
+      expect(updateDetailsFrom({ notes: '\u{1F600}'.repeat(1001) })).toEqual([
+        { field: 'notes', message: 'must be 1000 characters or fewer' },
+      ]);
+    });
+
+    it('refuses non-text notes', () => {
+      expect(updateDetailsFrom({ notes: 42 })).toEqual([
+        { field: 'notes', message: 'must be text' },
+      ]);
+    });
+  });
+
+  describe('the period', () => {
+    it('SCRUM17_AC4_endsAt_in_the_past_is_refused', () => {
+      expect(updateDetailsFrom({ endsAt: '2026-09-22T23:59:59Z' })).toEqual([
+        { field: 'endsAt', message: 'must be in the future' },
+      ]);
+    });
+
+    it('SCRUM17_AC4_endsAt_equal_to_now_is_refused', () => {
+      expect(updateDetailsFrom({ endsAt: NOW.toISOString() })).toEqual([
+        { field: 'endsAt', message: 'must be in the future' },
+      ]);
+    });
+
+    it('judges the future against the injected now', () => {
+      const endsAt = '2026-09-23T00:00:01Z';
+      expect(update({ endsAt }).endsAt).toBe(endsAt);
+      expect(
+        updateDetailsFrom({ endsAt }, { now: new Date('2026-09-23T00:00:02Z') }),
+      ).toEqual([{ field: 'endsAt', message: 'must be in the future' }]);
+    });
+
+    it('SCRUM17_AC4_both_times_reversed_are_refused', () => {
+      expect(
+        updateDetailsFrom({
+          startsAt: '2026-10-01T17:00:00+08:00',
+          endsAt: '2026-10-01T09:00:00+08:00',
+        }),
+      ).toEqual([{ field: 'endsAt', message: 'must be later than the start' }]);
+    });
+
+    it('both times equal are refused', () => {
+      expect(
+        updateDetailsFrom({
+          startsAt: '2026-10-01T09:00:00+08:00',
+          endsAt: '2026-10-01T01:00:00Z',
+        }),
+      ).toEqual([{ field: 'endsAt', message: 'must be later than the start' }]);
+    });
+
+    it('SCRUM17_AC4_endsAt_alone_is_not_compared_with_any_start', () => {
+      // Earlier than the stored start of every fixture block; only the
+      // database can see the stored start, so the validator must not judge it.
+      const endsAt = '2026-09-23T00:00:01Z';
+      expect(update({ endsAt }).endsAt).toBe(endsAt);
+    });
+
+    it('a malformed time is refused with the timestamp message', () => {
+      expect(updateDetailsFrom({ startsAt: '2026-10-01' })).toEqual([
+        { field: 'startsAt', message: 'must include a time of day, not a date on its own' },
+      ]);
+    });
+  });
+
+  describe('reason other', () => {
+    it('SCRUM17_AC4_reason_other_with_notes_cleared_is_refused', () => {
+      for (const notes of [null, '', '   ']) {
+        expect(updateDetailsFrom({ reason: 'other', notes })).toEqual([
+          { field: 'notes', message: 'is required when the reason is other' },
+        ]);
+      }
+    });
+
+    it('SCRUM17_AC4_reason_other_alone_is_accepted_for_the_database_to_judge', () => {
+      const result = update({ reason: 'other' });
+      expect(result.reason).toBe('other');
+      expect(result.notesSupplied).toBe(false);
+    });
+
+    it('reason other with notes is accepted', () => {
+      const result = update({ reason: 'other', notes: 'Film shoot' });
+      expect(result.reason).toBe('other');
+      expect(result.notes).toBe('Film shoot');
+    });
+
+    it('clearing notes alone is accepted (the stored reason is unknown here)', () => {
+      expect(update({ notes: null }).notesSupplied).toBe(true);
+    });
+  });
+
+  describe('SCRUM17_AC3 override pairing on an amendment', () => {
+    it('SCRUM17_AC3_override_without_ids_is_refused', () => {
+      expect(updateDetailsFrom({ reason: 'safety', confirmOverride: true })).toEqual([
+        { field: 'acknowledgedBookingIds', message: 'must list the bookings being overridden' },
+      ]);
+    });
+
+    it('SCRUM17_AC3_ids_without_override_are_refused', () => {
+      expect(updateDetailsFrom({ reason: 'safety', acknowledgedBookingIds: [ID_A] })).toEqual([
+        { field: 'acknowledgedBookingIds', message: 'can only be sent with confirmOverride' },
+      ]);
+    });
+
+    it('SCRUM17_AC3_ids_are_lowercased_and_deduped', () => {
+      const result = update({
+        endsAt: '2026-10-02T17:00:00+08:00',
+        confirmOverride: true,
+        acknowledgedBookingIds: [ID_B.toUpperCase(), ID_A, ID_B, ID_A.toUpperCase()],
+      });
+      expect(result.confirmOverride).toBe(true);
+      expect(result.acknowledgedBookingIds).toEqual([ID_B, ID_A]);
+    });
+
+    it('SCRUM17_AC3_string_true_is_refused', () => {
+      expect(
+        updateDetailsFrom({
+          reason: 'safety',
+          confirmOverride: 'true',
+          acknowledgedBookingIds: [ID_A],
+        }),
+      ).toEqual([{ field: 'confirmOverride', message: 'must be true or false' }]);
+    });
+
+    it('override fields default to false and []', () => {
+      const result = update({ reason: 'safety' });
+      expect(result.confirmOverride).toBe(false);
+      expect(result.acknowledgedBookingIds).toEqual([]);
+    });
+  });
+
+  describe('every fault at once', () => {
+    it('SCRUM17_AC4_reports_every_fault_together', () => {
+      const err = updateErrorFrom({
+        startsAt: null,
+        endsAt: '2026-09-01T00:00:00Z',
+        reason: 'party',
+        notes: 'x'.repeat(1001),
+        confirmOverride: true,
+      });
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.details).toEqual([
+        { field: 'startsAt', message: 'cannot be cleared' },
+        { field: 'endsAt', message: 'must be in the future' },
+        { field: 'reason', message: REASON_MESSAGE },
+        { field: 'notes', message: 'must be 1000 characters or fewer' },
+        { field: 'acknowledgedBookingIds', message: 'must list the bookings being overridden' },
+      ]);
+      expect(err.message).toMatch(/^Invalid venue block details -- startsAt: cannot be cleared; /);
+    });
+  });
 });

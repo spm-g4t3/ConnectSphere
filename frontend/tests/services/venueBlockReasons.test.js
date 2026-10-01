@@ -3,7 +3,7 @@
 // SCRUM-17 (AC1) / SCRUM-123. The frontend's list of venue block reasons.
 // The codes are asserted against a literal list rather than by importing the
 // backend, so this suite stands on its own; the literal is the same order as
-// venue_block_reason in backend/db/migrations/010_venue_blocks.sql.
+// venue_block_reason in backend/db/migrations/011_venue_blocks.sql.
 
 import { describe, it, expect } from "vitest";
 

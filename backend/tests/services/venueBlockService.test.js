@@ -21,6 +21,8 @@ import {
   toBookingConflict,
 } from '../../src/services/venueBlockService.js';
 import { ValidationError, NotFoundError, ConflictError } from '../../src/errors.js';
+// SCRUM-127: a separate import so the existing one is left as it was.
+import { updateVenueBlock, removeVenueBlock } from '../../src/services/venueBlockService.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -480,7 +482,7 @@ describe('SCRUM17_AC3 booking conflicts and the override', () => {
   });
 
   it('SCRUM17_AC3_created_with_affected_but_no_flagged_bookings_does_not_fall_back', async () => {
-    // A database without 013 answers with affected_bookings only. Nothing was
+    // A database without 014 answers with affected_bookings only. Nothing was
     // flagged there, so the honest answer is an empty list.
     rpc.mockResolvedValue({
       data: { outcome: 'created', block: blockRow(), affected_bookings: conflictRows },
@@ -725,5 +727,281 @@ describe('toBlock', () => {
       removedAt: '2026-10-02T00:00:00+00:00',
       removedBy: STAFF_ID,
     });
+  });
+});
+
+
+describe('SCRUM17_AC4 updateVenueBlock', () => {
+  const BOOKING_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const EVENT_ID = '8d0e6679-7425-40de-944b-e07fc1f90ae7';
+
+  const bookingRow = {
+    booking_id: BOOKING_ID,
+    event_request_id: EVENT_ID,
+    event_name: 'Orientation',
+    starts_at: '2026-10-01T02:00:00+00:00',
+    ends_at: '2026-10-01T04:00:00+00:00',
+  };
+  const camelBooking = {
+    bookingId: BOOKING_ID,
+    eventRequestId: EVENT_ID,
+    eventName: 'Orientation',
+    startsAt: '2026-10-01T02:00:00+00:00',
+    endsAt: '2026-10-01T04:00:00+00:00',
+  };
+
+  const updated = (extra = {}) => ({
+    data: { outcome: 'updated', block: blockRow(), affected_bookings: [], flagged_bookings: [], ...extra },
+    error: null,
+  });
+
+  const run = (input, userId = STAFF_ID) =>
+    updateVenueBlock(VENUE_ID, BLOCK_ID, input, userId, { now: NOW });
+
+  describe('the rpc call', () => {
+    it('SCRUM17_AC4_calls_update_venue_block_with_all_ten_named_params', async () => {
+      rpc.mockResolvedValueOnce(updated());
+
+      await run({ endsAt: ' 2026-10-02T17:00:00+08:00 ' });
+
+      expect(rpc).toHaveBeenCalledTimes(1);
+      expect(rpc).toHaveBeenCalledWith('update_venue_block', {
+        p_venue_id: VENUE_ID,
+        p_block_id: BLOCK_ID,
+        p_starts_at: null,
+        p_ends_at: '2026-10-02T17:00:00+08:00',
+        p_reason: null,
+        p_notes: null,
+        p_notes_supplied: false,
+        p_user_id: STAFF_ID,
+        p_confirm_override: false,
+        p_acknowledged_booking_ids: [],
+      });
+      expect(Object.keys(rpc.mock.calls[0][1])).toHaveLength(10);
+    });
+
+    it('SCRUM17_AC4_notes_null_is_sent_as_supplied', async () => {
+      rpc.mockResolvedValueOnce(updated());
+      await run({ notes: null });
+      const params = rpc.mock.calls[0][1];
+      expect(params.p_notes).toBeNull();
+      expect(params.p_notes_supplied).toBe(true);
+    });
+
+    it('sends trimmed notes as supplied', async () => {
+      rpc.mockResolvedValueOnce(updated());
+      await run({ notes: '  Rewired  ' });
+      const params = rpc.mock.calls[0][1];
+      expect(params.p_notes).toBe('Rewired');
+      expect(params.p_notes_supplied).toBe(true);
+    });
+
+    it('SCRUM17_AC4_p_user_id_is_the_acting_user_not_the_body', async () => {
+      rpc.mockResolvedValueOnce(updated());
+      await run({ reason: 'safety', userId: '00000000-0000-4000-8000-000000000000' });
+      expect(rpc.mock.calls[0][1].p_user_id).toBe(STAFF_ID);
+    });
+
+    it('SCRUM17_AC3_sends_the_override_and_normalised_ids', async () => {
+      rpc.mockResolvedValueOnce(updated());
+      await run({
+        endsAt: '2026-10-02T17:00:00+08:00',
+        confirmOverride: true,
+        acknowledgedBookingIds: [BOOKING_ID.toUpperCase(), BOOKING_ID],
+      });
+      const params = rpc.mock.calls[0][1];
+      expect(params.p_confirm_override).toBe(true);
+      expect(params.p_acknowledged_booking_ids).toEqual([BOOKING_ID]);
+    });
+
+    it('defaults the user to null', async () => {
+      rpc.mockResolvedValueOnce(updated());
+      await updateVenueBlock(VENUE_ID, BLOCK_ID, { reason: 'safety' }, undefined, { now: NOW });
+      expect(rpc.mock.calls[0][1].p_user_id).toBeNull();
+    });
+  });
+
+  describe('validation runs before any rpc', () => {
+    it.each([
+      ['a bad venue id', () => updateVenueBlock('nope', BLOCK_ID, { reason: 'safety' }, STAFF_ID, { now: NOW })],
+      ['a bad block id', () => updateVenueBlock(VENUE_ID, 'nope', { reason: 'safety' }, STAFF_ID, { now: NOW })],
+      ['an empty patch', () => run({})],
+      ['an override-only patch', () => run({ confirmOverride: true, acknowledgedBookingIds: [BOOKING_ID] })],
+      ['a null start', () => run({ startsAt: null })],
+      ['a past end', () => run({ endsAt: '2026-01-01T00:00:00Z' })],
+    ])('SCRUM17_AC4_refuses_%s_without_calling_the_rpc', async (_label, call) => {
+      const err = await errorFromAsync(call);
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(rpc).not.toHaveBeenCalled();
+      expect(from).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('outcomes', () => {
+    it('SCRUM17_AC4_updated_returns_the_camelcase_block_and_flagged_bookings', async () => {
+      rpc.mockResolvedValueOnce(
+        updated({ affected_bookings: [bookingRow], flagged_bookings: [bookingRow] }),
+      );
+      await expect(run({ reason: 'safety' })).resolves.toEqual({
+        block: CAMEL_BLOCK,
+        flaggedBookings: [camelBooking],
+      });
+    });
+
+    it('SCRUM17_AC3_flagged_bookings_come_only_from_flagged_bookings', async () => {
+      rpc.mockResolvedValueOnce(updated({ affected_bookings: [bookingRow], flagged_bookings: undefined }));
+      const result = await run({ reason: 'safety' });
+      expect(result.flaggedBookings).toEqual([]);
+    });
+
+    it('SCRUM17_AC3_conflict_throws_block_booking_conflict_with_camelcase_conflicts', async () => {
+      rpc.mockResolvedValueOnce({ data: { outcome: 'conflict', conflicts: [bookingRow] }, error: null });
+      const err = await errorFromAsync(() => run({ endsAt: '2026-10-02T17:00:00+08:00' }));
+      expect(err).toBeInstanceOf(ConflictError);
+      expect(err.status).toBe(409);
+      expect(err.code).toBe('BLOCK_BOOKING_CONFLICT');
+      expect(err.conflicts).toEqual([camelBooking]);
+      expect(err.message).toBe('This period overlaps approved bookings');
+    });
+
+    it('SCRUM17_AC3_conflict_after_confirming_says_the_list_is_stale', async () => {
+      rpc.mockResolvedValueOnce({ data: { outcome: 'conflict', conflicts: [bookingRow] }, error: null });
+      const err = await errorFromAsync(() =>
+        run({
+          endsAt: '2026-10-02T17:00:00+08:00',
+          confirmOverride: true,
+          acknowledgedBookingIds: [BOOKING_ID],
+        }),
+      );
+      expect(err).toBeInstanceOf(ConflictError);
+      expect(err.code).toBe('BLOCK_BOOKING_CONFLICT');
+      expect(err.message).toBe(
+        'The overlapping bookings have changed since you confirmed; review them again',
+      );
+    });
+
+    it.each([
+      ['an unknown outcome', { data: { outcome: 'created', block: blockRow() }, error: null }],
+      ['null data', { data: null, error: null }],
+    ])('SCRUM17_AC4_%s_throws_a_plain_error', async (_label, result) => {
+      rpc.mockResolvedValueOnce(result);
+      const err = await errorFromAsync(() => run({ reason: 'safety' }));
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(ValidationError);
+      expect(err).not.toBeInstanceOf(NotFoundError);
+      expect(err).not.toBeInstanceOf(ConflictError);
+      expect(err.message).toMatch(/Unexpected outcome from update_venue_block/);
+    });
+  });
+
+  describe('database errors', () => {
+    const fail = (error) => rpc.mockResolvedValueOnce({ data: null, error });
+
+    it('SCRUM17_AC4_P0002_becomes_not_found', async () => {
+      fail({ code: 'P0002', message: 'venue block x not found on venue y' });
+      const err = await errorFromAsync(() => run({ reason: 'safety' }));
+      expect(err).toBeInstanceOf(NotFoundError);
+      expect(err.status).toBe(404);
+    });
+
+    it.each(['BLOCK_REMOVED', 'BLOCK_ENDED', 'VENUE_RETIRED'])(
+      'SCRUM17_AC4_PT409_%s_becomes_a_conflict_with_that_code',
+      async (hint) => {
+        fail({ code: 'PT409', message: 'refused', hint, details: null });
+        const err = await errorFromAsync(() => run({ reason: 'safety' }));
+        expect(err).toBeInstanceOf(ConflictError);
+        expect(err.code).toBe(hint);
+        expect(err.conflicts).toEqual([]);
+      },
+    );
+
+    it('SCRUM17_AC4_PT409_BLOCK_OVERLAPS_BLOCK_names_the_clashing_block', async () => {
+      fail({
+        code: 'PT409',
+        message: 'this period overlaps another block',
+        hint: 'BLOCK_OVERLAPS_BLOCK',
+        details: OTHER_BLOCK_ID,
+      });
+      const err = await errorFromAsync(() => run({ endsAt: '2026-10-02T17:00:00+08:00' }));
+      expect(err).toBeInstanceOf(ConflictError);
+      expect(err.code).toBe('BLOCK_OVERLAPS_BLOCK');
+      expect(err.conflicts).toEqual([{ blockId: OTHER_BLOCK_ID }]);
+    });
+
+    it('SCRUM17_AC4_22023_becomes_a_validation_error', async () => {
+      fail({ code: '22023', message: 'a block with reason other needs notes' });
+      const err = await errorFromAsync(() => run({ reason: 'other' }));
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.status).toBe(400);
+    });
+
+    it('SCRUM17_AC4_23P01_becomes_block_overlaps_block', async () => {
+      fail({ code: '23P01', message: 'conflicting key value violates exclusion constraint' });
+      const err = await errorFromAsync(() => run({ endsAt: '2026-10-02T17:00:00+08:00' }));
+      expect(err).toBeInstanceOf(ConflictError);
+      expect(err.code).toBe('BLOCK_OVERLAPS_BLOCK');
+      expect(err.conflicts).toEqual([]);
+    });
+  });
+});
+
+
+describe('SCRUM17_AC4 removeVenueBlock', () => {
+  const removed = { data: { outcome: 'removed', block: blockRow({ removed_at: NOW.toISOString(), removed_by: STAFF_ID }) }, error: null };
+
+  it('SCRUM17_AC4_calls_remove_venue_block_with_three_params', async () => {
+    rpc.mockResolvedValueOnce(removed);
+    await removeVenueBlock(VENUE_ID, BLOCK_ID, STAFF_ID);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith('remove_venue_block', {
+      p_venue_id: VENUE_ID,
+      p_block_id: BLOCK_ID,
+      p_user_id: STAFF_ID,
+    });
+    expect(Object.keys(rpc.mock.calls[0][1])).toHaveLength(3);
+  });
+
+  it('SCRUM17_AC4_resolves_to_undefined', async () => {
+    rpc.mockResolvedValueOnce(removed);
+    await expect(removeVenueBlock(VENUE_ID, BLOCK_ID, STAFF_ID)).resolves.toBeUndefined();
+  });
+
+  it.each([
+    ['venue', () => removeVenueBlock('nope', BLOCK_ID, STAFF_ID)],
+    ['block', () => removeVenueBlock(VENUE_ID, 'nope', STAFF_ID)],
+  ])('SCRUM17_AC4_validates_the_%s_id_before_any_rpc', async (_label, call) => {
+    const err = await errorFromAsync(call);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM17_AC4_P0002_becomes_not_found', async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { code: 'P0002', message: 'not found' } });
+    const err = await errorFromAsync(() => removeVenueBlock(VENUE_ID, BLOCK_ID, STAFF_ID));
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.status).toBe(404);
+  });
+
+  it.each(['BLOCK_REMOVED', 'BLOCK_ENDED'])(
+    'SCRUM17_AC4_PT409_%s_becomes_a_409_conflict',
+    async (hint) => {
+      rpc.mockResolvedValueOnce({ data: null, error: { code: 'PT409', message: 'refused', hint } });
+      const err = await errorFromAsync(() => removeVenueBlock(VENUE_ID, BLOCK_ID, STAFF_ID));
+      expect(err).toBeInstanceOf(ConflictError);
+      expect(err.status).toBe(409);
+      expect(err.code).toBe(hint);
+      expect(err.conflicts).toEqual([]);
+    },
+  );
+
+  it.each([
+    ['an unknown outcome', { data: { outcome: 'updated' }, error: null }],
+    ['null data', { data: null, error: null }],
+  ])('SCRUM17_AC4_%s_throws', async (_label, result) => {
+    rpc.mockResolvedValueOnce(result);
+    const err = await errorFromAsync(() => removeVenueBlock(VENUE_ID, BLOCK_ID, STAFF_ID));
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ConflictError);
+    expect(err.message).toMatch(/Unexpected outcome from remove_venue_block/);
   });
 });

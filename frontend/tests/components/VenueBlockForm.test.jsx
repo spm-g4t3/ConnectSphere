@@ -419,3 +419,58 @@ describe("VenueBlockForm edit", () => {
     expect(screen.queryByRole("option", { name: /unrecognised reason/ })).not.toBeInTheDocument();
   });
 });
+
+describe("VenueBlockForm onDetailsChanged (SCRUM-127)", () => {
+  it("SCRUM17_AC3_onDetailsChanged_fires_for_reason_and_notes_but_not_dates", async () => {
+    const onDetailsChanged = vi.fn();
+    const onDatesChanged = vi.fn();
+    const { user } = renderForm({ onDetailsChanged, onDatesChanged });
+
+    setDate(startInput(), fromNow(DAY));
+    setDate(endInput(), fromNow(2 * DAY));
+    expect(onDetailsChanged).not.toHaveBeenCalled();
+    expect(onDatesChanged).toHaveBeenCalledTimes(2);
+
+    await user.selectOptions(reasonSelect(), "safety");
+    expect(onDetailsChanged).toHaveBeenCalledTimes(1);
+    expect(onDetailsChanged).toHaveBeenLastCalledWith();
+
+    await user.type(notesInput(), "ab");
+    expect(onDetailsChanged).toHaveBeenCalledTimes(3);
+    expect(onDatesChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it("fires in edit mode too, including when notes are cleared", async () => {
+    const onDetailsChanged = vi.fn();
+    const { user } = renderForm({
+      onDetailsChanged,
+      initialBlock: {
+        id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8",
+        startsAt: fromNow(DAY),
+        endsAt: fromNow(2 * DAY),
+        reason: "renovation",
+        notes: "Repainting",
+      },
+    });
+
+    await user.clear(notesInput());
+    expect(onDetailsChanged).toHaveBeenCalled();
+    const calls = onDetailsChanged.mock.calls.length;
+
+    setDate(endInput(), fromNow(3 * DAY));
+    expect(onDetailsChanged).toHaveBeenCalledTimes(calls);
+  });
+
+  it("is optional: changing reason and notes without it does not crash", async () => {
+    const { onSubmit, user } = renderForm();
+    await user.selectOptions(reasonSelect(), "maintenance");
+    await user.type(notesInput(), "note");
+    setDate(startInput(), fromNow(DAY));
+    setDate(endInput(), fromNow(2 * DAY));
+
+    expect(reasonSelect()).toHaveValue("maintenance");
+    expect(notesInput()).toHaveValue("note");
+    await user.click(screen.getByRole("button", { name: "Block venue" }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});

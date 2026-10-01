@@ -7,8 +7,12 @@
 //
 // Presentational on purpose. It calls no service: the parent owns the request,
 // passes `submitting`, and hands back what the API said as `serverErrors`
-// (the { field, message } details[]) and `formError` (anything else). Nothing
-// renders this yet; SCRUM-127 wires it to the routes.
+// (the { field, message } details[]) and `formError` (anything else).
+// VenueBlocksPanel (SCRUM-127) is that parent.
+//
+// onDatesChanged and onDetailsChanged tell the parent a field moved, so it can
+// drop a conflict list computed for the old values: an override must resend
+// exactly what the Venue Staff member last looked at (AC3).
 //
 // Form state is initialised once, from initialBlock, inside useState. There is
 // deliberately no prefill effect: the parent already has the block when it
@@ -56,6 +60,7 @@ export default function VenueBlockForm({
   serverErrors = [],
   formError,
   onDatesChanged,
+  onDetailsChanged,
 }) {
   const isEdit = Boolean(initialBlock);
   const idPrefix = useId();
@@ -99,6 +104,13 @@ export default function VenueBlockForm({
         startsAt: toOffsetIsoString(next.startsAt),
         endsAt: toOffsetIsoString(next.endsAt),
       });
+    }
+
+    // Separate from onDatesChanged so that callback keeps meaning "the period
+    // moved". A reason or notes change cannot alter which bookings conflict,
+    // but it does change what an override would save.
+    if (field === "reason" || field === "notes") {
+      onDetailsChanged?.();
     }
   }
 

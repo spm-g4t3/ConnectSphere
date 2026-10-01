@@ -6,9 +6,9 @@
  * AC1: a block is created with a venue, a start and end date and time, and a
  * reason category. This module says, in words a Venue Staff member can act
  * on, what is wrong with a block before it reaches the database. The database
- * is still the guarantee: 010_venue_blocks.sql carries the same ordering,
+ * is still the guarantee: 011_venue_blocks.sql carries the same ordering,
  * "other needs notes" and notes-length constraints, and create_venue_block
- * (011) re-checks the period and the overlap inside its own transaction. The
+ * (012) re-checks the period and the overlap inside its own transaction. The
  * duplication is intentional -- the database is the guarantee, this is the
  * readable message.
  *
@@ -22,7 +22,7 @@
  *    create_venue_block answers it under a row lock so it cannot go stale
  *    between the check and the insert.
  *  - Overlap with another block, or with approved bookings. Both need the
- *    database, and create_venue_block (012) answers them under locks. What
+ *    database, and create_venue_block (013) answers them under locks. What
  *    this module does check, for SCRUM-125, is the SHAPE of the override the
  *    caller sends: confirmOverride and acknowledgedBookingIds.
  *  - Whether the start is in the past. A block may start in the past -- staff
@@ -35,6 +35,13 @@
  * is overriding, so the two travel together: an override with no bookings
  * named, or bookings named with no override, is refused as malformed rather
  * than quietly treated as one or the other.
+ *
+ * SCRUM-127 (AC4) adds validateUpdateBlock, for shortening or extending a
+ * block or changing its reason or notes. It is a patch: an omitted field
+ * keeps its stored value, so the rules that compare fields -- start before
+ * end, "other needs notes" -- can only be judged here when both sides were
+ * sent. update_venue_block (015) judges them again on the merged row, which
+ * is the only place the stored half is visible.
  */
 
 import { ValidationError } from '../errors.js';
@@ -47,7 +54,10 @@ const UUID_PATTERN =
 
 const TIMESTAMP_FIELDS = ['startsAt', 'endsAt'];
 
-/** Mirrors venue_blocks_notes_length in 010. */
+/** SCRUM-127: the fields that make an update a change, rather than an empty request. */
+const PATCH_FIELDS = ['startsAt', 'endsAt', 'reason', 'notes'];
+
+/** Mirrors venue_blocks_notes_length in 011. */
 const NOTES_MAX_LENGTH = 1000;
 
 /**
@@ -174,6 +184,34 @@ function checkAcknowledgedIds(errors, value) {
 }
 
 /**
+ * The override fields together: each checked, then the pairing rules.
+ *
+ * Shared by create and update (SCRUM-127) so the gate's input has one
+ * definition. The pairing rules run only when both fields were themselves
+ * well formed, so a single fault is not reported twice.
+ *
+ * @returns {{confirmOverride: boolean, acknowledgedBookingIds: string[]}}
+ *          false and [] in place of a refused field
+ */
+function checkOverride(errors, input) {
+  const confirmOverride = checkConfirmOverride(errors, input.confirmOverride);
+  const acknowledgedBookingIds = checkAcknowledgedIds(errors, input.acknowledgedBookingIds);
+
+  if (confirmOverride !== null && acknowledgedBookingIds !== null) {
+    if (confirmOverride && acknowledgedBookingIds.length === 0) {
+      errors.add('acknowledgedBookingIds', 'must list the bookings being overridden');
+    } else if (!confirmOverride && acknowledgedBookingIds.length > 0) {
+      errors.add('acknowledgedBookingIds', 'can only be sent with confirmOverride');
+    }
+  }
+
+  return {
+    confirmOverride: confirmOverride ?? false,
+    acknowledgedBookingIds: acknowledgedBookingIds ?? [],
+  };
+}
+
+/**
  * Validate input for creating a venue block.
  *
  * `now` is injected so the future-end rule is deterministic. A check written
@@ -253,27 +291,14 @@ export function validateCreateBlock(input, { now = new Date() } = {}) {
   const { notes, wasText } = checkNotes(errors, input.notes);
   normalised.notes = notes;
 
-  // Mirrors venue_blocks_other_needs_notes in 010. Skipped when notes were not
+  // Mirrors venue_blocks_other_needs_notes in 011. Skipped when notes were not
   // text at all, which has already been reported.
   if (normalised.reason === BLOCK_REASON.OTHER && notes === null && wasText) {
     errors.add('notes', 'is required when the reason is other');
   }
 
-  // SCRUM-125. The pairing rules run only when both fields were themselves
-  // well formed, so a single fault is not reported twice.
-  const confirmOverride = checkConfirmOverride(errors, input.confirmOverride);
-  const acknowledgedBookingIds = checkAcknowledgedIds(errors, input.acknowledgedBookingIds);
-
-  if (confirmOverride !== null && acknowledgedBookingIds !== null) {
-    if (confirmOverride && acknowledgedBookingIds.length === 0) {
-      errors.add('acknowledgedBookingIds', 'must list the bookings being overridden');
-    } else if (!confirmOverride && acknowledgedBookingIds.length > 0) {
-      errors.add('acknowledgedBookingIds', 'can only be sent with confirmOverride');
-    }
-  }
-
-  normalised.confirmOverride = confirmOverride ?? false;
-  normalised.acknowledgedBookingIds = acknowledgedBookingIds ?? [];
+  // SCRUM-125.
+  Object.assign(normalised, checkOverride(errors, input));
 
   throwIfInvalid(errors);
   return normalised;
@@ -297,4 +322,126 @@ export function validateBlockId(id) {
 
   throwIfInvalid(errors);
   return id;
+}
+
+
+/**
+ * Validate input for amending a venue block (SCRUM-127, AC4).
+ *
+ * A patch. An omitted startsAt, endsAt or reason comes back null, meaning
+ * "keep the stored value", which update_venue_block (015) reads as such.
+ * Notes need notesSupplied beside them, because for notes null is also a real
+ * value: a null or blank notes clears them, while omitting notes keeps them.
+ *
+ * `now` is injected for the reason validateCreateBlock gives.
+ *
+ * @param {object} input
+ * @param {string} [input.startsAt]  ISO 8601 with an offset
+ * @param {string} [input.endsAt]    ISO 8601 with an offset; must be ahead of now
+ * @param {string} [input.reason]    one of BLOCK_REASON
+ * @param {string|null} [input.notes]  null or blank clears them
+ * @param {boolean} [input.confirmOverride]  as for validateCreateBlock
+ * @param {string[]} [input.acknowledgedBookingIds]  as for validateCreateBlock
+ * @param {object} [options]
+ * @param {Date} [options.now]       the instant to judge "future" against
+ * @returns {{startsAt: string|null, endsAt: string|null, reason: string|null,
+ *            notes: string|null, notesSupplied: boolean,
+ *            confirmOverride: boolean, acknowledgedBookingIds: string[]}}
+ * @throws {ValidationError} listing every problem found, not just the first
+ */
+export function validateUpdateBlock(input, { now = new Date() } = {}) {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new ValidationError('Invalid venue block details -- expected an object');
+  }
+
+  // The override fields do not count: an override-only body names nothing to
+  // amend. Unknown keys do not count either, so {userId} alone is refused.
+  // Same wording as validateUpdateVenue, so "nothing to do" is one message.
+  if (!PATCH_FIELDS.some((field) => input[field] !== undefined)) {
+    throw new ValidationError('Invalid venue block details -- no changes supplied');
+  }
+
+  const errors = createErrorCollector();
+  const normalised = {};
+  const instants = {};
+
+  for (const field of TIMESTAMP_FIELDS) {
+    const value = input[field];
+
+    if (value === undefined) {
+      normalised[field] = null;
+      continue;
+    }
+
+    // Null is refused rather than read as "keep". The columns are not null,
+    // so a client sending null is asking for something that cannot exist,
+    // and telling it so beats quietly keeping a value it meant to change.
+    if (value === null) {
+      errors.add(field, 'cannot be cleared');
+      normalised[field] = null;
+      continue;
+    }
+
+    const instant = checkTimestamp(errors, field, value);
+    if (instant === null) {
+      normalised[field] = null;
+    } else {
+      instants[field] = instant;
+      normalised[field] = value.trim();
+    }
+  }
+
+  // Only when both were sent. With one, the other side is the stored value,
+  // which update_venue_block checks on the merged row.
+  if (
+    instants.startsAt !== undefined &&
+    instants.endsAt !== undefined &&
+    instants.endsAt <= instants.startsAt
+  ) {
+    errors.add('endsAt', 'must be later than the start');
+  }
+
+  // As on create: a new start may be in the past, a new end may not.
+  if (instants.endsAt !== undefined && instants.endsAt <= now) {
+    errors.add('endsAt', 'must be in the future');
+  }
+
+  const reason = input.reason;
+  if (reason === undefined) {
+    normalised.reason = null;
+  } else if (reason === null) {
+    errors.add('reason', 'cannot be cleared');
+    normalised.reason = null;
+  } else if (!isBlockReason(reason)) {
+    errors.add('reason', REASON_MESSAGE);
+    normalised.reason = null;
+  } else {
+    normalised.reason = reason;
+  }
+
+  // checkNotes already turns null and blank into null, which here means
+  // "clear" -- so notesSupplied is what separates clearing from keeping.
+  const notesSupplied = input.notes !== undefined;
+  const { notes, wasText } = checkNotes(errors, input.notes);
+  normalised.notes = notes;
+  normalised.notesSupplied = notesSupplied;
+
+  // Only when both halves are in this request: reason other with notes being
+  // cleared. Other with notes omitted is left to update_venue_block, because
+  // only it can see whether the stored notes are blank.
+  if (
+    normalised.reason === BLOCK_REASON.OTHER &&
+    notesSupplied &&
+    notes === null &&
+    wasText
+  ) {
+    errors.add('notes', 'is required when the reason is other');
+  }
+
+  // The same override rules as validateCreateBlock: an amendment that widens
+  // the period over approved bookings faces the same gate (015).
+  Object.assign(normalised, checkOverride(errors, input));
+
+  throwIfInvalid(errors);
+  return normalised;
 }

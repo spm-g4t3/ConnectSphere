@@ -2,7 +2,7 @@
  * Tests for create_venue_block, read from the migration text.
  *
  * SCRUM-126 (part of SCRUM-17, AC1). CI has no database, so these pin the
- * function's shape from 011_venue_block_creation.sql with every `--` comment
+ * function's shape from 012_venue_block_creation.sql with every `--` comment
  * stripped -- a rule that exists only in a comment does not count.
  */
 
@@ -11,13 +11,13 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-/** The raw 011 migration, comments included. */
+/** The raw 012 migration, comments included. */
 function rawSql() {
   const here = dirname(fileURLToPath(import.meta.url));
-  return readFileSync(resolve(here, '../../db/migrations/011_venue_block_creation.sql'), 'utf8');
+  return readFileSync(resolve(here, '../../db/migrations/012_venue_block_creation.sql'), 'utf8');
 }
 
-/** The 011 migration with every `--` comment stripped, whitespace collapsed. */
+/** The 012 migration with every `--` comment stripped, whitespace collapsed. */
 function migrationSql() {
   return rawSql().replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').toLowerCase();
 }

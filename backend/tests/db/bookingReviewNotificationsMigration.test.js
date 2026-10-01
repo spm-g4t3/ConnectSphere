@@ -4,12 +4,12 @@
  * migration text.
  *
  * SCRUM-128 (part of SCRUM-17, AC3). CI has no database, so these pin the
- * shape of 013_booking_review_notifications.sql with every `--` comment
+ * shape of 014_booking_review_notifications.sql with every `--` comment
  * stripped -- a rule that exists only in a comment does not count.
  *
- * 013 re-states 012's create_venue_block body, so 012's step order and its
+ * 014 re-states 013's create_venue_block body, so 013's step order and its
  * "nothing written before the gate" rule are pinned here again: the copied
- * body must not drift from what 012's tests promise.
+ * body must not drift from what 013's tests promise.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -17,16 +17,16 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-/** The raw 013 migration, comments included. */
+/** The raw 014 migration, comments included. */
 function rawSql() {
   const here = dirname(fileURLToPath(import.meta.url));
   return readFileSync(
-    resolve(here, '../../db/migrations/013_booking_review_notifications.sql'),
+    resolve(here, '../../db/migrations/014_booking_review_notifications.sql'),
     'utf8',
   );
 }
 
-/** The 013 migration with every `--` comment stripped, whitespace collapsed. */
+/** The 014 migration with every `--` comment stripped, whitespace collapsed. */
 function migrationSql() {
   return rawSql().replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').toLowerCase();
 }
@@ -384,7 +384,7 @@ describe('no drop, no new rights', () => {
 
 
 describe('create_venue_block signature', () => {
-  it('SCRUM17_AC3_keeps_012s_eight_parameter_signature', () => {
+  it('SCRUM17_AC3_keeps_013s_eight_parameter_signature', () => {
     expect(SQL).toMatch(
       new RegExp(
         'create or replace function create_venue_block\\( ?' +
@@ -463,7 +463,7 @@ describe('create_venue_block: the gate, re-pinned', () => {
     expect(beforeReturn).not.toMatch(/flag_bookings_for_block/);
   });
 
-  it('locks the approved, overlapping bookings as 012 does', () => {
+  it('locks the approved, overlapping bookings as 013 does', () => {
     const where = CREATE_BODY.match(
       /with locked as \( select b\.id from bookings b where ([^)]*) order by b\.id for no key update of b \)/,
     );

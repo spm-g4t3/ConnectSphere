@@ -25,7 +25,7 @@
 import { toDatetimeLocalValue, toOffsetIsoString } from "./datetimeFormat";
 import { VENUE_BLOCK_REASONS } from "./venueBlockReasons";
 
-/** Mirrors venue_blocks_notes_length in 010 and NOTES_MAX_LENGTH in the backend. */
+/** Mirrors venue_blocks_notes_length in 011 and NOTES_MAX_LENGTH in the backend. */
 export const NOTES_MAX_LENGTH = 1000;
 
 const REASON_CODES = new Set(VENUE_BLOCK_REASONS.map((r) => r.code));

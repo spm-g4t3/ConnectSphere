@@ -5,7 +5,7 @@
 // wording is testable without rendering, the same split as
 // eventRequestStatusDisplay.js.
 //
-// The payload is the snapshot 013_booking_review_notifications.sql writes:
+// The payload is the snapshot 014_booking_review_notifications.sql writes:
 // { venueName, eventName, startsAt, endsAt, reason, blockStartsAt,
 //   blockEndsAt }. Every field is read defensively -- a notification outlives
 // the build that wrote it, and a missing name should read as "Unknown venue",

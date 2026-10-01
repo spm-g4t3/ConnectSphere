@@ -649,3 +649,410 @@ describe('service errors are translated into HTTP status codes', () => {
     consoleError.mockRestore();
   });
 });
+
+
+describe('SCRUM-17 venue block routes', () => {
+  const BLOCK_ID = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
+  const OTHER_BLOCK_ID = '6ba7b811-9dad-41d1-80b4-00c04fd430c8';
+  const BOOKING_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const FORGED_ID = '00000000-0000-4000-8000-000000000000';
+  const BASE = `/api/venues/${VENUE_ID}/blocks`;
+  const ONE = `${BASE}/${BLOCK_ID}`;
+
+  /** Far enough ahead that the real clock never makes it "past". */
+  const FUTURE_START = '2099-10-01T09:00:00+08:00';
+  const FUTURE_END = '2099-10-01T17:00:00+08:00';
+
+  function blockRow(overrides = {}) {
+    return {
+      id: BLOCK_ID,
+      venue_id: VENUE_ID,
+      starts_at: '2099-10-01T01:00:00+00:00',
+      ends_at: '2099-10-01T09:00:00+00:00',
+      reason: 'maintenance',
+      notes: null,
+      created_by: STAFF_ID,
+      last_modified_by: STAFF_ID,
+      created_at: '2026-09-23T00:00:00+00:00',
+      updated_at: '2026-09-23T00:00:00+00:00',
+      removed_at: null,
+      removed_by: null,
+      ...overrides,
+    };
+  }
+
+  const CAMEL_BLOCK = {
+    id: BLOCK_ID,
+    venueId: VENUE_ID,
+    startsAt: '2099-10-01T01:00:00+00:00',
+    endsAt: '2099-10-01T09:00:00+00:00',
+    reason: 'maintenance',
+    notes: null,
+    createdBy: STAFF_ID,
+    lastModifiedBy: STAFF_ID,
+    createdAt: '2026-09-23T00:00:00+00:00',
+    updatedAt: '2026-09-23T00:00:00+00:00',
+    removedAt: null,
+    removedBy: null,
+  };
+
+  const bookingRow = {
+    booking_id: BOOKING_ID,
+    event_request_id: EVENT_ID,
+    event_name: 'Orientation',
+    starts_at: '2099-10-01T02:00:00+00:00',
+    ends_at: '2099-10-01T04:00:00+00:00',
+  };
+  const camelBooking = {
+    bookingId: BOOKING_ID,
+    eventRequestId: EVENT_ID,
+    eventName: 'Orientation',
+    startsAt: '2099-10-01T02:00:00+00:00',
+    endsAt: '2099-10-01T04:00:00+00:00',
+  };
+
+  const createBody = { startsAt: FUTURE_START, endsAt: FUTURE_END, reason: 'maintenance' };
+  const pgError = (error) => ({ data: null, error });
+  const pt409 = (hint, details = null) =>
+    pgError({ code: 'PT409', message: `refused: ${hint}`, hint, details });
+
+  const ROUTES = [
+    ['GET', 'get', BASE, undefined],
+    ['POST', 'post', BASE, createBody],
+    ['PATCH', 'patch', ONE, { reason: 'safety' }],
+    ['DELETE', 'delete', ONE, undefined],
+  ];
+
+  function send(app, method, path, body) {
+    const req = request(app)[method](path);
+    return body === undefined ? req : req.send(body);
+  }
+
+  describe('authorisation', () => {
+    it.each(ROUTES)('SCRUM17_%s_blocks_answers_401_signed_out', async (_label, method, path, body) => {
+      const res = await send(appWith(signedOut), method, path, body);
+      expect(res.status).toBe(401);
+      expect(rpc).not.toHaveBeenCalled();
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    it.each(ROUTES)('SCRUM17_%s_blocks_answers_403_for_an_event_coordinator', async (_label, method, path, body) => {
+      const res = await send(appWith(signedInAs(ROLE.EVENT_COORDINATOR)), method, path, body);
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/Venue Staff/);
+      expect(rpc).not.toHaveBeenCalled();
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    it.each(ROUTES)('SCRUM17_%s_blocks_answers_403_for_an_event_organiser', async (_label, method, path, body) => {
+      const res = await send(appWith(signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID)), method, path, body);
+      expect(res.status).toBe(403);
+      expect(rpc).not.toHaveBeenCalled();
+      expect(from).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('GET /:id/blocks', () => {
+    it('SCRUM17_AC1_lists_active_blocks_as_a_camelcase_array', async () => {
+      const stub = queryStub(ok([blockRow()]));
+      from.mockReturnValueOnce(stub);
+
+      const res = await request(appWith()).get(BASE);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([CAMEL_BLOCK]);
+      expect(from).toHaveBeenCalledWith('venue_blocks');
+      expect(stub.args('eq')).toEqual(['venue_id', VENUE_ID]);
+      expect(stub.args('is')).toEqual(['removed_at', null]);
+    });
+
+    it('answers 200 [] when there are none', async () => {
+      from.mockReturnValueOnce(queryStub(ok([])));
+      const res = await request(appWith()).get(BASE);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('answers 400 for a malformed venue id without a query', async () => {
+      const res = await request(appWith()).get('/api/venues/not-a-uuid/blocks');
+      expect(res.status).toBe(400);
+      expect(from).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /:id/blocks', () => {
+    it('SCRUM17_AC1_creates_a_block_and_answers_201_with_block_and_flagged_bookings', async () => {
+      rpc.mockResolvedValueOnce(
+        ok({ outcome: 'created', block: blockRow(), affected_bookings: [], flagged_bookings: [] }),
+      );
+
+      const res = await request(appWith()).post(BASE).send(createBody);
+
+      expect(res.status).toBe(201);
+      expect(res.body).toEqual({ block: CAMEL_BLOCK, flaggedBookings: [] });
+      expect(rpc.mock.calls[0][0]).toBe('create_venue_block');
+    });
+
+    it('SCRUM17_AC1_acting_user_is_the_session_and_venue_is_the_path', async () => {
+      rpc.mockResolvedValueOnce(
+        ok({ outcome: 'created', block: blockRow(), affected_bookings: [], flagged_bookings: [] }),
+      );
+
+      await request(appWith()).post(BASE).send({ ...createBody, userId: FORGED_ID, venueId: FORGED_ID });
+
+      const params = rpc.mock.calls[0][1];
+      expect(params.p_user_id).toBe(STAFF_ID);
+      expect(params.p_venue_id).toBe(VENUE_ID);
+      expect(JSON.stringify(params)).not.toContain(FORGED_ID);
+    });
+
+    it('SCRUM17_AC3_returns_the_flagged_bookings_after_an_override', async () => {
+      rpc.mockResolvedValueOnce(
+        ok({ outcome: 'created', block: blockRow(), affected_bookings: [bookingRow], flagged_bookings: [bookingRow] }),
+      );
+
+      const res = await request(appWith()).post(BASE).send({
+        ...createBody,
+        confirmOverride: true,
+        acknowledgedBookingIds: [BOOKING_ID],
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body.flaggedBookings).toEqual([camelBooking]);
+    });
+
+    it('SCRUM17_AC1_answers_400_with_details_and_no_rpc', async () => {
+      const res = await request(appWith()).post(BASE).send({ startsAt: FUTURE_START, reason: 'party' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Invalid venue block details/);
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          { field: 'endsAt', message: 'is required' },
+          expect.objectContaining({ field: 'reason' }),
+        ]),
+      );
+      expect(rpc).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM17_AC3_answers_409_BLOCK_BOOKING_CONFLICT_with_the_bookings', async () => {
+      rpc.mockResolvedValueOnce(ok({ outcome: 'conflict', conflicts: [bookingRow] }));
+
+      const res = await request(appWith()).post(BASE).send(createBody);
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({
+        error: 'This period overlaps approved bookings',
+        code: 'BLOCK_BOOKING_CONFLICT',
+        conflicts: [camelBooking],
+      });
+    });
+
+    it('SCRUM17_AC1_answers_409_BLOCK_OVERLAPS_BLOCK_naming_the_block', async () => {
+      rpc.mockResolvedValueOnce(pt409('BLOCK_OVERLAPS_BLOCK', OTHER_BLOCK_ID));
+
+      const res = await request(appWith()).post(BASE).send(createBody);
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({
+        error: 'refused: BLOCK_OVERLAPS_BLOCK',
+        code: 'BLOCK_OVERLAPS_BLOCK',
+        conflicts: [{ blockId: OTHER_BLOCK_ID }],
+      });
+    });
+
+    it('SCRUM17_AC1_answers_409_VENUE_RETIRED', async () => {
+      rpc.mockResolvedValueOnce(pt409('VENUE_RETIRED'));
+
+      const res = await request(appWith()).post(BASE).send(createBody);
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({ error: 'refused: VENUE_RETIRED', code: 'VENUE_RETIRED', conflicts: [] });
+    });
+
+    it('SCRUM17_AC1_answers_404_for_a_missing_venue', async () => {
+      rpc.mockResolvedValueOnce(pgError({ code: 'P0002', message: `venue ${VENUE_ID} not found` }));
+
+      const res = await request(appWith()).post(BASE).send(createBody);
+
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: `venue ${VENUE_ID} not found` });
+    });
+  });
+
+  describe('PATCH /:id/blocks/:blockId', () => {
+    const updated = (extra = {}) =>
+      ok({ outcome: 'updated', block: blockRow(), affected_bookings: [], flagged_bookings: [], ...extra });
+
+    it('SCRUM17_AC4_amends_and_answers_200_with_block_and_flagged_bookings', async () => {
+      rpc.mockResolvedValueOnce(updated());
+
+      const res = await request(appWith()).patch(ONE).send({ endsAt: FUTURE_END });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ block: CAMEL_BLOCK, flaggedBookings: [] });
+      expect(rpc.mock.calls[0][0]).toBe('update_venue_block');
+    });
+
+    it('SCRUM17_AC4_acting_user_is_the_session_and_ids_are_the_path', async () => {
+      rpc.mockResolvedValueOnce(updated());
+
+      await request(appWith()).patch(ONE).send({ reason: 'safety', userId: FORGED_ID });
+
+      const params = rpc.mock.calls[0][1];
+      expect(params.p_user_id).toBe(STAFF_ID);
+      expect(params.p_venue_id).toBe(VENUE_ID);
+      expect(params.p_block_id).toBe(BLOCK_ID);
+      expect(params.p_reason).toBe('safety');
+    });
+
+    it.each([
+      ['an empty body', {}],
+      ['an override-only body', { confirmOverride: true, acknowledgedBookingIds: [BOOKING_ID] }],
+      ['a userId-only body', { userId: FORGED_ID }],
+    ])('SCRUM17_AC4_answers_400_for_%s_without_an_rpc', async (_label, body) => {
+      const res = await request(appWith()).patch(ONE).send(body);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Invalid venue block details -- no changes supplied');
+      expect(rpc).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM17_AC4_answers_400_for_a_malformed_block_id', async () => {
+      const res = await request(appWith()).patch(`${BASE}/not-a-uuid`).send({ reason: 'safety' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toEqual([{ field: 'blockId', message: 'must be a block id' }]);
+      expect(rpc).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM17_AC4_answers_400_with_details_for_a_bad_field', async () => {
+      const res = await request(appWith()).patch(ONE).send({ startsAt: null });
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toEqual([{ field: 'startsAt', message: 'cannot be cleared' }]);
+    });
+
+    it('SCRUM17_AC4_answers_404_for_a_block_not_on_the_venue', async () => {
+      rpc.mockResolvedValueOnce(pgError({ code: 'P0002', message: 'venue block not found on venue' }));
+
+      const res = await request(appWith()).patch(ONE).send({ reason: 'safety' });
+
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: 'venue block not found on venue' });
+    });
+
+    it.each(['BLOCK_REMOVED', 'BLOCK_ENDED', 'VENUE_RETIRED'])(
+      'SCRUM17_AC4_answers_409_%s_with_the_code',
+      async (hint) => {
+        rpc.mockResolvedValueOnce(pt409(hint));
+
+        const res = await request(appWith()).patch(ONE).send({ reason: 'safety' });
+
+        expect(res.status).toBe(409);
+        expect(res.body).toEqual({ error: `refused: ${hint}`, code: hint, conflicts: [] });
+      },
+    );
+
+    it('SCRUM17_AC3_answers_409_BLOCK_BOOKING_CONFLICT_when_an_extension_hits_bookings', async () => {
+      rpc.mockResolvedValueOnce(ok({ outcome: 'conflict', conflicts: [bookingRow] }));
+
+      const res = await request(appWith()).patch(ONE).send({ endsAt: FUTURE_END });
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({
+        error: 'This period overlaps approved bookings',
+        code: 'BLOCK_BOOKING_CONFLICT',
+        conflicts: [camelBooking],
+      });
+    });
+
+    it('SCRUM17_AC3_returns_the_flagged_bookings_after_an_override', async () => {
+      rpc.mockResolvedValueOnce(updated({ affected_bookings: [bookingRow], flagged_bookings: [bookingRow] }));
+
+      const res = await request(appWith()).patch(ONE).send({
+        endsAt: FUTURE_END,
+        confirmOverride: true,
+        acknowledgedBookingIds: [BOOKING_ID],
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.flaggedBookings).toEqual([camelBooking]);
+    });
+
+    it('answers 409 BLOCK_OVERLAPS_BLOCK naming the other block', async () => {
+      rpc.mockResolvedValueOnce(pt409('BLOCK_OVERLAPS_BLOCK', OTHER_BLOCK_ID));
+
+      const res = await request(appWith()).patch(ONE).send({ endsAt: FUTURE_END });
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('BLOCK_OVERLAPS_BLOCK');
+      expect(res.body.conflicts).toEqual([{ blockId: OTHER_BLOCK_ID }]);
+    });
+  });
+
+  describe('DELETE /:id/blocks/:blockId', () => {
+    const removed = ok({ outcome: 'removed', block: blockRow({ removed_at: RETIRED_AT, removed_by: STAFF_ID }) });
+
+    it('SCRUM17_AC4_removes_and_answers_204_with_an_empty_body', async () => {
+      rpc.mockResolvedValueOnce(removed);
+
+      const res = await request(appWith()).delete(ONE);
+
+      expect(res.status).toBe(204);
+      expect(res.text).toBe('');
+      expect(res.body).toEqual({});
+      expect(rpc).toHaveBeenCalledWith('remove_venue_block', {
+        p_venue_id: VENUE_ID,
+        p_block_id: BLOCK_ID,
+        p_user_id: STAFF_ID,
+      });
+    });
+
+    it('SCRUM17_AC4_p_user_id_is_the_session_even_with_a_forged_body', async () => {
+      rpc.mockResolvedValueOnce(removed);
+
+      await request(appWith()).delete(ONE).send({ userId: FORGED_ID });
+
+      expect(rpc.mock.calls[0][1].p_user_id).toBe(STAFF_ID);
+    });
+
+    it('answers 400 for a malformed block id without an rpc', async () => {
+      const res = await request(appWith()).delete(`${BASE}/not-a-uuid`);
+      expect(res.status).toBe(400);
+      expect(rpc).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM17_AC4_answers_404_for_a_missing_block', async () => {
+      rpc.mockResolvedValueOnce(pgError({ code: 'P0002', message: 'venue block not found on venue' }));
+
+      const res = await request(appWith()).delete(ONE);
+
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: 'venue block not found on venue' });
+    });
+
+    it.each(['BLOCK_REMOVED', 'BLOCK_ENDED'])('SCRUM17_AC4_answers_409_%s_with_the_code', async (hint) => {
+      rpc.mockResolvedValueOnce(pt409(hint));
+
+      const res = await request(appWith()).delete(ONE);
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({ error: `refused: ${hint}`, code: hint, conflicts: [] });
+    });
+
+    it('SCRUM17_AC4_answers_500_without_leaking_the_cause', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      rpc.mockResolvedValueOnce(pgError({ code: '42883', message: 'function remove_venue_block does not exist' }));
+
+      const res = await request(appWith()).delete(ONE);
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: 'Unexpected server error' });
+      expect(JSON.stringify(res.body)).not.toMatch(/remove_venue_block|42883/);
+      expect(consoleError).toHaveBeenCalledWith('Unexpected error in venues route:', expect.any(Error));
+
+      consoleError.mockRestore();
+    });
+  });
+});

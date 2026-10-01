@@ -3,11 +3,11 @@
  * read from the migration text.
  *
  * SCRUM-125 (part of SCRUM-17, AC3). CI has no database, so these pin the
- * shape of 012_venue_block_booking_conflicts.sql with every `--` comment
+ * shape of 013_venue_block_booking_conflicts.sql with every `--` comment
  * stripped -- a rule that exists only in a comment does not count.
  *
- * 012 re-states 011's create_venue_block body, so the 011 rules are pinned
- * here again: the copied body must not drift from what 011's tests promise.
+ * 013 re-states 012's create_venue_block body, so the 012 rules are pinned
+ * here again: the copied body must not drift from what 012's tests promise.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -15,16 +15,16 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-/** The raw 012 migration, comments included. */
+/** The raw 013 migration, comments included. */
 function rawSql() {
   const here = dirname(fileURLToPath(import.meta.url));
   return readFileSync(
-    resolve(here, '../../db/migrations/012_venue_block_booking_conflicts.sql'),
+    resolve(here, '../../db/migrations/013_venue_block_booking_conflicts.sql'),
     'utf8',
   );
 }
 
-/** The 012 migration with every `--` comment stripped, whitespace collapsed. */
+/** The 013 migration with every `--` comment stripped, whitespace collapsed. */
 function migrationSql() {
   return rawSql().replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').toLowerCase();
 }
@@ -63,11 +63,11 @@ describe('the migration text', () => {
 });
 
 
-describe('dropping the 011 signature', () => {
+describe('dropping the 012 signature', () => {
   const DROP =
     'drop function if exists create_venue_block(uuid, timestamptz, timestamptz, venue_block_reason, text, uuid);';
 
-  it('SCRUM17_AC3_drops_the_011_signature_before_redefining', () => {
+  it('SCRUM17_AC3_drops_the_012_signature_before_redefining', () => {
     const drop = SQL.indexOf(DROP);
     expect(drop).toBeGreaterThan(-1);
     expect(drop).toBeLessThan(SQL.indexOf(CREATE_START));
@@ -236,7 +236,7 @@ describe('create_venue_block: order of the steps', () => {
 });
 
 
-describe('create_venue_block: the 011 rules, re-pinned', () => {
+describe('create_venue_block: the 012 rules, re-pinned', () => {
   it('SCRUM17_AC1_locks_the_venue_row_for_no_key_update', () => {
     expect(CREATE_BODY).toMatch(/from venues where id = p_venue_id for no key update;/);
   });

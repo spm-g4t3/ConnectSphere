@@ -5,34 +5,43 @@
  *
  * AC1: a block is created with a venue, a start and end date and time, and a
  * reason category. Creation goes through create_venue_block in
- * 011_venue_block_creation.sql rather than a direct insert, because the
+ * 012_venue_block_creation.sql rather than a direct insert, because the
  * retirement and overlap checks have to hold until the insert commits and
  * PostgREST gives each supabase-js call its own transaction -- the migration's
  * header has the full argument.
  *
  * Input is validated before any network call, so a malformed request never
- * costs a round trip. The function and the table constraints in 010 remain
+ * costs a round trip. The function and the table constraints in 011 remain
  * the backstop, and translateError turns what they raise into typed errors.
  *
  * SCRUM-125 (AC3) adds booking conflicts. create_venue_block is redefined in
- * 012_venue_block_booking_conflicts.sql: a block over approved bookings is
+ * 013_venue_block_booking_conflicts.sql: a block over approved bookings is
  * created only when the caller confirms the override and acknowledges every
  * booking that still conflicts. Otherwise the RPC answers with the conflict
  * list, which this service raises as a ConflictError, BLOCK_BOOKING_CONFLICT.
  *
  * SCRUM-128 (AC3) completes the override. create_venue_block is redefined
- * again in 013_booking_review_notifications.sql: in the same transaction as
+ * again in 014_booking_review_notifications.sql: in the same transaction as
  * the insert, each overridden booking is set to flagged_for_review and every
  * Event Coordinator is notified. The created outcome now reports the bookings
  * actually flagged, which this service returns as flaggedBookings.
  *
- * No routes call this yet; SCRUM-127 adds them.
+ * SCRUM-127 (AC4) adds amending and removing, through update_venue_block and
+ * remove_venue_block in 015_venue_block_amend_remove.sql, for the reason 012
+ * gives for creation. An amendment can widen the period over approved
+ * bookings, so it answers conflicts exactly as creation does, and on an
+ * override flags them the same way. Removal is a soft delete that touches no
+ * booking. The routes in routes/venues.js are the first callers.
  */
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
 import { validateVenueId } from '../validation/venueValidation.js';
-import { validateCreateBlock, validateBlockId } from '../validation/venueBlockValidation.js';
+import {
+  validateCreateBlock,
+  validateUpdateBlock,
+  validateBlockId,
+} from '../validation/venueBlockValidation.js';
 
 /** Every column toBlock reads, so each read selects the same shape. */
 const BLOCK_COLUMNS =
@@ -46,7 +55,7 @@ const UUID_PATTERN =
 /** Postgres codes that mean "the input was wrong", whoever caught it. */
 const VALIDATION_CODES = new Set([
   '23514', // check constraint: times out of order, other without notes, notes too long
-  '22023', // invalid_parameter_value, raised by create_venue_block's period checks
+  '22023', // invalid_parameter_value: the period checks in create_ and update_venue_block
   '23502', // not null
   '22P02', // invalid text representation: a bad uuid or reason reached the cast
   '22007', // invalid datetime format
@@ -81,13 +90,16 @@ function translateError(error) {
     return new ValidationError(`A referenced record does not exist: ${detail}`);
   }
 
-  // raised by create_venue_block when the venue does not exist
+  // raised by create_venue_block when the venue does not exist, and by
+  // update_venue_block and remove_venue_block (015) for a missing venue or a
+  // block that is not on it
   if (code === 'P0002') {
     return new NotFoundError(detail || 'Venue not found');
   }
 
   // raised by create_venue_block: VENUE_RETIRED or BLOCK_OVERLAPS_BLOCK, carried
-  // in the hint so a client can tell them apart without reading prose.
+  // in the hint so a client can tell them apart without reading prose. 015
+  // adds BLOCK_REMOVED and BLOCK_ENDED, which pass through the same way.
   //
   // BLOCK_OVERLAPS_BLOCK carries the clashing block's id in DETAIL, which
   // PostgREST passes through as error.details. It becomes the conflict list,
@@ -101,7 +113,7 @@ function translateError(error) {
     return new ConflictError(detail, { code: hint, conflicts });
   }
 
-  // venue_blocks_no_overlap in 010. Reached only if a concurrent write beat
+  // venue_blocks_no_overlap in 011. Reached only if a concurrent write beat
   // the function's own overlap check, so it gets the same code that check uses.
   if (code === '23P01') {
     return new ConflictError('This period overlaps another block on this venue.', {
@@ -143,11 +155,11 @@ export function toBlock(row) {
  * camelCase.
  *
  * Exported so the conflict list and SCRUM-128's flagged bookings come back in
- * exactly the same shape: flag_bookings_for_block (013) returns the same
- * columns as venue_block_booking_conflicts (012) for that reason.
+ * exactly the same shape: flag_bookings_for_block (014) returns the same
+ * columns as venue_block_booking_conflicts (013) for that reason.
  *
- * @param {object} row  snake_case, from venue_block_booking_conflicts (012)
- *                      or flag_bookings_for_block (013)
+ * @param {object} row  snake_case, from venue_block_booking_conflicts (013)
+ *                      or flag_bookings_for_block (014)
  * @returns {{bookingId: string, eventRequestId: string, eventName: string,
  *            startsAt: string, endsAt: string}}
  */
@@ -159,6 +171,29 @@ export function toBookingConflict(row) {
     startsAt: row.starts_at,
     endsAt: row.ends_at,
   };
+}
+
+/**
+ * The ConflictError for a {outcome: 'conflict'} answer.
+ *
+ * Shared by create and update so the stale-override message lives in one
+ * place. Nothing was written. If the caller had already confirmed, the list
+ * it confirmed is stale -- a booking entered the period since -- and saying
+ * so tells the Venue Staff member why they are being asked again.
+ *
+ * @param {object} data              the RPC's jsonb result
+ * @param {boolean} confirmOverride  what the caller sent, after validation
+ * @returns {ConflictError} BLOCK_BOOKING_CONFLICT, conflicts shaped by
+ *          toBookingConflict
+ */
+function conflictFromOutcome(data, confirmOverride) {
+  const message = confirmOverride
+    ? 'The overlapping bookings have changed since you confirmed; review them again'
+    : 'This period overlaps approved bookings';
+  return new ConflictError(message, {
+    code: 'BLOCK_BOOKING_CONFLICT',
+    conflicts: (data.conflicts ?? []).map(toBookingConflict),
+  });
 }
 
 /**
@@ -175,7 +210,7 @@ export function toBookingConflict(row) {
  *          block, and the bookings the override flagged for review (shaped by
  *          toBookingConflict; [] when there were none). By the time this
  *          resolves those bookings are flagged_for_review and every Event
- *          Coordinator has a notification for each (013).
+ *          Coordinator has a notification for each (014).
  * @throws {ValidationError} bad input, before any network call
  * @throws {NotFoundError}   no venue with that id
  * @throws {ConflictError}   venue retired (VENUE_RETIRED); the period overlaps
@@ -204,17 +239,9 @@ export async function createVenueBlock(venueId, input, userId = null, { now } = 
   if (error) throw translateError(error);
 
   // Approved bookings overlap and were not all acknowledged; nothing was
-  // written. If the caller had already confirmed, the list it confirmed is
-  // stale -- a booking entered the period since -- and saying so tells the
-  // Venue Staff member why they are being asked again.
+  // written.
   if (data?.outcome === 'conflict') {
-    const message = block.confirmOverride
-      ? 'The overlapping bookings have changed since you confirmed; review them again'
-      : 'This period overlaps approved bookings';
-    throw new ConflictError(message, {
-      code: 'BLOCK_BOOKING_CONFLICT',
-      conflicts: (data.conflicts ?? []).map(toBookingConflict),
-    });
+    throw conflictFromOutcome(data, block.confirmOverride);
   }
 
   // Anything else is an outcome this build does not know. Failing loudly
@@ -226,7 +253,7 @@ export async function createVenueBlock(venueId, input, userId = null, { now } = 
   // flagged_bookings, not affected_bookings, and deliberately no fallback to
   // it. affected_bookings is the list the caller acknowledged; flagged_bookings
   // is what the database actually changed. Falling back would report bookings
-  // as flagged against a database where 013 has not been applied and nothing
+  // as flagged against a database where 014 has not been applied and nothing
   // was flagged at all -- an empty list is the honest answer there.
   return {
     block: toBlock(data.block),
@@ -288,4 +315,100 @@ export async function getVenueBlock(venueId, blockId) {
   if (!data) throw new NotFoundError(`Block ${blockId} not found on venue ${venueId}`);
 
   return toBlock(data);
+}
+
+/**
+ * Amend a block: shorten it, extend it, or change its reason or notes (AC4).
+ *
+ * A patch -- see validateUpdateBlock. update_venue_block (015) merges it onto
+ * the stored row and checks the result under the same locks creation takes.
+ *
+ * @param {string} venueId
+ * @param {string} blockId
+ * @param {object} input            see validateUpdateBlock
+ * @param {string|null} userId      the Venue Staff member amending the block;
+ *                                  recorded as last_modified_by, and as
+ *                                  flagged_by on any booking the amendment
+ *                                  overrides
+ * @param {object} [options]
+ * @param {Date} [options.now]      injected for tests; see validateUpdateBlock
+ * @returns {Promise<{block: object, flaggedBookings: object[]}>} as
+ *          createVenueBlock: the amended block, and the bookings this
+ *          amendment newly flagged ([] when none)
+ * @throws {ValidationError} bad input, before any network call; or a merged
+ *                           row the database refused (22023)
+ * @throws {NotFoundError}   no such venue, or no such block on it
+ * @throws {ConflictError}   BLOCK_REMOVED, BLOCK_ENDED, VENUE_RETIRED,
+ *                           BLOCK_OVERLAPS_BLOCK or BLOCK_BOOKING_CONFLICT,
+ *                           as createVenueBlock describes the last three
+ */
+export async function updateVenueBlock(venueId, blockId, input, userId = null, { now } = {}) {
+  validateVenueId(venueId);
+  validateBlockId(blockId);
+  const patch = validateUpdateBlock(input, { now });
+
+  // Every parameter named, defaults included, so what this sends never
+  // depends on the function's defaults staying as they are.
+  const { data, error } = await supabase.rpc('update_venue_block', {
+    p_venue_id: venueId,
+    p_block_id: blockId,
+    p_starts_at: patch.startsAt,
+    p_ends_at: patch.endsAt,
+    p_reason: patch.reason,
+    p_notes: patch.notes,
+    p_notes_supplied: patch.notesSupplied,
+    p_user_id: userId,
+    p_confirm_override: patch.confirmOverride,
+    p_acknowledged_booking_ids: patch.acknowledgedBookingIds,
+  });
+
+  if (error) throw translateError(error);
+
+  if (data?.outcome === 'conflict') {
+    throw conflictFromOutcome(data, patch.confirmOverride);
+  }
+
+  // As in createVenueBlock: an unknown outcome fails loudly.
+  if (data?.outcome !== 'updated') {
+    throw new Error(`Unexpected outcome from update_venue_block: ${data?.outcome}`);
+  }
+
+  // flagged_bookings only, for the reason createVenueBlock gives.
+  return {
+    block: toBlock(data.block),
+    flaggedBookings: (data.flagged_bookings ?? []).map(toBookingConflict),
+  };
+}
+
+/**
+ * Remove a block (AC4): a soft delete that records who removed it and when.
+ *
+ * Bookings the block flagged stay flagged; a Coordinator resolves each one.
+ *
+ * @param {string} venueId
+ * @param {string} blockId
+ * @param {string|null} userId  the Venue Staff member removing the block
+ * @returns {Promise<void>} nothing -- the route answers 204, and a removed
+ *          block is no longer in the list a client would show
+ * @throws {ValidationError} when either id is malformed, before any network call
+ * @throws {NotFoundError}   no such venue, or no such block on it
+ * @throws {ConflictError}   BLOCK_REMOVED (already removed) or BLOCK_ENDED
+ */
+export async function removeVenueBlock(venueId, blockId, userId = null) {
+  validateVenueId(venueId);
+  validateBlockId(blockId);
+
+  const { data, error } = await supabase.rpc('remove_venue_block', {
+    p_venue_id: venueId,
+    p_block_id: blockId,
+    p_user_id: userId,
+  });
+
+  if (error) throw translateError(error);
+
+  // An unknown outcome is not proof the block was removed, so it is not
+  // reported as success.
+  if (data?.outcome !== 'removed') {
+    throw new Error(`Unexpected outcome from remove_venue_block: ${data?.outcome}`);
+  }
 }

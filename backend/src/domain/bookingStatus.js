@@ -4,7 +4,7 @@
  * SCRUM-17 (AC3): a venue block only conflicts with *approved* bookings, so a
  * booking needs a status to say whether it is one.
  *
- * Mirrors the Postgres enum `booking_status` in 010_venue_blocks.sql exactly,
+ * Mirrors the Postgres enum `booking_status` in 011_venue_blocks.sql exactly,
  * in the same order. These two lists must stay identical -- a test asserts
  * the match.
  *

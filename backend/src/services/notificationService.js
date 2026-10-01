@@ -5,7 +5,7 @@
  *
  * AC3: when a block overrides approved bookings, each Event Coordinator is
  * notified. The notifications are written by the database, inside
- * create_venue_block (013_booking_review_notifications.sql), in the same
+ * create_venue_block (014_booking_review_notifications.sql), in the same
  * transaction that flags the bookings -- so this service never creates one.
  * It only lets a signed-in user read their own and mark one as read.
  *
@@ -20,7 +20,7 @@
  *    the stronger rule: a Coordinator who loses the role should still be able
  *    to read what they were sent, and nobody else can read it either way.
  *  - No shaping of the payload. It is stored as the camelCase snapshot the
- *    frontend renders (see 013, section 3), so it passes through untouched.
+ *    frontend renders (see 014, section 3), so it passes through untouched.
  */
 
 import { supabase } from '../config/supabaseClient.js';

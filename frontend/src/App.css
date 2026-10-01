@@ -139,7 +139,7 @@ button { cursor: pointer; }
 /* The rule above makes every .dashboard p muted grey, which would render a
    failed retire in exactly the same voice as the empty-state text. Same
    colour pair as .app-nav__error. */
-.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .venue-block-form__error, .dashboard .coordinator-notifications__error, .dashboard .coordinator-notifications__row-error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .venue-block-form__error, .dashboard .coordinator-notifications__error, .dashboard .coordinator-notifications__row-error, .dashboard .venue-blocks__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 /* NECESSARY, not cosmetic. .dashboard li above forces flex with
    justify-content: space-between, which on a checkbox row throws the box to
    one edge of the card and its label to the other with the whole width
@@ -178,6 +178,33 @@ button { cursor: pointer; }
 .dashboard--venue-staff .block-conflicts__list li:first-child { border-top: 0; }
 .dashboard--venue-staff .block-conflicts__actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .dashboard--venue-staff .block-conflicts__actions span { color: #8a5a00; font-size: 0.9rem; }
+/* SCRUM-127. The blocks panel. The notice reuses the .status--active green:
+   a save, possibly with bookings flagged, is a success to read, not a fault. */
+.dashboard--venue-staff .venue-blocks__notice { background: #e8f7f1; border-radius: 8px; margin: 12px 0; padding: 10px 14px; }
+.dashboard--venue-staff .venue-blocks__notice p { color: #17684f; margin: 4px 0; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above. With justify-content: space-between each flagged booking's
+   name, period and id would be thrown to opposite edges of the notice. */
+.dashboard--venue-staff .venue-blocks__flagged li { display: flex; justify-content: flex-start; flex-wrap: wrap; gap: 6px 12px; border-top: 0; padding: 4px 0; }
+.dashboard--venue-staff .venue-blocks__current { margin-top: 22px; }
+.dashboard--venue-staff .venue-blocks__current h3 { font-size: 1rem; margin: 0 0 8px; }
+/* Rows keep the .dashboard li spread -- details left, actions right, as in
+   the catalogue -- but top-aligned, because notes can wrap to several lines. */
+.dashboard--venue-staff .venue-blocks__list li { align-items: flex-start; }
+.dashboard--venue-staff .venue-blocks__item-main { align-items: center; display: flex; flex: 1; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.dashboard--venue-staff .venue-blocks__item-main .status-badge { margin-left: 0; }
+.dashboard--venue-staff .venue-blocks__notes, .dashboard--venue-staff .venue-blocks__clash-note, .dashboard--venue-staff .venue-blocks__ended-note, .dashboard--venue-staff .venue-blocks__item-main .venue-blocks__error { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
+.dashboard--venue-staff .venue-blocks__notes { color: var(--ink); white-space: pre-wrap; }
+.dashboard--venue-staff .venue-blocks__clash-note { color: #8a5a00; font-size: 0.86rem; }
+.dashboard--venue-staff .venue-blocks__ended-note { font-size: 0.84rem; }
+.dashboard--venue-staff .venue-blocks__item-actions { align-items: center; display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; }
+.dashboard--venue-staff .venue-blocks__item-actions span { color: #a43c32; font-size: 0.86rem; }
+.dashboard--venue-staff .venue-blocks__item--ended { opacity: 0.7; }
+/* The clashing block, in the same amber as the booking-conflict warning. */
+.dashboard--venue-staff .venue-blocks__item--clash { border-left: 3px solid #8a5a00; padding-left: 10px; }
+.dashboard--venue-staff .status--block-upcoming { background: #e9f1fb; color: #2b5285; }
+.dashboard--venue-staff .status--block-in_effect { background: #fff6e5; color: #8a5a00; }
+.dashboard--venue-staff .status--block-ended { background: #eef2f1; color: var(--muted); }
 /* History values are raw jsonb turned into text: long joined code lists, a
    whole week of opening hours, a JSON.stringify of last resort. Without
    these they overflow the card rather than wrapping, and the <pre> fallback

@@ -8,8 +8,8 @@
 // The list, and the two ways out of it. Presentational on purpose, like
 // VenueBlockForm: it calls no service. The parent holds the conflicts the API
 // returned (the BLOCK_BOOKING_CONFLICT 409's `conflicts`), passes
-// `submitting`, and resends the block with the ids this hands back. Nothing
-// renders this yet; SCRUM-127 wires it in.
+// `submitting`, and resends the block with the ids this hands back. That
+// parent is VenueBlocksPanel (SCRUM-127).
 //
 // The override is a two-step inline confirm rather than a modal or
 // window.confirm, for the reason VenueCatalogue's retire button gives: there

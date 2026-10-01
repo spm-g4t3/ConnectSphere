@@ -4,7 +4,7 @@
  * SCRUM-128, a subtask of SCRUM-17 (Block a Venue for Unavailability).
  *
  * AC3: an Event Coordinator is notified when a block overrides one of their
- * bookings. The database writes the notifications (013); these routes let the
+ * bookings. The database writes the notifications (014); these routes let the
  * signed-in user read theirs and mark one as read. Thin wrappers around
  * src/services/notificationService.js.
  *
@@ -24,28 +24,11 @@ import express from 'express';
 
 import { listNotifications, markNotificationRead } from '../services/notificationService.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
-import { AppError } from '../errors.js';
+import { createErrorHandler } from '../http/handleError.js';
 
 
-/**
- * Map an error to a response.
- *
- * The same helper as routes/venues.js and routes/eventRequests.js. This is the
- * third copy, which eventRequests.js says is the point to lift it into one
- * module. That is left as a follow-up on purpose: SCRUM-127 changes it too
- * (it must serialise ConflictError's code and conflicts), and lifting it here
- * would put two tickets' edits on one shared file at once.
- */
-function handleError(err, res) {
-  if (err instanceof AppError) {
-    const body = { error: err.message };
-    if (err.details) body.details = err.details;
-    return res.status(err.status).json(body);
-  }
-
-  console.error('Unexpected error in notifications route:', err);
-  return res.status(500).json({ error: 'Unexpected server error' });
-}
+/** Map an error to a response; see src/http/handleError.js (SCRUM-127). */
+const handleError = createErrorHandler('notifications route');
 
 
 /**

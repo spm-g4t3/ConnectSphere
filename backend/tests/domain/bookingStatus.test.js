@@ -1,5 +1,5 @@
 /**
- * Tests for the booking status vocabulary and the 010 venue block schema.
+ * Tests for the booking status vocabulary and the 011 venue block schema.
  *
  * SCRUM-17 (AC1, AC3, AC4) / SCRUM-123: a block only conflicts with approved
  * bookings, active blocks on one venue may not overlap, and every block
@@ -17,11 +17,11 @@ import { dirname, resolve } from 'node:path';
 import { BOOKING_STATUS, isBookingStatus } from '../../src/domain/bookingStatus.js';
 
 
-/** The 010 migration with every `--` comment stripped. */
+/** The 011 migration with every `--` comment stripped. */
 function migrationSql() {
   const here = dirname(fileURLToPath(import.meta.url));
   const sql = readFileSync(
-    resolve(here, '../../db/migrations/010_venue_blocks.sql'),
+    resolve(here, '../../db/migrations/011_venue_blocks.sql'),
     'utf8',
   );
   return sql.replace(/--[^\n]*/g, '');
@@ -85,7 +85,7 @@ describe('isBookingStatus', () => {
 });
 
 
-describe('010 migration schema', () => {
+describe('011 migration schema', () => {
   it('SCRUM17_AC3_existing_bookings_default_to_approved', () => {
     expect(migrationSql()).toMatch(
       /alter\s+table\s+bookings\s+add\s+column\s+if\s+not\s+exists\s+status\s+booking_status\s+not\s+null\s+default\s+'approved'/i,

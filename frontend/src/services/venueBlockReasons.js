@@ -4,7 +4,7 @@
 // venue, in the order the form should offer them.
 //
 // The codes mirror the Postgres enum `venue_block_reason` in
-// backend/db/migrations/010_venue_blocks.sql and BLOCK_REASON in
+// backend/db/migrations/011_venue_blocks.sql and BLOCK_REASON in
 // backend/src/domain/venueBlockReason.js, in the same order. Only the labels
 // are the frontend's own.
 

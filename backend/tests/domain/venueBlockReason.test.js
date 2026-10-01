@@ -17,11 +17,11 @@ import { dirname, resolve } from 'node:path';
 import { BLOCK_REASON, isBlockReason } from '../../src/domain/venueBlockReason.js';
 
 
-/** The 010 migration with every `--` comment stripped. */
+/** The 011 migration with every `--` comment stripped. */
 function migrationSql() {
   const here = dirname(fileURLToPath(import.meta.url));
   const sql = readFileSync(
-    resolve(here, '../../db/migrations/010_venue_blocks.sql'),
+    resolve(here, '../../db/migrations/011_venue_blocks.sql'),
     'utf8',
   );
   return sql.replace(/--[^\n]*/g, '');
