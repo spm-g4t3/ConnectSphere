@@ -1,8 +1,14 @@
 // VenueSearch.jsx
-// Updated to match the backend's real supported filters (location, minCapacity)
-// and response shape ({ id, name, location, maxCapacity }). Date filtering
-// isn't supported by the backend yet — raise that as a separate ticket if
-// your team needs it; don't invent it client-side.
+// Matches the backend's real supported filters (location, minCapacity, and an
+// optional startsAt/endsAt window) and response shape ({ id, name, location,
+// maxCapacity }).
+//
+// SCRUM-130 (part of SCRUM-17, AC2) added the window: with both dates set,
+// venues blocked at any point in [From, To) are left out. It is optional and
+// both-or-neither, so blank dates send exactly the search this page always
+// sent. It only excludes blocks — overlapping bookings are SCRUM-139's, and
+// operating hours SCRUM-20's. The dates are not read from the URL: prefilling
+// them from an event request belongs to SCRUM-141.
 //
 // SCRUM-45 added the seeded arrival: a Coordinator reaching this page from an
 // event request lands with ?minCapacity=<expected attendance> already applied
@@ -20,9 +26,15 @@
 //     So on reload the banner disappears and the search still behaves
 //     correctly. The filters are the contract; the banner is decoration.
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useId, useRef } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { deviceTimeZoneLabel } from "../services/datetimeFormat";
+import { formatRange } from "../services/displayFormat";
 import { searchActiveVenues } from "../services/venueService";
+import { toSearchWindow, validateSearchWindow } from "../services/venueSearchValidation";
+
+/** The window's fields. A 400 naming anything else gets the generic message. */
+const DATE_FIELDS = ["startsAt", "endsAt"];
 
 export default function VenueSearch() {
   const [searchParams] = useSearchParams();
@@ -41,28 +53,106 @@ export default function VenueSearch() {
   const [filters, setFilters] = useState(() => ({
     location: searchParams.get("location") ?? "",
     minCapacity: searchParams.get("minCapacity") ?? "",
+    startsAt: "",
+    endsAt: "",
   }));
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [searched, setSearched] = useState(false);
+  // { field, message } lists: the browser's check, and a 400's date details[].
+  const [fieldErrors, setFieldErrors] = useState([]);
+  const [serverFieldErrors, setServerFieldErrors] = useState([]);
+  // The window behind the results on screen, not the one in the inputs, so
+  // the note never describes a search that has not run.
+  const [appliedWindow, setAppliedWindow] = useState(null);
+
+  const idPrefix = useId();
 
   const handleSearch = useCallback(async () => {
+    const errors = validateSearchWindow(filters);
+    if (errors.length > 0) {
+      // No request, and the results from the last good search stay put.
+      setFieldErrors(errors);
+      setServerFieldErrors([]);
+      setError(null);
+      return;
+    }
+
+    const searchWindow = toSearchWindow(filters);
+    setFieldErrors([]);
+    setServerFieldErrors([]);
     setLoading(true);
     setError(null);
     try {
       const venues = await searchActiveVenues({
         location: filters.location || undefined,
         minCapacity: filters.minCapacity ? Number(filters.minCapacity) : undefined,
+        ...searchWindow,
       });
       setResults(venues);
       setSearched(true);
-    } catch {
-      setError("Could not load venues. Please try again.");
+      setAppliedWindow(searchWindow.startsAt ? searchWindow : null);
+    } catch (err) {
+      const details = err?.response?.status === 400 ? err.response.data?.details : null;
+      const dateDetails = Array.isArray(details)
+        ? details.filter((d) => DATE_FIELDS.includes(d?.field))
+        : [];
+      if (dateDetails.length > 0) {
+        setServerFieldErrors(dateDetails);
+      } else {
+        setError("Could not load venues. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
   }, [filters]);
+
+  function updateDate(field, value) {
+    setFilters({ ...filters, [field]: value });
+    // Editing a date retires that field's errors, client and server alike.
+    setFieldErrors((prev) => prev.filter((err) => err.field !== field));
+    setServerFieldErrors((prev) => prev.filter((err) => err.field !== field));
+  }
+
+  function clearDates() {
+    setFilters({ ...filters, startsAt: "", endsAt: "" });
+    setFieldErrors([]);
+    setServerFieldErrors([]);
+  }
+
+  function messagesFor(field) {
+    return [...fieldErrors, ...serverFieldErrors]
+      .filter((err) => err.field === field)
+      .map((err) => err.message);
+  }
+
+  function errorId(field) {
+    return `${idPrefix}-${field}-error`;
+  }
+
+  /** aria wiring for one control, the same way VenueBlockForm does it. */
+  function ariaFor(field) {
+    const hasErrors = messagesFor(field).length > 0;
+    return {
+      "aria-invalid": hasErrors ? "true" : undefined,
+      "aria-describedby": hasErrors ? errorId(field) : undefined,
+    };
+  }
+
+  function renderFieldErrors(field) {
+    const messages = messagesFor(field);
+    if (messages.length === 0) return null;
+    return (
+      <ul className="venue-search__field-error" id={errorId(field)}>
+        {messages.map((message, i) => (
+          <li key={i}>{message}</li>
+        ))}
+      </ul>
+    );
+  }
+
+  const hasDates = filters.startsAt !== "" || filters.endsAt !== "";
 
   // Arriving with a filter in the URL means somebody already asked the
   // question; making them press Search to repeat it is a wasted click. Fired
@@ -132,7 +222,52 @@ export default function VenueSearch() {
         </button>
       </div>
 
+      <div className="venue-search__window">
+        <div>
+          <label>
+            From
+            <input
+              type="datetime-local"
+              value={filters.startsAt}
+              onChange={(e) => updateDate("startsAt", e.target.value)}
+              disabled={loading}
+              {...ariaFor("startsAt")}
+            />
+          </label>
+          {renderFieldErrors("startsAt")}
+        </div>
+        <div>
+          <label>
+            To
+            <input
+              type="datetime-local"
+              value={filters.endsAt}
+              onChange={(e) => updateDate("endsAt", e.target.value)}
+              disabled={loading}
+              {...ariaFor("endsAt")}
+            />
+          </label>
+          {renderFieldErrors("endsAt")}
+        </div>
+        {hasDates && (
+          <button type="button" onClick={clearDates} disabled={loading}>
+            Clear dates
+          </button>
+        )}
+      </div>
+
+      {/* Disclosure, not a picker -- the same wording VenueBlockForm uses. */}
+      <p className="venue-search__hint">
+        Times are in your device's time zone ({deviceTimeZoneLabel()}).
+      </p>
+
       {error && <p className="venue-search__error">{error}</p>}
+
+      {appliedWindow && (
+        <p className="venue-search__window-note" role="status">
+          {`Venues blocked between ${formatRange(appliedWindow.startsAt, appliedWindow.endsAt)} are not shown.`}
+        </p>
+      )}
 
       <ul className="venue-search__results">
         {results.map((venue) => (

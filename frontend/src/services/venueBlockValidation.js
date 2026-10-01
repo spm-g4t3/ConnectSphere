@@ -21,6 +21,9 @@
 //
 // Lives here rather than in VenueBlockForm.jsx because react-refresh only
 // allows a component module to export components.
+//
+// parseDateTime is exported for venueSearchValidation.js (SCRUM-130), so the
+// search window and a block refuse exactly the same malformed dates.
 
 import { toDatetimeLocalValue, toOffsetIsoString } from "./datetimeFormat";
 import { VENUE_BLOCK_REASONS } from "./venueBlockReasons";
@@ -51,7 +54,7 @@ function daysInMonth(year, month) {
  * to 2 March instead of refusing it -- the backend's checkTimestamp does the
  * same for the same reason.
  */
-function parseDateTime(text) {
+export function parseDateTime(text) {
   const match = DATETIME_PATTERN.exec(text);
   if (!match) return null;
 

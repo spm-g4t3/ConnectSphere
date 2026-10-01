@@ -98,7 +98,7 @@ function queryStub(result) {
       Promise.resolve(result).then(onFulfilled, onRejected),
   };
 
-  for (const method of ['select', 'eq', 'is', 'ilike', 'gte', 'order', 'limit', 'delete']) {
+  for (const method of ['select', 'eq', 'is', 'ilike', 'gte', 'order', 'limit', 'delete', 'lt', 'gt', 'lte', 'not']) {
     stub[method] = (...args) => {
       calls.push([method, ...args]);
       return stub;
@@ -1098,5 +1098,144 @@ describe('AC3: a retired venue keeps its bookings', () => {
 
     expect(err).toBeInstanceOf(ValidationError);
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-130 (SCRUM-17 AC2): "The blocked period is excluded from venue search
+// results." from() is routed by table name, so the blocks read and the venues
+// read each get their own stub.
+// ---------------------------------------------------------------------------
+describe('SCRUM17_AC2 a dated search leaves out venues blocked in the window', () => {
+  const STARTS = '2026-10-01T10:00:00+08:00';
+  const ENDS = '2026-10-01T12:00:00+08:00';
+  const BLOCKED_A = 'a1b2c3d4-0000-4000-8000-00000000000a';
+  const BLOCKED_B = 'a1b2c3d4-0000-4000-8000-00000000000b';
+  const VENUE_ROW = { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'Level 2, SCIS', max_capacity: 40 };
+
+  /** Route from() by table; anything else is a test failure. */
+  function givenTables({ blocks = { data: [], error: null }, venues = { data: [VENUE_ROW], error: null } } = {}) {
+    const blocksStub = queryStub(blocks);
+    const venuesStub = queryStub(venues);
+    from.mockImplementation((table) => {
+      if (table === 'venue_blocks') return blocksStub;
+      if (table === 'venues') return venuesStub;
+      throw new Error(`unexpected table ${table}`);
+    });
+    return { blocksStub, venuesStub };
+  }
+
+  const tablesQueried = () => from.mock.calls.map(([table]) => table);
+
+  it.each([
+    ['no filters', undefined],
+    ['an empty object', {}],
+    ['blank dates', { startsAt: '', endsAt: '  ' }],
+    ['location and capacity only', { location: 'SCIS', minCapacity: 40 }],
+  ])('SCRUM17_AC2_with_%s_venue_blocks_is_never_queried_and_there_is_no_not', async (_label, filters) => {
+    const { venuesStub } = givenTables();
+
+    await searchVenues(filters);
+
+    expect(tablesQueried()).toEqual(['venues']);
+    expect(venuesStub.called('not')).toBe(false);
+  });
+
+  it('SCRUM17_AC2_with_a_window_blocks_are_read_first_then_not_in_is_applied', async () => {
+    const { blocksStub, venuesStub } = givenTables({
+      blocks: { data: [{ venue_id: BLOCKED_A }, { venue_id: BLOCKED_B }], error: null },
+    });
+
+    await searchVenues({ startsAt: STARTS, endsAt: ENDS });
+
+    expect(tablesQueried()).toEqual(['venue_blocks', 'venues']);
+    expect(blocksStub.args('lt')).toEqual(['starts_at', ENDS]);
+    expect(blocksStub.args('gt')).toEqual(['ends_at', STARTS]);
+    expect(venuesStub.args('not')).toEqual(['id', 'in', `(${BLOCKED_A},${BLOCKED_B})`]);
+  });
+
+  it('SCRUM17_AC2_a_venue_with_several_blocks_is_listed_once_in_the_not_in', async () => {
+    const { venuesStub } = givenTables({
+      blocks: {
+        data: [{ venue_id: BLOCKED_A }, { venue_id: BLOCKED_A }, { venue_id: BLOCKED_B }],
+        error: null,
+      },
+    });
+
+    await searchVenues({ startsAt: STARTS, endsAt: ENDS });
+
+    expect(venuesStub.args('not')).toEqual(['id', 'in', `(${BLOCKED_A},${BLOCKED_B})`]);
+  });
+
+  it.each([
+    ['an empty list', []],
+    ['null', null],
+  ])('SCRUM17_AC2_when_nothing_is_blocked_(%s)_there_is_no_not', async (_label, data) => {
+    const { venuesStub } = givenTables({ blocks: { data, error: null } });
+
+    await searchVenues({ startsAt: STARTS, endsAt: ENDS });
+
+    expect(tablesQueried()).toEqual(['venue_blocks', 'venues']);
+    expect(venuesStub.called('not')).toBe(false);
+  });
+
+  it('SCRUM17_AC2_a_dated_search_keeps_the_retired_filter_and_name_order', async () => {
+    const { venuesStub } = givenTables({
+      blocks: { data: [{ venue_id: BLOCKED_A }], error: null },
+    });
+
+    await searchVenues({ startsAt: STARTS, endsAt: ENDS });
+
+    expect(venuesStub.args('select')).toEqual(['id, name, location, max_capacity']);
+    expect(venuesStub.args('is')).toEqual(['retired_at', null]);
+    expect(venuesStub.args('order')).toEqual(['name']);
+  });
+
+  it('SCRUM17_AC2_a_dated_search_combines_with_location_and_capacity', async () => {
+    const { venuesStub } = givenTables({
+      blocks: { data: [{ venue_id: BLOCKED_A }], error: null },
+    });
+
+    await searchVenues({ location: 'SCIS', minCapacity: 40, startsAt: STARTS, endsAt: ENDS });
+
+    expect(venuesStub.args('ilike')).toEqual(['location', '%SCIS%']);
+    expect(venuesStub.args('gte')).toEqual(['max_capacity', 40]);
+    expect(venuesStub.args('not')).toEqual(['id', 'in', `(${BLOCKED_A})`]);
+    expect(venuesStub.args('is')).toEqual(['retired_at', null]);
+  });
+
+  it('SCRUM17_AC2_a_blocks_query_error_rejects_and_venues_is_never_queried', async () => {
+    givenTables({ blocks: { data: null, error: { code: '22P02', message: 'bad' } } });
+
+    await expect(searchVenues({ startsAt: STARTS, endsAt: ENDS })).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+    expect(tablesQueried()).toEqual(['venue_blocks']);
+  });
+
+  it('SCRUM17_AC2_an_unknown_blocks_error_rejects_too', async () => {
+    givenTables({ blocks: { data: null, error: { code: '08006', message: 'connection failure' } } });
+
+    await expect(searchVenues({ startsAt: STARTS, endsAt: ENDS })).rejects.toThrow('connection failure');
+    expect(tablesQueried()).toEqual(['venue_blocks']);
+  });
+
+  it.each([
+    ['one-sided', { startsAt: STARTS }],
+    ['reversed', { startsAt: ENDS, endsAt: STARTS }],
+    ['malformed', { startsAt: '2026-10-01', endsAt: ENDS }],
+  ])('SCRUM17_AC2_a_%s_window_is_refused_before_any_query', async (_label, filters) => {
+    const err = await errorFromAsync(() => searchVenues(filters));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM17_AC2_the_output_shape_is_unchanged_by_a_window', async () => {
+    givenTables({ blocks: { data: [{ venue_id: BLOCKED_A }], error: null } });
+
+    await expect(searchVenues({ startsAt: STARTS, endsAt: ENDS })).resolves.toEqual([
+      { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'Level 2, SCIS', maxCapacity: 40 },
+    ]);
   });
 });

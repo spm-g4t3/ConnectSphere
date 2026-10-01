@@ -95,7 +95,7 @@ function queryStub(result) {
     args: (method) => calls.find(([name]) => name === method)?.slice(1),
     then: (onFulfilled, onRejected) => Promise.resolve(result).then(onFulfilled, onRejected),
   };
-  for (const method of ['select', 'eq', 'is', 'ilike', 'gte', 'order', 'limit', 'delete']) {
+  for (const method of ['select', 'eq', 'is', 'ilike', 'gte', 'order', 'limit', 'delete', 'lt', 'gt', 'lte', 'not']) {
     stub[method] = (...args) => { calls.push([method, ...args]); return stub; };
   }
   stub.maybeSingle = (...args) => { calls.push(['maybeSingle', ...args]); return Promise.resolve(result); };
@@ -736,7 +736,7 @@ describe('SCRUM-17 venue block routes', () => {
       expect(from).not.toHaveBeenCalled();
     });
 
-    it.each(ROUTES)('SCRUM17_%s_blocks_answers_403_for_an_event_coordinator', async (_label, method, path, body) => {
+    it.each(ROUTES.filter(([label]) => label !== 'GET'))('SCRUM17_%s_blocks_answers_403_for_an_event_coordinator', async (_label, method, path, body) => {
       const res = await send(appWith(signedInAs(ROLE.EVENT_COORDINATOR)), method, path, body);
       expect(res.status).toBe(403);
       expect(res.body.error).toMatch(/Venue Staff/);
@@ -1053,6 +1053,276 @@ describe('SCRUM-17 venue block routes', () => {
       expect(consoleError).toHaveBeenCalledWith('Unexpected error in venues route:', expect.any(Error));
 
       consoleError.mockRestore();
+    });
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-130 (SCRUM-17 AC2): the search's date window, and the block window the
+// venue calendar reads through -- now readable by Event Coordinators too.
+// ---------------------------------------------------------------------------
+describe('SCRUM17_AC2 search window and block reads', () => {
+  const BLOCK_ID = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
+  const BLOCKED_ID = 'a1b2c3d4-0000-4000-8000-00000000000a';
+  const BLOCKS = `/api/venues/${VENUE_ID}/blocks`;
+  const DAY_MS = 86_400_000;
+
+  const blockRow = {
+    id: BLOCK_ID,
+    venue_id: VENUE_ID,
+    starts_at: '2026-10-01T01:00:00+00:00',
+    ends_at: '2026-10-01T09:00:00+00:00',
+    reason: 'maintenance',
+    notes: null,
+    created_by: STAFF_ID,
+    last_modified_by: STAFF_ID,
+    created_at: '2026-09-23T00:00:00+00:00',
+    updated_at: '2026-09-23T00:00:00+00:00',
+    removed_at: null,
+    removed_by: null,
+  };
+  const camelBlock = {
+    id: BLOCK_ID,
+    venueId: VENUE_ID,
+    startsAt: '2026-10-01T01:00:00+00:00',
+    endsAt: '2026-10-01T09:00:00+00:00',
+    reason: 'maintenance',
+    notes: null,
+    createdBy: STAFF_ID,
+    lastModifiedBy: STAFF_ID,
+    createdAt: '2026-09-23T00:00:00+00:00',
+    updatedAt: '2026-09-23T00:00:00+00:00',
+    removedAt: null,
+    removedBy: null,
+  };
+  const searchRow = { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'Level 2, SCIS', max_capacity: 40 };
+
+  /** Route from() by table name, so a dated search's two reads are told apart. */
+  function givenTables({ blocks = ok([]), venues = ok([searchRow]) } = {}) {
+    const blocksStub = queryStub(blocks);
+    const venuesStub = queryStub(venues);
+    from.mockImplementation((table) => {
+      if (table === 'venue_blocks') return blocksStub;
+      if (table === 'venues') return venuesStub;
+      throw new Error(`unexpected table ${table}`);
+    });
+    return { blocksStub, venuesStub };
+  }
+
+  const tablesQueried = () => from.mock.calls.map(([table]) => table);
+
+  describe('GET /search with startsAt and endsAt', () => {
+    it('SCRUM17_AC2_search_with_url_encoded_plus_offsets_reaches_the_filter', async () => {
+      const { blocksStub, venuesStub } = givenTables({ blocks: ok([{ venue_id: BLOCKED_ID }]) });
+
+      const res = await request(appWith(signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID))).get(
+        '/api/venues/search?startsAt=2026-10-01T10:00:00%2B08:00&endsAt=2026-10-01T12:00:00%2B08:00',
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([
+        { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'Level 2, SCIS', maxCapacity: 40 },
+      ]);
+      expect(tablesQueried()).toEqual(['venue_blocks', 'venues']);
+      expect(blocksStub.args('lt')).toEqual(['starts_at', '2026-10-01T12:00:00+08:00']);
+      expect(blocksStub.args('gt')).toEqual(['ends_at', '2026-10-01T10:00:00+08:00']);
+      expect(venuesStub.args('not')).toEqual(['id', 'in', `(${BLOCKED_ID})`]);
+    });
+
+    it('SCRUM17_AC2_search_with_Z_offsets_reaches_the_filter', async () => {
+      const { blocksStub } = givenTables();
+
+      const res = await request(appWith()).get(
+        '/api/venues/search?startsAt=2026-10-01T02:00:00Z&endsAt=2026-10-01T04:00:00Z',
+      );
+
+      expect(res.status).toBe(200);
+      expect(blocksStub.args('lt')).toEqual(['starts_at', '2026-10-01T04:00:00Z']);
+      expect(blocksStub.args('gt')).toEqual(['ends_at', '2026-10-01T02:00:00Z']);
+    });
+
+    it('SCRUM17_AC2_a_raw_plus_arrives_as_a_space_and_answers_400_on_startsAt', async () => {
+      const res = await request(appWith()).get(
+        '/api/venues/search?startsAt=2026-10-01T10:00:00+08:00&endsAt=2026-10-01T12:00:00Z',
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.body.details.map((d) => d.field)).toEqual(['startsAt']);
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM17_AC2_a_repeated_startsAt_param_answers_400', async () => {
+      const res = await request(appWith()).get(
+        '/api/venues/search?startsAt=2026-10-01T02:00:00Z&startsAt=2026-10-01T03:00:00Z&endsAt=2026-10-01T04:00:00Z',
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toEqual([
+        { field: 'startsAt', message: 'must be an ISO 8601 date and time, given as text' },
+      ]);
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['only startsAt', '?startsAt=2026-10-01T02:00:00Z', [{ field: 'endsAt', message: 'is required when a start is given' }]],
+      ['only endsAt', '?endsAt=2026-10-01T02:00:00Z', [{ field: 'startsAt', message: 'is required when an end is given' }]],
+      ['a blank endsAt', '?startsAt=2026-10-01T02:00:00Z&endsAt=', [{ field: 'endsAt', message: 'is required when a start is given' }]],
+      ['a reversed window', '?startsAt=2026-10-01T04:00:00Z&endsAt=2026-10-01T02:00:00Z', [{ field: 'endsAt', message: 'must be later than the start' }]],
+    ])('SCRUM17_AC2_%s_answers_400_with_details', async (_label, qs, details) => {
+      const res = await request(appWith()).get(`/api/venues/search${qs}`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toEqual(details);
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM17_AC2_blank_dates_search_exactly_as_before', async () => {
+      const { venuesStub } = givenTables();
+
+      const res = await request(appWith()).get('/api/venues/search?startsAt=&endsAt=');
+
+      expect(res.status).toBe(200);
+      expect(tablesQueried()).toEqual(['venues']);
+      expect(venuesStub.called('not')).toBe(false);
+    });
+
+    it.each([
+      ['an Event Coordinator', ROLE.EVENT_COORDINATOR],
+      ['an Event Organiser', ROLE.EVENT_ORGANISER],
+    ])('SCRUM17_AC2_%s_can_search_with_a_window', async (_label, role) => {
+      givenTables();
+
+      const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(
+        '/api/venues/search?startsAt=2026-10-01T02:00:00Z&endsAt=2026-10-01T04:00:00Z',
+      );
+
+      expect(res.status).toBe(200);
+      expect(tablesQueried()).toEqual(['venue_blocks', 'venues']);
+    });
+  });
+
+  describe('GET /:id/blocks readers and window', () => {
+    it('SCRUM17_AC2_an_event_coordinator_gets_200_with_the_full_block_shape', async () => {
+      const stub = queryStub(ok([blockRow]));
+      from.mockReturnValueOnce(stub);
+
+      const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR))).get(BLOCKS);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([camelBlock]);
+      expect(from).toHaveBeenCalledWith('venue_blocks');
+      expect(stub.args('is')).toEqual(['removed_at', null]);
+    });
+
+    it('SCRUM17_AC2_an_event_coordinator_can_read_through_a_window', async () => {
+      const stub = queryStub(ok([blockRow]));
+      from.mockReturnValueOnce(stub);
+
+      const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR))).get(
+        `${BLOCKS}?from=2026-10-01T00:00:00Z&to=2026-11-01T00:00:00Z`,
+      );
+
+      expect(res.status).toBe(200);
+      expect(stub.args('lt')).toEqual(['starts_at', '2026-11-01T00:00:00Z']);
+      expect(stub.args('gt')).toEqual(['ends_at', '2026-10-01T00:00:00Z']);
+    });
+
+    it.each([
+      ['an attendee', ROLE.ATTENDEE],
+      ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+      ['an Event Organiser', ROLE.EVENT_ORGANISER],
+    ])('SCRUM17_AC2_%s_gets_403_with_no_query', async (_label, role) => {
+      const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(BLOCKS);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/Venue Staff/);
+      expect(res.body.error).toMatch(/Event Coordinators/);
+      expect(from).not.toHaveBeenCalled();
+      expect(rpc).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM17_AC2_venue_staff_window_is_forwarded_as_lt_and_gt', async () => {
+      const stub = queryStub(ok([]));
+      from.mockReturnValueOnce(stub);
+
+      const res = await request(appWith()).get(
+        `${BLOCKS}?from=2026-10-01T00:00:00%2B08:00&to=2026-11-01T00:00:00%2B08:00`,
+      );
+
+      expect(res.status).toBe(200);
+      expect(stub.args('lt')).toEqual(['starts_at', '2026-11-01T00:00:00+08:00']);
+      expect(stub.args('gt')).toEqual(['ends_at', '2026-10-01T00:00:00+08:00']);
+      expect(stub.called('lte')).toBe(false);
+      expect(stub.called('gte')).toBe(false);
+    });
+
+    it('SCRUM17_AC2_no_window_means_no_lt_or_gt', async () => {
+      const stub = queryStub(ok([]));
+      from.mockReturnValueOnce(stub);
+
+      const res = await request(appWith()).get(BLOCKS);
+
+      expect(res.status).toBe(200);
+      expect(stub.called('lt')).toBe(false);
+      expect(stub.called('gt')).toBe(false);
+    });
+
+    it.each([
+      ['only from', '?from=2026-10-01T00:00:00Z', [{ field: 'to', message: 'is required when a start is given' }]],
+      ['only to', '?to=2026-10-01T00:00:00Z', [{ field: 'from', message: 'is required when an end is given' }]],
+      ['a reversed window', '?from=2026-11-01T00:00:00Z&to=2026-10-01T00:00:00Z', [{ field: 'to', message: 'must be later than the start' }]],
+    ])('SCRUM17_AC2_%s_answers_400_with_no_query', async (_label, qs, details) => {
+      const res = await request(appWith()).get(`${BLOCKS}${qs}`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toEqual(details);
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM17_AC2_a_raw_plus_in_from_answers_400', async () => {
+      const res = await request(appWith()).get(
+        `${BLOCKS}?from=2026-10-01T00:00:00+08:00&to=2026-11-01T00:00:00Z`,
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.body.details.map((d) => d.field)).toEqual(['from']);
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM17_AC2_exactly_400_days_answers_200', async () => {
+      const stub = queryStub(ok([]));
+      from.mockReturnValueOnce(stub);
+      const to = new Date(Date.parse('2026-01-01T00:00:00Z') + 400 * DAY_MS).toISOString();
+
+      const res = await request(appWith()).get(`${BLOCKS}?from=2026-01-01T00:00:00Z&to=${to}`);
+
+      expect(res.status).toBe(200);
+      expect(stub.args('lt')).toEqual(['starts_at', to]);
+    });
+
+    it('SCRUM17_AC2_401_days_answers_400_on_to', async () => {
+      const to = new Date(Date.parse('2026-01-01T00:00:00Z') + 401 * DAY_MS).toISOString();
+
+      const res = await request(appWith()).get(`${BLOCKS}?from=2026-01-01T00:00:00Z&to=${to}`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toEqual([{ field: 'to', message: 'must be within 400 days of the start' }]);
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['POST', 'post', BLOCKS, { startsAt: '2099-10-01T09:00:00Z', endsAt: '2099-10-01T17:00:00Z', reason: 'maintenance' }],
+      ['PATCH', 'patch', `${BLOCKS}/${BLOCK_ID}`, { reason: 'safety' }],
+      ['DELETE', 'delete', `${BLOCKS}/${BLOCK_ID}`, undefined],
+    ])('SCRUM17_AC2_%s_blocks_still_answers_403_for_an_event_coordinator', async (_label, method, path, body) => {
+      const req = request(appWith(signedInAs(ROLE.EVENT_COORDINATOR)))[method](path);
+      const res = await (body === undefined ? req : req.send(body));
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('This action is restricted to Venue Staff');
+      expect(rpc).not.toHaveBeenCalled();
+      expect(from).not.toHaveBeenCalled();
     });
   });
 });

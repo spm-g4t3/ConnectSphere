@@ -24,12 +24,15 @@
  *           is written from the Venue Staff member's seat.
  *   history Venue Staff only. It is an audit trail, and it names who changed
  *           what.
- *   blocks  Venue Staff only, reads included (SCRUM-127, part of SCRUM-17).
- *           Creating, amending and removing a block is the story's whole
- *           seat. The list is gated too: a block's notes are staff's own
- *           words and its rows name who made it, and the read other roles
- *           need -- "is this venue free then?" -- is SCRUM-130's narrower
- *           blocks-in-window endpoint, not this one.
+ *   blocks  writes Venue Staff only (SCRUM-127, part of SCRUM-17): creating,
+ *           amending and removing a block is the story's whole seat.
+ *           Reads are Venue Staff and Event Coordinators (SCRUM-130). The
+ *           venue calendar (SCRUM-178) shows Coordinators a venue's blocks
+ *           as "Blocked", and Coordinators are who resolve the bookings a
+ *           block flags. Organisers, Attendees and Technical Support still
+ *           get 403: a block's notes are staff's own words and its rows name
+ *           who made it, and what those roles need -- "is this venue free
+ *           then?" -- is answered by /search's date window instead.
  */
 
 import express from 'express';
@@ -86,6 +89,16 @@ function parseSearchFilters(query) {
     filters.minCapacity = Number(query.minCapacity);
   }
 
+  // SCRUM-130: passed through as sent, like location -- timestamps are text,
+  // so there is nothing to convert, and the validator owns every rule.
+  if (query.startsAt !== undefined) {
+    filters.startsAt = query.startsAt;
+  }
+
+  if (query.endsAt !== undefined) {
+    filters.endsAt = query.endsAt;
+  }
+
   return filters;
 }
 
@@ -137,6 +150,8 @@ export function createVenueRouter({
 } = {}) {
   const router = express.Router();
   const venueStaffOnly = requireRole(ROLE.VENUE_STAFF);
+  // SCRUM-130: reading blocks is wider than writing them; see the header.
+  const blockReaders = requireRole(ROLE.VENUE_STAFF, ROLE.EVENT_COORDINATOR);
 
   // Every route below needs to know who is calling -- reads to prove they are
   // signed in, writes to attribute the change.
@@ -175,6 +190,16 @@ export function createVenueRouter({
    * Declared before GET /:id, and that order is load-bearing rather than
    * stylistic: Express matches in declaration order, so /:id would otherwise
    * swallow this with id === 'search'. The frontend already calls this path.
+   *
+   * SCRUM-17 AC2 (SCRUM-130): ?startsAt=&endsAt=, both or neither, leaves out
+   * venues blocked at any point in that window. The offsets must be
+   * URL-encoded: a raw '+' in a query string decodes to a space, so
+   * '...T09:00:00+08:00' arrives as '...T09:00:00 08:00'. That is answered
+   * with 400 rather than guessed back into '+' -- a guessed offset is a
+   * silently different instant. axios params encodes it; Z needs no encoding.
+   *
+   * Statuses: 200; 400 for a bad capacity, or a one-sided, malformed or
+   * reversed window; 401; 500.
    */
   router.get('/search', async (req, res) => {
     try {
@@ -229,11 +254,19 @@ export function createVenueRouter({
    * SCRUM-17: a venue's active blocks, soonest first. A bare array, like
    * /:id/history; none is 200 [].
    *
-   * Statuses: 200, 400 for a malformed id, 401, 403, 500.
+   * SCRUM-130 (AC2): ?from=&to=, both or neither, narrows it to blocks
+   * overlapping [from, to), ended ones included, for the venue calendar. At
+   * most 400 days. The '+' in an offset must be URL-encoded, as /search
+   * explains.
+   *
+   * Statuses: 200; 400 for a malformed id, or a one-sided, malformed or
+   * reversed window, or one over 400 days; 401; 403 unless Venue Staff or an
+   * Event Coordinator; 500.
    */
-  router.get('/:id/blocks', venueStaffOnly, async (req, res) => {
+  router.get('/:id/blocks', blockReaders, async (req, res) => {
     try {
-      res.status(200).json(await listVenueBlocks(req.params.id));
+      const window = { from: req.query.from, to: req.query.to };
+      res.status(200).json(await listVenueBlocks(req.params.id, window));
     } catch (err) {
       handleError(err, res);
     }

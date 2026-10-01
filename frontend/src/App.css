@@ -270,7 +270,15 @@ button { cursor: pointer; }
 .venue-search__context p { color: var(--muted); margin: 4px 0; }
 .venue-search__context .venue-search__back { margin: 0 0 10px; }
 .venue-search__filters { align-items: end; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(160px, 220px) auto; }
-.venue-search__filters input { border: 1px solid var(--line); border-radius: 6px; min-width: 0; padding: 10px 12px; }
+.venue-search__filters input, .venue-search__window input { border: 1px solid var(--line); border-radius: 6px; min-width: 0; padding: 10px 12px; }
+/* SCRUM-130: the optional date window sits on its own row under the filter
+   bar, so the existing three-column bar keeps its shape. align-items: start
+   because a field's error list makes its cell taller than its neighbour's. */
+.venue-search__window { align-items: start; display: grid; gap: 12px; grid-template-columns: minmax(0, 220px) minmax(0, 220px) auto; justify-content: start; margin-top: 12px; }
+.venue-search__window label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; }
+.venue-search__window > button { align-self: end; }
+.venue-search__field-error { color: #a43c32; font-size: 0.84rem; list-style: none; margin: 6px 0 0; padding: 0; }
+.venue-search__hint, .venue-search__window-note { color: var(--muted); font-size: 0.84rem; margin: 8px 0; }
 .my-event-requests__details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 10px; }
 .my-event-requests__details summary { color: var(--teal-dark); cursor: pointer; font-size: 0.9rem; font-weight: 700; }
 .my-event-requests__details dl { display: grid; gap: 8px 16px; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 14px 0 4px; }
@@ -333,7 +341,7 @@ button { cursor: pointer; }
    .my-event-requests__header { align-items: flex-start; flex-direction: column; }
    .my-event-requests__item { padding: 16px; }
    .event-request-form, .change-request-form { padding: 18px; }
-   .event-request-form__row, .venue-search__filters { grid-template-columns: 1fr; }
+   .event-request-form__row, .venue-search__filters, .venue-search__window { grid-template-columns: 1fr; }
    .my-event-requests__details dl { grid-template-columns: 1fr; gap: 3px; }
    .my-event-requests__details dd { margin-bottom: 8px; }
 }

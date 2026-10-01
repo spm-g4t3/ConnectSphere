@@ -14,6 +14,9 @@
  * constraints in 002_venues.sql remain the backstop for anything validation
  * deliberately does not check -- unknown lookup codes, and writes made outside
  * this service -- and translateError turns those into typed errors.
+ *
+ * SCRUM-130 (part of SCRUM-17 AC2): searchVenues leaves out venues blocked in
+ * an optional date window, through venueBlockService's findBlockedVenueIds.
  */
 
 import { supabase } from '../config/supabaseClient.js';
@@ -24,6 +27,7 @@ import {
   validateVenueId,
   validateSearchFilters,
 } from '../validation/venueValidation.js';
+import { findBlockedVenueIds } from './venueBlockService.js';
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -238,13 +242,33 @@ export async function retireVenue(id, userId = null) {
  * yet. Those live in join tables and turn this into a multi-way join, which is
  * the known cost of the lookup-table design and a change worth its own ticket.
  *
+ * SCRUM-130 (SCRUM-17 AC2): with a startsAt/endsAt window, venues blocked at
+ * any point in it are left out. Deliberately that and nothing more:
+ *
+ *  - Venues with an overlapping booking still appear. Excluding them is
+ *    SCRUM-139's, as part of searching against an event's requirements.
+ *  - Operating hours are not checked. Whether a venue is open then is
+ *    SCRUM-20's.
+ *
  * @param {object} [filters]
  * @param {string} [filters.location]     matched as a substring, case-insensitively
  * @param {number} [filters.minCapacity]  venues that seat at least this many
- * @returns {Promise<object[]>} active venues, ordered by name
+ * @param {string} [filters.startsAt]     SCRUM-130: ISO 8601 with an offset
+ * @param {string} [filters.endsAt]       SCRUM-130: ISO 8601 with an offset
+ * @returns {Promise<object[]>} active venues, ordered by name, minus any
+ *                              blocked in the window
  */
 export async function searchVenues(filters = {}) {
   const search = validateSearchFilters(filters);
+
+  // Before the venues query, not after it: two reads with no shared
+  // transaction either way, and filtering in Postgres keeps the name order
+  // and leaves no second, in-memory copy of the rule. A blocks-query failure
+  // throws here, so the venues query never runs.
+  const blocked =
+    search.startsAt !== undefined
+      ? await findBlockedVenueIds(search.startsAt, search.endsAt)
+      : [];
 
   let query = supabase
     .from('venues')
@@ -257,6 +281,15 @@ export async function searchVenues(filters = {}) {
 
   if (search.minCapacity !== undefined) {
     query = query.gte('max_capacity', search.minCapacity);
+  }
+
+  // Skipped when nothing is blocked, so a dateless search -- or a window no
+  // block touches -- sends exactly the query it did before SCRUM-130. The ids
+  // travel in the URL, so a very large list could make a long one; at this
+  // catalogue's size that is not a concern, and it is the known cost of
+  // keeping this to two PostgREST calls with no new migration.
+  if (blocked.length > 0) {
+    query = query.not('id', 'in', `(${blocked.join(',')})`);
   }
 
   const { data, error } = await query.order('name');

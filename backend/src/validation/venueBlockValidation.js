@@ -42,17 +42,30 @@
  * end, "other needs notes" -- can only be judged here when both sides were
  * sent. update_venue_block (015) judges them again on the merged row, which
  * is the only place the stored half is visible.
+ *
+ * SCRUM-130 (AC2) adds two read-side checks. validateBlockWindow is the
+ * optional from/to window the venue calendar reads blocks through, capped at
+ * BLOCK_WINDOW_MAX_DAYS. validatePeriod is the period findBlockedVenueIds is
+ * asked about, where both ends are required. Neither has a future-end rule:
+ * these read blocks, they do not create them.
  */
 
 import { ValidationError } from '../errors.js';
 import { BLOCK_REASON, isBlockReason } from '../domain/venueBlockReason.js';
-import { checkTimestamp } from './timestampValidation.js';
+import { checkTimestamp, checkTimeWindow } from './timestampValidation.js';
 
 /** The shape gen_random_uuid() produces, which is what venue_blocks.id holds. */
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const TIMESTAMP_FIELDS = ['startsAt', 'endsAt'];
+
+/**
+ * SCRUM-130: the longest block window one read may ask for. A year view plus
+ * the spill-over weeks a month grid shows either side of it; it keeps one
+ * request from reading a venue's whole history.
+ */
+export const BLOCK_WINDOW_MAX_DAYS = 400;
 
 /** SCRUM-127: the fields that make an update a change, rather than an empty request. */
 const PATCH_FIELDS = ['startsAt', 'endsAt', 'reason', 'notes'];
@@ -444,4 +457,57 @@ export function validateUpdateBlock(input, { now = new Date() } = {}) {
 
   throwIfInvalid(errors);
   return normalised;
+}
+
+
+/**
+ * Validate the optional window a venue's blocks are read through (SCRUM-130).
+ *
+ * Both ends or neither. A block overlapping the window is in it; one that
+ * only touches its edge is not -- the service applies that, this checks the
+ * window itself.
+ *
+ * @param {object} [window]
+ * @param {string} [window.from]  ISO 8601 with an offset
+ * @param {string} [window.to]    ISO 8601 with an offset; later than from, and
+ *                                within BLOCK_WINDOW_MAX_DAYS of it
+ * @returns {{from: string, to: string}|null} null when neither was given
+ * @throws {ValidationError} listing every problem found
+ */
+export function validateBlockWindow({ from, to } = {}) {
+  const errors = createErrorCollector();
+  const window = checkTimeWindow(errors, ['from', 'to'], from, to, {
+    maxDays: BLOCK_WINDOW_MAX_DAYS,
+  });
+
+  throwIfInvalid(errors);
+  return window === null ? null : { from: window.start, to: window.end };
+}
+
+/**
+ * Validate a period that must be given in full (SCRUM-130).
+ *
+ * What findBlockedVenueIds is asked about. Unlike a search or calendar window
+ * there is no "no period" here: asking which venues are blocked during nothing
+ * is a caller bug, so neither end given reports both as required. No cap --
+ * how long an event may run is SCRUM-20's rule, not this one's.
+ *
+ * @param {object} [period]
+ * @param {string} [period.startsAt]  ISO 8601 with an offset
+ * @param {string} [period.endsAt]    ISO 8601 with an offset; later than startsAt
+ * @returns {{startsAt: string, endsAt: string}}
+ * @throws {ValidationError} listing every problem found
+ */
+export function validatePeriod({ startsAt, endsAt } = {}) {
+  const errors = createErrorCollector();
+  const window = checkTimeWindow(errors, TIMESTAMP_FIELDS, startsAt, endsAt);
+
+  // null with nothing recorded means neither end was given.
+  if (window === null && !errors.hasErrors) {
+    errors.add('startsAt', 'is required');
+    errors.add('endsAt', 'is required');
+  }
+
+  throwIfInvalid(errors);
+  return { startsAt: window.start, endsAt: window.end };
 }

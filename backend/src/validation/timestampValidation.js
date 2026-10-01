@@ -18,6 +18,11 @@
  *
  * Pure and synchronous -- no imports at all. checkTimestamp takes any object
  * with an add(field, message) method, so each caller keeps its own collector.
+ *
+ * SCRUM-130 adds checkTimeWindow, a start and end checked as a pair, for the
+ * venue search's date window and the venue calendar's block window. It lives
+ * here rather than in either validator so the two windows cannot drift apart
+ * on what "later than the start" means.
  */
 
 
@@ -129,4 +134,73 @@ export function checkTimestamp(errors, field, value) {
   }
 
   return instant;
+}
+
+
+/** One day in milliseconds, for checkTimeWindow's maxDays cap. */
+const DAY_MS = 86_400_000;
+
+/**
+ * Blank, undefined or null: not given. A query string sends an unfilled date
+ * box as '', and that is "no window", not a malformed one.
+ */
+function isGiven(value) {
+  return !(
+    value === undefined ||
+    value === null ||
+    (typeof value === 'string' && value.trim() === '')
+  );
+}
+
+/**
+ * An optional time window: both ends or neither (SCRUM-130).
+ *
+ * Half-open [start, end): the end must be strictly later than the start, the
+ * rule venue_blocks_no_overlap uses, so an empty window is refused rather than
+ * matching nothing. A window in the past is allowed -- the calendar shows the
+ * past too.
+ *
+ * When only one end is given, that end is still checked, so every fault in the
+ * request is reported at once rather than one per round trip.
+ *
+ * @param {{add: function(string, string): void}} errors  collector to record faults against
+ * @param {[string, string]} fields  the start and end field names faults are reported under
+ * @param {*} startValue  the caller's raw start
+ * @param {*} endValue    the caller's raw end
+ * @param {object} [options]
+ * @param {number} [options.maxDays]  the longest window allowed; exactly
+ *                                    maxDays passes. Omitted means no cap.
+ * @returns {{start: string, end: string}|null} both trimmed, or null when
+ *          neither was given or a fault was recorded
+ */
+export function checkTimeWindow(errors, [startField, endField], startValue, endValue, { maxDays } = {}) {
+  const hasStart = isGiven(startValue);
+  const hasEnd = isGiven(endValue);
+
+  if (!hasStart && !hasEnd) return null;
+
+  // The fault goes on the MISSING field: that is the box the user has to fill.
+  if (!hasStart) errors.add(startField, 'is required when an end is given');
+  if (!hasEnd) errors.add(endField, 'is required when a start is given');
+
+  const start = hasStart ? checkTimestamp(errors, startField, startValue) : null;
+  const end = hasEnd ? checkTimestamp(errors, endField, endValue) : null;
+
+  if (start === null || end === null) return null;
+
+  // Compared as instants, not strings, so mixed offsets order correctly.
+  if (end <= start) {
+    errors.add(endField, 'must be later than the start');
+    return null;
+  }
+
+  // Only once the order is right: a reversed window is not also "too long".
+  if (maxDays !== undefined && end - start > maxDays * DAY_MS) {
+    errors.add(endField, `must be within ${maxDays} days of the start`);
+    return null;
+  }
+
+  // Passed on as written, trimmed, for the reason validateCreateBlock gives:
+  // the columns are timestamptz, so Postgres resolves the offset.
+  return { start: startValue.trim(), end: endValue.trim() };
 }

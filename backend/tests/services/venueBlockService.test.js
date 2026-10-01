@@ -23,6 +23,8 @@ import {
 import { ValidationError, NotFoundError, ConflictError } from '../../src/errors.js';
 // SCRUM-127: a separate import so the existing one is left as it was.
 import { updateVenueBlock, removeVenueBlock } from '../../src/services/venueBlockService.js';
+// SCRUM-130: a separate import so the existing ones are left as they were.
+import { findBlockedVenueIds } from '../../src/services/venueBlockService.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -109,7 +111,7 @@ function queryStub(result) {
       Promise.resolve(result).then(onFulfilled, onRejected),
   };
 
-  for (const method of ['select', 'eq', 'is', 'ilike', 'gte', 'order', 'limit', 'delete']) {
+  for (const method of ['select', 'eq', 'is', 'ilike', 'gte', 'order', 'limit', 'delete', 'lt', 'gt', 'lte', 'not']) {
     stub[method] = (...args) => {
       calls.push([method, ...args]);
       return stub;
@@ -1003,5 +1005,201 @@ describe('SCRUM17_AC4 removeVenueBlock', () => {
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(ConflictError);
     expect(err.message).toMatch(/Unexpected outcome from remove_venue_block/);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-130 (SCRUM-17 AC2): the calendar's block window, and the blocked
+// venues a search leaves out.
+// ---------------------------------------------------------------------------
+describe('SCRUM17_AC2 listVenueBlocks through a window', () => {
+  const FROM = '2026-10-01T00:00:00+08:00';
+  const TO = '2026-11-01T00:00:00+08:00';
+  const DAY_MS = 86_400_000;
+
+  function givenList(result = { data: [blockRow()], error: null }) {
+    const stub = queryStub(result);
+    from.mockReturnValue(stub);
+    return stub;
+  }
+
+  it('SCRUM17_AC2_window_is_strict_overlap_lt_starts_at_to_and_gt_ends_at_from', async () => {
+    const stub = givenList();
+
+    await expect(listVenueBlocks(VENUE_ID, { from: FROM, to: TO })).resolves.toEqual([CAMEL_BLOCK]);
+
+    expect(from).toHaveBeenCalledTimes(1);
+    expect(from).toHaveBeenCalledWith('venue_blocks');
+    expect(stub.args('select')).toEqual([COLUMNS]);
+    expect(stub.args('eq')).toEqual(['venue_id', VENUE_ID]);
+    expect(stub.args('is')).toEqual(['removed_at', null]);
+    expect(stub.allArgs('lt')).toEqual([['starts_at', TO]]);
+    expect(stub.allArgs('gt')).toEqual([['ends_at', FROM]]);
+    expect(stub.allArgs('order').map(([column]) => column)).toEqual(['starts_at', 'id']);
+  });
+
+  it('SCRUM17_AC2_window_never_uses_lte_or_gte', async () => {
+    const stub = givenList();
+    await listVenueBlocks(VENUE_ID, { from: FROM, to: TO });
+    expect(stub.called('lte')).toBe(false);
+    expect(stub.called('gte')).toBe(false);
+  });
+
+  it('SCRUM17_AC2_gt_is_called_once_so_ended_blocks_are_not_hidden_by_a_now_filter', async () => {
+    const stub = givenList();
+    await listVenueBlocks(VENUE_ID, { from: '2001-01-01T00:00:00Z', to: '2001-02-01T00:00:00Z' });
+    expect(stub.allArgs('gt')).toEqual([['ends_at', '2001-01-01T00:00:00Z']]);
+    expect(stub.allArgs('lt')).toEqual([['starts_at', '2001-02-01T00:00:00Z']]);
+  });
+
+  it('SCRUM17_AC2_filters_come_before_the_order', async () => {
+    const stub = givenList();
+    await listVenueBlocks(VENUE_ID, { from: FROM, to: TO });
+    const names = stub.calls.map(([name]) => name);
+    expect(names.indexOf('lt')).toBeLessThan(names.indexOf('order'));
+    expect(names.indexOf('gt')).toBeLessThan(names.indexOf('order'));
+  });
+
+  it('SCRUM17_AC2_window_values_are_passed_trimmed', async () => {
+    const stub = givenList();
+    await listVenueBlocks(VENUE_ID, { from: ` ${FROM} `, to: ` ${TO}` });
+    expect(stub.args('lt')).toEqual(['starts_at', TO]);
+    expect(stub.args('gt')).toEqual(['ends_at', FROM]);
+  });
+
+  it.each([
+    ['no options', []],
+    ['an empty options object', [{}]],
+    ['both blank', [{ from: '', to: '' }]],
+    ['both undefined', [{ from: undefined, to: undefined }]],
+  ])('SCRUM17_AC2_with_%s_there_is_no_lt_or_gt', async (_label, extra) => {
+    const stub = givenList();
+    await listVenueBlocks(VENUE_ID, ...extra);
+    expect(stub.called('lt')).toBe(false);
+    expect(stub.called('gt')).toBe(false);
+    expect(stub.args('is')).toEqual(['removed_at', null]);
+  });
+
+  it.each([
+    ['one-sided (no to)', { from: FROM }, 'to'],
+    ['one-sided (no from)', { to: TO }, 'from'],
+    ['reversed', { from: TO, to: FROM }, 'to'],
+    ['malformed', { from: '2026-10-01', to: TO }, 'from'],
+    [
+      'over 400 days',
+      { from: '2026-01-01T00:00:00.000Z', to: new Date(Date.parse('2026-01-01T00:00:00Z') + 400 * DAY_MS + 1).toISOString() },
+      'to',
+    ],
+  ])('SCRUM17_AC2_a_%s_window_throws_before_any_query', async (_label, window, field) => {
+    const err = await errorFromAsync(() => listVenueBlocks(VENUE_ID, window));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toContain(field);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM17_AC2_exactly_400_days_is_queried', async () => {
+    const stub = givenList({ data: [], error: null });
+    const to = new Date(Date.parse('2026-01-01T00:00:00Z') + 400 * DAY_MS).toISOString();
+    await expect(
+      listVenueBlocks(VENUE_ID, { from: '2026-01-01T00:00:00.000Z', to }),
+    ).resolves.toEqual([]);
+    expect(stub.args('lt')).toEqual(['starts_at', to]);
+  });
+
+  it('SCRUM17_AC2_a_windowed_query_error_is_translated', async () => {
+    givenList({ data: null, error: { code: '22007', message: 'bad datetime' } });
+    await expect(listVenueBlocks(VENUE_ID, { from: FROM, to: TO })).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+  });
+
+  it('SCRUM17_AC2_a_windowed_unknown_error_is_a_plain_error', async () => {
+    givenList({ data: null, error: { code: '42P01', message: 'relation missing' } });
+    const err = await errorFromAsync(() => listVenueBlocks(VENUE_ID, { from: FROM, to: TO }));
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('relation missing');
+  });
+});
+
+
+describe('SCRUM17_AC2 findBlockedVenueIds', () => {
+  const STARTS = '2026-10-01T10:00:00+08:00';
+  const ENDS = '2026-10-01T12:00:00+08:00';
+  const VENUE_B = 'a1b2c3d4-0000-4000-8000-000000000002';
+
+  function givenBlocks(result) {
+    const stub = queryStub(result);
+    from.mockReturnValue(stub);
+    return stub;
+  }
+
+  it('SCRUM17_AC2_runs_the_exact_query_chain', async () => {
+    const stub = givenBlocks({ data: [{ venue_id: VENUE_ID }], error: null });
+
+    await expect(findBlockedVenueIds(STARTS, ENDS)).resolves.toEqual([VENUE_ID]);
+
+    expect(from).toHaveBeenCalledTimes(1);
+    expect(from).toHaveBeenCalledWith('venue_blocks');
+    expect(stub.calls).toEqual([
+      ['select', 'venue_id'],
+      ['is', 'removed_at', null],
+      ['lt', 'starts_at', ENDS],
+      ['gt', 'ends_at', STARTS],
+    ]);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM17_AC2_passes_the_period_trimmed', async () => {
+    const stub = givenBlocks({ data: [], error: null });
+    await findBlockedVenueIds(`  ${STARTS}`, `${ENDS}  `);
+    expect(stub.args('lt')).toEqual(['starts_at', ENDS]);
+    expect(stub.args('gt')).toEqual(['ends_at', STARTS]);
+  });
+
+  it('SCRUM17_AC2_de_duplicates_venue_ids_keeping_first_seen_order', async () => {
+    givenBlocks({
+      data: [{ venue_id: VENUE_ID }, { venue_id: VENUE_ID }, { venue_id: VENUE_B }],
+      error: null,
+    });
+    await expect(findBlockedVenueIds(STARTS, ENDS)).resolves.toEqual([VENUE_ID, VENUE_B]);
+  });
+
+  it.each([
+    ['null', null],
+    ['an empty list', []],
+  ])('SCRUM17_AC2_answers_an_empty_array_for_%s_data', async (_label, data) => {
+    givenBlocks({ data, error: null });
+    await expect(findBlockedVenueIds(STARTS, ENDS)).resolves.toEqual([]);
+  });
+
+  it.each([
+    ['neither', undefined, undefined, ['startsAt', 'endsAt']],
+    ['no end', STARTS, undefined, ['endsAt']],
+    ['no start', undefined, ENDS, ['startsAt']],
+    ['reversed', ENDS, STARTS, ['endsAt']],
+    ['equal', STARTS, STARTS, ['endsAt']],
+    ['malformed', '2026-10-01T10:00:00 08:00', ENDS, ['startsAt']],
+  ])('SCRUM17_AC2_validates_first_(%s)_and_runs_no_query', async (_label, s, e, fields) => {
+    const err = await errorFromAsync(() => findBlockedVenueIds(s, e));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toEqual(fields);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM17_AC2_a_22P02_becomes_a_ValidationError', async () => {
+    givenBlocks({ data: null, error: { code: '22P02', message: 'invalid input syntax' } });
+    await expect(findBlockedVenueIds(STARTS, ENDS)).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('SCRUM17_AC2_an_unknown_error_becomes_a_plain_Error', async () => {
+    givenBlocks({ data: null, error: { code: '08006', message: 'connection failure' } });
+    const err = await errorFromAsync(() => findBlockedVenueIds(STARTS, ENDS));
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err).not.toBeInstanceOf(NotFoundError);
+    expect(err).not.toBeInstanceOf(ConflictError);
+    expect(err.message).toBe('connection failure');
   });
 });

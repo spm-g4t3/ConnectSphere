@@ -161,3 +161,59 @@ describe("removeVenueBlock", () => {
     await expect(removeVenueBlock(VENUE_ID, BLOCK_ID)).rejects.toBe(err);
   });
 });
+
+describe("listVenueBlocks with a window (SCRUM-130)", () => {
+  const FROM = "2026-11-01T00:00:00+08:00";
+  const TO = "2026-12-01T00:00:00+08:00";
+
+  it("SCRUM17_AC2_sends_the_window_as_params", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [BLOCK] });
+
+    await expect(listVenueBlocks(VENUE_ID, { from: FROM, to: TO })).resolves.toEqual([BLOCK]);
+
+    expect(apiClient.get).toHaveBeenCalledTimes(1);
+    expect(apiClient.get).toHaveBeenCalledWith(`/venues/${VENUE_ID}/blocks`, {
+      params: { from: FROM, to: TO },
+    });
+  });
+
+  it("SCRUM17_AC2_no_window_makes_a_one_argument_call", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+
+    await listVenueBlocks(VENUE_ID);
+
+    expect(apiClient.get.mock.calls[0]).toHaveLength(1);
+    expect(apiClient.get.mock.calls[0][0]).toBe(`/venues/${VENUE_ID}/blocks`);
+  });
+
+  it("SCRUM17_AC2_an_empty_window_object_makes_a_one_argument_call", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+
+    await listVenueBlocks(VENUE_ID, {});
+
+    expect(apiClient.get.mock.calls[0]).toHaveLength(1);
+    expect(apiClient.get.mock.calls[0][0]).toBe(`/venues/${VENUE_ID}/blocks`);
+  });
+
+  it("SCRUM17_AC2_blank_window_values_make_a_one_argument_call", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+
+    await listVenueBlocks(VENUE_ID, { from: "", to: undefined });
+
+    expect(apiClient.get.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("SCRUM17_AC2_a_one_sided_window_is_forwarded_for_the_backend_to_judge", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+
+    await listVenueBlocks(VENUE_ID, { from: FROM });
+
+    expect(apiClient.get).toHaveBeenCalledWith(`/venues/${VENUE_ID}/blocks`, { params: { from: FROM } });
+  });
+
+  it("lets a windowed error through unchanged", async () => {
+    const err = httpError(400, { details: [{ field: "to", message: "must be within 400 days of the start" }] });
+    vi.mocked(apiClient.get).mockRejectedValue(err);
+    await expect(listVenueBlocks(VENUE_ID, { from: FROM, to: TO })).rejects.toBe(err);
+  });
+});

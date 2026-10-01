@@ -11,9 +11,12 @@
 //   - Response rows: { id, name, location, maxCapacity }, plus retiredAt on
 //     the catalogue listing — and no `status` field. `status` is not a
 //     backend concept anywhere in this API, so nothing should read one.
-//   - Supported filters: location (substring, case-insensitive), minCapacity
+//   - Supported filters: location (substring, case-insensitive), minCapacity,
+//     and an optional startsAt/endsAt window -- both or neither -- that drops
+//     venues blocked during it (SCRUM-130). Bookings are not considered.
 //   - /venues/:id/blocks lists, creates, changes and removes venue blocks.
-//     Venue Staff only (SCRUM-127); see the block section below.
+//     Venue Staff and Event Coordinators may list them (SCRUM-130); every
+//     write is Venue Staff only (SCRUM-127). See the block section below.
 
 import { apiClient } from "./apiClient"; // <-- replace with your actual API client
 
@@ -21,15 +24,25 @@ import { apiClient } from "./apiClient"; // <-- replace with your actual API cli
  * Searches active venues. Retired venues are never returned — the backend
  * enforces that unconditionally, so there's nothing to filter client-side.
  *
+ * With startsAt and endsAt (SCRUM-130), venues with a block overlapping the
+ * half-open window [startsAt, endsAt) are left out too; a block that only
+ * touches an edge does not count. Send both or neither -- one alone is a 400
+ * naming the missing field in details[]. Each date is omitted from the query
+ * when unset, so a dateless search is exactly the request it always was.
+ *
  * @param {Object} filters
  * @param {string} [filters.location]     substring match, case-insensitive
  * @param {number} [filters.minCapacity]  minimum seats needed
+ * @param {string} [filters.startsAt]     ISO with an explicit offset
+ * @param {string} [filters.endsAt]       ISO with an explicit offset, after startsAt
  * @returns {Promise<Array<{id, name, location, maxCapacity}>>}
  */
 export async function searchActiveVenues(filters = {}) {
   const params = {};
   if (filters.location) params.location = filters.location;
   if (filters.minCapacity) params.minCapacity = filters.minCapacity;
+  if (filters.startsAt) params.startsAt = filters.startsAt;
+  if (filters.endsAt) params.endsAt = filters.endsAt;
 
   const response = await apiClient.get("/venues/search", { params });
   return response.data;
@@ -226,7 +239,8 @@ export async function getVenueHistory(venueId) {
 }
 
 // --- Venue blocks (SCRUM-127, part of SCRUM-17) ---------------------------
-// All four are Venue Staff only. A block row is { id, venueId, startsAt,
+// Listing is open to Venue Staff and Event Coordinators (SCRUM-130); the
+// three writes are Venue Staff only. A block row is { id, venueId, startsAt,
 // endsAt, reason, notes, createdBy, createdAt, lastModifiedBy, updatedAt,
 // removedAt, removedBy }; the *By fields are unjoined uuids, like
 // getVenueHistory's changedBy.
@@ -239,13 +253,34 @@ export async function getVenueHistory(venueId) {
  * One venue's blocks: every block not removed, ended ones included, so the
  * list doubles as a record of past closures.
  *
- * Failures: 400 (the id is not a uuid), 401, 403, 404 (no such venue).
+ * With from and to (SCRUM-130), only blocks overlapping the half-open window
+ * [from, to) come back -- ended ones inside it included, because a calendar
+ * shows the past too. Both or neither, and at most 400 days apart; otherwise
+ * a 400 with details[] on `from`/`to`.
+ *
+ * Readable by Venue Staff and Event Coordinators; anyone else gets a 403.
+ *
+ * Failures: 400 (the id is not a uuid, or a bad window), 401, 403, 404 (no
+ * such venue).
  *
  * @param {string} venueId
+ * @param {Object} [window]
+ * @param {string} [window.from]  ISO with an explicit offset
+ * @param {string} [window.to]    ISO with an explicit offset, after from
  * @returns {Promise<Array<Object>>} block rows
  */
-export async function listVenueBlocks(venueId) {
-  const response = await apiClient.get(`/venues/${venueId}/blocks`);
+export async function listVenueBlocks(venueId, { from, to } = {}) {
+  const path = `/venues/${venueId}/blocks`;
+  const params = {};
+  if (from) params.from = from;
+  if (to) params.to = to;
+
+  // No second argument at all without a window, so the unwindowed call is
+  // byte-for-byte the one VenueBlocksPanel has always made.
+  const response =
+    Object.keys(params).length === 0
+      ? await apiClient.get(path)
+      : await apiClient.get(path, { params });
   return response.data;
 }
 

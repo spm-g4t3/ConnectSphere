@@ -6,7 +6,12 @@
 
 import { describe, it, expect } from "vitest";
 
-import { BLOCK_PHASE_LABELS, blockPhase } from "../../src/services/venueBlockDisplay.js";
+import {
+  BLOCK_PHASE_LABELS,
+  blockCalendarLabel,
+  blockPhase,
+} from "../../src/services/venueBlockDisplay.js";
+import { VENUE_BLOCK_REASONS } from "../../src/services/venueBlockReasons.js";
 
 const NOW = new Date("2026-10-02T04:00:00Z");
 const HOUR = 60 * 60 * 1000;
@@ -74,5 +79,41 @@ describe("BLOCK_PHASE_LABELS", () => {
       ended: "Ended",
     });
     expect(Object.isFrozen(BLOCK_PHASE_LABELS)).toBe(true);
+  });
+});
+
+describe("blockCalendarLabel (SCRUM-130)", () => {
+  it.each(VENUE_BLOCK_REASONS.map((r) => [r.code, r.label]))(
+    "SCRUM17_AC2_labels_%s_as_Blocked_with_its_reason_label",
+    (code, label) => {
+      expect(blockCalendarLabel({ reason: code })).toBe(`Blocked \u2014 ${label}`);
+    },
+  );
+
+  it("SCRUM17_AC2_covers_every_reason_the_form_offers", () => {
+    expect(VENUE_BLOCK_REASONS.length).toBeGreaterThan(0);
+    for (const { code, label } of VENUE_BLOCK_REASONS) {
+      expect(blockCalendarLabel({ reason: code })).toBe(`Blocked \u2014 ${label}`);
+    }
+  });
+
+  it("SCRUM17_AC2_separates_with_an_em_dash", () => {
+    const label = blockCalendarLabel({ reason: "maintenance" });
+    expect(label).toBe("Blocked \u2014 Maintenance");
+    expect(label.charCodeAt("Blocked ".length)).toBe(0x2014);
+  });
+
+  it("SCRUM17_AC2_an_unknown_reason_code_shows_raw", () => {
+    expect(blockCalendarLabel({ reason: "flood" })).toBe("Blocked \u2014 flood");
+  });
+
+  it.each([
+    ["a null reason", { reason: null }],
+    ["an empty reason", { reason: "" }],
+    ["no reason key", {}],
+    ["a null block", null],
+    ["an undefined block", undefined],
+  ])("SCRUM17_AC2_%s_is_plain_Blocked", (_label, block) => {
+    expect(blockCalendarLabel(block)).toBe("Blocked");
   });
 });

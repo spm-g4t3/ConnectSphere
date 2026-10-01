@@ -32,6 +32,16 @@
  * bookings, so it answers conflicts exactly as creation does, and on an
  * override flags them the same way. Removal is a soft delete that touches no
  * booking. The routes in routes/venues.js are the first callers.
+ *
+ * SCRUM-130 (AC2) adds the reads AC2's two halves need. listVenueBlocks takes
+ * an optional window, for the venue calendar (SCRUM-178), and
+ * findBlockedVenueIds answers which venues a period is blocked on, for venue
+ * search -- today's /venues/search, and SCRUM-20/139 and SCRUM-16 after it.
+ * Both use the half-open overlap venue_blocks_no_overlap uses: strict lt/gt,
+ * so a block that only touches a window's edge is not in it.
+ *
+ * This module never imports venueService.js. venueService imports
+ * findBlockedVenueIds from here, and the reverse import would be circular.
  */
 
 import { supabase } from '../config/supabaseClient.js';
@@ -41,6 +51,8 @@ import {
   validateCreateBlock,
   validateUpdateBlock,
   validateBlockId,
+  validateBlockWindow,
+  validatePeriod,
 } from '../validation/venueBlockValidation.js';
 
 /** Every column toBlock reads, so each read selects the same shape. */
@@ -264,28 +276,82 @@ export async function createVenueBlock(venueId, input, userId = null, { now } = 
 /**
  * A venue's active blocks, soonest first.
  *
- * Ended blocks are included; narrowing to a time window is SCRUM-130's job.
+ * Ended blocks are included, and so is a window wholly in the past: the
+ * calendar shows the past too, so there is deliberately no "now" filter.
  * Removed blocks are not. An unknown venue answers [], as getVenueHistory
  * does, rather than paying a round trip to say it does not exist.
  *
+ * SCRUM-130: with a from/to window, only blocks overlapping [from, to). The
+ * id and the window are both checked before any query, so a bad request costs
+ * no round trip.
+ *
  * @param {string} venueId
+ * @param {object} [window]        see validateBlockWindow; both or neither
+ * @param {string} [window.from]   ISO 8601 with an offset
+ * @param {string} [window.to]     ISO 8601 with an offset
  * @returns {Promise<object[]>} possibly empty
- * @throws {ValidationError} when the id is malformed, before any network call
+ * @throws {ValidationError} when the id or window is malformed, before any
+ *                           network call
  */
-export async function listVenueBlocks(venueId) {
+export async function listVenueBlocks(venueId, { from, to } = {}) {
   validateVenueId(venueId);
+  const window = validateBlockWindow({ from, to });
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('venue_blocks')
     .select(BLOCK_COLUMNS)
     .eq('venue_id', venueId)
-    .is('removed_at', null)
-    .order('starts_at')
-    .order('id');
+    .is('removed_at', null);
+
+  // Overlap, not containment: a block that starts before the window or ends
+  // after it is still on the calendar for the part that shows. Strict, so a
+  // block ending exactly at `from` is not in it.
+  if (window !== null) {
+    query = query.lt('starts_at', window.to).gt('ends_at', window.from);
+  }
+
+  const { data, error } = await query.order('starts_at').order('id');
 
   if (error) throw translateError(error);
 
   return (data ?? []).map(toBlock);
+}
+
+/**
+ * The venues blocked at any point in a period (SCRUM-130, AC2).
+ *
+ * Exported for every search that has to leave blocked venues out: today's
+ * /venues/search, and SCRUM-20/139 and SCRUM-16 later. Those will call it
+ * directly, not through searchVenues, which is why it validates its own input
+ * rather than trusting a caller to have done so.
+ *
+ * Only removed blocks are left out: a removed block blocks nothing. There is
+ * no "now" filter -- an ended block cannot overlap a future period anyway, and
+ * for a past one it is the truthful answer.
+ *
+ * @param {string} startsAt  ISO 8601 with an offset
+ * @param {string} endsAt    ISO 8601 with an offset; later than startsAt
+ * @returns {Promise<string[]>} each venue id once; [] when none is blocked
+ * @throws {ValidationError} when the period is missing or malformed, before
+ *                           any network call
+ */
+export async function findBlockedVenueIds(startsAt, endsAt) {
+  const period = validatePeriod({ startsAt, endsAt });
+
+  // The same strict overlap as listVenueBlocks. Touching the period's edge
+  // does not block it, matching venue_blocks_no_overlap in 011.
+  const { data, error } = await supabase
+    .from('venue_blocks')
+    .select('venue_id')
+    .is('removed_at', null)
+    .lt('starts_at', period.endsAt)
+    .gt('ends_at', period.startsAt);
+
+  if (error) throw translateError(error);
+
+  // Blocks on one venue never overlap each other, but several can fall in a
+  // long period, and the caller wants venues, not blocks.
+  return [...new Set((data ?? []).map((row) => row.venue_id))];
 }
 
 /**

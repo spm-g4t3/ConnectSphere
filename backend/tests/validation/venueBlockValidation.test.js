@@ -15,6 +15,12 @@ import {
 import { ValidationError } from '../../src/errors.js';
 // SCRUM-127: a separate import so the existing one is left as it was.
 import { validateUpdateBlock } from '../../src/validation/venueBlockValidation.js';
+// SCRUM-130: a separate import so the existing ones are left as they were.
+import {
+  BLOCK_WINDOW_MAX_DAYS,
+  validateBlockWindow,
+  validatePeriod,
+} from '../../src/validation/venueBlockValidation.js';
 
 const NOW = new Date('2026-09-23T00:00:00Z');
 
@@ -805,6 +811,136 @@ describe('SCRUM17_AC4 validateUpdateBlock', () => {
         { field: 'acknowledgedBookingIds', message: 'must list the bookings being overridden' },
       ]);
       expect(err.message).toMatch(/^Invalid venue block details -- startsAt: cannot be cleared; /);
+    });
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-130 (SCRUM-17 AC2): the block window the venue calendar reads
+// through, and the full period findBlockedVenueIds is asked about.
+// ---------------------------------------------------------------------------
+describe('SCRUM17_AC2 block read windows', () => {
+  const DAY_MS = 86_400_000;
+  const FROM = '2026-01-01T00:00:00.000Z';
+  const at = (ms) => new Date(Date.parse(FROM) + ms).toISOString();
+
+  function thrown(fn) {
+    try {
+      fn();
+      return null;
+    } catch (err) {
+      return err;
+    }
+  }
+
+  it('SCRUM17_AC2_BLOCK_WINDOW_MAX_DAYS_is_400', () => {
+    expect(BLOCK_WINDOW_MAX_DAYS).toBe(400);
+  });
+
+  describe('validateBlockWindow', () => {
+    it.each([
+      ['no argument', undefined],
+      ['an empty object', {}],
+      ['both undefined', { from: undefined, to: undefined }],
+      ['both blank', { from: '', to: '  ' }],
+      ['both null', { from: null, to: null }],
+    ])('SCRUM17_AC2_no_window_for_%s_is_null', (_label, input) => {
+      expect(validateBlockWindow(input)).toBeNull();
+    });
+
+    it('SCRUM17_AC2_a_valid_window_comes_back_trimmed_as_from_and_to', () => {
+      expect(
+        validateBlockWindow({ from: ' 2026-10-01T00:00:00+08:00 ', to: '2026-11-01T00:00:00+08:00  ' }),
+      ).toEqual({ from: '2026-10-01T00:00:00+08:00', to: '2026-11-01T00:00:00+08:00' });
+    });
+
+    it('SCRUM17_AC2_exactly_400_days_passes', () => {
+      expect(validateBlockWindow({ from: FROM, to: at(400 * DAY_MS) })).toEqual({
+        from: FROM,
+        to: at(400 * DAY_MS),
+      });
+    });
+
+    it('SCRUM17_AC2_one_ms_over_400_days_fails_on_to', () => {
+      const err = thrown(() => validateBlockWindow({ from: FROM, to: at(400 * DAY_MS + 1) }));
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.details).toEqual([{ field: 'to', message: 'must be within 400 days of the start' }]);
+      expect(err.message).toMatch(/^Invalid venue block details -- to: must be within 400 days/);
+    });
+
+    it('SCRUM17_AC2_a_missing_from_is_reported_on_from', () => {
+      const err = thrown(() => validateBlockWindow({ to: FROM }));
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.details).toEqual([{ field: 'from', message: 'is required when an end is given' }]);
+    });
+
+    it('SCRUM17_AC2_a_missing_to_is_reported_on_to', () => {
+      const err = thrown(() => validateBlockWindow({ from: FROM, to: '' }));
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.details).toEqual([{ field: 'to', message: 'is required when a start is given' }]);
+    });
+
+    it.each([
+      ['equal', FROM, FROM],
+      ['reversed', at(DAY_MS), FROM],
+    ])('SCRUM17_AC2_an_%s_window_is_refused_on_to', (_label, from, to) => {
+      const err = thrown(() => validateBlockWindow({ from, to }));
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.details).toEqual([{ field: 'to', message: 'must be later than the start' }]);
+    });
+
+    it('SCRUM17_AC2_a_malformed_from_is_refused', () => {
+      const err = thrown(() => validateBlockWindow({ from: '2026-10-01T00:00:00 08:00', to: FROM }));
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.details.map((d) => d.field)).toEqual(['from']);
+    });
+
+    it('SCRUM17_AC2_a_past_window_is_accepted_(the_calendar_shows_the_past)', () => {
+      expect(
+        validateBlockWindow({ from: '2001-01-01T00:00:00Z', to: '2001-02-01T00:00:00Z' }),
+      ).toEqual({ from: '2001-01-01T00:00:00Z', to: '2001-02-01T00:00:00Z' });
+    });
+  });
+
+  describe('validatePeriod', () => {
+    it('SCRUM17_AC2_a_full_period_comes_back_trimmed', () => {
+      expect(
+        validatePeriod({ startsAt: ' 2026-10-01T09:00:00+08:00', endsAt: '2026-10-01T17:00:00+08:00 ' }),
+      ).toEqual({ startsAt: '2026-10-01T09:00:00+08:00', endsAt: '2026-10-01T17:00:00+08:00' });
+    });
+
+    it.each([
+      ['no argument', undefined],
+      ['an empty object', {}],
+      ['both blank', { startsAt: '', endsAt: ' ' }],
+      ['both null', { startsAt: null, endsAt: null }],
+    ])('SCRUM17_AC2_neither_end_(%s)_reports_both_as_required', (_label, input) => {
+      const err = thrown(() => validatePeriod(input));
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.details).toEqual([
+        { field: 'startsAt', message: 'is required' },
+        { field: 'endsAt', message: 'is required' },
+      ]);
+    });
+
+    it('SCRUM17_AC2_a_one_sided_period_names_the_missing_end', () => {
+      const err = thrown(() => validatePeriod({ startsAt: FROM }));
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.details).toEqual([{ field: 'endsAt', message: 'is required when a start is given' }]);
+    });
+
+    it('SCRUM17_AC2_a_reversed_period_is_refused_on_endsAt', () => {
+      const err = thrown(() => validatePeriod({ startsAt: at(DAY_MS), endsAt: FROM }));
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.details).toEqual([{ field: 'endsAt', message: 'must be later than the start' }]);
+    });
+
+    it('SCRUM17_AC2_a_period_has_no_cap', () => {
+      expect(validatePeriod({ startsAt: FROM, endsAt: '2030-01-01T00:00:00Z' })).toEqual({
+        startsAt: FROM,
+        endsAt: '2030-01-01T00:00:00Z',
+      });
     });
   });
 });
