@@ -1,8 +1,8 @@
--- 012_venue_block_booking_conflicts.sql
+-- 013_venue_block_booking_conflicts.sql
 -- SCRUM-125: Overlap detection and override for venue blocks
 --
 -- Part of SCRUM-17 "Block a Venue for Unavailability (Venue Staff)".
--- Run this once in the Supabase SQL Editor, after 011_venue_block_creation.sql.
+-- Run this once in the Supabase SQL Editor, after 012_venue_block_creation.sql.
 --
 -- AC3: "A block that overlaps an existing approved booking is not created
 -- silently: the conflicting bookings are listed to the Venue Staff member, who
@@ -38,11 +38,11 @@
 
 
 -- ---------------------------------------------------------------------
--- 1. Drop the 011 signature
+-- 1. Drop the 012 signature
 -- ---------------------------------------------------------------------
 -- `create or replace` with a different parameter list does NOT replace -- it
 -- creates a second overload, and PostgREST then refuses the call as ambiguous
--- (PGRST203). 011's header asks for exactly this line.
+-- (PGRST203). 012's header asks for exactly this line.
 
 drop function if exists create_venue_block(uuid, timestamptz, timestamptz, venue_block_reason, text, uuid);
 
@@ -54,7 +54,7 @@ drop function if exists create_venue_block(uuid, timestamptz, timestamptz, venue
 --   * starts_at < p_ends_at and ends_at > p_starts_at means the same as a
 --     half-open '[)' overlap, so a booking that only touches the period at a
 --     boundary does not conflict -- the same rule blocks use among themselves;
---   * they can use idx_bookings_venue_approved from 010;
+--   * they can use idx_bookings_venue_approved from 011;
 --   * a null or reversed bound cannot raise an error, it just matches nothing.
 --
 -- Stable, and takes no locks: a stable function cannot take row locks.
@@ -90,7 +90,7 @@ $$;
 -- 3. Creating a block
 -- ---------------------------------------------------------------------
 -- Errors, and what the service turns them into (venueBlockService.js), are
--- unchanged from 011:
+-- unchanged from 012:
 --
 --   no_data_found (P0002)  no such venue                    -> NotFoundError
 --   PT409, hint VENUE_RETIRED         venue is retired      -> ConflictError
@@ -188,7 +188,7 @@ begin
 
   -- 4. Overlap with another active block.
   --
-  -- '[)' to match venue_blocks_no_overlap in 010, so blocks that touch at a
+  -- '[)' to match venue_blocks_no_overlap in 011, so blocks that touch at a
   -- boundary do not overlap. The exclusion constraint stays the guarantee;
   -- this check exists to name the block that clashed. The venue lock above
   -- means no other create_venue_block can insert between this read and the
@@ -274,7 +274,7 @@ begin
   -- >>> block or deadlock on them.
 
   -- 8. Insert. created_by and last_modified_by are both the acting user, as
-  --    010 asks, so a later audit trigger can read the author off the row.
+  --    011 asks, so a later audit trigger can read the author off the row.
   insert into venue_blocks (
     venue_id, starts_at, ends_at, reason, notes, created_by, last_modified_by
   )
@@ -283,7 +283,7 @@ begin
   )
   returning * into v_block;
 
-  -- 9. The outcome shape 011 promised, plus the bookings the override
+  -- 9. The outcome shape 012 promised, plus the bookings the override
   --    covered ('[]' when there were none).
   return jsonb_build_object(
     'outcome',           'created',

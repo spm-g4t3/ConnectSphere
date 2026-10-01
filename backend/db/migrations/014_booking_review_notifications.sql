@@ -1,16 +1,16 @@
--- 013_booking_review_notifications.sql
+-- 014_booking_review_notifications.sql
 -- SCRUM-128: Flag affected bookings for review and notify Event Coordinators
 --
 -- Part of SCRUM-17 "Block a Venue for Unavailability (Venue Staff)".
 -- Run this once in the Supabase SQL Editor, after
--- 012_venue_block_booking_conflicts.sql. Safe to re-run, like 010: every
+-- 013_venue_block_booking_conflicts.sql. Safe to re-run, like 011: every
 -- column, constraint, table and index is guarded, and both functions are
 -- `create or replace`.
 --
 -- AC3: "... explicitly confirm the override, in which case each affected
 -- booking is flagged for review and its Event Coordinator is notified."
 --
--- 012 did the detection and the override gate; this is the second half. Four
+-- 013 did the detection and the override gate; this is the second half. Four
 -- things happen here:
 --   * bookings gains review_block_id, flagged_at and flagged_by, so a flagged
 --     booking records WHICH block flagged it, WHEN, and WHO confirmed the
@@ -41,13 +41,13 @@
 
 
 -- ---------------------------------------------------------------------
--- 1. Bookings gain review columns (extends 009 and 010)
+-- 1. Bookings gain review columns (extends 009 and 011)
 -- ---------------------------------------------------------------------
 -- on delete set null for the block: blocks are soft-deleted, so a hard delete
 -- only happens outside the app, and it should not take the booking with it.
 -- The booking keeps flagged_at, which still says it was flagged.
 --
--- flagged_by is nullable for the reason 003 and 010 give for *_by columns:
+-- flagged_by is nullable for the reason 003 and 011 give for *_by columns:
 -- NULL is the honest record of "done outside the app".
 
 alter table bookings
@@ -57,7 +57,7 @@ alter table bookings
 
 -- A flag is a block AND a time, or neither. `add constraint` has no
 -- `if not exists`, so the guard reads pg_constraint instead, as the enum
--- guards in 010 read pg_type.
+-- guards in 011 read pg_type.
 --
 -- Deliberately not tied to status: a Coordinator resolving the review (a later
 -- story) may move the booking on to cancelled while keeping the record of why
@@ -87,7 +87,7 @@ create index if not exists idx_bookings_review_block
 -- ---------------------------------------------------------------------
 -- 2. Notifications
 -- ---------------------------------------------------------------------
--- type is text with a check rather than an enum, unlike 001 and 010. New
+-- type is text with a check rather than an enum, unlike 001 and 011. New
 -- notification types will arrive with other stories, and a check can be
 -- replaced inside a transaction, whereas `alter type ... add value` cannot be
 -- used in the same transaction that adds it. There is no JS mirror to keep in
@@ -142,17 +142,17 @@ alter table notifications enable row level security;
 -- ---------------------------------------------------------------------
 -- 3. Flagging the bookings a block overrides
 -- ---------------------------------------------------------------------
--- Returns the same columns as venue_block_booking_conflicts (012), so the
+-- Returns the same columns as venue_block_booking_conflicts (013), so the
 -- service maps both lists with one function, toBookingConflict.
 --
 -- plpgsql, with the caller's rights, like every function before it. It
 -- expects to run inside create_venue_block, which has already locked the
--- venue and the bookings "for no key update" (012, steps 1 and 5), so the
+-- venue and the bookings "for no key update" (013, steps 1 and 5), so the
 -- UPDATE below neither waits nor deadlocks on those rows.
 --
 -- The filters are re-applied rather than trusted. Only bookings that are in
 -- the list, still approved, on the block's venue and overlapping the block
--- (half-open, as in 012) are flagged. A stale or wrong id in p_booking_ids
+-- (half-open, as in 013) are flagged. A stale or wrong id in p_booking_ids
 -- therefore flags nothing instead of flagging a booking the block does not
 -- touch.
 --
@@ -201,7 +201,7 @@ begin
   -- 2. Flag. One UPDATE ... RETURNING, so the ids collected are exactly the
   --    rows this statement changed -- a booking cancelled in the meantime
   --    fails the status filter and is neither flagged nor notified about.
-  --    A CTE for the same reason as step 5 in 012: the aggregate runs
+  --    A CTE for the same reason as step 5 in 013: the aggregate runs
   --    outside the data-modifying statement.
   with flagged as (
     update bookings b
@@ -262,13 +262,13 @@ revoke execute on function flag_bookings_for_block(uuid, uuid[], uuid) from publ
 -- ---------------------------------------------------------------------
 -- 4. Creating a block, now flagging what it overrides
 -- ---------------------------------------------------------------------
--- The same eight-parameter signature as 012, so `create or replace` replaces
+-- The same eight-parameter signature as 013, so `create or replace` replaces
 -- it in place -- no drop, and no second overload for PostgREST to refuse as
--- ambiguous (the PGRST203 trap 011 and 012 describe).
+-- ambiguous (the PGRST203 trap 012 and 013 describe).
 --
--- Steps 1 to 7 are 012's, word for word; the errors and the conflict outcome
+-- Steps 1 to 7 are 013's, word for word; the errors and the conflict outcome
 -- are unchanged. What is new is step 8b, and 'flagged_bookings' in the
--- created outcome. 'affected_bookings' is kept, so a caller reading 012's
+-- created outcome. 'affected_bookings' is kept, so a caller reading 013's
 -- shape does not break: it is the list the Venue Staff member acknowledged,
 -- while 'flagged_bookings' is what was actually changed. Under the locks they
 -- are the same bookings; the service reads the second.
@@ -350,7 +350,7 @@ begin
 
   -- 4. Overlap with another active block.
   --
-  -- '[)' to match venue_blocks_no_overlap in 010, so blocks that touch at a
+  -- '[)' to match venue_blocks_no_overlap in 011, so blocks that touch at a
   -- boundary do not overlap. The exclusion constraint stays the guarantee;
   -- this check exists to name the block that clashed. The venue lock above
   -- means no other create_venue_block can insert between this read and the
@@ -430,7 +430,7 @@ begin
   end if;
 
   -- 8. Insert. created_by and last_modified_by are both the acting user, as
-  --    010 asks, so a later audit trigger can read the author off the row.
+  --    011 asks, so a later audit trigger can read the author off the row.
   insert into venue_blocks (
     venue_id, starts_at, ends_at, reason, notes, created_by, last_modified_by
   )
@@ -441,7 +441,7 @@ begin
 
   -- 8b. SCRUM-128: flag the overridden bookings and notify Event Coordinators.
   --
-  -- AFTER the insert, not between the gate and the insert where 012 left its
+  -- AFTER the insert, not between the gate and the insert where 013 left its
   -- marker. bookings.review_block_id is a foreign key to venue_blocks, and
   -- that key is checked immediately, statement by statement -- so a booking
   -- can only point at the block once the block's row exists, and its id is
@@ -469,7 +469,7 @@ begin
     into v_flagged
     from flag_bookings_for_block(v_block.id, v_live_ids, p_user_id) f;
 
-  -- 9. 012's outcome, plus the bookings actually flagged ('[]' when none).
+  -- 9. 013's outcome, plus the bookings actually flagged ('[]' when none).
   return jsonb_build_object(
     'outcome',           'created',
     'block',             to_jsonb(v_block),

@@ -1,4 +1,4 @@
--- 010_venue_blocks.sql
+-- 011_venue_blocks.sql
 -- SCRUM-123: Design and update the venue block data model
 --
 -- Part of SCRUM-17 "Block a Venue for Unavailability (Venue Staff)".

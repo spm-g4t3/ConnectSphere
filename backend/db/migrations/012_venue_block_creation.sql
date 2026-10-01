@@ -1,8 +1,8 @@
--- 011_venue_block_creation.sql
+-- 012_venue_block_creation.sql
 -- SCRUM-126: Validation and creation rules for venue blocks
 --
 -- Part of SCRUM-17 "Block a Venue for Unavailability (Venue Staff)".
--- Run this once in the Supabase SQL Editor, after 010_venue_blocks.sql.
+-- Run this once in the Supabase SQL Editor, after 011_venue_blocks.sql.
 --
 -- The single creation path for a block. AC1: "a block is created with venue,
 -- start/end datetime, reason category". backend/src/validation/
@@ -122,7 +122,7 @@ begin
 
   -- 4. Overlap with another active block.
   --
-  -- '[)' to match venue_blocks_no_overlap in 010, so blocks that touch at a
+  -- '[)' to match venue_blocks_no_overlap in 011, so blocks that touch at a
   -- boundary do not overlap. The exclusion constraint stays the guarantee;
   -- this check exists to name the block that clashed. The venue lock above
   -- means no other create_venue_block can insert between this read and the
@@ -144,7 +144,7 @@ begin
   end if;
 
   -- 5. Insert. created_by and last_modified_by are both the acting user, as
-  --    010 asks, so a later audit trigger can read the author off the row.
+  --    011 asks, so a later audit trigger can read the author off the row.
   insert into venue_blocks (
     venue_id, starts_at, ends_at, reason, notes, created_by, last_modified_by
   )
