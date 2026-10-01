@@ -2,7 +2,7 @@
 // Renders only the nav links relevant to the logged-in user's role.
 
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { normaliseRole } from "../auth/normaliseRole";
 
@@ -65,7 +65,13 @@ export default function Navigation() {
       <ul className="app-nav__links">
         {links.map((link) => (
           <li key={link.to}>
-            <Link to={link.to}>{link.label}</Link>
+            <NavLink
+              to={link.to}
+              end={link.to === "/dashboard"}
+              className={({ isActive }) => isActive ? "app-nav__link app-nav__link--active" : "app-nav__link"}
+            >
+              {link.label}
+            </NavLink>
           </li>
         ))}
       </ul>

@@ -18,7 +18,13 @@
 // what to add (a coordinatorOnly GET /:id/review) rather than leaving it to
 // be rediscovered.
 
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  getCoordinatorChangeRequests,
+  processCoordinatorChangeRequest,
+  requestEventClarification,
+} from "../services/eventRequestService";
 import {
   readStatusDisplay,
   statusClassName,
@@ -65,10 +71,42 @@ function seedableCapacity(value) {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-export default function CoordinatorRequestDetail({ request }) {
+export default function CoordinatorRequestDetail({
+  request,
+  onReviewDecisionProcessed,
+  onChangeRequestProcessed,
+}) {
   const navigate = useNavigate();
   const display = readStatusDisplay(request);
   const capacity = seedableCapacity(request.expectedAttendance);
+  const [reviewNote, setReviewNote] = useState("");
+  const [processingReviewDecision, setProcessingReviewDecision] = useState(false);
+  const [reviewDecisionError, setReviewDecisionError] = useState(null);
+  const [changeRequests, setChangeRequests] = useState([]);
+  const [changeRequestsLoading, setChangeRequestsLoading] = useState(true);
+  const [changeRequestsError, setChangeRequestsError] = useState(null);
+  const [processingChangeRequestId, setProcessingChangeRequestId] = useState(null);
+  const [rejectingChangeRequestId, setRejectingChangeRequestId] = useState(null);
+  const [rejectionNote, setRejectionNote] = useState("");
+  const [changeRequestActionError, setChangeRequestActionError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCoordinatorChangeRequests(request.id)
+      .then((items) => {
+        if (!cancelled) setChangeRequests(items);
+      })
+      .catch(() => {
+        if (!cancelled) setChangeRequestsError("Could not load organiser change requests.");
+      })
+      .finally(() => {
+        if (!cancelled) setChangeRequestsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [request.id]);
 
   /**
    * Hand off to venue search (workflow step 3).
@@ -95,8 +133,55 @@ export default function CoordinatorRequestDetail({ request }) {
           eventName: request.eventName,
           venueRequirements: request.venueRequirements ?? null,
         },
+          returnToReview: { request },
       },
     });
+  }
+
+  async function handleReviewDecision(decision) {
+    if (decision !== "returned_for_amendment") return;
+
+    const note = reviewNote.trim();
+    if (!note) {
+      setReviewDecisionError("Add instructions before returning this request.");
+      return;
+    }
+
+    setProcessingReviewDecision(true);
+    setReviewDecisionError(null);
+    try {
+      await requestEventClarification(request.id, note);
+      onReviewDecisionProcessed?.();
+    } catch (error) {
+      setReviewDecisionError(
+        error.response?.data?.error || "Could not return the request for amendment.",
+      );
+    } finally {
+      setProcessingReviewDecision(false);
+    }
+  }
+
+  async function handleChangeRequestDecision(changeRequest, decision, decisionNotes) {
+    setProcessingChangeRequestId(changeRequest.id);
+    setChangeRequestActionError(null);
+    try {
+      const processed = await processCoordinatorChangeRequest(changeRequest.id, {
+        decision,
+        decisionNotes,
+      });
+      setChangeRequests((current) =>
+        current.map((item) => item.id === processed.id ? { ...item, ...processed } : item),
+      );
+      setRejectingChangeRequestId(null);
+      setRejectionNote("");
+      onChangeRequestProcessed?.();
+    } catch (error) {
+      setChangeRequestActionError(
+        error.response?.data?.error || "Could not process this change request.",
+      );
+    } finally {
+      setProcessingChangeRequestId(null);
+    }
   }
 
   return (
@@ -157,6 +242,111 @@ export default function CoordinatorRequestDetail({ request }) {
       </section>
 
       <section>
+        <h3>Organiser change requests</h3>
+        {changeRequestsLoading && <p>Loading change requests...</p>}
+        {changeRequestsError && (
+          <p className="coordinator-clarification__error" role="alert">
+            {changeRequestsError}
+          </p>
+        )}
+        {!changeRequestsLoading && !changeRequestsError && changeRequests.length === 0 && (
+          <p>No change requests have been submitted for this event.</p>
+        )}
+        {!changeRequestsLoading && !changeRequestsError && changeRequests.length > 0 && (
+          <ul className="coordinator-change-requests">
+            {changeRequests.map((changeRequest) => {
+              const isOpen = !changeRequest.decision;
+              const isRejecting = rejectingChangeRequestId === changeRequest.id;
+
+              return (
+                <li key={changeRequest.id}>
+                  <strong>{changeRequest.fieldLabel}</strong>
+                  <p>{changeRequest.details}</p>
+                  <small>
+                    {changeRequest.status.replaceAll("_", " ")} | Requested{" "}
+                    {formatTimestamp(changeRequest.createdAt)}
+                  </small>
+                  {changeRequest.decision && (
+                    <p className="coordinator-change-requests__outcome">
+                      Outcome: {changeRequest.decision === "approved" ? "Approved" : "Rejected"}
+                      {changeRequest.decisionNotes && (
+                        <span> | Reason: {changeRequest.decisionNotes}</span>
+                      )}
+                    </p>
+                  )}
+                  {isOpen && (
+                    <div className="coordinator-change-requests__actions">
+                      <button
+                        type="button"
+                        disabled={processingChangeRequestId === changeRequest.id}
+                        onClick={() => handleChangeRequestDecision(changeRequest, "approved")}
+                      >
+                        {processingChangeRequestId === changeRequest.id ? "Processing..." : "Approve"}
+                      </button>
+                      {!isRejecting && (
+                        <button
+                          type="button"
+                          disabled={processingChangeRequestId === changeRequest.id}
+                          onClick={() => {
+                            setRejectingChangeRequestId(changeRequest.id);
+                            setRejectionNote("");
+                            setChangeRequestActionError(null);
+                          }}
+                        >
+                          Reject
+                        </button>
+                      )}
+                      {isRejecting && (
+                        <form
+                          className="coordinator-change-requests__reject-form"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            handleChangeRequestDecision(
+                              changeRequest,
+                              "rejected",
+                              rejectionNote.trim(),
+                            );
+                          }}
+                        >
+                          <label>
+                            Reason for rejection
+                            <textarea
+                              value={rejectionNote}
+                              onChange={(event) => setRejectionNote(event.target.value)}
+                              rows={3}
+                              maxLength={2000}
+                              required
+                            />
+                          </label>
+                          <button
+                            type="submit"
+                            disabled={processingChangeRequestId === changeRequest.id || !rejectionNote.trim()}
+                          >
+                            {processingChangeRequestId === changeRequest.id ? "Processing..." : "Confirm rejection"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRejectingChangeRequestId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {changeRequestActionError && (
+          <p className="coordinator-clarification__error" role="alert">
+            {changeRequestActionError}
+          </p>
+        )}
+      </section>
+
+      <section>
         <h3>Provenance</h3>
         <ul>
           <li>
@@ -175,6 +365,46 @@ export default function CoordinatorRequestDetail({ request }) {
           </li>
         </ul>
       </section>
+
+      {request.status === "pending_clarification" ? (
+        <section>
+          <h3>Waiting for organiser amendment</h3>
+          <p>{request.clarificationNote || "No clarification note was recorded."}</p>
+        </section>
+      ) : (
+        <section>
+          <h3>Coordinator decision</h3>
+          <p>Approve and reject are not available yet. To request updates, return the event to the Organiser for amendment.</p>
+          <div className="coordinator-clarification">
+            <label>
+              Amendment instructions
+              <textarea
+                value={reviewNote}
+                onChange={(event) => setReviewNote(event.target.value)}
+                rows={4}
+                maxLength={2000}
+                placeholder="Explain what the Organiser needs to clarify or amend."
+              />
+            </label>
+            {reviewDecisionError && (
+              <p className="coordinator-clarification__error" role="alert">
+                {reviewDecisionError}
+              </p>
+            )}
+            <div className="coordinator-review-actions">
+              <button className="coordinator-review-actions__approve" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("approved")}>
+                {processingReviewDecision ? "Saving..." : "Approve request"}
+              </button>
+              <button className="coordinator-review-actions__reject" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("rejected")}>
+                Reject request
+              </button>
+              <button className="coordinator-review-actions__return" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("returned_for_amendment")}>
+                Return for amendment
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section>
         <h3>Find a venue</h3>
