@@ -12,6 +12,9 @@
  * constraints in 002_venues.sql already guarantee correctness, and this layer
  * exists to say what went wrong in words a Venue Staff member can act on.
  *
+ * SCRUM-186 adds the turnaround between events, one of a fixed list of
+ * minutes (domain/turnaroundOptions.js).
+ *
  * Deliberately NOT checked here: whether a layout or facility code exists.
  * That is referential integrity, the foreign keys enforce it, and
  * venueService.translateError turns the violation into a ValidationError
@@ -21,6 +24,10 @@
 
 import { ValidationError } from '../errors.js';
 import { checkTimeWindow } from './timestampValidation.js';
+import {
+  TURNAROUND_MINUTES_OPTIONS,
+  isTurnaroundOption,
+} from '../domain/turnaroundOptions.js';
 
 /** HH:MM or HH:MM:SS, with real hour and minute ranges. */
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)(:([0-5]\d))?$/;
@@ -186,6 +193,24 @@ function checkHours(errors, value) {
   return cleaned;
 }
 
+/**
+ * SCRUM-186: turnaround between events, one of the allowed minute values.
+ *
+ * Only called when the field was supplied, so null here was sent on purpose
+ * and is refused: update_venue reads NULL as "keep the current value", and a
+ * request that says "clear it" should not quietly do nothing.
+ */
+function checkTurnaround(errors, value) {
+  if (!isTurnaroundOption(value)) {
+    errors.add(
+      'turnaroundMinutes',
+      `must be one of ${TURNAROUND_MINUTES_OPTIONS.join(', ')} minutes`,
+    );
+    return null;
+  }
+  return value;
+}
+
 
 /**
  * Validate input for creating a venue.
@@ -214,6 +239,10 @@ export function validateCreateVenue(input) {
 
   if (input.hours !== undefined) {
     normalised.hours = checkHours(errors, input.hours);
+  }
+
+  if (input.turnaroundMinutes !== undefined) {
+    normalised.turnaroundMinutes = checkTurnaround(errors, input.turnaroundMinutes);
   }
 
   throwIfInvalid(errors);
@@ -267,6 +296,12 @@ export function validateUpdateVenue(changes) {
 
   if (changes.hours !== undefined) {
     normalised.hours = checkHours(errors, changes.hours);
+  }
+
+  // !== undefined, not truthiness: 0 is a real choice, so {turnaroundMinutes: 0}
+  // on its own is a change and passes the "no changes supplied" rule above.
+  if (changes.turnaroundMinutes !== undefined) {
+    normalised.turnaroundMinutes = checkTurnaround(errors, changes.turnaroundMinutes);
   }
 
   throwIfInvalid(errors);

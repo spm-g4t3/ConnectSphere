@@ -53,6 +53,9 @@ export async function searchActiveVenues(filters = {}) {
  * Fetches a single venue's full details by id, including retired ones —
  * the backend intentionally still returns retired venues by id so past
  * bookings referencing them stay viewable.
+ *
+ * Carries turnaroundMinutes (SCRUM-186), a number -- 0 means none. Only this
+ * endpoint returns it; search and the catalogue list do not.
  */
 export async function getVenueDetails(venueId) {
   const response = await apiClient.get(`/venues/${venueId}`);
@@ -141,6 +144,7 @@ export async function retireVenue(venueId) {
  * @param {string[]} [input.accessibility]  accessibility feature codes
  * @param {string[]} [input.facilities]     facility codes
  * @param {Array<{day_of_week: number, opens_at: string, closes_at: string}>} [input.hours]
+ * @param {number} [input.turnaroundMinutes] one of 0, 15, 30, 45, 60, 90, 120 (SCRUM-186); 0 when omitted
  * @returns {Promise<Object>} the created venue, fully populated
  */
 export async function createVenue(input) {

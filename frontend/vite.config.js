@@ -1,7 +1,8 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
-// SCRUM-17 files are gated at 100% lines/branches/functions/statements each.
+// SCRUM-17 and SCRUM-186 files are gated at 100%
+// lines/branches/functions/statements each.
 // There is deliberately no global threshold: shared files -- venueService.js,
 // VenueCatalogue.jsx, VenueSearch.jsx (other stories) and datetimeFormat.js
 // (pre-existing; its time-zone-dependent sign branch cannot be reached in UTC
@@ -34,6 +35,10 @@ const SCRUM17_FILES = [
   'src/services/displayFormat.js',
 ]
 
+// SCRUM-186 owns one new file outright. VenueForm.jsx and VenueDetail.jsx
+// are SCRUM-15's and shared, so, like venueService.js, they are not gated.
+const SCRUM186_FILES = ['src/services/turnaroundOptions.js']
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -52,12 +57,13 @@ export default defineConfig({
       include: ['src/**/*.{js,jsx}'],
       reporter: ['text', 'json-summary'],
       reportOnFailure: true,
-      thresholds: Object.fromEntries(
-        SCRUM17_FILES.map((file) => [
+      thresholds: Object.fromEntries([
+        ...SCRUM17_FILES.map((file) => [
           file,
           file === 'src/components/VenueBlocksPanel.jsx' ? PANEL : FULL,
         ]),
-      ),
+        ...SCRUM186_FILES.map((file) => [file, FULL]),
+      ]),
     },
   },
 })
