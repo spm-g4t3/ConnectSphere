@@ -46,8 +46,9 @@ jobs:
         # fails if the lockfile and package.json have drifted apart.
         run: npm ci
 
-      - name: Run tests
-        run: npm test
+      # Runs the suite once; the per-file thresholds in vitest.config.js fail the job.
+      - name: Run tests with coverage
+        run: npm run test:coverage
 
   # SCRUM-123: the frontend had no checks at all. Lint, the Vitest suite, and a
   # production build -- the build catches a broken import that lint and tests
@@ -77,8 +78,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Run tests
-        run: npm test
+      # Runs the suite once; the per-file thresholds in vite.config.js fail the job.
+      - name: Run tests with coverage
+        run: npm run test:coverage
 
       - name: Build
         run: npm run build

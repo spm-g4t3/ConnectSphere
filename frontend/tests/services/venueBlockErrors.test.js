@@ -133,6 +133,13 @@ describe("blockErrorMessage statuses", () => {
       "Something went wrong. Please try again.",
     );
   });
+
+  // SCRUM-132: a 404 used to return undefined here, leaving the alert blank.
+  it("a 404 for an action it does not know also gets the generic message, never blank", () => {
+    expect(blockErrorMessage(httpError(404), "bogus")).toBe(
+      "Something went wrong. Please try again.",
+    );
+  });
 });
 
 describe("blockErrorMessage never shows the server prose", () => {

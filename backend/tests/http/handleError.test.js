@@ -140,3 +140,14 @@ describe('untyped errors', () => {
     expect(res.body).toEqual({ error: 'Unexpected server error' });
   });
 });
+
+
+describe('ConflictError fallbacks (SCRUM-132)', () => {
+  it('a ConflictError whose conflicts were explicitly null still sends conflicts []', () => {
+    // The constructor's default only covers undefined; null passes straight
+    // through, and a client must still be able to map over the key.
+    const { res } = respond(new ConflictError('Venue is already retired', { code: 'X', conflicts: null }));
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'Venue is already retired', code: 'X', conflicts: [] });
+  });
+});

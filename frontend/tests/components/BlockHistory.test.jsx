@@ -526,3 +526,24 @@ describe("BlockHistory refetch", () => {
     errorSpy.mockRestore();
   });
 });
+
+describe("BlockHistory coverage gaps (SCRUM-132)", () => {
+  it("SCRUM17_AC4_an_entry_whose_values_JSON_cannot_serialise_is_still_shown_raw", async () => {
+    vi.mocked(getVenueBlockHistory).mockResolvedValue([
+      {
+        ...AMENDED,
+        // Neither is a plain object, so the entry is shown raw. A BigInt makes
+        // JSON.stringify throw; a Symbol makes it return undefined.
+        oldValues: 10n,
+        newValues: Symbol("odd"),
+      },
+    ]);
+
+    await renderLoaded();
+
+    const entry = entryFor("Amended");
+    const pre = entry.querySelector("pre.venue-history__value");
+    expect(pre).not.toBeNull();
+    expect(pre.textContent).toBe("10 → Symbol(odd)");
+  });
+});

@@ -1418,3 +1418,96 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
     expect(document.getElementById(`block-history-${UPCOMING.id}`)).not.toBeNull();
   });
 });
+
+// ---- coverage gaps (SCRUM-132) ------------------------------------------------
+//
+// Defensive paths for answers the backend does not normally send. The three
+// double-click guards (`if (submitting) return`, `if (!pendingPayload)
+// return`, `if (removingId) return`) are deliberately not here: their
+// buttons are disabled, and React never dispatches a click to a disabled
+// button, so they cannot be reached from the UI.
+
+describe("VenueBlocksPanel coverage gaps (SCRUM-132)", () => {
+  it("SCRUM17_AC1_a_create_that_answers_with_no_body_still_reports_Block_saved_and_flags_nothing", async () => {
+    const { user } = await renderPanel();
+    vi.mocked(createVenueBlock).mockResolvedValueOnce(undefined);
+
+    await openCreateAndFill(user);
+    await submitCreate(user);
+
+    await waitFor(() => expect(noticeEl()).not.toBeNull());
+    expect(within(noticeEl()).getByText(MSG.saved)).toBeInTheDocument();
+    expect(noticeEl().textContent).not.toContain("flagged for review");
+    expect(noticeEl().querySelector(".venue-blocks__flagged")).toBeNull();
+    // Not an override, so the "nothing was flagged" line is not said either.
+    expect(within(noticeEl()).queryByText(MSG.noneFlagged)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Block venue" })).not.toBeInTheDocument();
+    expect(listVenueBlocks).toHaveBeenCalledTimes(2);
+  });
+
+  it("SCRUM17_AC3_a_booking_conflict_409_without_a_conflicts_array_lists_nothing_and_keeps_the_form_open", async () => {
+    const { user } = await renderPanel();
+    vi.mocked(createVenueBlock).mockRejectedValueOnce(
+      httpError(409, { code: "BLOCK_BOOKING_CONFLICT", conflicts: "not a list" }),
+    );
+
+    await openCreateAndFill(user);
+    await submitCreate(user);
+
+    await waitFor(() => expect(createVenueBlock).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Block venue" })).toBeEnabled(),
+    );
+    expect(document.querySelector(".block-conflicts")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Override and flag/ })).not.toBeInTheDocument();
+    expect(noticeEl()).toBeNull();
+    expect(listVenueBlocks).toHaveBeenCalledTimes(1);
+    expectNoUuidInText();
+  });
+
+  it("SCRUM17_AC1_BLOCK_OVERLAPS_BLOCK_without_a_conflicts_array_shows_the_message_and_marks_no_row", async () => {
+    const { user } = await renderPanel();
+    vi.mocked(createVenueBlock).mockRejectedValueOnce(
+      httpError(409, { code: "BLOCK_OVERLAPS_BLOCK" }),
+    );
+
+    await openCreateAndFill(user);
+    await submitCreate(user);
+
+    const form = document.querySelector("form.venue-block-form");
+    await waitFor(() => expect(within(form).getByRole("alert")).toHaveTextContent(MSG.overlapsBlock));
+    expect(document.querySelectorAll(".venue-blocks__item--clash")).toHaveLength(0);
+    expect(screen.queryByText("Overlaps the period you chose")).not.toBeInTheDocument();
+    expectNoUuidInText();
+  });
+
+  it("SCRUM17_AC3_a_flagged_booking_missing_its_id_name_and_event_reads_Unnamed_event_and_no_event", async () => {
+    const { user } = await renderPanel();
+    await reachConflict(user, [BOOKING_A]);
+    const bare = { startsAt: BOOKING_A.startsAt, endsAt: BOOKING_A.endsAt };
+    vi.mocked(createVenueBlock).mockResolvedValueOnce({
+      block: UPCOMING,
+      flaggedBookings: [bare, { ...bare, eventName: "", eventRequestId: null }],
+    });
+
+    await confirmOverride(user, 1);
+
+    await waitFor(() => expect(noticeEl()).not.toBeNull());
+    const notice = noticeEl();
+    expect(within(notice).getByText(MSG.saved)).toBeInTheDocument();
+    expect(
+      within(notice).getByText(
+        "2 bookings were flagged for review and Event Coordinators were notified:",
+      ),
+    ).toBeInTheDocument();
+    const items = within(notice).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      expect(within(item).getByText("Unnamed event")).toBeInTheDocument();
+      expect(within(item).getByText(formatRange(bare.startsAt, bare.endsAt))).toBeInTheDocument();
+      const code = within(item).getByText("no event");
+      expect(code.tagName).toBe("CODE");
+      expect(code).not.toHaveAttribute("title");
+    }
+  });
+});

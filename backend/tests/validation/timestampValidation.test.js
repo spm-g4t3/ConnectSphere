@@ -333,3 +333,43 @@ describe('SCRUM17_AC2 checkTimeWindow', () => {
     expect(details).toEqual([]);
   });
 });
+
+
+// SCRUM-132: a separate import so the existing one is left as it was.
+import { vi, afterEach } from 'vitest';
+
+describe('checkTimestamp coverage gaps (SCRUM-132)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('records "is not a real date" when the engine cannot parse a well-formed value', () => {
+    // Unreachable on V8 for anything matching TIMESTAMP_PATTERN, which is why
+    // the backstop exists: a future engine that parses differently. A Date
+    // that answers NaN for this one string stands in for that engine; every
+    // other construction (daysInMonth's Date.UTC included) is the real one.
+    const RealDate = Date;
+    const value = '2026-06-01T09:00:00+08:00';
+    class EngineThatCannotParse extends RealDate {
+      constructor(...args) {
+        if (args.length === 1 && args[0] === value) super(NaN);
+        else super(...args);
+      }
+    }
+    vi.stubGlobal('Date', EngineThatCannotParse);
+
+    const errors = collector();
+    const instant = checkTimestamp(errors, 'startsAt', value);
+
+    expect(instant).toBeNull();
+    expect(errors.details).toEqual([{ field: 'startsAt', message: 'is not a real date' }]);
+  });
+
+  it('the stub is gone afterwards, so the same value parses again', () => {
+    const errors = collector();
+    const instant = checkTimestamp(errors, 'startsAt', '2026-06-01T09:00:00+08:00');
+
+    expect(errors.details).toEqual([]);
+    expect(instant.toISOString()).toBe('2026-06-01T01:00:00.000Z');
+  });
+});

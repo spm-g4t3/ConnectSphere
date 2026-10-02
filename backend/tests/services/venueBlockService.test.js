@@ -1411,3 +1411,68 @@ describe('SCRUM17_AC4 getVenueBlockHistory', () => {
     expect(tables).toEqual(['venue_blocks']);
   });
 });
+
+
+describe('translateError fallbacks for sparse database errors (SCRUM-132)', () => {
+  // PostgREST does not promise message, details or hint on every error, so
+  // each fallback is reached with the field missing altogether.
+  async function createFailingWith(error) {
+    rpc.mockResolvedValue({ data: null, error });
+    return errorFromAsync(() => createVenueBlock(VENUE_ID, validInput(), STAFF_ID, { now: NOW }));
+  }
+
+  it('a validation code with no message still becomes a 400 with the fixed prefix', async () => {
+    const err = await createFailingWith({ code: '22P02' });
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('A value was rejected by the database: ');
+  });
+
+  it('23503 with no details is judged on the message alone', async () => {
+    const err = await createFailingWith({
+      code: '23503',
+      message: 'violates foreign key constraint "venue_blocks_created_by_fkey"',
+    });
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toMatch(/^The editing user does not exist: /);
+  });
+
+  it('23503 with neither message nor details is a referenced-record validation error', async () => {
+    const err = await createFailingWith({ code: '23503' });
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('A referenced record does not exist: ');
+  });
+
+  it('P0002 with no message falls back to "Venue not found"', async () => {
+    const err = await createFailingWith({ code: 'P0002' });
+
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.message).toBe('Venue not found');
+  });
+
+  it('PT409 with no hint is a conflict with code null and no conflicts', async () => {
+    const err = await createFailingWith({ code: 'PT409', message: 'conflict' });
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.code).toBeNull();
+    expect(err.conflicts).toEqual([]);
+  });
+
+  it('an unknown code with no message is a plain "Unexpected database error"', async () => {
+    const err = await createFailingWith({ code: '42P01' });
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('Unexpected database error');
+  });
+
+  it('the same fallbacks hold through removeVenueBlock', async () => {
+    rpc.mockResolvedValue({ data: null, error: { code: 'P0002' } });
+    const err = await errorFromAsync(() => removeVenueBlock(VENUE_ID, BLOCK_ID, STAFF_ID));
+
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.message).toBe('Venue not found');
+  });
+});

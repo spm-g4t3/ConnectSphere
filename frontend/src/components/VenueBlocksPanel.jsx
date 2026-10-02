@@ -244,7 +244,8 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
 
   function renderNotice() {
     if (!notice) return null;
-    const flagged = notice.flaggedBookings ?? [];
+    // Always an array: send() and handleRemove() both store one.
+    const flagged = notice.flaggedBookings;
 
     return (
       <div className="venue-blocks__notice" role="status">

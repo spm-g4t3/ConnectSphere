@@ -88,8 +88,6 @@ const VALIDATION_CODES = new Set([
  * turn an unrelated failure into a 404.
  */
 function translateError(error) {
-  if (!error) return null;
-
   const code = error.code;
   const detail = error.message ?? '';
 

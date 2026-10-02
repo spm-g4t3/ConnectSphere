@@ -281,3 +281,44 @@ describe("buildBlockChanges", () => {
     expect(buildBlockChanges({ ...form, notes: "new" }, block)).toEqual({ notes: "new" });
   });
 });
+
+describe("venueBlockValidation coverage gaps (SCRUM-132)", () => {
+  it("SCRUM17_AC1_refuses_a_well_shaped_date_with_an_impossible_time_of_day", () => {
+    const errors = validateBlockInput(
+      validValues({ startsAt: "2026-10-01T25:00", endsAt: "2026-10-01T09:60" }),
+      { now: NOW },
+    );
+    expect(errors).toEqual([
+      { field: "startsAt", message: "must be a valid date and time" },
+      { field: "endsAt", message: "must be a valid date and time" },
+    ]);
+  });
+
+  it("SCRUM17_AC4_an_edit_that_empties_a_date_sends_that_date_as_null", () => {
+    const initial = {
+      startsAt: "2026-10-01T01:00:00Z",
+      endsAt: "2026-10-01T09:00:00Z",
+      reason: "maintenance",
+      notes: null,
+    };
+    const changes = buildBlockChanges(
+      { startsAt: "", endsAt: local(initial.endsAt), reason: "maintenance", notes: "" },
+      initial,
+    );
+    expect(changes).toEqual({ startsAt: null });
+  });
+
+  it("SCRUM17_AC4_a_form_without_a_notes_field_clears_the_stored_notes", () => {
+    const initial = {
+      startsAt: "2026-10-01T01:00:00Z",
+      endsAt: "2026-10-01T09:00:00Z",
+      reason: "maintenance",
+      notes: "Aircon servicing",
+    };
+    const changes = buildBlockChanges(
+      { startsAt: local(initial.startsAt), endsAt: local(initial.endsAt), reason: "maintenance" },
+      initial,
+    );
+    expect(changes).toEqual({ notes: null });
+  });
+});

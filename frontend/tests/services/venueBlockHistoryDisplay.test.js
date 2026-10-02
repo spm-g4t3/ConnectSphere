@@ -367,3 +367,18 @@ describe("isCurrentUser", () => {
     expect(isCurrentUser("", "")).toBe(false);
   });
 });
+
+describe("venueBlockHistoryDisplay coverage gaps (SCRUM-132)", () => {
+  it("SCRUM17_AC4_blockCreationSummary_returns_an_empty_list_rather_than_throwing_on_a_value_that_cannot_be_read", () => {
+    const newValues = { starts_at: START };
+    Object.defineProperty(newValues, "reason", {
+      enumerable: true,
+      get() {
+        throw new Error("unreadable");
+      },
+    });
+
+    expect(() => blockCreationSummary(newValues)).not.toThrow();
+    expect(blockCreationSummary(newValues)).toEqual([]);
+  });
+});

@@ -474,3 +474,15 @@ describe("VenueBlockForm onDetailsChanged (SCRUM-127)", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("VenueBlockForm coverage gaps (SCRUM-132)", () => {
+  it("SCRUM17_AC1_a_server_error_with_no_field_is_shown_as_its_message_alone", () => {
+    renderForm({ serverErrors: [{ message: "Body must be a JSON object" }] });
+
+    const alert = screen.getByRole("alert");
+    const items = within(alert).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual(["Body must be a JSON object"]);
+    expect(alert.textContent).not.toContain("undefined");
+    expect(alert.textContent).not.toContain(": Body");
+  });
+});

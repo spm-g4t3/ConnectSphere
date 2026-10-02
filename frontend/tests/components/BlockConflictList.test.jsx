@@ -283,3 +283,22 @@ describe("SCRUM17_AC3 the override", () => {
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("BlockConflictList coverage gaps (SCRUM-132)", () => {
+  it("SCRUM17_AC3_conflicts_without_a_booking_id_still_render_one_row_each", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const first = { ...CONFLICT_A, bookingId: undefined };
+    const second = { ...CONFLICT_B, bookingId: undefined };
+
+    render(<BlockConflictList conflicts={[first, second]} />);
+
+    const items = within(document.querySelector(".block-conflicts__list")).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(within(items[0]).getByText("Tech Talk")).toBeInTheDocument();
+    expect(within(items[1]).getByText("Career Fair")).toBeInTheDocument();
+    expect(screen.getByText("This period overlaps 2 approved bookings")).toBeInTheDocument();
+    // Keyed by position, so React reports no duplicate or missing keys.
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+});

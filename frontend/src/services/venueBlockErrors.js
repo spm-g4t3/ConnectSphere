@@ -68,7 +68,9 @@ export function blockErrorMessage(err, action) {
   if (code && Object.hasOwn(CODE_MESSAGES, code)) return CODE_MESSAGES[code];
 
   const status = err?.response?.status;
-  if (status === 404) return NOT_FOUND_MESSAGES[action] ?? DEFAULT_MESSAGES[action];
+  // An action with no 404 wording falls through to the generic message below,
+  // rather than returning undefined and leaving the alert blank.
+  if (status === 404 && Object.hasOwn(NOT_FOUND_MESSAGES, action)) return NOT_FOUND_MESSAGES[action];
   if (status === 409) return UNKNOWN_CONFLICT_MESSAGE;
   if (Object.hasOwn(STATUS_MESSAGES, status)) return STATUS_MESSAGES[status];
 
