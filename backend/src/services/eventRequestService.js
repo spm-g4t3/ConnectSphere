@@ -47,12 +47,17 @@ import {
   NotFoundError,
   ConflictError,
   ServiceUnavailableError,
+  ForbiddenError,
 } from '../errors.js';
 import {
   validateCreateEventRequest,
   validateUpdateEventRequest,
   validateSubmitEventRequest,
 } from '../validation/eventRequestValidation.js';
+// The repository's one uuid check, exported from there precisely so it is not
+// copied (see its docstring). A pure module, so importing it keeps this
+// service loadable without credentials.
+import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
 import {
   STATUS,
   canTransition,
@@ -63,19 +68,24 @@ import {
 /**
  * The columns a caller ever reads, named rather than selected with '*'.
  *
- * assigned_coordinator_id (SCRUM-330, migration 014) is listed here and mapped
- * in toEventRequest in the same change. Naming the columns means a column
- * added to the database is invisible to the API until it is added here too.
- * That is how the decision columns from 010 (decision, decision_note,
- * decided_by, decided_at, reviewing_coordinator_id) exist in the database yet
- * have never appeared in a single API response. This column is not left out
- * the same way.
+ * Naming the columns means a column added to the database is invisible to the
+ * API until it is added here too. That is how the five decision columns from
+ * 010 (decision, decision_note, decided_by, decided_at,
+ * reviewing_coordinator_id) existed in the database without appearing in any
+ * API response.
+ *
+ * assigned_coordinator_id went in with SCRUM-330 (migration 014).
+ * reviewing_coordinator_id went in with SCRUM-331, the first of 010's five to
+ * reach a response, because a handover moves it (018) and the person now able
+ * to decide the event has to be visible. Each was mapped in toEventRequest in
+ * the same change. The other four decision columns are still absent, and stay
+ * absent until a story needs them.
  */
 const COLUMNS = `
   id, organiser_id, event_name, purpose, description,
   proposed_start, proposed_end, expected_attendance,
   venue_requirements, accessibility_requirements, equipment_requirements,
-  status, clarification_note, assigned_coordinator_id,
+  status, clarification_note, assigned_coordinator_id, reviewing_coordinator_id,
   created_at, updated_at, submitted_at
 `;
 
@@ -198,6 +208,42 @@ function translateError(error) {
     return new ServiceUnavailableError(detail);
   }
 
+  // The next three are raised by reassign_event_request (migration 018), and
+  // pass the message through unchanged for the same reason as the two above:
+  // it comes from `raise exception` in our own function, written to be read.
+  //
+  // 018's fourth refusal, a handover to the coordinator who already holds the
+  // event, uses check_violation (23514) on purpose, to match the history
+  // table's own constraint for the same rule. So it arrives through the 23514
+  // branch at the top and keeps that branch's prefix. That is unavoidable:
+  // 23514 cannot be told apart from a Postgres constraint violation by code
+  // alone, and those messages do need the wrapping.
+
+  // insufficient_privilege: the caller is not the event's assigned
+  // coordinator (SCRUM-327 AC6). 403 rather than this module's usual 404 for
+  // someone else's record: the caller is a coordinator who can already see
+  // this event in the shared queue, so the 403 reveals nothing (errors.js
+  // explains). Postgres also uses 42501 for its own "permission denied", but
+  // the API connects with the secret key, which is never refused on a table.
+  if (code === '42501') {
+    return new ForbiddenError(detail);
+  }
+
+  // invalid_parameter_value: the person named as the new coordinator does not
+  // hold the event_coordinator role. A 400, because the request named the
+  // wrong person.
+  if (code === '22023') {
+    return new ValidationError(detail);
+  }
+
+  // serialization_failure: 018's guarded update matched no row, meaning the
+  // event changed hands under it. 018 explains why this cannot happen while
+  // its row lock holds. If it ever does, the caller gets a conflict to reload
+  // from, not a 500.
+  if (code === '40001') {
+    return new ConflictError(detail);
+  }
+
   if (code === 'P0002' || /not found/i.test(detail)) {
     return new NotFoundError(detail || 'Event request not found');
   }
@@ -234,6 +280,11 @@ function toEventRequest(row) {
     // clarificationNote, so a row read without the column still gives the
     // caller null rather than undefined, and the key is always present.
     assignedCoordinatorId: row.assigned_coordinator_id ?? null,
+    // The coordinator who may decide the request (010's
+    // decided_by_is_reviewer). Null until someone starts the review. After a
+    // decision it records who decided, even when the event has since been
+    // handed to someone else (018).
+    reviewingCoordinatorId: row.reviewing_coordinator_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     submittedAt: row.submitted_at,
@@ -612,6 +663,100 @@ export async function respondToEventClarification(id, changes, organiserId, { cl
     throw new ConflictError('This request is no longer waiting for clarification. Refresh before editing.');
   }
   if (error) throw translateError(error);
+  return toEventRequest(data);
+}
+
+
+/**
+ * Hand an event to another Event Coordinator.
+ *
+ * SCRUM-331, for SCRUM-327 AC6 (only the assigned coordinator may hand an
+ * event over, and only in the statuses the AC names), AC7 (the new coordinator
+ * can then act on it) and AC9 (the handover records who made it, and the
+ * note).
+ *
+ * The whole handover happens in reassign_event_request (migration 018), called
+ * through rpc. In one transaction it locks the row, checks the caller is the
+ * assigned coordinator, the status allows a handover and the new coordinator
+ * holds the role, then moves assigned_coordinator_id (and
+ * reviewing_coordinator_id, if no decision has been made) and writes the
+ * history row. Two tables, all or nothing, and supabase-js has no
+ * transactions, so this is the same reasoning submitEventRequest gives.
+ *
+ * No read first, unlike submitEventRequest. Submission reads the row to
+ * validate the Organiser's form against it. A handover has no form to check
+ * against the row: everything a read could tell this service (does the event
+ * exist, is the caller its coordinator, does its status allow a handover) the
+ * function answers itself, under its row lock, when the answer cannot change
+ * before the write. A read here would only add a round trip whose answer could
+ * already be out of date.
+ *
+ * What the service does check, before any call:
+ *
+ *  - newCoordinatorId is present, not blank, and shaped like a uuid. The
+ *    function refuses a null itself (22023), but never sees an empty or
+ *    malformed id. p_new_coordinator_id is a uuid parameter, so PostgREST
+ *    fails to read such a value as one (22P02) before the function body runs,
+ *    and translateError does not recognise that code, so it would surface as
+ *    a 500. Checking here turns it into a 400 that names the field, and takes
+ *    no lock to do it.
+ *  - A blank handoverNote becomes null. 014 makes that the service's job, and
+ *    018 stores whatever it is handed. A note of spaces says nothing.
+ *
+ * What it deliberately does not check: whether the new coordinator holds the
+ * role. The function checks that while holding a lock on their profile, so
+ * the answer is true when the handover commits. A check here would read the
+ * role in a separate request, and could already be out of date.
+ *
+ * The signature has the shape of updateEventRequest(id, changes, organiserId):
+ * the caller's request in one object, the person acting separately, from the
+ * token. Two of the values are uuids, and as positional arguments they could
+ * be swapped without any error.
+ *
+ * @param {string} id                       the event request
+ * @param {object} changes                  the request body
+ * @param {string} changes.newCoordinatorId the coordinator taking the event
+ * @param {string} [changes.handoverNote]   optional, for the new coordinator
+ * @param {string} assignedBy               the caller, from the JWT -- never the body
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the event after the handover, in camelCase
+ * @throws {ValidationError} newCoordinatorId missing, blank or malformed
+ *                           (before any call); the named person is not an
+ *                           Event Coordinator; or they already hold the event
+ * @throws {ForbiddenError}  the caller is not the event's assigned coordinator
+ * @throws {NotFoundError}   no such event
+ * @throws {ConflictError}   the status does not allow a handover, or the event
+ *                           changed hands during this one
+ */
+export async function reassignEventRequest(id, changes, assignedBy, { client } = {}) {
+  const { newCoordinatorId, handoverNote } = changes ?? {};
+
+  if (!isPlausibleId(newCoordinatorId)) {
+    const message = typeof newCoordinatorId === 'string' && newCoordinatorId.trim() !== ''
+      ? 'must be the id of an Event Coordinator'
+      : 'is required';
+    throw new ValidationError(
+      `Invalid handover -- newCoordinatorId: ${message}`,
+      [{ field: 'newCoordinatorId', message }],
+    );
+  }
+
+  const note = typeof handoverNote === 'string' && handoverNote.trim() !== ''
+    ? handoverNote
+    : null;
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('reassign_event_request', {
+    p_event_request_id: id,
+    p_new_coordinator_id: newCoordinatorId.trim(),
+    p_assigned_by: assignedBy,
+    p_handover_note: note,
+  });
+
+  if (error) throw translateError(error);
+
   return toEventRequest(data);
 }
 

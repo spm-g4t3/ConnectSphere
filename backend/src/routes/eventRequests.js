@@ -45,8 +45,9 @@
  *    Residual, named rather than hidden: any authenticated user can POST /
  *    and own the draft they create. Low harm; if the team wants it closed the
  *    gate belongs on POST / alone, using the same requireRole option.
- *  - Coordinator writes are role-gated per route. Clarification is the one
- *    review action in this workflow; deciding organiser-submitted change
+ *  - Coordinator writes are role-gated per route. Clarification and, since
+ *    SCRUM-331, handing an event to a colleague (POST /:id/reassign) are the
+ *    Coordinator actions in this router. Deciding organiser-submitted change
  *    requests and moving requests through later planning statuses remain
  *    separate workflows.
  *
@@ -70,6 +71,7 @@ import {
   submitEventRequest,
   requestEventClarification,
   respondToEventClarification,
+  reassignEventRequest,
 } from '../services/eventRequestService.js';
 import {
   createChangeRequestFromClient,
@@ -408,6 +410,51 @@ export function createEventRequestRouter({
       const updated = await requestEventClarification(
         req.params.id,
         req.body?.note,
+        req.user.id,
+        { client },
+      );
+      res.status(200).json(withStatusDisplay(updated));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-331 (SCRUM-327 AC6, AC7, AC9): the assigned coordinator hands the
+   * event to a colleague, with an optional note.
+   *
+   * Behind coordinatorOnly, as a per-route argument like every other gate in
+   * this file. An Organiser is refused before the handler runs and the
+   * database is never touched.
+   *
+   * No ownership pre-check, and that is deliberate, not an omission next to
+   * POST /:id/submit. The submit route's pre-check is the only thing proving
+   * an Organiser owns the draft, because submitEventRequest checks no owner;
+   * the route tests call that pre-check "the single most important test in
+   * this file". Here the caller is a coordinator, not the Organiser, so
+   * organiser_id says nothing about whether they may act. The question that
+   * matters is whether the caller is this event's assigned coordinator, and
+   * reassign_event_request (018) answers it while holding the row lock, which
+   * is the only point where the answer cannot change before the write. A
+   * pre-check here would ask the same thing in a separate request and could
+   * already be out of date. A coordinator who does not hold the event gets the
+   * function's 403, not a 404: they can already see the event in the shared
+   * queue (errors.js gives the full argument).
+   *
+   * The body is passed whole. The service reads only newCoordinatorId and
+   * handoverNote from it, so a body naming someone else as assignedBy matches
+   * nothing. The caller is always req.user.id, from the token.
+   *
+   * 200 and the whole request, so the screen can redraw from the response.
+   * The function's refusals arrive through translateError: 403 (not the
+   * assigned coordinator), 400 (no such coordinator, or already theirs), 409
+   * (status does not allow a handover), 404 (no such event).
+   */
+  router.post('/:id/reassign', coordinatorOnly, async (req, res) => {
+    try {
+      const updated = await reassignEventRequest(
+        req.params.id,
+        req.body,
         req.user.id,
         { client },
       );
