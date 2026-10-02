@@ -995,10 +995,18 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
   };
 
   it('allows a Coordinator to request clarification with a required note', async () => {
+    // SCRUM-332: the event is now assigned to the signed-in coordinator, and
+    // the fixture says so. Without it the row has no coordinator, which only
+    // worked while the service ignored who was asking. What this test asserts
+    // is unchanged.
     const note = 'Please clarify the proposed event purpose.';
     const client = createWritableFakeClient([
-      ok(storedRow({ status: STATUS.SUBMITTED })),
-      ok(storedRow({ status: STATUS.PENDING_CLARIFICATION, clarification_note: note })),
+      ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: OTHER_ORGANISER_ID })),
+      ok(storedRow({
+        status: STATUS.PENDING_CLARIFICATION,
+        clarification_note: note,
+        assigned_coordinator_id: OTHER_ORGANISER_ID,
+      })),
     ]);
 
     const res = await request(appWith({ client, requireAuth: coordinatorAuth }))
@@ -2117,5 +2125,279 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/has status planning/);
     expect(client.calls).toHaveLength(1);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-332 -- every coordinator can read an event, and only its assigned
+// coordinator can change it
+// ---------------------------------------------------------------------------
+// SCRUM-327 AC7: after a handover the new coordinator can carry out every
+// coordinator action on the event, and the previous one can view it but no
+// longer change it.
+//
+// The read: a new route, GET /:id/review, behind coordinatorOnly. Not a role
+// branch inside GET /:id. Either would work, and these are the reasons for
+// this one:
+//
+//   - Who may call it is visible where it is declared, as a second argument,
+//     like every other coordinator path in this router. requireAuth.js keeps
+//     authorisation out of shared code for exactly this reason, so it can be
+//     read off the route.
+//   - It fails closed. A branch in GET /:id would choose between two
+//     authorisation rules inside the handler, and a mistake in its condition
+//     -- a missing role falling through to the coordinator side, say -- would
+//     turn the Organiser's 404 into an open read of every event in the system.
+//     A separate route behind requireRole answers 403 to anyone without the
+//     role before the handler runs, whatever is wrong inside it.
+//   - GET /:id stays exactly as it is, so its 404 and every test that pins it
+//     are untouched.
+//   - It follows the precedent already in this router: GET
+//     /:id/change-requests/review is the coordinator's read of an event's
+//     change requests, beside the Organiser's GET /:id/change-requests.
+//
+// The cost is two URLs for one event, and the frontend picks by role, as it
+// already does between GET / and GET /queue.
+//
+// Why an Organiser asking for someone else's event gets a 404 and a
+// coordinator gets the event: for the Organiser, whether an id exists is
+// itself the secret. One customer has no business learning that another's
+// request exists, so a foreign event is answered exactly as a missing one.
+// A coordinator works on ConnectSphere's side and already sees every event in
+// the shared queue, so there is no secret to keep, and AC7 says the previous
+// coordinator can still view an event they handed over. The exception is a
+// draft, which no coordinator is meant to know exists, so it stays a 404 on
+// both routes.
+
+/** GET the coordinator's single read, as COORDINATOR_ID unless told otherwise. */
+const readAsCoordinator = (client, requireAuth = signedInWithRole(ROLE.EVENT_COORDINATOR)) =>
+  request(appWith({ client, requireAuth })).get(`/api/event-requests/${REQUEST_ID}/review`);
+
+describe('SCRUM-332: every coordinator can read an event over HTTP', () => {
+  it.each([STATUS.APPROVED, STATUS.CONFIRMED])(
+    'SCRUM332_AC7_any_coordinator_can_read_an_event_in_%s',
+    async (status) => {
+      // Another Organiser's event, held by another coordinator, in a status
+      // the queue does not cover. Before SCRUM-332 no coordinator could read
+      // it at all.
+      const client = createWritableFakeClient([
+        ok(storedRow({
+          status,
+          organiser_id: OTHER_ORGANISER_ID,
+          assigned_coordinator_id: NEW_COORDINATOR_ID,
+        })),
+      ]);
+
+      const res = await readAsCoordinator(client);
+
+      // The same shape GET /:id serves, statusDisplay included, so the
+      // coordinator's screen renders it with the same helper.
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBe(REQUEST_ID);
+      expect(res.body.status).toBe(status);
+      expect(res.body.statusDisplay.status).toBe(status);
+
+      // One read, on the id alone: nothing narrows it to the caller.
+      expect(client.calls).toHaveLength(1);
+      expect(client.calls[0].filters).toEqual([['id', REQUEST_ID]]);
+    },
+  );
+
+  it('SCRUM332_AC7_the_previous_coordinator_can_still_view_the_event', async () => {
+    // AC7 in so many words: the event was handed to NEW_COORDINATOR_ID, and
+    // COORDINATOR_ID, who held it, can still read it.
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: NEW_COORDINATOR_ID })),
+    ]);
+
+    const res = await readAsCoordinator(client, signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_ID));
+
+    expect(res.status).toBe(200);
+    expect(res.body.assignedCoordinatorId).toBe(NEW_COORDINATOR_ID);
+  });
+
+  it('SCRUM332_AC7_a_missing_event_is_404', async () => {
+    const client = createWritableFakeClient([ok(null)]);
+
+    const res = await readAsCoordinator(client);
+
+    // The read must have happened. Without that assertion, Express's own 404
+    // for a path no route matches would pass this test before the route exists.
+    expect(res.status).toBe(404);
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM332_AC7_a_draft_is_404_to_a_coordinator', async () => {
+    // Identical to a missing event, status and body, so a coordinator cannot
+    // learn a draft exists by guessing its id.
+    const draft = await readAsCoordinator(
+      createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]),
+    );
+    const missing = await readAsCoordinator(createWritableFakeClient([ok(null)]));
+
+    expect(draft.status).toBe(404);
+    expect(draft.body).toEqual(missing.body);
+    expect(draft.body.error).toBeDefined();
+  });
+
+  it('SCRUM332_AC7_an_organiser_is_refused_the_coordinator_read_and_never_queries', async () => {
+    // An Organiser reads their own event through GET /:id. This route would
+    // hand them anyone's, so it refuses them before the handler runs.
+    const client = createWritableFakeClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
+
+    const res = await readAsCoordinator(client, signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID));
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM332_AC7_a_caller_with_no_role_is_refused_the_coordinator_read', async () => {
+    // Closed by default, as SCRUM45_AC2_refuses_a_caller_with_no_role_at_all
+    // pins for the queue: signedInAs sets no role, which is also what
+    // requireAuth resolves for an account with no profiles row.
+    const client = createWritableFakeClient([ok(storedRow())]);
+
+    const res = await readAsCoordinator(client, signedInAs(ORGANISER_ID));
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM332_AC7_the_coordinator_read_returns_401_without_a_token', async () => {
+    const client = createWritableFakeClient([ok(storedRow())]);
+
+    const res = await readAsCoordinator(client, signedOut);
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it("SCRUM332_AC7_an_organiser_still_gets_404_for_someone_elses_event", async () => {
+    // The Organiser's read is unchanged, and this time the Organiser carries
+    // the role, which the SCRUM-14 tests' stub does not. Still 404, for the
+    // reason in the block comment above: for an Organiser, existence is the
+    // secret.
+    const client = createWritableFakeClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
+
+    const res = await request(
+      appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID) }),
+    ).get(`/api/event-requests/${REQUEST_ID}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  it("SCRUM332_AC7_a_coordinator_reads_through_its_own_route_not_the_organisers", async () => {
+    // Pins the choice above. GET /:id does not branch on role, so a
+    // coordinator asking it for an event they did not organise gets the
+    // Organiser's answer, 404. If this starts returning 200, someone has put a
+    // role branch into the Organiser's read.
+    const client = createWritableFakeClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
+
+    const res = await request(
+      appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }),
+    ).get(`/api/event-requests/${REQUEST_ID}`);
+
+    expect(res.status).toBe(404);
+  });
+});
+
+
+describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', () => {
+  const askForClarification = (client, body, requireAuth = signedInWithRole(ROLE.EVENT_COORDINATOR)) =>
+    request(appWith({ client, requireAuth }))
+      .post(`/api/event-requests/${REQUEST_ID}/clarification`)
+      .send(body);
+
+  it('SCRUM332_AC7_only_the_assigned_coordinator_can_request_clarification', async () => {
+    // A coordinator, so past coordinatorOnly, but the event is held by
+    // NEW_COORDINATOR_ID. 403 from the service's read, with nothing written:
+    // only the read is queued, so an attempted update would fail rather than
+    // pass. Not a server fault, so nothing is logged.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: NEW_COORDINATOR_ID })),
+    ]);
+
+    const res = await askForClarification(client, { note: 'Please confirm the attendance.' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/assigned/i);
+    expect(client.calls.map((call) => call.operation)).toEqual(['select']);
+    expect(consoleError).not.toHaveBeenCalled();
+
+    consoleError.mockRestore();
+  });
+
+  it('SCRUM332_AC7_the_new_coordinator_can_request_clarification', async () => {
+    // The coordinator the event was handed to can act on it, and the write is
+    // guarded on them, taken from the token.
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: NEW_COORDINATOR_ID })),
+      ok(storedRow({
+        status: STATUS.PENDING_CLARIFICATION,
+        clarification_note: 'Please confirm the attendance.',
+        assigned_coordinator_id: NEW_COORDINATOR_ID,
+      })),
+    ]);
+
+    const res = await askForClarification(
+      client,
+      { note: 'Please confirm the attendance.' },
+      signedInWithRole(ROLE.EVENT_COORDINATOR, NEW_COORDINATOR_ID),
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe(STATUS.PENDING_CLARIFICATION);
+    expect(client.calls[1].filters).toContainEqual(['assigned_coordinator_id', NEW_COORDINATOR_ID]);
+  });
+
+  it('SCRUM332_AC7_takes_the_coordinator_from_the_token_not_the_body', async () => {
+    // The body names the assigned coordinator. It is ignored: the route reads
+    // only the note from the body, so the caller cannot claim to be someone
+    // else. Same rule as SCRUM331_AC9_records_who_handed_it_over.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const client = createWritableFakeClient([
+      ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: NEW_COORDINATOR_ID })),
+    ]);
+
+    const res = await askForClarification(client, {
+      note: 'Please confirm the attendance.',
+      coordinatorId: NEW_COORDINATOR_ID,
+    });
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(1);
+
+    consoleError.mockRestore();
+  });
+
+  it('SCRUM332_AC7_only_the_assigned_coordinator_can_decide_a_change_request', async () => {
+    // 019 refuses with 42501 under a lock on the event. The route's job is to
+    // answer 403 with 019's message, rather than the 500 it answers today
+    // because the change request service does not map that code. A refusal
+    // is not a fault, so nothing is logged for whoever is on call.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const changeRequestId = '44444444-4444-4444-8444-444444444444';
+    const message = `only the coordinator assigned to event request ${REQUEST_ID} can decide its change requests`;
+    const client = createWritableFakeClient([dbFailure('42501', message)]);
+
+    const res = await request(
+      appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }),
+    )
+      .post(`/api/event-requests/change-requests/${changeRequestId}/decision`)
+      .send({ decision: 'approved' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe(message);
+    expect(consoleError).not.toHaveBeenCalled();
+
+    // The function was asked, with the caller from the token as the person
+    // it checks.
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].fn).toBe('process_change_request');
+    expect(client.calls[0].args.p_processed_by).toBe(COORDINATOR_ID);
+
+    consoleError.mockRestore();
   });
 });

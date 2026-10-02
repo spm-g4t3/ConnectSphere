@@ -23,6 +23,14 @@
  *   AC7 -- the new coordinator can act on the event once it is handed over
  *   AC9 -- every handover records who made it, and the note
  *
+ * SCRUM-332 (a subtask of SCRUM-327) makes every coordinator action that
+ * changes an event check the caller is its assigned coordinator, and gives
+ * coordinators a single read. Its SCRUM332_AC7_* tests are at the bottom of
+ * this file, with the change request service's, which has no test file of its
+ * own:
+ *   AC7 -- after a handover the new coordinator can act on the event, and the
+ *          previous one can view it but no longer change it
+ *
  * SCRUM-330 (a subtask of SCRUM-327) moved the write half of submission into
  * the Postgres function submit_event_request (migration 016), which also
  * assigns the Event Coordinator. The SCRUM10_AC5 and SCRUM10_AC6 tests that
@@ -1598,13 +1606,21 @@ describe('SCRUM-11: a draft is updated in place', () => {
 
 describe('SCRUM-46: Coordinator clarification and Organiser response', () => {
   it('moves a submitted request to pending clarification and stores the note', async () => {
+    // SCRUM-332: the caller is now this event's assigned coordinator, and the
+    // fixture says so. It used to pass ORGANISER_ID as the coordinator against
+    // a row with no coordinator at all, which only worked while the service
+    // ignored who was asking. What this test asserts is unchanged.
     const note = 'Please clarify the accessibility arrangements.';
     const client = createFakeClient([
-      ok(storedRow({ status: STATUS.SUBMITTED })),
-      ok(storedRow({ status: STATUS.PENDING_CLARIFICATION, clarification_note: note })),
+      ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: COORDINATOR_ID })),
+      ok(storedRow({
+        status: STATUS.PENDING_CLARIFICATION,
+        clarification_note: note,
+        assigned_coordinator_id: COORDINATOR_ID,
+      })),
     ]);
 
-    const result = await requestEventClarification(REQUEST_ID, note, ORGANISER_ID, { client });
+    const result = await requestEventClarification(REQUEST_ID, note, COORDINATOR_ID, { client });
 
     expect(result.status).toBe(STATUS.PENDING_CLARIFICATION);
     expect(result.clarificationNote).toBe(note);
@@ -1962,5 +1978,414 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
     expect(err).not.toBeInstanceOf(NotFoundError);
     expect(err).not.toBeInstanceOf(ConflictError);
     expect(err.status).toBeUndefined();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-332 -- only the assigned coordinator changes an event, and every
+// coordinator can read one
+// ---------------------------------------------------------------------------
+/**
+ * SCRUM-327 AC7: after a handover, the new coordinator can carry out every
+ * coordinator action on the event, and the previous one can view it but no
+ * longer change it.
+ *
+ * An audit of every coordinator write found three that change an event.
+ * Reassignment already checks the caller, inside 018. Clarification checks
+ * nothing: it takes a coordinatorId, makes sure it is not blank, and throws it
+ * away. Deciding a change request is now checked by 019, but the change
+ * request service does not translate 019's refusal, so it reaches the caller
+ * as a 500. On the read side, no coordinator can read one event once it leaves
+ * the queue, which is exactly when AC6 still lets them hand it over.
+ *
+ * The import is appended for the reason the SCRUM-11 block gives for its own.
+ */
+import { getEventRequestForCoordinator } from '../../src/services/eventRequestService.js';
+
+const CHANGE_REQUEST_ID = '77777777-7777-4777-8777-777777777777';
+
+const CLARIFICATION_NOTE = 'Please confirm whether the event is open to the public.';
+
+/** An event past draft, held by COORDINATOR_ID unless told otherwise. */
+function assignedRow(overrides = {}) {
+  return storedRow({
+    status: STATUS.SUBMITTED,
+    submitted_at: NOW.toISOString(),
+    assigned_coordinator_id: COORDINATOR_ID,
+    ...overrides,
+  });
+}
+
+const askForClarification = (client, coordinatorId = COORDINATOR_ID) =>
+  requestEventClarification(REQUEST_ID, CLARIFICATION_NOTE, coordinatorId, { client });
+
+
+/**
+ * Why a coordinator who does not hold the event gets a 403, and a guard that
+ * matches no row gets a 409.
+ *
+ * requestEventClarification already reads the row before it writes, to check
+ * the status. That read also says who holds the event. So the service can
+ * answer the common case, a coordinator acting on someone else's event, from
+ * the read: 403, with nothing written. The caller can see the event (every
+ * coordinator can, see below), so a 403 reveals nothing and tells them the
+ * true reason. errors.js gives the full argument for ForbiddenError.
+ *
+ * The update then filters on assigned_coordinator_id as well as id and status.
+ * That filter does the same job organiser_id does in updateEventRequest: it
+ * makes the statement itself unable to touch an event the caller does not
+ * hold, rather than safe only because of a read made in an earlier request.
+ *
+ * If that update matches no row, the read a moment ago showed the caller held
+ * the event in a status that allowed this, so something changed in between:
+ * a handover, or a status change. That is a race, and a race is a 409, as it
+ * is in updateEventRequest and SCRUM-11's tests. A 403 would be wrong for the
+ * status case, where the caller still holds the event and is not forbidden
+ * anything. The 409 tells them to refresh, and the refreshed event shows them
+ * which it was.
+ *
+ * Treating a no-match as a 403 would make sense only without the read, when a
+ * coordinator who does not hold the event would be the likely cause. With the
+ * read, that case never reaches the update.
+ */
+describe('SCRUM-327 AC7: only the assigned coordinator can request clarification', () => {
+  it('SCRUM332_AC7_only_the_assigned_coordinator_can_request_clarification', async () => {
+    const client = createFakeClient([
+      ok(assignedRow()),
+      ok(assignedRow({ status: STATUS.PENDING_CLARIFICATION, clarification_note: CLARIFICATION_NOTE })),
+    ]);
+
+    await askForClarification(client);
+
+    // Asserted as a set of exactly three, not as an ordered list: each filter
+    // does separate work and dropping any one is a different bug, but which
+    // order they are chained in changes nothing.
+    //  - id narrows to the row.
+    //  - status is the existing guard: a change landing between the read and
+    //    the write matches nothing.
+    //  - assigned_coordinator_id is AC7. The write cannot touch an event the
+    //    caller does not hold, even if a handover lands after the read.
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'update']);
+    const { filters } = client.calls[1];
+    expect(filters).toHaveLength(3);
+    expect(filters).toEqual(expect.arrayContaining([
+      ['id', REQUEST_ID],
+      ['status', STATUS.SUBMITTED],
+      ['assigned_coordinator_id', COORDINATOR_ID],
+    ]));
+  });
+
+  it('SCRUM332_AC7_the_previous_coordinator_can_no_longer_request_clarification', async () => {
+    // The event was handed to NEW_COORDINATOR_ID. COORDINATOR_ID held it and
+    // no longer does. Refused from the read, with nothing written: the fake
+    // has only the read queued, so an attempted update would fail with "no
+    // result queued" rather than pass by accident.
+    const client = createFakeClient([ok(assignedRow({ assigned_coordinator_id: NEW_COORDINATOR_ID }))]);
+
+    const err = await errorFrom(askForClarification(client, COORDINATOR_ID));
+
+    expect(err).toBeInstanceOf(ForbiddenError);
+    expect(err.status).toBe(403);
+    expect(err.message).toMatch(/assigned/i);
+    expect(client.calls.map((call) => call.operation)).toEqual(['select']);
+  });
+
+  it('SCRUM332_AC7_the_new_coordinator_can_request_clarification', async () => {
+    // The other half of AC7: the person the event was handed to can act on it.
+    const client = createFakeClient([
+      ok(assignedRow({ assigned_coordinator_id: NEW_COORDINATOR_ID })),
+      ok(assignedRow({
+        status: STATUS.PENDING_CLARIFICATION,
+        clarification_note: CLARIFICATION_NOTE,
+        assigned_coordinator_id: NEW_COORDINATOR_ID,
+      })),
+    ]);
+
+    const result = await askForClarification(client, NEW_COORDINATOR_ID);
+
+    expect(result.status).toBe(STATUS.PENDING_CLARIFICATION);
+    expect(client.calls[1].filters).toContainEqual(['assigned_coordinator_id', NEW_COORDINATOR_ID]);
+  });
+
+  it('SCRUM332_AC7_checks_the_caller_before_the_status', async () => {
+    // An approved event cannot go to clarification, and this caller does not
+    // hold it either. They are told it is not theirs, not that the status is
+    // wrong: whether it could be sent for clarification is a question only
+    // its coordinator has any reason to ask. 018 orders its checks the same
+    // way, caller before status.
+    const client = createFakeClient([
+      ok(assignedRow({ status: STATUS.APPROVED, assigned_coordinator_id: NEW_COORDINATOR_ID })),
+    ]);
+
+    const err = await errorFrom(askForClarification(client, COORDINATOR_ID));
+
+    expect(err).toBeInstanceOf(ForbiddenError);
+    expect(err).not.toBeInstanceOf(ConflictError);
+  });
+
+  it('SCRUM332_AC7_reports_a_guard_that_matched_no_row_as_a_conflict', async () => {
+    // The read said the caller held the event and it was submitted. The
+    // update then matched nothing, so it changed hands or status in between.
+    // A race, so a 409 telling them to refresh -- see the block comment above
+    // for why not a 403.
+    const client = createFakeClient([
+      ok(assignedRow()),
+      dbError('PGRST116', 'JSON object requested, multiple (or no) rows returned'),
+    ]);
+
+    const err = await errorFrom(askForClarification(client));
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.status).toBe(409);
+    expect(err).not.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('SCRUM332_AC7_a_draft_is_not_found_rather_than_forbidden', async () => {
+    // A draft has no coordinator, so the caller check alone would answer 403,
+    // and a 403 confirms the id exists. Coordinators are not supposed to know
+    // a draft exists at all: COORDINATOR_QUEUE_STATUSES leaves drafts out of
+    // the queue for exactly that reason. errors.js says to use ForbiddenError
+    // only where the caller can already see the record, and nobody but the
+    // Organiser can see a draft. So it is answered exactly as a missing event
+    // is, down to the message.
+    const draft = createFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+    const missing = createFakeClient([ok(null)]);
+
+    const draftErr = await errorFrom(askForClarification(draft));
+    const missingErr = await errorFrom(askForClarification(missing));
+
+    expect(draftErr).toBeInstanceOf(NotFoundError);
+    expect(draftErr.status).toBe(404);
+    expect(draftErr.message).toBe(missingErr.message);
+    expect(draft.calls).toHaveLength(1);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['blank', '   '],
+  ])('SCRUM332_AC7_refuses_a_coordinator_id_that_is_%s_before_any_query', async (_label, value) => {
+    // Still refused before the client is touched, as it was before SCRUM-332.
+    // It matters more now: the id is compared and filtered on, and a blank
+    // one reaching the update would be a filter that matches nobody, which
+    // would look like a race and answer 409.
+    const client = createFakeClient([]);
+
+    // Called directly rather than through askForClarification, whose default
+    // would turn the undefined case into COORDINATOR_ID.
+    const err = await errorFrom(
+      requestEventClarification(REQUEST_ID, CLARIFICATION_NOTE, value, { client }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+
+/**
+ * The coordinator's single read.
+ *
+ * getEventRequestForOrganiser answers 404 unless the caller is the Organiser,
+ * and the queue covers only submitted, under_review and pending_clarification.
+ * So once an event is approved or confirmed, no coordinator can read it, while
+ * AC6 still lets its coordinator hand it over and AC7 says the previous one
+ * can still view it. SCRUM-332's Done criteria say reading stays open to every
+ * coordinator.
+ *
+ * It takes no coordinator id and no organiser id, and compares neither. That
+ * follows listEventRequestsForReview: a function that takes no owner checks
+ * none, and the caller proves the right to read. Here the proof is the role
+ * gate on the route. Which coordinator holds the event decides who can change
+ * it, never who can read it.
+ *
+ * The one thing it refuses is a draft. A draft is the Organiser's private
+ * working copy, and COORDINATOR_QUEUE_STATUSES leaves it out of the queue so
+ * that no coordinator learns it exists. A single read that returned drafts
+ * would undo that for anyone who guessed an id.
+ */
+describe('SCRUM-327 AC7: every coordinator can read an event', () => {
+  it('SCRUM332_AC7_any_coordinator_can_read_an_event', async () => {
+    // Held by a different coordinator and owned by a different Organiser, and
+    // still returned. One read, on id only: no organiser filter, no
+    // coordinator filter.
+    const client = createFakeClient([
+      ok(assignedRow({
+        organiser_id: OTHER_ORGANISER_ID,
+        assigned_coordinator_id: NEW_COORDINATOR_ID,
+      })),
+    ]);
+
+    const request = await getEventRequestForCoordinator(REQUEST_ID, { client });
+
+    expect(request).toMatchObject({
+      id: REQUEST_ID,
+      organiserId: OTHER_ORGANISER_ID,
+      assignedCoordinatorId: NEW_COORDINATOR_ID,
+    });
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].filters).toEqual([['id', REQUEST_ID]]);
+  });
+
+  it.each([STATUS.APPROVED, STATUS.CONFIRMED])(
+    'SCRUM332_AC7_reads_an_event_in_%s_which_the_queue_does_not_cover',
+    async (status) => {
+      // The gap this function exists to close, checked against the domain's
+      // own list rather than assumed, so the test says why it matters.
+      expect(COORDINATOR_QUEUE_STATUSES).not.toContain(status);
+
+      const client = createFakeClient([ok(assignedRow({ status }))]);
+
+      const request = await getEventRequestForCoordinator(REQUEST_ID, { client });
+
+      expect(request.status).toBe(status);
+    },
+  );
+
+  it('SCRUM332_AC7_reports_a_missing_event_as_not_found', async () => {
+    const client = createFakeClient([ok(null)]);
+
+    const err = await errorFrom(getEventRequestForCoordinator(REQUEST_ID, { client }));
+
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.status).toBe(404);
+  });
+
+  it('SCRUM332_AC7_hides_a_draft_exactly_as_it_hides_a_missing_event', async () => {
+    // Same status and same message as a missing event. A different message
+    // for "exists but is a draft" would be the enumeration oracle the 404 is
+    // there to avoid, the same rule SCRUM14_AC1_answers_a_foreign_request_
+    // exactly_as_it_answers_a_missing_one pins for the Organiser's read.
+    const draft = createFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+    const missing = createFakeClient([ok(null)]);
+
+    const draftErr = await errorFrom(getEventRequestForCoordinator(REQUEST_ID, { client: draft }));
+    const missingErr = await errorFrom(getEventRequestForCoordinator(REQUEST_ID, { client: missing }));
+
+    expect(draftErr).toBeInstanceOf(NotFoundError);
+    expect(draftErr.message).toBe(missingErr.message);
+  });
+
+  it('SCRUM332_AC7_takes_no_organiser_and_asserts_none', async () => {
+    // Mirrors SCRUM45_AC1_takes_no_organiser_and_asserts_none. Called with
+    // nothing but the id, and both the call and the signature are checked.
+    // If an organiser check were added here, every coordinator would get a
+    // 404 for every event they did not organise, which is the bug this
+    // function fixes. If a coordinator check were added, the previous
+    // coordinator could no longer view the event, which AC7 says they can.
+    const client = createFakeClient([ok(assignedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
+
+    await expect(getEventRequestForCoordinator(REQUEST_ID, { client })).resolves.toMatchObject({ id: REQUEST_ID });
+    expect(client.calls).toHaveLength(1);
+
+    // One required parameter, the id. The options object has a default, so it
+    // does not count towards .length.
+    expect(getEventRequestForCoordinator.length).toBe(1);
+  });
+});
+
+
+/**
+ * Deciding a change request, in eventChangeRequestService.js.
+ *
+ * There is no tests/services/eventChangeRequestService.test.js. That service is
+ * covered here, through the namespace import the SCRUM-11 seam guard already
+ * makes, and through the route tests. So its SCRUM-332 tests go here too,
+ * rather than in a new file nobody asked for.
+ *
+ * 019 does the check: process_change_request now refuses anyone but the
+ * event's assigned coordinator, under a lock on the event, with 42501. What is
+ * left for the service is to say so properly. Its translateError is separate
+ * from this module's and has no case for 42501, so today the refusal arrives
+ * as an untyped Error, which the route answers with a 500.
+ */
+describe("SCRUM-327 AC7: deciding a change request is refused to anyone but the event's coordinator", () => {
+  const decide = (client, input = { decision: 'approved' }) =>
+    eventChangeRequestService.processChangeRequest(CHANGE_REQUEST_ID, input, COORDINATOR_ID, { client });
+
+  /** The row process_change_request returns after an approval. */
+  const decidedChangeRequestRow = () => ({
+    id: CHANGE_REQUEST_ID,
+    event_request_id: REQUEST_ID,
+    requested_by: ORGANISER_ID,
+    change_field: 'expected_attendance',
+    requested_change: '250',
+    status: 'processed',
+    decision: 'approved',
+    decision_notes: null,
+    processed_by: COORDINATOR_ID,
+    processed_at: NOW.toISOString(),
+    created_at: '2026-01-12T03:00:00+00:00',
+    updated_at: NOW.toISOString(),
+  });
+
+  it('SCRUM332_AC7_only_the_assigned_coordinator_can_decide_a_change_request', async () => {
+    // 403, not 404: the caller is a coordinator, who can already read the
+    // event and its change requests, so the refusal tells them only the true
+    // reason. The message is 019's own, written for the person who asked, and
+    // passed through unchanged, as eventRequestService does for 018's 42501.
+    const message = `only the coordinator assigned to event request ${REQUEST_ID} can decide its change requests`;
+    const client = createFakeClient([dbError('42501', message)]);
+
+    const err = await errorFrom(decide(client));
+
+    expect(rpcCallsOf(client)).toHaveLength(1);
+    expect(err).toBeInstanceOf(ForbiddenError);
+    expect(err.status).toBe(403);
+    expect(err.message).toBe(message);
+  });
+
+  it('SCRUM332_AC7_the_deciding_coordinator_is_the_one_checked', async () => {
+    // 019 added no parameter. It checks p_processed_by, the person the
+    // decision is recorded against, so the person recorded as deciding is by
+    // construction the person who was allowed to. toEqual, so an extra
+    // argument such as p_assigned_coordinator_id fails here as surely as a
+    // missing one: 019 has no such parameter, and PostgREST would answer that
+    // call with "function not found".
+    const client = createFakeClient([ok(decidedChangeRequestRow())]);
+
+    await decide(client);
+
+    const [rpc] = rpcCallsOf(client);
+    expect(rpc.fn).toBe('process_change_request');
+    expect(rpc.args).toEqual({
+      p_change_request_id: CHANGE_REQUEST_ID,
+      p_decision: 'approved',
+      p_decision_notes: null,
+      p_processed_by: COORDINATOR_ID,
+    });
+  });
+
+  it.each([
+    {
+      // 019 raises this from its new read, with the same text and code 006
+      // used, and the check script asserts the 404.
+      name: 'SCRUM332_AC7_still_reports_a_missing_change_request_as_not_found',
+      code: 'P0002',
+      message: `change request ${CHANGE_REQUEST_ID} not found`,
+      Err: NotFoundError,
+      status: 404,
+    },
+    {
+      // 006 raised this with no SQLSTATE, so it is P0001, and 019 left it that
+      // way. This service matches it by its text, not its code. The row pins
+      // that mapping 42501 has not disturbed it, and that P0001 here did not
+      // become eventRequestService's 503.
+      name: 'SCRUM332_AC7_still_reports_an_already_processed_request_as_a_validation_error',
+      code: 'P0001',
+      message: `change request ${CHANGE_REQUEST_ID} has already been processed`,
+      Err: ValidationError,
+      status: 400,
+    },
+  ])('$name', async ({ code, message, Err, status }) => {
+    const client = createFakeClient([dbError(code, message)]);
+
+    const err = await errorFrom(decide(client));
+
+    expect(err).toBeInstanceOf(Err);
+    expect(err.status).toBe(status);
+    expect(err).not.toBeInstanceOf(ForbiddenError);
   });
 });
