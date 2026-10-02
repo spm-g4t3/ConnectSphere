@@ -1203,3 +1203,211 @@ describe('SCRUM17_AC2 findBlockedVenueIds', () => {
     expect(err.message).toBe('connection failure');
   });
 });
+
+
+// SCRUM-131: a separate import so the existing ones are left as they were.
+import { getVenueBlockHistory } from '../../src/services/venueBlockService.js';
+
+describe('SCRUM17_AC4 getVenueBlockHistory', () => {
+  const HISTORY_COLUMNS = 'id, block_id, action, changed_by, changed_at, old_values, new_values';
+  const H1 = 'aaaaaaaa-0000-4000-8000-000000000001';
+  const H2 = 'aaaaaaaa-0000-4000-8000-000000000002';
+  const H3 = 'aaaaaaaa-0000-4000-8000-000000000003';
+
+  /** Newest first, as the database would return them. */
+  const HISTORY_ROWS = [
+    {
+      id: H3,
+      block_id: BLOCK_ID,
+      action: 'removed',
+      changed_by: STAFF_ID,
+      changed_at: '2026-09-25T00:00:00+00:00',
+      old_values: { removed_at: null, removed_by: null },
+      new_values: { removed_at: '2026-09-25T00:00:00+00:00', removed_by: STAFF_ID },
+    },
+    {
+      id: H2,
+      block_id: BLOCK_ID,
+      action: 'amended',
+      changed_by: null,
+      changed_at: '2026-09-24T00:00:00+00:00',
+      old_values: { ends_at: '2026-10-01T09:00:00+00:00' },
+      new_values: { ends_at: '2026-10-01T07:00:00+00:00' },
+    },
+    {
+      id: H1,
+      block_id: BLOCK_ID,
+      action: 'created',
+      changed_by: STAFF_ID,
+      changed_at: '2026-09-23T00:00:00+00:00',
+      old_values: {},
+      new_values: { id: BLOCK_ID, venue_id: VENUE_ID, starts_at: '2026-10-01T01:00:00+00:00' },
+    },
+  ];
+
+  const CAMEL_HISTORY = [
+    {
+      id: H3,
+      blockId: BLOCK_ID,
+      action: 'removed',
+      changedBy: STAFF_ID,
+      changedAt: '2026-09-25T00:00:00+00:00',
+      oldValues: { removed_at: null, removed_by: null },
+      newValues: { removed_at: '2026-09-25T00:00:00+00:00', removed_by: STAFF_ID },
+    },
+    {
+      id: H2,
+      blockId: BLOCK_ID,
+      action: 'amended',
+      changedBy: null,
+      changedAt: '2026-09-24T00:00:00+00:00',
+      oldValues: { ends_at: '2026-10-01T09:00:00+00:00' },
+      newValues: { ends_at: '2026-10-01T07:00:00+00:00' },
+    },
+    {
+      id: H1,
+      blockId: BLOCK_ID,
+      action: 'created',
+      changedBy: STAFF_ID,
+      changedAt: '2026-09-23T00:00:00+00:00',
+      oldValues: {},
+      newValues: { id: BLOCK_ID, venue_id: VENUE_ID, starts_at: '2026-10-01T01:00:00+00:00' },
+    },
+  ];
+
+  /** Routes from() by table name and records the order tables were asked for. */
+  function given({ block = { data: blockRow(), error: null }, history = { data: HISTORY_ROWS, error: null } } = {}) {
+    const blockStub = queryStub(block);
+    const historyStub = queryStub(history);
+    const tables = [];
+    from.mockImplementation((table) => {
+      tables.push(table);
+      if (table === 'venue_blocks') return blockStub;
+      if (table === 'venue_block_history') return historyStub;
+      throw new Error(`unexpected table ${table}`);
+    });
+    return { blockStub, historyStub, tables };
+  }
+
+  it('SCRUM17_AC4_looks_the_block_up_before_reading_history', async () => {
+    const { tables } = given();
+    await getVenueBlockHistory(VENUE_ID, BLOCK_ID);
+    expect(tables).toEqual(['venue_blocks', 'venue_block_history']);
+  });
+
+  it('SCRUM17_AC4_scopes_the_block_lookup_to_the_venue', async () => {
+    const { blockStub } = given();
+    await getVenueBlockHistory(VENUE_ID, BLOCK_ID);
+    expect(blockStub.args('select')).toEqual([COLUMNS]);
+    expect(blockStub.allArgs('eq')).toEqual([['venue_id', VENUE_ID], ['id', BLOCK_ID]]);
+    expect(blockStub.called('maybeSingle')).toBe(true);
+  });
+
+  it('SCRUM17_AC4_reads_history_by_block_id_newest_first_with_id_tiebreak', async () => {
+    const { historyStub } = given();
+    await getVenueBlockHistory(VENUE_ID, BLOCK_ID);
+    expect(historyStub.args('select')).toEqual([HISTORY_COLUMNS]);
+    expect(historyStub.allArgs('eq')).toEqual([['block_id', BLOCK_ID]]);
+    expect(historyStub.allArgs('order')).toEqual([
+      ['changed_at', { ascending: false }],
+      ['id', { ascending: false }],
+    ]);
+  });
+
+  it('SCRUM17_AC4_maps_rows_to_camelCase_keeping_jsonb_as_stored', async () => {
+    given();
+    expect(await getVenueBlockHistory(VENUE_ID, BLOCK_ID)).toEqual(CAMEL_HISTORY);
+  });
+
+  it('SCRUM17_AC4_keeps_a_null_changedBy', async () => {
+    given();
+    const [, amended] = await getVenueBlockHistory(VENUE_ID, BLOCK_ID);
+    expect(amended).toHaveProperty('changedBy', null);
+  });
+
+  it('SCRUM17_AC4_a_created_row_has_empty_oldValues', async () => {
+    given();
+    const entries = await getVenueBlockHistory(VENUE_ID, BLOCK_ID);
+    const created = entries.find((e) => e.action === 'created');
+    expect(created.oldValues).toEqual({});
+    expect(Object.keys(created.newValues)).toEqual(['id', 'venue_id', 'starts_at']);
+  });
+
+  it('SCRUM17_AC4_a_removed_row_carries_removed_at_and_removed_by', async () => {
+    given();
+    const [removed] = await getVenueBlockHistory(VENUE_ID, BLOCK_ID);
+    expect(removed.action).toBe('removed');
+    expect(removed.oldValues).toEqual({ removed_at: null, removed_by: null });
+    expect(removed.newValues).toEqual({ removed_at: '2026-09-25T00:00:00+00:00', removed_by: STAFF_ID });
+  });
+
+  it('SCRUM17_AC4_returns_entries_with_exactly_the_seven_keys', async () => {
+    given();
+    const [first] = await getVenueBlockHistory(VENUE_ID, BLOCK_ID);
+    expect(Object.keys(first).sort()).toEqual(
+      ['action', 'blockId', 'changedAt', 'changedBy', 'id', 'newValues', 'oldValues'],
+    );
+  });
+
+  it('SCRUM17_AC4_a_removed_block_still_returns_its_history', async () => {
+    given({
+      block: {
+        data: blockRow({ removed_at: '2026-09-25T00:00:00+00:00', removed_by: STAFF_ID }),
+        error: null,
+      },
+    });
+    expect(await getVenueBlockHistory(VENUE_ID, BLOCK_ID)).toEqual(CAMEL_HISTORY);
+  });
+
+  it('SCRUM17_AC4_a_missing_or_other_venues_block_is_404_and_history_is_never_read', async () => {
+    // the lookup is scoped by venue_id, so another venue's block reads as no row
+    const { tables } = given({ block: { data: null, error: null } });
+    const err = await errorFromAsync(() => getVenueBlockHistory(VENUE_ID, OTHER_BLOCK_ID));
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.status).toBe(404);
+    expect(tables).toEqual(['venue_blocks']);
+  });
+
+  it.each([
+    ['an empty array', []],
+    ['null', null],
+  ])('SCRUM17_AC4_returns_[]_when_data_is_%s', async (_label, data) => {
+    given({ history: { data, error: null } });
+    expect(await getVenueBlockHistory(VENUE_ID, BLOCK_ID)).toEqual([]);
+  });
+
+  it.each([
+    ['a malformed venue id', 'not-a-uuid', BLOCK_ID],
+    ['a malformed block id', VENUE_ID, 'not-a-uuid'],
+    ['a missing block id', VENUE_ID, undefined],
+  ])('SCRUM17_AC4_%s_is_a_ValidationError_with_no_query', async (_label, venueId, blockId) => {
+    const err = await errorFromAsync(() => getVenueBlockHistory(venueId, blockId));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM17_AC4_a_history_22P02_becomes_a_ValidationError', async () => {
+    given({ history: { data: null, error: { code: '22P02', message: 'invalid input syntax' } } });
+    await expect(getVenueBlockHistory(VENUE_ID, BLOCK_ID)).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('SCRUM17_AC4_an_unknown_history_error_becomes_a_plain_Error', async () => {
+    given({ history: { data: null, error: { code: '42P01', message: 'relation does not exist' } } });
+    const err = await errorFromAsync(() => getVenueBlockHistory(VENUE_ID, BLOCK_ID));
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err).not.toBeInstanceOf(NotFoundError);
+    expect(err).not.toBeInstanceOf(ConflictError);
+    expect(err.message).toBe('relation does not exist');
+  });
+
+  it('SCRUM17_AC4_a_block_lookup_error_stops_before_history', async () => {
+    const { tables } = given({ block: { data: null, error: { code: '08006', message: 'connection failure' } } });
+    const err = await errorFromAsync(() => getVenueBlockHistory(VENUE_ID, BLOCK_ID));
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(NotFoundError);
+    expect(tables).toEqual(['venue_blocks']);
+  });
+});

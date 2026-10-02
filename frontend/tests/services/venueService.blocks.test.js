@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { apiClient } from "../../src/services/apiClient";
 import {
   createVenueBlock,
+  getVenueBlockHistory,
   listVenueBlocks,
   removeVenueBlock,
   updateVenueBlock,
@@ -215,5 +216,47 @@ describe("listVenueBlocks with a window (SCRUM-130)", () => {
     const err = httpError(400, { details: [{ field: "to", message: "must be within 400 days of the start" }] });
     vi.mocked(apiClient.get).mockRejectedValue(err);
     await expect(listVenueBlocks(VENUE_ID, { from: FROM, to: TO })).rejects.toBe(err);
+  });
+});
+
+describe("getVenueBlockHistory (SCRUM-131)", () => {
+  const ENTRY = {
+    id: "c1000000-0000-4000-8000-000000000001",
+    blockId: BLOCK_ID,
+    action: "amended",
+    changedBy: "d1000000-0000-4000-8000-000000000001",
+    changedAt: "2026-11-01T10:00:00+08:00",
+    oldValues: { ends_at: "2026-11-01T17:00:00+08:00" },
+    newValues: { ends_at: "2026-11-02T17:00:00+08:00" },
+  };
+
+  it("SCRUM17_AC4_gets_the_block_history_path_and_returns_the_body", async () => {
+    const body = [ENTRY];
+    vi.mocked(apiClient.get).mockResolvedValue({ data: body });
+
+    await expect(getVenueBlockHistory(VENUE_ID, BLOCK_ID)).resolves.toBe(body);
+
+    expect(apiClient.get).toHaveBeenCalledTimes(1);
+    expect(apiClient.get).toHaveBeenCalledWith(`/venues/${VENUE_ID}/blocks/${BLOCK_ID}/history`);
+    expect(apiClient.get.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("SCRUM17_AC4_returns_an_empty_history_as_is", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+    await expect(getVenueBlockHistory(VENUE_ID, BLOCK_ID)).resolves.toEqual([]);
+  });
+
+  for (const status of [400, 401, 403, 404, 500]) {
+    it(`SCRUM17_AC4_lets_a_${status}_through_unchanged`, async () => {
+      const err = httpError(status, { error: "nope" });
+      vi.mocked(apiClient.get).mockRejectedValue(err);
+      await expect(getVenueBlockHistory(VENUE_ID, BLOCK_ID)).rejects.toBe(err);
+    });
+  }
+
+  it("SCRUM17_AC4_lets_a_network_error_through_unchanged", async () => {
+    const err = new Error("Network Error");
+    vi.mocked(apiClient.get).mockRejectedValue(err);
+    await expect(getVenueBlockHistory(VENUE_ID, BLOCK_ID)).rejects.toBe(err);
   });
 });

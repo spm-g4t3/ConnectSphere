@@ -39,7 +39,10 @@ const RETIRE_ERROR_MESSAGES = {
   409: "That venue has already been retired.",
 };
 
-export default function VenueCatalogue() {
+// currentUserId (SCRUM-131) is only passed through, to VenueBlocksPanel, so
+// a block's audit line and history can say "you" for the signed-in user's own
+// changes. Optional: without it those show as a short id.
+export default function VenueCatalogue({ currentUserId } = {}) {
   const [venues, setVenues] = useState([]);
   const [loadingVenues, setLoadingVenues] = useState(true);
   const [venuesError, setVenuesError] = useState(null);
@@ -176,7 +179,7 @@ export default function VenueCatalogue() {
             retired meanwhile (VENUE_RETIRED), and the catalogue row should
             say so when we come back to it. */}
         <button onClick={handleSaved}>&larr; Back to the venue catalogue</button>
-        <VenueBlocksPanel venue={activePanel.venue} />
+        <VenueBlocksPanel venue={activePanel.venue} currentUserId={currentUserId} />
       </section>
     );
   }

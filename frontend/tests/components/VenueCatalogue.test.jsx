@@ -27,7 +27,11 @@ vi.mock("../../src/services/venueService", () => ({
 }));
 
 vi.mock("../../src/components/VenueBlocksPanel", () => ({
-  default: ({ venue }) => <div data-testid="blocks-panel">Blocks panel for {venue.name}</div>,
+  default: ({ venue, currentUserId }) => (
+    <div data-testid="blocks-panel" data-current-user-id={currentUserId ?? ""}>
+      Blocks panel for {venue.name}
+    </div>
+  ),
 }));
 
 const ACTIVE = {
@@ -110,5 +114,25 @@ describe("VenueCatalogue Manage blocks", () => {
     await waitFor(() =>
       expect(within(rowFor("Hall A")).getByRole("button", { name: "Manage blocks" })).toBeDisabled(),
     );
+  });
+});
+
+describe("VenueCatalogue currentUserId (SCRUM-131)", () => {
+  const ME = "d1000000-0000-4000-8000-000000000001";
+
+  it("SCRUM17_AC4_passes_currentUserId_through_to_the_blocks_panel", async () => {
+    const user = userEvent.setup();
+    render(<VenueCatalogue currentUserId={ME} />);
+    await screen.findByText("Hall A");
+
+    await user.click(within(rowFor("Hall A")).getByRole("button", { name: "Manage blocks" }));
+    expect(screen.getByTestId("blocks-panel")).toHaveAttribute("data-current-user-id", ME);
+  });
+
+  it("SCRUM17_AC4_without_a_currentUserId_the_panel_gets_none", async () => {
+    // As on the standalone /venue-catalogue route, which passes no id.
+    const { user } = await renderCatalogue();
+    await user.click(within(rowFor("Hall A")).getByRole("button", { name: "Manage blocks" }));
+    expect(screen.getByTestId("blocks-panel")).toHaveAttribute("data-current-user-id", "");
   });
 });

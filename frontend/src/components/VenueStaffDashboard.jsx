@@ -49,8 +49,12 @@ export default function VenueStaffDashboard({ user }) {
       </section>
 
       {/* Rendered as a direct child of .dashboard so its <section> root still
-          picks up the `.dashboard > section` card styling it had inline. */}
-      <VenueCatalogue />
+          picks up the `.dashboard > section` card styling it had inline.
+          currentUserId (SCRUM-131) lets the blocks panel say "you" for the
+          signed-in user's own block changes. A prop, not useAuth() inside the
+          panel: useAuth throws without an AuthProvider, and the panel's tests
+          render without one. */}
+      <VenueCatalogue currentUserId={user.id} />
     </div>
   );
 }

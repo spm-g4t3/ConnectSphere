@@ -40,6 +40,11 @@
  * Both use the half-open overlap venue_blocks_no_overlap uses: strict lt/gt,
  * so a block that only touches a window's edge is not in it.
  *
+ * SCRUM-131 (AC4) adds getVenueBlockHistory: every creation, amendment and
+ * removal, read from venue_block_history. Nothing here writes that table --
+ * the trigger in 016_venue_block_history.sql does, off the same write the
+ * functions above already make, so no RPC changes.
+ *
  * This module never imports venueService.js. venueService imports
  * findBlockedVenueIds from here, and the reverse import would be circular.
  */
@@ -477,4 +482,54 @@ export async function removeVenueBlock(venueId, blockId, userId = null) {
   if (data?.outcome !== 'removed') {
     throw new Error(`Unexpected outcome from remove_venue_block: ${data?.outcome}`);
   }
+}
+
+
+/** A venue_block_history row in camelCase; the jsonb stays as stored. */
+function toBlockHistoryEntry(row) {
+  return {
+    id: row.id,
+    blockId: row.block_id,
+    action: row.action,
+    changedBy: row.changed_by,
+    changedAt: row.changed_at,
+    oldValues: row.old_values,
+    newValues: row.new_values,
+  };
+}
+
+/**
+ * A block's audit trail, newest first (SCRUM-131, AC4).
+ *
+ * The block is looked up first, scoped to its venue. History rows carry no
+ * venue_id, so without that a block's trail could be read through any
+ * venue's URL. Removed blocks pass -- their trail is exactly what this keeps.
+ *
+ * oldValues and newValues are returned as stored, snake_case keys included,
+ * as getVenueHistory does: they are a record of columns, not an API shape.
+ *
+ * @param {string} venueId
+ * @param {string} blockId
+ * @returns {Promise<object[]>} {id, blockId, action, changedBy, changedAt,
+ *          oldValues, newValues}; action is created, amended or removed
+ * @throws {ValidationError} when either id is malformed, before any network call
+ * @throws {NotFoundError}   no such block on that venue
+ */
+export async function getVenueBlockHistory(venueId, blockId) {
+  validateVenueId(venueId);
+  validateBlockId(blockId);
+
+  await getVenueBlock(venueId, blockId);
+
+  // id breaks ties, as in getVenueHistory, so equal timestamps keep a stable order.
+  const { data, error } = await supabase
+    .from('venue_block_history')
+    .select('id, block_id, action, changed_by, changed_at, old_values, new_values')
+    .eq('block_id', blockId)
+    .order('changed_at', { ascending: false })
+    .order('id', { ascending: false });
+
+  if (error) throw translateError(error);
+
+  return (data ?? []).map(toBlockHistoryEntry);
 }

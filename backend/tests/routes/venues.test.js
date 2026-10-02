@@ -1326,3 +1326,177 @@ describe('SCRUM17_AC2 search window and block reads', () => {
     });
   });
 });
+
+
+describe('SCRUM17_AC4 GET /api/venues/:id/blocks/:blockId/history', () => {
+  const BLOCK_ID = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
+  const OTHER_BLOCK_ID = '6ba7b811-9dad-41d1-80b4-00c04fd430c8';
+  const HISTORY = `/api/venues/${VENUE_ID}/blocks/${BLOCK_ID}/history`;
+  const H1 = 'aaaaaaaa-0000-4000-8000-000000000001';
+  const H2 = 'aaaaaaaa-0000-4000-8000-000000000002';
+
+  const blockRow = (overrides = {}) => ({
+    id: BLOCK_ID,
+    venue_id: VENUE_ID,
+    starts_at: '2026-10-01T01:00:00+00:00',
+    ends_at: '2026-10-01T09:00:00+00:00',
+    reason: 'maintenance',
+    notes: null,
+    created_by: STAFF_ID,
+    last_modified_by: STAFF_ID,
+    created_at: '2026-09-23T00:00:00+00:00',
+    updated_at: '2026-09-23T00:00:00+00:00',
+    removed_at: null,
+    removed_by: null,
+    ...overrides,
+  });
+
+  /** In the order the stub returns them (the database's newest first). */
+  const HISTORY_ROWS = [
+    {
+      id: H2,
+      block_id: BLOCK_ID,
+      action: 'amended',
+      changed_by: null,
+      changed_at: '2026-09-24T00:00:00+00:00',
+      old_values: { ends_at: '2026-10-01T09:00:00+00:00' },
+      new_values: { ends_at: '2026-10-01T07:00:00+00:00' },
+    },
+    {
+      id: H1,
+      block_id: BLOCK_ID,
+      action: 'created',
+      changed_by: STAFF_ID,
+      changed_at: '2026-09-23T00:00:00+00:00',
+      old_values: {},
+      new_values: { reason: 'maintenance', starts_at: '2026-10-01T01:00:00+00:00' },
+    },
+  ];
+
+  /** Routes from() by table name. */
+  function given({ block = ok(blockRow()), history = ok(HISTORY_ROWS) } = {}) {
+    const tables = [];
+    from.mockImplementation((table) => {
+      tables.push(table);
+      if (table === 'venue_blocks') return queryStub(block);
+      if (table === 'venue_block_history') return queryStub(history);
+      throw new Error(`unexpected table ${table}`);
+    });
+    return tables;
+  }
+
+  it('SCRUM17_AC4_venue_staff_get_200_with_the_exact_camelCase_array', async () => {
+    const tables = given();
+
+    const res = await request(appWith()).get(HISTORY);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      {
+        id: H2,
+        blockId: BLOCK_ID,
+        action: 'amended',
+        changedBy: null,
+        changedAt: '2026-09-24T00:00:00+00:00',
+        oldValues: { ends_at: '2026-10-01T09:00:00+00:00' },
+        newValues: { ends_at: '2026-10-01T07:00:00+00:00' },
+      },
+      {
+        id: H1,
+        blockId: BLOCK_ID,
+        action: 'created',
+        changedBy: STAFF_ID,
+        changedAt: '2026-09-23T00:00:00+00:00',
+        oldValues: {},
+        newValues: { reason: 'maintenance', starts_at: '2026-10-01T01:00:00+00:00' },
+      },
+    ]);
+    expect(tables).toEqual(['venue_blocks', 'venue_block_history']);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM17_AC4_a_removed_block_still_answers_200', async () => {
+    given({ block: ok(blockRow({ removed_at: '2026-09-25T00:00:00+00:00', removed_by: STAFF_ID })) });
+
+    const res = await request(appWith()).get(HISTORY);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(2);
+  });
+
+  it('SCRUM17_AC4_no_history_answers_200_with_an_empty_array', async () => {
+    given({ history: ok([]) });
+
+    const res = await request(appWith()).get(HISTORY);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM17_AC4_signed_out_answers_401_with_no_query', async () => {
+    const res = await request(appWith(signedOut)).get(HISTORY);
+
+    expect(res.status).toBe(401);
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM17_AC4_an_event_coordinator_answers_403_naming_venue_staff', async () => {
+    const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR))).get(HISTORY);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/Venue Staff/);
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['an Event Organiser', ROLE.EVENT_ORGANISER],
+    ['an attendee', ROLE.ATTENDEE],
+    ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+  ])('SCRUM17_AC4_%s_answers_403_with_no_query', async (_label, role) => {
+    const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(HISTORY);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/Venue Staff/);
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM17_AC4_a_block_not_on_the_venue_answers_404_and_reads_no_history', async () => {
+    const tables = given({ block: ok(null) });
+
+    const res = await request(appWith()).get(
+      `/api/venues/${VENUE_ID}/blocks/${OTHER_BLOCK_ID}/history`,
+    );
+
+    expect(res.status).toBe(404);
+    expect(typeof res.body.error).toBe('string');
+    expect(tables).toEqual(['venue_blocks']);
+  });
+
+  it.each([
+    ['block id', `/api/venues/${VENUE_ID}/blocks/not-a-uuid/history`],
+    ['venue id', `/api/venues/not-a-uuid/blocks/${BLOCK_ID}/history`],
+  ])('SCRUM17_AC4_a_malformed_%s_answers_400_with_no_query', async (_label, path) => {
+    const res = await request(appWith()).get(path);
+
+    expect(res.status).toBe(400);
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM17_AC4_a_database_error_answers_500_without_leaking_it', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    given({ history: { data: null, error: { code: '42P01', message: 'relation venue_block_history does not exist' } } });
+
+    const res = await request(appWith()).get(HISTORY);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    expect(JSON.stringify(res.body)).not.toMatch(/venue_block_history|42P01/);
+    expect(consoleError).toHaveBeenCalledWith('Unexpected error in venues route:', expect.any(Error));
+
+    consoleError.mockRestore();
+  });
+});

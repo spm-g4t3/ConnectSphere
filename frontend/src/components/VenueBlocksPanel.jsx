@@ -17,6 +17,17 @@
 // After every save or remove the list is refetched rather than spliced, for
 // the reason VenueCatalogue gives: the server orders the rows, and the error
 // paths need a refetch anyway, so one recovery path beats two.
+//
+// SCRUM-131 (AC4's "with the creating or amending user and timestamp
+// recorded"). Each row says who created it and, once amended, who last
+// changed it, and has a History button that opens the block's full trail
+// (BlockHistory) under the row. One history is open at a time. History is a
+// read, so it is offered on ended rows too and is never disabled: it clashes
+// with no write in flight.
+//
+// currentUserId is a prop, not useAuth(): useAuth throws without an
+// AuthProvider, and this panel's tests render without one. Without it, the
+// signed-in user's own changes show as a short id instead of "you".
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -28,16 +39,18 @@ import {
 import { blockErrorMessage, isStaleBlockError } from "../services/venueBlockErrors";
 import { BLOCK_PHASE_LABELS, blockPhase } from "../services/venueBlockDisplay";
 import { reasonLabel } from "../services/venueBlockReasons";
-import { formatRange, shortId } from "../services/displayFormat";
+import { formatRange, formatTimestamp, shortId } from "../services/displayFormat";
+import { blockAuditSummary } from "../services/venueBlockHistoryDisplay";
 import VenueBlockForm from "./VenueBlockForm";
 import BlockConflictList from "./BlockConflictList";
+import BlockHistory, { BlockActor } from "./BlockHistory";
 
 /** "1 booking was" / "3 bookings were". */
 function bookingsWere(count) {
   return count === 1 ? "1 booking was" : `${count} bookings were`;
 }
 
-export default function VenueBlocksPanel({ venue }) {
+export default function VenueBlocksPanel({ venue, currentUserId }) {
   const [blocks, setBlocks] = useState([]);
   const [loadingBlocks, setLoadingBlocks] = useState(true);
   const [listError, setListError] = useState(null);
@@ -67,6 +80,10 @@ export default function VenueBlocksPanel({ venue }) {
   const [confirmingRemoveId, setConfirmingRemoveId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
   const [removeError, setRemoveError] = useState(null); // { id, message }
+
+  // The block whose history is open, if any. One at a time, so the list
+  // does not grow a trail under every row.
+  const [historyBlockId, setHistoryBlockId] = useState(null);
 
   const fetchBlocks = useCallback(async () => {
     setLoadingBlocks(true);
@@ -258,12 +275,39 @@ export default function VenueBlocksPanel({ venue }) {
     );
   }
 
+  function toggleHistory(blockId) {
+    setHistoryBlockId((open) => (open === blockId ? null : blockId));
+  }
+
+  /** "Created <time> by <actor> · Last amended <time> by <actor>", or nothing. */
+  function renderAudit(block) {
+    const { created, amended } = blockAuditSummary(block);
+    // Rows from before SCRUM-131's fields were read carry no createdAt.
+    if (!created) return null;
+
+    return (
+      <p className="venue-blocks__audit">
+        Created {formatTimestamp(created.at)}{" "}
+        <BlockActor id={created.by} currentUserId={currentUserId} />
+        {amended && (
+          <>
+            {" · Last amended "}
+            {formatTimestamp(amended.at)}{" "}
+            <BlockActor id={amended.by} currentUserId={currentUserId} />
+          </>
+        )}
+      </p>
+    );
+  }
+
   function renderRow(block) {
     const phase = blockPhase(block, now);
     const ended = phase === "ended";
     const clashing = clashingBlockIds.includes(block.id);
     const confirming = confirmingRemoveId === block.id;
     const removing = removingId === block.id;
+    const historyOpen = historyBlockId === block.id;
+    const historyId = `block-history-${block.id}`;
 
     const className = [
       "venue-blocks__item",
@@ -282,6 +326,7 @@ export default function VenueBlocksPanel({ venue }) {
             {BLOCK_PHASE_LABELS[phase]}
           </span>
           {block.notes && <p className="venue-blocks__notes">{block.notes}</p>}
+          {renderAudit(block)}
           {clashing && (
             <p className="venue-blocks__clash-note">Overlaps the period you chose</p>
           )}
@@ -297,43 +342,64 @@ export default function VenueBlocksPanel({ venue }) {
           )}
         </div>
 
-        {/* No actions on an ended block: the server refuses both with
-            BLOCK_ENDED, and a past closure is a record, not a setting. */}
-        {!ended && (
-          <div className="venue-blocks__item-actions">
-            {!confirming && (
-              <>
-                {/* A change on a retired venue is refused with VENUE_RETIRED,
-                    so Edit goes; Remove stays, because removing a block only
-                    reduces blocking and the server allows it. */}
-                <button
-                  onClick={() => openForm({ mode: "edit", block })}
-                  disabled={rowActionsDisabled || venueRetired}
-                  title={venueRetired ? "A retired venue cannot be blocked." : undefined}
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => setConfirmingRemoveId(block.id)}
-                  disabled={rowActionsDisabled}
-                >
-                  Remove
-                </button>
-              </>
-            )}
+        <div className="venue-blocks__item-actions">
+          {/* No Edit or Remove on an ended block: the server refuses both
+              with BLOCK_ENDED, and a past closure is a record, not a
+              setting. History stays -- it is a read. */}
+          {!ended && !confirming && (
+            <>
+              {/* A change on a retired venue is refused with VENUE_RETIRED,
+                  so Edit goes; Remove stays, because removing a block only
+                  reduces blocking and the server allows it. */}
+              <button
+                onClick={() => openForm({ mode: "edit", block })}
+                disabled={rowActionsDisabled || venueRetired}
+                title={venueRetired ? "A retired venue cannot be blocked." : undefined}
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => setConfirmingRemoveId(block.id)}
+                disabled={rowActionsDisabled}
+              >
+                Remove
+              </button>
+            </>
+          )}
 
-            {confirming && (
-              <>
-                <span>Remove this block? Bookings it flagged stay flagged for review.</span>
-                <button onClick={() => handleRemove(block)} disabled={removing}>
-                  {removing ? "Removing..." : "Yes, remove"}
-                </button>
-                <button onClick={() => setConfirmingRemoveId(null)} disabled={removing}>
-                  Cancel
-                </button>
-              </>
-            )}
-          </div>
+          {!ended && confirming && (
+            <>
+              <span>Remove this block? Bookings it flagged stay flagged for review.</span>
+              <button onClick={() => handleRemove(block)} disabled={removing}>
+                {removing ? "Removing..." : "Yes, remove"}
+              </button>
+              <button onClick={() => setConfirmingRemoveId(null)} disabled={removing}>
+                Cancel
+              </button>
+            </>
+          )}
+
+          <button
+            onClick={() => toggleHistory(block.id)}
+            aria-expanded={historyOpen}
+            aria-controls={historyId}
+          >
+            {historyOpen ? "Hide history" : "History"}
+          </button>
+        </div>
+
+        {/* Keyed by block so a different row's history never inherits this
+            one's entries. refreshKey is updatedAt: the refetch after a save
+            changes it, and the open history refetches with it. */}
+        {historyOpen && (
+          <BlockHistory
+            key={block.id}
+            venueId={venue.id}
+            blockId={block.id}
+            refreshKey={block.updatedAt}
+            currentUserId={currentUserId}
+            id={historyId}
+          />
         )}
       </li>
     );

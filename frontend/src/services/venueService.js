@@ -16,7 +16,8 @@
 //     venues blocked during it (SCRUM-130). Bookings are not considered.
 //   - /venues/:id/blocks lists, creates, changes and removes venue blocks.
 //     Venue Staff and Event Coordinators may list them (SCRUM-130); every
-//     write is Venue Staff only (SCRUM-127). See the block section below.
+//     write is Venue Staff only (SCRUM-127), and so is reading one block's
+//     change history (SCRUM-131). See the block section below.
 
 import { apiClient } from "./apiClient"; // <-- replace with your actual API client
 
@@ -239,8 +240,9 @@ export async function getVenueHistory(venueId) {
 }
 
 // --- Venue blocks (SCRUM-127, part of SCRUM-17) ---------------------------
-// Listing is open to Venue Staff and Event Coordinators (SCRUM-130); the
-// three writes are Venue Staff only. A block row is { id, venueId, startsAt,
+// Five calls: list, create, update, remove, and one block's history
+// (SCRUM-131). Listing is open to Venue Staff and Event Coordinators
+// (SCRUM-130); the three writes and the history are Venue Staff only. A block row is { id, venueId, startsAt,
 // endsAt, reason, notes, createdBy, createdAt, lastModifiedBy, updatedAt,
 // removedAt, removedBy }; the *By fields are unjoined uuids, like
 // getVenueHistory's changedBy.
@@ -352,6 +354,38 @@ export async function updateVenueBlock(venueId, blockId, changes) {
  */
 export async function removeVenueBlock(venueId, blockId) {
   await apiClient.delete(`/venues/${venueId}/blocks/${blockId}`);
+}
+
+/**
+ * One block's change history, newest first (SCRUM-131; SCRUM-17 AC4: "with
+ * the creating or amending user and timestamp recorded").
+ *
+ * Venue Staff only, like getVenueHistory -- the trail keeps superseded notes,
+ * and coordinators already see a block's current state. A 403 means the
+ * caller is not staff, not that anything is broken.
+ *
+ * Shape: { id, blockId, action, changedBy, changedAt, oldValues, newValues }.
+ * Conventions a renderer has to know:
+ *   - `action` is "created", "amended" or "removed".
+ *   - oldValues/newValues are raw jsonb, snake_case (starts_at, ends_at,
+ *     reason, notes, ...). A created entry has oldValues {} and the whole new
+ *     row; the others hold ONLY the keys that differed.
+ *   - `changedBy` is an unjoined uuid, or null for a change made outside the
+ *     application. No endpoint resolves it to a name.
+ *   - A save that changed nothing writes no entry.
+ *
+ * A removed block's history is still readable, if its id is known.
+ *
+ * Failures: 400 (an id is not a uuid), 401, 403, 404 (no such block on this
+ * venue).
+ *
+ * @param {string} venueId
+ * @param {string} blockId
+ * @returns {Promise<Array<{id, blockId, action, changedBy, changedAt, oldValues, newValues}>>}
+ */
+export async function getVenueBlockHistory(venueId, blockId) {
+  const response = await apiClient.get(`/venues/${venueId}/blocks/${blockId}/history`);
+  return response.data;
 }
 
 // --- STUB below: no backend endpoint exists yet for this ------------------

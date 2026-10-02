@@ -202,6 +202,18 @@ button { cursor: pointer; }
 .dashboard--venue-staff .venue-blocks__item--ended { opacity: 0.7; }
 /* The clashing block, in the same amber as the booking-conflict warning. */
 .dashboard--venue-staff .venue-blocks__item--clash { border-left: 3px solid #8a5a00; padding-left: 10px; }
+/* SCRUM-131. Rows wrap, so an open block history can take a full line under
+   the row's details and actions. */
+.dashboard--venue-staff .venue-blocks__list > li { flex-wrap: wrap; }
+.dashboard--venue-staff .venue-blocks__audit { color: var(--muted); flex-basis: 100%; font-size: 0.84rem; margin: 0; overflow-wrap: anywhere; }
+.dashboard--venue-staff .block-history { border-top: 1px solid var(--line); flex-basis: 100%; margin-top: 6px; padding-top: 8px; width: 100%; }
+.dashboard--venue-staff .block-history ul { list-style: none; margin: 0; padding: 0; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above. Without it each entry's header and its changes would be
+   spread to opposite edges of the row, with a rule between every line. */
+.dashboard--venue-staff .block-history li { display: block; border-top: 0; padding: 4px 0; }
+.dashboard--venue-staff .block-history .venue-history__meta { align-items: baseline; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.dashboard--venue-staff .block-history .venue-detail__help { color: var(--muted); font-size: 0.84rem; margin: 6px 0 0; }
 .dashboard--venue-staff .status--block-upcoming { background: #e9f1fb; color: #2b5285; }
 .dashboard--venue-staff .status--block-in_effect { background: #fff6e5; color: #8a5a00; }
 .dashboard--venue-staff .status--block-ended { background: #eef2f1; color: var(--muted); }

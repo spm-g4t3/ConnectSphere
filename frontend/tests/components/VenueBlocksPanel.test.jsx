@@ -23,12 +23,15 @@ import {
 } from "../../src/services/venueService";
 import { formatRange } from "../../src/services/displayFormat";
 import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
+import { getVenueBlockHistory } from "../../src/services/venueService";
+import { formatTimestamp } from "../../src/services/displayFormat";
 
 vi.mock("../../src/services/venueService", () => ({
   listVenueBlocks: vi.fn(),
   createVenueBlock: vi.fn(),
   updateVenueBlock: vi.fn(),
   removeVenueBlock: vi.fn(),
+  getVenueBlockHistory: vi.fn(),
 }));
 
 const OFFSET_SUFFIX = /[+-]\d{2}:\d{2}$|Z$/;
@@ -269,7 +272,9 @@ describe("VenueBlocksPanel list", () => {
     await renderPanel();
 
     const ended = rowFor(ENDED);
-    expect(within(ended).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(ended).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(within(ended).queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+    expect(within(ended).getByRole("button", { name: "History" })).toBeEnabled();
     expect(within(ended).getByText(MSG.endedNote)).toBeInTheDocument();
 
     for (const block of [UPCOMING, IN_EFFECT]) {
@@ -1105,5 +1110,311 @@ describe("VenueBlocksPanel safety", () => {
     await waitFor(() => expect(within(form).getByRole("alert")).toBeInTheDocument());
     expectNoUuidInText();
     expect(document.body.textContent).not.toContain(UUID_PROSE);
+  });
+});
+
+// ---- audit line and history (SCRUM-131) ------------------------------------
+
+describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
+  const ME = "d1000000-0000-4000-8000-000000000001";
+  const OTHER = "d2a3b4c5-0000-4000-8000-000000000002";
+  const CREATED_AT = fromNow(-20 * DAY);
+  const AMENDED_AT = fromNow(-19 * DAY);
+
+  /** A block as the list returns it once the audit fields are read. */
+  function audited(block, fields = {}) {
+    return {
+      ...block,
+      createdAt: CREATED_AT,
+      createdBy: ME,
+      updatedAt: CREATED_AT,
+      lastModifiedBy: ME,
+      ...fields,
+    };
+  }
+
+  const HISTORY_ENTRY = {
+    id: "c1000000-0000-4000-8000-000000000001",
+    blockId: UPCOMING.id,
+    action: "amended",
+    changedBy: ME,
+    changedAt: AMENDED_AT,
+    oldValues: { reason: "maintenance" },
+    newValues: { reason: "renovation" },
+  };
+
+  beforeEach(() => {
+    vi.mocked(getVenueBlockHistory).mockReset();
+    vi.mocked(getVenueBlockHistory).mockResolvedValue([HISTORY_ENTRY]);
+  });
+
+  async function renderWithUser(venue = VENUE, options = { currentUserId: ME }) {
+    const { currentUserId } = options;
+    const user = userEvent.setup();
+    const utils = render(<VenueBlocksPanel venue={venue} currentUserId={currentUserId} />);
+    await waitFor(() => expect(screen.queryByText("Loading...")).not.toBeInTheDocument());
+    return { user, ...utils };
+  }
+
+  function auditOf(block) {
+    return rowFor(block).querySelector(".venue-blocks__audit");
+  }
+
+  function historyButton(block) {
+    return within(rowFor(block)).getByRole("button", { name: /^(History|Hide history)$/ });
+  }
+
+  function openHistories() {
+    return document.querySelectorAll(".block-history");
+  }
+
+  // ---- audit line ----
+
+  it("SCRUM17_AC4_the_audit_line_says_who_created_the_block_and_when", async () => {
+    vi.mocked(listVenueBlocks).mockResolvedValue([audited(UPCOMING)]);
+    await renderWithUser();
+
+    expect(auditOf(UPCOMING)).toHaveTextContent(`Created ${formatTimestamp(CREATED_AT)} by you`, {
+      normalizeWhitespace: true,
+    });
+    expect(auditOf(UPCOMING).textContent).toBe(
+      `Created ${new Date(CREATED_AT).toLocaleString()} by you`,
+    );
+    // Never changed, so no amendment is named.
+    expect(auditOf(UPCOMING).textContent).not.toContain("Last amended");
+  });
+
+  it("SCRUM17_AC4_Last_amended_appears_only_after_an_amendment_and_names_the_amender", async () => {
+    vi.mocked(listVenueBlocks).mockResolvedValue([
+      audited(UPCOMING, { updatedAt: AMENDED_AT, lastModifiedBy: OTHER }),
+      audited(IN_EFFECT),
+    ]);
+    await renderWithUser();
+
+    const audit = auditOf(UPCOMING);
+    expect(audit.textContent).toBe(
+      `Created ${formatTimestamp(CREATED_AT)} by you · Last amended ${formatTimestamp(AMENDED_AT)} by d2a3b4c5`,
+    );
+    expect(audit.querySelector("code")).toHaveAttribute("title", OTHER);
+    expect(audit.textContent).not.toContain(OTHER);
+
+    expect(auditOf(IN_EFFECT).textContent).not.toContain("Last amended");
+  });
+
+  it("SCRUM17_AC4_a_block_created_outside_the_app_says_so", async () => {
+    vi.mocked(listVenueBlocks).mockResolvedValue([
+      audited(UPCOMING, { createdBy: null, lastModifiedBy: null }),
+    ]);
+    await renderWithUser();
+    expect(auditOf(UPCOMING).textContent).toBe(
+      `Created ${formatTimestamp(CREATED_AT)} outside the app`,
+    );
+  });
+
+  it("SCRUM17_AC4_rows_without_audit_fields_have_no_audit_line", async () => {
+    await renderWithUser();
+    expect(document.querySelector(".venue-blocks__audit")).toBeNull();
+    // The rows still render, with their History buttons.
+    for (const block of BLOCKS) {
+      expect(historyButton(block)).toBeEnabled();
+    }
+  });
+
+  it("SCRUM17_AC4_without_a_currentUserId_the_users_own_change_is_a_short_id_with_a_title", async () => {
+    vi.mocked(listVenueBlocks).mockResolvedValue([audited(UPCOMING)]);
+    await renderWithUser(VENUE, {});
+
+    const audit = auditOf(UPCOMING);
+    expect(audit.textContent).toBe(`Created ${formatTimestamp(CREATED_AT)} by d1000000`);
+    expect(audit.querySelector("code")).toHaveAttribute("title", ME);
+    expect(audit.textContent).not.toContain("you");
+  });
+
+  it("SCRUM17_AC4_the_audit_line_shows_no_full_uuid", async () => {
+    vi.mocked(listVenueBlocks).mockResolvedValue([
+      audited(UPCOMING, { createdBy: OTHER, updatedAt: AMENDED_AT, lastModifiedBy: OTHER }),
+    ]);
+    await renderWithUser();
+    expect(auditOf(UPCOMING).textContent).not.toMatch(UUID_PATTERN);
+  });
+
+  // ---- history toggle ----
+
+  it("SCRUM17_AC4_History_fetches_the_trail_under_the_row_and_Hide_history_closes_it", async () => {
+    const { user } = await renderWithUser();
+    expect(getVenueBlockHistory).not.toHaveBeenCalled();
+
+    const button = historyButton(UPCOMING);
+    expect(button).toHaveTextContent("History");
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    expect(button).toHaveAttribute("aria-controls", `block-history-${UPCOMING.id}`);
+    expect(openHistories()).toHaveLength(0);
+
+    await user.click(button);
+
+    expect(getVenueBlockHistory).toHaveBeenCalledTimes(1);
+    expect(getVenueBlockHistory).toHaveBeenCalledWith(VENUE.id, UPCOMING.id);
+    expect(historyButton(UPCOMING)).toHaveTextContent("Hide history");
+    expect(historyButton(UPCOMING)).toHaveAttribute("aria-expanded", "true");
+
+    const section = document.getElementById(`block-history-${UPCOMING.id}`);
+    expect(section).not.toBeNull();
+    expect(rowFor(UPCOMING).contains(section)).toBe(true);
+    // The row's last child.
+    expect(rowFor(UPCOMING).lastElementChild).toBe(section);
+    expect(
+      await within(section).findByText("Reason: Maintenance → Renovation"),
+    ).toBeInTheDocument();
+    // currentUserId reaches the history, so the user's own change is "you".
+    expect(within(section).getByText("by you")).toBeInTheDocument();
+
+    await user.click(historyButton(UPCOMING));
+    expect(document.getElementById(`block-history-${UPCOMING.id}`)).toBeNull();
+    expect(historyButton(UPCOMING)).toHaveTextContent("History");
+    expect(historyButton(UPCOMING)).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("SCRUM17_AC4_only_one_history_is_open_at_a_time", async () => {
+    const { user } = await renderWithUser();
+
+    await user.click(historyButton(UPCOMING));
+    await user.click(historyButton(IN_EFFECT));
+
+    expect(openHistories()).toHaveLength(1);
+    expect(document.getElementById(`block-history-${IN_EFFECT.id}`)).not.toBeNull();
+    expect(document.getElementById(`block-history-${UPCOMING.id}`)).toBeNull();
+    expect(historyButton(UPCOMING)).toHaveAttribute("aria-expanded", "false");
+    expect(historyButton(IN_EFFECT)).toHaveAttribute("aria-expanded", "true");
+    expect(getVenueBlockHistory).toHaveBeenLastCalledWith(VENUE.id, IN_EFFECT.id);
+  });
+
+  it("SCRUM17_AC4_an_ended_row_has_History_and_it_opens", async () => {
+    const { user } = await renderWithUser();
+    await user.click(historyButton(ENDED));
+    expect(getVenueBlockHistory).toHaveBeenCalledWith(VENUE.id, ENDED.id);
+    expect(document.getElementById(`block-history-${ENDED.id}`)).not.toBeNull();
+  });
+
+  it("SCRUM17_AC4_a_history_error_stays_inside_the_history_and_shows_no_uuid", async () => {
+    vi.mocked(getVenueBlockHistory).mockRejectedValue(httpError(403));
+    const { user } = await renderWithUser();
+    await user.click(historyButton(UPCOMING));
+
+    const section = document.getElementById(`block-history-${UPCOMING.id}`);
+    await waitFor(() =>
+      expect(within(section).getByRole("alert")).toHaveTextContent(
+        "Only Venue Staff can see a block's history.",
+      ),
+    );
+    expect(panelAlert()).toBeNull();
+    expectNoUuidInText();
+  });
+
+  // ---- never disabled ----
+
+  it("SCRUM17_AC4_History_stays_enabled_while_a_form_is_open", async () => {
+    const { user } = await renderWithUser();
+    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Edit" }));
+    await screen.findByRole("heading", { level: 2, name: "Change this block" });
+
+    for (const block of BLOCKS) expect(historyButton(block)).toBeEnabled();
+
+    await user.click(historyButton(IN_EFFECT));
+    expect(document.getElementById(`block-history-${IN_EFFECT.id}`)).not.toBeNull();
+    // The form is untouched.
+    expect(screen.getByRole("heading", { level: 2, name: "Change this block" })).toBeInTheDocument();
+  });
+
+  it("SCRUM17_AC4_History_stays_enabled_while_the_create_form_is_open", async () => {
+    const { user } = await renderWithUser();
+    await user.click(screen.getByRole("button", { name: "+ Add a block" }));
+    for (const block of BLOCKS) expect(historyButton(block)).toBeEnabled();
+  });
+
+  it("SCRUM17_AC4_History_stays_enabled_during_a_remove_confirm_and_while_it_is_in_flight", async () => {
+    const { user } = await renderWithUser();
+    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Remove" }));
+    expect(within(rowFor(UPCOMING)).getByText(MSG.confirmRemove)).toBeInTheDocument();
+    expect(historyButton(UPCOMING)).toBeEnabled();
+
+    const pending = deferred();
+    vi.mocked(removeVenueBlock).mockReturnValue(pending.promise);
+    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Yes, remove" }));
+    expect(within(rowFor(UPCOMING)).getByRole("button", { name: "Removing..." })).toBeDisabled();
+
+    for (const block of BLOCKS) expect(historyButton(block)).toBeEnabled();
+    await user.click(historyButton(UPCOMING));
+    expect(document.getElementById(`block-history-${UPCOMING.id}`)).not.toBeNull();
+
+    vi.mocked(listVenueBlocks).mockResolvedValue([IN_EFFECT, ENDED]);
+    await act(async () => pending.resolve(undefined));
+    await waitFor(() => expect(noticeEl()).toHaveTextContent(MSG.removed));
+  });
+
+  it("SCRUM17_AC4_History_stays_enabled_on_a_retired_venue", async () => {
+    const { user } = await renderWithUser({ ...VENUE, retiredAt: fromNow(-DAY) });
+    expect(within(rowFor(UPCOMING)).getByRole("button", { name: "Edit" })).toBeDisabled();
+    for (const block of BLOCKS) {
+      expect(historyButton(block)).toBeEnabled();
+      expect(historyButton(block)).not.toHaveAttribute("title");
+    }
+    await user.click(historyButton(UPCOMING));
+    expect(getVenueBlockHistory).toHaveBeenCalledWith(VENUE.id, UPCOMING.id);
+  });
+
+  // ---- refetch after a save ----
+
+  it("SCRUM17_AC4_an_open_history_refetches_after_a_save_changes_updatedAt", async () => {
+    vi.mocked(listVenueBlocks).mockResolvedValue([audited(UPCOMING), audited(IN_EFFECT)]);
+    const { user } = await renderWithUser();
+
+    await user.click(historyButton(UPCOMING));
+    await waitFor(() => expect(getVenueBlockHistory).toHaveBeenCalledTimes(1));
+
+    const amendedEntry = {
+      ...HISTORY_ENTRY,
+      id: "c2000000-0000-4000-8000-000000000002",
+      oldValues: { notes: "Aircon servicing" },
+      newValues: { notes: null },
+    };
+    vi.mocked(getVenueBlockHistory).mockResolvedValue([amendedEntry, HISTORY_ENTRY]);
+    vi.mocked(updateVenueBlock).mockResolvedValue({ block: UPCOMING, flaggedBookings: [] });
+    vi.mocked(listVenueBlocks).mockResolvedValue([
+      audited(UPCOMING, { notes: null, updatedAt: fromNow(0), lastModifiedBy: ME }),
+      audited(IN_EFFECT),
+    ]);
+
+    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Edit" }));
+    await user.clear(notesInput());
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(noticeEl()).toHaveTextContent(MSG.saved));
+    await waitFor(() => expect(getVenueBlockHistory).toHaveBeenCalledTimes(2));
+    expect(getVenueBlockHistory).toHaveBeenLastCalledWith(VENUE.id, UPCOMING.id);
+
+    const section = document.getElementById(`block-history-${UPCOMING.id}`);
+    expect(
+      await within(section).findByText("Notes: Aircon servicing → (none)"),
+    ).toBeInTheDocument();
+    expect(auditOf(UPCOMING).textContent).toContain("Last amended");
+  });
+
+  it("SCRUM17_AC4_an_open_history_does_not_refetch_when_its_updatedAt_is_unchanged", async () => {
+    vi.mocked(listVenueBlocks).mockResolvedValue([audited(UPCOMING), audited(IN_EFFECT)]);
+    const { user } = await renderWithUser();
+
+    await user.click(historyButton(UPCOMING));
+    await waitFor(() => expect(getVenueBlockHistory).toHaveBeenCalledTimes(1));
+
+    // Another row is removed; this row comes back unchanged.
+    vi.mocked(removeVenueBlock).mockResolvedValue(undefined);
+    vi.mocked(listVenueBlocks).mockResolvedValue([audited(UPCOMING)]);
+    await user.click(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Remove" }));
+    await user.click(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Yes, remove" }));
+    await waitFor(() => expect(noticeEl()).toHaveTextContent(MSG.removed));
+    await waitFor(() => expect(listVenueBlocks).toHaveBeenCalledTimes(2));
+
+    expect(getVenueBlockHistory).toHaveBeenCalledTimes(1);
+    expect(document.getElementById(`block-history-${UPCOMING.id}`)).not.toBeNull();
   });
 });

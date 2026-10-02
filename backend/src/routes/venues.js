@@ -33,6 +33,9 @@
  *           get 403: a block's notes are staff's own words and its rows name
  *           who made it, and what those roles need -- "is this venue free
  *           then?" -- is answered by /search's date window instead.
+ *           A block's history is Venue Staff only (SCRUM-131), like venue
+ *           history: it keeps superseded notes and names every editor, and
+ *           Coordinators already see the block as it stands.
  */
 
 import express from 'express';
@@ -52,6 +55,7 @@ import {
   createVenueBlock,
   updateVenueBlock,
   removeVenueBlock,
+  getVenueBlockHistory,
 } from '../services/venueBlockService.js';
 import { validateVenueId } from '../validation/venueValidation.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
@@ -267,6 +271,22 @@ export function createVenueRouter({
     try {
       const window = { from: req.query.from, to: req.query.to };
       res.status(200).json(await listVenueBlocks(req.params.id, window));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-17 AC4 (SCRUM-131): who created, amended and removed a block, and
+   * when, newest first. A bare array, like /:id/history. Removed blocks still
+   * answer: their trail is what this route keeps.
+   *
+   * Statuses: 200; 400 for a malformed id; 401; 403 unless Venue Staff; 404
+   * for a missing venue or a block not on it; 500.
+   */
+  router.get('/:id/blocks/:blockId/history', venueStaffOnly, async (req, res) => {
+    try {
+      res.status(200).json(await getVenueBlockHistory(req.params.id, req.params.blockId));
     } catch (err) {
       handleError(err, res);
     }
