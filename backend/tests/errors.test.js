@@ -17,6 +17,7 @@ import {
   ValidationError,
   NotFoundError,
   ConflictError,
+  ServiceUnavailableError,
 } from '../src/errors.js';
 
 /**
@@ -30,6 +31,10 @@ const TYPED_ERRORS = [
   { name: 'ValidationError', Err: ValidationError, status: 400 },
   { name: 'NotFoundError', Err: NotFoundError, status: 404 },
   { name: 'ConflictError', Err: ConflictError, status: 409 },
+  // SCRUM-330. Added to the same table rather than given tests of its own, so it
+  // gets every check the other three get: status, message, hierarchy, name and
+  // stack. The reason it exists is in the hierarchy block below.
+  { name: 'ServiceUnavailableError', Err: ServiceUnavailableError, status: 503 },
 ];
 
 
@@ -80,6 +85,19 @@ describe('the error hierarchy', () => {
     expect(new NotFoundError('x')).not.toBeInstanceOf(ValidationError);
     expect(new ConflictError('x')).not.toBeInstanceOf(NotFoundError);
   });
+
+  it('keeps "nobody is available" apart from "conflicts with the current state"', () => {
+    // SCRUM-327 AC5. When no Event Coordinator can be assigned, the request
+    // was valid and the Organiser did nothing wrong. Trying again later may
+    // succeed, and the AC's own message tells them to. 409 would say the
+    // request conflicts with its current state, and 400 would say to fix the
+    // input; neither is true. 503 is what lets the frontend show "try again
+    // later" rather than "fix your form", and the message only makes sense if
+    // the status agrees with it. A catch written for ConflictError must
+    // therefore not swallow this one.
+    expect(new ServiceUnavailableError('x')).not.toBeInstanceOf(ConflictError);
+    expect(new ServiceUnavailableError('x')).not.toBeInstanceOf(ValidationError);
+  });
 });
 
 
@@ -107,8 +125,9 @@ describe('ValidationError details', () => {
     expect(err.details[0]).toEqual({ field: 'location', message: 'cannot be blank' });
   });
 
-  it('is the only one of the three that carries details', () => {
+  it('is the only one of the typed errors that carries details', () => {
     expect(new NotFoundError('x').details).toBeUndefined();
     expect(new ConflictError('x').details).toBeUndefined();
+    expect(new ServiceUnavailableError('x').details).toBeUndefined();
   });
 });

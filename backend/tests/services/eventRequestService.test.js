@@ -15,6 +15,15 @@
  *   AC5 -- submitting a draft for review
  *   AC6 -- a draft is submitted once and only once
  *
+ * SCRUM-330 (a subtask of SCRUM-327) moved the write half of submission into
+ * the Postgres function submit_event_request (migration 016), which also
+ * assigns the Event Coordinator. The SCRUM10_AC5 and SCRUM10_AC6 tests that
+ * pinned the old client-side write are replaced by SCRUM330_* tests, named
+ * after SCRUM-327's criteria:
+ *   AC1 -- a coordinator is assigned automatically, as part of submission
+ *   AC5 -- with no coordinator available, submission is refused with that
+ *          message and the request stays a draft
+ *
  * Why this file runs without a .env, and why that is not an accident:
  *
  * src/config/supabaseClient.js throws at import time when SUPABASE_URL or
@@ -47,7 +56,13 @@ import {
   requestEventClarification,
   respondToEventClarification,
 } from '../../src/services/eventRequestService.js';
-import { ValidationError, NotFoundError, ConflictError } from '../../src/errors.js';
+import {
+  AppError,
+  ValidationError,
+  NotFoundError,
+  ConflictError,
+  ServiceUnavailableError,
+} from '../../src/errors.js';
 import { STATUS, canTransition } from '../../src/domain/eventRequestStatus.js';
 
 
@@ -77,7 +92,7 @@ function createFakeClient(results = []) {
   function settle(call) {
     if (queue.length === 0) {
       throw new Error(
-        `fake client: no result queued for ${call.operation} on ${call.table}`,
+        `fake client: no result queued for ${call.operation} on ${call.table ?? call.fn}`,
       );
     }
     return Promise.resolve(queue.shift());
@@ -137,8 +152,38 @@ function createFakeClient(results = []) {
       calls.push(call);
       return builder(call);
     },
+
+    // SCRUM-330. Submission now ends in db.rpc('submit_event_request', {...})
+    // instead of a .from().update() chain, because the write has to happen in
+    // one transaction with the coordinator assignment and its history row, and
+    // supabase-js has no transactions (migration 016's header argues this in
+    // full). So the fake has to answer rpc too.
+    //
+    // It records into the same `calls` list as .from(), not a separate one, so
+    // "read, then call the function, and nothing else" is one assertion over
+    // one ordered log. It takes its result from the same queue for the same
+    // reason. It returns the settled promise directly, with no builder: the
+    // function returns a single event_requests row, so the service awaits
+    // rpc() itself and has nothing to chain.
+    rpc(fn, args) {
+      const call = {
+        table: null,
+        operation: 'rpc',
+        fn,
+        args,
+        payload: null,
+        select: null,
+        filters: [],
+        order: [],
+      };
+      calls.push(call);
+      return settle(call);
+    },
   };
 }
+
+/** The rpc calls a fake client received, in order. */
+const rpcCallsOf = (client) => client.calls.filter((call) => call.operation === 'rpc');
 
 /** A successful Postgres response. */
 const ok = (data) => ({ data, error: null });
@@ -162,6 +207,9 @@ const NOW = new Date('2026-01-15T09:00:00.000Z');
 
 const ORGANISER_ID = '11111111-1111-4111-8111-111111111111';
 const REQUEST_ID = '22222222-2222-4222-8222-222222222222';
+
+/** SCRUM-330. The coordinator submit_event_request reports having assigned. */
+const COORDINATOR_ID = '44444444-4444-4444-8444-444444444444';
 
 /** What an API layer would hand the service, in camelCase. */
 const DRAFT_INPUT = Object.freeze({
@@ -477,77 +525,13 @@ describe('AC2: one record is read back and mapped', () => {
 
 
 // ---------------------------------------------------------------------------
-// Submitting for review
+// Submitting for review -- refusals the service still makes itself
 // ---------------------------------------------------------------------------
-describe('AC5: a complete draft is submitted for review', () => {
-  /** Read the draft, then write the submitted row. */
-  const submitting = (row = storedRow()) =>
-    createFakeClient([
-      ok(row),
-      ok({ ...row, status: STATUS.SUBMITTED, submitted_at: NOW.toISOString() }),
-    ]);
-
-  it('SCRUM10_AC5_reads_the_stored_record_before_writing', async () => {
-    // The stored row is the subject, not whatever the client sent. A draft was
-    // saved permissively and may have been edited since, so the only honest
-    // answer to "is this ready?" comes from reading it back.
-    const client = submitting();
-
-    await submitEventRequest(REQUEST_ID, { client, now: NOW });
-
-    expect(client.calls).toHaveLength(2);
-    expect(client.calls[0].operation).toBe('select');
-    expect(client.calls[0].filters).toContainEqual(['id', REQUEST_ID]);
-    expect(client.calls[1].operation).toBe('update');
-  });
-
-  it('SCRUM10_AC5_writes_the_submitted_status', async () => {
-    const client = submitting();
-
-    await submitEventRequest(REQUEST_ID, { client, now: NOW });
-
-    expect(client.calls[1].payload.status).toBe(STATUS.SUBMITTED);
-  });
-
-  it('SCRUM10_AC5_records_the_submission_time', async () => {
-    // Separate from created_at, which is when the draft was first saved. A
-    // draft may sit for days before it is sent, so review turnaround can only
-    // be measured from this column. The instant is asserted rather than the
-    // encoding, since 005 does not say whether the service sends an ISO string
-    // or a Date.
-    const client = submitting();
-
-    await submitEventRequest(REQUEST_ID, { client, now: NOW });
-
-    expect(instantOf(client.calls[1].payload.submitted_at)).toBe(NOW.getTime());
-  });
-
-  it('SCRUM10_AC5_guards_the_write_on_the_row_still_being_a_draft', async () => {
-    // The read and the write are two round trips with no transaction between
-    // them, so a second submit arriving in the gap would otherwise write
-    // 'submitted' twice and move submitted_at. Filtering the update on the old
-    // status makes the write itself the check: the second one matches no row.
-    const client = submitting();
-
-    await submitEventRequest(REQUEST_ID, { client, now: NOW });
-
-    expect(client.calls[1].filters).toContainEqual(['id', REQUEST_ID]);
-    expect(client.calls[1].filters).toContainEqual(['status', STATUS.DRAFT]);
-  });
-
-  it('SCRUM10_AC2_returns_the_updated_record_in_camelCase', async () => {
-    const client = submitting();
-
-    const record = await submitEventRequest(REQUEST_ID, { client, now: NOW });
-
-    expect(record.status).toBe(STATUS.SUBMITTED);
-    expect(instantOf(record.submittedAt)).toBe(NOW.getTime());
-    expect(record).not.toHaveProperty('submitted_at');
-  });
-});
-
-
-describe('AC4: an incomplete or ineligible request is not submitted', () => {
+// Two refusals still happen in the service, before any write is attempted:
+// a request that does not exist, and a draft that is not complete. Both tests
+// below predate SCRUM-330 and still hold unchanged, because the new path keeps
+// the read and the validation in front of the function call.
+describe('AC4: an incomplete or missing request is not submitted', () => {
   it('SCRUM10_AC4_refuses_an_incomplete_draft_and_names_every_gap', async () => {
     // The whole reason submission re-validates instead of trusting the client.
     // A draft is saved permissively by design -- the enum starts at 'draft' and
@@ -579,34 +563,6 @@ describe('AC4: an incomplete or ineligible request is not submitted', () => {
     expect(client.calls).toHaveLength(1);
   });
 
-  it.each(
-    Object.values(STATUS).filter((status) => !canTransition(status, STATUS.SUBMITTED)),
-  )('SCRUM10_AC4_refuses_submission_from_%s', async (status) => {
-    // Driven from canTransition rather than a list written out here, so the
-    // rule lives in one place: eventRequestStatus.js already answers which
-    // moves are legal, the Coordinator stories will reuse the same table, and a
-    // local `status === 'draft'` check here would be a second copy to keep in
-    // step. Deriving the cases means this test follows the rule if it changes.
-    const client = createFakeClient([ok(storedRow({ status }))]);
-
-    const err = await errorFrom(submitEventRequest(REQUEST_ID, { client, now: NOW }));
-
-    expect(err).toBeInstanceOf(ConflictError);
-    expect(err.status).toBe(409);
-    expect(client.calls).toHaveLength(1);
-  });
-
-  it('SCRUM10_AC4_names_the_current_status_in_the_refusal', async () => {
-    // "Cannot be submitted" leaves the Organiser guessing. Naming the status
-    // they are actually in tells them whether to wait or to do something --
-    // which is the distinction the status groups exist to make.
-    const client = createFakeClient([ok(storedRow({ status: STATUS.APPROVED }))]);
-
-    const err = await errorFrom(submitEventRequest(REQUEST_ID, { client, now: NOW }));
-
-    expect(err.message).toMatch(/approved/i);
-  });
-
   it('SCRUM10_AC4_raises_not_found_when_submitting_a_missing_record', async () => {
     const client = createFakeClient([ok(null)]);
 
@@ -619,46 +575,243 @@ describe('AC4: an incomplete or ineligible request is not submitted', () => {
 
 
 // ---------------------------------------------------------------------------
-// Submitting once, and only once
+// SCRUM-330 -- submitting assigns a coordinator, in one transaction
 // ---------------------------------------------------------------------------
-describe('AC6: a draft is submitted once and only once', () => {
-  it('SCRUM10_AC6_refuses_a_submit_whose_draft_guard_matched_no_row', async () => {
-    // The concurrent-submit path, and the case that makes the guard meaningful
-    // rather than decorative. Two callers submit the same draft -- a
-    // double-clicked button, a retried request, two tabs. Both reads succeed and
-    // both see a complete draft, because the read and the write are separate
-    // round trips with no transaction spanning them. The first update moves the
-    // row to 'submitted'; the second one's status = 'draft' filter then matches
-    // nothing, and PostgREST answers .single() with PGRST116 because it was
-    // asked for exactly one row and found none.
-    //
-    // Without the guard both writes would land: the second would overwrite
-    // submitted_at with a later instant, so review turnaround would be measured
-    // from the wrong moment, and any future status history would record the
-    // transition twice. The guard turns the write itself into the check, which
-    // is the only place it can be checked reliably -- a re-read before writing
-    // would just move the same race one step earlier.
-    //
-    // ConflictError rather than a validation failure: the input was never the
-    // problem. The request simply is not a draft any more, which is the same
-    // reason an already-submitted request is refused by canTransition.
+// The new shape of submitEventRequest: resolve the client, read the row, run
+// validateSubmitEventRequest against it, then call submit_event_request
+// (migration 016) through rpc. The function locks the row, checks it is still
+// a draft, picks a coordinator with pick_event_coordinator (015), writes
+// status, submitted_at and assigned_coordinator_id, and inserts the history
+// row, all in one transaction.
+//
+// What these tests deliberately do not cover, and where it is covered instead:
+//   - which coordinator is chosen: that is pick_event_coordinator's rule, and
+//     SCRUM-335 tests it against a real database. A fake can only return
+//     whatever id it is given, so a test here would prove nothing about the
+//     rule.
+//   - the history row's contents: it is written inside the function and never
+//     reaches the client, so there is nothing for the fake to observe.
+//   - reassignment: a separate subtask.
+
+/** The row submit_event_request returns: submitted, timed and assigned. */
+function submittedRow() {
+  return storedRow({
+    status: STATUS.SUBMITTED,
+    submitted_at: NOW.toISOString(),
+    assigned_coordinator_id: COORDINATOR_ID,
+  });
+}
+
+/** Read a complete draft, then answer the rpc with `rpcResult`. */
+const submittingWith = (rpcResult, row = storedRow()) =>
+  createFakeClient([ok(row), rpcResult]);
+
+describe('SCRUM-327 AC1: a coordinator is assigned as part of submission', () => {
+  it('SCRUM330_AC1_never_assigns_a_coordinator_to_an_incomplete_draft', async () => {
+    // Validation stays in the service, before the function, for two reasons.
+    // First, validateSubmitEventRequest reports every gap at once, which a
+    // Postgres exception cannot. Second, and more importantly here: 016's
+    // function has no completeness check of its own (its header says so), so
+    // this validation is the only thing that stops an incomplete draft being
+    // submitted and given a coordinator. The assertion that matters is
+    // therefore that the function is never called, not merely that an error
+    // came back.
     const client = createFakeClient([
-      ok(storedRow()),
-      dbError('PGRST116', 'JSON object requested, multiple (or no) rows returned'),
+      ok(storedRow({ purpose: null, expected_attendance: null })),
     ]);
 
     const err = await errorFrom(submitEventRequest(REQUEST_ID, { client, now: NOW }));
 
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err).sort()).toEqual(['expectedAttendance', 'purpose']);
+    expect(rpcCallsOf(client)).toHaveLength(0);
+  });
+
+  it('SCRUM330_AC1_assigns_a_coordinator_on_submission', async () => {
+    // One read, then exactly one call to the function, and nothing else. The
+    // arguments are compared with toEqual, so an extra argument fails the test
+    // as surely as a missing one. In particular, nothing names a coordinator:
+    // the service does not choose one, the function does, and the rule lives
+    // in one place (015).
+    //
+    // p_submitted_at is the injected `now` as an ISO string. The clock stays
+    // in the service, as 005 and 016 both record, so this test can state the
+    // exact instant rather than "roughly now".
+    const client = submittingWith(ok(submittedRow()));
+
+    await submitEventRequest(REQUEST_ID, { client, now: NOW });
+
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
+    expect(client.calls[0].filters).toContainEqual(['id', REQUEST_ID]);
+
+    const [rpc] = rpcCallsOf(client);
+    expect(rpc.fn).toBe('submit_event_request');
+    expect(rpc.args).toEqual({
+      p_event_request_id: REQUEST_ID,
+      p_submitted_at: NOW.toISOString(),
+    });
+  });
+
+  it('SCRUM330_AC1_returns_the_assigned_coordinator_in_camelCase', async () => {
+    // The row the function returns goes through toEventRequest like every
+    // other row this module returns, so the caller sees camelCase and never
+    // assigned_coordinator_id. This is the start of "the Organiser sees their
+    // coordinator": the id has to survive the mapping before anything can
+    // turn it into a name.
+    //
+    // This needs two changes in the implementation, not just the rpc call:
+    // toEventRequest has to map the new column, and COLUMNS has to select it,
+    // or every *read* (GET /:id, the lists, the queue) would quietly omit it.
+    // That is how the decision columns from 010 were left out of every API
+    // response. The second assertion block pins COLUMNS through the read this
+    // same call makes, so the omission cannot happen again unnoticed.
+    const client = submittingWith(ok(submittedRow()));
+
+    const record = await submitEventRequest(REQUEST_ID, { client, now: NOW });
+
+    expect(record.assignedCoordinatorId).toBe(COORDINATOR_ID);
+    expect(record.status).toBe(STATUS.SUBMITTED);
+    expect(instantOf(record.submittedAt)).toBe(NOW.getTime());
+    expect(Object.keys(record).some((key) => key.includes('_'))).toBe(false);
+
+    expect(client.calls[0].select).toContain('assigned_coordinator_id');
+  });
+
+  it('SCRUM330_AC1_submits_only_through_the_function', async () => {
+    // The brief offered two ways to show the transition check left the
+    // service: assert canTransition is not called, or assert that no update
+    // reaches the client. This asserts the second, for three reasons.
+    //   - It is observable through the fake this file already uses. Spying on
+    //     canTransition would need vi.mock over the domain module, the mocking
+    //     DSL this file avoids so that every test can be explained without it.
+    //   - "canTransition was not called" would still pass if someone replaced
+    //     it with a local `status === 'draft'` check, which is exactly the
+    //     second copy of the rule this change exists to remove.
+    //   - It is the failure that matters. A .from('event_requests').update()
+    //     alongside the rpc would be a write outside the function's
+    //     transaction, which is the thing 016 was written to prevent.
+    // The next test covers the other half: that no local check survives.
+    const client = submittingWith(ok(submittedRow()));
+
+    await submitEventRequest(REQUEST_ID, { client, now: NOW });
+
+    expect(client.calls.some((call) => call.operation === 'update')).toBe(false);
+    expect(client.calls.some((call) => call.operation === 'insert')).toBe(false);
+  });
+
+  it('SCRUM330_AC1_leaves_the_draft_check_to_the_function', async () => {
+    // A row the service reads as 'approved' is still sent to the function, and
+    // the refusal comes back from it. That is the proof that the service
+    // makes no status check of its own -- not canTransition, not anything
+    // else. The function's check is the one that counts, because it runs
+    // under the row lock. The service's read is already stale by the time it
+    // could act on it, so a local check could only ever duplicate the rule or
+    // disagree with it.
+    const client = submittingWith(
+      dbError('55000', `event request ${REQUEST_ID} has status approved, and only a draft can be submitted`),
+      storedRow({ status: STATUS.APPROVED }),
+    );
+
+    const err = await errorFrom(submitEventRequest(REQUEST_ID, { client, now: NOW }));
+
+    expect(rpcCallsOf(client)).toHaveLength(1);
+    expect(err).toBeInstanceOf(ConflictError);
+  });
+});
+
+
+describe("SCRUM-330: the function's refusals become typed errors", () => {
+  // 016 raises each refusal under its own SQLSTATE so translateError can map
+  // them by error.code, the way it already maps 23514 and 23503, rather than
+  // by matching message text. Every test here also asserts the function was
+  // actually called, so it cannot pass by the refusal coming from somewhere
+  // else, such as the old .update() path answering the same queued error.
+
+  it('SCRUM330_AC1_translates_a_request_that_vanished_into_not_found', async () => {
+    // P0002, no_data_found. The read found the row, so this means it was
+    // deleted between the read and the function taking its lock. Raised the
+    // way process_change_request (006) raises it, and already mapped by
+    // translateError.
+    const client = submittingWith(dbError('P0002', `event request ${REQUEST_ID} not found`));
+
+    const err = await errorFrom(submitEventRequest(REQUEST_ID, { client, now: NOW }));
+
+    expect(rpcCallsOf(client)).toHaveLength(1);
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.status).toBe(404);
+  });
+
+  it('SCRUM330_AC1_reports_a_request_that_is_no_longer_a_draft_as_a_conflict', async () => {
+    // 55000, object_not_in_prerequisite_state. This is now how a draft is
+    // submitted once and only once (SCRUM-10 AC6). A second submit waits on
+    // the first one's row lock, then finds the row no longer a draft. It
+    // replaces the PGRST116 guard the service used to carry, whose test this
+    // file no longer has.
+    //
+    // The message must name the status, and it must be the function's
+    // message. Here the service read the row as a draft, and the function
+    // reports 'cancelled' (draft -> cancelled is a legal move in
+    // ALLOWED_TRANSITIONS). The service's own read cannot know that, so the
+    // test passes only if translateError carries the database's message
+    // through. That message is the true one, because it was read under the
+    // lock.
+    const client = submittingWith(
+      dbError('55000', `event request ${REQUEST_ID} has status cancelled, and only a draft can be submitted`),
+    );
+
+    const err = await errorFrom(submitEventRequest(REQUEST_ID, { client, now: NOW }));
+
+    expect(rpcCallsOf(client)).toHaveLength(1);
     expect(err).toBeInstanceOf(ConflictError);
     expect(err.status).toBe(409);
-    expect(err.message).toMatch(/no longer/i);
-    expect(err.message).toMatch(/draft/i);
+    expect(err.message).toMatch(/cancelled/);
+  });
 
-    // Both round trips happened, and the write did carry the guard -- otherwise
-    // this test would be proving nothing about why the update matched no row.
-    expect(client.calls).toHaveLength(2);
-    expect(client.calls[1].operation).toBe('update');
-    expect(client.calls[1].filters).toContainEqual(['status', STATUS.DRAFT]);
+  it('SCRUM330_AC5_refuses_when_no_coordinator_is_available', async () => {
+    // P0001: pick_event_coordinator found nobody. 503, not 409: the request is
+    // valid and the Organiser did nothing wrong, and trying again later may
+    // succeed, which is what the AC's own message says. errors.test.js gives
+    // the full argument for the new class.
+    //
+    // The message is asserted exactly, because it is the AC's text. It is
+    // also exactly what 016 raises, so the service must pass it through
+    // without adding to it, not wrap it the way translateError wraps a check
+    // violation ("A value was rejected by the database: ...").
+    //
+    // "The request stays a draft" is guaranteed by the function: it raises
+    // inside its own transaction, so nothing it did is kept. This fake cannot
+    // observe that, and SCRUM-335's database tests do. What the fake can
+    // observe is the service's half: after the refusal, the service makes no
+    // write of its own to "tidy up".
+    const message = 'No coordinator is available; please try again later';
+    const client = submittingWith(dbError('P0001', message));
+
+    const err = await errorFrom(submitEventRequest(REQUEST_ID, { client, now: NOW }));
+
+    expect(rpcCallsOf(client)).toHaveLength(1);
+    expect(err).toBeInstanceOf(ServiceUnavailableError);
+    expect(err.status).toBe(503);
+    expect(err.message).toBe(message);
+    expect(client.calls.some((call) => call.operation === 'update')).toBe(false);
+  });
+
+  it('SCRUM330_AC1_treats_a_missing_submission_time_as_a_server_fault', async () => {
+    // 22004, null_value_not_allowed: the function was handed no submission
+    // time. Only a bug in the service can cause that, because the service
+    // always supplies `now`. So it must not come back as an AppError: a 400
+    // would tell the Organiser to fix a form that has nothing wrong with it.
+    // Left untyped, the route logs it and answers a 500, the same treatment
+    // SCRUM10_AC4_passes_an_unrecognised_database_error_through_untyped
+    // already pins for any code nobody anticipated.
+    const client = submittingWith(
+      dbError('22004', 'submit_event_request needs a submission time'),
+    );
+
+    const err = await errorFrom(submitEventRequest(REQUEST_ID, { client, now: NOW }));
+
+    expect(rpcCallsOf(client)).toHaveLength(1);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(AppError);
   });
 });
 
