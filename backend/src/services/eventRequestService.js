@@ -24,11 +24,15 @@
  *    worth stating precisely, because it decides what a route still has to do:
  *    getEventRequestForOrganiser and updateEventRequest take the Organiser and
  *    enforce it; createEventRequest stamps one; getEventRequestById,
- *    submitEventRequest and listEventRequestsForReview take none and check
- *    none, so a route calling any of those must prove the caller's right to
- *    read or write itself first. For the first two that proof is ownership;
- *    for listEventRequestsForReview it is a role gate, because the whole point
- *    of a review queue is that it crosses every Organiser. Role, and the
+ *    submitEventRequest, listEventRequestsForReview and
+ *    getEventRequestForCoordinator take none and check none, so a route
+ *    calling any of those must prove the caller's right to read or write
+ *    itself first. For the first two that proof is ownership; for the two
+ *    coordinator reads it is a role gate, because a coordinator may read any
+ *    event past draft. The same rule covers coordinators acting on an event
+ *    (SCRUM-332): requestEventClarification and reassignEventRequest take the
+ *    coordinator, and the event's assigned coordinator is enforced, by the
+ *    first itself and by 018's function for the second. Role, and the
  *    caller's relationship to an event, arrive with the JWT and belong in
  *    middleware. A service that quietly enforced half of it would make the
  *    other half look unnecessary.
@@ -599,7 +603,50 @@ export async function updateEventRequest(id, changes, organiserId, { client } = 
   return toEventRequest(data);
 }
 
-/** Ask an Organiser for clarification while reviewing their request. */
+/**
+ * Ask an Organiser for clarification while reviewing their request.
+ *
+ * SCRUM-46 created this. SCRUM-332 (SCRUM-327 AC7) makes it check who is
+ * asking: only the event's assigned coordinator may send it for clarification.
+ * Before SCRUM-332, coordinatorId was checked for being present and then
+ * ignored, so any Event Coordinator could do this to any event.
+ *
+ * Checked here, with a read and a guarded update, rather than in a Postgres
+ * function as reassignment (018) and change-request decisions (019) are. The
+ * write is one statement on one row, so there is no second write to keep in
+ * step with it, and the guard on the update is enough to make that statement
+ * unable to touch an event the caller does not hold.
+ *
+ * In order:
+ *
+ *  1. The read, through getEventRequestForCoordinator, so a draft is the same
+ *     404 here as on the coordinator's read, and a coordinator cannot use
+ *     this to learn a draft exists.
+ *  2. The caller. Someone else's event is a ForbiddenError, before anything is
+ *     written. The caller can already see the event, so a 403 reveals nothing
+ *     and gives the true reason. It comes before the status check, as in 018:
+ *     whether the event could be sent for clarification is a question only
+ *     its coordinator has any reason to ask.
+ *  3. The transition, as before.
+ *  4. The update, guarded on id, the status just read, and the caller as the
+ *     assigned coordinator. See the comment at the update for why a guard
+ *     that matches nothing is a 409 and not a 403.
+ *
+ * Who asked is still not recorded. event_requests has no column for it.
+ *
+ * @param {string} id
+ * @param {string} note           what the Organiser is asked to clarify
+ * @param {string} coordinatorId  the caller, from the JWT -- never the body
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the request, now pending_clarification, in camelCase
+ * @throws {ValidationError} no coordinatorId, or a blank or overlong note,
+ *                           before any round trip
+ * @throws {NotFoundError}   no such request, or it is a draft
+ * @throws {ForbiddenError}  the caller is not the event's assigned coordinator
+ * @throws {ConflictError}   the status does not allow clarification, or the
+ *                           event changed between the read and the write
+ */
 export async function requestEventClarification(id, note, coordinatorId, { client } = {}) {
   if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
     throw new ValidationError('coordinatorId is required');
@@ -613,21 +660,42 @@ export async function requestEventClarification(id, note, coordinatorId, { clien
   }
 
   const db = await resolveClient(client);
-  const current = await getEventRequestById(id, { client: db });
+  const current = await getEventRequestForCoordinator(id, { client: db });
+
+  if (current.assignedCoordinatorId !== coordinatorId) {
+    throw new ForbiddenError(
+      `Only the coordinator assigned to event request ${id} can request clarification on it.`,
+    );
+  }
+
   if (!canTransition(current.status, STATUS.PENDING_CLARIFICATION)) {
     throw new ConflictError(
       `An event request with status '${current.status}' cannot be sent for clarification.`,
     );
   }
 
+  // The assigned_coordinator_id filter does the job organiser_id does in
+  // updateEventRequest: the statement itself cannot touch an event the caller
+  // does not hold, rather than being safe only because of a read made in an
+  // earlier round trip. It is also the only thing that catches a handover
+  // landing between the read and this write.
   const { data, error } = await db
     .from('event_requests')
     .update({ status: STATUS.PENDING_CLARIFICATION, clarification_note: clarificationNote })
     .eq('id', id)
     .eq('status', current.status)
+    .eq('assigned_coordinator_id', coordinatorId)
     .select()
     .single();
 
+  // No row matched. Not a 403, although the coordinator filter may be what
+  // stopped matching: the read a moment ago showed this caller holding the
+  // event in a status that allowed this, so something changed in between, a
+  // handover or a status change. That is a race, and a race is a 409 here as
+  // it is in updateEventRequest. A 403 would be false when only the status
+  // moved, since the caller still holds the event. The wrong coordinator, the
+  // common case, never gets this far: the check after the read answers it
+  // with a 403. Refreshing shows the caller which of the two happened.
   if (error?.code === 'PGRST116') {
     throw new ConflictError('The request changed while clarification was being sent. Refresh and try again.');
   }
@@ -838,6 +906,55 @@ export async function getEventRequestForOrganiser(id, organiserId, { client } = 
     // Deliberately the same message getEventRequestById raises for an id that
     // does not exist. Two different messages would be the same oracle the
     // status code avoids.
+    throw new NotFoundError(`Event request ${id} not found`);
+  }
+
+  return request;
+}
+
+
+/**
+ * One event request, for any Event Coordinator.
+ *
+ * SCRUM-332, for SCRUM-327 AC7: after a handover the previous coordinator can
+ * still view the event, and only stops being able to change it. Before this,
+ * no coordinator could read a single event at all. getEventRequestForOrganiser
+ * answers 404 to anyone but its Organiser, and the queue covers only
+ * submitted, under_review and pending_clarification. So once an event was
+ * approved or confirmed, nobody on ConnectSphere's side could open it, while
+ * AC6 still let its coordinator hand it over.
+ *
+ * No organiser id and no coordinator id, and neither is compared. That is the
+ * rule this module's header states, and listEventRequestsForReview already
+ * follows it: a function that takes no owner checks none, and the caller
+ * proves the right to read. Here the proof is the role gate on the route
+ * (GET /:id/review, behind coordinatorOnly). Which coordinator holds an event
+ * decides who may change it, never who may read it.
+ *
+ * The one thing refused is a draft, answered with exactly the NotFoundError a
+ * missing id gets, message included. A draft is the Organiser's private
+ * working copy, and COORDINATOR_QUEUE_STATUSES leaves it out of the queue so
+ * that no coordinator learns it exists. A coordinator who guessed a draft's id
+ * must learn nothing more than from an id that matches nothing: a 403 would
+ * confirm the id, and so would a different message. errors.js limits
+ * ForbiddenError to records the caller can already see, and nobody but its
+ * Organiser can see a draft.
+ *
+ * Reads through getEventRequestById, as getEventRequestForOrganiser does, so
+ * there is one definition of what a stored request looks like.
+ *
+ * @param {string} id
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the stored request, in camelCase
+ * @throws {NotFoundError} when no such request exists, or it is a draft
+ */
+export async function getEventRequestForCoordinator(id, { client } = {}) {
+  const request = await getEventRequestById(id, { client });
+
+  if (request.status === STATUS.DRAFT) {
+    // The same message getEventRequestById raises for an id that does not
+    // exist, for the same reason getEventRequestForOrganiser reuses it.
     throw new NotFoundError(`Event request ${id} not found`);
   }
 
