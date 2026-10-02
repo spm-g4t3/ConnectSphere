@@ -43,6 +43,24 @@ export class ConflictError extends AppError {
 }
 
 /**
+ * ConnectSphere cannot do this right now, but may be able to later.
+ *
+ * SCRUM-330, for SCRUM-327 AC5: an event request is submitted, and there is no
+ * Event Coordinator to assign it to. The request is valid and the caller did
+ * nothing wrong, so it is not a 400. Nothing about the request conflicts with
+ * stored data, so it is not a 409 either; a 409 would tell the caller to
+ * reload and reconsider, which would not help. Retrying later may succeed,
+ * which is what 503 means and what the AC's own message tells the Organiser.
+ * Having its own status is what lets the frontend show "try again later"
+ * rather than "fix your input".
+ */
+export class ServiceUnavailableError extends AppError {
+  constructor(message) {
+    super(message, 503);
+  }
+}
+
+/**
  * The caller is not signed in, or their token is no longer good.
  *
  * SCRUM-42. Added alongside the other three so a 401 has a home in the same

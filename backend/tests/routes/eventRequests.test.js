@@ -587,6 +587,12 @@ describe('service errors are translated into HTTP status codes', () => {
  * rather than returning undefined, so a route that makes an unexpected extra
  * round trip fails with a legible message instead of a null dereference three
  * frames down.
+ *
+ * SCRUM-330 added rpc() to the service tests' fake, because submitEventRequest
+ * now calls submit_event_request (migration 016) instead of reading and then
+ * updating. It is added here in the same shape, to keep the two in step: it
+ * records into the same `calls` log, takes its result from the same queue,
+ * and returns the settled promise directly.
  */
 function createWritableFakeClient(results = []) {
   const queue = [...results];
@@ -595,7 +601,7 @@ function createWritableFakeClient(results = []) {
   function settle(call) {
     if (queue.length === 0) {
       throw new Error(
-        `fake client: no result queued for ${call.operation} on ${call.table}`,
+        `fake client: no result queued for ${call.operation} on ${call.table ?? call.fn}`,
       );
     }
     return Promise.resolve(queue.shift());
@@ -645,6 +651,23 @@ function createWritableFakeClient(results = []) {
       };
       calls.push(call);
       return builder(call);
+    },
+
+    // SCRUM-330. Same as createFakeClient's rpc in the service tests -- see the
+    // note above.
+    rpc(fn, args) {
+      const call = {
+        table: null,
+        operation: 'rpc',
+        fn,
+        args,
+        payload: null,
+        select: null,
+        filters: [],
+        order: [],
+      };
+      calls.push(call);
+      return settle(call);
     },
   };
 }
@@ -1113,8 +1136,13 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
       ok(submittableRow()),
       // submitEventRequest's own read.
       ok(submittableRow()),
-      // The guarded write.
-      ok(submittableRow({ status: STATUS.SUBMITTED, submitted_at: '2026-01-15T09:00:00+00:00' })),
+      // submit_event_request (016): the row as the function leaves it --
+      // submitted, timed, and assigned a coordinator (SCRUM-330).
+      ok(submittableRow({
+        status: STATUS.SUBMITTED,
+        submitted_at: '2026-01-15T09:00:00+00:00',
+        assigned_coordinator_id: COORDINATOR_ID,
+      })),
     ]);
 
     const res = await request(appWith({ client }))
@@ -1132,11 +1160,23 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
     expect(res.body).toHaveProperty('submittedAt');
     expect(typeof res.body.submittedAt).toBe('string');
 
-    // That the write stamped one at all is the half of the contract the
-    // fixture cannot prove: the row comes back with whatever was queued.
-    expect(client.calls[2].operation).toBe('update');
-    expect(typeof client.calls[2].payload.submitted_at).toBe('string');
-    expect(Number.isNaN(new Date(client.calls[2].payload.submitted_at).getTime())).toBe(false);
+    // That a submission time was actually sent is the half of the contract the
+    // fixture cannot prove, because the row comes back with whatever was
+    // queued. Since SCRUM-330 the time travels as an argument to the
+    // function, not in an update payload, so that is where it is checked.
+    // The exact value is not asserted, for the reason given above; the
+    // service tests pin it with an injected `now`.
+    expect(client.calls).toHaveLength(3);
+    expect(client.calls[2].operation).toBe('rpc');
+    expect(client.calls[2].fn).toBe('submit_event_request');
+    expect(client.calls[2].args.p_event_request_id).toBe(REQUEST_ID);
+    expect(typeof client.calls[2].args.p_submitted_at).toBe('string');
+    expect(Number.isNaN(new Date(client.calls[2].args.p_submitted_at).getTime())).toBe(false);
+
+    // SCRUM-327: the Organiser sees their coordinator. The id survives the
+    // service mapping and the route's withStatusDisplay projection, so it
+    // reaches the response. Turning it into a name is a later subtask.
+    expect(res.body.assignedCoordinatorId).toBe(COORDINATOR_ID);
   });
 
   it('SCRUM10_AC5_returns_404_for_another_organisers_draft', async () => {
@@ -1210,39 +1250,73 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
     // Complete and future-dated, so the only thing left to refuse is the
     // status. A past-dated fixture here would 400 on the dates and this test
     // would be proving nothing about "once and only once".
+    //
+    // Since SCRUM-330, "once and only once" is no longer a status test in the
+    // service. It is submit_event_request's draft check, made while holding
+    // the row lock. So the service passes a row it read as 'submitted' straight
+    // to the function, and the refusal comes back from there as 55000 with
+    // the function's own message.
     const submitted = submittableRow({ status: STATUS.SUBMITTED });
-    const client = createWritableFakeClient([ok(submitted), ok(submitted)]);
-
-    const res = await request(appWith({ client }))
-      .post(`/api/event-requests/${REQUEST_ID}/submit`)
-      .send({});
-
-    // 409 and not 400: the input was never the problem, the row's state was.
-    expect(res.status).toBe(409);
-    expect(res.body.error).toMatch(/cannot be submitted/i);
-
-    // And no second write landed, which is the whole of "once and only once".
-    expect(client.calls).toHaveLength(2);
-    expect(client.calls.every((call) => call.operation === 'select')).toBe(true);
-  });
-
-  it('SCRUM10_AC6_returns_409_when_a_second_submit_wins_the_race', async () => {
     const client = createWritableFakeClient([
-      ok(submittableRow()),
-      ok(submittableRow()),
-      dbFailure('PGRST116', 'JSON object requested, multiple (or no) rows returned'),
+      ok(submitted),
+      ok(submitted),
+      dbFailure(
+        '55000',
+        `event request ${REQUEST_ID} has status submitted, and only a draft can be submitted`,
+      ),
     ]);
 
     const res = await request(appWith({ client }))
       .post(`/api/event-requests/${REQUEST_ID}/submit`)
       .send({});
 
-    // Both callers read a draft; the first write moved it and the second
-    // matched no row. Without the .eq('status','draft') guard both writes
-    // would land and submitted_at would be overwritten with the later instant,
-    // measuring review turnaround from the wrong moment.
+    // 409 and not 400: the input was never the problem, the row's state was.
+    // The message names the status the function found, so the Organiser
+    // knows why. Matched as "has status submitted" rather than "submitted"
+    // alone, because the word also appears in "can be submitted".
     expect(res.status).toBe(409);
-    expect(client.calls[2].filters).toContainEqual(['status', STATUS.DRAFT]);
+    expect(res.body.error).toMatch(/has status submitted/);
+
+    // The refusal came from the function, and the service wrote nothing of
+    // its own around it.
+    expect(client.calls).toHaveLength(3);
+    expect(client.calls[2].operation).toBe('rpc');
+    expect(client.calls.some((call) => call.operation === 'update')).toBe(false);
+  });
+
+  it('SCRUM10_AC6_returns_409_when_a_second_submit_wins_the_race', async () => {
+    // Two submits of the same draft arrive together: a double-clicked button,
+    // a retried request, two tabs. Unlike the test above, BOTH reads see a
+    // draft here, so the service has no way to refuse. The race is decided
+    // inside submit_event_request. The first call locks the row (`for update`).
+    // The second call's function waits for that lock, then reads the row as
+    // the first left it, now 'submitted', and raises 55000. This fake plays the
+    // second caller.
+    //
+    // What the lock protects is the first submission's record. The second
+    // call is refused before its UPDATE, so the first submission's
+    // submitted_at is not overwritten with a later instant, and review
+    // turnaround is still measured from the right moment. No second
+    // coordinator is assigned and no second history row is written either.
+    // That happens inside the database and a fake cannot observe it. What
+    // the fake can observe is the service's part: the refusal arrives as a
+    // 409, and the service attempts no write of its own afterwards.
+    const client = createWritableFakeClient([
+      ok(submittableRow()),
+      ok(submittableRow()),
+      dbFailure(
+        '55000',
+        `event request ${REQUEST_ID} has status submitted, and only a draft can be submitted`,
+      ),
+    ]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/submit`)
+      .send({});
+
+    expect(res.status).toBe(409);
+    expect(client.calls.filter((call) => call.operation === 'rpc')).toHaveLength(1);
+    expect(client.calls.some((call) => call.operation === 'update')).toBe(false);
   });
 
   it('SCRUM10_AC5_returns_401_and_never_queries_without_a_token', async () => {

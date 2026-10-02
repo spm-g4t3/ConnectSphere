@@ -4,12 +4,13 @@
  * SCRUM-31, a subtask of SCRUM-10 (Create Event Request).
  *
  * Creates an event request as a draft, reads one back, and moves one from
- * draft to submitted. Writes go through plain table calls rather than a
- * Postgres function, unlike venueService.js: an event request is a single row
- * in a single table, so there is no partially-built record to protect against
- * and nothing a function body would buy. The one place ordering does matter --
- * the read-then-write in submitEventRequest -- is handled by guarding the write
- * instead, which is explained where it happens.
+ * draft to submitted. Most writes go through plain table calls rather than a
+ * Postgres function: they touch a single row in a single table, so there is no
+ * partly-written record to protect against. Submission is the exception.
+ * Since SCRUM-330 it also assigns an Event Coordinator and records that in a
+ * second table, and supabase-js has no transactions, so it calls
+ * submit_event_request (migration 016) through rpc. The reasoning is at
+ * submitEventRequest.
  *
  * Input is validated before any network call (SCRUM-30). The constraints in
  * 001_event_requests.sql and 005_event_request_details.sql remain the backstop
@@ -41,7 +42,12 @@
  *    reinterpret a value the timestamptz column already understands.
  */
 
-import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
+import {
+  ValidationError,
+  NotFoundError,
+  ConflictError,
+  ServiceUnavailableError,
+} from '../errors.js';
 import {
   validateCreateEventRequest,
   validateUpdateEventRequest,
@@ -54,12 +60,23 @@ import {
 } from '../domain/eventRequestStatus.js';
 
 
-/** The columns a caller ever reads, named rather than selected with '*'. */
+/**
+ * The columns a caller ever reads, named rather than selected with '*'.
+ *
+ * assigned_coordinator_id (SCRUM-330, migration 014) is listed here and mapped
+ * in toEventRequest in the same change. Naming the columns means a column
+ * added to the database is invisible to the API until it is added here too.
+ * That is how the decision columns from 010 (decision, decision_note,
+ * decided_by, decided_at, reviewing_coordinator_id) exist in the database yet
+ * have never appeared in a single API response. This column is not left out
+ * the same way.
+ */
 const COLUMNS = `
   id, organiser_id, event_name, purpose, description,
   proposed_start, proposed_end, expected_attendance,
   venue_requirements, accessibility_requirements, equipment_requirements,
-  status, clarification_note, created_at, updated_at, submitted_at
+  status, clarification_note, assigned_coordinator_id,
+  created_at, updated_at, submitted_at
 `;
 
 /**
@@ -150,6 +167,37 @@ function translateError(error) {
     return new ConflictError(`That record already exists: ${detail}`);
   }
 
+  // The next two are raised by submit_event_request (migration 016), each with
+  // its own SQLSTATE so they can be told apart by code rather than by matching
+  // message text.
+  //
+  // Both pass the database's message through unchanged, with no prefix,
+  // unlike 23514 above. A check violation's message is written by the Postgres
+  // driver for a developer ('new row violates check constraint ...'), so it is
+  // wrapped in a sentence a caller can make sense of. These two come from
+  // `raise exception` in our own function, and their text was written to be
+  // read by whoever made the request. The no-coordinator message is SCRUM-327
+  // AC5's exact wording. The not-a-draft message names the status the function
+  // saw while holding the row lock, which is more accurate than anything this
+  // service read a moment earlier.
+
+  // object_not_in_prerequisite_state: the request is no longer a draft. Most
+  // likely a second submit that waited on the first one's row lock.
+  if (code === '55000') {
+    return new ConflictError(detail);
+  }
+
+  // raise_exception: no Event Coordinator is available (AC5). 016 raises
+  // P0001 for that and nothing else. Nothing else this module calls raises
+  // P0001; 006's process_change_request does, for a change request already
+  // processed, but that goes through eventChangeRequestService and its own
+  // translator, not this one. A future function that raises P0001 for another
+  // reason and is called from here would need its own SQLSTATE, or it would
+  // arrive as a 503.
+  if (code === 'P0001') {
+    return new ServiceUnavailableError(detail);
+  }
+
   if (code === 'P0002' || /not found/i.test(detail)) {
     return new NotFoundError(detail || 'Event request not found');
   }
@@ -182,6 +230,10 @@ function toEventRequest(row) {
     equipmentRequirements: row.equipment_requirements,
     status: row.status,
     clarificationNote: row.clarification_note ?? null,
+    // Null on a draft, which nobody has been assigned yet. `?? null`, as for
+    // clarificationNote, so a row read without the column still gives the
+    // caller null rather than undefined, and the key is always present.
+    assignedCoordinatorId: row.assigned_coordinator_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     submittedAt: row.submitted_at,
@@ -310,19 +362,63 @@ export async function getEventRequestById(id, { client } = {}) {
 }
 
 /**
- * Submit a draft request for review, moving it draft -> submitted.
+ * Submit a draft request for review, moving it draft -> submitted and
+ * assigning it an Event Coordinator.
+ *
+ * SCRUM-10 created this. SCRUM-330 (SCRUM-327 AC1 and AC5) changed how it
+ * writes. It reads the row and validates it here, then hands the write to the
+ * Postgres function submit_event_request (migration 016) through rpc. In one
+ * transaction, that function locks the row, checks it is still a draft, picks
+ * a coordinator with pick_event_coordinator (015), writes status, submitted_at
+ * and assigned_coordinator_id, and inserts the assignment history row.
+ *
+ * Why the write moved: a submission now writes to two tables, and every part
+ * has to happen or none of it. The request must not end up submitted without a
+ * coordinator, and the coordinator must not be recorded without the history
+ * row. supabase-js has no transactions, since every call is its own HTTP
+ * request, so the service cannot guarantee that. A function body can. This is
+ * the reasoning venueService.js and process_change_request (006) already
+ * follow.
+ *
+ * What left this function with the write, and why it must not come back:
+ *
+ *  - The canTransition check. The function makes the same check, under the
+ *    row lock, which is the only place it is reliable. This service's read is
+ *    already out of date by the time it could act on it. A second copy here
+ *    would be the same rule in two places, able to disagree, and the
+ *    function's copy is the one that counts. A request that is not a draft is
+ *    therefore refused by the function (55000), and translateError turns that
+ *    into a ConflictError carrying the function's message.
+ *  - The PGRST116 guard on `.eq('status', 'draft')`. It existed because the read
+ *    and the write were two separate requests with nothing holding the row in
+ *    between. The function holds a row lock instead: a second concurrent
+ *    submit waits, then finds the row no longer a draft, which is the same
+ *    55000.
+ *
+ * What stays here, and why:
+ *
+ *  - The read, for the NotFoundError and because validation needs the row.
+ *  - validateSubmitEventRequest. It reports every gap at once, which a raised
+ *    exception cannot. And 016's function makes no completeness check of its
+ *    own, so this is the only thing that stops an incomplete draft being
+ *    submitted and given a coordinator.
+ *  - The clock. `now` is passed in as p_submitted_at, so tests can state the
+ *    exact instant, as 005 and 016 both record.
  *
  * @param {string} id
  * @param {object} [options]
  * @param {object} [options.client]
  * @param {Date} [options.now]  the submission instant; injected so callers and
  *                              tests are deterministic
- * @returns {Promise<object>} the updated request, in camelCase
- * @throws {NotFoundError}   when no request has that id
- * @throws {ValidationError} when the stored draft is not complete enough to
- *                           submit, listing every gap at once
- * @throws {ConflictError}   when the request is not in a status that can reach
- *                           'submitted', or when another submit got there first
+ * @returns {Promise<object>} the submitted request, in camelCase, including
+ *                            assignedCoordinatorId
+ * @throws {NotFoundError}           when no request has that id, at the read or
+ *                                   because it vanished before the function ran
+ * @throws {ValidationError}         when the stored draft is not complete enough
+ *                                   to submit, listing every gap at once
+ * @throws {ConflictError}           when the request is no longer a draft
+ * @throws {ServiceUnavailableError} when no Event Coordinator is available;
+ *                                   the request stays a draft (AC5)
  */
 export async function submitEventRequest(id, { client, now = new Date() } = {}) {
   const db = await resolveClient(client);
@@ -340,54 +436,21 @@ export async function submitEventRequest(id, { client, now = new Date() } = {}) 
   // is reported at once so the Organiser fixes the form in one pass.
   validateSubmitEventRequest(current, { now });
 
-  // Asked of the shared transition table rather than tested here as
-  // `status === 'draft'`. The rule then lives in one place: the Coordinator
-  // stories move requests through the later statuses and reuse the same table,
-  // and a local copy would be a second definition to keep in step.
-  if (!canTransition(current.status, STATUS.SUBMITTED)) {
-    throw new ConflictError(
-      `An event request with status '${current.status}' cannot be submitted.`,
-    );
-  }
-
-  const { data, error } = await db
-    .from('event_requests')
-    .update({
-      status: STATUS.SUBMITTED,
-
-      // An ISO string rather than a Date: the column is timestamptz and an
-      // instant with an explicit offset is unambiguous on the wire.
-      submitted_at: now.toISOString(),
-
-      // updated_at is left to the trigger, as on insert.
-    })
-    .eq('id', id)
-
-    // The guard, and the reason the check above is not enough on its own. The
-    // read and this write are two round trips with no transaction spanning
-    // them, so a second submit arriving in the gap would otherwise write
-    // 'submitted' twice: submitted_at would move to the later instant, and
-    // review turnaround would be measured from the wrong moment. Filtering on
-    // the old status makes the write itself the check -- the loser matches no
-    // row. Re-reading before writing would only move the same race one step
-    // earlier.
-    .eq('status', STATUS.DRAFT)
-    .select()
-    .single();
-
-  // PGRST116 here is the guard firing, not a missing request: the row was read
-  // successfully a moment ago, so the only way the filter matches nothing is
-  // that its status is no longer 'draft'. Handled at this site rather than in
-  // translateError, which cannot tell this case from an ordinary empty read.
-  if (error?.code === 'PGRST116') {
-    throw new ConflictError(
-      `This event request is no longer a draft -- it was most likely ` +
-      `submitted by another request a moment ago.`,
-    );
-  }
+  // One call, and no write of this service's own before or after it. A raised
+  // refusal rolls back everything the function did, so on any error the row
+  // is exactly as it was -- AC5's "the request stays a draft".
+  //
+  // now.toISOString(), as before: the parameter is timestamptz, and an instant
+  // with an explicit offset is unambiguous on the wire.
+  const { data, error } = await db.rpc('submit_event_request', {
+    p_event_request_id: id,
+    p_submitted_at: now.toISOString(),
+  });
 
   if (error) throw translateError(error);
 
+  // The function returns the updated event_requests row, so it maps the same
+  // way as every other row this module hands back.
   return toEventRequest(data);
 }
 
