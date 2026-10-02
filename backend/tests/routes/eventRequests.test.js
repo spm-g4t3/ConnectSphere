@@ -1940,3 +1940,182 @@ describe('SCRUM-45 AC2: the queue is restricted, and the restriction stays put',
     expect(client.calls[0].filters).toEqual([['organiser_id', ORGANISER_ID]]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// SCRUM-331 -- the assigned coordinator hands an event to a colleague over HTTP
+// ---------------------------------------------------------------------------
+// POST /api/event-requests/:id/reassign, body { newCoordinatorId, handoverNote }.
+// Behind coordinatorOnly, like every other Coordinator write in this router,
+// and with no ownership pre-check: the caller is a coordinator, not the
+// Organiser, and whether they hold this event is the one thing reassign_event_
+// request (018) checks under its row lock. So the route's only job is to pass
+// on what was asked, take the caller from the token, and turn the function's
+// refusals into status codes.
+//
+// Named after SCRUM-327's criteria:
+//   AC6 -- only the assigned coordinator may hand the event over
+//   AC7 -- the new coordinator can act on the event once it is handed over
+//   AC9 -- the handover records who made it, and the note
+
+/** The colleague the event is handed to. COORDINATOR_ID is the one handing it over. */
+const NEW_COORDINATOR_ID = '66666666-6666-4666-8666-666666666666';
+
+const HANDOVER_NOTE = 'On leave from Monday. The venue shortlist is in the notes.';
+
+/** The row reassign_event_request returns after an undecided handover. */
+const handedOverRow = () => storedRow({
+  status: STATUS.UNDER_REVIEW,
+  assigned_coordinator_id: NEW_COORDINATOR_ID,
+  reviewing_coordinator_id: NEW_COORDINATOR_ID,
+});
+
+/** POST the handover as the outgoing coordinator, unless told otherwise. */
+const handOver = (client, body, requireAuth = signedInWithRole(ROLE.EVENT_COORDINATOR)) =>
+  request(appWith({ client, requireAuth }))
+    .post(`/api/event-requests/${REQUEST_ID}/reassign`)
+    .send(body);
+
+describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () => {
+  it('SCRUM331_AC7_the_new_coordinator_can_act_on_the_event', async () => {
+    const client = createWritableFakeClient([ok(handedOverRow())]);
+
+    const res = await handOver(client, {
+      newCoordinatorId: NEW_COORDINATOR_ID,
+      handoverNote: HANDOVER_NOTE,
+    });
+
+    // 200 and the whole request, the same shape submit and the reads return,
+    // so the Coordinator's screen can redraw from the response. Both
+    // coordinator fields are checked: the event is now the new coordinator's,
+    // and so is the right to decide it.
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(REQUEST_ID);
+    expect(res.body.assignedCoordinatorId).toBe(NEW_COORDINATOR_ID);
+    expect(res.body.reviewingCoordinatorId).toBe(NEW_COORDINATOR_ID);
+    expect(res.body.statusDisplay.label).toBe('Under Review');
+
+    // One call, to the function, and nothing else.
+    expect(client.calls.map((call) => call.operation)).toEqual(['rpc']);
+    expect(client.calls[0].fn).toBe('reassign_event_request');
+  });
+
+  it('SCRUM331_AC9_records_who_handed_it_over', async () => {
+    // The person handing over comes from the token, never from the body. The
+    // body below names someone else as the one handing over, and that is
+    // ignored. Without this, any coordinator could make a handover look as if
+    // the assigned coordinator had made it, and the function's AC6 check
+    // would compare the wrong person.
+    const client = createWritableFakeClient([ok(handedOverRow())]);
+
+    const res = await handOver(client, {
+      newCoordinatorId: NEW_COORDINATOR_ID,
+      handoverNote: HANDOVER_NOTE,
+      assignedBy: OTHER_ORGANISER_ID,
+    });
+
+    expect(res.status).toBe(200);
+    expect(client.calls[0].args).toEqual({
+      p_event_request_id: REQUEST_ID,
+      p_new_coordinator_id: NEW_COORDINATOR_ID,
+      p_assigned_by: COORDINATOR_ID,
+      p_handover_note: HANDOVER_NOTE,
+    });
+  });
+
+  it('SCRUM331_AC9_the_handover_note_is_optional', async () => {
+    // A handover with no note is still a handover. It reaches the function as
+    // null, which is how 014's history table records "no note".
+    const client = createWritableFakeClient([ok(handedOverRow())]);
+
+    const res = await handOver(client, { newCoordinatorId: NEW_COORDINATOR_ID });
+
+    expect(res.status).toBe(200);
+    expect(client.calls[0].args.p_handover_note).toBeNull();
+  });
+
+  it('SCRUM331_AC7_refuses_a_missing_new_coordinator_before_the_database', async () => {
+    // 400 listing the field, and the client never touched. The function is
+    // not even asked: a missing id is a fault in the form, which the service
+    // reports without taking a lock (see the service tests for why it, not
+    // the function, catches this).
+    const client = createWritableFakeClient([]);
+
+    const res = await handOver(client, { handoverNote: HANDOVER_NOTE });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toContain('newCoordinatorId');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM331_AC6_an_organiser_is_refused_with_403_and_never_queries', async () => {
+    // coordinatorOnly answers before the handler runs. An Organiser has no
+    // event to hand over, whatever the body says, and is refused without the
+    // function being called at all.
+    const client = createWritableFakeClient([ok(handedOverRow())]);
+
+    const res = await handOver(
+      client,
+      { newCoordinatorId: NEW_COORDINATOR_ID },
+      signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID),
+    );
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM331_AC6_returns_401_without_a_token_and_never_queries', async () => {
+    const client = createWritableFakeClient([ok(handedOverRow())]);
+
+    const res = await handOver(client, { newCoordinatorId: NEW_COORDINATOR_ID }, signedOut);
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over', async () => {
+    // A coordinator, so past coordinatorOnly, but not this event's coordinator.
+    // Only the function can tell, because only it reads the row under lock,
+    // and it answers 42501. The route turns that into a 403, not a 404: the
+    // caller can see this event in the shared queue already, so "not found"
+    // would be false and would hide nothing (errors.test.js gives the full
+    // argument).
+    const message = `only the coordinator assigned to event request ${REQUEST_ID} can hand it over`;
+    const client = createWritableFakeClient([dbFailure('42501', message)]);
+
+    const res = await handOver(client, { newCoordinatorId: NEW_COORDINATOR_ID });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe(message);
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM331_AC7_refuses_a_new_coordinator_who_is_not_an_event_coordinator', async () => {
+    // 22023: the person named does not hold the role, checked by the function
+    // while it holds a lock on their profile. 400, because the request named
+    // someone who cannot take the event; the outgoing coordinator needs to
+    // pick someone else.
+    const client = createWritableFakeClient([
+      dbFailure('22023', `user ${NEW_COORDINATOR_ID} is not an Event Coordinator, so cannot be handed event request ${REQUEST_ID}`),
+    ]);
+
+    const res = await handOver(client, { newCoordinatorId: NEW_COORDINATOR_ID });
+
+    expect(res.status).toBe(400);
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM331_AC6_refuses_a_status_that_does_not_allow_a_handover', async () => {
+    // 55000: AC6 names five statuses a handover is allowed from, and planning
+    // is not one of them (018's header explains why). 409, as for a submit
+    // that finds the request no longer a draft.
+    const client = createWritableFakeClient([
+      dbFailure('55000', `event request ${REQUEST_ID} has status planning, and cannot be handed over in that status`),
+    ]);
+
+    const res = await handOver(client, { newCoordinatorId: NEW_COORDINATOR_ID });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/has status planning/);
+    expect(client.calls).toHaveLength(1);
+  });
+});

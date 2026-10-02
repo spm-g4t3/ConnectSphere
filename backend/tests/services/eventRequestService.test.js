@@ -15,6 +15,14 @@
  *   AC5 -- submitting a draft for review
  *   AC6 -- a draft is submitted once and only once
  *
+ * SCRUM-331 (a subtask of SCRUM-327) adds reassignEventRequest, which calls
+ * reassign_event_request (migration 018). Its SCRUM331_* tests are named after
+ * SCRUM-327's criteria:
+ *   AC6 -- only the assigned coordinator may hand an event over, and only in
+ *          the statuses the AC names
+ *   AC7 -- the new coordinator can act on the event once it is handed over
+ *   AC9 -- every handover records who made it, and the note
+ *
  * SCRUM-330 (a subtask of SCRUM-327) moved the write half of submission into
  * the Postgres function submit_event_request (migration 016), which also
  * assigns the Event Coordinator. The SCRUM10_AC5 and SCRUM10_AC6 tests that
@@ -55,6 +63,7 @@ import {
   getEventRequestForOrganiser,
   requestEventClarification,
   respondToEventClarification,
+  reassignEventRequest,
 } from '../../src/services/eventRequestService.js';
 import {
   AppError,
@@ -62,6 +71,7 @@ import {
   NotFoundError,
   ConflictError,
   ServiceUnavailableError,
+  ForbiddenError,
 } from '../../src/errors.js';
 import { STATUS, canTransition } from '../../src/domain/eventRequestStatus.js';
 
@@ -812,6 +822,256 @@ describe("SCRUM-330: the function's refusals become typed errors", () => {
     expect(rpcCallsOf(client)).toHaveLength(1);
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(AppError);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-331 -- the assigned coordinator hands the event to a colleague
+// ---------------------------------------------------------------------------
+// reassignEventRequest(id, { newCoordinatorId, handoverNote }, assignedBy,
+// { client }) calls reassign_event_request (migration 018) through rpc. The
+// function locks the row, checks the caller is the assigned coordinator, the
+// status allows a handover and the new coordinator holds the role, then moves
+// assigned_coordinator_id (and reviewing_coordinator_id, before a decision)
+// and writes the history row, all in one transaction.
+//
+// The signature has the shape of updateEventRequest(id, changes, organiserId)
+// and respondToEventClarification, not four positional arguments. Two of the
+// values are uuids, and in a positional list they can be swapped without any
+// error. Grouping what the caller asked for in one object, and taking the
+// person acting from the token separately, makes that mistake impossible and
+// lets the route hand req.body over untouched.
+//
+// Deliberately not tested here, and where it is covered instead:
+//   - whether reviewing_coordinator_id moves with the handover: that rule
+//     belongs to the function (018). A fake returns whatever row it is given,
+//     so a test here could only check the fixture against itself.
+//   - the history row's contents: written inside the function, never returned.
+//   - how a coordinator is chosen on submission: pick_event_coordinator (015).
+
+/** The coordinator the event is handed to. COORDINATOR_ID is the one handing over. */
+const NEW_COORDINATOR_ID = '66666666-6666-4666-8666-666666666666';
+
+const HANDOVER_NOTE = 'On leave from Monday. The venue shortlist is in the notes.';
+
+/** The row reassign_event_request returns: undecided, so the reviewer moved too. */
+function reassignedRow() {
+  return storedRow({
+    status: STATUS.UNDER_REVIEW,
+    submitted_at: NOW.toISOString(),
+    assigned_coordinator_id: NEW_COORDINATOR_ID,
+    reviewing_coordinator_id: NEW_COORDINATOR_ID,
+  });
+}
+
+/** One queued answer: the function's. reassignEventRequest makes no read. */
+const reassigningWith = (rpcResult) => createFakeClient([rpcResult]);
+
+const reassign = (client, changes = { newCoordinatorId: NEW_COORDINATOR_ID, handoverNote: HANDOVER_NOTE }) =>
+  reassignEventRequest(REQUEST_ID, changes, COORDINATOR_ID, { client });
+
+describe('SCRUM-327 AC6, AC7, AC9: an event is handed to another coordinator', () => {
+  it('SCRUM331_AC9_records_who_handed_it_over', async () => {
+    // One call to the function, and nothing else, not even a read. Every
+    // question a read could answer (does the event exist, is the caller its
+    // coordinator, does the status allow it) is answered by the function
+    // while it holds the row lock. A read here would only give an answer that
+    // could be out of date by the time the function ran.
+    //
+    // The arguments are compared with toEqual, so an extra argument fails as
+    // surely as a missing one. p_assigned_by is the caller passed in from the
+    // token, never anything from the request body. A non-null assigned_by is
+    // also what marks this history row as a person's handover rather than a
+    // system assignment (014's convention).
+    const client = reassigningWith(ok(reassignedRow()));
+
+    await reassign(client);
+
+    expect(client.calls.map((call) => call.operation)).toEqual(['rpc']);
+
+    const [rpc] = rpcCallsOf(client);
+    expect(rpc.fn).toBe('reassign_event_request');
+    expect(rpc.args).toEqual({
+      p_event_request_id: REQUEST_ID,
+      p_new_coordinator_id: NEW_COORDINATOR_ID,
+      p_assigned_by: COORDINATOR_ID,
+      p_handover_note: HANDOVER_NOTE,
+    });
+  });
+
+  it('SCRUM331_AC9_sends_an_omitted_or_blank_note_as_null', async () => {
+    // The note is optional. 014 makes normalising a blank note to null the
+    // service's job, and 018 stores whatever it is given, so this is the only
+    // place it can happen. A note of spaces says nothing, and stored as text it
+    // would show up in the history as a note that is empty.
+    const omitted = reassigningWith(ok(reassignedRow()));
+    await reassign(omitted, { newCoordinatorId: NEW_COORDINATOR_ID });
+
+    const blank = reassigningWith(ok(reassignedRow()));
+    await reassign(blank, { newCoordinatorId: NEW_COORDINATOR_ID, handoverNote: '   ' });
+
+    expect(rpcCallsOf(omitted)[0].args.p_handover_note).toBeNull();
+    expect(rpcCallsOf(blank)[0].args.p_handover_note).toBeNull();
+  });
+
+  it('SCRUM331_AC7_the_new_coordinator_can_act_on_the_event', async () => {
+    // The row comes back through toEventRequest like every other row, so the
+    // caller sees the new coordinator as assignedCoordinatorId. It also sees
+    // reviewingCoordinatorId, because "can act on the event" means "can decide
+    // it", and 010's decided_by_is_reviewer makes the reviewer the only person
+    // who can. This is the column the function moves on an undecided handover.
+    //
+    // reviewingCoordinatorId needs COLUMNS and toEventRequest to carry
+    // reviewing_coordinator_id, which is part of the implementation.
+    // assigned_coordinator_id went in with SCRUM-330. reviewing_coordinator_id
+    // is one of the five decision columns from 010 that have never reached an
+    // API response, and this is the first of them to need to.
+    const client = reassigningWith(ok(reassignedRow()));
+
+    const record = await reassign(client);
+
+    expect(record.assignedCoordinatorId).toBe(NEW_COORDINATOR_ID);
+    expect(record.reviewingCoordinatorId).toBe(NEW_COORDINATOR_ID);
+    expect(Object.keys(record).some((key) => key.includes('_'))).toBe(false);
+  });
+
+  it('SCRUM331_AC7_every_read_carries_the_reviewer', async () => {
+    // The other half of the line above. Any read, not just the handover's
+    // own response, has to carry the reviewer, or a coordinator who opened
+    // the event a moment later would not see who can decide it. COLUMNS is
+    // what every read selects, so it is pinned through an ordinary read.
+    const client = createFakeClient([
+      ok(storedRow({ reviewing_coordinator_id: NEW_COORDINATOR_ID })),
+    ]);
+
+    const record = await getEventRequestById(REQUEST_ID, { client });
+
+    expect(client.calls[0].select).toContain('reviewing_coordinator_id');
+    expect(record.reviewingCoordinatorId).toBe(NEW_COORDINATOR_ID);
+  });
+
+  it('SCRUM331_AC9_writes_nothing_outside_the_function', async () => {
+    // Both writes, the event's new coordinator and the history row, happen
+    // inside the function's transaction. A .update() or .insert() from the
+    // service alongside the rpc would be a write outside it, which is exactly
+    // what 018 was written to prevent: a coordinator changed with no record of
+    // the handover, or a record of a handover that never happened.
+    const client = reassigningWith(ok(reassignedRow()));
+
+    await reassign(client);
+
+    expect(client.calls.some((call) => call.operation === 'update')).toBe(false);
+    expect(client.calls.some((call) => call.operation === 'insert')).toBe(false);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['blank', '   '],
+    ['malformed', 'not-a-real-id'],
+  ])('SCRUM331_AC7_refuses_a_new_coordinator_id_that_is_%s_before_calling_the_function', async (_label, value) => {
+    // The service checks this itself, before the rpc, rather than leaving it
+    // to the function. The function would refuse a null with 22023, but it
+    // never sees the other three. p_new_coordinator_id is a uuid parameter, so
+    // PostgREST fails to read '', '   ' or 'not-a-real-id' as one (22P02)
+    // before the function body runs. translateError does not recognise that
+    // code, so the Organiser's colleague would get a 500 for a form fault. A
+    // check here answers all four as a 400 that names the field, without
+    // taking a row lock to do it. The function's own check stays as the
+    // backstop for any caller that does not go through the service.
+    const client = createFakeClient([]);
+
+    const err = await errorFrom(reassign(client, { newCoordinatorId: value, handoverNote: HANDOVER_NOTE }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(fieldsIn(err)).toContain('newCoordinatorId');
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+
+describe("SCRUM-331: the function's refusals become typed errors", () => {
+  // One row per SQLSTATE 018 raises. Each asserts the function was actually
+  // called, so a refusal cannot pass by coming from somewhere else.
+  //
+  // `exact` marks the codes whose message is passed through untouched,
+  // matching 55000 and P0001 under SCRUM-330: the text comes from `raise
+  // exception` in our own function and was written for the person who made
+  // the request. 23514 is the exception. translateError wraps every check
+  // violation ("A value was rejected by the database: ..."), because most of
+  // them come from Postgres's own constraint messages. It cannot tell 018's
+  // check_violation from one of those by code alone, so the message is only
+  // required to contain the function's text.
+  it.each([
+    {
+      name: 'SCRUM331_AC6_reports_an_event_that_does_not_exist_as_not_found',
+      code: 'P0002',
+      message: `event request ${REQUEST_ID} not found`,
+      Err: NotFoundError,
+      status: 404,
+      exact: false,
+    },
+    {
+      // AC6 itself. Raised under the row lock, so it is also how the second of
+      // two simultaneous handovers is refused: by the time it runs, the caller
+      // no longer holds the event (see 018's header).
+      name: 'SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over',
+      code: '42501',
+      message: `only the coordinator assigned to event request ${REQUEST_ID} can hand it over`,
+      Err: ForbiddenError,
+      status: 403,
+      exact: true,
+    },
+    {
+      name: 'SCRUM331_AC6_refuses_a_status_that_does_not_allow_a_handover',
+      code: '55000',
+      message: `event request ${REQUEST_ID} has status planning, and cannot be handed over in that status`,
+      Err: ConflictError,
+      status: 409,
+      exact: true,
+    },
+    {
+      name: 'SCRUM331_AC7_refuses_a_new_coordinator_who_is_not_an_event_coordinator',
+      code: '22023',
+      message: `user ${NEW_COORDINATOR_ID} is not an Event Coordinator, so cannot be handed event request ${REQUEST_ID}`,
+      Err: ValidationError,
+      status: 400,
+      exact: true,
+    },
+    {
+      name: 'SCRUM331_AC7_refuses_a_handover_to_the_current_coordinator',
+      code: '23514',
+      message: `event request ${REQUEST_ID} is already assigned to that coordinator`,
+      Err: ValidationError,
+      status: 400,
+      exact: false,
+    },
+    {
+      // The guarded update matched no row. 018 says this cannot happen while
+      // the row lock is held, and that if it ever does, the locking has
+      // broken. The caller should still get a conflict, not a 500.
+      name: 'SCRUM331_AC6_reports_a_handover_that_lost_a_race_as_a_conflict',
+      code: '40001',
+      message: `event request ${REQUEST_ID} changed hands while this handover was being made`,
+      Err: ConflictError,
+      status: 409,
+      exact: true,
+    },
+  ])('$name', async ({ code, message, Err, status, exact }) => {
+    const client = reassigningWith(dbError(code, message));
+
+    const err = await errorFrom(reassign(client));
+
+    expect(rpcCallsOf(client)).toHaveLength(1);
+    expect(err).toBeInstanceOf(Err);
+    expect(err.status).toBe(status);
+    if (exact) {
+      expect(err.message).toBe(message);
+    } else {
+      expect(err.message).toContain(message);
+    }
   });
 });
 

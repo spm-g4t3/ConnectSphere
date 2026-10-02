@@ -18,6 +18,7 @@ import {
   NotFoundError,
   ConflictError,
   ServiceUnavailableError,
+  ForbiddenError,
 } from '../src/errors.js';
 
 /**
@@ -35,6 +36,10 @@ const TYPED_ERRORS = [
   // gets every check the other three get: status, message, hierarchy, name and
   // stack. The reason it exists is in the hierarchy block below.
   { name: 'ServiceUnavailableError', Err: ServiceUnavailableError, status: 503 },
+  // SCRUM-331. In the table for the same reason as the line above: it gets
+  // every check the others get. Why it exists at all, when errors.js has said
+  // there would be none, is argued in the hierarchy block below.
+  { name: 'ForbiddenError', Err: ForbiddenError, status: 403 },
 ];
 
 
@@ -98,6 +103,32 @@ describe('the error hierarchy', () => {
     expect(new ServiceUnavailableError('x')).not.toBeInstanceOf(ConflictError);
     expect(new ServiceUnavailableError('x')).not.toBeInstanceOf(ValidationError);
   });
+
+  it('keeps "you may not" apart from "there is no such thing"', () => {
+    // SCRUM-327 AC6: only the event's assigned coordinator may hand it over.
+    // When anyone else tries, the answer is 403.
+    //
+    // errors.js has deliberately had no ForbiddenError until now, and its
+    // reason still holds where it was given. An Organiser who asks for another
+    // Organiser's request gets 404, not 403, because a 403 would confirm the
+    // id exists and turn the endpoint into a way of discovering which ids are
+    // real. That reasoning applies to a caller who should not know the event
+    // exists.
+    //
+    // It does not apply to a handover. Only Event Coordinators can reach the
+    // reassign route at all (coordinatorOnly), and every coordinator already
+    // sees every queued event in the shared review queue (SCRUM-45). A 403
+    // tells a coordinator nothing about which ids exist that the queue has not
+    // already shown them. What it does tell them is the true reason: the event
+    // exists, and it is not theirs to hand on. A 404 there would be a false
+    // answer, protecting nothing.
+    //
+    // So the two stay separate types. A catch written for a missing request
+    // must not swallow a refusal, or the route would answer "not found" for an
+    // event the coordinator can see in their own queue.
+    expect(new ForbiddenError('x')).not.toBeInstanceOf(NotFoundError);
+    expect(new NotFoundError('x')).not.toBeInstanceOf(ForbiddenError);
+  });
 });
 
 
@@ -129,5 +160,6 @@ describe('ValidationError details', () => {
     expect(new NotFoundError('x').details).toBeUndefined();
     expect(new ConflictError('x').details).toBeUndefined();
     expect(new ServiceUnavailableError('x').details).toBeUndefined();
+    expect(new ForbiddenError('x').details).toBeUndefined();
   });
 });
