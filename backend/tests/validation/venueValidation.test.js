@@ -413,3 +413,89 @@ describe('venue search filters', () => {
     expect(fieldsIn(err)).toEqual(['location', 'minCapacity']);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-130 (SCRUM-17 AC2): the optional date window on a venue search.
+// ---------------------------------------------------------------------------
+describe('SCRUM17_AC2 a venue search may carry a date window', () => {
+  const START = '2026-10-01T09:00:00+08:00';
+  const END = '2026-10-01T17:00:00+08:00';
+
+  it('SCRUM17_AC2_keeps_the_window_trimmed', () => {
+    expect(validateSearchFilters({ startsAt: `  ${START}`, endsAt: `${END} ` })).toEqual({
+      startsAt: START,
+      endsAt: END,
+    });
+  });
+
+  it('SCRUM17_AC2_keeps_the_window_beside_the_other_filters', () => {
+    expect(
+      validateSearchFilters({ location: ' SCIS ', minCapacity: 40, startsAt: START, endsAt: END }),
+    ).toEqual({ location: 'SCIS', minCapacity: 40, startsAt: START, endsAt: END });
+  });
+
+  it.each([
+    ['blank', { startsAt: '', endsAt: '' }],
+    ['whitespace', { startsAt: '  ', endsAt: ' ' }],
+    ['null', { startsAt: null, endsAt: null }],
+    ['undefined', { startsAt: undefined, endsAt: undefined }],
+  ])('SCRUM17_AC2_%s_dates_give_no_keys_at_all', (_label, filters) => {
+    const result = validateSearchFilters(filters);
+    expect(result).toEqual({});
+    expect(Object.keys(result)).toEqual([]);
+  });
+
+  it('SCRUM17_AC2_a_missing_end_is_refused_on_endsAt', () => {
+    const err = errorFrom(() => validateSearchFilters({ startsAt: START }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'endsAt', message: 'is required when a start is given' }]);
+  });
+
+  it('SCRUM17_AC2_a_missing_start_is_refused_on_startsAt', () => {
+    const err = errorFrom(() => validateSearchFilters({ startsAt: '', endsAt: END }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'startsAt', message: 'is required when an end is given' }]);
+  });
+
+  it.each([
+    ['equal', START, START],
+    ['reversed', END, START],
+  ])('SCRUM17_AC2_an_%s_window_is_refused_on_endsAt', (_label, startsAt, endsAt) => {
+    const err = errorFrom(() => validateSearchFilters({ startsAt, endsAt }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'endsAt', message: 'must be later than the start' }]);
+  });
+
+  it('SCRUM17_AC2_a_space_where_the_plus_was_is_refused', () => {
+    const err = errorFrom(() =>
+      validateSearchFilters({ startsAt: '2026-10-01T09:00:00 08:00', endsAt: END }),
+    );
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toEqual(['startsAt']);
+  });
+
+  it('SCRUM17_AC2_window_faults_are_collected_with_minCapacity_faults', () => {
+    const err = errorFrom(() =>
+      validateSearchFilters({ minCapacity: 0, startsAt: START }),
+    );
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([
+      { field: 'minCapacity', message: 'must be greater than zero' },
+      { field: 'endsAt', message: 'is required when a start is given' },
+    ]);
+    expect(err.message).toMatch(/minCapacity: must be greater than zero; endsAt: is required/);
+  });
+
+  it('SCRUM17_AC2_a_search_window_has_no_cap_(a_two_year_window_passes)', () => {
+    expect(
+      validateSearchFilters({ startsAt: '2026-01-01T00:00:00Z', endsAt: '2028-01-01T00:00:00Z' }),
+    ).toEqual({ startsAt: '2026-01-01T00:00:00Z', endsAt: '2028-01-01T00:00:00Z' });
+  });
+
+  it('SCRUM17_AC2_a_past_window_passes', () => {
+    expect(
+      validateSearchFilters({ startsAt: '2001-01-01T00:00:00Z', endsAt: '2001-01-02T00:00:00Z' }),
+    ).toEqual({ startsAt: '2001-01-01T00:00:00Z', endsAt: '2001-01-02T00:00:00Z' });
+  });
+});

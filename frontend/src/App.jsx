@@ -47,7 +47,18 @@ function AppRoutes() {
         <Route path="/events" element={<ProtectedRoute><MyEventRequests /></ProtectedRoute>} />
         {/* VenueSearch was written, correct, and imported by nothing — the route
             rendered a placeholder over a working component. Swapped for the real one. */}
-        <Route path="/venue-search" element={<ProtectedRoute><VenueSearch /></ProtectedRoute>} />
+        {/* Internal roles only. Venue search is the Coordinator's planning tool
+            (SCRUM-20); an Organiser landing here found a list with nothing to do,
+            which read as "pick your venue". Belt to the backend's braces, as with
+            /review-queue: an old link now lands on /unauthorized. */}
+        <Route
+          path="/venue-search"
+          element={
+            <ProtectedRoute allowedRoles={["event_coordinator", "venue_staff"]}>
+              <VenueSearch />
+            </ProtectedRoute>
+          }
+        />
         {/* First real user of allowedRoles in the app, which is why ProtectedRoute had
             to start normalising both sides first: the token says `venue_staff`.
             The `dashboard dashboard--venue-staff` wrapper is not decoration — the

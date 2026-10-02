@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getVenueBookings, getVenueHistory } from "../services/venueService";
+import { formatTimestamp, shortId } from "../services/displayFormat";
 
 const BOOKINGS_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
@@ -57,18 +58,6 @@ const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 /** The raw key when the label table has not heard of it -- never blank. */
 function fieldLabel(key) {
   return HISTORY_FIELD_LABELS[key] ?? key;
-}
-
-/** First segment of a uuid, for display. The full value goes in a title. */
-function shortId(id) {
-  return typeof id === "string" ? id.slice(0, 8) : String(id);
-}
-
-/** A timestamp in the reader's locale, or the raw string if it will not parse. */
-function formatTimestamp(value) {
-  if (!value) return "unknown";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
 /**

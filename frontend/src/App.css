@@ -139,7 +139,7 @@ button { cursor: pointer; }
 /* The rule above makes every .dashboard p muted grey, which would render a
    failed retire in exactly the same voice as the empty-state text. Same
    colour pair as .app-nav__error. */
-.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .venue-block-form__error, .dashboard .coordinator-notifications__error, .dashboard .coordinator-notifications__row-error, .dashboard .venue-blocks__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 /* NECESSARY, not cosmetic. .dashboard li above forces flex with
    justify-content: space-between, which on a checkbox row throws the box to
    one edge of the card and its label to the other with the whole width
@@ -147,6 +147,76 @@ button { cursor: pointer; }
    bug SCRUM-110 fixed at :24-30. Scoped to .venue-form so the catalogue's
    own rows keep the spread layout they want. */
 .dashboard--venue-staff .venue-form li { border-top: 0; display: block; padding: 4px 0; }
+/* SCRUM-126. The block form, scoped like .venue-form above. The label grid is
+   the same shape as .venue-form > label; the start and end sit side by side on
+   a __row, which collapses to one column on a phone. Field errors are red
+   rather than the muted .dashboard p grey, so a fault under a control is not
+   mistaken for help text. */
+.dashboard--venue-staff .venue-block-form label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0 0; }
+.dashboard--venue-staff .venue-block-form__row { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dashboard--venue-staff .venue-block-form input, .dashboard--venue-staff .venue-block-form select, .dashboard--venue-staff .venue-block-form textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
+.dashboard--venue-staff .venue-block-form textarea { resize: vertical; }
+.dashboard--venue-staff .venue-block-form [aria-invalid="true"] { border-color: #a43c32; }
+.dashboard--venue-staff .venue-block-form__field-error { color: #a43c32; font-size: 0.84rem; margin: 6px 0 0; }
+.dashboard--venue-staff .venue-block-form__hint, .dashboard--venue-staff .venue-block-form__help { color: var(--muted); font-size: 0.84rem; margin: 6px 0 0; }
+.dashboard--venue-staff .venue-block-form button { margin: 20px 10px 0 0; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above, here on the field-error lists and the alert's list. */
+.dashboard--venue-staff .venue-block-form li { border-top: 0; display: block; padding: 2px 0; }
+@media (max-width: 720px) {
+  .dashboard--venue-staff .venue-block-form__row { grid-template-columns: 1fr; }
+}
+/* SCRUM-125. The booking-conflict warning a block over approved bookings
+   raises. The same amber pair as .status--awaiting-review: a warning to act
+   on, not a failure. */
+.dashboard--venue-staff .block-conflicts { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 8px; margin: 18px 0; padding: 14px 16px; }
+.dashboard--venue-staff .block-conflicts h3 { color: #8a5a00; font-size: 1rem; margin: 0 0 8px; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above. With justify-content: space-between each row's name, period
+   and id would be thrown to opposite edges of the card. */
+.dashboard--venue-staff .block-conflicts__list li { border-top: 1px solid rgba(138, 90, 0, 0.18); display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: flex-start; padding: 8px 0; }
+.dashboard--venue-staff .block-conflicts__list li:first-child { border-top: 0; }
+.dashboard--venue-staff .block-conflicts__actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.dashboard--venue-staff .block-conflicts__actions span { color: #8a5a00; font-size: 0.9rem; }
+/* SCRUM-127. The blocks panel. The notice reuses the .status--active green:
+   a save, possibly with bookings flagged, is a success to read, not a fault. */
+.dashboard--venue-staff .venue-blocks__notice { background: #e8f7f1; border-radius: 8px; margin: 12px 0; padding: 10px 14px; }
+.dashboard--venue-staff .venue-blocks__notice p { color: #17684f; margin: 4px 0; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above. With justify-content: space-between each flagged booking's
+   name, period and id would be thrown to opposite edges of the notice. */
+.dashboard--venue-staff .venue-blocks__flagged li { display: flex; justify-content: flex-start; flex-wrap: wrap; gap: 6px 12px; border-top: 0; padding: 4px 0; }
+.dashboard--venue-staff .venue-blocks__current { margin-top: 22px; }
+.dashboard--venue-staff .venue-blocks__current h3 { font-size: 1rem; margin: 0 0 8px; }
+/* Rows keep the .dashboard li spread -- details left, actions right, as in
+   the catalogue -- but top-aligned, because notes can wrap to several lines. */
+.dashboard--venue-staff .venue-blocks__list li { align-items: flex-start; }
+.dashboard--venue-staff .venue-blocks__item-main { align-items: center; display: flex; flex: 1; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.dashboard--venue-staff .venue-blocks__item-main .status-badge { margin-left: 0; }
+.dashboard--venue-staff .venue-blocks__notes, .dashboard--venue-staff .venue-blocks__clash-note, .dashboard--venue-staff .venue-blocks__ended-note, .dashboard--venue-staff .venue-blocks__item-main .venue-blocks__error { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
+.dashboard--venue-staff .venue-blocks__notes { color: var(--ink); white-space: pre-wrap; }
+.dashboard--venue-staff .venue-blocks__clash-note { color: #8a5a00; font-size: 0.86rem; }
+.dashboard--venue-staff .venue-blocks__ended-note { font-size: 0.84rem; }
+.dashboard--venue-staff .venue-blocks__item-actions { align-items: center; display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; }
+.dashboard--venue-staff .venue-blocks__item-actions span { color: #a43c32; font-size: 0.86rem; }
+.dashboard--venue-staff .venue-blocks__item--ended { opacity: 0.7; }
+/* The clashing block, in the same amber as the booking-conflict warning. */
+.dashboard--venue-staff .venue-blocks__item--clash { border-left: 3px solid #8a5a00; padding-left: 10px; }
+/* SCRUM-131. Rows wrap, so an open block history can take a full line under
+   the row's details and actions. */
+.dashboard--venue-staff .venue-blocks__list > li { flex-wrap: wrap; }
+.dashboard--venue-staff .venue-blocks__audit { color: var(--muted); flex-basis: 100%; font-size: 0.84rem; margin: 0; overflow-wrap: anywhere; }
+.dashboard--venue-staff .block-history { border-top: 1px solid var(--line); flex-basis: 100%; margin-top: 6px; padding-top: 8px; width: 100%; }
+.dashboard--venue-staff .block-history ul { list-style: none; margin: 0; padding: 0; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above. Without it each entry's header and its changes would be
+   spread to opposite edges of the row, with a rule between every line. */
+.dashboard--venue-staff .block-history li { display: block; border-top: 0; padding: 4px 0; }
+.dashboard--venue-staff .block-history .venue-history__meta { align-items: baseline; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.dashboard--venue-staff .block-history .venue-detail__help { color: var(--muted); font-size: 0.84rem; margin: 6px 0 0; }
+.dashboard--venue-staff .status--block-upcoming { background: #e9f1fb; color: #2b5285; }
+.dashboard--venue-staff .status--block-in_effect { background: #fff6e5; color: #8a5a00; }
+.dashboard--venue-staff .status--block-ended { background: #eef2f1; color: var(--muted); }
 /* History values are raw jsonb turned into text: long joined code lists, a
    whole week of opening hours, a JSON.stringify of last resort. Without
    these they overflow the card rather than wrapping, and the <pre> fallback
@@ -188,6 +258,22 @@ button { cursor: pointer; }
    panel only -- the queue's own rows genuinely want the spread layout, since
    that is what puts the Review button on the right. */
 .dashboard--coordinator .coordinator-request-detail li { border-top: 0; display: block; padding: 4px 0; }
+/* SCRUM-128. The Coordinator's notifications card. The row keeps the shared
+   .dashboard li flex -- it is what puts "Mark as read" on the right, as the
+   queue's Review button is -- but align-items: center would float the button
+   against the middle of a three-line body, so it is pinned to the top, and
+   the body is allowed to take the width. Unread rows get a teal edge and a
+   "New" pill; read rows are muted rather than hidden, so they stay readable
+   without competing with what still needs attention. */
+.dashboard--coordinator .coordinator-notifications li { align-items: flex-start; }
+.dashboard--coordinator .coordinator-notifications__body { flex: 1; min-width: 0; }
+.dashboard--coordinator .coordinator-notifications__body p { margin: 0 0 4px; }
+.dashboard--coordinator .coordinator-notifications__headline strong { color: var(--ink); }
+.dashboard--coordinator .coordinator-notifications__detail { overflow-wrap: anywhere; }
+.dashboard--coordinator .coordinator-notifications__time { font-size: 0.8rem; }
+.dashboard--coordinator .coordinator-notifications__item--unread { border-left: 3px solid var(--teal); padding-left: 12px; }
+.dashboard--coordinator .coordinator-notifications__item--read { opacity: 0.7; }
+.dashboard--coordinator .coordinator-notifications__new { background: #e8f7f1; border-radius: 999px; color: #17684f; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-left: 10px; padding: 3px 10px; text-transform: uppercase; }
 /* The handoff banner on venue search. Needs a rule of its own because
    .venue-search has no card styling at all -- it is a bare filter bar -- so
    without one the context reads as a stray sentence above the inputs rather
@@ -196,7 +282,15 @@ button { cursor: pointer; }
 .venue-search__context p { color: var(--muted); margin: 4px 0; }
 .venue-search__context .venue-search__back { margin: 0 0 10px; }
 .venue-search__filters { align-items: end; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(160px, 220px) auto; }
-.venue-search__filters input { border: 1px solid var(--line); border-radius: 6px; min-width: 0; padding: 10px 12px; }
+.venue-search__filters input, .venue-search__window input { border: 1px solid var(--line); border-radius: 6px; min-width: 0; padding: 10px 12px; }
+/* SCRUM-130: the optional date window sits on its own row under the filter
+   bar, so the existing three-column bar keeps its shape. align-items: start
+   because a field's error list makes its cell taller than its neighbour's. */
+.venue-search__window { align-items: start; display: grid; gap: 12px; grid-template-columns: minmax(0, 220px) minmax(0, 220px) auto; justify-content: start; margin-top: 12px; }
+.venue-search__window label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; }
+.venue-search__window > button { align-self: end; }
+.venue-search__field-error { color: #a43c32; font-size: 0.84rem; list-style: none; margin: 6px 0 0; padding: 0; }
+.venue-search__hint, .venue-search__window-note { color: var(--muted); font-size: 0.84rem; margin: 8px 0; }
 .my-event-requests__details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 10px; }
 .my-event-requests__details summary { color: var(--teal-dark); cursor: pointer; font-size: 0.9rem; font-weight: 700; }
 .my-event-requests__details dl { display: grid; gap: 8px 16px; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 14px 0 4px; }
@@ -259,7 +353,7 @@ button { cursor: pointer; }
    .my-event-requests__header { align-items: flex-start; flex-direction: column; }
    .my-event-requests__item { padding: 16px; }
    .event-request-form, .change-request-form { padding: 18px; }
-   .event-request-form__row, .venue-search__filters { grid-template-columns: 1fr; }
+   .event-request-form__row, .venue-search__filters, .venue-search__window { grid-template-columns: 1fr; }
    .my-event-requests__details dl { grid-template-columns: 1fr; gap: 3px; }
    .my-event-requests__details dd { margin-bottom: 8px; }
 }

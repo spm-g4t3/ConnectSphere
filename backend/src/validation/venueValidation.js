@@ -6,7 +6,8 @@
  * AC1: name, location and maximum capacity are mandatory, and capacity must be
  * a positive whole number.
  *
- * Pure and synchronous -- no database, no imports beyond the error types. That
+ * Pure and synchronous -- no database, no imports beyond the error types and
+ * the shared timestamp rules (SCRUM-130). That
  * keeps it unit-testable without credentials, which is the point: the database
  * constraints in 002_venues.sql already guarantee correctness, and this layer
  * exists to say what went wrong in words a Venue Staff member can act on.
@@ -19,6 +20,7 @@
  */
 
 import { ValidationError } from '../errors.js';
+import { checkTimeWindow } from './timestampValidation.js';
 
 /** HH:MM or HH:MM:SS, with real hour and minute ranges. */
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)(:([0-5]\d))?$/;
@@ -320,9 +322,16 @@ function isUnset(value) {
  * every search, not an option a caller can switch off, so searchVenues applies
  * it unconditionally and no filter here can reach a retired venue.
  *
+ * SCRUM-130 adds an optional startsAt/endsAt window, both or neither, through
+ * the same checkTimeWindow the block window uses. No length cap: how long an
+ * event may run is SCRUM-20's rule, and a search should not invent one.
+ *
  * @param {object} [filters]
  * @param {string} [filters.location]     matched as a substring, case-insensitively
  * @param {number} [filters.minCapacity]  venues that seat at least this many
+ * @param {string} [filters.startsAt]     SCRUM-130: ISO 8601 with an offset
+ * @param {string} [filters.endsAt]       SCRUM-130: ISO 8601 with an offset;
+ *                                        later than startsAt
  * @returns {object} a normalised copy holding only the filters actually supplied
  * @throws {ValidationError}
  */
@@ -340,6 +349,14 @@ export function validateSearchFilters(filters = {}) {
 
   if (!isUnset(filters.minCapacity)) {
     normalised.minCapacity = checkCapacity(errors, 'minCapacity', filters.minCapacity);
+  }
+
+  // Keys only when a window was given, so a dateless search normalises to
+  // exactly what it did before SCRUM-130.
+  const window = checkTimeWindow(errors, ['startsAt', 'endsAt'], filters.startsAt, filters.endsAt);
+  if (window !== null) {
+    normalised.startsAt = window.start;
+    normalised.endsAt = window.end;
   }
 
   throwIfInvalid(errors);

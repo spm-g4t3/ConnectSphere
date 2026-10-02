@@ -65,7 +65,7 @@ export default function MyEventRequests() {
       }
       pendingClarificationId.current = null;
       setError(null);
-    } catch (err) {
+    } catch {
       setError("Could not load your event requests.");
     } finally {
       setLoading(false);

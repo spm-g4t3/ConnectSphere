@@ -1,7 +1,7 @@
 // EventCoordinatorDashboard.jsx
 //
 // The Event Coordinator's landing page: a greeting, the review queue, and the
-// pending-bookings stub.
+// notifications.
 //
 // SCRUM-45 replaced the first section wholesale. It used to call
 // getEventsNeedingAttention — a stub that console.warn'd and returned [], and
@@ -12,29 +12,18 @@
 // part of this screen with a route of its own (/review-queue). Same move, and
 // the same reason, as VenueCatalogue leaving VenueStaffDashboard.
 //
-// The pending-bookings section below stays a stub deliberately. Steps 4 and 5
-// of the workflow — asking for a specific venue, and Venue Staff approving it
-// — are out of this story's scope because 009_bookings.sql has no status,
-// approval or requester columns to drive them. The section is the seat that
-// work lands in; deleting it now just means re-adding it then.
+// SCRUM-128 replaced the pending-bookings stub that sat below the queue. It
+// called a venueService stub that console.warn'd and returned [] with no
+// endpoint behind it, and that stub is now deleted. Its seat now holds CoordinatorNotifications: when a
+// Venue Staff member blocks a venue over an approved booking, the booking is
+// flagged for review and every Coordinator is notified there (SCRUM-17 AC3).
+// Both sections are components of their own, so this file is only the page
+// around them.
 
-import { useEffect, useState } from "react";
-import { getPendingVenueBookings } from "../services/venueService";
 import ReviewQueue from "./ReviewQueue";
+import CoordinatorNotifications from "./CoordinatorNotifications";
 
 export default function EventCoordinatorDashboard({ user }) {
-  const [pendingBookings, setPendingBookings] = useState([]);
-
-  // Still a stub with no endpoint behind it, so it resolves to [] rather than
-  // rejecting. The .catch is here for the same reason VenueStaffDashboard's
-  // is: the day that stops being true should show up as an empty section
-  // rather than as an unhandled rejection in the console.
-  useEffect(() => {
-    getPendingVenueBookings()
-      .then(setPendingBookings)
-      .catch(() => setPendingBookings([]));
-  }, []);
-
   return (
     <div className="dashboard dashboard--coordinator">
       {/* user.name does not exist: auth.js returns { id, email, role } and
@@ -48,17 +37,8 @@ export default function EventCoordinatorDashboard({ user }) {
           on the Venue Staff dashboard. */}
       <ReviewQueue />
 
-      <section>
-        <h2>Pending venue bookings</h2>
-        <ul>
-          {pendingBookings.map((booking) => (
-            <li key={booking.id}>
-              {booking.venueName} — {booking.eventName}
-            </li>
-          ))}
-          {pendingBookings.length === 0 && <p>No pending bookings.</p>}
-        </ul>
-      </section>
+      {/* Also a direct child of .dashboard, for the same card styling. */}
+      <CoordinatorNotifications />
     </div>
   );
 }

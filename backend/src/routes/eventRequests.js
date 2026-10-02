@@ -88,29 +88,12 @@ import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js'
 // by contrast, imports the client statically; never pull it in here.
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
-import { AppError } from '../errors.js';
+// Credential-free too: http/handleError.js imports only errors.js.
+import { createErrorHandler } from '../http/handleError.js';
 
 
-/**
- * Map an error to a response.
- *
- * The same helper as src/routes/venues.js, which is the established pattern on
- * this codebase: every typed error already carries its own status, so a route
- * never decides what a failure means. When a third router appears this is worth
- * lifting into one module; two copies do not yet earn one.
- */
-function handleError(err, res) {
-  if (err instanceof AppError) {
-    const body = { error: err.message };
-    if (err.details) body.details = err.details;
-    return res.status(err.status).json(body);
-  }
-
-  // Untyped means nobody anticipated it, so the driver message is logged for
-  // whoever is on call and never returned to the Organiser.
-  console.error('Unexpected error in event requests route:', err);
-  return res.status(500).json({ error: 'Unexpected server error' });
-}
+/** Map an error to a response; see src/http/handleError.js (SCRUM-127). */
+const handleError = createErrorHandler('event requests route');
 
 
 /**

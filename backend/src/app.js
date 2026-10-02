@@ -13,6 +13,7 @@ import cors from 'cors';
 import authRoutes from './routes/auth.js';
 import eventRequestRoutes from './routes/eventRequests.js';
 import venueRoutes from './routes/venues.js';
+import notificationRoutes from './routes/notifications.js';
 
 const app = express();
 
@@ -28,6 +29,10 @@ app.use('/api/event-requests', eventRequestRoutes);
 // authorises instead. It now runs behind requireAuth, and its writes behind
 // requireRole(VENUE_STAFF).
 app.use('/api/venues', venueRoutes);
+
+// SCRUM-128: the signed-in user's own notifications. Behind requireAuth and
+// scoped to the caller; see the route file for why there is no role gate.
+app.use('/api/notifications', notificationRoutes);
 
 const PORT = process.env.PORT || 5000;
 

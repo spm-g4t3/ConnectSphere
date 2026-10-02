@@ -24,6 +24,18 @@
  *           is written from the Venue Staff member's seat.
  *   history Venue Staff only. It is an audit trail, and it names who changed
  *           what.
+ *   blocks  writes Venue Staff only (SCRUM-127, part of SCRUM-17): creating,
+ *           amending and removing a block is the story's whole seat.
+ *           Reads are Venue Staff and Event Coordinators (SCRUM-130). The
+ *           venue calendar (SCRUM-178) shows Coordinators a venue's blocks
+ *           as "Blocked", and Coordinators are who resolve the bookings a
+ *           block flags. Organisers, Attendees and Technical Support still
+ *           get 403: a block's notes are staff's own words and its rows name
+ *           who made it, and what those roles need -- "is this venue free
+ *           then?" -- is answered by /search's date window instead.
+ *           A block's history is Venue Staff only (SCRUM-131), like venue
+ *           history: it keeps superseded notes and names every editor, and
+ *           Coordinators already see the block as it stands.
  */
 
 import express from 'express';
@@ -38,29 +50,22 @@ import {
   getVenueHistory,
   getBookingsForVenue,
 } from '../services/venueService.js';
+import {
+  listVenueBlocks,
+  createVenueBlock,
+  updateVenueBlock,
+  removeVenueBlock,
+  getVenueBlockHistory,
+} from '../services/venueBlockService.js';
 import { validateVenueId } from '../validation/venueValidation.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
-import { AppError } from '../errors.js';
+import { createErrorHandler } from '../http/handleError.js';
 
 
-/**
- * Map an error to a response.
- *
- * Every typed error already carries its own status, so a route never decides
- * what a failure means. Same helper as routes/eventRequests.js.
- */
-function handleError(err, res) {
-  if (err instanceof AppError) {
-    const body = { error: err.message };
-    if (err.details) body.details = err.details;
-    return res.status(err.status).json(body);
-  }
-
-  console.error('Unexpected error in venues route:', err);
-  return res.status(500).json({ error: 'Unexpected server error' });
-}
+/** Map an error to a response; see src/http/handleError.js (SCRUM-127). */
+const handleError = createErrorHandler('venues route');
 
 
 /**
@@ -86,6 +91,16 @@ function parseSearchFilters(query) {
 
   if (query.minCapacity !== undefined && String(query.minCapacity).trim() !== '') {
     filters.minCapacity = Number(query.minCapacity);
+  }
+
+  // SCRUM-130: passed through as sent, like location -- timestamps are text,
+  // so there is nothing to convert, and the validator owns every rule.
+  if (query.startsAt !== undefined) {
+    filters.startsAt = query.startsAt;
+  }
+
+  if (query.endsAt !== undefined) {
+    filters.endsAt = query.endsAt;
   }
 
   return filters;
@@ -139,6 +154,8 @@ export function createVenueRouter({
 } = {}) {
   const router = express.Router();
   const venueStaffOnly = requireRole(ROLE.VENUE_STAFF);
+  // SCRUM-130: reading blocks is wider than writing them; see the header.
+  const blockReaders = requireRole(ROLE.VENUE_STAFF, ROLE.EVENT_COORDINATOR);
 
   // Every route below needs to know who is calling -- reads to prove they are
   // signed in, writes to attribute the change.
@@ -177,6 +194,16 @@ export function createVenueRouter({
    * Declared before GET /:id, and that order is load-bearing rather than
    * stylistic: Express matches in declaration order, so /:id would otherwise
    * swallow this with id === 'search'. The frontend already calls this path.
+   *
+   * SCRUM-17 AC2 (SCRUM-130): ?startsAt=&endsAt=, both or neither, leaves out
+   * venues blocked at any point in that window. The offsets must be
+   * URL-encoded: a raw '+' in a query string decodes to a space, so
+   * '...T09:00:00+08:00' arrives as '...T09:00:00 08:00'. That is answered
+   * with 400 rather than guessed back into '+' -- a guessed offset is a
+   * silently different instant. axios params encodes it; Z needs no encoding.
+   *
+   * Statuses: 200; 400 for a bad capacity, or a one-sided, malformed or
+   * reversed window; 401; 500.
    */
   router.get('/search', async (req, res) => {
     try {
@@ -222,6 +249,110 @@ export function createVenueRouter({
   router.get('/:id/history', venueStaffOnly, async (req, res) => {
     try {
       res.status(200).json(await getVenueHistory(req.params.id));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-17: a venue's active blocks, soonest first. A bare array, like
+   * /:id/history; none is 200 [].
+   *
+   * SCRUM-130 (AC2): ?from=&to=, both or neither, narrows it to blocks
+   * overlapping [from, to), ended ones included, for the venue calendar. At
+   * most 400 days. The '+' in an offset must be URL-encoded, as /search
+   * explains.
+   *
+   * Statuses: 200; 400 for a malformed id, or a one-sided, malformed or
+   * reversed window, or one over 400 days; 401; 403 unless Venue Staff or an
+   * Event Coordinator; 500.
+   */
+  router.get('/:id/blocks', blockReaders, async (req, res) => {
+    try {
+      const window = { from: req.query.from, to: req.query.to };
+      res.status(200).json(await listVenueBlocks(req.params.id, window));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-17 AC4 (SCRUM-131): who created, amended and removed a block, and
+   * when, newest first. A bare array, like /:id/history. Removed blocks still
+   * answer: their trail is what this route keeps.
+   *
+   * Statuses: 200; 400 for a malformed id; 401; 403 unless Venue Staff; 404
+   * for a missing venue or a block not on it; 500.
+   */
+  router.get('/:id/blocks/:blockId/history', venueStaffOnly, async (req, res) => {
+    try {
+      res.status(200).json(await getVenueBlockHistory(req.params.id, req.params.blockId));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-17 AC1 and AC3: block a venue for a period.
+   *
+   * The body goes to the service as sent, without changeSet: the block
+   * validators ignore unknown keys, so a body userId never reaches the RPC,
+   * and a non-object body is refused there with its own message. The acting
+   * user is still only ever actingUser(req).
+   *
+   * Statuses: 201 {block, flaggedBookings}; 400; 401; 403; 404 for a missing
+   * venue; 409 with code VENUE_RETIRED, BLOCK_OVERLAPS_BLOCK or
+   * BLOCK_BOOKING_CONFLICT (resend with confirmOverride and the listed
+   * booking ids to override); 500.
+   */
+  router.post('/:id/blocks', venueStaffOnly, async (req, res) => {
+    try {
+      const result = await createVenueBlock(req.params.id, req.body, actingUser(req));
+      res.status(201).json(result);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-17 AC4 (and AC3 when the change widens the period): shorten,
+   * extend, or change the reason or notes. PATCH because only the fields sent
+   * change.
+   *
+   * Statuses: 200 {block, flaggedBookings}; 400; 401; 403; 404 for a missing
+   * venue or a block not on it; 409 with code BLOCK_REMOVED, BLOCK_ENDED,
+   * VENUE_RETIRED, BLOCK_OVERLAPS_BLOCK or BLOCK_BOOKING_CONFLICT; 500.
+   */
+  router.patch('/:id/blocks/:blockId', venueStaffOnly, async (req, res) => {
+    try {
+      const result = await updateVenueBlock(
+        req.params.id,
+        req.params.blockId,
+        req.body,
+        actingUser(req),
+      );
+      res.status(200).json(result);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-17 AC4: remove a block.
+   *
+   * DELETE, unlike venue retirement's POST /:id/retire. Removal is also a
+   * soft delete, but from the client's side the block really is gone -- it
+   * leaves the list, and nothing about it can be changed again -- whereas a
+   * retired venue stays readable by id. 204 because there is
+   * nothing left to show.
+   *
+   * Statuses: 204; 400; 401; 403; 404; 409 with code BLOCK_REMOVED or
+   * BLOCK_ENDED; 500.
+   */
+  router.delete('/:id/blocks/:blockId', venueStaffOnly, async (req, res) => {
+    try {
+      await removeVenueBlock(req.params.id, req.params.blockId, actingUser(req));
+      res.status(204).end();
     } catch (err) {
       handleError(err, res);
     }
