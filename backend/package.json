@@ -14,7 +14,8 @@
     "request:check": "node scripts/check-event-request-service.js",
     "change-request:check": "node scripts/check-event-change-request-service.js",
     "routes:check": "node scripts/check-event-request-routes.js",
-    "venue-routes:check": "node scripts/check-venue-routes.js"
+    "venue-routes:check": "node scripts/check-venue-routes.js",
+    "assignment:check": "node scripts/check-coordinator-assignment.js"
   },
   "devDependencies": {
     "nodemon": "^3.1.0",
