@@ -1500,3 +1500,83 @@ describe('SCRUM17_AC4 GET /api/venues/:id/blocks/:blockId/history', () => {
     consoleError.mockRestore();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-186: the turnaround between events reaches the API
+// ---------------------------------------------------------------------------
+describe('SCRUM186 turnaround through the venue routes', () => {
+  it('SCRUM186_POST_with_turnaround_25_answers_400_on_turnaroundMinutes_with_no_rpc', async () => {
+    const res = await request(appWith()).post('/api/venues').send({
+      name: 'Hall A',
+      location: 'SCIS',
+      maxCapacity: 40,
+      turnaroundMinutes: 25,
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(['turnaroundMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM186_POST_with_turnaround_60_sends_60_and_answers_201', async () => {
+    rpc.mockResolvedValueOnce(ok(VENUE_ID));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ turnaround_minutes: 60 }))));
+
+    const res = await request(appWith()).post('/api/venues').send({
+      name: 'Hall A',
+      location: 'SCIS',
+      maxCapacity: 40,
+      turnaroundMinutes: 60,
+    });
+
+    expect(res.status).toBe(201);
+    expect(rpc.mock.calls[0][1].p_turnaround_minutes).toBe(60);
+    expect(res.body.turnaroundMinutes).toBe(60);
+  });
+
+  it('SCRUM186_PATCH_turnaround_0_answers_200_and_the_rpc_gets_0', async () => {
+    rpc.mockResolvedValueOnce(ok(null));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ turnaround_minutes: 0 }))));
+
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ turnaroundMinutes: 0 });
+
+    expect(res.status).toBe(200);
+    const [fn, payload] = rpc.mock.calls[0];
+    expect(fn).toBe('update_venue');
+    expect(payload.p_turnaround_minutes).toBe(0);
+    expect(res.body.turnaroundMinutes).toBe(0);
+  });
+
+  it('SCRUM186_PATCH_with_a_string_turnaround_answers_400_with_no_rpc', async () => {
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ turnaroundMinutes: '30' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(['turnaroundMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM186_PATCH_turnaround_from_a_non_venue_staff_role_is_refused', async () => {
+    const res = await request(appWith(signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID)))
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ turnaroundMinutes: 30 });
+
+    expect(res.status).toBe(403);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM186_GET_by_id_includes_turnaroundMinutes', async () => {
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ turnaround_minutes: 45 }))));
+
+    const res = await request(appWith()).get(`/api/venues/${VENUE_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.turnaroundMinutes).toBe(45);
+    expect(res.body).not.toHaveProperty('turnaround_minutes');
+  });
+});

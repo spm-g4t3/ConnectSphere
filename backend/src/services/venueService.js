@@ -15,6 +15,10 @@
  * deliberately does not check -- unknown lookup codes, and writes made outside
  * this service -- and translateError turns those into typed errors.
  *
+ * SCRUM-186: a venue's turnaround between events is written by create and
+ * update and read back by getVenueById only. Search and the list leave it out
+ * until SCRUM-139 has a use for it.
+ *
  * SCRUM-130 (part of SCRUM-17 AC2): searchVenues leaves out venues blocked in
  * an optional date window, through venueBlockService's findBlockedVenueIds.
  */
@@ -28,6 +32,7 @@ import {
   validateSearchFilters,
 } from '../validation/venueValidation.js';
 import { findBlockedVenueIds } from './venueBlockService.js';
+import { DEFAULT_TURNAROUND_MINUTES } from '../domain/turnaroundOptions.js';
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -42,7 +47,8 @@ function translateError(error) {
   const code = error.code;
   const detail = error.message ?? '';
 
-  // check constraint: capacity <= 0, closes_at <= opens_at, blank name
+  // check constraint: capacity <= 0, closes_at <= opens_at, blank name, a
+  // turnaround outside the allowed list (017)
   if (code === '23514') {
     return new ValidationError(`A value was rejected by the database: ${detail}`);
   }
@@ -90,6 +96,8 @@ function translateError(error) {
  * @param {string[]} [input.accessibility]  accessibility feature codes
  * @param {string[]} [input.facilities]     facility codes
  * @param {Array<{day_of_week: number, opens_at: string, closes_at: string}>} [input.hours]
+ * @param {number} [input.turnaroundMinutes]  SCRUM-186: one of 0, 15, 30, 45,
+ *                                            60, 90, 120; defaults to 0 (none)
  * @param {string|null} userId  the Venue Staff member making the change
  * @returns {Promise<object>} the created venue, fully populated
  */
@@ -105,6 +113,7 @@ export async function createVenue(input, userId = null) {
     p_accessibility: venue.accessibility ?? [],
     p_facilities: venue.facilities ?? [],
     p_hours: venue.hours ?? [],
+    p_turnaround_minutes: venue.turnaroundMinutes ?? DEFAULT_TURNAROUND_MINUTES,
     p_user_id: userId,
   });
 
@@ -119,6 +128,9 @@ export async function createVenue(input, userId = null) {
  * Omitting a field leaves it unchanged. Supplying an array REPLACES that
  * attribute set entirely, and supplying an empty array clears it -- so
  * forgetting to send facilities can never silently wipe them.
+ *
+ * SCRUM-186: turnaroundMinutes follows the same rule -- omitted keeps it, and
+ * 0 sets it to none.
  *
  * @param {string} id
  * @param {object} changes  same shape as createVenue input, all optional
@@ -137,6 +149,9 @@ export async function updateVenue(id, changes, userId = null) {
     p_accessibility: update.accessibility ?? null,
     p_facilities: update.facilities ?? null,
     p_hours: update.hours ?? null,
+    // ?? and never ||: NULL means "keep the current value", so || would turn
+    // a change back to 0 into no change at all.
+    p_turnaround_minutes: update.turnaroundMinutes ?? null,
     p_user_id: userId,
   });
 
@@ -151,6 +166,8 @@ export async function updateVenue(id, changes, userId = null) {
  * Retired venues are returned. AC3 requires a retired venue to stay viewable;
  * hiding them from *searches* is SCRUM-111's job, not this function's.
  *
+ * SCRUM-186: includes turnaroundMinutes, which the edit form prefills from.
+ *
  * @param {string} id
  * @returns {Promise<object>}
  */
@@ -158,7 +175,7 @@ export async function getVenueById(id) {
   const { data, error } = await supabase
     .from('venues')
     .select(`
-      id, name, location, max_capacity, retired_at,
+      id, name, location, max_capacity, turnaround_minutes, retired_at,
       created_at, updated_at, last_modified_by,
       venue_room_layouts ( room_layout_code ),
       venue_accessibility_features ( accessibility_feature_code ),
@@ -178,6 +195,7 @@ export async function getVenueById(id) {
     name: data.name,
     location: data.location,
     maxCapacity: data.max_capacity,
+    turnaroundMinutes: data.turnaround_minutes,
     retiredAt: data.retired_at,
     createdAt: data.created_at,
     updatedAt: data.updated_at,

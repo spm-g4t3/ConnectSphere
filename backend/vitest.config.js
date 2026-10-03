@@ -36,6 +36,9 @@ export default defineConfig({
         'src/routes/notifications.js': FULL,
         'src/domain/venueBlockReason.js': FULL,
         'src/domain/bookingStatus.js': FULL,
+        // SCRUM-186: a new file only this story owns, so it can gate without
+        // pulling in SCRUM-15's shared venueService.js or venueValidation.js.
+        'src/domain/turnaroundOptions.js': FULL,
       },
     },
   },
