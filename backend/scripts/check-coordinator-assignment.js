@@ -737,6 +737,37 @@ async function main() {
     409,
   );
 
+  // A null caller, straight at the function. reassignEventRequest always passes
+  // the caller it is given, and the route always gives it req.user.id from the
+  // token, so this path is only reachable by a direct call: anything holding
+  // the secret key, a future service, or a hand-run script.
+  //
+  // 018 refuses `p_assigned_by is null` explicitly, before comparing it with
+  // the event's coordinator, and that check was added during review. Without
+  // it, `is distinct from` would compare a null caller with a null coordinator,
+  // find them not distinct, and let the caller through.
+  //
+  // So the event matters. Against s1, which has a coordinator, `null is
+  // distinct from C` is true and the call is refused whether or not the
+  // explicit check exists, so a 42501 there proves nothing about it. The only
+  // events with no coordinator are drafts and cancelled ones (017 allows both).
+  // This is a cancelled one with none. With the explicit check it is refused as
+  // the caller (42501). Without it, the caller check would pass and the status
+  // check would refuse it instead (55000), so the code alone says which guard
+  // caught it.
+  const unheld = await insertEvent('cancelled_unheld', { status: 'cancelled', coordinator: null });
+  const { error: nullCallerError } = await supabase.rpc('reassign_event_request', {
+    p_event_request_id: unheld,
+    p_new_coordinator_id: receiver,
+    p_assigned_by: null,
+    p_handover_note: null,
+  });
+  check(
+    'a null caller is refused as the caller (42501), even on an event nobody holds',
+    nullCallerError?.code === '42501',
+    nullCallerError ? `${nullCallerError.code}: ${nullCallerError.message}` : 'the call was ACCEPTED',
+  );
+
   const afterRefusals = await historyOf(s1.id);
   const { data: s1Row } = await supabase
     .from('event_requests')
