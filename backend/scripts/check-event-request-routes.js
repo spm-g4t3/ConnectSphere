@@ -53,6 +53,11 @@ let draftEventId = null;
 let server = null;
 let failures = 0;
 
+// Errors from cleanup's own deletes, which supabase-js returns rather than
+// throws, so a delete a foreign key refuses is silent unless kept. See
+// cleanup() and the post-cleanup checks at the bottom of the file.
+const cleanupErrors = [];
+
 function check(label, passed, detail = '') {
   console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
   if (!passed) failures += 1;
@@ -93,44 +98,133 @@ async function createTestUser(label, role = 'event_organiser') {
   return data.user;
 }
 
-async function createEventRequest(ownerId, name, status) {
+/**
+ * A fixture event request, inserted directly through the admin client.
+ *
+ * SCRUM-330: assigned_coordinator_id is set explicitly. 017's constraint
+ * requires a coordinator on every row past draft, and these two rows are
+ * inserted straight at 'submitted'. They are fixtures for the ownership,
+ * queue and status-display checks, not a test of submission, so they do not
+ * go through submit_event_request. Submission is exercised separately below,
+ * by draftEventId, which is created, completed and submitted over HTTP and so
+ * is assigned by the real function. A fixed coordinator also keeps these
+ * fixtures deterministic, rather than depending on the selection rule and on
+ * whoever else is in the database.
+ *
+ * The coordinator is this script's own throwaway one. Giving it two fixture
+ * rows also raises its active-event count, which makes it less likely to be
+ * chosen for a real Organiser's submission while the script is running.
+ */
+async function createEventRequest(ownerId, name, status, assignedCoordinatorId) {
   const { data, error } = await supabase
     .from('event_requests')
-    .insert({ organiser_id: ownerId, event_name: name, status })
+    .insert({
+      organiser_id: ownerId,
+      event_name: name,
+      status,
+      assigned_coordinator_id: assignedCoordinatorId,
+    })
     .select()
     .single();
   if (error) throw new Error(`could not create test event request: ${error.message}`);
   return data.id;
 }
 
+/** Run one cleanup step, keeping its error rather than dropping it. */
+async function remove(label, query) {
+  const { error } = await query;
+  if (error) cleanupErrors.push(`${label}: ${error.message}`);
+}
+
 async function cleanup() {
   if (server) await new Promise((resolve) => server.close(resolve));
 
-  // Change requests before event requests, for the same reason event requests
-  // come before users: event_change_requests.event_request_id references the
-  // row being deleted, so deleting the event first fails and leaves both
-  // behind -- and the failure surfaces as a confusing FK refusal on a delete
-  // nobody was thinking about. requested_by references auth.users too, so this
-  // has to run before the user deletes below as well.
-  for (const id of [draftEventId, eventId, otherEventId]) {
-    if (!id) continue;
-    await supabase.from('event_change_requests').delete().eq('event_request_id', id);
+  const eventIds = [draftEventId, eventId, otherEventId].filter(Boolean);
+
+  // Change requests and assignment history before event requests, for the
+  // same reason event requests come before users: both reference the row
+  // being deleted, so deleting the event first fails and leaves everything
+  // behind, and the failure surfaces as a confusing FK refusal on a delete
+  // nobody was thinking about.
+  //
+  // Assignment history is new with SCRUM-330. draftEventId is submitted over
+  // HTTP, so submit_event_request writes a history row for it, and that
+  // table's event_request_id is ON DELETE RESTRICT (014) on purpose. Its
+  // new_coordinator_id is restricted too, which is a second reason it has to
+  // go before the coordinator's user below.
+  //
+  // requested_by and processed_by on change requests reference auth.users, so
+  // these also have to run before the user deletes.
+  for (const id of eventIds) {
+    await remove('change requests', supabase.from('event_change_requests').delete().eq('event_request_id', id));
+    await remove('assignment history', supabase.from('event_request_assignment_history').delete().eq('event_request_id', id));
   }
 
-  // Event requests before users: organiser_id is ON DELETE RESTRICT, so
-  // deleting the user first fails and leaves both behind.
-  if (eventId) await supabase.from('event_requests').delete().eq('id', eventId);
-  if (otherEventId) await supabase.from('event_requests').delete().eq('id', otherEventId);
-  if (draftEventId) await supabase.from('event_requests').delete().eq('id', draftEventId);
+  // Event requests before users: organiser_id and assigned_coordinator_id are
+  // both ON DELETE RESTRICT, so deleting a user first fails and leaves both
+  // behind.
+  for (const id of eventIds) {
+    await remove('event request', supabase.from('event_requests').delete().eq('id', id));
+  }
 
   // profiles cascades from auth.users, so deleting the user is enough -- but it
   // is deleted explicitly here so a failure shows up as its own error rather
   // than as a confusing FK refusal on the user delete.
   for (const id of [organiserId, otherOrganiserId, coordinatorId]) {
     if (!id) continue;
-    await supabase.from('profiles').delete().eq('id', id);
-    await supabase.auth.admin.deleteUser(id);
+    await remove('profile', supabase.from('profiles').delete().eq('id', id));
+    await remove('auth user', supabase.auth.admin.deleteUser(id));
   }
+}
+
+/**
+ * Prove the cleanup, after it has run.
+ *
+ * The count at the end of main() runs before cleanup by design: it asserts
+ * that this run created exactly its three rows. It cannot move after cleanup,
+ * because there it would be asking a different question with a different
+ * answer (zero). It was also the last check printed, so a run whose cleanup
+ * then failed still ended on "All checks passed ... cleaned up". That is how
+ * a leftover row from this script went unnoticed. These checks run after
+ * cleanup, in addition to that count, and are counted before the final
+ * message is chosen.
+ */
+async function verifyCleanup() {
+  check('cleanup ran without errors', cleanupErrors.length === 0, cleanupErrors.join('; '));
+
+  const { count: eventsLeft } = await supabase
+    .from('event_requests')
+    .select('id', { count: 'exact', head: true })
+    .like('event_name', `__check_routes_%_${STAMP}`);
+
+  const eventIds = [draftEventId, eventId, otherEventId].filter(Boolean);
+  const { count: historyLeft } = eventIds.length === 0
+    ? { count: 0 }
+    : await supabase
+      .from('event_request_assignment_history')
+      .select('id', { count: 'exact', head: true })
+      .in('event_request_id', eventIds);
+
+  const userIds = [organiserId, otherOrganiserId, coordinatorId].filter(Boolean);
+  const { count: profilesLeft } = userIds.length === 0
+    ? { count: 0 }
+    : await supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .in('id', userIds);
+
+  let usersLeft = 0;
+  for (const id of userIds) {
+    const { data } = await supabase.auth.admin.getUserById(id);
+    if (data?.user) usersLeft += 1;
+  }
+
+  check(
+    'nothing left behind after cleanup',
+    eventsLeft === 0 && historyLeft === 0 && profilesLeft === 0 && usersLeft === 0,
+    `${eventsLeft} request(s), ${historyLeft} history row(s), `
+      + `${profilesLeft} profile(s), ${usersLeft} user(s)`,
+  );
 }
 
 async function main() {
@@ -148,8 +242,8 @@ async function main() {
   const coordinator = await createTestUser('coordinator', 'event_coordinator');
   coordinatorId = coordinator.id;
 
-  eventId = await createEventRequest(organiserId, `__check_routes_mine_${STAMP}`, 'submitted');
-  otherEventId = await createEventRequest(otherOrganiserId, `__check_routes_theirs_${STAMP}`, 'submitted');
+  eventId = await createEventRequest(organiserId, `__check_routes_mine_${STAMP}`, 'submitted', coordinatorId);
+  otherEventId = await createEventRequest(otherOrganiserId, `__check_routes_theirs_${STAMP}`, 'submitted', coordinatorId);
 
   // A real sign-in, so the token below is one Supabase issued rather than one
   // this script constructed.
@@ -787,6 +881,7 @@ main()
   })
   .finally(async () => {
     await cleanup();
+    await verifyCleanup();
     if (failures > 0) {
       console.error(`\n${failures} check(s) failed.\n`);
       process.exit(1);

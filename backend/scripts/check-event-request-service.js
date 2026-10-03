@@ -47,6 +47,12 @@ const createdIds = [];
 let rowsBefore = null;
 let failures = 0;
 
+// Errors from cleanup's own deletes. supabase-js does not throw on a refused
+// delete, it returns { error }, so a delete that a foreign key refuses is
+// silent unless someone looks. SCRUM-330 found exactly that: the history row
+// a submission writes blocked the event delete, and the rows stayed behind.
+const cleanupErrors = [];
+
 function check(label, passed, detail = '') {
   console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
   if (!passed) failures += 1;
@@ -68,24 +74,48 @@ async function failureFrom(promise) {
   }
 }
 
-async function cleanup() {
-  if (createdIds.length === 0) return;
-  // No child tables and no ON DELETE RESTRICT to work around: an event request
-  // is a single row, so one delete removes everything this run created.
-  await supabase.from('event_requests').delete().in('id', createdIds);
+/** Run one cleanup delete, keeping its error rather than dropping it. */
+async function remove(label, query) {
+  const { error } = await query;
+  if (error) cleanupErrors.push(`${label}: ${error.message}`);
 }
 
-async function countRequests() {
+async function cleanup() {
+  if (createdIds.length === 0) return;
+
+  // Assignment history first. Since SCRUM-330, submitting a request writes an
+  // event_request_assignment_history row, and that table's event_request_id is
+  // ON DELETE RESTRICT (014) on purpose: it is an accountability record that
+  // must outlive a careless delete. Deleting the events first is refused. And
+  // because the events go in one statement, a single refused row keeps every
+  // row in that statement -- which is how this script left two behind.
+  await remove(
+    'assignment history',
+    supabase.from('event_request_assignment_history').delete().in('event_request_id', createdIds),
+  );
+  await remove('event requests', supabase.from('event_requests').delete().in('id', createdIds));
+}
+
+/** Rows in one table, for the before-and-after comparison. */
+async function countRows(table) {
   const { count } = await supabase
-    .from('event_requests')
+    .from(table)
     .select('*', { count: 'exact', head: true });
   return count ?? 0;
+}
+
+/** The two tables this script writes to. */
+async function countAll() {
+  return {
+    requests: await countRows('event_requests'),
+    history: await countRows('event_request_assignment_history'),
+  };
 }
 
 async function main() {
   console.log('\nEvent request service check\n');
 
-  rowsBefore = await countRequests();
+  rowsBefore = await countAll();
 
   // --- the Organiser ------------------------------------------------------
   // Read rather than hardcoded. organiser_id references auth.users, so an id
@@ -104,7 +134,7 @@ async function main() {
 
   const organiserId = organiser.id;
   console.log(`  organiser:   ${organiser.email ?? '(no email)'}  ${organiserId}`);
-  console.log(`  rows before: ${rowsBefore}\n`);
+  console.log(`  rows before: ${rowsBefore.requests} requests, ${rowsBefore.history} history\n`);
 
   // --- 1. a minimal draft -------------------------------------------------
   // Proves the permissive half of the design against the real schema: a request
@@ -296,11 +326,18 @@ main()
   .finally(async () => {
     await cleanup();
 
-    // Counted after cleanup so the script proves it left the table as it found
-    // it, rather than asserting it and hoping.
+    // Counted after cleanup so the script proves it left the tables as it found
+    // them, rather than asserting it and hoping. Assignment history is counted
+    // too, since SCRUM-330: the submission in step 4 writes a row there.
+    check('cleanup ran without errors', cleanupErrors.length === 0, cleanupErrors.join('; '));
     if (rowsBefore !== null) {
-      const rowsAfter = await countRequests();
-      check('nothing left behind', rowsAfter === rowsBefore, `${rowsBefore} -> ${rowsAfter}`);
+      const rowsAfter = await countAll();
+      check(
+        'nothing left behind',
+        rowsAfter.requests === rowsBefore.requests && rowsAfter.history === rowsBefore.history,
+        `requests ${rowsBefore.requests} -> ${rowsAfter.requests}, `
+          + `history ${rowsBefore.history} -> ${rowsAfter.history}`,
+      );
     }
 
     if (failures > 0) {
