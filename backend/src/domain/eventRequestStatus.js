@@ -18,8 +18,9 @@
  * enum `event_request_status`.
  *
  * There is no PLANNING status. The customer treats planning as approval, so
- * that stage is APPROVED. The enum still carries 'planning' until SCRUM-320
- * removes it; nothing here may write it, and a test asserts this list stays
+ * that stage is APPROVED. The enum still carries 'planning', because Postgres
+ * cannot drop an enum value; migration 020 refuses it with a constraint
+ * instead. Nothing here may write it, and a test asserts this list stays
  * inside the enum rather than leaving it to whoever edits one file to
  * remember the other.
  */

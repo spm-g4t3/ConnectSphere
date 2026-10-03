@@ -39,7 +39,7 @@ const CANCELLABLE = [
   STATUS.CONFIRMED,
 ];
 
-/** Removed by SCRUM-318. Still in the database enum until SCRUM-320 migrates it out. */
+/** Removed by SCRUM-318. Still in the database enum, which cannot drop a value; 020 refuses it. */
 const OBSOLETE_STATUSES = ['planning'];
 
 
@@ -72,8 +72,9 @@ describe('STATUS mirrors the database enum', () => {
   });
 
   it('leaves out only the statuses SCRUM-318 removed', () => {
-    // 001 is append-only, so 'planning' stays in its enum until SCRUM-320.
-    // Anything else missing from STATUS is drift, not removal.
+    // 001 is append-only, so 'planning' stays in its enum: Postgres cannot
+    // drop a value, and 020 refuses it with a constraint. Anything else
+    // missing from STATUS is drift, not removal.
     const missing = statusesDeclaredInSql().filter((s) => !ALL_STATUSES.includes(s));
     expect(missing.sort()).toEqual([...OBSOLETE_STATUSES].sort());
   });
