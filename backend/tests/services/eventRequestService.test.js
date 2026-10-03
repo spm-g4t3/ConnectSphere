@@ -2943,3 +2943,90 @@ describe('SCRUM-322: anyone else gets not found', () => {
     expect(client.calls.every((call) => call.operation === 'select')).toBe(true);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-325 -- every pair of statuses, generated from the status list
+// ---------------------------------------------------------------------------
+/**
+ * SCRUM-318 AC2, AC3 and AC4 through the one function every status change goes
+ * through. The domain tests pin the transition table against the Jira table by
+ * hand. These do not repeat the table: they take every ordered pair of
+ * statuses, ask canTransition which are allowed, and check what the service
+ * does with each. So a status added later is covered the moment it exists.
+ *
+ *  - A pair that is not allowed is refused with a ConflictError that names the
+ *    status the request is in, and nothing at all is sent to the database, so
+ *    the event is left unchanged and no history can be written.
+ *  - A pair that is allowed is sent, once, with the previous and new status and
+ *    the user. Draft -> submitted is the one allowed pair that is not sent
+ *    through here: submitting has its own path, which also assigns a
+ *    coordinator.
+ *  - Completed and cancelled lead nowhere, whatever the target.
+ */
+const EVERY_STATUS = Object.values(STATUS);
+const EVERY_PAIR = EVERY_STATUS.flatMap((from) => EVERY_STATUS.map((to) => [from, to]));
+const DISALLOWED_PAIRS = EVERY_PAIR.filter(([from, to]) => !canTransition(from, to));
+const SENT_PAIRS = EVERY_PAIR.filter(
+  ([from, to]) => canTransition(from, to) && !(from === STATUS.DRAFT && to === STATUS.SUBMITTED),
+);
+
+describe('SCRUM-325 AC2/AC3: every disallowed pair of statuses is refused with the current status', () => {
+  it('SCRUM325_generates_the_pairs_from_the_status_list', () => {
+    // A guard against the generation going quiet: every status is a source and
+    // a target, and both groups are non-empty.
+    expect(EVERY_PAIR).toHaveLength(EVERY_STATUS.length ** 2);
+    expect(DISALLOWED_PAIRS.length).toBeGreaterThan(0);
+    expect(SENT_PAIRS.length).toBeGreaterThan(0);
+    expect(DISALLOWED_PAIRS.length + SENT_PAIRS.length + 1).toBe(EVERY_PAIR.length);
+  });
+
+  it.each(DISALLOWED_PAIRS)(
+    'SCRUM325_AC3_refuses_%s_to_%s_naming_the_current_status_and_sending_nothing',
+    async (from, to) => {
+      const client = createFakeClient([]);
+
+      const err = await errorFrom(change(client, { expectedStatus: from, newStatus: to }));
+
+      expect(err).toBeInstanceOf(ConflictError);
+      expect(err.status).toBe(409);
+      expect(err.message).toContain(`'${from}'`);
+      expect(client.calls).toHaveLength(0);
+    },
+  );
+
+  it.each(SENT_PAIRS)('SCRUM325_AC2_sends_%s_to_%s_once_with_the_previous_and_new_status', async (from, to) => {
+    const client = createFakeClient([ok(approvedRow({ status: to }))]);
+
+    await change(client, { expectedStatus: from, newStatus: to });
+
+    expect(rpcCallsOf(client)).toHaveLength(1);
+    expect(client.calls).toHaveLength(1);
+    expect(rpcCallsOf(client)[0].args).toMatchObject({
+      p_event_request_id: REQUEST_ID,
+      p_expected_status: from,
+      p_new_status: to,
+      p_changed_by: COORDINATOR_ID,
+    });
+  });
+});
+
+
+describe('SCRUM-325 AC4: nothing leaves a final status', () => {
+  it.each([STATUS.COMPLETED, STATUS.CANCELLED])('SCRUM325_AC4_refuses_every_move_out_of_%s', async (final) => {
+    for (const to of EVERY_STATUS) {
+      const client = createFakeClient([]);
+
+      const err = await errorFrom(change(client, { expectedStatus: final, newStatus: to }));
+
+      expect(err, `${final} -> ${to}`).toBeInstanceOf(ConflictError);
+      expect(err.message).toContain(`'${final}'`);
+      expect(client.calls).toHaveLength(0);
+    }
+  });
+
+  it('SCRUM325_AC4_lets_a_rejected_request_go_back_to_a_draft_and_nowhere_else', () => {
+    // Rejected is not final: the Organiser can reopen it.
+    expect(EVERY_STATUS.filter((to) => canTransition(STATUS.REJECTED, to))).toEqual([STATUS.DRAFT]);
+  });
+});

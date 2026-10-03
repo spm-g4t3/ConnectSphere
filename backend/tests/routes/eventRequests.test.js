@@ -2596,3 +2596,30 @@ describe('SCRUM-322: GET /:id/status-history', () => {
     expect(client.calls).toHaveLength(0);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-325 -- a refused transition over HTTP
+// ---------------------------------------------------------------------------
+describe('SCRUM-325 AC3: a refused transition is a 409 that names the current status', () => {
+  it.each([STATUS.APPROVED, STATUS.CONFIRMED, STATUS.COMPLETED, STATUS.CANCELLED, STATUS.REJECTED])(
+    'SCRUM325_AC3_refuses_a_clarification_request_for_an_event_that_is_%s_and_writes_nothing',
+    async (status) => {
+      const client = createWritableFakeClient([
+        ok(storedRow({ status, assigned_coordinator_id: COORDINATOR_ID })),
+      ]);
+
+      const res = await request(appWith({
+        client,
+        requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_ID),
+      }))
+        .post(`/api/event-requests/${REQUEST_ID}/clarification`)
+        .send({ note: 'Please clarify.' });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain(`'${status}'`);
+      // Only the read happened: no status function was called, so no history.
+      expect(client.calls.map((call) => call.operation)).toEqual(['select']);
+    },
+  );
+});

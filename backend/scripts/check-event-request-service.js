@@ -28,6 +28,7 @@ import { supabase } from '../src/config/supabaseClient.js';
 import {
   createEventRequest,
   submitEventRequest,
+  changeEventRequestStatus,
   getEventRequestById,
 } from '../src/services/eventRequestService.js';
 import { ValidationError, NotFoundError, ConflictError } from '../src/errors.js';
@@ -350,6 +351,42 @@ async function main() {
   );
   check('the refused second submit wrote no history row', (await historyFor(complete.id)).length === 1);
   check('the refused second submit wrote no status history row', (await statusHistoryFor(complete.id)).length === 1);
+
+  // --- 7b. two simultaneous transitions from the same status --------------
+  // SCRUM-325. Two real connections to Postgres, so the row lock in
+  // change_event_request_status is what decides. Exactly one may succeed: the
+  // other finds the request no longer submitted and is refused, and only the
+  // winner leaves a history row.
+  const holderId = afterAgain.assignedCoordinatorId;
+  const race = await Promise.allSettled([
+    changeEventRequestStatus(complete.id, {
+      expectedStatus: 'submitted',
+      newStatus: 'under_review',
+      changedBy: holderId,
+      expectedCoordinatorId: holderId,
+    }),
+    changeEventRequestStatus(complete.id, {
+      expectedStatus: 'submitted',
+      newStatus: 'cancelled',
+      changedBy: holderId,
+      expectedCoordinatorId: holderId,
+    }),
+  ]);
+  const winners = race.filter((r) => r.status === 'fulfilled');
+  const losers = race.filter((r) => r.status === 'rejected');
+  check('exactly one of two simultaneous transitions succeeds', winners.length === 1, `${winners.length} succeeded`);
+  check(
+    'the other is refused as a conflict',
+    losers.length === 1 && losers[0].reason instanceof ConflictError,
+    losers[0]?.reason?.name ?? 'no error',
+  );
+  const afterRace = await statusHistoryFor(complete.id);
+  check('the race left exactly one more history row', afterRace.length === 2, String(afterRace.length));
+  check(
+    'and the request is in the status the winner chose',
+    winners[0]?.value?.status === (await getEventRequestById(complete.id)).status,
+    winners[0]?.value?.status ?? 'no winner',
+  );
 
   // --- 8. submitting something absent -------------------------------------
   const missing = await failureFrom(

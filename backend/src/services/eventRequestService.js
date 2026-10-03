@@ -683,14 +683,17 @@ export async function changeEventRequestStatus(
     }
   }
 
-  if (newStatus === STATUS.SUBMITTED) {
-    throw new ValidationError('A request is submitted with submitEventRequest, not by changing its status.');
-  }
-
+  // Before the submitted check below, so that every disallowed move, a move
+  // to submitted from anything but a draft included, is refused with the
+  // status the request is in (SCRUM-318 AC3).
   if (!canTransition(expectedStatus, newStatus)) {
     throw new ConflictError(
       `An event request with status '${expectedStatus}' cannot change to '${newStatus}'.`,
     );
+  }
+
+  if (newStatus === STATUS.SUBMITTED) {
+    throw new ValidationError('A request is submitted with submitEventRequest, not by changing its status.');
   }
 
   const db = await resolveClient(client);
