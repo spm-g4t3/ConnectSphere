@@ -9,6 +9,7 @@ import MyEventRequests from "./components/MyEventRequests";
 import VenueSearch from "./components/VenueSearch";
 import VenueCatalogue from "./components/VenueCatalogue";
 import ReviewQueue from "./components/ReviewQueue";
+import MyAssignedEvents from "./components/MyAssignedEvents";
 import "./App.css";
 
 function LoadingScreen() {
@@ -84,6 +85,25 @@ function AppRoutes() {
             <ProtectedRoute allowedRoles={["event_coordinator"]}>
               <div className="dashboard dashboard--coordinator">
                 <ReviewQueue />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* SCRUM-333: the coordinator's own events, every status, grouped.
+            /my-events and not /events, which is the Organiser's page
+            (MyEventRequests over the organiser-scoped endpoint).
+
+            Gated and wrapped exactly as /review-queue is, for the same two
+            reasons: allowedRoles turns an Organiser who follows a link here
+            into /unauthorized rather than a page of one error message (the
+            backend's GET /mine answers 403 regardless), and the wrapper is what
+            colours the badges, since App.css scopes them to a dashboard class. */}
+        <Route
+          path="/my-events"
+          element={
+            <ProtectedRoute allowedRoles={["event_coordinator"]}>
+              <div className="dashboard dashboard--coordinator">
+                <MyAssignedEvents />
               </div>
             </ProtectedRoute>
           }

@@ -14,6 +14,12 @@ const NAV_LINKS_BY_ROLE = {
   ],
   EVENT_COORDINATOR: [
     { to: "/dashboard", label: "Dashboard" },
+    // SCRUM-333. Above the queue because it is the coordinator's own work:
+    // the events they are responsible for, every status. "My Events", the
+    // same words as the Organiser's link, because it answers the same
+    // question for this role, but a different target: /events is the
+    // Organiser's page.
+    { to: "/my-events", label: "My Events" },
     // "/review-queue", not "/events" (SCRUM-45). /events renders
     // MyEventRequests, which reads the organiser-scoped endpoint, so this
     // link used to promise a Coordinator "Events" and hand them "You haven't
