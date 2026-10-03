@@ -1,5 +1,6 @@
 /**
- * End-to-end proof for the venue service (SCRUM-106, SCRUM-110, SCRUM-111).
+ * End-to-end proof for the venue service (SCRUM-106, SCRUM-110, SCRUM-111,
+ * SCRUM-186).
  *
  * Run with: npm run venue:check
  *
@@ -11,6 +12,9 @@
  * the database. Only this script can show that Postgres really raises the
  * codes the service claims to translate, so it is what proves PT409 and the
  * retirement audit row actually happen.
+ *
+ * SCRUM-186's turnaround steps run last, on a second venue of their own, so
+ * every count and "latest row" read above sees exactly what it did before.
  *
  * Exits non-zero on any failure.
  */
@@ -28,6 +32,7 @@ const NAME = `__check_venue_${Date.now()}`;
 const LOCATION = 'Level 2, SCIS';
 
 let created = null;
+let turnaroundVenue = null;
 let failures = 0;
 
 function check(label, passed, detail = '') {
@@ -36,10 +41,12 @@ function check(label, passed, detail = '') {
 }
 
 async function cleanup() {
-  if (!created) return;
-  // History first: ON DELETE RESTRICT blocks deleting a venue that has any.
-  await supabase.from('venue_change_history').delete().eq('venue_id', created.id);
-  await supabase.from('venues').delete().eq('id', created.id);
+  for (const venue of [created, turnaroundVenue]) {
+    if (!venue) continue;
+    // History first: ON DELETE RESTRICT blocks deleting a venue that has any.
+    await supabase.from('venue_change_history').delete().eq('venue_id', venue.id);
+    await supabase.from('venues').delete().eq('id', venue.id);
+  }
 }
 
 async function main() {
@@ -227,6 +234,63 @@ async function main() {
     conflictStatus = err.status;
   }
   check('retiring twice raises ConflictError', conflictStatus === 409, `status ${conflictStatus}`);
+
+  await checkTurnaround();
+}
+
+/**
+ * SCRUM-186: the turnaround column (017) through the service, the audit
+ * trail, and the database CHECK on its own.
+ */
+async function checkTurnaround() {
+  // --- default: a venue created without one reads back 0 -------------------
+  turnaroundVenue = await createVenue({
+    name: `${NAME}_turnaround`,
+    location: LOCATION,
+    maxCapacity: 20,
+  });
+  check('new venue defaults to no turnaround (017)', turnaroundVenue.turnaroundMinutes === 0,
+    `got ${turnaroundVenue.turnaroundMinutes}`);
+
+  const { data: creation } = await supabase
+    .from('venue_change_history')
+    .select('old_values, new_values')
+    .eq('venue_id', turnaroundVenue.id);
+  const turnaroundCreation = creation?.find((h) => Object.keys(h.old_values).length === 0);
+  check(
+    'the creation row stores the initial turnaround',
+    turnaroundCreation?.new_values?.turnaround_minutes === 0,
+    JSON.stringify(turnaroundCreation?.new_values?.turnaround_minutes ?? null),
+  );
+
+  // --- a change is audited by 003's diff trigger, with no snapshot change --
+  const thirty = await updateVenue(turnaroundVenue.id, { turnaroundMinutes: 30 }, null);
+  check('turnaround updated to 30', thirty.turnaroundMinutes === 30, `got ${thirty.turnaroundMinutes}`);
+
+  const { data: changes } = await supabase
+    .from('venue_change_history')
+    .select('old_values, new_values')
+    .eq('venue_id', turnaroundVenue.id);
+  const turnaroundRow = changes?.find((h) => h.old_values?.turnaround_minutes !== undefined);
+  check(
+    'turnaround change recorded as 0 -> 30',
+    JSON.stringify(turnaroundRow?.old_values) === '{"turnaround_minutes":0}' &&
+      JSON.stringify(turnaroundRow?.new_values) === '{"turnaround_minutes":30}',
+    `${JSON.stringify(turnaroundRow?.old_values)} -> ${JSON.stringify(turnaroundRow?.new_values)}`,
+  );
+
+  // --- back to 0: the ?? null pitfall, end to end --------------------------
+  const none = await updateVenue(turnaroundVenue.id, { turnaroundMinutes: 0 }, null);
+  check('turnaround set back to 0', none.turnaroundMinutes === 0, `got ${none.turnaroundMinutes}`);
+
+  // --- the CHECK holds without validation in front of it -------------------
+  // Straight to the rpc, past venueValidation, so only the database can refuse.
+  const { error: rejectedTurnaround } = await supabase.rpc('update_venue', {
+    p_id: turnaroundVenue.id,
+    p_turnaround_minutes: 25,
+  });
+  check('database refuses a turnaround of 25', rejectedTurnaround?.code === '23514',
+    `code ${rejectedTurnaround?.code ?? 'none'}`);
 }
 
 async function countVenues() {
@@ -245,5 +309,5 @@ main()
       console.error(`\n${failures} check(s) failed.\n`);
       process.exit(1);
     }
-    console.log('\nAll checks passed. Created, updated, audited, searched, retired, cleaned up.\n');
+    console.log('\nAll checks passed. Created, updated, audited, searched, retired, turnaround checked, cleaned up.\n');
   });

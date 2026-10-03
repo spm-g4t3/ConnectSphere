@@ -21,6 +21,7 @@ import { useEffect, useState, useCallback } from "react";
 import { getVenueCatalogue, retireVenue } from "../services/venueService";
 import VenueForm from "./VenueForm";
 import VenueDetail from "./VenueDetail";
+import VenueBlocksPanel from "./VenueBlocksPanel";
 
 // Keyed by status, the same shape as AuthContext's LOGIN_ERROR_MESSAGES.
 //
@@ -38,7 +39,10 @@ const RETIRE_ERROR_MESSAGES = {
   409: "That venue has already been retired.",
 };
 
-export default function VenueCatalogue() {
+// currentUserId (SCRUM-131) is only passed through, to VenueBlocksPanel, so
+// a block's audit line and history can say "you" for the signed-in user's own
+// changes. Optional: without it those show as a short id.
+export default function VenueCatalogue({ currentUserId } = {}) {
   const [venues, setVenues] = useState([]);
   const [loadingVenues, setLoadingVenues] = useState(true);
   const [venuesError, setVenuesError] = useState(null);
@@ -53,7 +57,7 @@ export default function VenueCatalogue() {
   const [retireError, setRetireError] = useState(null);   // { id, message }
 
   // Which panel is open, if any: { mode: "create" } | { mode: "edit", venue }
-  // | { mode: "detail", venue } | null. Copied from MyEventRequests, which is
+  // | { mode: "detail", venue } | { mode: "blocks", venue } | null. Copied from MyEventRequests, which is
   // where this app decided that a full-page panel with a Back button is what
   // it does instead of a modal — there is not one modal, <dialog> or
   // window.confirm anywhere in this frontend and this is not the place to
@@ -168,6 +172,18 @@ export default function VenueCatalogue() {
     );
   }
 
+  if (activePanel?.mode === "blocks") {
+    return (
+      <section>
+        {/* handleSaved, not a bare close: the panel can learn the venue was
+            retired meanwhile (VENUE_RETIRED), and the catalogue row should
+            say so when we come back to it. */}
+        <button onClick={handleSaved}>&larr; Back to the venue catalogue</button>
+        <VenueBlocksPanel venue={activePanel.venue} currentUserId={currentUserId} />
+      </section>
+    );
+  }
+
   return (
     <section>
       <h2>Venue catalogue</h2>
@@ -228,6 +244,17 @@ export default function VenueCatalogue() {
                     retirement a delete after all. */}
                 <button onClick={() => setActivePanel({ mode: "detail", venue })}>
                   View bookings &amp; history
+                </button>
+
+                {/* Disabled on a retired venue for the reason Edit details is:
+                    the server refuses a new block there with VENUE_RETIRED, so
+                    the button would only open a form that cannot be saved. */}
+                <button
+                  disabled={retired}
+                  title={retired ? "A retired venue cannot be blocked." : undefined}
+                  onClick={() => setActivePanel({ mode: "blocks", venue })}
+                >
+                  Manage blocks
                 </button>
 
                 {/* Two-step inline confirmation rather than a modal or

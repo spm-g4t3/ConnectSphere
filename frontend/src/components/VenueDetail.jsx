@@ -10,9 +10,14 @@
 //
 // SCRUM-15 AC4 -- "every change records the editing user, a timestamp, and
 // the previous values" -- is the history half.
+//
+// SCRUM-186: turnaround_minutes arrives through 003's diff trigger like any
+// other venues column; HISTORY_VALUE_FORMATTERS renders it as a duration.
 
 import { useCallback, useEffect, useState } from "react";
 import { getVenueBookings, getVenueHistory } from "../services/venueService";
+import { formatTimestamp, shortId } from "../services/displayFormat";
+import { formatTurnaround } from "../services/turnaroundOptions";
 
 const BOOKINGS_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
@@ -44,6 +49,7 @@ const HISTORY_FIELD_LABELS = {
   name: "Name",
   location: "Location",
   max_capacity: "Maximum capacity",
+  turnaround_minutes: "Turnaround between events",
   retired_at: "Retired at",
   created_at: "Created at",
   room_layouts: "Room layouts",
@@ -57,18 +63,6 @@ const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 /** The raw key when the label table has not heard of it -- never blank. */
 function fieldLabel(key) {
   return HISTORY_FIELD_LABELS[key] ?? key;
-}
-
-/** First segment of a uuid, for display. The full value goes in a title. */
-function shortId(id) {
-  return typeof id === "string" ? id.slice(0, 8) : String(id);
-}
-
-/** A timestamp in the reader's locale, or the raw string if it will not parse. */
-function formatTimestamp(value) {
-  if (!value) return "unknown";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
 /**
@@ -108,6 +102,27 @@ function fmt(value) {
     return String(value);
   } catch {
     return String(value);
+  }
+}
+
+// Per-field renderers, for a column whose raw value reads badly through fmt:
+// "30 minutes -> 1 hour", not "30 -> 60". A key not listed here uses fmt.
+const HISTORY_VALUE_FORMATTERS = {
+  turnaround_minutes: formatTurnaround,
+};
+
+/**
+ * One history value, rendered with its field's formatter when it has one.
+ * Wrapped for the same reason fmt is: a formatter that throws must cost one
+ * prettier string, not the panel.
+ */
+function fmtField(key, value) {
+  const formatter = HISTORY_VALUE_FORMATTERS[key];
+  if (!formatter) return fmt(value);
+  try {
+    return formatter(value);
+  } catch {
+    return fmt(value);
   }
 }
 
@@ -273,7 +288,7 @@ export default function VenueDetail({ venue }) {
                           <li key={key}>
                             <span>{fieldLabel(key)}</span>
                             <span className="venue-history__value">
-                              {fmt(oldValues[key])} &rarr; {fmt(newValues[key])}
+                              {fmtField(key, oldValues[key])} &rarr; {fmtField(key, newValues[key])}
                             </span>
                           </li>
                         ))}

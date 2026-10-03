@@ -31,7 +31,7 @@ function useChangeRequests(eventRequestId) {
       const data = await getChangeRequests(eventRequestId);
       setRequests(data);
       setError(null);
-    } catch (err) {
+    } catch {
       setError("Could not load your change requests.");
     } finally {
       setLoading(false);

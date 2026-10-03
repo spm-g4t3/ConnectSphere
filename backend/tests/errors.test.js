@@ -163,3 +163,38 @@ describe('ValidationError details', () => {
     expect(new ForbiddenError('x').details).toBeUndefined();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-126: a conflict can say which kind it is, and what it clashed with
+// ---------------------------------------------------------------------------
+describe('ConflictError code and conflicts', () => {
+  it('defaults code to null and conflicts to [] for a one-argument caller', () => {
+    const err = new ConflictError('venue is retired');
+
+    expect(err.code).toBeNull();
+    expect(err.conflicts).toEqual([]);
+    expect(err.message).toBe('venue is retired');
+  });
+
+  it('keeps the code and conflicts it was given', () => {
+    const conflicts = [{ id: 'b1' }, { id: 'b2' }];
+    const err = new ConflictError('overlaps', { code: 'BLOCK_OVERLAPS_BLOCK', conflicts });
+
+    expect(err.code).toBe('BLOCK_OVERLAPS_BLOCK');
+    expect(err.conflicts).toEqual(conflicts);
+  });
+
+  it('defaults whichever option is left out', () => {
+    expect(new ConflictError('x', { code: 'VENUE_RETIRED' }).conflicts).toEqual([]);
+    expect(new ConflictError('x', { conflicts: [{ id: 'b1' }] }).code).toBeNull();
+  });
+
+  it('still answers 409 and carries no details when given options', () => {
+    const err = new ConflictError('x', { code: 'VENUE_RETIRED', conflicts: [{ id: 'b1' }] });
+
+    expect(err.status).toBe(409);
+    expect(err.details).toBeUndefined();
+    expect(err.name).toBe('ConflictError');
+  });
+});

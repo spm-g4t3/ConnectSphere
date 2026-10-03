@@ -6,10 +6,14 @@
  * AC1: name, location and maximum capacity are mandatory, and capacity must be
  * a positive whole number.
  *
- * Pure and synchronous -- no database, no imports beyond the error types. That
+ * Pure and synchronous -- no database, no imports beyond the error types and
+ * the shared timestamp rules (SCRUM-130). That
  * keeps it unit-testable without credentials, which is the point: the database
  * constraints in 002_venues.sql already guarantee correctness, and this layer
  * exists to say what went wrong in words a Venue Staff member can act on.
+ *
+ * SCRUM-186 adds the turnaround between events, one of a fixed list of
+ * minutes (domain/turnaroundOptions.js).
  *
  * Deliberately NOT checked here: whether a layout or facility code exists.
  * That is referential integrity, the foreign keys enforce it, and
@@ -19,6 +23,11 @@
  */
 
 import { ValidationError } from '../errors.js';
+import { checkTimeWindow } from './timestampValidation.js';
+import {
+  TURNAROUND_MINUTES_OPTIONS,
+  isTurnaroundOption,
+} from '../domain/turnaroundOptions.js';
 
 /** HH:MM or HH:MM:SS, with real hour and minute ranges. */
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)(:([0-5]\d))?$/;
@@ -184,6 +193,24 @@ function checkHours(errors, value) {
   return cleaned;
 }
 
+/**
+ * SCRUM-186: turnaround between events, one of the allowed minute values.
+ *
+ * Only called when the field was supplied, so null here was sent on purpose
+ * and is refused: update_venue reads NULL as "keep the current value", and a
+ * request that says "clear it" should not quietly do nothing.
+ */
+function checkTurnaround(errors, value) {
+  if (!isTurnaroundOption(value)) {
+    errors.add(
+      'turnaroundMinutes',
+      `must be one of ${TURNAROUND_MINUTES_OPTIONS.join(', ')} minutes`,
+    );
+    return null;
+  }
+  return value;
+}
+
 
 /**
  * Validate input for creating a venue.
@@ -212,6 +239,10 @@ export function validateCreateVenue(input) {
 
   if (input.hours !== undefined) {
     normalised.hours = checkHours(errors, input.hours);
+  }
+
+  if (input.turnaroundMinutes !== undefined) {
+    normalised.turnaroundMinutes = checkTurnaround(errors, input.turnaroundMinutes);
   }
 
   throwIfInvalid(errors);
@@ -267,6 +298,12 @@ export function validateUpdateVenue(changes) {
     normalised.hours = checkHours(errors, changes.hours);
   }
 
+  // !== undefined, not truthiness: 0 is a real choice, so {turnaroundMinutes: 0}
+  // on its own is a change and passes the "no changes supplied" rule above.
+  if (changes.turnaroundMinutes !== undefined) {
+    normalised.turnaroundMinutes = checkTurnaround(errors, changes.turnaroundMinutes);
+  }
+
   throwIfInvalid(errors);
   return normalised;
 }
@@ -320,9 +357,16 @@ function isUnset(value) {
  * every search, not an option a caller can switch off, so searchVenues applies
  * it unconditionally and no filter here can reach a retired venue.
  *
+ * SCRUM-130 adds an optional startsAt/endsAt window, both or neither, through
+ * the same checkTimeWindow the block window uses. No length cap: how long an
+ * event may run is SCRUM-20's rule, and a search should not invent one.
+ *
  * @param {object} [filters]
  * @param {string} [filters.location]     matched as a substring, case-insensitively
  * @param {number} [filters.minCapacity]  venues that seat at least this many
+ * @param {string} [filters.startsAt]     SCRUM-130: ISO 8601 with an offset
+ * @param {string} [filters.endsAt]       SCRUM-130: ISO 8601 with an offset;
+ *                                        later than startsAt
  * @returns {object} a normalised copy holding only the filters actually supplied
  * @throws {ValidationError}
  */
@@ -340,6 +384,14 @@ export function validateSearchFilters(filters = {}) {
 
   if (!isUnset(filters.minCapacity)) {
     normalised.minCapacity = checkCapacity(errors, 'minCapacity', filters.minCapacity);
+  }
+
+  // Keys only when a window was given, so a dateless search normalises to
+  // exactly what it did before SCRUM-130.
+  const window = checkTimeWindow(errors, ['startsAt', 'endsAt'], filters.startsAt, filters.endsAt);
+  if (window !== null) {
+    normalised.startsAt = window.start;
+    normalised.endsAt = window.end;
   }
 
   throwIfInvalid(errors);
