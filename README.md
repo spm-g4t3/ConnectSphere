@@ -1,0 +1,239 @@
+# ConnectSphere
+
+Event planning and venue booking system for **ConnectSphere Event Services**, a regional organisation providing professional event planning and venue services across Southeast Asia.
+
+ConnectSphere coordinates events across its own venues and equipment inventory. This system replaces the current mix of email, spreadsheets and shared calendars with a single platform, so that an event request can be tracked from initial submission through review, venue booking, equipment reservation and attendee registration — without the same venue being double-booked or a last-minute change failing to reach the people it affects.
+
+**Repository:** https://github.com/spm-g4t3/ConnectSphere
+
+> **Status:** early development. The application scaffold is not yet in place; see [Getting started](#getting-started).
+
+## User roles
+
+| Role | Internal / External | Responsibility |
+|---|---|---|
+| Event Organiser | External | Client representative who submits an event and its requirements |
+| Event Coordinator | Internal | Owns planning for an assigned event; main internal point of contact |
+| Venue Staff | Internal | Venue information, availability, and booking decisions |
+| Technical Support Staff | Internal | Equipment, reservations, and technical support |
+| Attendee | External | Registers for and attends an event |
+
+Access to information and functionality depends on a user's role *and* their relationship to a given event.
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React (Vite, JavaScript) |
+| Backend | Node.js + Express (JavaScript) |
+| Database | Supabase (PostgreSQL) |
+| Auth | Supabase Auth |
+
+## Architecture
+
+Requests flow in one direction:
+
+```
+React  ──►  Express  ──►  Supabase
+```
+
+The frontend never queries the database directly. All data access goes through the Express API, which is the only tier that holds the Supabase service-role key and the only place authorisation rules are enforced.
+
+**Authentication boundary.** Supabase Auth is the exception to the flow above: the frontend uses `supabase-js` *solely* to sign in and obtain a JWT. That token is then sent as a `Bearer` header on every request to Express, which verifies it and derives the caller's role and event relationships from it. The frontend holds only the anon key and a session token; it never holds credentials that could bypass the API.
+
+## Repository layout
+
+```
+ConnectSphere/
+├── frontend/    # React (Vite, JS) — client application
+├── backend/     # Node.js + Express (JS) — API server
+└── package.json # dev scripts that run both together
+```
+
+## Getting started
+
+**Prerequisites:** Node.js 22+ and npm 10+.
+
+```bash
+git clone https://github.com/spm-g4t3/ConnectSphere.git
+cd ConnectSphere
+npm run install:all      # installs root, backend and frontend
+```
+
+Copy `backend/.env.example` to `backend/.env` and fill in the real values. Real `.env` files are gitignored and must never be committed. The frontend needs no `.env`: it defaults to `http://localhost:5000/api`, and `VITE_API_BASE_URL` overrides that if you need it to.
+
+Then, from the repository root:
+
+```bash
+npm run dev
+```
+
+That starts both servers at once — the API on **http://localhost:5000** and the client on **http://localhost:5173** — with each line of output labelled `backend` or `frontend`. Ctrl+C stops both, and if either exits with a failure the other is stopped too, so you never end up talking to half a system.
+
+| Command | Runs |
+|---|---|
+| `npm run dev` | Both servers together. The usual one. |
+| `npm run dev:backend` | The API alone, on port 5000. |
+| `npm run dev:frontend` | The client alone, on port 5173. |
+| `npm run install:all` | Installs dependencies in all three packages. |
+| `npm test` | The backend unit suite, same as CI runs. |
+
+Each package can still be driven on its own from inside its own directory; the root scripts are a convenience, not a new layer.
+
+## Event status lifecycle
+
+An event request is always in exactly one of nine statuses, and moves between them only along the transitions below. The statuses and transitions are defined once, in `backend/src/domain/eventRequestStatus.js` (`STATUS`, `ALLOWED_TRANSITIONS`, `canTransition`). Every story uses these names.
+
+### Statuses and what the Organiser sees
+
+The stored value is internal. The Event Organiser never sees it: they see the label in the last column, which comes from one map, `ORGANISER_STATUS_LABEL`, in the same file. The API sends it to the frontend as `statusDisplay`, so the frontend keeps no copy of the words.
+
+| Status | Stored value | Organiser sees |
+|---|---|---|
+| Draft | `draft` | Draft |
+| Submitted | `submitted` | Requested |
+| Under review | `under_review` | Under review |
+| Pending clarification | `pending_clarification` | Awaiting your response |
+| Approved | `approved` | Planning |
+| Confirmed | `confirmed` | Confirmed |
+| Completed | `completed` | Completed |
+| Rejected | `rejected` | Rejected |
+| Cancelled | `cancelled` | Cancelled |
+
+### Allowed transitions
+
+Only these transitions are allowed. This story defines which moves are valid; who may perform each one is checked in the story named in the last column.
+
+| From | To | Who, and in which story |
+|---|---|---|
+| Draft | Submitted | The organiser submits (SCRUM-10). A coordinator is assigned automatically (N04) |
+| Submitted | Under review | The assigned coordinator starts reviewing (SCRUM-19) |
+| Under review | Pending clarification | The assigned coordinator asks for clarification (SCRUM-162) |
+| Pending clarification | Under review | The organiser replies, or the assigned coordinator closes the request (SCRUM-162) |
+| Under review | Approved or Rejected | The assigned coordinator decides (SCRUM-19) |
+| Approved | Rejected | The assigned coordinator rejects an event whose essential arrangements can't be met (SCRUM-19) |
+| Rejected | Draft | The organiser reopens a rejected request to revise and resubmit it (SCRUM-19) |
+| Approved | Confirmed | The assigned coordinator confirms (N07) |
+| Confirmed | Approved | A significant change is accepted, so the event needs re-planning (N05, N06) |
+| Confirmed | Completed | The assigned coordinator marks the event completed after it ends (N23) |
+| Submitted, Under review, Pending clarification, Approved, Confirmed | Cancelled | The assigned coordinator cancels, including when the organiser asks to withdraw (N08) |
+
+```
+Draft -> Submitted -> Under review <-> Pending clarification
+                          |
+                          +-> Approved <-> Confirmed -> Completed
+                          |      |
+                          +------+-> Rejected -> Draft (reopened)
+
+Cancelled: from Submitted, Under review, Pending clarification, Approved or Confirmed.
+```
+
+- **Final statuses.** Completed and Cancelled are final: nothing leads out of them. A cancelled event cannot be reinstated; the organiser submits a new request instead. Rejected is not final, because a rejected request can be reopened as a draft.
+- **A refused transition.** Any other transition is refused by the backend with a 409 whose message states the event's current status, and the event is left unchanged. No history row is written.
+- **What is built.** The transition rules above are all enforced. Endpoints exist today for Draft → Submitted, asking for clarification, and the organiser's reply. The other transitions are valid in the table but have no endpoint until the story that owns them lands.
+
+### How a status changes
+
+- **One rule.** `canTransition` is the only place the transition table is read. The service asks it before it calls the database; the database does not hold a second copy.
+- **One mechanism.** `changeEventRequestStatus` (`backend/src/services/eventRequestService.js`) asks `canTransition`, then calls the Postgres function `change_event_request_status` (migration `021`) through RPC. In one transaction that function locks the row, refuses if the status is no longer the one the caller last saw, writes the new status and inserts the history row. Every story that changes a status calls this; none writes the status column itself.
+- **Draft → Submitted is the one exception, and it is its own path.** Submitting also assigns a coordinator and sets `submitted_at`, so it goes through `submitEventRequest` and the Postgres function `submit_event_request` (SCRUM-327, replaced in `021`). In one transaction it checks the request is a draft, picks the coordinator with `pick_event_coordinator`, sets the status, `submitted_at` and `assigned_coordinator_id`, writes the assignment history row and writes the status history row. `change_event_request_status` refuses `submitted` as a target, so there is exactly one way to submit, and `event_requests_assigned_when_submitted` (migration `017`) refuses a submitted request with no coordinator.
+- **Creating a draft** is not a transition: the row is inserted as `draft` and there is no previous status to record.
+
+### Status history
+
+Each transition records the previous status, the new status, the user who caused it, the date and time, and the reason where one was given. The table is `event_request_status_history` (migration `021`) and its rows are only ever inserted. A status change and its history row succeed or fail together, and a refused or failed transition writes none.
+
+`GET /api/event-requests/:id/status-history` returns an event's full history, oldest first, as `previousStatus`, `newStatus`, the Organiser-facing label for each, `changedByName`, `changedAt` and `reason`. Only the event's Organiser and its currently assigned coordinator can read it; anyone else, and a request that does not exist, gets the same 404. An event with no recorded change returns an empty list. History starts when migration `021` is applied: requests that were already past draft have none.
+
+Two histories exist and they are not merged:
+
+| Table | Records | Written by |
+|---|---|---|
+| `event_request_status_history` | What stage the event reached: previous status, new status, who, when, why | `change_event_request_status`, and `submit_event_request` for Draft → Submitted |
+| `event_request_assignment_history` | Who is responsible for the event: previous coordinator, new coordinator, who assigned, handover note | `submit_event_request` (first assignment), `reassign_event_request` (handover) |
+
+A submission writes one row to each. A handover writes only to the assignment history, because the stage does not change.
+
+### Coordinator columns
+
+- `assigned_coordinator_id` is who holds the event now. It is set on submission and can change hands by handover. Only this person may act on the event, and only this person and the Organiser can read its status history.
+- `decided_by` (from SCRUM-19's decision columns) is who decided to approve or reject. It is permanent and must equal `reviewing_coordinator_id`. It does not move when the event is handed over.
+
+They are different facts and the code never uses one for the other.
+
+### Design decisions
+
+- **No separate Planning status.** The customer said Planning is "the same as under review/planning" and that "approval = sufficient info for planning". Internally that stage is Approved; the Organiser sees it labelled "Planning", the customer's own word. The `planning` value is gone from the model, and a database constraint refuses it.
+- **Pending clarification is its own status.** The customer allowed a separate status "if the team finds that it makes it more clear". It makes clear to the Organiser that the next move is theirs.
+- **Rejected requests can be revised and resubmitted.** The customer said rejection "is not necessarily final". An approved event whose essential arrangements can't be met also becomes Rejected, because the customer said it "gets rejected rather than sitting pending indefinitely".
+- **A confirmed event can go back to Approved.** The customer said a confirmed event "can revert if major change occurs and reviewed by the co-ordinator".
+- **Cancelled is final.** The customer said "when an event is cancelled, it is cancelled".
+- **There is no Withdrawn status.** The customer said the organiser "may request withdrawal via Coordinator", so a withdrawal is a cancellation by the coordinator, with the reason recorded.
+- **Drafts are deleted, not cancelled.** A draft has no coordinator yet, so there is nobody to cancel it, and Draft → Cancelled is not a transition.
+
+### Where the implementation differs from the story
+
+- Submitted → Pending clarification is also allowed. The table above does not list it, but clarification works from Submitted today (SCRUM-46) and nothing yet moves a request to Under review. It should be removed once the coordinator can start a review.
+- "The assigned coordinator closes the request" (Pending clarification → Under review) has no endpoint yet.
+- `planning` is no longer a status in the code, but it is still a value of the database enum, which Postgres cannot shrink. Migration `020` moves any such row to Approved and a constraint refuses the value.
+- No endpoint deletes a draft yet.
+- Moving a request to Approved, Rejected or Confirmed needs the decision columns from SCRUM-19. `change_event_request_status` does not write them, so those transitions will need that story to extend it.
+## Development workflow
+
+### Branches
+
+| Branch | Purpose |
+|---|---|
+| `main` | The shippable increment. Updated only at a sprint boundary, by merging `dev`. Tagged per release (`v0.1.0-sprint1`). |
+| `dev` | Default branch and integration target. All feature work merges here during the sprint. |
+| `feature/SCRUM-<id>-<slug>` | One branch per user story, cut from `dev`. |
+
+Also in use: `bugfix/SCRUM-<id>-<slug>`, and `hotfix/<slug>` cut from `main` for a broken release.
+
+**One branch per user story, not per person.** Each branch maps to exactly one backlog item, so any requirement can be traced to its commits, its pull request, and its tests.
+
+```bash
+git checkout dev
+git pull
+git checkout -b feature/SCRUM-14-track-event-request-status
+```
+
+### Commits
+
+Conventional Commits, prefixed with the Jira ticket:
+
+```
+feat(SCRUM-14): add event status badge component
+fix(SCRUM-14): handle unknown status values
+test(SCRUM-14): cover status transition edge cases
+```
+
+### Pull requests
+
+- Feature branch → `dev`. One teammate approval required. **Squash merge**, so each story becomes a single commit on `dev`.
+- `dev` → `main` at the end of each sprint. **Merge commit**, so sprint boundaries stay visible in history.
+- Describe what changed and link the Jira ticket. Note how you verified it.
+
+### Definition of Done
+
+A story is done when its acceptance criteria are met, it has tests, it has been reviewed and merged to `dev`, and the Jira ticket has been moved to Done.
+
+## Testing
+
+| Command | What it proves | Needs credentials |
+|---|---|---|
+| `npm test` | The unit suite. Run on every pull request by CI. | No |
+| `npm run db:check` | The migrations were applied and the seed data landed. | Yes |
+| `npm run venue:check` | The venue service end to end: the transactional RPCs, the schema constraints, the audit trigger and retirement, against a real database. | Yes |
+| `npm run routes:check` | The event request routes end to end: a real Supabase token through the auth middleware, ownership scoping against row level security, and a status change reaching the client. | Yes |
+| `npm run venue-routes:check` | The venue catalogue routes end to end, one block per SCRUM-15 acceptance criterion: creation, an authorised change reaching the search, retirement leaving the search while its bookings survive, and the audit trail naming the editing user. | Yes |
+
+Run them all from `backend/`.
+
+Test files live in `backend/tests/`, mirroring `backend/src/`. Each `describe` block is named after the acceptance criterion it proves, so a requirement traces to the test that covers it without a separate document to keep in step.
+
+Tests that would otherwise reach Supabase replace the client with a mock, which is what lets the suite run in CI with no `.env`. The one exception is deliberate: `backend/tests/config/supabaseClient.test.js` re-imports the real module to prove it refuses a half-configured environment.
+
+### Why the migrations have no unit tests
+
+`backend/db/migrations/` is DDL that only Postgres can execute. Testing it means running it, which needs a live database and a secret key — and that key bypasses row level security entirely, so it does not belong in CI. The two check scripts above are the proof instead, run by hand before opening a pull request. `backend/tests/domain/eventRequestStatus.test.js` covers the one part that can be checked statically: it reads the status enum out of `001_event_requests.sql` and asserts the JavaScript vocabulary still matches it.
