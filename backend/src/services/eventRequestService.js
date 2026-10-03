@@ -32,7 +32,9 @@
  *    event past draft. The same rule covers coordinators acting on an event
  *    (SCRUM-332): requestEventClarification and reassignEventRequest take the
  *    coordinator, and the event's assigned coordinator is enforced, by the
- *    first itself and by 018's function for the second. Role, and the
+ *    first itself and by 018's function for the second.
+ *    listEventRequestsForCoordinator (SCRUM-333) takes the coordinator and
+ *    reads only the events assigned to them. Role, and the
  *    caller's relationship to an event, arrive with the JWT and belong in
  *    middleware. A service that quietly enforced half of it would make the
  *    other half look unnecessary.
@@ -1011,6 +1013,12 @@ export async function getEventRequestForCoordinator(id, { client } = {}) {
  * of the shared queue: a Coordinator learns what was asked for, not who to
  * contact about it. Render it as an identifier.
  *
+ * listEventRequestsForCoordinator, below, does show the organiser's name, and
+ * that is not a contradiction. The floor is for a queue of work nobody has
+ * taken on, which every coordinator sees. "My events" holds only the events
+ * the caller is responsible for, where contacting the organiser is the job.
+ * Its docstring gives the argument in full.
+ *
  * Unpaginated, like every other list in this API. Bounded in practice by the
  * status filter -- a decided request drops out -- but say it rather than
  * discover it.
@@ -1034,4 +1042,127 @@ export async function listEventRequestsForReview({ client } = {}) {
   // An empty queue is the good state, not a missing resource: it means nothing
   // is waiting on a Coordinator. 200 [] all the way up, never a NotFoundError.
   return (data ?? []).map(toEventRequest);
+}
+
+
+/**
+ * Every event assigned to one coordinator, soonest first, each with its
+ * organiser's name.
+ *
+ * SCRUM-333, for SCRUM-327 AC11: each coordinator has a "My events" list
+ * showing the events assigned to them, grouped by status, earliest event
+ * first. It sits beside the shared queue, which is unchanged: the queue is the
+ * view of work nobody holds yet, and this is the view of work one person does
+ * hold.
+ *
+ * No status filter. The queue leaves decided statuses out because it is a
+ * worklist, and a worklist that kept them would never empty. This is a list
+ * of responsibility instead. AC11 groups it by status, which assumes more than
+ * the live ones, and a coordinator still needs the event they rejected when
+ * its Organiser asks why, or the completed one when a report is due. Leave
+ * the terminal statuses out here and there is no way to find them at all,
+ * because the coordinator read needs an id. The frontend can collapse the
+ * groups that are finished. Drafts stay out without a filter: a draft never
+ * has an assigned coordinator, because assignment happens at submission
+ * (016), so assigned_coordinator_id = caller already excludes every one. That
+ * keeps the privacy boundary COORDINATOR_QUEUE_STATUSES keeps for the queue.
+ *
+ * Why this list shows the organiser's name, when listEventRequestsForReview
+ * calls leaving it out "the privacy floor of the shared queue": that floor is
+ * for a queue every coordinator sees, of events none of them has taken on, so
+ * a coordinator learns what was asked for and not who to contact. These are
+ * events the caller is responsible for, and AC7 makes them the one person who
+ * can act on them. Contacting the organiser is part of that job. The two lists
+ * answer the question differently because the work is the caller's here and
+ * nobody's there. profiles has full_name but no email, so a name is all there
+ * is to show.
+ *
+ * Why the names are a second read rather than a join in the select. PostgREST
+ * embeds one table in another only along a foreign key between them, and
+ * there is none: event_requests.organiser_id references auth.users (001), and
+ * so does profiles.id (007). select('..., profiles(full_name)') would fail
+ * with "could not find a relationship". Adding that foreign key would need a
+ * migration, and would refuse every organiser without a profiles row, which
+ * the hand-run check scripts create. So this reads the events, then reads
+ * full_name for exactly the organisers in that list with one .in(). Both are
+ * reads, so there is nothing to keep atomic between them. The second read is
+ * narrowed to the organisers of the caller's own events, so it cannot be used
+ * to read anyone else's name.
+ *
+ * Choices worth defending:
+ *
+ *  - Ordered by proposed_start ascending, because "earliest event first"
+ *    means the event happening soonest. The queue orders by submitted_at
+ *    because it asks who has waited longest; this asks what is coming up.
+ *    nullsFirst: false because proposed_start is nullable and Postgres sorts
+ *    nulls first on ASC, which would put an undated event at the head of a
+ *    list ordered by date. The id tiebreak is the queue's, for the queue's
+ *    reason.
+ *  - The same COLUMNS as every other read, so a row here is the shape GET
+ *    /:id/review returns, plus organiserName.
+ *  - organiserName flat beside organiserId, not a nested object: every other
+ *    field is flat, and a nested { id, fullName } would carry the id twice.
+ *    null when full_name is null or the organiser has no profiles row, so the
+ *    key is always there.
+ *  - No second read for an empty list: no rows, no organisers to name.
+ *  - If the name read fails, the call fails. Returning the events with every
+ *    name null would look like organisers who never gave a name, and nobody
+ *    would know a read had failed.
+ *  - A flat array, not grouped. Every list in this API is a bare array, and
+ *    grouping by status is presentation.
+ *
+ * Unpaginated, like every other list here, and unlike the queue it is not
+ * bounded by a status filter: it grows with every event the coordinator ever
+ * holds. Said here rather than discovered.
+ *
+ * @param {string} coordinatorId  from the JWT, via requireAuth -- never the client
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object[]>} possibly empty, in camelCase, each with organiserName
+ * @throws {ValidationError} when no coordinator was supplied, before any round trip
+ */
+export async function listEventRequestsForCoordinator(coordinatorId, { client } = {}) {
+  // Refused before the client is touched. Without the caller, the read below
+  // would have no filter at all and return every assigned event in the
+  // system. The id comes from the token, so a missing one is a caller bug.
+  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
+    throw new ValidationError(
+      'Invalid coordinator -- coordinatorId: is required',
+      [{ field: 'coordinatorId', message: 'is required' }],
+    );
+  }
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db
+    .from('event_requests')
+    .select(COLUMNS)
+    .eq('assigned_coordinator_id', coordinatorId)
+    .order('proposed_start', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true });
+
+  if (error) throw translateError(error);
+
+  const rows = data ?? [];
+
+  // Nothing assigned is the good state, not a missing resource.
+  if (rows.length === 0) return [];
+
+  const organiserIds = [...new Set(rows.map((row) => row.organiser_id))];
+
+  const { data: profiles, error: profilesError } = await db
+    .from('profiles')
+    .select('id, full_name')
+    .in('id', organiserIds);
+
+  if (profilesError) throw translateError(profilesError);
+
+  const nameById = new Map(
+    (profiles ?? []).map((profile) => [profile.id, profile.full_name ?? null]),
+  );
+
+  return rows.map((row) => ({
+    ...toEventRequest(row),
+    organiserName: nameById.get(row.organiser_id) ?? null,
+  }));
 }

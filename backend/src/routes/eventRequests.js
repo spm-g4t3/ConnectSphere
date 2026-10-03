@@ -71,6 +71,7 @@ import {
   getEventRequestForOrganiser,
   getEventRequestForCoordinator,
   listEventRequestsForReview,
+  listEventRequestsForCoordinator,
   createEventRequest,
   updateEventRequest,
   submitEventRequest,
@@ -197,15 +198,17 @@ export function createEventRequestRouter({
   /**
    * SCRUM-45: everything awaiting a decision, for an Event Coordinator.
    *
-   * The one route in this file that is not scoped to req.user.id, and the fix
+   * The first route in this file that was not scoped to req.user.id (GET
+   * /:id/review, since SCRUM-332, is the other), and the fix
    * for the reported bug that a submitted request never reached the
    * Coordinator side. Which rows qualify is decided by
    * COORDINATOR_QUEUE_STATUSES in the domain -- notably, a draft never appears
    * here, which is what keeps a shared queue from exposing an Organiser's
    * private working copy.
    *
-   * DECLARATION ORDER HERE IS LOAD-BEARING, and this is the one place in this
-   * router where that is literally true. Every other ordering note in this
+   * DECLARATION ORDER HERE IS LOAD-BEARING, and this and GET /mine below
+   * (SCRUM-333) are the only places in this router where that is literally
+   * true. Every other ordering note in this
    * file -- on /:id/status below, and above the writes -- carefully explains
    * that the paths cannot actually collide because /:id is one segment and
    * /:id/... is two. This one can and does: '/queue' is also one segment, so
@@ -229,6 +232,39 @@ export function createEventRequestRouter({
   router.get('/queue', coordinatorOnly, async (req, res) => {
     try {
       const requests = await listEventRequestsForReview({ client });
+      res.status(200).json(requests.map(withStatusDisplay));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-333 (SCRUM-327 AC11): "My events", every event assigned to the
+   * signed-in coordinator, soonest first, each with its organiser's name.
+   *
+   * Beside GET /queue, not replacing it. The queue is the only view of work
+   * nobody holds yet; this is the work the caller does hold. Which one the
+   * dashboard opens on is the frontend's choice.
+   *
+   * DECLARATION ORDER IS LOAD-BEARING, exactly as for /queue above. '/mine' is
+   * one segment, so declared after GET /:id Express would match it with
+   * id === 'mine' and send a coordinator to the Organiser's read, which
+   * answers 404. Do not move it below /:id.
+   *
+   * coordinatorOnly as a per-route argument, like every gate in this file.
+   * The list is narrowed to req.user.id as the assigned coordinator, never to
+   * anything in the query string, so one coordinator cannot read another's.
+   *
+   * A bare array, like GET / and GET /queue. The frontend groups it by status;
+   * grouping is presentation. An empty list is 200 [], never 404: nothing
+   * assigned is not a missing resource.
+   *
+   * Statuses: 200, 401 from requireAuth, 403 for the wrong role or no role,
+   * 500 for anything untyped.
+   */
+  router.get('/mine', coordinatorOnly, async (req, res) => {
+    try {
+      const requests = await listEventRequestsForCoordinator(req.user.id, { client });
       res.status(200).json(requests.map(withStatusDisplay));
     } catch (err) {
       handleError(err, res);
