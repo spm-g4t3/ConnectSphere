@@ -68,6 +68,7 @@ import {
   STATUS,
   canTransition,
   COORDINATOR_QUEUE_STATUSES,
+  getOrganiserStatusLabel,
 } from '../domain/eventRequestStatus.js';
 
 
@@ -1074,7 +1075,12 @@ export async function getEventRequestForCoordinator(id, { client } = {}) {
  * the assigned coordinator is one, and an event with no coordinator (a draft)
  * matches nobody on that side.
  *
- * Each row carries the name of the user who caused the change, from
+ * Each row carries the status before and after as recorded, and the label an
+ * Organiser sees for each (SCRUM-323), because the Organiser reads this
+ * history and must never be shown an internal name. The raw statuses stay for
+ * code that branches on them.
+ *
+ * Each row also carries the name of the user who caused the change, from
  * profiles.full_name, and not their id. The history table references
  * auth.users, not profiles, so PostgREST cannot join them and the names are a
  * second read. A user with no profile or no name is null rather than a guess;
@@ -1084,13 +1090,15 @@ export async function getEventRequestForCoordinator(id, { client } = {}) {
  * empty list and not a NotFoundError: the event exists and the caller may read
  * it, so "nothing yet" is the true answer.
  *
- * Not decorated with the Organiser-facing status labels. Those are SCRUM-323.
+ * Not decorated with the whole display (group, description). It carries the
+ * label alone.
  *
  * @param {string} id
  * @param {string} userId  the caller, from the JWT -- never the body
  * @param {object} [options]
  * @param {object} [options.client]
- * @returns {Promise<Array<{previousStatus: string, newStatus: string,
+ * @returns {Promise<Array<{previousStatus: string, previousStatusLabel: string,
+ *           newStatus: string, newStatusLabel: string,
  *           changedByName: string|null, changedAt: string, reason: string|null}>>}
  * @throws {ValidationError} when no user was supplied
  * @throws {NotFoundError}   no such request, or the caller is neither its
@@ -1131,7 +1139,9 @@ export async function getEventRequestStatusHistory(id, userId, { client } = {}) 
 
   return rows.map((row) => ({
     previousStatus: row.previous_status,
+    previousStatusLabel: getOrganiserStatusLabel(row.previous_status),
     newStatus: row.new_status,
+    newStatusLabel: getOrganiserStatusLabel(row.new_status),
     changedByName: nameById.get(row.changed_by) ?? null,
     changedAt: row.created_at,
     reason: row.reason ?? null,

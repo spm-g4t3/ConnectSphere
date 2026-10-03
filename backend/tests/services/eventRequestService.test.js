@@ -2779,7 +2779,9 @@ describe('SCRUM-322 AC6: the Organiser and the assigned coordinator see the full
 
     expect(history[1]).toEqual({
       previousStatus: STATUS.SUBMITTED,
+      previousStatusLabel: 'Requested',
       newStatus: STATUS.UNDER_REVIEW,
+      newStatusLabel: 'Under review',
       changedByName: 'Carlos Coordinator',
       changedAt: '2026-01-16T09:00:00+00:00',
       reason: 'Picked up for review.',
@@ -2788,16 +2790,31 @@ describe('SCRUM-322 AC6: the Organiser and the assigned coordinator see the full
     expect(history[0].reason).toBeNull();
   });
 
-  it('SCRUM322_AC6_exposes_only_those_five_fields', async () => {
+  it('SCRUM323_AC7_shows_the_organiser_label_for_every_status_in_the_history', async () => {
+    // The raw statuses are kept for code that branches on them. What an
+    // Organiser reads is the label, never the internal name.
+    const client = readingHistory();
+
+    const history = await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(history.map((entry) => [entry.previousStatusLabel, entry.newStatusLabel])).toEqual([
+      ['Draft', 'Requested'],
+      ['Requested', 'Under review'],
+      ['Under review', 'Awaiting your response'],
+    ]);
+  });
+
+  it('SCRUM322_AC6_exposes_only_those_seven_fields', async () => {
     // Not the user id, the row id or the event id: what the screen shows is the
     // name, and the ids are nobody's business.
     const client = readingHistory();
 
     const [first] = await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
 
-    expect(Object.keys(first).sort()).toEqual(
-      ['changedAt', 'changedByName', 'newStatus', 'previousStatus', 'reason'],
-    );
+    expect(Object.keys(first).sort()).toEqual([
+      'changedAt', 'changedByName', 'newStatus', 'newStatusLabel',
+      'previousStatus', 'previousStatusLabel', 'reason',
+    ]);
   });
 
   it('SCRUM322_AC6_asks_for_the_oldest_change_first', async () => {

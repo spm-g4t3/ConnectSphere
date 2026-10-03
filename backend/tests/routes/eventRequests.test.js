@@ -364,8 +364,8 @@ describe('AC4: the status endpoint answers a refetch cheaply and freshly', () =>
     const before = await request(app).get(`/api/event-requests/${REQUEST_ID}/status`);
     const after = await request(app).get(`/api/event-requests/${REQUEST_ID}/status`);
 
-    expect(before.body.label).toBe('Submitted');
-    expect(after.body.label).toBe('Under Review');
+    expect(before.body.label).toBe('Requested');
+    expect(after.body.label).toBe('Under review');
     expect(after.body.updatedAt).not.toBe(before.body.updatedAt);
   });
 
@@ -2031,7 +2031,7 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
     expect(res.body.id).toBe(REQUEST_ID);
     expect(res.body.assignedCoordinatorId).toBe(NEW_COORDINATOR_ID);
     expect(res.body.reviewingCoordinatorId).toBe(NEW_COORDINATOR_ID);
-    expect(res.body.statusDisplay.label).toBe('Under Review');
+    expect(res.body.statusDisplay.label).toBe('Under review');
 
     // One call, to the function, and nothing else.
     expect(client.calls.map((call) => call.operation)).toEqual(['rpc']);
@@ -2495,14 +2495,18 @@ describe('SCRUM-322: GET /:id/status-history', () => {
     expect(res.body).toEqual([
       {
         previousStatus: STATUS.DRAFT,
+        previousStatusLabel: 'Draft',
         newStatus: STATUS.SUBMITTED,
+        newStatusLabel: 'Requested',
         changedByName: 'Olivia Organiser',
         changedAt: '2026-01-15T09:00:00+00:00',
         reason: null,
       },
       {
         previousStatus: STATUS.SUBMITTED,
+        previousStatusLabel: 'Requested',
         newStatus: STATUS.UNDER_REVIEW,
+        newStatusLabel: 'Under review',
         changedByName: 'Carlos Coordinator',
         changedAt: '2026-01-16T09:00:00+00:00',
         reason: 'Picked up for review.',
@@ -2520,16 +2524,17 @@ describe('SCRUM-322: GET /:id/status-history', () => {
     expect(res.body).toHaveLength(2);
   });
 
-  it('SCRUM322_AC6_is_a_bare_array_with_no_status_labels_or_ids', async () => {
+  it('SCRUM322_AC6_is_a_bare_array_with_labels_and_no_ids', async () => {
     const client = createQueueFakeClient([ok(heldEvent()), ok(rows()), ok(people())]);
 
     const res = await readHistory(client, signedInAs(ORGANISER_ID));
 
     expect(Array.isArray(res.body)).toBe(true);
     for (const entry of res.body) {
-      expect(Object.keys(entry).sort()).toEqual(
-        ['changedAt', 'changedByName', 'newStatus', 'previousStatus', 'reason'],
-      );
+      expect(Object.keys(entry).sort()).toEqual([
+        'changedAt', 'changedByName', 'newStatus', 'newStatusLabel',
+        'previousStatus', 'previousStatusLabel', 'reason',
+      ]);
     }
   });
 

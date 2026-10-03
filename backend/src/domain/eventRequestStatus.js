@@ -70,57 +70,85 @@ export const STATUS_GROUP = Object.freeze({
 
 
 /**
+ * The label the Event Organiser sees for each status (SCRUM-318 AC7).
+ *
+ * The one definition of these words. STATUS_DISPLAY below takes its labels
+ * from here, and so does everything that shows a status to an Organiser, so no
+ * screen or response needs a copy and none can drift.
+ *
+ * Presentation only. The keys are the internal statuses, which are what the
+ * database stores and the transition table speaks, and they are unchanged.
+ * The Organiser never sees them: 'submitted' reads "Requested",
+ * 'pending_clarification' reads "Awaiting your response", and 'approved' reads
+ * "Planning", the customer's own word for that stage. There is no planning
+ * status behind that label.
+ */
+export const ORGANISER_STATUS_LABEL = Object.freeze({
+  [STATUS.DRAFT]: 'Draft',
+  [STATUS.SUBMITTED]: 'Requested',
+  [STATUS.UNDER_REVIEW]: 'Under review',
+  [STATUS.PENDING_CLARIFICATION]: 'Awaiting your response',
+  [STATUS.APPROVED]: 'Planning',
+  [STATUS.CONFIRMED]: 'Confirmed',
+  [STATUS.COMPLETED]: 'Completed',
+  [STATUS.REJECTED]: 'Rejected',
+  [STATUS.CANCELLED]: 'Cancelled',
+});
+
+
+/**
  * What the Organiser sees for each status.
  *
- * Descriptions are written in the second person because they are shown to the
- * Organiser directly, and the customer brief asks that the system "not assume
- * that users understand ConnectSphere's internal processes".
+ * Labels come from ORGANISER_STATUS_LABEL. Descriptions are written in the
+ * second person because they are shown to the Organiser directly, and the
+ * customer brief asks that the system "not assume that users understand
+ * ConnectSphere's internal processes".
  *
  * Object.freeze is shallow, so each entry is frozen too.
  */
 export const STATUS_DISPLAY = Object.freeze({
   [STATUS.DRAFT]: Object.freeze({
-    label: 'Draft',
+    label: ORGANISER_STATUS_LABEL[STATUS.DRAFT],
     group: STATUS_GROUP.DRAFT,
     description: 'Not yet submitted to ConnectSphere. You can keep editing it.',
   }),
   [STATUS.SUBMITTED]: Object.freeze({
-    label: 'Submitted',
+    label: ORGANISER_STATUS_LABEL[STATUS.SUBMITTED],
     group: STATUS_GROUP.AWAITING_REVIEW,
     description: 'Received by ConnectSphere and waiting to be picked up by a Coordinator.',
   }),
   [STATUS.UNDER_REVIEW]: Object.freeze({
-    label: 'Under Review',
+    label: ORGANISER_STATUS_LABEL[STATUS.UNDER_REVIEW],
     group: STATUS_GROUP.UNDER_REVIEW,
     description: 'A Coordinator is assessing your request.',
   }),
   [STATUS.PENDING_CLARIFICATION]: Object.freeze({
-    label: 'Action Needed',
+    label: ORGANISER_STATUS_LABEL[STATUS.PENDING_CLARIFICATION],
     group: STATUS_GROUP.ACTION_REQUIRED,
     description: 'A Coordinator needs more information from you before this can move forward.',
   }),
   [STATUS.APPROVED]: Object.freeze({
-    label: 'Approved',
+    label: ORGANISER_STATUS_LABEL[STATUS.APPROVED],
     group: STATUS_GROUP.APPROVED,
     description: 'Your request has been accepted. Arrangements will now begin.',
   }),
   [STATUS.CONFIRMED]: Object.freeze({
-    label: 'Confirmed',
+    label: ORGANISER_STATUS_LABEL[STATUS.CONFIRMED],
     group: STATUS_GROUP.CONFIRMED,
     description: 'All arrangements are complete. Your event is going ahead.',
   }),
   [STATUS.COMPLETED]: Object.freeze({
-    label: 'Completed',
+    label: ORGANISER_STATUS_LABEL[STATUS.COMPLETED],
     group: STATUS_GROUP.COMPLETED,
     description: 'This event has taken place.',
   }),
   [STATUS.REJECTED]: Object.freeze({
-    label: 'Rejected',
+    label: ORGANISER_STATUS_LABEL[STATUS.REJECTED],
     group: STATUS_GROUP.REJECTED,
     description: 'This request was not accepted. See the Coordinator notes for the reason.',
   }),
   [STATUS.CANCELLED]: Object.freeze({
-    label: 'Cancelled',
+    label: ORGANISER_STATUS_LABEL[STATUS.CANCELLED],
     group: STATUS_GROUP.CANCELLED,
     description: 'This event was called off.',
   }),
@@ -339,4 +367,21 @@ export function getStatusDisplay(status) {
  */
 export function isKnownStatus(status) {
   return Object.hasOwn(STATUS_DISPLAY, status);
+}
+
+
+/**
+ * The label an Organiser sees for a status, for places that show only the
+ * words and not the whole display.
+ *
+ * SCRUM-323. Reads through getStatusDisplay, so it follows SCRUM-47's
+ * convention rather than inventing its own: a status this build does not know
+ * is "Unknown Status", and nothing usable is "Status Unavailable". It never
+ * returns undefined and never echoes an internal name it does not recognise.
+ *
+ * @param {string} status
+ * @returns {string}
+ */
+export function getOrganiserStatusLabel(status) {
+  return getStatusDisplay(status).label;
 }

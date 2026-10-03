@@ -150,7 +150,7 @@ describe('AC3: the Organiser can tell which stage they are at', () => {
   it('returns the shape the API sends to React', () => {
     expect(getStatusDisplay(STATUS.UNDER_REVIEW)).toEqual({
       status: 'under_review',
-      label: 'Under Review',
+      label: 'Under review',
       group: STATUS_GROUP.UNDER_REVIEW,
       description: 'A Coordinator is assessing your request.',
     });
@@ -578,4 +578,99 @@ describe('SCRUM-45: the review queue is a set of statuses, named in the domain',
     expect(() => { COORDINATOR_QUEUE_STATUSES.push(STATUS.DRAFT); }).toThrow();
     expect(COORDINATOR_QUEUE_STATUSES).toHaveLength(3);
   });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-323 -- the Organiser-facing label for each status (SCRUM-318 AC7)
+// ---------------------------------------------------------------------------
+/**
+ * Appended, with its import, for the reason the SCRUM-45 block above gives for
+ * its own: everything above this line is the regression gate for SCRUM-44 and
+ * SCRUM-47.
+ *
+ * AC7 is a table, and it is written out below in full rather than derived from
+ * the module, so that a label changed by accident fails here and names the row.
+ */
+import { ORGANISER_STATUS_LABEL, getOrganiserStatusLabel } from '../../src/domain/eventRequestStatus.js';
+
+const AC7_LABELS = [
+  [STATUS.DRAFT, 'Draft'],
+  [STATUS.SUBMITTED, 'Requested'],
+  [STATUS.UNDER_REVIEW, 'Under review'],
+  [STATUS.PENDING_CLARIFICATION, 'Awaiting your response'],
+  [STATUS.APPROVED, 'Planning'],
+  [STATUS.CONFIRMED, 'Confirmed'],
+  [STATUS.COMPLETED, 'Completed'],
+  [STATUS.REJECTED, 'Rejected'],
+  [STATUS.CANCELLED, 'Cancelled'],
+];
+
+describe('SCRUM-323 AC7: every status has its Organiser label', () => {
+  it.each(AC7_LABELS)('SCRUM323_AC7_shows_%s_as_%s', (status, label) => {
+    expect(ORGANISER_STATUS_LABEL[status]).toBe(label);
+    expect(getOrganiserStatusLabel(status)).toBe(label);
+    expect(getStatusDisplay(status).label).toBe(label);
+    expect(STATUS_DISPLAY[status].label).toBe(label);
+  });
+
+  it('SCRUM323_AC7_covers_exactly_the_statuses_there_are', () => {
+    expect(AC7_LABELS.map(([status]) => status).sort()).toEqual([...ALL_STATUSES].sort());
+    expect(Object.keys(ORGANISER_STATUS_LABEL).sort()).toEqual([...ALL_STATUSES].sort());
+  });
+
+  it('SCRUM323_AC7_has_one_definition_the_display_reads_from', () => {
+    // The display table holds no words of its own: each label is the map's.
+    for (const status of ALL_STATUSES) {
+      expect(STATUS_DISPLAY[status].label).toBe(ORGANISER_STATUS_LABEL[status]);
+    }
+  });
+
+  it('SCRUM323_AC7_never_shows_an_internal_name_with_an_underscore', () => {
+    for (const label of Object.values(ORGANISER_STATUS_LABEL)) {
+      expect(label).not.toMatch(/_/);
+    }
+  });
+
+  it('SCRUM323_AC7_labels_approved_as_planning_without_a_planning_status', () => {
+    // "Planning" is the customer's word for the approved stage, and only a
+    // label. Nothing stores or accepts it as a status.
+    expect(ORGANISER_STATUS_LABEL[STATUS.APPROVED]).toBe('Planning');
+    expect(Object.values(STATUS)).not.toContain('planning');
+    expect(Object.keys(ORGANISER_STATUS_LABEL)).not.toContain('planning');
+    expect(isKnownStatus('Planning')).toBe(false);
+  });
+
+  it('SCRUM323_AC7_leaves_the_internal_statuses_unchanged', () => {
+    expect(Object.values(STATUS).sort()).toEqual([
+      'approved', 'cancelled', 'completed', 'confirmed', 'draft',
+      'pending_clarification', 'rejected', 'submitted', 'under_review',
+    ]);
+  });
+
+  it('SCRUM323_AC7_cannot_be_edited_at_runtime', () => {
+    expect(Object.isFrozen(ORGANISER_STATUS_LABEL)).toBe(true);
+    expect(() => { ORGANISER_STATUS_LABEL[STATUS.APPROVED] = 'Approved'; }).toThrow();
+    expect(ORGANISER_STATUS_LABEL[STATUS.APPROVED]).toBe('Planning');
+  });
+});
+
+
+describe('SCRUM-323: a status that is not one of the nine', () => {
+  // SCRUM-47's convention: a value that arrived but is not known is "Unknown
+  // Status", and nothing usable is "Status Unavailable". Never undefined, and
+  // never the unrecognised value itself.
+  it.each(['planning', 'postponed', 'DRAFT', 'Requested', 'constructor', '__proto__'])(
+    'SCRUM323_labels_%s as unknown',
+    (value) => {
+      expect(getOrganiserStatusLabel(value)).toBe(STATUS_FALLBACK.UNKNOWN.label);
+    },
+  );
+
+  it.each([null, undefined, '', '   ', 42, {}, []])(
+    'SCRUM323_labels_%o as unavailable',
+    (value) => {
+      expect(getOrganiserStatusLabel(value)).toBe(STATUS_FALLBACK.UNAVAILABLE.label);
+    },
+  );
 });

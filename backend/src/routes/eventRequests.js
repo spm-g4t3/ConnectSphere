@@ -268,8 +268,8 @@ export function createEventRequestRouter({
    * caller and enforces the rule itself, as getEventRequestForOrganiser does
    * for its routes. The caller is always req.user.id, from the token.
    *
-   * Not wrapped in withStatusDisplay. The rows carry raw statuses; the
-   * Organiser-facing labels are SCRUM-323.
+   * Not wrapped in withStatusDisplay. Each row carries the raw statuses and the
+   * Organiser-facing label for each (SCRUM-323), and no more.
    */
   router.get('/:id/status-history', async (req, res) => {
     try {
