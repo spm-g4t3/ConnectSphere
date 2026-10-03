@@ -19,6 +19,7 @@ import {
 import EventRequestForm from "./EventRequestForm";
 import ChangeRequestForm from "./ChangeRequestForm";
 import ChangeRequestStatusList from "./ChangeRequestStatusList";
+import AssignmentHistory from "./AssignmentHistory";
 
 function formatEventDate(value) {
   if (!value) return "Not specified";
@@ -30,6 +31,42 @@ function formatEventDate(value) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
+}
+
+/**
+ * SCRUM-334, for SCRUM-327 AC10: the Organiser sees who their coordinator is
+ * and how the event got to them, without the handover notes.
+ *
+ * Inline on the event, collapsed, rather than a fifth panel. The four panels
+ * this screen already has are all for doing something: create, edit, respond
+ * to a clarification, request a change. This is reading a few lines, and a
+ * panel would take the Organiser away from their list to read them. The
+ * "Current event details" <details> beside it is the same kind of thing, read
+ * on demand from the row, so this uses the same control.
+ *
+ * Loaded only once opened. The list has one row per request, and reading
+ * every row's history on every load, and again on every tab focus, would be
+ * one extra request per row for something most rows never open: the N+1 the
+ * backend router's header warns about. The cost is that the coordinator's
+ * name is behind one click. Showing it on the row itself without that cost
+ * needs the backend to send the name with the Organiser's list, which is a
+ * backend change and a follow-up. Once opened it stays loaded; closing and
+ * reopening does not read it again.
+ */
+function CoordinatorDetails({ eventRequestId }) {
+  const [opened, setOpened] = useState(false);
+
+  return (
+    <details
+      className="my-event-requests__details"
+      onToggle={(event) => {
+        if (event.currentTarget.open) setOpened(true);
+      }}
+    >
+      <summary>Your coordinator and assignment history</summary>
+      {opened && <AssignmentHistory eventRequestId={eventRequestId} view="organiser" />}
+    </details>
+  );
 }
 
 export default function MyEventRequests() {
@@ -215,6 +252,10 @@ export default function MyEventRequests() {
                   <dd>{req.equipmentRequirements || "Not specified"}</dd>
                 </dl>
               </details>
+
+              {/* Not on a draft: a coordinator is assigned at submission, so a
+                  draft has nobody and no history to show. */}
+              {req.status !== "draft" && <CoordinatorDetails eventRequestId={req.id} />}
 
               <div className="my-event-requests__item-actions">
                 {req.status === "draft" && (
