@@ -106,11 +106,22 @@ describe('SCRUM-327 / SCRUM-318: the application has one draft -> submitted path
     expect(callers).toEqual(['services/eventRequestService.js']);
   });
 
-  it('never reads or writes the status history table itself', () => {
-    const touching = SOURCES.filter(({ text }) => /event_request_status_history/.test(text))
-      .map(({ path }) => relative(path));
+  it('only reads the status history table, and only from the service', () => {
+    // SCRUM-322 reads it. Writing is for change_event_request_status and
+    // submit_event_request, so no table call on it may insert, update, delete or
+    // upsert.
+    const touching = SOURCES.filter(({ text }) => /event_request_status_history/.test(text));
 
-    expect(touching).toEqual([]);
+    expect(touching.map(({ path }) => relative(path))).toEqual(['services/eventRequestService.js']);
+
+    const chains = [...touching[0].text.matchAll(/\.from\(\s*['"]event_request_status_history['"]\s*\)[^;]*;/g)]
+      .map((m) => m[0]);
+
+    expect(chains.length).toBeGreaterThan(0);
+    for (const chain of chains) {
+      expect(chain).toMatch(/\.select\(/);
+      expect(chain).not.toMatch(/\.(insert|update|delete|upsert)\(/);
+    }
   });
 });
 

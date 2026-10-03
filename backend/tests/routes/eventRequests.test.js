@@ -2435,3 +2435,159 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
     consoleError.mockRestore();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-322 -- GET /:id/status-history over HTTP
+// ---------------------------------------------------------------------------
+/**
+ * SCRUM-318 AC6: the Event Organiser and the assigned coordinator can view the
+ * event's full status history, oldest first. Anyone else gets "not found".
+ *
+ * The route is open to any signed-in user and the service decides, so these
+ * tests drive both together through real Express routing: who is signed in
+ * comes from the fake authenticator, what is stored comes from the fake
+ * client. Reads through createQueueFakeClient above, which has .in() for the
+ * name lookup.
+ */
+describe('SCRUM-322: GET /:id/status-history', () => {
+  const STRANGER_ID = '99999999-9999-4999-8999-999999999999';
+
+  const heldEvent = (overrides = {}) =>
+    storedRow({
+      status: STATUS.UNDER_REVIEW,
+      submitted_at: '2026-01-15T09:00:00+00:00',
+      assigned_coordinator_id: COORDINATOR_ID,
+      ...overrides,
+    });
+
+  const rows = () => [
+    {
+      previous_status: STATUS.DRAFT,
+      new_status: STATUS.SUBMITTED,
+      changed_by: ORGANISER_ID,
+      reason: null,
+      created_at: '2026-01-15T09:00:00+00:00',
+    },
+    {
+      previous_status: STATUS.SUBMITTED,
+      new_status: STATUS.UNDER_REVIEW,
+      changed_by: COORDINATOR_ID,
+      reason: 'Picked up for review.',
+      created_at: '2026-01-16T09:00:00+00:00',
+    },
+  ];
+
+  const people = () => [
+    { id: ORGANISER_ID, full_name: 'Olivia Organiser' },
+    { id: COORDINATOR_ID, full_name: 'Carlos Coordinator' },
+  ];
+
+  const readHistory = (client, requireAuth) =>
+    request(appWith({ client, requireAuth })).get(`/api/event-requests/${REQUEST_ID}/status-history`);
+
+  it('SCRUM322_AC6_shows_the_organiser_the_full_history_oldest_first', async () => {
+    const client = createQueueFakeClient([ok(heldEvent()), ok(rows()), ok(people())]);
+
+    const res = await readHistory(client, signedInAs(ORGANISER_ID));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      {
+        previousStatus: STATUS.DRAFT,
+        newStatus: STATUS.SUBMITTED,
+        changedByName: 'Olivia Organiser',
+        changedAt: '2026-01-15T09:00:00+00:00',
+        reason: null,
+      },
+      {
+        previousStatus: STATUS.SUBMITTED,
+        newStatus: STATUS.UNDER_REVIEW,
+        changedByName: 'Carlos Coordinator',
+        changedAt: '2026-01-16T09:00:00+00:00',
+        reason: 'Picked up for review.',
+      },
+    ]);
+    expect(client.calls[1].order).toEqual([['created_at', { ascending: true }]]);
+  });
+
+  it('SCRUM322_AC6_shows_the_assigned_coordinator_the_full_history', async () => {
+    const client = createQueueFakeClient([ok(heldEvent()), ok(rows()), ok(people())]);
+
+    const res = await readHistory(client, signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_ID));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(2);
+  });
+
+  it('SCRUM322_AC6_is_a_bare_array_with_no_status_labels_or_ids', async () => {
+    const client = createQueueFakeClient([ok(heldEvent()), ok(rows()), ok(people())]);
+
+    const res = await readHistory(client, signedInAs(ORGANISER_ID));
+
+    expect(Array.isArray(res.body)).toBe(true);
+    for (const entry of res.body) {
+      expect(Object.keys(entry).sort()).toEqual(
+        ['changedAt', 'changedByName', 'newStatus', 'previousStatus', 'reason'],
+      );
+    }
+  });
+
+  it('SCRUM322_AC6_returns_an_empty_list_for_an_event_with_no_history', async () => {
+    const client = createQueueFakeClient([ok(storedRow({ status: STATUS.DRAFT })), ok([])]);
+
+    const res = await readHistory(client, signedInAs(ORGANISER_ID));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it.each([
+    ['an unrelated organiser', signedInAs(STRANGER_ID), heldEvent()],
+    ['a coordinator the event is not assigned to', signedInWithRole(ROLE.EVENT_COORDINATOR, NEW_COORDINATOR_ID), heldEvent()],
+    ['the previous coordinator after a handover', signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_ID), heldEvent({ assigned_coordinator_id: NEW_COORDINATOR_ID })],
+    ['a coordinator, for a draft', signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_ID), storedRow({ status: STATUS.DRAFT })],
+  ])('SCRUM322_gives_%s not found and reads no history', async (_label, auth, event) => {
+    const client = createQueueFakeClient([ok(event)]);
+
+    const res = await readHistory(client, auth);
+
+    expect(res.status).toBe(404);
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM322_answers_a_missing_event_exactly_as_it_answers_a_refusal', async () => {
+    // Same status and same body, so a caller cannot tell an event that does not
+    // exist from one they may not read.
+    const refused = await readHistory(
+      createQueueFakeClient([ok(heldEvent())]),
+      signedInAs(STRANGER_ID),
+    );
+    const missing = await readHistory(
+      createQueueFakeClient([ok(null)]),
+      signedInAs(STRANGER_ID),
+    );
+
+    expect(missing.status).toBe(404);
+    expect(missing.body).toEqual(refused.body);
+  });
+
+  it('SCRUM322_takes_the_user_from_the_token_not_the_query', async () => {
+    const client = createQueueFakeClient([ok(heldEvent())]);
+
+    const res = await request(appWith({ client, requireAuth: signedInAs(STRANGER_ID) }))
+      .get(`/api/event-requests/${REQUEST_ID}/status-history`)
+      .query({ userId: ORGANISER_ID, organiserId: ORGANISER_ID });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('SCRUM322_returns_401_and_never_queries_without_a_token', async () => {
+    const client = createQueueFakeClient([]);
+
+    const res = await readHistory(client, signedOut);
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+});

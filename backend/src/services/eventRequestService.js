@@ -1057,6 +1057,89 @@ export async function getEventRequestForCoordinator(id, { client } = {}) {
 
 
 /**
+ * The status history of one event request, oldest first.
+ *
+ * SCRUM-322, for SCRUM-318 AC6. Reads what change_event_request_status and
+ * submit_event_request (migration 021) wrote into event_request_status_history.
+ * Nothing here writes, and nothing re-derives a status: the rows are returned
+ * as recorded.
+ *
+ * Only the event's Organiser and its assigned coordinator may read it. Anyone
+ * else, including a coordinator the event is not assigned to, gets exactly the
+ * NotFoundError a missing id gets, message included, for the reason
+ * getEventRequestForOrganiser gives: a 403, or a different message, would
+ * confirm the id exists. The check is here, beside the read, so a second
+ * caller cannot forget it. It compares the caller with the stored
+ * organiserId and assignedCoordinatorId, so no role is read: a person who is
+ * the assigned coordinator is one, and an event with no coordinator (a draft)
+ * matches nobody on that side.
+ *
+ * Each row carries the name of the user who caused the change, from
+ * profiles.full_name, and not their id. The history table references
+ * auth.users, not profiles, so PostgREST cannot join them and the names are a
+ * second read. A user with no profile or no name is null rather than a guess;
+ * an email address is never offered in its place.
+ *
+ * An event with no recorded change, a draft or one submitted before 021, is an
+ * empty list and not a NotFoundError: the event exists and the caller may read
+ * it, so "nothing yet" is the true answer.
+ *
+ * Not decorated with the Organiser-facing status labels. Those are SCRUM-323.
+ *
+ * @param {string} id
+ * @param {string} userId  the caller, from the JWT -- never the body
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<Array<{previousStatus: string, newStatus: string,
+ *           changedByName: string|null, changedAt: string, reason: string|null}>>}
+ * @throws {ValidationError} when no user was supplied
+ * @throws {NotFoundError}   no such request, or the caller is neither its
+ *                           Organiser nor its assigned coordinator
+ */
+export async function getEventRequestStatusHistory(id, userId, { client } = {}) {
+  if (typeof userId !== 'string' || userId.trim() === '') {
+    throw new ValidationError('userId is required');
+  }
+
+  const db = await resolveClient(client);
+  const request = await getEventRequestById(id, { client: db });
+
+  if (request.organiserId !== userId && request.assignedCoordinatorId !== userId) {
+    throw new NotFoundError(`Event request ${id} not found`);
+  }
+
+  const { data: rows, error } = await db
+    .from('event_request_status_history')
+    .select('previous_status, new_status, changed_by, reason, created_at')
+    .eq('event_request_id', id)
+    .order('created_at', { ascending: true });
+
+  if (error) throw translateError(error);
+  if (!rows || rows.length === 0) return [];
+
+  const userIds = [...new Set(rows.map((row) => row.changed_by))];
+  const { data: profiles, error: profileError } = await db
+    .from('profiles')
+    .select('id, full_name')
+    .in('id', userIds);
+
+  if (profileError) throw translateError(profileError);
+
+  const nameById = new Map(
+    (profiles ?? []).map((profile) => [profile.id, profile.full_name?.trim() || null]),
+  );
+
+  return rows.map((row) => ({
+    previousStatus: row.previous_status,
+    newStatus: row.new_status,
+    changedByName: nameById.get(row.changed_by) ?? null,
+    changedAt: row.created_at,
+    reason: row.reason ?? null,
+  }));
+}
+
+
+/**
  * Every event request awaiting a decision, oldest waiting first.
  *
  * SCRUM-45. The Event Coordinator's review queue, and the fix for the reported

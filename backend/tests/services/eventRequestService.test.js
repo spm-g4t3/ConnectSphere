@@ -2691,3 +2691,238 @@ describe('SCRUM-321 with SCRUM-327: Draft -> Submitted keeps its own path and ga
     expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-322 -- an event's status history, for its Organiser and its coordinator
+// ---------------------------------------------------------------------------
+/**
+ * SCRUM-318 AC6: the Event Organiser and the assigned coordinator can view the
+ * event's full status history, oldest first.
+ *
+ * Reads through createQueueFakeClient above, the one fake here with .in(),
+ * because the names come from a second read of profiles filtered by id. The
+ * history rows are what 021's functions wrote; these tests queue them as
+ * PostgREST would return them, so what is under test is who may read them, the
+ * order asked for, and the shape handed back.
+ *
+ * The import is appended for the reason the SCRUM-11 block gives for its own.
+ */
+import { getEventRequestStatusHistory } from '../../src/services/eventRequestService.js';
+
+const STRANGER_ID = '99999999-9999-4999-8999-999999999999';
+
+/** An event past draft, held by COORDINATOR_ID, as getEventRequestById reads it. */
+const heldEvent = (overrides = {}) =>
+  storedRow({
+    status: STATUS.APPROVED,
+    submitted_at: NOW.toISOString(),
+    assigned_coordinator_id: COORDINATOR_ID,
+    ...overrides,
+  });
+
+/** History rows as the table returns them. */
+const historyRows = () => [
+  {
+    previous_status: STATUS.DRAFT,
+    new_status: STATUS.SUBMITTED,
+    changed_by: ORGANISER_ID,
+    reason: null,
+    created_at: '2026-01-15T09:00:00+00:00',
+  },
+  {
+    previous_status: STATUS.SUBMITTED,
+    new_status: STATUS.UNDER_REVIEW,
+    changed_by: COORDINATOR_ID,
+    reason: 'Picked up for review.',
+    created_at: '2026-01-16T09:00:00+00:00',
+  },
+  {
+    previous_status: STATUS.UNDER_REVIEW,
+    new_status: STATUS.PENDING_CLARIFICATION,
+    changed_by: COORDINATOR_ID,
+    reason: 'Is it open to the public?',
+    created_at: '2026-01-17T09:00:00+00:00',
+  },
+];
+
+const profiles = () => [
+  { id: ORGANISER_ID, full_name: 'Olivia Organiser' },
+  { id: COORDINATOR_ID, full_name: 'Carlos Coordinator' },
+];
+
+/** The event, then its history, then the names. */
+const readingHistory = (event = heldEvent(), rows = historyRows(), people = profiles()) =>
+  createQueueFakeClient([ok(event), ok(rows), ok(people)]);
+
+describe('SCRUM-322 AC6: the Organiser and the assigned coordinator see the full history', () => {
+  it('SCRUM322_AC6_shows_the_organiser_every_change', async () => {
+    const client = readingHistory();
+
+    const history = await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(history).toHaveLength(3);
+  });
+
+  it('SCRUM322_AC6_shows_the_assigned_coordinator_every_change', async () => {
+    const client = readingHistory();
+
+    const history = await getEventRequestStatusHistory(REQUEST_ID, COORDINATOR_ID, { client });
+
+    expect(history).toHaveLength(3);
+  });
+
+  it('SCRUM322_AC6_returns_previous_status_new_status_name_time_and_reason', async () => {
+    const client = readingHistory();
+
+    const history = await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(history[1]).toEqual({
+      previousStatus: STATUS.SUBMITTED,
+      newStatus: STATUS.UNDER_REVIEW,
+      changedByName: 'Carlos Coordinator',
+      changedAt: '2026-01-16T09:00:00+00:00',
+      reason: 'Picked up for review.',
+    });
+    expect(history[0].changedByName).toBe('Olivia Organiser');
+    expect(history[0].reason).toBeNull();
+  });
+
+  it('SCRUM322_AC6_exposes_only_those_five_fields', async () => {
+    // Not the user id, the row id or the event id: what the screen shows is the
+    // name, and the ids are nobody's business.
+    const client = readingHistory();
+
+    const [first] = await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(Object.keys(first).sort()).toEqual(
+      ['changedAt', 'changedByName', 'newStatus', 'previousStatus', 'reason'],
+    );
+  });
+
+  it('SCRUM322_AC6_asks_for_the_oldest_change_first', async () => {
+    const client = readingHistory();
+
+    await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
+
+    const history = client.calls[1];
+    expect(history.table).toBe('event_request_status_history');
+    expect(history.filters).toEqual([['event_request_id', REQUEST_ID]]);
+    expect(history.order).toEqual([['created_at', { ascending: true }]]);
+  });
+
+  it('SCRUM322_AC6_returns_the_rows_in_the_order_the_database_gave_them', async () => {
+    const client = readingHistory();
+
+    const history = await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(history.map((entry) => entry.newStatus)).toEqual([
+      STATUS.SUBMITTED,
+      STATUS.UNDER_REVIEW,
+      STATUS.PENDING_CLARIFICATION,
+    ]);
+  });
+
+  it('SCRUM322_AC6_looks_up_each_name_once_in_a_single_read', async () => {
+    const client = readingHistory();
+
+    await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(client.calls).toHaveLength(3);
+    expect(client.calls[2].table).toBe('profiles');
+    expect(client.calls[2].inFilters).toEqual([['id', [ORGANISER_ID, COORDINATOR_ID]]]);
+  });
+
+  it.each([
+    ['has no profile', []],
+    ['has a profile with no name', [{ id: COORDINATOR_ID, full_name: null }]],
+    ['has a blank name', [{ id: COORDINATOR_ID, full_name: '   ' }]],
+  ])('SCRUM322_AC6_reports_a_null_name_for_a_user_who_%s', async (_label, people) => {
+    const client = readingHistory(heldEvent(), historyRows(), people);
+
+    const history = await getEventRequestStatusHistory(REQUEST_ID, COORDINATOR_ID, { client });
+
+    expect(history[1].changedByName).toBeNull();
+  });
+
+  it('SCRUM322_AC6_returns_an_empty_list_when_nothing_has_changed_yet', async () => {
+    // A draft, or an event submitted before 021: it exists and the caller may
+    // read it, so "nothing yet" is the true answer, and no names are looked up.
+    const client = createQueueFakeClient([ok(storedRow()), ok([])]);
+
+    const history = await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(history).toEqual([]);
+    expect(client.calls).toHaveLength(2);
+  });
+});
+
+
+describe('SCRUM-322: anyone else gets not found', () => {
+  const missingMessage = `Event request ${REQUEST_ID} not found`;
+
+  it.each([
+    ['an unrelated user', STRANGER_ID, heldEvent()],
+    ['a coordinator the event is not assigned to', NEW_COORDINATOR_ID, heldEvent()],
+    ['the previous coordinator after a handover', COORDINATOR_ID, heldEvent({ assigned_coordinator_id: NEW_COORDINATOR_ID })],
+    ['another organiser', OTHER_ORGANISER_ID, heldEvent()],
+    ['a coordinator, for a draft with no coordinator', COORDINATOR_ID, storedRow()],
+  ])('SCRUM322_refuses_%s with not found, and reads no history', async (_label, userId, event) => {
+    const client = createQueueFakeClient([ok(event)]);
+
+    const err = await errorFrom(getEventRequestStatusHistory(REQUEST_ID, userId, { client }));
+
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.status).toBe(404);
+    expect(err.message).toBe(missingMessage);
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM322_answers_a_missing_event_with_the_same_not_found', async () => {
+    // Identical to the refusals above, so the two cannot be told apart.
+    const client = createQueueFakeClient([ok(null)]);
+
+    const err = await errorFrom(getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client }));
+
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.message).toBe(missingMessage);
+  });
+
+  it.each([undefined, null, '', '   ', 42])(
+    'SCRUM322_refuses_%j_as_the_user_before_any_read',
+    async (userId) => {
+      const client = createQueueFakeClient([]);
+
+      const err = await errorFrom(getEventRequestStatusHistory(REQUEST_ID, userId, { client }));
+
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(client.calls).toHaveLength(0);
+    },
+  );
+
+  it('SCRUM322_does_not_hide_a_failed_history_read_behind_an_empty_list', async () => {
+    const client = createQueueFakeClient([ok(heldEvent()), dbError('XX000', 'boom')]);
+
+    const err = await errorFrom(getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe('boom');
+  });
+
+  it('SCRUM322_does_not_hide_a_failed_name_lookup_behind_missing_names', async () => {
+    const client = createQueueFakeClient([ok(heldEvent()), ok(historyRows()), dbError('XX000', 'boom')]);
+
+    const err = await errorFrom(getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe('boom');
+  });
+
+  it('SCRUM322_writes_nothing', async () => {
+    const client = readingHistory();
+
+    await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(client.calls.every((call) => call.operation === 'select')).toBe(true);
+  });
+});
