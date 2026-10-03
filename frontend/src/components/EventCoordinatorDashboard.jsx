@@ -21,6 +21,9 @@
 // around them.
 
 import ReviewQueue from "./ReviewQueue";
+import MyAssignedEvents from "./MyAssignedEvents";
+import CoordinatorNotifications from "./CoordinatorNotifications";
+import ReviewQueue from "./ReviewQueue";
 
 export default function EventCoordinatorDashboard({ user }) {
   return (
