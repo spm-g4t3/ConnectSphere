@@ -238,13 +238,13 @@ describe('AC2: the response carries every stage of the planning process', () => 
   );
 
   it('SCRUM14_AC2_keeps_the_raw_status_alongside_the_display', async () => {
-    const client = createFakeClient([ok(storedRow({ status: STATUS.PLANNING }))]);
+    const client = createFakeClient([ok(storedRow({ status: STATUS.APPROVED }))]);
 
     const res = await request(appWith({ client })).get(`/api/event-requests/${REQUEST_ID}`);
 
     // The frontend gates actions on the raw value ("continue editing" only on a
     // draft), so removing it in favour of the display object would break that.
-    expect(res.body.status).toBe(STATUS.PLANNING);
+    expect(res.body.status).toBe(STATUS.APPROVED);
   });
 
   it('SCRUM14_AC2_never_lets_the_status_description_overwrite_the_event_description', async () => {

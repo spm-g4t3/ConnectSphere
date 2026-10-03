@@ -14,11 +14,14 @@
 
 
 /**
- * The ten statuses, spelled exactly as the Postgres enum `event_request_status`.
+ * The nine statuses of the lifecycle (SCRUM-318), spelled as in the Postgres
+ * enum `event_request_status`.
  *
- * These two lists must stay identical. If they drift, the database rejects the
- * write at runtime -- so a test asserts the match rather than leaving it to
- * whoever edits one file to remember the other.
+ * There is no PLANNING status. The customer treats planning as approval, so
+ * that stage is APPROVED. The enum still carries 'planning' until SCRUM-320
+ * removes it; nothing here may write it, and a test asserts this list stays
+ * inside the enum rather than leaving it to whoever edits one file to
+ * remember the other.
  */
 export const STATUS = Object.freeze({
   DRAFT: 'draft',
@@ -26,7 +29,6 @@ export const STATUS = Object.freeze({
   UNDER_REVIEW: 'under_review',
   PENDING_CLARIFICATION: 'pending_clarification',
   APPROVED: 'approved',
-  PLANNING: 'planning',
   CONFIRMED: 'confirmed',
   COMPLETED: 'completed',
   REJECTED: 'rejected',
@@ -101,11 +103,6 @@ export const STATUS_DISPLAY = Object.freeze({
     group: STATUS_GROUP.APPROVED,
     description: 'Your request has been accepted. Arrangements will now begin.',
   }),
-  [STATUS.PLANNING]: Object.freeze({
-    label: 'In Planning',
-    group: STATUS_GROUP.APPROVED,
-    description: 'Venue and equipment arrangements are being made.',
-  }),
   [STATUS.CONFIRMED]: Object.freeze({
     label: 'Confirmed',
     group: STATUS_GROUP.CONFIRMED,
@@ -132,23 +129,34 @@ export const STATUS_DISPLAY = Object.freeze({
 /**
  * Which status changes are legal.
  *
- * Two rules worth spelling out:
+ * SCRUM-318 owns this table. It says which moves are valid; who may make each
+ * one is checked in the story that performs it.
+ *
+ * Rules worth spelling out:
  *
  *  - pending_clarification goes back to under_review, not to submitted. The
  *    Coordinator already holds the request; the Organiser is answering them,
  *    not re-joining the queue.
  *
- *  - cancelled is reachable from every live status including confirmed. The
- *    customer brief has Organisers postponing or cancelling "due to unforeseen
- *    circumstances" with no stage limit, and real events are cancelled late.
+ *  - cancelled is reachable from submitted, under_review, pending_clarification,
+ *    approved and confirmed. A draft is deleted rather than cancelled, because
+ *    it has no coordinator yet to cancel it.
  *
- * completed, rejected and cancelled are terminal: nothing leads out of them, so
- * a rejected request can never quietly become confirmed.
+ *  - rejected leads back to draft only: the Organiser may revise and resubmit.
+ *    An approved event whose essential arrangements cannot be met is rejected.
+ *    A confirmed event goes back to approved when a significant change needs
+ *    re-planning.
+ *
+ *  - completed and cancelled are terminal: nothing leads out of them. A
+ *    cancelled event is never reinstated; a new request is submitted instead.
+ *
+ * submitted -> pending_clarification is kept although the SCRUM-318 table
+ * lists clarification from under_review only: it is how clarification works
+ * today (SCRUM-46) and nothing yet moves a request to under_review.
  */
 export const ALLOWED_TRANSITIONS = Object.freeze({
   [STATUS.DRAFT]: Object.freeze([
     STATUS.SUBMITTED,
-    STATUS.CANCELLED,
   ]),
   [STATUS.SUBMITTED]: Object.freeze([
     STATUS.UNDER_REVIEW,
@@ -166,19 +174,19 @@ export const ALLOWED_TRANSITIONS = Object.freeze({
     STATUS.CANCELLED,
   ]),
   [STATUS.APPROVED]: Object.freeze([
-    STATUS.PLANNING,
-    STATUS.CANCELLED,
-  ]),
-  [STATUS.PLANNING]: Object.freeze([
+    STATUS.REJECTED,
     STATUS.CONFIRMED,
     STATUS.CANCELLED,
   ]),
   [STATUS.CONFIRMED]: Object.freeze([
+    STATUS.APPROVED,
     STATUS.COMPLETED,
     STATUS.CANCELLED,
   ]),
   [STATUS.COMPLETED]: Object.freeze([]),
-  [STATUS.REJECTED]: Object.freeze([]),
+  [STATUS.REJECTED]: Object.freeze([
+    STATUS.DRAFT,
+  ]),
   [STATUS.CANCELLED]: Object.freeze([]),
 });
 
@@ -206,7 +214,7 @@ export const ALLOWED_TRANSITIONS = Object.freeze({
  *    they have not chosen to show anyone, so the status filter IS the access
  *    control, and widening this array is what would breach it.
  *
- *  - approved, planning, confirmed, completed, rejected and cancelled are out
+ *  - approved, confirmed, completed, rejected and cancelled are out
  *    because a decision has been made. What a Coordinator does with a request
  *    afterwards is a post-decision worklist, and whoever builds that screen
  *    owns its own list rather than inheriting a queue that would never empty.

@@ -27,11 +27,20 @@ import {
 
 const ALL_STATUSES = Object.values(STATUS);
 
-/** Statuses nothing leads out of. */
-const TERMINAL = [STATUS.COMPLETED, STATUS.REJECTED, STATUS.CANCELLED];
+/** Final: nothing leads out of them (SCRUM-318). Rejected is not, it reopens as a draft. */
+const TERMINAL = [STATUS.COMPLETED, STATUS.CANCELLED];
 
-/** Everything still in flight -- all of which must be cancellable. */
-const LIVE = ALL_STATUSES.filter((s) => !TERMINAL.includes(s));
+/** The statuses SCRUM-318 allows the assigned coordinator to cancel from. */
+const CANCELLABLE = [
+  STATUS.SUBMITTED,
+  STATUS.UNDER_REVIEW,
+  STATUS.PENDING_CLARIFICATION,
+  STATUS.APPROVED,
+  STATUS.CONFIRMED,
+];
+
+/** Removed by SCRUM-318. Still in the database enum until SCRUM-320 migrates it out. */
+const OBSOLETE_STATUSES = ['planning'];
 
 
 // ---------------------------------------------------------------------------
@@ -55,14 +64,22 @@ describe('STATUS mirrors the database enum', () => {
       .map((m) => m[1]);
   }
 
-  it('declares exactly the same values as the SQL migration', () => {
-    // The database is the source of truth. If this fails, one of the two files
-    // was edited without the other and writes will be rejected at runtime.
-    expect([...ALL_STATUSES].sort()).toEqual(statusesDeclaredInSql().sort());
+  it('only uses values the SQL migration declares', () => {
+    // The database is the source of truth for what is storable. If this fails,
+    // a status was added here without a migration and writes will be rejected
+    // at runtime.
+    expect(statusesDeclaredInSql()).toEqual(expect.arrayContaining(ALL_STATUSES));
   });
 
-  it('has ten statuses', () => {
-    expect(ALL_STATUSES).toHaveLength(10);
+  it('leaves out only the statuses SCRUM-318 removed', () => {
+    // 001 is append-only, so 'planning' stays in its enum until SCRUM-320.
+    // Anything else missing from STATUS is drift, not removal.
+    const missing = statusesDeclaredInSql().filter((s) => !ALL_STATUSES.includes(s));
+    expect(missing.sort()).toEqual([...OBSOLETE_STATUSES].sort());
+  });
+
+  it('has nine statuses', () => {
+    expect(ALL_STATUSES).toHaveLength(9);
   });
 
   it('has no duplicate values', () => {
@@ -113,9 +130,7 @@ describe('AC3: the Organiser can tell which stage they are at', () => {
     [STATUS.UNDER_REVIEW, STATUS_GROUP.UNDER_REVIEW],
     [STATUS.PENDING_CLARIFICATION, STATUS_GROUP.ACTION_REQUIRED],
     [STATUS.APPROVED, STATUS_GROUP.APPROVED],
-    [STATUS.PLANNING, STATUS_GROUP.APPROVED],
-    [STATUS.CONFIRMED, STATUS_GROUP.CONFIRMED],
-    [STATUS.REJECTED, STATUS_GROUP.REJECTED],
+    [STATUS.CONFIRMED, STATUS_GROUP.CONFIRMED],    [STATUS.REJECTED, STATUS_GROUP.REJECTED],
   ])('%s is presented as %s', (status, group) => {
     expect(getStatusDisplay(status).group).toBe(group);
   });
@@ -167,26 +182,68 @@ describe('only legal status transitions are permitted', () => {
     [STATUS.UNDER_REVIEW, STATUS.REJECTED],
     [STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION],
     [STATUS.PENDING_CLARIFICATION, STATUS.UNDER_REVIEW],
-    [STATUS.APPROVED, STATUS.PLANNING],
-    [STATUS.PLANNING, STATUS.CONFIRMED],
     [STATUS.CONFIRMED, STATUS.COMPLETED],
+    // SCRUM-318 additions
+    [STATUS.APPROVED, STATUS.CONFIRMED],
+    [STATUS.CONFIRMED, STATUS.APPROVED],
+    [STATUS.APPROVED, STATUS.REJECTED],
+    [STATUS.REJECTED, STATUS.DRAFT],
   ])('allows %s -> %s', (from, to) => {
     expect(canTransition(from, to)).toBe(true);
   });
 
   it.each([
-    // a rejected request must never quietly become live again
+    // a rejected request is revised as a draft, never revived in place
     [STATUS.REJECTED, STATUS.CONFIRMED],
     [STATUS.REJECTED, STATUS.UNDER_REVIEW],
+    [STATUS.REJECTED, STATUS.SUBMITTED],
+    [STATUS.REJECTED, STATUS.APPROVED],
+    [STATUS.REJECTED, STATUS.CANCELLED],
     // nothing escapes a finished or abandoned request
     [STATUS.COMPLETED, STATUS.CANCELLED],
     [STATUS.CANCELLED, STATUS.DRAFT],
     [STATUS.SUBMITTED, STATUS.APPROVED],
     [STATUS.DRAFT, STATUS.CONFIRMED],
-    // planning cannot run backwards
-    [STATUS.CONFIRMED, STATUS.PLANNING],
+    // a draft has no coordinator to cancel it; drafts are deleted
+    [STATUS.DRAFT, STATUS.CANCELLED],
+    // the stages are not skipped or run backwards, except confirmed -> approved
+    [STATUS.UNDER_REVIEW, STATUS.CONFIRMED],
+    [STATUS.UNDER_REVIEW, STATUS.SUBMITTED],
+    [STATUS.APPROVED, STATUS.UNDER_REVIEW],
+    [STATUS.CONFIRMED, STATUS.UNDER_REVIEW],
+    [STATUS.CONFIRMED, STATUS.REJECTED],
+    [STATUS.APPROVED, STATUS.COMPLETED],
+    [STATUS.PENDING_CLARIFICATION, STATUS.APPROVED],
+    [STATUS.PENDING_CLARIFICATION, STATUS.REJECTED],
   ])('refuses %s -> %s', (from, to) => {
     expect(canTransition(from, to)).toBe(false);
+  });
+
+  it('refuses every transition outside the SCRUM-318 table', () => {
+    // The whole table, so a transition added by accident fails here even when
+    // nobody thought to write a case for it.
+    const permitted = new Set([
+      'draft>submitted',
+      'submitted>under_review',
+      'submitted>pending_clarification',
+      'under_review>pending_clarification',
+      'pending_clarification>under_review',
+      'under_review>approved',
+      'under_review>rejected',
+      'approved>rejected',
+      'rejected>draft',
+      'approved>confirmed',
+      'confirmed>approved',
+      'confirmed>completed',
+      ...CANCELLABLE.map((s) => `${s}>cancelled`),
+    ]);
+
+    for (const from of ALL_STATUSES) {
+      for (const to of ALL_STATUSES) {
+        expect(canTransition(from, to), `${from} -> ${to}`)
+          .toBe(permitted.has(`${from}>${to}`));
+      }
+    }
   });
 
   it.each(TERMINAL)('%s is terminal', (status) => {
@@ -196,10 +253,44 @@ describe('only legal status transitions are permitted', () => {
     }
   });
 
-  it.each(LIVE)('%s can be cancelled', (status) => {
-    // The brief lets an Organiser cancel "due to unforeseen circumstances"
-    // with no stage limit, so every live status reaches cancelled.
+  it('does not treat rejected as terminal', () => {
+    expect(ALLOWED_TRANSITIONS[STATUS.REJECTED]).toEqual([STATUS.DRAFT]);
+  });
+
+  it.each(CANCELLABLE)('%s can be cancelled', (status) => {
     expect(canTransition(status, STATUS.CANCELLED)).toBe(true);
+  });
+
+  it.each([STATUS.DRAFT, STATUS.REJECTED, ...TERMINAL.filter((s) => s !== STATUS.CANCELLED)])(
+    '%s cannot be cancelled',
+    (status) => {
+      expect(canTransition(status, STATUS.CANCELLED)).toBe(false);
+    },
+  );
+});
+
+
+describe('SCRUM-318: obsolete statuses are not part of the lifecycle', () => {
+  it.each(OBSOLETE_STATUSES)('%s is not a status', (status) => {
+    expect(Object.values(STATUS)).not.toContain(status);
+    expect(isKnownStatus(status)).toBe(false);
+    expect(Object.hasOwn(ALLOWED_TRANSITIONS, status)).toBe(false);
+  });
+
+  it.each(OBSOLETE_STATUSES)('%s is refused as a starting status', (status) => {
+    for (const target of ALL_STATUSES) {
+      expect(canTransition(status, target)).toBe(false);
+    }
+  });
+
+  it.each(OBSOLETE_STATUSES)('%s is refused as a target status', (status) => {
+    for (const from of ALL_STATUSES) {
+      expect(canTransition(from, status)).toBe(false);
+    }
+  });
+
+  it.each(OBSOLETE_STATUSES)('%s is displayed as an unknown status', (status) => {
+    expect(getStatusDisplay(status).group).toBe(STATUS_GROUP.UNKNOWN);
   });
 });
 
@@ -245,9 +336,9 @@ describe('the vocabulary is immutable', () => {
   });
 
   it('refuses changes to the transition table', () => {
-    expect(() => { ALLOWED_TRANSITIONS[STATUS.REJECTED].push(STATUS.APPROVED); })
+    expect(() => { ALLOWED_TRANSITIONS[STATUS.COMPLETED].push(STATUS.APPROVED); })
       .toThrow();
-    expect(ALLOWED_TRANSITIONS[STATUS.REJECTED]).toEqual([]);
+    expect(ALLOWED_TRANSITIONS[STATUS.COMPLETED]).toEqual([]);
   });
 
   it('returns a frozen display object', () => {
@@ -473,7 +564,7 @@ describe('SCRUM-45: the review queue is a set of statuses, named in the domain',
     // looking at it. What a Coordinator does with a request after a decision
     // is a post-decision worklist, and whoever builds that screen owns its
     // own list.
-    for (const status of TERMINAL) {
+    for (const status of [STATUS.COMPLETED, STATUS.REJECTED, STATUS.CANCELLED]) {
       expect(COORDINATOR_QUEUE_STATUSES).not.toContain(status);
     }
   });
