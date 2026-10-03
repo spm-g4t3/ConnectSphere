@@ -20,7 +20,6 @@
 // Both sections are components of their own, so this file is only the page
 // around them.
 
-import ReviewQueue from "./ReviewQueue";
 import MyAssignedEvents from "./MyAssignedEvents";
 import CoordinatorNotifications from "./CoordinatorNotifications";
 import ReviewQueue from "./ReviewQueue";
