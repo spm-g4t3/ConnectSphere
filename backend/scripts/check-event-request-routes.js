@@ -158,6 +158,9 @@ async function cleanup() {
   for (const id of eventIds) {
     await remove('change requests', supabase.from('event_change_requests').delete().eq('event_request_id', id));
     await remove('assignment history', supabase.from('event_request_assignment_history').delete().eq('event_request_id', id));
+    // SCRUM-321: the submission also wrote a status history row. changed_by
+    // is restricted to the organiser too, so it goes before the user.
+    await remove('status history', supabase.from('event_request_status_history').delete().eq('event_request_id', id));
   }
 
   // Event requests before users: organiser_id and assigned_coordinator_id are
@@ -688,6 +691,21 @@ async function main() {
     'a submitted request cannot be submitted again',
     submittedTwice.status === 409,
     `status ${submittedTwice.status}`,
+  );
+
+  // SCRUM-321: the submission over HTTP left one status history row, naming
+  // the signed-in Organiser, and the refused second submit left no second.
+  const { data: statusRows } = await supabaseAdmin
+    .from('event_request_status_history')
+    .select('previous_status, new_status, changed_by')
+    .eq('event_request_id', draftEventId);
+  check(
+    'the submission recorded one status change: draft -> submitted, by the organiser',
+    statusRows?.length === 1
+      && statusRows[0].previous_status === 'draft'
+      && statusRows[0].new_status === 'submitted'
+      && statusRows[0].changed_by === organiserId,
+    JSON.stringify(statusRows),
   );
 
   // -- SCRUM-45: a request submitted over HTTP joins the queue ---------------

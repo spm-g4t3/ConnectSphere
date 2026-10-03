@@ -10,7 +10,9 @@
  * Since SCRUM-330 it also assigns an Event Coordinator and records that in a
  * second table, and supabase-js has no transactions, so it calls
  * submit_event_request (migration 016) through rpc. The reasoning is at
- * submitEventRequest.
+ * submitEventRequest. Since SCRUM-321 every other status change goes through
+ * changeEventRequestStatus, which writes the status and its history row in
+ * one transaction (migration 021), and submission writes its history row too.
  *
  * Input is validated before any network call (SCRUM-30). The constraints in
  * 001_event_requests.sql and 005_event_request_details.sql remain the backstop
@@ -465,6 +467,8 @@ export async function getEventRequestById(id, { client } = {}) {
  * @param {object} [options.client]
  * @param {Date} [options.now]  the submission instant; injected so callers and
  *                              tests are deterministic
+ * @param {string} [options.changedBy]  who is submitting, for the status
+ *                              history; defaults to the draft's Organiser
  * @returns {Promise<object>} the submitted request, in camelCase, including
  *                            assignedCoordinatorId
  * @throws {NotFoundError}           when no request has that id, at the read or
@@ -475,7 +479,7 @@ export async function getEventRequestById(id, { client } = {}) {
  * @throws {ServiceUnavailableError} when no Event Coordinator is available;
  *                                   the request stays a draft (AC5)
  */
-export async function submitEventRequest(id, { client, now = new Date() } = {}) {
+export async function submitEventRequest(id, { client, now = new Date(), changedBy } = {}) {
   const db = await resolveClient(client);
 
   // Read through getEventRequestById rather than repeating the query, so there
@@ -497,9 +501,15 @@ export async function submitEventRequest(id, { client, now = new Date() } = {}) 
   //
   // now.toISOString(), as before: the parameter is timestamptz, and an instant
   // with an explicit offset is unambiguous on the wire.
+  //
+  // p_changed_by is who the status history records as submitting. The route
+  // passes the signed-in Organiser, after proving the draft is theirs. Without
+  // one it is the draft's own Organiser, the only person who may submit it, so
+  // a caller that has already established ownership need not repeat the id.
   const { data, error } = await db.rpc('submit_event_request', {
     p_event_request_id: id,
     p_submitted_at: now.toISOString(),
+    p_changed_by: changedBy ?? current.organiserId,
   });
 
   if (error) throw translateError(error);
@@ -604,18 +614,108 @@ export async function updateEventRequest(id, changes, organiserId, { client } = 
 }
 
 /**
+ * Change an event request's status, and record that it changed.
+ *
+ * SCRUM-321. The one function every status change goes through, apart from
+ * submission (see below). A story that moves a request to another status
+ * calls this; it does not write the status column itself.
+ *
+ * In order:
+ *
+ *  1. canTransition, the one transition rule, on the status the caller last
+ *     saw and the one it wants. An illegal move is a ConflictError naming that
+ *     status, and nothing is sent to the database.
+ *  2. change_event_request_status (migration 021), through rpc. In one
+ *     transaction it locks the row, refuses if the row is no longer in
+ *     expectedStatus, writes the new status, and inserts the history row:
+ *     previous status, new status, who, when, and the reason if one was given.
+ *     Status and history are written together or not at all, and
+ *     supabase-js has no transactions, so a function is the only way to
+ *     guarantee that. 021's header gives the full argument.
+ *
+ * Why the rule is asked here and not in the function: a copy of the transition
+ * table in SQL would be the same rule in two places, able to disagree. The
+ * function checks the one thing only it can check reliably, that the status is
+ * still what the caller checked.
+ *
+ * Submitting is not done through this function. It also assigns a coordinator
+ * and sets submitted_at, so it has its own, submitEventRequest, and a request
+ * cannot reach submitted any other way. Asking for it here is refused.
+ *
+ * This takes no view on who may make the change. Whoever calls it has already
+ * proved that, as every function in this module does.
+ *
+ * @param {string} id
+ * @param {object} change
+ * @param {string} change.expectedStatus  the status the caller last saw
+ * @param {string} change.newStatus       the status to move to
+ * @param {string} change.changedBy       the user causing it, from the JWT
+ * @param {string} [change.reason]        why, if a reason was given
+ * @param {string} [change.expectedCoordinatorId]
+ *        pass the caller's id when they act as the event's assigned
+ *        coordinator, and the change is refused if the event has been handed on
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the request after the change, in camelCase
+ * @throws {ValidationError} no changedBy, an overlong reason, or submitted as the target
+ * @throws {ConflictError}   the move is not allowed from expectedStatus, or the
+ *                           request is no longer in it, or was handed on
+ * @throws {NotFoundError}   no such request
+ */
+export async function changeEventRequestStatus(
+  id,
+  { expectedStatus, newStatus, changedBy, reason, expectedCoordinatorId = null },
+  { client } = {},
+) {
+  if (typeof changedBy !== 'string' || changedBy.trim() === '') {
+    throw new ValidationError('changedBy is required');
+  }
+
+  let storedReason = null;
+  if (reason !== undefined && reason !== null) {
+    if (typeof reason !== 'string') {
+      throw new ValidationError('reason must be text');
+    }
+    storedReason = reason.trim() === '' ? null : reason.trim();
+    if (storedReason !== null && storedReason.length > 2000) {
+      throw new ValidationError('reason must be 2000 characters or fewer');
+    }
+  }
+
+  if (newStatus === STATUS.SUBMITTED) {
+    throw new ValidationError('A request is submitted with submitEventRequest, not by changing its status.');
+  }
+
+  if (!canTransition(expectedStatus, newStatus)) {
+    throw new ConflictError(
+      `An event request with status '${expectedStatus}' cannot change to '${newStatus}'.`,
+    );
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('change_event_request_status', {
+    p_event_request_id: id,
+    p_expected_status: expectedStatus,
+    p_new_status: newStatus,
+    p_changed_by: changedBy,
+    p_reason: storedReason,
+    p_expected_coordinator: expectedCoordinatorId,
+  });
+
+  if (error) throw translateError(error);
+
+  return toEventRequest(data);
+}
+
+/**
  * Ask an Organiser for clarification while reviewing their request.
  *
  * SCRUM-46 created this. SCRUM-332 (SCRUM-327 AC7) makes it check who is
  * asking: only the event's assigned coordinator may send it for clarification.
  * Before SCRUM-332, coordinatorId was checked for being present and then
- * ignored, so any Event Coordinator could do this to any event.
- *
- * Checked here, with a read and a guarded update, rather than in a Postgres
- * function as reassignment (018) and change-request decisions (019) are. The
- * write is one statement on one row, so there is no second write to keep in
- * step with it, and the guard on the update is enough to make that statement
- * unable to touch an event the caller does not hold.
+ * ignored, so any Event Coordinator could do this to any event. SCRUM-321
+ * moves the write into changeEventRequestStatus, so the change is recorded in
+ * the status history.
  *
  * In order:
  *
@@ -627,12 +727,12 @@ export async function updateEventRequest(id, changes, organiserId, { client } = 
  *     and gives the true reason. It comes before the status check, as in 018:
  *     whether the event could be sent for clarification is a question only
  *     its coordinator has any reason to ask.
- *  3. The transition, as before.
- *  4. The update, guarded on id, the status just read, and the caller as the
- *     assigned coordinator. See the comment at the update for why a guard
- *     that matches nothing is a 409 and not a 403.
- *
- * Who asked is still not recorded. event_requests has no column for it.
+ *  3. changeEventRequestStatus, which asks canTransition and writes. The note
+ *     travels as the reason: it is why the request changed status, and the
+ *     function stores it as the clarification note too (021). The caller is
+ *     passed as the expected coordinator, so an event handed to someone else
+ *     between the read and the write is a 409, not a change made by someone
+ *     who no longer holds it. A refresh shows which it was.
  *
  * @param {string} id
  * @param {string} note           what the Organiser is asked to clarify
@@ -668,42 +768,31 @@ export async function requestEventClarification(id, note, coordinatorId, { clien
     );
   }
 
-  if (!canTransition(current.status, STATUS.PENDING_CLARIFICATION)) {
-    throw new ConflictError(
-      `An event request with status '${current.status}' cannot be sent for clarification.`,
-    );
-  }
-
-  // The assigned_coordinator_id filter does the job organiser_id does in
-  // updateEventRequest: the statement itself cannot touch an event the caller
-  // does not hold, rather than being safe only because of a read made in an
-  // earlier round trip. It is also the only thing that catches a handover
-  // landing between the read and this write.
-  const { data, error } = await db
-    .from('event_requests')
-    .update({ status: STATUS.PENDING_CLARIFICATION, clarification_note: clarificationNote })
-    .eq('id', id)
-    .eq('status', current.status)
-    .eq('assigned_coordinator_id', coordinatorId)
-    .select()
-    .single();
-
-  // No row matched. Not a 403, although the coordinator filter may be what
-  // stopped matching: the read a moment ago showed this caller holding the
-  // event in a status that allowed this, so something changed in between, a
-  // handover or a status change. That is a race, and a race is a 409 here as
-  // it is in updateEventRequest. A 403 would be false when only the status
-  // moved, since the caller still holds the event. The wrong coordinator, the
-  // common case, never gets this far: the check after the read answers it
-  // with a 403. Refreshing shows the caller which of the two happened.
-  if (error?.code === 'PGRST116') {
-    throw new ConflictError('The request changed while clarification was being sent. Refresh and try again.');
-  }
-  if (error) throw translateError(error);
-  return toEventRequest(data);
+  return changeEventRequestStatus(
+    id,
+    {
+      expectedStatus: current.status,
+      newStatus: STATUS.PENDING_CLARIFICATION,
+      changedBy: coordinatorId,
+      reason: clarificationNote,
+      expectedCoordinatorId: coordinatorId,
+    },
+    { client: db },
+  );
 }
 
-/** Save the Organiser's amendments and return the request to Coordinator review. */
+/**
+ * Save the Organiser's amendments and return the request to Coordinator review.
+ *
+ * Two writes, in this order. The amendments first, in a guarded update that
+ * touches no status: it matches only while the request is still pending
+ * clarification and the caller's, so a request that has moved on is a
+ * ConflictError and nothing is saved. Then the status change, through
+ * changeEventRequestStatus, which records it and clears the clarification
+ * note. If the second fails after the first, the amendments are saved and the
+ * request is still pending clarification, so the Organiser can send them
+ * again; nothing is half-moved.
+ */
 export async function respondToEventClarification(id, changes, organiserId, { client } = {}) {
   assertOrganiser(organiserId);
   const validated = validateUpdateEventRequest(changes);
@@ -714,13 +803,9 @@ export async function respondToEventClarification(id, changes, organiserId, { cl
     throw new ConflictError('This request is not waiting for clarification. Refresh before editing.');
   }
 
-  const { data, error } = await db
+  const { error } = await db
     .from('event_requests')
-    .update({
-      ...toColumns(validated),
-      status: STATUS.UNDER_REVIEW,
-      clarification_note: null,
-    })
+    .update(toColumns(validated))
     .eq('id', id)
     .eq('organiser_id', organiserId)
     .eq('status', STATUS.PENDING_CLARIFICATION)
@@ -731,7 +816,16 @@ export async function respondToEventClarification(id, changes, organiserId, { cl
     throw new ConflictError('This request is no longer waiting for clarification. Refresh before editing.');
   }
   if (error) throw translateError(error);
-  return toEventRequest(data);
+
+  return changeEventRequestStatus(
+    id,
+    {
+      expectedStatus: STATUS.PENDING_CLARIFICATION,
+      newStatus: STATUS.UNDER_REVIEW,
+      changedBy: organiserId,
+    },
+    { client: db },
+  );
 }
 
 

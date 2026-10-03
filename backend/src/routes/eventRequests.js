@@ -432,7 +432,7 @@ export function createEventRequestRouter({
     try {
       await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
-      const submitted = await submitEventRequest(req.params.id, { client });
+      const submitted = await submitEventRequest(req.params.id, { client, changedBy: req.user.id });
       res.status(200).json(withStatusDisplay(submitted));
     } catch (err) {
       handleError(err, res);

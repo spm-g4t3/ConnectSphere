@@ -83,7 +83,11 @@ async function remove(label, query) {
 async function cleanup() {
   if (createdIds.length === 0) return;
 
-  // Assignment history first. Since SCRUM-330, submitting a request writes an
+  // Both history tables first: the status history since SCRUM-321 and the
+  // assignment history since SCRUM-330. Both are ON DELETE RESTRICT, so the
+  // events cannot go while a row of either remains.
+  //
+  // Assignment history. Since SCRUM-330, submitting a request writes an
   // event_request_assignment_history row, and that table's event_request_id is
   // ON DELETE RESTRICT (014) on purpose: it is an accountability record that
   // must outlive a careless delete. Deleting the events first is refused. And
@@ -92,6 +96,10 @@ async function cleanup() {
   await remove(
     'assignment history',
     supabase.from('event_request_assignment_history').delete().in('event_request_id', createdIds),
+  );
+  await remove(
+    'status history',
+    supabase.from('event_request_status_history').delete().in('event_request_id', createdIds),
   );
   await remove('event requests', supabase.from('event_requests').delete().in('id', createdIds));
 }
@@ -104,12 +112,35 @@ async function countRows(table) {
   return count ?? 0;
 }
 
-/** The two tables this script writes to. */
+/** The three tables this script writes to. */
 async function countAll() {
   return {
     requests: await countRows('event_requests'),
     history: await countRows('event_request_assignment_history'),
+    statusHistory: await countRows('event_request_status_history'),
   };
+}
+
+/** The assignment history rows written for one event, oldest first. */
+async function historyFor(eventRequestId) {
+  const { data, error } = await supabase
+    .from('event_request_assignment_history')
+    .select('previous_coordinator_id, new_coordinator_id, assigned_by')
+    .eq('event_request_id', eventRequestId)
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(`could not read assignment history: ${error.message}`);
+  return data ?? [];
+}
+
+/** The status history rows written for one event, oldest first. */
+async function statusHistoryFor(eventRequestId) {
+  const { data, error } = await supabase
+    .from('event_request_status_history')
+    .select('previous_status, new_status, changed_by, reason, created_at')
+    .eq('event_request_id', eventRequestId)
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(`could not read status history: ${error.message}`);
+  return data ?? [];
 }
 
 async function main() {
@@ -229,6 +260,35 @@ async function main() {
   const skew = Math.abs(new Date(submitted.submittedAt).getTime() - beforeSubmit);
   check('submitted_at is close to now', skew < 60_000, `${skew} ms from the local clock`);
 
+  // SCRUM-321: the same submission records the status change, once, beside
+  // the assignment and separate from it.
+  const statusAfterSubmit = await statusHistoryFor(complete.id);
+  check('exactly one status history row written', statusAfterSubmit.length === 1, String(statusAfterSubmit.length));
+  check(
+    'the status history row is draft -> submitted, by the organiser',
+    statusAfterSubmit[0]?.previous_status === 'draft'
+      && statusAfterSubmit[0]?.new_status === 'submitted'
+      && statusAfterSubmit[0]?.changed_by === organiserId
+      && statusAfterSubmit[0]?.reason === null,
+    JSON.stringify(statusAfterSubmit[0] ?? null),
+  );
+  check('the status history row has a timestamp', Boolean(statusAfterSubmit[0]?.created_at));
+
+  // SCRUM-327 / SCRUM-318: the one production path assigns the coordinator and
+  // records it, exactly once. Read back from the tables rather than from the
+  // service's return value, so this proves what was stored.
+  check('a coordinator is assigned', Boolean(submitted.assignedCoordinatorId), submitted.assignedCoordinatorId);
+
+  const historyAfterSubmit = await historyFor(complete.id);
+  check('exactly one history row written', historyAfterSubmit.length === 1, String(historyAfterSubmit.length));
+  check(
+    'the history row names the assigned coordinator, assigned by the system',
+    historyAfterSubmit[0]?.new_coordinator_id === submitted.assignedCoordinatorId
+      && historyAfterSubmit[0]?.previous_coordinator_id === null
+      && historyAfterSubmit[0]?.assigned_by === null,
+    JSON.stringify(historyAfterSubmit[0] ?? null),
+  );
+
   // --- 5. the constraint from 005 is real ---------------------------------
   // Deliberately bypasses the service and attacks the table directly, which is
   // the only way to prove the constraint rather than the code in front of it.
@@ -263,6 +323,14 @@ async function main() {
   const gaps = (incomplete?.details ?? []).map((d) => d.field).sort();
   check('every gap listed, not just the first', gaps.length === 4, gaps.join(',') || 'none');
 
+  // A refused submission leaves nothing behind: still a draft, no coordinator,
+  // no history row.
+  const stillDraft = await getEventRequestById(minimal.id);
+  check('the refused request is still a draft', stillDraft.status === 'draft', stillDraft.status);
+  check('the refused request has no coordinator', stillDraft.assignedCoordinatorId === null, String(stillDraft.assignedCoordinatorId));
+  check('the refused request has no history row', (await historyFor(minimal.id)).length === 0);
+  check('the refused request has no status history row', (await statusHistoryFor(minimal.id)).length === 0);
+
   // --- 7. submitting twice ------------------------------------------------
   // The complete request is already 'submitted' from step 4, so canTransition
   // refuses it. This is the sequential case; the concurrent one is covered by
@@ -272,6 +340,16 @@ async function main() {
   check('second submit refused', again instanceof ConflictError, again?.name ?? 'no error');
   check('reported as 409', again?.status === 409, String(again?.status));
   check('message names the current status', /submitted/i.test(again?.message ?? ''), again?.message ?? '');
+
+  // The refused second submit changes nothing: same coordinator, still one row.
+  const afterAgain = await getEventRequestById(complete.id);
+  check(
+    'the refused second submit kept the coordinator',
+    afterAgain.assignedCoordinatorId === submitted.assignedCoordinatorId,
+    String(afterAgain.assignedCoordinatorId),
+  );
+  check('the refused second submit wrote no history row', (await historyFor(complete.id)).length === 1);
+  check('the refused second submit wrote no status history row', (await statusHistoryFor(complete.id)).length === 1);
 
   // --- 8. submitting something absent -------------------------------------
   const missing = await failureFrom(
@@ -334,9 +412,12 @@ main()
       const rowsAfter = await countAll();
       check(
         'nothing left behind',
-        rowsAfter.requests === rowsBefore.requests && rowsAfter.history === rowsBefore.history,
+        rowsAfter.requests === rowsBefore.requests
+          && rowsAfter.history === rowsBefore.history
+          && rowsAfter.statusHistory === rowsBefore.statusHistory,
         `requests ${rowsBefore.requests} -> ${rowsAfter.requests}, `
-          + `history ${rowsBefore.history} -> ${rowsAfter.history}`,
+          + `history ${rowsBefore.history} -> ${rowsAfter.history}, `
+          + `status history ${rowsBefore.statusHistory} -> ${rowsAfter.statusHistory}`,
       );
     }
 
