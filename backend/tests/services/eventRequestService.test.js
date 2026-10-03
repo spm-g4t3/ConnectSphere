@@ -31,6 +31,11 @@
  *   AC7 -- after a handover the new coordinator can act on the event, and the
  *          previous one can view it but no longer change it
  *
+ * SCRUM-333 (a subtask of SCRUM-327) adds listEventRequestsForCoordinator, the
+ * "My events" list. Its SCRUM333_AC11_* tests are the last block in this file:
+ *   AC11 -- each coordinator has a list of the events assigned to them,
+ *           grouped by status, earliest event first
+ *
  * SCRUM-330 (a subtask of SCRUM-327) moved the write half of submission into
  * the Postgres function submit_event_request (migration 016), which also
  * assigns the Event Coordinator. The SCRUM10_AC5 and SCRUM10_AC6 tests that
@@ -2387,5 +2392,339 @@ describe("SCRUM-327 AC7: deciding a change request is refused to anyone but the 
     expect(err).toBeInstanceOf(Err);
     expect(err.status).toBe(status);
     expect(err).not.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-333 -- "My events": the events assigned to one coordinator
+// ---------------------------------------------------------------------------
+/**
+ * SCRUM-327 AC11: each coordinator has a "My events" list showing the events
+ * assigned to them, grouped by status, earliest event first.
+ *
+ * listEventRequestsForCoordinator(coordinatorId, { client }). It sits beside
+ * the shared queue, which stays exactly as it is: the queue is the view of
+ * work nobody holds yet, and this is the view of work one person does hold.
+ *
+ * Decisions these tests pin, each argued where it is tested:
+ *
+ *  - Every status, not just live ones. See
+ *    SCRUM333_AC11_covers_every_status_including_decided_ones.
+ *  - Ordered by proposed_start, soonest first, nulls last, then id. The queue
+ *    orders by submitted_at because it asks who has waited longest. This
+ *    list asks what is coming up soonest, which is what "earliest event
+ *    first" means.
+ *  - A flat array, like every list in this API. Grouping by status is
+ *    presentation, and the frontend already maps over bare arrays.
+ *  - Each row carries the organiser's name, as organiserName.
+ *
+ * Why the name is here, when the queue deliberately leaves it out.
+ * listEventRequestsForReview's docstring calls the absence of a name "the
+ * privacy floor of the shared queue": a coordinator learns what was asked
+ * for, not who to contact about it. That is right for a queue of events
+ * nobody has taken on, which every coordinator sees. It is wrong for events
+ * you are responsible for, where contacting the organiser is the job, and AC7
+ * makes you the one person who can act on them. So the two lists answer the
+ * same question differently on purpose, and the reason is whose work it is.
+ *
+ * Why the name comes from a second read, not a join in the select. PostgREST
+ * embeds one table in another only along a foreign key between them.
+ * event_requests.organiser_id references auth.users (001), and so does
+ * profiles.id (007); nothing links event_requests to profiles directly, so
+ * select('..., profiles(full_name)') would fail with "could not find a
+ * relationship". Adding that foreign key would need a migration, and would
+ * refuse every organiser without a profiles row. So the service reads the
+ * events, then reads full_name from profiles for exactly the organisers in
+ * that list, with one .in(), and merges. Two round trips, both reads, so there
+ * is nothing to keep atomic: a name changed between the two is simply read a
+ * moment later.
+ *
+ * The second read is narrowed to the organisers of the caller's own events,
+ * so it cannot be used to read anyone else's name. profiles has full_name but
+ * no email, so a name is all there is to show, and full_name is nullable.
+ *
+ * Uses createQueueFakeClient from the SCRUM-45 block, because the second read
+ * needs .in(), which createFakeClient does not have.
+ */
+import { listEventRequestsForCoordinator } from '../../src/services/eventRequestService.js';
+
+/** An event assigned to COORDINATOR_ID unless told otherwise. */
+function myEventRow(overrides = {}) {
+  return storedRow({
+    status: STATUS.SUBMITTED,
+    submitted_at: NOW.toISOString(),
+    assigned_coordinator_id: COORDINATOR_ID,
+    ...overrides,
+  });
+}
+
+/** A profiles row, as the second read returns it. */
+const profileRow = (id, fullName) => ({ id, full_name: fullName });
+
+/** The ids an .in() asked for, sorted, so a test compares sets. */
+const idsAskedFor = (call) => [...call.inFilters[0][1]].sort();
+
+describe('SCRUM-327 AC11: a coordinator lists the events assigned to them', () => {
+  it('SCRUM333_AC11_lists_only_the_coordinators_own_events', async () => {
+    const client = createQueueFakeClient([
+      ok([myEventRow()]),
+      ok([profileRow(ORGANISER_ID, 'Aisha Rahman')]),
+    ]);
+
+    await listEventRequestsForCoordinator(COORDINATOR_ID, { client });
+
+    const [events] = client.calls;
+    expect(events.table).toBe('event_requests');
+
+    // Exactly one filter: the caller as the assigned coordinator. Not an
+    // organiser, which would turn this into one Organiser's list, and no
+    // status IN list (see the next test).
+    //
+    // No draft filter is needed either. A draft never has an assigned
+    // coordinator: assignment happens at submission (016), and nothing writes
+    // the column on a draft. So filtering on the caller already leaves every
+    // draft out, the same privacy boundary the queue keeps.
+    expect(events.filters).toEqual([['assigned_coordinator_id', COORDINATOR_ID]]);
+    expect(events.inFilters).toEqual([]);
+  });
+
+  it('SCRUM333_AC11_covers_every_status_including_decided_ones', async () => {
+    // Every status the event can be in once assigned, decided and terminal
+    // ones included. The queue leaves decided statuses out because it is a
+    // worklist, and a worklist that kept them would never empty. This list is
+    // something else: the events this coordinator is responsible for. AC11
+    // groups them by status, which assumes more than the live ones, and a
+    // coordinator still needs the event they rejected when its Organiser asks
+    // why, or the completed one when a report is due. Leaving terminal
+    // statuses out here would leave no way to find them at all, since the
+    // coordinator read needs an id. The frontend can collapse the groups that
+    // are done.
+    const statuses = [
+      STATUS.SUBMITTED,
+      STATUS.UNDER_REVIEW,
+      STATUS.APPROVED,
+      STATUS.CONFIRMED,
+      STATUS.COMPLETED,
+      STATUS.REJECTED,
+      STATUS.CANCELLED,
+    ];
+    const client = createQueueFakeClient([
+      ok(statuses.map((status, i) => myEventRow({ id: `event-${i}`, status }))),
+      ok([profileRow(ORGANISER_ID, 'Aisha Rahman')]),
+    ]);
+
+    const events = await listEventRequestsForCoordinator(COORDINATOR_ID, { client });
+
+    expect(events.map((event) => event.status)).toEqual(statuses);
+    expect(client.calls[0].inFilters).toEqual([]);
+  });
+
+  it('SCRUM333_AC11_orders_by_the_event_date', async () => {
+    const client = createQueueFakeClient([
+      ok([myEventRow()]),
+      ok([profileRow(ORGANISER_ID, 'Aisha Rahman')]),
+    ]);
+
+    await listEventRequestsForCoordinator(COORDINATOR_ID, { client });
+
+    // proposed_start ascending: the event happening soonest comes first.
+    // nullsFirst: false is stated, not assumed. proposed_start is nullable
+    // (001), and Postgres sorts nulls first on ASC, which would put an event
+    // with no date at the head of a list ordered by date. id breaks ties, as
+    // it does in the queue, so two refetches of identical data cannot come
+    // back in different orders.
+    expect(client.calls[0].order).toEqual([
+      ['proposed_start', { ascending: true, nullsFirst: false }],
+      ['id', { ascending: true }],
+    ]);
+  });
+
+  it('SCRUM333_AC11_selects_the_same_columns_as_every_other_read', async () => {
+    const client = createQueueFakeClient([
+      ok([myEventRow()]),
+      ok([profileRow(ORGANISER_ID, 'Aisha Rahman')]),
+      ok([storedRow()]),
+    ]);
+
+    await listEventRequestsForCoordinator(COORDINATOR_ID, { client });
+    await listEventRequestsForOrganiser(ORGANISER_ID, { client });
+
+    // The same COLUMNS, compared rather than copied, as the queue's own test
+    // does. A row here is the same shape GET /:id/review returns, so the
+    // frontend can open a detail panel from a row it already holds.
+    const [mine, , organisers] = client.calls;
+    expect(mine.select).toBe(organisers.select);
+  });
+
+  it('SCRUM333_AC11_returns_events_from_more_than_one_organiser', async () => {
+    // These are one coordinator's events, not one Organiser's, so they
+    // naturally belong to several Organisers. Nothing drops a row for that.
+    const client = createQueueFakeClient([
+      ok([
+        myEventRow({ id: 'a', organiser_id: ORGANISER_ID }),
+        myEventRow({ id: 'b', organiser_id: OTHER_ORGANISER_ID }),
+      ]),
+      ok([
+        profileRow(ORGANISER_ID, 'Aisha Rahman'),
+        profileRow(OTHER_ORGANISER_ID, 'Daniel Lim'),
+      ]),
+    ]);
+
+    const events = await listEventRequestsForCoordinator(COORDINATOR_ID, { client });
+
+    expect(events.map((event) => event.organiserId)).toEqual([ORGANISER_ID, OTHER_ORGANISER_ID]);
+  });
+
+  it('SCRUM333_AC11_carries_the_organisers_name', async () => {
+    // Three events, two Organisers. One read of profiles, for exactly those
+    // two ids, each asked for once, and each event gets its Organiser's name.
+    // organiserName sits flat beside organiserId rather than in a nested
+    // { id, fullName } object: every other field on a request is flat, and
+    // organiserId is already where the frontend reads it, so a nested object
+    // would carry the id twice.
+    const client = createQueueFakeClient([
+      ok([
+        myEventRow({ id: 'a', organiser_id: ORGANISER_ID }),
+        myEventRow({ id: 'b', organiser_id: OTHER_ORGANISER_ID }),
+        myEventRow({ id: 'c', organiser_id: ORGANISER_ID }),
+      ]),
+      ok([
+        profileRow(ORGANISER_ID, 'Aisha Rahman'),
+        profileRow(OTHER_ORGANISER_ID, 'Daniel Lim'),
+      ]),
+    ]);
+
+    const events = await listEventRequestsForCoordinator(COORDINATOR_ID, { client });
+
+    expect(client.calls).toHaveLength(2);
+    const names = client.calls[1];
+    expect(names.table).toBe('profiles');
+    expect(names.select).toMatch(/\bid\b/);
+    expect(names.select).toMatch(/full_name/);
+    expect(names.inFilters).toHaveLength(1);
+    expect(names.inFilters[0][0]).toBe('id');
+    expect(idsAskedFor(names)).toEqual([ORGANISER_ID, OTHER_ORGANISER_ID].sort());
+
+    expect(events.map((event) => event.organiserName))
+      .toEqual(['Aisha Rahman', 'Daniel Lim', 'Aisha Rahman']);
+  });
+
+  it('SCRUM333_AC11_a_missing_or_null_name_is_null', async () => {
+    // Two ways to have no name. full_name is nullable (007), and an organiser
+    // can have no profiles row at all: the hand-run check scripts create such
+    // users. Both are null, not undefined, so the key is always present and
+    // the frontend can test for it in one way.
+    const client = createQueueFakeClient([
+      ok([
+        myEventRow({ id: 'a', organiser_id: ORGANISER_ID }),
+        myEventRow({ id: 'b', organiser_id: OTHER_ORGANISER_ID }),
+      ]),
+      ok([profileRow(ORGANISER_ID, null)]),
+    ]);
+
+    const events = await listEventRequestsForCoordinator(COORDINATOR_ID, { client });
+
+    expect(events[0].organiserName).toBeNull();
+    expect(events[1].organiserName).toBeNull();
+  });
+
+  it('SCRUM333_AC11_answers_an_empty_list_with_an_empty_array', async () => {
+    // A coordinator with nothing assigned is the good state, not a missing
+    // resource, so it is [] and never a NotFoundError. With no events there
+    // are no organisers to name, so there is no second read: the fake queues
+    // one answer and would throw on a second call.
+    await expect(listEventRequestsForCoordinator(COORDINATOR_ID, {
+      client: createQueueFakeClient([ok([])]),
+    })).resolves.toEqual([]);
+
+    // null is the shape PostgREST can return for an empty result set.
+    await expect(listEventRequestsForCoordinator(COORDINATOR_ID, {
+      client: createQueueFakeClient([ok(null)]),
+    })).resolves.toEqual([]);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['blank', '   '],
+  ])('SCRUM333_AC11_refuses_to_query_at_all_without_a_coordinator_%s', async (_label, value) => {
+    // Mirrors SCRUM14_AC1_refuses_to_query_at_all_without_an_organiser. A
+    // missing coordinator must not reach the database as a query whose only
+    // filter is gone, which would be every assigned event in the system. It
+    // comes from the token, so a missing one is a caller bug, refused before
+    // the client is touched.
+    const client = createQueueFakeClient([ok([myEventRow()]), ok([])]);
+
+    const err = await errorFrom(listEventRequestsForCoordinator(value, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM333_AC11_leaves_an_unrecognised_database_failure_untyped', async () => {
+    // Through translateError, so an unrecognised code stays an untyped Error
+    // and the route answers 500 with a generic message, logging the driver's
+    // text rather than returning it. Typed, it would reach the coordinator as
+    // a 400 or 404 telling them to fix something that is not theirs, and a
+    // 404 would read as "nothing assigned".
+    const client = createQueueFakeClient([dbError('42P01', 'relation does not exist')]);
+
+    const err = await errorFrom(listEventRequestsForCoordinator(COORDINATOR_ID, { client }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err).not.toBeInstanceOf(NotFoundError);
+    expect(err.status).toBeUndefined();
+  });
+
+  it('SCRUM333_AC11_fails_rather_than_dropping_names_when_the_name_read_fails', async () => {
+    // If the second read fails, the call fails. Returning the events with
+    // every name null would look like a list of organisers with no names,
+    // and nobody would know a read had failed. An honest error the screen can
+    // retry is better than a quietly wrong list.
+    const client = createQueueFakeClient([
+      ok([myEventRow()]),
+      dbError('42P01', 'relation "profiles" does not exist'),
+    ]);
+
+    const err = await errorFrom(listEventRequestsForCoordinator(COORDINATOR_ID, { client }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.status).toBeUndefined();
+  });
+
+  it('SCRUM333_AC11_maps_every_row_into_camelCase', async () => {
+    const client = createQueueFakeClient([
+      ok([
+        myEventRow({ id: 'a', status: STATUS.APPROVED }),
+        myEventRow({ id: 'b', status: STATUS.CONFIRMED }),
+      ]),
+      ok([profileRow(ORGANISER_ID, 'Aisha Rahman')]),
+    ]);
+
+    const events = await listEventRequestsForCoordinator(COORDINATOR_ID, { client });
+
+    expect(events[0]).toMatchObject({
+      id: 'a',
+      organiserId: ORGANISER_ID,
+      organiserName: 'Aisha Rahman',
+      assignedCoordinatorId: COORDINATOR_ID,
+      status: STATUS.APPROVED,
+    });
+
+    // On every row, and including the new key: a snake_case leak would
+    // render as a blank field on the coordinator's screen.
+    for (const event of events) {
+      expect(Object.keys(event).some((key) => key.includes('_'))).toBe(false);
+    }
+  });
+
+  it('SCRUM333_AC11_takes_the_coordinator_as_its_only_required_parameter', () => {
+    // The coordinator, then the usual options object, whose default keeps it
+    // out of .length. The queue takes no owner at all; this one takes exactly
+    // one, because it is one person's list.
+    expect(listEventRequestsForCoordinator.length).toBe(1);
   });
 });

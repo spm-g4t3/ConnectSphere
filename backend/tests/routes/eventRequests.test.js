@@ -2401,3 +2401,178 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
     consoleError.mockRestore();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-333 -- GET /api/event-requests/mine, a coordinator's "My events"
+// ---------------------------------------------------------------------------
+// SCRUM-327 AC11: each coordinator has a list of the events assigned to them,
+// grouped by status, earliest event first.
+//
+// Behind coordinatorOnly, like GET /queue, and for a related reason: neither
+// list is narrowed to an Organiser, so the role is what decides who may ask.
+// Unlike the queue, this one is narrowed to the caller, as the assigned
+// coordinator, and the caller comes from the token.
+//
+// GET /queue is untouched. It is the only view of work nobody holds yet, so
+// "My events" sits beside it rather than replacing it; which one the
+// dashboard opens on is a frontend choice.
+//
+// The service tests carry the arguments for the statuses covered, the order,
+// and the organiser's name. These tests are about the transport: the gate,
+// the scoping, the shape, and the path.
+//
+// The route fakes answer two calls per successful list: the events, then the
+// organisers' names from profiles (see the service tests for why that is a
+// second read rather than a join).
+
+/** GET /mine, as COORDINATOR_ID unless told otherwise. */
+const listMine = (client, requireAuth = signedInWithRole(ROLE.EVENT_COORDINATOR)) =>
+  request(appWith({ client, requireAuth })).get('/api/event-requests/mine');
+
+/** Two events, two Organisers, both assigned to COORDINATOR_ID. */
+const myEventRows = () => [
+  storedRow({ id: 'mine-1', organiser_id: ORGANISER_ID, status: STATUS.APPROVED, assigned_coordinator_id: COORDINATOR_ID }),
+  storedRow({ id: 'mine-2', organiser_id: OTHER_ORGANISER_ID, status: STATUS.SUBMITTED, assigned_coordinator_id: COORDINATOR_ID }),
+];
+
+const organiserNames = () => [
+  { id: ORGANISER_ID, full_name: 'Aisha Rahman' },
+  { id: OTHER_ORGANISER_ID, full_name: 'Daniel Lim' },
+];
+
+describe('SCRUM-333: a coordinator reads their own events over HTTP', () => {
+  it('SCRUM333_AC11_returns_200_and_a_bare_array_for_a_coordinator', async () => {
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client);
+
+    // A bare array, like GET / and GET /queue. The frontend groups it by
+    // status; grouping is presentation, and a server-side grouping would be a
+    // shape no other list in this API has.
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(2);
+  });
+
+  it('SCRUM333_AC11_lists_only_the_coordinators_own_events', async () => {
+    // Mirrors SCRUM14_AC1_scopes_the_query_to_the_token_not_the_query_string.
+    // The query string names another coordinator, and the read is still
+    // narrowed to the one in the token. Otherwise any coordinator could read
+    // any other's list just by asking for it.
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    await request(appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }))
+      .get('/api/event-requests/mine')
+      .query({ coordinatorId: NEW_COORDINATOR_ID, assignedCoordinatorId: NEW_COORDINATOR_ID });
+
+    expect(client.calls[0].table).toBe('event_requests');
+    expect(client.calls[0].filters).toEqual([['assigned_coordinator_id', COORDINATOR_ID]]);
+  });
+
+  it('SCRUM333_AC11_a_reassigned_event_follows_its_new_coordinator', async () => {
+    // After a handover from COORDINATOR_ID to NEW_COORDINATOR_ID, the event
+    // is on the new coordinator's list and off the old one's.
+    //
+    // Asserted through the filter, not the rows. The fake returns whatever
+    // rows it is given, so a test that fed it the "right" rows and checked
+    // they came back would only check the fixture against itself. What
+    // actually decides which list an event is on is the database applying
+    // assigned_coordinator_id = caller, and 018 moves that column on a
+    // handover. So the honest assertion is that each caller's read carries
+    // their own id, and nobody else's.
+    const asNew = createQueueFakeClient([ok([]), ok([])]);
+    const asOld = createQueueFakeClient([ok([]), ok([])]);
+
+    await listMine(asNew, signedInWithRole(ROLE.EVENT_COORDINATOR, NEW_COORDINATOR_ID));
+    await listMine(asOld, signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_ID));
+
+    expect(asNew.calls[0].filters).toEqual([['assigned_coordinator_id', NEW_COORDINATOR_ID]]);
+    expect(asOld.calls[0].filters).toEqual([['assigned_coordinator_id', COORDINATOR_ID]]);
+  });
+
+  it('SCRUM333_AC11_carries_the_status_display_on_every_row', async () => {
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client);
+
+    // Same projection as the queue's rows and the Organiser's list, so the
+    // status badges, and the status groups the frontend builds, come from one
+    // vocabulary.
+    for (const row of res.body) {
+      expect(row.statusDisplay).toBeDefined();
+      expect(row.statusDisplay.status).toBe(row.status);
+      expect(row.statusDisplay.label).toBe(STATUS_DISPLAY[row.status].label);
+      expect(row.statusDisplay.group).toBe(STATUS_DISPLAY[row.status].group);
+    }
+  });
+
+  it('SCRUM333_AC11_carries_the_organisers_name', async () => {
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client);
+
+    // Survives serialisation, beside the id it names.
+    expect(res.body.map((row) => [row.organiserId, row.organiserName])).toEqual([
+      [ORGANISER_ID, 'Aisha Rahman'],
+      [OTHER_ORGANISER_ID, 'Daniel Lim'],
+    ]);
+  });
+
+  it('SCRUM333_AC11_answers_an_empty_list_with_200_and_not_404', async () => {
+    // Nothing assigned is the good state, not a missing resource. With no
+    // events there is no second read, so only one answer is queued.
+    const client = createQueueFakeClient([ok([])]);
+
+    const res = await listMine(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM333_AC11_does_not_read_the_mine_path_as_a_request_id', async () => {
+    // '/mine' is one segment, like '/queue', so declared after GET /:id
+    // Express would match it with id === 'mine' and send the caller to the
+    // Organiser's read. Mirrors SCRUM45_AC1_does_not_read_the_queue_path_as_a_
+    // request_id, and asserted from the outside: a 200, a read narrowed to the
+    // coordinator, and no id filter.
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client);
+
+    expect(res.status).toBe(200);
+    expect(client.calls[0].filters).toEqual([['assigned_coordinator_id', COORDINATOR_ID]]);
+    expect(client.calls[0].filters).not.toContainEqual(['id', 'mine']);
+  });
+
+  it('SCRUM333_AC11_an_organiser_is_refused_with_403_and_never_queries', async () => {
+    // coordinatorOnly answers before the handler runs. An Organiser has no
+    // assigned events; their own list is GET /.
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client, signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID));
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM333_AC11_a_caller_with_no_role_is_refused', async () => {
+    // Closed by default, as for the queue: signedInAs sets no role, which is
+    // also what requireAuth resolves for an account with no profiles row.
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client, signedInAs(COORDINATOR_ID));
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM333_AC11_returns_401_without_a_token_and_never_queries', async () => {
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client, signedOut);
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+});
