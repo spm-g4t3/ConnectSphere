@@ -34,7 +34,10 @@
  *    coordinator, and the event's assigned coordinator is enforced, by the
  *    first itself and by 018's function for the second.
  *    listEventRequestsForCoordinator (SCRUM-333) takes the coordinator and
- *    reads only the events assigned to them. Role, and the
+ *    reads only the events assigned to them. listCoordinators and
+ *    listAssignmentHistory (SCRUM-334) take no owner and check none, so their
+ *    routes prove the right to read: the role for the coordinator list, and
+ *    for the history the same proof the event needs. Role, and the
  *    caller's relationship to an event, arrive with the JWT and belong in
  *    middleware. A service that quietly enforced half of it would make the
  *    other half look unnecessary.
@@ -69,6 +72,8 @@ import {
   canTransition,
   COORDINATOR_QUEUE_STATUSES,
 } from '../domain/eventRequestStatus.js';
+// Imports nothing itself, so this service stays loadable without credentials.
+import { ROLE } from '../domain/userRole.js';
 
 
 /**
@@ -1148,21 +1153,237 @@ export async function listEventRequestsForCoordinator(coordinatorId, { client } 
   // Nothing assigned is the good state, not a missing resource.
   if (rows.length === 0) return [];
 
-  const organiserIds = [...new Set(rows.map((row) => row.organiser_id))];
-
-  const { data: profiles, error: profilesError } = await db
-    .from('profiles')
-    .select('id, full_name')
-    .in('id', organiserIds);
-
-  if (profilesError) throw translateError(profilesError);
-
-  const nameById = new Map(
-    (profiles ?? []).map((profile) => [profile.id, profile.full_name ?? null]),
-  );
+  const nameOf = await readNames(db, rows.map((row) => row.organiser_id));
 
   return rows.map((row) => ({
     ...toEventRequest(row),
-    organiserName: nameById.get(row.organiser_id) ?? null,
+    organiserName: nameOf(row.organiser_id),
   }));
+}
+
+
+/**
+ * Read full_name for a set of users, in one request, and return a lookup.
+ *
+ * The second read listEventRequestsForCoordinator and listAssignmentHistory
+ * both make, kept in one place so they cannot drift apart. Nothing has a
+ * foreign key to profiles (every user column references auth.users), so
+ * PostgREST cannot embed a name in the first read; that argument is in full
+ * at listEventRequestsForCoordinator.
+ *
+ * Each id is asked for once, and nulls are dropped before asking: a null is
+ * "nobody", which has no name to read. The lookup answers null for a null id,
+ * an id with no profiles row, and a profile whose full_name is null, so a
+ * caller always gets a string or null, never undefined.
+ *
+ * A failed read throws. Returning an empty lookup would give every row a null
+ * name, which looks like people who never gave one, and nobody would know a
+ * read had failed.
+ *
+ * @param {object} db         a resolved client
+ * @param {Array<string|null>} ids  user ids, repeats and nulls allowed
+ * @returns {Promise<(id: string|null) => string|null>}
+ */
+async function readNames(db, ids) {
+  const wanted = [...new Set(ids.filter((id) => id != null))];
+
+  const { data, error } = await db
+    .from('profiles')
+    .select('id, full_name')
+    .in('id', wanted);
+
+  if (error) throw translateError(error);
+
+  const nameById = new Map((data ?? []).map((profile) => [profile.id, profile.full_name ?? null]));
+
+  return (id) => (id == null ? null : nameById.get(id) ?? null);
+}
+
+
+/**
+ * Every Event Coordinator, as { id, fullName }, for the reassign picker.
+ *
+ * SCRUM-334, for SCRUM-327 AC9: the outgoing coordinator chooses who to hand
+ * the event to, so the screen needs the people they can choose from.
+ *
+ * This is the first read in the API that lists users, so it is the first that
+ * could be used to enumerate staff. It selects only what the picker shows, the
+ * id and the name, never the whole row: no role, no created_at. Who may call it
+ * is decided at the route, which puts it behind coordinatorOnly.
+ *
+ * { id, fullName } because the object is the person, so its keys are that
+ * person's columns in camelCase, the rule toEventRequest follows.
+ * organiserName on "My events" is prefixed only because it names someone else
+ * on an event's row.
+ *
+ * Ordered by full_name, nulls last, then id. A picker is scanned by a person
+ * looking for a colleague, so alphabetical is what they need; id alone would
+ * be stable but would look random. full_name is nullable, so a coordinator
+ * with no name goes to the end rather than the top, and the id orders those,
+ * and any two people with the same name, the same way every time. A
+ * coordinator with no name is still listed: they can still take an event.
+ *
+ * The caller is included. Someone cannot hand an event to themselves, so the
+ * picker leaves them out, which is presentation. Doing it here would make
+ * this "everyone but me".
+ *
+ * The role comes from ROLE in domain/userRole.js rather than a literal, so it
+ * is the same string requireRole checks. It is also the value 014 and 015
+ * select coordinators by.
+ *
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<Array<{ id: string, fullName: string|null }>>} possibly empty
+ */
+export async function listCoordinators({ client } = {}) {
+  const db = await resolveClient(client);
+
+  const { data, error } = await db
+    .from('profiles')
+    .select('id, full_name')
+    .eq('role', ROLE.EVENT_COORDINATOR)
+    .order('full_name', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true });
+
+  if (error) throw translateError(error);
+
+  // No coordinators is not an error. Nobody can be handed an event, and the
+  // picker says so; that is its message to show.
+  return (data ?? []).map((profile) => ({
+    id: profile.id,
+    fullName: profile.full_name ?? null,
+  }));
+}
+
+
+/**
+ * The history columns every view reads. handover_note is not here: it is
+ * added only for a coordinator's view (see listAssignmentHistory).
+ * event_request_id is not here either, because every row read has the id the
+ * caller asked for.
+ */
+const HISTORY_COLUMNS = 'id, previous_coordinator_id, new_coordinator_id, assigned_by, created_at';
+
+
+/**
+ * One event's assignment history, oldest first.
+ *
+ * SCRUM-334, for SCRUM-327 AC9 (every handover records who made it, and the
+ * note) and AC10 (the Organiser's screen shows the history). Reads
+ * event_request_assignment_history (014), which 016 writes on submission and
+ * 018 on every handover.
+ *
+ * Its own read, behind its own routes, not folded into the event reads. Folded
+ * in, it would put a growing array inside every event read, /mine and /queue
+ * included, where nothing shows it. Change requests are separate for the same
+ * reason.
+ *
+ * Takes no owner and checks none, which is this module's rule. The route
+ * proves the right to read, with the same proof the event itself needs:
+ * ownership for an Organiser, the role for a coordinator.
+ *
+ * Each entry:
+ *
+ *   { id,
+ *     previousCoordinatorId, previousCoordinatorName,
+ *     newCoordinatorId,      newCoordinatorName,
+ *     assignedById,          assignedByName,
+ *     automatic,
+ *     createdAt,
+ *     handoverNote }         <- only with includeNotes: true
+ *
+ * Ids beside names, flat, as organiserId sits beside organiserName on "My
+ * events". createdAt keeps the column's name; 014 records that it is the
+ * moment the assignment took effect.
+ *
+ * Why `automatic` is a flag, rather than leaving the client to test
+ * assignedById for null. 014 says a null assigned_by means the system assigned
+ * the event, on submission or in a backfill. That is the database's
+ * convention, and every client would otherwise have to know it. Once names are
+ * added it is also ambiguous: assignedByName is null both for the system and
+ * for a person with no full_name. So the API states the one fact the screen
+ * needs, "assigned automatically" or "handed over by", derived from
+ * assigned_by alone, and keeps assignedById as the source.
+ *
+ * Why the handover note is withheld unless asked for, and why its key is then
+ * absent rather than null. The note is written by one coordinator for
+ * another, "I'm on leave, the shortlist is in my notes". The Organiser sees
+ * who and when, which the customer confirmed, but not the note: if they could
+ * read it, coordinators would write it differently or stop writing it, and the
+ * handover it exists for would get worse. null already means "no note was
+ * written", which is true of every automatic assignment. An absent key means
+ * "not sent to you". If both were null, nobody could tell a withheld note from
+ * a missing one. Without includeNotes the column is not even selected, so a
+ * later change to the mapping cannot leak it. includeNotes defaults to false,
+ * so a caller that forgets to choose gets the Organiser's view.
+ *
+ * Oldest first, then id. A history is a chain, null -> A, A -> B, and a chain
+ * is read from its start. 014's index is (event_request_id, created_at desc),
+ * newest first, and it still serves this query: Postgres reads a btree index
+ * backwards as readily as forwards, so one event's rows are found and returned
+ * in order without a sort. id breaks ties the same way every time.
+ *
+ * Names come from one read of profiles, for every person the history mentions,
+ * each asked for once (readNames). No rows, no second read. If the name read
+ * fails, the call fails.
+ *
+ * @param {string} id  the event request
+ * @param {object} [view]
+ * @param {boolean} [view.includeNotes=false]  true only for a coordinator's view
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object[]>} possibly empty, oldest first, in camelCase
+ * @throws {ValidationError} when no event id was supplied, before any round trip
+ */
+export async function listAssignmentHistory(id, { includeNotes = false } = {}, { client } = {}) {
+  // Without an event id the read below would have no filter, and return every
+  // assignment ever made.
+  if (typeof id !== 'string' || id.trim() === '') {
+    throw new ValidationError(
+      'Invalid assignment history -- eventRequestId: is required',
+      [{ field: 'eventRequestId', message: 'is required' }],
+    );
+  }
+
+  const columns = includeNotes ? `${HISTORY_COLUMNS}, handover_note` : HISTORY_COLUMNS;
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db
+    .from('event_request_assignment_history')
+    .select(columns)
+    .eq('event_request_id', id)
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true });
+
+  if (error) throw translateError(error);
+
+  const rows = data ?? [];
+
+  // A draft has no history, and that is an ordinary state.
+  if (rows.length === 0) return [];
+
+  const nameOf = await readNames(
+    db,
+    rows.flatMap((row) => [row.previous_coordinator_id, row.new_coordinator_id, row.assigned_by]),
+  );
+
+  return rows.map((row) => {
+    const entry = {
+      id: row.id,
+      previousCoordinatorId: row.previous_coordinator_id ?? null,
+      previousCoordinatorName: nameOf(row.previous_coordinator_id),
+      newCoordinatorId: row.new_coordinator_id,
+      newCoordinatorName: nameOf(row.new_coordinator_id),
+      assignedById: row.assigned_by ?? null,
+      assignedByName: nameOf(row.assigned_by),
+      automatic: row.assigned_by == null,
+      createdAt: row.created_at,
+    };
+
+    // Added only when asked for, so the Organiser's entries have no such key.
+    if (includeNotes) entry.handoverNote = row.handover_note ?? null;
+
+    return entry;
+  });
 }

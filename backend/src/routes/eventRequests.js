@@ -72,6 +72,8 @@ import {
   getEventRequestForCoordinator,
   listEventRequestsForReview,
   listEventRequestsForCoordinator,
+  listCoordinators,
+  listAssignmentHistory,
   createEventRequest,
   updateEventRequest,
   submitEventRequest,
@@ -206,9 +208,9 @@ export function createEventRequestRouter({
    * here, which is what keeps a shared queue from exposing an Organiser's
    * private working copy.
    *
-   * DECLARATION ORDER HERE IS LOAD-BEARING, and this and GET /mine below
-   * (SCRUM-333) are the only places in this router where that is literally
-   * true. Every other ordering note in this
+   * DECLARATION ORDER HERE IS LOAD-BEARING, and this, GET /mine (SCRUM-333)
+   * and GET /coordinators (SCRUM-334) below are the only places in this
+   * router where that is literally true. Every other ordering note in this
    * file -- on /:id/status below, and above the writes -- carefully explains
    * that the paths cannot actually collide because /:id is one segment and
    * /:id/... is two. This one can and does: '/queue' is also one segment, so
@@ -266,6 +268,31 @@ export function createEventRequestRouter({
     try {
       const requests = await listEventRequestsForCoordinator(req.user.id, { client });
       res.status(200).json(requests.map(withStatusDisplay));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-334 (SCRUM-327 AC9): every Event Coordinator, as { id, fullName },
+   * for the reassign picker.
+   *
+   * Behind coordinatorOnly. This is the first endpoint in the API that lists
+   * users, so the first that could be used to enumerate staff, and no
+   * Organiser or attendee feature needs it: only the reassign picker does. The
+   * gate fails closed, and a future story that needs the list elsewhere can
+   * widen it and give its reason.
+   *
+   * DECLARATION ORDER IS LOAD-BEARING, as for /queue and /mine above:
+   * '/coordinators' is one segment, so declared after GET /:id it would be
+   * read as id === 'coordinators'. Do not move it below /:id.
+   *
+   * A bare array. It includes the caller; leaving them out of the picker is
+   * presentation.
+   */
+  router.get('/coordinators', coordinatorOnly, async (req, res) => {
+    try {
+      res.status(200).json(await listCoordinators({ client }));
     } catch (err) {
       handleError(err, res);
     }
@@ -393,6 +420,71 @@ export function createEventRequestRouter({
     try {
       const request = await getEventRequestForCoordinator(req.params.id, { client });
       res.status(200).json(withStatusDisplay(request));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-334 (SCRUM-327 AC9, AC10): an event's assignment history, in two
+   * routes. This one is the Organiser's; GET /:id/assignments/review below is
+   * the coordinators'.
+   *
+   * Two routes rather than one that branches on role, for the reasons
+   * GET /:id/review gives for sitting beside GET /:id, and the pattern
+   * /:id/change-requests and /:id/change-requests/review already follow. Who
+   * may call each can be read off its declaration. And it fails closed: one
+   * handler choosing between the two views on req.user.role, with its
+   * condition wrong, would hand every Organiser every event's history, notes
+   * included, while the coordinators' route is refused by requireRole before
+   * its handler runs.
+   *
+   * The ownership pre-check is the proof, as on GET /:id/change-requests:
+   * listAssignmentHistory takes no owner. Someone else's event is the same 404
+   * as a missing one, and the history is never read. A coordinator calling
+   * this route is treated like any other caller who did not organise the
+   * event; their view is /assignments/review.
+   *
+   * Without notes. The handover note is written by one coordinator for
+   * another, and the Organiser sees who and when, never the note. The key is
+   * absent, not null, so "not sent to you" is not confused with "none was
+   * written" (the service's docstring gives the argument).
+   *
+   * Its own endpoint rather than a field on the event, so the event reads,
+   * /mine and /queue included, do not carry a growing array nothing displays.
+   */
+  router.get('/:id/assignments', async (req, res) => {
+    try {
+      await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+
+      const history = await listAssignmentHistory(req.params.id, { includeNotes: false }, { client });
+      res.status(200).json(history);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-334 (SCRUM-327 AC9): the coordinators' view of an event's
+   * assignment history, with the handover notes.
+   *
+   * Behind coordinatorOnly. Every coordinator gets the notes, not only the one
+   * now assigned. They can already read the event (GET /:id/review), and the
+   * note is written for the coordinator team; the Organiser is the reader it is
+   * kept from, and the role gate does that. Limiting it to the current
+   * assignee would also hide every note from the coordinator who wrote it,
+   * since writing one means handing the event away, and from whoever takes the
+   * event next.
+   *
+   * Reads the event through getEventRequestForCoordinator first, so a draft or
+   * a missing id is a 404 here as it is on GET /:id/review.
+   */
+  router.get('/:id/assignments/review', coordinatorOnly, async (req, res) => {
+    try {
+      await getEventRequestForCoordinator(req.params.id, { client });
+
+      const history = await listAssignmentHistory(req.params.id, { includeNotes: true }, { client });
+      res.status(200).json(history);
     } catch (err) {
       handleError(err, res);
     }
