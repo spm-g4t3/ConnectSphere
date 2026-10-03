@@ -36,6 +36,13 @@
  *   AC11 -- each coordinator has a list of the events assigned to them,
  *           grouped by status, earliest event first
  *
+ * SCRUM-334 (a subtask of SCRUM-327) adds listCoordinators, for the reassign
+ * picker, and listAssignmentHistory, an event's history of coordinators. Their
+ * SCRUM334_* tests follow SCRUM-333's:
+ *   AC9  -- every handover records who made it, and the note
+ *   AC10 -- the Organiser's screen shows the event's assignment history
+ *
+
  * SCRUM-330 (a subtask of SCRUM-327) moved the write half of submission into
  * the Postgres function submit_event_request (migration 016), which also
  * assigns the Event Coordinator. The SCRUM10_AC5 and SCRUM10_AC6 tests that
@@ -2726,5 +2733,417 @@ describe('SCRUM-327 AC11: a coordinator lists the events assigned to them', () =
     // out of .length. The queue takes no owner at all; this one takes exactly
     // one, because it is one person's list.
     expect(listEventRequestsForCoordinator.length).toBe(1);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-334 -- the coordinator list, and an event's assignment history
+// ---------------------------------------------------------------------------
+/**
+ * Two reads, for the reassign screen and the history view.
+ *
+ *   listCoordinators({ client })
+ *     every Event Coordinator's id and name, for the reassign picker.
+ *   listAssignmentHistory(id, { includeNotes }, { client })
+ *     one event's assignment history, oldest first.
+ *
+ * Named after SCRUM-327's criteria:
+ *   AC9  -- every handover records who made it, and the note
+ *   AC10 -- the Organiser's screen shows the event's assignment history
+ *
+ * The history is its own read and its own endpoint, not folded into the event
+ * reads. Folded in, it would put a growing array inside every event read,
+ * including /mine and /queue, where nothing displays it. Change requests are
+ * already a separate endpoint (GET /:id/change-requests) for the same reason.
+ *
+ * Neither function checks who is asking, which is this module's rule: a
+ * function that takes no owner checks none, and the route proves the right to
+ * read. For the coordinator list that proof is the role gate. For the history
+ * it is the same proof the event itself needs: ownership for an Organiser,
+ * the role for a coordinator.
+ *
+ * Names come from profiles in a second read, as listEventRequestsForCoordinator
+ * reads them and for the same reason: nothing has a foreign key to profiles,
+ * so PostgREST cannot embed it.
+ *
+ * Imports appended, for the reason the SCRUM-11 block gives.
+ */
+import { listCoordinators, listAssignmentHistory } from '../../src/services/eventRequestService.js';
+
+/** The column names a select string asks for, sorted, so a test compares sets. */
+const columnsOf = (call) => call.select.split(',').map((column) => column.trim()).sort();
+
+describe('SCRUM-327 AC9: every coordinator, for the reassign picker', () => {
+  /**
+   * Why the shape is { id, fullName }: the object is the person, so its keys
+   * are that person's columns in camelCase, by the same rule toEventRequest
+   * follows. organiserName on "My events" is prefixed because it names
+   * someone else on an event's row; here nothing needs prefixing.
+   *
+   * Why ordered by name, nulls last, then id: a picker is read by a person
+   * looking for a colleague, so alphabetical is what they scan. full_name is
+   * nullable, so nameless coordinators go to the end rather than the top, and
+   * id orders those, and any two people with the same name, the same way every
+   * time. Ordering by id alone would be stable but would look random to the
+   * person using it.
+   */
+  it('SCRUM334_AC9_lists_every_event_coordinator', async () => {
+    const client = createQueueFakeClient([ok([profileRow(COORDINATOR_ID, 'Priya Nair')])]);
+
+    await listCoordinators({ client });
+
+    const [call] = client.calls;
+    expect(call.table).toBe('profiles');
+
+    // One filter, the role, and nothing narrowing it further.
+    expect(call.filters).toEqual([['role', 'event_coordinator']]);
+    expect(call.inFilters).toEqual([]);
+
+    // The id and the name, never the whole row. This is the first read in the
+    // API that lists users, so it reads only what the picker shows.
+    expect(columnsOf(call)).toEqual(['full_name', 'id']);
+  });
+
+  it('SCRUM334_AC9_returns_each_coordinator_as_an_id_and_a_name', async () => {
+    const client = createQueueFakeClient([
+      ok([profileRow(COORDINATOR_ID, 'Priya Nair'), profileRow(NEW_COORDINATOR_ID, 'Marcus Tan')]),
+    ]);
+
+    const coordinators = await listCoordinators({ client });
+
+    // toEqual, so an extra key fails: no role, no created_at.
+    expect(coordinators).toEqual([
+      { id: COORDINATOR_ID, fullName: 'Priya Nair' },
+      { id: NEW_COORDINATOR_ID, fullName: 'Marcus Tan' },
+    ]);
+  });
+
+  it('SCRUM334_AC9_keeps_a_coordinator_with_no_name', async () => {
+    // full_name is nullable (007). A coordinator with no name is still a
+    // coordinator who can take an event, so they are listed, with null, and
+    // the picker shows them some other way.
+    const client = createQueueFakeClient([ok([profileRow(NEW_COORDINATOR_ID, null)])]);
+
+    const coordinators = await listCoordinators({ client });
+
+    expect(coordinators).toEqual([{ id: NEW_COORDINATOR_ID, fullName: null }]);
+  });
+
+  it('SCRUM334_AC9_orders_coordinators_by_name_then_id', async () => {
+    const client = createQueueFakeClient([ok([])]);
+
+    await listCoordinators({ client });
+
+    expect(client.calls[0].order).toEqual([
+      ['full_name', { ascending: true, nullsFirst: false }],
+      ['id', { ascending: true }],
+    ]);
+  });
+
+  it('SCRUM334_AC9_answers_no_coordinators_with_an_empty_array', async () => {
+    // Not an error. With no coordinators nobody can be handed an event, and
+    // the picker should say so; that is the picker's message to show, not a
+    // failure of this read. null is how PostgREST can send an empty result.
+    await expect(listCoordinators({ client: createQueueFakeClient([ok([])]) })).resolves.toEqual([]);
+    await expect(listCoordinators({ client: createQueueFakeClient([ok(null)]) })).resolves.toEqual([]);
+  });
+
+  it('SCRUM334_AC9_leaves_an_unrecognised_database_failure_untyped', async () => {
+    const client = createQueueFakeClient([dbError('42P01', 'relation "profiles" does not exist')]);
+
+    const err = await errorFrom(listCoordinators({ client }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err).not.toBeInstanceOf(NotFoundError);
+    expect(err.status).toBeUndefined();
+  });
+
+  it('SCRUM334_AC9_takes_no_required_parameter', () => {
+    // Nothing to scope it to: every coordinator, for any coordinator.
+    expect(listCoordinators.length).toBe(0);
+  });
+});
+
+
+/**
+ * An event's assignment history.
+ *
+ * Shape of one entry:
+ *
+ *   { id,
+ *     previousCoordinatorId, previousCoordinatorName,
+ *     newCoordinatorId,      newCoordinatorName,
+ *     assignedById,          assignedByName,
+ *     automatic,
+ *     createdAt,
+ *     handoverNote }         <- only when includeNotes is true
+ *
+ * Flat, ids beside names, as organiserId sits beside organiserName on "My
+ * events". createdAt keeps the column's name, as every other mapping here
+ * does; 014 records that it is the moment the assignment took effect.
+ *
+ * Why `automatic` exists, when 014 already says a null assigned_by means the
+ * system assigned the event. That convention is the database's vocabulary,
+ * and every client would otherwise have to know it. It is also ambiguous once
+ * names are added: assignedByName is null both for the system and for a
+ * person with no full_name. So the API states the one fact the screen needs,
+ * "assigned automatically" or "handed over by", as a boolean derived from
+ * assigned_by alone, and assignedById stays as the source it came from.
+ *
+ * Why the handover note is withheld from the Organiser. AC10 says the
+ * Organiser's screen shows the history, and the customer confirmed they see
+ * the coordinator's name, so who and when are theirs. The note is not. It is
+ * written by one coordinator for another, "I'm on leave, the shortlist is in
+ * my notes", and if the Organiser could read it, coordinators would write
+ * differently or stop writing it, and the handover it exists for would get
+ * worse. So the coordinator's view carries it and the Organiser's does not.
+ *
+ * The key is absent, not null. null already means "no note was written",
+ * which is true of every automatic assignment. An absent key means "not sent
+ * to you". If both were null, the Organiser's screen could not tell a
+ * withheld note from a missing one, and nor could a test. Without
+ * includeNotes the note is not even selected, so it cannot reach a response
+ * through a later mapping mistake.
+ *
+ * includeNotes defaults to false. A caller that forgets to say gets the
+ * Organiser's view, never the other way round.
+ */
+describe('SCRUM-327 AC9, AC10: an event\'s assignment history', () => {
+  /** The first row for an event: submitted, assigned by the system. */
+  const firstAssignment = () => ({
+    id: 'history-1',
+    event_request_id: REQUEST_ID,
+    previous_coordinator_id: null,
+    new_coordinator_id: COORDINATOR_ID,
+    assigned_by: null,
+    handover_note: null,
+    created_at: '2026-01-15T09:00:00+00:00',
+  });
+
+  /** A handover from COORDINATOR_ID to NEW_COORDINATOR_ID, made by COORDINATOR_ID. */
+  const handover = () => ({
+    id: 'history-2',
+    event_request_id: REQUEST_ID,
+    previous_coordinator_id: COORDINATOR_ID,
+    new_coordinator_id: NEW_COORDINATOR_ID,
+    assigned_by: COORDINATOR_ID,
+    handover_note: HANDOVER_NOTE,
+    created_at: '2026-01-20T09:00:00+00:00',
+  });
+
+  const coordinatorNames = () => [
+    profileRow(COORDINATOR_ID, 'Priya Nair'),
+    profileRow(NEW_COORDINATOR_ID, 'Marcus Tan'),
+  ];
+
+  const historyWith = (rows = [firstAssignment(), handover()], names = coordinatorNames()) =>
+    createQueueFakeClient([ok(rows), ok(names)]);
+
+  it('SCRUM334_AC10_reads_one_events_history_oldest_first', async () => {
+    const client = historyWith();
+
+    await listAssignmentHistory(REQUEST_ID, { includeNotes: true }, { client });
+
+    const [history] = client.calls;
+    expect(history.table).toBe('event_request_assignment_history');
+    expect(history.filters).toEqual([['event_request_id', REQUEST_ID]]);
+    expect(history.select).not.toBe('*');
+
+    // Oldest first, because a history reads as a chain, null -> A, A -> B,
+    // and a chain is read from its start. That is the opposite of 014's
+    // index, (event_request_id, created_at desc), and the index still serves
+    // it: Postgres walks a btree index backwards as easily as forwards, so
+    // one event's rows are still found and returned in order without a sort.
+    // id breaks ties the same way every time.
+    expect(history.order).toEqual([
+      ['created_at', { ascending: true }],
+      ['id', { ascending: true }],
+    ]);
+  });
+
+  it('SCRUM334_AC9_shows_who_handed_the_event_over', async () => {
+    const client = historyWith();
+
+    const [, entry] = await listAssignmentHistory(REQUEST_ID, { includeNotes: true }, { client });
+
+    expect(entry).toMatchObject({
+      id: 'history-2',
+      previousCoordinatorId: COORDINATOR_ID,
+      previousCoordinatorName: 'Priya Nair',
+      newCoordinatorId: NEW_COORDINATOR_ID,
+      newCoordinatorName: 'Marcus Tan',
+      assignedById: COORDINATOR_ID,
+      assignedByName: 'Priya Nair',
+      automatic: false,
+      createdAt: '2026-01-20T09:00:00+00:00',
+    });
+  });
+
+  it('SCRUM334_AC9_marks_a_system_assignment_as_automatic', async () => {
+    // The first assignment: nobody held the event before, and nobody handed
+    // it over, so the previous coordinator and the person are all null, and
+    // automatic says why.
+    const client = historyWith();
+
+    const [entry] = await listAssignmentHistory(REQUEST_ID, { includeNotes: true }, { client });
+
+    expect(entry).toMatchObject({
+      previousCoordinatorId: null,
+      previousCoordinatorName: null,
+      newCoordinatorId: COORDINATOR_ID,
+      newCoordinatorName: 'Priya Nair',
+      assignedById: null,
+      assignedByName: null,
+      automatic: true,
+    });
+  });
+
+  it('SCRUM334_AC9_reads_every_name_in_one_read', async () => {
+    // One read of profiles for everyone the history names, previous, new and
+    // assigned_by alike, each asked for once, and never a null.
+    const client = historyWith();
+
+    await listAssignmentHistory(REQUEST_ID, { includeNotes: true }, { client });
+
+    expect(client.calls).toHaveLength(2);
+    const names = client.calls[1];
+    expect(names.table).toBe('profiles');
+    expect(columnsOf(names)).toEqual(['full_name', 'id']);
+    expect(names.inFilters).toHaveLength(1);
+    expect(names.inFilters[0][0]).toBe('id');
+    expect(idsAskedFor(names)).toEqual([COORDINATOR_ID, NEW_COORDINATOR_ID].sort());
+  });
+
+  it('SCRUM334_AC9_a_person_with_no_name_is_still_a_person', async () => {
+    // NEW_COORDINATOR_ID has no profiles row, and COORDINATOR_ID, who made
+    // the handover, has a null full_name. Both names are null, and the
+    // handover is still not automatic, because a person made it. This is the
+    // case `automatic` exists for: assignedByName alone cannot tell a
+    // nameless person from the system.
+    const client = historyWith(
+      [handover()],
+      [profileRow(COORDINATOR_ID, null)],
+    );
+
+    const [entry] = await listAssignmentHistory(REQUEST_ID, { includeNotes: true }, { client });
+
+    expect(entry.newCoordinatorName).toBeNull();
+    expect(entry.assignedByName).toBeNull();
+    expect(entry.assignedById).toBe(COORDINATOR_ID);
+    expect(entry.automatic).toBe(false);
+  });
+
+  it('SCRUM334_AC9_carries_the_handover_note_for_a_coordinator', async () => {
+    const client = historyWith();
+
+    const [first, second] = await listAssignmentHistory(REQUEST_ID, { includeNotes: true }, { client });
+
+    // The note on the handover, and null on the automatic assignment, which
+    // has nobody handing over and so never has one. Present on both.
+    expect(second.handoverNote).toBe(HANDOVER_NOTE);
+    expect('handoverNote' in first).toBe(true);
+    expect(first.handoverNote).toBeNull();
+    expect(columnsOf(client.calls[0])).toContain('handover_note');
+  });
+
+  it('SCRUM334_AC10_withholds_the_handover_note_from_the_organiser', async () => {
+    const client = historyWith();
+
+    const entries = await listAssignmentHistory(REQUEST_ID, { includeNotes: false }, { client });
+
+    // Absent, not null: see the block comment above. And not selected at
+    // all, so a later change to the mapping cannot leak it.
+    for (const entry of entries) {
+      expect('handoverNote' in entry).toBe(false);
+    }
+    expect(columnsOf(client.calls[0])).not.toContain('handover_note');
+
+    // Who and when are still there. They are the Organiser's to see.
+    expect(entries[1]).toMatchObject({
+      previousCoordinatorName: 'Priya Nair',
+      newCoordinatorName: 'Marcus Tan',
+      assignedByName: 'Priya Nair',
+      createdAt: '2026-01-20T09:00:00+00:00',
+    });
+  });
+
+  it('SCRUM334_AC10_withholds_the_handover_note_unless_asked_for', async () => {
+    // includeNotes left out entirely. The safe answer is the Organiser's
+    // view, so a caller that forgets to choose leaks nothing.
+    const client = historyWith();
+
+    const entries = await listAssignmentHistory(REQUEST_ID, undefined, { client });
+
+    for (const entry of entries) {
+      expect('handoverNote' in entry).toBe(false);
+    }
+  });
+
+  it('SCRUM334_AC10_answers_an_event_with_no_history_with_an_empty_array', async () => {
+    // A draft has none, and that is an ordinary state, not a missing
+    // resource. With no rows there is nobody to name, so there is no second
+    // read: one answer queued, and a second call would throw.
+    await expect(listAssignmentHistory(REQUEST_ID, { includeNotes: true }, {
+      client: createQueueFakeClient([ok([])]),
+    })).resolves.toEqual([]);
+
+    await expect(listAssignmentHistory(REQUEST_ID, { includeNotes: true }, {
+      client: createQueueFakeClient([ok(null)]),
+    })).resolves.toEqual([]);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['blank', '   '],
+  ])('SCRUM334_AC10_refuses_an_event_id_that_is_%s_before_any_query', async (_label, value) => {
+    // Without an event id the history read would have no filter, and return
+    // every assignment ever made.
+    const client = historyWith();
+
+    const err = await errorFrom(listAssignmentHistory(value, { includeNotes: true }, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM334_AC10_leaves_an_unrecognised_database_failure_untyped', async () => {
+    const client = createQueueFakeClient([dbError('42P01', 'relation does not exist')]);
+
+    const err = await errorFrom(listAssignmentHistory(REQUEST_ID, { includeNotes: true }, { client }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err).not.toBeInstanceOf(NotFoundError);
+    expect(err.status).toBeUndefined();
+  });
+
+  it('SCRUM334_AC9_fails_rather_than_dropping_names_when_the_name_read_fails', async () => {
+    // As in listEventRequestsForCoordinator: a history with every name null
+    // would look like a history of nameless people, and nobody would know a
+    // read had failed.
+    const client = createQueueFakeClient([
+      ok([firstAssignment(), handover()]),
+      dbError('42P01', 'relation "profiles" does not exist'),
+    ]);
+
+    const err = await errorFrom(listAssignmentHistory(REQUEST_ID, { includeNotes: true }, { client }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.status).toBeUndefined();
+  });
+
+  it('SCRUM334_AC10_maps_every_entry_into_camelCase', async () => {
+    const client = historyWith();
+
+    const entries = await listAssignmentHistory(REQUEST_ID, { includeNotes: true }, { client });
+
+    expect(entries).toHaveLength(2);
+    for (const entry of entries) {
+      expect(Object.keys(entry).some((key) => key.includes('_'))).toBe(false);
+    }
   });
 });
