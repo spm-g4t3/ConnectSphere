@@ -1,7 +1,7 @@
 // EventCoordinatorDashboard.jsx
 //
-// The Event Coordinator's landing page: a greeting, the review queue, and the
-// pending-bookings stub.
+// The Event Coordinator's landing page: a greeting, their own events
+// (SCRUM-333), the review queue, and their notifications (SCRUM-128).
 //
 // SCRUM-45 replaced the first section wholesale. It used to call
 // getEventsNeedingAttention — a stub that console.warn'd and returned [], and
@@ -21,8 +21,8 @@
 // around them.
 
 import MyAssignedEvents from "./MyAssignedEvents";
-import CoordinatorNotifications from "./CoordinatorNotifications";
 import ReviewQueue from "./ReviewQueue";
+import CoordinatorNotifications from "./CoordinatorNotifications";
 
 export default function EventCoordinatorDashboard({ user }) {
   return (
