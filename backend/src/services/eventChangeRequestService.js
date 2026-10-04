@@ -52,7 +52,7 @@
  * typed error, the same division venueService.js uses.
  */
 
-import { ValidationError, NotFoundError } from '../errors.js';
+import { ValidationError, NotFoundError, ForbiddenError } from '../errors.js';
 import {
   validateCreateChangeRequest,
   validateProcessChangeRequest,
@@ -123,6 +123,17 @@ function translateError(error) {
   // direct caller of the service should not get a raw driver message either)
   if (code === '22P02') {
     return new ValidationError(`Invalid id format: ${detail}`);
+  }
+
+  // raised by process_change_request (019) when the caller is not the
+  // assigned coordinator of the change request's event (SCRUM-332). The
+  // function's own message, written for the coordinator, passed through
+  // unchanged, as eventRequestService does for 018's 42501. A 403 rather than
+  // a 404, because a coordinator can already read the event and its change
+  // requests (errors.js gives the argument). Matched by code, before the two
+  // message patterns below; 019 words its message so it matches neither.
+  if (code === '42501') {
+    return new ForbiddenError(detail);
   }
 
   // raised by process_change_request when the id matches nothing
@@ -411,9 +422,19 @@ export async function getChangeRequestById(changeRequestId, organiserId, { clien
  * the decision itself is rolled back too, so a change request can never be
  * left marked processed for a change that was never actually made.
  *
- * Coordinator authorization is enforced by the API route. This service also
- * relies on the foreign key in 006_event_change_requests.sql to ensure the
- * deciding user exists.
+ * Authorisation is split in two, and neither half is in this function. The
+ * route checks the role: only an Event Coordinator gets this far. The
+ * database checks which coordinator: since SCRUM-332, process_change_request
+ * (019) refuses anyone but the event's assigned coordinator, with 42501, while
+ * holding a lock on the event, so a handover cannot land between the check and
+ * the decision. translateError turns that into a ForbiddenError. processedBy
+ * is the person checked, and the person recorded as deciding, so the two
+ * cannot differ.
+ *
+ * Checked in the function rather than here because a check here would take
+ * three round trips (the change request, its event, then the call), and a
+ * handover could commit between the second and the third. 019's header gives
+ * the full argument.
  *
  * @param {string} changeRequestId
  * @param {object} decisionInput
@@ -426,6 +447,7 @@ export async function getChangeRequestById(changeRequestId, organiserId, { clien
  * @throws {ValidationError} bad input, an already-processed request, or a
  *   missing rejection reason
  * @throws {NotFoundError} no change request exists with that id
+ * @throws {ForbiddenError} processedBy is not the event's assigned coordinator
  */
 export async function processChangeRequest(
   changeRequestId,

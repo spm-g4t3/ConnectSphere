@@ -4,12 +4,13 @@
  * SCRUM-31, a subtask of SCRUM-10 (Create Event Request).
  *
  * Creates an event request as a draft, reads one back, and moves one from
- * draft to submitted. Writes go through plain table calls rather than a
- * Postgres function, unlike venueService.js: an event request is a single row
- * in a single table, so there is no partially-built record to protect against
- * and nothing a function body would buy. The one place ordering does matter --
- * the read-then-write in submitEventRequest -- is handled by guarding the write
- * instead, which is explained where it happens.
+ * draft to submitted. Most writes go through plain table calls rather than a
+ * Postgres function: they touch a single row in a single table, so there is no
+ * partly-written record to protect against. Submission is the exception.
+ * Since SCRUM-330 it also assigns an Event Coordinator and records that in a
+ * second table, and supabase-js has no transactions, so it calls
+ * submit_event_request (migration 016) through rpc. The reasoning is at
+ * submitEventRequest.
  *
  * Input is validated before any network call (SCRUM-30). The constraints in
  * 001_event_requests.sql and 005_event_request_details.sql remain the backstop
@@ -23,11 +24,20 @@
  *    worth stating precisely, because it decides what a route still has to do:
  *    getEventRequestForOrganiser and updateEventRequest take the Organiser and
  *    enforce it; createEventRequest stamps one; getEventRequestById,
- *    submitEventRequest and listEventRequestsForReview take none and check
- *    none, so a route calling any of those must prove the caller's right to
- *    read or write itself first. For the first two that proof is ownership;
- *    for listEventRequestsForReview it is a role gate, because the whole point
- *    of a review queue is that it crosses every Organiser. Role, and the
+ *    submitEventRequest, listEventRequestsForReview and
+ *    getEventRequestForCoordinator take none and check none, so a route
+ *    calling any of those must prove the caller's right to read or write
+ *    itself first. For the first two that proof is ownership; for the two
+ *    coordinator reads it is a role gate, because a coordinator may read any
+ *    event past draft. The same rule covers coordinators acting on an event
+ *    (SCRUM-332): requestEventClarification and reassignEventRequest take the
+ *    coordinator, and the event's assigned coordinator is enforced, by the
+ *    first itself and by 018's function for the second.
+ *    listEventRequestsForCoordinator (SCRUM-333) takes the coordinator and
+ *    reads only the events assigned to them. listCoordinators and
+ *    listAssignmentHistory (SCRUM-334) take no owner and check none, so their
+ *    routes prove the right to read: the role for the coordinator list, and
+ *    for the history the same proof the event needs. Role, and the
  *    caller's relationship to an event, arrive with the JWT and belong in
  *    middleware. A service that quietly enforced half of it would make the
  *    other half look unnecessary.
@@ -41,25 +51,53 @@
  *    reinterpret a value the timestamptz column already understands.
  */
 
-import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
+import {
+  ValidationError,
+  NotFoundError,
+  ConflictError,
+  ServiceUnavailableError,
+  ForbiddenError,
+} from '../errors.js';
 import {
   validateCreateEventRequest,
   validateUpdateEventRequest,
   validateSubmitEventRequest,
 } from '../validation/eventRequestValidation.js';
+// The repository's one uuid check, exported from there precisely so it is not
+// copied (see its docstring). A pure module, so importing it keeps this
+// service loadable without credentials.
+import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
 import {
   STATUS,
   canTransition,
   COORDINATOR_QUEUE_STATUSES,
 } from '../domain/eventRequestStatus.js';
+// Imports nothing itself, so this service stays loadable without credentials.
+import { ROLE } from '../domain/userRole.js';
 
 
-/** The columns a caller ever reads, named rather than selected with '*'. */
+/**
+ * The columns a caller ever reads, named rather than selected with '*'.
+ *
+ * Naming the columns means a column added to the database is invisible to the
+ * API until it is added here too. That is how the five decision columns from
+ * 010 (decision, decision_note, decided_by, decided_at,
+ * reviewing_coordinator_id) existed in the database without appearing in any
+ * API response.
+ *
+ * assigned_coordinator_id went in with SCRUM-330 (migration 014).
+ * reviewing_coordinator_id went in with SCRUM-331, the first of 010's five to
+ * reach a response, because a handover moves it (018) and the person now able
+ * to decide the event has to be visible. Each was mapped in toEventRequest in
+ * the same change. The other four decision columns are still absent, and stay
+ * absent until a story needs them.
+ */
 const COLUMNS = `
   id, organiser_id, event_name, purpose, description,
   proposed_start, proposed_end, expected_attendance,
   venue_requirements, accessibility_requirements, equipment_requirements,
-  status, clarification_note, created_at, updated_at, submitted_at
+  status, clarification_note, assigned_coordinator_id, reviewing_coordinator_id,
+  created_at, updated_at, submitted_at
 `;
 
 /**
@@ -150,6 +188,73 @@ function translateError(error) {
     return new ConflictError(`That record already exists: ${detail}`);
   }
 
+  // The next two are raised by submit_event_request (migration 016), each with
+  // its own SQLSTATE so they can be told apart by code rather than by matching
+  // message text.
+  //
+  // Both pass the database's message through unchanged, with no prefix,
+  // unlike 23514 above. A check violation's message is written by the Postgres
+  // driver for a developer ('new row violates check constraint ...'), so it is
+  // wrapped in a sentence a caller can make sense of. These two come from
+  // `raise exception` in our own function, and their text was written to be
+  // read by whoever made the request. The no-coordinator message is SCRUM-327
+  // AC5's exact wording. The not-a-draft message names the status the function
+  // saw while holding the row lock, which is more accurate than anything this
+  // service read a moment earlier.
+
+  // object_not_in_prerequisite_state: the request is no longer a draft. Most
+  // likely a second submit that waited on the first one's row lock.
+  if (code === '55000') {
+    return new ConflictError(detail);
+  }
+
+  // raise_exception: no Event Coordinator is available (AC5). 016 raises
+  // P0001 for that and nothing else. Nothing else this module calls raises
+  // P0001; 006's process_change_request does, for a change request already
+  // processed, but that goes through eventChangeRequestService and its own
+  // translator, not this one. A future function that raises P0001 for another
+  // reason and is called from here would need its own SQLSTATE, or it would
+  // arrive as a 503.
+  if (code === 'P0001') {
+    return new ServiceUnavailableError(detail);
+  }
+
+  // The next three are raised by reassign_event_request (migration 018), and
+  // pass the message through unchanged for the same reason as the two above:
+  // it comes from `raise exception` in our own function, written to be read.
+  //
+  // 018's fourth refusal, a handover to the coordinator who already holds the
+  // event, uses check_violation (23514) on purpose, to match the history
+  // table's own constraint for the same rule. So it arrives through the 23514
+  // branch at the top and keeps that branch's prefix. That is unavoidable:
+  // 23514 cannot be told apart from a Postgres constraint violation by code
+  // alone, and those messages do need the wrapping.
+
+  // insufficient_privilege: the caller is not the event's assigned
+  // coordinator (SCRUM-327 AC6). 403 rather than this module's usual 404 for
+  // someone else's record: the caller is a coordinator who can already see
+  // this event in the shared queue, so the 403 reveals nothing (errors.js
+  // explains). Postgres also uses 42501 for its own "permission denied", but
+  // the API connects with the secret key, which is never refused on a table.
+  if (code === '42501') {
+    return new ForbiddenError(detail);
+  }
+
+  // invalid_parameter_value: the person named as the new coordinator does not
+  // hold the event_coordinator role. A 400, because the request named the
+  // wrong person.
+  if (code === '22023') {
+    return new ValidationError(detail);
+  }
+
+  // serialization_failure: 018's guarded update matched no row, meaning the
+  // event changed hands under it. 018 explains why this cannot happen while
+  // its row lock holds. If it ever does, the caller gets a conflict to reload
+  // from, not a 500.
+  if (code === '40001') {
+    return new ConflictError(detail);
+  }
+
   if (code === 'P0002' || /not found/i.test(detail)) {
     return new NotFoundError(detail || 'Event request not found');
   }
@@ -182,6 +287,15 @@ function toEventRequest(row) {
     equipmentRequirements: row.equipment_requirements,
     status: row.status,
     clarificationNote: row.clarification_note ?? null,
+    // Null on a draft, which nobody has been assigned yet. `?? null`, as for
+    // clarificationNote, so a row read without the column still gives the
+    // caller null rather than undefined, and the key is always present.
+    assignedCoordinatorId: row.assigned_coordinator_id ?? null,
+    // The coordinator who may decide the request (010's
+    // decided_by_is_reviewer). Null until someone starts the review. After a
+    // decision it records who decided, even when the event has since been
+    // handed to someone else (018).
+    reviewingCoordinatorId: row.reviewing_coordinator_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     submittedAt: row.submitted_at,
@@ -310,19 +424,63 @@ export async function getEventRequestById(id, { client } = {}) {
 }
 
 /**
- * Submit a draft request for review, moving it draft -> submitted.
+ * Submit a draft request for review, moving it draft -> submitted and
+ * assigning it an Event Coordinator.
+ *
+ * SCRUM-10 created this. SCRUM-330 (SCRUM-327 AC1 and AC5) changed how it
+ * writes. It reads the row and validates it here, then hands the write to the
+ * Postgres function submit_event_request (migration 016) through rpc. In one
+ * transaction, that function locks the row, checks it is still a draft, picks
+ * a coordinator with pick_event_coordinator (015), writes status, submitted_at
+ * and assigned_coordinator_id, and inserts the assignment history row.
+ *
+ * Why the write moved: a submission now writes to two tables, and every part
+ * has to happen or none of it. The request must not end up submitted without a
+ * coordinator, and the coordinator must not be recorded without the history
+ * row. supabase-js has no transactions, since every call is its own HTTP
+ * request, so the service cannot guarantee that. A function body can. This is
+ * the reasoning venueService.js and process_change_request (006) already
+ * follow.
+ *
+ * What left this function with the write, and why it must not come back:
+ *
+ *  - The canTransition check. The function makes the same check, under the
+ *    row lock, which is the only place it is reliable. This service's read is
+ *    already out of date by the time it could act on it. A second copy here
+ *    would be the same rule in two places, able to disagree, and the
+ *    function's copy is the one that counts. A request that is not a draft is
+ *    therefore refused by the function (55000), and translateError turns that
+ *    into a ConflictError carrying the function's message.
+ *  - The PGRST116 guard on `.eq('status', 'draft')`. It existed because the read
+ *    and the write were two separate requests with nothing holding the row in
+ *    between. The function holds a row lock instead: a second concurrent
+ *    submit waits, then finds the row no longer a draft, which is the same
+ *    55000.
+ *
+ * What stays here, and why:
+ *
+ *  - The read, for the NotFoundError and because validation needs the row.
+ *  - validateSubmitEventRequest. It reports every gap at once, which a raised
+ *    exception cannot. And 016's function makes no completeness check of its
+ *    own, so this is the only thing that stops an incomplete draft being
+ *    submitted and given a coordinator.
+ *  - The clock. `now` is passed in as p_submitted_at, so tests can state the
+ *    exact instant, as 005 and 016 both record.
  *
  * @param {string} id
  * @param {object} [options]
  * @param {object} [options.client]
  * @param {Date} [options.now]  the submission instant; injected so callers and
  *                              tests are deterministic
- * @returns {Promise<object>} the updated request, in camelCase
- * @throws {NotFoundError}   when no request has that id
- * @throws {ValidationError} when the stored draft is not complete enough to
- *                           submit, listing every gap at once
- * @throws {ConflictError}   when the request is not in a status that can reach
- *                           'submitted', or when another submit got there first
+ * @returns {Promise<object>} the submitted request, in camelCase, including
+ *                            assignedCoordinatorId
+ * @throws {NotFoundError}           when no request has that id, at the read or
+ *                                   because it vanished before the function ran
+ * @throws {ValidationError}         when the stored draft is not complete enough
+ *                                   to submit, listing every gap at once
+ * @throws {ConflictError}           when the request is no longer a draft
+ * @throws {ServiceUnavailableError} when no Event Coordinator is available;
+ *                                   the request stays a draft (AC5)
  */
 export async function submitEventRequest(id, { client, now = new Date() } = {}) {
   const db = await resolveClient(client);
@@ -340,54 +498,21 @@ export async function submitEventRequest(id, { client, now = new Date() } = {}) 
   // is reported at once so the Organiser fixes the form in one pass.
   validateSubmitEventRequest(current, { now });
 
-  // Asked of the shared transition table rather than tested here as
-  // `status === 'draft'`. The rule then lives in one place: the Coordinator
-  // stories move requests through the later statuses and reuse the same table,
-  // and a local copy would be a second definition to keep in step.
-  if (!canTransition(current.status, STATUS.SUBMITTED)) {
-    throw new ConflictError(
-      `An event request with status '${current.status}' cannot be submitted.`,
-    );
-  }
-
-  const { data, error } = await db
-    .from('event_requests')
-    .update({
-      status: STATUS.SUBMITTED,
-
-      // An ISO string rather than a Date: the column is timestamptz and an
-      // instant with an explicit offset is unambiguous on the wire.
-      submitted_at: now.toISOString(),
-
-      // updated_at is left to the trigger, as on insert.
-    })
-    .eq('id', id)
-
-    // The guard, and the reason the check above is not enough on its own. The
-    // read and this write are two round trips with no transaction spanning
-    // them, so a second submit arriving in the gap would otherwise write
-    // 'submitted' twice: submitted_at would move to the later instant, and
-    // review turnaround would be measured from the wrong moment. Filtering on
-    // the old status makes the write itself the check -- the loser matches no
-    // row. Re-reading before writing would only move the same race one step
-    // earlier.
-    .eq('status', STATUS.DRAFT)
-    .select()
-    .single();
-
-  // PGRST116 here is the guard firing, not a missing request: the row was read
-  // successfully a moment ago, so the only way the filter matches nothing is
-  // that its status is no longer 'draft'. Handled at this site rather than in
-  // translateError, which cannot tell this case from an ordinary empty read.
-  if (error?.code === 'PGRST116') {
-    throw new ConflictError(
-      `This event request is no longer a draft -- it was most likely ` +
-      `submitted by another request a moment ago.`,
-    );
-  }
+  // One call, and no write of this service's own before or after it. A raised
+  // refusal rolls back everything the function did, so on any error the row
+  // is exactly as it was -- AC5's "the request stays a draft".
+  //
+  // now.toISOString(), as before: the parameter is timestamptz, and an instant
+  // with an explicit offset is unambiguous on the wire.
+  const { data, error } = await db.rpc('submit_event_request', {
+    p_event_request_id: id,
+    p_submitted_at: now.toISOString(),
+  });
 
   if (error) throw translateError(error);
 
+  // The function returns the updated event_requests row, so it maps the same
+  // way as every other row this module hands back.
   return toEventRequest(data);
 }
 
@@ -485,7 +610,50 @@ export async function updateEventRequest(id, changes, organiserId, { client } = 
   return toEventRequest(data);
 }
 
-/** Ask an Organiser for clarification while reviewing their request. */
+/**
+ * Ask an Organiser for clarification while reviewing their request.
+ *
+ * SCRUM-46 created this. SCRUM-332 (SCRUM-327 AC7) makes it check who is
+ * asking: only the event's assigned coordinator may send it for clarification.
+ * Before SCRUM-332, coordinatorId was checked for being present and then
+ * ignored, so any Event Coordinator could do this to any event.
+ *
+ * Checked here, with a read and a guarded update, rather than in a Postgres
+ * function as reassignment (018) and change-request decisions (019) are. The
+ * write is one statement on one row, so there is no second write to keep in
+ * step with it, and the guard on the update is enough to make that statement
+ * unable to touch an event the caller does not hold.
+ *
+ * In order:
+ *
+ *  1. The read, through getEventRequestForCoordinator, so a draft is the same
+ *     404 here as on the coordinator's read, and a coordinator cannot use
+ *     this to learn a draft exists.
+ *  2. The caller. Someone else's event is a ForbiddenError, before anything is
+ *     written. The caller can already see the event, so a 403 reveals nothing
+ *     and gives the true reason. It comes before the status check, as in 018:
+ *     whether the event could be sent for clarification is a question only
+ *     its coordinator has any reason to ask.
+ *  3. The transition, as before.
+ *  4. The update, guarded on id, the status just read, and the caller as the
+ *     assigned coordinator. See the comment at the update for why a guard
+ *     that matches nothing is a 409 and not a 403.
+ *
+ * Who asked is still not recorded. event_requests has no column for it.
+ *
+ * @param {string} id
+ * @param {string} note           what the Organiser is asked to clarify
+ * @param {string} coordinatorId  the caller, from the JWT -- never the body
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the request, now pending_clarification, in camelCase
+ * @throws {ValidationError} no coordinatorId, or a blank or overlong note,
+ *                           before any round trip
+ * @throws {NotFoundError}   no such request, or it is a draft
+ * @throws {ForbiddenError}  the caller is not the event's assigned coordinator
+ * @throws {ConflictError}   the status does not allow clarification, or the
+ *                           event changed between the read and the write
+ */
 export async function requestEventClarification(id, note, coordinatorId, { client } = {}) {
   if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
     throw new ValidationError('coordinatorId is required');
@@ -499,21 +667,42 @@ export async function requestEventClarification(id, note, coordinatorId, { clien
   }
 
   const db = await resolveClient(client);
-  const current = await getEventRequestById(id, { client: db });
+  const current = await getEventRequestForCoordinator(id, { client: db });
+
+  if (current.assignedCoordinatorId !== coordinatorId) {
+    throw new ForbiddenError(
+      `Only the coordinator assigned to event request ${id} can request clarification on it.`,
+    );
+  }
+
   if (!canTransition(current.status, STATUS.PENDING_CLARIFICATION)) {
     throw new ConflictError(
       `An event request with status '${current.status}' cannot be sent for clarification.`,
     );
   }
 
+  // The assigned_coordinator_id filter does the job organiser_id does in
+  // updateEventRequest: the statement itself cannot touch an event the caller
+  // does not hold, rather than being safe only because of a read made in an
+  // earlier round trip. It is also the only thing that catches a handover
+  // landing between the read and this write.
   const { data, error } = await db
     .from('event_requests')
     .update({ status: STATUS.PENDING_CLARIFICATION, clarification_note: clarificationNote })
     .eq('id', id)
     .eq('status', current.status)
+    .eq('assigned_coordinator_id', coordinatorId)
     .select()
     .single();
 
+  // No row matched. Not a 403, although the coordinator filter may be what
+  // stopped matching: the read a moment ago showed this caller holding the
+  // event in a status that allowed this, so something changed in between, a
+  // handover or a status change. That is a race, and a race is a 409 here as
+  // it is in updateEventRequest. A 403 would be false when only the status
+  // moved, since the caller still holds the event. The wrong coordinator, the
+  // common case, never gets this far: the check after the read answers it
+  // with a 403. Refreshing shows the caller which of the two happened.
   if (error?.code === 'PGRST116') {
     throw new ConflictError('The request changed while clarification was being sent. Refresh and try again.');
   }
@@ -549,6 +738,100 @@ export async function respondToEventClarification(id, changes, organiserId, { cl
     throw new ConflictError('This request is no longer waiting for clarification. Refresh before editing.');
   }
   if (error) throw translateError(error);
+  return toEventRequest(data);
+}
+
+
+/**
+ * Hand an event to another Event Coordinator.
+ *
+ * SCRUM-331, for SCRUM-327 AC6 (only the assigned coordinator may hand an
+ * event over, and only in the statuses the AC names), AC7 (the new coordinator
+ * can then act on it) and AC9 (the handover records who made it, and the
+ * note).
+ *
+ * The whole handover happens in reassign_event_request (migration 018), called
+ * through rpc. In one transaction it locks the row, checks the caller is the
+ * assigned coordinator, the status allows a handover and the new coordinator
+ * holds the role, then moves assigned_coordinator_id (and
+ * reviewing_coordinator_id, if no decision has been made) and writes the
+ * history row. Two tables, all or nothing, and supabase-js has no
+ * transactions, so this is the same reasoning submitEventRequest gives.
+ *
+ * No read first, unlike submitEventRequest. Submission reads the row to
+ * validate the Organiser's form against it. A handover has no form to check
+ * against the row: everything a read could tell this service (does the event
+ * exist, is the caller its coordinator, does its status allow a handover) the
+ * function answers itself, under its row lock, when the answer cannot change
+ * before the write. A read here would only add a round trip whose answer could
+ * already be out of date.
+ *
+ * What the service does check, before any call:
+ *
+ *  - newCoordinatorId is present, not blank, and shaped like a uuid. The
+ *    function refuses a null itself (22023), but never sees an empty or
+ *    malformed id. p_new_coordinator_id is a uuid parameter, so PostgREST
+ *    fails to read such a value as one (22P02) before the function body runs,
+ *    and translateError does not recognise that code, so it would surface as
+ *    a 500. Checking here turns it into a 400 that names the field, and takes
+ *    no lock to do it.
+ *  - A blank handoverNote becomes null. 014 makes that the service's job, and
+ *    018 stores whatever it is handed. A note of spaces says nothing.
+ *
+ * What it deliberately does not check: whether the new coordinator holds the
+ * role. The function checks that while holding a lock on their profile, so
+ * the answer is true when the handover commits. A check here would read the
+ * role in a separate request, and could already be out of date.
+ *
+ * The signature has the shape of updateEventRequest(id, changes, organiserId):
+ * the caller's request in one object, the person acting separately, from the
+ * token. Two of the values are uuids, and as positional arguments they could
+ * be swapped without any error.
+ *
+ * @param {string} id                       the event request
+ * @param {object} changes                  the request body
+ * @param {string} changes.newCoordinatorId the coordinator taking the event
+ * @param {string} [changes.handoverNote]   optional, for the new coordinator
+ * @param {string} assignedBy               the caller, from the JWT -- never the body
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the event after the handover, in camelCase
+ * @throws {ValidationError} newCoordinatorId missing, blank or malformed
+ *                           (before any call); the named person is not an
+ *                           Event Coordinator; or they already hold the event
+ * @throws {ForbiddenError}  the caller is not the event's assigned coordinator
+ * @throws {NotFoundError}   no such event
+ * @throws {ConflictError}   the status does not allow a handover, or the event
+ *                           changed hands during this one
+ */
+export async function reassignEventRequest(id, changes, assignedBy, { client } = {}) {
+  const { newCoordinatorId, handoverNote } = changes ?? {};
+
+  if (!isPlausibleId(newCoordinatorId)) {
+    const message = typeof newCoordinatorId === 'string' && newCoordinatorId.trim() !== ''
+      ? 'must be the id of an Event Coordinator'
+      : 'is required';
+    throw new ValidationError(
+      `Invalid handover -- newCoordinatorId: ${message}`,
+      [{ field: 'newCoordinatorId', message }],
+    );
+  }
+
+  const note = typeof handoverNote === 'string' && handoverNote.trim() !== ''
+    ? handoverNote
+    : null;
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('reassign_event_request', {
+    p_event_request_id: id,
+    p_new_coordinator_id: newCoordinatorId.trim(),
+    p_assigned_by: assignedBy,
+    p_handover_note: note,
+  });
+
+  if (error) throw translateError(error);
+
   return toEventRequest(data);
 }
 
@@ -638,6 +921,55 @@ export async function getEventRequestForOrganiser(id, organiserId, { client } = 
 
 
 /**
+ * One event request, for any Event Coordinator.
+ *
+ * SCRUM-332, for SCRUM-327 AC7: after a handover the previous coordinator can
+ * still view the event, and only stops being able to change it. Before this,
+ * no coordinator could read a single event at all. getEventRequestForOrganiser
+ * answers 404 to anyone but its Organiser, and the queue covers only
+ * submitted, under_review and pending_clarification. So once an event was
+ * approved or confirmed, nobody on ConnectSphere's side could open it, while
+ * AC6 still let its coordinator hand it over.
+ *
+ * No organiser id and no coordinator id, and neither is compared. That is the
+ * rule this module's header states, and listEventRequestsForReview already
+ * follows it: a function that takes no owner checks none, and the caller
+ * proves the right to read. Here the proof is the role gate on the route
+ * (GET /:id/review, behind coordinatorOnly). Which coordinator holds an event
+ * decides who may change it, never who may read it.
+ *
+ * The one thing refused is a draft, answered with exactly the NotFoundError a
+ * missing id gets, message included. A draft is the Organiser's private
+ * working copy, and COORDINATOR_QUEUE_STATUSES leaves it out of the queue so
+ * that no coordinator learns it exists. A coordinator who guessed a draft's id
+ * must learn nothing more than from an id that matches nothing: a 403 would
+ * confirm the id, and so would a different message. errors.js limits
+ * ForbiddenError to records the caller can already see, and nobody but its
+ * Organiser can see a draft.
+ *
+ * Reads through getEventRequestById, as getEventRequestForOrganiser does, so
+ * there is one definition of what a stored request looks like.
+ *
+ * @param {string} id
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the stored request, in camelCase
+ * @throws {NotFoundError} when no such request exists, or it is a draft
+ */
+export async function getEventRequestForCoordinator(id, { client } = {}) {
+  const request = await getEventRequestById(id, { client });
+
+  if (request.status === STATUS.DRAFT) {
+    // The same message getEventRequestById raises for an id that does not
+    // exist, for the same reason getEventRequestForOrganiser reuses it.
+    throw new NotFoundError(`Event request ${id} not found`);
+  }
+
+  return request;
+}
+
+
+/**
  * Every event request awaiting a decision, oldest waiting first.
  *
  * SCRUM-45. The Event Coordinator's review queue, and the fix for the reported
@@ -686,6 +1018,12 @@ export async function getEventRequestForOrganiser(id, organiserId, { client } = 
  * of the shared queue: a Coordinator learns what was asked for, not who to
  * contact about it. Render it as an identifier.
  *
+ * listEventRequestsForCoordinator, below, does show the organiser's name, and
+ * that is not a contradiction. The floor is for a queue of work nobody has
+ * taken on, which every coordinator sees. "My events" holds only the events
+ * the caller is responsible for, where contacting the organiser is the job.
+ * Its docstring gives the argument in full.
+ *
  * Unpaginated, like every other list in this API. Bounded in practice by the
  * status filter -- a decided request drops out -- but say it rather than
  * discover it.
@@ -709,4 +1047,343 @@ export async function listEventRequestsForReview({ client } = {}) {
   // An empty queue is the good state, not a missing resource: it means nothing
   // is waiting on a Coordinator. 200 [] all the way up, never a NotFoundError.
   return (data ?? []).map(toEventRequest);
+}
+
+
+/**
+ * Every event assigned to one coordinator, soonest first, each with its
+ * organiser's name.
+ *
+ * SCRUM-333, for SCRUM-327 AC11: each coordinator has a "My events" list
+ * showing the events assigned to them, grouped by status, earliest event
+ * first. It sits beside the shared queue, which is unchanged: the queue is the
+ * view of work nobody holds yet, and this is the view of work one person does
+ * hold.
+ *
+ * No status filter. The queue leaves decided statuses out because it is a
+ * worklist, and a worklist that kept them would never empty. This is a list
+ * of responsibility instead. AC11 groups it by status, which assumes more than
+ * the live ones, and a coordinator still needs the event they rejected when
+ * its Organiser asks why, or the completed one when a report is due. Leave
+ * the terminal statuses out here and there is no way to find them at all,
+ * because the coordinator read needs an id. The frontend can collapse the
+ * groups that are finished. Drafts stay out without a filter: a draft never
+ * has an assigned coordinator, because assignment happens at submission
+ * (016), so assigned_coordinator_id = caller already excludes every one. That
+ * keeps the privacy boundary COORDINATOR_QUEUE_STATUSES keeps for the queue.
+ *
+ * Why this list shows the organiser's name, when listEventRequestsForReview
+ * calls leaving it out "the privacy floor of the shared queue": that floor is
+ * for a queue every coordinator sees, of events none of them has taken on, so
+ * a coordinator learns what was asked for and not who to contact. These are
+ * events the caller is responsible for, and AC7 makes them the one person who
+ * can act on them. Contacting the organiser is part of that job. The two lists
+ * answer the question differently because the work is the caller's here and
+ * nobody's there. profiles has full_name but no email, so a name is all there
+ * is to show.
+ *
+ * Why the names are a second read rather than a join in the select. PostgREST
+ * embeds one table in another only along a foreign key between them, and
+ * there is none: event_requests.organiser_id references auth.users (001), and
+ * so does profiles.id (007). select('..., profiles(full_name)') would fail
+ * with "could not find a relationship". Adding that foreign key would need a
+ * migration, and would refuse every organiser without a profiles row, which
+ * the hand-run check scripts create. So this reads the events, then reads
+ * full_name for exactly the organisers in that list with one .in(). Both are
+ * reads, so there is nothing to keep atomic between them. The second read is
+ * narrowed to the organisers of the caller's own events, so it cannot be used
+ * to read anyone else's name.
+ *
+ * Choices worth defending:
+ *
+ *  - Ordered by proposed_start ascending, because "earliest event first"
+ *    means the event happening soonest. The queue orders by submitted_at
+ *    because it asks who has waited longest; this asks what is coming up.
+ *    nullsFirst: false because proposed_start is nullable and Postgres sorts
+ *    nulls first on ASC, which would put an undated event at the head of a
+ *    list ordered by date. The id tiebreak is the queue's, for the queue's
+ *    reason.
+ *  - The same COLUMNS as every other read, so a row here is the shape GET
+ *    /:id/review returns, plus organiserName.
+ *  - organiserName flat beside organiserId, not a nested object: every other
+ *    field is flat, and a nested { id, fullName } would carry the id twice.
+ *    null when full_name is null or the organiser has no profiles row, so the
+ *    key is always there.
+ *  - No second read for an empty list: no rows, no organisers to name.
+ *  - If the name read fails, the call fails. Returning the events with every
+ *    name null would look like organisers who never gave a name, and nobody
+ *    would know a read had failed.
+ *  - A flat array, not grouped. Every list in this API is a bare array, and
+ *    grouping by status is presentation.
+ *
+ * Unpaginated, like every other list here, and unlike the queue it is not
+ * bounded by a status filter: it grows with every event the coordinator ever
+ * holds. Said here rather than discovered.
+ *
+ * @param {string} coordinatorId  from the JWT, via requireAuth -- never the client
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object[]>} possibly empty, in camelCase, each with organiserName
+ * @throws {ValidationError} when no coordinator was supplied, before any round trip
+ */
+export async function listEventRequestsForCoordinator(coordinatorId, { client } = {}) {
+  // Refused before the client is touched. Without the caller, the read below
+  // would have no filter at all and return every assigned event in the
+  // system. The id comes from the token, so a missing one is a caller bug.
+  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
+    throw new ValidationError(
+      'Invalid coordinator -- coordinatorId: is required',
+      [{ field: 'coordinatorId', message: 'is required' }],
+    );
+  }
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db
+    .from('event_requests')
+    .select(COLUMNS)
+    .eq('assigned_coordinator_id', coordinatorId)
+    .order('proposed_start', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true });
+
+  if (error) throw translateError(error);
+
+  const rows = data ?? [];
+
+  // Nothing assigned is the good state, not a missing resource.
+  if (rows.length === 0) return [];
+
+  const nameOf = await readNames(db, rows.map((row) => row.organiser_id));
+
+  return rows.map((row) => ({
+    ...toEventRequest(row),
+    organiserName: nameOf(row.organiser_id),
+  }));
+}
+
+
+/**
+ * Read full_name for a set of users, in one request, and return a lookup.
+ *
+ * The second read listEventRequestsForCoordinator and listAssignmentHistory
+ * both make, kept in one place so they cannot drift apart. Nothing has a
+ * foreign key to profiles (every user column references auth.users), so
+ * PostgREST cannot embed a name in the first read; that argument is in full
+ * at listEventRequestsForCoordinator.
+ *
+ * Each id is asked for once, and nulls are dropped before asking: a null is
+ * "nobody", which has no name to read. The lookup answers null for a null id,
+ * an id with no profiles row, and a profile whose full_name is null, so a
+ * caller always gets a string or null, never undefined.
+ *
+ * A failed read throws. Returning an empty lookup would give every row a null
+ * name, which looks like people who never gave one, and nobody would know a
+ * read had failed.
+ *
+ * @param {object} db         a resolved client
+ * @param {Array<string|null>} ids  user ids, repeats and nulls allowed
+ * @returns {Promise<(id: string|null) => string|null>}
+ */
+async function readNames(db, ids) {
+  const wanted = [...new Set(ids.filter((id) => id != null))];
+
+  const { data, error } = await db
+    .from('profiles')
+    .select('id, full_name')
+    .in('id', wanted);
+
+  if (error) throw translateError(error);
+
+  const nameById = new Map((data ?? []).map((profile) => [profile.id, profile.full_name ?? null]));
+
+  return (id) => (id == null ? null : nameById.get(id) ?? null);
+}
+
+
+/**
+ * Every Event Coordinator, as { id, fullName }, for the reassign picker.
+ *
+ * SCRUM-334, for SCRUM-327 AC9: the outgoing coordinator chooses who to hand
+ * the event to, so the screen needs the people they can choose from.
+ *
+ * This is the first read in the API that lists users, so it is the first that
+ * could be used to enumerate staff. It selects only what the picker shows, the
+ * id and the name, never the whole row: no role, no created_at. Who may call it
+ * is decided at the route, which puts it behind coordinatorOnly.
+ *
+ * { id, fullName } because the object is the person, so its keys are that
+ * person's columns in camelCase, the rule toEventRequest follows.
+ * organiserName on "My events" is prefixed only because it names someone else
+ * on an event's row.
+ *
+ * Ordered by full_name, nulls last, then id. A picker is scanned by a person
+ * looking for a colleague, so alphabetical is what they need; id alone would
+ * be stable but would look random. full_name is nullable, so a coordinator
+ * with no name goes to the end rather than the top, and the id orders those,
+ * and any two people with the same name, the same way every time. A
+ * coordinator with no name is still listed: they can still take an event.
+ *
+ * The caller is included. Someone cannot hand an event to themselves, so the
+ * picker leaves them out, which is presentation. Doing it here would make
+ * this "everyone but me".
+ *
+ * The role comes from ROLE in domain/userRole.js rather than a literal, so it
+ * is the same string requireRole checks. It is also the value 014 and 015
+ * select coordinators by.
+ *
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<Array<{ id: string, fullName: string|null }>>} possibly empty
+ */
+export async function listCoordinators({ client } = {}) {
+  const db = await resolveClient(client);
+
+  const { data, error } = await db
+    .from('profiles')
+    .select('id, full_name')
+    .eq('role', ROLE.EVENT_COORDINATOR)
+    .order('full_name', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true });
+
+  if (error) throw translateError(error);
+
+  // No coordinators is not an error. Nobody can be handed an event, and the
+  // picker says so; that is its message to show.
+  return (data ?? []).map((profile) => ({
+    id: profile.id,
+    fullName: profile.full_name ?? null,
+  }));
+}
+
+
+/**
+ * The history columns every view reads. handover_note is not here: it is
+ * added only for a coordinator's view (see listAssignmentHistory).
+ * event_request_id is not here either, because every row read has the id the
+ * caller asked for.
+ */
+const HISTORY_COLUMNS = 'id, previous_coordinator_id, new_coordinator_id, assigned_by, created_at';
+
+
+/**
+ * One event's assignment history, oldest first.
+ *
+ * SCRUM-334, for SCRUM-327 AC9 (every handover records who made it, and the
+ * note) and AC10 (the Organiser's screen shows the history). Reads
+ * event_request_assignment_history (014), which 016 writes on submission and
+ * 018 on every handover.
+ *
+ * Its own read, behind its own routes, not folded into the event reads. Folded
+ * in, it would put a growing array inside every event read, /mine and /queue
+ * included, where nothing shows it. Change requests are separate for the same
+ * reason.
+ *
+ * Takes no owner and checks none, which is this module's rule. The route
+ * proves the right to read, with the same proof the event itself needs:
+ * ownership for an Organiser, the role for a coordinator.
+ *
+ * Each entry:
+ *
+ *   { id,
+ *     previousCoordinatorId, previousCoordinatorName,
+ *     newCoordinatorId,      newCoordinatorName,
+ *     assignedById,          assignedByName,
+ *     automatic,
+ *     createdAt,
+ *     handoverNote }         <- only with includeNotes: true
+ *
+ * Ids beside names, flat, as organiserId sits beside organiserName on "My
+ * events". createdAt keeps the column's name; 014 records that it is the
+ * moment the assignment took effect.
+ *
+ * Why `automatic` is a flag, rather than leaving the client to test
+ * assignedById for null. 014 says a null assigned_by means the system assigned
+ * the event, on submission or in a backfill. That is the database's
+ * convention, and every client would otherwise have to know it. Once names are
+ * added it is also ambiguous: assignedByName is null both for the system and
+ * for a person with no full_name. So the API states the one fact the screen
+ * needs, "assigned automatically" or "handed over by", derived from
+ * assigned_by alone, and keeps assignedById as the source.
+ *
+ * Why the handover note is withheld unless asked for, and why its key is then
+ * absent rather than null. The note is written by one coordinator for
+ * another, "I'm on leave, the shortlist is in my notes". The Organiser sees
+ * who and when, which the customer confirmed, but not the note: if they could
+ * read it, coordinators would write it differently or stop writing it, and the
+ * handover it exists for would get worse. null already means "no note was
+ * written", which is true of every automatic assignment. An absent key means
+ * "not sent to you". If both were null, nobody could tell a withheld note from
+ * a missing one. Without includeNotes the column is not even selected, so a
+ * later change to the mapping cannot leak it. includeNotes defaults to false,
+ * so a caller that forgets to choose gets the Organiser's view.
+ *
+ * Oldest first, then id. A history is a chain, null -> A, A -> B, and a chain
+ * is read from its start. 014's index is (event_request_id, created_at desc),
+ * newest first, and it still serves this query: Postgres reads a btree index
+ * backwards as readily as forwards, so one event's rows are found and returned
+ * in order without a sort. id breaks ties the same way every time.
+ *
+ * Names come from one read of profiles, for every person the history mentions,
+ * each asked for once (readNames). No rows, no second read. If the name read
+ * fails, the call fails.
+ *
+ * @param {string} id  the event request
+ * @param {object} [view]
+ * @param {boolean} [view.includeNotes=false]  true only for a coordinator's view
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object[]>} possibly empty, oldest first, in camelCase
+ * @throws {ValidationError} when no event id was supplied, before any round trip
+ */
+export async function listAssignmentHistory(id, { includeNotes = false } = {}, { client } = {}) {
+  // Without an event id the read below would have no filter, and return every
+  // assignment ever made.
+  if (typeof id !== 'string' || id.trim() === '') {
+    throw new ValidationError(
+      'Invalid assignment history -- eventRequestId: is required',
+      [{ field: 'eventRequestId', message: 'is required' }],
+    );
+  }
+
+  const columns = includeNotes ? `${HISTORY_COLUMNS}, handover_note` : HISTORY_COLUMNS;
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db
+    .from('event_request_assignment_history')
+    .select(columns)
+    .eq('event_request_id', id)
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true });
+
+  if (error) throw translateError(error);
+
+  const rows = data ?? [];
+
+  // A draft has no history, and that is an ordinary state.
+  if (rows.length === 0) return [];
+
+  const nameOf = await readNames(
+    db,
+    rows.flatMap((row) => [row.previous_coordinator_id, row.new_coordinator_id, row.assigned_by]),
+  );
+
+  return rows.map((row) => {
+    const entry = {
+      id: row.id,
+      previousCoordinatorId: row.previous_coordinator_id ?? null,
+      previousCoordinatorName: nameOf(row.previous_coordinator_id),
+      newCoordinatorId: row.new_coordinator_id,
+      newCoordinatorName: nameOf(row.new_coordinator_id),
+      assignedById: row.assigned_by ?? null,
+      assignedByName: nameOf(row.assigned_by),
+      automatic: row.assigned_by == null,
+      createdAt: row.created_at,
+    };
+
+    // Added only when asked for, so the Organiser's entries have no such key.
+    if (includeNotes) entry.handoverNote = row.handover_note ?? null;
+
+    return entry;
+  });
 }

@@ -34,11 +34,19 @@ const PASSWORD = `Check-${STAMP}-Aa1!`;
 
 let staffId = null;
 let organiserId = null;
+
+// SCRUM-330. The coordinator of record for the booking's event -- see where it
+// is created in AC3.
+let coordinatorId = null;
 let venueId = null;
 let eventId = null;
 let bookingId = null;
 let server = null;
 let failures = 0;
+
+// Errors from cleanup's own deletes, which supabase-js returns rather than
+// throws -- so a delete a foreign key refuses is silent unless kept.
+const cleanupErrors = [];
 
 function check(label, passed, detail = '') {
   console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
@@ -74,23 +82,77 @@ async function tokenFor(user) {
   return data.session.access_token;
 }
 
+/** Run one cleanup step, keeping its error rather than dropping it. */
+async function remove(label, query) {
+  const { error } = await query;
+  if (error) cleanupErrors.push(`${label}: ${error.message}`);
+}
+
 async function cleanup() {
   if (server) await new Promise((resolve) => server.close(resolve));
 
   // Order is forced by the foreign keys: bookings and history both point at the
   // venue with on delete restrict, and last_modified_by points at the user.
-  if (bookingId) await supabaseAdmin.from('bookings').delete().eq('id', bookingId);
+  if (bookingId) await remove('booking', supabaseAdmin.from('bookings').delete().eq('id', bookingId));
   if (venueId) {
-    await supabaseAdmin.from('venue_change_history').delete().eq('venue_id', venueId);
-    await supabaseAdmin.from('venues').delete().eq('id', venueId);
+    await remove('venue history', supabaseAdmin.from('venue_change_history').delete().eq('venue_id', venueId));
+    await remove('venue', supabaseAdmin.from('venues').delete().eq('id', venueId));
   }
-  if (eventId) await supabaseAdmin.from('event_requests').delete().eq('id', eventId);
+  if (eventId) {
+    // Assignment history before the event: event_request_assignment_history
+    // .event_request_id is ON DELETE RESTRICT (014), on purpose, because it is
+    // an accountability record. This script inserts its event directly, so no
+    // history row is written today. The delete keeps cleanup correct if that
+    // ever changes.
+    await remove('assignment history', supabaseAdmin.from('event_request_assignment_history').delete().eq('event_request_id', eventId));
+    await remove('event request', supabaseAdmin.from('event_requests').delete().eq('id', eventId));
+  }
 
   for (const id of [staffId, organiserId]) {
     if (!id) continue;
-    await supabaseAdmin.from('profiles').delete().eq('id', id);
-    await supabase.auth.admin.deleteUser(id);
+    await remove('profile', supabaseAdmin.from('profiles').delete().eq('id', id));
+    await remove('auth user', supabase.auth.admin.deleteUser(id));
   }
+
+  // After the event, which references it through assigned_coordinator_id
+  // (ON DELETE RESTRICT). It has no profile to delete -- see AC3.
+  if (coordinatorId) await remove('auth user', supabase.auth.admin.deleteUser(coordinatorId));
+}
+
+/** Prove the cleanup after it has run, rather than assuming it worked. */
+async function verifyCleanup() {
+  check('cleanup ran without errors', cleanupErrors.length === 0, cleanupErrors.join('; '));
+
+  const { count: eventsLeft } = await supabaseAdmin
+    .from('event_requests')
+    .select('id', { count: 'exact', head: true })
+    .like('event_name', `__check_venue_event_${STAMP}`);
+
+  const { count: venuesLeft } = await supabaseAdmin
+    .from('venues')
+    .select('id', { count: 'exact', head: true })
+    .like('name', `__check_venue_${STAMP}`);
+
+  const userIds = [staffId, organiserId, coordinatorId].filter(Boolean);
+  const { count: profilesLeft } = userIds.length === 0
+    ? { count: 0 }
+    : await supabaseAdmin
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .in('id', userIds);
+
+  let usersLeft = 0;
+  for (const id of userIds) {
+    const { data } = await supabase.auth.admin.getUserById(id);
+    if (data?.user) usersLeft += 1;
+  }
+
+  check(
+    'nothing left behind after cleanup',
+    eventsLeft === 0 && venuesLeft === 0 && profilesLeft === 0 && usersLeft === 0,
+    `${eventsLeft} request(s), ${venuesLeft} venue(s), `
+      + `${profilesLeft} profile(s), ${usersLeft} user(s)`,
+  );
 }
 
 async function main() {
@@ -205,10 +267,36 @@ async function main() {
   // -- AC3 ------------------------------------------------------------------
   console.log('\n  AC3 -- retirement, and what survives it\n');
 
-  // A booking needs an event request, which needs an organiser.
+  // A booking needs an event request, which needs an organiser -- and, since
+  // SCRUM-330, a coordinator: 017's constraint requires one on every row past
+  // draft, and this row is inserted at 'submitted'.
+  //
+  // The event is only somewhere for the booking to point, and submission is
+  // not what this script tests. So it is inserted directly with a fixed
+  // coordinator rather than going through submit_event_request.
+  //
+  // The coordinator is a throwaway auth user created only to be named here,
+  // with no profiles row, as change-request:check does. That keeps it out of
+  // pick_event_coordinator's candidates, so it cannot be handed a real
+  // Organiser's submission while this runs. The other options were worse: a
+  // test user with the event_coordinator role would be a live candidate, and
+  // the real coordinator would tie a venue check to the assignment data and
+  // block deleting that person until cleanup.
+  const { data: coordinatorUser, error: coordinatorError } = await supabase.auth.admin.createUser({
+    email: `__check_venue_coordinator_${STAMP}@example.invalid`,
+    email_confirm: true,
+  });
+  if (coordinatorError) throw new Error(`could not create test coordinator: ${coordinatorError.message}`);
+  coordinatorId = coordinatorUser.user.id;
+
   const { data: event, error: eventError } = await supabaseAdmin
     .from('event_requests')
-    .insert({ organiser_id: organiserId, event_name: `__check_venue_event_${STAMP}`, status: 'submitted' })
+    .insert({
+      organiser_id: organiserId,
+      event_name: `__check_venue_event_${STAMP}`,
+      status: 'submitted',
+      assigned_coordinator_id: coordinatorId,
+    })
     .select().single();
   if (eventError) throw new Error(`could not create test event request: ${eventError.message}`);
   eventId = event.id;
@@ -332,6 +420,7 @@ main()
   })
   .finally(async () => {
     await cleanup();
+    await verifyCleanup();
     if (failures > 0) {
       console.error(`\n${failures} check(s) failed.\n`);
       process.exit(1);

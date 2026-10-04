@@ -10,12 +10,29 @@ import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import EventCoordinatorDashboard from "../../src/components/EventCoordinatorDashboard.jsx";
-import { getEventRequestQueue } from "../../src/services/eventRequestService";
+import { getEventRequestQueue, getMyAssignedEvents } from "../../src/services/eventRequestService";
 import { listNotifications } from "../../src/services/notificationService";
 import * as venueService from "../../src/services/venueService";
 
+// Every export the dashboard's component tree reaches, not only the queue's.
+// A vi.mock factory is strict: reading an export it did not return throws,
+// and since SCRUM-333 and SCRUM-334 the page renders My events
+// (getMyAssignedEvents) and, through ReviewQueue's detail panel, imports
+// CoordinatorRequestDetail, AssignmentHistory and ReassignEventPanel.
+// AssignmentHistory reads its two history functions when the module loads,
+// so a missing one fails the whole file before any test runs. Only
+// getMyAssignedEvents is called on render; the rest are here so the modules
+// load, and are never called, because nothing in these tests opens an event.
 vi.mock("../../src/services/eventRequestService", () => ({
   getEventRequestQueue: vi.fn(),
+  getMyAssignedEvents: vi.fn(),
+  getCoordinatorChangeRequests: vi.fn(),
+  processCoordinatorChangeRequest: vi.fn(),
+  requestEventClarification: vi.fn(),
+  getAssignmentHistory: vi.fn(),
+  getAssignmentHistoryForReview: vi.fn(),
+  listCoordinators: vi.fn(),
+  reassignEventRequest: vi.fn(),
 }));
 
 vi.mock("../../src/services/notificationService", () => ({
@@ -58,6 +75,8 @@ function renderDashboard(user = USER) {
 beforeEach(() => {
   vi.mocked(getEventRequestQueue).mockReset();
   vi.mocked(getEventRequestQueue).mockResolvedValue([]);
+  vi.mocked(getMyAssignedEvents).mockReset();
+  vi.mocked(getMyAssignedEvents).mockResolvedValue([]);
   vi.mocked(listNotifications).mockReset();
   vi.mocked(listNotifications).mockResolvedValue([]);
 });
@@ -71,6 +90,19 @@ describe("SCRUM17_AC3 EventCoordinatorDashboard", () => {
     expect(await screen.findByText("You have no notifications.")).toBeInTheDocument();
     expect(getEventRequestQueue).toHaveBeenCalled();
     expect(listNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  it("SCRUM333_AC11_renders_my_events_above_the_review_queue", async () => {
+    // The dashboard's own share of SCRUM-333: My events is on the page, read
+    // from GET /mine, and comes before the shared queue. This is also the test
+    // that fails if the MyAssignedEvents import is ever dropped from the page
+    // again, which renders as a crash rather than a missing section.
+    renderDashboard();
+
+    const mine = await screen.findByRole("heading", { name: "My events" });
+    const queue = await screen.findByRole("heading", { name: "Review queue" });
+    expect(getMyAssignedEvents).toHaveBeenCalledTimes(1);
+    expect(mine.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("SCRUM17_AC3_pending_venue_bookings_section_is_gone", async () => {

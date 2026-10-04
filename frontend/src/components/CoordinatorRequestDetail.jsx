@@ -16,10 +16,18 @@
 // in `activePanel` state -- so it is the house behaviour rather than a
 // regression. If a shareable link is ever wanted, the backend plan records
 // what to add (a coordinatorOnly GET /:id/review) rather than leaving it to
-// be rediscovered.
+// be rediscovered. (SCRUM-332 has since built that route; nothing here uses
+// it yet.)
+//
+// SCRUM-334 added the event's coordinator and assignment history, and the
+// assigned coordinator's Reassign action, which opens ReassignEventPanel as a
+// panel in place of this one.
 
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import AssignmentHistory from "./AssignmentHistory";
+import ReassignEventPanel from "./ReassignEventPanel";
 import {
   getCoordinatorChangeRequests,
   processCoordinatorChangeRequest,
@@ -89,6 +97,25 @@ export default function CoordinatorRequestDetail({
   const [rejectingChangeRequestId, setRejectingChangeRequestId] = useState(null);
   const [rejectionNote, setRejectionNote] = useState("");
   const [changeRequestActionError, setChangeRequestActionError] = useState(null);
+
+  // SCRUM-334. reassigning swaps this panel for ReassignEventPanel.
+  // handedOverTo is who the event went to, if this coordinator handed it over
+  // while the panel was open: the `request` prop is the row the parent loaded
+  // and may not be replaced (see handleReassigned). historyVersion is the
+  // AssignmentHistory key, bumped to make it read the history again.
+  const { user } = useAuth();
+  const [reassigning, setReassigning] = useState(false);
+  const [handedOverTo, setHandedOverTo] = useState(null);
+  const [historyVersion, setHistoryVersion] = useState(0);
+
+  const assignedCoordinatorId = handedOverTo?.id ?? request.assignedCoordinatorId;
+
+  // Reassign shows only to the event's assigned coordinator. This mirrors the
+  // server's AC6 check in reassign_event_request (018) and is a convenience,
+  // not the gate: it saves everyone else from a button that can only be
+  // refused. The server checks again, under a lock, and if the row this panel
+  // holds is stale, ReassignEventPanel turns the 403 into a message.
+  const canReassign = Boolean(user?.id) && assignedCoordinatorId === user.id;
 
   useEffect(() => {
     let cancelled = false;
@@ -182,6 +209,43 @@ export default function CoordinatorRequestDetail({
     } finally {
       setProcessingChangeRequestId(null);
     }
+  }
+
+  /**
+   * The server accepted the handover (SCRUM-334).
+   *
+   * Closes the handover panel, records who the event went to so the Reassign
+   * button disappears at once, and remounts AssignmentHistory so it reads the
+   * new entry. The panel stays open on this event, now read-only for this
+   * coordinator, so they can see the handover in the history before leaving.
+   *
+   * Then the parent's list is refreshed through onChangeRequestProcessed. That
+   * prop's name is narrower than what it does: both parents implement it as
+   * "refetch the list and keep this panel open on the refreshed row", which
+   * is exactly what a handover needs. In My events the event leaves the list;
+   * in the queue its row is refreshed with the new coordinator. A new prop,
+   * say onEventChanged, would be the cleaner name, but adding one means
+   * editing ReviewQueue and MyAssignedEvents, which this ticket does not
+   * touch. The rename is a follow-up.
+   */
+  function handleReassigned(updated, chosen) {
+    setHandedOverTo({
+      id: updated?.assignedCoordinatorId ?? chosen?.id ?? null,
+      fullName: chosen?.fullName ?? null,
+    });
+    setReassigning(false);
+    setHistoryVersion((version) => version + 1);
+    onChangeRequestProcessed?.();
+  }
+
+  if (reassigning) {
+    return (
+      <ReassignEventPanel
+        request={request}
+        onCancel={() => setReassigning(false)}
+        onReassigned={handleReassigned}
+      />
+    );
   }
 
   return (
@@ -354,16 +418,47 @@ export default function CoordinatorRequestDetail({
             <span>{formatTimestamp(request.submittedAt)}</span>
           </li>
           <li>
-            {/* A bare uuid on purpose. The queue joins no profiles row, so no
-                name exists to show -- that is the privacy floor of a queue
-                every Coordinator can read, not a missing feature. Rendered as
-                an identifier so it never reads as a label. */}
+            {/* The name when the row has one, the bare uuid when it does not.
+                A queue row never has one: the queue joins no profiles row,
+                which is the privacy floor of a queue every Coordinator can
+                read. A "My events" row does (SCRUM-333), because those are
+                events this coordinator is responsible for, where contacting
+                the Organiser is the job. The uuid is rendered as an
+                identifier so it never reads as a label. */}
             <strong>Organiser</strong>
-            <code title={request.organiserId ?? undefined}>
-              {request.organiserId ?? "unknown"}
-            </code>
+            {request.organiserName ? (
+              <span>{request.organiserName}</span>
+            ) : (
+              <code title={request.organiserId ?? undefined}>
+                {request.organiserId ?? "unknown"}
+              </code>
+            )}
           </li>
         </ul>
+      </section>
+
+      {/* SCRUM-334: who holds the event now, and how it got there, with the
+          handover notes, which every coordinator may read. Read fresh when this
+          panel opens, so it is the current coordinator even if the row this
+          panel was opened from is a little out of date. */}
+      <section>
+        <h3>Coordinator</h3>
+        <AssignmentHistory key={historyVersion} eventRequestId={request.id} view="coordinator" />
+
+        {handedOverTo && (
+          <p className="coordinator-reassign__notice" role="status">
+            Handed over to {handedOverTo.fullName ?? "the coordinator you chose"}. You can still
+            view this event, but not change it.
+          </p>
+        )}
+
+        {canReassign && (
+          <div className="coordinator-reassign">
+            <button type="button" onClick={() => setReassigning(true)}>
+              Hand over to another coordinator
+            </button>
+          </div>
+        )}
       </section>
 
       {request.status === "pending_clarification" ? (

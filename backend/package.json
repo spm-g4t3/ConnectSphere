@@ -15,8 +15,7 @@
     "request:check": "node scripts/check-event-request-service.js",
     "change-request:check": "node scripts/check-event-change-request-service.js",
     "routes:check": "node scripts/check-event-request-routes.js",
-    "venue-routes:check": "node scripts/check-venue-routes.js",
-    "venue-blocks:check": "node scripts/check-venue-blocks.js"
+    "venue-routes:check": "node scripts/check-venue-routes.js"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "5.0.0",

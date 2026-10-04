@@ -31,6 +31,10 @@ let coordinatorId = null;
 let eventId = null;
 let failures = 0;
 
+// Errors from cleanup's own deletes, which supabase-js returns rather than
+// throws -- so a delete a foreign key refuses is silent unless kept.
+const cleanupErrors = [];
+
 function check(label, passed, detail = '') {
   console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
   if (!passed) failures += 1;
@@ -46,17 +50,61 @@ async function createTestUser(label) {
   return data.user.id;
 }
 
+/** Run one cleanup step, keeping its error rather than dropping it. */
+async function remove(label, query) {
+  const { error } = await query;
+  if (error) cleanupErrors.push(`${label}: ${error.message}`);
+}
+
 async function cleanup() {
   if (eventId) {
     // Change requests first: their FK to event_requests is ON DELETE CASCADE,
     // so this line is not strictly required, but it keeps the intent explicit
     // rather than relying on cascade behaviour a future migration could change.
-    await supabase.from('event_change_requests').delete().eq('event_request_id', eventId);
-    await supabase.from('event_requests').delete().eq('id', eventId);
+    await remove('change requests', supabase.from('event_change_requests').delete().eq('event_request_id', eventId));
+
+    // Assignment history next. Unlike change requests this one is required:
+    // event_request_assignment_history.event_request_id is ON DELETE RESTRICT
+    // (014), on purpose, because it is an accountability record. This script
+    // inserts its event directly and never submits it, so today no history row
+    // exists. The delete is here anyway, so cleanup does not depend on that
+    // staying true. If the event is ever created through submit_event_request,
+    // cleanup already handles it.
+    await remove('assignment history', supabase.from('event_request_assignment_history').delete().eq('event_request_id', eventId));
+
+    await remove('event request', supabase.from('event_requests').delete().eq('id', eventId));
   }
-  if (organiserId) await supabase.auth.admin.deleteUser(organiserId);
-  if (otherOrganiserId) await supabase.auth.admin.deleteUser(otherOrganiserId);
-  if (coordinatorId) await supabase.auth.admin.deleteUser(coordinatorId);
+
+  // Users last: the event references the organiser and, since SCRUM-330, the
+  // coordinator through assigned_coordinator_id, both ON DELETE RESTRICT.
+  for (const id of [organiserId, otherOrganiserId, coordinatorId]) {
+    if (id) await remove('auth user', supabase.auth.admin.deleteUser(id));
+  }
+}
+
+/** Prove the cleanup after it has run, rather than assuming it worked. */
+async function verifyCleanup() {
+  check('cleanup ran without errors', cleanupErrors.length === 0, cleanupErrors.join('; '));
+
+  const { count: eventsLeft } = await supabase
+    .from('event_requests')
+    .select('id', { count: 'exact', head: true })
+    .like('event_name', `__check_event_${STAMP}`);
+
+  let usersLeft = 0;
+  for (const id of [organiserId, otherOrganiserId, coordinatorId]) {
+    if (!id) continue;
+    const { data } = await supabase.auth.admin.getUserById(id);
+    if (data?.user) usersLeft += 1;
+  }
+
+  // Change requests cascade from the event, so no event means none of those;
+  // history is restricted, so the event delete succeeding means none of that.
+  check(
+    'nothing left behind after cleanup',
+    eventsLeft === 0 && usersLeft === 0,
+    `${eventsLeft} request(s), ${usersLeft} user(s)`,
+  );
 }
 
 async function main() {
@@ -66,12 +114,26 @@ async function main() {
   otherOrganiserId = await createTestUser('other');
   coordinatorId = await createTestUser('coordinator');
 
+  // SCRUM-330: assigned_coordinator_id is set explicitly, because 017's
+  // constraint requires a coordinator on every row past draft. This event
+  // exists only so change requests have something to hang off. Submission is
+  // not what this script tests, so the row does not go through
+  // submit_event_request, and a fixed coordinator keeps it deterministic.
+  //
+  // The coordinator is this script's own throwaway user, which deliberately
+  // has no profiles row. pick_event_coordinator only considers profiles with
+  // the event_coordinator role, so this user can never be handed a real
+  // Organiser's submission while the script is running. The foreign key only
+  // needs a real auth.users row, which it is. The status flips further down
+  // (to draft and back to submitted) keep the coordinator throughout, so they
+  // satisfy the constraint too.
   const { data: event, error: createEventError } = await supabase
     .from('event_requests')
     .insert({
       organiser_id: organiserId,
       event_name: `__check_event_${STAMP}`,
       status: 'submitted',
+      assigned_coordinator_id: coordinatorId,
     })
     .select()
     .single();
@@ -432,6 +494,7 @@ main()
   })
   .finally(async () => {
     await cleanup();
+    await verifyCleanup();
     if (failures > 0) {
       console.error(`\n${failures} check(s) failed.\n`);
       process.exit(1);
