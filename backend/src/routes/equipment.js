@@ -2,9 +2,8 @@
  * Equipment catalogue routes.
  *
  * SCRUM-276, a subtask of SCRUM-275 "Maintain Equipment Catalogue and Status -
- * Technical Support Staff". Retire and reinstate (SCRUM-278) and the damaged
- * and under-maintenance quantities (SCRUM-277) are added to this router by
- * their own subtasks.
+ * Technical Support Staff". Retire and reinstate (SCRUM-278) is added to this
+ * router by its own subtask.
  *
  * Who may do what, and why:
  *
@@ -31,6 +30,7 @@ import {
   listEquipmentTypes,
   listActiveEquipmentTypes,
   getEquipmentTypeHistory,
+  recordEquipmentCondition,
 } from '../services/equipmentService.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
@@ -126,6 +126,25 @@ export function createEquipmentRouter({
   router.get('/:id/history', technicalSupportOnly, async (req, res) => {
     try {
       res.status(200).json(await getEquipmentTypeHistory(req.params.id));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * AC4 and AC5 (SCRUM-277): record how many units are damaged and how many
+   * are under maintenance, with a note. Either or both quantities may be sent;
+   * the one left out stays as it was. Reducing a number is how units are
+   * marked usable again. PATCH because only what is sent changes.
+   *
+   * Statuses: 200 with the updated type, usableQuantity being the new figure;
+   * 400 listing every invalid field, including a missing note or damaged plus
+   * under maintenance above the total; 401; 403; 404 when no type has that id;
+   * 500.
+   */
+  router.patch('/:id/condition', technicalSupportOnly, async (req, res) => {
+    try {
+      res.status(200).json(await recordEquipmentCondition(req.params.id, req.body, actingUser(req)));
     } catch (err) {
       handleError(err, res);
     }

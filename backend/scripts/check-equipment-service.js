@@ -10,6 +10,9 @@
  *
  * SCRUM-279 adds the history steps at the end.
  *
+ * SCRUM-277 adds the damage and maintenance steps, and SCRUM-279 the history
+ * steps after them.
+ *
  * What it proves that the mocked tests cannot:
  *   - the ilike name check and the unique index on lower(trim(name)) agree
  *   - the check constraints from 022 refuse bad direct writes
@@ -34,6 +37,7 @@ import {
   listEquipmentTypes,
   listActiveEquipmentTypes,
   getEquipmentTypeHistory,
+  recordEquipmentCondition,
 } from '../src/services/equipmentService.js';
 
 const PREFIX = `__check_equipment_${Date.now()}`;
@@ -225,6 +229,41 @@ async function main() {
   const actor = profile.data?.id ?? null;
   check('a technical support user exists to attribute changes to', Boolean(actor));
 
+  // --- recording damage and maintenance (SCRUM-277) ------------------------------
+  // The type stands at total 3, damaged 2, under maintenance 1 here.
+  const lowered = await recordEquipmentCondition(type.id, { damagedQuantity: 1, note: 'lens replaced' }, actor);
+  check(
+    'damaged lowered, maintenance left as it was',
+    lowered.damagedQuantity === 1 && lowered.underMaintenanceQuantity === 1,
+    `${lowered.damagedQuantity}/${lowered.underMaintenanceQuantity}`,
+  );
+  check('usable figure updated', lowered.usableQuantity === 1, `got ${lowered.usableQuantity}`);
+
+  const tooMany = await failureOf(recordEquipmentCondition(type.id, { underMaintenanceQuantity: 3, note: 'x' }, actor));
+  check(
+    'damaged plus maintenance above the total refused',
+    tooMany?.status === 400 && tooMany.details.some((d) => d.field === 'underMaintenanceQuantity'),
+    tooMany?.message,
+  );
+
+  const noNote = await failureOf(recordEquipmentCondition(type.id, { damagedQuantity: 0 }, actor));
+  check('a missing note refused, listing note', noNote?.status === 400 && noNote.details.some((d) => d.field === 'note'), noNote?.message);
+
+  const restored = await recordEquipmentCondition(
+    type.id,
+    { damagedQuantity: 0, underMaintenanceQuantity: 0, note: 'all back in use' },
+    actor,
+  );
+  check('reducing both marks every unit usable again', restored.usableQuantity === 3, `got ${restored.usableQuantity}`);
+
+  const same = await failureOf(
+    recordEquipmentCondition(type.id, { damagedQuantity: 0, underMaintenanceQuantity: 0, note: 'again' }, actor),
+  );
+  check('values the type already has are refused', same?.status === 400 && same.details.some((d) => d.field === 'equipment'), same?.message);
+
+  const noType = await failureOf(recordEquipmentCondition(randomUUID(), { damagedQuantity: 1, note: 'x' }, actor));
+  check('an unknown type answers not found', noType?.status === 404, noType?.message);
+
   await updateEquipmentType(type.id, { location: 'Store 3' }, actor);
   const history = await getEquipmentTypeHistory(type.id);
   const byField = (field) => history.filter((row) => row.field === field);
@@ -232,6 +271,8 @@ async function main() {
   check('creation recorded', byField('created').length === 1 && byField('created')[0].newValue === type.name);
   check('the total change recorded with old and new values', byField('totalQuantity').some((r) => r.oldValue === '10' && r.newValue === '3'));
   check('a damaged change made directly is recorded by the trigger', byField('damagedQuantity').some((r) => r.oldValue === '0' && r.newValue === '2'));
+  check('the damage note is kept on its history row', byField('damagedQuantity').some((r) => r.newValue === '1' && r.note === 'lens replaced'));
+  check('the maintenance note is kept on its history row', byField('underMaintenanceQuantity').some((r) => r.newValue === '0' && r.note === 'all back in use'));
   check('newest change is listed first', history[0]?.field === 'location', history[0]?.field);
   check(
     'the edit records the acting user and both values',

@@ -3,9 +3,9 @@
  *
  * SCRUM-276, a subtask of SCRUM-275 "Maintain Equipment Catalogue and Status".
  *
- * Creates and edits equipment types and reads them back. Damaged and
- * under-maintenance quantities (SCRUM-277) and retire and reinstate (SCRUM-278)
- * are separate subtasks and are not here. SCRUM-279 adds the change history:
+ * Creates and edits equipment types and reads them back (SCRUM-276), and
+ * records damaged and under-maintenance quantities with a note (SCRUM-277).
+ * Retire and reinstate (SCRUM-278) is a separate subtask and is not here. SCRUM-279 adds the change history:
  * the acting user goes in with every write and a database trigger records the
  * change (023_equipment_history.sql), and getEquipmentTypeHistory reads it back.
  *
@@ -27,10 +27,12 @@ import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
 import {
   checkCreateEquipmentType,
   checkUpdateEquipmentType,
+  checkConditionChange,
   hasField,
   throwIfInvalid,
   validateEquipmentTypeId,
 } from '../validation/equipmentValidation.js';
+import { assertNoOverCommitment } from './equipmentOverCommitment.js';
 
 const TABLE = 'equipment_types';
 
@@ -247,11 +249,109 @@ export async function updateEquipmentType(id, changes, userId = null) {
   }
   throwIfInvalid(details);
 
+  // AC7: a smaller total can leave fewer usable units than are reserved.
+  if (value.totalQuantity !== undefined) {
+    const unusable = current.damaged_quantity + current.under_maintenance_quantity;
+    const usableBefore = current.total_quantity - unusable;
+    const usableAfter = value.totalQuantity - unusable;
+    if (usableAfter < usableBefore) {
+      await assertNoOverCommitment({ equipmentTypeId: id, usableAfter });
+    }
+  }
+
   const { data, error } = await supabase
     .from(TABLE)
     // last_change_note is cleared so a note from an earlier damage or
     // maintenance change can never be attached to a later one.
     .update({ ...toColumns(value), last_modified_by: userId, last_change_note: null })
+    .eq('id', id)
+    .select(COLUMNS)
+    .maybeSingle();
+
+  if (error) throw translateError(error);
+  if (!data) throw new NotFoundError(`Equipment type ${id} not found`);
+
+  return toEquipmentType(data);
+}
+
+
+/**
+ * AC4 and AC5: record how many units are damaged and how many are under
+ * maintenance, with a note.
+ *
+ * Either quantity, or both, may be given; the one left out stays as it was.
+ * Reducing a number is how units are marked usable again, and needs no special
+ * handling. Sending the values a type already has is refused: there is
+ * nothing to record a note against, and accepting it would lose the note.
+ *
+ * Damaged plus under maintenance can never exceed the total. When the change
+ * would leave fewer usable units than before, the over-commitment hook runs
+ * before anything is saved (AC7, SCRUM-310). The note is written with the
+ * change, and the history trigger copies it onto the damaged and
+ * under-maintenance rows (SCRUM-279).
+ *
+ * @param {string} id
+ * @param {object} input  damagedQuantity and/or underMaintenanceQuantity, and note
+ * @param {string|null} [userId]  who is recording it, kept in the history
+ * @returns {Promise<object>} the updated type, usableQuantity included
+ * @throws {ValidationError} listing every invalid field, or for a malformed id
+ * @throws {NotFoundError} when no type has that id
+ */
+export async function recordEquipmentCondition(id, input, userId = null) {
+  validateEquipmentTypeId(id);
+
+  const { value, details } = checkConditionChange(input);
+
+  // A body that is not an object, or names neither quantity, is refused before any query.
+  if (hasField(details, 'equipment')) throwIfInvalid(details);
+
+  const current = await readRow(id);
+  if (!current) throw new NotFoundError(`Equipment type ${id} not found`);
+
+  const damaged = value.damagedQuantity ?? current.damaged_quantity;
+  const underMaintenance = value.underMaintenanceQuantity ?? current.under_maintenance_quantity;
+
+  if (damaged + underMaintenance > current.total_quantity) {
+    details.push({
+      field: value.damagedQuantity !== undefined ? 'damagedQuantity' : 'underMaintenanceQuantity',
+      message:
+        `damaged plus under maintenance (${damaged + underMaintenance}) ` +
+        `can't exceed the total (${current.total_quantity})`,
+    });
+  }
+
+  // Nothing changed means no history row, so the note would be lost without a
+  // word. Only judged once every other check has passed, because a rejected
+  // value falls back to the current one and would look like "no change".
+  if (
+    details.length === 0 &&
+    damaged === current.damaged_quantity &&
+    underMaintenance === current.under_maintenance_quantity
+  ) {
+    details.push({
+      field: 'equipment',
+      message: 'nothing changed: damaged and under maintenance already have these values',
+    });
+  }
+  throwIfInvalid(details);
+
+  const usableBefore =
+    current.total_quantity - current.damaged_quantity - current.under_maintenance_quantity;
+  const usableAfter = current.total_quantity - damaged - underMaintenance;
+  if (usableAfter < usableBefore) {
+    await assertNoOverCommitment({ equipmentTypeId: id, usableAfter });
+  }
+
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({
+      ...(value.damagedQuantity !== undefined && { damaged_quantity: value.damagedQuantity }),
+      ...(value.underMaintenanceQuantity !== undefined && {
+        under_maintenance_quantity: value.underMaintenanceQuantity,
+      }),
+      last_modified_by: userId,
+      last_change_note: value.note,
+    })
     .eq('id', id)
     .select(COLUMNS)
     .maybeSingle();

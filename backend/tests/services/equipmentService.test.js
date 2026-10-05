@@ -33,8 +33,14 @@ const {
   listEquipmentTypes,
   listActiveEquipmentTypes,
   getEquipmentTypeHistory,
+  recordEquipmentCondition,
 } = await import('../../src/services/equipmentService.js');
+vi.mock('../../src/services/equipmentOverCommitment.js', () => ({
+  assertNoOverCommitment: vi.fn(),
+}));
+
 const { supabase } = await import('../../src/config/supabaseClient.js');
+const { assertNoOverCommitment } = await import('../../src/services/equipmentOverCommitment.js');
 const { ValidationError, NotFoundError, ConflictError } = await import('../../src/errors.js');
 
 
@@ -88,6 +94,7 @@ const failed = (code, message) => ({ data: null, error: { code, message } });
 
 beforeEach(() => {
   from.mockReset();
+  assertNoOverCommitment.mockReset();
 });
 
 
@@ -545,5 +552,230 @@ describe('AC8: reading the history', () => {
     from.mockReturnValueOnce(queryStub(failed('57014', 'timeout')));
 
     await expect(getEquipmentTypeHistory(TYPE_ID)).rejects.toThrow('timeout');
+  });
+});
+
+
+describe('AC4: recording damaged and under-maintenance quantities', () => {
+  // The default row is total 10, damaged 2, under maintenance 1, so usable 7.
+
+  it('SCRUM275_AC4_writes_only_the_quantity_sent_with_the_note_and_the_user', async () => {
+    const write = queryStub(ok(typeRow({ damaged_quantity: 4 })));
+    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+
+    await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 4, note: ' dropped ' }, USER_ID);
+
+    expect(write.args('update')).toEqual([
+      { damaged_quantity: 4, last_modified_by: USER_ID, last_change_note: 'dropped' },
+    ]);
+    expect(write.args('eq')).toEqual(['id', TYPE_ID]);
+  });
+
+  it('SCRUM275_AC4_writes_both_quantities_when_both_are_sent', async () => {
+    const write = queryStub(ok(typeRow()));
+    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+
+    await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 3, underMaintenanceQuantity: 2, note: 'x' });
+
+    expect(write.args('update')[0]).toMatchObject({ damaged_quantity: 3, under_maintenance_quantity: 2 });
+  });
+
+  it('SCRUM275_AC5_returns_the_new_usable_figure', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ damaged_quantity: 5 }))));
+
+    const updated = await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 5, note: 'x' });
+
+    // 10 total, 5 damaged, 1 under maintenance
+    expect(updated).toMatchObject({ damagedQuantity: 5, underMaintenanceQuantity: 1, usableQuantity: 4 });
+  });
+
+  it('SCRUM275_AC4_lets_a_reduction_mark_units_usable_again_without_the_hook', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ damaged_quantity: 0 }))));
+
+    const updated = await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 0, note: 'repaired' });
+
+    expect(updated.usableQuantity).toBe(9);
+    expect(assertNoOverCommitment).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC4_allows_damaged_plus_maintenance_equal_to_the_total', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ damaged_quantity: 9 }))));
+
+    const updated = await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 9, note: 'flood' });
+
+    expect(updated.usableQuantity).toBe(0);
+  });
+
+  it('SCRUM275_AC4_refuses_damaged_plus_maintenance_above_the_total_and_writes_nothing', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    const attempt = recordEquipmentCondition(TYPE_ID, { damagedQuantity: 10, note: 'x' });
+
+    // 10 damaged + 1 under maintenance = 11 against a total of 10
+    await expect(attempt).rejects.toMatchObject({
+      status: 400,
+      details: [{ field: 'damagedQuantity', message: "damaged plus under maintenance (11) can't exceed the total (10)" }],
+    });
+    expect(from).toHaveBeenCalledTimes(1);
+    expect(assertNoOverCommitment).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC4_refuses_values_the_type_already_has_and_writes_nothing', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    // the default row already has 2 damaged
+    const attempt = recordEquipmentCondition(TYPE_ID, { damagedQuantity: 2, note: 'same again' });
+
+    await expect(attempt).rejects.toMatchObject({
+      status: 400,
+      details: [{ field: 'equipment', message: 'nothing changed: damaged and under maintenance already have these values' }],
+    });
+    expect(from).toHaveBeenCalledTimes(1);
+    expect(assertNoOverCommitment).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC4_refuses_both_quantities_when_neither_differs', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    const attempt = recordEquipmentCondition(TYPE_ID, { damagedQuantity: 2, underMaintenanceQuantity: 1, note: 'x' });
+
+    await expect(attempt).rejects.toMatchObject({ details: [{ field: 'equipment' }] });
+  });
+
+  it('SCRUM275_AC4_accepts_a_change_to_just_one_of_two_quantities', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ under_maintenance_quantity: 0 }))));
+
+    const updated = await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 2, underMaintenanceQuantity: 0, note: 'back' });
+
+    expect(updated.underMaintenanceQuantity).toBe(0);
+  });
+
+  it('SCRUM275_AC4_names_the_maintenance_field_when_only_maintenance_was_sent', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    const attempt = recordEquipmentCondition(TYPE_ID, { underMaintenanceQuantity: 9, note: 'x' });
+
+    await expect(attempt).rejects.toMatchObject({ details: [{ field: 'underMaintenanceQuantity' }] });
+  });
+
+  it('SCRUM275_AC4_lists_a_missing_note_together_with_a_bad_quantity', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    const attempt = recordEquipmentCondition(TYPE_ID, { damagedQuantity: -1 });
+
+    await expect(attempt).rejects.toMatchObject({
+      details: [{ field: 'damagedQuantity' }, { field: 'note', message: 'is required' }],
+    });
+  });
+
+  it('SCRUM275_AC4_refuses_a_change_naming_neither_quantity_before_any_query', async () => {
+    await expect(recordEquipmentCondition(TYPE_ID, { note: 'x' })).rejects.toBeInstanceOf(ValidationError);
+    await expect(recordEquipmentCondition(TYPE_ID, null)).rejects.toBeInstanceOf(ValidationError);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC4_refuses_a_malformed_id_before_any_query', async () => {
+    await expect(recordEquipmentCondition('nope', { damagedQuantity: 1, note: 'x' })).rejects.toBeInstanceOf(ValidationError);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC4_answers_not_found_for_an_unknown_type', async () => {
+    from.mockReturnValueOnce(queryStub(ok(null)));
+
+    await expect(recordEquipmentCondition(TYPE_ID, { damagedQuantity: 1, note: 'x' })).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('SCRUM275_AC4_answers_not_found_when_the_type_disappears_before_the_write', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(queryStub(ok(null)));
+
+    await expect(recordEquipmentCondition(TYPE_ID, { damagedQuantity: 1, note: 'x' })).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('SCRUM275_AC4_translates_a_constraint_refusal_from_a_race_on_write', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(failed('23514', 'unusable_within_total')));
+
+    await expect(recordEquipmentCondition(TYPE_ID, { damagedQuantity: 4, note: 'x' })).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('SCRUM275_AC4_surfaces_a_failed_read_of_the_current_row', async () => {
+    from.mockReturnValueOnce(queryStub(failed('57014', 'timeout')));
+
+    await expect(recordEquipmentCondition(TYPE_ID, { damagedQuantity: 1, note: 'x' })).rejects.toThrow('timeout');
+  });
+});
+
+
+describe('AC7: the over-commitment hook', () => {
+  it('SCRUM275_AC7_runs_before_saving_when_damage_lowers_the_usable_figure', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ damaged_quantity: 5 }))));
+
+    await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 5, note: 'x' });
+
+    // 10 total, 5 damaged, 1 under maintenance leaves 4 usable
+    expect(assertNoOverCommitment).toHaveBeenCalledWith({ equipmentTypeId: TYPE_ID, usableAfter: 4 });
+  });
+
+  it('SCRUM275_AC7_a_refusal_from_the_hook_stops_the_write', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    assertNoOverCommitment.mockRejectedValueOnce(new ConflictError('reserved for a later event'));
+
+    const attempt = recordEquipmentCondition(TYPE_ID, { damagedQuantity: 5, note: 'x' });
+
+    await expect(attempt).rejects.toBeInstanceOf(ConflictError);
+    expect(from).toHaveBeenCalledTimes(1);
+  });
+
+  it('SCRUM275_AC7_does_not_run_when_the_usable_figure_stays_the_same', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    // 3 damaged and 0 under maintenance, against 2 and 1: different values, same usable figure
+    await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 3, underMaintenanceQuantity: 0, note: 'moved' });
+
+    expect(assertNoOverCommitment).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC7_runs_before_saving_when_the_total_is_reduced', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ total_quantity: 5 }))));
+
+    await updateEquipmentType(TYPE_ID, { totalQuantity: 5 });
+
+    // 5 total, 2 damaged, 1 under maintenance leaves 2 usable
+    expect(assertNoOverCommitment).toHaveBeenCalledWith({ equipmentTypeId: TYPE_ID, usableAfter: 2 });
+  });
+
+  it('SCRUM275_AC7_a_refusal_from_the_hook_stops_a_total_reduction', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    assertNoOverCommitment.mockRejectedValueOnce(new ConflictError('reserved for a later event'));
+
+    const attempt = updateEquipmentType(TYPE_ID, { totalQuantity: 5 });
+
+    await expect(attempt).rejects.toBeInstanceOf(ConflictError);
+    expect(from).toHaveBeenCalledTimes(1);
+  });
+
+  it('SCRUM275_AC7_does_not_run_when_the_total_is_raised', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ total_quantity: 20 }))));
+
+    await updateEquipmentType(TYPE_ID, { totalQuantity: 20 });
+
+    expect(assertNoOverCommitment).not.toHaveBeenCalled();
   });
 });

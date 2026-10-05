@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import {
   checkCreateEquipmentType,
   checkUpdateEquipmentType,
+  checkConditionChange,
   hasField,
   throwIfInvalid,
   validateEquipmentTypeId,
@@ -234,5 +235,65 @@ describe('the equipment type id', () => {
 
   it.each([['abc'], [''], [undefined], [null], [42]])('SCRUM275_AC3_refuses_%j_as_an_id', (id) => {
     expect(() => validateEquipmentTypeId(id)).toThrow(ValidationError);
+  });
+});
+
+
+describe('AC4: recording damaged and under-maintenance quantities', () => {
+  it('SCRUM275_AC4_accepts_both_quantities_and_a_note', () => {
+    const { value, details } = checkConditionChange({ damagedQuantity: 2, underMaintenanceQuantity: 1, note: ' cracked lens ' });
+
+    expect(details).toEqual([]);
+    expect(value).toEqual({ damagedQuantity: 2, underMaintenanceQuantity: 1, note: 'cracked lens' });
+  });
+
+  it('SCRUM275_AC4_accepts_either_quantity_alone', () => {
+    expect(checkConditionChange({ damagedQuantity: 0, note: 'fixed' }).value).toEqual({ damagedQuantity: 0, note: 'fixed' });
+    expect(checkConditionChange({ underMaintenanceQuantity: 3, note: 'servicing' }).value).toEqual({ underMaintenanceQuantity: 3, note: 'servicing' });
+  });
+
+  it.each([
+    ['missing', undefined, 'is required'],
+    ['null', null, 'is required'],
+    ['blank', '  ', 'must not be blank'],
+    ['not text', 5, 'must be text'],
+  ])('SCRUM275_AC4_refuses_a_note_that_is_%s', (_label, note, message) => {
+    const { details } = checkConditionChange({ damagedQuantity: 1, note });
+
+    expect(details).toEqual([{ field: 'note', message }]);
+  });
+
+  it.each([['negative', -1], ['a fraction', 1.5], ['text', '2'], ['NaN', Number.NaN], ['null', null], ['too large', MAX_QUANTITY + 1]])(
+    'SCRUM275_AC4_refuses_a_damaged_quantity_that_is_%s',
+    (_label, damagedQuantity) => {
+      const { details } = checkConditionChange({ damagedQuantity, note: 'x' });
+
+      expect(fields(details)).toEqual(['damagedQuantity']);
+    },
+  );
+
+  it('SCRUM275_AC4_lists_every_invalid_field_together', () => {
+    const { details } = checkConditionChange({ damagedQuantity: -1, underMaintenanceQuantity: 'a', note: '' });
+
+    expect(fields(details)).toEqual(['damagedQuantity', 'underMaintenanceQuantity', 'note']);
+  });
+
+  it('SCRUM275_AC4_refuses_a_change_naming_neither_quantity', () => {
+    const { details } = checkConditionChange({ note: 'x' });
+
+    expect(hasField(details, 'equipment')).toBe(true);
+  });
+
+  it('SCRUM275_AC4_ignores_fields_that_have_their_own_endpoints', () => {
+    const { value } = checkConditionChange({ damagedQuantity: 1, note: 'x', totalQuantity: 99, name: 'y' });
+
+    expect(value).toEqual({ damagedQuantity: 1, note: 'x' });
+  });
+
+  it.each([[null], ['text'], [[]]])('SCRUM275_AC4_refuses_a_body_that_is_not_an_object_(%j)', (input) => {
+    const { value, details } = checkConditionChange(input);
+
+    expect(value).toBeNull();
+    expect(hasField(details, 'equipment')).toBe(true);
   });
 });

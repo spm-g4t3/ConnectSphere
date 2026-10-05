@@ -330,3 +330,90 @@ describe('AC8: the change history', () => {
     expect(insertSpy.mock.calls[0][0].last_modified_by).toBe(STAFF_ID);
   });
 });
+
+
+describe('AC4 and AC5: recording damaged and under-maintenance quantities', () => {
+  const url = `/api/equipment/${TYPE_ID}/condition`;
+  const body = { damagedQuantity: 4, note: 'dropped in transit' };
+
+  it('SCRUM275_AC4_lets_technical_support_record_damage_and_returns_the_usable_figure', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ damaged_quantity: 4 }))));
+
+    const res = await request(appWith()).patch(url).send(body);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ damagedQuantity: 4, usableQuantity: 6 });
+  });
+
+  it.each(OTHER_ROLES)('SCRUM275_AC1_refuses_%s_on_recording_damage_with_403_and_changes_nothing', async (role) => {
+    const res = await request(appWith(signedInAs(role))).patch(url).send(body);
+
+    expect(res.status).toBe(403);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC4_answers_400_listing_a_missing_note', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    const res = await request(appWith()).patch(url).send({ damagedQuantity: 1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'note', message: 'is required' }]);
+  });
+
+  it('SCRUM275_AC4_answers_400_when_damaged_plus_maintenance_would_exceed_the_total', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow({ total_quantity: 5, damaged_quantity: 0, under_maintenance_quantity: 0 }))));
+
+    const res = await request(appWith()).patch(url).send({ damagedQuantity: 6, note: 'x' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details[0].message).toBe("damaged plus under maintenance (6) can't exceed the total (5)");
+  });
+
+  it('SCRUM275_AC4_answers_400_when_nothing_would_change', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    const res = await request(appWith()).patch(url).send({ damagedQuantity: 0, note: 'same again' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details[0].field).toBe('equipment');
+  });
+
+  it('SCRUM275_AC4_answers_400_for_a_body_naming_neither_quantity_without_a_query', async () => {
+    const res = await request(appWith()).patch(url).send({ note: 'x' });
+
+    expect(res.status).toBe(400);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC4_answers_404_for_an_unknown_type', async () => {
+    from.mockReturnValueOnce(queryStub(ok(null)));
+
+    const res = await request(appWith()).patch(url).send(body);
+
+    expect(res.status).toBe(404);
+  });
+
+  it('SCRUM275_AC4_answers_400_for_a_malformed_id', async () => {
+    const res = await request(appWith()).patch('/api/equipment/not-a-uuid/condition').send(body);
+
+    expect(res.status).toBe(400);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC4_records_the_signed_in_user_and_the_note', async () => {
+    const write = queryStub(ok(typeRow({ damaged_quantity: 4 })));
+    const updateSpy = vi.spyOn(write, 'update');
+    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+
+    await request(appWith()).patch(url).send({ ...body, lastModifiedBy: 'someone-else' });
+
+    expect(updateSpy.mock.calls[0][0]).toEqual({
+      damaged_quantity: 4,
+      last_modified_by: STAFF_ID,
+      last_change_note: 'dropped in transit',
+    });
+  });
+});

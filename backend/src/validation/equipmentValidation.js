@@ -89,6 +89,39 @@ function readOptionalText(details, field, value) {
 }
 
 
+const CONDITION_FIELDS = ['damagedQuantity', 'underMaintenanceQuantity'];
+
+/** A quantity of damaged or under-maintenance units: a whole number of zero or more. */
+function readQuantity(details, field, value) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > MAX_QUANTITY) {
+    details.push({
+      field,
+      message: `must be a whole number of zero or more, and no larger than ${MAX_QUANTITY}`,
+    });
+    return undefined;
+  }
+  return value;
+}
+
+/** The note that explains a damage or maintenance change. Required, and trimmed. */
+function readNote(details, value) {
+  if (value === undefined || value === null) {
+    details.push({ field: 'note', message: 'is required' });
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    details.push({ field: 'note', message: 'must be text' });
+    return undefined;
+  }
+  const note = value.trim();
+  if (note === '') {
+    details.push({ field: 'note', message: 'must not be blank' });
+    return undefined;
+  }
+  return note;
+}
+
+
 /**
  * AC2: check the input for a new equipment type.
  *
@@ -149,6 +182,43 @@ export function checkUpdateEquipmentType(changes) {
     details.push({
       field: 'equipment',
       message: 'provide at least one of name, description, category, location or totalQuantity',
+    });
+  }
+
+  return { value, details };
+}
+
+/**
+ * AC4: check a change to a type's damaged and under-maintenance quantities.
+ *
+ * Either quantity, or both, may be sent; the one left out stays as it was. A
+ * note is always required. The rule that damaged plus under maintenance can't
+ * exceed the total needs the current total, so equipmentService adds it.
+ *
+ * @param {unknown} input
+ * @returns {{value: object|null, details: Array<{field: string, message: string}>}}
+ */
+export function checkConditionChange(input) {
+  if (!isObject(input)) {
+    return { value: null, details: [{ field: 'equipment', message: 'must be an object' }] };
+  }
+
+  const details = [];
+  const value = {};
+
+  for (const field of CONDITION_FIELDS) {
+    if (input[field] === undefined) continue;
+    const quantity = readQuantity(details, field, input[field]);
+    if (quantity !== undefined) value[field] = quantity;
+  }
+
+  const note = readNote(details, input.note);
+  if (note !== undefined) value.note = note;
+
+  if (!CONDITION_FIELDS.some((field) => input[field] !== undefined)) {
+    details.push({
+      field: 'equipment',
+      message: 'provide damagedQuantity, underMaintenanceQuantity or both',
     });
   }
 
