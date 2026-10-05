@@ -5,7 +5,10 @@
 //     venue list in the API that a retired venue can appear in.
 //   - GET /venues/search returns ALREADY-active-only venues
 //     (backend filters retired_at IS NULL server-side — see searchVenues()
-//     in backend/src/services/venueService.js)
+//     in backend/src/services/venueService.js), unless includeRetired=true
+//     (SCRUM-185, for SCRUM-178 AC1): Venue Staff and Event Coordinators
+//     only (403 otherwise), never with a date window (400), and each row then
+//     carries retiredAt.
 //   - POST /venues/:id/retire retires one venue. Venue Staff only, and
 //     one-way: 005_venue_retirement.sql defines no un-retire.
 //   - Response rows: { id, name, location, maxCapacity }, plus retiredAt on
@@ -24,8 +27,12 @@
 import { apiClient } from "./apiClient"; // <-- replace with your actual API client
 
 /**
- * Searches active venues. Retired venues are never returned — the backend
- * enforces that unconditionally, so there's nothing to filter client-side.
+ * Searches active venues. Retired venues are left out by the backend, so
+ * there's nothing to filter client-side -- unless includeRetired is set
+ * (SCRUM-185), which returns them too, each row with retiredAt (ISO or null).
+ * Only Venue Staff and Event Coordinators may set it (403 otherwise), and not
+ * together with a window (400 naming includeRetired). It is sent only when
+ * true, so a default search is exactly the request it always was.
  *
  * With startsAt and endsAt (SCRUM-130), venues with a block overlapping the
  * half-open window [startsAt, endsAt) are left out too; a block that only
@@ -38,7 +45,8 @@ import { apiClient } from "./apiClient"; // <-- replace with your actual API cli
  * @param {number} [filters.minCapacity]  minimum seats needed
  * @param {string} [filters.startsAt]     ISO with an explicit offset
  * @param {string} [filters.endsAt]       ISO with an explicit offset, after startsAt
- * @returns {Promise<Array<{id, name, location, maxCapacity}>>}
+ * @param {boolean} [filters.includeRetired]  also return retired venues
+ * @returns {Promise<Array<{id, name, location, maxCapacity, retiredAt?}>>}
  */
 export async function searchActiveVenues(filters = {}) {
   const params = {};
@@ -46,6 +54,7 @@ export async function searchActiveVenues(filters = {}) {
   if (filters.minCapacity) params.minCapacity = filters.minCapacity;
   if (filters.startsAt) params.startsAt = filters.startsAt;
   if (filters.endsAt) params.endsAt = filters.endsAt;
+  if (filters.includeRetired === true) params.includeRetired = true;
 
   const response = await apiClient.get("/venues/search", { params });
   return response.data;

@@ -1974,3 +1974,137 @@ describe('SCRUM178_AC6 the bookings read is refused to Organisers and Attendees,
     expect(from.mock.calls.map(([table]) => table)).toEqual(['bookings']);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-185 (SCRUM-178 AC1): GET /search?includeRetired=true lists retired
+// venues too, so a retired venue's calendar can be reached from search. It is
+// Venue Staff and Event Coordinators only (AC6); the flag is validated before
+// the role check, and both before any database call.
+// ---------------------------------------------------------------------------
+describe('SCRUM178_AC1 Coordinators and Venue Staff can search retired venues', () => {
+  const SEARCH = '/api/venues/search';
+  const ACTIVE_ID = 'c0ffee00-0000-4000-8000-000000000001';
+  const ACTIVE_ROW = { id: ACTIVE_ID, name: 'Active Room', location: 'Level 1, SCIS', max_capacity: 30 };
+  const RETIRED_ROW = catalogueRow({ retired_at: RETIRED_AT });
+  const WINDOW_QS = 'startsAt=2026-10-01T02:00:00Z&endsAt=2026-10-01T04:00:00Z';
+
+  it.each([
+    ['Venue Staff', ROLE.VENUE_STAFF],
+    ['an Event Coordinator', ROLE.EVENT_COORDINATOR],
+  ])('SCRUM178_AC1_%s_gets_200_with_retiredAt_on_every_row', async (_label, role) => {
+    const query = queryStub(ok([{ ...ACTIVE_ROW, retired_at: null }, RETIRED_ROW]));
+    from.mockReturnValueOnce(query);
+
+    const res = await request(appWith(signedInAs(role))).get(`${SEARCH}?includeRetired=true`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      { id: ACTIVE_ID, name: 'Active Room', location: 'Level 1, SCIS', maxCapacity: 30, retiredAt: null },
+      { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'Level 2, SCIS', maxCapacity: 40, retiredAt: RETIRED_AT },
+    ]);
+    expect(from.mock.calls.map(([table]) => table)).toEqual(['venues']);
+    expect(query.called('is')).toBe(false);
+    expect(query.args('select')).toEqual(['id, name, location, max_capacity, retired_at']);
+  });
+
+  it('SCRUM178_AC1_the_flag_still_passes_location_and_minCapacity_through', async () => {
+    const query = queryStub(ok([]));
+    from.mockReturnValueOnce(query);
+
+    const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR)))
+      .get(`${SEARCH}?includeRetired=true&location=SCIS&minCapacity=40`);
+
+    expect(res.status).toBe(200);
+    expect(query.args('ilike')).toEqual(['location', '%SCIS%']);
+    expect(query.args('gte')).toEqual(['max_capacity', 40]);
+  });
+
+  it('SCRUM178_AC1_an_organiser_without_the_flag_searches_exactly_as_before', async () => {
+    const query = queryStub(ok([{ ...ACTIVE_ROW }]));
+    from.mockReturnValueOnce(query);
+
+    const res = await request(appWith(signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID))).get(SEARCH);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{ id: ACTIVE_ID, name: 'Active Room', location: 'Level 1, SCIS', maxCapacity: 30 }]);
+    expect(Object.keys(res.body[0])).toEqual(['id', 'name', 'location', 'maxCapacity']);
+    expect(query.args('select')).toEqual(['id, name, location, max_capacity']);
+    expect(query.args('is')).toEqual(['retired_at', null]);
+  });
+
+  it.each([
+    ['false', '?includeRetired=false'],
+    ['blank', '?includeRetired='],
+  ])('SCRUM178_AC1_an_organiser_with_includeRetired_%s_gets_the_ordinary_search', async (_label, qs) => {
+    const query = queryStub(ok([{ ...ACTIVE_ROW }]));
+    from.mockReturnValueOnce(query);
+
+    const res = await request(appWith(signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID))).get(`${SEARCH}${qs}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{ id: ACTIVE_ID, name: 'Active Room', location: 'Level 1, SCIS', maxCapacity: 30 }]);
+    expect(query.args('is')).toEqual(['retired_at', null]);
+  });
+
+  it.each([
+    ['junk', '?includeRetired=junk'],
+    ['upper case', '?includeRetired=TRUE'],
+    ['one', '?includeRetired=1'],
+    ['repeated', '?includeRetired=true&includeRetired=true'],
+  ])('SCRUM178_AC1_a_%s_flag_answers_400_even_for_an_organiser', async (_label, qs) => {
+    // Validation comes before the role check, so a junk value is a 400 for
+    // everyone, never a 403 that hides the real fault.
+    const res = await request(appWith(signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID))).get(`${SEARCH}${qs}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'includeRetired', message: 'must be true or false' }]);
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['Venue Staff', ROLE.VENUE_STAFF],
+    ['an Event Coordinator', ROLE.EVENT_COORDINATOR],
+    ['an Event Organiser', ROLE.EVENT_ORGANISER],
+  ])('SCRUM178_AC1_%s_with_the_flag_and_a_window_answers_400_on_includeRetired', async (_label, role) => {
+    const res = await request(appWith(signedInAs(role, ORGANISER_ID)))
+      .get(`${SEARCH}?includeRetired=true&${WINDOW_QS}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([
+      {
+        field: 'includeRetired',
+        message: 'cannot be combined with a date window: a retired venue cannot be booked',
+      },
+    ]);
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('SCRUM178_AC6 Organisers and Attendees cannot search retired venues', () => {
+  const SEARCH = '/api/venues/search';
+  const ROLE_403 = { error: 'This action is restricted to Venue Staff or Event Coordinators' };
+
+  it.each([
+    ['an Event Organiser', ROLE.EVENT_ORGANISER],
+    ['an attendee', ROLE.ATTENDEE],
+    ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+  ])('SCRUM178_AC6_%s_with_includeRetired_gets_403_with_no_query', async (_label, role) => {
+    const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(`${SEARCH}?includeRetired=true`);
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual(ROLE_403);
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM178_AC6_signed_out_with_includeRetired_answers_401_with_no_query', async () => {
+    const res = await request(appWith(signedOut)).get(`${SEARCH}?includeRetired=true`);
+
+    expect(res.status).toBe(401);
+    expect(from).not.toHaveBeenCalled();
+  });
+});

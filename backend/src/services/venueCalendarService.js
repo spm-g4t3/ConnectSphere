@@ -32,7 +32,7 @@
  * Deliberately NOT here:
  *
  *  - Display labels. The backend returns kinds, statuses and reasons; the
- *    frontend owns the wording ("Booked", "Blocked", "Under review").
+ *    frontend owns the wording ("Booked", "Blocked", "Booked – under review").
  *  - Tentative holds. SCRUM-16 has not built them, so there is nothing to
  *    read; when it does, they become a third kind.
  *  - Whether the venue is retired. getVenueById returns retired venues, and a

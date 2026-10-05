@@ -133,9 +133,10 @@ export default function VenueDetail({ venue }) {
   const venueId = venue.id;
 
   // Two fetchers, two error states, two loading flags -- on purpose. History
-  // is Venue Staff only and bookings are open to any authenticated user, so a
-  // 403 on one must not blank the other. One combined fetch with a single
-  // catch would throw away the half that succeeded.
+  // is Venue Staff only and bookings are open to Venue Staff and Event
+  // Coordinators only (SCRUM-182), so a 403 on one must not blank the other.
+  // One combined fetch with a single catch would throw away the half that
+  // succeeded.
   const [bookings, setBookings] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(true);
   const [bookingsError, setBookingsError] = useState(null);

@@ -53,7 +53,7 @@ function VenueCalendarRoute() {
 }
 
 function AppRoutes() {
-  const { loading, logoutMessage, clearLogoutMessage } = useAuth();
+  const { user, loading, logoutMessage, clearLogoutMessage } = useAuth();
 
   useEffect(() => {
     if (!logoutMessage) return undefined;
@@ -82,7 +82,7 @@ function AppRoutes() {
           path="/venue-search"
           element={
             <ProtectedRoute allowedRoles={["event_coordinator", "venue_staff"]}>
-              <VenueSearch />
+              <VenueSearch role={user?.role} />
             </ProtectedRoute>
           }
         />

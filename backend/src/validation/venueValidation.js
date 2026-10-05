@@ -15,6 +15,9 @@
  * SCRUM-186 adds the turnaround between events, one of a fixed list of
  * minutes (domain/turnaroundOptions.js).
  *
+ * SCRUM-185 (SCRUM-178 AC1) adds includeRetired to the search filters, so a
+ * retired venue's calendar can be reached from search.
+ *
  * Deliberately NOT checked here: whether a layout or facility code exists.
  * That is referential integrity, the foreign keys enforce it, and
  * venueService.translateError turns the violation into a ValidationError
@@ -353,9 +356,12 @@ function isUnset(value) {
  * empty object is valid -- "show me everything" is a legitimate search rather
  * than a caller bug.
  *
- * Retirement is deliberately not a filter. AC3 makes active-only the rule for
- * every search, not an option a caller can switch off, so searchVenues applies
- * it unconditionally and no filter here can reach a retired venue.
+ * Retirement was deliberately not a filter: AC3 makes active-only the rule
+ * for every search. SCRUM-185 (SCRUM-178 AC1) adds one exception,
+ * includeRetired, so Venue Staff and Event Coordinators can find a retired
+ * venue and open its calendar. This module only checks its shape; who may set
+ * it is the route's rule (routes/venues.js), because validation knows no
+ * roles. Without it a search is active-only exactly as before.
  *
  * SCRUM-130 adds an optional startsAt/endsAt window, both or neither, through
  * the same checkTimeWindow the block window uses. No length cap: how long an
@@ -367,6 +373,10 @@ function isUnset(value) {
  * @param {string} [filters.startsAt]     SCRUM-130: ISO 8601 with an offset
  * @param {string} [filters.endsAt]       SCRUM-130: ISO 8601 with an offset;
  *                                        later than startsAt
+ * @param {boolean|string} [filters.includeRetired]  SCRUM-185: true or
+ *                                        'true' to include retired venues;
+ *                                        false, 'false' or unset leaves it
+ *                                        off. Not with a date window.
  * @returns {object} a normalised copy holding only the filters actually supplied
  * @throws {ValidationError}
  */
@@ -394,6 +404,39 @@ export function validateSearchFilters(filters = {}) {
     normalised.endsAt = window.end;
   }
 
+  // SCRUM-185. The key is set only when true, so a search without the flag --
+  // or with it off -- normalises to exactly what it did before.
+  const includeRetired = checkIncludeRetired(errors, filters.includeRetired);
+  if (includeRetired) {
+    if (window !== null) {
+      errors.add(
+        'includeRetired',
+        'cannot be combined with a date window: a retired venue cannot be booked',
+      );
+    } else {
+      normalised.includeRetired = true;
+    }
+  }
+
   throwIfInvalid(errors);
   return normalised;
+}
+
+/**
+ * The includeRetired flag: a boolean, or its query-string spelling.
+ *
+ * SCRUM-185. A query parameter is always text, so 'true' and 'false' are
+ * accepted alongside the booleans. Nothing else is: not 'TRUE', '1' or 'yes',
+ * and not the array Express builds from a repeated parameter. A flag that
+ * widens what a search can reach should mean one thing, and a near miss is
+ * reported rather than guessed at. Unset (undefined, null or blank) is off,
+ * like every other search field (isUnset).
+ *
+ * @returns {boolean} true only for true or 'true'
+ */
+function checkIncludeRetired(errors, value) {
+  if (isUnset(value) || value === false || value === 'false') return false;
+  if (value === true || value === 'true') return true;
+  errors.add('includeRetired', 'must be true or false');
+  return false;
 }

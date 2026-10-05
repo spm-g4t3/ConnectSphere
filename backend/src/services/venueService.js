@@ -21,6 +21,10 @@
  *
  * SCRUM-130 (part of SCRUM-17 AC2): searchVenues leaves out venues blocked in
  * an optional date window, through venueBlockService's findBlockedVenueIds.
+ *
+ * SCRUM-185 (SCRUM-178 AC1): searchVenues can include retired venues when
+ * asked, so a retired venue's calendar is reachable. The route decides who
+ * may ask.
  */
 
 import { supabase } from '../config/supabaseClient.js';
@@ -249,12 +253,18 @@ export async function retireVenue(id, userId = null) {
 /**
  * Search the venue catalogue.
  *
- * SCRUM-111. AC3 again, from the other side: retired venues must not appear
- * here. The filter is applied once, server-side, by .is('retired_at', null) --
- * the two partial indexes in 002 exist for exactly this predicate. There is
- * deliberately no second filter over the returned rows: a duplicated rule is a
- * rule that can disagree with itself, and the caller cannot opt out of this
- * one anyway.
+ * SCRUM-111. AC3 again, from the other side: by default retired venues do
+ * not appear here. The filter is applied once, server-side, by
+ * .is('retired_at', null) -- the two partial indexes in 002 exist for exactly
+ * this predicate. There is deliberately no second filter over the returned
+ * rows: a duplicated rule is a rule that can disagree with itself.
+ *
+ * SCRUM-185 (SCRUM-178 AC1): includeRetired drops that filter and adds
+ * retiredAt to each row, so a retired venue can be found and its calendar
+ * opened. Only Venue Staff and Event Coordinators may set it, and the route
+ * enforces that (routes/venues.js); this function trusts its caller on roles
+ * like every other service here. Without the flag the query and each row's
+ * keys are exactly as before.
  *
  * Attribute filters (facilities, layouts, accessibility) are not supported
  * yet. Those live in join tables and turn this into a multi-way join, which is
@@ -273,8 +283,11 @@ export async function retireVenue(id, userId = null) {
  * @param {number} [filters.minCapacity]  venues that seat at least this many
  * @param {string} [filters.startsAt]     SCRUM-130: ISO 8601 with an offset
  * @param {string} [filters.endsAt]       SCRUM-130: ISO 8601 with an offset
- * @returns {Promise<object[]>} active venues, ordered by name, minus any
- *                              blocked in the window
+ * @param {boolean|string} [filters.includeRetired]  SCRUM-185: include retired
+ *                                        venues; not with a date window
+ * @returns {Promise<object[]>} active venues (retired too, each with
+ *                              retiredAt, when includeRetired), ordered by
+ *                              name, minus any blocked in the window
  */
 export async function searchVenues(filters = {}) {
   const search = validateSearchFilters(filters);
@@ -288,10 +301,14 @@ export async function searchVenues(filters = {}) {
       ? await findBlockedVenueIds(search.startsAt, search.endsAt)
       : [];
 
-  let query = supabase
-    .from('venues')
-    .select('id, name, location, max_capacity')
-    .is('retired_at', null);
+  // SCRUM-185: two branches rather than one with a conditional column, so the
+  // default search sends byte-for-byte the query it always has.
+  let query = search.includeRetired
+    ? supabase.from('venues').select('id, name, location, max_capacity, retired_at')
+    : supabase
+        .from('venues')
+        .select('id, name, location, max_capacity')
+        .is('retired_at', null);
 
   if (search.location !== undefined) {
     query = query.ilike('location', `%${search.location}%`);
@@ -314,12 +331,17 @@ export async function searchVenues(filters = {}) {
 
   if (error) throw translateError(error);
 
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    name: row.name,
-    location: row.location,
-    maxCapacity: row.max_capacity,
-  }));
+  return (data ?? []).map((row) => {
+    const venue = {
+      id: row.id,
+      name: row.name,
+      location: row.location,
+      maxCapacity: row.max_capacity,
+    };
+    // Only when asked for, so a default search's rows keep exactly their keys.
+    if (search.includeRetired) venue.retiredAt = row.retired_at;
+    return venue;
+  });
 }
 
 

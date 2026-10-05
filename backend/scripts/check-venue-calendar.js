@@ -15,7 +15,9 @@
  * the database itself answers, and so that:
  *
  *  - AC1: Venue Staff and Event Coordinators open the calendar, for an active
- *    venue and for a retired one, on a past window too;
+ *    venue and for a retired one, on a past window too; and (SCRUM-185) a
+ *    Coordinator's search with includeRetired=true finds the retired venue,
+ *    an Organiser's is 403, and an Organiser's plain search leaves it out;
  *  - AC2: a booking comes back as kind 'booking' with its status ('approved',
  *    or 'flagged_for_review' once an override block flags it through
  *    create_venue_block / flag_bookings_for_block, 014) and its event name, and
@@ -555,6 +557,33 @@ async function main() {
   const retiredStaff = await calendar('staff', retired.id, past(-24), past(24));
   check('Venue Staff get 200 for the retired venue too', retiredStaff.status === 200,
     `status ${retiredStaff.status}`);
+
+  // --- AC1 (SCRUM-185): the retired venue is reachable from search ----------
+  // Narrowed to this run's location, so the live catalogue's other venues do
+  // not matter.
+  console.log('\n  AC1 a retired venue is found by search with includeRetired');
+
+  const searchQuery = (extra = '') => `/search?location=${encodeURIComponent(`${NAME}_loc`)}${extra}`;
+  const findRetired = async (res) => {
+    const body = await res.json().catch(() => null);
+    return Array.isArray(body) ? body.find((v) => v.id === retired.id) : undefined;
+  };
+
+  const coordSearch = await call('coordinator', searchQuery('&includeRetired=true'));
+  const coordHit = coordSearch.status === 200 ? await findRetired(coordSearch) : undefined;
+  check('an Event Coordinator searching with includeRetired=true gets 200', coordSearch.status === 200,
+    `status ${coordSearch.status}`);
+  check('and the retired venue is listed with a non-null retiredAt',
+    Boolean(coordHit) && coordHit.retiredAt != null, coordHit ? `retiredAt ${coordHit.retiredAt}` : 'not listed');
+
+  const organiserFlag = await call('organiser', searchQuery('&includeRetired=true'));
+  check('an Event Organiser searching with includeRetired=true gets 403', organiserFlag.status === 403,
+    `status ${organiserFlag.status}`);
+
+  const organiserPlain = await call('organiser', searchQuery());
+  const organiserHit = organiserPlain.status === 200 ? await findRetired(organiserPlain) : undefined;
+  check('an Event Organiser searching without the flag gets 200 without the retired venue',
+    organiserPlain.status === 200 && !organiserHit, `status ${organiserPlain.status}`);
 
   // --- AC6: everyone else is refused ------------------------------------------
   console.log('\n  AC6 Organisers and Attendees are refused');

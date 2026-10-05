@@ -21,6 +21,9 @@
 // from the real clock at the start of each test with the local Date
 // constructor, and compared as instants with toISOString. No fake timers.
 // Passes under TZ=UTC, Asia/Singapore and America/New_York.
+//
+// SCRUM-185 (for SCRUM-178 AC1): the fake search honours includeRetired, and a
+// coordinator reaches a retired venue's past bookings from search.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -110,8 +113,11 @@ function dayTitle(date) {
  */
 function createFakeVenueBackend({ venues, entriesByVenue }) {
   return {
-    async searchActiveVenues() {
-      return venues.filter((venue) => !venue.retiredAt).map((venue) => ({ ...venue }));
+    // Like GET /venues/search: retired venues only with includeRetired (SCRUM-185).
+    async searchActiveVenues(filters = {}) {
+      return venues
+        .filter((venue) => filters.includeRetired === true || !venue.retiredAt)
+        .map((venue) => ({ ...venue }));
     },
     async getVenueCatalogue() {
       return venues.map((venue) => ({ ...venue }));
@@ -136,6 +142,7 @@ const FAKE_BACKED = ["searchActiveVenues", "getVenueCatalogue", "getVenueDetails
 let backend;
 let monday;
 let entries;
+let retiredMonday;
 
 function signIn(role) {
   vi.mocked(useAuth).mockReturnValue({
@@ -222,6 +229,10 @@ beforeEach(() => {
     },
   };
 
+  // The week the venue retired, and a booking the week before it.
+  retiredMonday = mondayOf(new Date(RETIRED.retiredAt));
+  const farewellDay = dayAfter(retiredMonday, -5);
+
   backend = createFakeVenueBackend({
     venues: [VENUE, RETIRED],
     entriesByVenue: {
@@ -234,6 +245,15 @@ beforeEach(() => {
           endsAt: at(dayAfter(monday, 4), 12),
           reason: "renovation",
           notes: null,
+        },
+        {
+          kind: "booking",
+          id: "b-old",
+          startsAt: at(farewellDay, 10),
+          endsAt: at(farewellDay, 12),
+          status: "approved",
+          eventRequestId: "e-old",
+          eventName: "Farewell Gala",
         },
       ],
     },
@@ -349,6 +369,55 @@ describe("SCRUM178_AC1_AC2_AC4 venue calendar flow (SCRUM-184)", () => {
     expect(lastWindow()).toEqual({ ...windowOf(monday, dayAfter(monday, 7)), venueId: RETIRED.id });
     const friday = within(screen.getByRole("table")).getAllByRole("cell")[4];
     expect(labelOf(within(friday).getByRole("listitem"))).toBe("Blocked — Renovation");
+  });
+});
+
+describe("SCRUM178_AC1 retired venue calendar from search (SCRUM-185)", () => {
+  it("SCRUM178_AC1_coordinator_opens_a_retired_venues_calendar_from_search", async () => {
+    const user = userEvent.setup();
+    signIn("event_coordinator");
+    renderAppAt("/venue-search");
+
+    // ---- 1. A default search lists active venues only ----------------------
+    await user.click(screen.getByRole("button", { name: "Search venues" }));
+    expect(await screen.findByText("Hall A")).toBeInTheDocument();
+    expect(screen.queryByText("Old Annex")).not.toBeInTheDocument();
+    expect(venueService.searchActiveVenues.mock.calls[0][0]).not.toHaveProperty("includeRetired");
+
+    // ---- 2. Tick Include retired, then Search ------------------------------
+    await user.click(screen.getByRole("checkbox", { name: "Include retired venues" }));
+    expect(venueService.searchActiveVenues).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Search venues" }));
+
+    const row = (await screen.findByText("Old Annex")).closest("li");
+    expect(venueService.searchActiveVenues).toHaveBeenCalledTimes(2);
+    expect(venueService.searchActiveVenues.mock.calls[1][0]).toMatchObject({ includeRetired: true });
+    expect(within(row).getByText("Retired")).toHaveClass("venue-search__badge");
+
+    // ---- 3. View calendar opens on the week it retired ---------------------
+    await user.click(within(row).getByRole("link", { name: "View calendar" }));
+
+    expect(window.location.pathname).toBe(`/venues/${RETIRED.id}/calendar`);
+    expect(await screen.findByRole("heading", { level: 1, name: "Old Annex" })).toBeInTheDocument();
+    expect(screen.getByText("Retired")).toHaveClass("venue-calendar__badge");
+    await settled();
+
+    expect(calendarWindows()).toEqual([
+      { venueId: RETIRED.id, from: retiredMonday.toISOString(), to: dayAfter(retiredMonday, 7).toISOString() },
+    ]);
+    expect(screen.queryByText("Farewell Gala")).not.toBeInTheDocument();
+
+    // ---- 4. Previous week shows the past booking ---------------------------
+    await user.click(screen.getByRole("button", { name: "Previous week" }));
+    const gala = await screen.findByText("Farewell Gala");
+    expect(lastWindow()).toEqual({
+      venueId: RETIRED.id,
+      from: dayAfter(retiredMonday, -7).toISOString(),
+      to: retiredMonday.toISOString(),
+    });
+    expect(labelOf(gala.closest("li"))).toBe("Booked");
+    const wednesday = within(screen.getByRole("table")).getAllByRole("cell")[2];
+    expect(within(wednesday).getByRole("listitem")).toHaveTextContent("Farewell Gala");
   });
 });
 
