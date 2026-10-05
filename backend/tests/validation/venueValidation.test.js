@@ -4,6 +4,7 @@
  * SCRUM-94: validate venue creation and update input.
  * SCRUM-110: the venue id retirement is given.
  * SCRUM-111: the filters a venue search may be narrowed by.
+ * SCRUM-138 (SCRUM-20 AC1): a search against an event's requirements.
  *
  * Describe blocks are named after the acceptance criteria they cover, so a
  * requirement traces to the test proving it.
@@ -16,6 +17,7 @@ import {
   validateUpdateVenue,
   validateVenueId,
   validateSearchFilters,
+  validateEventSearchCriteria,
 } from '../../src/validation/venueValidation.js';
 import { ValidationError } from '../../src/errors.js';
 
@@ -869,5 +871,282 @@ describe('SCRUM20_SCRUM137 setup time', () => {
   it('SCRUM20_SCRUM137_the_summary_message_names_the_field', () => {
     const err = errorFrom(() => validateCreateVenue({ ...VALID, setupMinutes: 25 }));
     expect(err.message).toContain(`setupMinutes: ${MESSAGE}`);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-138, for SCRUM-20 AC1: "Search by event date, start time, end time and
+// expected attendance. Room layout, accessibility features and facilities are
+// optional." Cases B-AC1-01..10, 14 (shape half) and 15 of
+// SCRUM-20-test-cases.md. Whether a code EXISTS (B-AC1-11..13) is the
+// service's check and is tested in venueService.test.js.
+// ---------------------------------------------------------------------------
+describe('SCRUM20_AC1 event search criteria', () => {
+  /** The required fields only: Wednesday 2026-11-11, 10:00-12:00 Singapore, 80 people. */
+  const REQUIRED = Object.freeze({
+    startsAt: '2026-11-11T10:00:00+08:00',
+    endsAt: '2026-11-11T12:00:00+08:00',
+    expectedAttendance: 80,
+  });
+
+  const detailsFor = (input) => errorFrom(() => validateEventSearchCriteria(input))?.details;
+
+  it('SCRUM20_AC1_required_fields_only_is_valid', () => {
+    // B-AC1-01: accepted, and no optional key appears.
+    expect(validateEventSearchCriteria({ ...REQUIRED })).toEqual({ ...REQUIRED });
+  });
+
+  it('SCRUM20_AC1_every_criterion_supplied_is_valid', () => {
+    const input = {
+      ...REQUIRED,
+      layout: 'theatre',
+      accessibility: ['step_free_entrance'],
+      facilities: ['projector', 'wifi'],
+    };
+    expect(validateEventSearchCriteria(input)).toEqual(input);
+  });
+
+  it('SCRUM20_AC1_timestamps_and_codes_are_trimmed', () => {
+    const result = validateEventSearchCriteria({
+      startsAt: '  2026-11-11T10:00:00+08:00 ',
+      endsAt: ' 2026-11-11T12:00:00+08:00',
+      expectedAttendance: 80,
+      layout: '  theatre ',
+      accessibility: [' lift_access '],
+      facilities: ['wifi  '],
+    });
+    expect(result).toEqual({
+      ...REQUIRED,
+      layout: 'theatre',
+      accessibility: ['lift_access'],
+      facilities: ['wifi'],
+    });
+  });
+
+  it('SCRUM20_AC1_utc_timestamps_are_accepted', () => {
+    const input = { ...REQUIRED, startsAt: '2026-11-11T02:00:00Z', endsAt: '2026-11-11T04:00:00Z' };
+    expect(validateEventSearchCriteria(input)).toEqual(input);
+  });
+
+  it.each([
+    ['SCRUM20_AC1_missing_start_is_an_error', 'startsAt'],
+    ['SCRUM20_AC1_missing_end_is_an_error', 'endsAt'],
+    ['SCRUM20_AC1_missing_attendance_is_an_error', 'expectedAttendance'],
+  ])('%s', (_name, field) => {
+    const input = { ...REQUIRED };
+    delete input[field];
+
+    const err = errorFrom(() => validateEventSearchCriteria(input));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field, message: 'is required' }]);
+  });
+
+  it.each([
+    ['null', null],
+    ['an empty string', ''],
+    ['a blank string', '   '],
+  ])('SCRUM20_AC1_start_given_as_%s_is_required', (_label, value) => {
+    expect(detailsFor({ ...REQUIRED, startsAt: value }))
+      .toEqual([{ field: 'startsAt', message: 'is required' }]);
+  });
+
+  it.each([
+    ['null', null],
+    ['an empty string', ''],
+  ])('SCRUM20_AC1_end_given_as_%s_is_required', (_label, value) => {
+    expect(detailsFor({ ...REQUIRED, endsAt: value }))
+      .toEqual([{ field: 'endsAt', message: 'is required' }]);
+  });
+
+  it('SCRUM20_AC1_missing_period_reports_both_ends', () => {
+    expect(detailsFor({ expectedAttendance: 80 })).toEqual([
+      { field: 'startsAt', message: 'is required' },
+      { field: 'endsAt', message: 'is required' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_missing_end_and_malformed_start_are_reported_together', () => {
+    const details = detailsFor({ startsAt: 'tomorrow', expectedAttendance: 80 });
+    expect(details.map((d) => d.field).sort()).toEqual(['endsAt', 'startsAt']);
+    expect(details).toContainEqual({ field: 'endsAt', message: 'is required' });
+  });
+
+  it('SCRUM20_AC1_missing_start_and_malformed_end_are_reported_together', () => {
+    const details = detailsFor({ endsAt: '2026-11-11T12:00:00', expectedAttendance: 80 });
+    expect(details).toEqual([
+      { field: 'startsAt', message: 'is required' },
+      { field: 'endsAt', message: 'must include a UTC offset, such as Z or +08:00' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_missing_start_with_a_valid_end_reports_only_the_start', () => {
+    expect(detailsFor({ endsAt: REQUIRED.endsAt, expectedAttendance: 80 }))
+      .toEqual([{ field: 'startsAt', message: 'is required' }]);
+  });
+
+  it('SCRUM20_AC1_invalid_date_is_an_error', () => {
+    // B-AC1-05: there is no 31 November.
+    const details = detailsFor({ ...REQUIRED, startsAt: '2026-11-31T10:00:00+08:00' });
+    expect(details.map((d) => d.field)).toEqual(['startsAt']);
+  });
+
+  it('SCRUM20_AC1_timestamp_without_offset_is_an_error', () => {
+    // B-AC1-06
+    expect(detailsFor({ ...REQUIRED, startsAt: '2026-11-11T10:00:00' })).toEqual([
+      { field: 'startsAt', message: 'must include a UTC offset, such as Z or +08:00' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_timestamp_as_a_number_is_an_error', () => {
+    const details = detailsFor({ ...REQUIRED, endsAt: Date.parse(REQUIRED.endsAt) });
+    expect(details.map((d) => d.field)).toEqual(['endsAt']);
+  });
+
+  it('SCRUM20_AC1_end_equal_to_start_is_an_error', () => {
+    // B-AC1-07
+    expect(detailsFor({ ...REQUIRED, endsAt: REQUIRED.startsAt })).toEqual([
+      { field: 'endsAt', message: 'must be later than the start' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_end_before_start_is_an_error', () => {
+    // B-AC1-08
+    expect(detailsFor({ ...REQUIRED, endsAt: '2026-11-11T09:00:00+08:00' })).toEqual([
+      { field: 'endsAt', message: 'must be later than the start' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_end_before_start_is_judged_as_instants_across_offsets', () => {
+    // The start 10:00+08:00 is 02:00Z; an end of 03:00Z is an hour later, so
+    // the window is valid even though "03:00" reads earlier than "10:00".
+    expect(() => validateEventSearchCriteria({
+      ...REQUIRED,
+      endsAt: '2026-11-11T03:00:00Z',
+    })).not.toThrow();
+    // 01:00Z is 09:00 Singapore: before the 10:00 start.
+    expect(detailsFor({ ...REQUIRED, endsAt: '2026-11-11T01:00:00Z' })).toEqual([
+      { field: 'endsAt', message: 'must be later than the start' },
+    ]);
+  });
+
+  it.each([
+    ['SCRUM20_AC1_attendance_below_one_is_an_error (0)', 0, 'must be greater than zero'],
+    ['SCRUM20_AC1_attendance_below_one_is_an_error (-1)', -1, 'must be greater than zero'],
+    ['SCRUM20_AC1_attendance_below_one_is_an_error (-5)', -5, 'must be greater than zero'],
+    ['SCRUM20_AC1_fractional_attendance_is_an_error (1.5)', 1.5, 'must be a whole number'],
+    ['SCRUM20_AC1_fractional_attendance_is_an_error (80.5)', 80.5, 'must be a whole number'],
+    ['SCRUM20_AC1_attendance_as_text_is_an_error', '40', 'must be a number'],
+    ['SCRUM20_AC1_attendance_nan_is_an_error', NaN, 'must be a number'],
+    ['SCRUM20_AC1_attendance_null_is_required', null, 'is required'],
+  ])('%s', (_name, value, message) => {
+    expect(detailsFor({ ...REQUIRED, expectedAttendance: value }))
+      .toEqual([{ field: 'expectedAttendance', message }]);
+  });
+
+  it('SCRUM20_AC1_attendance_of_one_is_valid', () => {
+    expect(validateEventSearchCriteria({ ...REQUIRED, expectedAttendance: 1 }).expectedAttendance)
+      .toBe(1);
+  });
+
+  it.each([
+    ['a number', 3],
+    ['an array', ['theatre']],
+    ['an object', { code: 'theatre' }],
+    ['a boolean', true],
+  ])('SCRUM20_AC1_layout_as_%s_is_an_error', (_label, value) => {
+    expect(detailsFor({ ...REQUIRED, layout: value }))
+      .toEqual([{ field: 'layout', message: 'must be a single layout code' }]);
+  });
+
+  it.each(['accessibility', 'facilities'])('SCRUM20_AC1_%s_not_an_array_is_an_error', (field) => {
+    expect(detailsFor({ ...REQUIRED, [field]: 'wifi' }))
+      .toEqual([{ field, message: 'must be an array of codes' }]);
+  });
+
+  it.each(['accessibility', 'facilities'])('SCRUM20_AC1_%s_with_blank_entries_is_an_error', (field) => {
+    expect(detailsFor({ ...REQUIRED, [field]: ['ok', '', '  ', 7] })).toEqual([
+      { field, message: 'entry 1 must be a non-empty code' },
+      { field, message: 'entry 2 must be a non-empty code' },
+      { field, message: 'entry 3 must be a non-empty code' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_every_fault_is_reported_at_once', () => {
+    // B-AC1-14, shape half: no endsAt, attendance 0, and a malformed facility
+    // list come back in one ValidationError. (The unknown-code half cannot
+    // join them: validation throws before the service looks codes up -- see
+    // venueService.test.js.)
+    const err = errorFrom(() => validateEventSearchCriteria({
+      startsAt: REQUIRED.startsAt,
+      expectedAttendance: 0,
+      layout: 7,
+      facilities: [''],
+    }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([
+      { field: 'endsAt', message: 'is required' },
+      { field: 'expectedAttendance', message: 'must be greater than zero' },
+      { field: 'layout', message: 'must be a single layout code' },
+      { field: 'facilities', message: 'entry 0 must be a non-empty code' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_the_summary_message_names_each_field', () => {
+    const err = errorFrom(() => validateEventSearchCriteria({ startsAt: REQUIRED.startsAt }));
+    expect(err.message).toContain('endsAt: is required');
+    expect(err.message).toContain('expectedAttendance: is required');
+  });
+
+  it('SCRUM20_AC1_unknown_keys_are_ignored', () => {
+    expect(validateEventSearchCriteria({
+      ...REQUIRED,
+      attendance: 999,
+      includeRetired: true,
+      eventName: 'Gala',
+    })).toEqual({ ...REQUIRED });
+  });
+
+  it('SCRUM20_AC1_empty_optional_criteria_mean_not_filtered', () => {
+    // B-AC1-15: an unfilled form field is not a criterion.
+    const result = validateEventSearchCriteria({
+      ...REQUIRED,
+      layout: '',
+      accessibility: [],
+      facilities: [],
+    });
+    expect(result).toEqual({ ...REQUIRED });
+    expect(result).not.toHaveProperty('layout');
+    expect(result).not.toHaveProperty('accessibility');
+    expect(result).not.toHaveProperty('facilities');
+  });
+
+  it('SCRUM20_AC1_null_or_blank_optional_criteria_mean_not_filtered', () => {
+    expect(validateEventSearchCriteria({
+      ...REQUIRED,
+      layout: '   ',
+      accessibility: null,
+      facilities: undefined,
+    })).toEqual({ ...REQUIRED });
+    expect(validateEventSearchCriteria({ ...REQUIRED, layout: null })).toEqual({ ...REQUIRED });
+  });
+
+  it('SCRUM20_AC1_does_not_mutate_its_input', () => {
+    const input = { ...REQUIRED, layout: ' theatre ', facilities: [' wifi '] };
+    const snapshot = structuredClone(input);
+    validateEventSearchCriteria(input);
+    expect(input).toEqual(snapshot);
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['an array', [REQUIRED]],
+    ['a string', 'startsAt=...'],
+    ['a number', 80],
+  ])('SCRUM20_AC1_criteria_given_as_%s_are_refused', (_label, value) => {
+    const err = errorFrom(() => validateEventSearchCriteria(value));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toMatch(/expected an object/);
   });
 });

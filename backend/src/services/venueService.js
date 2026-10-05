@@ -29,6 +29,12 @@
  * SCRUM-185 (SCRUM-178 AC1): searchVenues can include retired venues when
  * asked, so a retired venue's calendar is reachable. The route decides who
  * may ask.
+ *
+ * SCRUM-138 (SCRUM-20 AC1/AC3/AC4/AC7): findVenuesForEvent searches against
+ * an event's requirements, keeping only venues that meet every supplied
+ * criterion. The rule itself lives in domain/venueMatching.js; this file loads
+ * the venues and checks the requested codes exist. searchVenues is untouched --
+ * SCRUM-140 decides how the search page moves over.
  */
 
 import { supabase } from '../config/supabaseClient.js';
@@ -38,10 +44,28 @@ import {
   validateUpdateVenue,
   validateVenueId,
   validateSearchFilters,
+  validateEventSearchCriteria,
 } from '../validation/venueValidation.js';
 import { findBlockedVenueIds } from './venueBlockService.js';
 import { DEFAULT_TURNAROUND_MINUTES } from '../domain/turnaroundOptions.js';
 import { DEFAULT_SETUP_MINUTES } from '../domain/setupOptions.js';
+import { matchesAllCriteria } from '../domain/venueMatching.js';
+
+/**
+ * The venue columns with every attribute joined: four join tables, flattened
+ * by toVenueWithAttributes below.
+ *
+ * SCRUM-138: shared by getVenueById and findVenuesForEvent, so the one-venue
+ * read and the search can never disagree on what a venue's attributes are.
+ */
+const VENUE_WITH_ATTRIBUTES_SELECT = `
+      id, name, location, max_capacity, turnaround_minutes, setup_minutes,
+      retired_at, created_at, updated_at, last_modified_by,
+      venue_room_layouts ( room_layout_code ),
+      venue_accessibility_features ( accessibility_feature_code ),
+      venue_facilities ( facility_code ),
+      venue_operating_hours ( day_of_week, opens_at, closes_at )
+    `;
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -193,22 +217,32 @@ export async function updateVenue(id, changes, userId = null) {
 export async function getVenueById(id) {
   const { data, error } = await supabase
     .from('venues')
-    .select(`
-      id, name, location, max_capacity, turnaround_minutes, setup_minutes,
-      retired_at, created_at, updated_at, last_modified_by,
-      venue_room_layouts ( room_layout_code ),
-      venue_accessibility_features ( accessibility_feature_code ),
-      venue_facilities ( facility_code ),
-      venue_operating_hours ( day_of_week, opens_at, closes_at )
-    `)
+    .select(VENUE_WITH_ATTRIBUTES_SELECT)
     .eq('id', id)
     .maybeSingle();
 
   if (error) throw translateError(error);
   if (!data) throw new NotFoundError(`Venue ${id} not found`);
 
-  // Flatten the join rows into plain arrays of codes -- callers want
-  // ['projector','wifi'], not [{facility_code:'projector'}, ...].
+  return toVenueWithAttributes(data);
+}
+
+/**
+ * One row of VENUE_WITH_ATTRIBUTES_SELECT, in camelCase.
+ *
+ * SCRUM-138: lifted out of getVenueById unchanged -- same keys, same order,
+ * same sorting -- so findVenuesForEvent maps rows exactly as the one-venue
+ * read does and getVenueById's result is what it was.
+ *
+ * Flattens the join rows into plain arrays of codes -- callers want
+ * ['projector','wifi'], not [{facility_code:'projector'}, ...]. A venue with
+ * none of something gets [] rather than null, because PostgREST returns an
+ * empty embedded array for it (B-AC7-02).
+ *
+ * @param {object} data  a venues row with its four embedded join tables
+ * @returns {object}
+ */
+function toVenueWithAttributes(data) {
   return {
     id: data.id,
     name: data.name,
@@ -358,6 +392,132 @@ export async function searchVenues(filters = {}) {
     if (search.includeRetired) venue.retiredAt = row.retired_at;
     return venue;
   });
+}
+
+
+/**
+ * The lookup table behind each optional criterion, keyed by the criterion's
+ * field name -- which is also the field an unknown code is reported under.
+ */
+const CRITERION_LOOKUPS = [
+  { field: 'layout', table: 'room_layouts' },
+  { field: 'accessibility', table: 'accessibility_features' },
+  { field: 'facilities', table: 'facilities' },
+];
+
+/**
+ * Refuse a search naming a layout, accessibility feature or facility that
+ * does not exist.
+ *
+ * SCRUM-138, for SCRUM-20 B-AC1-11 to 13 (the case document's open point 2).
+ * On create and update an unknown code hits a foreign key and translateError
+ * names it. A search writes nothing, so there is no foreign key to hit: an
+ * unknown code would simply match no venue, and the coordinator would read
+ * "nothing matched" when the real fault was a typo. So it is checked here,
+ * against the lookup tables, and answered with a 400 naming the code.
+ *
+ * Only the kinds actually supplied are read, one query each, and nothing at
+ * all when no optional criterion was given. Every unknown code across every
+ * kind is collected into one ValidationError, the same "every fault at once"
+ * rule validation follows.
+ *
+ * @param {object} criteria  validated, so optional keys are present only when
+ *                           they hold something to check
+ * @throws {ValidationError} details [{ field, message: 'unknown code "x"' }]
+ */
+async function assertKnownCodes(criteria) {
+  const details = [];
+
+  for (const { field, table } of CRITERION_LOOKUPS) {
+    if (criteria[field] === undefined) continue;
+
+    // layout is one code, the others lists; a Set also stops a code repeated
+    // in the request from being reported twice.
+    const requested = [...new Set([criteria[field]].flat())];
+
+    const { data, error } = await supabase
+      .from(table)
+      .select('code')
+      .in('code', requested);
+
+    if (error) throw translateError(error);
+
+    const known = new Set((data ?? []).map((row) => row.code));
+    for (const code of requested) {
+      if (!known.has(code)) details.push({ field, message: `unknown code "${code}"` });
+    }
+  }
+
+  if (details.length > 0) {
+    const summary = details.map(({ field, message }) => `${field}: ${message}`).join('; ');
+    throw new ValidationError(`Invalid venue search -- ${summary}`, details);
+  }
+}
+
+/**
+ * Search for venues that can host an event.
+ *
+ * SCRUM-138, for SCRUM-20:
+ *  - AC1: the event's period and expected attendance are required; layout,
+ *    accessibility features and facilities are optional, and an optional
+ *    criterion left out is not filtered on.
+ *  - AC3/AC4: a venue is returned only if it meets every supplied criterion
+ *    -- domain/venueMatching.js's matchesAllCriteria, which answers yes or no
+ *    and never why.
+ *  - AC7: each result carries name, location, maximum capacity, layouts,
+ *    accessibility features and facilities, plus the id to book it by.
+ *
+ * Retired venues are never returned: .is('retired_at', null) in the query, the
+ * predicate 002's partial indexes exist for, as in searchVenues (SCRUM-111).
+ *
+ * Why load every active venue and filter in JavaScript rather than in the
+ * query: the rule then has exactly one home, matchesAllCriteria, which every
+ * boundary case can test without a database (CI has none). Pushing half of it
+ * into PostgREST would split it across two languages that could drift, and
+ * the hours check -- a Singapore weekday and wall-clock time derived from the
+ * request -- does not translate into a PostgREST filter at all. The catalogue
+ * is small, so the cost is one query returning a few dozen rows. If it grows,
+ * the first optimisation is a capacity pre-filter, .gte('max_capacity', ...),
+ * which is safe because it can only remove venues the rule would remove too.
+ *
+ * Not yet: bookings, blocks, and setup and turnaround (SCRUM-139). Each
+ * result carries setupMinutes and turnaroundMinutes ready for that, and hours
+ * so a result can show when the venue is open.
+ *
+ * @param {object} criteria  see validateEventSearchCriteria
+ * @returns {Promise<object[]>} matching active venues, ordered by name, each
+ *   { id, name, location, maxCapacity, layouts, accessibility, facilities,
+ *     hours, setupMinutes, turnaroundMinutes }; [] when nothing matches
+ * @throws {ValidationError} a malformed request or an unknown code, before
+ *   the venues are read
+ */
+export async function findVenuesForEvent(criteria) {
+  const search = validateEventSearchCriteria(criteria);
+  await assertKnownCodes(search);
+
+  const { data, error } = await supabase
+    .from('venues')
+    .select(VENUE_WITH_ATTRIBUTES_SELECT)
+    .is('retired_at', null)
+    .order('name');
+
+  if (error) throw translateError(error);
+
+  return (data ?? [])
+    .map(toVenueWithAttributes)
+    .filter((venue) => matchesAllCriteria(venue, search))
+    .map((venue) => ({
+      id: venue.id,
+      name: venue.name,
+      location: venue.location,
+      maxCapacity: venue.maxCapacity,
+      layouts: venue.layouts,
+      accessibility: venue.accessibility,
+      facilities: venue.facilities,
+      hours: venue.hours,
+      setupMinutes: venue.setupMinutes,
+      turnaroundMinutes: venue.turnaroundMinutes,
+    }));
 }
 
 
