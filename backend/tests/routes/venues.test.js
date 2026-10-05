@@ -2108,3 +2108,109 @@ describe('SCRUM178_AC6 Organisers and Attendees cannot search retired venues', (
     expect(from).not.toHaveBeenCalled();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-137 (SCRUM-20): the setup time before an event reaches the API
+// ---------------------------------------------------------------------------
+describe('SCRUM20_SCRUM137 setup time through the venue routes', () => {
+  it('SCRUM20_SCRUM137_POST_with_setup_25_answers_400_on_setupMinutes_with_no_rpc', async () => {
+    const res = await request(appWith()).post('/api/venues').send({
+      name: 'Hall A',
+      location: 'SCIS',
+      maxCapacity: 40,
+      setupMinutes: 25,
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(['setupMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM20_SCRUM137_POST_with_setup_30_sends_30_and_answers_201', async () => {
+    rpc.mockResolvedValueOnce(ok(VENUE_ID));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ setup_minutes: 30 }))));
+
+    const res = await request(appWith()).post('/api/venues').send({
+      name: 'Hall A',
+      location: 'SCIS',
+      maxCapacity: 40,
+      setupMinutes: 30,
+    });
+
+    expect(res.status).toBe(201);
+    const [fn, payload] = rpc.mock.calls[0];
+    expect(fn).toBe('create_venue');
+    expect(payload.p_setup_minutes).toBe(30);
+    expect(res.body.setupMinutes).toBe(30);
+  });
+
+  it('SCRUM20_SCRUM137_POST_without_setup_sends_the_default_0', async () => {
+    rpc.mockResolvedValueOnce(ok(VENUE_ID));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ setup_minutes: 0 }))));
+
+    const res = await request(appWith()).post('/api/venues').send({
+      name: 'Hall A',
+      location: 'SCIS',
+      maxCapacity: 40,
+    });
+
+    expect(res.status).toBe(201);
+    expect(rpc.mock.calls[0][1].p_setup_minutes).toBe(0);
+  });
+
+  it('SCRUM20_SCRUM137_PATCH_setup_0_answers_200_and_the_rpc_gets_0', async () => {
+    rpc.mockResolvedValueOnce(ok(null));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ setup_minutes: 0 }))));
+
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ setupMinutes: 0 });
+
+    expect(res.status).toBe(200);
+    const [fn, payload] = rpc.mock.calls[0];
+    expect(fn).toBe('update_venue');
+    expect(payload.p_setup_minutes).toBe(0);
+    expect(res.body.setupMinutes).toBe(0);
+  });
+
+  it('SCRUM20_SCRUM137_PATCH_with_a_string_setup_answers_400_with_no_rpc', async () => {
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ setupMinutes: '30' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(['setupMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM20_SCRUM137_PATCH_with_null_setup_answers_400_with_no_rpc', async () => {
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ setupMinutes: null });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(['setupMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM20_SCRUM137_PATCH_setup_from_a_non_venue_staff_role_is_refused', async () => {
+    const res = await request(appWith(signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID)))
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ setupMinutes: 30 });
+
+    expect(res.status).toBe(403);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM20_SCRUM137_GET_by_id_includes_setupMinutes', async () => {
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ setup_minutes: 45 }))));
+
+    const res = await request(appWith()).get(`/api/venues/${VENUE_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.setupMinutes).toBe(45);
+    expect(res.body).not.toHaveProperty('setup_minutes');
+  });
+});

@@ -67,6 +67,9 @@ export async function searchActiveVenues(filters = {}) {
  *
  * Carries turnaroundMinutes (SCRUM-186), a number -- 0 means none. Only this
  * endpoint returns it; search and the catalogue list do not.
+ *
+ * Carries setupMinutes (SCRUM-137) the same way: a number, 0 means none, and
+ * only this endpoint returns it.
  */
 export async function getVenueDetails(venueId) {
   const response = await apiClient.get(`/venues/${venueId}`);
@@ -156,6 +159,7 @@ export async function retireVenue(venueId) {
  * @param {string[]} [input.facilities]     facility codes
  * @param {Array<{day_of_week: number, opens_at: string, closes_at: string}>} [input.hours]
  * @param {number} [input.turnaroundMinutes] one of 0, 15, 30, 45, 60, 90, 120 (SCRUM-186); 0 when omitted
+ * @param {number} [input.setupMinutes]      one of 0, 15, 30, 45, 60, 90, 120 (SCRUM-137); 0 when omitted
  * @returns {Promise<Object>} the created venue, fully populated
  */
 export async function createVenue(input) {

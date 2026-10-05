@@ -15,6 +15,9 @@
  * SCRUM-186 adds the turnaround between events, one of a fixed list of
  * minutes (domain/turnaroundOptions.js).
  *
+ * SCRUM-137 (SCRUM-20) adds the setup time before an event, checked the same
+ * way against its own list (domain/setupOptions.js).
+ *
  * SCRUM-185 (SCRUM-178 AC1) adds includeRetired to the search filters, so a
  * retired venue's calendar can be reached from search.
  *
@@ -31,6 +34,7 @@ import {
   TURNAROUND_MINUTES_OPTIONS,
   isTurnaroundOption,
 } from '../domain/turnaroundOptions.js';
+import { SETUP_MINUTES_OPTIONS, isSetupOption } from '../domain/setupOptions.js';
 
 /** HH:MM or HH:MM:SS, with real hour and minute ranges. */
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)(:([0-5]\d))?$/;
@@ -214,6 +218,25 @@ function checkTurnaround(errors, value) {
   return value;
 }
 
+/**
+ * SCRUM-137: setup time before an event, one of the allowed minute values.
+ *
+ * A separate check from checkTurnaround, not a shared one, because the two
+ * lists are separate (each mirrors its own CHECK in the database) and the
+ * error must name the field the caller actually sent. Null is refused for the
+ * same reason as there: update_venue reads NULL as "keep the current value".
+ */
+function checkSetup(errors, value) {
+  if (!isSetupOption(value)) {
+    errors.add(
+      'setupMinutes',
+      `must be one of ${SETUP_MINUTES_OPTIONS.join(', ')} minutes`,
+    );
+    return null;
+  }
+  return value;
+}
+
 
 /**
  * Validate input for creating a venue.
@@ -246,6 +269,10 @@ export function validateCreateVenue(input) {
 
   if (input.turnaroundMinutes !== undefined) {
     normalised.turnaroundMinutes = checkTurnaround(errors, input.turnaroundMinutes);
+  }
+
+  if (input.setupMinutes !== undefined) {
+    normalised.setupMinutes = checkSetup(errors, input.setupMinutes);
   }
 
   throwIfInvalid(errors);
@@ -305,6 +332,13 @@ export function validateUpdateVenue(changes) {
   // on its own is a change and passes the "no changes supplied" rule above.
   if (changes.turnaroundMinutes !== undefined) {
     normalised.turnaroundMinutes = checkTurnaround(errors, changes.turnaroundMinutes);
+  }
+
+  // Same rule for setup: {setupMinutes: 0} alone is a change. The "no changes
+  // supplied" count above already sees it, because it counts every key whose
+  // value is not undefined -- so no field list there needs updating.
+  if (changes.setupMinutes !== undefined) {
+    normalised.setupMinutes = checkSetup(errors, changes.setupMinutes);
   }
 
   throwIfInvalid(errors);

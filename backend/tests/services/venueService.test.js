@@ -1455,6 +1455,7 @@ describe('SCRUM186 turnaround is written by create and update and read by id', (
       p_facilities: null,
       p_hours: null,
       p_turnaround_minutes: 90,
+      p_setup_minutes: null,
       p_user_id: STAFF_ID,
     });
   });
@@ -1508,6 +1509,189 @@ describe('SCRUM186 turnaround is written by create and update and read by id', (
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.status).toBe(400);
     expect(err.message).toContain('venues_turnaround_minutes_allowed');
+    expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-137 (SCRUM-20): the setup time before an event follows turnaround's
+// path exactly -- written by create and update, read back by getVenueById.
+// ---------------------------------------------------------------------------
+describe('SCRUM20_SCRUM137 setup time is written by create and update and read by id', () => {
+  const NEW_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const MINIMAL = Object.freeze({
+    name: 'Seminar Room 2-1',
+    location: 'Level 2, SCIS',
+    maxCapacity: 40,
+  });
+
+  it('SCRUM20_SCRUM137_getVenueById_selects_setup_minutes', async () => {
+    const read = queryStub({ data: populatedVenueRow({ setup_minutes: 30 }), error: null });
+    from.mockReturnValue(read);
+
+    await getVenueById(VENUE_ID);
+
+    expect(read.args('select')[0]).toMatch(/\bsetup_minutes\b/);
+  });
+
+  it('SCRUM20_SCRUM137_getVenueById_maps_setup_minutes_to_setupMinutes', async () => {
+    from.mockReturnValue(
+      queryStub({ data: populatedVenueRow({ setup_minutes: 30 }), error: null }),
+    );
+
+    const venue = await getVenueById(VENUE_ID);
+
+    expect(venue.setupMinutes).toBe(30);
+    expect(venue).not.toHaveProperty('setup_minutes');
+  });
+
+  it('SCRUM20_SCRUM137_getVenueById_maps_a_zero_setup_as_0_not_missing', async () => {
+    from.mockReturnValue(queryStub({ data: retiredVenueRow({ setup_minutes: 0 }), error: null }));
+
+    const venue = await getVenueById(VENUE_ID);
+
+    expect(venue.setupMinutes).toBe(0);
+  });
+
+  it('SCRUM20_SCRUM137_getVenueById_keeps_setup_and_turnaround_apart', async () => {
+    from.mockReturnValue(
+      queryStub({
+        data: populatedVenueRow({ setup_minutes: 15, turnaround_minutes: 90 }),
+        error: null,
+      }),
+    );
+
+    const venue = await getVenueById(VENUE_ID);
+
+    expect(venue.setupMinutes).toBe(15);
+    expect(venue.turnaroundMinutes).toBe(90);
+  });
+
+  it('SCRUM20_SCRUM137_create_sends_the_default_0_when_setup_is_omitted', async () => {
+    givenWriteSucceeds(populatedVenueRow(), NEW_ID);
+
+    await createVenue(MINIMAL, STAFF_ID);
+
+    expect(rpcArgs().p_setup_minutes).toBe(0);
+  });
+
+  it.each([0, 15, 30, 45, 60, 90, 120])(
+    'SCRUM20_SCRUM137_create_sends_the_given_setup_%s',
+    async (minutes) => {
+      givenWriteSucceeds(populatedVenueRow(), NEW_ID);
+
+      await createVenue({ ...MINIMAL, setupMinutes: minutes }, STAFF_ID);
+
+      expect(rpcArgs().p_setup_minutes).toBe(minutes);
+    },
+  );
+
+  it('SCRUM20_SCRUM137_create_sends_setup_and_turnaround_as_separate_params', async () => {
+    givenWriteSucceeds(populatedVenueRow(), NEW_ID);
+
+    await createVenue({ ...MINIMAL, setupMinutes: 30, turnaroundMinutes: 45 }, STAFF_ID);
+
+    expect(rpcArgs().p_setup_minutes).toBe(30);
+    expect(rpcArgs().p_turnaround_minutes).toBe(45);
+  });
+
+  it('SCRUM20_SCRUM137_create_returns_the_setup_read_back', async () => {
+    givenWriteSucceeds(populatedVenueRow({ id: NEW_ID, setup_minutes: 120 }), NEW_ID);
+
+    const venue = await createVenue({ ...MINIMAL, setupMinutes: 120 }, STAFF_ID);
+
+    expect(venue.setupMinutes).toBe(120);
+  });
+
+  it('SCRUM20_SCRUM137_update_sends_null_when_setup_is_omitted', async () => {
+    givenWriteSucceeds(populatedVenueRow());
+
+    await updateVenue(VENUE_ID, { name: 'x' }, STAFF_ID);
+
+    expect(rpcArgs()).toHaveProperty('p_setup_minutes', null);
+  });
+
+  it('SCRUM20_SCRUM137_update_sends_0_when_setup_is_set_back_to_none', async () => {
+    // Catches a `|| null` regression: update_venue reads NULL as "keep", so
+    // turning 0 into null would leave the old setup time in place.
+    givenWriteSucceeds(populatedVenueRow({ setup_minutes: 0 }));
+
+    await updateVenue(VENUE_ID, { setupMinutes: 0 }, STAFF_ID);
+
+    expect(rpcArgs().p_setup_minutes).toBe(0);
+    expect(rpcArgs().p_setup_minutes).not.toBeNull();
+  });
+
+  it('SCRUM20_SCRUM137_update_setup_alone_leaves_every_other_field_null', async () => {
+    givenWriteSucceeds(populatedVenueRow({ setup_minutes: 60 }));
+
+    await updateVenue(VENUE_ID, { setupMinutes: 60 }, STAFF_ID);
+
+    expect(rpcArgs()).toEqual({
+      p_id: VENUE_ID,
+      p_name: null,
+      p_location: null,
+      p_max_capacity: null,
+      p_layouts: null,
+      p_accessibility: null,
+      p_facilities: null,
+      p_hours: null,
+      p_turnaround_minutes: null,
+      p_setup_minutes: 60,
+      p_user_id: STAFF_ID,
+    });
+  });
+
+  it('SCRUM20_SCRUM137_update_returns_the_setup_read_back', async () => {
+    givenWriteSucceeds(populatedVenueRow({ setup_minutes: 30 }));
+
+    const venue = await updateVenue(VENUE_ID, { setupMinutes: 30 }, STAFF_ID);
+
+    expect(venue.setupMinutes).toBe(30);
+  });
+
+  it('SCRUM20_SCRUM137_create_rejects_setup_25_before_any_rpc', async () => {
+    const err = await errorFromAsync(() =>
+      createVenue({ ...MINIMAL, setupMinutes: 25 }, STAFF_ID),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toEqual(['setupMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM20_SCRUM137_update_rejects_setup_25_before_any_rpc', async () => {
+    const err = await errorFromAsync(() =>
+      updateVenue(VENUE_ID, { setupMinutes: 25 }, STAFF_ID),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toEqual(['setupMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['createVenue', () => createVenue(MINIMAL, STAFF_ID)],
+    ['updateVenue', () => updateVenue(VENUE_ID, { setupMinutes: 30 }, STAFF_ID)],
+  ])('SCRUM20_SCRUM137_%s_reports_23514_on_venues_setup_minutes_allowed_as_a_validation_error', async (_name, call) => {
+    // The database CHECK (023) is the backstop for writes that bypass validation.
+    rpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: '23514',
+        message:
+          'new row for relation "venues" violates check constraint ' +
+          '"venues_setup_minutes_allowed"',
+      },
+    });
+
+    const err = await errorFromAsync(call);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('venues_setup_minutes_allowed');
     expect(from).not.toHaveBeenCalled();
   });
 });

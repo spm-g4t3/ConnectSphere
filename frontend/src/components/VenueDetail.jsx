@@ -13,6 +13,9 @@
 //
 // SCRUM-186: turnaround_minutes arrives through 003's diff trigger like any
 // other venues column; HISTORY_VALUE_FORMATTERS renders it as a duration.
+//
+// SCRUM-137: setup_minutes (023) arrives the same way and is rendered with the
+// same formatter -- formatTurnaround formats any number of minutes.
 
 import { useCallback, useEffect, useState } from "react";
 import { getVenueBookings, getVenueHistory } from "../services/venueService";
@@ -53,6 +56,7 @@ const HISTORY_FIELD_LABELS = {
   location: "Location",
   max_capacity: "Maximum capacity",
   turnaround_minutes: "Turnaround between events",
+  setup_minutes: "Setup before events",
   retired_at: "Retired at",
   created_at: "Created at",
   room_layouts: "Room layouts",
@@ -112,6 +116,7 @@ function fmt(value) {
 // "30 minutes -> 1 hour", not "30 -> 60". A key not listed here uses fmt.
 const HISTORY_VALUE_FORMATTERS = {
   turnaround_minutes: formatTurnaround,
+  setup_minutes: formatTurnaround,
 };
 
 /**

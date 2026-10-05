@@ -753,3 +753,121 @@ describe('SCRUM186 operating hours model limits', () => {
     expect(err.details[0].message).toMatch(/repeats day 2/);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-137 (SCRUM-20): the setup time before an event, one of a fixed list
+// of minutes (src/domain/setupOptions.js, mirroring 023's CHECK). Checked
+// exactly like turnaround, but reported on its own field.
+// ---------------------------------------------------------------------------
+describe('SCRUM20_SCRUM137 setup time', () => {
+  const OPTIONS = [0, 15, 30, 45, 60, 90, 120];
+  const MESSAGE = 'must be one of 0, 15, 30, 45, 60, 90, 120 minutes';
+
+  it.each(OPTIONS)('SCRUM20_SCRUM137_create_accepts_setup_%s', (minutes) => {
+    expect(validateCreateVenue({ ...VALID, setupMinutes: minutes }).setupMinutes)
+      .toBe(minutes);
+  });
+
+  it.each(OPTIONS)('SCRUM20_SCRUM137_update_accepts_setup_%s', (minutes) => {
+    expect(validateUpdateVenue({ setupMinutes: minutes })).toEqual({
+      setupMinutes: minutes,
+    });
+  });
+
+  it('SCRUM20_SCRUM137_create_leaves_an_omitted_setup_out_of_the_result', () => {
+    const result = validateCreateVenue({ ...VALID });
+    expect(result).not.toHaveProperty('setupMinutes');
+  });
+
+  it('SCRUM20_SCRUM137_create_treats_an_explicit_undefined_as_omitted', () => {
+    const result = validateCreateVenue({ ...VALID, setupMinutes: undefined });
+    expect(result).not.toHaveProperty('setupMinutes');
+  });
+
+  it('SCRUM20_SCRUM137_update_leaves_an_omitted_setup_out_of_the_result', () => {
+    expect(validateUpdateVenue({ name: 'x' })).toEqual({ name: 'x' });
+    expect(validateUpdateVenue({ turnaroundMinutes: 30 })).toEqual({ turnaroundMinutes: 30 });
+  });
+
+  it('SCRUM20_SCRUM137_update_setup_0_alone_is_a_valid_change', () => {
+    // 0 is falsy, but it is a real choice ("none"), not "no change supplied".
+    expect(validateUpdateVenue({ setupMinutes: 0 })).toEqual({ setupMinutes: 0 });
+  });
+
+  it('SCRUM20_SCRUM137_setup_and_turnaround_are_kept_separate', () => {
+    expect(
+      validateCreateVenue({ ...VALID, setupMinutes: 15, turnaroundMinutes: 60 }),
+    ).toMatchObject({ setupMinutes: 15, turnaroundMinutes: 60 });
+    expect(validateUpdateVenue({ setupMinutes: 120, turnaroundMinutes: 0 })).toEqual({
+      setupMinutes: 120,
+      turnaroundMinutes: 0,
+    });
+  });
+
+  const BAD = [
+    ['null', null],
+    ['a numeric string', '30'],
+    ['a value between options', 25],
+    ['a negative option', -15],
+    ['a lead time longer than two hours', 180],
+    ['a fractional number', 1.5],
+    ['NaN', NaN],
+    ['Infinity', Infinity],
+    ['an object', {}],
+    ['an array holding an option', [30]],
+    ['a boolean', true],
+  ];
+
+  it.each(BAD)('SCRUM20_SCRUM137_create_rejects_%s_on_field_setupMinutes', (_label, value) => {
+    const err = errorFrom(() => validateCreateVenue({ ...VALID, setupMinutes: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'setupMinutes', message: MESSAGE }]);
+  });
+
+  it.each(BAD)('SCRUM20_SCRUM137_update_rejects_%s_on_field_setupMinutes', (_label, value) => {
+    const err = errorFrom(() => validateUpdateVenue({ setupMinutes: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'setupMinutes', message: MESSAGE }]);
+  });
+
+  it('SCRUM20_SCRUM137_update_null_setup_is_refused_rather_than_read_as_keep', () => {
+    // update_venue reads NULL as "keep", so a deliberate null must not pass
+    // validation and silently do nothing.
+    const err = errorFrom(() => validateUpdateVenue({ setupMinutes: null }));
+    expect(fieldsIn(err)).toEqual(['setupMinutes']);
+  });
+
+  it('SCRUM20_SCRUM137_create_null_setup_is_refused', () => {
+    const err = errorFrom(() => validateCreateVenue({ ...VALID, setupMinutes: null }));
+    expect(fieldsIn(err)).toEqual(['setupMinutes']);
+  });
+
+  it('SCRUM20_SCRUM137_a_bad_setup_is_not_reported_as_turnaround', () => {
+    const err = errorFrom(() =>
+      validateCreateVenue({ ...VALID, setupMinutes: 25, turnaroundMinutes: 30 }),
+    );
+    expect(fieldsIn(err)).toEqual(['setupMinutes']);
+  });
+
+  it('SCRUM20_SCRUM137_create_reports_a_bad_setup_together_with_a_bad_name', () => {
+    const err = errorFrom(() =>
+      validateCreateVenue({ ...VALID, name: '  ', setupMinutes: 25 }),
+    );
+    expect(err.details).toHaveLength(2);
+    expect(fieldsIn(err).sort()).toEqual(['name', 'setupMinutes']);
+  });
+
+  it('SCRUM20_SCRUM137_update_reports_a_bad_setup_together_with_a_bad_turnaround', () => {
+    const err = errorFrom(() =>
+      validateUpdateVenue({ name: '', setupMinutes: 25, turnaroundMinutes: 25 }),
+    );
+    expect(err.details).toHaveLength(3);
+    expect(fieldsIn(err).sort()).toEqual(['name', 'setupMinutes', 'turnaroundMinutes']);
+  });
+
+  it('SCRUM20_SCRUM137_the_summary_message_names_the_field', () => {
+    const err = errorFrom(() => validateCreateVenue({ ...VALID, setupMinutes: 25 }));
+    expect(err.message).toContain(`setupMinutes: ${MESSAGE}`);
+  });
+});

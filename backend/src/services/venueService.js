@@ -19,6 +19,10 @@
  * update and read back by getVenueById only. Search and the list leave it out
  * until SCRUM-139 has a use for it.
  *
+ * SCRUM-137 (SCRUM-20): the setup time before an event follows exactly the
+ * same path as turnaround -- written by create and update, read back by
+ * getVenueById only, and left out of search until SCRUM-139 uses it.
+ *
  * SCRUM-130 (part of SCRUM-17 AC2): searchVenues leaves out venues blocked in
  * an optional date window, through venueBlockService's findBlockedVenueIds.
  *
@@ -37,6 +41,7 @@ import {
 } from '../validation/venueValidation.js';
 import { findBlockedVenueIds } from './venueBlockService.js';
 import { DEFAULT_TURNAROUND_MINUTES } from '../domain/turnaroundOptions.js';
+import { DEFAULT_SETUP_MINUTES } from '../domain/setupOptions.js';
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -52,7 +57,8 @@ function translateError(error) {
   const detail = error.message ?? '';
 
   // check constraint: capacity <= 0, closes_at <= opens_at, blank name, a
-  // turnaround outside the allowed list (017)
+  // turnaround outside the allowed list (017), a setup time outside its own
+  // list (023)
   if (code === '23514') {
     return new ValidationError(`A value was rejected by the database: ${detail}`);
   }
@@ -102,6 +108,8 @@ function translateError(error) {
  * @param {Array<{day_of_week: number, opens_at: string, closes_at: string}>} [input.hours]
  * @param {number} [input.turnaroundMinutes]  SCRUM-186: one of 0, 15, 30, 45,
  *                                            60, 90, 120; defaults to 0 (none)
+ * @param {number} [input.setupMinutes]  SCRUM-137: one of 0, 15, 30, 45, 60,
+ *                                       90, 120; defaults to 0 (none)
  * @param {string|null} userId  the Venue Staff member making the change
  * @returns {Promise<object>} the created venue, fully populated
  */
@@ -118,6 +126,7 @@ export async function createVenue(input, userId = null) {
     p_facilities: venue.facilities ?? [],
     p_hours: venue.hours ?? [],
     p_turnaround_minutes: venue.turnaroundMinutes ?? DEFAULT_TURNAROUND_MINUTES,
+    p_setup_minutes: venue.setupMinutes ?? DEFAULT_SETUP_MINUTES,
     p_user_id: userId,
   });
 
@@ -135,6 +144,8 @@ export async function createVenue(input, userId = null) {
  *
  * SCRUM-186: turnaroundMinutes follows the same rule -- omitted keeps it, and
  * 0 sets it to none.
+ *
+ * SCRUM-137: so does setupMinutes.
  *
  * @param {string} id
  * @param {object} changes  same shape as createVenue input, all optional
@@ -156,6 +167,9 @@ export async function updateVenue(id, changes, userId = null) {
     // ?? and never ||: NULL means "keep the current value", so || would turn
     // a change back to 0 into no change at all.
     p_turnaround_minutes: update.turnaroundMinutes ?? null,
+    // Same pitfall, same fix: ?? never ||, or setting setup back to 0 would
+    // silently keep the old value.
+    p_setup_minutes: update.setupMinutes ?? null,
     p_user_id: userId,
   });
 
@@ -171,6 +185,7 @@ export async function updateVenue(id, changes, userId = null) {
  * hiding them from *searches* is SCRUM-111's job, not this function's.
  *
  * SCRUM-186: includes turnaroundMinutes, which the edit form prefills from.
+ * SCRUM-137: likewise setupMinutes.
  *
  * @param {string} id
  * @returns {Promise<object>}
@@ -179,8 +194,8 @@ export async function getVenueById(id) {
   const { data, error } = await supabase
     .from('venues')
     .select(`
-      id, name, location, max_capacity, turnaround_minutes, retired_at,
-      created_at, updated_at, last_modified_by,
+      id, name, location, max_capacity, turnaround_minutes, setup_minutes,
+      retired_at, created_at, updated_at, last_modified_by,
       venue_room_layouts ( room_layout_code ),
       venue_accessibility_features ( accessibility_feature_code ),
       venue_facilities ( facility_code ),
@@ -200,6 +215,7 @@ export async function getVenueById(id) {
     location: data.location,
     maxCapacity: data.max_capacity,
     turnaroundMinutes: data.turnaround_minutes,
+    setupMinutes: data.setup_minutes,
     retiredAt: data.retired_at,
     createdAt: data.created_at,
     updatedAt: data.updated_at,

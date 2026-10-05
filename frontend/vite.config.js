@@ -1,7 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
-// SCRUM-17, SCRUM-186 and SCRUM-178 files are gated at 100%
+// SCRUM-17, SCRUM-186, SCRUM-178 and SCRUM-137 files are gated at 100%
 // lines/branches/functions/statements each.
 // There is deliberately no global threshold: shared files -- venueService.js,
 // VenueCatalogue.jsx, VenueSearch.jsx (other stories) and datetimeFormat.js
@@ -39,6 +39,10 @@ const SCRUM17_FILES = [
 // are SCRUM-15's and shared, so, like venueService.js, they are not gated.
 const SCRUM186_FILES = ['src/services/turnaroundOptions.js']
 
+// SCRUM-137 (SCRUM-20) likewise owns one new file outright; its VenueForm.jsx
+// and VenueDetail.jsx edits sit in shared files and are not gated.
+const SCRUM137_FILES = ['src/services/setupOptions.js']
+
 // SCRUM-178 (the calendar, built in SCRUM-180) owns these three outright.
 // venueService.js gains getVenueCalendar but is shared, so it is not gated,
 // and neither is App.jsx for the route.
@@ -73,6 +77,7 @@ export default defineConfig({
         ]),
         ...SCRUM186_FILES.map((file) => [file, FULL]),
         ...SCRUM178_FILES.map((file) => [file, FULL]),
+        ...SCRUM137_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

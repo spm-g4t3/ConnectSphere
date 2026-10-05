@@ -163,3 +163,82 @@ describe("SCRUM182 the bookings panel names the role gate", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("SCRUM20_SCRUM137 setup time in the change history", () => {
+  const EDITOR = "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d";
+  const CHANGED_AT = "2026-10-05T08:15:00+08:00";
+
+  function historyEntry(oldValues, newValues) {
+    return { id: "h137", changedAt: CHANGED_AT, changedBy: EDITOR, oldValues, newValues };
+  }
+
+  /** The value span next to a field label. */
+  function valueFor(label) {
+    const labelSpan = screen.getByText(label);
+    return labelSpan.closest("li").querySelector(".venue-history__value");
+  }
+
+  beforeEach(() => {
+    vi.mocked(getVenueBookings).mockResolvedValue([]);
+  });
+
+  it("SCRUM20_SCRUM137_shows_a_setup_change_from_none_as_durations", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry({ setup_minutes: 0 }, { setup_minutes: 30 }),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    expect(await screen.findByText("Setup before events")).toBeInTheDocument();
+    expect(valueFor("Setup before events")).toHaveTextContent("None → 30 minutes");
+  });
+
+  it("SCRUM20_SCRUM137_shows_hours_and_back_to_none", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry({ setup_minutes: 90 }, { setup_minutes: 0 }),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Setup before events");
+    expect(valueFor("Setup before events")).toHaveTextContent("1 hour 30 minutes → None");
+  });
+
+  it("SCRUM20_SCRUM137_the_raw_column_name_is_never_shown", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry({ setup_minutes: 0 }, { setup_minutes: 60 }),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Setup before events");
+    expect(screen.queryByText("setup_minutes")).not.toBeInTheDocument();
+    expect(valueFor("Setup before events")).not.toHaveTextContent("0 → 60");
+  });
+
+  it("SCRUM20_SCRUM137_setup_and_turnaround_in_one_entry_get_their_own_rows", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry(
+        { setup_minutes: 0, turnaround_minutes: 30 },
+        { setup_minutes: 15, turnaround_minutes: 60 },
+      ),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Setup before events");
+    expect(valueFor("Setup before events")).toHaveTextContent("None → 15 minutes");
+    expect(valueFor("Turnaround between events")).toHaveTextContent("30 minutes → 1 hour");
+  });
+
+  it("SCRUM20_SCRUM137_a_creation_entry_with_setup_shows_only_venue_created", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry({}, { name: "Hall A", location: "Level 2", setup_minutes: 30 }),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    expect(await screen.findByText("Venue created")).toBeInTheDocument();
+    expect(screen.queryByText("Setup before events")).not.toBeInTheDocument();
+  });
+});
