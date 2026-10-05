@@ -146,7 +146,7 @@ describe("VenueCatalogue currentUserId (SCRUM-131)", () => {
   });
 });
 
-describe("VenueCatalogue View calendar (SCRUM-181)", () => {
+describe("SCRUM178_AC1 VenueCatalogue View calendar (SCRUM-181)", () => {
   function CalendarProbe() {
     const { venueId } = useParams();
     const location = useLocation();

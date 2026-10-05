@@ -28,7 +28,7 @@ const BLOCK = {
   notes: "Replace the stage lights",
 };
 
-describe("calendarEntryDisplay", () => {
+describe("SCRUM178_AC2 calendarEntryDisplay labels", () => {
   it("SCRUM178_AC2_an_approved_booking_reads_Booked_with_the_event_name", () => {
     expect(calendarEntryDisplay(BOOKING)).toEqual({
       label: "Booked",
@@ -74,7 +74,9 @@ describe("calendarEntryDisplay", () => {
       tone: "booked",
     });
   });
+});
 
+describe("SCRUM178_AC5 calendarEntryDisplay hidden entries", () => {
   it.each(["pending", "cancelled", "rejected", "APPROVED", "toString", "hasOwnProperty", undefined])(
     "SCRUM178_AC5_a_booking_with_status_%s_is_hidden",
     (status) => {
@@ -91,5 +93,14 @@ describe("calendarEntryDisplay", () => {
     ["undefined", undefined],
   ])("SCRUM178_AC5_a_%s_entry_is_hidden_without_throwing", (_, value) => {
     expect(calendarEntryDisplay(value)).toBeNull();
+  });
+});
+
+describe("SCRUM178_AC3 calendarEntryDisplay pending requests", () => {
+  it.each(["pending", "rejected"])("SCRUM178_AC3_a_%s_booking_is_never_labelled_Booked", (status) => {
+    // Kept alongside the AC5 table above: a request that is still pending (or
+    // was turned down) has no approved booking, so it must not read "Booked".
+    expect(calendarEntryDisplay({ ...BOOKING, status })).toBeNull();
+    expect(calendarEntryDisplay({ ...BOOKING, status, eventName: "Pending Party" })).toBeNull();
   });
 });

@@ -47,7 +47,7 @@ beforeEach(() => {
   vi.mocked(apiClient.get).mockReset();
 });
 
-describe("getVenueCalendar", () => {
+describe("SCRUM178_AC4 getVenueCalendar window params", () => {
   it("SCRUM178_AC4_gets_the_calendar_path_with_the_window_and_returns_the_body", async () => {
     vi.mocked(apiClient.get).mockResolvedValue({ data: ENTRIES });
 
@@ -72,10 +72,21 @@ describe("getVenueCalendar", () => {
     vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
     await expect(getVenueCalendar(VENUE_ID, WINDOW)).resolves.toEqual([]);
   });
+});
 
-  it.each([400, 401, 403, 404, 500])("lets a %s error through unchanged", async (status) => {
+describe("SCRUM178_AC1 getVenueCalendar errors", () => {
+  it.each([400, 401, 403, 404, 500])("SCRUM178_AC1_lets_a_%s_error_through_unchanged", async (status) => {
     const err = httpError(status);
     vi.mocked(apiClient.get).mockRejectedValue(err);
     await expect(getVenueCalendar(VENUE_ID, WINDOW)).rejects.toBe(err);
+  });
+
+  it("SCRUM178_AC1_a_network_error_without_a_response_passes_through_unchanged", async () => {
+    const err = new Error("Network Error");
+    vi.mocked(apiClient.get).mockRejectedValue(err);
+
+    const caught = await getVenueCalendar(VENUE_ID, WINDOW).catch((e) => e);
+    expect(caught).toBe(err);
+    expect(caught).not.toHaveProperty("response");
   });
 });

@@ -131,6 +131,43 @@ function weekCells(title = "5 – 11 Oct 2026") {
   return within(table).getAllByRole("cell");
 }
 
+/**
+ * Answer every getVenueCalendar call with only the entries overlapping the
+ * requested window, as the endpoint does, so each view gets its own slice.
+ */
+function serveByWindow(entries) {
+  vi.mocked(getVenueCalendar).mockImplementation(async (_venueId, { from, to }) =>
+    entries.filter(
+      (entry) => new Date(entry.startsAt) < new Date(to) && new Date(entry.endsAt) > new Date(from),
+    ),
+  );
+}
+
+const VIEW_TITLES = {
+  day: () => dayTitle(local(2026, 9, 7)),
+  week: () => "5 – 11 Oct 2026",
+  month: () => "October 2026",
+};
+
+/**
+ * Switch from the opening week to `view` and wait until the answer for the
+ * new window has landed: the heading names the new period and the loading
+ * line is gone, which only happens once the result is keyed to that window.
+ */
+async function showView(user, view) {
+  if (view !== "week") {
+    await user.click(screen.getByRole("button", { name: view[0].toUpperCase() + view.slice(1) }));
+  }
+  await waitFor(() => {
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(VIEW_TITLES[view]());
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+}
+
+function cellOfDay(date) {
+  return screen.getByRole("button", { name: dayButtonName(date) }).closest("td");
+}
+
 beforeEach(() => {
   vi.mocked(getVenueCalendar).mockReset();
   vi.mocked(getVenueDetails).mockReset();
@@ -142,7 +179,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("SCRUM178 VenueCalendar: views and the window requested (AC4)", () => {
+describe("SCRUM178_AC4 VenueCalendar views and the window requested", () => {
   it("SCRUM178_AC4_opens_on_the_week_view_and_requests_monday_to_monday", async () => {
     await renderCalendar();
 
@@ -429,9 +466,142 @@ describe("SCRUM178 VenueCalendar: views and the window requested (AC4)", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.getByRole("table", { name: "5 – 11 Oct 2026" })).toBeInTheDocument();
   });
+
+  it("SCRUM178_AC4_an_overnight_entry_shows_on_both_days_in_the_month_view", async () => {
+    // Tuesday 22:00 to Wednesday 02:00.
+    const overnight = { ...APPROVED, id: "b-night", startsAt: oct(6, 22), endsAt: oct(7, 2), eventName: "Night Shoot" };
+    serveByWindow([overnight]);
+    const { user } = await renderCalendar();
+    await showView(user, "month");
+
+    expect(within(cellOfDay(local(2026, 9, 6))).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(cellOfDay(local(2026, 9, 7))).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(cellOfDay(local(2026, 9, 5))).queryByRole("list")).not.toBeInTheDocument();
+    expect(within(cellOfDay(local(2026, 9, 8))).queryByRole("list")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Night Shoot")).toHaveLength(2);
+  });
+
+  it("SCRUM178_AC4_an_entry_starting_before_the_window_shows_on_the_first_day", async () => {
+    // Sunday 4 October 20:00 to Monday 5 October 03:00: it starts in the
+    // previous week, but overlaps this one, so the endpoint returns it.
+    const acrossWeeks = { ...BLOCK, id: "k-sun", startsAt: oct(4, 20), endsAt: oct(5, 3) };
+    serveByWindow([acrossWeeks]);
+    await renderCalendar();
+
+    expect(getVenueCalendar).toHaveBeenCalledTimes(1);
+    const counts = weekCells().map((cell) => within(cell).queryAllByRole("listitem").length);
+    expect(counts).toEqual([1, 0, 0, 0, 0, 0, 0]);
+    expect(within(weekCells()[0]).getByRole("listitem")).toHaveClass("venue-calendar__entry--blocked");
+  });
+
+  it("SCRUM178_AC4_today_in_the_month_view_comes_back_from_several_months_away", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(local(2026, 9, 21, 15));
+
+    const { user } = await renderCalendar();
+    await showView(user, "month");
+    for (let i = 0; i < 4; i += 1) {
+      await user.click(screen.getByRole("button", { name: "Next month" }));
+    }
+    expect(await screen.findByRole("table", { name: "February 2027" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Go to today" }));
+
+    expect(await screen.findByRole("table", { name: "October 2026" })).toBeInTheDocument();
+    expect(requestedWindow()).toMatchObject({ from: local(2026, 8, 28), to: local(2026, 10, 2) });
+    expect(screen.getByRole("button", { name: "Month" })).toHaveAttribute("aria-pressed", "true");
+    expect(cellOfDay(local(2026, 9, 21))).toHaveClass("venue-calendar__cell--today");
+  });
+
+  it("SCRUM178_AC4_switching_week_to_month_while_the_week_is_pending_never_shows_the_week_answer", async () => {
+    const week = deferred();
+    const month = deferred();
+    vi.mocked(getVenueCalendar).mockReturnValueOnce(week.promise).mockReturnValueOnce(month.promise);
+
+    const user = userEvent.setup();
+    render(<VenueCalendar venueId={VENUE_ID} initialDate={WED_7_OCT} />);
+    await user.click(screen.getByRole("button", { name: "Month" }));
+    expect(getVenueCalendar).toHaveBeenCalledTimes(2);
+    expect(requestedWindow()).toMatchObject({ from: local(2026, 8, 28), to: local(2026, 10, 2) });
+
+    // The week answers first, while the month is still on its way.
+    const staleEntry = { ...APPROVED, id: "b-stale", startsAt: oct(8, 9), endsAt: oct(8, 10), eventName: "Stale Event" };
+    await act(async () => week.resolve([staleEntry]));
+    expect(screen.getByRole("status")).toHaveTextContent("Loading calendar...");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stale Event")).not.toBeInTheDocument();
+
+    const monthEntry = { ...APPROVED, id: "b-month", startsAt: oct(20, 9), endsAt: oct(20, 11), eventName: "Month Event" };
+    await act(async () => month.resolve([monthEntry]));
+    expect(screen.getByRole("table", { name: "October 2026" })).toBeInTheDocument();
+    expect(screen.getByText("Month Event")).toBeInTheDocument();
+    expect(screen.queryByText("Stale Event")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM178_AC4_today_pressed_while_requests_are_pending_shows_only_todays_answer", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(local(2026, 9, 21, 15));
+
+    const opening = deferred();
+    const nextWeek = deferred();
+    const today = deferred();
+    vi.mocked(getVenueCalendar)
+      .mockReturnValueOnce(opening.promise)
+      .mockReturnValueOnce(nextWeek.promise)
+      .mockReturnValueOnce(today.promise);
+
+    const user = userEvent.setup();
+    render(<VenueCalendar venueId={VENUE_ID} initialDate={WED_7_OCT} />);
+    await user.click(screen.getByRole("button", { name: "Next week" }));
+    await user.click(screen.getByRole("button", { name: "Go to today" }));
+    expect(getVenueCalendar).toHaveBeenCalledTimes(3);
+    expect(requestedWindow()).toMatchObject({ from: local(2026, 9, 19), to: local(2026, 9, 26) });
+
+    // Both earlier windows answer late, with entries that would land on
+    // today's week if the guard let them through.
+    const staleA = { ...APPROVED, id: "b-a", startsAt: oct(20, 9), endsAt: oct(20, 10), eventName: "Stale A" };
+    const staleB = { ...APPROVED, id: "b-b", startsAt: oct(22, 9), endsAt: oct(22, 10), eventName: "Stale B" };
+    await act(async () => {
+      nextWeek.resolve([staleB]);
+      opening.resolve([staleA]);
+    });
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.queryByText("Stale A")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stale B")).not.toBeInTheDocument();
+
+    const current = { ...APPROVED, id: "b-now", startsAt: oct(21, 9), endsAt: oct(21, 10), eventName: "Today Event" };
+    await act(async () => today.resolve([current]));
+    expect(screen.getByRole("table", { name: "19 – 25 Oct 2026" })).toBeInTheDocument();
+    expect(screen.getByText("Today Event")).toBeInTheDocument();
+    expect(screen.queryByText("Stale A")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stale B")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM178_AC4_previous_and_next_are_named_after_the_current_view", async () => {
+    const { user } = await renderCalendar();
+    const nav = screen.getByRole("group", { name: "Move through the calendar" });
+
+    const expectNames = (unit) => {
+      expect(within(nav).getByRole("button", { name: `Previous ${unit}` })).toHaveTextContent(/^Previous$/);
+      expect(within(nav).getByRole("button", { name: `Next ${unit}` })).toHaveTextContent(/^Next$/);
+      for (const other of ["day", "week", "month"].filter((u) => u !== unit)) {
+        expect(within(nav).queryByRole("button", { name: `Previous ${other}` })).not.toBeInTheDocument();
+        expect(within(nav).queryByRole("button", { name: `Next ${other}` })).not.toBeInTheDocument();
+      }
+    };
+
+    expectNames("week");
+    await user.click(screen.getByRole("button", { name: "Day" }));
+    expectNames("day");
+    await user.click(screen.getByRole("button", { name: "Month" }));
+    expectNames("month");
+    await user.click(screen.getByRole("button", { name: "Week" }));
+    expectNames("week");
+  });
 });
 
-describe("SCRUM178 VenueCalendar: entry labels (AC2)", () => {
+describe("SCRUM178_AC2 VenueCalendar entry labels", () => {
   it("SCRUM178_AC2_week_view_labels_each_tone_on_its_own_day", async () => {
     vi.mocked(getVenueCalendar).mockResolvedValue([APPROVED, FLAGGED, BLOCK]);
     await renderCalendar();
@@ -576,7 +746,46 @@ describe("SCRUM178 VenueCalendar: entry labels (AC2)", () => {
   });
 });
 
-describe("SCRUM178 VenueCalendar: hidden entries (AC5)", () => {
+describe("SCRUM178_AC3 VenueCalendar pending requests are not shown as booked", () => {
+  // A booked control on the same day, so each view is shown with something
+  // in it and an empty view cannot pass the test by accident.
+  const CONTROL = { ...APPROVED, id: "b-ok", startsAt: oct(7, 8), endsAt: oct(7, 9) };
+  const PENDING = { ...APPROVED, id: "b-pending", status: "pending", startsAt: oct(7, 10), endsAt: oct(7, 12), eventName: "Pending Party" };
+  const REJECTED = { ...APPROVED, id: "b-rejected", status: "rejected", startsAt: oct(7, 13), endsAt: oct(7, 15), eventName: "Rejected Rally" };
+
+  it.each(["day", "week", "month"])(
+    "SCRUM178_AC3_pending_and_rejected_bookings_are_not_shown_in_the_%s_view",
+    async (view) => {
+      serveByWindow([CONTROL, PENDING, REJECTED]);
+      const { user } = await renderCalendar();
+      await showView(user, view);
+
+      // The endpoint's answer did carry all three.
+      expect(await vi.mocked(getVenueCalendar).mock.results.at(-1).value).toHaveLength(3);
+
+      const items = screen.getAllByRole("listitem");
+      expect(items).toHaveLength(1);
+      expect(items[0]).toHaveClass("venue-calendar__entry--booked");
+      expect(items[0]).toHaveTextContent("Gala Dinner");
+      expect(document.querySelectorAll(".venue-calendar__entry-label")).toHaveLength(1);
+      expect(screen.queryByText("Pending Party")).not.toBeInTheDocument();
+      expect(screen.queryByText("Rejected Rally")).not.toBeInTheDocument();
+      expect(screen.queryByText("Booked – under review")).not.toBeInTheDocument();
+    },
+  );
+
+  it("SCRUM178_AC3_a_day_of_only_pending_and_rejected_requests_shows_the_empty_state", async () => {
+    serveByWindow([PENDING, REJECTED]);
+    const { user } = await renderCalendar();
+    await showView(user, "day");
+
+    expect(screen.getByText("Nothing booked or blocked in this period.")).toBeInTheDocument();
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Booked/)).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM178_AC5 VenueCalendar hidden entries", () => {
   it("SCRUM178_AC5_unknown_statuses_and_kinds_are_not_rendered", async () => {
     vi.mocked(getVenueCalendar).mockResolvedValue([
       APPROVED,
@@ -609,10 +818,34 @@ describe("SCRUM178 VenueCalendar: hidden entries (AC5)", () => {
     expect(await screen.findByText("Nothing booked or blocked in this period.")).toBeInTheDocument();
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
+
+  it.each(["day", "month"])(
+    "SCRUM178_AC5_cancelled_unknown_kind_and_hold_entries_are_hidden_in_the_%s_view",
+    async (view) => {
+      const control = { ...APPROVED, id: "b-ok", startsAt: oct(7, 8), endsAt: oct(7, 9) };
+      serveByWindow([
+        control,
+        { ...APPROVED, id: "c1", status: "cancelled", startsAt: oct(7, 10), endsAt: oct(7, 11), eventName: "Cancelled Concert" },
+        { ...APPROVED, id: "u1", kind: "reservation", startsAt: oct(7, 12), endsAt: oct(7, 13), eventName: "Mystery Kind" },
+        { ...BLOCK, id: "h1", kind: "hold", reason: "other", startsAt: oct(7, 14), endsAt: oct(7, 15) },
+      ]);
+      const { user } = await renderCalendar();
+      await showView(user, view);
+
+      expect(await vi.mocked(getVenueCalendar).mock.results.at(-1).value).toHaveLength(4);
+      const items = screen.getAllByRole("listitem");
+      expect(items).toHaveLength(1);
+      expect(items[0]).toHaveTextContent("Gala Dinner");
+      expect(screen.queryByText("Cancelled Concert")).not.toBeInTheDocument();
+      expect(screen.queryByText("Mystery Kind")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Other/)).not.toBeInTheDocument();
+      expect(document.querySelectorAll(".venue-calendar__entry--blocked")).toHaveLength(0);
+    },
+  );
 });
 
-describe("SCRUM178 VenueCalendar: empty state", () => {
-  it("SCRUM178_AC4_an_empty_week_says_so_and_still_shows_the_grid", async () => {
+describe("SCRUM178_AC1 VenueCalendar empty state", () => {
+  it("SCRUM178_AC1_an_empty_week_says_so_and_still_shows_the_grid", async () => {
     await renderCalendar();
 
     expect(screen.getByText("Nothing booked or blocked in this period.")).toBeInTheDocument();
@@ -621,16 +854,15 @@ describe("SCRUM178 VenueCalendar: empty state", () => {
   });
 });
 
-describe("SCRUM178 VenueCalendar: errors", () => {
+describe("SCRUM178_AC1 VenueCalendar errors", () => {
   it.each([
     [400, "That venue id was not recognised. Please go back and refresh."],
     [401, "Your session has expired. Please sign in again."],
-    [403, "Only Venue Staff and Event Coordinators can see a venue's calendar."],
     [404, "That venue does not exist. It may have been removed."],
     [500, "The calendar could not be loaded. Please try again."],
     [418, "Could not load this venue's calendar. Please try again."],
     [503, "Could not load this venue's calendar. Please try again."],
-  ])("SCRUM178_AC4_a_%s_shows_its_message", async (status, message) => {
+  ])("SCRUM178_AC1_a_%s_shows_its_message", async (status, message) => {
     vi.mocked(getVenueCalendar).mockRejectedValue(httpError(status));
     render(<VenueCalendar venueId={VENUE_ID} initialDate={WED_7_OCT} />);
 
@@ -642,7 +874,7 @@ describe("SCRUM178 VenueCalendar: errors", () => {
     expect(screen.queryByText(/database prose/)).not.toBeInTheDocument();
   });
 
-  it("SCRUM178_AC4_a_network_error_without_a_response_shows_the_fallback", async () => {
+  it("SCRUM178_AC1_a_network_error_without_a_response_shows_the_fallback", async () => {
     vi.mocked(getVenueCalendar).mockRejectedValue(new Error("Network Error"));
     render(<VenueCalendar venueId={VENUE_ID} initialDate={WED_7_OCT} />);
 
@@ -651,7 +883,7 @@ describe("SCRUM178 VenueCalendar: errors", () => {
     );
   });
 
-  it("SCRUM178_AC4_the_toolbar_still_works_after_an_error_and_a_success_clears_it", async () => {
+  it("SCRUM178_AC1_the_toolbar_still_works_after_an_error_and_a_success_clears_it", async () => {
     vi.mocked(getVenueCalendar).mockRejectedValueOnce(httpError(500)).mockResolvedValue([APPROVED]);
     const user = userEvent.setup();
     render(<VenueCalendar venueId={VENUE_ID} initialDate={WED_7_OCT} />);
@@ -669,8 +901,26 @@ describe("SCRUM178 VenueCalendar: errors", () => {
   });
 });
 
-describe("SCRUM178 VenueCalendar: venue header", () => {
-  it("SCRUM178_AC4_shows_the_venue_name_without_a_retired_badge", async () => {
+describe("SCRUM178_AC6 VenueCalendar refused by the backend", () => {
+  // Split out of the AC1 errors table above: a 403 is the backend refusing an
+  // Organiser or Attendee, so it belongs to AC6. The assertions are the same.
+  it("SCRUM178_AC6_a_403_shows_its_message", async () => {
+    vi.mocked(getVenueCalendar).mockRejectedValue(httpError(403));
+    render(<VenueCalendar venueId={VENUE_ID} initialDate={WED_7_OCT} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Only Venue Staff and Event Coordinators can see a venue's calendar.",
+    );
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nothing booked or blocked in this period.")).not.toBeInTheDocument();
+    // The server's prose is never surfaced.
+    expect(screen.queryByText(/database prose/)).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM178_AC1 VenueCalendar venue header", () => {
+  it("SCRUM178_AC1_shows_the_venue_name_without_a_retired_badge", async () => {
     await renderCalendar();
 
     expect(await screen.findByRole("heading", { level: 1, name: "Hall A" })).toBeInTheDocument();
@@ -679,7 +929,7 @@ describe("SCRUM178 VenueCalendar: venue header", () => {
     expect(getVenueDetails).toHaveBeenCalledWith(VENUE_ID);
   });
 
-  it("SCRUM178_AC4_shows_a_retired_badge_for_a_retired_venue", async () => {
+  it("SCRUM178_AC1_shows_a_retired_badge_for_a_retired_venue", async () => {
     vi.mocked(getVenueDetails).mockResolvedValue({ ...VENUE, retiredAt: "2026-09-01T00:00:00+08:00" });
     await renderCalendar();
 
@@ -687,7 +937,39 @@ describe("SCRUM178 VenueCalendar: venue header", () => {
     expect(screen.getByText("Retired")).toHaveClass("venue-calendar__badge");
   });
 
-  it("SCRUM178_AC4_a_header_failure_falls_back_and_the_calendar_still_loads", async () => {
+  it("SCRUM178_AC1_a_retired_venue_on_a_past_date_shows_its_past_bookings_and_blocks", async () => {
+    // Retired in June 2025, opened on Wednesday 12 March 2025.
+    vi.mocked(getVenueDetails).mockResolvedValue({ ...VENUE, retiredAt: local(2025, 5, 1).toISOString() });
+    const pastBooking = {
+      ...APPROVED,
+      id: "b-past",
+      startsAt: local(2025, 2, 11, 9).toISOString(),
+      endsAt: local(2025, 2, 11, 17).toISOString(),
+      eventName: "Spring Fair",
+    };
+    const pastBlock = {
+      ...BLOCK,
+      id: "k-past",
+      startsAt: local(2025, 2, 13, 8).toISOString(),
+      endsAt: local(2025, 2, 13, 18).toISOString(),
+    };
+    serveByWindow([pastBooking, pastBlock]);
+    await renderCalendar({ initialDate: local(2025, 2, 12, 10) });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Hall A" })).toBeInTheDocument();
+    expect(screen.getByText("Retired")).toHaveClass("venue-calendar__badge");
+    expect(requestedWindow()).toMatchObject({ from: local(2025, 2, 10), to: local(2025, 2, 17) });
+
+    const cells = weekCells("10 – 16 Mar 2025");
+    const booked = within(cells[1]).getByRole("listitem");
+    expect(booked.querySelector(".venue-calendar__entry-label")).toHaveTextContent(/^Booked$/);
+    expect(booked.querySelector(".venue-calendar__entry-detail")).toHaveTextContent("Spring Fair");
+    const blocked = within(cells[3]).getByRole("listitem");
+    expect(blocked.querySelector(".venue-calendar__entry-label")).toHaveTextContent("Blocked — Maintenance");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM178_AC1_a_header_failure_falls_back_and_the_calendar_still_loads", async () => {
     vi.mocked(getVenueDetails).mockRejectedValue(httpError(500));
     vi.mocked(getVenueCalendar).mockResolvedValue([APPROVED]);
     await renderCalendar();
@@ -698,7 +980,7 @@ describe("SCRUM178 VenueCalendar: venue header", () => {
     expect(screen.queryByText("Retired")).not.toBeInTheDocument();
   });
 
-  it("SCRUM178_AC4_the_header_is_fetched_once_while_the_view_moves", async () => {
+  it("SCRUM178_AC1_the_header_is_fetched_once_while_the_view_moves", async () => {
     const { user } = await renderCalendar();
     await user.click(screen.getByRole("button", { name: "Next week" }));
     await user.click(screen.getByRole("button", { name: "Month" }));
@@ -708,8 +990,8 @@ describe("SCRUM178 VenueCalendar: venue header", () => {
   });
 });
 
-describe("SCRUM178 VenueCalendar: stale responses and unmounting", () => {
-  it("SCRUM178_AC4_a_late_answer_for_a_window_already_left_is_ignored", async () => {
+describe("SCRUM178_AC1 VenueCalendar stale responses and unmounting", () => {
+  it("SCRUM178_AC1_a_late_answer_for_a_window_already_left_is_ignored", async () => {
     const weekA = deferred();
     const weekB = deferred();
     vi.mocked(getVenueCalendar).mockReturnValueOnce(weekA.promise).mockReturnValueOnce(weekB.promise);
@@ -737,7 +1019,7 @@ describe("SCRUM178 VenueCalendar: stale responses and unmounting", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("SCRUM178_AC4_a_late_error_for_a_window_already_left_is_ignored", async () => {
+  it("SCRUM178_AC1_a_late_error_for_a_window_already_left_is_ignored", async () => {
     const weekA = deferred();
     vi.mocked(getVenueCalendar).mockReturnValueOnce(weekA.promise).mockResolvedValue([]);
 
@@ -752,7 +1034,7 @@ describe("SCRUM178 VenueCalendar: stale responses and unmounting", () => {
     expect(screen.getByRole("table", { name: "12 – 18 Oct 2026" })).toBeInTheDocument();
   });
 
-  it("SCRUM178_AC4_answers_arriving_after_unmount_are_dropped", async () => {
+  it("SCRUM178_AC1_answers_arriving_after_unmount_are_dropped", async () => {
     const header = deferred();
     const calendar = deferred();
     vi.mocked(getVenueDetails).mockReturnValue(header.promise);
@@ -772,7 +1054,7 @@ describe("SCRUM178 VenueCalendar: stale responses and unmounting", () => {
     consoleError.mockRestore();
   });
 
-  it("SCRUM178_AC4_a_header_failure_after_unmount_is_dropped", async () => {
+  it("SCRUM178_AC1_a_header_failure_after_unmount_is_dropped", async () => {
     const header = deferred();
     vi.mocked(getVenueDetails).mockReturnValue(header.promise);
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});

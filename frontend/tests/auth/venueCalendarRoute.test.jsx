@@ -72,9 +72,9 @@ function navigateTo(path) {
   });
 }
 
-describe("/venues/:venueId/calendar route", () => {
+describe("SCRUM178_AC1 /venues/:venueId/calendar route opens the calendar", () => {
   it.each(["venue_staff", "event_coordinator"])(
-    "SCRUM178_AC4_renders_the_calendar_for_the_url_venue_for_%s",
+    "SCRUM178_AC1_renders_the_calendar_for_the_url_venue_for_%s",
     (role) => {
       renderAppAt(`/venues/${VENUE_ID}/calendar`, role);
 
@@ -87,6 +87,14 @@ describe("/venues/:venueId/calendar route", () => {
     },
   );
 
+  it("SCRUM178_AC1_passes_whichever_venue_id_the_url_names", () => {
+    renderAppAt(`/venues/${OTHER_VENUE_ID}/calendar`, "venue_staff");
+
+    expect(screen.getByTestId("venue-calendar-stub")).toHaveTextContent(`Calendar for ${OTHER_VENUE_ID}`);
+  });
+});
+
+describe("SCRUM178_AC6 /venues/:venueId/calendar route is limited to internal roles", () => {
   it.each([
     ["event_coordinator"],
     ["venue_staff"],
@@ -118,13 +126,7 @@ describe("/venues/:venueId/calendar route", () => {
     expect(calendarStub.lastInitialDate).toBeUndefined();
   });
 
-  it("SCRUM178_AC4_passes_whichever_venue_id_the_url_names", () => {
-    renderAppAt(`/venues/${OTHER_VENUE_ID}/calendar`, "venue_staff");
-
-    expect(screen.getByTestId("venue-calendar-stub")).toHaveTextContent(`Calendar for ${OTHER_VENUE_ID}`);
-  });
-
-  it("SCRUM178_AC4_sends_a_signed_out_visitor_to_login", () => {
+  it("SCRUM178_AC6_sends_a_signed_out_visitor_to_login", () => {
     renderAppAt(`/venues/${VENUE_ID}/calendar`, null);
 
     expect(screen.queryByTestId("venue-calendar-stub")).not.toBeInTheDocument();
@@ -132,7 +134,7 @@ describe("/venues/:venueId/calendar route", () => {
   });
 });
 
-describe("/venues/:venueId/calendar ?date= (SCRUM-181)", () => {
+describe("SCRUM178_AC1 /venues/:venueId/calendar ?date= (SCRUM-181)", () => {
   it("SCRUM178_AC1_a_valid_date_opens_the_calendar_on_that_local_day", () => {
     renderAppAt(`/venues/${VENUE_ID}/calendar?date=2026-11-03`, "venue_staff");
 

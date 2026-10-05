@@ -38,7 +38,7 @@ function entry(id, start, end) {
   return { id, startsAt: start.toISOString(), endsAt: end.toISOString() };
 }
 
-describe("constants", () => {
+describe("SCRUM178_AC4 constants", () => {
   it("SCRUM178_AC4_offers_day_week_and_month_in_that_order", () => {
     expect(CALENDAR_VIEWS).toEqual(["day", "week", "month"]);
     expect(Object.isFrozen(CALENDAR_VIEWS)).toBe(true);
@@ -49,7 +49,7 @@ describe("constants", () => {
   });
 });
 
-describe("startOfDay and addDays", () => {
+describe("SCRUM178_AC4 startOfDay and addDays", () => {
   it("SCRUM178_AC4_startOfDay_is_local_midnight_and_does_not_mutate", () => {
     const input = local(2026, 9, 7, 15, 45);
     const before = input.getTime();
@@ -67,7 +67,7 @@ describe("startOfDay and addDays", () => {
   });
 });
 
-describe("startOfWeek", () => {
+describe("SCRUM178_AC4 startOfWeek", () => {
   it("SCRUM178_AC4_weeks_start_on_monday", () => {
     // Mon 5 Oct 2026 through Sun 11 Oct 2026 all belong to the week of the 5th.
     for (let d = 5; d <= 11; d += 1) {
@@ -87,7 +87,7 @@ describe("startOfWeek", () => {
   });
 });
 
-describe("rangeFor", () => {
+describe("SCRUM178_AC4 rangeFor", () => {
   it("SCRUM178_AC4_day_is_one_local_day", () => {
     expect(rangeFor("day", local(2026, 9, 7, 15))).toEqual({
       start: local(2026, 9, 7),
@@ -148,7 +148,7 @@ describe("rangeFor", () => {
   });
 });
 
-describe("shiftAnchor", () => {
+describe("SCRUM178_AC4 shiftAnchor", () => {
   it("SCRUM178_AC4_day_moves_one_day_each_way", () => {
     expect(shiftAnchor("day", local(2026, 9, 7), 1)).toEqual(local(2026, 9, 8));
     expect(shiftAnchor("day", local(2026, 9, 1), -1)).toEqual(local(2026, 8, 30));
@@ -188,7 +188,7 @@ describe("shiftAnchor", () => {
   });
 });
 
-describe("daysIn", () => {
+describe("SCRUM178_AC4 daysIn", () => {
   it("SCRUM178_AC4_lists_every_day_at_midnight_with_end_exclusive", () => {
     const days = daysIn({ start: local(2026, 9, 5), end: local(2026, 9, 12) });
     expect(days).toHaveLength(7);
@@ -208,7 +208,7 @@ describe("daysIn", () => {
   });
 });
 
-describe("entriesOnDay", () => {
+describe("SCRUM178_AC2 entriesOnDay", () => {
   const morning = entry("morning", local(2026, 9, 6, 9), local(2026, 9, 6, 12));
   const toMidnight = entry("to-midnight", local(2026, 9, 6, 18), local(2026, 9, 7));
   const fromMidnight = entry("from-midnight", local(2026, 9, 7), local(2026, 9, 7, 2));
@@ -216,7 +216,7 @@ describe("entriesOnDay", () => {
 
   const all = [morning, toMidnight, fromMidnight, multiDay];
 
-  it("SCRUM178_AC4_keeps_entries_that_overlap_the_day_in_their_original_order", () => {
+  it("SCRUM178_AC2_keeps_entries_that_overlap_the_day_in_their_original_order", () => {
     expect(entriesOnDay(all, local(2026, 9, 6)).map((e) => e.id)).toEqual([
       "morning",
       "to-midnight",
@@ -224,29 +224,29 @@ describe("entriesOnDay", () => {
     ]);
   });
 
-  it("SCRUM178_AC4_an_entry_ending_exactly_at_midnight_does_not_leak_into_the_next_day", () => {
+  it("SCRUM178_AC2_an_entry_ending_exactly_at_midnight_does_not_leak_into_the_next_day", () => {
     expect(entriesOnDay(all, local(2026, 9, 7)).map((e) => e.id)).toEqual([
       "from-midnight",
       "multi",
     ]);
   });
 
-  it("SCRUM178_AC4_an_entry_starting_exactly_at_the_next_midnight_is_not_on_this_day", () => {
+  it("SCRUM178_AC2_an_entry_starting_exactly_at_the_next_midnight_is_not_on_this_day", () => {
     expect(entriesOnDay([fromMidnight], local(2026, 9, 6))).toEqual([]);
   });
 
-  it("SCRUM178_AC4_a_multi_day_entry_shows_on_every_day_it_covers", () => {
+  it("SCRUM178_AC2_a_multi_day_entry_shows_on_every_day_it_covers", () => {
     const covered = [4, 5, 6, 7, 8, 9].map(
       (d) => entriesOnDay([multiDay], local(2026, 9, d)).length,
     );
     expect(covered).toEqual([0, 1, 1, 1, 1, 0]);
   });
 
-  it("SCRUM178_AC4_accepts_a_day_with_a_time_of_day", () => {
+  it("SCRUM178_AC2_accepts_a_day_with_a_time_of_day", () => {
     expect(entriesOnDay([morning], local(2026, 9, 6, 20))).toEqual([morning]);
   });
 
-  it("SCRUM178_AC4_reads_offset_timestamps_as_instants", () => {
+  it("SCRUM178_AC2_reads_offset_timestamps_as_instants", () => {
     // 2026-10-06T01:00Z lies inside local 6 Oct in UTC and in +08:00.
     const offsetEntry = {
       id: "offset",
@@ -257,7 +257,7 @@ describe("entriesOnDay", () => {
   });
 });
 
-describe("toWireWindow", () => {
+describe("SCRUM178_AC4 toWireWindow", () => {
   it("SCRUM178_AC4_both_ends_carry_an_explicit_offset_and_name_the_same_instants", () => {
     const range = rangeFor("week", local(2026, 9, 7));
     const { from, to } = toWireWindow(range);
@@ -281,7 +281,7 @@ describe("toWireWindow", () => {
   });
 });
 
-describe("rangeTitle", () => {
+describe("SCRUM178_AC4 rangeTitle", () => {
   const FULL = { day: "numeric", month: "short", year: "numeric" };
 
   it("SCRUM178_AC4_day_title_names_the_weekday_and_date", () => {
@@ -331,7 +331,7 @@ describe("rangeTitle", () => {
   });
 });
 
-describe("parseCalendarDate (SCRUM-181)", () => {
+describe("SCRUM178_AC1 parseCalendarDate (SCRUM-181)", () => {
   it("SCRUM178_AC1_parses_YYYY_MM_DD_as_local_midnight", () => {
     const date = parseCalendarDate("2026-11-03");
 
@@ -370,7 +370,7 @@ describe("parseCalendarDate (SCRUM-181)", () => {
   });
 });
 
-describe("toCalendarDateParam (SCRUM-181)", () => {
+describe("SCRUM178_AC1 toCalendarDateParam (SCRUM-181)", () => {
   it("SCRUM178_AC1_zero_pads_month_and_day", () => {
     expect(toCalendarDateParam(local(2026, 0, 5))).toBe("2026-01-05");
     expect(toCalendarDateParam(local(2026, 11, 31))).toBe("2026-12-31");

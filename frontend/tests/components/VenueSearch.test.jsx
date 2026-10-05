@@ -698,7 +698,7 @@ describe("VenueSearch date window (SCRUM-130)", () => {
 // SCRUM-181: each result links to its venue's calendar
 // ---------------------------------------------------------------------------
 
-describe("VenueSearch View calendar (SCRUM-181)", () => {
+describe("SCRUM178_AC1 VenueSearch View calendar (SCRUM-181)", () => {
   const resultFor = (name) => screen.getByText(name).closest("li");
   const calendarLink = (name) => within(resultFor(name)).getByRole("link", { name: "View calendar" });
 

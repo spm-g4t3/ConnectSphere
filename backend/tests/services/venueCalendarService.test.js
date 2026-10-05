@@ -10,6 +10,7 @@
  *          blocks carry their reason
  *   AC3 -- pending requests are not shown as booked (a status allow-list)
  *   AC5 -- cancelled bookings and removed blocks are not shown
+ *   (A database error stops the calendar opening, so it is filed under AC1.)
  *   (AC6, the roles, is a route concern: tests/routes/venues.test.js.)
  *
  * The Supabase client is replaced wholesale, as venueBlockService.test.js
@@ -28,6 +29,7 @@ import {
   toBlockEntry,
 } from '../../src/services/venueCalendarService.js';
 import { ValidationError, NotFoundError, AppError } from '../../src/errors.js';
+import { BOOKING_STATUS } from '../../src/domain/bookingStatus.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -168,8 +170,8 @@ beforeEach(() => {
 });
 
 
-describe('the test double', () => {
-  it('has replaced the real Supabase client', () => {
+describe('SCRUM178 the test double', () => {
+  it('SCRUM178_the_supabase_client_is_mocked_and_never_the_real_one', () => {
     expect(vi.isMockFunction(supabase.rpc)).toBe(true);
     expect(vi.isMockFunction(supabase.from)).toBe(true);
   });
@@ -302,7 +304,7 @@ describe('SCRUM178_AC2 entry mapping', () => {
 });
 
 
-describe('SCRUM178_AC3_AC5 what the queries ask for', () => {
+describe('SCRUM178_AC3 pending requests are not shown as booked: the bookings status allow-list', () => {
   it('SCRUM178_AC3_bookings_query_is_an_allow_list_of_approved_and_flagged', async () => {
     const { bookings } = givenTables();
 
@@ -312,22 +314,38 @@ describe('SCRUM178_AC3_AC5 what the queries ask for', () => {
     expect(bookings.args('eq')).toEqual(['venue_id', VENUE_ID]);
     expect(bookings.args('in')).toEqual(['status', ['approved', 'flagged_for_review']]);
     expect(bookings.allArgs('in')).toHaveLength(1);
-    // Neither pending nor cancelled is in the allow-list.
-    expect(bookings.args('in')[1]).not.toContain('cancelled');
+    // Pending is not in the allow-list (cancelled is checked under AC5).
     expect(bookings.args('in')[1]).not.toContain('pending');
     // An allow-list, not a "not cancelled" filter.
     expect(bookings.called('not')).toBe(false);
   });
 
-  it('SCRUM178_AC3_bookings_overlap_is_strict_half_open', async () => {
+  it('SCRUM178_AC3_pending_request_has_no_booking_so_never_reaches_the_calendar', async () => {
+    // A pending event request has no bookings row: a booking only exists once
+    // a request is approved, and the status vocabulary has no 'pending'. The
+    // calendar reads bookings through an allow-list, so even a status added
+    // later is hidden until someone puts it on the list.
     const { bookings } = givenTables();
 
     await getVenueCalendar(VENUE_ID, WINDOW);
 
-    expect(bookings.args('lt')).toEqual(['starts_at', TO]);
-    expect(bookings.args('gt')).toEqual(['ends_at', FROM]);
-    expect(bookings.called('lte')).toBe(false);
-    expect(bookings.called('gte')).toBe(false);
+    expect(bookings.args('in')).toEqual([
+      'status',
+      [BOOKING_STATUS.APPROVED, BOOKING_STATUS.FLAGGED_FOR_REVIEW],
+    ]);
+    expect(Object.values(BOOKING_STATUS)).not.toContain('pending');
+    expect(tablesQueried()).not.toContain('event_requests');
+  });
+});
+
+
+describe('SCRUM178_AC5 cancelled bookings and removed blocks are not shown', () => {
+  it('SCRUM178_AC5_bookings_query_leaves_out_cancelled_bookings', async () => {
+    const { bookings } = givenTables();
+
+    await getVenueCalendar(VENUE_ID, WINDOW);
+
+    expect(bookings.args('in')[1]).not.toContain('cancelled');
   });
 
   it('SCRUM178_AC5_blocks_query_leaves_out_removed_blocks_within_the_window', async () => {
@@ -339,6 +357,20 @@ describe('SCRUM178_AC3_AC5 what the queries ask for', () => {
     expect(blocks.args('is')).toEqual(['removed_at', null]);
     expect(blocks.args('lt')).toEqual(['starts_at', TO]);
     expect(blocks.args('gt')).toEqual(['ends_at', FROM]);
+  });
+});
+
+
+describe('SCRUM178_AC1 the window reaches the queries as given', () => {
+  it('SCRUM178_AC1_bookings_overlap_is_strict_half_open', async () => {
+    const { bookings } = givenTables();
+
+    await getVenueCalendar(VENUE_ID, WINDOW);
+
+    expect(bookings.args('lt')).toEqual(['starts_at', TO]);
+    expect(bookings.args('gt')).toEqual(['ends_at', FROM]);
+    expect(bookings.called('lte')).toBe(false);
+    expect(bookings.called('gte')).toBe(false);
   });
 
   it('SCRUM178_AC1_window_is_trimmed_before_it_reaches_the_queries', async () => {
@@ -525,8 +557,8 @@ describe('SCRUM178_AC1 window and id validation, before any network call', () =>
 });
 
 
-describe('SCRUM178 database errors', () => {
-  it('SCRUM178_a_22P02_on_bookings_is_a_ValidationError', async () => {
+describe('SCRUM178_AC1 a database error stops the calendar opening', () => {
+  it('SCRUM178_AC1_a_22P02_on_bookings_is_a_ValidationError', async () => {
     givenTables({ bookings: fail({ code: '22P02', message: 'invalid input syntax for type uuid' }) });
 
     const err = await errorFromAsync(() => getVenueCalendar(VENUE_ID, WINDOW));
@@ -536,7 +568,7 @@ describe('SCRUM178 database errors', () => {
     expect(err.message).toBe('A value was rejected by the database: invalid input syntax for type uuid');
   });
 
-  it('SCRUM178_a_22P02_with_no_message_is_still_a_ValidationError', async () => {
+  it('SCRUM178_AC1_a_22P02_with_no_message_is_still_a_ValidationError', async () => {
     givenTables({ bookings: fail({ code: '22P02' }) });
 
     const err = await errorFromAsync(() => getVenueCalendar(VENUE_ID, WINDOW));
@@ -545,7 +577,7 @@ describe('SCRUM178 database errors', () => {
     expect(err.message).toBe('A value was rejected by the database: ');
   });
 
-  it('SCRUM178_another_code_is_a_plain_Error_with_the_driver_message', async () => {
+  it('SCRUM178_AC1_another_code_is_a_plain_Error_with_the_driver_message', async () => {
     givenTables({ bookings: fail({ code: '42P01', message: 'relation "bookings" does not exist' }) });
 
     const err = await errorFromAsync(() => getVenueCalendar(VENUE_ID, WINDOW));
@@ -559,7 +591,7 @@ describe('SCRUM178 database errors', () => {
   it.each([
     ['no message', { code: '42P01' }],
     ['an empty message', { code: '08006', message: '' }],
-  ])('SCRUM178_an_error_with_%s_is_Unexpected_database_error', async (_label, error) => {
+  ])('SCRUM178_AC1_an_error_with_%s_is_Unexpected_database_error', async (_label, error) => {
     givenTables({ bookings: fail(error) });
 
     const err = await errorFromAsync(() => getVenueCalendar(VENUE_ID, WINDOW));
@@ -568,7 +600,7 @@ describe('SCRUM178 database errors', () => {
     expect(err.message).toBe('Unexpected database error');
   });
 
-  it('SCRUM178_a_venue_lookup_error_stops_before_bookings_and_blocks', async () => {
+  it('SCRUM178_AC1_a_venue_lookup_error_stops_before_bookings_and_blocks', async () => {
     givenTables({ venue: fail({ code: '42P01', message: 'relation "venues" does not exist' }) });
 
     const err = await errorFromAsync(() => getVenueCalendar(VENUE_ID, WINDOW));
@@ -577,7 +609,7 @@ describe('SCRUM178 database errors', () => {
     expect(tablesQueried()).toEqual(['venues']);
   });
 
-  it('SCRUM178_a_blocks_error_rejects_the_whole_calendar', async () => {
+  it('SCRUM178_AC1_a_blocks_error_rejects_the_whole_calendar', async () => {
     givenTables({
       bookings: ok([bookingRow()]),
       blocks: fail({ code: '42P01', message: 'relation "venue_blocks" does not exist' }),

@@ -227,6 +227,8 @@ A story is done when its acceptance criteria are met, it has tests, it has been 
 | `npm run venue:check` | The venue service end to end: the transactional RPCs, the schema constraints, the audit trigger and retirement, against a real database. | Yes |
 | `npm run routes:check` | The event request routes end to end: a real Supabase token through the auth middleware, ownership scoping against row level security, and a status change reaching the client. | Yes |
 | `npm run venue-routes:check` | The venue catalogue routes end to end, one block per SCRUM-15 acceptance criterion: creation, an authorised change reaching the search, retirement leaving the search while its bookings survive, and the audit trail naming the editing user. | Yes |
+| `npm run venue-blocks:check` | Venue blocks end to end, against a real database: half-open periods, an override flagging the booking and notifying every Event Coordinator, amend and remove recording the acting user, the audit trail, and a blocked venue leaving search. | Yes |
+| `npm run venue-calendar:check` | The venue calendar route end to end, one block per SCRUM-178 acceptance criterion: real tokens for Venue Staff and Event Coordinators on an active and a retired venue, approved and flagged bookings and blocks soonest first, a pending request, cancelled booking, removed block and edge-touching block left out, and Organisers and Attendees refused. | Yes |
 
 Run them all from `backend/`.
 

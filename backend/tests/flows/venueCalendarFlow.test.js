@@ -4,7 +4,7 @@
  * venue, overrides a block over an approved booking and removes it again, and
  * an Event Coordinator reads GET /api/venues/:id/calendar after each step to
  * see what the calendar makes of it. An Event Organiser is refused the
- * calendar but still searches.
+ * calendar but still searches, and an Attendee is refused it too.
  *
  * The harness is venueBlockFlow.test.js's, and so is the honesty note: this
  * proves WIRING AND CONTRACTS. The real venues router, role gates, validators,
@@ -28,6 +28,10 @@
  *   SCRUM178 AC2 -- bookings and blocks both appear on the calendar
  *   SCRUM178 AC5 -- a removed block leaves the calendar
  *   SCRUM178 AC6 -- only internal roles read the calendar
+ *
+ * Steps that only set the journey up -- creating, overriding and removing a
+ * block -- check SCRUM-17 behaviour, not the calendar, so they carry only
+ * their SCRUM17 tag.
  *   SCRUM17  AC1 -- a block is created with a venue, a period and a reason
  *   SCRUM17  AC2 -- blocked venues leave search and show on the calendar
  *   SCRUM17  AC3 -- an override flags the approved booking for review
@@ -57,6 +61,7 @@ const OTHER_VENUE_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3302';
 const STAFF_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
 const COORDINATOR_ID = '11111111-1111-4111-8111-111111111111';
 const ORGANISER_ID = '33333333-3333-4333-8333-333333333333';
+const ATTENDEE_ID = '44444444-4444-4444-8444-444444444444';
 const BOOKING_1 = 'a1b2c3d4-0000-4000-8000-00000000000b';
 const EVENT_1 = '22222222-2222-4222-8222-222222222221';
 const BLOCK_A_ID = '6ba7b810-9dad-41d1-80b4-00c04fd430a1';
@@ -66,6 +71,7 @@ const USERS = {
   staff: { id: STAFF_ID, role: ROLE.VENUE_STAFF },
   coordinator: { id: COORDINATOR_ID, role: ROLE.EVENT_COORDINATOR },
   organiser: { id: ORGANISER_ID, role: ROLE.EVENT_ORGANISER },
+  attendee: { id: ATTENDEE_ID, role: ROLE.ATTENDEE },
 };
 
 /**
@@ -312,9 +318,9 @@ describe('the test double', () => {
 });
 
 
-describe('SCRUM183 calendar and venue blocks journey: block, override, remove', () => {
+describe('SCRUM178_AC2_AC5_AC6 calendar journey through venue blocks: block, override, remove', () => {
   describe('SCRUM178_AC2 blocks and bookings both show on the calendar', () => {
-    it('SCRUM178_AC2_SCRUM17_AC1_staff_creates_a_maintenance_block_with_201', async () => {
+    it('SCRUM17_AC1_staff_creates_a_maintenance_block_with_201', async () => {
       script(rpcStep(
         'create_venue_block',
         ok({ outcome: 'created', block: blockRow(), affected_bookings: [], flagged_bookings: [] }),
@@ -375,7 +381,7 @@ describe('SCRUM183 calendar and venue blocks journey: block, override, remove', 
       expect(res.body[0]).toMatchObject({ kind: 'booking', status: 'approved', eventName: 'Tech Talk' });
     });
 
-    it('SCRUM178_AC2_SCRUM17_AC3_override_block_is_409_then_201_with_flaggedBookings', async () => {
+    it('SCRUM17_AC3_override_block_is_409_then_201_with_flaggedBookings', async () => {
       script(rpcStep(
         'create_venue_block',
         ok({ outcome: 'conflict', conflicts: [B1_CONFLICT_ROW] }),
@@ -459,7 +465,7 @@ describe('SCRUM183 calendar and venue blocks journey: block, override, remove', 
   });
 
   describe('SCRUM178_AC5 a removed block leaves the calendar', () => {
-    it('SCRUM178_AC5_SCRUM17_AC4_staff_removes_the_override_block_with_204', async () => {
+    it('SCRUM17_AC4_staff_removes_the_override_block_with_204', async () => {
       script(rpcStep(
         'remove_venue_block',
         ok({ outcome: 'removed', block: blockMRow({ removed_at: '2026-10-01T00:05:00+00:00', removed_by: STAFF_ID }) }),
@@ -578,6 +584,22 @@ describe('SCRUM183 calendar and venue blocks journey: block, override, remove', 
 
       expect(search.status).toBe(200);
       expect(search.body.map((v) => v.id)).toEqual([OTHER_VENUE_ID]);
+    });
+
+    it('SCRUM178_AC6_attendee_gets_403_on_calendar_with_no_supabase_call', async () => {
+      // Nothing is scripted, so any read the gate let through would fail as
+      // an unscripted call; the counts below say the same thing directly.
+      rpc.mockClear();
+      from.mockClear();
+
+      const refused = await as('attendee', (r) => r.get(calendarUrl(DAY_FROM, DAY_TO)));
+
+      expect(refused.status).toBe(403);
+      expect(refused.body.error).toMatch(/Venue Staff/);
+      expect(refused.body.error).toMatch(/Event Coordinators/);
+      expect(Array.isArray(refused.body)).toBe(false);
+      expect(from).not.toHaveBeenCalled();
+      expect(rpc).not.toHaveBeenCalled();
     });
   });
 });
