@@ -16,7 +16,8 @@
     "change-request:check": "node scripts/check-event-change-request-service.js",
     "routes:check": "node scripts/check-event-request-routes.js",
     "venue-routes:check": "node scripts/check-venue-routes.js",
-    "equipment:check": "node scripts/check-equipment-service.js"
+    "equipment:check": "node scripts/check-equipment-service.js",
+    "equipment:seed": "node db/seeds/equipment.js"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "5.0.0",
