@@ -43,6 +43,13 @@ const SCRUM186_FILES = ['src/services/turnaroundOptions.js']
 // and VenueDetail.jsx edits sit in shared files and are not gated.
 const SCRUM137_FILES = ['src/services/setupOptions.js']
 
+// SCRUM-141 (SCRUM-20) owns the inline event venue search outright.
+// CoordinatorRequestDetail.jsx and venueService.js are shared, so not gated.
+const SCRUM141_FILES = [
+  'src/services/eventVenueSearchForm.js',
+  'src/components/EventVenueFinder.jsx',
+]
+
 // SCRUM-178 (the calendar, built in SCRUM-180) owns these three outright.
 // venueService.js gains getVenueCalendar but is shared, so it is not gated,
 // and neither is App.jsx for the route.
@@ -78,6 +85,7 @@ export default defineConfig({
         ...SCRUM186_FILES.map((file) => [file, FULL]),
         ...SCRUM178_FILES.map((file) => [file, FULL]),
         ...SCRUM137_FILES.map((file) => [file, FULL]),
+        ...SCRUM141_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

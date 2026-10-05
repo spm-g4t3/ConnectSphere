@@ -327,6 +327,26 @@ describe('SCRUM20 event search through the HTTP layer', () => {
     expect(res.text).toBe('[]');
   });
 
+  it('SCRUM20_E2E_AC4_SCRUM141_location_narrows_the_search_case_insensitively', async () => {
+    // Only Harbour Room's location ("Harbour Room, SCIS") contains "HARBOUR".
+    // The match is made in matchesAllCriteria, not by an ilike on the venues
+    // read, so only Harbour Room's bookings and blocks are read afterwards.
+    script(
+      lookupStep('room_layouts', ['theatre']),
+      lookupStep('accessibility_features', ['step_free_entrance']),
+      lookupStep('facilities', ['projector', 'wifi']),
+      fromStep('venues', ok(VENUE_ROWS), (q) => {
+        expect(q.called('ilike')).toBe(false);
+      }),
+      occupancySteps([HARBOUR], [BOOKING_ROWS[1]], []),
+    );
+
+    const res = await asCoordinator(searchUrl({ ...BASE, location: '  HARBOUR ' }));
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((v) => v.name)).toEqual(['Harbour Room']);
+  });
+
   it('SCRUM20_E2E_AC1_an_unencoded_plus_in_an_offset_is_400_before_any_query', async () => {
     // No steps scripted: the request must be refused before Supabase is asked.
     const url = `/api/venues/event-search?startsAt=${at('10:00')}&endsAt=${at('12:00')}` +

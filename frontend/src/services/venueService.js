@@ -65,11 +65,12 @@ export async function searchActiveVenues(filters = {}) {
 
 /**
  * Searches venues against an event's requirements (SCRUM-140, for SCRUM-20).
- * Not wired to a page yet -- SCRUM-141 does that.
+ * SCRUM-141's EventVenueFinder, inside the coordinator's event view, calls it.
  *
  * Returns only active venues that meet EVERY supplied criterion: capacity and
  * opening hours cover the event, the layout and every listed accessibility
- * feature and facility are provided, and no approved booking or active block
+ * feature and facility are provided, the location contains the requested text
+ * (SCRUM-141, case-insensitive), and no approved booking or active block
  * overlaps the event once the venue's setup and turnaround are added. No
  * match is 200 [], never a 404.
  *
@@ -82,7 +83,8 @@ export async function searchActiveVenues(filters = {}) {
  * they are not filtered on. axios encodes the '+' in an offset as %2B.
  *
  * Failures: 400 with details[] naming every bad field at once (a missing or
- * malformed period, a bad attendance, an unknown code), 401, 403, 500.
+ * malformed period, a bad attendance, a non-text location, an unknown code),
+ * 401, 403, 500.
  *
  * @param {Object} criteria
  * @param {string} criteria.startsAt            ISO with an explicit offset
@@ -91,6 +93,8 @@ export async function searchActiveVenues(filters = {}) {
  * @param {string} [criteria.layout]            one room layout code
  * @param {string[]} [criteria.accessibility]   accessibility feature codes
  * @param {string[]} [criteria.facilities]      facility codes
+ * @param {string} [criteria.location]          SCRUM-141: text the venue's
+ *                                              location must contain
  * @returns {Promise<Array<{id, name, location, maxCapacity, layouts, accessibility, facilities, hours, setupMinutes, turnaroundMinutes}>>}
  */
 export async function findVenuesForEvent(criteria) {
@@ -101,6 +105,9 @@ export async function findVenuesForEvent(criteria) {
   };
   if (typeof criteria.layout === "string" && criteria.layout.trim() !== "") {
     params.layout = criteria.layout;
+  }
+  if (typeof criteria.location === "string" && criteria.location.trim() !== "") {
+    params.location = criteria.location;
   }
   for (const field of ["accessibility", "facilities"]) {
     const codes = criteria[field];

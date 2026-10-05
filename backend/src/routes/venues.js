@@ -180,7 +180,8 @@ function parseCodeList(value) {
  * Shaped like parseSearchFilters: convert only what the transport mangles,
  * and leave every rule to the validator.
  *
- * startsAt, endsAt and layout pass through as sent -- they are text already.
+ * startsAt, endsAt, layout and location (SCRUM-141) pass through as sent --
+ * they are text already.
  *
  * expectedAttendance becomes a number, but only when non-blank, so a missing
  * or empty one reaches the validator as absent and gets "is required" rather
@@ -210,6 +211,10 @@ function parseEventSearch(query) {
 
   if (query.layout !== undefined) {
     criteria.layout = query.layout;
+  }
+
+  if (query.location !== undefined) {
+    criteria.location = query.location;
   }
 
   for (const field of ['accessibility', 'facilities']) {
@@ -375,14 +380,15 @@ export function createVenueRouter({
    * SCRUM-20 (SCRUM-140): search venues against an event's requirements.
    *
    * ?startsAt=&endsAt=&expectedAttendance= are required; ?layout=,
-   * ?accessibility= and ?facilities= are optional, the last two
-   * comma-separated codes (parseEventSearch). findVenuesForEvent does the rest:
-   * AC1 the criteria themselves; AC2 active venues only; AC3 capacity and
-   * opening hours cover the event; AC4 the layout and every requested
-   * accessibility feature and facility are provided; AC5/AC6 no approved
-   * booking or active block overlaps the event once the venue's setup and
-   * turnaround are added; AC7 every supplied criterion must match; AC8 no
-   * match is an empty list.
+   * ?accessibility=, ?facilities= and ?location= (SCRUM-141) are optional,
+   * accessibility and facilities as comma-separated codes (parseEventSearch).
+   * findVenuesForEvent does the rest: AC1 the criteria themselves; AC2 active
+   * venues only; AC3 capacity and opening hours cover the event; AC4 the
+   * layout and every requested accessibility feature and facility are
+   * provided, and the location contains the requested text; AC5/AC6 no
+   * approved booking or active block overlaps the event once the venue's
+   * setup and turnaround are added; AC7 every supplied criterion must match;
+   * AC8 no match is an empty list.
    *
    * The '+' in an offset must be URL-encoded as %2B, as /search explains;
    * axios params does it.
@@ -397,8 +403,8 @@ export function createVenueRouter({
    *
    * Statuses: 200 with the matching venues, and 200 [] when none match (AC8)
    * -- never 404, since an empty result is an answer, not a missing resource;
-   * 400 {error, details} for a missing or malformed period, a bad attendance
-   * or an unknown code; 401; 403 for any role but Event Coordinator; 500.
+   * 400 {error, details} for a missing or malformed period, a bad attendance,
+   * a non-text location or an unknown code; 401; 403 for any role but Event Coordinator; 500.
    */
   router.get('/event-search', coordinatorsOnly, async (req, res) => {
     try {

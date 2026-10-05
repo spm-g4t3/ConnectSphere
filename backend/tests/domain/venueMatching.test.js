@@ -28,6 +28,7 @@ import {
   coversPeriod,
   supportsLayout,
   providesAll,
+  matchesLocation,
   matchesAllCriteria,
 } from '../../src/domain/venueMatching.js';
 
@@ -331,10 +332,84 @@ describe('SCRUM20_AC3 matchesAllCriteria', () => {
 });
 
 
+// SCRUM-141: location, the optional criterion the Week 4 instructions list.
+describe('SCRUM20_AC1 SCRUM141 location', () => {
+  it('SCRUM20_AC1_no_location_requested_passes_every_venue', () => {
+    expect(matchesLocation(harbourRoom(), undefined)).toBe(true);
+    expect(matchesLocation(harbourRoom({ location: '' }), undefined)).toBe(true);
+  });
+
+  it.each([
+    ['exact text', 'Level 1'],
+    ['a lower-case fragment', 'level'],
+    ['an upper-case fragment', 'LEVEL 1'],
+    ['mixed case in the middle', 'eL 1'],
+    ['a single character', '1'],
+  ])('SCRUM20_AC3_location_containing_%s_matches_case_insensitively', (_label, text) => {
+    expect(matchesLocation(harbourRoom(), text)).toBe(true);
+  });
+
+  it('SCRUM20_AC3_venue_text_in_upper_case_matches_a_lower_case_request', () => {
+    expect(matchesLocation(harbourRoom({ location: 'ORCHARD ROAD' }), 'orchard')).toBe(true);
+  });
+
+  it.each([
+    ['other text', 'Level 2'],
+    ['text longer than the location', 'Level 1, SCIS'],
+    ['words out of order', '1 Level'],
+  ])('SCRUM20_AC3_location_not_containing_%s_is_excluded', (_label, text) => {
+    expect(matchesLocation(harbourRoom(), text)).toBe(false);
+  });
+
+  it('SCRUM20_AC3_percent_is_a_literal_character_not_a_wildcard', () => {
+    // ilike would read 'Lev%1' as "Lev, anything, 1"; this must not.
+    expect(matchesLocation(harbourRoom(), 'Lev%1')).toBe(false);
+    expect(matchesLocation(harbourRoom(), '%')).toBe(false);
+    expect(matchesLocation(harbourRoom({ location: '100% Hall' }), '100%')).toBe(true);
+  });
+
+  it('SCRUM20_AC3_underscore_is_a_literal_character_not_a_wildcard', () => {
+    // ilike would read 'Level_1' as "Level, any one character, 1"; this must not.
+    expect(matchesLocation(harbourRoom(), 'Level_1')).toBe(false);
+    expect(matchesLocation(harbourRoom(), '_')).toBe(false);
+    expect(matchesLocation(harbourRoom({ location: 'Room_A, Level 1' }), 'room_a')).toBe(true);
+  });
+
+  it('SCRUM20_AC3_result_is_a_strict_boolean', () => {
+    expect(matchesLocation(harbourRoom(), 'level')).toStrictEqual(true);
+    expect(matchesLocation(harbourRoom(), 'basement')).toStrictEqual(false);
+  });
+
+  it('SCRUM20_AC3_matchesAllCriteria_applies_the_location', () => {
+    expect(matchesAllCriteria(harbourRoom(), baseRequest({ location: 'level 1' }))).toBe(true);
+    expect(matchesAllCriteria(harbourRoom(), baseRequest({ location: 'Level 2' }))).toBe(false);
+  });
+
+  it('SCRUM20_AC1_matchesAllCriteria_without_a_location_is_unchanged', () => {
+    const request = baseRequest();
+    expect(request).not.toHaveProperty('location');
+    expect(matchesAllCriteria(harbourRoom({ location: 'Anywhere' }), request)).toBe(true);
+  });
+
+  it('SCRUM20_AC3_location_alone_with_the_required_fields_filters', () => {
+    const bare = harbourRoom({ layouts: [], accessibility: [], facilities: [] });
+    const required = { startsAt: sgt('10:00'), endsAt: sgt('12:00'), expectedAttendance: 80 };
+
+    expect(matchesAllCriteria(bare, { ...required, location: 'LEVEL' })).toBe(true);
+    expect(matchesAllCriteria(bare, { ...required, location: 'Tower' })).toBe(false);
+  });
+});
+
+
 // B-AC4-01..05: Candidate is Control with exactly one thing changed.
+// SCRUM-141: the request carries a location too, so the table can hold a
+// venue that fails only that.
 describe('SCRUM20_AC4 meeting only some criteria is not enough', () => {
+  const AC4_REQUEST = () => baseRequest({ location: 'level 1' });
+
   it('SCRUM20_AC4_control_meets_the_base_request', () => {
     expect(matchesAllCriteria(harbourRoom(), baseRequest())).toBe(true);
+    expect(matchesAllCriteria(harbourRoom(), AC4_REQUEST())).toBe(true);
   });
 
   it.each([
@@ -346,7 +421,8 @@ describe('SCRUM20_AC4 meeting only some criteria is not enough', () => {
     ['SCRUM20_AC4_venue_failing_only_layout_is_excluded', { layouts: ['classroom'] }],
     ['SCRUM20_AC4_venue_failing_only_accessibility_is_excluded', { accessibility: ['lift_access'] }],
     ['SCRUM20_AC4_venue_failing_only_facilities_is_excluded', { facilities: ['pa_system', 'projector'] }],
+    ['SCRUM20_AC4_venue_failing_only_location_is_excluded', { location: 'Level 2' }],
   ])('%s', (_name, change) => {
-    expect(matchesAllCriteria(harbourRoom(change), baseRequest())).toBe(false);
+    expect(matchesAllCriteria(harbourRoom(change), AC4_REQUEST())).toBe(false);
   });
 });

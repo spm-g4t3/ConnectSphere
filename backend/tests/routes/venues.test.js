@@ -2373,6 +2373,39 @@ describe('SCRUM20 GET /api/venues/event-search', () => {
 
       expect(criteriaSent()).toEqual({ startsAt: STARTS_AT, endsAt: ENDS_AT, expectedAttendance: 80 });
     });
+
+    it('SCRUM20_AC1_SCRUM141_location_is_passed_through_as_sent', async () => {
+      await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=80&location=${encodeURIComponent('  Level 2, SCIS ')}`);
+
+      // Trimmed by the real validator inside the real service, not by the route.
+      expect(criteriaSent()).toEqual({
+        startsAt: STARTS_AT,
+        endsAt: ENDS_AT,
+        expectedAttendance: 80,
+        location: '  Level 2, SCIS ',
+      });
+    });
+
+    it('SCRUM20_AC1_SCRUM141_percent_and_underscore_in_location_arrive_unchanged', async () => {
+      await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=80&location=${encodeURIComponent('100%_Hall')}`);
+
+      expect(criteriaSent().location).toBe('100%_Hall');
+    });
+
+    it('SCRUM20_AC1_SCRUM141_no_location_leaves_the_key_out', async () => {
+      await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=80&layout=theatre`);
+
+      expect(criteriaSent()).not.toHaveProperty('location');
+    });
+
+    it('SCRUM20_AC1_SCRUM141_an_empty_location_reaches_the_service_as_sent', async () => {
+      // The route converts nothing; the validator turns blank into absent.
+      await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=80&location=`);
+
+      expect(criteriaSent().location).toBe('');
+    });
   });
 
   describe('bad input reaches the real validator and is 400 with details', () => {
@@ -2401,6 +2434,16 @@ describe('SCRUM20 GET /api/venues/event-search', () => {
 
       expect(res.status).toBe(400);
       expect(fieldsOf(res)).toEqual(['expectedAttendance']);
+    });
+
+    it('SCRUM20_AC1_SCRUM141_a_repeated_location_is_400_must_be_text', async () => {
+      // ?location=a&location=b arrives as an array, which is not text.
+      const res = await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=80&location=a&location=b`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toEqual([{ field: 'location', message: 'must be text' }]);
+      expect(from).not.toHaveBeenCalled();
     });
 
     it('SCRUM20_AC1_fractional_attendance_is_400', async () => {

@@ -467,7 +467,8 @@ async function assertKnownCodes(criteria) {
  * SCRUM-138, for SCRUM-20:
  *  - AC1: the event's period and expected attendance are required; layout,
  *    accessibility features and facilities are optional, and an optional
- *    criterion left out is not filtered on.
+ *    criterion left out is not filtered on. SCRUM-141 adds an optional
+ *    location, matched in matchesAllCriteria like the rest.
  *  - AC3/AC4: a venue is returned only if it meets every supplied criterion
  *    -- domain/venueMatching.js's matchesAllCriteria, which answers yes or no
  *    and never why.

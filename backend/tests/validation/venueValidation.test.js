@@ -1152,6 +1152,92 @@ describe('SCRUM20_AC1 event search criteria', () => {
 });
 
 
+describe('SCRUM20_AC1 SCRUM141 event search location', () => {
+  const REQUIRED = Object.freeze({
+    startsAt: '2026-11-11T10:00:00+08:00',
+    endsAt: '2026-11-11T12:00:00+08:00',
+    expectedAttendance: 80,
+  });
+
+  const detailsFor = (input) => errorFrom(() => validateEventSearchCriteria(input))?.details;
+
+  it('SCRUM20_AC1_location_is_optional', () => {
+    const result = validateEventSearchCriteria({ ...REQUIRED });
+    expect(result).toEqual({ ...REQUIRED });
+    expect(result).not.toHaveProperty('location');
+  });
+
+  it('SCRUM20_AC1_location_is_kept_when_supplied', () => {
+    expect(validateEventSearchCriteria({ ...REQUIRED, location: 'Level 2' }))
+      .toEqual({ ...REQUIRED, location: 'Level 2' });
+  });
+
+  it('SCRUM20_AC1_location_is_trimmed', () => {
+    expect(validateEventSearchCriteria({ ...REQUIRED, location: '  Orchard Road \t' }).location)
+      .toBe('Orchard Road');
+  });
+
+  it('SCRUM20_AC1_location_keeps_its_case_and_inner_spaces', () => {
+    expect(validateEventSearchCriteria({ ...REQUIRED, location: ' LEVEL  1 ' }).location)
+      .toBe('LEVEL  1');
+  });
+
+  it('SCRUM20_AC1_location_keeps_percent_and_underscore_as_typed', () => {
+    expect(validateEventSearchCriteria({ ...REQUIRED, location: '100%_Hall' }).location)
+      .toBe('100%_Hall');
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['an empty string', ''],
+    ['a blank string', '   '],
+  ])('SCRUM20_AC1_location_given_as_%s_means_not_filtered', (_label, value) => {
+    const result = validateEventSearchCriteria({ ...REQUIRED, location: value });
+    expect(result).toEqual({ ...REQUIRED });
+    expect(result).not.toHaveProperty('location');
+  });
+
+  it.each([
+    ['a number', 42],
+    ['a boolean', true],
+    ['an array', ['Level 1']],
+    ['an object', { contains: 'Level' }],
+  ])('SCRUM20_AC1_location_given_as_%s_must_be_text', (_label, value) => {
+    const err = errorFrom(() => validateEventSearchCriteria({ ...REQUIRED, location: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'location', message: 'must be text' }]);
+    expect(err.message).toMatch(/^Invalid venue search -- /);
+  });
+
+  it('SCRUM20_AC1_a_bad_location_is_reported_with_every_other_fault', () => {
+    const details = detailsFor({ startsAt: REQUIRED.startsAt, location: 7 });
+    expect(details).toEqual(expect.arrayContaining([
+      { field: 'endsAt', message: 'is required' },
+      { field: 'expectedAttendance', message: 'is required' },
+      { field: 'location', message: 'must be text' },
+    ]));
+  });
+
+  it('SCRUM20_AC1_every_criterion_with_location_is_valid', () => {
+    const input = {
+      ...REQUIRED,
+      layout: 'theatre',
+      accessibility: ['step_free_entrance'],
+      facilities: ['projector'],
+      location: 'Level 1',
+    };
+    expect(validateEventSearchCriteria(input)).toEqual(input);
+  });
+
+  it('SCRUM20_AC1_location_does_not_mutate_its_input', () => {
+    const input = { ...REQUIRED, location: '  Level 1  ' };
+    validateEventSearchCriteria(input);
+    expect(input.location).toBe('  Level 1  ');
+  });
+});
+
+
 describe('SCRUM20 SCRUM140 a refused search is not reported as bad venue details', () => {
   const REQUIRED = Object.freeze({
     startsAt: '2026-11-11T10:00:00+08:00',

@@ -22,7 +22,8 @@
  * retired venue's calendar can be reached from search.
  *
  * SCRUM-138 (SCRUM-20 AC1) adds validateEventSearchCriteria, the shape of a
- * search against an event's requirements. Code existence is still not checked
+ * search against an event's requirements; SCRUM-141 adds an optional location
+ * to it. Code existence is still not checked
  * here, for the reason below; for a search there is no foreign key to fall
  * back on, so venueService.assertKnownCodes does it against the lookup tables.
  *
@@ -503,10 +504,13 @@ function checkIncludeRetired(errors, value) {
  * Every fault is reported at once, as everywhere else in this module. Unknown
  * keys are ignored, as everywhere else too.
  *
+ * SCRUM-141 adds location, the one criterion the Week 4 instructions list that
+ * AC1 does not. It is optional, like layout and the code lists.
+ *
  * Leaving an optional criterion out means it is not filtered on. A blank
- * layout and an empty list are treated the same as leaving it out (B-AC1-15):
- * an unfilled form field is not a criterion, and "provides every one of
- * nothing" filters nothing anyway. So the normalised object carries an
+ * layout or location and an empty list are treated the same as leaving it
+ * out (B-AC1-15): an unfilled form field is not a criterion, and "provides
+ * every one of nothing" filters nothing anyway. So the normalised object carries an
  * optional key only when there is something to filter by.
  *
  * Whether each code exists is NOT checked here -- see the header. The service
@@ -519,8 +523,11 @@ function checkIncludeRetired(errors, value) {
  * @param {string} [input.layout]            one room layout code
  * @param {string[]} [input.accessibility]   accessibility feature codes
  * @param {string[]} [input.facilities]      facility codes
+ * @param {string} [input.location]          SCRUM-141: text the venue's
+ *                                           location must contain
  * @returns {object} a normalised copy: startsAt and endsAt trimmed, codes
- *                   trimmed, optional keys only when something was supplied
+ *                   and location trimmed, optional keys only when something
+ *                   was supplied
  * @throws {ValidationError} listing every problem found
  */
 export function validateEventSearchCriteria(input) {
@@ -552,6 +559,18 @@ export function validateEventSearchCriteria(input) {
     if (input[field] === undefined || input[field] === null) continue;
     const codes = checkCodeArray(errors, field, input[field]);
     if (codes !== null && codes.length > 0) normalised[field] = codes;
+  }
+
+  // SCRUM-141: location, optional like the codes above. Shaped like layout:
+  // isUnset has ruled out a blank string, so a string here is something to
+  // match, trimmed; anything else gets checkRequiredText's wording for a
+  // text field that is not text.
+  if (!isUnset(input.location)) {
+    if (typeof input.location === 'string') {
+      normalised.location = input.location.trim();
+    } else {
+      errors.add('location', 'must be text');
+    }
   }
 
   throwIfInvalid(errors, 'Invalid venue search');

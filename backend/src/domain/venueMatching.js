@@ -26,12 +26,17 @@
  * Deliberately free of imports, database calls and framework code -- pure data
  * and pure functions, the same shape as domain/turnaroundOptions.js.
  *
+ * SCRUM-141 adds location, an optional criterion the Week 4 instructions list:
+ * the venue's location must contain the requested text (matchesLocation).
+ *
  * Shapes:
- *  - venue: what venueService's toVenueWithAttributes returns -- maxCapacity,
+ *  - venue: what venueService's toVenueWithAttributes returns -- location,
+ *    maxCapacity,
  *    and layouts, accessibility and facilities as arrays of codes, and hours as
  *    [{ day_of_week, opens_at, closes_at }] straight from venue_operating_hours.
  *  - criteria: what validateEventSearchCriteria returns -- startsAt, endsAt,
- *    expectedAttendance, and optionally layout, accessibility and facilities.
+ *    expectedAttendance, and optionally layout, accessibility, facilities and
+ *    location.
  *    An optional criterion that is absent is not filtered on.
  */
 
@@ -201,6 +206,33 @@ export function providesAll(venueCodes, requested) {
 }
 
 /**
+ * SCRUM-141: the venue's location contains the requested text, ignoring case.
+ *
+ * The same meaning as the old /search's ilike '%...%' (venueService
+ * searchVenues), so "orchard" finds "Orchard Road" in both searches. Only
+ * the meaning: ilike treats % and _ as wildcards, and this treats them as
+ * the characters they are, which is what someone typing them means.
+ *
+ * toLowerCase rather than toLocaleLowerCase: the locale variant depends on
+ * the server's locale (a Turkish one lowercases 'I' to a dotless 'ı'), so
+ * the same request could match differently on two machines. toLowerCase
+ * applies Unicode's default mapping everywhere.
+ *
+ * No location asked for means every venue passes, like supportsLayout. The
+ * validator has already trimmed it and turned a blank one into absent.
+ *
+ * @param {{location: string}} venue
+ * @param {string} [location]
+ * @returns {boolean}
+ */
+export function matchesLocation(venue, location) {
+  return (
+    location === undefined ||
+    venue.location.toLowerCase().includes(location.toLowerCase())
+  );
+}
+
+/**
  * AC3 and AC4: does this venue meet every supplied criterion?
  *
  * Returns a boolean and nothing else, on purpose. It never says which check
@@ -219,6 +251,7 @@ export function matchesAllCriteria(venue, criteria) {
     coversPeriod(venue.hours, criteria.startsAt, criteria.endsAt) &&
     supportsLayout(venue, criteria.layout) &&
     providesAll(venue.accessibility, criteria.accessibility) &&
-    providesAll(venue.facilities, criteria.facilities)
+    providesAll(venue.facilities, criteria.facilities) &&
+    matchesLocation(venue, criteria.location)
   );
 }

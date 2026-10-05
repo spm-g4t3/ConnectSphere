@@ -488,3 +488,30 @@ button { cursor: pointer; }
    .venue-calendar-page { padding: 30px 18px; }
    .venue-calendar__toolbar { align-items: flex-start; flex-direction: column; }
 }
+/* SCRUM-141 (SCRUM-20). The event venue finder inside the coordinator's event
+   panel. Scoped under .coordinator-request-detail so nothing leaks into
+   /venue-search, which keeps its own .venue-search__* rules. The panel only
+   ever renders inside .dashboard--coordinator, so that prefix is kept for
+   specificity against the panel's own `li` rules above.
+   The field-error lists and the results are <li>s, so the shared
+   `.dashboard li` flex rule (spread, rule between rows) is overridden below:
+   NECESSARY, not cosmetic -- the same bug .venue-form li fixes. */
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder { display: grid; gap: 12px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__row { align-items: start; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__field { display: grid; gap: 7px; min-width: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__field label,
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__group legend { color: var(--muted); font-size: 0.9rem; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__field input,
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__field select { border: 1px solid var(--line); border-radius: 6px; min-width: 0; padding: 10px 12px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__group { border: 1px solid var(--line); border-radius: 8px; margin: 0; min-width: 0; padding: 10px 14px 12px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__options { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__option { align-items: center; display: inline-flex; font-size: 0.9rem; gap: 8px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__hint { color: var(--muted); font-size: 0.84rem; margin: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__actions { display: flex; justify-content: flex-start; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__field-error { color: #a43c32; font-size: 0.84rem; list-style: none; margin: 0; padding: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__field-error li { border-top: 0; display: block; padding: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__results { list-style: none; margin: 0; padding: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__results li { border-top: 1px solid var(--line); display: block; padding: 8px 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__results li:first-child { border-top: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__browse { font-size: 0.9rem; margin: 12px 0 0; }
