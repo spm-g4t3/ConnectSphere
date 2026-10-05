@@ -26,6 +26,10 @@ const TABLES = [
   { name: 'venue_blocks', migration: '011', expected: null },
   { name: 'notifications', migration: '014', expected: null },
   { name: 'venue_block_history', migration: '016', expected: null },
+  { name: 'equipment_types', migration: '022', expected: null },
+  { name: 'equipment_requests', migration: '022', expected: null },
+  { name: 'equipment_lines', migration: '022', expected: null },
+  { name: 'equipment_reservations', migration: '022', expected: null },
 ];
 
 /** Read one id while asking PostgREST for the exact count. */
