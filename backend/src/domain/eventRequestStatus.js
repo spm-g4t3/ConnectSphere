@@ -179,9 +179,12 @@ export const STATUS_DISPLAY = Object.freeze({
  *  - completed and cancelled are terminal: nothing leads out of them. A
  *    cancelled event is never reinstated; a new request is submitted instead.
  *
- * submitted -> pending_clarification is kept although the SCRUM-318 table
- * lists clarification from under_review only: it is how clarification works
- * today (SCRUM-46) and nothing yet moves a request to under_review.
+ * Clarification is asked for from under_review only. A coordinator who asks
+ * for it on a submitted request moves it to under_review first, as two
+ * recorded transitions (requestEventClarification).
+ *
+ * Migration 022 holds this same table in SQL, so the database function refuses
+ * an illegal move whoever calls it. A test compares the two.
  */
 export const ALLOWED_TRANSITIONS = Object.freeze({
   [STATUS.DRAFT]: Object.freeze([
@@ -189,7 +192,6 @@ export const ALLOWED_TRANSITIONS = Object.freeze({
   ]),
   [STATUS.SUBMITTED]: Object.freeze([
     STATUS.UNDER_REVIEW,
-    STATUS.PENDING_CLARIFICATION,
     STATUS.CANCELLED,
   ]),
   [STATUS.UNDER_REVIEW]: Object.freeze([

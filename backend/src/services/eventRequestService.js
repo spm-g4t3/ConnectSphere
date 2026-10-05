@@ -641,10 +641,13 @@ export async function updateEventRequest(id, changes, organiserId, { client } = 
  *     supabase-js has no transactions, so a function is the only way to
  *     guarantee that. 021's header gives the full argument.
  *
- * Why the rule is asked here and not in the function: a copy of the transition
- * table in SQL would be the same rule in two places, able to disagree. The
- * function checks the one thing only it can check reliably, that the status is
- * still what the caller checked.
+ * The rule is asked in two places on purpose. canTransition here refuses an
+ * illegal move before any round trip, with the status named. The function
+ * (migration 022) holds the same table in SQL and refuses it again under the
+ * row lock, because the function is callable by anything that reaches the
+ * database, not only this service. A test compares the two tables pair by
+ * pair, so they cannot drift unnoticed. The function also checks the thing
+ * only it can check reliably, that the status is still what the caller saw.
  *
  * Submitting is not done through this function. It also assigns a coordinator
  * and sets submitted_at, so it has its own, submitEventRequest, and a request
@@ -738,12 +741,19 @@ export async function changeEventRequestStatus(
  *     and gives the true reason. It comes before the status check, as in 018:
  *     whether the event could be sent for clarification is a question only
  *     its coordinator has any reason to ask.
- *  3. changeEventRequestStatus, which asks canTransition and writes. The note
- *     travels as the reason: it is why the request changed status, and the
- *     function stores it as the clarification note too (021). The caller is
- *     passed as the expected coordinator, so an event handed to someone else
- *     between the read and the write is a 409, not a change made by someone
- *     who no longer holds it. A refresh shows which it was.
+ *  3. changeEventRequestStatus, which asks canTransition and writes. A request
+ *     that is still submitted is first moved to under_review, because
+ *     clarification is asked for from under_review only (SCRUM-318). That is
+ *     two recorded transitions, submitted -> under_review and then
+ *     under_review -> pending_clarification, each its own database call. If
+ *     the second is refused the request stays under_review, a legal status the
+ *     coordinator can act on, and the first row is a true record of what
+ *     happened. The note travels as the reason for the second: it is why the
+ *     request changed status, and the function stores it as the clarification
+ *     note too (021). The caller is passed as the expected coordinator on both,
+ *     so an event handed to someone else between the read and a write is a
+ *     409, not a change made by someone who no longer holds it. A refresh
+ *     shows which it was.
  *
  * @param {string} id
  * @param {string} note           what the Organiser is asked to clarify
@@ -779,10 +789,26 @@ export async function requestEventClarification(id, note, coordinatorId, { clien
     );
   }
 
+  let expectedStatus = current.status;
+
+  if (expectedStatus === STATUS.SUBMITTED) {
+    await changeEventRequestStatus(
+      id,
+      {
+        expectedStatus,
+        newStatus: STATUS.UNDER_REVIEW,
+        changedBy: coordinatorId,
+        expectedCoordinatorId: coordinatorId,
+      },
+      { client: db },
+    );
+    expectedStatus = STATUS.UNDER_REVIEW;
+  }
+
   return changeEventRequestStatus(
     id,
     {
-      expectedStatus: current.status,
+      expectedStatus,
       newStatus: STATUS.PENDING_CLARIFICATION,
       changedBy: coordinatorId,
       reason: clarificationNote,

@@ -178,7 +178,6 @@ describe('only legal status transitions are permitted', () => {
   it.each([
     [STATUS.DRAFT, STATUS.SUBMITTED],
     [STATUS.SUBMITTED, STATUS.UNDER_REVIEW],
-    [STATUS.SUBMITTED, STATUS.PENDING_CLARIFICATION],
     [STATUS.UNDER_REVIEW, STATUS.APPROVED],
     [STATUS.UNDER_REVIEW, STATUS.REJECTED],
     [STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION],
@@ -204,6 +203,8 @@ describe('only legal status transitions are permitted', () => {
     [STATUS.COMPLETED, STATUS.CANCELLED],
     [STATUS.CANCELLED, STATUS.DRAFT],
     [STATUS.SUBMITTED, STATUS.APPROVED],
+    // clarification is asked for from under_review only
+    [STATUS.SUBMITTED, STATUS.PENDING_CLARIFICATION],
     [STATUS.DRAFT, STATUS.CONFIRMED],
     // a draft has no coordinator to cancel it; drafts are deleted
     [STATUS.DRAFT, STATUS.CANCELLED],
@@ -226,7 +227,6 @@ describe('only legal status transitions are permitted', () => {
     const permitted = new Set([
       'draft>submitted',
       'submitted>under_review',
-      'submitted>pending_clarification',
       'under_review>pending_clarification',
       'pending_clarification>under_review',
       'under_review>approved',

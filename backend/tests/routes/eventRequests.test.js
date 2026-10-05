@@ -1002,6 +1002,7 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
     const note = 'Please clarify the proposed event purpose.';
     const client = createWritableFakeClient([
       ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: OTHER_ORGANISER_ID })),
+      ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: OTHER_ORGANISER_ID })),
       ok(storedRow({
         status: STATUS.PENDING_CLARIFICATION,
         clarification_note: note,
@@ -1017,13 +1018,23 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
     expect(res.body.status).toBe(STATUS.PENDING_CLARIFICATION);
     expect(res.body.clarificationNote).toBe(note);
 
-    // SCRUM-321: the change is one call to the status function, recorded
-    // against the signed-in coordinator, with the note as the reason.
-    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
+    // SCRUM-318: a submitted request is first moved to under_review, then to
+    // pending_clarification. Two calls to the status function, both recorded
+    // against the signed-in coordinator, with the note as the second's reason.
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc', 'rpc']);
     expect(client.calls[1].fn).toBe('change_event_request_status');
     expect(client.calls[1].args).toEqual({
       p_event_request_id: REQUEST_ID,
       p_expected_status: STATUS.SUBMITTED,
+      p_new_status: STATUS.UNDER_REVIEW,
+      p_changed_by: OTHER_ORGANISER_ID,
+      p_reason: null,
+      p_expected_coordinator: OTHER_ORGANISER_ID,
+    });
+    expect(client.calls[2].fn).toBe('change_event_request_status');
+    expect(client.calls[2].args).toEqual({
+      p_event_request_id: REQUEST_ID,
+      p_expected_status: STATUS.UNDER_REVIEW,
       p_new_status: STATUS.PENDING_CLARIFICATION,
       p_changed_by: OTHER_ORGANISER_ID,
       p_reason: note,
@@ -2366,6 +2377,7 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
     // the token.
     const client = createWritableFakeClient([
       ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: NEW_COORDINATOR_ID })),
+      ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: NEW_COORDINATOR_ID })),
       ok(storedRow({
         status: STATUS.PENDING_CLARIFICATION,
         clarification_note: 'Please confirm the attendance.',
@@ -2381,9 +2393,11 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe(STATUS.PENDING_CLARIFICATION);
-    expect(client.calls[1].fn).toBe('change_event_request_status');
-    expect(client.calls[1].args.p_expected_coordinator).toBe(NEW_COORDINATOR_ID);
-    expect(client.calls[1].args.p_changed_by).toBe(NEW_COORDINATOR_ID);
+    for (const call of client.calls.slice(1)) {
+      expect(call.fn).toBe('change_event_request_status');
+      expect(call.args.p_expected_coordinator).toBe(NEW_COORDINATOR_ID);
+      expect(call.args.p_changed_by).toBe(NEW_COORDINATOR_ID);
+    }
   });
 
   it('SCRUM332_AC7_takes_the_coordinator_from_the_token_not_the_body', async () => {

@@ -27,7 +27,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-import { STATUS } from '../../src/domain/eventRequestStatus.js';
+import { STATUS, canTransition } from '../../src/domain/eventRequestStatus.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
@@ -84,6 +84,7 @@ const RECORDED_TRANSITIONS = [
   [STATUS.UNDER_REVIEW, STATUS.APPROVED],
   [STATUS.UNDER_REVIEW, STATUS.REJECTED],
   [STATUS.APPROVED, STATUS.REJECTED],
+  [STATUS.REJECTED, STATUS.DRAFT],
   [STATUS.APPROVED, STATUS.CONFIRMED],
   [STATUS.CONFIRMED, STATUS.APPROVED],
   [STATUS.CONFIRMED, STATUS.COMPLETED],
@@ -144,6 +145,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     await db.query("insert into profiles (id, role) values ($1, 'event_organiser')", [organiser]);
     await db.exec(migration('020_event_status_lifecycle.sql'));
     await db.exec(migration('021_event_status_history.sql'));
+    await db.exec(migration('022_event_status_transitions.sql'));
   }, 60_000);
 
   afterAll(async () => {
@@ -350,7 +352,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
         ['the event was handed to another coordinator', (id) => change(id, STATUS.SUBMITTED, STATUS.UNDER_REVIEW, coordinator, null, otherCoordinator), '40001'],
         ['the reason is blank', (id) => change(id, STATUS.SUBMITTED, STATUS.UNDER_REVIEW, coordinator, '   '), '23514'],
         ['the user does not exist', (id) => change(id, STATUS.SUBMITTED, STATUS.UNDER_REVIEW, '99999999-9999-4999-8999-999999999999'), '23503'],
-        ['the status would break a table constraint (a reopened draft keeps its submitted_at)', (id) => change(id, STATUS.SUBMITTED, STATUS.DRAFT), '23514'],
+        ['the move is not one of the sixteen (a submitted request cannot go back to draft)', (id) => change(id, STATUS.SUBMITTED, STATUS.DRAFT), '55000'],
       ])('SCRUM325_refuses_when_%s', async (_label, attempt, code) => {
         const id = await request(STATUS.SUBMITTED);
         const before = await row(id);
@@ -377,6 +379,42 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
         );
 
         expect(err.code).toBe('P0002');
+      });
+    });
+
+    describe('a rejected request is reopened as a draft', () => {
+      it('SCRUM318_reopens_a_rejected_request_without_a_submission_time_and_records_it_once', async () => {
+        const id = await request(STATUS.REJECTED);
+
+        const { rows: [reopened] } = await change(id, STATUS.REJECTED, STATUS.DRAFT, organiser, 'Revising after feedback.');
+
+        expect(reopened).toMatchObject({ status: STATUS.DRAFT, submitted_at: null });
+        const history = await statusHistory(id);
+        expect(history).toHaveLength(1);
+        expect(history[0]).toMatchObject({
+          previous_status: STATUS.REJECTED,
+          new_status: STATUS.DRAFT,
+          changed_by: organiser,
+          reason: 'Revising after feedback.',
+        });
+      });
+
+      it('SCRUM318_lets_the_reopened_draft_be_submitted_again_through_the_one_submission_path', async () => {
+        const id = await request(STATUS.REJECTED);
+        await change(id, STATUS.REJECTED, STATUS.DRAFT, organiser);
+        await pause();
+
+        const { rows: [again] } = await submit(id);
+
+        expect(again.status).toBe(STATUS.SUBMITTED);
+        expect(again.submitted_at).not.toBeNull();
+        expect([coordinator, otherCoordinator]).toContain(again.assigned_coordinator_id);
+        const history = await statusHistory(id);
+        expect(history.map((h) => [h.previous_status, h.new_status])).toEqual([
+          [STATUS.REJECTED, STATUS.DRAFT],
+          [STATUS.DRAFT, STATUS.SUBMITTED],
+        ]);
+        expect(await assignmentHistory(id)).toHaveLength(1);
       });
     });
 
@@ -431,6 +469,89 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     });
   });
 
+  describe('the database holds the same transition table as the domain', () => {
+    // Hand-written from SCRUM-318, not read from either module, so neither copy
+    // can drift without this test saying so.
+    const SIXTEEN = [
+      ['draft', 'submitted'],
+      ['submitted', 'under_review'],
+      ['under_review', 'pending_clarification'],
+      ['pending_clarification', 'under_review'],
+      ['under_review', 'approved'],
+      ['under_review', 'rejected'],
+      ['approved', 'rejected'],
+      ['rejected', 'draft'],
+      ['approved', 'confirmed'],
+      ['confirmed', 'approved'],
+      ['confirmed', 'completed'],
+      ['submitted', 'cancelled'],
+      ['under_review', 'cancelled'],
+      ['pending_clarification', 'cancelled'],
+      ['approved', 'cancelled'],
+      ['confirmed', 'cancelled'],
+    ];
+    const NINE = Object.values(STATUS);
+    const WITH_PLANNING = [...NINE, 'planning'];
+    const isSixteen = (from, to) => SIXTEEN.some(([f, t]) => f === from && t === to);
+
+    it('SCRUM318_allows_exactly_the_sixteen_listed_transitions_and_nothing_else', async () => {
+      const allowed = [];
+      for (const from of WITH_PLANNING) {
+        for (const to of WITH_PLANNING) {
+          const { rows: [r] } = await db.query('select event_request_status_allows($1, $2) as allowed', [from, to]);
+          if (r.allowed) allowed.push([from, to]);
+        }
+      }
+
+      expect(allowed.map((pair) => pair.join('>')).sort()).toEqual(SIXTEEN.map((pair) => pair.join('>')).sort());
+    });
+
+    it('SCRUM318_agrees_with_canTransition_for_every_pair_of_statuses', async () => {
+      for (const from of WITH_PLANNING) {
+        for (const to of WITH_PLANNING) {
+          const { rows: [r] } = await db.query('select event_request_status_allows($1, $2) as allowed', [from, to]);
+          expect(r.allowed, `${from} -> ${to}`).toBe(canTransition(from, to));
+        }
+      }
+    });
+
+    describe('every other move between the nine statuses', () => {
+      // A move to the status the request is already in, and a move to
+      // submitted, are refused earlier and for their own reasons, tested above.
+      const REFUSED = NINE.flatMap((from) =>
+        NINE.filter((to) => to !== from && to !== STATUS.SUBMITTED && !isSixteen(from, to))
+          .map((to) => [from, to]),
+      );
+
+      it.each(REFUSED)('SCRUM318_refuses_%s_to_%s_names_the_status_and_changes_nothing', async (from, to) => {
+        const id = await request(from);
+        const before = await row(id);
+
+        const err = await refusal(change(id, from, to, coordinator));
+
+        expect(err.code).toBe('55000');
+        expect(err.message).toContain(`status ${from}`);
+        expect(await row(id)).toEqual(before);
+        expect(await statusHistory(id)).toHaveLength(0);
+      });
+
+      it.each([STATUS.COMPLETED, STATUS.CANCELLED])(
+        'SCRUM318_refuses_every_move_out_of_%s_when_the_caller_has_its_status_right',
+        async (final) => {
+          for (const to of NINE.filter((s) => s !== final && s !== STATUS.SUBMITTED)) {
+            const id = await request(final);
+
+            const err = await refusal(change(id, final, to, coordinator));
+
+            expect(err.code, `${final} -> ${to}`).toBe('55000');
+            expect((await row(id)).status).toBe(final);
+            expect(await statusHistory(id)).toHaveLength(0);
+          }
+        },
+      );
+    });
+  });
+
   describe('planning is rejected by the database', () => {
     const placed = { submitted_at: new Date().toISOString() };
 
@@ -454,8 +575,27 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
 
       const err = await refusal(change(id, STATUS.APPROVED, 'planning'));
 
-      expect(err.message).toContain('event_requests_status_in_lifecycle');
+      // Refused as a move outside the sixteen, before the table constraint is
+      // reached, and naming the status the request is in.
+      expect(err.code).toBe('55000');
+      expect(err.message).toContain('approved');
+      expect(err.message).toContain('planning');
       expect((await row(id)).status).toBe(STATUS.APPROVED);
+      expect(await statusHistory(id)).toHaveLength(0);
+    });
+
+    it.each([
+      ['previous', "'planning', 'approved'"],
+      ['new', "'approved', 'planning'"],
+    ])('SCRUM318_refuses_a_history_row_whose_%s_status_is_planning', async (_which, pair) => {
+      const id = await request(STATUS.APPROVED);
+
+      const err = await refusal(db.query(
+        `insert into event_request_status_history (event_request_id, previous_status, new_status, changed_by) values ($1, ${pair}, $2)`,
+        [id, organiser],
+      ));
+
+      expect(err.message).toContain('event_request_status_history_statuses_in_lifecycle');
       expect(await statusHistory(id)).toHaveLength(0);
     });
 
@@ -501,6 +641,70 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       expect(await statusHistory(id)).toHaveLength(1);
     });
   });
+});
+
+
+describe('SCRUM-318: a rejected request reopens on a database that has SCRUM-19\'s decision columns', () => {
+  it('SCRUM318_clears_the_decision_with_the_status_and_runs_022_again_without_error', async () => {
+    const db = await databaseBefore020();
+    try {
+      // 010's decision columns and the two constraints 020 keeps, which this
+      // branch does not carry. A rejected request has a decision and a draft
+      // may not, so the reopen has to clear it in the same statement.
+      await db.exec(`
+        alter table event_requests
+          add column decision text,
+          add column decision_note text,
+          add column decided_by uuid references auth.users (id),
+          add column decided_at timestamptz,
+          add constraint event_requests_decided_status_has_decision check (
+            status not in ('approved', 'rejected', 'confirmed', 'completed') or decision is not null
+          ),
+          add constraint event_requests_decision_has_decided_status check (
+            decision is null or status in ('approved', 'rejected', 'confirmed', 'completed', 'cancelled')
+          );
+      `);
+      await db.exec(migration('020_event_status_lifecycle.sql'));
+      await db.exec(migration('021_event_status_history.sql'));
+      await db.exec(migration('022_event_status_transitions.sql'));
+      await db.exec(migration('022_event_status_transitions.sql'));
+
+      const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+      const organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
+      const coordinator = (await one("insert into auth.users (email) values ('c@x') returning id")).id;
+      await db.query("insert into profiles (id, role) values ($1, 'event_organiser'), ($2, 'event_coordinator')", [organiser, coordinator]);
+      const { id } = await one(
+        `insert into event_requests
+           (organiser_id, event_name, status, submitted_at, assigned_coordinator_id, reviewing_coordinator_id,
+            decision, decision_note, decided_by, decided_at)
+         values ($1, 'rejected event', 'rejected', now(), $2, $2, 'rejected', 'No venue.', $2, now())
+         returning id`,
+        [organiser, coordinator],
+      );
+
+      const { rows: [reopened] } = await db.query(
+        'select * from change_event_request_status($1, $2, $3, $4, $5)',
+        [id, STATUS.REJECTED, STATUS.DRAFT, organiser, null],
+      );
+
+      expect(reopened).toMatchObject({
+        status: STATUS.DRAFT,
+        submitted_at: null,
+        decision: null,
+        decision_note: null,
+        decided_by: null,
+        decided_at: null,
+      });
+      const { rows: history } = await db.query('select * from event_request_status_history where event_request_id = $1', [id]);
+      expect(history).toHaveLength(1);
+      expect(history[0]).toMatchObject({ previous_status: 'rejected', new_status: 'draft', changed_by: organiser });
+
+      const { rows: [again] } = await db.query('select * from submit_event_request($1, now(), $2)', [id, organiser]);
+      expect(again).toMatchObject({ status: STATUS.SUBMITTED, assigned_coordinator_id: coordinator });
+    } finally {
+      await db.close();
+    }
+  }, 60_000);
 });
 
 

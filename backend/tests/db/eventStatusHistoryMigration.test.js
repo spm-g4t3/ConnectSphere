@@ -115,7 +115,7 @@ describe('SCRUM-321 AC3: change_event_request_status writes the status and its h
     expect(body).toMatch(/if p_new_status = 'submitted' then raise exception[^;]*using errcode = 'invalid_parameter_value'/);
   });
 
-  it('does not hold a copy of the transition table, which lives in canTransition', () => {
+  it("021's own definition holds no transition table; 022 replaces it with one that does", () => {
     expect(body).not.toMatch(/allowed_transitions|can_transition/);
     expect(body).not.toMatch(/when p_expected_status = '(draft|submitted|approved|confirmed|rejected)'/);
   });
@@ -177,6 +177,11 @@ describe('SCRUM-321: only the two lifecycle functions write the status history',
         return count > 0 ? [`${name}: ${count}`] : [];
       });
 
-    expect(writers).toEqual(['021_event_status_history.sql: 2']);
+    expect(writers).toEqual([
+      '021_event_status_history.sql: 2',
+      // 022 replaces change_event_request_status; 021's copy is superseded, not
+      // a second live writer.
+      '022_event_status_transitions.sql: 1',
+    ]);
   });
 });
