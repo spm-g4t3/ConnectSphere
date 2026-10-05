@@ -417,3 +417,87 @@ describe('AC4 and AC5: recording damaged and under-maintenance quantities', () =
     });
   });
 });
+
+
+describe('AC6: retire and reinstate', () => {
+  const RETIRED = '2026-10-01T09:00:00+00:00';
+  const retireUrl = `/api/equipment/${TYPE_ID}/retire`;
+  const reinstateUrl = `/api/equipment/${TYPE_ID}/reinstate`;
+
+  it('SCRUM275_AC6_lets_technical_support_retire_a_type', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))));
+
+    const res = await request(appWith()).post(retireUrl);
+
+    expect(res.status).toBe(200);
+    expect(res.body.retiredAt).toBe(RETIRED);
+  });
+
+  it('SCRUM275_AC6_lets_technical_support_reinstate_a_type', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))))
+      .mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    const res = await request(appWith()).post(reinstateUrl);
+
+    expect(res.status).toBe(200);
+    expect(res.body.retiredAt).toBeNull();
+  });
+
+  it.each(OTHER_ROLES)('SCRUM275_AC1_refuses_%s_on_retire_with_403_and_changes_nothing', async (role) => {
+    const res = await request(appWith(signedInAs(role))).post(retireUrl);
+
+    expect(res.status).toBe(403);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it.each(OTHER_ROLES)('SCRUM275_AC1_refuses_%s_on_reinstate_with_403_and_changes_nothing', async (role) => {
+    const res = await request(appWith(signedInAs(role))).post(reinstateUrl);
+
+    expect(res.status).toBe(403);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC6_answers_409_with_a_code_when_retiring_a_retired_type', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))));
+
+    const res = await request(appWith()).post(retireUrl);
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('EQUIPMENT_ALREADY_RETIRED');
+  });
+
+  it('SCRUM275_AC6_answers_409_with_a_code_when_reinstating_a_type_that_is_not_retired', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    const res = await request(appWith()).post(reinstateUrl);
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('EQUIPMENT_NOT_RETIRED');
+  });
+
+  it('SCRUM275_AC6_answers_404_for_an_unknown_type_on_both', async () => {
+    from.mockReturnValueOnce(queryStub(ok(null))).mockReturnValueOnce(queryStub(ok(null)));
+
+    expect((await request(appWith()).post(retireUrl)).status).toBe(404);
+    expect((await request(appWith()).post(reinstateUrl)).status).toBe(404);
+  });
+
+  it('SCRUM275_AC6_answers_400_for_a_malformed_id_on_both', async () => {
+    expect((await request(appWith()).post('/api/equipment/not-a-uuid/retire')).status).toBe(400);
+    expect((await request(appWith()).post('/api/equipment/not-a-uuid/reinstate')).status).toBe(400);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC6_records_the_signed_in_user_when_retiring', async () => {
+    const write = queryStub(ok(typeRow({ retired_at: RETIRED })));
+    const updateSpy = vi.spyOn(write, 'update');
+    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+
+    await request(appWith()).post(retireUrl).send({ lastModifiedBy: 'someone-else' });
+
+    expect(updateSpy.mock.calls[0][0].last_modified_by).toBe(STAFF_ID);
+  });
+});

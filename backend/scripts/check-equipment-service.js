@@ -8,10 +8,8 @@
  * which mocks Supabase: only this script can show that Postgres really enforces
  * what the service relies on.
  *
- * SCRUM-279 adds the history steps at the end.
- *
- * SCRUM-277 adds the damage and maintenance steps, and SCRUM-279 the history
- * steps after them.
+ * SCRUM-277 adds the damage and maintenance steps, SCRUM-278 retire and
+ * reinstate, and SCRUM-279 the history steps after them.
  *
  * What it proves that the mocked tests cannot:
  *   - the ilike name check and the unique index on lower(trim(name)) agree
@@ -38,6 +36,8 @@ import {
   listActiveEquipmentTypes,
   getEquipmentTypeHistory,
   recordEquipmentCondition,
+  retireEquipmentType,
+  reinstateEquipmentType,
 } from '../src/services/equipmentService.js';
 
 const PREFIX = `__check_equipment_${Date.now()}`;
@@ -263,6 +263,34 @@ async function main() {
 
   const noType = await failureOf(recordEquipmentCondition(randomUUID(), { damagedQuantity: 1, note: 'x' }, actor));
   check('an unknown type answers not found', noType?.status === 404, noType?.message);
+
+  // --- retire and reinstate (SCRUM-278) -----------------------------------------
+  const spare = await track({ name: `${PREFIX}_spare`, totalQuantity: 4 });
+  const retiredSpare = await retireEquipmentType(spare.id, actor);
+  check('retire stamps retiredAt', Boolean(retiredSpare.retiredAt));
+  check('a retired type leaves the active list', !(await listActiveEquipmentTypes()).some((t) => t.id === spare.id));
+  check('a retired type stays in the full catalogue', (await listEquipmentTypes()).some((t) => t.id === spare.id && t.retiredAt));
+
+  const twice = await failureOf(retireEquipmentType(spare.id, actor));
+  check('retiring twice answers 409', twice?.status === 409 && twice.code === 'EQUIPMENT_ALREADY_RETIRED', twice?.message);
+
+  const back = await reinstateEquipmentType(spare.id, actor);
+  check('reinstate clears retiredAt', back.retiredAt === null);
+  check('a reinstated type is back in the active list', (await listActiveEquipmentTypes()).some((t) => t.id === spare.id));
+
+  const notRetired = await failureOf(reinstateEquipmentType(spare.id, actor));
+  check(
+    'reinstating a type that is not retired answers 409',
+    notRetired?.status === 409 && notRetired.code === 'EQUIPMENT_NOT_RETIRED',
+    notRetired?.message,
+  );
+
+  const retiredHistory = (await getEquipmentTypeHistory(spare.id)).filter((row) => row.field === 'retiredAt');
+  check(
+    'retire and reinstate are both in the history with the acting user',
+    retiredHistory.length === 2 && retiredHistory.every((row) => row.changedBy === actor),
+    `${retiredHistory.length} rows`,
+  );
 
   await updateEquipmentType(type.id, { location: 'Store 3' }, actor);
   const history = await getEquipmentTypeHistory(type.id);

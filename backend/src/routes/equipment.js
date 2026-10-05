@@ -2,8 +2,7 @@
  * Equipment catalogue routes.
  *
  * SCRUM-276, a subtask of SCRUM-275 "Maintain Equipment Catalogue and Status -
- * Technical Support Staff". Retire and reinstate (SCRUM-278) is added to this
- * router by its own subtask.
+ * Technical Support Staff". Its subtasks add the routes below.
  *
  * Who may do what, and why:
  *
@@ -31,6 +30,8 @@ import {
   listActiveEquipmentTypes,
   getEquipmentTypeHistory,
   recordEquipmentCondition,
+  retireEquipmentType,
+  reinstateEquipmentType,
 } from '../services/equipmentService.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
@@ -126,6 +127,39 @@ export function createEquipmentRouter({
   router.get('/:id/history', technicalSupportOnly, async (req, res) => {
     try {
       res.status(200).json(await getEquipmentTypeHistory(req.params.id));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * AC6 (SCRUM-278): retire a type, so it leaves the active list and can't be
+   * chosen on new equipment lines. Existing lines and reservations keep it.
+   *
+   * POST rather than DELETE, as for venues: retirement is a soft delete the
+   * record survives, and a DELETE would describe the opposite.
+   *
+   * Statuses: 200 with the updated type; 400 for a malformed id; 401; 403;
+   * 404; 409 with code EQUIPMENT_ALREADY_RETIRED, or whatever the
+   * over-commitment check refuses with (SCRUM-310); 500.
+   */
+  router.post('/:id/retire', technicalSupportOnly, async (req, res) => {
+    try {
+      res.status(200).json(await retireEquipmentType(req.params.id, actingUser(req)));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * AC6 (SCRUM-278): bring a retired type back into the active list.
+   *
+   * Statuses: 200 with the updated type; 400; 401; 403; 404; 409 with code
+   * EQUIPMENT_NOT_RETIRED; 500.
+   */
+  router.post('/:id/reinstate', technicalSupportOnly, async (req, res) => {
+    try {
+      res.status(200).json(await reinstateEquipmentType(req.params.id, actingUser(req)));
     } catch (err) {
       handleError(err, res);
     }

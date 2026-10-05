@@ -4,8 +4,8 @@
  * SCRUM-276, a subtask of SCRUM-275 "Maintain Equipment Catalogue and Status".
  *
  * Creates and edits equipment types and reads them back (SCRUM-276), and
- * records damaged and under-maintenance quantities with a note (SCRUM-277).
- * Retire and reinstate (SCRUM-278) is a separate subtask and is not here. SCRUM-279 adds the change history:
+ * records damaged and under-maintenance quantities with a note (SCRUM-277), and
+ * retires and reinstates types (SCRUM-278). SCRUM-279 adds the change history:
  * the acting user goes in with every write and a database trigger records the
  * change (023_equipment_history.sql), and getEquipmentTypeHistory reads it back.
  *
@@ -166,6 +166,10 @@ async function isNameTaken(name, excludeId = null) {
   if (error) throw translateError(error);
 
   return (data ?? []).length > 0;
+}
+
+function alreadyRetired() {
+  return new ConflictError('Equipment type is already retired', { code: 'EQUIPMENT_ALREADY_RETIRED' });
 }
 
 async function readRow(id) {
@@ -352,6 +356,90 @@ export async function recordEquipmentCondition(id, input, userId = null) {
       last_modified_by: userId,
       last_change_note: value.note,
     })
+    .eq('id', id)
+    .select(COLUMNS)
+    .maybeSingle();
+
+  if (error) throw translateError(error);
+  if (!data) throw new NotFoundError(`Equipment type ${id} not found`);
+
+  return toEquipmentType(data);
+}
+
+
+/**
+ * AC6: retire a type, so it drops out of the active list and can't be chosen
+ * on new equipment lines.
+ *
+ * Existing lines and reservations that use it are untouched: nothing here
+ * reads or writes them, and retirement is a timestamp on the type, never a
+ * delete, so past events keep their equipment history. A retired type keeps
+ * its quantities and can still be edited.
+ *
+ * Retiring takes every usable unit out of service, so when any are usable the
+ * over-commitment hook runs first with usableAfter 0 (AC7, SCRUM-310). The
+ * history trigger records retired_at going from empty to a time, with the user.
+ *
+ * @param {string} id
+ * @param {string|null} [userId]  who is retiring it, kept in the history
+ * @returns {Promise<object>} the updated type, retiredAt set
+ * @throws {ValidationError} for a malformed id
+ * @throws {NotFoundError} when no type has that id
+ * @throws {ConflictError} EQUIPMENT_ALREADY_RETIRED when it is already retired
+ */
+export async function retireEquipmentType(id, userId = null) {
+  validateEquipmentTypeId(id);
+
+  const current = await readRow(id);
+  if (!current) throw new NotFoundError(`Equipment type ${id} not found`);
+  if (current.retired_at) throw alreadyRetired();
+
+  const usableBefore =
+    current.total_quantity - current.damaged_quantity - current.under_maintenance_quantity;
+  if (usableBefore > 0) {
+    await assertNoOverCommitment({ equipmentTypeId: id, usableAfter: 0 });
+  }
+
+  // The retired_at guard means a second writer racing this one is refused
+  // instead of overwriting the first retirement time.
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({ retired_at: new Date().toISOString(), last_modified_by: userId, last_change_note: null })
+    .eq('id', id)
+    .is('retired_at', null)
+    .select(COLUMNS)
+    .maybeSingle();
+
+  if (error) throw translateError(error);
+  if (!data) throw alreadyRetired();
+
+  return toEquipmentType(data);
+}
+
+
+/**
+ * AC6: bring a retired type back. It returns to the active list and can be
+ * chosen on new equipment lines again.
+ *
+ * @param {string} id
+ * @param {string|null} [userId]  who is reinstating it, kept in the history
+ * @returns {Promise<object>} the updated type, retiredAt empty
+ * @throws {ValidationError} for a malformed id
+ * @throws {NotFoundError} when no type has that id
+ * @throws {ConflictError} EQUIPMENT_NOT_RETIRED when it is not retired
+ */
+export async function reinstateEquipmentType(id, userId = null) {
+  validateEquipmentTypeId(id);
+
+  const current = await readRow(id);
+  if (!current) throw new NotFoundError(`Equipment type ${id} not found`);
+  if (!current.retired_at) {
+    throw new ConflictError('Equipment type is not retired', { code: 'EQUIPMENT_NOT_RETIRED' });
+  }
+
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({ retired_at: null, last_modified_by: userId, last_change_note: null })
     .eq('id', id)
     .select(COLUMNS)
     .maybeSingle();

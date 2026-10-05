@@ -34,6 +34,8 @@ const {
   listActiveEquipmentTypes,
   getEquipmentTypeHistory,
   recordEquipmentCondition,
+  retireEquipmentType,
+  reinstateEquipmentType,
 } = await import('../../src/services/equipmentService.js');
 vi.mock('../../src/services/equipmentOverCommitment.js', () => ({
   assertNoOverCommitment: vi.fn(),
@@ -777,5 +779,145 @@ describe('AC7: the over-commitment hook', () => {
     await updateEquipmentType(TYPE_ID, { totalQuantity: 20 });
 
     expect(assertNoOverCommitment).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('AC6: retiring and reinstating a type', () => {
+  const RETIRED = '2026-10-01T09:00:00+00:00';
+
+  it('SCRUM275_AC6_retire_stamps_retired_at_and_records_the_user', async () => {
+    const write = queryStub(ok(typeRow({ retired_at: RETIRED })));
+    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+
+    const retired = await retireEquipmentType(TYPE_ID, USER_ID);
+
+    const [changes] = write.args('update');
+    expect(Number.isNaN(Date.parse(changes.retired_at))).toBe(false);
+    expect(changes).toMatchObject({ last_modified_by: USER_ID, last_change_note: null });
+    expect(write.args('eq')).toEqual(['id', TYPE_ID]);
+    expect(retired.retiredAt).toBe(RETIRED);
+  });
+
+  it('SCRUM275_AC6_retire_only_writes_while_the_type_is_still_active', async () => {
+    const write = queryStub(ok(typeRow({ retired_at: RETIRED })));
+    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+
+    await retireEquipmentType(TYPE_ID);
+
+    expect(write.args('is')).toEqual(['retired_at', null]);
+  });
+
+  it('SCRUM275_AC6_a_retired_type_keeps_its_quantities', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))));
+
+    const retired = await retireEquipmentType(TYPE_ID);
+
+    expect(retired).toMatchObject({ totalQuantity: 10, damagedQuantity: 2, underMaintenanceQuantity: 1 });
+  });
+
+  it('SCRUM275_AC7_retire_runs_the_over_commitment_hook_with_nothing_usable_left', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))));
+
+    await retireEquipmentType(TYPE_ID);
+
+    expect(assertNoOverCommitment).toHaveBeenCalledWith({ equipmentTypeId: TYPE_ID, usableAfter: 0 });
+  });
+
+  it('SCRUM275_AC7_a_refusal_from_the_hook_stops_the_retirement', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    assertNoOverCommitment.mockRejectedValueOnce(new ConflictError('reserved for a later event'));
+
+    await expect(retireEquipmentType(TYPE_ID)).rejects.toBeInstanceOf(ConflictError);
+    expect(from).toHaveBeenCalledTimes(1);
+  });
+
+  it('SCRUM275_AC7_retire_skips_the_hook_when_nothing_was_usable_anyway', async () => {
+    // total 3, damaged 2, under maintenance 1: nothing usable
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow({ total_quantity: 3 }))))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ total_quantity: 3, retired_at: RETIRED }))));
+
+    await retireEquipmentType(TYPE_ID);
+
+    expect(assertNoOverCommitment).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC6_retiring_a_retired_type_answers_409_and_writes_nothing', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))));
+
+    const attempt = retireEquipmentType(TYPE_ID);
+
+    await expect(attempt).rejects.toBeInstanceOf(ConflictError);
+    await expect(attempt).rejects.toMatchObject({ status: 409, code: 'EQUIPMENT_ALREADY_RETIRED' });
+    expect(from).toHaveBeenCalledTimes(1);
+    expect(assertNoOverCommitment).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC6_retire_answers_409_when_another_writer_retires_it_first', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(queryStub(ok(null)));
+
+    await expect(retireEquipmentType(TYPE_ID)).rejects.toMatchObject({ status: 409, code: 'EQUIPMENT_ALREADY_RETIRED' });
+  });
+
+  it('SCRUM275_AC6_retire_answers_not_found_for_an_unknown_type', async () => {
+    from.mockReturnValueOnce(queryStub(ok(null)));
+
+    await expect(retireEquipmentType(TYPE_ID)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('SCRUM275_AC6_retire_refuses_a_malformed_id_before_any_query', async () => {
+    await expect(retireEquipmentType('nope')).rejects.toBeInstanceOf(ValidationError);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC6_reinstate_clears_retired_at_and_records_the_user', async () => {
+    const write = queryStub(ok(typeRow()));
+    from.mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED })))).mockReturnValueOnce(write);
+
+    const reinstated = await reinstateEquipmentType(TYPE_ID, USER_ID);
+
+    expect(write.args('update')).toEqual([{ retired_at: null, last_modified_by: USER_ID, last_change_note: null }]);
+    expect(reinstated.retiredAt).toBeNull();
+  });
+
+  it('SCRUM275_AC7_reinstate_does_not_run_the_hook', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))))
+      .mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    await reinstateEquipmentType(TYPE_ID);
+
+    expect(assertNoOverCommitment).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC6_reinstating_a_type_that_is_not_retired_answers_409', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    const attempt = reinstateEquipmentType(TYPE_ID);
+
+    await expect(attempt).rejects.toMatchObject({ status: 409, code: 'EQUIPMENT_NOT_RETIRED' });
+    expect(from).toHaveBeenCalledTimes(1);
+  });
+
+  it('SCRUM275_AC6_reinstate_answers_not_found_for_an_unknown_type', async () => {
+    from.mockReturnValueOnce(queryStub(ok(null)));
+
+    await expect(reinstateEquipmentType(TYPE_ID)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('SCRUM275_AC6_reinstate_answers_not_found_when_the_type_disappears_before_the_write', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED })))).mockReturnValueOnce(queryStub(ok(null)));
+
+    await expect(reinstateEquipmentType(TYPE_ID)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('SCRUM275_AC6_reinstate_refuses_a_malformed_id_before_any_query', async () => {
+    await expect(reinstateEquipmentType('nope')).rejects.toBeInstanceOf(ValidationError);
+    expect(from).not.toHaveBeenCalled();
   });
 });

@@ -4,7 +4,8 @@
  * SCRUM-277 calls this before saving anything that would leave fewer usable
  * units than a type has today: recording damage or maintenance. SCRUM-276's
  * total change calls it too when the total is reduced, and retiring a type
- * (SCRUM-278) will call it the same way. AC7 of SCRUM-275 says that when the
+ * (SCRUM-278) calls it with usableAfter 0, since a retired type has no units
+ * left to offer. AC7 of SCRUM-275 says that when the
  * usable figure would fall below the units reserved for any future period, the
  * check in SCRUM-310 runs before anything is saved.
  *
