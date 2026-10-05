@@ -1,0 +1,282 @@
+/**
+ * Tests for the equipment catalogue routes.
+ *
+ * SCRUM-276, a subtask of SCRUM-275 "Maintain Equipment Catalogue and
+ * Status". Named SCRUM275_ACn_<what_it_checks>. These are about transport and
+ * authorisation: the right routes exist, the right roles reach them, and a
+ * refused attempt reaches no service function, so it changes nothing.
+ *
+ *   AC1 -- only Technical Support Staff write; coordinators read active types
+ *          only; anyone else is refused, and a refused attempt changes nothing
+ *   AC2 -- create answers 201, or 400 listing every invalid field
+ *   AC3 -- edit answers 200, 400 or 404
+ *
+ * The Supabase client is mocked with a factory, as in routes/venues.test.js.
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import express from 'express';
+import request from 'supertest';
+
+const { from } = vi.hoisted(() => ({ from: vi.fn() }));
+
+vi.mock('../../src/config/supabaseClient.js', () => {
+  const client = { from };
+  return { supabase: client, default: client };
+});
+
+const { createEquipmentRouter } = await import('../../src/routes/equipment.js');
+const { supabase } = await import('../../src/config/supabaseClient.js');
+const { ROLE } = await import('../../src/domain/userRole.js');
+
+
+const TYPE_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+const STAFF_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
+
+function typeRow(overrides = {}) {
+  return {
+    id: TYPE_ID,
+    name: 'Projector',
+    description: null,
+    category: null,
+    location: null,
+    total_quantity: 10,
+    damaged_quantity: 0,
+    under_maintenance_quantity: 0,
+    retired_at: null,
+    created_at: '2026-10-01T09:00:00+00:00',
+    updated_at: '2026-10-01T09:00:00+00:00',
+    ...overrides,
+  };
+}
+
+/** The thenable query stub the service tests use, with the write methods too. */
+function queryStub(result) {
+  const stub = { then: (onFulfilled, onRejected) => Promise.resolve(result).then(onFulfilled, onRejected) };
+  for (const method of ['select', 'eq', 'neq', 'is', 'ilike', 'order', 'limit', 'insert', 'update']) {
+    stub[method] = () => stub;
+  }
+  stub.single = () => Promise.resolve(result);
+  stub.maybeSingle = () => Promise.resolve(result);
+  return stub;
+}
+
+const ok = (data) => ({ data, error: null });
+
+/** Stands in for a signed-in user of a given role. */
+const signedInAs = (role, id = STAFF_ID) => (req, _res, next) => {
+  req.user = { id, email: 'someone@example.com', role };
+  next();
+};
+
+/** Stands in for no session, answering as the real middleware does. */
+const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+
+/** An app with the router mounted where app.js mounts it. */
+function appWith(requireAuth = signedInAs(ROLE.TECHNICAL_SUPPORT_STAFF)) {
+  return express()
+    .use(express.json())
+    .use('/api/equipment', createEquipmentRouter({ requireAuth }));
+}
+
+const OTHER_ROLES = [ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.ATTENDEE, ROLE.EVENT_COORDINATOR];
+
+beforeEach(() => {
+  from.mockReset();
+});
+
+
+describe('the test double', () => {
+  it('SCRUM275_the_supabase_client_is_mocked_and_never_the_real_one', () => {
+    expect(vi.isMockFunction(supabase.from)).toBe(true);
+  });
+});
+
+
+describe('AC1: only Technical Support Staff can write', () => {
+  it.each(OTHER_ROLES)('SCRUM275_AC1_refuses_%s_on_create_with_403_and_changes_nothing', async (role) => {
+    const res = await request(appWith(signedInAs(role)))
+      .post('/api/equipment')
+      .send({ name: 'Projector', totalQuantity: 1 });
+
+    expect(res.status).toBe(403);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it.each(OTHER_ROLES)('SCRUM275_AC1_refuses_%s_on_edit_with_403_and_changes_nothing', async (role) => {
+    const res = await request(appWith(signedInAs(role)))
+      .patch(`/api/equipment/${TYPE_ID}`)
+      .send({ name: 'Mic' });
+
+    expect(res.status).toBe(403);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC1_refuses_a_signed_out_caller_with_401', async () => {
+    const res = await request(appWith(signedOut)).post('/api/equipment').send({ name: 'x', totalQuantity: 1 });
+
+    expect(res.status).toBe(401);
+    expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('AC1: who can read', () => {
+  it('SCRUM275_AC1_lets_an_event_coordinator_read_the_active_types', async () => {
+    from.mockReturnValueOnce(queryStub(ok([typeRow()])));
+
+    const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR))).get('/api/equipment/active');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{ id: TYPE_ID, name: 'Projector', description: null, category: null }]);
+  });
+
+  it('SCRUM275_AC1_lets_technical_support_read_the_active_types', async () => {
+    from.mockReturnValueOnce(queryStub(ok([])));
+
+    const res = await request(appWith()).get('/api/equipment/active');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it.each([ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.ATTENDEE])(
+    'SCRUM275_AC1_refuses_%s_on_the_active_list_with_403',
+    async (role) => {
+      const res = await request(appWith(signedInAs(role))).get('/api/equipment/active');
+
+      expect(res.status).toBe(403);
+      expect(from).not.toHaveBeenCalled();
+    },
+  );
+
+  it('SCRUM275_AC1_keeps_the_full_catalogue_to_technical_support', async () => {
+    const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR))).get('/api/equipment');
+
+    expect(res.status).toBe(403);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC5_gives_technical_support_the_full_catalogue_with_usable_quantities', async () => {
+    from.mockReturnValueOnce(queryStub(ok([typeRow({ damaged_quantity: 2, under_maintenance_quantity: 1 })])));
+
+    const res = await request(appWith()).get('/api/equipment');
+
+    expect(res.status).toBe(200);
+    expect(res.body[0]).toMatchObject({ totalQuantity: 10, usableQuantity: 7 });
+  });
+
+  it('SCRUM275_AC1_answers_500_without_leaking_a_driver_message', async () => {
+    from.mockReturnValueOnce(queryStub({ data: null, error: { code: '57014', message: 'secret driver text' } }));
+
+    const res = await request(appWith()).get('/api/equipment');
+
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(res.body)).not.toContain('secret driver text');
+  });
+});
+
+
+describe('AC2: creating a type', () => {
+  it('SCRUM275_AC2_creates_a_type_and_answers_201', async () => {
+    from.mockReturnValueOnce(queryStub(ok([]))).mockReturnValueOnce(queryStub(ok(typeRow())));
+
+    const res = await request(appWith()).post('/api/equipment').send({ name: 'Projector', totalQuantity: 10 });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ id: TYPE_ID, name: 'Projector', totalQuantity: 10, usableQuantity: 10 });
+  });
+
+  it('SCRUM275_AC2_answers_400_listing_every_invalid_field', async () => {
+    const res = await request(appWith()).post('/api/equipment').send({ name: ' ', totalQuantity: -1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((detail) => detail.field)).toEqual(['name', 'totalQuantity']);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC2_answers_400_for_a_name_already_in_use', async () => {
+    from.mockReturnValueOnce(queryStub(ok([{ id: 'x' }])));
+
+    const res = await request(appWith()).post('/api/equipment').send({ name: 'projector', totalQuantity: 1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'name', message: 'is already used by another equipment type' }]);
+  });
+
+  it('SCRUM275_AC2_answers_409_with_a_code_when_two_writers_race_to_a_name', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok([])))
+      .mockReturnValueOnce(queryStub({ data: null, error: { code: '23505', message: 'duplicate' } }));
+
+    const res = await request(appWith()).post('/api/equipment').send({ name: 'Projector', totalQuantity: 1 });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('EQUIPMENT_NAME_TAKEN');
+  });
+
+  it('SCRUM275_AC2_ignores_damaged_and_retired_fields_in_the_body', async () => {
+    const insert = queryStub(ok(typeRow()));
+    const insertSpy = vi.spyOn(insert, 'insert');
+    from.mockReturnValueOnce(queryStub(ok([]))).mockReturnValueOnce(insert);
+
+    await request(appWith())
+      .post('/api/equipment')
+      .send({ name: 'Projector', totalQuantity: 10, damagedQuantity: 9, retiredAt: '2026-01-01T00:00:00Z' });
+
+    expect(insertSpy).toHaveBeenCalledWith({
+      name: 'Projector',
+      description: null,
+      category: null,
+      location: null,
+      total_quantity: 10,
+    });
+  });
+});
+
+
+describe('AC3: editing a type', () => {
+  it('SCRUM275_AC3_edits_a_type_and_answers_200', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(typeRow({ location: 'Store room 2' }))));
+
+    const res = await request(appWith()).patch(`/api/equipment/${TYPE_ID}`).send({ location: 'Store room 2' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.location).toBe('Store room 2');
+  });
+
+  it('SCRUM275_AC3_answers_404_for_an_unknown_type', async () => {
+    from.mockReturnValueOnce(queryStub(ok(null)));
+
+    const res = await request(appWith()).patch(`/api/equipment/${TYPE_ID}`).send({ name: 'Mic' });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('SCRUM275_AC3_answers_400_for_a_malformed_id', async () => {
+    const res = await request(appWith()).patch('/api/equipment/not-a-uuid').send({ name: 'Mic' });
+
+    expect(res.status).toBe(400);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC3_answers_400_when_the_total_would_drop_below_damaged_plus_maintenance', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow({ damaged_quantity: 4, under_maintenance_quantity: 2 }))));
+
+    const res = await request(appWith()).patch(`/api/equipment/${TYPE_ID}`).send({ totalQuantity: 5 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([
+      { field: 'totalQuantity', message: "can't be below damaged plus under maintenance (6)" },
+    ]);
+  });
+
+  it('SCRUM275_AC3_answers_400_for_an_empty_change', async () => {
+    const res = await request(appWith()).patch(`/api/equipment/${TYPE_ID}`).send({});
+
+    expect(res.status).toBe(400);
+    expect(from).not.toHaveBeenCalled();
+  });
+});
