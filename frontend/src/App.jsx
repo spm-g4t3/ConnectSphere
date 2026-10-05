@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { useEffect } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
@@ -10,6 +10,7 @@ import VenueSearch from "./components/VenueSearch";
 import VenueCatalogue from "./components/VenueCatalogue";
 import ReviewQueue from "./components/ReviewQueue";
 import MyAssignedEvents from "./components/MyAssignedEvents";
+import VenueCalendar from "./components/VenueCalendar";
 import "./App.css";
 
 function LoadingScreen() {
@@ -22,6 +23,18 @@ function PagePlaceholder({ title, description }) {
       <span className="eyebrow">ConnectSphere workspace</span>
       <h1>{title}</h1>
       <p>{description}</p>
+    </main>
+  );
+}
+
+// The calendar takes its venue from the URL. key={venueId} remounts it when
+// only the id changes, so one venue's view, dates and header never carry over
+// onto another's.
+function VenueCalendarRoute() {
+  const { venueId } = useParams();
+  return (
+    <main className="venue-calendar-page">
+      <VenueCalendar key={venueId} venueId={venueId} />
     </main>
   );
 }
@@ -116,6 +129,20 @@ function AppRoutes() {
               <div className="dashboard dashboard--coordinator">
                 <MyAssignedEvents />
               </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* SCRUM-180 (part of SCRUM-178): one venue's calendar of bookings and
+            blocks. Signed-in only, and deliberately no allowedRoles yet: the
+            role gate is SCRUM-182, and until it lands the backend's 403 is
+            what keeps an Organiser out -- the page shows it as a message rather
+            than an empty calendar. Nothing links here yet either; the links
+            from the catalogue and search are SCRUM-181. */}
+        <Route
+          path="/venues/:venueId/calendar"
+          element={
+            <ProtectedRoute>
+              <VenueCalendarRoute />
             </ProtectedRoute>
           }
         />

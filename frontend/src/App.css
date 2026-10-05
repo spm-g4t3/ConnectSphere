@@ -410,6 +410,51 @@ button { cursor: pointer; }
 .change-request-outcome--rejected { background: #fff0ee; color: #a43c32; }
 .change-request-status-list__decision-notes { background: #f3f6f4; color: var(--ink); margin: 0; padding: 9px 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .change-request-status-list__date { color: var(--muted); font-size: 0.82rem; }
+/* SCRUM-180: the venue calendar. Unscoped, unlike the dashboard panels above,
+   because it has its own route (/venues/:venueId/calendar) and is not rendered
+   inside a .dashboard wrapper -- so it brings its own page width, button and
+   list rules rather than borrowing them. The three entry tones reuse the
+   palette's success, warning and error pairs, and each also carries its own
+   words ("Booked", "Booked - under review", "Blocked") and a different left
+   border style, so the meaning never rests on colour alone. */
+.venue-calendar-page { margin: 0 auto; max-width: 1080px; padding: clamp(34px, 6vw, 64px) 24px; }
+.venue-calendar__header { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.venue-calendar__header .eyebrow { flex-basis: 100%; }
+.venue-calendar__header h1 { color: var(--ink); font-size: clamp(1.8rem, 3.5vw, 2.6rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.venue-calendar__badge { background: #eef2f1; border-radius: 999px; color: var(--muted); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; padding: 3px 10px; text-transform: uppercase; }
+.venue-calendar__toolbar { align-items: center; display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; margin: 24px 0 8px; }
+.venue-calendar__nav, .venue-calendar__views { display: flex; flex-wrap: wrap; gap: 6px; }
+.venue-calendar button { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; color: var(--teal-dark); cursor: pointer; padding: 8px 14px; }
+.venue-calendar button:hover { background: #eef6f3; }
+.venue-calendar button:focus-visible { outline: 3px solid rgba(8, 127, 123, 0.35); outline-offset: 2px; }
+.venue-calendar__views button[aria-pressed="true"] { background: var(--teal); border-color: var(--teal); color: white; font-weight: 700; }
+.venue-calendar__title { color: var(--teal-dark); font-size: 1.2rem; margin: 18px 0 12px; }
+.venue-calendar__loading, .venue-calendar__empty { color: var(--muted); }
+.venue-calendar__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+/* The table scrolls inside this box on a narrow screen, rather than seven
+   columns being squeezed unreadable or the whole page scrolling sideways. */
+.venue-calendar__scroll { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); max-width: 100%; overflow-x: auto; }
+.venue-calendar__grid { border-collapse: collapse; min-width: 720px; table-layout: fixed; width: 100%; }
+.venue-calendar__grid th { border-bottom: 1px solid var(--line); color: var(--muted); font-size: 0.8rem; font-weight: 700; padding: 10px 8px; text-align: left; }
+.venue-calendar__grid td { border-left: 1px solid var(--line); border-top: 1px solid var(--line); padding: 6px; vertical-align: top; }
+.venue-calendar__grid td:first-child { border-left: 0; }
+.venue-calendar__grid--week td { height: 160px; }
+.venue-calendar__grid--month td { height: 104px; }
+.venue-calendar__date { color: var(--ink); }
+.venue-calendar__cell--muted { background: #f6f8f7; }
+.venue-calendar__cell--today { background: #eef6f3; box-shadow: inset 0 3px 0 var(--teal); }
+.venue-calendar .venue-calendar__day-number { background: transparent; border: 0; font-weight: 700; padding: 2px 6px; }
+.venue-calendar__cell--muted .venue-calendar__day-number { color: var(--muted); }
+.venue-calendar .venue-calendar__cell--today .venue-calendar__day-number { background: var(--teal); border-radius: 999px; color: white; }
+.venue-calendar__entries { display: grid; gap: 6px; list-style: none; margin: 4px 0 0; padding: 0; }
+.venue-calendar__entry { border-left: 4px solid; border-radius: 6px; display: grid; font-size: 0.84rem; gap: 2px; overflow-wrap: anywhere; padding: 6px 8px; }
+.venue-calendar__entry-time { color: var(--muted); font-size: 0.78rem; }
+.venue-calendar__entry-label { font-weight: 700; }
+.venue-calendar__entry-detail { color: var(--ink); }
+.venue-calendar__entry--booked { background: #e8f7f1; border-color: #17684f; color: #17684f; }
+.venue-calendar__entry--review { background: #fff6e5; border-color: #8a5a00; border-left-style: dashed; color: #8a5a00; }
+.venue-calendar__entry--blocked { background: #fff0ee; border-color: #a43c32; border-left-style: double; border-left-width: 6px; color: #a43c32; }
+.venue-calendar__grid--month .venue-calendar__entry { font-size: 0.76rem; padding: 3px 6px; }
 @media (max-width: 720px) {
    .app-nav { align-items: flex-start; flex-wrap: wrap; gap: 12px 16px; padding: 14px 18px; }
    .app-nav__links { flex: 1 1 100%; gap: 2px; order: 3; overflow-x: auto; width: 100%; }
@@ -431,4 +476,6 @@ button { cursor: pointer; }
    .event-request-form__row, .venue-search__filters, .venue-search__window { grid-template-columns: 1fr; }
    .my-event-requests__details dl { grid-template-columns: 1fr; gap: 3px; }
    .my-event-requests__details dd { margin-bottom: 8px; }
+   .venue-calendar-page { padding: 30px 18px; }
+   .venue-calendar__toolbar { align-items: flex-start; flex-direction: column; }
 }

@@ -18,6 +18,8 @@
 //     Venue Staff and Event Coordinators may list them (SCRUM-130); every
 //     write is Venue Staff only (SCRUM-127), and so is reading one block's
 //     change history (SCRUM-131). See the block section below.
+//   - /venues/:id/calendar merges a venue's bookings and blocks over a
+//     required window (SCRUM-179), for the venue calendar (SCRUM-178).
 
 import { apiClient } from "./apiClient"; // <-- replace with your actual API client
 
@@ -287,6 +289,38 @@ export async function listVenueBlocks(venueId, { from, to } = {}) {
     Object.keys(params).length === 0
       ? await apiClient.get(path)
       : await apiClient.get(path, { params });
+  return response.data;
+}
+
+/**
+ * One venue's calendar (SCRUM-178, served by SCRUM-179): its approved and
+ * flagged bookings and its active blocks overlapping the half-open window
+ * [from, to), merged into one array sorted by start. Each entry is either
+ *   { kind: 'booking', id, startsAt, endsAt, status, eventRequestId, eventName }
+ * with status 'approved' or 'flagged_for_review', or
+ *   { kind: 'block', id, startsAt, endsAt, reason, notes }.
+ * An empty window is 200 [].
+ *
+ * Unlike listVenueBlocks the window is REQUIRED -- a calendar always shows a
+ * range -- and at most 400 days long. Both ends need an explicit offset; axios
+ * encodes the '+' in one as %2B, which the backend asks for.
+ *
+ * Readable by Venue Staff and Event Coordinators, retired venues included.
+ *
+ * Failures: 400 (the id is not a uuid, or the window is missing, one-sided,
+ * malformed, reversed or over 400 days), 401, 403 (any other role), 404 (no
+ * such venue), 500.
+ *
+ * @param {string} venueId
+ * @param {Object} window
+ * @param {string} window.from  ISO with an explicit offset
+ * @param {string} window.to    ISO with an explicit offset, after from
+ * @returns {Promise<Array<Object>>} calendar entries, soonest first
+ */
+export async function getVenueCalendar(venueId, { from, to }) {
+  const response = await apiClient.get(`/venues/${venueId}/calendar`, {
+    params: { from, to },
+  });
   return response.data;
 }
 
