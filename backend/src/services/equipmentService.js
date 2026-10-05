@@ -4,8 +4,10 @@
  * SCRUM-276, a subtask of SCRUM-275 "Maintain Equipment Catalogue and Status".
  *
  * Creates and edits equipment types and reads them back. Damaged and
- * under-maintenance quantities (SCRUM-277), retire and reinstate (SCRUM-278)
- * and the change history (SCRUM-279) are separate subtasks and are not here.
+ * under-maintenance quantities (SCRUM-277) and retire and reinstate (SCRUM-278)
+ * are separate subtasks and are not here. SCRUM-279 adds the change history:
+ * the acting user goes in with every write and a database trigger records the
+ * change (023_equipment_history.sql), and getEquipmentTypeHistory reads it back.
  *
  * Equipment is tracked as a quantity per type, not as individual units, so one
  * row is one type and a quantity is just a number on it.
@@ -65,6 +67,11 @@ function translateError(error) {
     return new ValidationError(`A value was rejected by the database: ${detail}`);
   }
 
+  // last_modified_by names a user who does not exist
+  if (code === '23503') {
+    return new ValidationError(`The editing user does not exist: ${detail}`);
+  }
+
   if (code === '23505') {
     return new ConflictError(`An equipment type with that name already exists: ${detail}`, {
       code: 'EQUIPMENT_NAME_TAKEN',
@@ -110,6 +117,34 @@ function toPickerType(row) {
   };
 }
 
+const HISTORY_COLUMNS =
+  'id, equipment_type_id, field_name, old_value, new_value, note, changed_by, changed_at';
+
+/** Column names in history rows, as the API names those fields. */
+const FIELD_FOR_COLUMN = {
+  total_quantity: 'totalQuantity',
+  damaged_quantity: 'damagedQuantity',
+  under_maintenance_quantity: 'underMaintenanceQuantity',
+  retired_at: 'retiredAt',
+};
+
+/**
+ * Values are returned as stored, which is text: a quantity of 10 is "10".
+ * field is 'created' for the row written when a type is first made.
+ */
+function toHistoryEntry(row) {
+  return {
+    id: row.id,
+    equipmentTypeId: row.equipment_type_id,
+    field: FIELD_FOR_COLUMN[row.field_name] ?? row.field_name,
+    oldValue: row.old_value,
+    newValue: row.new_value,
+    note: row.note,
+    changedBy: row.changed_by,
+    changedAt: row.changed_at,
+  };
+}
+
 function toColumns(value) {
   return Object.fromEntries(
     Object.entries(value).map(([field, fieldValue]) => [COLUMN_FOR[field], fieldValue]),
@@ -145,11 +180,12 @@ async function readRow(id) {
  * defaults, so a new type is fully usable.
  *
  * @param {object} input  name and totalQuantity are required
+ * @param {string|null} [userId]  who is creating it, recorded in the history
  * @returns {Promise<object>} the created type
  * @throws {ValidationError} listing every invalid field, before any write
  * @throws {ConflictError} when two writers race to the same name
  */
-export async function createEquipmentType(input) {
+export async function createEquipmentType(input, userId = null) {
   const { value, details } = checkCreateEquipmentType(input);
 
   // A body that is not an object is refused before any query.
@@ -162,7 +198,7 @@ export async function createEquipmentType(input) {
 
   const { data, error } = await supabase
     .from(TABLE)
-    .insert(toColumns(value))
+    .insert({ ...toColumns(value), last_modified_by: userId })
     .select(COLUMNS)
     .single();
 
@@ -180,11 +216,12 @@ export async function createEquipmentType(input) {
  *
  * @param {string} id
  * @param {object} changes  any of name, description, category, location, totalQuantity
+ * @param {string|null} [userId]  who is editing it, recorded in the history
  * @returns {Promise<object>} the updated type
  * @throws {ValidationError} listing every invalid field, or for a malformed id
  * @throws {NotFoundError} when no type has that id
  */
-export async function updateEquipmentType(id, changes) {
+export async function updateEquipmentType(id, changes, userId = null) {
   validateEquipmentTypeId(id);
 
   const { value, details } = checkUpdateEquipmentType(changes);
@@ -212,7 +249,9 @@ export async function updateEquipmentType(id, changes) {
 
   const { data, error } = await supabase
     .from(TABLE)
-    .update(toColumns(value))
+    // last_change_note is cleared so a note from an earlier damage or
+    // maintenance change can never be attached to a later one.
+    .update({ ...toColumns(value), last_modified_by: userId, last_change_note: null })
     .eq('id', id)
     .select(COLUMNS)
     .maybeSingle();
@@ -256,4 +295,32 @@ export async function listActiveEquipmentTypes() {
   if (error) throw translateError(error);
 
   return (data ?? []).map(toPickerType);
+}
+
+
+/**
+ * A type's change history, newest first (AC8).
+ *
+ * The type is deliberately not checked for existence first: a type with no
+ * history and a type that never existed both answer with an empty list, the
+ * same choice venueService.getVenueHistory makes. The id is still validated so
+ * a malformed one is a 400 rather than a Postgres cast error.
+ *
+ * @param {string} id
+ * @returns {Promise<object[]>} possibly empty
+ * @throws {ValidationError} when the id is malformed, before any query
+ */
+export async function getEquipmentTypeHistory(id) {
+  validateEquipmentTypeId(id);
+
+  const { data, error } = await supabase
+    .from('equipment_type_history')
+    .select(HISTORY_COLUMNS)
+    .eq('equipment_type_id', id)
+    .order('changed_at', { ascending: false })
+    .order('id', { ascending: false });
+
+  if (error) throw translateError(error);
+
+  return (data ?? []).map(toHistoryEntry);
 }

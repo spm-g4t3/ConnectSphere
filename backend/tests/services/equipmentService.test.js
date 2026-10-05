@@ -32,6 +32,7 @@ const {
   updateEquipmentType,
   listEquipmentTypes,
   listActiveEquipmentTypes,
+  getEquipmentTypeHistory,
 } = await import('../../src/services/equipmentService.js');
 const { supabase } = await import('../../src/config/supabaseClient.js');
 const { ValidationError, NotFoundError, ConflictError } = await import('../../src/errors.js');
@@ -39,6 +40,7 @@ const { ValidationError, NotFoundError, ConflictError } = await import('../../sr
 
 const TYPE_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
 const OTHER_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+const USER_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
 
 /** The row shape the service selects. */
 function typeRow(overrides = {}) {
@@ -68,6 +70,8 @@ function queryStub(result) {
   const stub = {
     called: (method) => calls.some(([name]) => name === method),
     args: (method) => calls.find(([name]) => name === method)?.slice(1),
+    /** Every call to it, in order, for a method used more than once. */
+    all: (method) => calls.filter(([name]) => name === method).map(([, ...args]) => args),
     then: (onFulfilled, onRejected) => Promise.resolve(result).then(onFulfilled, onRejected),
   };
   for (const method of ['select', 'eq', 'neq', 'is', 'ilike', 'order', 'limit', 'insert', 'update']) {
@@ -115,6 +119,7 @@ describe('AC2: creating a type', () => {
         category: 'Display',
         location: 'Store room 1',
         total_quantity: 10,
+        last_modified_by: null,
       },
     ]);
     expect(created).toMatchObject({ id: TYPE_ID, name: 'Projector', totalQuantity: 10, usableQuantity: 10 });
@@ -216,7 +221,9 @@ describe('AC3: editing a type', () => {
 
     const updated = await updateEquipmentType(TYPE_ID, { location: 'Store room 2' });
 
-    expect(write.args('update')).toEqual([{ location: 'Store room 2' }]);
+    expect(write.args('update')).toEqual([
+      { location: 'Store room 2', last_modified_by: null, last_change_note: null },
+    ]);
     expect(write.args('eq')).toEqual(['id', TYPE_ID]);
     expect(updated.location).toBe('Store room 2');
   });
@@ -227,7 +234,9 @@ describe('AC3: editing a type', () => {
 
     await updateEquipmentType(TYPE_ID, { totalQuantity: 12 });
 
-    expect(write.args('update')).toEqual([{ total_quantity: 12 }]);
+    expect(write.args('update')).toEqual([
+      { total_quantity: 12, last_modified_by: null, last_change_note: null },
+    ]);
   });
 
   it('SCRUM275_AC3_does_not_count_the_type_itself_when_checking_the_name', async () => {
@@ -423,5 +432,118 @@ describe('AC1 and AC6: the picker', () => {
     from.mockReturnValueOnce(queryStub(failed('57014', 'timeout')));
 
     await expect(listActiveEquipmentTypes()).rejects.toThrow('timeout');
+  });
+});
+
+
+describe('AC8: recording who changed what', () => {
+  it('SCRUM275_AC8_records_the_acting_user_on_create', async () => {
+    const insert = queryStub(ok(typeRow()));
+    from.mockReturnValueOnce(queryStub(ok([]))).mockReturnValueOnce(insert);
+
+    await createEquipmentType({ name: 'Projector', totalQuantity: 10 }, USER_ID);
+
+    expect(insert.args('insert')[0].last_modified_by).toBe(USER_ID);
+  });
+
+  it('SCRUM275_AC8_records_the_acting_user_on_edit_and_clears_any_stale_note', async () => {
+    const write = queryStub(ok(typeRow()));
+    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+
+    await updateEquipmentType(TYPE_ID, { location: 'Store room 2' }, USER_ID);
+
+    expect(write.args('update')[0]).toMatchObject({ last_modified_by: USER_ID, last_change_note: null });
+  });
+
+  it('SCRUM275_AC8_refuses_an_acting_user_who_does_not_exist', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok([])))
+      .mockReturnValueOnce(queryStub(failed('23503', 'violates foreign key constraint "last_modified_by_fkey"')));
+
+    const attempt = createEquipmentType({ name: 'Projector', totalQuantity: 10 }, OTHER_ID);
+
+    await expect(attempt).rejects.toBeInstanceOf(ValidationError);
+    await expect(attempt).rejects.toThrow(/editing user does not exist/);
+  });
+});
+
+
+describe('AC8: reading the history', () => {
+  const historyRow = (overrides = {}) => ({
+    id: 7,
+    equipment_type_id: TYPE_ID,
+    field_name: 'damaged_quantity',
+    old_value: '0',
+    new_value: '2',
+    note: 'cracked lens',
+    changed_by: USER_ID,
+    changed_at: '2026-10-01T09:00:00+00:00',
+    ...overrides,
+  });
+
+  it('SCRUM275_AC8_asks_for_this_types_rows_newest_first', async () => {
+    const read = queryStub(ok([]));
+    from.mockReturnValueOnce(read);
+
+    await getEquipmentTypeHistory(TYPE_ID);
+
+    expect(from).toHaveBeenCalledWith('equipment_type_history');
+    expect(read.args('eq')).toEqual(['equipment_type_id', TYPE_ID]);
+    expect(read.all('order')).toEqual([
+      ['changed_at', { ascending: false }],
+      ['id', { ascending: false }],
+    ]);
+  });
+
+  it('SCRUM275_AC8_returns_old_and_new_values_the_user_and_the_note', async () => {
+    from.mockReturnValueOnce(queryStub(ok([historyRow()])));
+
+    const [entry] = await getEquipmentTypeHistory(TYPE_ID);
+
+    expect(entry).toEqual({
+      id: 7,
+      equipmentTypeId: TYPE_ID,
+      field: 'damagedQuantity',
+      oldValue: '0',
+      newValue: '2',
+      note: 'cracked lens',
+      changedBy: USER_ID,
+      changedAt: '2026-10-01T09:00:00+00:00',
+    });
+  });
+
+  it('SCRUM275_AC8_names_fields_as_the_api_does_and_passes_others_through', async () => {
+    from.mockReturnValueOnce(
+      queryStub(ok([
+        historyRow({ field_name: 'total_quantity' }),
+        historyRow({ field_name: 'under_maintenance_quantity' }),
+        historyRow({ field_name: 'retired_at' }),
+        historyRow({ field_name: 'name' }),
+        historyRow({ field_name: 'created' }),
+      ])),
+    );
+
+    const entries = await getEquipmentTypeHistory(TYPE_ID);
+
+    expect(entries.map((entry) => entry.field)).toEqual([
+      'totalQuantity', 'underMaintenanceQuantity', 'retiredAt', 'name', 'created',
+    ]);
+  });
+
+  it('SCRUM275_AC8_answers_an_empty_list_when_there_is_no_history', async () => {
+    from.mockReturnValueOnce(queryStub(ok(null)));
+
+    await expect(getEquipmentTypeHistory(TYPE_ID)).resolves.toEqual([]);
+  });
+
+  it('SCRUM275_AC8_refuses_a_malformed_id_before_any_query', async () => {
+    await expect(getEquipmentTypeHistory('nope')).rejects.toBeInstanceOf(ValidationError);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC8_surfaces_a_failed_read', async () => {
+    from.mockReturnValueOnce(queryStub(failed('57014', 'timeout')));
+
+    await expect(getEquipmentTypeHistory(TYPE_ID)).rejects.toThrow('timeout');
   });
 });

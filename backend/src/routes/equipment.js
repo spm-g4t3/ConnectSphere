@@ -2,9 +2,9 @@
  * Equipment catalogue routes.
  *
  * SCRUM-276, a subtask of SCRUM-275 "Maintain Equipment Catalogue and Status -
- * Technical Support Staff". Retire and reinstate (SCRUM-278), the damaged and
- * under-maintenance quantities (SCRUM-277) and the history (SCRUM-279) are
- * added to this router by their own subtasks.
+ * Technical Support Staff". Retire and reinstate (SCRUM-278) and the damaged
+ * and under-maintenance quantities (SCRUM-277) are added to this router by
+ * their own subtasks.
  *
  * Who may do what, and why:
  *
@@ -15,6 +15,8 @@
  *           Support Staff only. It is the one read that returns retired types
  *           and the damaged and under-maintenance figures, so it is the
  *           staff-only list, as GET /api/venues is for venues.
+ *   history one type's change history (SCRUM-279): Technical Support Staff
+ *           only. It names who changed what, so it is staff's own audit trail.
  *   active  active types only, in the reduced shape a picker needs:
  *           Technical Support Staff and Event Coordinators (AC1). This is
  *           what SCRUM-21's equipment picker reads. Organisers, Venue Staff
@@ -28,6 +30,7 @@ import {
   updateEquipmentType,
   listEquipmentTypes,
   listActiveEquipmentTypes,
+  getEquipmentTypeHistory,
 } from '../services/equipmentService.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
@@ -37,6 +40,15 @@ import { createErrorHandler } from '../http/handleError.js';
 
 /** Map an error to a response; see src/http/handleError.js. */
 const handleError = createErrorHandler('equipment route');
+
+
+/**
+ * The acting user is the signed-in one, and the request body never gets a say.
+ * It is recorded in the change history.
+ */
+function actingUser(req) {
+  return req.user.id;
+}
 
 
 /**
@@ -98,7 +110,22 @@ export function createEquipmentRouter({
    */
   router.post('/', technicalSupportOnly, async (req, res) => {
     try {
-      res.status(201).json(await createEquipmentType(req.body));
+      res.status(201).json(await createEquipmentType(req.body, actingUser(req)));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * AC8 (SCRUM-279): who changed what and when, newest first. A bare array,
+   * like /api/venues/:id/history; none is 200 [].
+   *
+   * Statuses: 200; 400 for a malformed id; 401; 403 unless Technical Support
+   * Staff; 500.
+   */
+  router.get('/:id/history', technicalSupportOnly, async (req, res) => {
+    try {
+      res.status(200).json(await getEquipmentTypeHistory(req.params.id));
     } catch (err) {
       handleError(err, res);
     }
@@ -112,7 +139,7 @@ export function createEquipmentRouter({
    */
   router.patch('/:id', technicalSupportOnly, async (req, res) => {
     try {
-      res.status(200).json(await updateEquipmentType(req.params.id, req.body));
+      res.status(200).json(await updateEquipmentType(req.params.id, req.body, actingUser(req)));
     } catch (err) {
       handleError(err, res);
     }

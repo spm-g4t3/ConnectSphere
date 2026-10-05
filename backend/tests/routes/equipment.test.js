@@ -230,6 +230,7 @@ describe('AC2: creating a type', () => {
       category: null,
       location: null,
       total_quantity: 10,
+      last_modified_by: STAFF_ID,
     });
   });
 });
@@ -278,5 +279,54 @@ describe('AC3: editing a type', () => {
 
     expect(res.status).toBe(400);
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('AC8: the change history', () => {
+  const historyRow = {
+    id: 1,
+    equipment_type_id: TYPE_ID,
+    field_name: 'total_quantity',
+    old_value: '10',
+    new_value: '12',
+    note: null,
+    changed_by: STAFF_ID,
+    changed_at: '2026-10-01T09:00:00+00:00',
+  };
+
+  it('SCRUM275_AC8_gives_technical_support_a_types_history', async () => {
+    from.mockReturnValueOnce(queryStub(ok([historyRow])));
+
+    const res = await request(appWith()).get(`/api/equipment/${TYPE_ID}/history`);
+
+    expect(res.status).toBe(200);
+    expect(res.body[0]).toMatchObject({ field: 'totalQuantity', oldValue: '10', newValue: '12', changedBy: STAFF_ID });
+  });
+
+  it.each(OTHER_ROLES)('SCRUM275_AC8_refuses_%s_on_the_history_with_403', async (role) => {
+    const res = await request(appWith(signedInAs(role))).get(`/api/equipment/${TYPE_ID}/history`);
+
+    expect(res.status).toBe(403);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC8_answers_400_for_a_malformed_id', async () => {
+    const res = await request(appWith()).get('/api/equipment/not-a-uuid/history');
+
+    expect(res.status).toBe(400);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM275_AC8_records_the_signed_in_user_and_ignores_one_named_in_the_body', async () => {
+    const insert = queryStub(ok(typeRow()));
+    const insertSpy = vi.spyOn(insert, 'insert');
+    from.mockReturnValueOnce(queryStub(ok([]))).mockReturnValueOnce(insert);
+
+    await request(appWith())
+      .post('/api/equipment')
+      .send({ name: 'Projector', totalQuantity: 10, lastModifiedBy: 'someone-else', userId: 'someone-else' });
+
+    expect(insertSpy.mock.calls[0][0].last_modified_by).toBe(STAFF_ID);
   });
 });
