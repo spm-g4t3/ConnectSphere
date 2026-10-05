@@ -16,6 +16,11 @@
  *           Coordinators can search for potential venues using requirements
  *           such as date, time, attendance..."), so restricting those to
  *           Venue Staff would break the feature they exist to serve.
+ *           One exception inside search (SCRUM-185, SCRUM-178 AC1):
+ *           ?includeRetired=true is Venue Staff and Event Coordinators only,
+ *           the same pair as the calendar it leads to. Anyone else asking
+ *           for it gets 403, so a retired venue still never reaches a list
+ *           an Organiser or Attendee can obtain.
  *           The full catalogue listing is the one exception -- Venue Staff
  *           only (SCRUM-110), because it is the only read that returns
  *           retired venues, and SCRUM-111's invariant is that a retired one
@@ -36,6 +41,13 @@
  *           A block's history is Venue Staff only (SCRUM-131), like venue
  *           history: it keeps superseded notes and names every editor, and
  *           Coordinators already see the block as it stands.
+ *   calendar Venue Staff and Event Coordinators (SCRUM-179), the same as
+ *           block reads, because it shows the same blocks beside bookings.
+ *   bookings Venue Staff and Event Coordinators (SCRUM-182), the same as
+ *           the calendar. Before SCRUM-182 any authenticated user could read
+ *           them, which made the calendar's 403 a formality: an Organiser
+ *           could fetch the bookings half of it here. A retired venue's
+ *           bookings stay readable (SCRUM-15 AC3).
  */
 
 import express from 'express';
@@ -57,7 +69,11 @@ import {
   removeVenueBlock,
   getVenueBlockHistory,
 } from '../services/venueBlockService.js';
-import { validateVenueId } from '../validation/venueValidation.js';
+import { getVenueCalendar } from '../services/venueCalendarService.js';
+import {
+  validateVenueId,
+  validateSearchFilters,
+} from '../validation/venueValidation.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
@@ -101,6 +117,13 @@ function parseSearchFilters(query) {
 
   if (query.endsAt !== undefined) {
     filters.endsAt = query.endsAt;
+  }
+
+  // SCRUM-185: passed through as sent too. 'true' and 'false' are the
+  // validator's to read, so a junk value gets its 400 rather than being
+  // quietly coerced here.
+  if (query.includeRetired !== undefined) {
+    filters.includeRetired = query.includeRetired;
   }
 
   return filters;
@@ -154,8 +177,31 @@ export function createVenueRouter({
 } = {}) {
   const router = express.Router();
   const venueStaffOnly = requireRole(ROLE.VENUE_STAFF);
-  // SCRUM-130: reading blocks is wider than writing them; see the header.
-  const blockReaders = requireRole(ROLE.VENUE_STAFF, ROLE.EVENT_COORDINATOR);
+  // The internal roles: Venue Staff and Event Coordinators. SCRUM-130 opened
+  // block reads to them, wider than block writes; SCRUM-179 gave the calendar
+  // the same pair, and SCRUM-182 put bookings behind it too, so the calendar
+  // cannot be reassembled from an ungated read. See the header.
+  const internalReaders = requireRole(ROLE.VENUE_STAFF, ROLE.EVENT_COORDINATOR);
+
+  /**
+   * SCRUM-185: /search is open to every signed-in user, but including retired
+   * venues is the internal roles' only, so this gate applies internalReaders
+   * just when the flag is set. Reusing it keeps one list of roles and one 403
+   * body. Validated first, so the gate reads the flag the service will act on
+   * ('false' is off, junk is 400) -- and all of it before any database call.
+   * searchVenues validates again; it is pure, and keeping its own check means
+   * the service stays safe for any other caller.
+   */
+  function gateRetiredSearch(req, res, next) {
+    let filters;
+    try {
+      filters = validateSearchFilters(parseSearchFilters(req.query));
+    } catch (err) {
+      return handleError(err, res);
+    }
+    if (filters.includeRetired) return internalReaders(req, res, next);
+    return next();
+  }
 
   // Every route below needs to know who is calling -- reads to prove they are
   // signed in, writes to attribute the change.
@@ -170,6 +216,11 @@ export function createVenueRouter({
    * door straight around SCRUM-111's invariant that a retired venue never
    * appears in a venue list. The role check is what keeps /search the only
    * venue list a non-staff caller can obtain.
+   *
+   * SCRUM-185 since lets Event Coordinators reach retired venues through
+   * /search?includeRetired=true, for the calendar. That is a narrower read
+   * (no turnaround, no audit fields) and gated in its own right; this full
+   * listing stays Venue Staff only.
    *
    * Declared first is convention, not correctness. Unlike /search against
    * /:id below -- where declaration order genuinely is load-bearing -- /:id
@@ -202,10 +253,18 @@ export function createVenueRouter({
    * with 400 rather than guessed back into '+' -- a guessed offset is a
    * silently different instant. axios params encodes it; Z needs no encoding.
    *
-   * Statuses: 200; 400 for a bad capacity, or a one-sided, malformed or
-   * reversed window; 401; 500.
+   * SCRUM-178 AC1 (SCRUM-185): ?includeRetired=true also returns retired
+   * venues, each row then carrying retiredAt, so a retired venue's calendar
+   * can be reached from search. Venue Staff and Event Coordinators only
+   * (gateRetiredSearch above); 'false' or absent is the ordinary search. It
+   * cannot be combined with a date window -- a retired venue cannot be booked.
+   *
+   * Statuses: 200; 400 for a bad capacity, a one-sided, malformed or
+   * reversed window, an includeRetired other than true/false, or
+   * includeRetired with a window; 401; 403 for includeRetired unless Venue
+   * Staff or an Event Coordinator; 500.
    */
-  router.get('/search', async (req, res) => {
+  router.get('/search', gateRetiredSearch, async (req, res) => {
     try {
       const venues = await searchVenues(parseSearchFilters(req.query));
       res.status(200).json(venues);
@@ -236,8 +295,17 @@ export function createVenueRouter({
    *
    * Deliberately not gated on the venue being active -- a retired venue's
    * bookings are exactly what this exists to serve.
+   *
+   * It is gated on role, though (SCRUM-182): Venue Staff and Event
+   * Coordinators only, the same as /:id/calendar. The calendar shows these
+   * same bookings, and SCRUM-178 AC6 keeps Organisers and Attendees out of
+   * it; left open, this route would be a side door to what the calendar's
+   * 403 refuses.
+   *
+   * Statuses: 200; 400 for a malformed id (the service validates it); 401;
+   * 403 unless Venue Staff or an Event Coordinator; 500.
    */
-  router.get('/:id/bookings', async (req, res) => {
+  router.get('/:id/bookings', internalReaders, async (req, res) => {
     try {
       res.status(200).json(await getBookingsForVenue(req.params.id));
     } catch (err) {
@@ -267,10 +335,34 @@ export function createVenueRouter({
    * reversed window, or one over 400 days; 401; 403 unless Venue Staff or an
    * Event Coordinator; 500.
    */
-  router.get('/:id/blocks', blockReaders, async (req, res) => {
+  router.get('/:id/blocks', internalReaders, async (req, res) => {
     try {
       const window = { from: req.query.from, to: req.query.to };
       res.status(200).json(await listVenueBlocks(req.params.id, window));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-178 (SCRUM-179): a venue's availability calendar -- its approved
+   * and flagged bookings and its active blocks overlapping [from, to), merged
+   * and soonest first. A bare array of entries, each with kind 'booking' or
+   * 'block'; nothing in the window is 200 [].
+   *
+   * ?from=&to= is required here, unlike /:id/blocks: a calendar always shows
+   * a range. At most 400 days. The '+' in an offset must be URL-encoded as
+   * %2B, as /search explains. Readable by the same roles as /:id/blocks, and
+   * for a retired venue too.
+   *
+   * Statuses: 200; 400 for a malformed id, or a missing, one-sided,
+   * malformed or reversed window, or one over 400 days; 401; 403 unless Venue
+   * Staff or an Event Coordinator; 404 for an unknown venue; 500.
+   */
+  router.get('/:id/calendar', internalReaders, async (req, res) => {
+    try {
+      const window = { from: req.query.from, to: req.query.to };
+      res.status(200).json(await getVenueCalendar(req.params.id, window));
     } catch (err) {
       handleError(err, res);
     }

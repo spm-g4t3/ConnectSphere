@@ -18,6 +18,7 @@
 // confirm, same error map, same refetch-rather-than-splice, same finally.
 
 import { useEffect, useState, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { getVenueCatalogue, retireVenue } from "../services/venueService";
 import VenueForm from "./VenueForm";
 import VenueDetail from "./VenueDetail";
@@ -245,6 +246,15 @@ export default function VenueCatalogue({ currentUserId } = {}) {
                 <button onClick={() => setActivePanel({ mode: "detail", venue })}>
                   View bookings &amp; history
                 </button>
+
+                {/* SCRUM-181. NOT disabled when retired either, for the same
+                    clause: SCRUM-178 AC1 keeps a retired venue's past
+                    bookings viewable on its calendar. A Link rather than a
+                    panel because the calendar is a route of its own, so the
+                    URL can be bookmarked and search can link to it too. */}
+                <Link to={`/venues/${venue.id}/calendar`} className="venue-catalogue__calendar-link">
+                  View calendar
+                </Link>
 
                 {/* Disabled on a retired venue for the reason Edit details is:
                     the server refuses a new block there with VENUE_RETIRED, so

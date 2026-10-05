@@ -146,3 +146,20 @@ describe("SCRUM186 turnaround in the change history", () => {
     expect(screen.queryByText(/30 minutes/)).not.toBeInTheDocument();
   });
 });
+
+describe("SCRUM182 the bookings panel names the role gate", () => {
+  it("SCRUM178_AC6_a_403_from_getVenueBookings_shows_who_can_see_bookings", async () => {
+    vi.mocked(getVenueBookings).mockRejectedValue({ response: { status: 403 } });
+
+    render(<VenueDetail venue={VENUE} />);
+
+    const message = await screen.findByText(
+      "Only Venue Staff and Event Coordinators can see a venue's bookings.",
+    );
+    expect(message).toHaveAttribute("role", "alert");
+    expect(message).toHaveClass("venue-detail__error");
+    expect(
+      screen.queryByText("Could not load this venue's bookings. Please try again."),
+    ).not.toBeInTheDocument();
+  });
+});

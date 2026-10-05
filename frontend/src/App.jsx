@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { useEffect } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
@@ -10,6 +10,8 @@ import VenueSearch from "./components/VenueSearch";
 import VenueCatalogue from "./components/VenueCatalogue";
 import ReviewQueue from "./components/ReviewQueue";
 import MyAssignedEvents from "./components/MyAssignedEvents";
+import VenueCalendar from "./components/VenueCalendar";
+import { parseCalendarDate } from "./services/calendarRange";
 import "./App.css";
 
 function LoadingScreen() {
@@ -26,8 +28,32 @@ function PagePlaceholder({ title, description }) {
   );
 }
 
+// The calendar takes its venue from the URL, and optionally the day to open
+// on from ?date=YYYY-MM-DD. SCRUM-181 links here from the venue catalogue and
+// from venue search results; a search with a window sends that window's start
+// date. A missing, malformed or impossible date passes undefined, so the
+// component's own default of today applies.
+//
+// The key holds both, so following a new link remounts the calendar: one
+// venue's view, dates and header never carry over onto another's, and a new
+// ?date= is not ignored by a calendar that already read its initialDate.
+function VenueCalendarRoute() {
+  const { venueId } = useParams();
+  const [searchParams] = useSearchParams();
+  const date = searchParams.get("date");
+  return (
+    <main className="venue-calendar-page">
+      <VenueCalendar
+        key={`${venueId} ${date ?? ""}`}
+        venueId={venueId}
+        initialDate={parseCalendarDate(date) ?? undefined}
+      />
+    </main>
+  );
+}
+
 function AppRoutes() {
-  const { loading, logoutMessage, clearLogoutMessage } = useAuth();
+  const { user, loading, logoutMessage, clearLogoutMessage } = useAuth();
 
   useEffect(() => {
     if (!logoutMessage) return undefined;
@@ -56,7 +82,7 @@ function AppRoutes() {
           path="/venue-search"
           element={
             <ProtectedRoute allowedRoles={["event_coordinator", "venue_staff"]}>
-              <VenueSearch />
+              <VenueSearch role={user?.role} />
             </ProtectedRoute>
           }
         />
@@ -116,6 +142,22 @@ function AppRoutes() {
               <div className="dashboard dashboard--coordinator">
                 <MyAssignedEvents />
               </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* SCRUM-180 (part of SCRUM-178): one venue's calendar of bookings and
+            blocks, linked from the catalogue and from venue search (SCRUM-181).
+            Internal roles only (SCRUM-182, SCRUM-178 AC6): the same two roles
+            the backend's GET /venues/:id/calendar admits. Belt to the backend's
+            braces, as with /venue-search: the API answers 403 regardless, and
+            what this buys is the failure mode -- an Organiser who follows a link
+            here lands on /unauthorized instead of on a calendar frame whose
+            only content is an error message. */}
+        <Route
+          path="/venues/:venueId/calendar"
+          element={
+            <ProtectedRoute allowedRoles={["event_coordinator", "venue_staff"]}>
+              <VenueCalendarRoute />
             </ProtectedRoute>
           }
         />

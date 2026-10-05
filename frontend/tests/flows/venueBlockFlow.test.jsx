@@ -20,6 +20,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 
 import VenueCatalogue from "../../src/components/VenueCatalogue.jsx";
 import * as venueService from "../../src/services/venueService";
@@ -301,7 +302,11 @@ describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
     const END = iso(base + 11 * DAY);
     const NEW_END = iso(base + 11 * DAY - 2 * HOUR);
 
-    render(<VenueCatalogue currentUserId={STAFF_ID} />);
+    render(
+      <MemoryRouter>
+        <VenueCatalogue currentUserId={STAFF_ID} />
+      </MemoryRouter>,
+    );
 
     // ---- 1. Open the panel from the catalogue --------------------------------
     await user.click(await screen.findByRole("button", { name: "Manage blocks" }));
