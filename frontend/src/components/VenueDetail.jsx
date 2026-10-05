@@ -22,6 +22,9 @@ import { formatTurnaround } from "../services/turnaroundOptions";
 const BOOKINGS_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
   401: "Your session has expired. Please sign in again.",
+  // SCRUM-182 gated the route. Only Venue Staff reach this panel in practice,
+  // but the map names every status the API can now return.
+  403: "Only Venue Staff and Event Coordinators can see a venue's bookings.",
   // Not a lie, and not a shrug either. 009_bookings.sql is a hand-run
   // migration; in an environment where it was never run, the missing-table
   // error falls past every branch of venueService.translateError and arrives

@@ -191,8 +191,13 @@ export async function updateVenue(venueId, changes) {
  * second clause: "while its past bookings remain viewable").
  *
  * Deliberately NOT gated on the venue being active -- a retired venue's
- * bookings are exactly what this exists to serve. Any authenticated user may
- * call it; unlike getVenueHistory there is no staff-only gate.
+ * bookings are exactly what this exists to serve.
+ *
+ * Venue Staff and Event Coordinators only (SCRUM-182), the same roles as the
+ * venue calendar, which shows these same bookings. Any other signed-in role
+ * gets a 403: before SCRUM-182 this was open to every authenticated user, a
+ * side door around the calendar's gate. Wider than getVenueHistory, which is
+ * Venue Staff only.
  *
  * Rows join nothing. The service selects six columns and none of them is a
  * name, so eventRequestId arrives as a bare uuid with no event name attached;

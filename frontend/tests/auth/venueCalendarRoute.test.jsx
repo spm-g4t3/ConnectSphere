@@ -2,9 +2,12 @@
 //
 // SCRUM-180 (part of SCRUM-178). The /venues/:venueId/calendar route renders
 // the REAL App, so this pins App.jsx's actual route table: the calendar is
-// signed-in only, takes its venue from the URL, and (until SCRUM-182 adds
-// allowedRoles) is not role-gated on the client -- the backend's 403 keeps an
-// Organiser out. Only the auth context and VenueCalendar itself are mocked.
+// signed-in only, takes its venue from the URL, and (SCRUM-182, AC6) is
+// limited on the client to Event Coordinators and Venue Staff -- a second
+// layer on top of the backend's 403, so an Organiser, Attendee or Technical
+// Support user lands on /unauthorized and the calendar never mounts. Only the
+// auth context and VenueCalendar itself are mocked; the real ProtectedRoute
+// and /unauthorized page run.
 //
 // App owns a BrowserRouter, so the starting URL is set through the History
 // API before rendering, and the redirect is read back off window.location.
@@ -84,14 +87,35 @@ describe("/venues/:venueId/calendar route", () => {
     },
   );
 
-  it("SCRUM178_AC4_is_not_role_gated_on_the_client_yet", () => {
-    // SCRUM-182 adds allowedRoles; until then an Organiser reaches the page
-    // and sees the backend's 403 as a message.
-    renderAppAt(`/venues/${VENUE_ID}/calendar`, "event_organiser");
+  it.each([
+    ["event_coordinator"],
+    ["venue_staff"],
+    // ProtectedRoute compares through normaliseRole, so case and separators
+    // in the token's role do not matter.
+    ["VENUE_STAFF"],
+    ["Event_Coordinator"],
+    ["venue-staff"],
+  ])("SCRUM178_AC6_%s_can_open_the_calendar", (role) => {
+    renderAppAt(`/venues/${VENUE_ID}/calendar`, role);
 
-    expect(screen.getByTestId("venue-calendar-stub")).toBeInTheDocument();
+    expect(screen.getByTestId("venue-calendar-stub")).toHaveTextContent(`Calendar for ${VENUE_ID}`);
     expect(screen.queryByRole("heading", { name: "Not available to your role" })).not.toBeInTheDocument();
     expect(window.location.pathname).toBe(`/venues/${VENUE_ID}/calendar`);
+    expect(calendarStub.mounts).toBe(1);
+  });
+
+  it.each([
+    ["event_organiser"],
+    ["attendee"],
+    ["technical_support_staff"],
+  ])("SCRUM178_AC6_%s_is_sent_to_unauthorized_and_never_mounts_the_calendar", (role) => {
+    renderAppAt(`/venues/${VENUE_ID}/calendar?date=2026-11-03`, role);
+
+    expect(window.location.pathname).toBe("/unauthorized");
+    expect(screen.getByRole("heading", { name: "Not available to your role" })).toBeInTheDocument();
+    expect(screen.queryByTestId("venue-calendar-stub")).not.toBeInTheDocument();
+    expect(calendarStub.mounts).toBe(0);
+    expect(calendarStub.lastInitialDate).toBeUndefined();
   });
 
   it("SCRUM178_AC4_passes_whichever_venue_id_the_url_names", () => {

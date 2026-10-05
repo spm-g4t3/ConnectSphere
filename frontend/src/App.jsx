@@ -146,15 +146,17 @@ function AppRoutes() {
           }
         />
         {/* SCRUM-180 (part of SCRUM-178): one venue's calendar of bookings and
-            blocks. Signed-in only, and deliberately no allowedRoles yet: the
-            role gate is SCRUM-182, and until it lands the backend's 403 is
-            what keeps an Organiser out -- the page shows it as a message rather
-            than an empty calendar. Nothing links here yet either; the links
-            from the catalogue and search are SCRUM-181. */}
+            blocks, linked from the catalogue and from venue search (SCRUM-181).
+            Internal roles only (SCRUM-182, SCRUM-178 AC6): the same two roles
+            the backend's GET /venues/:id/calendar admits. Belt to the backend's
+            braces, as with /venue-search: the API answers 403 regardless, and
+            what this buys is the failure mode -- an Organiser who follows a link
+            here lands on /unauthorized instead of on a calendar frame whose
+            only content is an error message. */}
         <Route
           path="/venues/:venueId/calendar"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["event_coordinator", "venue_staff"]}>
               <VenueCalendarRoute />
             </ProtectedRoute>
           }

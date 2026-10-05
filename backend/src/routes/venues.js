@@ -38,6 +38,11 @@
  *           Coordinators already see the block as it stands.
  *   calendar Venue Staff and Event Coordinators (SCRUM-179), the same as
  *           block reads, because it shows the same blocks beside bookings.
+ *   bookings Venue Staff and Event Coordinators (SCRUM-182), the same as
+ *           the calendar. Before SCRUM-182 any authenticated user could read
+ *           them, which made the calendar's 403 a formality: an Organiser
+ *           could fetch the bookings half of it here. A retired venue's
+ *           bookings stay readable (SCRUM-15 AC3).
  */
 
 import express from 'express';
@@ -157,8 +162,11 @@ export function createVenueRouter({
 } = {}) {
   const router = express.Router();
   const venueStaffOnly = requireRole(ROLE.VENUE_STAFF);
-  // SCRUM-130: reading blocks is wider than writing them; see the header.
-  const blockReaders = requireRole(ROLE.VENUE_STAFF, ROLE.EVENT_COORDINATOR);
+  // The internal roles: Venue Staff and Event Coordinators. SCRUM-130 opened
+  // block reads to them, wider than block writes; SCRUM-179 gave the calendar
+  // the same pair, and SCRUM-182 put bookings behind it too, so the calendar
+  // cannot be reassembled from an ungated read. See the header.
+  const internalReaders = requireRole(ROLE.VENUE_STAFF, ROLE.EVENT_COORDINATOR);
 
   // Every route below needs to know who is calling -- reads to prove they are
   // signed in, writes to attribute the change.
@@ -239,8 +247,17 @@ export function createVenueRouter({
    *
    * Deliberately not gated on the venue being active -- a retired venue's
    * bookings are exactly what this exists to serve.
+   *
+   * It is gated on role, though (SCRUM-182): Venue Staff and Event
+   * Coordinators only, the same as /:id/calendar. The calendar shows these
+   * same bookings, and SCRUM-178 AC6 keeps Organisers and Attendees out of
+   * it; left open, this route would be a side door to what the calendar's
+   * 403 refuses.
+   *
+   * Statuses: 200; 400 for a malformed id (the service validates it); 401;
+   * 403 unless Venue Staff or an Event Coordinator; 500.
    */
-  router.get('/:id/bookings', async (req, res) => {
+  router.get('/:id/bookings', internalReaders, async (req, res) => {
     try {
       res.status(200).json(await getBookingsForVenue(req.params.id));
     } catch (err) {
@@ -270,7 +287,7 @@ export function createVenueRouter({
    * reversed window, or one over 400 days; 401; 403 unless Venue Staff or an
    * Event Coordinator; 500.
    */
-  router.get('/:id/blocks', blockReaders, async (req, res) => {
+  router.get('/:id/blocks', internalReaders, async (req, res) => {
     try {
       const window = { from: req.query.from, to: req.query.to };
       res.status(200).json(await listVenueBlocks(req.params.id, window));
@@ -294,7 +311,7 @@ export function createVenueRouter({
    * malformed or reversed window, or one over 400 days; 401; 403 unless Venue
    * Staff or an Event Coordinator; 404 for an unknown venue; 500.
    */
-  router.get('/:id/calendar', blockReaders, async (req, res) => {
+  router.get('/:id/calendar', internalReaders, async (req, res) => {
     try {
       const window = { from: req.query.from, to: req.query.to };
       res.status(200).json(await getVenueCalendar(req.params.id, window));

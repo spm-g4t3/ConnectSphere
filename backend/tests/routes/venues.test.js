@@ -1771,3 +1771,61 @@ describe('SCRUM178 GET /api/venues/:id/calendar', () => {
     consoleError.mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// SCRUM-182: the SCRUM-15 bookings read is gated like the calendar, so it is
+// no side door into the bookings half of the calendar.
+// ---------------------------------------------------------------------------
+describe('SCRUM182 GET /api/venues/:id/bookings is limited to internal roles', () => {
+  const BOOKINGS = `/api/venues/${VENUE_ID}/bookings`;
+
+  const bookingRow = {
+    id: 'b1', venue_id: VENUE_ID, event_request_id: EVENT_ID,
+    starts_at: '2026-06-01T09:00:00+00:00', ends_at: '2026-06-01T17:00:00+00:00',
+    created_at: '2026-05-01T09:00:00+00:00',
+  };
+  const bookingBody = {
+    id: 'b1', venueId: VENUE_ID, eventRequestId: EVENT_ID,
+    startsAt: '2026-06-01T09:00:00+00:00', endsAt: '2026-06-01T17:00:00+00:00',
+    createdAt: '2026-05-01T09:00:00+00:00',
+  };
+
+  it.each([
+    ['Venue Staff', ROLE.VENUE_STAFF],
+    ['an Event Coordinator', ROLE.EVENT_COORDINATOR],
+  ])('SCRUM178_AC6_%s_gets_200_with_the_bookings', async (_label, role) => {
+    from.mockReturnValueOnce(queryStub(ok([bookingRow])));
+
+    const res = await request(appWith(signedInAs(role))).get(BOOKINGS);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([bookingBody]);
+    expect(from).toHaveBeenCalledWith('bookings');
+  });
+
+  it.each([
+    ['an Event Organiser', ROLE.EVENT_ORGANISER],
+    ['an attendee', ROLE.ATTENDEE],
+    ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+  ])('SCRUM178_AC6_%s_gets_403_with_no_query', async (_label, role) => {
+    const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(BOOKINGS);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/Venue Staff/);
+    expect(res.body.error).toMatch(/Event Coordinators/);
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM15_AC3_a_coordinator_can_still_read_a_retired_venues_bookings', async () => {
+    // getBookingsForVenue never looks at the venue's retired_at, so a retired
+    // venue's bookings come back the same as an active one's.
+    from.mockReturnValueOnce(queryStub(ok([bookingRow])));
+
+    const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR))).get(BOOKINGS);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([bookingBody]);
+    expect(from.mock.calls.map(([table]) => table)).toEqual(['bookings']);
+  });
+});
