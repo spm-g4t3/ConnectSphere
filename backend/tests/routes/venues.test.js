@@ -95,7 +95,8 @@ function queryStub(result) {
     args: (method) => calls.find(([name]) => name === method)?.slice(1),
     then: (onFulfilled, onRejected) => Promise.resolve(result).then(onFulfilled, onRejected),
   };
-  for (const method of ['select', 'eq', 'is', 'ilike', 'gte', 'order', 'limit', 'delete', 'lt', 'gt', 'lte', 'not']) {
+  // SCRUM-179: 'in' added for the calendar's bookings status filter.
+  for (const method of ['select', 'eq', 'is', 'in', 'ilike', 'gte', 'order', 'limit', 'delete', 'lt', 'gt', 'lte', 'not']) {
     stub[method] = (...args) => { calls.push([method, ...args]); return stub; };
   }
   stub.maybeSingle = (...args) => { calls.push(['maybeSingle', ...args]); return Promise.resolve(result); };
@@ -1578,5 +1579,195 @@ describe('SCRUM186 turnaround through the venue routes', () => {
     expect(res.status).toBe(200);
     expect(res.body.turnaroundMinutes).toBe(45);
     expect(res.body).not.toHaveProperty('turnaround_minutes');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-178 (SCRUM-179): a venue's availability calendar
+// ---------------------------------------------------------------------------
+describe('SCRUM178 GET /api/venues/:id/calendar', () => {
+  const BOOKING_ID = 'b0000000-0000-4000-8000-00000000000a';
+  const REQUEST_ID = 'e0000000-0000-4000-8000-00000000000a';
+  const BLOCK_ID = 'c0000000-0000-4000-8000-00000000000a';
+  const CALENDAR = `/api/venues/${VENUE_ID}/calendar`;
+  const WINDOW_QS = '?from=2026-10-01T00:00:00%2B08:00&to=2026-11-01T00:00:00%2B08:00';
+
+  const bookingRow = {
+    id: BOOKING_ID,
+    event_request_id: REQUEST_ID,
+    starts_at: '2026-10-05T01:00:00+00:00',
+    ends_at: '2026-10-05T04:00:00+00:00',
+    status: 'approved',
+    event_requests: { event_name: 'Freshmen Orientation' },
+  };
+  const blockRow = {
+    id: BLOCK_ID,
+    venue_id: VENUE_ID,
+    starts_at: '2026-10-03T01:00:00+00:00',
+    ends_at: '2026-10-03T09:00:00+00:00',
+    reason: 'maintenance',
+    notes: null,
+    created_by: STAFF_ID,
+    last_modified_by: STAFF_ID,
+    created_at: '2026-09-23T00:00:00+00:00',
+    updated_at: '2026-09-23T00:00:00+00:00',
+    removed_at: null,
+    removed_by: null,
+  };
+
+  /** Route from() by table name; returns the stubs so a test can inspect them. */
+  function givenTables({ venue = ok(venueRow()), bookings = ok([bookingRow]), blocks = ok([blockRow]) } = {}) {
+    const stubs = {
+      venues: queryStub(venue),
+      bookings: queryStub(bookings),
+      venue_blocks: queryStub(blocks),
+    };
+    from.mockImplementation((table) => {
+      if (!(table in stubs)) throw new Error(`unexpected table ${table}`);
+      return stubs[table];
+    });
+    return stubs;
+  }
+
+  const tablesQueried = () => from.mock.calls.map(([table]) => table);
+
+  it.each([
+    ['Venue Staff', ROLE.VENUE_STAFF],
+    ['an Event Coordinator', ROLE.EVENT_COORDINATOR],
+  ])('SCRUM178_AC1_%s_gets_200_with_the_merged_entries', async (_label, role) => {
+    const { bookings } = givenTables();
+
+    const res = await request(appWith(signedInAs(role))).get(`${CALENDAR}${WINDOW_QS}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      {
+        kind: 'block',
+        id: BLOCK_ID,
+        startsAt: '2026-10-03T01:00:00+00:00',
+        endsAt: '2026-10-03T09:00:00+00:00',
+        reason: 'maintenance',
+        notes: null,
+      },
+      {
+        kind: 'booking',
+        id: BOOKING_ID,
+        startsAt: '2026-10-05T01:00:00+00:00',
+        endsAt: '2026-10-05T04:00:00+00:00',
+        status: 'approved',
+        eventRequestId: REQUEST_ID,
+        eventName: 'Freshmen Orientation',
+      },
+    ]);
+    // %2B decodes to '+', so the offset reaches the query intact.
+    expect(bookings.args('lt')).toEqual(['starts_at', '2026-11-01T00:00:00+08:00']);
+    expect(bookings.args('gt')).toEqual(['ends_at', '2026-10-01T00:00:00+08:00']);
+    expect(bookings.args('in')).toEqual(['status', ['approved', 'flagged_for_review']]);
+  });
+
+  it('SCRUM178_AC1_a_retired_venue_answers_200_with_its_entries', async () => {
+    givenTables({ venue: ok(venueRow({ retired_at: RETIRED_AT })) });
+
+    const res = await request(appWith()).get(`${CALENDAR}${WINDOW_QS}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(2);
+  });
+
+  it('SCRUM178_AC1_nothing_in_the_window_answers_200_with_an_empty_array', async () => {
+    givenTables({ bookings: ok([]), blocks: ok([]) });
+
+    const res = await request(appWith()).get(`${CALENDAR}${WINDOW_QS}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it.each([
+    ['an Event Organiser', ROLE.EVENT_ORGANISER],
+    ['an attendee', ROLE.ATTENDEE],
+    ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+  ])('SCRUM178_AC6_%s_gets_403_with_no_query', async (_label, role) => {
+    const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(`${CALENDAR}${WINDOW_QS}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/Venue Staff/);
+    expect(res.body.error).toMatch(/Event Coordinators/);
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM178_AC6_signed_out_answers_401_with_no_query', async () => {
+    const res = await request(appWith(signedOut)).get(`${CALENDAR}${WINDOW_QS}`);
+
+    expect(res.status).toBe(401);
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM178_AC1_a_missing_window_answers_400_naming_both_ends', async () => {
+    const res = await request(appWith()).get(CALENDAR);
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([
+      { field: 'from', message: 'is required' },
+      { field: 'to', message: 'is required' },
+    ]);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['only from', '?from=2026-10-01T00:00:00Z', [{ field: 'to', message: 'is required' }]],
+    ['only to', '?to=2026-10-01T00:00:00Z', [{ field: 'from', message: 'is required' }]],
+    ['a reversed window', '?from=2026-11-01T00:00:00Z&to=2026-10-01T00:00:00Z', [{ field: 'to', message: 'must be later than the start' }]],
+  ])('SCRUM178_AC1_%s_answers_400_with_no_query', async (_label, qs, details) => {
+    const res = await request(appWith()).get(`${CALENDAR}${qs}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual(details);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM178_AC1_a_raw_plus_offset_arrives_as_a_space_and_answers_400', async () => {
+    const res = await request(appWith()).get(
+      `${CALENDAR}?from=2026-10-01T00:00:00+08:00&to=2026-11-01T00:00:00Z`,
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(['from']);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM178_AC1_a_malformed_venue_id_answers_400_with_no_query', async () => {
+    const res = await request(appWith()).get(`/api/venues/not-a-uuid/calendar${WINDOW_QS}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'id', message: 'must be a venue id' }]);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM178_AC1_an_unknown_venue_answers_404_and_reads_no_bookings_or_blocks', async () => {
+    givenTables({ venue: ok(null) });
+
+    const res = await request(appWith()).get(`${CALENDAR}${WINDOW_QS}`);
+
+    expect(res.status).toBe(404);
+    expect(typeof res.body.error).toBe('string');
+    expect(tablesQueried()).toEqual(['venues']);
+  });
+
+  it('SCRUM178_a_database_error_answers_500_without_leaking_it', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    givenTables({ bookings: { data: null, error: { code: '42P01', message: 'relation bookings does not exist' } } });
+
+    const res = await request(appWith()).get(`${CALENDAR}${WINDOW_QS}`);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    expect(JSON.stringify(res.body)).not.toMatch(/relation|42P01/);
+    expect(consoleError).toHaveBeenCalledWith('Unexpected error in venues route:', expect.any(Error));
+
+    consoleError.mockRestore();
   });
 });

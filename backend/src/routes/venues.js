@@ -36,6 +36,8 @@
  *           A block's history is Venue Staff only (SCRUM-131), like venue
  *           history: it keeps superseded notes and names every editor, and
  *           Coordinators already see the block as it stands.
+ *   calendar Venue Staff and Event Coordinators (SCRUM-179), the same as
+ *           block reads, because it shows the same blocks beside bookings.
  */
 
 import express from 'express';
@@ -57,6 +59,7 @@ import {
   removeVenueBlock,
   getVenueBlockHistory,
 } from '../services/venueBlockService.js';
+import { getVenueCalendar } from '../services/venueCalendarService.js';
 import { validateVenueId } from '../validation/venueValidation.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
@@ -271,6 +274,30 @@ export function createVenueRouter({
     try {
       const window = { from: req.query.from, to: req.query.to };
       res.status(200).json(await listVenueBlocks(req.params.id, window));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-178 (SCRUM-179): a venue's availability calendar -- its approved
+   * and flagged bookings and its active blocks overlapping [from, to), merged
+   * and soonest first. A bare array of entries, each with kind 'booking' or
+   * 'block'; nothing in the window is 200 [].
+   *
+   * ?from=&to= is required here, unlike /:id/blocks: a calendar always shows
+   * a range. At most 400 days. The '+' in an offset must be URL-encoded as
+   * %2B, as /search explains. Readable by the same roles as /:id/blocks, and
+   * for a retired venue too.
+   *
+   * Statuses: 200; 400 for a malformed id, or a missing, one-sided,
+   * malformed or reversed window, or one over 400 days; 401; 403 unless Venue
+   * Staff or an Event Coordinator; 404 for an unknown venue; 500.
+   */
+  router.get('/:id/calendar', blockReaders, async (req, res) => {
+    try {
+      const window = { from: req.query.from, to: req.query.to };
+      res.status(200).json(await getVenueCalendar(req.params.id, window));
     } catch (err) {
       handleError(err, res);
     }
