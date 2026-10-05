@@ -10,7 +10,8 @@
 // API before rendering, and the redirect is read back off window.location.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
+import { useEffect } from "react";
 
 import App from "../../src/App.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
@@ -20,12 +21,23 @@ vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
 }));
 
+// mounts counts how many times the stub has MOUNTED (not rendered), so a key
+// change is visible as a new mount; lastInitialDate keeps the prop itself, so
+// the Date can be checked rather than its string form.
+const calendarStub = vi.hoisted(() => ({ mounts: 0, lastInitialDate: undefined }));
+
 vi.mock("../../src/components/VenueCalendar", () => ({
-  default: ({ venueId, initialDate }) => (
-    <p data-testid="venue-calendar-stub" data-initial-date={String(initialDate)}>
-      Calendar for {venueId}
-    </p>
-  ),
+  default: function VenueCalendarStub({ venueId, initialDate }) {
+    calendarStub.lastInitialDate = initialDate;
+    useEffect(() => {
+      calendarStub.mounts += 1;
+    }, []);
+    return (
+      <p data-testid="venue-calendar-stub" data-initial-date={String(initialDate)}>
+        Calendar for {venueId}
+      </p>
+    );
+  },
 }));
 
 const VENUE_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -45,7 +57,17 @@ function renderAppAt(path, role) {
 
 beforeEach(() => {
   vi.mocked(useAuth).mockReset();
+  calendarStub.mounts = 0;
+  calendarStub.lastInitialDate = undefined;
 });
+
+/** Client-side navigation inside App's BrowserRouter, as a Link click does it. */
+function navigateTo(path) {
+  act(() => {
+    window.history.pushState({}, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+}
 
 describe("/venues/:venueId/calendar route", () => {
   it.each(["venue_staff", "event_coordinator"])(
@@ -83,5 +105,69 @@ describe("/venues/:venueId/calendar route", () => {
 
     expect(screen.queryByTestId("venue-calendar-stub")).not.toBeInTheDocument();
     expect(window.location.pathname).toBe("/login");
+  });
+});
+
+describe("/venues/:venueId/calendar ?date= (SCRUM-181)", () => {
+  it("SCRUM178_AC1_a_valid_date_opens_the_calendar_on_that_local_day", () => {
+    renderAppAt(`/venues/${VENUE_ID}/calendar?date=2026-11-03`, "venue_staff");
+
+    expect(screen.getByTestId("venue-calendar-stub")).toHaveTextContent(`Calendar for ${VENUE_ID}`);
+    const initialDate = calendarStub.lastInitialDate;
+    expect(initialDate).toBeInstanceOf(Date);
+    expect(initialDate).toEqual(new Date(2026, 10, 3));
+    expect([initialDate.getFullYear(), initialDate.getMonth(), initialDate.getDate()]).toEqual([2026, 10, 3]);
+    expect([initialDate.getHours(), initialDate.getMinutes(), initialDate.getSeconds()]).toEqual([0, 0, 0]);
+  });
+
+  it.each([
+    ["garbage", "?date=garbage"],
+    ["an impossible date", "?date=2026-02-30"],
+    ["an empty date", "?date="],
+    ["no date", ""],
+  ])("SCRUM178_AC1_%s_leaves_initialDate_undefined_so_today_applies", (_label, query) => {
+    renderAppAt(`/venues/${VENUE_ID}/calendar${query}`, "venue_staff");
+
+    expect(screen.getByTestId("venue-calendar-stub")).toHaveAttribute("data-initial-date", "undefined");
+    expect(calendarStub.lastInitialDate).toBeUndefined();
+  });
+
+  it("SCRUM178_AC1_a_new_date_remounts_the_calendar", () => {
+    renderAppAt(`/venues/${VENUE_ID}/calendar?date=2026-11-03`, "venue_staff");
+    expect(calendarStub.mounts).toBe(1);
+
+    navigateTo(`/venues/${VENUE_ID}/calendar?date=2026-12-01`);
+
+    expect(calendarStub.mounts).toBe(2);
+    expect(calendarStub.lastInitialDate).toEqual(new Date(2026, 11, 1));
+  });
+
+  it("SCRUM178_AC1_dropping_the_date_remounts_the_calendar_on_today", () => {
+    renderAppAt(`/venues/${VENUE_ID}/calendar?date=2026-11-03`, "venue_staff");
+    expect(calendarStub.mounts).toBe(1);
+
+    navigateTo(`/venues/${VENUE_ID}/calendar`);
+
+    expect(calendarStub.mounts).toBe(2);
+    expect(calendarStub.lastInitialDate).toBeUndefined();
+  });
+
+  it("SCRUM178_AC1_a_new_venue_with_the_same_date_remounts_the_calendar", () => {
+    renderAppAt(`/venues/${VENUE_ID}/calendar?date=2026-11-03`, "venue_staff");
+
+    navigateTo(`/venues/${OTHER_VENUE_ID}/calendar?date=2026-11-03`);
+
+    expect(calendarStub.mounts).toBe(2);
+    expect(screen.getByTestId("venue-calendar-stub")).toHaveTextContent(`Calendar for ${OTHER_VENUE_ID}`);
+  });
+
+  it("SCRUM178_AC1_the_same_url_again_does_not_remount_the_calendar", () => {
+    // The control for the remount tests: navigation alone is not a remount.
+    renderAppAt(`/venues/${VENUE_ID}/calendar?date=2026-11-03`, "venue_staff");
+
+    navigateTo(`/venues/${VENUE_ID}/calendar?date=2026-11-03`);
+
+    expect(calendarStub.mounts).toBe(1);
+    expect(calendarStub.lastInitialDate).toEqual(new Date(2026, 10, 3));
   });
 });

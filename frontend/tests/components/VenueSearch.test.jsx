@@ -17,12 +17,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import VenueSearch from "../../src/components/VenueSearch.jsx";
 import { searchActiveVenues } from "../../src/services/venueService";
 import { deviceTimeZoneLabel, toDatetimeLocalValue } from "../../src/services/datetimeFormat.js";
 import { formatRange } from "../../src/services/displayFormat.js";
+import { toCalendarDateParam } from "../../src/services/calendarRange.js";
 
 vi.mock("../../src/services/venueService", () => ({
   searchActiveVenues: vi.fn(),
@@ -69,6 +70,16 @@ function ReviewQueueProbe() {
   return <div data-testid="review-queue">{JSON.stringify(location.state)}</div>;
 }
 
+function CalendarProbe() {
+  const { venueId } = useParams();
+  const location = useLocation();
+  return (
+    <div data-testid="calendar-probe" data-search={location.search}>
+      Calendar route for {venueId}
+    </div>
+  );
+}
+
 function renderSearch({ path = "/venue-search", state } = {}) {
   const user = userEvent.setup();
   const utils = render(
@@ -76,6 +87,7 @@ function renderSearch({ path = "/venue-search", state } = {}) {
       <Routes>
         <Route path="/venue-search" element={<VenueSearch />} />
         <Route path="/review-queue" element={<ReviewQueueProbe />} />
+        <Route path="/venues/:venueId/calendar" element={<CalendarProbe />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -679,5 +691,104 @@ describe("VenueSearch date window (SCRUM-130)", () => {
     await screen.findByText(GENERIC_ERROR);
     expect(fromInput()).toBeEnabled();
     expect(toInput()).toBeEnabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-181: each result links to its venue's calendar
+// ---------------------------------------------------------------------------
+
+describe("VenueSearch View calendar (SCRUM-181)", () => {
+  const resultFor = (name) => screen.getByText(name).closest("li");
+  const calendarLink = (name) => within(resultFor(name)).getByRole("link", { name: "View calendar" });
+
+  it("SCRUM178_AC1_each_result_links_to_its_own_calendar", async () => {
+    vi.mocked(searchActiveVenues).mockResolvedValue([HALL, ANNEX]);
+    const { user } = renderSearch();
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+
+    expect(screen.getAllByRole("link", { name: "View calendar" })).toHaveLength(2);
+    expect(calendarLink("Hall A")).toHaveAttribute("href", `/venues/${HALL.id}/calendar`);
+    expect(calendarLink("Annex")).toHaveAttribute("href", `/venues/${ANNEX.id}/calendar`);
+  });
+
+  it("SCRUM178_AC1_without_an_applied_window_the_link_has_no_query", async () => {
+    const { user } = renderSearch();
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+
+    const href = calendarLink("Hall A").getAttribute("href");
+    expect(href).toBe(`/venues/${HALL.id}/calendar`);
+    expect(href).not.toContain("?");
+  });
+
+  it("SCRUM178_AC1_typing_a_window_without_searching_adds_no_query", async () => {
+    const { user } = renderSearch();
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+
+    // The link follows the window behind the results, not the inputs.
+    setFrom(START_ISO);
+    setTo(END_ISO);
+    expect(calendarLink("Hall A")).toHaveAttribute("href", `/venues/${HALL.id}/calendar`);
+  });
+
+  it("SCRUM178_AC1_with_an_applied_window_the_link_carries_its_start_date", async () => {
+    vi.mocked(searchActiveVenues).mockResolvedValue([HALL, ANNEX]);
+    const { user } = renderSearch();
+    setFrom(START_ISO);
+    setTo(END_ISO);
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+
+    // The local day of the window's start, whatever zone the test runs in.
+    const expectedDate = toCalendarDateParam(new Date(START_ISO));
+    expect(expectedDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(calendarLink("Hall A")).toHaveAttribute("href", `/venues/${HALL.id}/calendar?date=${expectedDate}`);
+    expect(calendarLink("Annex")).toHaveAttribute("href", `/venues/${ANNEX.id}/calendar?date=${expectedDate}`);
+  });
+
+  it("SCRUM178_AC1_a_window_starting_late_in_the_local_day_keeps_that_local_date", async () => {
+    // 23:30 local on 9 Nov is still 9 Nov here, even where UTC says 10 Nov.
+    const lateStart = new Date(2026, 10, 9, 23, 30).toISOString();
+    const lateEnd = new Date(2026, 10, 10, 1, 30).toISOString();
+    const { user } = renderSearch();
+    setFrom(lateStart);
+    setTo(lateEnd);
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+
+    expect(calendarLink("Hall A")).toHaveAttribute("href", `/venues/${HALL.id}/calendar?date=2026-11-09`);
+  });
+
+  it("SCRUM178_AC1_a_later_dateless_search_drops_the_query", async () => {
+    const { user } = renderSearch();
+    setFrom(START_ISO);
+    setTo(END_ISO);
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+    expect(calendarLink("Hall A").getAttribute("href")).toContain("?date=");
+
+    await user.click(screen.getByRole("button", { name: "Clear dates" }));
+    await user.click(searchButton());
+    await waitFor(() => expect(searchActiveVenues).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(calendarLink("Hall A")).toHaveAttribute("href", `/venues/${HALL.id}/calendar`),
+    );
+  });
+
+  it("SCRUM178_AC1_clicking_it_lands_on_the_calendar_route_with_the_date", async () => {
+    const { user } = renderSearch();
+    setFrom(START_ISO);
+    setTo(END_ISO);
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+
+    await user.click(calendarLink("Hall A"));
+
+    const probe = await screen.findByTestId("calendar-probe");
+    expect(probe).toHaveTextContent(`Calendar route for ${HALL.id}`);
+    expect(probe).toHaveAttribute("data-search", `?date=${toCalendarDateParam(new Date(START_ISO))}`);
   });
 });

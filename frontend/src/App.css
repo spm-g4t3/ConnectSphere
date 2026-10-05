@@ -58,6 +58,12 @@ button { cursor: pointer; }
 .dashboard > section > ul > li { align-items: center; }
 .dashboard--organiser__create-event { background: var(--teal); border-radius: 6px; color: white; display: inline-block; padding: 10px 16px; text-decoration: none; }
 .dashboard--organiser__create-event:hover { background: var(--teal-dark); }
+/* SCRUM-181. The "View calendar" links are router Links, so no button rule
+   reaches them; these give them the action-row button look (the small
+   size of .dashboard li button), as the create-event link above does. */
+.venue-catalogue__calendar-link, .venue-search__calendar-link { background: var(--teal); border-radius: 6px; color: white; display: inline-block; font-size: 0.84rem; padding: 7px 11px; text-decoration: none; }
+.venue-catalogue__calendar-link:hover, .venue-search__calendar-link:hover { background: var(--teal-dark); }
+.venue-search__calendar-link { margin-left: 12px; }
 .dashboard--organiser .status-badge { border-radius: 999px; display: inline-block; flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; line-height: 1.3; padding: 4px 10px; text-transform: uppercase; }
 .dashboard--organiser .status--draft { background: #eef2f1; color: #42545a; }
 .dashboard--organiser .status--awaiting-review { background: #fff6e5; color: #8a5a00; }

@@ -18,11 +18,13 @@ import {
   addDays,
   daysIn,
   entriesOnDay,
+  parseCalendarDate,
   rangeFor,
   rangeTitle,
   shiftAnchor,
   startOfDay,
   startOfWeek,
+  toCalendarDateParam,
   toWireWindow,
 } from "../../src/services/calendarRange.js";
 
@@ -326,5 +328,68 @@ describe("rangeTitle", () => {
     expect(rangeTitle("month", rangeFor("month", local(2026, 0, 31)))).toBe("January 2026");
     // A month that starts on a Monday has no padding at all.
     expect(rangeTitle("month", rangeFor("month", local(2026, 5, 1)))).toBe("June 2026");
+  });
+});
+
+describe("parseCalendarDate (SCRUM-181)", () => {
+  it("SCRUM178_AC1_parses_YYYY_MM_DD_as_local_midnight", () => {
+    const date = parseCalendarDate("2026-11-03");
+
+    expect(date).toBeInstanceOf(Date);
+    expect(date.getFullYear()).toBe(2026);
+    expect(date.getMonth()).toBe(10);
+    expect(date.getDate()).toBe(3);
+    expect([date.getHours(), date.getMinutes(), date.getSeconds(), date.getMilliseconds()]).toEqual([
+      0, 0, 0, 0,
+    ]);
+    expect(date).toEqual(local(2026, 10, 3));
+  });
+
+  it("SCRUM178_AC1_accepts_29_February_in_a_leap_year", () => {
+    expect(parseCalendarDate("2028-02-29")).toEqual(local(2028, 1, 29));
+  });
+
+  it.each(["2026-02-30", "2026-13-01", "2026-00-10", "2027-02-29", "2026-04-31", "2026-10-00"])(
+    "SCRUM178_AC1_rejects_the_impossible_date_%s",
+    (value) => {
+      expect(parseCalendarDate(value)).toBeNull();
+    },
+  );
+
+  it.each([
+    ["an unpadded date", "2026-1-5"],
+    ["an empty string", ""],
+    ["garbage", "garbage"],
+    ["a date with a time", "2026-11-03T00:00"],
+    ["a date with surrounding spaces", " 2026-11-03 "],
+    ["null", null],
+    ["undefined", undefined],
+    ["a number", 12345],
+  ])("SCRUM178_AC1_returns_null_for_%s", (_label, value) => {
+    expect(parseCalendarDate(value)).toBeNull();
+  });
+});
+
+describe("toCalendarDateParam (SCRUM-181)", () => {
+  it("SCRUM178_AC1_zero_pads_month_and_day", () => {
+    expect(toCalendarDateParam(local(2026, 0, 5))).toBe("2026-01-05");
+    expect(toCalendarDateParam(local(2026, 11, 31))).toBe("2026-12-31");
+  });
+
+  it("SCRUM178_AC1_uses_the_local_day_whatever_the_time", () => {
+    expect(toCalendarDateParam(local(2026, 10, 3, 0, 0))).toBe("2026-11-03");
+    expect(toCalendarDateParam(local(2026, 10, 3, 23, 59))).toBe("2026-11-03");
+  });
+
+  it.each(["2026-11-03", "2028-02-29", "2026-01-01", "1999-12-31"])(
+    "SCRUM178_AC1_round_trips_%s_through_parseCalendarDate",
+    (value) => {
+      expect(toCalendarDateParam(parseCalendarDate(value))).toBe(value);
+    },
+  );
+
+  it("SCRUM178_AC1_parse_of_the_param_is_that_day_s_midnight", () => {
+    const moment = local(2026, 9, 5, 14, 30);
+    expect(parseCalendarDate(toCalendarDateParam(moment))).toEqual(startOfDay(moment));
   });
 });

@@ -227,3 +227,40 @@ export function rangeTitle(view, { start, end }) {
       : FULL_DATE;
   return `${start.toLocaleDateString(CALENDAR_LOCALE, startOptions)} – ${last.toLocaleDateString(CALENDAR_LOCALE, FULL_DATE)}`;
 }
+
+/**
+ * A `?date=` value as a local-midnight Date, or null when there is no usable
+ * date in it.
+ *
+ * Strictly YYYY-MM-DD, built with the local Date constructor so the day is
+ * the reader's day (rule 1 in the header). The constructor rolls an
+ * impossible date forward -- 2026-02-30 becomes 2 March -- so the year, month
+ * and day must come back unchanged, or the link named a day that does not
+ * exist and the caller falls back to today.
+ *
+ * @param {*} value  normally a string from the URL, or null when absent
+ * @returns {Date|null}
+ */
+export function parseCalendarDate(value) {
+  const match = typeof value === "string" && /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(year, month - 1, day);
+  const unchanged =
+    date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+  return unchanged ? date : null;
+}
+
+/**
+ * The inverse of parseCalendarDate: `date`'s local day as YYYY-MM-DD, for a
+ * `?date=` link. Local getters, not toISOString, which would give the UTC
+ * day: local midnight east of Greenwich is still the previous day in UTC.
+ *
+ * @param {Date} date
+ * @returns {string} e.g. "2026-10-05"
+ */
+export function toCalendarDateParam(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}

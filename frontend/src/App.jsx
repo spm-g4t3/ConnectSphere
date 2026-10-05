@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { useEffect } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
@@ -11,6 +11,7 @@ import VenueCatalogue from "./components/VenueCatalogue";
 import ReviewQueue from "./components/ReviewQueue";
 import MyAssignedEvents from "./components/MyAssignedEvents";
 import VenueCalendar from "./components/VenueCalendar";
+import { parseCalendarDate } from "./services/calendarRange";
 import "./App.css";
 
 function LoadingScreen() {
@@ -27,14 +28,26 @@ function PagePlaceholder({ title, description }) {
   );
 }
 
-// The calendar takes its venue from the URL. key={venueId} remounts it when
-// only the id changes, so one venue's view, dates and header never carry over
-// onto another's.
+// The calendar takes its venue from the URL, and optionally the day to open
+// on from ?date=YYYY-MM-DD. SCRUM-181 links here from the venue catalogue and
+// from venue search results; a search with a window sends that window's start
+// date. A missing, malformed or impossible date passes undefined, so the
+// component's own default of today applies.
+//
+// The key holds both, so following a new link remounts the calendar: one
+// venue's view, dates and header never carry over onto another's, and a new
+// ?date= is not ignored by a calendar that already read its initialDate.
 function VenueCalendarRoute() {
   const { venueId } = useParams();
+  const [searchParams] = useSearchParams();
+  const date = searchParams.get("date");
   return (
     <main className="venue-calendar-page">
-      <VenueCalendar key={venueId} venueId={venueId} />
+      <VenueCalendar
+        key={`${venueId} ${date ?? ""}`}
+        venueId={venueId}
+        initialDate={parseCalendarDate(date) ?? undefined}
+      />
     </main>
   );
 }

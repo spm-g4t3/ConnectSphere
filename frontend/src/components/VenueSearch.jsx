@@ -27,8 +27,9 @@
 //     correctly. The filters are the contract; the banner is decoration.
 
 import { useState, useCallback, useEffect, useId, useRef } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { deviceTimeZoneLabel } from "../services/datetimeFormat";
+import { toCalendarDateParam } from "../services/calendarRange";
 import { formatRange } from "../services/displayFormat";
 import { searchActiveVenues } from "../services/venueService";
 import { toSearchWindow, validateSearchWindow } from "../services/venueSearchValidation";
@@ -68,6 +69,13 @@ export default function VenueSearch() {
   const [appliedWindow, setAppliedWindow] = useState(null);
 
   const idPrefix = useId();
+
+  // SCRUM-181. With a window applied, the calendar opens on the day it starts,
+  // so the link lands on the week that was searched. appliedWindow, not the
+  // inputs: it is the window behind the results the link sits in.
+  const calendarHref = (venue) =>
+    `/venues/${venue.id}/calendar` +
+    (appliedWindow ? `?date=${toCalendarDateParam(new Date(appliedWindow.startsAt))}` : "");
 
   const handleSearch = useCallback(async () => {
     const errors = validateSearchWindow(filters);
@@ -273,6 +281,9 @@ export default function VenueSearch() {
         {results.map((venue) => (
           <li key={venue.id}>
             <strong>{venue.name}</strong> — {venue.location}, seats up to {venue.maxCapacity}
+            <Link to={calendarHref(venue)} className="venue-search__calendar-link">
+              View calendar
+            </Link>
           </li>
         ))}
         {searched && !loading && results.length === 0 && (
