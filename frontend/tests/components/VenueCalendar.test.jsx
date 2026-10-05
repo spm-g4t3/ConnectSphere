@@ -25,6 +25,8 @@ import userEvent from "@testing-library/user-event";
 
 import VenueCalendar from "../../src/components/VenueCalendar.jsx";
 import { getVenueCalendar, getVenueDetails } from "../../src/services/venueService";
+import { blockCalendarLabel } from "../../src/services/venueBlockDisplay";
+import { VENUE_BLOCK_REASONS } from "../../src/services/venueBlockReasons";
 
 vi.mock("../../src/services/venueService", () => ({
   getVenueCalendar: vi.fn(),
@@ -473,6 +475,28 @@ describe("SCRUM178 VenueCalendar: entry labels (AC2)", () => {
 
     const entry = within(weekCells()[4]).getByRole("listitem");
     expect(entry.querySelector(".venue-calendar__entry-label")).toHaveTextContent(/^Blocked$/);
+  });
+
+  it("SCRUM178_AC2_SCRUM17_AC2_block_label_is_scrum130_blockCalendarLabel", async () => {
+    // SCRUM-183: the calendar's block wording is SCRUM-130's, not its own.
+    // Every reason is checked, so a copy of the wording that only happens to
+    // match "Maintenance" still fails here.
+    const blocks = VENUE_BLOCK_REASONS.map(({ code }, index) => ({
+      ...BLOCK,
+      id: `k-${code}`,
+      reason: code,
+      startsAt: oct(5 + index, 8),
+      endsAt: oct(5 + index, 9),
+    }));
+    vi.mocked(getVenueCalendar).mockResolvedValue(blocks);
+    await renderCalendar();
+
+    const cells = weekCells();
+    blocks.forEach((entry, index) => {
+      const item = within(cells[index]).getByRole("listitem");
+      expect(item).toHaveClass("venue-calendar__entry--blocked");
+      expect(item.querySelector(".venue-calendar__entry-label").textContent).toBe(blockCalendarLabel(entry));
+    });
   });
 
   it("SCRUM178_AC2_a_booking_without_an_event_name_has_no_detail", async () => {

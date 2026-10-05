@@ -18,8 +18,8 @@
 //   - The calendar itself is the page. Its failures are mapped by status to
 //     words, as VenueDetail does, and shown in an alert.
 //
-// Not role-gated here: until SCRUM-182 adds allowedRoles to the route, an
-// Organiser who reaches this page sees the backend's 403 as a message.
+// Role-gated by the route (SCRUM-182's ProtectedRoute in App.jsx); the 403
+// message below is only a fallback if the backend refuses anyway.
 
 import { useEffect, useId, useState } from "react";
 import { getVenueCalendar, getVenueDetails } from "../services/venueService";
