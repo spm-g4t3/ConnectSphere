@@ -78,3 +78,71 @@ describe("SCRUM17 VenueDetail after the display helpers moved", () => {
     expect(screen.getByText(new Date(changedAt).toLocaleString())).toBeInTheDocument();
   });
 });
+
+describe("SCRUM186 turnaround in the change history", () => {
+  const EDITOR = "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d";
+  const CHANGED_AT = "2026-09-20T08:15:00+08:00";
+
+  function historyEntry(oldValues, newValues) {
+    return { id: "h186", changedAt: CHANGED_AT, changedBy: EDITOR, oldValues, newValues };
+  }
+
+  /** The value span next to a field label. */
+  function valueFor(label) {
+    const labelSpan = screen.getByText(label);
+    return labelSpan.closest("li").querySelector(".venue-history__value");
+  }
+
+  beforeEach(() => {
+    vi.mocked(getVenueBookings).mockResolvedValue([]);
+  });
+
+  it("SCRUM186_shows_a_turnaround_change_as_durations", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry({ turnaround_minutes: 30 }, { turnaround_minutes: 60 }),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    expect(await screen.findByText("Turnaround between events")).toBeInTheDocument();
+    expect(valueFor("Turnaround between events")).toHaveTextContent("30 minutes → 1 hour");
+  });
+
+  it("SCRUM186_shows_null_to_zero_as_not_set_to_none", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry({ turnaround_minutes: null }, { turnaround_minutes: 0 }),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Turnaround between events");
+    expect(valueFor("Turnaround between events")).toHaveTextContent("not set → None");
+  });
+
+  it("SCRUM186_an_odd_turnaround_value_renders_as_is_alongside_other_fields", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry(
+        { turnaround_minutes: "abc", name: "Hall A" },
+        { turnaround_minutes: 15, name: "Hall B" },
+      ),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Turnaround between events");
+    expect(valueFor("Turnaround between events")).toHaveTextContent("abc → 15 minutes");
+    expect(valueFor("Name")).toHaveTextContent("Hall A → Hall B");
+  });
+
+  it("SCRUM186_a_creation_entry_with_turnaround_shows_only_venue_created", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry({}, { name: "Hall A", location: "Level 2", turnaround_minutes: 30 }),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    expect(await screen.findByText("Venue created")).toBeInTheDocument();
+    expect(screen.queryByText("Turnaround between events")).not.toBeInTheDocument();
+    expect(screen.queryByText(/30 minutes/)).not.toBeInTheDocument();
+  });
+});

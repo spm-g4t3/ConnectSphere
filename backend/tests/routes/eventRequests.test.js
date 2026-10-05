@@ -2599,6 +2599,486 @@ describe('SCRUM-322: GET /:id/status-history', () => {
 
 
 // ---------------------------------------------------------------------------
+// SCRUM-333 -- GET /api/event-requests/mine, a coordinator's "My events"
+// ---------------------------------------------------------------------------
+// SCRUM-327 AC11: each coordinator has a list of the events assigned to them,
+// grouped by status, earliest event first.
+//
+// Behind coordinatorOnly, like GET /queue, and for a related reason: neither
+// list is narrowed to an Organiser, so the role is what decides who may ask.
+// Unlike the queue, this one is narrowed to the caller, as the assigned
+// coordinator, and the caller comes from the token.
+//
+// GET /queue is untouched. It is the only view of work nobody holds yet, so
+// "My events" sits beside it rather than replacing it; which one the
+// dashboard opens on is a frontend choice.
+//
+// The service tests carry the arguments for the statuses covered, the order,
+// and the organiser's name. These tests are about the transport: the gate,
+// the scoping, the shape, and the path.
+//
+// The route fakes answer two calls per successful list: the events, then the
+// organisers' names from profiles (see the service tests for why that is a
+// second read rather than a join).
+
+/** GET /mine, as COORDINATOR_ID unless told otherwise. */
+const listMine = (client, requireAuth = signedInWithRole(ROLE.EVENT_COORDINATOR)) =>
+  request(appWith({ client, requireAuth })).get('/api/event-requests/mine');
+
+/** Two events, two Organisers, both assigned to COORDINATOR_ID. */
+const myEventRows = () => [
+  storedRow({ id: 'mine-1', organiser_id: ORGANISER_ID, status: STATUS.APPROVED, assigned_coordinator_id: COORDINATOR_ID }),
+  storedRow({ id: 'mine-2', organiser_id: OTHER_ORGANISER_ID, status: STATUS.SUBMITTED, assigned_coordinator_id: COORDINATOR_ID }),
+];
+
+const organiserNames = () => [
+  { id: ORGANISER_ID, full_name: 'Aisha Rahman' },
+  { id: OTHER_ORGANISER_ID, full_name: 'Daniel Lim' },
+];
+
+describe('SCRUM-333: a coordinator reads their own events over HTTP', () => {
+  it('SCRUM333_AC11_returns_200_and_a_bare_array_for_a_coordinator', async () => {
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client);
+
+    // A bare array, like GET / and GET /queue. The frontend groups it by
+    // status; grouping is presentation, and a server-side grouping would be a
+    // shape no other list in this API has.
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(2);
+  });
+
+  it('SCRUM333_AC11_lists_only_the_coordinators_own_events', async () => {
+    // Mirrors SCRUM14_AC1_scopes_the_query_to_the_token_not_the_query_string.
+    // The query string names another coordinator, and the read is still
+    // narrowed to the one in the token. Otherwise any coordinator could read
+    // any other's list just by asking for it.
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    await request(appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }))
+      .get('/api/event-requests/mine')
+      .query({ coordinatorId: NEW_COORDINATOR_ID, assignedCoordinatorId: NEW_COORDINATOR_ID });
+
+    expect(client.calls[0].table).toBe('event_requests');
+    expect(client.calls[0].filters).toEqual([['assigned_coordinator_id', COORDINATOR_ID]]);
+  });
+
+  it('SCRUM333_AC11_a_reassigned_event_follows_its_new_coordinator', async () => {
+    // After a handover from COORDINATOR_ID to NEW_COORDINATOR_ID, the event
+    // is on the new coordinator's list and off the old one's.
+    //
+    // Asserted through the filter, not the rows. The fake returns whatever
+    // rows it is given, so a test that fed it the "right" rows and checked
+    // they came back would only check the fixture against itself. What
+    // actually decides which list an event is on is the database applying
+    // assigned_coordinator_id = caller, and 018 moves that column on a
+    // handover. So the honest assertion is that each caller's read carries
+    // their own id, and nobody else's.
+    const asNew = createQueueFakeClient([ok([]), ok([])]);
+    const asOld = createQueueFakeClient([ok([]), ok([])]);
+
+    await listMine(asNew, signedInWithRole(ROLE.EVENT_COORDINATOR, NEW_COORDINATOR_ID));
+    await listMine(asOld, signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_ID));
+
+    expect(asNew.calls[0].filters).toEqual([['assigned_coordinator_id', NEW_COORDINATOR_ID]]);
+    expect(asOld.calls[0].filters).toEqual([['assigned_coordinator_id', COORDINATOR_ID]]);
+  });
+
+  it('SCRUM333_AC11_carries_the_status_display_on_every_row', async () => {
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client);
+
+    // Same projection as the queue's rows and the Organiser's list, so the
+    // status badges, and the status groups the frontend builds, come from one
+    // vocabulary.
+    for (const row of res.body) {
+      expect(row.statusDisplay).toBeDefined();
+      expect(row.statusDisplay.status).toBe(row.status);
+      expect(row.statusDisplay.label).toBe(STATUS_DISPLAY[row.status].label);
+      expect(row.statusDisplay.group).toBe(STATUS_DISPLAY[row.status].group);
+    }
+  });
+
+  it('SCRUM333_AC11_carries_the_organisers_name', async () => {
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client);
+
+    // Survives serialisation, beside the id it names.
+    expect(res.body.map((row) => [row.organiserId, row.organiserName])).toEqual([
+      [ORGANISER_ID, 'Aisha Rahman'],
+      [OTHER_ORGANISER_ID, 'Daniel Lim'],
+    ]);
+  });
+
+  it('SCRUM333_AC11_answers_an_empty_list_with_200_and_not_404', async () => {
+    // Nothing assigned is the good state, not a missing resource. With no
+    // events there is no second read, so only one answer is queued.
+    const client = createQueueFakeClient([ok([])]);
+
+    const res = await listMine(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM333_AC11_does_not_read_the_mine_path_as_a_request_id', async () => {
+    // '/mine' is one segment, like '/queue', so declared after GET /:id
+    // Express would match it with id === 'mine' and send the caller to the
+    // Organiser's read. Mirrors SCRUM45_AC1_does_not_read_the_queue_path_as_a_
+    // request_id, and asserted from the outside: a 200, a read narrowed to the
+    // coordinator, and no id filter.
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client);
+
+    expect(res.status).toBe(200);
+    expect(client.calls[0].filters).toEqual([['assigned_coordinator_id', COORDINATOR_ID]]);
+    expect(client.calls[0].filters).not.toContainEqual(['id', 'mine']);
+  });
+
+  it('SCRUM333_AC11_an_organiser_is_refused_with_403_and_never_queries', async () => {
+    // coordinatorOnly answers before the handler runs. An Organiser has no
+    // assigned events; their own list is GET /.
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client, signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID));
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM333_AC11_a_caller_with_no_role_is_refused', async () => {
+    // Closed by default, as for the queue: signedInAs sets no role, which is
+    // also what requireAuth resolves for an account with no profiles row.
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client, signedInAs(COORDINATOR_ID));
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM333_AC11_returns_401_without_a_token_and_never_queries', async () => {
+    const client = createQueueFakeClient([ok(myEventRows()), ok(organiserNames())]);
+
+    const res = await listMine(client, signedOut);
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-334 -- GET /coordinators, and an event's assignment history
+// ---------------------------------------------------------------------------
+// Named after SCRUM-327's criteria:
+//   AC9  -- every handover records who made it, and the note
+//   AC10 -- the Organiser's screen shows the event's assignment history
+//
+// GET /coordinators is behind coordinatorOnly. It is the first endpoint in
+// this API that lists users, so the first that could be used to enumerate
+// staff, and no Organiser or attendee feature needs it: only the reassign
+// picker does. coordinatorOnly fails closed. A future story that needs it
+// elsewhere can widen the gate and give its reason.
+//
+// The history is two routes, not one route that branches on role:
+//
+//   GET /:id/assignments         the Organiser's: their own event only,
+//                                someone else's is a 404, and no notes.
+//   GET /:id/assignments/review  a coordinator's: any event past draft, behind
+//                                coordinatorOnly, with notes.
+//
+// This is the split SCRUM-332 made for the event itself (GET /:id beside
+// GET /:id/review), and the one this router already had for change requests
+// (GET /:id/change-requests beside GET /:id/change-requests/review). The
+// reasons are the same. Who may call each route can be read off its
+// declaration. And it fails closed: a role branch inside one handler that got
+// its condition wrong would hand every Organiser every event's history,
+// notes included, while a route behind requireRole answers 403 before its
+// handler runs. A single URL was the other option. It would be one fewer
+// route, but it would be the one place in this router where an authorisation
+// decision is made inside a handler, with no reason it should be done here
+// and not for GET /:id.
+//
+// The history is its own endpoint rather than part of the event reads. Folded
+// in, it would put a growing array inside every event read, /mine and /queue
+// included, where nothing shows it. Change requests are separate for the same
+// reason.
+
+/** A third coordinator, holding nothing in these fixtures. */
+const THIRD_COORDINATOR_ID = '88888888-8888-4888-8888-888888888888';
+
+/** One event's history, as PostgREST returns it: an automatic assignment, then a handover. */
+const historyRows = () => [
+  {
+    id: 'history-1',
+    event_request_id: REQUEST_ID,
+    previous_coordinator_id: null,
+    new_coordinator_id: COORDINATOR_ID,
+    assigned_by: null,
+    handover_note: null,
+    created_at: '2026-01-15T09:00:00+00:00',
+  },
+  {
+    id: 'history-2',
+    event_request_id: REQUEST_ID,
+    previous_coordinator_id: COORDINATOR_ID,
+    new_coordinator_id: NEW_COORDINATOR_ID,
+    assigned_by: COORDINATOR_ID,
+    handover_note: HANDOVER_NOTE,
+    created_at: '2026-01-20T09:00:00+00:00',
+  },
+];
+
+const historyNames = () => [
+  { id: COORDINATOR_ID, full_name: 'Priya Nair' },
+  { id: NEW_COORDINATOR_ID, full_name: 'Marcus Tan' },
+];
+
+describe('SCRUM-334: the coordinator list over HTTP', () => {
+  const listCoordinatorsAs = (client, requireAuth = signedInWithRole(ROLE.EVENT_COORDINATOR)) =>
+    request(appWith({ client, requireAuth })).get('/api/event-requests/coordinators');
+
+  it('SCRUM334_AC9_a_coordinator_lists_every_coordinator', async () => {
+    const client = createQueueFakeClient([ok(historyNames())]);
+
+    const res = await listCoordinatorsAs(client);
+
+    // A bare array of { id, fullName }, like every list in this API.
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      { id: COORDINATOR_ID, fullName: 'Priya Nair' },
+      { id: NEW_COORDINATOR_ID, fullName: 'Marcus Tan' },
+    ]);
+  });
+
+  it('SCRUM334_AC9_does_not_read_the_coordinators_path_as_a_request_id', async () => {
+    // '/coordinators' is one segment, like '/queue' and '/mine', so declared
+    // after GET /:id Express would match it with id === 'coordinators' and
+    // answer from the Organiser's read. Asserted from the outside: a 200, and
+    // the one read is of profiles by role, not of an event by id.
+    const client = createQueueFakeClient([ok(historyNames())]);
+
+    const res = await listCoordinatorsAs(client);
+
+    expect(res.status).toBe(200);
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].table).toBe('profiles');
+    expect(client.calls[0].filters).toEqual([['role', 'event_coordinator']]);
+  });
+
+  it('SCRUM334_AC9_an_organiser_is_refused_the_coordinator_list_and_never_queries', async () => {
+    const client = createQueueFakeClient([ok(historyNames())]);
+
+    const res = await listCoordinatorsAs(client, signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID));
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM334_AC9_a_caller_with_no_role_is_refused_the_coordinator_list', async () => {
+    // Closed by default, as for the queue and "My events".
+    const client = createQueueFakeClient([ok(historyNames())]);
+
+    const res = await listCoordinatorsAs(client, signedInAs(ORGANISER_ID));
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM334_AC9_the_coordinator_list_returns_401_without_a_token', async () => {
+    const client = createQueueFakeClient([ok(historyNames())]);
+
+    const res = await listCoordinatorsAs(client, signedOut);
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+
+describe("SCRUM-334: the Organiser's view of the assignment history over HTTP", () => {
+  const organiserHistory = (client, requireAuth = signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID)) =>
+    request(appWith({ client, requireAuth })).get(`/api/event-requests/${REQUEST_ID}/assignments`);
+
+  it('SCRUM334_AC10_the_organiser_sees_who_and_when', async () => {
+    const client = createQueueFakeClient([
+      ok(storedRow({ assigned_coordinator_id: NEW_COORDINATOR_ID })),
+      ok(historyRows()),
+      ok(historyNames()),
+    ]);
+
+    const res = await organiserHistory(client);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body[1]).toMatchObject({
+      previousCoordinatorName: 'Priya Nair',
+      newCoordinatorName: 'Marcus Tan',
+      assignedByName: 'Priya Nair',
+      automatic: false,
+      createdAt: '2026-01-20T09:00:00+00:00',
+    });
+    expect(res.body[0].automatic).toBe(true);
+
+    // Ownership first, then the history, then the names. The event read is
+    // the proof the Organiser may see this history at all, as on GET
+    // /:id/change-requests; the history read takes no owner.
+    expect(client.calls.map((call) => call.table))
+      .toEqual(['event_requests', 'event_request_assignment_history', 'profiles']);
+    expect(client.calls[0].filters).toEqual([['id', REQUEST_ID]]);
+    expect(client.calls[1].order[0]).toEqual(['created_at', { ascending: true }]);
+  });
+
+  it('SCRUM334_AC10_withholds_the_handover_note_from_the_organiser', async () => {
+    // The note is written by one coordinator for another, so it never
+    // reaches the Organiser. Absent, not null, so the screen can tell "not
+    // sent to you" from "none was written" (see the service tests).
+    const client = createQueueFakeClient([
+      ok(storedRow({ assigned_coordinator_id: NEW_COORDINATOR_ID })),
+      ok(historyRows()),
+      ok(historyNames()),
+    ]);
+
+    const res = await organiserHistory(client);
+
+    expect(res.status).toBe(200);
+    for (const entry of res.body) {
+      expect('handoverNote' in entry).toBe(false);
+    }
+    expect(JSON.stringify(res.body)).not.toContain(HANDOVER_NOTE);
+  });
+
+  it("SCRUM334_AC10_a_different_organiser_gets_404", async () => {
+    // Someone else's event, answered exactly as a missing one, as every
+    // Organiser read in this router does: for an Organiser, whether an id
+    // exists is itself the secret. The history is never read.
+    const foreignClient = createQueueFakeClient([
+      ok(storedRow({ organiser_id: OTHER_ORGANISER_ID })),
+      ok(historyRows()),
+      ok(historyNames()),
+    ]);
+    const missingClient = createQueueFakeClient([ok(null)]);
+
+    const foreign = await organiserHistory(foreignClient);
+    const missing = await organiserHistory(missingClient);
+
+    expect(foreign.status).toBe(404);
+    expect(foreign.body).toEqual(missing.body);
+    expect(foreignClient.calls).toHaveLength(1);
+  });
+
+  it("SCRUM334_AC10_a_coordinator_uses_their_own_route_not_the_organisers", async () => {
+    // Pins the two-route choice. This route does not branch on role, so a
+    // coordinator who did not organise the event gets the Organiser's answer,
+    // 404, and reads the history through /assignments/review instead.
+    const client = createQueueFakeClient([
+      ok(storedRow({ organiser_id: OTHER_ORGANISER_ID })),
+      ok(historyRows()),
+      ok(historyNames()),
+    ]);
+
+    const res = await organiserHistory(client, signedInWithRole(ROLE.EVENT_COORDINATOR));
+
+    expect(res.status).toBe(404);
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM334_AC10_the_organisers_history_returns_401_without_a_token', async () => {
+    const client = createQueueFakeClient([ok(storedRow()), ok(historyRows()), ok(historyNames())]);
+
+    const res = await organiserHistory(client, signedOut);
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+
+describe("SCRUM-334: a coordinator's view of the assignment history over HTTP", () => {
+  const coordinatorHistory = (client, requireAuth = signedInWithRole(ROLE.EVENT_COORDINATOR)) =>
+    request(appWith({ client, requireAuth })).get(`/api/event-requests/${REQUEST_ID}/assignments/review`);
+
+  it('SCRUM334_AC9_the_assigned_coordinator_sees_the_history_with_notes', async () => {
+    const client = createQueueFakeClient([
+      ok(storedRow({ assigned_coordinator_id: NEW_COORDINATOR_ID })),
+      ok(historyRows()),
+      ok(historyNames()),
+    ]);
+
+    const res = await coordinatorHistory(client, signedInWithRole(ROLE.EVENT_COORDINATOR, NEW_COORDINATOR_ID));
+
+    // The person the note was written for.
+    expect(res.status).toBe(200);
+    expect(res.body[1].handoverNote).toBe(HANDOVER_NOTE);
+    expect(res.body[0].handoverNote).toBeNull();
+    expect(client.calls.map((call) => call.table))
+      .toEqual(['event_requests', 'event_request_assignment_history', 'profiles']);
+    expect(client.calls[1].order[0]).toEqual(['created_at', { ascending: true }]);
+  });
+
+  it('SCRUM334_AC9_any_coordinator_sees_the_history_with_notes', async () => {
+    // A coordinator who holds nothing here still gets the notes. Three
+    // reasons:
+    //  - They can already read the event (GET /:id/review, SCRUM-332), and
+    //    the history is part of it.
+    //  - The note's audience is the coordinator team, not one person. The
+    //    Organiser is the reader it must be kept from, and the role gate does
+    //    that.
+    //  - Limiting notes to the current assignee would hide every note from the
+    //    coordinator who wrote it, since writing one means handing the event
+    //    away, and from whoever takes the event next, who needs the trail.
+    const client = createQueueFakeClient([
+      ok(storedRow({ assigned_coordinator_id: NEW_COORDINATOR_ID })),
+      ok(historyRows()),
+      ok(historyNames()),
+    ]);
+
+    const res = await coordinatorHistory(client, signedInWithRole(ROLE.EVENT_COORDINATOR, THIRD_COORDINATOR_ID));
+
+    expect(res.status).toBe(200);
+    expect(res.body[1].handoverNote).toBe(HANDOVER_NOTE);
+  });
+
+  it('SCRUM334_AC9_a_draft_has_no_history_for_a_coordinator', async () => {
+    // The event is read through the coordinator read, so a draft is a 404
+    // here as it is on GET /:id/review: no coordinator learns a draft exists.
+    const client = createQueueFakeClient([ok(storedRow({ status: STATUS.DRAFT })), ok([]), ok([])]);
+
+    const res = await coordinatorHistory(client);
+
+    expect(res.status).toBe(404);
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM334_AC10_an_organiser_is_refused_the_coordinator_history_and_never_queries', async () => {
+    // Even the owning Organiser: this is the view with notes. Their view is
+    // GET /:id/assignments.
+    const client = createQueueFakeClient([ok(storedRow()), ok(historyRows()), ok(historyNames())]);
+
+    const res = await coordinatorHistory(client, signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID));
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM334_AC9_the_coordinator_history_returns_401_without_a_token', async () => {
+    const client = createQueueFakeClient([ok(storedRow()), ok(historyRows()), ok(historyNames())]);
+
+    const res = await coordinatorHistory(client, signedOut);
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
 // SCRUM-325 -- a refused transition over HTTP
 // ---------------------------------------------------------------------------
 describe('SCRUM-325 AC3: a refused transition is a 409 that names the current status', () => {

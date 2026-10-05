@@ -499,3 +499,171 @@ describe('SCRUM17_AC2 a venue search may carry a date window', () => {
     ).toEqual({ startsAt: '2001-01-01T00:00:00Z', endsAt: '2001-01-02T00:00:00Z' });
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-186: the turnaround between events, one of a fixed list of minutes
+// (src/domain/turnaroundOptions.js, mirroring 017's CHECK).
+// ---------------------------------------------------------------------------
+describe('SCRUM186 turnaround time', () => {
+  const OPTIONS = [0, 15, 30, 45, 60, 90, 120];
+  const MESSAGE = 'must be one of 0, 15, 30, 45, 60, 90, 120 minutes';
+
+  it.each(OPTIONS)('SCRUM186_create_accepts_turnaround_%s', (minutes) => {
+    expect(validateCreateVenue({ ...VALID, turnaroundMinutes: minutes }).turnaroundMinutes)
+      .toBe(minutes);
+  });
+
+  it.each(OPTIONS)('SCRUM186_update_accepts_turnaround_%s', (minutes) => {
+    expect(validateUpdateVenue({ turnaroundMinutes: minutes })).toEqual({
+      turnaroundMinutes: minutes,
+    });
+  });
+
+  it('SCRUM186_create_leaves_an_omitted_turnaround_out_of_the_result', () => {
+    const result = validateCreateVenue({ ...VALID });
+    expect(result).not.toHaveProperty('turnaroundMinutes');
+  });
+
+  it('SCRUM186_create_treats_an_explicit_undefined_as_omitted', () => {
+    const result = validateCreateVenue({ ...VALID, turnaroundMinutes: undefined });
+    expect(result).not.toHaveProperty('turnaroundMinutes');
+  });
+
+  it('SCRUM186_update_leaves_an_omitted_turnaround_out_of_the_result', () => {
+    expect(validateUpdateVenue({ name: 'x' })).toEqual({ name: 'x' });
+  });
+
+  it('SCRUM186_update_turnaround_0_alone_is_a_valid_change', () => {
+    // 0 is falsy, but it is a real choice ("none"), not "no change supplied".
+    expect(validateUpdateVenue({ turnaroundMinutes: 0 })).toEqual({ turnaroundMinutes: 0 });
+  });
+
+  it('SCRUM186_accepts_negative_zero_as_zero', () => {
+    // Documented, not desired-or-undesired: Number.isInteger(-0) is true and
+    // includes() uses SameValueZero, so -0 passes. JSON cannot send -0
+    // distinctly (JSON.stringify(-0) === '0'), so it never arrives over HTTP.
+    expect(validateCreateVenue({ ...VALID, turnaroundMinutes: -0 }).turnaroundMinutes).toBe(-0);
+    expect(validateUpdateVenue({ turnaroundMinutes: -0 }).turnaroundMinutes).toBe(-0);
+  });
+
+  const BAD = [
+    ['null', null],
+    ['a numeric string', '30'],
+    ['a value between options', 25],
+    ['a negative option', -15],
+    ['a gap longer than two hours', 180],
+    ['a fractional number', 15.5],
+    ['NaN', NaN],
+    ['Infinity', Infinity],
+    ['an object', {}],
+    ['an array holding an option', [30]],
+  ];
+
+  it.each(BAD)('SCRUM186_create_rejects_%s_on_field_turnaroundMinutes', (_label, value) => {
+    const err = errorFrom(() => validateCreateVenue({ ...VALID, turnaroundMinutes: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'turnaroundMinutes', message: MESSAGE }]);
+  });
+
+  it.each(BAD)('SCRUM186_update_rejects_%s_on_field_turnaroundMinutes', (_label, value) => {
+    const err = errorFrom(() => validateUpdateVenue({ turnaroundMinutes: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'turnaroundMinutes', message: MESSAGE }]);
+  });
+
+  it('SCRUM186_update_null_turnaround_is_refused_rather_than_read_as_keep', () => {
+    // update_venue reads NULL as "keep", so a deliberate null must not pass
+    // validation and silently do nothing.
+    const err = errorFrom(() => validateUpdateVenue({ turnaroundMinutes: null }));
+    expect(fieldsIn(err)).toEqual(['turnaroundMinutes']);
+  });
+
+  it('SCRUM186_create_reports_a_bad_turnaround_together_with_a_bad_name', () => {
+    const err = errorFrom(() =>
+      validateCreateVenue({ ...VALID, name: '  ', turnaroundMinutes: 25 }),
+    );
+    expect(err.details).toHaveLength(2);
+    expect(fieldsIn(err).sort()).toEqual(['name', 'turnaroundMinutes']);
+  });
+
+  it('SCRUM186_update_reports_a_bad_turnaround_together_with_a_bad_name', () => {
+    const err = errorFrom(() => validateUpdateVenue({ name: '', turnaroundMinutes: 25 }));
+    expect(err.details).toHaveLength(2);
+    expect(fieldsIn(err).sort()).toEqual(['name', 'turnaroundMinutes']);
+  });
+
+  it('SCRUM186_the_summary_message_names_the_field', () => {
+    const err = errorFrom(() => validateCreateVenue({ ...VALID, turnaroundMinutes: 25 }));
+    expect(err.message).toContain(`turnaroundMinutes: ${MESSAGE}`);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-186: the per-weekday hours model is verified, not changed. Its limits
+// (see the 017 header) are pinned here so nobody mistakes them for bugs.
+// ---------------------------------------------------------------------------
+describe('SCRUM186 operating hours model limits', () => {
+  it('SCRUM186_a_day_left_out_is_closed_and_is_accepted', () => {
+    // Monday to Friday only: Saturday (6) and Sunday (0) have no row.
+    const weekdays = [1, 2, 3, 4, 5].map((day) => ({
+      day_of_week: day, opens_at: '09:00', closes_at: '18:00',
+    }));
+    const result = validateCreateVenue({ ...VALID, hours: weekdays });
+    expect(result.hours.map((h) => h.day_of_week)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('SCRUM186_no_hours_at_all_is_accepted_every_day_closed', () => {
+    expect(validateCreateVenue({ ...VALID, hours: [] }).hours).toEqual([]);
+  });
+
+  it('SCRUM186_an_overnight_window_22_00_to_02_00_is_rejected', () => {
+    const err = errorFrom(() =>
+      validateCreateVenue({
+        ...VALID,
+        hours: [{ day_of_week: 5, opens_at: '22:00', closes_at: '02:00' }],
+      }),
+    );
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details[0]).toMatchObject({ field: 'hours' });
+    expect(err.details[0].message).toMatch(/after opens_at/);
+  });
+
+  it('SCRUM186_an_overnight_window_is_rejected_on_update_too', () => {
+    const err = errorFrom(() =>
+      validateUpdateVenue({ hours: [{ day_of_week: 5, opens_at: '22:00', closes_at: '02:00' }] }),
+    );
+    expect(fieldsIn(err)).toEqual(['hours']);
+  });
+
+  it('SCRUM186_the_latest_closing_time_is_23_59', () => {
+    expect(
+      validateCreateVenue({
+        ...VALID,
+        hours: [{ day_of_week: 1, opens_at: '09:00', closes_at: '23:59' }],
+      }).hours,
+    ).toHaveLength(1);
+
+    const err = errorFrom(() =>
+      validateCreateVenue({
+        ...VALID,
+        hours: [{ day_of_week: 1, opens_at: '09:00', closes_at: '24:00' }],
+      }),
+    );
+    expect(fieldsIn(err)).toContain('hours');
+  });
+
+  it('SCRUM186_only_one_window_per_day_no_split_shifts', () => {
+    const err = errorFrom(() =>
+      validateCreateVenue({
+        ...VALID,
+        hours: [
+          { day_of_week: 2, opens_at: '08:00', closes_at: '12:00' },
+          { day_of_week: 2, opens_at: '13:00', closes_at: '17:00' },
+        ],
+      }),
+    );
+    expect(err.details[0].message).toMatch(/repeats day 2/);
+  });
+});

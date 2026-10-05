@@ -1,7 +1,7 @@
 // EventCoordinatorDashboard.jsx
 //
-// The Event Coordinator's landing page: a greeting, the review queue, and the
-// notifications.
+// The Event Coordinator's landing page: a greeting, their own events
+// (SCRUM-333), the review queue, and their notifications (SCRUM-128).
 //
 // SCRUM-45 replaced the first section wholesale. It used to call
 // getEventsNeedingAttention — a stub that console.warn'd and returned [], and
@@ -20,6 +20,7 @@
 // Both sections are components of their own, so this file is only the page
 // around them.
 
+import MyAssignedEvents from "./MyAssignedEvents";
 import ReviewQueue from "./ReviewQueue";
 import CoordinatorNotifications from "./CoordinatorNotifications";
 
@@ -32,9 +33,21 @@ export default function EventCoordinatorDashboard({ user }) {
           real fix is server-side and has its own ticket. */}
       <h1>Welcome, {user.name ?? user.email}</h1>
 
-      {/* A direct child of .dashboard so its <section> root picks up the
-          `.dashboard > section` card styling, exactly as VenueCatalogue does
-          on the Venue Staff dashboard. */}
+      {/* SCRUM-333. Both lists, mine first. They answer different questions:
+          My events is the work this coordinator holds, every status, soonest
+          first; the review queue is every event awaiting a decision across the
+          whole team, whoever holds it. Since SCRUM-330 every event is assigned
+          the moment it is submitted, so the queue is no longer "work nobody
+          holds". It stays because it is the only view of what colleagues have
+          waiting, which is what a coordinator covering for someone, or
+          picking who to hand an event to, needs to see. Mine comes first
+          because it is the work this person is accountable for.
+
+          Both are direct children of .dashboard so each <section> root picks
+          up the `.dashboard > section` card styling, exactly as VenueCatalogue
+          does on the Venue Staff dashboard. Each keeps its own detail panel,
+          so opening an event in one leaves the other as it was. */}
+      <MyAssignedEvents />
       <ReviewQueue />
 
       {/* Also a direct child of .dashboard, for the same card styling. */}

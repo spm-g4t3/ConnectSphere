@@ -63,6 +63,7 @@ function retiredVenueRow(overrides = {}) {
     name: 'Seminar Room 2-1',
     location: 'Level 2, SCIS',
     max_capacity: 40,
+    turnaround_minutes: 0,
     retired_at: RETIRED_AT,
     created_at: '2026-09-12T09:00:00+00:00',
     updated_at: RETIRED_AT,
@@ -122,6 +123,7 @@ function queryStub(result) {
 function populatedVenueRow(overrides = {}) {
   return retiredVenueRow({
     retired_at: null,
+    turnaround_minutes: 45,
     venue_room_layouts: [
       { room_layout_code: 'theatre' },
       { room_layout_code: 'classroom' },
@@ -776,7 +778,7 @@ describe('AC2: an authorised change is saved', () => {
     }));
   });
 
-  it.each(['p_name', 'p_location', 'p_layouts', 'p_accessibility', 'p_facilities', 'p_hours'])(
+  it.each(['p_name', 'p_location', 'p_layouts', 'p_accessibility', 'p_facilities', 'p_hours', 'p_turnaround_minutes'])(
     'sends null for %s when it was not supplied, so the function leaves it alone',
     async (param) => {
       // 004_venue_functions.sql: NULL means "leave unchanged". Sending
@@ -1237,5 +1239,161 @@ describe('SCRUM17_AC2 a dated search leaves out venues blocked in the window', (
     await expect(searchVenues({ startsAt: STARTS, endsAt: ENDS })).resolves.toEqual([
       { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'Level 2, SCIS', maxCapacity: 40 },
     ]);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-186: the turnaround between events
+// ---------------------------------------------------------------------------
+describe('SCRUM186 turnaround is written by create and update and read by id', () => {
+  const NEW_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const MINIMAL = Object.freeze({
+    name: 'Seminar Room 2-1',
+    location: 'Level 2, SCIS',
+    maxCapacity: 40,
+  });
+
+  it('SCRUM186_getVenueById_selects_turnaround_minutes', async () => {
+    const read = queryStub({ data: populatedVenueRow(), error: null });
+    from.mockReturnValue(read);
+
+    await getVenueById(VENUE_ID);
+
+    expect(read.args('select')[0]).toMatch(/\bturnaround_minutes\b/);
+  });
+
+  it('SCRUM186_getVenueById_maps_turnaround_minutes_to_turnaroundMinutes', async () => {
+    from.mockReturnValue(queryStub({ data: populatedVenueRow(), error: null }));
+
+    const venue = await getVenueById(VENUE_ID);
+
+    expect(venue.turnaroundMinutes).toBe(45);
+    expect(venue).not.toHaveProperty('turnaround_minutes');
+  });
+
+  it('SCRUM186_getVenueById_maps_a_zero_turnaround_as_0_not_missing', async () => {
+    from.mockReturnValue(queryStub({ data: retiredVenueRow(), error: null }));
+
+    const venue = await getVenueById(VENUE_ID);
+
+    expect(venue.turnaroundMinutes).toBe(0);
+  });
+
+  it('SCRUM186_create_sends_the_default_0_when_turnaround_is_omitted', async () => {
+    givenWriteSucceeds(populatedVenueRow(), NEW_ID);
+
+    await createVenue(MINIMAL, STAFF_ID);
+
+    expect(rpcArgs().p_turnaround_minutes).toBe(0);
+  });
+
+  it.each([0, 15, 30, 45, 60, 90, 120])(
+    'SCRUM186_create_sends_the_given_turnaround_%s',
+    async (minutes) => {
+      givenWriteSucceeds(populatedVenueRow(), NEW_ID);
+
+      await createVenue({ ...MINIMAL, turnaroundMinutes: minutes }, STAFF_ID);
+
+      expect(rpcArgs().p_turnaround_minutes).toBe(minutes);
+    },
+  );
+
+  it('SCRUM186_create_returns_the_turnaround_read_back', async () => {
+    givenWriteSucceeds(populatedVenueRow({ id: NEW_ID, turnaround_minutes: 120 }), NEW_ID);
+
+    const venue = await createVenue({ ...MINIMAL, turnaroundMinutes: 120 }, STAFF_ID);
+
+    expect(venue.turnaroundMinutes).toBe(120);
+  });
+
+  it('SCRUM186_update_sends_null_when_only_the_name_changes', async () => {
+    givenWriteSucceeds(populatedVenueRow());
+
+    await updateVenue(VENUE_ID, { name: 'x' }, STAFF_ID);
+
+    expect(rpcArgs().p_turnaround_minutes).toBeNull();
+  });
+
+  it('SCRUM186_update_sends_0_when_turnaround_is_set_back_to_none', async () => {
+    // Catches a `|| null` regression: update_venue reads NULL as "keep", so
+    // turning 0 into null would leave the old turnaround in place.
+    givenWriteSucceeds(populatedVenueRow({ turnaround_minutes: 0 }));
+
+    await updateVenue(VENUE_ID, { turnaroundMinutes: 0 }, STAFF_ID);
+
+    expect(rpcArgs().p_turnaround_minutes).toBe(0);
+    expect(rpcArgs().p_turnaround_minutes).not.toBeNull();
+  });
+
+  it('SCRUM186_update_turnaround_alone_leaves_every_other_field_null', async () => {
+    givenWriteSucceeds(populatedVenueRow({ turnaround_minutes: 90 }));
+
+    await updateVenue(VENUE_ID, { turnaroundMinutes: 90 }, STAFF_ID);
+
+    expect(rpcArgs()).toEqual({
+      p_id: VENUE_ID,
+      p_name: null,
+      p_location: null,
+      p_max_capacity: null,
+      p_layouts: null,
+      p_accessibility: null,
+      p_facilities: null,
+      p_hours: null,
+      p_turnaround_minutes: 90,
+      p_user_id: STAFF_ID,
+    });
+  });
+
+  it('SCRUM186_update_returns_the_turnaround_read_back', async () => {
+    givenWriteSucceeds(populatedVenueRow({ turnaround_minutes: 30 }));
+
+    const venue = await updateVenue(VENUE_ID, { turnaroundMinutes: 30 }, STAFF_ID);
+
+    expect(venue.turnaroundMinutes).toBe(30);
+  });
+
+  it('SCRUM186_create_rejects_turnaround_25_before_any_rpc', async () => {
+    const err = await errorFromAsync(() =>
+      createVenue({ ...MINIMAL, turnaroundMinutes: 25 }, STAFF_ID),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toEqual(['turnaroundMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM186_update_rejects_turnaround_25_before_any_rpc', async () => {
+    const err = await errorFromAsync(() =>
+      updateVenue(VENUE_ID, { turnaroundMinutes: 25 }, STAFF_ID),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toEqual(['turnaroundMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['createVenue', () => createVenue(MINIMAL, STAFF_ID)],
+    ['updateVenue', () => updateVenue(VENUE_ID, { turnaroundMinutes: 30 }, STAFF_ID)],
+  ])('SCRUM186_%s_reports_23514_on_venues_turnaround_minutes_allowed_as_a_validation_error', async (_name, call) => {
+    // The database CHECK is the backstop for writes that bypass validation.
+    rpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: '23514',
+        message:
+          'new row for relation "venues" violates check constraint ' +
+          '"venues_turnaround_minutes_allowed"',
+      },
+    });
+
+    const err = await errorFromAsync(call);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('venues_turnaround_minutes_allowed');
+    expect(from).not.toHaveBeenCalled();
   });
 });
