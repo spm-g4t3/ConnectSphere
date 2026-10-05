@@ -14,11 +14,15 @@
 
 
 /**
- * The ten statuses, spelled exactly as the Postgres enum `event_request_status`.
+ * The nine statuses of the lifecycle (SCRUM-318), spelled as in the Postgres
+ * enum `event_request_status`.
  *
- * These two lists must stay identical. If they drift, the database rejects the
- * write at runtime -- so a test asserts the match rather than leaving it to
- * whoever edits one file to remember the other.
+ * There is no PLANNING status. The customer treats planning as approval, so
+ * that stage is APPROVED. The enum still carries 'planning', because Postgres
+ * cannot drop an enum value; migration 020 refuses it with a constraint
+ * instead. Nothing here may write it, and a test asserts this list stays
+ * inside the enum rather than leaving it to whoever edits one file to
+ * remember the other.
  */
 export const STATUS = Object.freeze({
   DRAFT: 'draft',
@@ -26,7 +30,6 @@ export const STATUS = Object.freeze({
   UNDER_REVIEW: 'under_review',
   PENDING_CLARIFICATION: 'pending_clarification',
   APPROVED: 'approved',
-  PLANNING: 'planning',
   CONFIRMED: 'confirmed',
   COMPLETED: 'completed',
   REJECTED: 'rejected',
@@ -67,62 +70,85 @@ export const STATUS_GROUP = Object.freeze({
 
 
 /**
+ * The label the Event Organiser sees for each status (SCRUM-318 AC7).
+ *
+ * The one definition of these words. STATUS_DISPLAY below takes its labels
+ * from here, and so does everything that shows a status to an Organiser, so no
+ * screen or response needs a copy and none can drift.
+ *
+ * Presentation only. The keys are the internal statuses, which are what the
+ * database stores and the transition table speaks, and they are unchanged.
+ * The Organiser never sees them: 'submitted' reads "Requested",
+ * 'pending_clarification' reads "Awaiting your response", and 'approved' reads
+ * "Planning", the customer's own word for that stage. There is no planning
+ * status behind that label.
+ */
+export const ORGANISER_STATUS_LABEL = Object.freeze({
+  [STATUS.DRAFT]: 'Draft',
+  [STATUS.SUBMITTED]: 'Requested',
+  [STATUS.UNDER_REVIEW]: 'Under review',
+  [STATUS.PENDING_CLARIFICATION]: 'Awaiting your response',
+  [STATUS.APPROVED]: 'Planning',
+  [STATUS.CONFIRMED]: 'Confirmed',
+  [STATUS.COMPLETED]: 'Completed',
+  [STATUS.REJECTED]: 'Rejected',
+  [STATUS.CANCELLED]: 'Cancelled',
+});
+
+
+/**
  * What the Organiser sees for each status.
  *
- * Descriptions are written in the second person because they are shown to the
- * Organiser directly, and the customer brief asks that the system "not assume
- * that users understand ConnectSphere's internal processes".
+ * Labels come from ORGANISER_STATUS_LABEL. Descriptions are written in the
+ * second person because they are shown to the Organiser directly, and the
+ * customer brief asks that the system "not assume that users understand
+ * ConnectSphere's internal processes".
  *
  * Object.freeze is shallow, so each entry is frozen too.
  */
 export const STATUS_DISPLAY = Object.freeze({
   [STATUS.DRAFT]: Object.freeze({
-    label: 'Draft',
+    label: ORGANISER_STATUS_LABEL[STATUS.DRAFT],
     group: STATUS_GROUP.DRAFT,
     description: 'Not yet submitted to ConnectSphere. You can keep editing it.',
   }),
   [STATUS.SUBMITTED]: Object.freeze({
-    label: 'Submitted',
+    label: ORGANISER_STATUS_LABEL[STATUS.SUBMITTED],
     group: STATUS_GROUP.AWAITING_REVIEW,
     description: 'Received by ConnectSphere and waiting to be picked up by a Coordinator.',
   }),
   [STATUS.UNDER_REVIEW]: Object.freeze({
-    label: 'Under Review',
+    label: ORGANISER_STATUS_LABEL[STATUS.UNDER_REVIEW],
     group: STATUS_GROUP.UNDER_REVIEW,
     description: 'A Coordinator is assessing your request.',
   }),
   [STATUS.PENDING_CLARIFICATION]: Object.freeze({
-    label: 'Action Needed',
+    label: ORGANISER_STATUS_LABEL[STATUS.PENDING_CLARIFICATION],
     group: STATUS_GROUP.ACTION_REQUIRED,
     description: 'A Coordinator needs more information from you before this can move forward.',
   }),
   [STATUS.APPROVED]: Object.freeze({
-    label: 'Approved',
+    label: ORGANISER_STATUS_LABEL[STATUS.APPROVED],
     group: STATUS_GROUP.APPROVED,
     description: 'Your request has been accepted. Arrangements will now begin.',
   }),
-  [STATUS.PLANNING]: Object.freeze({
-    label: 'In Planning',
-    group: STATUS_GROUP.APPROVED,
-    description: 'Venue and equipment arrangements are being made.',
-  }),
   [STATUS.CONFIRMED]: Object.freeze({
-    label: 'Confirmed',
+    label: ORGANISER_STATUS_LABEL[STATUS.CONFIRMED],
     group: STATUS_GROUP.CONFIRMED,
     description: 'All arrangements are complete. Your event is going ahead.',
   }),
   [STATUS.COMPLETED]: Object.freeze({
-    label: 'Completed',
+    label: ORGANISER_STATUS_LABEL[STATUS.COMPLETED],
     group: STATUS_GROUP.COMPLETED,
     description: 'This event has taken place.',
   }),
   [STATUS.REJECTED]: Object.freeze({
-    label: 'Rejected',
+    label: ORGANISER_STATUS_LABEL[STATUS.REJECTED],
     group: STATUS_GROUP.REJECTED,
     description: 'This request was not accepted. See the Coordinator notes for the reason.',
   }),
   [STATUS.CANCELLED]: Object.freeze({
-    label: 'Cancelled',
+    label: ORGANISER_STATUS_LABEL[STATUS.CANCELLED],
     group: STATUS_GROUP.CANCELLED,
     description: 'This event was called off.',
   }),
@@ -132,27 +158,40 @@ export const STATUS_DISPLAY = Object.freeze({
 /**
  * Which status changes are legal.
  *
- * Two rules worth spelling out:
+ * SCRUM-318 owns this table. It says which moves are valid; who may make each
+ * one is checked in the story that performs it.
+ *
+ * Rules worth spelling out:
  *
  *  - pending_clarification goes back to under_review, not to submitted. The
  *    Coordinator already holds the request; the Organiser is answering them,
  *    not re-joining the queue.
  *
- *  - cancelled is reachable from every live status including confirmed. The
- *    customer brief has Organisers postponing or cancelling "due to unforeseen
- *    circumstances" with no stage limit, and real events are cancelled late.
+ *  - cancelled is reachable from submitted, under_review, pending_clarification,
+ *    approved and confirmed. A draft is deleted rather than cancelled, because
+ *    it has no coordinator yet to cancel it.
  *
- * completed, rejected and cancelled are terminal: nothing leads out of them, so
- * a rejected request can never quietly become confirmed.
+ *  - rejected leads back to draft only: the Organiser may revise and resubmit.
+ *    An approved event whose essential arrangements cannot be met is rejected.
+ *    A confirmed event goes back to approved when a significant change needs
+ *    re-planning.
+ *
+ *  - completed and cancelled are terminal: nothing leads out of them. A
+ *    cancelled event is never reinstated; a new request is submitted instead.
+ *
+ * Clarification is asked for from under_review only. A coordinator who asks
+ * for it on a submitted request moves it to under_review first, as two
+ * recorded transitions (requestEventClarification).
+ *
+ * Migration 022 holds this same table in SQL, so the database function refuses
+ * an illegal move whoever calls it. A test compares the two.
  */
 export const ALLOWED_TRANSITIONS = Object.freeze({
   [STATUS.DRAFT]: Object.freeze([
     STATUS.SUBMITTED,
-    STATUS.CANCELLED,
   ]),
   [STATUS.SUBMITTED]: Object.freeze([
     STATUS.UNDER_REVIEW,
-    STATUS.PENDING_CLARIFICATION,
     STATUS.CANCELLED,
   ]),
   [STATUS.UNDER_REVIEW]: Object.freeze([
@@ -166,19 +205,19 @@ export const ALLOWED_TRANSITIONS = Object.freeze({
     STATUS.CANCELLED,
   ]),
   [STATUS.APPROVED]: Object.freeze([
-    STATUS.PLANNING,
-    STATUS.CANCELLED,
-  ]),
-  [STATUS.PLANNING]: Object.freeze([
+    STATUS.REJECTED,
     STATUS.CONFIRMED,
     STATUS.CANCELLED,
   ]),
   [STATUS.CONFIRMED]: Object.freeze([
+    STATUS.APPROVED,
     STATUS.COMPLETED,
     STATUS.CANCELLED,
   ]),
   [STATUS.COMPLETED]: Object.freeze([]),
-  [STATUS.REJECTED]: Object.freeze([]),
+  [STATUS.REJECTED]: Object.freeze([
+    STATUS.DRAFT,
+  ]),
   [STATUS.CANCELLED]: Object.freeze([]),
 });
 
@@ -206,7 +245,7 @@ export const ALLOWED_TRANSITIONS = Object.freeze({
  *    they have not chosen to show anyone, so the status filter IS the access
  *    control, and widening this array is what would breach it.
  *
- *  - approved, planning, confirmed, completed, rejected and cancelled are out
+ *  - approved, confirmed, completed, rejected and cancelled are out
  *    because a decision has been made. What a Coordinator does with a request
  *    afterwards is a post-decision worklist, and whoever builds that screen
  *    owns its own list rather than inheriting a queue that would never empty.
@@ -330,4 +369,21 @@ export function getStatusDisplay(status) {
  */
 export function isKnownStatus(status) {
   return Object.hasOwn(STATUS_DISPLAY, status);
+}
+
+
+/**
+ * The label an Organiser sees for a status, for places that show only the
+ * words and not the whole display.
+ *
+ * SCRUM-323. Reads through getStatusDisplay, so it follows SCRUM-47's
+ * convention rather than inventing its own: a status this build does not know
+ * is "Unknown Status", and nothing usable is "Status Unavailable". It never
+ * returns undefined and never echoes an internal name it does not recognise.
+ *
+ * @param {string} status
+ * @returns {string}
+ */
+export function getOrganiserStatusLabel(status) {
+  return getStatusDisplay(status).label;
 }

@@ -70,6 +70,7 @@ import {
   listEventRequestsForOrganiser,
   getEventRequestForOrganiser,
   getEventRequestForCoordinator,
+  getEventRequestStatusHistory,
   listEventRequestsForReview,
   listEventRequestsForCoordinator,
   listCoordinators,
@@ -307,6 +308,36 @@ export function createEventRequestRouter({
         updatedAt: request.updatedAt,
         submittedAt: request.submittedAt,
       });
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-322 (SCRUM-318 AC6): an event's full status history, oldest first.
+   *
+   * A bare array, like GET /:id/change-requests: the screen maps over it
+   * directly. An event with no recorded change is 200 [], not a 404.
+   *
+   * Open to any signed-in user at the router, and no role gate here, because
+   * the two people who may read it hold different roles: the Organiser, and
+   * the event's assigned coordinator. Who may read is decided in the service,
+   * against the stored event, and anyone else, a coordinator the event is not
+   * assigned to included, gets a 404 worded exactly like a missing event. A
+   * coordinatorOnly gate would have shut the Organiser out, and a role check
+   * on its own would have let every coordinator in.
+   *
+   * No ownership pre-check, unlike POST /:id/submit: the service takes the
+   * caller and enforces the rule itself, as getEventRequestForOrganiser does
+   * for its routes. The caller is always req.user.id, from the token.
+   *
+   * Not wrapped in withStatusDisplay. Each row carries the raw statuses and the
+   * Organiser-facing label for each (SCRUM-323), and no more.
+   */
+  router.get('/:id/status-history', async (req, res) => {
+    try {
+      const history = await getEventRequestStatusHistory(req.params.id, req.user.id, { client });
+      res.status(200).json(history);
     } catch (err) {
       handleError(err, res);
     }
@@ -560,7 +591,7 @@ export function createEventRequestRouter({
     try {
       await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
-      const submitted = await submitEventRequest(req.params.id, { client });
+      const submitted = await submitEventRequest(req.params.id, { client, changedBy: req.user.id });
       res.status(200).json(withStatusDisplay(submitted));
     } catch (err) {
       handleError(err, res);
