@@ -1150,3 +1150,42 @@ describe('SCRUM20_AC1 event search criteria', () => {
     expect(err.message).toMatch(/expected an object/);
   });
 });
+
+
+describe('SCRUM20 SCRUM140 a refused search is not reported as bad venue details', () => {
+  const REQUIRED = Object.freeze({
+    startsAt: '2026-11-11T10:00:00+08:00',
+    endsAt: '2026-11-11T12:00:00+08:00',
+    expectedAttendance: 80,
+  });
+
+  it('SCRUM20_AC1_event_search_errors_start_with_Invalid_venue_search', () => {
+    const err = errorFrom(() => validateEventSearchCriteria({ ...REQUIRED, expectedAttendance: 0 }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message.startsWith('Invalid venue search -- ')).toBe(true);
+    expect(err.message).not.toMatch(/venue details/);
+    expect(fieldsIn(err)).toEqual(['expectedAttendance']);
+  });
+
+  it('SCRUM20_AC1_every_search_fault_is_listed_after_the_search_label', () => {
+    const err = errorFrom(() => validateEventSearchCriteria({}));
+
+    expect(err.message).toMatch(/^Invalid venue search -- /);
+    expect(err.message).toContain('startsAt: is required');
+    expect(err.message).toContain('expectedAttendance: is required');
+  });
+
+  it('SCRUM20_SCRUM140_venue_create_errors_still_start_with_Invalid_venue_details', () => {
+    const err = errorFrom(() => validateCreateVenue({ ...VALID, maxCapacity: -5 }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message.startsWith('Invalid venue details -- ')).toBe(true);
+  });
+
+  it('SCRUM20_SCRUM140_venue_update_errors_still_start_with_Invalid_venue_details', () => {
+    const err = errorFrom(() => validateUpdateVenue({ maxCapacity: -5 }));
+
+    expect(err.message.startsWith('Invalid venue details -- ')).toBe(true);
+  });
+});

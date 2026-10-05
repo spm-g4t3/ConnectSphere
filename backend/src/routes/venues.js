@@ -48,6 +48,11 @@
  *           them, which made the calendar's 403 a formality: an Organiser
  *           could fetch the bookings half of it here. A retired venue's
  *           bookings stay readable (SCRUM-15 AC3).
+ *   event-search  Event Coordinators only (SCRUM-140, for SCRUM-20). The
+ *           story is written from the Event Coordinator's seat, and its
+ *           results reveal when venues are busy: a venue left out is one
+ *           with a booking or block in that period. Every other role gets
+ *           403. Venue Staff keep the old /search, which is unchanged.
  */
 
 import express from 'express';
@@ -61,6 +66,7 @@ import {
   searchVenues,
   getVenueHistory,
   getBookingsForVenue,
+  findVenuesForEvent,
 } from '../services/venueService.js';
 import {
   listVenueBlocks,
@@ -131,6 +137,92 @@ function parseSearchFilters(query) {
 
 
 /**
+ * Split comma-separated codes into one list, for accessibility and facilities.
+ *
+ * Why commas: axios's default serialisation of an array param is `key[]=a&
+ * key[]=b`, and Express 5's default query parser ('simple', which is Node's
+ * querystring.parse -- express/lib/application.js sets it, utils.js
+ * compileQueryParser maps it) keeps that as a key literally named 'key[]', so
+ * req.query.key would be undefined and the criterion silently lost. A single
+ * `key=a,b` survives any client and any parser, and codes never contain
+ * commas. A repeated `key=a&key=b`, which querystring.parse does turn into an
+ * array, is accepted too and split the same way.
+ *
+ * Blank pieces are dropped (`a,,b`, a trailing comma, an untouched field), and
+ * if nothing is left the result is undefined so the caller leaves the key out
+ * -- the validator treats a missing list as "not filtered on".
+ *
+ * Only strings are split. Anything else -- a non-string array entry, or an
+ * object a different query parser might build -- is passed through as it
+ * came, so validateEventSearchCriteria reports it ("must be an array of
+ * codes", "entry N must be a non-empty code") rather than this quietly
+ * dropping it. The simple parser only produces strings, so in production that
+ * is a guard, not a path.
+ */
+function parseCodeList(value) {
+  if (typeof value !== 'string' && !Array.isArray(value)) return value;
+
+  const pieces = typeof value === 'string' ? [value] : value;
+  const codes = pieces.flatMap((piece) =>
+    typeof piece === 'string'
+      ? piece.split(',').map((code) => code.trim()).filter((code) => code !== '')
+      : [piece],
+  );
+
+  return codes.length > 0 ? codes : undefined;
+}
+
+
+/**
+ * Turn an event search's query string into what validateEventSearchCriteria
+ * expects (SCRUM-140, for SCRUM-20 AC1).
+ *
+ * Shaped like parseSearchFilters: convert only what the transport mangles,
+ * and leave every rule to the validator.
+ *
+ * startsAt, endsAt and layout pass through as sent -- they are text already.
+ *
+ * expectedAttendance becomes a number, but only when non-blank, so a missing
+ * or empty one reaches the validator as absent and gets "is required" rather
+ * than becoming 0 or NaN. Number('abc') is NaN and Number('12.5') 12.5, so
+ * both still get the message they deserve.
+ *
+ * accessibility and facilities are comma-separated lists; see parseCodeList.
+ * Each key is set only when something is left to filter by.
+ */
+function parseEventSearch(query) {
+  const criteria = {};
+
+  if (query.startsAt !== undefined) {
+    criteria.startsAt = query.startsAt;
+  }
+
+  if (query.endsAt !== undefined) {
+    criteria.endsAt = query.endsAt;
+  }
+
+  if (
+    query.expectedAttendance !== undefined &&
+    String(query.expectedAttendance).trim() !== ''
+  ) {
+    criteria.expectedAttendance = Number(query.expectedAttendance);
+  }
+
+  if (query.layout !== undefined) {
+    criteria.layout = query.layout;
+  }
+
+  for (const field of ['accessibility', 'facilities']) {
+    if (query[field] === undefined) continue;
+    const codes = parseCodeList(query[field]);
+    if (codes !== undefined) criteria[field] = codes;
+  }
+
+  return criteria;
+}
+
+
+/**
  * The acting user is the signed-in one, and the request body never gets a say.
  *
  * This replaces `req.body.userId ?? null`, which let a client name whoever it
@@ -182,6 +274,11 @@ export function createVenueRouter({
   // the same pair, and SCRUM-182 put bookings behind it too, so the calendar
   // cannot be reassembled from an ungated read. See the header.
   const internalReaders = requireRole(ROLE.VENUE_STAFF, ROLE.EVENT_COORDINATOR);
+  // SCRUM-140: the event search (SCRUM-20) is the Event Coordinator's alone.
+  // The story is written from their seat, and its results reveal when venues
+  // are busy -- a venue missing from them has a booking or block then. Venue
+  // Staff keep the old /search. See the header.
+  const coordinatorsOnly = requireRole(ROLE.EVENT_COORDINATOR);
 
   /**
    * SCRUM-185: /search is open to every signed-in user, but including retired
@@ -225,8 +322,9 @@ export function createVenueRouter({
    * Declared first is convention, not correctness. Unlike /search against
    * /:id below -- where declaration order genuinely is load-bearing -- /:id
    * cannot match an empty segment, so nothing breaks if this moves. It sits
-   * here so read order follows the resource: / then /search then /:id then
-   * /:id/bookings then /:id/history, and the writes after.
+   * here so read order follows the resource: / then /search then
+   * /event-search then /:id then /:id/bookings then /:id/history, and the
+   * writes after.
    *
    * Nothing is read off the request -- no path param, no body, no query
    * string -- so there is nothing here to validate or sanitise.
@@ -268,6 +366,43 @@ export function createVenueRouter({
     try {
       const venues = await searchVenues(parseSearchFilters(req.query));
       res.status(200).json(venues);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-20 (SCRUM-140): search venues against an event's requirements.
+   *
+   * ?startsAt=&endsAt=&expectedAttendance= are required; ?layout=,
+   * ?accessibility= and ?facilities= are optional, the last two
+   * comma-separated codes (parseEventSearch). findVenuesForEvent does the rest:
+   * AC1 the criteria themselves; AC2 active venues only; AC3 capacity and
+   * opening hours cover the event; AC4 the layout and every requested
+   * accessibility feature and facility are provided; AC5/AC6 no approved
+   * booking or active block overlaps the event once the venue's setup and
+   * turnaround are added; AC7 every supplied criterion must match; AC8 no
+   * match is an empty list.
+   *
+   * The '+' in an offset must be URL-encoded as %2B, as /search explains;
+   * axios params does it.
+   *
+   * A separate route rather than more /search parameters: /search's contract
+   * is what the catalogue, the calendar links and Venue Staff rely on, and it
+   * has different required fields, a different role and a different result
+   * shape. Leaving it untouched keeps every existing caller working.
+   *
+   * Declared before GET /:id, and like /search that order is load-bearing:
+   * otherwise /:id would match this with id === 'event-search'.
+   *
+   * Statuses: 200 with the matching venues, and 200 [] when none match (AC8)
+   * -- never 404, since an empty result is an answer, not a missing resource;
+   * 400 {error, details} for a missing or malformed period, a bad attendance
+   * or an unknown code; 401; 403 for any role but Event Coordinator; 500.
+   */
+  router.get('/event-search', coordinatorsOnly, async (req, res) => {
+    try {
+      res.status(200).json(await findVenuesForEvent(parseEventSearch(req.query)));
     } catch (err) {
       handleError(err, res);
     }

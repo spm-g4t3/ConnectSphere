@@ -68,14 +68,21 @@ function createErrorCollector() {
   };
 }
 
-function throwIfInvalid(errors) {
+/**
+ * Throw one ValidationError carrying every collected problem, if there are any.
+ *
+ * The label opens the message. It defaults to the venue form's, which every
+ * caller used until SCRUM-140; a search passes its own so a refused search is
+ * not reported as bad venue details (the wrong prefix SCRUM-138 noted).
+ */
+function throwIfInvalid(errors, label = 'Invalid venue details') {
   if (!errors.hasErrors) return;
 
   const summary = errors.details
     .map(({ field, message }) => `${field}: ${message}`)
     .join('; ');
 
-  throw new ValidationError(`Invalid venue details -- ${summary}`, errors.details);
+  throw new ValidationError(`${label} -- ${summary}`, errors.details);
 }
 
 /** Required text: must be a string with something in it once trimmed. */
@@ -547,7 +554,7 @@ export function validateEventSearchCriteria(input) {
     if (codes !== null && codes.length > 0) normalised[field] = codes;
   }
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid venue search');
   return normalised;
 }
 

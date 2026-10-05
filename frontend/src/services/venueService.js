@@ -23,6 +23,9 @@
 //     change history (SCRUM-131). See the block section below.
 //   - /venues/:id/calendar merges a venue's bookings and blocks over a
 //     required window (SCRUM-179), for the venue calendar (SCRUM-178).
+//   - GET /venues/event-search searches against an event's requirements
+//     (SCRUM-140, for SCRUM-20). Event Coordinators only; see
+//     findVenuesForEvent below.
 
 import { apiClient } from "./apiClient"; // <-- replace with your actual API client
 
@@ -57,6 +60,54 @@ export async function searchActiveVenues(filters = {}) {
   if (filters.includeRetired === true) params.includeRetired = true;
 
   const response = await apiClient.get("/venues/search", { params });
+  return response.data;
+}
+
+/**
+ * Searches venues against an event's requirements (SCRUM-140, for SCRUM-20).
+ * Not wired to a page yet -- SCRUM-141 does that.
+ *
+ * Returns only active venues that meet EVERY supplied criterion: capacity and
+ * opening hours cover the event, the layout and every listed accessibility
+ * feature and facility are provided, and no approved booking or active block
+ * overlaps the event once the venue's setup and turnaround are added. No
+ * match is 200 [], never a 404.
+ *
+ * Event Coordinators only: any other role gets a 403, Venue Staff included --
+ * they keep searchActiveVenues above.
+ *
+ * The lists travel comma-joined (?facilities=projector,wifi), because axios's
+ * default `facilities[]=` form is not read as a list by the backend's query
+ * parser. Optional criteria are left out of the query when blank or empty, so
+ * they are not filtered on. axios encodes the '+' in an offset as %2B.
+ *
+ * Failures: 400 with details[] naming every bad field at once (a missing or
+ * malformed period, a bad attendance, an unknown code), 401, 403, 500.
+ *
+ * @param {Object} criteria
+ * @param {string} criteria.startsAt            ISO with an explicit offset
+ * @param {string} criteria.endsAt              ISO with an explicit offset, after startsAt
+ * @param {number} criteria.expectedAttendance  a positive whole number
+ * @param {string} [criteria.layout]            one room layout code
+ * @param {string[]} [criteria.accessibility]   accessibility feature codes
+ * @param {string[]} [criteria.facilities]      facility codes
+ * @returns {Promise<Array<{id, name, location, maxCapacity, layouts, accessibility, facilities, hours, setupMinutes, turnaroundMinutes}>>}
+ */
+export async function findVenuesForEvent(criteria) {
+  const params = {
+    startsAt: criteria.startsAt,
+    endsAt: criteria.endsAt,
+    expectedAttendance: criteria.expectedAttendance,
+  };
+  if (typeof criteria.layout === "string" && criteria.layout.trim() !== "") {
+    params.layout = criteria.layout;
+  }
+  for (const field of ["accessibility", "facilities"]) {
+    const codes = criteria[field];
+    if (Array.isArray(codes) && codes.length > 0) params[field] = codes.join(",");
+  }
+
+  const response = await apiClient.get("/venues/event-search", { params });
   return response.data;
 }
 
