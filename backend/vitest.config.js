@@ -49,6 +49,11 @@ export default defineConfig({
         // only this story owns. The service and validation edits sit in
         // SCRUM-15's shared files, so they are reported but do not gate.
         'src/domain/venueMatching.js': FULL,
+        // SCRUM-139 (SCRUM-20 AC5/AC6): the occupancy rule and its read are
+        // new files only this story owns; the findVenuesForEvent edit sits in
+        // SCRUM-15's shared venueService.js and does not gate.
+        'src/domain/venueOccupancy.js': FULL,
+        'src/services/venueOccupancyService.js': FULL,
       },
     },
   },

@@ -1764,7 +1764,7 @@ describe('SCRUM20 findVenuesForEvent', () => {
    * that were asked for (as .in('code', ...) would), and `venues` with
    * `rows`. Any table can be given an error instead.
    */
-  function givenEventSearch({ rows = [], errors = {}, known = KNOWN } = {}) {
+  function givenEventSearch({ rows = [], errors = {}, known = KNOWN, bookings = [], blocks = [] } = {}) {
     const stubs = {};
     from.mockImplementation((table) => {
       if (table === 'venues') {
@@ -1772,6 +1772,27 @@ describe('SCRUM20 findVenuesForEvent', () => {
           errors.venues ? { data: null, error: errors.venues } : { data: rows, error: null },
         );
         return stubs.venues;
+      }
+      // SCRUM-139: the occupancy reads. Empty by default, so a venue that
+      // passes the attributes is still returned; a test passes `bookings` /
+      // `blocks` rows (or errors.bookings / errors.venue_blocks) to change
+      // that. The stub returns every row it is given: it does not apply the
+      // filters, it records them (all of them -- .in is called twice).
+      if (table === 'bookings' || table === 'venue_blocks') {
+        const occupied = table === 'bookings' ? bookings : blocks;
+        const stub = queryStub(
+          errors[table] ? { data: null, error: errors[table] } : { data: occupied, error: null },
+        );
+        stub.calls = [];
+        for (const method of ['select', 'in', 'is', 'lt', 'gt']) {
+          const inner = stub[method];
+          stub[method] = (...args) => {
+            stub.calls.push([method, ...args]);
+            return inner(...args);
+          };
+        }
+        stubs[table] = stub;
+        return stub;
       }
       if (!(table in known)) throw new Error(`unexpected table ${table}`);
       // The stub resolves to a fixed result, so filter lazily on .in's argument.
@@ -1791,7 +1812,14 @@ describe('SCRUM20 findVenuesForEvent', () => {
     return stubs;
   }
 
-  const tablesRead = () => from.mock.calls.map(([table]) => table);
+  // The venue and lookup-table reads (AC1/AC3). SCRUM-139's occupancy reads
+  // (bookings, venue_blocks) are left out here and checked by occupancyTablesRead,
+  // so the AC1 "which lookup tables were read" assertions keep their meaning.
+  const OCCUPANCY_TABLES = ['bookings', 'venue_blocks'];
+  const tablesRead = () =>
+    from.mock.calls.map(([table]) => table).filter((table) => !OCCUPANCY_TABLES.includes(table));
+  const occupancyTablesRead = () =>
+    from.mock.calls.map(([table]) => table).filter((table) => OCCUPANCY_TABLES.includes(table));
 
   // --- AC1: inputs ---------------------------------------------------------
 
@@ -2161,6 +2189,249 @@ describe('SCRUM20 findVenuesForEvent', () => {
     expect(venue.facilities).toEqual([]);
     expect(venue.layouts).toEqual([]);
     expect(venue.accessibility).toEqual([]);
+  });
+
+  // --- SCRUM-139 AC5/AC6: bookings and blocks ------------------------------
+  // The overlap rule itself is unit-tested in tests/domain/venueOccupancy.test.js
+  // and the read in tests/services/venueOccupancyService.test.js; these prove
+  // findVenuesForEvent wires them together. Stub rows are returned as given:
+  // the stub records the filters, it does not apply them.
+
+  const RIVERSIDE_ID = '6c1a2d3e-0000-4000-8000-000000000002';
+  /** Harbour Room and Riverside Hall, both meeting the base request. */
+  const twoMatchingRows = () => [
+    harbourRow(),
+    harbourRow({ id: RIVERSIDE_ID, name: 'Riverside Hall' }),
+  ];
+  const occupancy = (venueId, from, to, extra = {}) => ({
+    venue_id: venueId,
+    starts_at: `2026-11-11T${from}:00+08:00`,
+    ends_at: `2026-11-11T${to}:00+08:00`,
+    ...extra,
+  });
+
+  it('SCRUM20_AC6_overlapping_approved_booking_excludes_the_venue', async () => {
+    // B-AC6-01
+    givenEventSearch({
+      rows: twoMatchingRows(),
+      bookings: [occupancy(HARBOUR_ID, '10:30', '11:30', { status: 'approved' })],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.name)).toEqual(['Riverside Hall']);
+  });
+
+  it('SCRUM20_AC6_booking_at_another_venue_does_not_exclude', async () => {
+    // B-AC6-08
+    givenEventSearch({
+      rows: twoMatchingRows(),
+      bookings: [occupancy(RIVERSIDE_ID, '10:30', '11:30', { status: 'approved' })],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.name)).toEqual(['Harbour Room']);
+  });
+
+  it('SCRUM20_AC6_flagged_booking_without_block_still_excludes_the_venue', async () => {
+    // B-AC6-03, inverted by decision: a flagged_for_review booking still holds
+    // its venue even when no block covers it any more.
+    const stubs = givenEventSearch({
+      rows: [harbourRow()],
+      bookings: [occupancy(HARBOUR_ID, '10:30', '11:30', { status: 'flagged_for_review' })],
+      blocks: [],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result).toEqual([]);
+    expect(stubs.bookings.calls).toContainEqual(['in', 'status', ['approved', 'flagged_for_review']]);
+  });
+
+  it('SCRUM20_AC6_flagged_bookings_block_still_excludes_the_venue', async () => {
+    // B-AC6-04: flagged booking under its active block.
+    givenEventSearch({
+      rows: [harbourRow()],
+      bookings: [occupancy(HARBOUR_ID, '10:30', '11:30', { status: 'flagged_for_review' })],
+      blocks: [occupancy(HARBOUR_ID, '10:00', '12:00')],
+    });
+
+    await expect(findVenuesForEvent({ ...BASE })).resolves.toEqual([]);
+  });
+
+  it('SCRUM20_AC6_cancelled_booking_does_not_exclude', async () => {
+    // B-AC6-02. The status filter keeps a cancelled booking out of the read,
+    // so the stub answers nothing for it -- and the filter sent is checked.
+    const stubs = givenEventSearch({ rows: [harbourRow()], bookings: [] });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
+    const statusFilter = stubs.bookings.calls.find(([m, col]) => m === 'in' && col === 'status');
+    expect(statusFilter).toEqual(['in', 'status', ['approved', 'flagged_for_review']]);
+    expect(statusFilter[2]).not.toContain('cancelled');
+  });
+
+  it('SCRUM20_AC6_overlapping_active_block_excludes_the_venue', async () => {
+    // B-AC6-05
+    givenEventSearch({ rows: twoMatchingRows(), blocks: [occupancy(HARBOUR_ID, '10:00', '12:00')] });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.name)).toEqual(['Riverside Hall']);
+  });
+
+  it('SCRUM20_AC6_removed_block_does_not_exclude', async () => {
+    // B-AC6-06. .is('removed_at', null) keeps a removed block out of the read.
+    const stubs = givenEventSearch({ rows: [harbourRow()], blocks: [] });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
+    expect(stubs.venue_blocks.calls).toContainEqual(['is', 'removed_at', null]);
+  });
+
+  it('SCRUM20_AC5_touching_booking_and_block_do_not_exclude (service)', async () => {
+    // B-AC5-01/02 and 08/09 through the service, zero buffers.
+    givenEventSearch({
+      rows: [harbourRow()],
+      bookings: [occupancy(HARBOUR_ID, '08:00', '10:00')],
+      blocks: [occupancy(HARBOUR_ID, '12:00', '14:00')],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
+  });
+
+  it('SCRUM20_AC5_the_venues_own_setup_and_turnaround_pad_the_check (service)', async () => {
+    // Worked example: setup 30, turnaround 45, booking 10:00-12:00. Request
+    // 13:15 is kept (edge), 13:14 is excluded.
+    const row = harbourRow({ setup_minutes: 30, turnaround_minutes: 45 });
+    const bookings = [occupancy(HARBOUR_ID, '10:00', '12:00')];
+
+    givenEventSearch({ rows: [row], bookings });
+    const kept = await findVenuesForEvent({
+      ...BASE,
+      startsAt: '2026-11-11T13:15:00+08:00',
+      endsAt: '2026-11-11T14:00:00+08:00',
+    });
+
+    givenEventSearch({ rows: [row], bookings });
+    const excluded = await findVenuesForEvent({
+      ...BASE,
+      startsAt: '2026-11-11T13:14:00+08:00',
+      endsAt: '2026-11-11T14:00:00+08:00',
+    });
+
+    expect(kept.map((v) => v.id)).toEqual([HARBOUR_ID]);
+    expect(excluded).toEqual([]);
+  });
+
+  it('SCRUM20_AC5_operating_hours_ignore_setup_and_turnaround', async () => {
+    // B-AC5-26: hours 09:00-18:00, setup 30, turnaround 45, no bookings.
+    // Request 09:00-18:00 (padded 08:30-18:45) is still returned.
+    givenEventSearch({ rows: [harbourRow({ setup_minutes: 30, turnaround_minutes: 45 })] });
+
+    const result = await findVenuesForEvent({
+      ...BASE,
+      startsAt: '2026-11-11T09:00:00+08:00',
+      endsAt: '2026-11-11T18:00:00+08:00',
+    });
+
+    expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
+  });
+
+  it('SCRUM20_AC5_occupancy_reads_are_widened_by_240_minutes', async () => {
+    const stubs = givenEventSearch({ rows: [harbourRow()] });
+
+    await findVenuesForEvent({ ...BASE });
+
+    for (const table of ['bookings', 'venue_blocks']) {
+      expect(stubs[table].calls).toContainEqual(['lt', 'starts_at', '2026-11-11T08:00:00.000Z']);
+      expect(stubs[table].calls).toContainEqual(['gt', 'ends_at', '2026-11-10T22:00:00.000Z']);
+    }
+  });
+
+  it('SCRUM20_AC6_no_candidates_reads_no_bookings_or_blocks', async () => {
+    // No venues at all, and venues failing the attributes: neither reads.
+    givenEventSearch({ rows: [] });
+    await findVenuesForEvent({ ...BASE });
+    expect(occupancyTablesRead()).toEqual([]);
+
+    vi.resetAllMocks();
+    givenEventSearch({ rows: [harbourRow({ max_capacity: 10 })] });
+    await expect(findVenuesForEvent({ ...BASE })).resolves.toEqual([]);
+    expect(occupancyTablesRead()).toEqual([]);
+  });
+
+  it('SCRUM20_AC6_occupancy_is_read_only_for_attribute_matching_venues', async () => {
+    const stubs = givenEventSearch({
+      rows: [
+        harbourRow({ id: 'a', name: 'Atrium' }),
+        harbourRow({ id: 'b', name: 'Boardroom', max_capacity: 79 }),
+        harbourRow({ id: 'c', name: 'Cove' }),
+      ],
+    });
+
+    await findVenuesForEvent({ ...BASE });
+
+    expect(occupancyTablesRead().sort()).toEqual(['bookings', 'venue_blocks']);
+    expect(stubs.bookings.calls).toContainEqual(['in', 'venue_id', ['a', 'c']]);
+    expect(stubs.venue_blocks.calls).toContainEqual(['in', 'venue_id', ['a', 'c']]);
+  });
+
+  it.each([
+    ['bookings', 'bookings read failed'],
+    ['venue_blocks', 'blocks read failed'],
+  ])('SCRUM20_AC6_a_%s_read_error_propagates', async (table, message) => {
+    givenEventSearch({ rows: [harbourRow()], errors: { [table]: { code: 'XX000', message } } });
+
+    const err = await errorFromAsync(() => findVenuesForEvent({ ...BASE }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err.message).toBe(message);
+  });
+
+  it('SCRUM20_AC6_an_occupancy_22P02_propagates_as_a_validation_error', async () => {
+    givenEventSearch({ rows: [harbourRow()], errors: { bookings: { code: '22P02', message: 'bad uuid' } } });
+
+    const err = await errorFromAsync(() => findVenuesForEvent({ ...BASE }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+  });
+
+  it('SCRUM20_AC6_exclusion_keeps_name_order_and_the_projection', async () => {
+    givenEventSearch({
+      rows: [
+        harbourRow({ id: 'a', name: 'Atrium' }),
+        harbourRow({ id: 'b', name: 'Boardroom' }),
+        harbourRow({ id: 'c', name: 'Cove' }),
+        harbourRow({ id: 'd', name: 'Dockside' }),
+      ],
+      bookings: [occupancy('b', '11:00', '13:00')],
+      blocks: [occupancy('d', '09:00', '10:01')],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.name)).toEqual(['Atrium', 'Cove']);
+    for (const venue of result) {
+      expect(Object.keys(venue).sort()).toEqual([
+        'accessibility',
+        'facilities',
+        'hours',
+        'id',
+        'layouts',
+        'location',
+        'maxCapacity',
+        'name',
+        'setupMinutes',
+        'turnaroundMinutes',
+      ]);
+    }
   });
 });
 

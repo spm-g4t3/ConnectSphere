@@ -35,6 +35,11 @@
  * criterion. The rule itself lives in domain/venueMatching.js; this file loads
  * the venues and checks the requested codes exist. searchVenues is untouched --
  * SCRUM-140 decides how the search page moves over.
+ *
+ * SCRUM-139 (SCRUM-20 AC5/AC6, Week 7): findVenuesForEvent also leaves out a
+ * venue with an occupying booking or an active block overlapping the event,
+ * each padded by the venue's setup and turnaround. The rule lives in
+ * domain/venueOccupancy.js; venueOccupancyService.js reads the rows.
  */
 
 import { supabase } from '../config/supabaseClient.js';
@@ -50,6 +55,8 @@ import { findBlockedVenueIds } from './venueBlockService.js';
 import { DEFAULT_TURNAROUND_MINUTES } from '../domain/turnaroundOptions.js';
 import { DEFAULT_SETUP_MINUTES } from '../domain/setupOptions.js';
 import { matchesAllCriteria } from '../domain/venueMatching.js';
+import { isVenueFree } from '../domain/venueOccupancy.js';
+import { findOccupancies } from './venueOccupancyService.js';
 
 /**
  * The venue columns with every attribute joined: four join tables, flattened
@@ -480,9 +487,14 @@ async function assertKnownCodes(criteria) {
  * the first optimisation is a capacity pre-filter, .gte('max_capacity', ...),
  * which is safe because it can only remove venues the rule would remove too.
  *
- * Not yet: bookings, blocks, and setup and turnaround (SCRUM-139). Each
- * result carries setupMinutes and turnaroundMinutes ready for that, and hours
- * so a result can show when the venue is open.
+ * SCRUM-139 (AC5/AC6, Week 7): a venue that passes the attributes is then
+ * kept only if domain/venueOccupancy.js's isVenueFree says no occupying
+ * booking or active block overlaps the event once setup and turnaround are
+ * added. Attributes first, so bookings and blocks are read only for venues
+ * still in the running, in one pair of queries for all of them -- and not at
+ * all when none are. Like matchesAllCriteria, isVenueFree answers yes or no,
+ * never why. Each result still carries setupMinutes and turnaroundMinutes, and
+ * hours so a result can show when the venue is open.
  *
  * @param {object} criteria  see validateEventSearchCriteria
  * @returns {Promise<object[]>} matching active venues, ordered by name, each
@@ -490,6 +502,8 @@ async function assertKnownCodes(criteria) {
  *     hours, setupMinutes, turnaroundMinutes }; [] when nothing matches
  * @throws {ValidationError} a malformed request or an unknown code, before
  *   the venues are read
+ * @throws {Error} a failed bookings or blocks read (SCRUM-139), translated by
+ *   venueOccupancyService
  */
 export async function findVenuesForEvent(criteria) {
   const search = validateEventSearchCriteria(criteria);
@@ -503,9 +517,23 @@ export async function findVenuesForEvent(criteria) {
 
   if (error) throw translateError(error);
 
-  return (data ?? [])
+  const candidates = (data ?? [])
     .map(toVenueWithAttributes)
-    .filter((venue) => matchesAllCriteria(venue, search))
+    .filter((venue) => matchesAllCriteria(venue, search));
+
+  if (candidates.length === 0) return [];
+
+  const occupancies = await findOccupancies(
+    candidates.map((venue) => venue.id),
+    search.startsAt,
+    search.endsAt,
+  );
+
+  return candidates
+    .filter((venue) => {
+      const { bookings, blocks } = occupancies.get(venue.id);
+      return isVenueFree(venue, search, bookings, blocks);
+    })
     .map((venue) => ({
       id: venue.id,
       name: venue.name,
