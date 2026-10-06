@@ -104,6 +104,25 @@ describe("describeNotification: booking_flagged", () => {
 });
 
 describe("describeNotification: other types", () => {
+  it.each([
+    ["clarification_requested", "A Coordinator has a question about Tech Talk"],
+    ["clarification_replied", "The Organiser replied about Tech Talk"],
+    ["clarification_closed", "A Coordinator closed the clarification for Tech Talk"],
+  ])("describes %s with event context", (type, headline) => {
+    expect(describeNotification({
+      id: "n3",
+      type,
+      payload: {
+        eventName: "Tech Talk",
+        message: "Please confirm the details.",
+        replyByDate: "2026-10-10",
+      },
+    })).toEqual({
+      headline,
+      detail: "Please confirm the details. Reply by 2026-10-10.",
+    });
+  });
+
   it("SCRUM17_AC3_an_unknown_type_is_shown_generically_not_hidden", () => {
     expect(describeNotification({ id: "n2", type: "something_new", payload: PAYLOAD })).toEqual({
       headline: "New notification",

@@ -86,18 +86,41 @@ export async function submitEventRequest(id) {
   return response.data;
 }
 
-export async function requestEventClarification(id, note) {
-  const response = await apiClient.post(`/event-requests/${id}/clarification`, { note });
+export async function requestEventClarification(
+  id,
+  note,
+  replyByDate = null,
+  requestedFields = [],
+) {
+  const response = await apiClient.post(`/event-requests/${id}/clarification`, {
+    note,
+    replyByDate,
+    requestedFields,
+  });
   return response.data;
 }
 
-export async function respondToEventClarification(id, updates) {
+export async function respondToEventClarification(id, message, amendments = {}) {
   const response = await apiClient.patch(
     `/event-requests/${id}/clarification-response`,
-    updates,
+    { message, amendments },
   );
   return response.data;
 }
+
+export async function closeEventClarification(id, note) {
+  const response = await apiClient.post(
+    `/event-requests/${id}/clarification/close`,
+    { note },
+  );
+  return response.data;
+}
+
+export async function getEventClarificationHistory(id) {
+  const response = await apiClient.get(`/event-requests/${id}/clarification-history`);
+  return response.data;
+}
+
 
 export async function getCoordinatorChangeRequests(eventRequestId) {
   const response = await apiClient.get(

@@ -99,7 +99,8 @@ const COLUMNS = `
   id, organiser_id, event_name, purpose, description,
   proposed_start, proposed_end, expected_attendance,
   venue_requirements, accessibility_requirements, equipment_requirements,
-  status, clarification_note, assigned_coordinator_id, reviewing_coordinator_id,
+  status, clarification_note, clarification_reply_by_date,
+  assigned_coordinator_id, reviewing_coordinator_id,
   created_at, updated_at, submitted_at
 `;
 
@@ -120,6 +121,18 @@ const COLUMN_BY_FIELD = Object.freeze({
   accessibilityRequirements: 'accessibility_requirements',
   equipmentRequirements: 'equipment_requirements',
 });
+
+const CLARIFICATION_AMENDABLE_FIELDS = Object.freeze([
+  'eventName',
+  'purpose',
+  'description',
+  'proposedStart',
+  'proposedEnd',
+  'expectedAttendance',
+  'venueRequirements',
+  'accessibilityRequirements',
+  'equipmentRequirements',
+]);
 
 
 /**
@@ -290,6 +303,7 @@ function toEventRequest(row) {
     equipmentRequirements: row.equipment_requirements,
     status: row.status,
     clarificationNote: row.clarification_note ?? null,
+    clarificationReplyByDate: row.clarification_reply_by_date ?? null,
     // Null on a draft, which nobody has been assigned yet. `?? null`, as for
     // clarificationNote, so a row read without the column still gives the
     // caller null rather than undefined, and the key is always present.
@@ -741,34 +755,31 @@ export async function changeEventRequestStatus(
  *     and gives the true reason. It comes before the status check, as in 018:
  *     whether the event could be sent for clarification is a question only
  *     its coordinator has any reason to ask.
- *  3. changeEventRequestStatus, which asks canTransition and writes. A request
- *     that is still submitted is first moved to under_review, because
- *     clarification is asked for from under_review only (SCRUM-318). That is
- *     two recorded transitions, submitted -> under_review and then
- *     under_review -> pending_clarification, each its own database call. If
- *     the second is refused the request stays under_review, a legal status the
- *     coordinator can act on, and the first row is a true record of what
- *     happened. The note travels as the reason for the second: it is why the
- *     request changed status, and the function stores it as the clarification
- *     note too (021). The caller is passed as the expected coordinator on both,
- *     so an event handed to someone else between the read and a write is a
- *     409, not a change made by someone who no longer holds it. A refresh
- *     shows which it was.
+ *  3. request_event_clarification changes under_review to
+ *     pending_clarification and saves the note and optional reply-by date in
+ *     one transaction. The caller is passed as the expected coordinator, so
+ *     an event handed to someone else between the read and write is a 409.
  *
  * @param {string} id
  * @param {string} note           what the Organiser is asked to clarify
  * @param {string} coordinatorId  the caller, from the JWT -- never the body
  * @param {object} [options]
+ * @param {string|null} [options.replyByDate] optional ISO calendar date
  * @param {object} [options.client]
  * @returns {Promise<object>} the request, now pending_clarification, in camelCase
- * @throws {ValidationError} no coordinatorId, or a blank or overlong note,
- *                           before any round trip
+ * @throws {ValidationError} no coordinatorId, a blank or overlong note, or
+ *                           an invalid/non-future reply-by date
  * @throws {NotFoundError}   no such request, or it is a draft
  * @throws {ForbiddenError}  the caller is not the event's assigned coordinator
  * @throws {ConflictError}   the status does not allow clarification, or the
  *                           event changed between the read and the write
  */
-export async function requestEventClarification(id, note, coordinatorId, { client } = {}) {
+export async function requestEventClarification(
+  id,
+  note,
+  coordinatorId,
+  { replyByDate = null, requestedFields = [], client } = {},
+) {
   if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
     throw new ValidationError('coordinatorId is required');
   }
@@ -778,6 +789,26 @@ export async function requestEventClarification(id, note, coordinatorId, { clien
   const clarificationNote = note.trim();
   if (clarificationNote.length > 2000) {
     throw new ValidationError('clarification note must be 2000 characters or fewer');
+  }
+  if (
+    !Array.isArray(requestedFields) ||
+    requestedFields.some((field) => !CLARIFICATION_AMENDABLE_FIELDS.includes(field))
+  ) {
+    throw new ValidationError('requestedFields must contain only editable event fields');
+  }
+  const clarificationRequestedFields = [...new Set(requestedFields)];
+  let clarificationReplyByDate = null;
+  if (replyByDate !== undefined && replyByDate !== null && replyByDate !== '') {
+    if (
+      typeof replyByDate !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(replyByDate) ||
+      Number.isNaN(Date.parse(`${replyByDate}T00:00:00.000Z`)) ||
+      new Date(`${replyByDate}T00:00:00.000Z`).toISOString().slice(0, 10) !== replyByDate ||
+      replyByDate <= new Date().toISOString().slice(0, 10)
+    ) {
+      throw new ValidationError('replyByDate must be a valid date in the future');
+    }
+    clarificationReplyByDate = replyByDate;
   }
 
   const db = await resolveClient(client);
@@ -789,50 +820,74 @@ export async function requestEventClarification(id, note, coordinatorId, { clien
     );
   }
 
-  let expectedStatus = current.status;
-
-  if (expectedStatus === STATUS.SUBMITTED) {
-    await changeEventRequestStatus(
-      id,
-      {
-        expectedStatus,
-        newStatus: STATUS.UNDER_REVIEW,
-        changedBy: coordinatorId,
-        expectedCoordinatorId: coordinatorId,
-      },
-      { client: db },
+  if (current.status !== STATUS.UNDER_REVIEW) {
+    throw new ConflictError(
+      `An event request with status '${current.status}' cannot change to '${STATUS.PENDING_CLARIFICATION}'.`,
     );
-    expectedStatus = STATUS.UNDER_REVIEW;
   }
 
-  return changeEventRequestStatus(
-    id,
-    {
-      expectedStatus,
-      newStatus: STATUS.PENDING_CLARIFICATION,
-      changedBy: coordinatorId,
-      reason: clarificationNote,
-      expectedCoordinatorId: coordinatorId,
-    },
-    { client: db },
-  );
+  const { data, error } = await db.rpc('request_event_clarification_with_fields', {
+    p_event_request_id: id,
+    p_changed_by: coordinatorId,
+    p_expected_coordinator: coordinatorId,
+    p_reason: clarificationNote,
+    p_reply_by_date: clarificationReplyByDate,
+    p_requested_fields: clarificationRequestedFields,
+  });
+  if (error) throw translateError(error);
+
+  return toEventRequest(data);
 }
 
 /**
- * Save the Organiser's amendments and return the request to Coordinator review.
+ * Append the Organiser's reply and only the amendments requested by the Coordinator.
  *
- * Two writes, in this order. The amendments first, in a guarded update that
- * touches no status: it matches only while the request is still pending
- * clarification and the caller's, so a request that has moved on is a
- * ConflictError and nothing is saved. Then the status change, through
- * changeEventRequestStatus, which records it and clears the clarification
- * note. If the second fails after the first, the amendments are saved and the
- * request is still pending clarification, so the Organiser can send them
- * again; nothing is half-moved.
+ * The RPC verifies ownership and current status, inserts the immutable reply,
+ * returns the status to under_review, and notifies the assigned Coordinator
+ * in one transaction. The database refuses fields the open question did not request.
  */
-export async function respondToEventClarification(id, changes, organiserId, { client } = {}) {
+export async function respondToEventClarification(
+  id,
+  message,
+  organiserId,
+  amendments = {},
+  { client } = {},
+) {
   assertOrganiser(organiserId);
-  const validated = validateUpdateEventRequest(changes);
+  if (typeof message !== 'string' || message.trim() === '') {
+    throw new ValidationError('clarification reply is required');
+  }
+  if (message.trim().length > 2000) {
+    throw new ValidationError('clarification reply must be 2000 characters or fewer');
+  }
+  if (typeof amendments !== 'object' || amendments === null || Array.isArray(amendments)) {
+    throw new ValidationError('clarification amendments must be an object');
+  }
+
+  const keys = Object.keys(amendments);
+  if (keys.some((field) => !CLARIFICATION_AMENDABLE_FIELDS.includes(field))) {
+    throw new ValidationError('clarification amendments include an unknown event field');
+  }
+  const clearFields = {};
+  const valuesToValidate = {};
+  for (const [field, value] of Object.entries(amendments)) {
+    if (field === 'eventName' && (value === null || (typeof value === 'string' && !value.trim()))) {
+      throw new ValidationError('eventName cannot be blank');
+    }
+    if (
+      value === null ||
+      (typeof value === 'string' && value.trim() === '' && field !== 'eventName')
+    ) {
+      clearFields[field] = null;
+    } else {
+      valuesToValidate[field] = value;
+    }
+  }
+  const validatedAmendments = Object.keys(valuesToValidate).length > 0
+    ? validateUpdateEventRequest(valuesToValidate)
+    : {};
+  const updatePayload = { ...validatedAmendments, ...clearFields };
+
   const db = await resolveClient(client);
   const current = await getEventRequestForOrganiser(id, organiserId, { client: db });
 
@@ -840,29 +895,49 @@ export async function respondToEventClarification(id, changes, organiserId, { cl
     throw new ConflictError('This request is not waiting for clarification. Refresh before editing.');
   }
 
-  const { error } = await db
-    .from('event_requests')
-    .update(toColumns(validated))
-    .eq('id', id)
-    .eq('organiser_id', organiserId)
-    .eq('status', STATUS.PENDING_CLARIFICATION)
-    .select()
-    .single();
-
-  if (error?.code === 'PGRST116') {
-    throw new ConflictError('This request is no longer waiting for clarification. Refresh before editing.');
-  }
+  const { data, error } = await db.rpc('reply_to_event_clarification_with_amendments', {
+    p_event_request_id: id,
+    p_organiser_id: organiserId,
+    p_reply: message.trim(),
+    p_updates: updatePayload,
+  });
   if (error) throw translateError(error);
 
-  return changeEventRequestStatus(
-    id,
-    {
-      expectedStatus: STATUS.PENDING_CLARIFICATION,
-      newStatus: STATUS.UNDER_REVIEW,
-      changedBy: organiserId,
-    },
-    { client: db },
-  );
+  return toEventRequest(data);
+}
+
+export async function closeEventClarification(id, message, coordinatorId, { client } = {}) {
+  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
+    throw new ValidationError('coordinatorId is required');
+  }
+  if (typeof message !== 'string' || message.trim() === '') {
+    throw new ValidationError('clarification closure note is required');
+  }
+  if (message.trim().length > 2000) {
+    throw new ValidationError('clarification closure note must be 2000 characters or fewer');
+  }
+
+  const db = await resolveClient(client);
+  const current = await getEventRequestForCoordinator(id, { client: db });
+  if (current.assignedCoordinatorId !== coordinatorId) {
+    throw new ForbiddenError(
+      `Only the coordinator assigned to event request ${id} can close its clarification request.`,
+    );
+  }
+  if (current.status !== STATUS.PENDING_CLARIFICATION) {
+    throw new ConflictError(
+      `An event request with status '${current.status}' cannot close a clarification request.`,
+    );
+  }
+
+  const { data, error } = await db.rpc('close_event_clarification', {
+    p_event_request_id: id,
+    p_coordinator_id: coordinatorId,
+    p_expected_coordinator: coordinatorId,
+    p_message: message.trim(),
+  });
+  if (error) throw translateError(error);
+  return toEventRequest(data);
 }
 
 
@@ -1184,6 +1259,38 @@ export async function getEventRequestStatusHistory(id, userId, { client } = {}) 
   }));
 }
 
+export async function getEventClarificationHistory(id, userId, role, { client } = {}) {
+  if (typeof userId !== 'string' || userId.trim() === '') {
+    throw new ValidationError('userId is required');
+  }
+  const db = await resolveClient(client);
+  const request = await getEventRequestById(id, { client: db });
+  const isOwner = request.organiserId === userId;
+  const isCoordinator = role === ROLE.EVENT_COORDINATOR && request.status !== STATUS.DRAFT;
+  if (!isOwner && !isCoordinator) {
+    throw new NotFoundError(`Event request ${id} not found`);
+  }
+
+  const { data: entries, error } = await db
+    .from('event_request_clarification_history')
+    .select('id, entry_type, message, created_by, reply_by_date, requested_fields, created_at')
+    .eq('event_request_id', id)
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true });
+  if (error) throw translateError(error);
+  if (!entries?.length) return [];
+
+  const nameOf = await readNames(db, entries.map((entry) => entry.created_by));
+  return entries.map((entry) => ({
+    id: entry.id,
+    type: entry.entry_type,
+    message: entry.message,
+    authorName: nameOf(entry.created_by),
+    createdAt: entry.created_at,
+    replyByDate: entry.reply_by_date ?? null,
+    requestedFields: entry.requested_fields ?? [],
+  }));
+}
 
 /**
  * Every event request awaiting a decision, oldest waiting first.
