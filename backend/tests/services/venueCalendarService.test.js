@@ -321,10 +321,9 @@ describe('SCRUM178_AC3 pending requests are not shown as booked: the bookings st
   });
 
   it('SCRUM178_AC3_pending_request_has_no_booking_so_never_reaches_the_calendar', async () => {
-    // A pending event request has no bookings row: a booking only exists once
-    // a request is approved, and the status vocabulary has no 'pending'. The
-    // calendar reads bookings through an allow-list, so even a status added
-    // later is hidden until someone puts it on the list.
+    // SCRUM-250 gave bookings a 'pending' status, so a pending booking request
+    // is now a bookings row. The calendar reads bookings through an
+    // allow-list, which keeps pending, rejected and withdrawn rows off it.
     const { bookings } = givenTables();
 
     await getVenueCalendar(VENUE_ID, WINDOW);
@@ -333,7 +332,13 @@ describe('SCRUM178_AC3 pending requests are not shown as booked: the bookings st
       'status',
       [BOOKING_STATUS.APPROVED, BOOKING_STATUS.FLAGGED_FOR_REVIEW],
     ]);
-    expect(Object.values(BOOKING_STATUS)).not.toContain('pending');
+    for (const status of [
+      BOOKING_STATUS.PENDING,
+      BOOKING_STATUS.REJECTED,
+      BOOKING_STATUS.WITHDRAWN,
+    ]) {
+      expect(bookings.args('in')[1]).not.toContain(status);
+    }
     expect(tablesQueried()).not.toContain('event_requests');
   });
 });

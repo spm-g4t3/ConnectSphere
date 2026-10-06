@@ -27,14 +27,34 @@ function migrationSql() {
   return sql.replace(/--[^\n]*/g, '');
 }
 
-/** Pull the enum values straight out of the migration, in declared order. */
+/** The 027 migration (SCRUM-250) with every `--` comment stripped. */
+function requestStatusMigrationSql() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sql = readFileSync(
+    resolve(here, '../../db/migrations/027_booking_request_statuses.sql'),
+    'utf8',
+  );
+  return sql.replace(/--[^\n]*/g, '');
+}
+
+/**
+ * The enum values as the migrations leave them, in declared order: the ones
+ * 011 creates, then the ones 027 appends.
+ */
 function statusesDeclaredInSql() {
   const block = migrationSql().match(
     /create type booking_status as enum \(([\s\S]*?)\);/i,
   );
   if (!block) throw new Error('could not find the enum in the migration');
 
-  return [...block[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  const created = [...block[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  const added = [
+    ...requestStatusMigrationSql().matchAll(
+      /alter\s+type\s+booking_status\s+add\s+value\s+if\s+not\s+exists\s+'([a-z_]+)'/gi,
+    ),
+  ].map((m) => m[1]);
+
+  return [...created, ...added];
 }
 
 /** The body of the venue_blocks create table statement. */
@@ -52,11 +72,14 @@ describe('BOOKING_STATUS mirrors the database enum', () => {
     expect(Object.values(BOOKING_STATUS)).toEqual(statusesDeclaredInSql());
   });
 
-  it('exposes exactly approved, flagged_for_review and cancelled, in order', () => {
+  it('SCRUM250_exposes_the_three_original_statuses_then_the_request_statuses, in order', () => {
     expect(Object.values(BOOKING_STATUS)).toEqual([
       'approved',
       'flagged_for_review',
       'cancelled',
+      'pending',
+      'rejected',
+      'withdrawn',
     ]);
   });
 
@@ -72,7 +95,8 @@ describe('isBookingStatus', () => {
   });
 
   it.each([
-    ['an unknown string', 'pending'],
+    ['an unknown string', 'declined'],
+    ['a status in the wrong case', 'Pending'],
     ['an inherited key', 'toString'],
     ['an enum key rather than its value', 'APPROVED'],
     ['empty string', ''],
