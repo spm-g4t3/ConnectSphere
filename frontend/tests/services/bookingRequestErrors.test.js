@@ -11,6 +11,8 @@ import {
   isSuitabilityConfirmationRequired,
   periodConflicts,
   unmetCriteria,
+  isStaleWithdrawError,
+  withdrawErrorMessage,
 } from "../../src/services/bookingRequestErrors.js";
 
 const http = (status, data = {}) => Object.assign(new Error(`status ${status}`), { response: { status, data } });
@@ -131,6 +133,56 @@ describe("fieldErrorsFrom", () => {
     "SCRUM254_is_empty_for_%s",
     (err) => {
       expect(fieldErrorsFrom(err, ["setupNotes"])).toEqual([]);
+    },
+  );
+});
+
+describe("withdrawErrorMessage (SCRUM-255)", () => {
+  it.each([
+    ["BOOKING_NOT_PENDING", /no longer pending, so it can't be withdrawn.*refreshed/],
+    ["BOOKING_CHANGED", /changed while you were working.*refreshed/],
+  ])("SCRUM255_explains_the_409_%s", (code, pattern) => {
+    expect(withdrawErrorMessage(conflict(code))).toMatch(pattern);
+  });
+
+  it("SCRUM255_any_other_409_is_treated_as_a_changed_request", () => {
+    expect(withdrawErrorMessage(conflict("SOMETHING_NEW"))).toMatch(/changed while you were working/);
+    expect(withdrawErrorMessage(http(409, {}))).toMatch(/changed while you were working/);
+  });
+
+  it.each([
+    [401, /sign in again/],
+    [403, /assigned to this event can withdraw/],
+    [404, /no longer exists.*refreshed/],
+  ])("SCRUM255_explains_a_%i", (status, pattern) => {
+    expect(withdrawErrorMessage(http(status))).toMatch(pattern);
+  });
+
+  it.each([http(400), http(500), new Error("network"), undefined, conflict("toString")])(
+    "SCRUM255_falls_back_to_the_default_for_%s",
+    (err) => {
+      // conflict("toString") is a 409, which is a changed request, not the default.
+      const expected = err?.response?.status === 409
+        ? /changed while you were working/
+        : /Could not withdraw the request/;
+      expect(withdrawErrorMessage(err)).toMatch(expected);
+    },
+  );
+
+  it("SCRUM255_never_shows_the_servers_own_prose", () => {
+    expect(withdrawErrorMessage(http(409, { error: "booking 4444 is withdrawn", code: "BOOKING_NOT_PENDING" }))).not.toContain("4444");
+  });
+});
+
+describe("isStaleWithdrawError (SCRUM-255)", () => {
+  it.each([403, 404, 409])("SCRUM255_a_%i_means_the_list_is_out_of_date", (status) => {
+    expect(isStaleWithdrawError(http(status))).toBe(true);
+  });
+
+  it.each([http(400), http(401), http(500), new Error("network"), undefined])(
+    "SCRUM255_%s_does_not",
+    (err) => {
+      expect(isStaleWithdrawError(err)).toBe(false);
     },
   );
 });

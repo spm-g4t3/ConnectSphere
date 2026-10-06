@@ -10,6 +10,7 @@ import VenueSearch from "./components/VenueSearch";
 import VenueCatalogue from "./components/VenueCatalogue";
 import ReviewQueue from "./components/ReviewQueue";
 import MyAssignedEvents from "./components/MyAssignedEvents";
+import MyBookingRequests from "./components/MyBookingRequests";
 import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
 import "./App.css";
@@ -141,6 +142,20 @@ function AppRoutes() {
             <ProtectedRoute allowedRoles={["event_coordinator"]}>
               <div className="dashboard dashboard--coordinator">
                 <MyAssignedEvents />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* SCRUM-255: the coordinator's venue booking requests and their
+            statuses. Gated and wrapped as /my-events is, for the same reasons:
+            GET /booking-requests/mine is role-checked server-side, and the
+            wrapper is what colours the status badges. */}
+        <Route
+          path="/my-venue-requests"
+          element={
+            <ProtectedRoute allowedRoles={["event_coordinator"]}>
+              <div className="dashboard dashboard--coordinator">
+                <MyBookingRequests />
               </div>
             </ProtectedRoute>
           }

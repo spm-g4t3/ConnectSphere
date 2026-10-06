@@ -58,6 +58,18 @@ describe("Navigation links by role", () => {
     expect(screen.getByRole("link", { name: "Review Queue" })).toHaveAttribute("href", "/review-queue");
   });
 
+  it("SCRUM255_gives_only_an_Event_Coordinator_the_Venue_Requests_link", () => {
+    renderAs("event_coordinator");
+    expect(screen.getByRole("link", { name: "Venue Requests" })).toHaveAttribute("href", "/my-venue-requests");
+  });
+
+  it.each(["event_organiser", "venue_staff", "technical_support_staff"])(
+    "SCRUM255_does_not_show_the_Venue_Requests_link_to_%s",
+    (role) => {
+      renderAs(role);
+      expect(screen.queryByRole("link", { name: "Venue Requests" })).not.toBeInTheDocument();
+    },
+  );
   it("gives Venue Staff no Find a Venue link", () => {
     renderAs("venue_staff");
 

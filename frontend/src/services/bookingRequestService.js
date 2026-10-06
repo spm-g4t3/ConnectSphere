@@ -34,3 +34,40 @@ export async function createBookingRequest(input) {
   const response = await apiClient.post("/booking-requests", input);
   return response.data;
 }
+
+/**
+ * The signed-in coordinator's booking requests, newest first (SCRUM-255).
+ *
+ * Every status -- pending, approved, flagged for review, rejected, withdrawn
+ * and cancelled -- on every event assigned to the caller. The list is the
+ * caller's from the token; there is no parameter that could ask for someone
+ * else's. Each row carries the event's name and status, the venue's name and
+ * location, the period, and a `statusDisplay` ({ status, label, group,
+ * description }) so this file and its callers keep no copy of the vocabulary.
+ * `flaggedAt` is the review indicator for a booking a venue block flagged.
+ *
+ * Gated on the event_coordinator role, so a 403 means "not a coordinator", not
+ * a fault. An empty list is the good state.
+ *
+ * @returns {Promise<Array>} possibly empty
+ */
+export async function getMyBookingRequests() {
+  const response = await apiClient.get("/booking-requests/mine");
+  return response.data;
+}
+
+/**
+ * Withdraws a pending request (POST /booking-requests/:id/withdraw, SCRUM-253).
+ *
+ * Failures: 400 (malformed id), 401, 403 (not the event's assigned coordinator),
+ * 404, and 409 BOOKING_NOT_PENDING (approved, rejected, already withdrawn and so
+ * on: repeating the call is refused, not answered as a success) or
+ * BOOKING_CHANGED.
+ *
+ * @param {string} id  the request's id
+ * @returns {Promise<Object>} the request, now withdrawn
+ */
+export async function withdrawBookingRequest(id) {
+  const response = await apiClient.post(`/booking-requests/${id}/withdraw`);
+  return response.data;
+}

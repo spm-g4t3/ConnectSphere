@@ -98,3 +98,50 @@ export function fieldErrorsFrom(err, fields) {
   const details = err?.response?.status === 400 ? err.response.data?.details : null;
   return Array.isArray(details) ? details.filter((d) => fields.includes(d?.field)) : [];
 }
+
+// SCRUM-255: withdrawing, from the list. Same shape as above, with a note on
+// each message that the list has been refreshed where the answer means the
+// coordinator's copy of the request was out of date.
+const WITHDRAW_CODE_MESSAGES = {
+  BOOKING_NOT_PENDING:
+    "This request is no longer pending, so it can't be withdrawn. The list has been refreshed.",
+  BOOKING_CHANGED: "This request changed while you were working on it. The list has been refreshed.",
+};
+
+const WITHDRAW_STATUS_MESSAGES = {
+  401: "Your session has expired. Please sign in again.",
+  403: "Only the coordinator assigned to this event can withdraw its venue requests. The list has been refreshed.",
+  404: "That request no longer exists. The list has been refreshed.",
+};
+
+const WITHDRAW_DEFAULT_MESSAGE = "Could not withdraw the request. Please try again.";
+
+/**
+ * The message for a failed withdrawal.
+ *
+ * @param {unknown} err  what withdrawBookingRequest threw
+ * @returns {string}
+ */
+export function withdrawErrorMessage(err) {
+  const code = codeOf(err);
+  if (code && Object.hasOwn(WITHDRAW_CODE_MESSAGES, code)) return WITHDRAW_CODE_MESSAGES[code];
+
+  const status = err?.response?.status;
+  if (status === 409) return WITHDRAW_CODE_MESSAGES.BOOKING_CHANGED;
+  if (Object.hasOwn(WITHDRAW_STATUS_MESSAGES, status)) return WITHDRAW_STATUS_MESSAGES[status];
+
+  return WITHDRAW_DEFAULT_MESSAGE;
+}
+
+/**
+ * Whether a failed withdrawal means the list on screen is out of date, so the
+ * caller should refetch: the request is gone (404), is no longer this
+ * coordinator's (403) or has changed (any 409).
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isStaleWithdrawError(err) {
+  const status = err?.response?.status;
+  return status === 403 || status === 404 || status === 409;
+}

@@ -14,7 +14,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-import { BOOKING_STATUS, isBookingStatus } from '../../src/domain/bookingStatus.js';
+import {
+  BOOKING_STATUS,
+  BOOKING_STATUS_DISPLAY,
+  getBookingStatusDisplay,
+  isBookingStatus,
+} from '../../src/domain/bookingStatus.js';
 
 
 /** The 011 migration with every `--` comment stripped. */
@@ -131,5 +136,46 @@ describe('011 migration schema', () => {
     ['removed_by', /^\s*removed_by\s+uuid\b/im],
   ])('SCRUM17_AC4_venue_blocks_has_audit_columns: %s', (_column, pattern) => {
     expect(venueBlocksTableBody()).toMatch(pattern);
+  });
+});
+
+describe('SCRUM-255: how a booking status is shown to the coordinator', () => {
+  it('SCRUM255_has_a_display_for_every_status_and_nothing_else', () => {
+    expect(Object.keys(BOOKING_STATUS_DISPLAY).sort()).toEqual(Object.values(BOOKING_STATUS).sort());
+    expect(Object.isFrozen(BOOKING_STATUS_DISPLAY)).toBe(true);
+  });
+
+  it.each([
+    ['pending', 'Pending', 'PENDING'],
+    ['rejected', 'Rejected', 'REJECTED'],
+    ['withdrawn', 'Withdrawn', 'WITHDRAWN'],
+    ['approved', 'Approved', 'APPROVED'],
+    ['flagged_for_review', 'Flagged for review', 'FLAGGED'],
+    ['cancelled', 'Cancelled', 'CANCELLED'],
+  ])('SCRUM255_shows_%s_as_%s_in_group_%s', (status, label, group) => {
+    const display = getBookingStatusDisplay(status);
+    expect(display).toMatchObject({ status, label, group });
+    expect(display.description).toEqual(expect.any(String));
+    expect(Object.isFrozen(display)).toBe(true);
+  });
+
+  it('SCRUM255_every_status_has_its_own_label_and_group', () => {
+    const displays = Object.values(BOOKING_STATUS).map(getBookingStatusDisplay);
+    expect(new Set(displays.map((d) => d.label)).size).toBe(displays.length);
+    expect(new Set(displays.map((d) => d.group)).size).toBe(displays.length);
+  });
+
+  it.each([
+    ['a status this build does not know', 'on_hold', 'on_hold'],
+    ['an inherited key', 'toString', 'toString'],
+    ['nothing', undefined, null],
+    ['null', null, null],
+    ['a number', 7, null],
+  ])('SCRUM255_never_returns_undefined_for_%s', (_label, value, expectedStatus) => {
+    expect(getBookingStatusDisplay(value)).toMatchObject({
+      status: expectedStatus,
+      label: 'Unknown Status',
+      group: 'UNKNOWN',
+    });
   });
 });

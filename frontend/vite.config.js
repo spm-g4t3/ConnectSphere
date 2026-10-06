@@ -18,6 +18,12 @@ const FULL = { lines: 100, branches: 100, functions: 100, statements: 100 }
 // as cheap defence; the disabled buttons are the real protection.
 const PANEL = { lines: 100, branches: 97.56, functions: 100, statements: 97.81 }
 
+// SCRUM-255's one exception, measured the same way: if (sending.current) return
+// in MyBookingRequests.jsx's handleWithdraw is unreachable, because every
+// Withdraw button is disabled while one is being sent and React does not
+// dispatch clicks to disabled buttons. The ref is cheap defence behind them.
+const MY_BOOKING_REQUESTS = { lines: 100, branches: 98.07, functions: 100, statements: 98.24 }
+
 const SCRUM17_FILES = [
   'src/components/VenueBlocksPanel.jsx',
   'src/components/VenueBlockForm.jsx',
@@ -56,6 +62,8 @@ const SCRUM254_FILES = [
   'src/services/bookingRequestService.js',
   'src/services/bookingRequestEligibility.js',
   'src/services/bookingRequestErrors.js',
+  'src/components/MyBookingRequests.jsx',
+  'src/services/bookingRequestStatusDisplay.js',
 ]
 
 // https://vite.dev/config/
@@ -83,7 +91,10 @@ export default defineConfig({
         ]),
         ...SCRUM186_FILES.map((file) => [file, FULL]),
         ...SCRUM178_FILES.map((file) => [file, FULL]),
-        ...SCRUM254_FILES.map((file) => [file, FULL]),
+        ...SCRUM254_FILES.map((file) => [
+          file,
+          file === 'src/components/MyBookingRequests.jsx' ? MY_BOOKING_REQUESTS : FULL,
+        ]),
       ]),
     },
   },

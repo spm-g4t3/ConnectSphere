@@ -45,7 +45,7 @@ import { validateCreateBookingRequest, validateBookingRequestId } from '../valid
 import { getEventRequestForCoordinator } from './eventRequestService.js';
 import { checkVenueSuitability } from './venueSuitabilityService.js';
 import { STATUS } from '../domain/eventRequestStatus.js';
-import { BOOKING_STATUS } from '../domain/bookingStatus.js';
+import { BOOKING_STATUS, getBookingStatusDisplay } from '../domain/bookingStatus.js';
 
 /** The event statuses a venue can be requested for (SCRUM-243 AC1). */
 const BOOKABLE_EVENT_STATUSES = Object.freeze([STATUS.APPROVED, STATUS.CONFIRMED]);
@@ -143,6 +143,55 @@ function toPeriodConflict(entry) {
     eventName: entry.event_name,
     startsAt: entry.starts_at,
     endsAt: entry.ends_at,
+  };
+}
+
+/**
+ * PostgREST embeds a many-to-one as an object, but an array if it were ever
+ * read as one-to-many. Read defensively, as venueCalendarService does.
+ */
+function one(embedded) {
+  return Array.isArray(embedded) ? embedded[0] : embedded;
+}
+
+/** What the list reads: the booking, with its event and its venue embedded. */
+const LIST_COLUMNS = `
+  id, event_request_id, venue_id, starts_at, ends_at, status,
+  room_layout_code, setup_notes, suitability_overridden, created_at, flagged_at,
+  venues(name, location),
+  event_requests!inner(event_name, status, assigned_coordinator_id)
+`;
+
+/**
+ * One row of the coordinator's list, in camelCase, with the event and venue
+ * details beside the request.
+ *
+ * statusDisplay is the label and group for the status (domain/bookingStatus.js),
+ * so the screen keeps no copy of the vocabulary. flaggedAt is the review
+ * indicator for a booking a venue block has flagged (014); null otherwise.
+ *
+ * @param {object} row  from LIST_COLUMNS
+ */
+function toBookingRequestListItem(row) {
+  const event = one(row.event_requests) ?? {};
+  const venue = one(row.venues) ?? {};
+  return {
+    id: row.id,
+    eventRequestId: row.event_request_id,
+    eventName: event.event_name ?? null,
+    eventStatus: event.status ?? null,
+    venueId: row.venue_id,
+    venueName: venue.name ?? null,
+    venueLocation: venue.location ?? null,
+    status: row.status,
+    statusDisplay: getBookingStatusDisplay(row.status),
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    roomLayoutCode: row.room_layout_code ?? null,
+    setupNotes: row.setup_notes ?? null,
+    suitabilityOverridden: row.suitability_overridden ?? false,
+    flaggedAt: row.flagged_at ?? null,
+    createdAt: row.created_at,
   };
 }
 
@@ -288,6 +337,61 @@ export async function createBookingRequest(
     throw new Error(`create_booking_request returned a ${booking.status} booking, not a pending one`);
   }
   return booking;
+}
+
+/**
+ * The coordinator's booking requests and their statuses.
+ *
+ * SCRUM-255. Every booking on an event assigned to the caller, newest first,
+ * whatever its status: pending, approved, flagged for review, rejected,
+ * withdrawn and cancelled. The caller is the only input and comes from the
+ * token; there is no parameter that could ask for someone else's.
+ *
+ * The scope is the event's assigned coordinator, the same rule that gates
+ * creating and withdrawing (030, 031). It is applied in the query, as an inner
+ * join on the event narrowed by assigned_coordinator_id, so a booking on
+ * anyone else's event is never read. The rows are then checked against the
+ * caller once more in code. That repeats a rule, which this codebase usually
+ * avoids, and is kept on purpose: this is the read that could leak another
+ * coordinator's requests, and a filter PostgREST silently ignores -- a
+ * misspelt embed or column -- would otherwise fail open. After a handover the
+ * new coordinator sees the event's requests and the previous one no longer
+ * does, which is the point of scoping to the assigned coordinator.
+ *
+ * Shaped for the list: the event's name and status, and the venue's name and
+ * location, so the screen needs no second read. A booking that predates
+ * requests has no requester, layout or notes, and those read null.
+ *
+ * @param {string} coordinatorId  from the JWT -- never the client
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object[]>} possibly empty, in camelCase
+ * @throws {ValidationError} when no coordinator was supplied, before any round trip
+ */
+export async function listBookingRequestsForCoordinator(coordinatorId, { client } = {}) {
+  // Refused before the client is touched: without the caller the read would
+  // have no filter at all.
+  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
+    throw new ValidationError(
+      'Invalid coordinator -- coordinatorId: is required',
+      [{ field: 'coordinatorId', message: 'is required' }],
+    );
+  }
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db
+    .from('bookings')
+    .select(LIST_COLUMNS)
+    .eq('event_requests.assigned_coordinator_id', coordinatorId)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true });
+
+  if (error) throw translateError(error);
+
+  return (data ?? [])
+    .filter((row) => one(row.event_requests)?.assigned_coordinator_id === coordinatorId)
+    .map(toBookingRequestListItem);
 }
 
 /**

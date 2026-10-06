@@ -118,8 +118,13 @@ function createFakeClient(results = []) {
           call.filters.push([column, value]);
           return chain;
         },
+        order: (column, options) => {
+          (call.order ??= []).push([column, options]);
+          return chain;
+        },
         maybeSingle: () => settle(call),
         single: () => settle(call),
+        then: (resolve, reject) => settle(call).then(resolve, reject),
       };
       return chain;
     },
@@ -670,5 +675,258 @@ describe('SCRUM-253: a coordinator withdraws a pending request', () => {
   ])('SCRUM253_refuses_%s_rather_than_reporting_a_withdrawal', async (_label, result) => {
     const res = await withdraw(createFakeClient([result]));
     expect(res.status).toBe(500);
+  });
+});
+
+
+describe('SCRUM-255: the coordinator lists their booking requests', () => {
+  const OTHER_EVENT_ID = '99999999-9999-4999-8999-999999999999';
+
+  /** A bookings row as PostgREST returns it with the event and venue embedded. */
+  function listRow(overrides = {}, embeds = {}) {
+    return {
+      id: BOOKING_ID,
+      event_request_id: EVENT_ID,
+      venue_id: VENUE_ID,
+      starts_at: START,
+      ends_at: END,
+      status: 'pending',
+      room_layout_code: 'theatre',
+      setup_notes: 'Extra tables',
+      suitability_overridden: false,
+      created_at: '2026-10-06T10:00:00+00:00',
+      flagged_at: null,
+      venues: { name: 'Hall A', location: 'Level 2' },
+      event_requests: {
+        event_name: 'IS212 Industry Night',
+        status: 'approved',
+        assigned_coordinator_id: COORDINATOR_ID,
+      },
+      ...overrides,
+      ...embeds,
+    };
+  }
+
+  const list = (client, options = {}) =>
+    request(appWith({ client, ...options })).get('/api/booking-requests/mine');
+
+  it('SCRUM255_returns_the_requests_with_event_venue_and_period', async () => {
+    const client = createFakeClient([ok([listRow()])]);
+
+    const res = await list(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      {
+        id: BOOKING_ID,
+        eventRequestId: EVENT_ID,
+        eventName: 'IS212 Industry Night',
+        eventStatus: 'approved',
+        venueId: VENUE_ID,
+        venueName: 'Hall A',
+        venueLocation: 'Level 2',
+        status: 'pending',
+        statusDisplay: {
+          status: 'pending',
+          label: 'Pending',
+          group: 'PENDING',
+          description: 'Waiting for Venue Staff to decide. It can still be withdrawn.',
+        },
+        startsAt: START,
+        endsAt: END,
+        roomLayoutCode: 'theatre',
+        setupNotes: 'Extra tables',
+        suitabilityOverridden: false,
+        flaggedAt: null,
+        createdAt: '2026-10-06T10:00:00+00:00',
+      },
+    ]);
+  });
+
+  it.each([
+    ['pending', 'Pending'],
+    ['approved', 'Approved'],
+    ['rejected', 'Rejected'],
+    ['withdrawn', 'Withdrawn'],
+    ['cancelled', 'Cancelled'],
+    ['flagged_for_review', 'Flagged for review'],
+  ])('SCRUM255_labels_a_%s_request_%s', async (status, label) => {
+    const res = await list(createFakeClient([ok([listRow({ status })])]));
+    expect(res.body[0].status).toBe(status);
+    expect(res.body[0].statusDisplay.label).toBe(label);
+  });
+
+  it('SCRUM255_keeps_the_review_indicator_of_a_flagged_booking', async () => {
+    const flaggedAt = '2026-10-05T09:00:00+00:00';
+    const res = await list(createFakeClient([ok([listRow({ status: 'flagged_for_review', flagged_at: flaggedAt })])]));
+    expect(res.body[0]).toMatchObject({ status: 'flagged_for_review', flaggedAt });
+  });
+
+  it('SCRUM255_a_status_this_build_does_not_know_is_shown_as_unknown_not_dropped', async () => {
+    const res = await list(createFakeClient([ok([listRow({ status: 'on_hold' })])]));
+    expect(res.body[0].statusDisplay).toMatchObject({ status: 'on_hold', group: 'UNKNOWN' });
+  });
+
+  it('SCRUM255_reads_a_booking_that_predates_requests_with_null_details', async () => {
+    const res = await list(
+      createFakeClient([
+        ok([
+          listRow({
+            status: 'approved',
+            room_layout_code: null,
+            setup_notes: null,
+            suitability_overridden: null,
+            flagged_at: undefined,
+          }),
+        ]),
+      ]),
+    );
+    expect(res.body[0]).toMatchObject({
+      roomLayoutCode: null,
+      setupNotes: null,
+      suitabilityOverridden: false,
+      flaggedAt: null,
+    });
+  });
+
+  it('SCRUM255_reads_an_embed_that_arrives_as_an_array_or_is_missing', async () => {
+    const res = await list(
+      createFakeClient([
+        ok([
+          listRow({}, {
+            venues: [{ name: 'Annex', location: 'Block C' }],
+            event_requests: [{ event_name: 'Gala', status: 'confirmed', assigned_coordinator_id: COORDINATOR_ID }],
+          }),
+          listRow({ id: OTHER_BOOKING_ID }, { venues: null }),
+        ]),
+      ]),
+    );
+    expect(res.body[0]).toMatchObject({ venueName: 'Annex', eventName: 'Gala', eventStatus: 'confirmed' });
+    expect(res.body[1]).toMatchObject({ venueName: null, venueLocation: null });
+  });
+
+  it('SCRUM255_an_empty_list_is_200_not_404', async () => {
+    const res = await list(createFakeClient([ok([])]));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM255_a_null_result_is_an_empty_list', async () => {
+    const res = await list(createFakeClient([ok(null)]));
+    expect(res.body).toEqual([]);
+  });
+});
+
+describe('SCRUM-255: a coordinator sees only requests on their own events', () => {
+  const OTHER_EVENT_ID = '99999999-9999-4999-8999-999999999999';
+  const list = (client, options = {}) =>
+    request(appWith({ client, ...options })).get('/api/booking-requests/mine');
+  const row = (id, assignedTo) => ({
+    id,
+    event_request_id: EVENT_ID,
+    venue_id: VENUE_ID,
+    starts_at: START,
+    ends_at: END,
+    status: 'pending',
+    created_at: '2026-10-06T10:00:00+00:00',
+    venues: { name: 'Hall A', location: 'Level 2' },
+    event_requests: { event_name: 'Event', status: 'approved', assigned_coordinator_id: assignedTo },
+  });
+
+  it('SCRUM255_narrows_the_query_to_the_token_user_through_the_events_assignment', async () => {
+    const client = createFakeClient([ok([])]);
+
+    await request(appWith({ client }))
+      .get('/api/booking-requests/mine')
+      .query({ coordinatorId: OTHER_COORDINATOR_ID, assignedCoordinatorId: OTHER_COORDINATOR_ID });
+
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]).toMatchObject({ table: 'bookings' });
+    // The only filter, and it is the caller from the token, never the query string.
+    expect(client.calls[0].filters).toEqual([['event_requests.assigned_coordinator_id', COORDINATOR_ID]]);
+    // An inner join, so a booking on an unassigned event is not read at all.
+    expect(client.calls[0].select).toBeUndefined();
+  });
+
+  it('SCRUM255_uses_whoever_is_signed_in_so_each_coordinator_gets_their_own_scope', async () => {
+    const mine = createFakeClient([ok([])]);
+    const theirs = createFakeClient([ok([])]);
+
+    await list(mine);
+    await list(theirs, { requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR, OTHER_COORDINATOR_ID) });
+
+    expect(mine.calls[0].filters[0][1]).toBe(COORDINATOR_ID);
+    expect(theirs.calls[0].filters[0][1]).toBe(OTHER_COORDINATOR_ID);
+  });
+
+  it('SCRUM255_drops_a_row_for_another_coordinator_even_if_the_query_filter_failed_open', async () => {
+    const client = createFakeClient([
+      ok([row(BOOKING_ID, COORDINATOR_ID), row(OTHER_BOOKING_ID, OTHER_COORDINATOR_ID), row(BLOCK_ID, null)]),
+    ]);
+
+    const res = await list(client);
+
+    expect(res.body.map((r) => r.id)).toEqual([BOOKING_ID]);
+  });
+
+  it('SCRUM255_returns_nothing_when_every_row_belongs_to_someone_else', async () => {
+    const res = await list(createFakeClient([ok([row(OTHER_BOOKING_ID, OTHER_COORDINATOR_ID)])]));
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM255_a_row_with_no_event_embed_is_not_trusted', async () => {
+    const res = await list(createFakeClient([ok([{ ...row(BOOKING_ID, COORDINATOR_ID), event_requests: null }])]));
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM255_orders_newest_first_with_an_id_tiebreak', async () => {
+    const client = createFakeClient([ok([])]);
+    await list(client);
+    expect(client.calls[0].order).toEqual([
+      ['created_at', { ascending: false }],
+      ['id', { ascending: true }],
+    ]);
+  });
+
+  it('SCRUM255_returns_401_without_a_token_and_never_queries', async () => {
+    const client = createFakeClient([ok([])]);
+    const res = await list(client, { requireAuth: signedOut });
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.ATTENDEE, null])(
+    'SCRUM255_refuses_%s_with_403_and_never_queries',
+    async (role) => {
+      const client = createFakeClient([ok([])]);
+      const res = await list(client, { requireAuth: signedInWithRole(role) });
+      expect(res.status).toBe(403);
+      expect(client.calls).toHaveLength(0);
+    },
+  );
+
+  it('SCRUM255_a_database_failure_is_a_500_without_the_driver_message', async () => {
+    const res = await list(createFakeClient([dbFailure('XX000', 'relation secret_table exploded')]));
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(res.body)).not.toContain('secret_table');
+  });
+
+  it('SCRUM255_refuses_a_missing_caller_before_the_database', async () => {
+    const client = createFakeClient([ok([])]);
+    const res = await list(client, {
+      requireAuth: (req, _res, next) => {
+        req.user = { id: '', role: ROLE.EVENT_COORDINATOR };
+        next();
+      },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(['coordinatorId']);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM255_the_list_route_does_not_swallow_the_withdraw_route', async () => {
+    const client = createFakeClient([ok({ outcome: 'withdrawn', booking: bookingRow({ status: 'withdrawn' }) })]);
+    const res = await request(appWith({ client })).post(`/api/booking-requests/${OTHER_EVENT_ID}/withdraw`);
+    expect(res.status).toBe(200);
   });
 });

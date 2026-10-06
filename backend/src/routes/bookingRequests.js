@@ -1,10 +1,12 @@
 /**
  * Booking request routes.
  *
- * SCRUM-252 and SCRUM-253, subtasks of SCRUM-243 (Submit a Venue Booking Request).
+ * SCRUM-252, SCRUM-253 and SCRUM-255, subtasks of SCRUM-243 (Submit a Venue
+ * Booking Request).
  *
- * POST / creates a request for a venue against an approved or confirmed event,
- * and POST /:id/withdraw withdraws a pending one, both behind coordinatorOnly.
+ * GET /mine lists the signed-in coordinator's requests, POST / creates a request
+ * for a venue against an approved or confirmed event, and POST /:id/withdraw
+ * withdraws a pending one, all behind coordinatorOnly.
  * Whether the caller is that event's assigned coordinator is checked in the
  * service and again, under lock, in create_booking_request (030), or only
  * under lock in withdraw_booking_request (031); the route only passes on what
@@ -24,7 +26,11 @@ import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js'
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorHandler } from '../http/handleError.js';
-import { createBookingRequest, withdrawBookingRequest } from '../services/bookingRequestService.js';
+import {
+  createBookingRequest,
+  listBookingRequestsForCoordinator,
+  withdrawBookingRequest,
+} from '../services/bookingRequestService.js';
 
 const handleError = createErrorHandler('booking requests route');
 
@@ -47,6 +53,28 @@ export function createBookingRequestRouter({
   const coordinatorOnly = requireRole(ROLE.EVENT_COORDINATOR);
 
   router.use(requireAuth);
+
+  /**
+   * SCRUM-255: the signed-in coordinator's booking requests, newest first,
+   * every status, each with its event, venue and period.
+   *
+   * Narrowed to the events assigned to req.user.id, never to anything in the
+   * query string or body, so one coordinator cannot read another's. Behind
+   * coordinatorOnly, so an Organiser or Venue Staff is refused before the
+   * database is touched. A bare array, like the other lists; an empty one is
+   * 200 [], never 404.
+   *
+   * Statuses: 200, 401, 403 for the wrong role or no role, 500 for anything
+   * untyped.
+   */
+  router.get('/mine', coordinatorOnly, async (req, res) => {
+    try {
+      const requests = await listBookingRequestsForCoordinator(req.user.id, { client });
+      res.status(200).json(requests);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
 
   /**
    * Request a venue. 201 and the new request, which is always pending.

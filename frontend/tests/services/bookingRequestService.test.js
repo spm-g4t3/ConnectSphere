@@ -6,13 +6,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { apiClient } from "../../src/services/apiClient";
-import { createBookingRequest } from "../../src/services/bookingRequestService.js";
+import {
+  createBookingRequest,
+  getMyBookingRequests,
+  withdrawBookingRequest,
+} from "../../src/services/bookingRequestService.js";
 
 vi.mock("../../src/services/apiClient", () => ({
-  apiClient: { post: vi.fn() },
+  apiClient: { get: vi.fn(), post: vi.fn() },
 }));
 
 beforeEach(() => {
+  vi.mocked(apiClient.get).mockReset();
   vi.mocked(apiClient.post).mockReset();
 });
 
@@ -32,5 +37,28 @@ describe("createBookingRequest", () => {
     vi.mocked(apiClient.post).mockRejectedValue(failure);
 
     await expect(createBookingRequest({})).rejects.toBe(failure);
+  });
+});
+
+describe("getMyBookingRequests (SCRUM-255)", () => {
+  it("SCRUM255_gets_/booking-requests/mine_with_no_parameters_and_returns_the_body", async () => {
+    const rows = [{ id: "b1", status: "pending" }];
+    vi.mocked(apiClient.get).mockResolvedValue({ data: rows });
+
+    await expect(getMyBookingRequests()).resolves.toBe(rows);
+
+    // No user id, no filter: the backend scopes the list to the token.
+    expect(apiClient.get).toHaveBeenCalledWith("/booking-requests/mine");
+  });
+});
+
+describe("withdrawBookingRequest (SCRUM-255)", () => {
+  it("SCRUM255_posts_to_the_withdraw_route_with_no_body_and_returns_the_request", async () => {
+    const withdrawn = { id: "b1", status: "withdrawn" };
+    vi.mocked(apiClient.post).mockResolvedValue({ data: withdrawn });
+
+    await expect(withdrawBookingRequest("b1")).resolves.toBe(withdrawn);
+
+    expect(apiClient.post).toHaveBeenCalledWith("/booking-requests/b1/withdraw");
   });
 });
