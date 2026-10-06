@@ -151,6 +151,9 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["technical_support_staff"]}>
               <EquipmentCatalogue />
+            </ProtectedRoute>
+          }
+        />
         {/* SCRUM-180 (part of SCRUM-178): one venue's calendar of bookings and
             blocks, linked from the catalogue and from venue search (SCRUM-181).
             Internal roles only (SCRUM-182, SCRUM-178 AC6): the same two roles
