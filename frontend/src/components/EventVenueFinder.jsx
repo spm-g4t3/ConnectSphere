@@ -30,7 +30,13 @@
 // The code lists show as labels from venueLookups, which is a known-stale
 // copy, so a code it has not heard of shows as itself rather than vanishing,
 // and an empty list says "None listed" rather than leaving a blank.
-// SCRUM-143 adds the no-match message and retry.
+//
+// SCRUM-143 (AC8): a search that matches nothing says so, in fixed text that
+// names no criterion. The search applies every criterion together, so no one
+// of them is "the reason", and naming one would steer the coordinator to
+// loosen it when another edit might do. The form keeps its values, so
+// adjusting and searching again is the retry. The message hides while a
+// search runs and goes once a new search succeeds or fails.
 //
 // The event's free-text requirements are already shown under "Requirements"
 // in the same panel, so this section does not repeat them.
@@ -109,8 +115,8 @@ export default function EventVenueFinder({ request }) {
   const [serverFieldErrors, setServerFieldErrors] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  // null until a search has succeeded, so "not searched yet" and "searched,
-  // nothing matched" stay distinguishable for SCRUM-143.
+  // null until a search has succeeded, so "not searched yet" (no message) and
+  // "searched, nothing matched" (the no-match message) stay distinguishable.
   const [results, setResults] = useState(null);
 
   const idPrefix = useId();
@@ -335,6 +341,13 @@ export default function EventVenueFinder({ request }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {/* status, not alert: an empty result is an answer, not a failure. */}
+      {results !== null && results.length === 0 && !loading && (
+        <p className="event-venue-finder__no-match" role="status">
+          No venue matched your criteria. Adjust the criteria above and search again.
+        </p>
       )}
     </form>
   );

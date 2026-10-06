@@ -512,6 +512,7 @@ button { cursor: pointer; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__field-error { color: #a43c32; font-size: 0.84rem; list-style: none; margin: 0; padding: 0; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__field-error li { border-top: 0; display: block; padding: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__no-match { color: var(--muted); font-size: 0.9rem; margin: 0; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__results { list-style: none; margin: 0; padding: 0; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__results li { border-top: 1px solid var(--line); display: block; padding: 8px 0; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__results li:first-child { border-top: 0; }

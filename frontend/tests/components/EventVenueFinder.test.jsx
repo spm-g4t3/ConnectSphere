@@ -5,7 +5,8 @@
 // coordinator presses Search.
 //
 // venueService is mocked, so nothing touches the network. SCRUM-142's venue
-// details are asserted at the end; SCRUM-143's no-match message is not.
+// details and SCRUM-143's no-match message and retry (AC8) are asserted at
+// the end.
 //
 // Timezone-safe: the event's instants are fixed ISO strings and every expected
 // input value comes from toDatetimeLocalValue; date and time inputs are set
@@ -348,17 +349,6 @@ describe("SCRUM20_AC1 searching", () => {
         .getAllByRole("heading")
         .map((heading) => heading.textContent),
     ).toEqual(["Hall A", "Annex"]);
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("SCRUM20_AC1_an_empty_result_shows_no_list_and_no_error", async () => {
-    // The no-match message is SCRUM-143's; this only pins that nothing breaks.
-    const { user } = renderFinder();
-    await user.click(searchButton());
-
-    await waitFor(() => expect(findVenuesForEvent).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(searchButton()).toHaveTextContent("Search venues"));
-    expect(screen.queryByRole("list", { name: "Matching venues" })).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -738,5 +728,116 @@ describe("SCRUM20 venue details on each result (SCRUM-142)", () => {
       "Facilities",
     ]);
     expect(article).not.toHaveTextContent(/hours|setup|turnaround|08:00|22:00|45|30/i);
+  });
+});
+
+describe("SCRUM20_AC8 no venue matched (SCRUM-143)", () => {
+  const NO_MATCH = "No venue matched your criteria.";
+  const noMatch = () => screen.queryByRole("status");
+
+  it("SCRUM20_AC8_empty_response_shows_the_no_match_message", async () => {
+    const { user } = renderFinder();
+    await user.click(searchButton());
+
+    expect(await screen.findByRole("status")).toHaveTextContent(NO_MATCH);
+    expect(screen.queryByRole("list", { name: "Matching venues" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM20_AC8_no_match_message_names_no_criterion", async () => {
+    // Fixed text: it never says which criterion left the list empty.
+    const { user } = renderFinder();
+    await user.type(field.location(), "Level 9");
+    await user.selectOptions(field.layout(), "banquet");
+    await user.click(screen.getByLabelText("Projector"));
+    await user.click(searchButton());
+
+    const status = await screen.findByRole("status");
+    expect(status).not.toHaveTextContent(
+      /capacity|attendance|hours|time|layout|accessib|facilit|location|date/i,
+    );
+  });
+
+  it("SCRUM20_AC8_inputs_keep_their_values_after_no_match", async () => {
+    const { user } = renderFinder();
+
+    await user.clear(field.attendance());
+    await user.type(field.attendance(), "500");
+    await user.type(field.location(), "Level 9");
+    await user.selectOptions(field.layout(), "banquet");
+    await user.click(screen.getByLabelText("Projector"));
+    await user.click(screen.getByLabelText("Step-free entrance"));
+    await user.click(searchButton());
+    await screen.findByRole("status");
+
+    expect(field.date()).toHaveValue(START.date);
+    expect(field.start()).toHaveValue(START.time);
+    expect(field.end()).toHaveValue(END.time);
+    expect(field.attendance()).toHaveValue(500);
+    expect(field.location()).toHaveValue("Level 9");
+    expect(field.layout()).toHaveValue("banquet");
+    const ticked = screen.getAllByRole("checkbox").filter((box) => box.checked);
+    expect(ticked).toEqual([
+      screen.getByLabelText("Step-free entrance"),
+      screen.getByLabelText("Projector"),
+    ]);
+  });
+
+  it("SCRUM20_AC8_adjusting_and_searching_again_replaces_the_message", async () => {
+    vi.mocked(findVenuesForEvent)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([HALL]);
+    const { user } = renderFinder();
+
+    await user.click(searchButton());
+    await screen.findByRole("status");
+    await user.clear(field.attendance());
+    await user.type(field.attendance(), "40");
+    await user.click(searchButton());
+
+    const list = await screen.findByRole("list", { name: "Matching venues" });
+    expect(within(list).getByRole("heading", { name: "Hall A" })).toBeInTheDocument();
+    expect(noMatch()).not.toBeInTheDocument();
+    expect(findVenuesForEvent).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(findVenuesForEvent).mock.calls[1][0].expectedAttendance).toBe(40);
+  });
+
+  it("SCRUM20_AC8_no_message_before_the_first_search", () => {
+    renderFinder();
+
+    expect(noMatch()).not.toBeInTheDocument();
+    expect(screen.queryByText(NO_MATCH, { exact: false })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM20_AC8_the_message_is_hidden_while_a_new_search_runs", async () => {
+    const pending = deferred();
+    vi.mocked(findVenuesForEvent)
+      .mockResolvedValueOnce([])
+      .mockReturnValueOnce(pending.promise);
+    const { user } = renderFinder();
+
+    await user.click(searchButton());
+    await screen.findByRole("status");
+    await user.click(searchButton());
+
+    expect(searchButton()).toHaveTextContent("Searching...");
+    expect(noMatch()).not.toBeInTheDocument();
+
+    pending.resolve([]);
+    expect(await screen.findByRole("status")).toHaveTextContent(NO_MATCH);
+  });
+
+  it("SCRUM20_AC8_a_failed_search_after_no_match_shows_the_error_not_the_message", async () => {
+    vi.mocked(findVenuesForEvent)
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(httpError(500, {}));
+    const { user } = renderFinder();
+
+    await user.click(searchButton());
+    await screen.findByRole("status");
+    await user.click(searchButton());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(GENERIC_ERROR);
+    expect(noMatch()).not.toBeInTheDocument();
   });
 });
