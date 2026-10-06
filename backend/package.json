@@ -18,8 +18,11 @@
     "venue-routes:check": "node scripts/check-venue-routes.js",
     "equipment:check": "node scripts/check-equipment-service.js",
     "equipment:seed": "node db/seeds/equipment.js"
+    "venue-blocks:check": "node scripts/check-venue-blocks.js",
+    "venue-calendar:check": "node scripts/check-venue-calendar.js"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@vitest/coverage-v8": "5.0.0",
     "nodemon": "^3.1.0",
     "supertest": "^7.2.2",

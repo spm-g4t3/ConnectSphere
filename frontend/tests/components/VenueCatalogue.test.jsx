@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import VenueCatalogue from "../../src/components/VenueCatalogue.jsx";
 import { getVenueCatalogue } from "../../src/services/venueService";
@@ -68,7 +69,11 @@ function rowFor(name) {
 
 async function renderCatalogue() {
   const user = userEvent.setup();
-  render(<VenueCatalogue />);
+  render(
+    <MemoryRouter>
+      <VenueCatalogue />
+    </MemoryRouter>,
+  );
   await screen.findByText("Hall A");
   return { user };
 }
@@ -122,7 +127,11 @@ describe("VenueCatalogue currentUserId (SCRUM-131)", () => {
 
   it("SCRUM17_AC4_passes_currentUserId_through_to_the_blocks_panel", async () => {
     const user = userEvent.setup();
-    render(<VenueCatalogue currentUserId={ME} />);
+    render(
+      <MemoryRouter>
+        <VenueCatalogue currentUserId={ME} />
+      </MemoryRouter>,
+    );
     await screen.findByText("Hall A");
 
     await user.click(within(rowFor("Hall A")).getByRole("button", { name: "Manage blocks" }));
@@ -134,5 +143,58 @@ describe("VenueCatalogue currentUserId (SCRUM-131)", () => {
     const { user } = await renderCatalogue();
     await user.click(within(rowFor("Hall A")).getByRole("button", { name: "Manage blocks" }));
     expect(screen.getByTestId("blocks-panel")).toHaveAttribute("data-current-user-id", "");
+  });
+});
+
+describe("SCRUM178_AC1 VenueCatalogue View calendar (SCRUM-181)", () => {
+  function CalendarProbe() {
+    const { venueId } = useParams();
+    const location = useLocation();
+    return (
+      <div data-testid="calendar-probe" data-search={location.search}>
+        Calendar route for {venueId}
+      </div>
+    );
+  }
+
+  it.each([
+    ["an active", "Hall A", ACTIVE],
+    ["a retired", "Old Annex", RETIRED],
+  ])("SCRUM178_AC1_%s_venue_links_to_its_calendar", async (_label, name, venue) => {
+    await renderCatalogue();
+    const link = within(rowFor(name)).getByRole("link", { name: "View calendar" });
+
+    expect(link).toHaveAttribute("href", `/venues/${venue.id}/calendar`);
+    expect(link).toHaveClass("venue-catalogue__calendar-link");
+    // Never disabled: a retired venue's past bookings stay viewable.
+    expect(link).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("SCRUM178_AC1_every_row_has_exactly_one_calendar_link", async () => {
+    await renderCatalogue();
+    expect(screen.getAllByRole("link", { name: "View calendar" })).toHaveLength(2);
+  });
+
+  it.each([
+    ["an active", "Hall A", ACTIVE],
+    ["a retired", "Old Annex", RETIRED],
+  ])("SCRUM178_AC1_clicking_it_on_%s_venue_lands_on_the_calendar_route", async (_label, name, venue) => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/venue-catalogue"]}>
+        <Routes>
+          <Route path="/venue-catalogue" element={<VenueCatalogue />} />
+          <Route path="/venues/:venueId/calendar" element={<CalendarProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("Hall A");
+
+    await user.click(within(rowFor(name)).getByRole("link", { name: "View calendar" }));
+
+    const probe = await screen.findByTestId("calendar-probe");
+    expect(probe).toHaveTextContent(`Calendar route for ${venue.id}`);
+    expect(probe).toHaveAttribute("data-search", "");
+    expect(screen.queryByRole("heading", { name: "Venue catalogue" })).not.toBeInTheDocument();
   });
 });

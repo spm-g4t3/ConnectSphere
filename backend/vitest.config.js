@@ -39,6 +39,9 @@ export default defineConfig({
         // SCRUM-186: a new file only this story owns, so it can gate without
         // pulling in SCRUM-15's shared venueService.js or venueValidation.js.
         'src/domain/turnaroundOptions.js': FULL,
+        // SCRUM-178 (SCRUM-179): the calendar read is a new file only this
+        // story owns, so it gates without pulling in routes/venues.js.
+        'src/services/venueCalendarService.js': FULL,
       },
     },
   },

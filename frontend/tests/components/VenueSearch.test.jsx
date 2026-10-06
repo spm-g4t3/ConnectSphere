@@ -13,16 +13,21 @@
 // and set with fireEvent.change; payloads are checked by offset shape and
 // getTime(); expected text comes from formatRange, never a hard-coded
 // wall-clock string.
+//
+// SCRUM-185 (for SCRUM-178 AC1) adds "Include retired venues": shown by role,
+// exclusive with the date window, seeded from ?includeRetired=true, and
+// retired rows linking to the calendar on the week they retired.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import VenueSearch from "../../src/components/VenueSearch.jsx";
 import { searchActiveVenues } from "../../src/services/venueService";
 import { deviceTimeZoneLabel, toDatetimeLocalValue } from "../../src/services/datetimeFormat.js";
 import { formatRange } from "../../src/services/displayFormat.js";
+import { toCalendarDateParam } from "../../src/services/calendarRange.js";
 
 vi.mock("../../src/services/venueService", () => ({
   searchActiveVenues: vi.fn(),
@@ -69,13 +74,24 @@ function ReviewQueueProbe() {
   return <div data-testid="review-queue">{JSON.stringify(location.state)}</div>;
 }
 
-function renderSearch({ path = "/venue-search", state } = {}) {
+function CalendarProbe() {
+  const { venueId } = useParams();
+  const location = useLocation();
+  return (
+    <div data-testid="calendar-probe" data-search={location.search}>
+      Calendar route for {venueId}
+    </div>
+  );
+}
+
+function renderSearch({ path = "/venue-search", state, role } = {}) {
   const user = userEvent.setup();
   const utils = render(
     <MemoryRouter initialEntries={[{ pathname: path.split("?")[0], search: path.includes("?") ? `?${path.split("?")[1]}` : "", state }]}>
       <Routes>
-        <Route path="/venue-search" element={<VenueSearch />} />
+        <Route path="/venue-search" element={<VenueSearch role={role} />} />
         <Route path="/review-queue" element={<ReviewQueueProbe />} />
+        <Route path="/venues/:venueId/calendar" element={<CalendarProbe />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -679,5 +695,502 @@ describe("VenueSearch date window (SCRUM-130)", () => {
     await screen.findByText(GENERIC_ERROR);
     expect(fromInput()).toBeEnabled();
     expect(toInput()).toBeEnabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-181: each result links to its venue's calendar
+// ---------------------------------------------------------------------------
+
+describe("SCRUM178_AC1 VenueSearch View calendar (SCRUM-181)", () => {
+  const resultFor = (name) => screen.getByText(name).closest("li");
+  const calendarLink = (name) => within(resultFor(name)).getByRole("link", { name: "View calendar" });
+
+  it("SCRUM178_AC1_each_result_links_to_its_own_calendar", async () => {
+    vi.mocked(searchActiveVenues).mockResolvedValue([HALL, ANNEX]);
+    const { user } = renderSearch();
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+
+    expect(screen.getAllByRole("link", { name: "View calendar" })).toHaveLength(2);
+    expect(calendarLink("Hall A")).toHaveAttribute("href", `/venues/${HALL.id}/calendar`);
+    expect(calendarLink("Annex")).toHaveAttribute("href", `/venues/${ANNEX.id}/calendar`);
+  });
+
+  it("SCRUM178_AC1_without_an_applied_window_the_link_has_no_query", async () => {
+    const { user } = renderSearch();
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+
+    const href = calendarLink("Hall A").getAttribute("href");
+    expect(href).toBe(`/venues/${HALL.id}/calendar`);
+    expect(href).not.toContain("?");
+  });
+
+  it("SCRUM178_AC1_typing_a_window_without_searching_adds_no_query", async () => {
+    const { user } = renderSearch();
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+
+    // The link follows the window behind the results, not the inputs.
+    setFrom(START_ISO);
+    setTo(END_ISO);
+    expect(calendarLink("Hall A")).toHaveAttribute("href", `/venues/${HALL.id}/calendar`);
+  });
+
+  it("SCRUM178_AC1_with_an_applied_window_the_link_carries_its_start_date", async () => {
+    vi.mocked(searchActiveVenues).mockResolvedValue([HALL, ANNEX]);
+    const { user } = renderSearch();
+    setFrom(START_ISO);
+    setTo(END_ISO);
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+
+    // The local day of the window's start, whatever zone the test runs in.
+    const expectedDate = toCalendarDateParam(new Date(START_ISO));
+    expect(expectedDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(calendarLink("Hall A")).toHaveAttribute("href", `/venues/${HALL.id}/calendar?date=${expectedDate}`);
+    expect(calendarLink("Annex")).toHaveAttribute("href", `/venues/${ANNEX.id}/calendar?date=${expectedDate}`);
+  });
+
+  it("SCRUM178_AC1_a_window_starting_late_in_the_local_day_keeps_that_local_date", async () => {
+    // 23:30 local on 9 Nov is still 9 Nov here, even where UTC says 10 Nov.
+    const lateStart = new Date(2026, 10, 9, 23, 30).toISOString();
+    const lateEnd = new Date(2026, 10, 10, 1, 30).toISOString();
+    const { user } = renderSearch();
+    setFrom(lateStart);
+    setTo(lateEnd);
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+
+    expect(calendarLink("Hall A")).toHaveAttribute("href", `/venues/${HALL.id}/calendar?date=2026-11-09`);
+  });
+
+  it("SCRUM178_AC1_a_later_dateless_search_drops_the_query", async () => {
+    const { user } = renderSearch();
+    setFrom(START_ISO);
+    setTo(END_ISO);
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+    expect(calendarLink("Hall A").getAttribute("href")).toContain("?date=");
+
+    await user.click(screen.getByRole("button", { name: "Clear dates" }));
+    await user.click(searchButton());
+    await waitFor(() => expect(searchActiveVenues).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(calendarLink("Hall A")).toHaveAttribute("href", `/venues/${HALL.id}/calendar`),
+    );
+  });
+
+  it("SCRUM178_AC1_clicking_it_lands_on_the_calendar_route_with_the_date", async () => {
+    const { user } = renderSearch();
+    setFrom(START_ISO);
+    setTo(END_ISO);
+    await user.click(searchButton());
+    await screen.findByText("Hall A");
+
+    await user.click(calendarLink("Hall A"));
+
+    const probe = await screen.findByTestId("calendar-probe");
+    expect(probe).toHaveTextContent(`Calendar route for ${HALL.id}`);
+    expect(probe).toHaveAttribute("data-search", `?date=${toCalendarDateParam(new Date(START_ISO))}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-185 (for SCRUM-178 AC1): Include retired venues
+// ---------------------------------------------------------------------------
+
+describe("SCRUM178_AC1 VenueSearch include retired venues (SCRUM-185)", () => {
+  const COORDINATOR = "event_coordinator";
+  const STAFF = "venue_staff";
+  const RETIRED_HINT = "Retired venues can't be booked, so they can only be searched without dates.";
+  const DATES_OFF_HINT = "Dates are off while retired venues are included: a retired venue can't be booked.";
+  const ALL_EMPTY_STATE = "No venues match your search.";
+
+  // Late on 31 Aug UTC: 31 Aug in New York, 1 Sep in Singapore. The expected
+  // link date is always worked out with toCalendarDateParam, never hard-coded.
+  const OLD = {
+    id: "v3",
+    name: "Old Annex",
+    location: "Block C",
+    maxCapacity: 50,
+    retiredAt: "2026-08-31T23:30:00Z",
+  };
+  const ACTIVE = { ...HALL, retiredAt: null };
+
+  const checkbox = () => screen.getByRole("checkbox", { name: "Include retired venues" });
+  const queryCheckbox = () => screen.queryByRole("checkbox", { name: "Include retired venues" });
+  const resultFor = (name) => screen.getByText(name).closest("li");
+  const calendarLink = (name) => within(resultFor(name)).getByRole("link", { name: "View calendar" });
+
+  describe("who sees the checkbox", () => {
+    it.each([
+      ["event_coordinator", COORDINATOR],
+      ["venue_staff", STAFF],
+      ["a spelling normaliseRole accepts (Venue Staff)", "Venue Staff"],
+      ["a spelling normaliseRole accepts (EVENT-COORDINATOR)", " EVENT-COORDINATOR "],
+    ])("SCRUM178_AC1_shows_the_checkbox_to_%s", (_label, role) => {
+      renderSearch({ role });
+      expect(checkbox()).toBeInTheDocument();
+      expect(checkbox()).not.toBeChecked();
+      expect(checkbox()).toBeEnabled();
+    });
+
+    it.each([
+      ["an organiser", "event_organiser"],
+      ["an organizer spelt with a z", "event_organizer"],
+      ["an attendee", "attendee"],
+      ["no role", undefined],
+      ["an empty role", ""],
+    ])("SCRUM178_AC1_hides_the_checkbox_from_%s", (_label, role) => {
+      renderSearch({ role });
+      expect(queryCheckbox()).not.toBeInTheDocument();
+      expect(screen.queryByText("Include retired venues")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("the request", () => {
+    it("SCRUM178_AC1_ticking_and_searching_sends_includeRetired_true_and_no_dates", async () => {
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.type(screen.getByPlaceholderText("Location"), "Block");
+      await user.click(checkbox());
+      await user.click(searchButton());
+
+      expect(searchActiveVenues).toHaveBeenCalledTimes(1);
+      const payload = searchActiveVenues.mock.calls[0][0];
+      expect(payload).toStrictEqual({ location: "Block", minCapacity: undefined, includeRetired: true });
+      expect(payload).not.toHaveProperty("startsAt");
+      expect(payload).not.toHaveProperty("endsAt");
+    });
+
+    it("SCRUM178_AC1_staff_ticking_and_searching_sends_includeRetired_true", async () => {
+      const { user } = renderSearch({ role: STAFF });
+      await user.click(checkbox());
+      await user.click(searchButton());
+      expect(searchActiveVenues.mock.calls[0][0]).toStrictEqual({
+        location: undefined,
+        minCapacity: undefined,
+        includeRetired: true,
+      });
+    });
+
+    it("SCRUM178_AC1_an_unticked_box_sends_no_flag_at_all", async () => {
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(searchButton());
+      const payload = searchActiveVenues.mock.calls[0][0];
+      expect(Object.keys(payload).sort()).toEqual(["location", "minCapacity"]);
+    });
+
+    it("SCRUM178_AC1_unticking_again_sends_no_flag", async () => {
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(checkbox());
+      await user.click(checkbox());
+      await user.click(searchButton());
+      expect(searchActiveVenues.mock.calls[0][0]).not.toHaveProperty("includeRetired");
+    });
+
+    it("SCRUM178_AC1_ticking_the_box_alone_does_not_search", async () => {
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(checkbox());
+      expect(checkbox()).toBeChecked();
+      await user.click(checkbox());
+      await user.click(checkbox());
+      await Promise.resolve();
+      expect(searchActiveVenues).not.toHaveBeenCalled();
+    });
+
+    it("SCRUM178_AC1_ticking_the_box_after_a_url_auto_search_does_not_search_again", async () => {
+      const { user } = renderSearch({ path: "/venue-search?location=Level", role: COORDINATOR });
+      await screen.findByText("Hall A");
+      expect(searchActiveVenues).toHaveBeenCalledTimes(1);
+
+      await user.click(checkbox());
+      await Promise.resolve();
+      expect(searchActiveVenues).toHaveBeenCalledTimes(1);
+
+      await user.click(searchButton());
+      await waitFor(() => expect(searchActiveVenues).toHaveBeenCalledTimes(2));
+      expect(searchActiveVenues.mock.calls[1][0]).toStrictEqual({
+        location: "Level",
+        minCapacity: undefined,
+        includeRetired: true,
+      });
+    });
+  });
+
+  describe("the box and the dates exclude each other", () => {
+    it("SCRUM178_AC1_a_from_date_disables_the_box_with_a_hint", () => {
+      renderSearch({ role: COORDINATOR });
+      expect(screen.queryByText(RETIRED_HINT)).not.toBeInTheDocument();
+
+      setFrom(START_ISO);
+
+      expect(checkbox()).toBeDisabled();
+      expect(screen.getByText(RETIRED_HINT)).toBeInTheDocument();
+    });
+
+    it("SCRUM178_AC1_a_to_date_alone_disables_the_box_and_clearing_it_re_enables_it", async () => {
+      const { user } = renderSearch({ role: COORDINATOR });
+      setTo(END_ISO);
+      expect(checkbox()).toBeDisabled();
+      expect(screen.getByText(RETIRED_HINT)).toBeInTheDocument();
+
+      await user.click(clearButton());
+
+      expect(checkbox()).toBeEnabled();
+      expect(screen.queryByText(RETIRED_HINT)).not.toBeInTheDocument();
+    });
+
+    it("SCRUM178_AC1_ticking_the_box_disables_both_dates_with_a_hint", async () => {
+      const { user } = renderSearch({ role: COORDINATOR });
+      expect(screen.queryByText(DATES_OFF_HINT)).not.toBeInTheDocument();
+      expect(fromInput()).toBeEnabled();
+
+      await user.click(checkbox());
+
+      expect(fromInput()).toBeDisabled();
+      expect(toInput()).toBeDisabled();
+      expect(screen.getByText(DATES_OFF_HINT)).toBeInTheDocument();
+
+      await user.click(checkbox());
+
+      expect(fromInput()).toBeEnabled();
+      expect(toInput()).toBeEnabled();
+      expect(screen.queryByText(DATES_OFF_HINT)).not.toBeInTheDocument();
+    });
+
+    it("SCRUM178_AC1_the_box_is_disabled_while_a_search_is_loading", async () => {
+      const pending = deferred();
+      vi.mocked(searchActiveVenues).mockReturnValue(pending.promise);
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(checkbox());
+      await user.click(searchButton());
+      expect(checkbox()).toBeDisabled();
+
+      pending.resolve([OLD]);
+      await screen.findByText("Old Annex");
+      expect(checkbox()).toBeEnabled();
+      expect(checkbox()).toBeChecked();
+    });
+
+    it("SCRUM178_AC1_the_date_hint_never_shows_to_a_role_without_the_box", () => {
+      renderSearch({ role: "event_organiser" });
+      setFrom(START_ISO);
+      expect(screen.queryByText(RETIRED_HINT)).not.toBeInTheDocument();
+      expect(fromInput()).toBeEnabled();
+    });
+  });
+
+  describe("?includeRetired=true in the URL", () => {
+    it("SCRUM178_AC1_pre_ticks_the_box_and_searches_once_for_a_coordinator", async () => {
+      vi.mocked(searchActiveVenues).mockResolvedValue([ACTIVE, OLD]);
+      const { user } = renderSearch({ path: "/venue-search?includeRetired=true", role: COORDINATOR });
+
+      expect(await screen.findByText("Old Annex")).toBeInTheDocument();
+      expect(checkbox()).toBeChecked();
+      expect(fromInput()).toBeDisabled();
+      expect(searchActiveVenues).toHaveBeenCalledTimes(1);
+      expect(searchActiveVenues.mock.calls[0][0]).toStrictEqual({
+        location: undefined,
+        minCapacity: undefined,
+        includeRetired: true,
+      });
+
+      // Changing the filters changes handleSearch; the auto-search stays one-off.
+      await user.type(screen.getByPlaceholderText("Location"), "Blo");
+      await user.click(checkbox());
+      await user.click(checkbox());
+      expect(searchActiveVenues).toHaveBeenCalledTimes(1);
+    });
+
+    it("SCRUM178_AC1_pre_ticks_the_box_for_venue_staff_alongside_other_url_filters", async () => {
+      renderSearch({ path: "/venue-search?location=Block&includeRetired=true", role: STAFF });
+      await screen.findByText("Hall A");
+      expect(checkbox()).toBeChecked();
+      expect(searchActiveVenues).toHaveBeenCalledTimes(1);
+      expect(searchActiveVenues.mock.calls[0][0]).toStrictEqual({
+        location: "Block",
+        minCapacity: undefined,
+        includeRetired: true,
+      });
+    });
+
+    it("SCRUM178_AC1_any_other_value_neither_ticks_nor_searches", async () => {
+      renderSearch({ path: "/venue-search?includeRetired=1", role: COORDINATOR });
+      await Promise.resolve();
+      expect(checkbox()).not.toBeChecked();
+      expect(searchActiveVenues).not.toHaveBeenCalled();
+    });
+
+    it("SCRUM178_AC1_is_ignored_for_an_organiser_with_no_search_and_no_box", async () => {
+      renderSearch({ path: "/venue-search?includeRetired=true", role: "event_organiser" });
+      await Promise.resolve();
+      expect(queryCheckbox()).not.toBeInTheDocument();
+      expect(searchActiveVenues).not.toHaveBeenCalled();
+    });
+
+    it("SCRUM178_AC1_an_organisers_url_search_never_carries_the_flag", async () => {
+      renderSearch({ path: "/venue-search?location=Level&includeRetired=true", role: "event_organiser" });
+      await screen.findByText("Hall A");
+      expect(searchActiveVenues).toHaveBeenCalledTimes(1);
+      const payload = searchActiveVenues.mock.calls[0][0];
+      expect(payload).toStrictEqual({ location: "Level", minCapacity: undefined });
+      expect(payload).not.toHaveProperty("includeRetired");
+    });
+  });
+
+  describe("retired rows", () => {
+    it("SCRUM178_AC1_a_retired_row_shows_the_Retired_badge_and_an_active_row_does_not", async () => {
+      vi.mocked(searchActiveVenues).mockResolvedValue([ACTIVE, OLD]);
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(checkbox());
+      await user.click(searchButton());
+      await screen.findByText("Old Annex");
+
+      const badge = within(resultFor("Old Annex")).getByText("Retired");
+      expect(badge.tagName).toBe("SPAN");
+      expect(badge).toHaveClass("venue-search__badge");
+      expect(within(resultFor("Hall A")).queryByText("Retired")).not.toBeInTheDocument();
+      expect(document.querySelectorAll(".venue-search__badge")).toHaveLength(1);
+      expect(resultFor("Old Annex")).toHaveTextContent(`— ${OLD.location}, seats up to ${OLD.maxCapacity}`);
+    });
+
+    it("SCRUM178_AC1_a_retired_rows_link_opens_on_its_retirement_day", async () => {
+      vi.mocked(searchActiveVenues).mockResolvedValue([ACTIVE, OLD]);
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(checkbox());
+      await user.click(searchButton());
+      await screen.findByText("Old Annex");
+
+      const expectedDate = toCalendarDateParam(new Date(OLD.retiredAt));
+      expect(expectedDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      const href = calendarLink("Old Annex").getAttribute("href");
+      expect(href).toBe(`/venues/${OLD.id}/calendar?date=${expectedDate}`);
+      expect(href.endsWith(`?date=${expectedDate}`)).toBe(true);
+    });
+
+    it("SCRUM178_AC1_the_retirement_day_is_the_local_day_not_the_utc_one", async () => {
+      // 23:30 local on 31 Aug is still 31 Aug here, wherever UTC puts it.
+      const lateRetired = { ...OLD, retiredAt: new Date(2026, 7, 31, 23, 30).toISOString() };
+      vi.mocked(searchActiveVenues).mockResolvedValue([lateRetired]);
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(checkbox());
+      await user.click(searchButton());
+      await screen.findByText("Old Annex");
+
+      expect(calendarLink("Old Annex")).toHaveAttribute("href", `/venues/${OLD.id}/calendar?date=2026-08-31`);
+    });
+
+    it("SCRUM178_AC1_an_active_rows_link_is_unchanged", async () => {
+      vi.mocked(searchActiveVenues).mockResolvedValue([ACTIVE, OLD]);
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(checkbox());
+      await user.click(searchButton());
+      await screen.findByText("Hall A");
+
+      expect(calendarLink("Hall A")).toHaveAttribute("href", `/venues/${HALL.id}/calendar`);
+    });
+
+    it("SCRUM178_AC1_clicking_a_retired_rows_link_lands_on_its_calendar_with_the_date", async () => {
+      vi.mocked(searchActiveVenues).mockResolvedValue([OLD]);
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(checkbox());
+      await user.click(searchButton());
+      await screen.findByText("Old Annex");
+
+      await user.click(calendarLink("Old Annex"));
+
+      const probe = await screen.findByTestId("calendar-probe");
+      expect(probe).toHaveTextContent(`Calendar route for ${OLD.id}`);
+      expect(probe).toHaveAttribute("data-search", `?date=${toCalendarDateParam(new Date(OLD.retiredAt))}`);
+    });
+  });
+
+  describe("the empty state", () => {
+    it("SCRUM178_AC1_says_no_venues_after_an_empty_search_that_included_retired", async () => {
+      vi.mocked(searchActiveVenues).mockResolvedValue([]);
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(checkbox());
+      await user.click(searchButton());
+
+      expect(await screen.findByText(ALL_EMPTY_STATE)).toBeInTheDocument();
+      expect(screen.queryByText(EMPTY_STATE)).not.toBeInTheDocument();
+    });
+
+    it("SCRUM178_AC1_says_no_active_venues_after_an_empty_search_without_retired", async () => {
+      vi.mocked(searchActiveVenues).mockResolvedValue([]);
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(searchButton());
+
+      expect(await screen.findByText(EMPTY_STATE)).toBeInTheDocument();
+      expect(screen.queryByText(ALL_EMPTY_STATE)).not.toBeInTheDocument();
+    });
+
+    it("SCRUM178_AC1_follows_the_search_that_ran_not_the_box", async () => {
+      vi.mocked(searchActiveVenues).mockResolvedValue([]);
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(searchButton());
+      await screen.findByText(EMPTY_STATE);
+
+      // Ticking without searching leaves the wording of the search on screen.
+      await user.click(checkbox());
+      expect(screen.getByText(EMPTY_STATE)).toBeInTheDocument();
+
+      await user.click(searchButton());
+      expect(await screen.findByText(ALL_EMPTY_STATE)).toBeInTheDocument();
+
+      await user.click(checkbox());
+      await user.click(searchButton());
+      expect(await screen.findByText(EMPTY_STATE)).toBeInTheDocument();
+    });
+  });
+
+  describe("a server 400 on includeRetired", () => {
+    const MESSAGE = "cannot be combined with a date window";
+
+    it("SCRUM178_AC1_renders_the_message_under_the_checkbox_with_no_generic_banner", async () => {
+      vi.mocked(searchActiveVenues).mockRejectedValue(
+        httpError(400, { details: [{ field: "includeRetired", message: MESSAGE }] }),
+      );
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(checkbox());
+      await user.click(searchButton());
+
+      expect(await screen.findByText(MESSAGE)).toBeInTheDocument();
+      expect(checkbox()).toHaveAttribute("aria-invalid", "true");
+      const list = errorListFor(checkbox());
+      expect(list).not.toBeNull();
+      expect(list.tagName).toBe("UL");
+      expect(within(list).getByText(MESSAGE)).toBeInTheDocument();
+      expect(list.closest(".venue-search__retired")).not.toBeNull();
+      expect(genericError()).not.toBeInTheDocument();
+      expect(fromInput()).not.toHaveAttribute("aria-invalid");
+      expect(toInput()).not.toHaveAttribute("aria-invalid");
+    });
+
+    it("SCRUM178_AC1_toggling_the_box_clears_its_server_error", async () => {
+      vi.mocked(searchActiveVenues).mockRejectedValue(
+        httpError(400, { details: [{ field: "includeRetired", message: MESSAGE }] }),
+      );
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(checkbox());
+      await user.click(searchButton());
+      await screen.findByText(MESSAGE);
+
+      await user.click(checkbox());
+
+      expect(screen.queryByText(MESSAGE)).not.toBeInTheDocument();
+      expect(checkbox()).not.toHaveAttribute("aria-invalid");
+      expect(checkbox()).not.toHaveAttribute("aria-describedby");
+    });
+
+    it("SCRUM178_AC1_a_403_shows_the_generic_message", async () => {
+      vi.mocked(searchActiveVenues).mockRejectedValue(httpError(403, { error: "Forbidden" }));
+      const { user } = renderSearch({ role: COORDINATOR });
+      await user.click(checkbox());
+      await user.click(searchButton());
+      expect(await screen.findByText(GENERIC_ERROR)).toBeInTheDocument();
+    });
   });
 });

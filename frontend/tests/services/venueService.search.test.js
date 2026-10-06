@@ -3,6 +3,8 @@
 // SCRUM-130 (part of SCRUM-17, AC2). searchActiveVenues and its optional
 // startsAt/endsAt window. apiClient is mocked, so nothing touches the network.
 // A dateless search must send exactly the params it always did.
+//
+// SCRUM-185 (for SCRUM-178 AC1): includeRetired is sent only when it is true.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -63,6 +65,36 @@ describe("searchActiveVenues", () => {
   it("SCRUM17_AC2_does_not_judge_a_one_sided_window_leaving_that_to_the_backend", async () => {
     await searchActiveVenues({ startsAt: STARTS_AT });
     expect(apiClient.get.mock.calls[0][1].params).toStrictEqual({ startsAt: STARTS_AT });
+  });
+
+  it("SCRUM178_AC1_includeRetired_true_sends_the_flag", async () => {
+    await searchActiveVenues({ location: "Level", includeRetired: true });
+    expect(apiClient.get).toHaveBeenCalledWith("/venues/search", {
+      params: { location: "Level", includeRetired: true },
+    });
+  });
+
+  it("SCRUM178_AC1_includeRetired_alone_sends_only_the_flag", async () => {
+    await searchActiveVenues({ includeRetired: true });
+    expect(apiClient.get.mock.calls[0][1].params).toStrictEqual({ includeRetired: true });
+  });
+
+  it("SCRUM178_AC1_includeRetired_false_or_absent_sends_no_flag", async () => {
+    await searchActiveVenues({ location: "Level", includeRetired: false });
+    await searchActiveVenues({ location: "Level" });
+    for (const [, { params }] of apiClient.get.mock.calls) {
+      expect(params).toStrictEqual({ location: "Level" });
+      expect(params).not.toHaveProperty("includeRetired");
+    }
+  });
+
+  it("SCRUM178_AC1_only_the_boolean_true_sends_the_flag", async () => {
+    // A string "true" or a truthy number is not the boolean the caller means.
+    await searchActiveVenues({ includeRetired: "true" });
+    await searchActiveVenues({ includeRetired: 1 });
+    for (const [, { params }] of apiClient.get.mock.calls) {
+      expect(params).toStrictEqual({});
+    }
   });
 
   it("lets an error through unchanged", async () => {

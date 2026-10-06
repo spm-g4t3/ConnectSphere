@@ -25,19 +25,50 @@
 //     request's title in a URL leaks into history and into any shared link.
 //     So on reload the banner disappears and the search still behaves
 //     correctly. The filters are the contract; the banner is decoration.
+//
+// SCRUM-185 (for SCRUM-178 AC1) added "Include retired venues", so a retired
+// venue's past bookings can still be reached through its calendar:
+//
+//   - Shown only to Venue Staff and Event Coordinators, the roles the backend
+//     allows the flag for (anyone else gets a 403). The role is a prop, read
+//     from useAuth() by App.jsx: useAuth throws without an AuthProvider, and
+//     this page's tests render without one -- the same reason BlockHistory
+//     takes currentUserId as a prop.
+//   - It and the date window exclude each other. A retired venue can't be
+//     booked, so a dated search over it means nothing, and the backend answers
+//     that combination with a 400. Each control is disabled while the other is
+//     set, with a hint saying why; neither is ever cleared behind the user's
+//     back.
+//   - It is a filter, so it seeds from the query string (?includeRetired=true,
+//     the same spelling the API takes) exactly like location and minCapacity:
+//     once, on first render, and its presence alone triggers the auto-search.
+//   - A retired row's "View calendar" opens on the week the venue retired,
+//     which is where its past bookings end.
 
 import { useState, useCallback, useEffect, useId, useRef } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { deviceTimeZoneLabel } from "../services/datetimeFormat";
+import { toCalendarDateParam } from "../services/calendarRange";
 import { formatRange } from "../services/displayFormat";
+import { normaliseRole } from "../auth/normaliseRole";
 import { searchActiveVenues } from "../services/venueService";
 import { toSearchWindow, validateSearchWindow } from "../services/venueSearchValidation";
 
 /** The window's fields. A 400 naming anything else gets the generic message. */
 const DATE_FIELDS = ["startsAt", "endsAt"];
 
-export default function VenueSearch() {
+/** Fields a 400's details[] may name that get shown beside their control. */
+const SERVER_FIELDS = [...DATE_FIELDS, "includeRetired"];
+
+/** The roles the backend lets search retired venues (SCRUM-185). */
+const RETIRED_SEARCH_ROLES = ["event_coordinator", "venue_staff"].map(normaliseRole);
+
+/** The query-string value that seeds the checkbox. */
+const INCLUDE_RETIRED_PARAM = "true";
+
+export default function VenueSearch({ role } = {}) {
   const [searchParams] = useSearchParams();
+  const canIncludeRetired = RETIRED_SEARCH_ROLES.includes(normaliseRole(role));
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -55,6 +86,10 @@ export default function VenueSearch() {
     minCapacity: searchParams.get("minCapacity") ?? "",
     startsAt: "",
     endsAt: "",
+    // Never seeded for a role that can't send it: a shared link must not
+    // turn into a 403 for an Organiser.
+    includeRetired:
+      canIncludeRetired && searchParams.get("includeRetired") === INCLUDE_RETIRED_PARAM,
   }));
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -66,8 +101,24 @@ export default function VenueSearch() {
   // The window behind the results on screen, not the one in the inputs, so
   // the note never describes a search that has not run.
   const [appliedWindow, setAppliedWindow] = useState(null);
+  // Likewise whether the results on screen include retired venues.
+  const [appliedIncludeRetired, setAppliedIncludeRetired] = useState(false);
 
   const idPrefix = useId();
+
+  // SCRUM-181. With a window applied, the calendar opens on the day it starts,
+  // so the link lands on the week that was searched. appliedWindow, not the
+  // inputs: it is the window behind the results the link sits in.
+  //
+  // SCRUM-185. A retired venue opens on the week it retired instead: its
+  // bookings end there, and a retired row never sits under a window anyway.
+  const calendarHref = (venue) => {
+    const base = `/venues/${venue.id}/calendar`;
+    if (venue.retiredAt) return `${base}?date=${toCalendarDateParam(new Date(venue.retiredAt))}`;
+    return appliedWindow
+      ? `${base}?date=${toCalendarDateParam(new Date(appliedWindow.startsAt))}`
+      : base;
+  };
 
   const handleSearch = useCallback(async () => {
     const errors = validateSearchWindow(filters);
@@ -80,6 +131,8 @@ export default function VenueSearch() {
     }
 
     const searchWindow = toSearchWindow(filters);
+    // The controls keep the two apart; this guards a state they can't reach.
+    const includeRetired = canIncludeRetired && filters.includeRetired && !searchWindow.startsAt;
     setFieldErrors([]);
     setServerFieldErrors([]);
     setLoading(true);
@@ -89,14 +142,18 @@ export default function VenueSearch() {
         location: filters.location || undefined,
         minCapacity: filters.minCapacity ? Number(filters.minCapacity) : undefined,
         ...searchWindow,
+        // Spread in only when set, so a default search's filters keep exactly
+        // the keys they always had.
+        ...(includeRetired ? { includeRetired: true } : {}),
       });
       setResults(venues);
       setSearched(true);
       setAppliedWindow(searchWindow.startsAt ? searchWindow : null);
+      setAppliedIncludeRetired(includeRetired);
     } catch (err) {
       const details = err?.response?.status === 400 ? err.response.data?.details : null;
       const dateDetails = Array.isArray(details)
-        ? details.filter((d) => DATE_FIELDS.includes(d?.field))
+        ? details.filter((d) => SERVER_FIELDS.includes(d?.field))
         : [];
       if (dateDetails.length > 0) {
         setServerFieldErrors(dateDetails);
@@ -106,13 +163,18 @@ export default function VenueSearch() {
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, canIncludeRetired]);
 
   function updateDate(field, value) {
     setFilters({ ...filters, [field]: value });
     // Editing a date retires that field's errors, client and server alike.
     setFieldErrors((prev) => prev.filter((err) => err.field !== field));
     setServerFieldErrors((prev) => prev.filter((err) => err.field !== field));
+  }
+
+  function updateIncludeRetired(checked) {
+    setFilters({ ...filters, includeRetired: checked });
+    setServerFieldErrors((prev) => prev.filter((err) => err.field !== "includeRetired"));
   }
 
   function clearDates() {
@@ -153,6 +215,7 @@ export default function VenueSearch() {
   }
 
   const hasDates = filters.startsAt !== "" || filters.endsAt !== "";
+  const retiredChecked = canIncludeRetired && filters.includeRetired;
 
   // Arriving with a filter in the URL means somebody already asked the
   // question; making them press Search to repeat it is a wasted click. Fired
@@ -168,11 +231,18 @@ export default function VenueSearch() {
 
   useEffect(() => {
     if (autoSearched.current) return;
-    if (!searchParams.get("location") && !searchParams.get("minCapacity")) return;
+    if (
+      !searchParams.get("location") &&
+      !searchParams.get("minCapacity") &&
+      // The URL, not the live checkbox: ticking the box must not search.
+      !(canIncludeRetired && searchParams.get("includeRetired") === INCLUDE_RETIRED_PARAM)
+    ) {
+      return;
+    }
 
     autoSearched.current = true;
     handleSearch();
-  }, [searchParams, handleSearch]);
+  }, [searchParams, handleSearch, canIncludeRetired]);
 
   return (
     <div className="venue-search">
@@ -230,7 +300,7 @@ export default function VenueSearch() {
               type="datetime-local"
               value={filters.startsAt}
               onChange={(e) => updateDate("startsAt", e.target.value)}
-              disabled={loading}
+              disabled={loading || retiredChecked}
               {...ariaFor("startsAt")}
             />
           </label>
@@ -243,7 +313,7 @@ export default function VenueSearch() {
               type="datetime-local"
               value={filters.endsAt}
               onChange={(e) => updateDate("endsAt", e.target.value)}
-              disabled={loading}
+              disabled={loading || retiredChecked}
               {...ariaFor("endsAt")}
             />
           </label>
@@ -255,6 +325,32 @@ export default function VenueSearch() {
           </button>
         )}
       </div>
+
+      {canIncludeRetired && (
+        <div className="venue-search__retired">
+          <label>
+            <input
+              type="checkbox"
+              checked={filters.includeRetired}
+              onChange={(e) => updateIncludeRetired(e.target.checked)}
+              disabled={loading || hasDates}
+              {...ariaFor("includeRetired")}
+            />
+            Include retired venues
+          </label>
+          {renderFieldErrors("includeRetired")}
+          {hasDates && (
+            <p className="venue-search__hint">
+              Retired venues can't be booked, so they can only be searched without dates.
+            </p>
+          )}
+          {retiredChecked && (
+            <p className="venue-search__hint">
+              Dates are off while retired venues are included: a retired venue can't be booked.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Disclosure, not a picker -- the same wording VenueBlockForm uses. */}
       <p className="venue-search__hint">
@@ -272,11 +368,20 @@ export default function VenueSearch() {
       <ul className="venue-search__results">
         {results.map((venue) => (
           <li key={venue.id}>
-            <strong>{venue.name}</strong> — {venue.location}, seats up to {venue.maxCapacity}
+            <strong>{venue.name}</strong>
+            {venue.retiredAt && <span className="venue-search__badge">Retired</span>}
+            {" "}— {venue.location}, seats up to {venue.maxCapacity}
+            <Link to={calendarHref(venue)} className="venue-search__calendar-link">
+              View calendar
+            </Link>
           </li>
         ))}
         {searched && !loading && results.length === 0 && (
-          <p>No active venues match your search.</p>
+          <p>
+            {appliedIncludeRetired
+              ? "No venues match your search."
+              : "No active venues match your search."}
+          </p>
         )}
       </ul>
     </div>

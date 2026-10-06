@@ -502,6 +502,92 @@ describe('SCRUM17_AC2 a venue search may carry a date window', () => {
 
 
 // ---------------------------------------------------------------------------
+// SCRUM-185 (SCRUM-178 AC1): includeRetired, so a retired venue's calendar
+// can be reached from search. Shape only here; the role rule is the route's.
+// ---------------------------------------------------------------------------
+describe('SCRUM178_AC1 a venue search may include retired venues', () => {
+  const START = '2026-10-01T09:00:00+08:00';
+  const END = '2026-10-01T17:00:00+08:00';
+
+  it.each([
+    ['boolean_true', true],
+    ['string_true', 'true'],
+  ])('SCRUM178_AC1_%s_sets_includeRetired', (_label, value) => {
+    expect(validateSearchFilters({ includeRetired: value })).toEqual({ includeRetired: true });
+  });
+
+  it('SCRUM178_AC1_includeRetired_sits_beside_location_and_minCapacity', () => {
+    expect(
+      validateSearchFilters({ location: ' SCIS ', minCapacity: 40, includeRetired: 'true' }),
+    ).toEqual({ location: 'SCIS', minCapacity: 40, includeRetired: true });
+  });
+
+  it.each([
+    ['boolean_false', false],
+    ['string_false', 'false'],
+    ['undefined', undefined],
+    ['null', null],
+    ['blank', ''],
+    ['whitespace', '   '],
+  ])('SCRUM178_AC1_%s_leaves_no_includeRetired_key', (_label, value) => {
+    const result = validateSearchFilters({ includeRetired: value });
+    expect(result).toEqual({});
+    expect(Object.keys(result)).toEqual([]);
+  });
+
+  it('SCRUM178_AC1_the_default_search_has_no_includeRetired_key', () => {
+    expect('includeRetired' in validateSearchFilters()).toBe(false);
+    expect('includeRetired' in validateSearchFilters({ location: 'SCIS' })).toBe(false);
+  });
+
+  it.each([
+    ['upper_case_TRUE', 'TRUE'],
+    ['one', '1'],
+    ['yes', 'yes'],
+    ['number_1', 1],
+    ['array_from_a_repeated_param', ['true']],
+    ['two_element_array', ['true', 'true']],
+    ['object', {}],
+  ])('SCRUM178_AC1_%s_is_refused_on_includeRetired', (_label, value) => {
+    const err = errorFrom(() => validateSearchFilters({ includeRetired: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'includeRetired', message: 'must be true or false' }]);
+  });
+
+  it.each([
+    ['boolean_true', true],
+    ['string_true', 'true'],
+  ])('SCRUM178_AC1_%s_with_a_date_window_is_refused_on_includeRetired', (_label, value) => {
+    const err = errorFrom(() =>
+      validateSearchFilters({ includeRetired: value, startsAt: START, endsAt: END }),
+    );
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([
+      {
+        field: 'includeRetired',
+        message: 'cannot be combined with a date window: a retired venue cannot be booked',
+      },
+    ]);
+  });
+
+  it('SCRUM178_AC1_includeRetired_false_with_a_window_is_the_ordinary_window_search', () => {
+    expect(
+      validateSearchFilters({ includeRetired: 'false', startsAt: START, endsAt: END }),
+    ).toEqual({ startsAt: START, endsAt: END });
+  });
+
+  it('SCRUM178_AC1_includeRetired_faults_are_collected_with_other_faults', () => {
+    const err = errorFrom(() => validateSearchFilters({ minCapacity: 0, includeRetired: 'yes' }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([
+      { field: 'minCapacity', message: 'must be greater than zero' },
+      { field: 'includeRetired', message: 'must be true or false' },
+    ]);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
 // SCRUM-186: the turnaround between events, one of a fixed list of minutes
 // (src/domain/turnaroundOptions.js, mirroring 017's CHECK).
 // ---------------------------------------------------------------------------

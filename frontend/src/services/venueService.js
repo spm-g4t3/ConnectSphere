@@ -5,7 +5,10 @@
 //     venue list in the API that a retired venue can appear in.
 //   - GET /venues/search returns ALREADY-active-only venues
 //     (backend filters retired_at IS NULL server-side — see searchVenues()
-//     in backend/src/services/venueService.js)
+//     in backend/src/services/venueService.js), unless includeRetired=true
+//     (SCRUM-185, for SCRUM-178 AC1): Venue Staff and Event Coordinators
+//     only (403 otherwise), never with a date window (400), and each row then
+//     carries retiredAt.
 //   - POST /venues/:id/retire retires one venue. Venue Staff only, and
 //     one-way: 005_venue_retirement.sql defines no un-retire.
 //   - Response rows: { id, name, location, maxCapacity }, plus retiredAt on
@@ -18,12 +21,18 @@
 //     Venue Staff and Event Coordinators may list them (SCRUM-130); every
 //     write is Venue Staff only (SCRUM-127), and so is reading one block's
 //     change history (SCRUM-131). See the block section below.
+//   - /venues/:id/calendar merges a venue's bookings and blocks over a
+//     required window (SCRUM-179), for the venue calendar (SCRUM-178).
 
 import { apiClient } from "./apiClient"; // <-- replace with your actual API client
 
 /**
- * Searches active venues. Retired venues are never returned — the backend
- * enforces that unconditionally, so there's nothing to filter client-side.
+ * Searches active venues. Retired venues are left out by the backend, so
+ * there's nothing to filter client-side -- unless includeRetired is set
+ * (SCRUM-185), which returns them too, each row with retiredAt (ISO or null).
+ * Only Venue Staff and Event Coordinators may set it (403 otherwise), and not
+ * together with a window (400 naming includeRetired). It is sent only when
+ * true, so a default search is exactly the request it always was.
  *
  * With startsAt and endsAt (SCRUM-130), venues with a block overlapping the
  * half-open window [startsAt, endsAt) are left out too; a block that only
@@ -36,7 +45,8 @@ import { apiClient } from "./apiClient"; // <-- replace with your actual API cli
  * @param {number} [filters.minCapacity]  minimum seats needed
  * @param {string} [filters.startsAt]     ISO with an explicit offset
  * @param {string} [filters.endsAt]       ISO with an explicit offset, after startsAt
- * @returns {Promise<Array<{id, name, location, maxCapacity}>>}
+ * @param {boolean} [filters.includeRetired]  also return retired venues
+ * @returns {Promise<Array<{id, name, location, maxCapacity, retiredAt?}>>}
  */
 export async function searchActiveVenues(filters = {}) {
   const params = {};
@@ -44,6 +54,7 @@ export async function searchActiveVenues(filters = {}) {
   if (filters.minCapacity) params.minCapacity = filters.minCapacity;
   if (filters.startsAt) params.startsAt = filters.startsAt;
   if (filters.endsAt) params.endsAt = filters.endsAt;
+  if (filters.includeRetired === true) params.includeRetired = true;
 
   const response = await apiClient.get("/venues/search", { params });
   return response.data;
@@ -189,8 +200,13 @@ export async function updateVenue(venueId, changes) {
  * second clause: "while its past bookings remain viewable").
  *
  * Deliberately NOT gated on the venue being active -- a retired venue's
- * bookings are exactly what this exists to serve. Any authenticated user may
- * call it; unlike getVenueHistory there is no staff-only gate.
+ * bookings are exactly what this exists to serve.
+ *
+ * Venue Staff and Event Coordinators only (SCRUM-182), the same roles as the
+ * venue calendar, which shows these same bookings. Any other signed-in role
+ * gets a 403: before SCRUM-182 this was open to every authenticated user, a
+ * side door around the calendar's gate. Wider than getVenueHistory, which is
+ * Venue Staff only.
  *
  * Rows join nothing. The service selects six columns and none of them is a
  * name, so eventRequestId arrives as a bare uuid with no event name attached;
@@ -287,6 +303,38 @@ export async function listVenueBlocks(venueId, { from, to } = {}) {
     Object.keys(params).length === 0
       ? await apiClient.get(path)
       : await apiClient.get(path, { params });
+  return response.data;
+}
+
+/**
+ * One venue's calendar (SCRUM-178, served by SCRUM-179): its approved and
+ * flagged bookings and its active blocks overlapping the half-open window
+ * [from, to), merged into one array sorted by start. Each entry is either
+ *   { kind: 'booking', id, startsAt, endsAt, status, eventRequestId, eventName }
+ * with status 'approved' or 'flagged_for_review', or
+ *   { kind: 'block', id, startsAt, endsAt, reason, notes }.
+ * An empty window is 200 [].
+ *
+ * Unlike listVenueBlocks the window is REQUIRED -- a calendar always shows a
+ * range -- and at most 400 days long. Both ends need an explicit offset; axios
+ * encodes the '+' in one as %2B, which the backend asks for.
+ *
+ * Readable by Venue Staff and Event Coordinators, retired venues included.
+ *
+ * Failures: 400 (the id is not a uuid, or the window is missing, one-sided,
+ * malformed, reversed or over 400 days), 401, 403 (any other role), 404 (no
+ * such venue), 500.
+ *
+ * @param {string} venueId
+ * @param {Object} window
+ * @param {string} window.from  ISO with an explicit offset
+ * @param {string} window.to    ISO with an explicit offset, after from
+ * @returns {Promise<Array<Object>>} calendar entries, soonest first
+ */
+export async function getVenueCalendar(venueId, { from, to }) {
+  const response = await apiClient.get(`/venues/${venueId}/calendar`, {
+    params: { from, to },
+  });
   return response.data;
 }
 

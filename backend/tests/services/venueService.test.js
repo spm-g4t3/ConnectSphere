@@ -1244,6 +1244,120 @@ describe('SCRUM17_AC2 a dated search leaves out venues blocked in the window', (
 
 
 // ---------------------------------------------------------------------------
+// SCRUM-185 (SCRUM-178 AC1): includeRetired drops the active-only filter and
+// adds retiredAt, so a retired venue's calendar is reachable from search.
+// Without the flag the query and the row keys must be exactly as before.
+// ---------------------------------------------------------------------------
+describe('SCRUM178_AC1 a search can include retired venues when asked', () => {
+  const ACTIVE_ID = 'c0ffee00-0000-4000-8000-000000000001';
+  const ACTIVE_ROW = { id: ACTIVE_ID, name: 'Active Room', location: 'Level 1, SCIS', max_capacity: 30 };
+  const RETIRED_ROW = {
+    id: VENUE_ID,
+    name: 'Seminar Room 2-1',
+    location: 'Level 2, SCIS',
+    max_capacity: 40,
+    retired_at: RETIRED_AT,
+  };
+
+  it.each([
+    ['boolean', true],
+    ['query string', 'true'],
+  ])('SCRUM178_AC1_with_the_%s_flag_there_is_no_retired_at_filter', async (_label, flag) => {
+    const query = givenSearchReturns([]);
+
+    await searchVenues({ includeRetired: flag });
+
+    expect(from).toHaveBeenCalledWith('venues');
+    expect(query.called('is')).toBe(false);
+    expect(query.args('select')).toEqual(['id, name, location, max_capacity, retired_at']);
+    expect(query.args('order')).toEqual(['name']);
+  });
+
+  it('SCRUM178_AC1_with_the_flag_rows_carry_retiredAt_null_for_active_and_the_timestamp_for_retired', async () => {
+    givenSearchReturns([{ ...ACTIVE_ROW, retired_at: null }, RETIRED_ROW]);
+
+    await expect(searchVenues({ includeRetired: true })).resolves.toEqual([
+      { id: ACTIVE_ID, name: 'Active Room', location: 'Level 1, SCIS', maxCapacity: 30, retiredAt: null },
+      {
+        id: VENUE_ID,
+        name: 'Seminar Room 2-1',
+        location: 'Level 2, SCIS',
+        maxCapacity: 40,
+        retiredAt: RETIRED_AT,
+      },
+    ]);
+  });
+
+  it('SCRUM178_AC1_with_the_flag_location_and_minCapacity_still_apply', async () => {
+    const query = givenSearchReturns([]);
+
+    await searchVenues({ includeRetired: 'true', location: 'SCIS', minCapacity: 40 });
+
+    expect(query.args('ilike')).toEqual(['location', '%SCIS%']);
+    expect(query.args('gte')).toEqual(['max_capacity', 40]);
+    expect(query.called('is')).toBe(false);
+  });
+
+  it.each([
+    ['no filters', undefined],
+    ['includeRetired false', { includeRetired: false }],
+    ["includeRetired 'false'", { includeRetired: 'false' }],
+    ['a blank includeRetired', { includeRetired: '' }],
+  ])('SCRUM178_AC1_with_%s_the_query_is_exactly_as_before', async (_label, filters) => {
+    const query = givenSearchReturns([]);
+
+    await searchVenues(filters);
+
+    expect(query.args('select')).toEqual(['id, name, location, max_capacity']);
+    expect(query.args('is')).toEqual(['retired_at', null]);
+  });
+
+  it('SCRUM178_AC1_without_the_flag_rows_keep_exactly_their_keys', async () => {
+    // Even a row that somehow carried retired_at must not grow a retiredAt.
+    givenSearchReturns([{ ...ACTIVE_ROW, retired_at: null }]);
+
+    const [row] = await searchVenues();
+
+    expect(Object.keys(row)).toEqual(['id', 'name', 'location', 'maxCapacity']);
+  });
+
+  it('SCRUM178_AC1_with_the_flag_rows_add_only_retiredAt', async () => {
+    givenSearchReturns([RETIRED_ROW]);
+
+    const [row] = await searchVenues({ includeRetired: true });
+
+    expect(Object.keys(row)).toEqual(['id', 'name', 'location', 'maxCapacity', 'retiredAt']);
+  });
+
+  it('SCRUM178_AC1_the_flag_with_a_window_is_refused_before_any_network_call', async () => {
+    const err = await errorFromAsync(() =>
+      searchVenues({
+        includeRetired: true,
+        startsAt: '2026-10-01T10:00:00+08:00',
+        endsAt: '2026-10-01T12:00:00+08:00',
+      }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([
+      {
+        field: 'includeRetired',
+        message: 'cannot be combined with a date window: a retired venue cannot be booked',
+      },
+    ]);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM178_AC1_a_junk_flag_is_refused_before_any_network_call', async () => {
+    const err = await errorFromAsync(() => searchVenues({ includeRetired: 'yes' }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
 // SCRUM-186: the turnaround between events
 // ---------------------------------------------------------------------------
 describe('SCRUM186 turnaround is written by create and update and read by id', () => {
