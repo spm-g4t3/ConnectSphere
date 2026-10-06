@@ -48,6 +48,16 @@ const SCRUM178_FILES = [
   'src/components/VenueCalendar.jsx',
 ]
 
+// SCRUM-254 owns these outright. VenueSearch.jsx and CoordinatorRequestDetail.jsx
+// gain the request button and the richer handoff but are shared (SCRUM-45,
+// SCRUM-130, SCRUM-185, SCRUM-334), so, like venueService.js, they are not gated.
+const SCRUM254_FILES = [
+  'src/components/BookingRequestPanel.jsx',
+  'src/services/bookingRequestService.js',
+  'src/services/bookingRequestEligibility.js',
+  'src/services/bookingRequestErrors.js',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -73,6 +83,7 @@ export default defineConfig({
         ]),
         ...SCRUM186_FILES.map((file) => [file, FULL]),
         ...SCRUM178_FILES.map((file) => [file, FULL]),
+        ...SCRUM254_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

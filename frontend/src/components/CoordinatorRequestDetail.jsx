@@ -157,6 +157,16 @@ export default function CoordinatorRequestDetail({
     navigate(`/venue-search${query}`, {
       state: {
         eventRequestContext: {
+          // SCRUM-254: enough for venue search to offer "Request this venue"
+          // for this event without another read. The server re-reads the
+          // event and sends nothing of this onwards.
+          id: request.id,
+          status: request.status,
+          assignedCoordinatorId: assignedCoordinatorId ?? null,
+          proposedStart: request.proposedStart ?? null,
+          proposedEnd: request.proposedEnd ?? null,
+          expectedAttendance: request.expectedAttendance ?? null,
+          accessibilityRequirements: request.accessibilityRequirements ?? null,
           eventName: request.eventName,
           venueRequirements: request.venueRequirements ?? null,
         },
