@@ -16,6 +16,11 @@ const STATUS_CONFIG = {
   processed: { label: "Processed", className: "status--processed" },
 };
 
+const DECISION_CONFIG = {
+  approved: { label: "Approved", className: "change-request-outcome--approved" },
+  rejected: { label: "Rejected", className: "change-request-outcome--rejected" },
+};
+
 function useChangeRequests(eventRequestId) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -26,7 +31,7 @@ function useChangeRequests(eventRequestId) {
       const data = await getChangeRequests(eventRequestId);
       setRequests(data);
       setError(null);
-    } catch (err) {
+    } catch {
       setError("Could not load your change requests.");
     } finally {
       setLoading(false);
@@ -64,12 +69,27 @@ export default function ChangeRequestStatusList({ eventRequestId }) {
           label: req.status,
           className: "status--unknown",
         };
+        const decision = DECISION_CONFIG[req.decision];
 
         return (
           <li key={req.id} className="change-request-status-list__item">
             <div className="change-request-status-list__field">{req.fieldLabel}</div>
             <div className="change-request-status-list__details">{req.details}</div>
-            <span className={`status-badge ${config.className}`}>{config.label}</span>
+            <div className="change-request-status-list__statuses">
+              <span className={`change-request-status-list__badge ${config.className}`}>
+                {config.label}
+              </span>
+              {decision && (
+                <span className={`change-request-status-list__badge ${decision.className}`}>
+                  Outcome: {decision.label}
+                </span>
+              )}
+            </div>
+            {req.decisionNotes && (
+              <p className="change-request-status-list__decision-notes">
+                <strong>Coordinator note:</strong> {req.decisionNotes}
+              </p>
+            )}
             <span className="change-request-status-list__date">
               Requested {new Date(req.createdAt).toLocaleDateString()}
             </span>

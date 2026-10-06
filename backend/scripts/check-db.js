@@ -22,14 +22,23 @@ const TABLES = [
   { name: 'accessibility_features', migration: '002', expected: 5 },
   { name: 'facilities', migration: '002', expected: 8 },
   { name: 'venue_change_history', migration: '003', expected: null },
-  { name: 'event_change_requests', migration: '005', expected: null },
+  { name: 'event_change_requests', migration: '006', expected: null },
+  { name: 'venue_blocks', migration: '011', expected: null },
+  { name: 'notifications', migration: '014', expected: null },
+  { name: 'venue_block_history', migration: '016', expected: null },
+  { name: 'equipment_types', migration: '022', expected: null },
+  { name: 'equipment_requests', migration: '022', expected: null },
+  { name: 'equipment_lines', migration: '022', expected: null },
+  { name: 'equipment_reservations', migration: '022', expected: null },
+  { name: 'equipment_type_history', migration: '023', expected: null },
 ];
 
-/** head: true asks for the count without transferring any rows. */
+/** Read one id while asking PostgREST for the exact count. */
 async function countRows(table) {
   const { count, error } = await supabase
     .from(table)
-    .select('*', { count: 'exact', head: true });
+    .select('*', { count: 'exact' })
+    .limit(1);
 
   if (error) throw new Error(error.message);
   return count ?? 0;

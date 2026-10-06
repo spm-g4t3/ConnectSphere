@@ -413,3 +413,343 @@ describe('venue search filters', () => {
     expect(fieldsIn(err)).toEqual(['location', 'minCapacity']);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-130 (SCRUM-17 AC2): the optional date window on a venue search.
+// ---------------------------------------------------------------------------
+describe('SCRUM17_AC2 a venue search may carry a date window', () => {
+  const START = '2026-10-01T09:00:00+08:00';
+  const END = '2026-10-01T17:00:00+08:00';
+
+  it('SCRUM17_AC2_keeps_the_window_trimmed', () => {
+    expect(validateSearchFilters({ startsAt: `  ${START}`, endsAt: `${END} ` })).toEqual({
+      startsAt: START,
+      endsAt: END,
+    });
+  });
+
+  it('SCRUM17_AC2_keeps_the_window_beside_the_other_filters', () => {
+    expect(
+      validateSearchFilters({ location: ' SCIS ', minCapacity: 40, startsAt: START, endsAt: END }),
+    ).toEqual({ location: 'SCIS', minCapacity: 40, startsAt: START, endsAt: END });
+  });
+
+  it.each([
+    ['blank', { startsAt: '', endsAt: '' }],
+    ['whitespace', { startsAt: '  ', endsAt: ' ' }],
+    ['null', { startsAt: null, endsAt: null }],
+    ['undefined', { startsAt: undefined, endsAt: undefined }],
+  ])('SCRUM17_AC2_%s_dates_give_no_keys_at_all', (_label, filters) => {
+    const result = validateSearchFilters(filters);
+    expect(result).toEqual({});
+    expect(Object.keys(result)).toEqual([]);
+  });
+
+  it('SCRUM17_AC2_a_missing_end_is_refused_on_endsAt', () => {
+    const err = errorFrom(() => validateSearchFilters({ startsAt: START }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'endsAt', message: 'is required when a start is given' }]);
+  });
+
+  it('SCRUM17_AC2_a_missing_start_is_refused_on_startsAt', () => {
+    const err = errorFrom(() => validateSearchFilters({ startsAt: '', endsAt: END }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'startsAt', message: 'is required when an end is given' }]);
+  });
+
+  it.each([
+    ['equal', START, START],
+    ['reversed', END, START],
+  ])('SCRUM17_AC2_an_%s_window_is_refused_on_endsAt', (_label, startsAt, endsAt) => {
+    const err = errorFrom(() => validateSearchFilters({ startsAt, endsAt }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'endsAt', message: 'must be later than the start' }]);
+  });
+
+  it('SCRUM17_AC2_a_space_where_the_plus_was_is_refused', () => {
+    const err = errorFrom(() =>
+      validateSearchFilters({ startsAt: '2026-10-01T09:00:00 08:00', endsAt: END }),
+    );
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toEqual(['startsAt']);
+  });
+
+  it('SCRUM17_AC2_window_faults_are_collected_with_minCapacity_faults', () => {
+    const err = errorFrom(() =>
+      validateSearchFilters({ minCapacity: 0, startsAt: START }),
+    );
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([
+      { field: 'minCapacity', message: 'must be greater than zero' },
+      { field: 'endsAt', message: 'is required when a start is given' },
+    ]);
+    expect(err.message).toMatch(/minCapacity: must be greater than zero; endsAt: is required/);
+  });
+
+  it('SCRUM17_AC2_a_search_window_has_no_cap_(a_two_year_window_passes)', () => {
+    expect(
+      validateSearchFilters({ startsAt: '2026-01-01T00:00:00Z', endsAt: '2028-01-01T00:00:00Z' }),
+    ).toEqual({ startsAt: '2026-01-01T00:00:00Z', endsAt: '2028-01-01T00:00:00Z' });
+  });
+
+  it('SCRUM17_AC2_a_past_window_passes', () => {
+    expect(
+      validateSearchFilters({ startsAt: '2001-01-01T00:00:00Z', endsAt: '2001-01-02T00:00:00Z' }),
+    ).toEqual({ startsAt: '2001-01-01T00:00:00Z', endsAt: '2001-01-02T00:00:00Z' });
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-185 (SCRUM-178 AC1): includeRetired, so a retired venue's calendar
+// can be reached from search. Shape only here; the role rule is the route's.
+// ---------------------------------------------------------------------------
+describe('SCRUM178_AC1 a venue search may include retired venues', () => {
+  const START = '2026-10-01T09:00:00+08:00';
+  const END = '2026-10-01T17:00:00+08:00';
+
+  it.each([
+    ['boolean_true', true],
+    ['string_true', 'true'],
+  ])('SCRUM178_AC1_%s_sets_includeRetired', (_label, value) => {
+    expect(validateSearchFilters({ includeRetired: value })).toEqual({ includeRetired: true });
+  });
+
+  it('SCRUM178_AC1_includeRetired_sits_beside_location_and_minCapacity', () => {
+    expect(
+      validateSearchFilters({ location: ' SCIS ', minCapacity: 40, includeRetired: 'true' }),
+    ).toEqual({ location: 'SCIS', minCapacity: 40, includeRetired: true });
+  });
+
+  it.each([
+    ['boolean_false', false],
+    ['string_false', 'false'],
+    ['undefined', undefined],
+    ['null', null],
+    ['blank', ''],
+    ['whitespace', '   '],
+  ])('SCRUM178_AC1_%s_leaves_no_includeRetired_key', (_label, value) => {
+    const result = validateSearchFilters({ includeRetired: value });
+    expect(result).toEqual({});
+    expect(Object.keys(result)).toEqual([]);
+  });
+
+  it('SCRUM178_AC1_the_default_search_has_no_includeRetired_key', () => {
+    expect('includeRetired' in validateSearchFilters()).toBe(false);
+    expect('includeRetired' in validateSearchFilters({ location: 'SCIS' })).toBe(false);
+  });
+
+  it.each([
+    ['upper_case_TRUE', 'TRUE'],
+    ['one', '1'],
+    ['yes', 'yes'],
+    ['number_1', 1],
+    ['array_from_a_repeated_param', ['true']],
+    ['two_element_array', ['true', 'true']],
+    ['object', {}],
+  ])('SCRUM178_AC1_%s_is_refused_on_includeRetired', (_label, value) => {
+    const err = errorFrom(() => validateSearchFilters({ includeRetired: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'includeRetired', message: 'must be true or false' }]);
+  });
+
+  it.each([
+    ['boolean_true', true],
+    ['string_true', 'true'],
+  ])('SCRUM178_AC1_%s_with_a_date_window_is_refused_on_includeRetired', (_label, value) => {
+    const err = errorFrom(() =>
+      validateSearchFilters({ includeRetired: value, startsAt: START, endsAt: END }),
+    );
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([
+      {
+        field: 'includeRetired',
+        message: 'cannot be combined with a date window: a retired venue cannot be booked',
+      },
+    ]);
+  });
+
+  it('SCRUM178_AC1_includeRetired_false_with_a_window_is_the_ordinary_window_search', () => {
+    expect(
+      validateSearchFilters({ includeRetired: 'false', startsAt: START, endsAt: END }),
+    ).toEqual({ startsAt: START, endsAt: END });
+  });
+
+  it('SCRUM178_AC1_includeRetired_faults_are_collected_with_other_faults', () => {
+    const err = errorFrom(() => validateSearchFilters({ minCapacity: 0, includeRetired: 'yes' }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([
+      { field: 'minCapacity', message: 'must be greater than zero' },
+      { field: 'includeRetired', message: 'must be true or false' },
+    ]);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-186: the turnaround between events, one of a fixed list of minutes
+// (src/domain/turnaroundOptions.js, mirroring 017's CHECK).
+// ---------------------------------------------------------------------------
+describe('SCRUM186 turnaround time', () => {
+  const OPTIONS = [0, 15, 30, 45, 60, 90, 120];
+  const MESSAGE = 'must be one of 0, 15, 30, 45, 60, 90, 120 minutes';
+
+  it.each(OPTIONS)('SCRUM186_create_accepts_turnaround_%s', (minutes) => {
+    expect(validateCreateVenue({ ...VALID, turnaroundMinutes: minutes }).turnaroundMinutes)
+      .toBe(minutes);
+  });
+
+  it.each(OPTIONS)('SCRUM186_update_accepts_turnaround_%s', (minutes) => {
+    expect(validateUpdateVenue({ turnaroundMinutes: minutes })).toEqual({
+      turnaroundMinutes: minutes,
+    });
+  });
+
+  it('SCRUM186_create_leaves_an_omitted_turnaround_out_of_the_result', () => {
+    const result = validateCreateVenue({ ...VALID });
+    expect(result).not.toHaveProperty('turnaroundMinutes');
+  });
+
+  it('SCRUM186_create_treats_an_explicit_undefined_as_omitted', () => {
+    const result = validateCreateVenue({ ...VALID, turnaroundMinutes: undefined });
+    expect(result).not.toHaveProperty('turnaroundMinutes');
+  });
+
+  it('SCRUM186_update_leaves_an_omitted_turnaround_out_of_the_result', () => {
+    expect(validateUpdateVenue({ name: 'x' })).toEqual({ name: 'x' });
+  });
+
+  it('SCRUM186_update_turnaround_0_alone_is_a_valid_change', () => {
+    // 0 is falsy, but it is a real choice ("none"), not "no change supplied".
+    expect(validateUpdateVenue({ turnaroundMinutes: 0 })).toEqual({ turnaroundMinutes: 0 });
+  });
+
+  it('SCRUM186_accepts_negative_zero_as_zero', () => {
+    // Documented, not desired-or-undesired: Number.isInteger(-0) is true and
+    // includes() uses SameValueZero, so -0 passes. JSON cannot send -0
+    // distinctly (JSON.stringify(-0) === '0'), so it never arrives over HTTP.
+    expect(validateCreateVenue({ ...VALID, turnaroundMinutes: -0 }).turnaroundMinutes).toBe(-0);
+    expect(validateUpdateVenue({ turnaroundMinutes: -0 }).turnaroundMinutes).toBe(-0);
+  });
+
+  const BAD = [
+    ['null', null],
+    ['a numeric string', '30'],
+    ['a value between options', 25],
+    ['a negative option', -15],
+    ['a gap longer than two hours', 180],
+    ['a fractional number', 15.5],
+    ['NaN', NaN],
+    ['Infinity', Infinity],
+    ['an object', {}],
+    ['an array holding an option', [30]],
+  ];
+
+  it.each(BAD)('SCRUM186_create_rejects_%s_on_field_turnaroundMinutes', (_label, value) => {
+    const err = errorFrom(() => validateCreateVenue({ ...VALID, turnaroundMinutes: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'turnaroundMinutes', message: MESSAGE }]);
+  });
+
+  it.each(BAD)('SCRUM186_update_rejects_%s_on_field_turnaroundMinutes', (_label, value) => {
+    const err = errorFrom(() => validateUpdateVenue({ turnaroundMinutes: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'turnaroundMinutes', message: MESSAGE }]);
+  });
+
+  it('SCRUM186_update_null_turnaround_is_refused_rather_than_read_as_keep', () => {
+    // update_venue reads NULL as "keep", so a deliberate null must not pass
+    // validation and silently do nothing.
+    const err = errorFrom(() => validateUpdateVenue({ turnaroundMinutes: null }));
+    expect(fieldsIn(err)).toEqual(['turnaroundMinutes']);
+  });
+
+  it('SCRUM186_create_reports_a_bad_turnaround_together_with_a_bad_name', () => {
+    const err = errorFrom(() =>
+      validateCreateVenue({ ...VALID, name: '  ', turnaroundMinutes: 25 }),
+    );
+    expect(err.details).toHaveLength(2);
+    expect(fieldsIn(err).sort()).toEqual(['name', 'turnaroundMinutes']);
+  });
+
+  it('SCRUM186_update_reports_a_bad_turnaround_together_with_a_bad_name', () => {
+    const err = errorFrom(() => validateUpdateVenue({ name: '', turnaroundMinutes: 25 }));
+    expect(err.details).toHaveLength(2);
+    expect(fieldsIn(err).sort()).toEqual(['name', 'turnaroundMinutes']);
+  });
+
+  it('SCRUM186_the_summary_message_names_the_field', () => {
+    const err = errorFrom(() => validateCreateVenue({ ...VALID, turnaroundMinutes: 25 }));
+    expect(err.message).toContain(`turnaroundMinutes: ${MESSAGE}`);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-186: the per-weekday hours model is verified, not changed. Its limits
+// (see the 017 header) are pinned here so nobody mistakes them for bugs.
+// ---------------------------------------------------------------------------
+describe('SCRUM186 operating hours model limits', () => {
+  it('SCRUM186_a_day_left_out_is_closed_and_is_accepted', () => {
+    // Monday to Friday only: Saturday (6) and Sunday (0) have no row.
+    const weekdays = [1, 2, 3, 4, 5].map((day) => ({
+      day_of_week: day, opens_at: '09:00', closes_at: '18:00',
+    }));
+    const result = validateCreateVenue({ ...VALID, hours: weekdays });
+    expect(result.hours.map((h) => h.day_of_week)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('SCRUM186_no_hours_at_all_is_accepted_every_day_closed', () => {
+    expect(validateCreateVenue({ ...VALID, hours: [] }).hours).toEqual([]);
+  });
+
+  it('SCRUM186_an_overnight_window_22_00_to_02_00_is_rejected', () => {
+    const err = errorFrom(() =>
+      validateCreateVenue({
+        ...VALID,
+        hours: [{ day_of_week: 5, opens_at: '22:00', closes_at: '02:00' }],
+      }),
+    );
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details[0]).toMatchObject({ field: 'hours' });
+    expect(err.details[0].message).toMatch(/after opens_at/);
+  });
+
+  it('SCRUM186_an_overnight_window_is_rejected_on_update_too', () => {
+    const err = errorFrom(() =>
+      validateUpdateVenue({ hours: [{ day_of_week: 5, opens_at: '22:00', closes_at: '02:00' }] }),
+    );
+    expect(fieldsIn(err)).toEqual(['hours']);
+  });
+
+  it('SCRUM186_the_latest_closing_time_is_23_59', () => {
+    expect(
+      validateCreateVenue({
+        ...VALID,
+        hours: [{ day_of_week: 1, opens_at: '09:00', closes_at: '23:59' }],
+      }).hours,
+    ).toHaveLength(1);
+
+    const err = errorFrom(() =>
+      validateCreateVenue({
+        ...VALID,
+        hours: [{ day_of_week: 1, opens_at: '09:00', closes_at: '24:00' }],
+      }),
+    );
+    expect(fieldsIn(err)).toContain('hours');
+  });
+
+  it('SCRUM186_only_one_window_per_day_no_split_shifts', () => {
+    const err = errorFrom(() =>
+      validateCreateVenue({
+        ...VALID,
+        hours: [
+          { day_of_week: 2, opens_at: '08:00', closes_at: '12:00' },
+          { day_of_week: 2, opens_at: '13:00', closes_at: '17:00' },
+        ],
+      }),
+    );
+    expect(err.details[0].message).toMatch(/repeats day 2/);
+  });
+});

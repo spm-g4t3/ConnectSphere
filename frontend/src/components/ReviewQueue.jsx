@@ -14,7 +14,7 @@
 // EventCoordinatorDashboard, for the reason VenueCatalogue was: this is the
 // only part of that screen with a route of its own (/review-queue), and
 // inline it would mean that route rendering a second copy of the greeting and
-// the pending-bookings stub.
+// the notifications card.
 //
 // It renders a <section> and NOT the `dashboard dashboard--coordinator`
 // wrapper, so the card styling and the badge rules both come from whichever
@@ -24,6 +24,7 @@
 // every badge here renders as bare text.
 
 import { useCallback, useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { getEventRequestQueue } from "../services/eventRequestService";
 import {
   readStatusDisplay,
@@ -45,6 +46,7 @@ const QUEUE_ERROR_MESSAGES = {
 };
 
 export default function ReviewQueue() {
+  const location = useLocation();
   const [queue, setQueue] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -54,7 +56,11 @@ export default function ReviewQueue() {
   // VenueCatalogue use — there is not one modal, <dialog> or window.confirm
   // anywhere in this frontend and this is not the place to introduce the
   // first.
-  const [activePanel, setActivePanel] = useState(null);
+  const [activePanel, setActivePanel] = useState(() =>
+    location.state?.request
+      ? { mode: "detail", request: location.state.request }
+      : null,
+  );
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -62,11 +68,13 @@ export default function ReviewQueue() {
       const data = await getEventRequestQueue();
       setQueue(data);
       setError(null);
+      return data;
     } catch (err) {
       setError(
         QUEUE_ERROR_MESSAGES[err.response?.status] ||
           "The review queue could not be loaded. Please try again.",
       );
+      return null;
     } finally {
       setLoading(false);
     }
@@ -101,12 +109,27 @@ export default function ReviewQueue() {
   if (activePanel?.mode === "detail") {
     return (
       <section>
-        <button onClick={() => setActivePanel(null)}>
+        <button className="review-queue__back" onClick={() => setActivePanel(null)}>
           &larr; Back to the review queue
         </button>
-        {/* No onSaved and no refetch on close: this story gives the
-            Coordinator a read and a handoff, not a decision to record. */}
-        <CoordinatorRequestDetail request={activePanel.request} />
+        <CoordinatorRequestDetail
+          request={activePanel.request}
+          onReviewDecisionProcessed={() => {
+            setActivePanel(null);
+            fetchQueue();
+          }}
+          onChangeRequestProcessed={async () => {
+            const refreshedQueue = await fetchQueue();
+            const refreshedRequest = refreshedQueue?.find(
+              (item) => item.id === activePanel.request.id,
+            );
+            if (refreshedRequest) {
+              setActivePanel((current) =>
+                current ? { ...current, request: refreshedRequest } : current,
+              );
+            }
+          }}
+        />
       </section>
     );
   }

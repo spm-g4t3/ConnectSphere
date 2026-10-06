@@ -16,9 +16,23 @@
 // in `activePanel` state -- so it is the house behaviour rather than a
 // regression. If a shareable link is ever wanted, the backend plan records
 // what to add (a coordinatorOnly GET /:id/review) rather than leaving it to
-// be rediscovered.
+// be rediscovered. (SCRUM-332 has since built that route; nothing here uses
+// it yet.)
+//
+// SCRUM-334 added the event's coordinator and assignment history, and the
+// assigned coordinator's Reassign action, which opens ReassignEventPanel as a
+// panel in place of this one.
 
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import AssignmentHistory from "./AssignmentHistory";
+import ReassignEventPanel from "./ReassignEventPanel";
+import {
+  getCoordinatorChangeRequests,
+  processCoordinatorChangeRequest,
+  requestEventClarification,
+} from "../services/eventRequestService";
 import {
   readStatusDisplay,
   statusClassName,
@@ -65,10 +79,61 @@ function seedableCapacity(value) {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-export default function CoordinatorRequestDetail({ request }) {
+export default function CoordinatorRequestDetail({
+  request,
+  onReviewDecisionProcessed,
+  onChangeRequestProcessed,
+}) {
   const navigate = useNavigate();
   const display = readStatusDisplay(request);
   const capacity = seedableCapacity(request.expectedAttendance);
+  const [reviewNote, setReviewNote] = useState("");
+  const [processingReviewDecision, setProcessingReviewDecision] = useState(false);
+  const [reviewDecisionError, setReviewDecisionError] = useState(null);
+  const [changeRequests, setChangeRequests] = useState([]);
+  const [changeRequestsLoading, setChangeRequestsLoading] = useState(true);
+  const [changeRequestsError, setChangeRequestsError] = useState(null);
+  const [processingChangeRequestId, setProcessingChangeRequestId] = useState(null);
+  const [rejectingChangeRequestId, setRejectingChangeRequestId] = useState(null);
+  const [rejectionNote, setRejectionNote] = useState("");
+  const [changeRequestActionError, setChangeRequestActionError] = useState(null);
+
+  // SCRUM-334. reassigning swaps this panel for ReassignEventPanel.
+  // handedOverTo is who the event went to, if this coordinator handed it over
+  // while the panel was open: the `request` prop is the row the parent loaded
+  // and may not be replaced (see handleReassigned). historyVersion is the
+  // AssignmentHistory key, bumped to make it read the history again.
+  const { user } = useAuth();
+  const [reassigning, setReassigning] = useState(false);
+  const [handedOverTo, setHandedOverTo] = useState(null);
+  const [historyVersion, setHistoryVersion] = useState(0);
+
+  const assignedCoordinatorId = handedOverTo?.id ?? request.assignedCoordinatorId;
+
+  // Reassign shows only to the event's assigned coordinator. This mirrors the
+  // server's AC6 check in reassign_event_request (018) and is a convenience,
+  // not the gate: it saves everyone else from a button that can only be
+  // refused. The server checks again, under a lock, and if the row this panel
+  // holds is stale, ReassignEventPanel turns the 403 into a message.
+  const canReassign = Boolean(user?.id) && assignedCoordinatorId === user.id;
+
+  useEffect(() => {
+    let cancelled = false;
+    getCoordinatorChangeRequests(request.id)
+      .then((items) => {
+        if (!cancelled) setChangeRequests(items);
+      })
+      .catch(() => {
+        if (!cancelled) setChangeRequestsError("Could not load organiser change requests.");
+      })
+      .finally(() => {
+        if (!cancelled) setChangeRequestsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [request.id]);
 
   /**
    * Hand off to venue search (workflow step 3).
@@ -95,8 +160,92 @@ export default function CoordinatorRequestDetail({ request }) {
           eventName: request.eventName,
           venueRequirements: request.venueRequirements ?? null,
         },
+          returnToReview: { request },
       },
     });
+  }
+
+  async function handleReviewDecision(decision) {
+    if (decision !== "returned_for_amendment") return;
+
+    const note = reviewNote.trim();
+    if (!note) {
+      setReviewDecisionError("Add instructions before returning this request.");
+      return;
+    }
+
+    setProcessingReviewDecision(true);
+    setReviewDecisionError(null);
+    try {
+      await requestEventClarification(request.id, note);
+      onReviewDecisionProcessed?.();
+    } catch (error) {
+      setReviewDecisionError(
+        error.response?.data?.error || "Could not return the request for amendment.",
+      );
+    } finally {
+      setProcessingReviewDecision(false);
+    }
+  }
+
+  async function handleChangeRequestDecision(changeRequest, decision, decisionNotes) {
+    setProcessingChangeRequestId(changeRequest.id);
+    setChangeRequestActionError(null);
+    try {
+      const processed = await processCoordinatorChangeRequest(changeRequest.id, {
+        decision,
+        decisionNotes,
+      });
+      setChangeRequests((current) =>
+        current.map((item) => item.id === processed.id ? { ...item, ...processed } : item),
+      );
+      setRejectingChangeRequestId(null);
+      setRejectionNote("");
+      onChangeRequestProcessed?.();
+    } catch (error) {
+      setChangeRequestActionError(
+        error.response?.data?.error || "Could not process this change request.",
+      );
+    } finally {
+      setProcessingChangeRequestId(null);
+    }
+  }
+
+  /**
+   * The server accepted the handover (SCRUM-334).
+   *
+   * Closes the handover panel, records who the event went to so the Reassign
+   * button disappears at once, and remounts AssignmentHistory so it reads the
+   * new entry. The panel stays open on this event, now read-only for this
+   * coordinator, so they can see the handover in the history before leaving.
+   *
+   * Then the parent's list is refreshed through onChangeRequestProcessed. That
+   * prop's name is narrower than what it does: both parents implement it as
+   * "refetch the list and keep this panel open on the refreshed row", which
+   * is exactly what a handover needs. In My events the event leaves the list;
+   * in the queue its row is refreshed with the new coordinator. A new prop,
+   * say onEventChanged, would be the cleaner name, but adding one means
+   * editing ReviewQueue and MyAssignedEvents, which this ticket does not
+   * touch. The rename is a follow-up.
+   */
+  function handleReassigned(updated, chosen) {
+    setHandedOverTo({
+      id: updated?.assignedCoordinatorId ?? chosen?.id ?? null,
+      fullName: chosen?.fullName ?? null,
+    });
+    setReassigning(false);
+    setHistoryVersion((version) => version + 1);
+    onChangeRequestProcessed?.();
+  }
+
+  if (reassigning) {
+    return (
+      <ReassignEventPanel
+        request={request}
+        onCancel={() => setReassigning(false)}
+        onReassigned={handleReassigned}
+      />
+    );
   }
 
   return (
@@ -157,6 +306,111 @@ export default function CoordinatorRequestDetail({ request }) {
       </section>
 
       <section>
+        <h3>Organiser change requests</h3>
+        {changeRequestsLoading && <p>Loading change requests...</p>}
+        {changeRequestsError && (
+          <p className="coordinator-clarification__error" role="alert">
+            {changeRequestsError}
+          </p>
+        )}
+        {!changeRequestsLoading && !changeRequestsError && changeRequests.length === 0 && (
+          <p>No change requests have been submitted for this event.</p>
+        )}
+        {!changeRequestsLoading && !changeRequestsError && changeRequests.length > 0 && (
+          <ul className="coordinator-change-requests">
+            {changeRequests.map((changeRequest) => {
+              const isOpen = !changeRequest.decision;
+              const isRejecting = rejectingChangeRequestId === changeRequest.id;
+
+              return (
+                <li key={changeRequest.id}>
+                  <strong>{changeRequest.fieldLabel}</strong>
+                  <p>{changeRequest.details}</p>
+                  <small>
+                    {changeRequest.status.replaceAll("_", " ")} | Requested{" "}
+                    {formatTimestamp(changeRequest.createdAt)}
+                  </small>
+                  {changeRequest.decision && (
+                    <p className="coordinator-change-requests__outcome">
+                      Outcome: {changeRequest.decision === "approved" ? "Approved" : "Rejected"}
+                      {changeRequest.decisionNotes && (
+                        <span> | Reason: {changeRequest.decisionNotes}</span>
+                      )}
+                    </p>
+                  )}
+                  {isOpen && (
+                    <div className="coordinator-change-requests__actions">
+                      <button
+                        type="button"
+                        disabled={processingChangeRequestId === changeRequest.id}
+                        onClick={() => handleChangeRequestDecision(changeRequest, "approved")}
+                      >
+                        {processingChangeRequestId === changeRequest.id ? "Processing..." : "Approve"}
+                      </button>
+                      {!isRejecting && (
+                        <button
+                          type="button"
+                          disabled={processingChangeRequestId === changeRequest.id}
+                          onClick={() => {
+                            setRejectingChangeRequestId(changeRequest.id);
+                            setRejectionNote("");
+                            setChangeRequestActionError(null);
+                          }}
+                        >
+                          Reject
+                        </button>
+                      )}
+                      {isRejecting && (
+                        <form
+                          className="coordinator-change-requests__reject-form"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            handleChangeRequestDecision(
+                              changeRequest,
+                              "rejected",
+                              rejectionNote.trim(),
+                            );
+                          }}
+                        >
+                          <label>
+                            Reason for rejection
+                            <textarea
+                              value={rejectionNote}
+                              onChange={(event) => setRejectionNote(event.target.value)}
+                              rows={3}
+                              maxLength={2000}
+                              required
+                            />
+                          </label>
+                          <button
+                            type="submit"
+                            disabled={processingChangeRequestId === changeRequest.id || !rejectionNote.trim()}
+                          >
+                            {processingChangeRequestId === changeRequest.id ? "Processing..." : "Confirm rejection"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRejectingChangeRequestId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {changeRequestActionError && (
+          <p className="coordinator-clarification__error" role="alert">
+            {changeRequestActionError}
+          </p>
+        )}
+      </section>
+
+      <section>
         <h3>Provenance</h3>
         <ul>
           <li>
@@ -164,17 +418,88 @@ export default function CoordinatorRequestDetail({ request }) {
             <span>{formatTimestamp(request.submittedAt)}</span>
           </li>
           <li>
-            {/* A bare uuid on purpose. The queue joins no profiles row, so no
-                name exists to show -- that is the privacy floor of a queue
-                every Coordinator can read, not a missing feature. Rendered as
-                an identifier so it never reads as a label. */}
+            {/* The name when the row has one, the bare uuid when it does not.
+                A queue row never has one: the queue joins no profiles row,
+                which is the privacy floor of a queue every Coordinator can
+                read. A "My events" row does (SCRUM-333), because those are
+                events this coordinator is responsible for, where contacting
+                the Organiser is the job. The uuid is rendered as an
+                identifier so it never reads as a label. */}
             <strong>Organiser</strong>
-            <code title={request.organiserId ?? undefined}>
-              {request.organiserId ?? "unknown"}
-            </code>
+            {request.organiserName ? (
+              <span>{request.organiserName}</span>
+            ) : (
+              <code title={request.organiserId ?? undefined}>
+                {request.organiserId ?? "unknown"}
+              </code>
+            )}
           </li>
         </ul>
       </section>
+
+      {/* SCRUM-334: who holds the event now, and how it got there, with the
+          handover notes, which every coordinator may read. Read fresh when this
+          panel opens, so it is the current coordinator even if the row this
+          panel was opened from is a little out of date. */}
+      <section>
+        <h3>Coordinator</h3>
+        <AssignmentHistory key={historyVersion} eventRequestId={request.id} view="coordinator" />
+
+        {handedOverTo && (
+          <p className="coordinator-reassign__notice" role="status">
+            Handed over to {handedOverTo.fullName ?? "the coordinator you chose"}. You can still
+            view this event, but not change it.
+          </p>
+        )}
+
+        {canReassign && (
+          <div className="coordinator-reassign">
+            <button type="button" onClick={() => setReassigning(true)}>
+              Hand over to another coordinator
+            </button>
+          </div>
+        )}
+      </section>
+
+      {request.status === "pending_clarification" ? (
+        <section>
+          <h3>Waiting for organiser amendment</h3>
+          <p>{request.clarificationNote || "No clarification note was recorded."}</p>
+        </section>
+      ) : (
+        <section>
+          <h3>Coordinator decision</h3>
+          <p>Approve and reject are not available yet. To request updates, return the event to the Organiser for amendment.</p>
+          <div className="coordinator-clarification">
+            <label>
+              Amendment instructions
+              <textarea
+                value={reviewNote}
+                onChange={(event) => setReviewNote(event.target.value)}
+                rows={4}
+                maxLength={2000}
+                placeholder="Explain what the Organiser needs to clarify or amend."
+              />
+            </label>
+            {reviewDecisionError && (
+              <p className="coordinator-clarification__error" role="alert">
+                {reviewDecisionError}
+              </p>
+            )}
+            <div className="coordinator-review-actions">
+              <button className="coordinator-review-actions__approve" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("approved")}>
+                {processingReviewDecision ? "Saving..." : "Approve request"}
+              </button>
+              <button className="coordinator-review-actions__reject" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("rejected")}>
+                Reject request
+              </button>
+              <button className="coordinator-review-actions__return" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("returned_for_amendment")}>
+                Return for amendment
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section>
         <h3>Find a venue</h3>

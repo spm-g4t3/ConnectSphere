@@ -1,0 +1,42 @@
+/* SCRUM-280. The catalogue screen's own styling.
+ *
+ * The app's base rule paints every .dashboard button as a solid teal block, which
+ * made the row actions the loudest thing in the table and the data the quietest.
+ * Inside the table the actions are quiet outline buttons, the equipment itself
+ * leads, and the page's primary action ("Add equipment type", outside the table)
+ * and the forms keep the solid style. Selectors start from .equipment-catalogue
+ * so they outrank `.dashboard button` without !important. */
+
+.equipment-catalogue__bar { align-items: center; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 14px; }
+.equipment-catalogue__bar h2 { margin: 0; }
+
+/* ---- the table: data first ---- */
+.equipment-table { border-collapse: collapse; width: 100%; }
+.equipment-table th { border-bottom: 2px solid var(--line, #d9e4e0); color: var(--muted, #64757a); font-size: 0.74rem; font-weight: 700; letter-spacing: 0.05em; padding: 8px 10px; text-align: left; text-transform: uppercase; }
+.equipment-table td { border-top: 1px solid var(--line, #d9e4e0); padding: 13px 10px; text-align: left; vertical-align: middle; }
+.equipment-table tbody tr:hover { background: #f4f9f7; }
+.equipment-table td:first-child { color: var(--ink, #17242b); font-size: 1.02rem; font-weight: 700; }
+.equipment-table .equipment-table__number { font-variant-numeric: tabular-nums; text-align: right; }
+.equipment-table th.equipment-table__number { text-align: right; }
+/* the Usable column is the figure people come here for */
+.equipment-table td.equipment-table__number:nth-last-child(2) { color: var(--teal-dark, #075c5a); font-size: 1.05rem; font-weight: 800; }
+
+/* ---- the row actions: quiet outline buttons ---- */
+.equipment-table__actions { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.equipment-catalogue .equipment-table__actions button { background: #ffffff; border: 1px solid #b9cdc8; border-radius: 6px; color: var(--teal-dark, #075c5a); font-size: 0.88rem; font-weight: 600; padding: 7px 14px; white-space: nowrap; }
+.equipment-catalogue .equipment-table__actions button:hover { background: #eef6f3; border-color: var(--teal, #087f7b); color: var(--teal-dark, #075c5a); }
+.equipment-catalogue .equipment-table__actions button:disabled { background: #ffffff; opacity: 0.5; }
+
+/* Retire reads as the careful action, and its confirm step is the one solid
+   button in the table, so it cannot be clicked by accident. */
+.equipment-catalogue .equipment-table__actions button[aria-label^="Retire"] { border-color: #e3c3c3; color: #a12a2a; }
+.equipment-catalogue .equipment-table__actions button[aria-label^="Retire"]:hover { background: #fbefef; border-color: #a12a2a; color: #a12a2a; }
+.equipment-catalogue .equipment-table__actions button[aria-label^="Confirm retire"] { background: #a12a2a; border-color: #a12a2a; color: #ffffff; }
+.equipment-catalogue .equipment-table__actions button[aria-label^="Confirm retire"]:hover { background: #7f1f1f; border-color: #7f1f1f; color: #ffffff; }
+
+/* ---- the forms and history keep the app's solid buttons ---- */
+.equipment-form { display: grid; gap: 14px; max-width: 520px; }
+.equipment-form__field { display: grid; gap: 4px; }
+.equipment-form__field input, .equipment-form__field textarea { font: inherit; padding: 8px; }
+.equipment-errors { color: #a12a2a; margin: 0; }
+.equipment-errors li { border-top: 0; padding: 2px 0; }

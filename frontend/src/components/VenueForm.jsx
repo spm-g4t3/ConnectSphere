@@ -10,8 +10,12 @@
 // and carries no layouts, accessibility, facilities or hours; opening the
 // form on that row would render four empty sections and then -- see
 // buildChanges below -- offer to save them as empty.
+//
+// SCRUM-186 adds the turnaround between events: one select from a fixed list
+// of durations (turnaroundOptions.js), sent on create and, like every other
+// field, on edit only when it moved.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { createVenue, getVenueDetails, updateVenue } from "../services/venueService";
 import {
   ACCESSIBILITY_FEATURES,
@@ -21,6 +25,10 @@ import {
   UNKNOWN_CODE_TITLE,
   optionsWithUnknownCodes,
 } from "../services/venueLookups";
+import {
+  DEFAULT_TURNAROUND_MINUTES,
+  turnaroundOptionsWith,
+} from "../services/turnaroundOptions";
 
 // Keyed by status, like RETIRE_ERROR_MESSAGES and AuthContext's
 // LOGIN_ERROR_MESSAGES.
@@ -134,6 +142,8 @@ const EMPTY_FORM = {
   accessibility: [],
   facilities: [],
   hours: toHourRows([]),
+  // A string because <select> values are strings; Number() at submit.
+  turnaroundMinutes: String(DEFAULT_TURNAROUND_MINUTES),
 };
 
 /** One vocabulary's checkboxes, including any code this build has never met. */
@@ -164,6 +174,7 @@ function CodeCheckboxes({ legend, options, selected, onToggle, disabled }) {
 
 export default function VenueForm({ venueId = null, onSaved }) {
   const isEdit = Boolean(venueId);
+  const turnaroundHelpId = useId();
 
   const [form, setForm] = useState(EMPTY_FORM);
 
@@ -199,6 +210,11 @@ export default function VenueForm({ venueId = null, onSaved }) {
         accessibility: venue.accessibility ?? [],
         facilities: venue.facilities ?? [],
         hours: toHourRows(venue.hours),
+        // `??`, not `||`: a saved 0 is a real choice ("None"), not a gap.
+        // A server that omits the field (a backend before 017) reads as the
+        // default, which is also what buildChanges compares against -- so an
+        // untouched select sends nothing.
+        turnaroundMinutes: String(venue.turnaroundMinutes ?? DEFAULT_TURNAROUND_MINUTES),
       });
       setLoadError(null);
     } catch {
@@ -242,6 +258,8 @@ export default function VenueForm({ venueId = null, onSaved }) {
       accessibility: form.accessibility,
       facilities: form.facilities,
       hours: fromHourRows(form.hours),
+      // Always sent, even at the default, so what is saved is what was shown.
+      turnaroundMinutes: Number(form.turnaroundMinutes),
     };
   }
 
@@ -288,6 +306,12 @@ export default function VenueForm({ venueId = null, onSaved }) {
     const hours = fromHourRows(form.hours);
     if (normaliseHours(hours) !== normaliseHours(baseline.hours)) {
       changes.hours = hours;
+    }
+
+    // Compared as numbers: the select holds "0", the server sends 0.
+    const turnaround = Number(form.turnaroundMinutes);
+    if (turnaround !== (baseline.turnaroundMinutes ?? DEFAULT_TURNAROUND_MINUTES)) {
+      changes.turnaroundMinutes = turnaround;
     }
 
     return changes;
@@ -361,6 +385,9 @@ export default function VenueForm({ venueId = null, onSaved }) {
     baseline?.accessibility,
   );
   const facilityOptions = optionsWithUnknownCodes(FACILITIES, baseline?.facilities);
+  // From the BASELINE for the same reason: a saved value the list lacks keeps
+  // its option even after another one is chosen.
+  const turnaroundOptions = turnaroundOptionsWith(baseline?.turnaroundMinutes);
 
   return (
     <form className="venue-form" onSubmit={handleSubmit}>
@@ -457,6 +484,29 @@ export default function VenueForm({ venueId = null, onSaved }) {
           Leave a day unticked to record the venue as closed that day.
         </p>
       </fieldset>
+
+      <label>
+        Turnaround between events
+        <select
+          value={form.turnaroundMinutes}
+          onChange={(e) => updateField("turnaroundMinutes", e.target.value)}
+          disabled={saving}
+          aria-describedby={turnaroundHelpId}
+        >
+          {turnaroundOptions.map((option) => (
+            <option key={option.minutes} value={String(option.minutes)}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {/* Outside the label so it is not part of the select's accessible name;
+          aria-describedby ties it back. Says what the field means, not that
+          anything enforces it -- nothing does yet (SCRUM-139). */}
+      <p className="venue-form__help" id={turnaroundHelpId}>
+        Time the venue needs between one event ending and the next starting, for
+        set-up and clear-down.
+      </p>
 
       {saveError && (
         <p className="venue-form__error" role="alert">

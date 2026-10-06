@@ -30,9 +30,11 @@
 // is worse than none: it sends the next reader looking for a backend gap that
 // is already closed.
 //
-// getEventRequestQueue is the one call here that is not the Organiser's own
+// getEventRequestQueue was the first call here that is not the Organiser's own
 // data (SCRUM-45). It is gated on the Event Coordinator role server-side, so
 // a 403 from it is an ordinary outcome for any other role rather than a fault.
+// The SCRUM-327 calls at the bottom of this file are the same kind, and are
+// introduced there.
 
 import { apiClient } from "./apiClient";
 
@@ -81,6 +83,34 @@ export async function updateEventRequest(id, input) {
  */
 export async function submitEventRequest(id) {
   const response = await apiClient.post(`/event-requests/${id}/submit`);
+  return response.data;
+}
+
+export async function requestEventClarification(id, note) {
+  const response = await apiClient.post(`/event-requests/${id}/clarification`, { note });
+  return response.data;
+}
+
+export async function respondToEventClarification(id, updates) {
+  const response = await apiClient.patch(
+    `/event-requests/${id}/clarification-response`,
+    updates,
+  );
+  return response.data;
+}
+
+export async function getCoordinatorChangeRequests(eventRequestId) {
+  const response = await apiClient.get(
+    `/event-requests/${eventRequestId}/change-requests/review`,
+  );
+  return response.data;
+}
+
+export async function processCoordinatorChangeRequest(changeRequestId, decision) {
+  const response = await apiClient.post(
+    `/event-requests/change-requests/${changeRequestId}/decision`,
+    decision,
+  );
   return response.data;
 }
 
@@ -144,5 +174,217 @@ export async function getEventRequestStatus(id) {
  */
 export async function getEventRequestQueue() {
   const response = await apiClient.get("/event-requests/queue");
+  return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// SCRUM-327: coordinator assignment
+// ---------------------------------------------------------------------------
+// The six calls below are the frontend half of SCRUM-331 to SCRUM-334. The
+// backend for all six is built and tested; no component calls these yet. They
+// are added on their own first so the app behaves exactly as before, and each
+// screen that uses one can be built and reviewed separately.
+//
+// Every one of them is role-gated or ownership-scoped on the server. Nothing
+// here decides who may see what: a call the caller is not entitled to make
+// comes back as a 403 or a 404, and the component turns that into a message.
+
+/**
+ * Every event assigned to the signed-in coordinator, "My events" (SCRUM-333).
+ *
+ * Every status, decided and finished ones included: this is the list of what
+ * the coordinator is responsible for, not a worklist that empties. Drafts
+ * never appear, because a draft has no coordinator yet.
+ *
+ * Ordered by the backend, earliest event first by proposedStart, with events
+ * that have no date at the end. Not re-sorted here, for the reason
+ * ReviewQueue gives: the server already answered "what is coming up soonest",
+ * and a second answer in the client is how two screens start disagreeing.
+ * Grouping by status, which SCRUM-327 AC11 asks for, is the component's job.
+ *
+ * Each row is the shape getMyEventRequests returns, statusDisplay included,
+ * plus organiserName: the Organiser's name, or null when they have none on
+ * record. This is the one list that carries a name. The shared queue
+ * deliberately does not, because it is everyone's queue; these are events the
+ * coordinator is responsible for, where contacting the Organiser is the job.
+ *
+ * Gated on the event_coordinator role, so a 403 means "not a coordinator",
+ * not a fault. The list is the caller's from the token; there is no parameter
+ * that could ask for someone else's.
+ *
+ * @returns {Promise<Array>} possibly empty; nothing assigned is the good state
+ */
+export async function getMyAssignedEvents() {
+  const response = await apiClient.get("/event-requests/mine");
+  return response.data;
+}
+
+/**
+ * One event, for any Event Coordinator (SCRUM-332).
+ *
+ * Not only the assigned coordinator: every coordinator can read every event
+ * past draft. Which coordinator holds an event decides who may change it,
+ * never who may read it, and SCRUM-327 AC7 says the previous coordinator can
+ * still view an event they handed over.
+ *
+ * This is how a coordinator opens an event the queue no longer carries. The
+ * queue holds only submitted, under_review and pending_clarification, so an
+ * approved or confirmed event, the ones "My events" lists, can only be opened
+ * through here. getEventRequestById reads the Organiser's route, which answers
+ * 404 to anyone who did not organise the event.
+ *
+ * A draft answers 404, the same as an id that does not exist. That is
+ * deliberate: a draft is the Organiser's private working copy, and no
+ * coordinator is meant to learn that one exists.
+ *
+ * The response is the same shape as a queue row, statusDisplay included,
+ * without organiserName.
+ *
+ * @param {string} id
+ * @returns {Promise<Object>}
+ */
+export async function getEventRequestForReview(id) {
+  const response = await apiClient.get(`/event-requests/${id}/review`);
+  return response.data;
+}
+
+/**
+ * Every Event Coordinator, for the reassign picker (SCRUM-334).
+ *
+ * Each entry is { id, fullName }, in name order, with anyone who has no name
+ * on record at the end. fullName can be null: a coordinator with no name is
+ * still someone an event can be handed to, so the picker has to show them
+ * some other way rather than drop them.
+ *
+ * The list includes the caller. Nobody can hand an event to themselves, so
+ * the picker should leave the signed-in user out, matching on id: the user in
+ * AuthContext has no name to compare. That is the picker's job; the server
+ * returns the plain list.
+ *
+ * Gated on the event_coordinator role. This is the first call in the app that
+ * lists people, and nothing outside the reassign screen needs it.
+ *
+ * @returns {Promise<Array<{id: string, fullName: string|null}>>} possibly empty
+ */
+export async function listCoordinators() {
+  const response = await apiClient.get("/event-requests/coordinators");
+  return response.data;
+}
+
+/**
+ * One event's assignment history, the Organiser's view (SCRUM-334, SCRUM-327
+ * AC10).
+ *
+ * Oldest first, so it reads as a chain: assigned to A on submission, then
+ * handed from A to B, then from B to C. Each entry:
+ *
+ *   { id,
+ *     previousCoordinatorId, previousCoordinatorName,
+ *     newCoordinatorId,      newCoordinatorName,
+ *     assignedById,          assignedByName,
+ *     automatic,
+ *     createdAt }
+ *
+ * Two things a caller must understand before rendering one:
+ *
+ *  - automatic: true means the system assigned the event when it was
+ *    submitted. There is no person behind it, so assignedById and
+ *    assignedByName are null by design, not because data is missing. Render
+ *    it as "Assigned automatically", not as a handover by nobody. Test
+ *    automatic rather than assignedByName, because a name is also null for a
+ *    person who has none on record.
+ *  - previousCoordinatorId and previousCoordinatorName are null on the first
+ *    entry, because nobody held the event before it was assigned.
+ *
+ * Any name can be null when the person has none on record. createdAt is an
+ * ISO timestamp: when that assignment took effect.
+ *
+ * There is no handoverNote key, and that is deliberate. The note is written by
+ * one coordinator for another ("I'm on leave, the shortlist is in my notes"),
+ * and the Organiser sees who and when, never the note. The key is absent
+ * rather than null so that "not sent to you" is never confused with "none was
+ * written".
+ *
+ * Organiser-scoped: someone else's event answers 404, exactly as a missing
+ * one does. A coordinator calling this gets the same 404 for an event they
+ * did not organise; their view is getAssignmentHistoryForReview.
+ *
+ * @param {string} id
+ * @returns {Promise<Array>} possibly empty: a draft has no history yet
+ */
+export async function getAssignmentHistory(id) {
+  const response = await apiClient.get(`/event-requests/${id}/assignments`);
+  return response.data;
+}
+
+/**
+ * One event's assignment history, a coordinator's view (SCRUM-334, SCRUM-327
+ * AC9).
+ *
+ * The same entries as getAssignmentHistory, oldest first, with the same two
+ * rules: automatic: true means the system assigned it on submission and the
+ * assignedBy fields are null by design, and the previous coordinator is null
+ * on the first entry because nobody held the event before. Each entry also
+ * carries handoverNote: the note's text, or null when none was written, which
+ * is always so on an automatic assignment.
+ *
+ * Any coordinator gets the notes, not only the one now assigned. The note is
+ * written for the coordinator team, and the Organiser is the reader it is
+ * kept from. Limiting it to the current coordinator would hide every note from
+ * the person who wrote it, since writing one means handing the event away.
+ *
+ * Gated on the event_coordinator role, so a 403 means "not a coordinator". A
+ * draft or a missing id answers 404, as getEventRequestForReview does.
+ *
+ * @param {string} id
+ * @returns {Promise<Array>} possibly empty
+ */
+export async function getAssignmentHistoryForReview(id) {
+  const response = await apiClient.get(`/event-requests/${id}/assignments/review`);
+  return response.data;
+}
+
+/**
+ * Hand an event to another Event Coordinator, with an optional note
+ * (SCRUM-331, SCRUM-327 AC6 and AC9).
+ *
+ * Only the event's assigned coordinator may do this. The person handing over
+ * is whoever is signed in, taken from the token on the server; nothing sent
+ * here can name someone else.
+ *
+ * The body is exactly { newCoordinatorId, handoverNote }. A blank or omitted
+ * note is stored as no note.
+ *
+ * Returns the event after the handover, statusDisplay included, with
+ * assignedCoordinatorId now the new coordinator, so a screen can redraw from
+ * the response.
+ *
+ * The status codes a caller will want to tell apart:
+ *
+ *   403  the caller is not the event's assigned coordinator, or is not a
+ *        coordinator at all. It may have just been handed to someone else.
+ *   400  newCoordinatorId is missing or not an id, the person named is not an
+ *        Event Coordinator, or they already hold the event. A missing or
+ *        malformed id carries err.response.data.details naming the field.
+ *   409  the event's status does not allow a handover (only submitted,
+ *        under_review, pending_clarification, approved and confirmed do), or
+ *        it changed hands while this request was in flight.
+ *   404  the event does not exist.
+ *
+ * The 403 and 400 messages are written by the database and name ids, so they
+ * read badly as they are. Show a message chosen by status code instead, the
+ * way ReviewQueue does.
+ *
+ * @param {string} id
+ * @param {Object} handover
+ * @param {string} handover.newCoordinatorId  an id from listCoordinators
+ * @param {string} [handover.handoverNote]    optional, for the new coordinator
+ * @returns {Promise<Object>} the event after the handover
+ */
+export async function reassignEventRequest(id, { newCoordinatorId, handoverNote }) {
+  const response = await apiClient.post(`/event-requests/${id}/reassign`, {
+    newCoordinatorId,
+    handoverNote,
+  });
   return response.data;
 }

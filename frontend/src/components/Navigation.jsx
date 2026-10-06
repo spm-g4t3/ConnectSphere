@@ -2,7 +2,7 @@
 // Renders only the nav links relevant to the logged-in user's role.
 
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { normaliseRole } from "../auth/normaliseRole";
 
@@ -10,10 +10,17 @@ const NAV_LINKS_BY_ROLE = {
   EVENT_ORGANISER: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/events", label: "My Events" },
-    { to: "/venue-search", label: "Find a Venue" },
+    // No "Find a Venue": an Organiser states venue needs on the request
+    // (SCRUM-10); Coordinators search and book venues (SCRUM-20, SCRUM-243).
   ],
   EVENT_COORDINATOR: [
     { to: "/dashboard", label: "Dashboard" },
+    // SCRUM-333. Above the queue because it is the coordinator's own work:
+    // the events they are responsible for, every status. "My Events", the
+    // same words as the Organiser's link, because it answers the same
+    // question for this role, but a different target: /events is the
+    // Organiser's page.
+    { to: "/my-events", label: "My Events" },
     // "/review-queue", not "/events" (SCRUM-45). /events renders
     // MyEventRequests, which reads the organiser-scoped endpoint, so this
     // link used to promise a Coordinator "Events" and hand them "You haven't
@@ -40,6 +47,7 @@ const NAV_LINKS_BY_ROLE = {
     { to: "/dashboard", label: "Dashboard" },
     { to: "/tickets", label: "Support Tickets" },
     { to: "/equipment", label: "Equipment Requests" },
+    { to: "/equipment-catalogue", label: "Equipment Catalogue" },
   ],
 };
 
@@ -65,7 +73,13 @@ export default function Navigation() {
       <ul className="app-nav__links">
         {links.map((link) => (
           <li key={link.to}>
-            <Link to={link.to}>{link.label}</Link>
+            <NavLink
+              to={link.to}
+              end={link.to === "/dashboard"}
+              className={({ isActive }) => isActive ? "app-nav__link app-nav__link--active" : "app-nav__link"}
+            >
+              {link.label}
+            </NavLink>
           </li>
         ))}
       </ul>

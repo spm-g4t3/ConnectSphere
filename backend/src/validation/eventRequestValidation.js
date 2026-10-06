@@ -19,8 +19,14 @@
  * proposed start has to be ahead of now.
  *
  * Pure and synchronous -- no database, no network, no imports beyond the error
- * types, and no clock read except the default for the injected `now`. That
- * keeps it unit-testable without credentials and deterministic in CI.
+ * types and the shared timestamp rules, and no clock read except the default
+ * for the injected `now`. That keeps it unit-testable without credentials and
+ * deterministic in CI.
+ *
+ * The timestamp rules themselves -- TIMESTAMP_PATTERN, its two near-miss
+ * patterns, daysInMonth and checkTimestamp -- live in timestampValidation.js
+ * (SCRUM-126), moved there unchanged so venue blocks obey the same contract.
+ * Their reasoning is documented there, not here.
  *
  * Deliberately NOT checked here:
  *
@@ -30,10 +36,10 @@
  *  - Any minimum notice between submission and the proposed start. The customer
  *    has not said what that period should be; inventing one would be a business
  *    rule nobody asked for. Open for the next Q&A.
- *  - Timezone conversion. A caller must state an offset (see TIMESTAMP_PATTERN)
- *    but the value is passed on as written: the column is timestamptz, so
- *    Postgres is the authority on resolving it, and a second interpretation
- *    here could only introduce disagreement.
+ *  - Timezone conversion. A caller must state an offset (see TIMESTAMP_PATTERN
+ *    in timestampValidation.js) but the value is passed on as written: the
+ *    column is timestamptz, so Postgres is the authority on resolving it, and
+ *    a second interpretation here could only introduce disagreement.
  *  - submitted_at, and any status transition. Whether the move to 'submitted'
  *    is legal is answered by canTransition in src/domain/eventRequestStatus.js,
  *    and stamping the timestamp is the service layer's job. This module answers
@@ -41,6 +47,7 @@
  */
 
 import { ValidationError } from '../errors.js';
+import { checkTimestamp } from './timestampValidation.js';
 
 
 /** Fields carrying prose, in the order the story lists them. */
@@ -93,45 +100,6 @@ const SUBMIT_MANDATORY = [
  * has to arrive, and it is enforced separately below for exactly that reason.
  */
 const UPDATE_MANDATORY = [];
-
-
-/** A date with no time of day at all. Checked first so it can be named. */
-const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * A date and time with no offset. Exists only to produce a better message than
- * "malformed" for a value that is nearly right, so its date part stays loose --
- * anything reaching it already has a time of day and no offset.
- */
-const LOCAL_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?$/;
-
-/**
- * An instant this system will accept: a real calendar date, a time of day, and
- * an explicit offset. Seconds and fractional seconds are optional, following
- * the TIME_PATTERN precedent in venueValidation.js -- no Organiser types
- * milliseconds, and demanding them would refuse a well-formed value.
- *
- * The offset is required, not optional. ECMAScript parses a date-time without
- * one as LOCAL time while parsing a date-only value as UTC, so an offset-less
- * string means a different instant on a developer's machine, on Supabase and in
- * CI -- the same stored request would describe three different periods.
- *
- * Ranges are spelled out rather than left as \d{2} for the same reason
- * TIME_PATTERN spells out hours and minutes: '2026-13-45' should be refused for
- * what it is, not survive to be caught by a parse failure further down.
- */
-const TIMESTAMP_PATTERN =
-  /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):([0-5]\d)(:([0-5]\d)(\.\d+)?)?(Z|[+-]([01]\d|2[0-3]):([0-5]\d))$/;
-
-/**
- * How many days that month actually had, leap years included.
- *
- * Date.UTC(year, month, 0) is day zero of the following month, which is the
- * last day of this one -- month being 1-based here and 0-based there.
- */
-function daysInMonth(year, month) {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
 
 
 /**
@@ -198,74 +166,6 @@ function checkText(errors, field, value, required) {
   }
 
   return trimmed;
-}
-
-/**
- * A timestamp, checked on the string's shape before it is parsed.
- *
- * The order matters and is the whole point of the two-step approach. A
- * deliberate midnight event, '2026-06-01T00:00:00Z', and a date-only
- * '2026-06-01' resolve to exactly the same instant, so no examination of the
- * parsed value can tell them apart -- a rule inferred from the instant would
- * have to refuse real midnight events. Only the string distinguishes them.
- *
- * The calendar day is then checked arithmetically rather than by trusting the
- * parse. '2026-02-30T09:00:00Z' matches every pattern here and is not a day,
- * and new Date() does not refuse it: V8 rolls it forward to 2026-03-02 and
- * reports success. An Organiser who typed 30 February would have been handed an
- * event two days later without being told -- the same silently invented value
- * the offset and time-of-day rules exist to stop.
- *
- * @returns {Date|null} the instant, or null when a fault was recorded
- */
-function checkTimestamp(errors, field, value) {
-  if (typeof value !== 'string') {
-    // Strict about type, as checkCapacity in venueValidation.js is: epoch
-    // milliseconds are a number the platform would happily accept, and a caller
-    // sending them should find out here rather than three stories downstream.
-    errors.add(field, 'must be an ISO 8601 date and time, given as text');
-    return null;
-  }
-
-  const text = value.trim();
-
-  if (DATE_ONLY_PATTERN.test(text)) {
-    // Naming the real fault. "Invalid timestamp" would send the Organiser
-    // hunting for a typo in a date that is perfectly well formed.
-    errors.add(field, 'must include a time of day, not a date on its own');
-    return null;
-  }
-
-  if (LOCAL_DATETIME_PATTERN.test(text)) {
-    errors.add(field, 'must include a UTC offset, such as Z or +08:00');
-    return null;
-  }
-
-  const match = TIMESTAMP_PATTERN.exec(text);
-  if (match === null) {
-    errors.add(
-      field,
-      'must be an ISO 8601 date and time such as 2026-06-01T09:00:00+08:00',
-    );
-    return null;
-  }
-
-  const [, year, month, day] = match;
-  if (Number(day) > daysInMonth(Number(year), Number(month))) {
-    errors.add(field, 'is not a real date -- that month does not have that many days');
-    return null;
-  }
-
-  const instant = new Date(text);
-  if (Number.isNaN(instant.getTime())) {
-    // Unreachable for anything matching the pattern above on this engine, and
-    // kept as a backstop rather than removed: it costs one comparison, and the
-    // alternative is trusting that no future engine parses differently.
-    errors.add(field, 'is not a real date');
-    return null;
-  }
-
-  return instant;
 }
 
 /**
