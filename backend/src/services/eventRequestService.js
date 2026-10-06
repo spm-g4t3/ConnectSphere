@@ -89,17 +89,24 @@ import { ROLE } from '../domain/userRole.js';
  * API response.
  *
  * assigned_coordinator_id went in with SCRUM-330 (migration 014).
- * reviewing_coordinator_id went in with SCRUM-331, the first of 010's five to
+ * reviewing_coordinator_id went in with SCRUM-331, the first of 025's five to
  * reach a response, because a handover moves it (018) and the person now able
  * to decide the event has to be visible. Each was mapped in toEventRequest in
- * the same change. The other four decision columns are still absent, and stay
- * absent until a story needs them.
+ * the same change.
+ *
+ * decision, decision_note, decided_by and decided_at went in with SCRUM-121
+ * (SCRUM-19), which completes 025's five. Until then none of the four had
+ * reached any API response: nothing wrote them, because no function could
+ * record a decision before 029. Now decide_event_request writes them, and
+ * SCRUM-19 AC9 asks for the outcome, the note, who decided and when to be
+ * recorded and visible, so every read carries them.
  */
 const COLUMNS = `
   id, organiser_id, event_name, purpose, description,
   proposed_start, proposed_end, expected_attendance,
   venue_requirements, accessibility_requirements, equipment_requirements,
   status, clarification_note, assigned_coordinator_id, reviewing_coordinator_id,
+  decision, decision_note, decided_by, decided_at,
   created_at, updated_at, submitted_at
 `;
 
@@ -244,8 +251,9 @@ function translateError(error) {
   }
 
   // invalid_parameter_value: the person named as the new coordinator does not
-  // hold the event_coordinator role. A 400, because the request named the
-  // wrong person.
+  // hold the event_coordinator role (018), or a rejection has no reason
+  // (decide_event_request, 029, the backstop behind decideEventRequest's own
+  // check). A 400 either way, because the request carried a bad value.
   if (code === '22023') {
     return new ValidationError(detail);
   }
@@ -294,11 +302,19 @@ function toEventRequest(row) {
     // clarificationNote, so a row read without the column still gives the
     // caller null rather than undefined, and the key is always present.
     assignedCoordinatorId: row.assigned_coordinator_id ?? null,
-    // The coordinator who may decide the request (010's
-    // decided_by_is_reviewer). Null until someone starts the review. After a
-    // decision it records who decided, even when the event has since been
-    // handed to someone else (018).
+    // The coordinator who may decide the request (025's
+    // decided_by_is_reviewer). Null until the review is started
+    // (start_event_review, 029). After a decision it records who decided, even
+    // when the event has since been handed to someone else (018).
     reviewingCoordinatorId: row.reviewing_coordinator_id ?? null,
+    // SCRUM-19 AC9: the outcome, the note, who decided and when. All four are
+    // null until decide_event_request (029) records a decision, and 025's
+    // decision_fields_together keeps decision, decidedBy and decidedAt set or
+    // null together. `?? null` so an undecided row has the keys, as above.
+    decision: row.decision ?? null,
+    decisionNote: row.decision_note ?? null,
+    decidedBy: row.decided_by ?? null,
+    decidedAt: row.decided_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     submittedAt: row.submitted_at,
@@ -741,19 +757,21 @@ export async function changeEventRequestStatus(
  *     and gives the true reason. It comes before the status check, as in 018:
  *     whether the event could be sent for clarification is a question only
  *     its coordinator has any reason to ask.
- *  3. changeEventRequestStatus, which asks canTransition and writes. A request
- *     that is still submitted is first moved to under_review, because
- *     clarification is asked for from under_review only (SCRUM-318). That is
- *     two recorded transitions, submitted -> under_review and then
- *     under_review -> pending_clarification, each its own database call. If
- *     the second is refused the request stays under_review, a legal status the
- *     coordinator can act on, and the first row is a true record of what
- *     happened. The note travels as the reason for the second: it is why the
- *     request changed status, and the function stores it as the clarification
- *     note too (021). The caller is passed as the expected coordinator on both,
- *     so an event handed to someone else between the read and a write is a
- *     409, not a change made by someone who no longer holds it. A refresh
- *     shows which it was.
+ *  3. The writes. A request that is still submitted is first put under
+ *     review, because clarification is asked for from under_review only
+ *     (SCRUM-318). Since SCRUM-19 that first step is startEventReview, which
+ *     also makes the caller the reviewing coordinator (see the comment at the
+ *     call). Then changeEventRequestStatus, which asks canTransition and
+ *     writes under_review -> pending_clarification. Two recorded transitions,
+ *     each its own database call. If the second is refused the request stays
+ *     under_review, a legal status the coordinator can act on, and the first
+ *     row is a true record of what happened. The note travels as the reason
+ *     for the second: it is why the request changed status, and the function
+ *     stores it as the clarification note too (021). Both calls refuse a
+ *     caller who no longer holds the event: start_event_review with a 403,
+ *     since it checks the caller under its lock, and the status change with a
+ *     409, since it compares an expected coordinator. A refresh shows which it
+ *     was.
  *
  * @param {string} id
  * @param {string} note           what the Organiser is asked to clarify
@@ -791,17 +809,16 @@ export async function requestEventClarification(id, note, coordinatorId, { clien
 
   let expectedStatus = current.status;
 
+  // A submitted request is put under review first, through startEventReview
+  // (start_event_review, 029), not changeEventRequestStatus. The old path
+  // wrote only the status, so reviewing_coordinator_id stayed null, and 025's
+  // decided_by_is_reviewer then refused every decision on that request: the
+  // coordinator who asked the question could never approve or reject it.
+  // start_event_review sets the reviewer in the same statement as the status,
+  // and refuses anyone but the assigned coordinator under its row lock, so it
+  // carries the same guard the expected coordinator gave the old call.
   if (expectedStatus === STATUS.SUBMITTED) {
-    await changeEventRequestStatus(
-      id,
-      {
-        expectedStatus,
-        newStatus: STATUS.UNDER_REVIEW,
-        changedBy: coordinatorId,
-        expectedCoordinatorId: coordinatorId,
-      },
-      { client: db },
-    );
+    await startEventReview(id, coordinatorId, { client: db });
     expectedStatus = STATUS.UNDER_REVIEW;
   }
 
@@ -952,6 +969,154 @@ export async function reassignEventRequest(id, changes, assignedBy, { client } =
     p_new_coordinator_id: newCoordinatorId.trim(),
     p_assigned_by: assignedBy,
     p_handover_note: note,
+  });
+
+  if (error) throw translateError(error);
+
+  return toEventRequest(data);
+}
+
+
+/**
+ * The assigned coordinator starts reviewing a submitted request.
+ *
+ * SCRUM-346, for SCRUM-19 AC1. The whole change happens in start_event_review
+ * (migration 029), called through rpc. In one transaction it locks the row,
+ * refuses anyone but the assigned coordinator, refuses any status but
+ * submitted, then moves the request to under_review, makes the caller its
+ * reviewing coordinator, and writes the status history row.
+ *
+ * Setting the reviewer is the reason this exists. 025's decided_by_is_reviewer
+ * requires the person who decides to be the reviewing coordinator, and before
+ * 029 nothing ever set that column, so no decision could be recorded at all.
+ * change_event_request_status cannot set it; 029's header gives the full
+ * argument for a function of its own.
+ *
+ * No read first, for the reason reassignEventRequest gives: everything a read
+ * could tell this service (does the event exist, is the caller its
+ * coordinator, is it submitted) the function answers under its row lock, when
+ * the answer cannot change before the write. A blank caller is refused here,
+ * because it would never reach the function as a uuid.
+ *
+ * @param {string} id
+ * @param {string} coordinatorId  the caller, from the JWT -- never the body
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the request, now under_review, in camelCase
+ * @throws {ValidationError} no coordinatorId, before any call
+ * @throws {ForbiddenError}  the caller is not the event's assigned coordinator
+ * @throws {ConflictError}   the request is not submitted, or changed under the call
+ * @throws {NotFoundError}   no such request
+ */
+export async function startEventReview(id, coordinatorId, { client } = {}) {
+  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
+    throw new ValidationError('coordinatorId is required');
+  }
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('start_event_review', {
+    p_event_request_id: id,
+    p_coordinator_id: coordinatorId,
+  });
+
+  if (error) throw translateError(error);
+
+  return toEventRequest(data);
+}
+
+
+/** The two decisions a coordinator can make, exactly as 025's enum spells them. */
+const DECISIONS = Object.freeze(['approved', 'rejected']);
+
+/**
+ * The assigned coordinator approves or rejects a request under review.
+ *
+ * SCRUM-119 and SCRUM-121, for SCRUM-19 AC1, AC2, AC3, AC5, AC6, AC7 and AC9.
+ * The status and the whole decision are written by decide_event_request
+ * (migration 029) in one statement, because 025's constraints are checked
+ * against the whole row: written apart, each half would leave a row one of
+ * them refuses. The function also locks the row, checks the caller is the
+ * assigned coordinator and the reviewer, that the request is under review,
+ * and (AC6) that an approval's start date has not passed, and writes the
+ * status history row with the note as its reason.
+ *
+ * What the service checks first, before any call:
+ *
+ *  - decision is exactly 'approved' or 'rejected', lowercase. No
+ *    case-folding: those are the enum's values, the frontend sends one from a
+ *    button rather than typed text, and accepting 'Approved' would invent a
+ *    second spelling the API must honour forever. Anything else would reach
+ *    PostgREST as an unreadable enum value and come back as a 500.
+ *  - a rejection has a reason. 029 refuses it too (22023), but its refusal is
+ *    one sentence in a Postgres exception; this one names decisionNote in
+ *    details, so the form can show it beside the field, as every other form
+ *    fault in this API is reported. The function's check stays as the
+ *    backstop for any caller that does not come through here.
+ *  - decidedBy is present.
+ *
+ * A blank note becomes null, as reassignEventRequest does for a handover note.
+ * Sent as spaces it would also fail 021's reason_not_blank on the history row,
+ * since the note is that row's reason.
+ *
+ * `now` is injectable for 016's reason for submitted_at, and it matters more
+ * here: AC6 measures "has the start date passed" at this instant, so a test of
+ * that boundary needs to state it.
+ *
+ * @param {string} id
+ * @param {object} input
+ * @param {string} input.decision        'approved' or 'rejected'
+ * @param {string} [input.decisionNote]  required when rejecting
+ * @param {string} decidedBy             the caller, from the JWT -- never the body
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @param {Date}   [options.now]         the decision time
+ * @returns {Promise<object>} the request after the decision, in camelCase
+ * @throws {ValidationError} a bad decision, a rejection with no reason, or no
+ *                           decidedBy, before any call
+ * @throws {ForbiddenError}  the caller is not the assigned coordinator or reviewer
+ * @throws {ConflictError}   not under review, or an approval whose start date
+ *                           has passed, or changed under the call
+ * @throws {NotFoundError}   no such request
+ */
+export async function decideEventRequest(
+  id,
+  { decision, decisionNote } = {},
+  decidedBy,
+  { client, now = new Date() } = {},
+) {
+  if (!DECISIONS.includes(decision)) {
+    const message = "must be 'approved' or 'rejected'";
+    throw new ValidationError(
+      `Invalid decision -- decision: ${message}`,
+      [{ field: 'decision', message }],
+    );
+  }
+
+  const note = typeof decisionNote === 'string' && decisionNote.trim() !== ''
+    ? decisionNote
+    : null;
+
+  if (decision === 'rejected' && note === null) {
+    const message = 'is required when rejecting a request';
+    throw new ValidationError(
+      `Invalid decision -- decisionNote: ${message}`,
+      [{ field: 'decisionNote', message }],
+    );
+  }
+
+  if (typeof decidedBy !== 'string' || decidedBy.trim() === '') {
+    throw new ValidationError('decidedBy is required');
+  }
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('decide_event_request', {
+    p_event_request_id: id,
+    p_decision: decision,
+    p_decision_note: note,
+    p_decided_by: decidedBy,
+    p_decided_at: now.toISOString(),
   });
 
   if (error) throw translateError(error);
