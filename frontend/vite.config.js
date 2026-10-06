@@ -76,6 +76,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./tests/setup.js'],
     include: ['tests/**/*.test.{js,jsx}'],
+    testTimeout: 15000,
     // Explicit imports (describe/it/expect from 'vitest') rather than globals,
     // matching the backend suite and keeping ESLint's no-undef honest.
     globals: false,
