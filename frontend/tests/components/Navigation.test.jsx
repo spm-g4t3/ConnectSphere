@@ -69,5 +69,11 @@ describe("Navigation links by role", () => {
   renderAs("technical_support_staff");
 
   expect(screen.getByRole("link", { name: "Equipment Catalogue" })).toHaveAttribute("href", "/equipment-catalogue");
+  });
+
+  it("gives Technical Support Staff a Check Availability link", () => {
+  renderAs("technical_support_staff");
+
+  expect(screen.getByRole("link", { name: "Check Availability" })).toHaveAttribute("href", "/equipment-availability");
 });
 });

@@ -48,6 +48,7 @@ const NAV_LINKS_BY_ROLE = {
     { to: "/tickets", label: "Support Tickets" },
     { to: "/equipment", label: "Equipment Requests" },
     { to: "/equipment-catalogue", label: "Equipment Catalogue" },
+    { to: "/equipment-availability", label: "Check Availability" },
   ],
 };
 
