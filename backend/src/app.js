@@ -14,6 +14,7 @@ import authRoutes from './routes/auth.js';
 import eventRequestRoutes from './routes/eventRequests.js';
 import venueRoutes from './routes/venues.js';
 import notificationRoutes from './routes/notifications.js';
+import bookingRequestRoutes from './routes/bookingRequests.js';
 
 const app = express();
 
@@ -33,6 +34,9 @@ app.use('/api/venues', venueRoutes);
 // SCRUM-128: the signed-in user's own notifications. Behind requireAuth and
 // scoped to the caller; see the route file for why there is no role gate.
 app.use('/api/notifications', notificationRoutes);
+
+// SCRUM-252: an Event Coordinator requests a venue for an approved event.
+app.use('/api/booking-requests', bookingRequestRoutes);
 
 const PORT = process.env.PORT || 5000;
 
