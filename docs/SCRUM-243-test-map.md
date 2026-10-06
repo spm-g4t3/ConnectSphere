@@ -56,3 +56,21 @@ Key to the layers:
 - **N10 suitability.** Not built; every suitability test uses a fake checker.
 - **Live checks.** They have not been run against the project database, which
   did not have migrations 027-031 when this was written.
+
+## SCRUM-257 review: what remains before the story can close
+
+Implemented and verified here: every criterion except the parts below.
+Blocked by work outside this story:
+
+| Blocker | Owner | Effect on SCRUM-243 |
+|---|---|---|
+| No suitability check (N10) | SCRUM-188 / SCRUM-190 | `POST /api/booking-requests` answers 503 in production, so no request can be submitted. The confirmation flow is tested with a fake checker only. |
+| No "request submitted" notification | SCRUM-174 (SCRUM-210 to SCRUM-216) | Criterion 6's notification half. Migration 030 marks where the insert belongs. |
+| No Venue Staff pending list endpoint or screen | SCRUM-258 (SCRUM-259, SCRUM-263) | Criterion 6's "appears in Venue Staff's pending list" holds at the data level only (`status = 'pending'`); the dashboard section is still a stub. |
+| No suitability panel | SCRUM-191 | Criterion 2's second request entry point. `BookingRequestPanel` is ready to mount. |
+| Migrations 027-031 not applied to the project database; live checks not run | the team | `npm run booking-requests:check` has never executed its races. |
+
+Fixed during the review: `GET /api/venues/:id/bookings` (and the venue detail
+panel) listed every row of `bookings` with no status, so a pending, rejected or
+withdrawn request read as a booking. It now returns `status` and `statusDisplay`
+and the panel shows the label.
