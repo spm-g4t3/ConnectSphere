@@ -65,6 +65,23 @@ function checkOptionalText(errors, field, value, max) {
 }
 
 /**
+ * SCRUM-253: which booking request is being withdrawn must at least be shaped
+ * like an id, so a value that can never match one costs no round trip.
+ *
+ * @param {*} id
+ * @returns {string} the id, trimmed and lower-cased
+ * @throws {ValidationError}
+ */
+export function validateBookingRequestId(id) {
+  if (!isPlausibleId(id)) {
+    throw new ValidationError('Invalid booking request id', [
+      { field: 'id', message: 'must be a valid booking request id' },
+    ]);
+  }
+  return id.trim().toLowerCase();
+}
+
+/**
  * Validate input for creating a booking request.
  *
  * @param {object} input

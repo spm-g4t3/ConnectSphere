@@ -1,7 +1,7 @@
 /**
  * Tests for the booking request route.
  *
- * SCRUM-252, a subtask of SCRUM-243 (Submit a Venue Booking Request).
+ * SCRUM-252 and SCRUM-253, subtasks of SCRUM-243 (Submit a Venue Booking Request).
  *
  * Transport and service tests together: real Express routing and the real
  * service, over a fake Supabase client and a fake suitability checker. What the
@@ -549,5 +549,126 @@ describe('SCRUM-252: the suitability check (N10)', () => {
 
     expect(res.status).toBe(500);
     expect(client.calls.map((c) => c.operation)).toEqual(['select']);
+  });
+});
+
+
+describe('SCRUM-253: a coordinator withdraws a pending request', () => {
+  const withdrawn = (overrides) => ok({ outcome: 'withdrawn', booking: bookingRow({ status: 'withdrawn', ...overrides }) });
+
+  const withdraw = (client, id = BOOKING_ID, options = {}) =>
+    request(appWith({ client, ...options })).post(`/api/booking-requests/${id}/withdraw`);
+
+  it('SCRUM253_withdraws_the_request_and_returns_200', async () => {
+    const client = createFakeClient([withdrawn()]);
+
+    const res = await withdraw(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: BOOKING_ID, eventRequestId: EVENT_ID, venueId: VENUE_ID, status: 'withdrawn' });
+    // One call, to the function, and nothing else: the checks are its.
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]).toMatchObject({ operation: 'rpc', fn: 'withdraw_booking_request' });
+  });
+
+  it('SCRUM253_takes_the_caller_from_the_token_never_the_body', async () => {
+    const client = createFakeClient([withdrawn()]);
+
+    await request(appWith({ client }))
+      .post(`/api/booking-requests/${BOOKING_ID}/withdraw`)
+      .send({ requestedBy: OTHER_COORDINATOR_ID, status: 'approved', p_requested_by: OTHER_COORDINATOR_ID });
+
+    expect(client.calls[0].args).toEqual({ p_booking_id: BOOKING_ID, p_requested_by: COORDINATOR_ID });
+  });
+
+  it('SCRUM253_lower_cases_the_id_it_sends', async () => {
+    const client = createFakeClient([withdrawn()]);
+    await withdraw(client, BOOKING_ID.toUpperCase());
+    expect(client.calls[0].args.p_booking_id).toBe(BOOKING_ID);
+  });
+
+  it('SCRUM253_returns_401_without_a_token_and_never_queries', async () => {
+    const client = createFakeClient([withdrawn()]);
+    const res = await withdraw(client, BOOKING_ID, { requireAuth: signedOut });
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.ATTENDEE])(
+    'SCRUM253_refuses_%s_with_403_and_never_queries',
+    async (role) => {
+      const client = createFakeClient([withdrawn()]);
+      const res = await withdraw(client, BOOKING_ID, { requireAuth: signedInWithRole(role) });
+      expect(res.status).toBe(403);
+      expect(client.calls).toHaveLength(0);
+    },
+  );
+
+  it('SCRUM253_refuses_a_coordinator_who_is_not_assigned_with_403', async () => {
+    const message = `only the coordinator assigned to event request ${EVENT_ID} can withdraw its booking requests`;
+    const res = await withdraw(createFakeClient([dbFailure('42501', message)]), BOOKING_ID, {
+      requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR, OTHER_COORDINATOR_ID),
+    });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe(message);
+  });
+
+  it('SCRUM253_answers_404_for_a_request_that_does_not_exist', async () => {
+    const res = await withdraw(createFakeClient([dbFailure('P0002', `booking request ${BOOKING_ID} not found`)]));
+    expect(res.status).toBe(404);
+  });
+
+  it.each(['nope', '123', 'null'])('SCRUM253_refuses_the_malformed_id_%s_with_400_before_the_database', async (id) => {
+    const client = createFakeClient([withdrawn()]);
+    const res = await withdraw(client, id);
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(['id']);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each(['approved', 'rejected', 'withdrawn', 'cancelled', 'flagged_for_review'])(
+    'SCRUM253_refuses_a_%s_request_with_409_BOOKING_NOT_PENDING',
+    async (status) => {
+      const res = await withdraw(
+        createFakeClient([
+          dbFailure('PT409', `booking request ${BOOKING_ID} is ${status}, and only a pending request can be withdrawn`, {
+            hint: 'BOOKING_NOT_PENDING',
+          }),
+        ]),
+      );
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({ code: 'BOOKING_NOT_PENDING', conflicts: [] });
+      expect(res.body.error).toContain(status);
+    },
+  );
+
+  it('SCRUM253_a_repeated_withdrawal_is_a_409_the_second_time_not_a_repeat_of_the_200', async () => {
+    const client = createFakeClient([
+      withdrawn(),
+      dbFailure('PT409', `booking request ${BOOKING_ID} is withdrawn, and only a pending request can be withdrawn`, {
+        hint: 'BOOKING_NOT_PENDING',
+      }),
+    ]);
+
+    const first = await withdraw(client);
+    const second = await withdraw(client);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(409);
+    expect(second.body.code).toBe('BOOKING_NOT_PENDING');
+  });
+
+  it('SCRUM253_a_request_that_changed_under_the_call_is_a_409', async () => {
+    const res = await withdraw(createFakeClient([dbFailure('40001', 'booking request changed while it was being withdrawn')]));
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('BOOKING_CHANGED');
+  });
+
+  it.each([
+    ['an outcome it does not know', ok({ outcome: 'something' })],
+    ['a booking that is not withdrawn', ok({ outcome: 'withdrawn', booking: bookingRow({ status: 'pending' }) })],
+  ])('SCRUM253_refuses_%s_rather_than_reporting_a_withdrawal', async (_label, result) => {
+    const res = await withdraw(createFakeClient([result]));
+    expect(res.status).toBe(500);
   });
 });

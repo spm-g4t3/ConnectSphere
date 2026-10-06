@@ -41,7 +41,7 @@ import {
   ConflictError,
   ForbiddenError,
 } from '../errors.js';
-import { validateCreateBookingRequest } from '../validation/bookingRequestValidation.js';
+import { validateCreateBookingRequest, validateBookingRequestId } from '../validation/bookingRequestValidation.js';
 import { getEventRequestForCoordinator } from './eventRequestService.js';
 import { checkVenueSuitability } from './venueSuitabilityService.js';
 import { STATUS } from '../domain/eventRequestStatus.js';
@@ -97,6 +97,13 @@ function translateError(error) {
 
   if (code === '42501') {
     return new ForbiddenError(detail);
+  }
+
+  // serialization_failure: withdraw_booking_request's guarded update matched no
+  // row, meaning the request changed under it. 031 explains why that cannot
+  // happen while its locks hold; if it does, the caller reloads.
+  if (code === '40001') {
+    return new ConflictError(detail, { code: 'BOOKING_CHANGED' });
   }
 
   if (code === 'PT409') {
@@ -279,6 +286,57 @@ export async function createBookingRequest(
   const booking = toBookingRequest(data.booking);
   if (booking.status !== BOOKING_STATUS.PENDING) {
     throw new Error(`create_booking_request returned a ${booking.status} booking, not a pending one`);
+  }
+  return booking;
+}
+
+/**
+ * Withdraw a pending booking request.
+ *
+ * SCRUM-253. Goes through withdraw_booking_request (031), which locks the
+ * event and the booking, checks the caller is the event's assigned coordinator
+ * and that the request is still pending, and changes it in one guarded update
+ * that also notifies Venue Staff. As with reassigning an event, there is no
+ * pre-check here: the question that matters is answered under the lock, where
+ * it cannot change before the write.
+ *
+ * A request that is not pending -- including one already withdrawn -- is a
+ * ConflictError and nothing is changed. Withdrawing twice is not a success the
+ * second time.
+ *
+ * @param {string} bookingId  the request's id
+ * @param {string} userId     the caller, from the JWT -- never the body
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the request, now withdrawn, shaped by toBookingRequest
+ * @throws {ValidationError} no user, or a malformed id, before any network call
+ * @throws {NotFoundError}   no such booking request
+ * @throws {ForbiddenError}  the caller is not the event's assigned coordinator
+ * @throws {ConflictError}   BOOKING_NOT_PENDING, or the request changed under
+ *                           the call
+ */
+export async function withdrawBookingRequest(bookingId, userId, { client } = {}) {
+  if (typeof userId !== 'string' || userId.trim() === '') {
+    throw new ValidationError('A signed-in user is required to withdraw a booking request');
+  }
+  const id = validateBookingRequestId(bookingId);
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('withdraw_booking_request', {
+    p_booking_id: id,
+    p_requested_by: userId,
+  });
+
+  if (error) throw translateError(error);
+
+  if (data?.outcome !== 'withdrawn') {
+    throw new Error(`Unexpected outcome from withdraw_booking_request: ${data?.outcome}`);
+  }
+
+  const booking = toBookingRequest(data.booking);
+  if (booking.status !== BOOKING_STATUS.WITHDRAWN) {
+    throw new Error(`withdraw_booking_request returned a ${booking.status} booking, not a withdrawn one`);
   }
   return booking;
 }

@@ -1,12 +1,14 @@
 /**
  * Booking request routes.
  *
- * SCRUM-252, a subtask of SCRUM-243 (Submit a Venue Booking Request).
+ * SCRUM-252 and SCRUM-253, subtasks of SCRUM-243 (Submit a Venue Booking Request).
  *
  * POST / creates a request for a venue against an approved or confirmed event,
- * behind coordinatorOnly. Whether the caller is that event's assigned
- * coordinator is checked in the service and again, under lock, in
- * create_booking_request (030); the route only passes on what was asked and
+ * and POST /:id/withdraw withdraws a pending one, both behind coordinatorOnly.
+ * Whether the caller is that event's assigned coordinator is checked in the
+ * service and again, under lock, in create_booking_request (030), or only
+ * under lock in withdraw_booking_request (031); the route only passes on what
+ * was asked and
  * takes the caller from the token. The body is passed whole and the service
  * reads only the coordinator's choices from it, so a body naming a status, a
  * period or another requester matches nothing.
@@ -22,7 +24,7 @@ import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js'
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorHandler } from '../http/handleError.js';
-import { createBookingRequest } from '../services/bookingRequestService.js';
+import { createBookingRequest, withdrawBookingRequest } from '../services/bookingRequestService.js';
 
 const handleError = createErrorHandler('booking requests route');
 
@@ -63,6 +65,28 @@ export function createBookingRequestRouter({
         checkSuitability,
       });
       res.status(201).json(booking);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-253: withdraw a pending request. 200 and the request, now withdrawn.
+   *
+   * Behind coordinatorOnly, with no pre-check, like POST /:id/reassign: whether
+   * the caller is the event's assigned coordinator, and whether the request is
+   * still pending, are answered by withdraw_booking_request under its locks.
+   * There is no body; the caller is always req.user.id.
+   *
+   * Statuses: 400 malformed id; 401; 403 wrong role, or not this event's
+   * coordinator; 404 no such request; 409 BOOKING_NOT_PENDING, which includes a
+   * request that was already withdrawn -- repeating the call is refused, not
+   * answered as a success.
+   */
+  router.post('/:id/withdraw', coordinatorOnly, async (req, res) => {
+    try {
+      const booking = await withdrawBookingRequest(req.params.id, req.user.id, { client });
+      res.status(200).json(booking);
     } catch (err) {
       handleError(err, res);
     }

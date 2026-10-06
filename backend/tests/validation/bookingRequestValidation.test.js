@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   validateCreateBookingRequest,
+  validateBookingRequestId,
   SETUP_NOTES_MAX_LENGTH,
 } from '../../src/validation/bookingRequestValidation.js';
 import { ValidationError } from '../../src/errors.js';
@@ -52,7 +53,7 @@ describe('validateCreateBookingRequest', () => {
   });
 
   it('SCRUM252_counts_setup_notes_in_code_points_like_postgres', () => {
-    const atLimit = '😀'.repeat(SETUP_NOTES_MAX_LENGTH);
+    const atLimit = '\u{1F600}'.repeat(SETUP_NOTES_MAX_LENGTH);
     expect(validateCreateBookingRequest({ ...BASE, setupNotes: atLimit }).setupNotes).toBe(atLimit);
     expect(() => validateCreateBookingRequest({ ...BASE, setupNotes: `${atLimit}x` })).toThrow(ValidationError);
   });
@@ -63,5 +64,16 @@ describe('validateCreateBookingRequest', () => {
 
   it('SCRUM252_refuses_a_layout_that_is_not_text', () => {
     expect(() => validateCreateBookingRequest({ ...BASE, roomLayoutCode: 5 })).toThrow(ValidationError);
+  });
+});
+
+
+describe('validateBookingRequestId (SCRUM-253)', () => {
+  it('SCRUM253_trims_and_lower_cases_an_id', () => {
+    expect(validateBookingRequestId(` ${EVENT_ID.toUpperCase()} `)).toBe(EVENT_ID);
+  });
+
+  it.each([undefined, null, '', 'nope', 7, {}])('SCRUM253_refuses_%j', (id) => {
+    expect(() => validateBookingRequestId(id)).toThrow(ValidationError);
   });
 });
