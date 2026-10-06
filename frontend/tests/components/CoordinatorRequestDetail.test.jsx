@@ -9,8 +9,10 @@
 // the form itself. Every service the panel's tree reaches is mocked, and
 // useAuth is mocked so no AuthProvider (and no Supabase) is needed.
 //
-// Timezone-safe: expected input values come from toDatetimeLocalValue, never a
-// hard-coded wall-clock string; date inputs are set with fireEvent.change.
+// Timezone-proof: the finder shows Singapore (venue) time on every device, so
+// expected input values are the Singapore wall clock as literals, and the
+// suite passes unchanged under TZ=UTC, Asia/Singapore and America/New_York.
+// Date inputs are set with fireEvent.change.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
@@ -24,7 +26,6 @@ import {
   getCoordinatorChangeRequests,
 } from "../../src/services/eventRequestService";
 import { findVenuesForEvent } from "../../src/services/venueService";
-import { toDatetimeLocalValue } from "../../src/services/datetimeFormat.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -46,14 +47,9 @@ vi.mock("../../src/services/venueService", () => ({
 
 const COORDINATOR = { id: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d", role: "event_coordinator" };
 
-// One calendar date in every zone the suite runs in, clear of DST changes.
+// Wednesday 11 November 2026, 10:00-12:00 Singapore.
 const START_ISO = "2026-11-11T10:00:00+08:00";
 const END_ISO = "2026-11-11T12:00:00+08:00";
-
-function localParts(iso) {
-  const [date, time] = toDatetimeLocalValue(iso).split("T");
-  return { date, time };
-}
 
 const EVENT = Object.freeze({
   id: "e1",
@@ -131,13 +127,11 @@ beforeEach(() => {
 describe("SCRUM20_AC2 the event view holds the venue search", () => {
   it("SCRUM20_AC2_find_a_venue_renders_the_form_prefilled_from_the_event", async () => {
     renderDetail();
-    const start = localParts(START_ISO);
-    const end = localParts(END_ISO);
 
     expect(screen.getByRole("heading", { name: "Find a venue" })).toBeInTheDocument();
-    expect(inFinder.date()).toHaveValue(start.date);
-    expect(inFinder.start()).toHaveValue(start.time);
-    expect(inFinder.end()).toHaveValue(end.time);
+    expect(inFinder.date()).toHaveValue("2026-11-11");
+    expect(inFinder.start()).toHaveValue("10:00");
+    expect(inFinder.end()).toHaveValue("12:00");
     expect(inFinder.attendance()).toHaveValue(80);
     expect(within(finderSection()).getByRole("button", { name: "Search venues" })).toBeInTheDocument();
     await waitFor(() => expect(getCoordinatorChangeRequests).toHaveBeenCalledWith("e1"));
@@ -221,7 +215,7 @@ describe("SCRUM20_AC2 re-seeding when the event changes", () => {
     const movedStart = "2026-11-11T11:00:00+08:00";
     rerenderWith({ ...EVENT, proposedStart: movedStart });
 
-    expect(inFinder.start()).toHaveValue(localParts(movedStart).time);
+    expect(inFinder.start()).toHaveValue("11:00");
     expect(inFinder.attendance()).toHaveValue(80);
   });
 
@@ -232,7 +226,7 @@ describe("SCRUM20_AC2 re-seeding when the event changes", () => {
     const movedEnd = "2026-11-11T11:30:00+08:00";
     rerenderWith({ ...EVENT, proposedEnd: movedEnd });
 
-    expect(inFinder.end()).toHaveValue(localParts(movedEnd).time);
+    expect(inFinder.end()).toHaveValue("11:30");
     expect(inFinder.attendance()).toHaveValue(80);
   });
 
@@ -242,13 +236,12 @@ describe("SCRUM20_AC2 re-seeding when the event changes", () => {
     const { rerenderWith } = renderDetail();
     fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
     fireEvent.change(inFinder.location(), { target: { value: "Level 2" } });
-    const edited = localParts("2026-11-12T10:00:00+08:00");
-    fireEvent.change(inFinder.date(), { target: { value: edited.date } });
+    fireEvent.change(inFinder.date(), { target: { value: "2026-11-12" } });
 
     rerenderWith({ ...EVENT, status: "under_review", purpose: "Updated purpose" });
 
     expect(inFinder.attendance()).toHaveValue(150);
     expect(inFinder.location()).toHaveValue("Level 2");
-    expect(inFinder.date()).toHaveValue(edited.date);
+    expect(inFinder.date()).toHaveValue("2026-11-12");
   });
 });

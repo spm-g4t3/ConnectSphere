@@ -8,10 +8,10 @@
 // details and SCRUM-143's no-match message and retry (AC8) are asserted at
 // the end.
 //
-// Timezone-safe: the event's instants are fixed ISO strings and every expected
-// input value comes from toDatetimeLocalValue; date and time inputs are set
-// with fireEvent.change; payloads are checked by offset shape and getTime().
-// Run under UTC, Asia/Singapore and America/New_York.
+// Timezone-proof: the finder shows Singapore (venue) time on every device, so
+// expected input values are Singapore literals and payloads are compared with
+// +08:00 strings. Date and time inputs are set with fireEvent.change. Run
+// under UTC, Asia/Singapore and America/New_York.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
@@ -19,7 +19,6 @@ import userEvent from "@testing-library/user-event";
 
 import EventVenueFinder from "../../src/components/EventVenueFinder.jsx";
 import { findVenuesForEvent } from "../../src/services/venueService";
-import { deviceTimeZoneLabel, toDatetimeLocalValue } from "../../src/services/datetimeFormat.js";
 import {
   ACCESSIBILITY_FEATURES,
   FACILITIES,
@@ -30,22 +29,15 @@ vi.mock("../../src/services/venueService", () => ({
   findVenuesForEvent: vi.fn(),
 }));
 
-const OFFSET_SUFFIX = /[+-]\d{2}:\d{2}$/;
 const GENERIC_ERROR = "Could not search venues. Please try again.";
 const FORBIDDEN = "Only Event Coordinators can search by event requirements.";
 
-// Wednesday 11 November 2026, 10:00-12:00 Singapore: one date in every zone
-// the suite runs in, and clear of DST changes.
+// Wednesday 11 November 2026, 10:00-12:00 Singapore, shown as exactly that on
+// every device.
 const START_ISO = "2026-11-11T10:00:00+08:00";
 const END_ISO = "2026-11-11T12:00:00+08:00";
-
-function localParts(iso) {
-  const [date, time] = toDatetimeLocalValue(iso).split("T");
-  return { date, time };
-}
-
-const START = localParts(START_ISO);
-const END = localParts(END_ISO);
+const START = { date: "2026-11-11", time: "10:00" };
+const END = { date: "2026-11-11", time: "12:00" };
 
 const EVENT = Object.freeze({
   id: "e1",
@@ -175,6 +167,32 @@ describe("SCRUM20_AC2 pre-filled from the event", () => {
     expect(describedErrors(field.attendance())).toEqual(["is required"]);
   });
 
+  it("SCRUM20_AC2_prefill_uses_singapore_time_on_any_device", () => {
+    // 09:00-13:00 Singapore is 20:00-00:00 the day before in New York. The
+    // form still shows the Singapore period, End included.
+    renderFinder({
+      ...EVENT,
+      proposedStart: "2026-11-11T09:00:00+08:00",
+      proposedEnd: "2026-11-11T13:00:00+08:00",
+    });
+
+    expect(field.date()).toHaveValue("2026-11-11");
+    expect(field.start()).toHaveValue("09:00");
+    expect(field.end()).toHaveValue("13:00");
+  });
+
+  it("SCRUM20_AC2_event_crossing_singapore_midnight_leaves_the_end_blank", () => {
+    renderFinder({
+      ...EVENT,
+      proposedStart: "2026-11-11T22:00:00+08:00",
+      proposedEnd: "2026-11-12T01:00:00+08:00",
+    });
+
+    expect(field.date()).toHaveValue("2026-11-11");
+    expect(field.start()).toHaveValue("22:00");
+    expect(field.end()).toHaveValue("");
+  });
+
   it("SCRUM20_AC2_event_on_two_dates_leaves_the_end_for_the_coordinator", () => {
     renderFinder({ ...EVENT, proposedEnd: "2026-11-13T12:00:00+08:00" });
 
@@ -204,10 +222,11 @@ describe("SCRUM20_AC2 pre-filled from the event", () => {
     expect(field.attendance()).toHaveValue(30);
   });
 
-  it("SCRUM20_AC1_the_time_zone_is_disclosed", () => {
+  it("SCRUM20_AC1_the_time_zone_is_disclosed_as_singapore_time", () => {
     renderFinder();
-    expect(screen.getByText(`Times are in your device's time zone (${deviceTimeZoneLabel()}).`))
+    expect(screen.getByText("Times are Singapore time (Asia/Singapore), the venues' local time."))
       .toBeInTheDocument();
+    expect(screen.queryByText(/device/)).not.toBeInTheDocument();
   });
 });
 
@@ -238,11 +257,22 @@ describe("SCRUM20_AC1 searching", () => {
 
     const criteria = await sentCriteria();
     expect(Object.keys(criteria).sort()).toEqual(["endsAt", "expectedAttendance", "startsAt"]);
-    expect(criteria.startsAt).toMatch(OFFSET_SUFFIX);
-    expect(criteria.endsAt).toMatch(OFFSET_SUFFIX);
-    expect(new Date(criteria.startsAt).getTime()).toBe(new Date(START_ISO).getTime());
-    expect(new Date(criteria.endsAt).getTime()).toBe(new Date(END_ISO).getTime());
+    expect(criteria.startsAt).toBe(START_ISO);
+    expect(criteria.endsAt).toBe(END_ISO);
     expect(criteria.expectedAttendance).toBe(80);
+  });
+
+  it("SCRUM20_AC1_sent_period_is_singapore_time", async () => {
+    const { user } = renderFinder({
+      ...EVENT,
+      proposedStart: "2026-11-11T09:00:00+08:00",
+      proposedEnd: "2026-11-11T13:00:00+08:00",
+    });
+    await user.click(searchButton());
+
+    const criteria = await sentCriteria();
+    expect(criteria.startsAt).toBe("2026-11-11T09:00:00+08:00");
+    expect(criteria.endsAt).toBe("2026-11-11T13:00:00+08:00");
   });
 
   it("SCRUM20_AC2_edited_values_are_sent", async () => {
@@ -250,43 +280,35 @@ describe("SCRUM20_AC1 searching", () => {
 
     await user.clear(field.attendance());
     await user.type(field.attendance(), "120");
-    // Earlier, not later: in New York the event already ends at 23:00, so a
-    // later end would cross local midnight.
-    const earlierEnd = localParts("2026-11-11T11:30:00+08:00");
-    fireEvent.change(field.end(), { target: { value: earlierEnd.time } });
+    fireEvent.change(field.end(), { target: { value: "11:30" } });
     await user.click(searchButton());
 
     const criteria = await sentCriteria();
     expect(criteria.expectedAttendance).toBe(120);
-    expect(new Date(criteria.endsAt).getTime()).toBe(new Date("2026-11-11T11:30:00+08:00").getTime());
+    expect(criteria.endsAt).toBe("2026-11-11T11:30:00+08:00");
   });
 
   it("SCRUM20_AC2_an_edited_start_is_sent", async () => {
     const { user } = renderFinder();
 
-    // Later, not earlier: in New York the event starts at 21:00, and 10:30
-    // Singapore is still on that date in every test zone.
-    const laterStart = localParts("2026-11-11T10:30:00+08:00");
-    fireEvent.change(field.start(), { target: { value: laterStart.time } });
-    expect(field.start()).toHaveValue(laterStart.time);
+    fireEvent.change(field.start(), { target: { value: "10:30" } });
+    expect(field.start()).toHaveValue("10:30");
     await user.click(searchButton());
 
     const criteria = await sentCriteria();
-    expect(new Date(criteria.startsAt).getTime()).toBe(new Date("2026-11-11T10:30:00+08:00").getTime());
-    expect(new Date(criteria.endsAt).getTime()).toBe(new Date(END_ISO).getTime());
+    expect(criteria.startsAt).toBe("2026-11-11T10:30:00+08:00");
+    expect(criteria.endsAt).toBe(END_ISO);
   });
 
   it("SCRUM20_AC2_changing_the_date_moves_start_and_end", async () => {
     const { user } = renderFinder();
 
-    const nextDay = localParts("2026-11-12T10:00:00+08:00");
-    fireEvent.change(field.date(), { target: { value: nextDay.date } });
+    fireEvent.change(field.date(), { target: { value: "2026-11-12" } });
     await user.click(searchButton());
 
     const criteria = await sentCriteria();
-    const DAY = 24 * 60 * 60 * 1000;
-    expect(new Date(criteria.startsAt).getTime()).toBe(new Date(START_ISO).getTime() + DAY);
-    expect(new Date(criteria.endsAt).getTime()).toBe(new Date(END_ISO).getTime() + DAY);
+    expect(criteria.startsAt).toBe("2026-11-12T10:00:00+08:00");
+    expect(criteria.endsAt).toBe("2026-11-12T12:00:00+08:00");
   });
 
   it("SCRUM20_AC1_selected_codes_and_location_are_sent", async () => {

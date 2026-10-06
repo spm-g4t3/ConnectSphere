@@ -16,9 +16,10 @@
 //   - the auth context, so the signed-in coordinator is known without
 //     Supabase.
 //
-// Timezone-safe: the event's instants are fixed ISO strings and every expected
-// input value comes from toDatetimeLocalValue; the sent period is compared
-// with getTime(). Passes under TZ=UTC, Asia/Singapore and America/New_York.
+// Timezone-proof: the finder shows Singapore (venue) time on every device, so
+// the expected inputs are Singapore literals and the sent period is the
+// event's own +08:00 strings. Passes under TZ=UTC, Asia/Singapore and
+// America/New_York.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -29,7 +30,6 @@ import CoordinatorRequestDetail from "../../src/components/CoordinatorRequestDet
 import { useAuth } from "../../src/auth/AuthContext";
 import * as eventRequestService from "../../src/services/eventRequestService";
 import * as venueService from "../../src/services/venueService";
-import { toDatetimeLocalValue } from "../../src/services/datetimeFormat.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -74,20 +74,13 @@ vi.mock("../../src/services/venueService", () => ({
   getPendingBookingRequests: vi.fn(),
 }));
 
-const OFFSET_SUFFIX = /[+-]\d{2}:\d{2}$/;
 const NO_MATCH = "No venue matched your criteria.";
 
 const COORDINATOR = { id: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d", role: "event_coordinator" };
 
-// Wednesday 11 November 2026, 10:00-12:00 Singapore: one date in every zone
-// the suite runs in, and clear of DST changes.
+// Wednesday 11 November 2026, 10:00-12:00 Singapore.
 const START_ISO = "2026-11-11T10:00:00+08:00";
 const END_ISO = "2026-11-11T12:00:00+08:00";
-
-function localParts(iso) {
-  const [date, time] = toDatetimeLocalValue(iso).split("T");
-  return { date, time };
-}
 
 const EVENT = Object.freeze({
   id: "e1",
@@ -195,14 +188,12 @@ beforeEach(() => {
 describe("SCRUM20_AC2_AC7_AC8 venue search flow from the event view (SCRUM-144)", () => {
   it("SCRUM20_AC2_AC7_AC8_find_venue_prefill_no_match_adjust_results_flow", async () => {
     const { user } = renderEventView();
-    const start = localParts(START_ISO);
-    const end = localParts(END_ISO);
 
     // ---- 1. AC2: the event view opens with the search pre-filled -----------
     expect(screen.getByRole("heading", { name: "Find a venue" })).toBeInTheDocument();
-    expect(inFinder.date()).toHaveValue(start.date);
-    expect(inFinder.start()).toHaveValue(start.time);
-    expect(inFinder.end()).toHaveValue(end.time);
+    expect(inFinder.date()).toHaveValue("2026-11-11");
+    expect(inFinder.start()).toHaveValue("10:00");
+    expect(inFinder.end()).toHaveValue("12:00");
     expect(inFinder.attendance()).toHaveValue(80);
     expect(venueService.findVenuesForEvent).not.toHaveBeenCalled();
 
@@ -215,15 +206,13 @@ describe("SCRUM20_AC2_AC7_AC8 venue search flow from the event view (SCRUM-144)"
       .not.toBeInTheDocument();
 
     const first = vi.mocked(venueService.findVenuesForEvent).mock.calls[0][0];
-    expect(first.startsAt).toMatch(OFFSET_SUFFIX);
-    expect(first.endsAt).toMatch(OFFSET_SUFFIX);
-    expect(new Date(first.startsAt).getTime()).toBe(new Date(START_ISO).getTime());
-    expect(new Date(first.endsAt).getTime()).toBe(new Date(END_ISO).getTime());
+    expect(first.startsAt).toBe(START_ISO);
+    expect(first.endsAt).toBe(END_ISO);
     expect(first.expectedAttendance).toBe(80);
 
     // ---- 3. AC8: lower the attendance and search again ---------------------
     // The form kept the event's values, so only the attendance changes.
-    expect(inFinder.date()).toHaveValue(start.date);
+    expect(inFinder.date()).toHaveValue("2026-11-11");
     await user.clear(inFinder.attendance());
     await user.type(inFinder.attendance(), "50");
     await user.click(inFinder.search());

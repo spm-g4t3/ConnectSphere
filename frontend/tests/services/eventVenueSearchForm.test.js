@@ -4,11 +4,10 @@
 // the form from an event, checking it, turning it into findVenuesForEvent's
 // criteria, and sorting a 400's details[] onto the form's fields.
 //
-// Timezone-safe: event instants are fixed ISO strings, and every expected
-// date and time is derived from them through toDatetimeLocalValue, the same
-// helper the module uses. Wire values are compared by offset shape and
-// getTime(), never against a hard-coded wall-clock string. Run under UTC,
-// Asia/Singapore and America/New_York.
+// Timezone-proof: the form holds Singapore (venue) time on every device, so
+// expected dates and times are Singapore literals and wire values are exact
+// +08:00 strings. The same assertions pass under UTC, Asia/Singapore and
+// America/New_York; run the suite under each.
 
 import { describe, it, expect } from "vitest";
 
@@ -20,23 +19,13 @@ import {
   toSearchCriteria,
   validateEventSearchForm,
 } from "../../src/services/eventVenueSearchForm.js";
-import { toDatetimeLocalValue } from "../../src/services/datetimeFormat.js";
 
-const OFFSET_SUFFIX = /[+-]\d{2}:\d{2}$/;
-
-// Wednesday 11 November 2026, 10:00-12:00 Singapore. Clear of every DST change
-// the test zones have, and on one calendar date in each of them.
+// Wednesday 11 November 2026, 10:00-12:00 Singapore, and the Singapore date
+// and times the form should hold for it on any device.
 const START_ISO = "2026-11-11T10:00:00+08:00";
 const END_ISO = "2026-11-11T12:00:00+08:00";
-
-/** { date, time } of an instant in this device's zone, via the module's own helper. */
-function localParts(iso) {
-  const [date, time] = toDatetimeLocalValue(iso).split("T");
-  return { date, time };
-}
-
-const START = localParts(START_ISO);
-const END = localParts(END_ISO);
+const START = { date: "2026-11-11", time: "10:00" };
+const END = { date: "2026-11-11", time: "12:00" };
 
 const EVENT = Object.freeze({
   id: "e1",
@@ -84,9 +73,6 @@ describe("EMPTY_EVENT_SEARCH_FORM", () => {
 
 describe("SCRUM20_AC2 seedFromEvent", () => {
   it("SCRUM20_AC2_full_event_fills_date_times_and_attendance", () => {
-    // The fixture's start and end share a date in every zone the suite runs in.
-    expect(END.date).toBe(START.date);
-
     expect(seedFromEvent(EVENT)).toEqual({
       date: START.date,
       startTime: START.time,
@@ -101,8 +87,38 @@ describe("SCRUM20_AC2 seedFromEvent", () => {
 
   it("SCRUM20_AC2_seeded_times_name_the_event_instants", () => {
     const form = seedFromEvent(EVENT);
-    expect(new Date(`${form.date}T${form.startTime}`).getTime()).toBe(new Date(START_ISO).getTime());
-    expect(new Date(`${form.date}T${form.endTime}`).getTime()).toBe(new Date(END_ISO).getTime());
+    // Read as Singapore wall clock, the seeded values are the event's instants.
+    expect(new Date(`${form.date}T${form.startTime}:00+08:00`).getTime())
+      .toBe(new Date(START_ISO).getTime());
+    expect(new Date(`${form.date}T${form.endTime}:00+08:00`).getTime())
+      .toBe(new Date(END_ISO).getTime());
+  });
+
+  it("SCRUM20_AC2_prefill_uses_singapore_time_on_any_device", () => {
+    // 09:00-13:00 Singapore is 20:00-00:00 the day before in New York, which
+    // would leave End blank if the form read the device's clock.
+    expect(seedFromEvent({
+      ...EVENT,
+      proposedStart: "2026-11-11T09:00:00+08:00",
+      proposedEnd: "2026-11-11T13:00:00+08:00",
+    })).toMatchObject({ date: "2026-11-11", startTime: "09:00", endTime: "13:00" });
+  });
+
+  it("SCRUM20_AC2_instants_in_another_offset_are_read_in_singapore", () => {
+    // 01:00-05:00 UTC is 09:00-13:00 Singapore.
+    expect(seedFromEvent({
+      ...EVENT,
+      proposedStart: "2026-11-11T01:00:00Z",
+      proposedEnd: "2026-11-11T05:00:00+00:00",
+    })).toMatchObject({ date: "2026-11-11", startTime: "09:00", endTime: "13:00" });
+  });
+
+  it("SCRUM20_AC2_event_crossing_singapore_midnight_leaves_the_end_empty", () => {
+    expect(seedFromEvent({
+      ...EVENT,
+      proposedStart: "2026-11-11T22:00:00+08:00",
+      proposedEnd: "2026-11-12T01:00:00+08:00",
+    })).toMatchObject({ date: "2026-11-11", startTime: "22:00", endTime: "" });
   });
 
   it("SCRUM20_AC2_optional_criteria_start_empty_whatever_the_prose_says", () => {
@@ -162,10 +178,7 @@ describe("SCRUM20_AC2 seedFromEvent", () => {
   });
 
   it("SCRUM20_AC2_end_on_a_different_date_leaves_the_end_time_empty", () => {
-    // Two days later is a different date in every zone.
     const laterEnd = "2026-11-13T12:00:00+08:00";
-    expect(localParts(laterEnd).date).not.toBe(START.date);
-
     expect(seedFromEvent({ ...EVENT, proposedEnd: laterEnd })).toMatchObject({
       date: START.date,
       startTime: START.time,
@@ -373,22 +386,27 @@ describe("SCRUM20_AC1 toSearchCriteria", () => {
     expect(Object.keys(criteria).sort()).toEqual(["endsAt", "expectedAttendance", "startsAt"]);
   });
 
-  it("SCRUM20_AC1_start_and_end_carry_an_offset_and_name_the_typed_instants", () => {
+  it("SCRUM20_AC1_sent_period_is_singapore_time", () => {
+    // The typed date and times, as typed, with Singapore's +08:00 -- not the
+    // device's offset.
     const criteria = toSearchCriteria(validForm());
 
-    expect(criteria.startsAt).toMatch(OFFSET_SUFFIX);
-    expect(criteria.endsAt).toMatch(OFFSET_SUFFIX);
-    // Parsed back, the offset string names the same instant as the wall-clock
-    // value read in this device's zone.
-    expect(new Date(criteria.startsAt).getTime()).toBe(new Date("2026-11-11T10:00").getTime());
-    expect(new Date(criteria.endsAt).getTime()).toBe(new Date("2026-11-11T12:00").getTime());
+    expect(criteria.startsAt).toBe("2026-11-11T10:00:00+08:00");
+    expect(criteria.endsAt).toBe("2026-11-11T12:00:00+08:00");
+  });
+
+  it("SCRUM20_AC1_typed_seconds_are_kept", () => {
+    const criteria = toSearchCriteria(validForm({ startTime: "10:00:30", endTime: "12:00:00" }));
+
+    expect(criteria.startsAt).toBe("2026-11-11T10:00:30+08:00");
+    expect(criteria.endsAt).toBe("2026-11-11T12:00:00+08:00");
   });
 
   it("SCRUM20_AC2_a_seeded_form_sends_the_event_instants_back", () => {
     const criteria = toSearchCriteria(seedFromEvent(EVENT));
 
-    expect(new Date(criteria.startsAt).getTime()).toBe(new Date(START_ISO).getTime());
-    expect(new Date(criteria.endsAt).getTime()).toBe(new Date(END_ISO).getTime());
+    expect(criteria.startsAt).toBe(START_ISO);
+    expect(criteria.endsAt).toBe(END_ISO);
     expect(criteria.expectedAttendance).toBe(80);
   });
 
@@ -398,7 +416,7 @@ describe("SCRUM20_AC1 toSearchCriteria", () => {
 
   it("SCRUM20_AC1_values_are_trimmed_before_conversion", () => {
     const criteria = toSearchCriteria(validForm({ date: " 2026-11-11 ", startTime: " 10:00 " }));
-    expect(new Date(criteria.startsAt).getTime()).toBe(new Date("2026-11-11T10:00").getTime());
+    expect(criteria.startsAt).toBe("2026-11-11T10:00:00+08:00");
   });
 
   it("SCRUM20_AC1_selected_codes_are_sent", () => {

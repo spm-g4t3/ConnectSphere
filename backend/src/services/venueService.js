@@ -16,12 +16,14 @@
  * this service -- and translateError turns those into typed errors.
  *
  * SCRUM-186: a venue's turnaround between events is written by create and
- * update and read back by getVenueById only. Search and the list leave it out
- * until SCRUM-139 has a use for it.
+ * update and read back by getVenueById and findVenuesForEvent. searchVenues
+ * and the list leave it out.
  *
  * SCRUM-137 (SCRUM-20): the setup time before an event follows exactly the
  * same path as turnaround -- written by create and update, read back by
- * getVenueById only, and left out of search until SCRUM-139 uses it.
+ * getVenueById and findVenuesForEvent, and left out of searchVenues and the
+ * list. findVenuesForEvent pads each period by the venue's setup and
+ * turnaround through domain/venueOccupancy.js (SCRUM-139, below).
  *
  * SCRUM-130 (part of SCRUM-17 AC2): searchVenues leaves out venues blocked in
  * an optional date window, through venueBlockService's findBlockedVenueIds.

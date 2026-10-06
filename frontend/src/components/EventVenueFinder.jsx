@@ -38,11 +38,15 @@
 // adjusting and searching again is the retry. The message hides while a
 // search runs and goes once a new search succeeds or fails.
 //
+// SCRUM-20 AC1/AC2: the date and times are Singapore wall clock, not the
+// device's, because the backend checks them against venue hours in Singapore
+// (eventVenueSearchForm.js explains). The hint under them says so.
+//
 // The event's free-text requirements are already shown under "Requirements"
 // in the same panel, so this section does not repeat them.
 
 import { useId, useState } from "react";
-import { deviceTimeZoneLabel } from "../services/datetimeFormat";
+import { VENUE_TIME_ZONE } from "../services/datetimeFormat";
 import {
   mapServerDetails,
   searchErrorMessage,
@@ -249,9 +253,9 @@ export default function EventVenueFinder({ request }) {
         </div>
       </div>
 
-      {/* Disclosure, not a picker -- the same wording VenueSearch uses. */}
+      {/* Disclosure, not a picker: venue time on every device (see the header). */}
       <p className="event-venue-finder__hint">
-        Times are in your device's time zone ({deviceTimeZoneLabel()}).
+        Times are Singapore time ({VENUE_TIME_ZONE}), the venues' local time.
       </p>
 
       <div className="event-venue-finder__row">

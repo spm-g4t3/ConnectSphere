@@ -13,19 +13,22 @@
 //     accessibility: [], facilities: [] }
 //
 // One date and two times rather than two datetime-local inputs: an event that
-// crosses midnight can never match, because no venue's opening hours do
-// (venueMatching.coversPeriod), so the form does not offer one.
+// crosses Singapore midnight can never match, because no venue's opening
+// hours do (venueMatching.coversPeriod), so the form does not offer one.
 //
-// Times are the device's wall clock, the same reading toDatetimeLocalValue
-// gives an instant on the way in and toOffsetIsoString on the way out. The
-// backend requires an explicit offset (datetimeFormat.js explains why).
+// The date and times are Singapore wall clock -- the venues' local time --
+// whatever zone the device is set to: toVenueWallClock reads an instant on
+// the way in and toVenueOffsetIsoString stamps +08:00 on the way out. The
+// device's clock would be the wrong one: the backend checks hours and "one
+// date" in Singapore, so a New York reading of a 09:00-13:00 event
+// (20:00-00:00, across device midnight) could not even be entered.
 //
 // The validation wording follows the backend's validateEventSearchCriteria
 // where the two overlap ("is required", "must be later than the start",
 // "must be a whole number"). The backend stays the authority; this names an
 // obvious mistake before a round trip, as venueSearchValidation.js does.
 
-import { toDatetimeLocalValue, toOffsetIsoString } from "./datetimeFormat";
+import { toVenueOffsetIsoString, toVenueWallClock } from "./datetimeFormat";
 import { parseDateTime } from "./venueBlockValidation";
 
 /** The form's empty shape, so every caller starts from the same keys. */
@@ -79,9 +82,9 @@ function codes(value) {
   return Array.isArray(value) ? value.filter((code) => typeof code === "string" && code !== "") : [];
 }
 
-/** "YYYY-MM-DDTHH:mm" split into its date and time, or two blanks. */
-function splitLocal(isoString) {
-  const local = toDatetimeLocalValue(isoString);
+/** An instant as its Singapore date and time, or two blanks. */
+function splitVenueTime(isoString) {
+  const local = toVenueWallClock(isoString);
   if (local === "") return { date: "", time: "" };
   const [date, time] = local.split("T");
   return { date, time };
@@ -95,14 +98,14 @@ function isValidDate(date) {
 /**
  * The form's starting values, read from the event request.
  *
- * - proposedStart and proposedEnd become a date and two times in the device's
- *   zone. A missing or unreadable one leaves its fields empty for the
- *   coordinator to fill in, rather than inventing a time.
+ * - proposedStart and proposedEnd become a date and two times in Singapore
+ *   time, on any device. A missing or unreadable one leaves its fields empty
+ *   for the coordinator to fill in, rather than inventing a time.
  * - The date is the start's, or the end's when there is no start.
- * - The end time is filled only when the end falls on that date. A request
- *   running past midnight cannot be searched as one period (see the header),
- *   so its end is left for the coordinator to decide rather than silently
- *   moved onto the start's date.
+ * - The end time is filled only when the end falls on that Singapore date. A
+ *   request running past Singapore midnight cannot be searched as one period
+ *   (see the header), so its end is left for the coordinator to decide rather
+ *   than silently moved onto the start's date.
  * - expectedAttendance is filled only when it is a whole number of at least 1;
  *   the column is nullable.
  * - Location, layout, accessibility and facilities start empty. The event
@@ -114,8 +117,8 @@ function isValidDate(date) {
  * @returns {object} form values, in the shape described in the header
  */
 export function seedFromEvent(request) {
-  const start = splitLocal(request?.proposedStart);
-  const end = splitLocal(request?.proposedEnd);
+  const start = splitVenueTime(request?.proposedStart);
+  const end = splitVenueTime(request?.proposedEnd);
   const date = start.date || end.date;
   const attendance = request?.expectedAttendance;
 
@@ -189,7 +192,7 @@ export function validateEventSearchForm(values = {}) {
 /**
  * The form as findVenuesForEvent's criteria. Validate first: this does not judge.
  *
- * startsAt and endsAt carry the device's offset (toOffsetIsoString), and
+ * startsAt and endsAt carry Singapore's +08:00 (toVenueOffsetIsoString), and
  * expectedAttendance is a number. Optional criteria appear only when set --
  * location and layout non-blank, the code lists non-empty -- so a search that
  * leaves them alone sends exactly the required three.
@@ -200,8 +203,8 @@ export function validateEventSearchForm(values = {}) {
 export function toSearchCriteria(values = {}) {
   const date = text(values.date);
   const criteria = {
-    startsAt: toOffsetIsoString(`${date}T${text(values.startTime)}`),
-    endsAt: toOffsetIsoString(`${date}T${text(values.endTime)}`),
+    startsAt: toVenueOffsetIsoString(`${date}T${text(values.startTime)}`),
+    endsAt: toVenueOffsetIsoString(`${date}T${text(values.endTime)}`),
     expectedAttendance: Number(text(values.expectedAttendance)),
   };
 

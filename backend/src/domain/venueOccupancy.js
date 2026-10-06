@@ -3,8 +3,8 @@
  *
  * SCRUM-139, a subtask of SCRUM-20 (Search Venues Against Event Requirements).
  *
- * AC5: a venue is excluded when an existing booking or an active block
- * overlaps the requested period. Two periods overlap when
+ * AC6: a venue is excluded when an occupying booking or an active block
+ * overlaps the requested period. AC5: two periods overlap when
  *
  *     a.start < b.end && a.end > b.start
  *
@@ -20,7 +20,7 @@
  * strict lt/gt read in the services use, so search and the database agree on
  * what touching means.
  *
- * AC6 and Week 7 (setup and turnaround). At a venue, an event occupies
+ * Week 7 (setup and turnaround). At a venue, an event occupies
  * [start - setup, end + turnaround), using that venue's own minutes -- and so
  * does the requested event, because it needs its own setup and turnaround
  * too. The customer's worked example: setup 30, turnaround 45, a booking
@@ -57,7 +57,7 @@ const MS_PER_MINUTE = 60 * 1000;
 /**
  * The booking statuses that occupy a venue: approved AND flagged_for_review.
  *
- * Deliberately wider than AC5/AC6's word "approved". A flagged event still
+ * Deliberately wider than AC6's word "approved". A flagged event still
  * holds its venue until the coordinator moves it -- Week 7 asks us to
  * "preserve the original event" rather than drop it. The block that flagged it
  * may since have been shortened or removed (015's header allows both), so the

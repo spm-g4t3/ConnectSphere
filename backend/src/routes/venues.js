@@ -382,13 +382,20 @@ export function createVenueRouter({
    * ?startsAt=&endsAt=&expectedAttendance= are required; ?layout=,
    * ?accessibility=, ?facilities= and ?location= (SCRUM-141) are optional,
    * accessibility and facilities as comma-separated codes (parseEventSearch).
-   * findVenuesForEvent does the rest: AC1 the criteria themselves; AC2 active
-   * venues only; AC3 capacity and opening hours cover the event; AC4 the
-   * layout and every requested accessibility feature and facility are
-   * provided, and the location contains the requested text; AC5/AC6 no
-   * approved booking or active block overlaps the event once the venue's
-   * setup and turnaround are added; AC7 every supplied criterion must match;
-   * AC8 no match is an empty list.
+   * findVenuesForEvent does the rest: AC1 the criteria themselves; active
+   * venues only (SCRUM-15 AC3); AC3 capacity and opening hours cover the
+   * event, the layout and every requested accessibility feature and facility
+   * are provided, and the location contains the requested text; AC4 every
+   * supplied criterion must match, a partial match is not returned; AC5/AC6
+   * no occupying booking -- approved or flagged_for_review, the SCRUM-139
+   * decision in domain/venueOccupancy.js -- and no active block overlaps the
+   * event, on the strict rule, once the venue's setup and turnaround are
+   * added; AC7 each result carries the venue's details; AC8 no match is an
+   * empty list. AC2's pre-fill is the client's.
+   *
+   * No includeRetired here: parseEventSearch copies only the keys it knows,
+   * so it is never read and retired venues are always left out -- unlike
+   * /search, which validates it.
    *
    * The '+' in an offset must be URL-encoded as %2B, as /search explains;
    * axios params does it.

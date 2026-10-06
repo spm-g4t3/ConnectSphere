@@ -12,8 +12,9 @@
 -- The Week 7 Customer Change adds a setup time before each event, alongside
 -- the turnaround after it: "An event 10:00-12:00 with 30 min setup and 45 min
 -- turnaround occupies 9:30-12:45." This migration stores the setup time;
--- nothing enforces it yet. SCRUM-139 will, by treating an approved booking as
--- occupying [start - setup, end + turnaround) when it checks for overlap.
+-- nothing enforces it yet. SCRUM-139 will, by treating an occupying booking
+-- (approved or flagged_for_review, domain/venueOccupancy.js) as occupying
+-- [start - setup, end + turnaround) when it checks for overlap.
 --
 -- Storage: venues.setup_minutes, a smallint with a named CHECK listing the
 -- allowed values (0, 15, 30, 45, 60, 90, 120) -- the same shape, and the same
@@ -54,8 +55,8 @@
 --   room layout                  | venue_room_layouts (002)
 --   accessibility                | venue_accessibility_features (002)
 --   facilities                   | venue_facilities (002)
---   not already booked           | bookings with status 'approved' (009/011),
---                                |   via idx_bookings_venue_approved (011)
+--   not already booked           | bookings with status 'approved' or
+--                                |   'flagged_for_review' (009/011)
 --   not blocked                  | venue_blocks where removed_at is null (011)
 --   gap after an event           | venues.turnaround_minutes (017)
 --   preparation before an event  | venues.setup_minutes (this file)
