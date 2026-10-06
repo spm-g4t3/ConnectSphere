@@ -23,8 +23,14 @@
 //     details[] show beside the fields they name (mapServerDetails), and
 //     anything else gets one message above the results.
 //
-// Results are a plain list of names for now. SCRUM-142 adds each venue's
-// details, and SCRUM-143 the no-match message and retry.
+// SCRUM-142: each result shows the six things the story asks for -- name,
+// location, maximum capacity, room layouts, accessibility features and
+// facilities -- and nothing else. Hours, setup and turnaround come back too
+// but are left off: the search has already checked them against the event.
+// The code lists show as labels from venueLookups, which is a known-stale
+// copy, so a code it has not heard of shows as itself rather than vanishing,
+// and an empty list says "None listed" rather than leaving a blank.
+// SCRUM-143 adds the no-match message and retry.
 //
 // The event's free-text requirements are already shown under "Requirements"
 // in the same panel, so this section does not repeat them.
@@ -44,6 +50,51 @@ import {
   FACILITIES,
   ROOM_LAYOUTS,
 } from "../services/venueLookups";
+
+/** The three code lists on a result, in the order they are shown. */
+const RESULT_CODE_LISTS = [
+  { field: "layouts", term: "Room layouts", options: ROOM_LAYOUTS },
+  { field: "accessibility", term: "Accessibility features", options: ACCESSIBILITY_FEATURES },
+  { field: "facilities", term: "Facilities", options: FACILITIES },
+];
+
+/**
+ * A code list as readable text. A code venueLookups does not know shows as
+ * the raw code -- the same fallback VenueDetail's fieldLabel uses -- because
+ * the lookup copy is stale by design and hiding a code would misreport the
+ * venue.
+ */
+function codesText(codes, options) {
+  if (!Array.isArray(codes) || codes.length === 0) return "None listed";
+  return codes
+    .map((code) => options.find((option) => option.code === code)?.label ?? code)
+    .join(", ");
+}
+
+/** One matching venue: its name as the heading, the rest as a <dl>. */
+function VenueResult({ venue, headingId }) {
+  const rows = [
+    { term: "Location", value: venue.location },
+    { term: "Maximum capacity", value: venue.maxCapacity },
+    ...RESULT_CODE_LISTS.map(({ field, term, options }) => ({
+      term,
+      value: codesText(venue[field], options),
+    })),
+  ];
+  return (
+    <article className="event-venue-finder__result" aria-labelledby={headingId}>
+      <h4 id={headingId}>{venue.name}</h4>
+      <dl>
+        {rows.map(({ term, value }) => (
+          <div key={term} className="event-venue-finder__result-row">
+            <dt>{term}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </article>
+  );
+}
 
 /** The two checkbox groups, in the order they are shown. */
 const CODE_GROUPS = [
@@ -279,7 +330,9 @@ export default function EventVenueFinder({ request }) {
       {results !== null && results.length > 0 && (
         <ul className="event-venue-finder__results" aria-label="Matching venues">
           {results.map((venue) => (
-            <li key={venue.id}>{venue.name}</li>
+            <li key={venue.id}>
+              <VenueResult venue={venue} headingId={`${idPrefix}-venue-${venue.id}`} />
+            </li>
           ))}
         </ul>
       )}

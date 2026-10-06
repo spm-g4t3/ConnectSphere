@@ -4,9 +4,8 @@
 // event view -- pre-filled from the event, editable, and run only when the
 // coordinator presses Search.
 //
-// venueService is mocked, so nothing touches the network. Results are only a
-// list of names here; SCRUM-142 adds venue details and SCRUM-143 the no-match
-// message, so neither is asserted.
+// venueService is mocked, so nothing touches the network. SCRUM-142's venue
+// details are asserted at the end; SCRUM-143's no-match message is not.
 //
 // Timezone-safe: the event's instants are fixed ISO strings and every expected
 // input value comes from toDatetimeLocalValue; date and time inputs are set
@@ -56,8 +55,30 @@ const EVENT = Object.freeze({
   venueRequirements: "Theatre layout with a projector",
 });
 
-const HALL = { id: "v1", name: "Hall A", location: "Level 2", maxCapacity: 200 };
-const ANNEX = { id: "v2", name: "Annex", location: "Block C", maxCapacity: 90 };
+const HALL = {
+  id: "v1",
+  name: "Hall A",
+  location: "Level 2",
+  maxCapacity: 200,
+  layouts: ["theatre", "u_shape"],
+  accessibility: ["step_free_entrance", "hearing_loop"],
+  facilities: ["projector", "wifi"],
+  hours: [{ dayOfWeek: 3, opensAt: "08:00", closesAt: "22:00" }],
+  setupMinutes: 45,
+  turnaroundMinutes: 30,
+};
+const ANNEX = {
+  id: "v2",
+  name: "Annex",
+  location: "Block C",
+  maxCapacity: 90,
+  layouts: ["classroom"],
+  accessibility: [],
+  facilities: [],
+  hours: [],
+  setupMinutes: 0,
+  turnaroundMinutes: 0,
+};
 
 function deferred() {
   let resolve;
@@ -322,10 +343,11 @@ describe("SCRUM20_AC1 searching", () => {
     await user.click(searchButton());
 
     const list = await screen.findByRole("list", { name: "Matching venues" });
-    expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
-      "Hall A",
-      "Annex",
-    ]);
+    expect(
+      within(list)
+        .getAllByRole("heading")
+        .map((heading) => heading.textContent),
+    ).toEqual(["Hall A", "Annex"]);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -627,5 +649,94 @@ describe("SCRUM20_AC1 server errors", () => {
     await screen.findByRole("list", { name: "Matching venues" });
     expect(field.location()).not.toHaveAttribute("aria-invalid");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM20 venue details on each result (SCRUM-142)", () => {
+  /** Term -> definition text for one result, found by its venue name. */
+  async function detailsOf(name) {
+    const article = await screen.findByRole("article", { name });
+    const terms = within(article).getAllByRole("term").map((dt) => dt.textContent);
+    const values = within(article).getAllByRole("definition").map((dd) => dd.textContent);
+    return Object.fromEntries(terms.map((term, i) => [term, values[i]]));
+  }
+
+  async function searchReturning(venues) {
+    vi.mocked(findVenuesForEvent).mockResolvedValue(venues);
+    const { user } = renderFinder();
+    await user.click(searchButton());
+    await screen.findByRole("list", { name: "Matching venues" });
+  }
+
+  it("SCRUM20_each_result_shows_name_location_capacity_layouts_accessibility_and_facilities", async () => {
+    await searchReturning([HALL, ANNEX]);
+
+    expect(screen.getByRole("heading", { name: "Hall A" })).toBeInTheDocument();
+    expect(await detailsOf("Hall A")).toEqual({
+      Location: "Level 2",
+      "Maximum capacity": "200",
+      "Room layouts": "Theatre, U-Shape",
+      "Accessibility features": "Step-free entrance, Hearing loop",
+      Facilities: "Projector, Wi-Fi",
+    });
+    expect((await detailsOf("Annex"))["Room layouts"]).toBe("Classroom");
+  });
+
+  it("SCRUM20_labels_come_from_venueLookups_not_the_raw_codes", async () => {
+    await searchReturning([
+      {
+        ...HALL,
+        layouts: ROOM_LAYOUTS.map((o) => o.code),
+        accessibility: ACCESSIBILITY_FEATURES.map((o) => o.code),
+        facilities: FACILITIES.map((o) => o.code),
+      },
+    ]);
+
+    const details = await detailsOf("Hall A");
+    expect(details["Room layouts"]).toBe(ROOM_LAYOUTS.map((o) => o.label).join(", "));
+    expect(details["Accessibility features"]).toBe(
+      ACCESSIBILITY_FEATURES.map((o) => o.label).join(", "),
+    );
+    expect(details.Facilities).toBe(FACILITIES.map((o) => o.label).join(", "));
+  });
+
+  it("SCRUM20_a_code_the_lookup_copy_does_not_know_shows_as_the_raw_code", async () => {
+    // venueLookups is a known-stale copy: a newer code must still show.
+    await searchReturning([
+      {
+        ...HALL,
+        layouts: ["theatre", "cabaret"],
+        accessibility: ["braille_signage"],
+        facilities: ["projector", "stage_lighting"],
+      },
+    ]);
+
+    const details = await detailsOf("Hall A");
+    expect(details["Room layouts"]).toBe("Theatre, cabaret");
+    expect(details["Accessibility features"]).toBe("braille_signage");
+    expect(details.Facilities).toBe("Projector, stage_lighting");
+  });
+
+  it("SCRUM20_an_empty_code_list_says_none_listed", async () => {
+    await searchReturning([{ ...ANNEX, layouts: [] }]);
+
+    const details = await detailsOf("Annex");
+    expect(details["Room layouts"]).toBe("None listed");
+    expect(details["Accessibility features"]).toBe("None listed");
+    expect(details.Facilities).toBe("None listed");
+  });
+
+  it("SCRUM20_only_the_six_required_fields_are_shown", async () => {
+    await searchReturning([HALL]);
+
+    const article = await screen.findByRole("article", { name: "Hall A" });
+    expect(Object.keys(await detailsOf("Hall A"))).toEqual([
+      "Location",
+      "Maximum capacity",
+      "Room layouts",
+      "Accessibility features",
+      "Facilities",
+    ]);
+    expect(article).not.toHaveTextContent(/hours|setup|turnaround|08:00|22:00|45|30/i);
   });
 });
