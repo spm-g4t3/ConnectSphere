@@ -729,6 +729,23 @@ describe("SCRUM20 venue details on each result (SCRUM-142)", () => {
     ]);
     expect(article).not.toHaveTextContent(/hours|setup|turnaround|08:00|22:00|45|30/i);
   });
+
+  it("SCRUM20_AC7_results_are_shown_as_returned_without_refiltering", async () => {
+    // The server decides what matches and in what order. Zeta is below the
+    // form's 80 and listed before Alpha: the client neither drops nor sorts.
+    const ZETA = { ...ANNEX, id: "v9", name: "Zeta", maxCapacity: 50 };
+    const ALPHA = { ...HALL, id: "v8", name: "Alpha" };
+    await searchReturning([ZETA, ALPHA]);
+
+    expect(field.attendance()).toHaveValue(80);
+    const list = screen.getByRole("list", { name: "Matching venues" });
+    expect(
+      within(list)
+        .getAllByRole("heading")
+        .map((heading) => heading.textContent),
+    ).toEqual(["Zeta", "Alpha"]);
+    expect((await detailsOf("Zeta"))["Maximum capacity"]).toBe("50");
+  });
 });
 
 describe("SCRUM20_AC8 no venue matched (SCRUM-143)", () => {

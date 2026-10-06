@@ -15,8 +15,10 @@
  * contradict its own query.
  *
  * Cases: B-E2E-01 (one search over several criteria returns exactly the
- * venues meeting all of them) and B-E2E-02 (the same search with no match is
- * 200 []).
+ * venues meeting all of them), B-E2E-02 (the same search with no match is
+ * 200 []), B-E2E-03 (SCRUM-144: a booking or block touching the padded period
+ * leaves the venue in, one minute over takes it out) and B-AC6-07 (SCRUM-144:
+ * the venues read filters out retired venues).
  *
  * Time-zone safe: every timestamp carries an explicit +08:00 offset and is
  * compared as an instant.
@@ -359,5 +361,96 @@ describe('SCRUM20 event search through the HTTP layer', () => {
     expect(res.body.details.map((d) => d.field)).toEqual(
       expect.arrayContaining(['startsAt', 'endsAt']),
     );
+  });
+});
+
+
+/**
+ * SCRUM-144: AC5's touching edges and AC6's retired rule, end to end.
+ *
+ * The padding arithmetic, from domain/venueOccupancy.js. Every venue here has
+ * setup 15 and turnaround 30, and the request is 10:00-12:00, so it occupies
+ * [09:45, 12:30) at each venue.
+ *
+ *  - A booking is padded the same way, [start - 15, end + 30). It touches the
+ *    request when its padded end is 09:45 (it ends at 09:15) or its padded
+ *    start is 12:30 (it starts at 12:45). One minute further in -- ending
+ *    09:16, starting 12:44 -- overlaps.
+ *  - A block is a closure and is compared raw against the padded request. It
+ *    touches when it ends at 09:45 or starts at 12:30; ending 09:46 or
+ *    starting 12:29 overlaps.
+ *
+ * Every row sits inside the read window (the request widened by the largest
+ * setup plus turnaround, 06:00-16:00), so satisfiesFilters passes them all
+ * and only the occupancy rule decides.
+ */
+describe('SCRUM20 availability edges and retired venues through the HTTP layer', () => {
+  /** Just the period and attendance: no codes, so no lookup reads. */
+  const PERIOD_ONLY = { startsAt: BASE.startsAt, endsAt: BASE.endsAt, expectedAttendance: '80' };
+
+  // Named so .order('name') returns them in this order.
+  const TOUCHING = venueRow(ATRIUM, 'Atrium Hall');
+  const OVER_AT_START = venueRow(BOARDROOM, 'Boardroom 3');
+  const OVER_AT_END = venueRow(CONCOURSE, 'Concourse Room');
+  const ROWS = [TOUCHING, OVER_AT_START, OVER_AT_END];
+  const IDS = [ATRIUM, BOARDROOM, CONCOURSE];
+
+  it('SCRUM20_AC5_touching_booking_venue_appears_in_the_flow', async () => {
+    // B-E2E-03, bookings: padded, they touch at 09:15 and 12:45.
+    script(
+      venuesStep(ROWS),
+      occupancySteps(IDS, [
+        // Padded 07:45-09:45 and 12:30-14:30: both touch [09:45, 12:30).
+        { venue_id: ATRIUM, starts_at: utc('08:00'), ends_at: utc('09:15') },
+        { venue_id: ATRIUM, starts_at: utc('12:45'), ends_at: utc('14:00') },
+        // Padded to 09:46: one minute into the request's setup.
+        { venue_id: BOARDROOM, starts_at: utc('08:00'), ends_at: utc('09:16') },
+        // Padded from 12:29: one minute into the request's turnaround.
+        { venue_id: CONCOURSE, starts_at: utc('12:44'), ends_at: utc('14:00') },
+      ], []),
+    );
+
+    const res = await asCoordinator(searchUrl(PERIOD_ONLY));
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((v) => v.name)).toEqual(['Atrium Hall']);
+  });
+
+  it('SCRUM20_AC5_touching_block_venue_appears_in_the_flow', async () => {
+    // B-E2E-03, blocks: raw, they touch at 09:45 and 12:30.
+    script(
+      venuesStep(ROWS),
+      occupancySteps(IDS, [], [
+        // Ends where the padded request starts, starts where it ends.
+        { venue_id: ATRIUM, starts_at: utc('08:00'), ends_at: utc('09:45') },
+        { venue_id: ATRIUM, starts_at: utc('12:30'), ends_at: utc('14:00') },
+        // One minute into the request's setup.
+        { venue_id: BOARDROOM, starts_at: utc('08:00'), ends_at: utc('09:46') },
+        // One minute into the request's turnaround.
+        { venue_id: CONCOURSE, starts_at: utc('12:29'), ends_at: utc('14:00') },
+      ]),
+    );
+
+    const res = await asCoordinator(searchUrl(PERIOD_ONLY));
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((v) => v.name)).toEqual(['Atrium Hall']);
+  });
+
+  it('SCRUM20_AC6_retired_venue_is_never_returned', async () => {
+    // B-AC6-07. The venues read is the only place a retired venue could get
+    // in, so it must filter retired_at is null and nothing else -- no
+    // includeRetired switch, no second read without the filter.
+    script(
+      fromStep('venues', ok([TOUCHING]), (q) => {
+        expect(q.allArgs('is')).toEqual([['retired_at', null]]);
+      }),
+      occupancySteps([ATRIUM], [], []),
+    );
+
+    const res = await asCoordinator(searchUrl(PERIOD_ONLY));
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((v) => v.name)).toEqual(['Atrium Hall']);
   });
 });

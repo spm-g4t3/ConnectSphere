@@ -2243,7 +2243,8 @@ describe('SCRUM20_SCRUM137 setup time through the venue routes', () => {
  * check that a bad query reaches the real validator.
  *
  * Cases: B-AC1-17 to 19 (route), B-AC8-02/03, against the new route rather
- * than /search -- SCRUM-140 gave the event search its own path.
+ * than /search -- SCRUM-140 gave the event search its own path -- and
+ * B-AC6-09 (SCRUM-144: includeRetired is ignored, not honoured).
  */
 describe('SCRUM20 GET /api/venues/event-search', () => {
   const COORDINATOR_ID = '33333333-3333-4333-8333-333333333333';
@@ -2543,6 +2544,26 @@ describe('SCRUM20 GET /api/venues/event-search', () => {
       expect(search).toHaveBeenCalledTimes(1);
       expect(search.mock.calls[0][0]).toEqual({ location: 'SCIS' });
       expect(find).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('retired venues', () => {
+    it('SCRUM20_AC6_include_retired_with_event_search_is_ignored', async () => {
+      // B-AC6-09 (SCRUM-144). parseEventSearch copies only the keys it knows,
+      // so the flag never reaches the service: 200, not 400, and the real
+      // service still reads active venues only.
+      const venues = queryStub(ok([]));
+      from.mockReturnValueOnce(venues);
+
+      const res = await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=40&includeRetired=true`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+      expect(criteriaSent()).toEqual({ startsAt: STARTS_AT, endsAt: ENDS_AT, expectedAttendance: 40 });
+      expect(from).toHaveBeenCalledTimes(1);
+      expect(from).toHaveBeenCalledWith('venues');
+      expect(venues.args('is')).toEqual(['retired_at', null]);
     });
   });
 });
