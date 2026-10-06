@@ -2,7 +2,7 @@
 
 **Story:** Approve or Reject a Submitted Event Request — Event Coordinator
 **Subtask:** SCRUM-95 (design) → implemented by SCRUM-134
-**Schema:** `backend/db/migrations/010_event_request_decisions.sql` (applied)
+**Schema:** `backend/db/migrations/025_event_request_decisions.sql` (applied; renamed from 010 on 6 October 2026)
 
 This document is the written layer between SCRUM-19's acceptance criteria and the
 Vitest files that implement them. Deliverable #3 requires test cases traceable

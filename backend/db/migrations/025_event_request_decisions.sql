@@ -1,5 +1,20 @@
--- 010_event_request_decisions.sql
+-- 025_event_request_decisions.sql
 -- SCRUM-163, a subtask of SCRUM-19 (Approve or Reject a Submitted Event Request)
+--
+-- Renamed from 010_ on 6 October 2026, because dev
+-- already had a different 010 (010_event_request_clarifications.sql). 025 was
+-- agreed with the team; 024 is claimed. This file is applied to the live
+-- database under its old name, so the rename is a repository correction, not a
+-- schema change. Do not run it again: there is nothing left for it to do. (It
+-- is idempotent, as "Safe to run again" below says, so a mistaken run changes
+-- nothing.)
+--
+-- 014_coordinator_assignment.sql and 018_reassign_event_request.sql still call
+-- it by its 010_ name, deliberately: both are applied, and
+-- migrations here are append-only (001's header states the rule). 014's
+-- prerequisite guard raises an error naming the old filename; it also names
+-- the SCRUM-19 branch, which is enough to find this file. The "Numbered 010"
+-- paragraph below is the original reasoning, kept as written.
 --
 -- Gives an event request somewhere to record who reviewed it, what was decided,
 -- why, by whom and when. Until now the table could say a request had been
