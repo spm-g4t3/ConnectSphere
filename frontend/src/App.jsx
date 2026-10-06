@@ -10,6 +10,7 @@ import VenueSearch from "./components/VenueSearch";
 import VenueCatalogue from "./components/VenueCatalogue";
 import ReviewQueue from "./components/ReviewQueue";
 import MyAssignedEvents from "./components/MyAssignedEvents";
+import EquipmentCatalogue from "./components/EquipmentCatalogue";
 import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
 import "./App.css";
@@ -142,6 +143,14 @@ function AppRoutes() {
               <div className="dashboard dashboard--coordinator">
                 <MyAssignedEvents />
               </div>
+            </ProtectedRoute>
+          }
+        />
+                <Route
+          path="/equipment-catalogue"
+          element={
+            <ProtectedRoute allowedRoles={["technical_support_staff"]}>
+              <EquipmentCatalogue />
             </ProtectedRoute>
           }
         />

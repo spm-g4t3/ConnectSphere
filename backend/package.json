@@ -16,6 +16,8 @@
     "change-request:check": "node scripts/check-event-change-request-service.js",
     "routes:check": "node scripts/check-event-request-routes.js",
     "venue-routes:check": "node scripts/check-venue-routes.js",
+    "equipment:check": "node scripts/check-equipment-service.js",
+    "equipment:seed": "node db/seeds/equipment.js",
     "venue-blocks:check": "node scripts/check-venue-blocks.js",
     "venue-calendar:check": "node scripts/check-venue-calendar.js",
     "equipment-availability:check": "node scripts/check-equipment-availability.js"

@@ -64,4 +64,10 @@ describe("Navigation links by role", () => {
     expect(screen.getByRole("link", { name: "Venue Catalogue" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Find a Venue" })).not.toBeInTheDocument();
   });
+
+  it("gives Technical Support Staff an Equipment Catalogue link", () => {
+  renderAs("technical_support_staff");
+
+  expect(screen.getByRole("link", { name: "Equipment Catalogue" })).toHaveAttribute("href", "/equipment-catalogue");
+});
 });
