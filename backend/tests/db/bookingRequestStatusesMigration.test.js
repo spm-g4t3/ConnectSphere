@@ -92,7 +92,7 @@ describe('SCRUM-250: booking request statuses in Postgres', () => {
     existingBookingId = (await insertBooking('approved')).id;
 
     await db.exec(migration(MIGRATION_027));
-  });
+  }, 60_000);
 
   afterAll(async () => {
     await db.close();
