@@ -337,6 +337,45 @@ describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
     });
   });
 
+  describe('SCRUM-256: a withdrawal and its notification succeed or fail together', () => {
+    it('SCRUM256_a_failed_notification_rolls_the_withdrawal_back', async () => {
+      const { id } = await makeBooking('pending');
+      await db.exec(`
+        create function pg_temp_refuse_notification() returns trigger language plpgsql as $$
+        begin raise exception 'notifications are unavailable' using errcode = 'XX001'; end $$;
+        create trigger refuse_notification before insert on notifications
+          for each row execute function pg_temp_refuse_notification();
+      `);
+
+      try {
+        const err = await refusal(withdraw(id));
+
+        expect(err.code).toBe('XX001');
+        // Neither half survived: still pending, and nobody was told.
+        expect(await statusOf(id)).toBe('pending');
+        expect(await withdrawnNotifications(id)).toHaveLength(0);
+      } finally {
+        await db.exec('drop trigger refuse_notification on notifications; drop function pg_temp_refuse_notification();');
+      }
+
+      // Once notifications work again the same request can be withdrawn.
+      expect((await withdraw(id)).booking.status).toBe('withdrawn');
+      expect(await withdrawnNotifications(id)).toHaveLength(2);
+    });
+
+    it('SCRUM256_a_withdrawal_with_no_venue_staff_still_succeeds_and_notifies_nobody', async () => {
+      const { id } = await makeBooking('pending');
+      await db.query(`update profiles set role = 'event_coordinator' where id = any ($1)`, [[staffA, staffB]]);
+
+      try {
+        expect((await withdraw(id)).booking.status).toBe('withdrawn');
+        expect(await withdrawnNotifications(id)).toHaveLength(0);
+      } finally {
+        await db.query(`update profiles set role = 'venue_staff' where id = any ($1)`, [[staffA, staffB]]);
+      }
+    });
+  });
+
   describe('the locking protocol and who may call', () => {
     const sql = readFileSync(resolve(here, '../../db/migrations/031_withdraw_booking_request.sql'), 'utf8')
       .replace(/--[^\n]*/g, '')

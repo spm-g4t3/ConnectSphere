@@ -7,8 +7,8 @@
  *
  * Applied in order: 001, 005, 007, 010, a stand-in for SCRUM-19's decision
  * column (014 reads it and it is not on this branch, as in
- * eventStatusLifecycleDatabase.test.js), 014, then 002, 009, 011, 013, 027, 028
- * and 030.
+ * eventStatusLifecycleDatabase.test.js), 014, then 002, 009, 011, 013, 014
+ * (booking review and notifications), 027, 028 and 030.
  *
  * What PGlite is not: a second connection. It runs one query at a time, so it
  * cannot show two real transactions blocking each other on the row locks. The
@@ -39,6 +39,7 @@ const MIGRATIONS = [
   '009_bookings.sql',
   '011_venue_blocks.sql',
   '013_venue_block_booking_conflicts.sql',
+  '014_booking_review_notifications.sql',
   '027_booking_request_statuses.sql',
   '028_booking_status_default_pending.sql',
   '030_create_booking_request.sql',
@@ -452,6 +453,122 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
       const err = await refusal(request(eventId, await makeVenue(), { suitability }));
       expect(err.code).toBe('22023');
       expect(await bookingsFor(eventId)).toHaveLength(0);
+    });
+  });
+
+  describe('SCRUM-256: authorization after a handover and the persisted request', () => {
+    it('SCRUM256_a_handover_moves_the_right_to_request_to_the_new_coordinator', async () => {
+      const eventId = await makeEvent();
+      const venueId = await makeVenue();
+      await db.query('update event_requests set assigned_coordinator_id = $1 where id = $2', [otherCoordinator, eventId]);
+
+      const err = await refusal(request(eventId, venueId, { requestedBy: coordinator }));
+      expect(err.code).toBe('42501');
+      expect(await bookingsFor(eventId)).toHaveLength(0);
+
+      const result = await request(eventId, venueId, { requestedBy: otherCoordinator });
+      expect(result.booking).toMatchObject({ status: 'pending', requested_by: otherCoordinator });
+    });
+
+    it('SCRUM256_the_request_keeps_the_period_and_requirements_the_event_had_when_it_was_made', async () => {
+      const eventId = await makeEvent();
+      const { booking } = await request(eventId, await makeVenue());
+
+      await db.query(
+        `update event_requests
+            set proposed_start = '2027-01-01T09:00:00+00', proposed_end = '2027-01-01T17:00:00+00',
+                venue_requirements = 'Changed', accessibility_requirements = 'Changed'
+          where id = $1`,
+        [eventId],
+      );
+
+      const stored = await one('select * from bookings where id = $1', [booking.id]);
+      expect(new Date(stored.starts_at).toISOString()).toBe(new Date(START).toISOString());
+      expect(new Date(stored.ends_at).toISOString()).toBe(new Date(END).toISOString());
+      expect(stored).toMatchObject({ venue_requirements: 'Tiered seating', accessibility_requirements: 'Step-free entrance' });
+    });
+
+    it('SCRUM256_a_request_is_attributed_to_the_caller_not_to_anyone_the_event_names', async () => {
+      const eventId = await makeEvent({ organiser_id: organiser });
+      const { booking } = await request(eventId, await makeVenue());
+      expect(booking.requested_by).toBe(coordinator);
+      expect(booking.requested_by).not.toBe(organiser);
+    });
+  });
+
+  describe('SCRUM-256: the interval convention at the edges of the event period', () => {
+    // The event runs 09:00-17:00. Periods are half-open, as in 011 and 013: one
+    // that only touches an edge is clear, and one that reaches a second inside is not.
+    const EDGES = [
+      ['ends exactly when the event starts', '2026-12-01T07:00:00+00:00', '2026-12-01T09:00:00+00:00', false],
+      ['starts exactly when the event ends', '2026-12-01T17:00:00+00:00', '2026-12-01T19:00:00+00:00', false],
+      ['ends one second after the event starts', '2026-12-01T07:00:00+00:00', '2026-12-01T09:00:01+00:00', true],
+      ['starts one second before the event ends', '2026-12-01T16:59:59+00:00', '2026-12-01T19:00:00+00:00', true],
+      ['sits wholly inside the event', '2026-12-01T11:00:00+00:00', '2026-12-01T12:00:00+00:00', true],
+      ['wholly contains the event', '2026-12-01T06:00:00+00:00', '2026-12-01T20:00:00+00:00', true],
+      ['matches the event exactly', START, END, true],
+    ];
+
+    it.each(EDGES)('SCRUM256_a_venue_block_that_%s', async (_label, startsAt, endsAt, conflicts) => {
+      const venueId = await makeVenue();
+      await makeBlock(venueId, startsAt, endsAt);
+      const result = await request(await makeEvent(), venueId);
+      expect(result.outcome).toBe(conflicts ? 'conflict' : 'created');
+    });
+
+    it.each(EDGES)('SCRUM256_an_approved_booking_that_%s', async (_label, startsAt, endsAt, conflicts) => {
+      const venueId = await makeVenue();
+      await makeBooking(venueId, await makeEvent(), 'approved', startsAt, endsAt);
+      const result = await request(await makeEvent(), venueId);
+      expect(result.outcome).toBe(conflicts ? 'conflict' : 'created');
+    });
+
+    it('SCRUM256_a_block_or_booking_at_another_venue_is_not_in_the_way', async () => {
+      const venueId = await makeVenue();
+      const elsewhere = await makeVenue();
+      await makeBlock(elsewhere, START, END);
+      await makeBooking(elsewhere, await makeEvent(), 'approved');
+      expect((await request(await makeEvent(), venueId)).outcome).toBe('created');
+    });
+  });
+
+  describe('SCRUM-256: a booking flagged by a real venue block (N24)', () => {
+    const DAY = 86_400_000;
+    const iso = (offsetDays, hour) => {
+      const d = new Date(Date.now() + offsetDays * DAY);
+      d.setUTCHours(hour, 0, 0, 0);
+      return d.toISOString();
+    };
+
+    it('SCRUM256_an_event_whose_booking_a_block_flagged_cannot_request_another_venue', async () => {
+      const eventId = await makeEvent();
+      const flaggedVenue = await makeVenue();
+      const bookingId = await makeBooking(flaggedVenue, eventId, 'approved', iso(20, 9), iso(20, 17));
+
+      // The SCRUM-17 override: Venue Staff confirm, and 014 flags the booking.
+      const created = await one(
+        `select create_venue_block($1, $2, $3, 'maintenance', null, null, true, $4::uuid[]) as result`,
+        [flaggedVenue, iso(20, 8), iso(20, 18), [bookingId]],
+      );
+      expect(created.result.outcome).toBe('created');
+      expect((await one('select status from bookings where id = $1', [bookingId])).status).toBe('flagged_for_review');
+
+      const err = await refusal(request(eventId, await makeVenue()));
+
+      expect(err).toMatchObject({ code: 'PT409', hint: 'BOOKING_FLAGGED_FOR_REVIEW', detail: bookingId });
+      expect(await bookingsFor(eventId)).toHaveLength(1);
+    });
+
+    it('SCRUM256_once_the_flagged_booking_is_cancelled_the_event_can_request_again', async () => {
+      const eventId = await makeEvent();
+      const venueId = await makeVenue();
+      const bookingId = await makeBooking(venueId, eventId, 'flagged_for_review');
+      expect((await refusal(request(eventId, await makeVenue()))).hint).toBe('BOOKING_FLAGGED_FOR_REVIEW');
+
+      // What SCRUM-266's cancel will do.
+      await db.query(`update bookings set status = 'cancelled' where id = $1`, [bookingId]);
+
+      expect((await request(eventId, await makeVenue())).outcome).toBe('created');
     });
   });
 
