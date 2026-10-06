@@ -388,3 +388,84 @@ export async function reassignEventRequest(id, { newCoordinatorId, handoverNote 
   });
   return response.data;
 }
+
+// ---------------------------------------------------------------------------
+// SCRUM-19: starting a review, and deciding a request
+// ---------------------------------------------------------------------------
+// The frontend half of SCRUM-346, SCRUM-119 and SCRUM-121. The backend writes
+// both through migration 029's functions, which check under a row lock that
+// the caller is the event's assigned coordinator and that the request is in
+// the right status. Nothing here decides who may do what.
+
+/**
+ * Start reviewing a submitted request (SCRUM-19 AC1).
+ *
+ * Moves it from submitted to under_review and makes the signed-in coordinator
+ * its reviewing coordinator, the one person the database then allows to
+ * decide it. No body: the caller is taken from the token.
+ *
+ * Returns the request after the change, statusDisplay included, so a screen
+ * can redraw from the response.
+ *
+ * The status codes a caller will want to tell apart:
+ *
+ *   403  the caller is not the event's assigned coordinator, or is not a
+ *        coordinator at all. It may have just been handed to someone else.
+ *   409  the request is not submitted any more: someone started the review
+ *        already, or it moved on.
+ *   404  the request does not exist.
+ *
+ * The 403 and 409 messages are written by the database and name ids, so show
+ * a message chosen by status code instead, as ReviewQueue does.
+ *
+ * @param {string} id
+ * @returns {Promise<Object>} the request, now under review
+ */
+export async function startEventReview(id) {
+  const response = await apiClient.post(`/event-requests/${id}/start-review`);
+  return response.data;
+}
+
+/**
+ * Approve or reject a request under review (SCRUM-19 AC2-AC9).
+ *
+ * The body is exactly { decision, decisionNote }. decision is 'approved' or
+ * 'rejected', lowercase, nothing else. A rejection needs a reason in
+ * decisionNote; an approval's note is optional. Who decided and when are not
+ * sent: the server takes the caller from the token and the time from its own
+ * clock.
+ *
+ * Returns the request after the decision, with decision, decisionNote,
+ * decidedBy and decidedAt filled in and statusDisplay updated.
+ *
+ * The status codes a caller will want to tell apart:
+ *
+ *   400  the decision value is not one of the two, or a rejection has no
+ *        reason. A missing reason carries err.response.data.details naming
+ *        decisionNote.
+ *   403  the caller is not the event's assigned coordinator, or someone else
+ *        is recorded as reviewing it.
+ *   409  one of two things, sharing a code on purpose (029's header): the
+ *        request is not under review (not started yet, waiting on a
+ *        clarification, or already decided), or, for an approval only, the
+ *        event's proposed start date has passed or is missing (AC6). The
+ *        remedy for the second is to agree a new date with the organiser or
+ *        reject the request, so a screen should say that, not a generic
+ *        failure.
+ *   404  the request does not exist.
+ *
+ * The database's messages name ids, so show a message chosen by status code.
+ *
+ * @param {string} id
+ * @param {Object} decision
+ * @param {'approved'|'rejected'} decision.decision
+ * @param {string} [decision.decisionNote]  required when rejecting
+ * @returns {Promise<Object>} the request after the decision
+ */
+export async function decideEventRequest(id, { decision, decisionNote }) {
+  const response = await apiClient.post(`/event-requests/${id}/decision`, {
+    decision,
+    decisionNote,
+  });
+  return response.data;
+}

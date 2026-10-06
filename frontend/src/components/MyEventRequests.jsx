@@ -20,6 +20,7 @@ import EventRequestForm from "./EventRequestForm";
 import ChangeRequestForm from "./ChangeRequestForm";
 import ChangeRequestStatusList from "./ChangeRequestStatusList";
 import AssignmentHistory from "./AssignmentHistory";
+import DecisionOutcome from "./DecisionOutcome";
 
 function formatEventDate(value) {
   if (!value) return "Not specified";
@@ -229,6 +230,27 @@ export default function MyEventRequests() {
                 <p className="my-event-requests__clarification" role="alert">
                   <strong>Coordinator clarification:</strong> {req.clarificationNote}
                 </p>
+              )}
+
+              {/* SCRUM-133, for SCRUM-19 AC10: once decided, the outcome, the
+                  reason or note, and who decided, on the row itself rather than
+                  behind a <details>. The coordinator history beside it is
+                  collapsed because it is background; the decision is the news
+                  this Organiser came back to read, and a rejection's reason is
+                  what they need to act on. A rejected request's own status
+                  description already says "See the Coordinator notes for the
+                  reason", so the reason belongs where that sentence points.
+
+                  Shown whenever a decision is recorded, whatever the status
+                  now is, as on the coordinator's panel. The decider's name is
+                  one read of the assignment history, made only for decided
+                  rows, once per page visit (DecisionOutcome explains where the
+                  name comes from). */}
+              {req.decision && (
+                <div className="my-event-requests__decision">
+                  <strong>Decision</strong>
+                  <DecisionOutcome request={req} view="organiser" />
+                </div>
               )}
 
               <details className="my-event-requests__details">
