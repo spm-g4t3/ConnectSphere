@@ -89,6 +89,19 @@ describe('AC5 to AC7: which reservations count', () => {
   });
 });
 
+describe('AC5: damaged and under maintenance count for every period', () => {
+  it('SCRUM23_AC5_damaged_and_under_maintenance_are_subtracted_from_the_total', () => {
+    expect(FUNCTION).toMatch(/v_type\.total_quantity - v_type\.damaged_quantity - v_type\.under_maintenance_quantity/);
+  });
+
+  it('SCRUM23_AC5_they_come_from_the_type_row_so_no_period_filter_applies_to_them', () => {
+    expect(FUNCTION).toContain('v_type.damaged_quantity');
+    expect(FUNCTION).toContain('v_type.under_maintenance_quantity');
+    expect(WHERE).not.toMatch(/damaged/);
+    expect(WHERE).not.toMatch(/under_maintenance/);
+  });
+});
+
 describe('AC3, AC5 and AC9: the figure', () => {
   it('SCRUM23_AC3_available_is_total_minus_damaged_minus_maintenance_minus_reserved', () => {
     expect(FUNCTION).toMatch(/'available', v_type\.total_quantity - v_type\.damaged_quantity - v_type\.under_maintenance_quantity - v_reserved/);
