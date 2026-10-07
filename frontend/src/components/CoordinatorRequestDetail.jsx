@@ -22,17 +22,25 @@
 // SCRUM-334 added the event's coordinator and assignment history, and the
 // assigned coordinator's Reassign action, which opens ReassignEventPanel as a
 // panel in place of this one.
+//
+// SCRUM-129 (SCRUM-19) replaced the dead decision section. The assigned
+// coordinator now starts the review of a submitted request, then approves,
+// rejects or returns it for amendment; a decided request shows its decision
+// read-only (DecisionOutcome). See the comment above the decision section.
 
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import AssignmentHistory from "./AssignmentHistory";
+import DecisionOutcome from "./DecisionOutcome";
 import ReassignEventPanel from "./ReassignEventPanel";
 import ClarificationHistory from "./ClarificationHistory";
 import {
+  decideEventRequest,
   getCoordinatorChangeRequests,
   processCoordinatorChangeRequest,
   requestEventClarification,
+  startEventReview,
   closeEventClarification,
 } from "../services/eventRequestService";
 import {
@@ -93,13 +101,71 @@ function seedableCapacity(value) {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
+// SCRUM-19. Keyed by status, as ReviewQueue's table is, because the server's
+// messages are written by the database and name ids.
+const START_REVIEW_ERROR_MESSAGES = {
+  403: "This request is no longer assigned to you, so you cannot start its review. Go back and reopen it to see who holds it now.",
+  404: "This request no longer exists.",
+  409: "This request is no longer waiting to be reviewed. Go back and reopen it to see where it stands.",
+};
+
+const DECISION_ERROR_MESSAGES = {
+  400: "A reason is required to reject this request.",
+  403: "This request is no longer assigned to you, or someone else is reviewing it. Go back and reopen it to see who holds it now.",
+  404: "This request no longer exists.",
+  409: "This request has changed since you opened it: it may already be decided, or waiting on a clarification. Go back and reopen it to see where it stands.",
+};
+
+// Return for amendment (POST /:id/clarification), keyed by status for the
+// same reason: requestEventClarification's refusals name the event's id. 400
+// is a blank or overlong note, which this screen already prevents (the
+// handler checks for a blank one, the textarea caps the length), so it can
+// only arrive from a note the server counts differently. 404 is a missing
+// event. 409 covers both of its causes, a status that moved and a handover
+// mid-flight, because both have the same remedy.
+const RETURN_FOR_AMENDMENT_ERROR_MESSAGES = {
+  400: "The instructions could not be sent as written. Check they are not empty and are 2,000 characters or fewer, then try again.",
+  403: "This request is no longer assigned to you, so you cannot return it for amendment. Go back and reopen it to see who holds it now.",
+  404: "This request no longer exists.",
+  409: "This request has changed since you opened it: it may already be decided, waiting on a clarification, or handed to another coordinator. Go back and reopen it to see where it stands.",
+};
+
+// AC6, said in this screen's words. The server's own refusal says the same:
+// agree a new date or reject.
+const START_DATE_PASSED_MESSAGE =
+  "This request cannot be approved because its proposed start date has passed or is missing. Agree a new date with the organiser, or reject the request.";
+
+/**
+ * Has this event's proposed start passed, by this browser's clock?
+ *
+ * Used only to choose which 409 message to show after an approval is refused
+ * (see handleDecision), never to decide whether to allow the approval: the
+ * server decides that, against its own clock. A missing or unreadable date
+ * counts as passed, as the server treats a missing one.
+ */
+function startDateHasPassed(value) {
+  if (!value) return true;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) || time <= Date.now();
+}
+
 export default function CoordinatorRequestDetail({
   request,
   onReviewDecisionProcessed,
   onChangeRequestProcessed,
 }) {
   const navigate = useNavigate();
-  const display = readStatusDisplay(request);
+
+  // SCRUM-19. The request as this panel last saw it change. Starting a review
+  // or deciding returns the updated request, and the panel stays open on it,
+  // showing the next step or the recorded decision, rather than closing and
+  // leaving the coordinator to find the request again. The `request` prop is
+  // the row the parent loaded; this overrides it once this panel has changed
+  // the request itself.
+  const [updatedRequest, setUpdatedRequest] = useState(null);
+  const current = updatedRequest ?? request;
+
+  const display = readStatusDisplay(current);
   const capacity = seedableCapacity(request.expectedAttendance);
   const earliestReplyDate = new Date();
   earliestReplyDate.setUTCDate(earliestReplyDate.getUTCDate() + 1);
@@ -139,6 +205,17 @@ export default function CoordinatorRequestDetail({
   // holds is stale, ReassignEventPanel turns the 403 into a message.
   const isAssignedCoordinator = Boolean(user?.id) && assignedCoordinatorId === user.id;
   const canReassign = isAssignedCoordinator;
+
+  // SCRUM-19. isAssignedCoordinator also decides who sees the review and
+  // decision actions, and for the same reason: a convenience, not the gate.
+  // 029's start_event_review and decide_event_request refuse anyone but the
+  // assigned coordinator (and, for a decision, the recorded reviewer) under
+  // the row lock, whatever this screen shows. docs/SCRUM-327.md makes the
+  // same argument for the hand-over button.
+
+  const [startingReview, setStartingReview] = useState(false);
+  const [startReviewError, setStartReviewError] = useState(null);
+  const [decisionError, setDecisionError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -198,9 +275,7 @@ export default function CoordinatorRequestDetail({
     });
   }
 
-  async function handleReviewDecision(decision) {
-    if (decision !== "returned_for_amendment") return;
-
+  async function handleReturnForAmendment() {
     const note = reviewNote.trim();
     if (!note) {
       setReviewDecisionError("Add instructions before returning this request.");
@@ -209,6 +284,7 @@ export default function CoordinatorRequestDetail({
 
     setProcessingReviewDecision(true);
     setReviewDecisionError(null);
+    setDecisionError(null);
     try {
       await requestEventClarification(
         request.id,
@@ -219,8 +295,90 @@ export default function CoordinatorRequestDetail({
       onReviewDecisionProcessed?.();
     } catch (error) {
       setReviewDecisionError(
-        error.response?.data?.error || "Could not return the request for amendment.",
+        RETURN_FOR_AMENDMENT_ERROR_MESSAGES[error.response?.status] ||
+          "The request could not be returned for amendment. Please try again.",
       );
+    } finally {
+      setProcessingReviewDecision(false);
+    }
+  }
+
+  /**
+   * SCRUM-19 AC1: start reviewing a submitted request.
+   *
+   * On success the panel stays open on the updated request, which is now
+   * under review with this coordinator as its reviewer, so the decision
+   * actions appear in place. The parent's list is refreshed through
+   * onChangeRequestProcessed, for the reason handleReassigned gives below.
+   */
+  async function handleStartReview() {
+    setStartingReview(true);
+    setStartReviewError(null);
+    try {
+      const updated = await startEventReview(request.id);
+      setUpdatedRequest(updated);
+      onChangeRequestProcessed?.();
+    } catch (error) {
+      setStartReviewError(
+        START_REVIEW_ERROR_MESSAGES[error.response?.status] ||
+          "The review could not be started. Please try again.",
+      );
+    } finally {
+      setStartingReview(false);
+    }
+  }
+
+  /**
+   * SCRUM-19: approve or reject the request under review.
+   *
+   * A rejection with no reason is refused here, before the call, as the
+   * service and the database refuse it too: the coordinator is told what to
+   * fill in without a round trip. An approval's note is optional.
+   *
+   * On success the panel stays open and shows the recorded decision
+   * read-only, which is the coordinator's confirmation that it was recorded.
+   *
+   * 409 means one of two things, and the two are told apart. The server
+   * shares the code (029's header: the event is not in a state that allows
+   * this, either way), but the remedies differ: a request that changed needs
+   * reopening; an event whose start date has passed needs a new date agreed
+   * with the organiser, or a rejection (AC6). Showing the first message for
+   * the second would send the coordinator to reopen a request that will be
+   * refused again. So for a refused approval the event's own proposed start,
+   * already on this screen, chooses: passed or missing means AC6's message.
+   * A rejection is never refused for its date, so its 409 is always the
+   * status case. Not by matching the server's message text, which is free to
+   * change; the date is data. The one imprecision is clock skew between this
+   * browser and the server within moments of the start time, where the other
+   * message could show; both still say what to do next.
+   */
+  async function handleDecision(decision) {
+    const note = reviewNote.trim();
+    if (decision === "rejected" && !note) {
+      setDecisionError("Add a reason before rejecting this request.");
+      return;
+    }
+
+    setProcessingReviewDecision(true);
+    setDecisionError(null);
+    setReviewDecisionError(null);
+    try {
+      const updated = await decideEventRequest(request.id, {
+        decision,
+        decisionNote: note || undefined,
+      });
+      setUpdatedRequest(updated);
+      setReviewNote("");
+      onChangeRequestProcessed?.();
+    } catch (error) {
+      const status = error.response?.status;
+      if (status === 409 && decision === "approved" && startDateHasPassed(current.proposedStart)) {
+        setDecisionError(START_DATE_PASSED_MESSAGE);
+      } else {
+        setDecisionError(
+          DECISION_ERROR_MESSAGES[status] || "The decision could not be recorded. Please try again.",
+        );
+      }
     } finally {
       setProcessingReviewDecision(false);
     }
@@ -520,14 +678,35 @@ export default function CoordinatorRequestDetail({
         )}
       </section>
 
-      {request.status === "pending_clarification" ? (
+      {/* SCRUM-19. What the decision section shows, in order:
+
+            1. A recorded decision, read-only, whatever the status now is. An
+               approved event later confirmed or cancelled still carries its
+               decision, and AC9 says it is not edited. Checked on the decision
+               itself rather than a list of "decided" statuses, so no status
+               vocabulary is copied here for it.
+            2. Pending clarification: the existing waiting panel.
+            3. Submitted: Start review, for the assigned coordinator.
+            4. Under review: Approve, Reject and Return for amendment, for the
+               assigned coordinator.
+            Anyone else sees what is happening but nothing to press.
+
+            The status and ownership checks here are a convenience, not the
+            gate: the server refuses regardless, and the error tables above say
+            why in words. */}
+      {current.decision ? (
+        <section>
+          <h3>Decision</h3>
+          <DecisionOutcome request={current} view="coordinator" />
+        </section>
+      ) : current.status === "pending_clarification" ? (
         <section>
           <h3>Waiting for organiser reply</h3>
-          <p>{request.clarificationNote || "No clarification note was recorded."}</p>
-          {request.clarificationReplyByDate && (
+          <p>{current.clarificationNote || "No clarification note was recorded."}</p>
+          {current.clarificationReplyByDate && (
             <p>
-              Reply by: {request.clarificationReplyByDate}
-              {request.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
+              Reply by: {current.clarificationReplyByDate}
+              {current.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
                 <strong className="clarification-overdue"> Overdue</strong>
               )}
             </p>
@@ -555,20 +734,45 @@ export default function CoordinatorRequestDetail({
             </form>
           )}
         </section>
-      ) : (
+      ) : current.status === "submitted" ? (
+        <section>
+          <h3>Review</h3>
+          {isAssignedCoordinator ? (
+            <div className="coordinator-start-review">
+              <p>
+                Start the review to approve, reject, or return this request for
+                amendment. You will be recorded as its reviewer.
+              </p>
+              {startReviewError && (
+                <p className="coordinator-clarification__error" role="alert">
+                  {startReviewError}
+                </p>
+              )}
+              <button type="button" disabled={startingReview} onClick={handleStartReview}>
+                {startingReview ? "Starting..." : "Start review"}
+              </button>
+            </div>
+          ) : (
+            <p>Waiting for the assigned coordinator to start the review.</p>
+          )}
+        </section>
+      ) : current.status === "under_review" ? (
         <section>
           <h3>Coordinator decision</h3>
-          <p>Approve and reject are not available yet. To request updates, return the event to the Organiser for amendment.</p>
-          {request.status === "under_review" && isAssignedCoordinator && (
+          {isAssignedCoordinator ? (
             <div className="coordinator-clarification">
+              {/* One note for all three actions. Whichever is chosen, the note
+                  is read by the Organiser: as the rejection reason, the
+                  approval note, or the amendment instructions. One box means
+                  the note cannot be typed into the wrong one. */}
               <label>
-                Clarification question
+                Note for the Organiser
                 <textarea
                   value={reviewNote}
                   onChange={(event) => setReviewNote(event.target.value)}
                   rows={4}
                   maxLength={2000}
-                  placeholder="Explain what you need the Organiser to clarify."
+                  placeholder="Required to reject or to return for amendment; optional when approving."
                 />
               </label>
               <details className="coordinator-clarification__amendments" open>
@@ -582,9 +786,9 @@ export default function CoordinatorRequestDetail({
                         type="checkbox"
                         checked={requestedFields.includes(field)}
                         onChange={(event) => {
-                          setRequestedFields((current) => event.target.checked
-                            ? [...current, field]
-                            : current.filter((item) => item !== field));
+                          setRequestedFields((previous) => event.target.checked
+                            ? [...previous, field]
+                            : previous.filter((item) => item !== field));
                         }}
                       />
                       {label}
@@ -601,28 +805,28 @@ export default function CoordinatorRequestDetail({
                   onChange={(event) => setReplyByDate(event.target.value)}
                 />
               </label>
-              {reviewDecisionError && (
+              {(decisionError || reviewDecisionError) && (
                 <p className="coordinator-clarification__error" role="alert">
-                  {reviewDecisionError}
+                  {decisionError || reviewDecisionError}
                 </p>
               )}
+              <div className="coordinator-review-actions">
+                <button className="coordinator-review-actions__approve" type="button" disabled={processingReviewDecision} onClick={() => handleDecision("approved")}>
+                  {processingReviewDecision ? "Saving..." : "Approve request"}
+                </button>
+                <button className="coordinator-review-actions__reject" type="button" disabled={processingReviewDecision} onClick={() => handleDecision("rejected")}>
+                  Reject request
+                </button>
+                <button className="coordinator-review-actions__return" type="button" disabled={processingReviewDecision} onClick={handleReturnForAmendment}>
+                  Return for amendment
+                </button>
+              </div>
             </div>
+          ) : (
+            <p>Only the assigned coordinator can decide this request.</p>
           )}
-          <div className="coordinator-review-actions">
-            <button className="coordinator-review-actions__approve" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("approved")}>
-              {processingReviewDecision ? "Saving..." : "Approve request"}
-            </button>
-            <button className="coordinator-review-actions__reject" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("rejected")}>
-              Reject request
-            </button>
-            {request.status === "under_review" && isAssignedCoordinator && (
-              <button className="coordinator-review-actions__return" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("returned_for_amendment")}>
-                Return for amendment
-              </button>
-            )}
-          </div>
         </section>
-      )}
+      ) : null}
 
       {request.status !== "pending_clarification" && (
         <section className="coordinator-clarification-history">

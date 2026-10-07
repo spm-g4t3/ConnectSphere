@@ -168,7 +168,7 @@ describe('SCRUM-321 with SCRUM-327: submitting records the status change once, b
 });
 
 
-describe('SCRUM-321: only the two lifecycle functions write the status history', () => {
+describe('SCRUM-321: only the lifecycle and decision functions write the status history', () => {
   it('has no other writer in any migration', () => {
     const writers = readdirSync(MIGRATIONS)
       .filter((name) => name.endsWith('.sql'))
@@ -182,6 +182,14 @@ describe('SCRUM-321: only the two lifecycle functions write the status history',
       // 022 replaces change_event_request_status; 021's copy is superseded, not
       // a second live writer.
       '022_event_status_transitions.sql: 1',
+      // SCRUM-19. start_event_review and decide_event_request each write more
+      // than a status: the reviewer, and the four decision fields, which 025's
+      // constraints require in the same statement as the status. So each
+      // writes its own history row, in the shape change_event_request_status
+      // uses, rather than delegating to a function that cannot write those
+      // columns. The same argument 021 makes for submit_event_request. One
+      // row per function, so two.
+      '029_event_request_decisions_functions.sql: 2',
     ]);
   });
 });

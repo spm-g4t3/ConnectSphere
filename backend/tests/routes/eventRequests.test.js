@@ -997,8 +997,10 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
   it('allows the assigned Coordinator to request clarification with a required note and optional reply-by date', async () => {
     // SCRUM-332: the event is now assigned to the signed-in coordinator, and
     // the fixture says so. Without it the row has no coordinator, which only
-    // worked while the service ignored who was asking. What this test asserts
-    // is unchanged.
+    // worked while the service ignored who was asking.
+    //
+    // Under review, not submitted as in dev before SCRUM-162: clarification is
+    // asked for from under_review only, and a submitted request is refused.
     const note = 'Please clarify the proposed event purpose.';
     const replyByDate = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
     const client = createWritableFakeClient([
@@ -3104,4 +3106,252 @@ describe('SCRUM-325 AC3: a refused transition is a 409 that names the current st
       expect(client.calls.map((call) => call.operation)).toEqual(['select']);
     },
   );
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-19 -- POST /:id/start-review and POST /:id/decision
+// ---------------------------------------------------------------------------
+// SCRUM-346, SCRUM-119 and SCRUM-121. The coordinator starts reviewing a
+// submitted request, then approves or rejects it. Both routes are behind
+// coordinatorOnly, like every coordinator write in this router, with no
+// ownership pre-check: whether the caller is this event's assigned
+// coordinator, and its reviewer, is what 029's functions check under the row
+// lock, the only point where the answer cannot change before the write. So
+// each route's job is to pass on what was asked, take the caller from the
+// token, and turn the function's refusals into status codes.
+//
+// Why /start-review and /decision, and not POST /:id/review. GET /:id/review
+// already exists: it is the coordinator's read of one event (SCRUM-332). Two
+// verbs on one path for unrelated actions, one reading and one changing the
+// status, would read as one resource and mislead whoever adds the next route.
+// /start-review says what it does. /decision cannot collide with the change
+// request decision route either: that is /change-requests/:id/decision, three
+// segments to this one's two.
+
+/** POST to one of the two routes, as COORDINATOR_ID unless told otherwise. */
+const postAsCoordinator = (client, path, body = {}, requireAuth = signedInWithRole(ROLE.EVENT_COORDINATOR)) =>
+  request(appWith({ client, requireAuth }))
+    .post(`/api/event-requests/${REQUEST_ID}/${path}`)
+    .send(body);
+
+/** The row start_event_review returns: under review, the caller as reviewer. */
+const underReviewRow = () => storedRow({
+  status: STATUS.UNDER_REVIEW,
+  assigned_coordinator_id: COORDINATOR_ID,
+  reviewing_coordinator_id: COORDINATOR_ID,
+});
+
+/** The row decide_event_request returns. */
+const decidedRow = (decision, note) => storedRow({
+  status: decision,
+  assigned_coordinator_id: COORDINATOR_ID,
+  reviewing_coordinator_id: COORDINATOR_ID,
+  decision,
+  decision_note: note,
+  decided_by: COORDINATOR_ID,
+  decided_at: '2026-01-15T09:00:00+00:00',
+});
+
+describe('SCRUM-19: a coordinator starts reviewing a request over HTTP', () => {
+  it('SCRUM19_AC1_the_assigned_coordinator_starts_the_review', async () => {
+    // 200 and the whole request, carrying its reviewer and statusDisplay, so
+    // the screen can redraw from the response. The body names someone else as
+    // the coordinator, and is ignored: the caller is always the token's user.
+    const client = createWritableFakeClient([ok(underReviewRow())]);
+
+    const res = await postAsCoordinator(client, 'start-review', { coordinatorId: OTHER_ORGANISER_ID });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe(STATUS.UNDER_REVIEW);
+    expect(res.body.reviewingCoordinatorId).toBe(COORDINATOR_ID);
+    expect(res.body.statusDisplay.status).toBe(STATUS.UNDER_REVIEW);
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].fn).toBe('start_event_review');
+    expect(client.calls[0].args).toEqual({
+      p_event_request_id: REQUEST_ID,
+      p_coordinator_id: COORDINATOR_ID,
+    });
+  });
+
+  it('SCRUM19_AC1_the_start_review_path_is_not_read_as_an_id', async () => {
+    // The request reaches the function with the id from the URL, and nothing
+    // read 'start-review' as an id on the way: no select at all, and the id
+    // sent is the event's.
+    const client = createWritableFakeClient([ok(underReviewRow())]);
+
+    await postAsCoordinator(client, 'start-review');
+
+    expect(client.calls.map((call) => call.operation)).toEqual(['rpc']);
+    expect(client.calls[0].args.p_event_request_id).toBe(REQUEST_ID);
+  });
+
+  it('SCRUM19_AC1_an_organiser_cannot_start_a_review_and_nothing_is_queried', async () => {
+    const client = createWritableFakeClient([ok(underReviewRow())]);
+
+    const res = await postAsCoordinator(client, 'start-review', {}, signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID));
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM19_AC1_starting_a_review_returns_401_without_a_token', async () => {
+    const client = createWritableFakeClient([ok(underReviewRow())]);
+
+    const res = await postAsCoordinator(client, 'start-review', {}, signedOut);
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM19_AC1_only_the_assigned_coordinator_starts_the_review', async () => {
+    // A coordinator, so past coordinatorOnly, but not this event's. Only the
+    // function can tell, under its lock, and its 42501 becomes a 403 with its
+    // message: the caller can already see the event, so a 404 would be false.
+    const message = `only the coordinator assigned to event request ${REQUEST_ID} can start reviewing it`;
+    const client = createWritableFakeClient([dbFailure('42501', message)]);
+
+    const res = await postAsCoordinator(client, 'start-review');
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe(message);
+  });
+
+  it('SCRUM19_AC1_a_request_that_is_not_submitted_cannot_be_put_under_review', async () => {
+    const client = createWritableFakeClient([
+      dbFailure('55000', `event request ${REQUEST_ID} has status approved, and only a submitted request can be put under review`),
+    ]);
+
+    const res = await postAsCoordinator(client, 'start-review');
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/has status approved/);
+  });
+});
+
+
+describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
+  it('SCRUM19_AC7_the_assigned_coordinator_approves', async () => {
+    // All five arguments. p_decided_by is the token's user, whatever the body
+    // says. p_decided_at is the server's clock: the route injects nothing, so
+    // the service's default `now` is used, and it is checked here to be a
+    // real instant close to the request rather than a fixed value.
+    const client = createWritableFakeClient([ok(decidedRow('approved', 'Approved as submitted.'))]);
+    const before = Date.now();
+
+    const res = await postAsCoordinator(client, 'decision', {
+      decision: 'approved',
+      decisionNote: 'Approved as submitted.',
+      decidedBy: OTHER_ORGANISER_ID,
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('approved');
+    expect(res.body.statusDisplay.status).toBe('approved');
+    expect(client.calls).toHaveLength(1);
+    const [rpc] = client.calls;
+    expect(rpc.fn).toBe('decide_event_request');
+    expect(rpc.args).toMatchObject({
+      p_event_request_id: REQUEST_ID,
+      p_decision: 'approved',
+      p_decision_note: 'Approved as submitted.',
+      p_decided_by: COORDINATOR_ID,
+    });
+    expect(Object.keys(rpc.args).sort()).toEqual(
+      ['p_decided_at', 'p_decided_by', 'p_decision', 'p_decision_note', 'p_event_request_id'],
+    );
+    const decidedAt = new Date(rpc.args.p_decided_at).getTime();
+    expect(Math.abs(decidedAt - before)).toBeLessThan(60_000);
+  });
+
+  it('SCRUM19_AC9_the_response_carries_the_recorded_decision', async () => {
+    // A rejection with its reason. The response carries what AC9 records:
+    // the outcome, the reason, who decided and when, so the coordinator's
+    // screen and the Organiser's read show the same thing.
+    const reason = 'Venue capacity cannot meet the expected attendance.';
+    const client = createWritableFakeClient([ok(decidedRow('rejected', reason))]);
+
+    const res = await postAsCoordinator(client, 'decision', { decision: 'rejected', decisionNote: reason });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      status: 'rejected',
+      decision: 'rejected',
+      decisionNote: reason,
+      decidedBy: COORDINATOR_ID,
+      decidedAt: '2026-01-15T09:00:00+00:00',
+    });
+  });
+
+  it('SCRUM19_AC5_a_rejection_with_no_reason_is_a_400_naming_the_field', async () => {
+    // Refused by the service before the database, with details naming the
+    // field so the form can show the message beside it.
+    const client = createWritableFakeClient([]);
+
+    const res = await postAsCoordinator(client, 'decision', { decision: 'rejected' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(['decisionNote']);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM19_AC6_refuses_an_approval_when_the_start_date_has_passed', async () => {
+    // 029's AC6 refusal is 55000, a 409, and its message tells the coordinator
+    // what to do instead.
+    const message = `event request ${REQUEST_ID} cannot be approved because its proposed start date has passed or is missing. Agree a new date with the organiser, or reject the request`;
+    const client = createWritableFakeClient([dbFailure('55000', message)]);
+
+    const res = await postAsCoordinator(client, 'decision', { decision: 'approved' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/start date/);
+  });
+
+  it('SCRUM19_AC1_only_the_assigned_coordinator_decides', async () => {
+    const message = `only the coordinator assigned to event request ${REQUEST_ID} can decide it`;
+    const client = createWritableFakeClient([dbFailure('42501', message)]);
+
+    const res = await postAsCoordinator(client, 'decision', { decision: 'approved' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe(message);
+  });
+
+  it('SCRUM19_AC3_refuses_a_decision_on_a_request_awaiting_clarification', async () => {
+    const client = createWritableFakeClient([
+      dbFailure('55000', `event request ${REQUEST_ID} has status pending_clarification, and only a request under review can be decided`),
+    ]);
+
+    const res = await postAsCoordinator(client, 'decision', { decision: 'approved' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/pending_clarification/);
+  });
+
+  it('SCRUM19_AC7_the_decision_path_is_not_read_as_an_id', async () => {
+    const client = createWritableFakeClient([ok(decidedRow('approved', null))]);
+
+    await postAsCoordinator(client, 'decision', { decision: 'approved' });
+
+    expect(client.calls.map((call) => call.operation)).toEqual(['rpc']);
+    expect(client.calls[0].args.p_event_request_id).toBe(REQUEST_ID);
+  });
+
+  it('SCRUM19_AC1_an_organiser_cannot_decide_and_nothing_is_queried', async () => {
+    const client = createWritableFakeClient([ok(decidedRow('approved', null))]);
+
+    const res = await postAsCoordinator(client, 'decision', { decision: 'approved' }, signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID));
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM19_AC1_deciding_returns_401_without_a_token', async () => {
+    const client = createWritableFakeClient([ok(decidedRow('approved', null))]);
+
+    const res = await postAsCoordinator(client, 'decision', { decision: 'approved' }, signedOut);
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
 });

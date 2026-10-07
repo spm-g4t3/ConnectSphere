@@ -377,6 +377,22 @@ button { cursor: pointer; }
 .dashboard--coordinator .reassign-event__form select:focus, .dashboard--coordinator .reassign-event__form textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .dashboard--coordinator .reassign-event__hint { font-size: 0.84rem; margin: -6px 0 0; }
 .dashboard--coordinator .reassign-event__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* SCRUM-19. DecisionOutcome renders on the coordinator's event panel
+   (.dashboard--coordinator) and on the Organiser's list (.my-event-requests),
+   so, like .assignment-history above, it is scoped to its own class rather
+   than to either screen. A two-column definition list, label then value, the
+   shape .my-event-requests__details dl already uses for the event details.
+   The values are content, not commentary, so they keep --ink against
+   `.dashboard p`'s grey (they are <dd>, which that rule does not reach). */
+.decision-outcome { display: grid; gap: 6px 16px; grid-template-columns: minmax(110px, 160px) minmax(0, 1fr); margin: 8px 0 0; }
+.decision-outcome dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.decision-outcome dd { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* The Organiser's decision block sits on the row itself, so it is set off from
+   the description above it the way the clarification note is. */
+.my-event-requests__decision { background: #f6f9f8; border-left: 3px solid var(--teal); margin: 12px 0; padding: 10px 12px; }
+.my-event-requests__decision > strong { color: var(--ink); display: block; font-size: 0.92rem; }
+.dashboard--coordinator .coordinator-start-review { display: grid; gap: 10px; justify-items: start; }
+.dashboard--coordinator .coordinator-start-review p { margin: 0; }
 .my-event-requests .status-badge { border-radius: 999px; display: inline-block; flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; line-height: 1.3; padding: 4px 10px; text-transform: uppercase; }
 .my-event-requests .status--draft { background: #eef2f1; color: #42545a; }
 .my-event-requests .status--awaiting-review { background: #fff6e5; color: #8a5a00; }
@@ -563,6 +579,8 @@ button { cursor: pointer; }
    .event-request-form__row, .venue-search__filters, .venue-search__window { grid-template-columns: 1fr; }
    .my-event-requests__details dl { grid-template-columns: 1fr; gap: 3px; }
    .my-event-requests__details dd { margin-bottom: 8px; }
+   .decision-outcome { grid-template-columns: 1fr; gap: 3px; }
+   .decision-outcome dd { margin-bottom: 8px; }
    .venue-calendar-page { padding: 30px 18px; }
    .venue-calendar__toolbar { align-items: flex-start; flex-direction: column; }
 }
