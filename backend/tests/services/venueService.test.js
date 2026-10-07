@@ -30,6 +30,7 @@ import {
   getBookingsForVenue,
 } from '../../src/services/venueService.js';
 import { ValidationError, NotFoundError, ConflictError } from '../../src/errors.js';
+import { getBookingStatusDisplay } from '../../src/domain/bookingStatus.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -1053,6 +1054,8 @@ describe('AC3: a retired venue keeps its bookings', () => {
     expect(from).toHaveBeenCalledWith('bookings');
     expect(stub.args('eq')).toEqual(['venue_id', VENUE_ID]);
     expect(stub.args('order')).toEqual(['starts_at', { ascending: false }]);
+    // SCRUM-243: the status is read, so a request is not mistaken for a hold.
+    expect(stub.args('select')[0]).toContain('status');
   });
 
   it('SCRUM15_AC3_does_not_filter_on_the_venue_being_active', async () => {
@@ -1074,6 +1077,7 @@ describe('AC3: a retired venue keeps its bookings', () => {
       event_request_id: '22222222-2222-4222-8222-222222222222',
       starts_at: '2026-06-01T09:00:00+00:00',
       ends_at: '2026-06-01T17:00:00+00:00',
+      status: 'withdrawn',
       created_at: '2026-05-01T09:00:00+00:00',
     }], error: null }));
 
@@ -1085,6 +1089,8 @@ describe('AC3: a retired venue keeps its bookings', () => {
       eventRequestId: '22222222-2222-4222-8222-222222222222',
       startsAt: '2026-06-01T09:00:00+00:00',
       endsAt: '2026-06-01T17:00:00+00:00',
+      status: 'withdrawn',
+      statusDisplay: getBookingStatusDisplay('withdrawn'),
       createdAt: '2026-05-01T09:00:00+00:00',
     });
   });

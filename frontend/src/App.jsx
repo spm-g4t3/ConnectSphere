@@ -10,6 +10,7 @@ import VenueSearch from "./components/VenueSearch";
 import VenueCatalogue from "./components/VenueCatalogue";
 import ReviewQueue from "./components/ReviewQueue";
 import MyAssignedEvents from "./components/MyAssignedEvents";
+import MyBookingRequests from "./components/MyBookingRequests";
 import EquipmentCatalogue from "./components/EquipmentCatalogue";
 import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
@@ -84,7 +85,7 @@ function AppRoutes() {
           path="/venue-search"
           element={
             <ProtectedRoute allowedRoles={["event_coordinator", "venue_staff"]}>
-              <VenueSearch role={user?.role} />
+              <VenueSearch role={user?.role} userId={user?.id} />
             </ProtectedRoute>
           }
         />
@@ -147,7 +148,21 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
-                <Route
+        {/* SCRUM-255: the coordinator's venue booking requests and their
+            statuses. Gated and wrapped as /my-events is, for the same reasons:
+            GET /booking-requests/mine is role-checked server-side, and the
+            wrapper is what colours the status badges. */}
+        <Route
+          path="/my-venue-requests"
+          element={
+            <ProtectedRoute allowedRoles={["event_coordinator"]}>
+              <div className="dashboard dashboard--coordinator">
+                <MyBookingRequests />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/equipment-catalogue"
           element={
             <ProtectedRoute allowedRoles={["technical_support_staff"]}>
@@ -155,7 +170,7 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
-                <Route
+        <Route
           path="/equipment-availability"
           element={
             <ProtectedRoute allowedRoles={["technical_support_staff"]}>

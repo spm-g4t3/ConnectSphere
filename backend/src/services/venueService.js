@@ -37,6 +37,7 @@ import {
 } from '../validation/venueValidation.js';
 import { findBlockedVenueIds } from './venueBlockService.js';
 import { DEFAULT_TURNAROUND_MINUTES } from '../domain/turnaroundOptions.js';
+import { getBookingStatusDisplay } from '../domain/bookingStatus.js';
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -462,7 +463,7 @@ export async function getBookingsForVenue(venueId) {
 
   const { data, error } = await supabase
     .from('bookings')
-    .select('id, venue_id, event_request_id, starts_at, ends_at, created_at')
+    .select('id, venue_id, event_request_id, starts_at, ends_at, status, created_at')
     .eq('venue_id', venueId)
     .order('starts_at', { ascending: false });
 
@@ -474,6 +475,10 @@ export async function getBookingsForVenue(venueId) {
     eventRequestId: row.event_request_id,
     startsAt: row.starts_at,
     endsAt: row.ends_at,
+    // SCRUM-243: a row here may be a venue booking request (pending, rejected,
+    // withdrawn) and not only a hold, so the status travels with it.
+    status: row.status,
+    statusDisplay: getBookingStatusDisplay(row.status),
     createdAt: row.created_at,
   }));
 }
