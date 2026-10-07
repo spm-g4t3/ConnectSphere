@@ -36,6 +36,26 @@ export function describeNotification(notification) {
     };
   }
 
+  if (
+    notification?.type === "clarification_requested" ||
+    notification?.type === "clarification_replied" ||
+    notification?.type === "clarification_closed"
+  ) {
+    const eventName = payload.eventName || "the event request";
+    const headlineByType = {
+      clarification_requested: `A Coordinator has a question about ${eventName}`,
+      clarification_replied: `The Organiser replied about ${eventName}`,
+      clarification_closed: `A Coordinator closed the clarification for ${eventName}`,
+    };
+    const detail = payload.message || "Open the event request to review the conversation.";
+    return {
+      headline: headlineByType[notification.type],
+      detail: payload.replyByDate
+        ? `${detail} Reply by ${payload.replyByDate}.`
+        : detail,
+    };
+  }
+
   // A type this build does not know (the backend added one). Shown, not
   // hidden: an unread notification that renders as nothing would sit in the
   // unread count with no way to find or clear it.

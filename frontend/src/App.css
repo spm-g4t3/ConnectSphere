@@ -287,6 +287,44 @@ button { cursor: pointer; }
 .dashboard--coordinator .status--booking-flagged { background: #fff0ee; color: #a43c32; }
 .dashboard--coordinator .status--booking-rejected { background: #fff0ee; color: #a43c32; }
 .dashboard--coordinator .status--booking-withdrawn, .dashboard--coordinator .status--booking-cancelled, .dashboard--coordinator .status--booking-unknown { background: #eef2f1; color: var(--muted); }
+.clarification-overdue { color: #a43c32; font-weight: 700; }
+.my-assigned-events__needs-attention { background: #fff6e5; border-left: 3px solid #bb7a12; margin-top: 16px; padding: 12px; }
+.clarification-history { display: grid; gap: 12px; list-style: none; margin: 12px 0; padding: 0; }
+.clarification-history__entry { border-left: 3px solid var(--line); padding: 4px 12px; }
+.clarification-history__entry p { margin: 6px 0; white-space: pre-wrap; }
+.clarification-history__entry--overdue { border-color: #a43c32; }
+.clarification-reply { display: grid; gap: 12px; }
+.clarification-reply label { display: grid; gap: 7px; }
+.clarification-reply__history { border-top: 1px solid var(--line); padding-top: 10px; }
+.clarification-reply__history > summary, .coordinator-clarification-history summary { color: var(--teal-dark); cursor: pointer; font-size: 0.9rem; font-weight: 700; }
+.coordinator-clarification-history details { margin-top: 8px; }
+.clarification-reply textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; resize: vertical; }
+.clarification-reply__amendments { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 12px; margin: 0; padding: 16px; }
+.clarification-reply__amendments legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
+.clarification-reply__amendments p { color: var(--muted); margin: 0; }
+.clarification-reply__notice { background: #eef6f3; border-radius: 6px; margin: 0; padding: 10px 12px; }
+.clarification-reply input, .clarification-reply__amendments textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
+.clarification-amendments { background: #f7faf9; border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 16px; padding: 18px; }
+.clarification-amendments__heading { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+.clarification-amendments__heading h3 { color: var(--ink); font-size: 1rem; margin: 0; }
+.clarification-amendments__heading p { font-size: 0.88rem; margin: 5px 0 0; }
+.clarification-amendments__badge { background: #e8edf0; border-radius: 999px; color: #42545a; font-size: 0.76rem; font-weight: 700; padding: 5px 10px; white-space: nowrap; }
+.clarification-amendments__badge--active { background: #e8f7f1; color: #17684f; }
+.clarification-amendments .clarification-reply__amendments { background: var(--paper); }
+.clarification-amendments__grid { display: grid; gap: 12px 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); }
+.clarification-amendments__empty { background: var(--paper); border: 1px dashed #c7d6d1; border-radius: 8px; display: grid; gap: 6px; padding: 14px; }
+.clarification-amendments__empty strong { color: var(--ink); font-size: 0.92rem; }
+.clarification-amendments__empty span { color: var(--muted); font-size: 0.88rem; line-height: 1.5; }
+.clarification-amendments__readonly { border-top: 1px solid var(--line); padding-top: 12px; }
+.clarification-amendments__readonly summary { color: var(--teal-dark); cursor: pointer; font-size: 0.88rem; font-weight: 700; }
+.clarification-amendments__readonly dl { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); margin: 14px 0 0; }
+.clarification-amendments__readonly dl > div { background: var(--paper); border: 1px solid var(--line); border-radius: 7px; min-width: 0; padding: 10px 12px; }
+.clarification-amendments__readonly dt { color: var(--muted); font-size: 0.76rem; font-weight: 700; margin-bottom: 4px; }
+.clarification-amendments__readonly dd { color: var(--ink); font-size: 0.88rem; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.coordinator-clarification__fields { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 8px; margin: 0; padding: 14px; }
+.coordinator-clarification__fields legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
+.coordinator-clarification__fields p { color: var(--muted); font-size: 0.86rem; margin: 0; }
+.coordinator-clarification__fields label { align-items: center; display: flex; gap: 8px; }
 /* An organiser with no name on record is shown by id, which must read as an
    identifier, not prose. The same treatment venue history gives its uuids. */
 .dashboard--coordinator .my-assigned-events code { background: #eef2f1; border-radius: 4px; color: var(--muted); font-size: 0.78rem; padding: 2px 6px; }
@@ -424,6 +462,8 @@ button { cursor: pointer; }
 .coordinator-clarification textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 96px; padding: 10px 12px; resize: vertical; }
 .coordinator-clarification textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .coordinator-clarification__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
+.coordinator-clarification__amendments > summary { color: var(--teal-dark); cursor: pointer; font-size: 0.9rem; font-weight: 700; }
+.coordinator-clarification__amendments[open] { display: grid; gap: 10px; }
 .coordinator-review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .coordinator-review-actions button { transition: background-color 140ms ease, box-shadow 140ms ease; }
 .coordinator-review-actions__approve { background: #17684f !important; }
