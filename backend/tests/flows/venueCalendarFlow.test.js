@@ -21,6 +21,15 @@
  * an unexpected call -- an "unflag" on removal, say -- fails the step that
  * made it.
  *
+ * SCRUM-484: the calendar's bookings read is now
+ * rpc('venue_occupancy_conflicts', {..., p_pad_requested: false}) (032), and a
+ * dated search asks rpc('available_venue_ids') (033) after reading the venues,
+ * instead of a raw venue_blocks read before it. The scripted answers stand in
+ * for those functions; the real rule (padding, statuses, touching is clear)
+ * is Postgres's and is tested against PGlite in tests/db/. The honesty checks
+ * below apply the plain half-open overlap to what this fake returns, so a
+ * scripted answer still cannot contradict the window it was asked about.
+ *
  * Time-zone safe: every timestamp is written with an explicit +08:00 offset
  * and compared as an instant (toISOString / getTime), never as a local string.
  *
@@ -94,14 +103,25 @@ const B1_CONFLICT_ROW = {
   starts_at: utc('10:00'), ends_at: utc('12:00'),
 };
 
+/**
+ * B1 as venue_occupancy_conflicts() (032) returns it: flat, with its occupied
+ * period. The venue has no setup and 30 minutes of turnaround (VENUE_ROW), so
+ * B1 occupies [10:00, 12:30).
+ */
 function bookingRow(status) {
   return {
+    kind: 'booking',
     id: BOOKING_1,
+    status,
     event_request_id: EVENT_1,
+    event_name: 'Tech Talk',
+    reason: null,
     starts_at: utc('10:00'),
     ends_at: utc('12:00'),
-    status,
-    event_requests: { event_name: 'Tech Talk' },
+    occupied_starts_at: utc('10:00'),
+    occupied_ends_at: utc('12:30'),
+    setup_minutes: 0,
+    turnaround_minutes: 30,
   };
 }
 
@@ -242,9 +262,20 @@ function expectStrictOverlap(q, windowFrom, windowTo) {
 }
 
 /**
+ * Would a strict half-open overlap of the row's OCCUPIED period with the
+ * window hold? What venue_occupancy_conflicts(..., false) is specified to
+ * return; the fake's rows are checked against it, not decided by it.
+ */
+function occupiesWindow(row, windowFrom, windowTo) {
+  return Date.parse(row.occupied_starts_at) < Date.parse(windowTo)
+    && Date.parse(row.occupied_ends_at) > Date.parse(windowFrom);
+}
+
+/**
  * The three reads one GET /:id/calendar makes, in the order it makes them:
  * the venue (so an unknown venue is 404, not an empty calendar), then the
  * bookings and the blocks, both started before either is awaited.
+ * SCRUM-484: the bookings read is the shared occupancy rpc, window unpadded.
  */
 function calendarSteps({ windowFrom, windowTo, bookings, blocks, onBlocksQuery }) {
   return [
@@ -252,11 +283,14 @@ function calendarSteps({ windowFrom, windowTo, bookings, blocks, onBlocksQuery }
       expect(q.allArgs('eq')).toEqual([['id', VENUE_ID]]);
       expect(q.called('maybeSingle')).toBe(true);
     }),
-    fromStep('bookings', ok(bookings), (q) => {
-      expect(q.allArgs('eq')).toEqual([['venue_id', VENUE_ID]]);
-      expect(q.args('in')).toEqual(['status', ['approved', 'flagged_for_review']]);
-      expectStrictOverlap(q, windowFrom, windowTo);
-      for (const row of bookings) expect(satisfiesFilters(q, row), row.id).toBe(true);
+    rpcStep('venue_occupancy_conflicts', ok(bookings), (args) => {
+      expect(args).toEqual({
+        p_venue_id: VENUE_ID,
+        p_starts_at: windowFrom,
+        p_ends_at: windowTo,
+        p_pad_requested: false,
+      });
+      for (const row of bookings) expect(occupiesWindow(row, windowFrom, windowTo), row.id).toBe(true);
     }),
     fromStep('venue_blocks', ok(blocks), (q) => {
       expect(q.allArgs('eq')).toEqual([['venue_id', VENUE_ID]]);
@@ -459,6 +493,11 @@ describe('SCRUM178_AC2_AC5_AC6 calendar journey through venue blocks: block, ove
         status: 'flagged_for_review',
         eventRequestId: EVENT_1,
         eventName: 'Tech Talk',
+        // SCRUM-484 (AC7): the occupied period, as the database computed it.
+        occupiedStartsAt: utc('10:00'),
+        occupiedEndsAt: utc('12:30'),
+        setupMinutes: 0,
+        turnaroundMinutes: 30,
       });
       expect(res.body[0]).toMatchObject({ kind: 'block', reason: 'maintenance' });
     });
@@ -524,14 +563,14 @@ describe('SCRUM178_AC2_AC5_AC6 calendar journey through venue blocks: block, ove
       expect(calendar.status).toBe(200);
       expect(calendar.body).toEqual([]);
 
+      // SCRUM-484: the dated search reads the venues, then asks
+      // available_venue_ids() (033) about them. The scripted answer frees both:
+      // A only touches the window, and touching is clear in the shared rule
+      // (PGlite: SCRUM20_AC5_block_touching_the_padded_end_is_free and
+      // SCRUM484_AC5_request_setup_touching_block_end_is_clear). This venue
+      // has no setup, so the request's own padding moves only its end, away
+      // from A.
       script(
-        fromStep('venue_blocks', ok([]), (q) => {
-          expect(q.args('select')).toEqual(['venue_id']);
-          expect(q.args('is')).toEqual(['removed_at', null]);
-          expectStrictOverlap(q, windowFrom, windowTo);
-          expect(satisfiesFilters(q, blockRow())).toBe(false);
-          recorded.search = { lt: q.allArgs('lt'), gt: q.allArgs('gt') };
-        }),
         fromStep(
           'venues',
           ok([
@@ -539,8 +578,20 @@ describe('SCRUM178_AC2_AC5_AC6 calendar journey through venue blocks: block, ove
             { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'SCIS', max_capacity: 40 },
           ]),
           (q) => {
-            // Nothing blocked, so no venue is excluded.
+            // Availability is not a PostgREST filter any more.
             expect(q.called('not')).toBe(false);
+          },
+        ),
+        rpcStep(
+          'available_venue_ids',
+          ok([{ venue_id: OTHER_VENUE_ID }, { venue_id: VENUE_ID }]),
+          (args) => {
+            expect(args).toEqual({
+              p_venue_ids: [OTHER_VENUE_ID, VENUE_ID],
+              p_starts_at: windowFrom,
+              p_ends_at: windowTo,
+            });
+            recorded.search = { from: args.p_starts_at, to: args.p_ends_at };
           },
         ),
       );
@@ -550,8 +601,9 @@ describe('SCRUM178_AC2_AC5_AC6 calendar journey through venue blocks: block, ove
       expect(search.status).toBe(200);
       expect(search.body.map((v) => v.id)).toContain(VENUE_ID);
 
-      // The same overlap test, on the same values, in both reads.
-      expect(recorded.search).toEqual(recorded.calendar);
+      // The same window, on the same values, reaches both reads.
+      expect(recorded.calendar).toEqual({ lt: [['starts_at', windowTo]], gt: [['ends_at', windowFrom]] });
+      expect(recorded.search).toEqual({ from: windowFrom, to: windowTo });
     });
   });
 
@@ -565,19 +617,31 @@ describe('SCRUM178_AC2_AC5_AC6 calendar journey through venue blocks: block, ove
       expect(refused.body.error).toMatch(/Event Coordinators/);
 
       // The Organiser's dated search still leaves the blocked venue out.
+      // SCRUM-484: through available_venue_ids() (033). Block A [14:00,
+      // 15:00) overlaps the period, so the scripted answer leaves VENUE_ID out.
       script(
-        fromStep('venue_blocks', ok([{ venue_id: VENUE_ID }]), (q) => {
-          expectStrictOverlap(q, at('14:00'), at('15:00'));
-          expect(satisfiesFilters(q, blockRow())).toBe(true);
-        }),
         fromStep(
           'venues',
-          ok([{ id: OTHER_VENUE_ID, name: 'Lecture Hall', location: 'SOE', max_capacity: 200 }]),
+          ok([
+            { id: OTHER_VENUE_ID, name: 'Lecture Hall', location: 'SOE', max_capacity: 200 },
+            { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'SCIS', max_capacity: 40 },
+          ]),
           (q) => {
             expect(q.args('is')).toEqual(['retired_at', null]);
-            expect(q.args('not')).toEqual(['id', 'in', `(${VENUE_ID})`]);
+            expect(q.called('not')).toBe(false);
           },
         ),
+        rpcStep('available_venue_ids', ok([{ venue_id: OTHER_VENUE_ID }]), (args) => {
+          expect(args).toEqual({
+            p_venue_ids: [OTHER_VENUE_ID, VENUE_ID],
+            p_starts_at: at('14:00'),
+            p_ends_at: at('15:00'),
+          });
+          // The fake's answer agrees with the overlap: A meets [14:00, 15:00).
+          const a = blockRow();
+          expect(Date.parse(a.starts_at) < Date.parse(args.p_ends_at)
+            && Date.parse(a.ends_at) > Date.parse(args.p_starts_at)).toBe(true);
+        }),
       );
 
       const search = await as('organiser', (r) => r.get(searchUrl(at('14:00'), at('15:00'))));

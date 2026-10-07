@@ -8,6 +8,15 @@
  * (bookings.starts_at / bookings.ends_at), and the only UPDATE of bookings is
  * the one that sets status = 'flagged_for_review', inside
  * flag_bookings_for_block in 014.
+ *
+ * SCRUM-484 adds 032 and 033, which redefine the block functions. Two rules
+ * are adapted, each where it is checked:
+ *  - 033 redefines flag_bookings_for_block, so its UPDATE of bookings is the
+ *    second one: still the review flag, still inside that function, still
+ *    approved-only, still the same four columns.
+ *  - 033 also redefines create_booking_request (030's body, step 7 replaced),
+ *    which inserts the booking REQUEST: a pending row with the event's own
+ *    period. That is the one insert allowed; no block function inserts.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -23,7 +32,12 @@ const MIGRATIONS = [
   '013_venue_block_booking_conflicts.sql',
   '014_booking_review_notifications.sql',
   '015_venue_block_amend_remove.sql',
+  '032_venue_occupancy.sql',
+  '033_venue_occupancy_callers.sql',
 ];
+
+/** The two files that define flag_bookings_for_block, in order. */
+const FLAG_FILES = ['014_booking_review_notifications.sql', '033_venue_occupancy_callers.sql'];
 
 /** A migration with every `--` comment stripped, whitespace collapsed, lower-cased. */
 function normalised(name) {
@@ -70,6 +84,7 @@ const ALL_UPDATES = MIGRATIONS.flatMap((name) =>
 
 describe('SCRUM17_AC4 the block migrations never write a booking period', () => {
   it('SCRUM17_AC4_all_five_migrations_were_read', () => {
+    // SCRUM-484: seven since 032 and 033 joined the list.
     for (const name of MIGRATIONS) {
       expect(SQL[name].length, name).toBeGreaterThan(0);
     }
@@ -84,8 +99,24 @@ describe('SCRUM17_AC4 the block migrations never write a booking period', () => 
   });
 
   it('SCRUM17_AC4_no_migration_inserts_bookings', () => {
+    const INSERT = /\binsert\s+into\s+(?:public\.)?bookings\b/g;
     for (const name of MIGRATIONS) {
-      expect(SQL[name], name).not.toMatch(/\binsert\s+into\s+(?:public\.)?bookings\b/);
+      const inserts = [...SQL[name].matchAll(INSERT)];
+      if (name !== '033_venue_occupancy_callers.sql') {
+        expect(inserts.length, name).toBe(0);
+        continue;
+      }
+      // Adapted for SCRUM-484: 033 carries create_booking_request (030's body
+      // with only step 7 replaced). Its one insert is the booking request
+      // itself -- a new pending row with the event's own period -- not a
+      // block writing over an existing booking.
+      const span = functionSpan(SQL[name], 'create_booking_request');
+      expect(inserts.length, name).toBe(1);
+      expect(span).not.toBeNull();
+      expect(inserts[0].index).toBeGreaterThan(span.from);
+      expect(inserts[0].index).toBeLessThan(span.to);
+      const statement = SQL[name].slice(inserts[0].index, SQL[name].indexOf(';', inserts[0].index));
+      expect(statement).toMatch(/v_event\.proposed_start, v_event\.proposed_end, 'pending'/);
     }
   });
 
@@ -108,35 +139,39 @@ describe('SCRUM17_AC4 the block migrations never write a booking period', () => 
 
 
 describe('SCRUM17_AC4 the only update of bookings is the review flag', () => {
+  // Adapted for SCRUM-484: 033 redefines flag_bookings_for_block (only its
+  // overlap test changes), so there is one such UPDATE per definition -- 014's
+  // and 033's -- and each one is checked below.
   it('SCRUM17_AC4_there_is_exactly_one_update_of_bookings_and_it_is_in_014', () => {
-    expect(ALL_UPDATES.map(({ name }) => name)).toEqual(['014_booking_review_notifications.sql']);
+    expect(ALL_UPDATES.map(({ name }) => name)).toEqual(FLAG_FILES);
   });
 
   it("SCRUM17_AC4_it_sets_status_to_flagged_for_review_and_nothing_of_the_period", () => {
-    const [{ setClause }] = ALL_UPDATES;
-    expect(setClause).toMatch(/^status\s*=\s*'flagged_for_review'\s*,/);
-    expect(assignedColumns(setClause)).toEqual([
-      'status',
-      'review_block_id',
-      'flagged_at',
-      'flagged_by',
-    ]);
+    for (const { name, setClause } of ALL_UPDATES) {
+      expect(setClause, name).toMatch(/^status\s*=\s*'flagged_for_review'\s*,/);
+      expect(assignedColumns(setClause), name).toEqual([
+        'status',
+        'review_block_id',
+        'flagged_at',
+        'flagged_by',
+      ]);
+    }
   });
 
   it('SCRUM17_AC4_it_lives_inside_flag_bookings_for_block', () => {
-    const sql = SQL['014_booking_review_notifications.sql'];
-    const span = functionSpan(sql, 'flag_bookings_for_block');
-    expect(span).not.toBeNull();
-
-    const [{ index }] = ALL_UPDATES;
-    expect(index).toBeGreaterThan(span.from);
-    expect(index).toBeLessThan(span.to);
+    for (const { name, index } of ALL_UPDATES) {
+      const span = functionSpan(SQL[name], 'flag_bookings_for_block');
+      expect(span, name).not.toBeNull();
+      expect(index, name).toBeGreaterThan(span.from);
+      expect(index, name).toBeLessThan(span.to);
+    }
   });
 
   it('SCRUM17_AC4_it_only_flags_approved_bookings', () => {
-    const sql = SQL['014_booking_review_notifications.sql'];
-    const [{ index }] = ALL_UPDATES;
-    const statement = sql.slice(index, sql.indexOf(' returning ', index));
-    expect(statement).toMatch(/\bwhere\b.*\bb\.status\s*=\s*'approved'/);
+    for (const { name, index } of ALL_UPDATES) {
+      const sql = SQL[name];
+      const statement = sql.slice(index, sql.indexOf(' returning ', index));
+      expect(statement, name).toMatch(/\bwhere\b.*\bb\.status\s*=\s*'approved'/);
+    }
   });
 });

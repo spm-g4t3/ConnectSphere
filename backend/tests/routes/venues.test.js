@@ -1118,23 +1118,41 @@ describe('SCRUM17_AC2 search window and block reads', () => {
   };
   const searchRow = { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'Level 2, SCIS', max_capacity: 40 };
 
-  /** Route from() by table name, so a dated search's two reads are told apart. */
-  function givenTables({ blocks = ok([]), venues = ok([searchRow]) } = {}) {
-    const blocksStub = queryStub(blocks);
+  /**
+   * Route from() by table name and answer the availability rpc.
+   *
+   * SCRUM-484: a dated search no longer reads venue_blocks. It reads the
+   * venues, then asks available_venue_ids() (033) which of them are free.
+   * `occupied` is the scripted answer: the ids the database reports as taken
+   * (default none). blocksStub is kept so a test can prove venue_blocks is
+   * never read for search.
+   */
+  function givenTables({ occupied = [], venues = ok([searchRow]) } = {}) {
+    const blocksStub = queryStub(ok([]));
     const venuesStub = queryStub(venues);
     from.mockImplementation((table) => {
       if (table === 'venue_blocks') return blocksStub;
       if (table === 'venues') return venuesStub;
       throw new Error(`unexpected table ${table}`);
     });
+    rpc.mockImplementation(async (name, args) => {
+      if (name !== 'available_venue_ids') throw new Error(`unexpected rpc ${name}`);
+      return ok(args.p_venue_ids.filter((id) => !occupied.includes(id)).map((id) => ({ venue_id: id })));
+    });
     return { blocksStub, venuesStub };
   }
 
   const tablesQueried = () => from.mock.calls.map(([table]) => table);
+  const availabilityArgs = () => rpc.mock.calls.find(([name]) => name === 'available_venue_ids')?.[1];
 
   describe('GET /search with startsAt and endsAt', () => {
     it('SCRUM17_AC2_search_with_url_encoded_plus_offsets_reaches_the_filter', async () => {
-      const { blocksStub, venuesStub } = givenTables({ blocks: ok([{ venue_id: BLOCKED_ID }]) });
+      // SCRUM-484: the filter the offsets reach is available_venue_ids();
+      // the venue it reports as occupied is left out of the 200.
+      const { venuesStub } = givenTables({
+        venues: ok([{ ...searchRow, id: BLOCKED_ID, name: 'Atrium' }, searchRow]),
+        occupied: [BLOCKED_ID],
+      });
 
       const res = await request(appWith(signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID))).get(
         '/api/venues/search?startsAt=2026-10-01T10:00:00%2B08:00&endsAt=2026-10-01T12:00:00%2B08:00',
@@ -1144,22 +1162,27 @@ describe('SCRUM17_AC2 search window and block reads', () => {
       expect(res.body).toEqual([
         { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'Level 2, SCIS', maxCapacity: 40 },
       ]);
-      expect(tablesQueried()).toEqual(['venue_blocks', 'venues']);
-      expect(blocksStub.args('lt')).toEqual(['starts_at', '2026-10-01T12:00:00+08:00']);
-      expect(blocksStub.args('gt')).toEqual(['ends_at', '2026-10-01T10:00:00+08:00']);
-      expect(venuesStub.args('not')).toEqual(['id', 'in', `(${BLOCKED_ID})`]);
+      expect(tablesQueried()).toEqual(['venues']);
+      expect(availabilityArgs()).toEqual({
+        p_venue_ids: [BLOCKED_ID, VENUE_ID],
+        p_starts_at: '2026-10-01T10:00:00+08:00',
+        p_ends_at: '2026-10-01T12:00:00+08:00',
+      });
+      expect(venuesStub.called('not')).toBe(false);
     });
 
     it('SCRUM17_AC2_search_with_Z_offsets_reaches_the_filter', async () => {
-      const { blocksStub } = givenTables();
+      givenTables();
 
       const res = await request(appWith()).get(
         '/api/venues/search?startsAt=2026-10-01T02:00:00Z&endsAt=2026-10-01T04:00:00Z',
       );
 
       expect(res.status).toBe(200);
-      expect(blocksStub.args('lt')).toEqual(['starts_at', '2026-10-01T04:00:00Z']);
-      expect(blocksStub.args('gt')).toEqual(['ends_at', '2026-10-01T02:00:00Z']);
+      expect(availabilityArgs()).toMatchObject({
+        p_starts_at: '2026-10-01T02:00:00Z',
+        p_ends_at: '2026-10-01T04:00:00Z',
+      });
     });
 
     it('SCRUM17_AC2_a_raw_plus_arrives_as_a_space_and_answers_400_on_startsAt', async () => {
@@ -1205,6 +1228,7 @@ describe('SCRUM17_AC2 search window and block reads', () => {
       expect(res.status).toBe(200);
       expect(tablesQueried()).toEqual(['venues']);
       expect(venuesStub.called('not')).toBe(false);
+      expect(rpc).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -1218,7 +1242,9 @@ describe('SCRUM17_AC2 search window and block reads', () => {
       );
 
       expect(res.status).toBe(200);
-      expect(tablesQueried()).toEqual(['venue_blocks', 'venues']);
+      // SCRUM-484: one venues read, then the availability rpc.
+      expect(tablesQueried()).toEqual(['venues']);
+      expect(availabilityArgs()).toBeDefined();
     });
   });
 
@@ -1615,13 +1641,31 @@ const CALENDAR = `/api/venues/${VENUE_ID}/calendar`;
 const CALENDAR_WINDOW_QS = '?from=2026-10-01T00:00:00%2B08:00&to=2026-11-01T00:00:00%2B08:00';
 const CALENDAR_DAY_MS = 86_400_000;
 
+/**
+ * SCRUM-484: a booking row as venue_occupancy_conflicts() (032) returns it --
+ * the calendar reads bookings through that rpc now, with the event's name
+ * flat and the occupied period at the venue's 30/45 minutes.
+ */
 const calendarBookingRow = {
+  kind: 'booking',
   id: CALENDAR_BOOKING_ID,
+  status: 'approved',
   event_request_id: CALENDAR_REQUEST_ID,
+  event_name: 'Freshmen Orientation',
+  reason: null,
   starts_at: '2026-10-05T01:00:00+00:00',
   ends_at: '2026-10-05T04:00:00+00:00',
-  status: 'approved',
-  event_requests: { event_name: 'Freshmen Orientation' },
+  occupied_starts_at: '2026-10-05T00:30:00+00:00',
+  occupied_ends_at: '2026-10-05T04:45:00+00:00',
+  setup_minutes: 30,
+  turnaround_minutes: 45,
+};
+/** The four SCRUM-484 keys calendarBookingRow maps to (AC7). */
+const calendarOccupied = {
+  occupiedStartsAt: '2026-10-05T00:30:00+00:00',
+  occupiedEndsAt: '2026-10-05T04:45:00+00:00',
+  setupMinutes: 30,
+  turnaroundMinutes: 45,
 };
 const calendarBlockRow = {
   id: CALENDAR_BLOCK_ID,
@@ -1638,7 +1682,15 @@ const calendarBlockRow = {
   removed_by: null,
 };
 
-/** Route from() by table name; returns the stubs so a test can inspect them. */
+/**
+ * Route from() by table name and answer the bookings rpc; returns the stubs
+ * so a test can inspect them.
+ *
+ * SCRUM-484: bookings are read through rpc('venue_occupancy_conflicts'), not
+ * from('bookings'). `bookings` is that rpc's result; `stubs.bookings.args()`
+ * hands back the payload the service sent. A bookings table read would now
+ * throw ("unexpected table"), which is part of what these tests prove.
+ */
 function givenCalendarTables({
   venue = ok(venueRow()),
   bookings = ok([calendarBookingRow]),
@@ -1646,13 +1698,19 @@ function givenCalendarTables({
 } = {}) {
   const stubs = {
     venues: queryStub(venue),
-    bookings: queryStub(bookings),
     venue_blocks: queryStub(blocks),
   };
   from.mockImplementation((table) => {
     if (!(table in stubs)) throw new Error(`unexpected table ${table}`);
     return stubs[table];
   });
+  rpc.mockImplementation(async (name) => {
+    if (name !== 'venue_occupancy_conflicts') throw new Error(`unexpected rpc ${name}`);
+    return bookings;
+  });
+  stubs.bookings = {
+    args: () => rpc.mock.calls.find(([name]) => name === 'venue_occupancy_conflicts')?.[1],
+  };
   return stubs;
 }
 
@@ -1686,12 +1744,18 @@ describe('SCRUM178_AC1 Coordinators and Venue Staff can open the calendar of an 
         status: 'approved',
         eventRequestId: CALENDAR_REQUEST_ID,
         eventName: 'Freshmen Orientation',
+        ...calendarOccupied,
       },
     ]);
-    // %2B decodes to '+', so the offset reaches the query intact.
-    expect(bookings.args('lt')).toEqual(['starts_at', '2026-11-01T00:00:00+08:00']);
-    expect(bookings.args('gt')).toEqual(['ends_at', '2026-10-01T00:00:00+08:00']);
-    expect(bookings.args('in')).toEqual(['status', ['approved', 'flagged_for_review']]);
+    // %2B decodes to '+', so the offset reaches the rpc intact. SCRUM-484:
+    // the window goes to venue_occupancy_conflicts unpadded, and the
+    // occupying statuses are the function's, not a filter sent from here.
+    expect(bookings.args()).toEqual({
+      p_venue_id: VENUE_ID,
+      p_starts_at: '2026-10-01T00:00:00+08:00',
+      p_ends_at: '2026-11-01T00:00:00+08:00',
+      p_pad_requested: false,
+    });
   });
 
   it('SCRUM178_AC1_a_retired_venue_answers_200_with_its_entries', async () => {
@@ -1774,7 +1838,7 @@ describe('SCRUM178_AC1 an invalid id or window stops the calendar opening, befor
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
-    expect(bookings.args('lt')).toEqual(['starts_at', to]);
+    expect(bookings.args().p_ends_at).toBe(to);
     expect(blocks.args('lt')).toEqual(['starts_at', to]);
   });
 
@@ -1875,7 +1939,7 @@ describe('SCRUM178_AC1 a database error stops the calendar opening', () => {
 describe('SCRUM178_AC2 entries carry what the Booked, Under review and Blocked labels need', () => {
   it('SCRUM178_AC2_a_flagged_booking_answers_with_status_flagged_for_review', async () => {
     givenCalendarTables({
-      bookings: ok([{ ...calendarBookingRow, status: 'flagged_for_review', event_requests: { event_name: 'Career Fair' } }]),
+      bookings: ok([{ ...calendarBookingRow, status: 'flagged_for_review', event_name: 'Career Fair' }]),
       blocks: ok([]),
     });
 
@@ -1891,13 +1955,15 @@ describe('SCRUM178_AC2 entries carry what the Booked, Under review and Blocked l
         status: 'flagged_for_review',
         eventRequestId: CALENDAR_REQUEST_ID,
         eventName: 'Career Fair',
+        ...calendarOccupied,
       },
     ]);
   });
 
   it('SCRUM178_AC2_a_booking_whose_event_request_is_missing_answers_eventName_null', async () => {
     givenCalendarTables({
-      bookings: ok([{ ...calendarBookingRow, event_requests: null }]),
+      // SCRUM-484: the rpc returns the name flat; a missing one is null.
+      bookings: ok([{ ...calendarBookingRow, event_name: null }]),
       blocks: ok([]),
     });
 

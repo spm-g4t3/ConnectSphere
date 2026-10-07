@@ -34,19 +34,28 @@
  * booking. The routes in routes/venues.js are the first callers.
  *
  * SCRUM-130 (AC2) adds the reads AC2's two halves need. listVenueBlocks takes
- * an optional window, for the venue calendar (SCRUM-178), and
- * findBlockedVenueIds answers which venues a period is blocked on, for venue
- * search -- today's /venues/search, and SCRUM-20/139 and SCRUM-16 after it.
- * Both use the half-open overlap venue_blocks_no_overlap uses: strict lt/gt,
- * so a block that only touches a window's edge is not in it.
+ * an optional window, for the venue calendar (SCRUM-178). It uses the
+ * half-open overlap venue_blocks_no_overlap uses: strict lt/gt, so a block
+ * that only touches a window's edge is not in it. (SCRUM-130's second read,
+ * findBlockedVenueIds, was removed by SCRUM-484; see below.)
+ *
+ * SCRUM-484 (Week 7, setup and turnaround): 033_venue_occupancy_callers.sql
+ * redefines create_venue_block, update_venue_block and flag_bookings_for_block
+ * so a booking overlaps a block when its OCCUPIED period -- padded with the
+ * venue's setup and turnaround -- meets the block's own, unpadded period. The
+ * rule is venue_occupancy_conflicts() (032); nothing here re-implements it.
+ * findBlockedVenueIds, SCRUM-130's raw "which venues are blocked" read, is
+ * removed: venue search and the live check ask available_venue_ids() (033),
+ * which counts bookings as well as blocks, so no raw copy of the overlap rule
+ * is left to be picked up by mistake.
  *
  * SCRUM-131 (AC4) adds getVenueBlockHistory: every creation, amendment and
  * removal, read from venue_block_history. Nothing here writes that table --
  * the trigger in 016_venue_block_history.sql does, off the same write the
  * functions above already make, so no RPC changes.
  *
- * This module never imports venueService.js. venueService imports
- * findBlockedVenueIds from here, and the reverse import would be circular.
+ * This module never imports venueService.js. venueCalendarService imports
+ * both, and keeping the dependency one-way keeps that import graph acyclic.
  */
 
 import { supabase } from '../config/supabaseClient.js';
@@ -57,7 +66,6 @@ import {
   validateUpdateBlock,
   validateBlockId,
   validateBlockWindow,
-  validatePeriod,
 } from '../validation/venueBlockValidation.js';
 
 /** Every column toBlock reads, so each read selects the same shape. */
@@ -170,13 +178,24 @@ export function toBlock(row) {
  * camelCase.
  *
  * Exported so the conflict list and SCRUM-128's flagged bookings come back in
- * exactly the same shape: flag_bookings_for_block (014) returns the same
- * columns as venue_block_booking_conflicts (013) for that reason.
+ * exactly the same shape: flag_bookings_for_block returns the same five
+ * columns the conflict list starts with, for that reason.
  *
- * @param {object} row  snake_case, from venue_block_booking_conflicts (013)
- *                      or flag_bookings_for_block (014)
+ * SCRUM-484 (AC7): a conflict row from 033 also carries the booking's
+ * occupied period -- its own period padded with the venue's setup and
+ * turnaround -- and those two minute values, so the screen can show which
+ * part of the clash is setup, event or turnaround without redoing the
+ * arithmetic (that would be a second copy of the rule AC4 forbids). A
+ * flagged-bookings row does not carry them -- flag_bookings_for_block keeps
+ * 014's columns -- so on those the four fields are undefined, and JSON leaves
+ * them out.
+ *
+ * @param {object} row  snake_case, from create_ or update_venue_block's
+ *                      conflict list (033) or flag_bookings_for_block (014/033)
  * @returns {{bookingId: string, eventRequestId: string, eventName: string,
- *            startsAt: string, endsAt: string}}
+ *            startsAt: string, endsAt: string, occupiedStartsAt?: string,
+ *            occupiedEndsAt?: string, setupMinutes?: number,
+ *            turnaroundMinutes?: number}}
  */
 export function toBookingConflict(row) {
   return {
@@ -185,6 +204,10 @@ export function toBookingConflict(row) {
     eventName: row.event_name,
     startsAt: row.starts_at,
     endsAt: row.ends_at,
+    occupiedStartsAt: row.occupied_starts_at,
+    occupiedEndsAt: row.occupied_ends_at,
+    setupMinutes: row.setup_minutes,
+    turnaroundMinutes: row.turnaround_minutes,
   };
 }
 
@@ -318,43 +341,6 @@ export async function listVenueBlocks(venueId, { from, to } = {}) {
   if (error) throw translateError(error);
 
   return (data ?? []).map(toBlock);
-}
-
-/**
- * The venues blocked at any point in a period (SCRUM-130, AC2).
- *
- * Exported for every search that has to leave blocked venues out: today's
- * /venues/search, and SCRUM-20/139 and SCRUM-16 later. Those will call it
- * directly, not through searchVenues, which is why it validates its own input
- * rather than trusting a caller to have done so.
- *
- * Only removed blocks are left out: a removed block blocks nothing. There is
- * no "now" filter -- an ended block cannot overlap a future period anyway, and
- * for a past one it is the truthful answer.
- *
- * @param {string} startsAt  ISO 8601 with an offset
- * @param {string} endsAt    ISO 8601 with an offset; later than startsAt
- * @returns {Promise<string[]>} each venue id once; [] when none is blocked
- * @throws {ValidationError} when the period is missing or malformed, before
- *                           any network call
- */
-export async function findBlockedVenueIds(startsAt, endsAt) {
-  const period = validatePeriod({ startsAt, endsAt });
-
-  // The same strict overlap as listVenueBlocks. Touching the period's edge
-  // does not block it, matching venue_blocks_no_overlap in 011.
-  const { data, error } = await supabase
-    .from('venue_blocks')
-    .select('venue_id')
-    .is('removed_at', null)
-    .lt('starts_at', period.endsAt)
-    .gt('ends_at', period.startsAt);
-
-  if (error) throw translateError(error);
-
-  // Blocks on one venue never overlap each other, but several can fall in a
-  // long period, and the caller wants venues, not blocks.
-  return [...new Set((data ?? []).map((row) => row.venue_id))];
 }
 
 /**

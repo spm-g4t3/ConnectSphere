@@ -23,8 +23,6 @@ import {
 import { ValidationError, NotFoundError, ConflictError } from '../../src/errors.js';
 // SCRUM-127: a separate import so the existing one is left as it was.
 import { updateVenueBlock, removeVenueBlock } from '../../src/services/venueBlockService.js';
-// SCRUM-130: a separate import so the existing ones are left as they were.
-import { findBlockedVenueIds } from '../../src/services/venueBlockService.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -1124,85 +1122,12 @@ describe('SCRUM17_AC2 listVenueBlocks through a window', () => {
 });
 
 
-describe('SCRUM17_AC2 findBlockedVenueIds', () => {
-  const STARTS = '2026-10-01T10:00:00+08:00';
-  const ENDS = '2026-10-01T12:00:00+08:00';
-  const VENUE_B = 'a1b2c3d4-0000-4000-8000-000000000002';
-
-  function givenBlocks(result) {
-    const stub = queryStub(result);
-    from.mockReturnValue(stub);
-    return stub;
-  }
-
-  it('SCRUM17_AC2_runs_the_exact_query_chain', async () => {
-    const stub = givenBlocks({ data: [{ venue_id: VENUE_ID }], error: null });
-
-    await expect(findBlockedVenueIds(STARTS, ENDS)).resolves.toEqual([VENUE_ID]);
-
-    expect(from).toHaveBeenCalledTimes(1);
-    expect(from).toHaveBeenCalledWith('venue_blocks');
-    expect(stub.calls).toEqual([
-      ['select', 'venue_id'],
-      ['is', 'removed_at', null],
-      ['lt', 'starts_at', ENDS],
-      ['gt', 'ends_at', STARTS],
-    ]);
-    expect(rpc).not.toHaveBeenCalled();
-  });
-
-  it('SCRUM17_AC2_passes_the_period_trimmed', async () => {
-    const stub = givenBlocks({ data: [], error: null });
-    await findBlockedVenueIds(`  ${STARTS}`, `${ENDS}  `);
-    expect(stub.args('lt')).toEqual(['starts_at', ENDS]);
-    expect(stub.args('gt')).toEqual(['ends_at', STARTS]);
-  });
-
-  it('SCRUM17_AC2_de_duplicates_venue_ids_keeping_first_seen_order', async () => {
-    givenBlocks({
-      data: [{ venue_id: VENUE_ID }, { venue_id: VENUE_ID }, { venue_id: VENUE_B }],
-      error: null,
-    });
-    await expect(findBlockedVenueIds(STARTS, ENDS)).resolves.toEqual([VENUE_ID, VENUE_B]);
-  });
-
-  it.each([
-    ['null', null],
-    ['an empty list', []],
-  ])('SCRUM17_AC2_answers_an_empty_array_for_%s_data', async (_label, data) => {
-    givenBlocks({ data, error: null });
-    await expect(findBlockedVenueIds(STARTS, ENDS)).resolves.toEqual([]);
-  });
-
-  it.each([
-    ['neither', undefined, undefined, ['startsAt', 'endsAt']],
-    ['no end', STARTS, undefined, ['endsAt']],
-    ['no start', undefined, ENDS, ['startsAt']],
-    ['reversed', ENDS, STARTS, ['endsAt']],
-    ['equal', STARTS, STARTS, ['endsAt']],
-    ['malformed', '2026-10-01T10:00:00 08:00', ENDS, ['startsAt']],
-  ])('SCRUM17_AC2_validates_first_(%s)_and_runs_no_query', async (_label, s, e, fields) => {
-    const err = await errorFromAsync(() => findBlockedVenueIds(s, e));
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.details.map((d) => d.field)).toEqual(fields);
-    expect(from).not.toHaveBeenCalled();
-  });
-
-  it('SCRUM17_AC2_a_22P02_becomes_a_ValidationError', async () => {
-    givenBlocks({ data: null, error: { code: '22P02', message: 'invalid input syntax' } });
-    await expect(findBlockedVenueIds(STARTS, ENDS)).rejects.toBeInstanceOf(ValidationError);
-  });
-
-  it('SCRUM17_AC2_an_unknown_error_becomes_a_plain_Error', async () => {
-    givenBlocks({ data: null, error: { code: '08006', message: 'connection failure' } });
-    const err = await errorFromAsync(() => findBlockedVenueIds(STARTS, ENDS));
-    expect(err).toBeInstanceOf(Error);
-    expect(err).not.toBeInstanceOf(ValidationError);
-    expect(err).not.toBeInstanceOf(NotFoundError);
-    expect(err).not.toBeInstanceOf(ConflictError);
-    expect(err.message).toBe('connection failure');
-  });
-});
+// SCRUM-484: the SCRUM17_AC2 findBlockedVenueIds tests that stood here are
+// deleted with the function. Its raw "which venues are blocked" read was a
+// second copy of the overlap rule; venue search now asks
+// available_venue_ids() (033). What they pinned -- a block excludes its venue,
+// a removed block excludes nothing, touching the period's edge is clear --
+// is covered against real Postgres in tests/db/venueSearchOccupancyDatabase.test.js.
 
 
 // SCRUM-131: a separate import so the existing ones are left as they were.
@@ -1474,5 +1399,82 @@ describe('translateError fallbacks for sparse database errors (SCRUM-132)', () =
 
     expect(err).toBeInstanceOf(NotFoundError);
     expect(err.message).toBe('Venue not found');
+  });
+});
+
+
+describe('SCRUM484 block conflicts carry the occupied period', () => {
+  // D = 2026-11-11. Booking 10:00-12:00 at a 30/45 venue occupies 09:30-12:45.
+  const BOOKING_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const EVENT_ID = '8d0e6679-7425-40de-944b-e07fc1f90ae7';
+
+  // A conflict row as create_ / update_venue_block (033) build it.
+  const conflictRow = {
+    booking_id: BOOKING_ID,
+    event_request_id: EVENT_ID,
+    event_name: 'Orientation',
+    starts_at: '2026-11-11T10:00:00+08:00',
+    ends_at: '2026-11-11T12:00:00+08:00',
+    occupied_starts_at: '2026-11-11T09:30:00+08:00',
+    occupied_ends_at: '2026-11-11T12:45:00+08:00',
+    setup_minutes: 30,
+    turnaround_minutes: 45,
+  };
+  const camelConflict = {
+    bookingId: BOOKING_ID,
+    eventRequestId: EVENT_ID,
+    eventName: 'Orientation',
+    startsAt: '2026-11-11T10:00:00+08:00',
+    endsAt: '2026-11-11T12:00:00+08:00',
+    occupiedStartsAt: '2026-11-11T09:30:00+08:00',
+    occupiedEndsAt: '2026-11-11T12:45:00+08:00',
+    setupMinutes: 30,
+    turnaroundMinutes: 45,
+  };
+  const blockInput = {
+    startsAt: '2026-11-11T12:00:00+08:00',
+    endsAt: '2026-11-11T12:30:00+08:00',
+    reason: 'maintenance',
+  };
+
+  it('SCRUM484_AC7_block_conflicts_carry_occupied_periods', async () => {
+    // B-AC7-04: both writers' conflict lists, mapped by toBookingConflict.
+    rpc.mockResolvedValueOnce({ data: { outcome: 'conflict', conflicts: [conflictRow] }, error: null });
+    const created = await errorFromAsync(() =>
+      createVenueBlock(VENUE_ID, blockInput, STAFF_ID, { now: NOW }),
+    );
+    expect(created).toBeInstanceOf(ConflictError);
+    expect(created.code).toBe('BLOCK_BOOKING_CONFLICT');
+    expect(created.conflicts).toStrictEqual([camelConflict]);
+
+    rpc.mockResolvedValueOnce({ data: { outcome: 'conflict', conflicts: [conflictRow] }, error: null });
+    const updated = await errorFromAsync(() =>
+      updateVenueBlock(VENUE_ID, BLOCK_ID, { endsAt: blockInput.endsAt }, STAFF_ID, { now: NOW }),
+    );
+    expect(updated).toBeInstanceOf(ConflictError);
+    expect(updated.code).toBe('BLOCK_BOOKING_CONFLICT');
+    expect(updated.conflicts).toStrictEqual([camelConflict]);
+  });
+
+  it('SCRUM484_AC7_toBookingConflict_maps_the_four_occupied_fields', () => {
+    expect(toBookingConflict(conflictRow)).toStrictEqual(camelConflict);
+  });
+
+  it('SCRUM484_AC7_flagged_rows_without_occupied_fields_leave_them_undefined', () => {
+    // flag_bookings_for_block keeps 014's five columns (033), so a flagged
+    // row has no occupied fields; they map to undefined and JSON drops them.
+    const { occupied_starts_at, occupied_ends_at, setup_minutes, turnaround_minutes, ...flagRow } = conflictRow;
+    const mapped = toBookingConflict(flagRow);
+    expect(mapped.occupiedStartsAt).toBeUndefined();
+    expect(mapped.occupiedEndsAt).toBeUndefined();
+    expect(mapped.setupMinutes).toBeUndefined();
+    expect(mapped.turnaroundMinutes).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(mapped))).toEqual({
+      bookingId: BOOKING_ID,
+      eventRequestId: EVENT_ID,
+      eventName: 'Orientation',
+      startsAt: '2026-11-11T10:00:00+08:00',
+      endsAt: '2026-11-11T12:00:00+08:00',
+    });
   });
 });

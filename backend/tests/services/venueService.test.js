@@ -1118,25 +1118,44 @@ describe('AC3: a retired venue keeps its bookings', () => {
 // read each get their own stub.
 // ---------------------------------------------------------------------------
 describe('SCRUM17_AC2 a dated search leaves out venues blocked in the window', () => {
+  // SCRUM-484 (AC4, decision 5): the window is no longer checked by a raw read
+  // of venue_blocks (findBlockedVenueIds, removed). searchVenues reads the
+  // venues first, then asks available_venue_ids() (033) which of them nothing
+  // occupies -- blocks raw, bookings padded with the venue's setup and
+  // turnaround. The test names are kept so SCRUM-130's trace still finds
+  // them; each assertion is rewritten to the new contract and says so. What
+  // the database answers for a block (touching is clear, a removed block is
+  // ignored, an active one excludes) is proved against real Postgres in
+  // tests/db/venueSearchOccupancyDatabase.test.js.
   const STARTS = '2026-10-01T10:00:00+08:00';
   const ENDS = '2026-10-01T12:00:00+08:00';
   const BLOCKED_A = 'a1b2c3d4-0000-4000-8000-00000000000a';
   const BLOCKED_B = 'a1b2c3d4-0000-4000-8000-00000000000b';
   const VENUE_ROW = { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'Level 2, SCIS', max_capacity: 40 };
+  const rowFor = (id, name) => ({ id, name, location: 'Level 2, SCIS', max_capacity: 40 });
 
-  /** Route from() by table; anything else is a test failure. */
-  function givenTables({ blocks = { data: [], error: null }, venues = { data: [VENUE_ROW], error: null } } = {}) {
-    const blocksStub = queryStub(blocks);
+  /**
+   * Route from() by table and answer the rpc. `free` is the scripted
+   * available_venue_ids answer: a function of the ids asked about (default:
+   * every one is free), or a fixed { data, error } result.
+   */
+  function givenTables({ venues = { data: [VENUE_ROW], error: null }, free } = {}) {
     const venuesStub = queryStub(venues);
     from.mockImplementation((table) => {
-      if (table === 'venue_blocks') return blocksStub;
       if (table === 'venues') return venuesStub;
       throw new Error(`unexpected table ${table}`);
     });
-    return { blocksStub, venuesStub };
+    rpc.mockImplementation(async (name, args) => {
+      if (name !== 'available_venue_ids') throw new Error(`unexpected rpc ${name}`);
+      if (free && typeof free === 'object') return free;
+      const ids = typeof free === 'function' ? free(args.p_venue_ids) : args.p_venue_ids;
+      return { data: ids.map((id) => ({ venue_id: id })), error: null };
+    });
+    return { venuesStub };
   }
 
   const tablesQueried = () => from.mock.calls.map(([table]) => table);
+  const availabilityCalls = () => rpc.mock.calls.filter(([name]) => name === 'available_venue_ids');
 
   it.each([
     ['no filters', undefined],
@@ -1148,87 +1167,112 @@ describe('SCRUM17_AC2 a dated search leaves out venues blocked in the window', (
 
     await searchVenues(filters);
 
+    // SCRUM-484: and without a window availability is never asked either.
     expect(tablesQueried()).toEqual(['venues']);
     expect(venuesStub.called('not')).toBe(false);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('SCRUM17_AC2_with_a_window_blocks_are_read_first_then_not_in_is_applied', async () => {
-    const { blocksStub, venuesStub } = givenTables({
-      blocks: { data: [{ venue_id: BLOCKED_A }, { venue_id: BLOCKED_B }], error: null },
+    // SCRUM-484: the order is now venues first, then one available_venue_ids
+    // call for the ids read; the venues the call leaves out are dropped in
+    // memory, not with a .not('id', 'in', ...) on the query.
+    const { venuesStub } = givenTables({
+      venues: { data: [rowFor(BLOCKED_A, 'Atrium'), rowFor(BLOCKED_B, 'Boardroom'), VENUE_ROW], error: null },
+      free: (ids) => ids.filter((id) => id === VENUE_ID),
     });
 
-    await searchVenues({ startsAt: STARTS, endsAt: ENDS });
+    const result = await searchVenues({ startsAt: STARTS, endsAt: ENDS });
 
-    expect(tablesQueried()).toEqual(['venue_blocks', 'venues']);
-    expect(blocksStub.args('lt')).toEqual(['starts_at', ENDS]);
-    expect(blocksStub.args('gt')).toEqual(['ends_at', STARTS]);
-    expect(venuesStub.args('not')).toEqual(['id', 'in', `(${BLOCKED_A},${BLOCKED_B})`]);
+    expect(tablesQueried()).toEqual(['venues']);
+    expect(availabilityCalls()).toEqual([
+      ['available_venue_ids', { p_venue_ids: [BLOCKED_A, BLOCKED_B, VENUE_ID], p_starts_at: STARTS, p_ends_at: ENDS }],
+    ]);
+    expect(venuesStub.called('not')).toBe(false);
+    expect(result.map((v) => v.id)).toEqual([VENUE_ID]);
   });
 
   it('SCRUM17_AC2_a_venue_with_several_blocks_is_listed_once_in_the_not_in', async () => {
-    const { venuesStub } = givenTables({
-      blocks: {
-        data: [{ venue_id: BLOCKED_A }, { venue_id: BLOCKED_A }, { venue_id: BLOCKED_B }],
-        error: null,
-      },
+    // SCRUM-484: there is no not-in list any more. The equivalent guarantee:
+    // a venue the database names twice is still one result, and one it does
+    // not name at all is left out once.
+    givenTables({
+      venues: { data: [rowFor(BLOCKED_A, 'Atrium'), VENUE_ROW], error: null },
+      free: { data: [{ venue_id: VENUE_ID }, { venue_id: VENUE_ID }], error: null },
     });
 
-    await searchVenues({ startsAt: STARTS, endsAt: ENDS });
+    const result = await searchVenues({ startsAt: STARTS, endsAt: ENDS });
 
-    expect(venuesStub.args('not')).toEqual(['id', 'in', `(${BLOCKED_A},${BLOCKED_B})`]);
+    expect(result.map((v) => v.id)).toEqual([VENUE_ID]);
   });
 
   it.each([
-    ['an empty list', []],
-    ['null', null],
-  ])('SCRUM17_AC2_when_nothing_is_blocked_(%s)_there_is_no_not', async (_label, data) => {
-    const { venuesStub } = givenTables({ blocks: { data, error: null } });
+    ['an empty list', 'every venue answered free'],
+    ['null', 'null data'],
+  ])('SCRUM17_AC2_when_nothing_is_blocked_(%s)_there_is_no_not', async (label) => {
+    // SCRUM-484: the venues query never carries a .not now. "Nothing
+    // blocked" is the database answering every venue as free, and every
+    // venue is kept. A null answer is the opposite case: nothing is known to
+    // be free, so nothing is offered (fail closed rather than open).
+    const { venuesStub } = givenTables(
+      label === 'null' ? { free: { data: null, error: null } } : {},
+    );
 
-    await searchVenues({ startsAt: STARTS, endsAt: ENDS });
+    const result = await searchVenues({ startsAt: STARTS, endsAt: ENDS });
 
-    expect(tablesQueried()).toEqual(['venue_blocks', 'venues']);
+    expect(tablesQueried()).toEqual(['venues']);
     expect(venuesStub.called('not')).toBe(false);
+    expect(result.map((v) => v.id)).toEqual(label === 'null' ? [] : [VENUE_ID]);
   });
 
   it('SCRUM17_AC2_a_dated_search_keeps_the_retired_filter_and_name_order', async () => {
     const { venuesStub } = givenTables({
-      blocks: { data: [{ venue_id: BLOCKED_A }], error: null },
+      venues: {
+        data: [rowFor(BLOCKED_A, 'Atrium'), rowFor(BLOCKED_B, 'Boardroom'), rowFor(VENUE_ID, 'Cove')],
+        error: null,
+      },
+      free: (ids) => ids.filter((id) => id !== BLOCKED_B),
     });
 
-    await searchVenues({ startsAt: STARTS, endsAt: ENDS });
+    const result = await searchVenues({ startsAt: STARTS, endsAt: ENDS });
 
     expect(venuesStub.args('select')).toEqual(['id, name, location, max_capacity']);
     expect(venuesStub.args('is')).toEqual(['retired_at', null]);
     expect(venuesStub.args('order')).toEqual(['name']);
+    // The filter keeps the database's name order.
+    expect(result.map((v) => v.name)).toEqual(['Atrium', 'Cove']);
   });
 
   it('SCRUM17_AC2_a_dated_search_combines_with_location_and_capacity', async () => {
-    const { venuesStub } = givenTables({
-      blocks: { data: [{ venue_id: BLOCKED_A }], error: null },
-    });
+    const { venuesStub } = givenTables({ free: () => [] });
 
-    await searchVenues({ location: 'SCIS', minCapacity: 40, startsAt: STARTS, endsAt: ENDS });
+    const result = await searchVenues({ location: 'SCIS', minCapacity: 40, startsAt: STARTS, endsAt: ENDS });
 
     expect(venuesStub.args('ilike')).toEqual(['location', '%SCIS%']);
     expect(venuesStub.args('gte')).toEqual(['max_capacity', 40]);
-    expect(venuesStub.args('not')).toEqual(['id', 'in', `(${BLOCKED_A})`]);
     expect(venuesStub.args('is')).toEqual(['retired_at', null]);
+    // Only the venues that passed location and capacity are asked about.
+    expect(availabilityCalls()[0][1].p_venue_ids).toEqual([VENUE_ID]);
+    expect(result).toEqual([]);
   });
 
   it('SCRUM17_AC2_a_blocks_query_error_rejects_and_venues_is_never_queried', async () => {
-    givenTables({ blocks: { data: null, error: { code: '22P02', message: 'bad' } } });
+    // SCRUM-484: the availability call now comes after the venues read, so
+    // venues IS queried; the error still rejects, translated (22P02 -> 400).
+    // Pins that a 22P02 from available_venue_ids maps to a ValidationError (400).
+    givenTables({ free: { data: null, error: { code: '22P02', message: 'bad' } } });
 
     await expect(searchVenues({ startsAt: STARTS, endsAt: ENDS })).rejects.toBeInstanceOf(
       ValidationError,
     );
-    expect(tablesQueried()).toEqual(['venue_blocks']);
+    expect(tablesQueried()).toEqual(['venues']);
+    expect(availabilityCalls()).toHaveLength(1);
   });
 
   it('SCRUM17_AC2_an_unknown_blocks_error_rejects_too', async () => {
-    givenTables({ blocks: { data: null, error: { code: '08006', message: 'connection failure' } } });
+    givenTables({ free: { data: null, error: { code: '08006', message: 'connection failure' } } });
 
     await expect(searchVenues({ startsAt: STARTS, endsAt: ENDS })).rejects.toThrow('connection failure');
-    expect(tablesQueried()).toEqual(['venue_blocks']);
   });
 
   it.each([
@@ -1239,14 +1283,64 @@ describe('SCRUM17_AC2 a dated search leaves out venues blocked in the window', (
     const err = await errorFromAsync(() => searchVenues(filters));
     expect(err).toBeInstanceOf(ValidationError);
     expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('SCRUM17_AC2_the_output_shape_is_unchanged_by_a_window', async () => {
-    givenTables({ blocks: { data: [{ venue_id: BLOCKED_A }], error: null } });
+    givenTables();
 
     await expect(searchVenues({ startsAt: STARTS, endsAt: ENDS })).resolves.toEqual([
       { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'Level 2, SCIS', maxCapacity: 40 },
     ]);
+  });
+
+  // --- SCRUM-484 ------------------------------------------------------------
+
+  it('SCRUM484_AC4_dated_catalogue_search_follows_the_decision', async () => {
+    // B-AC4-17, decision 5: the dated catalogue search asks the shared rule,
+    // so a venue the database reports as occupied -- by a booking now, not
+    // only a block -- is left out. The service cannot tell which; it only
+    // passes the ids and the window through and keeps what comes back.
+    givenTables({
+      venues: { data: [rowFor(BLOCKED_A, 'Booked Hall'), VENUE_ROW], error: null },
+      free: (ids) => ids.filter((id) => id !== BLOCKED_A),
+    });
+
+    const result = await searchVenues({ startsAt: STARTS, endsAt: ENDS });
+
+    expect(availabilityCalls()).toHaveLength(1);
+    expect(availabilityCalls()[0][1]).toEqual({
+      p_venue_ids: [BLOCKED_A, VENUE_ID],
+      p_starts_at: STARTS,
+      p_ends_at: ENDS,
+    });
+    expect(result.map((v) => v.id)).toEqual([VENUE_ID]);
+    expect(tablesQueried()).not.toContain('venue_blocks');
+    expect(tablesQueried()).not.toContain('bookings');
+  });
+
+  it('SCRUM484_AC4_dated_catalogue_search_with_no_rows_asks_nothing', async () => {
+    givenTables({ venues: { data: [], error: null } });
+
+    await expect(searchVenues({ startsAt: STARTS, endsAt: ENDS })).resolves.toEqual([]);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM484_AC4_dated_catalogue_search_ignores_ids_it_did_not_ask_about', async () => {
+    givenTables({
+      free: { data: [{ venue_id: VENUE_ID }, { venue_id: BLOCKED_B }], error: null },
+    });
+
+    const result = await searchVenues({ startsAt: STARTS, endsAt: ENDS });
+
+    expect(result.map((v) => v.id)).toEqual([VENUE_ID]);
+  });
+
+  it('SCRUM484_AC4_dated_catalogue_search_translates_an_rpc_not_found', async () => {
+    // PGRST202-style "function not found" before 033 is applied, or P0002.
+    givenTables({ free: { data: null, error: { code: 'P0002', message: 'function not found' } } });
+
+    await expect(searchVenues({ startsAt: STARTS, endsAt: ENDS })).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
@@ -1770,35 +1864,29 @@ describe('SCRUM20 findVenuesForEvent', () => {
    * that were asked for (as .in('code', ...) would), and `venues` with
    * `rows`. Any table can be given an error instead.
    */
-  function givenEventSearch({ rows = [], errors = {}, known = KNOWN, bookings = [], blocks = [] } = {}) {
+  function givenEventSearch({ rows = [], errors = {}, known = KNOWN, occupied = [], free } = {}) {
     const stubs = {};
+    // SCRUM-484: availability is one rpc, available_venue_ids (033), instead
+    // of SCRUM-139's bookings and venue_blocks reads. The stub is a scripted
+    // answer, not the rule: it echoes back every id it is asked about except
+    // those in `occupied` (or, when `free` is a function, whatever it returns
+    // for the call's args). errors.available makes the call fail. The rule
+    // itself is proved against real Postgres in
+    // tests/db/venueSearchOccupancyDatabase.test.js.
+    rpc.mockImplementation(async (name, args) => {
+      if (name !== 'available_venue_ids') throw new Error(`unexpected rpc ${name}`);
+      if (errors.available) return { data: null, error: errors.available };
+      const ids = typeof free === 'function'
+        ? free(args)
+        : args.p_venue_ids.filter((id) => !occupied.includes(id));
+      return { data: ids.map((id) => ({ venue_id: id })), error: null };
+    });
     from.mockImplementation((table) => {
       if (table === 'venues') {
         stubs.venues = queryStub(
           errors.venues ? { data: null, error: errors.venues } : { data: rows, error: null },
         );
         return stubs.venues;
-      }
-      // SCRUM-139: the occupancy reads. Empty by default, so a venue that
-      // passes the attributes is still returned; a test passes `bookings` /
-      // `blocks` rows (or errors.bookings / errors.venue_blocks) to change
-      // that. The stub returns every row it is given: it does not apply the
-      // filters, it records them (all of them -- .in is called twice).
-      if (table === 'bookings' || table === 'venue_blocks') {
-        const occupied = table === 'bookings' ? bookings : blocks;
-        const stub = queryStub(
-          errors[table] ? { data: null, error: errors[table] } : { data: occupied, error: null },
-        );
-        stub.calls = [];
-        for (const method of ['select', 'in', 'is', 'lt', 'gt']) {
-          const inner = stub[method];
-          stub[method] = (...args) => {
-            stub.calls.push([method, ...args]);
-            return inner(...args);
-          };
-        }
-        stubs[table] = stub;
-        return stub;
       }
       if (!(table in known)) throw new Error(`unexpected table ${table}`);
       // The stub resolves to a fixed result, so filter lazily on .in's argument.
@@ -1818,14 +1906,10 @@ describe('SCRUM20 findVenuesForEvent', () => {
     return stubs;
   }
 
-  // The venue and lookup-table reads (AC1/AC3). SCRUM-139's occupancy reads
-  // (bookings, venue_blocks) are left out here and checked by occupancyTablesRead,
-  // so the AC1 "which lookup tables were read" assertions keep their meaning.
-  const OCCUPANCY_TABLES = ['bookings', 'venue_blocks'];
-  const tablesRead = () =>
-    from.mock.calls.map(([table]) => table).filter((table) => !OCCUPANCY_TABLES.includes(table));
-  const occupancyTablesRead = () =>
-    from.mock.calls.map(([table]) => table).filter((table) => OCCUPANCY_TABLES.includes(table));
+  // The venue and lookup-table reads (AC1/AC3). SCRUM-484: no occupancy table
+  // is read through from() any more; availability is the rpc below.
+  const tablesRead = () => from.mock.calls.map(([table]) => table);
+  const availabilityCalls = () => rpc.mock.calls.filter(([name]) => name === 'available_venue_ids');
 
   // --- AC1: inputs ---------------------------------------------------------
 
@@ -2198,10 +2282,16 @@ describe('SCRUM20 findVenuesForEvent', () => {
   });
 
   // --- SCRUM-139 AC5/AC6: bookings and blocks ------------------------------
-  // The overlap rule itself is unit-tested in tests/domain/venueOccupancy.test.js
-  // and the read in tests/services/venueOccupancyService.test.js; these prove
-  // findVenuesForEvent wires them together. Stub rows are returned as given:
-  // the stub records the filters, it does not apply them.
+  // SCRUM-484 (AC4): the overlap rule left JavaScript. Which venues are free
+  // is answered by available_venue_ids() (033), which calls the shared
+  // venue_occupancy_conflicts() (032). These tests keep SCRUM-139's names and
+  // now prove the service's half of the contract: it asks once, with the
+  // attribute-matching ids and the event's own period, sends no rule of its
+  // own (no statuses, no minutes, no widening), and keeps exactly the venues
+  // the database answers as free, in name order. Each rule a name refers to
+  // -- statuses, removed blocks, padding, touching edges -- is proved against
+  // real Postgres, under the same name, in
+  // tests/db/venueSearchOccupancyDatabase.test.js.
 
   const RIVERSIDE_ID = '6c1a2d3e-0000-4000-8000-000000000002';
   /** Harbour Room and Riverside Hall, both meeting the base request. */
@@ -2209,19 +2299,10 @@ describe('SCRUM20 findVenuesForEvent', () => {
     harbourRow(),
     harbourRow({ id: RIVERSIDE_ID, name: 'Riverside Hall' }),
   ];
-  const occupancy = (venueId, from, to, extra = {}) => ({
-    venue_id: venueId,
-    starts_at: `2026-11-11T${from}:00+08:00`,
-    ends_at: `2026-11-11T${to}:00+08:00`,
-    ...extra,
-  });
 
   it('SCRUM20_AC6_overlapping_approved_booking_excludes_the_venue', async () => {
-    // B-AC6-01
-    givenEventSearch({
-      rows: twoMatchingRows(),
-      bookings: [occupancy(HARBOUR_ID, '10:30', '11:30', { status: 'approved' })],
-    });
+    // B-AC6-01: the database reports Harbour Room occupied.
+    givenEventSearch({ rows: twoMatchingRows(), occupied: [HARBOUR_ID] });
 
     const result = await findVenuesForEvent({ ...BASE });
 
@@ -2230,10 +2311,7 @@ describe('SCRUM20 findVenuesForEvent', () => {
 
   it('SCRUM20_AC6_booking_at_another_venue_does_not_exclude', async () => {
     // B-AC6-08
-    givenEventSearch({
-      rows: twoMatchingRows(),
-      bookings: [occupancy(RIVERSIDE_ID, '10:30', '11:30', { status: 'approved' })],
-    });
+    givenEventSearch({ rows: twoMatchingRows(), occupied: [RIVERSIDE_ID] });
 
     const result = await findVenuesForEvent({ ...BASE });
 
@@ -2241,47 +2319,38 @@ describe('SCRUM20 findVenuesForEvent', () => {
   });
 
   it('SCRUM20_AC6_flagged_booking_without_block_still_excludes_the_venue', async () => {
-    // B-AC6-03, inverted by decision: a flagged_for_review booking still holds
-    // its venue even when no block covers it any more.
-    const stubs = givenEventSearch({
-      rows: [harbourRow()],
-      bookings: [occupancy(HARBOUR_ID, '10:30', '11:30', { status: 'flagged_for_review' })],
-      blocks: [],
-    });
+    // B-AC6-03, inverted by decision. Which statuses occupy is now decided in
+    // SQL (032's allow-list), so the service sends no status list at all.
+    givenEventSearch({ rows: [harbourRow()], occupied: [HARBOUR_ID] });
 
     const result = await findVenuesForEvent({ ...BASE });
 
     expect(result).toEqual([]);
-    expect(stubs.bookings.calls).toContainEqual(['in', 'status', ['approved', 'flagged_for_review']]);
+    expect(Object.keys(availabilityCalls()[0][1]).sort()).toEqual(['p_ends_at', 'p_starts_at', 'p_venue_ids']);
   });
 
   it('SCRUM20_AC6_flagged_bookings_block_still_excludes_the_venue', async () => {
-    // B-AC6-04: flagged booking under its active block.
-    givenEventSearch({
-      rows: [harbourRow()],
-      bookings: [occupancy(HARBOUR_ID, '10:30', '11:30', { status: 'flagged_for_review' })],
-      blocks: [occupancy(HARBOUR_ID, '10:00', '12:00')],
-    });
+    // B-AC6-04
+    givenEventSearch({ rows: [harbourRow()], occupied: [HARBOUR_ID] });
 
     await expect(findVenuesForEvent({ ...BASE })).resolves.toEqual([]);
   });
 
   it('SCRUM20_AC6_cancelled_booking_does_not_exclude', async () => {
-    // B-AC6-02. The status filter keeps a cancelled booking out of the read,
-    // so the stub answers nothing for it -- and the filter sent is checked.
-    const stubs = givenEventSearch({ rows: [harbourRow()], bookings: [] });
+    // B-AC6-02: the database answers the venue as free; the service keeps it
+    // and has no status filter of its own that could disagree.
+    givenEventSearch({ rows: [harbourRow()] });
 
     const result = await findVenuesForEvent({ ...BASE });
 
     expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
-    const statusFilter = stubs.bookings.calls.find(([m, col]) => m === 'in' && col === 'status');
-    expect(statusFilter).toEqual(['in', 'status', ['approved', 'flagged_for_review']]);
-    expect(statusFilter[2]).not.toContain('cancelled');
+    expect(JSON.stringify(availabilityCalls())).not.toContain('cancelled');
+    expect(tablesRead()).not.toContain('bookings');
   });
 
   it('SCRUM20_AC6_overlapping_active_block_excludes_the_venue', async () => {
     // B-AC6-05
-    givenEventSearch({ rows: twoMatchingRows(), blocks: [occupancy(HARBOUR_ID, '10:00', '12:00')] });
+    givenEventSearch({ rows: twoMatchingRows(), occupied: [HARBOUR_ID] });
 
     const result = await findVenuesForEvent({ ...BASE });
 
@@ -2289,42 +2358,44 @@ describe('SCRUM20 findVenuesForEvent', () => {
   });
 
   it('SCRUM20_AC6_removed_block_does_not_exclude', async () => {
-    // B-AC6-06. .is('removed_at', null) keeps a removed block out of the read.
-    const stubs = givenEventSearch({ rows: [harbourRow()], blocks: [] });
+    // B-AC6-06: free per the database; venue_blocks is never read here.
+    givenEventSearch({ rows: [harbourRow()] });
 
     const result = await findVenuesForEvent({ ...BASE });
 
     expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
-    expect(stubs.venue_blocks.calls).toContainEqual(['is', 'removed_at', null]);
+    expect(tablesRead()).not.toContain('venue_blocks');
   });
 
   it('SCRUM20_AC5_touching_booking_and_block_do_not_exclude (service)', async () => {
-    // B-AC5-01/02 and 08/09 through the service, zero buffers.
-    givenEventSearch({
-      rows: [harbourRow()],
-      bookings: [occupancy(HARBOUR_ID, '08:00', '10:00')],
-      blocks: [occupancy(HARBOUR_ID, '12:00', '14:00')],
-    });
+    // B-AC5-01/02 and 08/09: the service passes the event's period through
+    // unchanged; the database decides that touching is clear.
+    givenEventSearch({ rows: [harbourRow()] });
 
     const result = await findVenuesForEvent({ ...BASE });
 
     expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
+    expect(availabilityCalls()[0][1]).toMatchObject({ p_starts_at: BASE.startsAt, p_ends_at: BASE.endsAt });
   });
 
   it('SCRUM20_AC5_the_venues_own_setup_and_turnaround_pad_the_check (service)', async () => {
-    // Worked example: setup 30, turnaround 45, booking 10:00-12:00. Request
-    // 13:15 is kept (edge), 13:14 is excluded.
+    // Worked example. The padding happens in Postgres (the venue's minutes
+    // are read there), so the service sends the request unpadded and no
+    // minutes. A scripted answer stands in for the database: 13:14 occupied,
+    // 13:15 free.
     const row = harbourRow({ setup_minutes: 30, turnaround_minutes: 45 });
-    const bookings = [occupancy(HARBOUR_ID, '10:00', '12:00')];
+    const answer = (args) => (args.p_starts_at === '2026-11-11T13:14:00+08:00' ? [] : args.p_venue_ids);
 
-    givenEventSearch({ rows: [row], bookings });
+    givenEventSearch({ rows: [row], free: answer });
     const kept = await findVenuesForEvent({
       ...BASE,
       startsAt: '2026-11-11T13:15:00+08:00',
       endsAt: '2026-11-11T14:00:00+08:00',
     });
+    const keptArgs = availabilityCalls()[0][1];
 
-    givenEventSearch({ rows: [row], bookings });
+    vi.resetAllMocks();
+    givenEventSearch({ rows: [row], free: answer });
     const excluded = await findVenuesForEvent({
       ...BASE,
       startsAt: '2026-11-11T13:14:00+08:00',
@@ -2333,10 +2404,15 @@ describe('SCRUM20 findVenuesForEvent', () => {
 
     expect(kept.map((v) => v.id)).toEqual([HARBOUR_ID]);
     expect(excluded).toEqual([]);
+    expect(keptArgs).toEqual({
+      p_venue_ids: [HARBOUR_ID],
+      p_starts_at: '2026-11-11T13:15:00+08:00',
+      p_ends_at: '2026-11-11T14:00:00+08:00',
+    });
   });
 
   it('SCRUM20_AC5_operating_hours_ignore_setup_and_turnaround', async () => {
-    // B-AC5-26: hours 09:00-18:00, setup 30, turnaround 45, no bookings.
+    // B-AC5-26: hours 09:00-18:00, setup 30, turnaround 45, nothing booked.
     // Request 09:00-18:00 (padded 08:30-18:45) is still returned.
     givenEventSearch({ rows: [harbourRow({ setup_minutes: 30, turnaround_minutes: 45 })] });
 
@@ -2350,30 +2426,34 @@ describe('SCRUM20 findVenuesForEvent', () => {
   });
 
   it('SCRUM20_AC5_occupancy_reads_are_widened_by_240_minutes', async () => {
-    const stubs = givenEventSearch({ rows: [harbourRow()] });
+    // SCRUM-484: no longer widened. The 240-minute read window was the JS
+    // copy's way of fetching every row any venue's minutes could reach; the
+    // database now pads per venue itself, so the service sends the exact
+    // period it was given.
+    givenEventSearch({ rows: [harbourRow()] });
 
     await findVenuesForEvent({ ...BASE });
 
-    for (const table of ['bookings', 'venue_blocks']) {
-      expect(stubs[table].calls).toContainEqual(['lt', 'starts_at', '2026-11-11T08:00:00.000Z']);
-      expect(stubs[table].calls).toContainEqual(['gt', 'ends_at', '2026-11-10T22:00:00.000Z']);
-    }
+    expect(availabilityCalls()).toEqual([
+      ['available_venue_ids', { p_venue_ids: [HARBOUR_ID], p_starts_at: BASE.startsAt, p_ends_at: BASE.endsAt }],
+    ]);
   });
 
   it('SCRUM20_AC6_no_candidates_reads_no_bookings_or_blocks', async () => {
-    // No venues at all, and venues failing the attributes: neither reads.
+    // No venues at all, and venues failing the attributes: availability is
+    // never asked.
     givenEventSearch({ rows: [] });
     await findVenuesForEvent({ ...BASE });
-    expect(occupancyTablesRead()).toEqual([]);
+    expect(rpc).not.toHaveBeenCalled();
 
     vi.resetAllMocks();
     givenEventSearch({ rows: [harbourRow({ max_capacity: 10 })] });
     await expect(findVenuesForEvent({ ...BASE })).resolves.toEqual([]);
-    expect(occupancyTablesRead()).toEqual([]);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('SCRUM20_AC6_occupancy_is_read_only_for_attribute_matching_venues', async () => {
-    const stubs = givenEventSearch({
+    givenEventSearch({
       rows: [
         harbourRow({ id: 'a', name: 'Atrium' }),
         harbourRow({ id: 'b', name: 'Boardroom', max_capacity: 79 }),
@@ -2383,16 +2463,17 @@ describe('SCRUM20 findVenuesForEvent', () => {
 
     await findVenuesForEvent({ ...BASE });
 
-    expect(occupancyTablesRead().sort()).toEqual(['bookings', 'venue_blocks']);
-    expect(stubs.bookings.calls).toContainEqual(['in', 'venue_id', ['a', 'c']]);
-    expect(stubs.venue_blocks.calls).toContainEqual(['in', 'venue_id', ['a', 'c']]);
+    expect(availabilityCalls()).toHaveLength(1);
+    expect(availabilityCalls()[0][1].p_venue_ids).toEqual(['a', 'c']);
   });
 
   it.each([
     ['bookings', 'bookings read failed'],
     ['venue_blocks', 'blocks read failed'],
-  ])('SCRUM20_AC6_a_%s_read_error_propagates', async (table, message) => {
-    givenEventSearch({ rows: [harbourRow()], errors: { [table]: { code: 'XX000', message } } });
+  ])('SCRUM20_AC6_a_%s_read_error_propagates', async (_table, message) => {
+    // SCRUM-484: both reads became the one rpc; either failure is that call
+    // failing, and it still propagates, translated.
+    givenEventSearch({ rows: [harbourRow()], errors: { available: { code: 'XX000', message } } });
 
     const err = await errorFromAsync(() => findVenuesForEvent({ ...BASE }));
 
@@ -2402,7 +2483,8 @@ describe('SCRUM20 findVenuesForEvent', () => {
   });
 
   it('SCRUM20_AC6_an_occupancy_22P02_propagates_as_a_validation_error', async () => {
-    givenEventSearch({ rows: [harbourRow()], errors: { bookings: { code: '22P02', message: 'bad uuid' } } });
+    // Pins that a 22P02 from available_venue_ids maps to a ValidationError (400).
+    givenEventSearch({ rows: [harbourRow()], errors: { available: { code: '22P02', message: 'bad uuid' } } });
 
     const err = await errorFromAsync(() => findVenuesForEvent({ ...BASE }));
 
@@ -2417,8 +2499,7 @@ describe('SCRUM20 findVenuesForEvent', () => {
         harbourRow({ id: 'c', name: 'Cove' }),
         harbourRow({ id: 'd', name: 'Dockside' }),
       ],
-      bookings: [occupancy('b', '11:00', '13:00')],
-      blocks: [occupancy('d', '09:00', '10:01')],
+      occupied: ['b', 'd'],
     });
 
     const result = await findVenuesForEvent({ ...BASE });
@@ -2438,6 +2519,83 @@ describe('SCRUM20 findVenuesForEvent', () => {
         'turnaroundMinutes',
       ]);
     }
+  });
+
+  // --- SCRUM-484: the shared function decides -------------------------------
+
+  it('SCRUM484_AC4_search_asks_the_shared_function_which_venues_are_free', async () => {
+    // B-AC4-03: two matching venues; the rpc answers only Riverside Hall.
+    givenEventSearch({ rows: twoMatchingRows(), free: () => [RIVERSIDE_ID] });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith('available_venue_ids', {
+      p_venue_ids: [HARBOUR_ID, RIVERSIDE_ID],
+      p_starts_at: BASE.startsAt,
+      p_ends_at: BASE.endsAt,
+    });
+    expect(result.map((v) => v.id)).toEqual([RIVERSIDE_ID]);
+    expect(tablesRead()).not.toContain('bookings');
+    expect(tablesRead()).not.toContain('venue_blocks');
+  });
+
+  it('SCRUM484_AC4_search_keeps_only_the_returned_ids_in_name_order', async () => {
+    // The answer comes back in any order and may name an id that was not
+    // asked about; only candidates the database named are kept, in the
+    // venues query's name order.
+    givenEventSearch({
+      rows: [
+        harbourRow({ id: 'a', name: 'Atrium' }),
+        harbourRow({ id: 'b', name: 'Boardroom' }),
+        harbourRow({ id: 'c', name: 'Cove' }),
+      ],
+      free: () => ['c', 'zzz-not-asked', 'a', 'a'],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.name)).toEqual(['Atrium', 'Cove']);
+  });
+
+  it('SCRUM484_AC4_search_null_answer_offers_no_venue', async () => {
+    // data: null with no error means nothing is known to be free.
+    givenEventSearch({ rows: [harbourRow()] });
+    rpc.mockResolvedValue({ data: null, error: null });
+
+    await expect(findVenuesForEvent({ ...BASE })).resolves.toEqual([]);
+  });
+
+  it.each([
+    ['XX000', 'availability failed', Error],
+    ['P0002', 'function available_venue_ids not found', NotFoundError],
+    ['23514', 'check failed', ValidationError],
+  ])('SCRUM484_AC4_search_rpc_error_%s_is_translated', async (code, message, Type) => {
+    givenEventSearch({ rows: [harbourRow()], errors: { available: { code, message } } });
+
+    const err = await errorFromAsync(() => findVenuesForEvent({ ...BASE }));
+
+    expect(err).toBeInstanceOf(Type);
+    expect(err.message).toContain(message);
+  });
+
+  it('SCRUM484_AC7_search_still_hides_without_saying_why', async () => {
+    // B-AC7-07: Harbour Room (30/45) is hidden by a booking's turnaround.
+    // The result is just [], with nothing naming setup, turnaround or the
+    // booking (SCRUM-143/145).
+    givenEventSearch({
+      rows: [harbourRow({ setup_minutes: 30, turnaround_minutes: 45 })],
+      occupied: [HARBOUR_ID],
+    });
+
+    const result = await findVenuesForEvent({
+      ...BASE,
+      startsAt: '2026-11-11T13:00:00+08:00',
+      endsAt: '2026-11-11T14:00:00+08:00',
+    });
+
+    expect(result).toEqual([]);
+    expect(JSON.stringify(result)).not.toMatch(/setup|turnaround|booking/i);
   });
 });
 

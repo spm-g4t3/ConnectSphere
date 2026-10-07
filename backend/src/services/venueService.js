@@ -23,10 +23,11 @@
  * same path as turnaround -- written by create and update, read back by
  * getVenueById and findVenuesForEvent, and left out of searchVenues and the
  * list. findVenuesForEvent pads each period by the venue's setup and
- * turnaround through domain/venueOccupancy.js (SCRUM-139, below).
+ * turnaround through available_venue_ids() (SCRUM-484, below).
  *
  * SCRUM-130 (part of SCRUM-17 AC2): searchVenues leaves out venues blocked in
- * an optional date window, through venueBlockService's findBlockedVenueIds.
+ * an optional date window. SCRUM-484 moved that onto available_venue_ids()
+ * too, so it now leaves out booked venues as well (below).
  *
  * SCRUM-185 (SCRUM-178 AC1): searchVenues can include retired venues when
  * asked, so a retired venue's calendar is reachable. The route decides who
@@ -40,8 +41,15 @@
  *
  * SCRUM-139 (SCRUM-20 AC5/AC6, Week 7): findVenuesForEvent also leaves out a
  * venue with an occupying booking or an active block overlapping the event,
- * each padded by the venue's setup and turnaround. The rule lives in
- * domain/venueOccupancy.js; venueOccupancyService.js reads the rows.
+ * each padded by the venue's setup and turnaround.
+ *
+ * SCRUM-484 (AC4): that rule used to be a JavaScript copy
+ * (domain/venueOccupancy.js, read by venueOccupancyService.js). Both are
+ * gone. Availability is now asked of available_venue_ids() in
+ * 033_venue_occupancy_callers.sql, which calls venue_occupancy_conflicts()
+ * (032) -- the same function the block writers, the booking request and the
+ * calendar call. One formula, in one place, so search can never offer a venue
+ * that a booking request at the same period would then refuse.
  */
 
 import { supabase } from '../config/supabaseClient.js';
@@ -53,12 +61,9 @@ import {
   validateSearchFilters,
   validateEventSearchCriteria,
 } from '../validation/venueValidation.js';
-import { findBlockedVenueIds } from './venueBlockService.js';
 import { DEFAULT_TURNAROUND_MINUTES } from '../domain/turnaroundOptions.js';
 import { DEFAULT_SETUP_MINUTES } from '../domain/setupOptions.js';
 import { matchesAllCriteria } from '../domain/venueMatching.js';
-import { isVenueFree } from '../domain/venueOccupancy.js';
-import { findOccupancies } from './venueOccupancyService.js';
 import { getBookingStatusDisplay } from '../domain/bookingStatus.js';
 
 /**
@@ -311,6 +316,53 @@ export async function retireVenue(id, userId = null) {
 }
 
 /**
+ * Which of these venues nothing occupies during a period (SCRUM-484, AC4).
+ *
+ * One call to available_venue_ids() (033) for every candidate, so the rule --
+ * bookings (approved or flagged_for_review) padded with the venue's setup and
+ * turnaround, blocks raw, the requested period padded too, touching is clear
+ * -- is decided in Postgres by venue_occupancy_conflicts() (032) and nowhere
+ * else. This function only carries the answer back as a Set for the callers'
+ * filters; it decides nothing.
+ *
+ * Shared by searchVenues and findVenuesForEvent so both searches ask the same
+ * question the same way. An empty candidate list answers an empty Set without
+ * a call.
+ *
+ * @param {string[]} venueIds  ids just read from venues
+ * @param {string} startsAt    ISO 8601 with an offset, validated by the caller
+ * @param {string} endsAt      ISO 8601 with an offset, validated by the caller
+ * @returns {Promise<Set<string>>} the ids that are free
+ * @throws {Error} a failed call, through translateError
+ */
+async function findAvailableVenueIds(venueIds, startsAt, endsAt) {
+  if (venueIds.length === 0) return new Set();
+
+  const { data, error } = await supabase.rpc('available_venue_ids', {
+    p_venue_ids: venueIds,
+    p_starts_at: startsAt,
+    p_ends_at: endsAt,
+  });
+
+  // 22P02 (invalid text representation: a bad uuid or timestamp reached the
+  // cast) is the caller's input, not a server fault, so it is a 400 -- what
+  // findOccupancies and findBlockedVenueIds answered before SCRUM-484 moved
+  // both searches onto this call, with the same message. Mapped here rather
+  // than in translateError so the other venue calls keep their exact
+  // behaviour; everything else still goes through translateError.
+  if (error?.code === '22P02') {
+    throw new ValidationError(`A value was rejected by the database: ${error.message ?? ''}`);
+  }
+  if (error) throw translateError(error);
+
+  // available_venue_ids returns table (venue_id uuid) rather than setof uuid:
+  // PostgREST always answers a table result as an array of objects, while its
+  // shape for a set of bare scalars is less certain. So each row is
+  // { venue_id }.
+  return new Set((data ?? []).map((row) => row.venue_id));
+}
+
+/**
  * Search the venue catalogue.
  *
  * SCRUM-111. AC3 again, from the other side: by default retired venues do
@@ -331,12 +383,19 @@ export async function retireVenue(id, userId = null) {
  * the known cost of the lookup-table design and a change worth its own ticket.
  *
  * SCRUM-130 (SCRUM-17 AC2): with a startsAt/endsAt window, venues blocked at
- * any point in it are left out. Deliberately that and nothing more:
+ * any point in it are left out.
  *
- *  - Venues with an overlapping booking still appear. Excluding them is
- *    SCRUM-139's, as part of searching against an event's requirements.
- *  - Operating hours are not checked. Whether a venue is open then is
- *    SCRUM-20's.
+ * SCRUM-484 (AC4, decision 5): the window is now checked by
+ * available_venue_ids(), the shared rule, rather than by a raw read of
+ * venue_blocks. A deliberate side effect: a venue with an occupying booking
+ * in the window -- including its setup and turnaround -- is now left out too,
+ * exactly as findVenuesForEvent leaves it out. Keeping a blocks-only answer
+ * here would have meant keeping a second, raw copy of the overlap rule, and
+ * the catalogue would have offered venues that a booking request then
+ * refused.
+ *
+ * Operating hours are still not checked. Whether a venue is open then is
+ * SCRUM-20's.
  *
  * @param {object} [filters]
  * @param {string} [filters.location]     matched as a substring, case-insensitively
@@ -347,19 +406,10 @@ export async function retireVenue(id, userId = null) {
  *                                        venues; not with a date window
  * @returns {Promise<object[]>} active venues (retired too, each with
  *                              retiredAt, when includeRetired), ordered by
- *                              name, minus any blocked in the window
+ *                              name, minus any occupied in the window
  */
 export async function searchVenues(filters = {}) {
   const search = validateSearchFilters(filters);
-
-  // Before the venues query, not after it: two reads with no shared
-  // transaction either way, and filtering in Postgres keeps the name order
-  // and leaves no second, in-memory copy of the rule. A blocks-query failure
-  // throws here, so the venues query never runs.
-  const blocked =
-    search.startsAt !== undefined
-      ? await findBlockedVenueIds(search.startsAt, search.endsAt)
-      : [];
 
   // SCRUM-185: two branches rather than one with a conditional column, so the
   // default search sends byte-for-byte the query it always has.
@@ -378,20 +428,28 @@ export async function searchVenues(filters = {}) {
     query = query.gte('max_capacity', search.minCapacity);
   }
 
-  // Skipped when nothing is blocked, so a dateless search -- or a window no
-  // block touches -- sends exactly the query it did before SCRUM-130. The ids
-  // travel in the URL, so a very large list could make a long one; at this
-  // catalogue's size that is not a concern, and it is the known cost of
-  // keeping this to two PostgREST calls with no new migration.
-  if (blocked.length > 0) {
-    query = query.not('id', 'in', `(${blocked.join(',')})`);
-  }
-
   const { data, error } = await query.order('name');
 
   if (error) throw translateError(error);
 
-  return (data ?? []).map((row) => {
+  let rows = data ?? [];
+
+  // SCRUM-484: after the venues query, not before it as SCRUM-130's blocks
+  // read was. available_venue_ids() answers for the venues it is given, so it
+  // is asked only about the ones that passed location and capacity -- one
+  // call, and none when nothing did. A dateless search sends exactly the
+  // query it always has. Filtering keeps the name order; the Set is a
+  // membership test, not a second copy of the rule.
+  if (search.startsAt !== undefined && rows.length > 0) {
+    const free = await findAvailableVenueIds(
+      rows.map((row) => row.id),
+      search.startsAt,
+      search.endsAt,
+    );
+    rows = rows.filter((row) => free.has(row.id));
+  }
+
+  return rows.map((row) => {
     const venue = {
       id: row.id,
       name: row.name,
@@ -492,13 +550,23 @@ async function assertKnownCodes(criteria) {
  * which is safe because it can only remove venues the rule would remove too.
  *
  * SCRUM-139 (AC5/AC6, Week 7): a venue that passes the attributes is then
- * kept only if domain/venueOccupancy.js's isVenueFree says no occupying
- * booking or active block overlaps the event once setup and turnaround are
- * added. Attributes first, so bookings and blocks are read only for venues
- * still in the running, in one pair of queries for all of them -- and not at
- * all when none are. Like matchesAllCriteria, isVenueFree answers yes or no,
- * never why. Each result still carries setupMinutes and turnaroundMinutes, and
- * hours so a result can show when the venue is open.
+ * kept only if no occupying booking or active block overlaps the event once
+ * setup and turnaround are added.
+ *
+ * SCRUM-484 (AC4): that question is now asked of available_venue_ids() (033),
+ * which calls the shared venue_occupancy_conflicts() (032), instead of
+ * SCRUM-139's JavaScript copy of the rule. Attributes first, so availability
+ * is asked only for venues still in the running, in one call for all of them
+ * -- and not at all when none are. The answer is a set of ids, yes or no per
+ * venue, never why, as SCRUM-145 requires. Each result still carries
+ * setupMinutes and turnaroundMinutes, and hours so a result can show when the
+ * venue is open.
+ *
+ * Why the attribute rule stays in JavaScript while the period rule moved:
+ * matchesAllCriteria is used by nothing but search, so it has one home
+ * already. The period rule is also enforced by the block writers and the
+ * booking request inside their transactions, which can only call SQL, so SQL
+ * is the one place it can live once.
  *
  * @param {object} criteria  see validateEventSearchCriteria
  * @returns {Promise<object[]>} matching active venues, ordered by name, each
@@ -506,8 +574,8 @@ async function assertKnownCodes(criteria) {
  *     hours, setupMinutes, turnaroundMinutes }; [] when nothing matches
  * @throws {ValidationError} a malformed request or an unknown code, before
  *   the venues are read
- * @throws {Error} a failed bookings or blocks read (SCRUM-139), translated by
- *   venueOccupancyService
+ * @throws {Error} a failed availability call (SCRUM-484), through
+ *   translateError
  */
 export async function findVenuesForEvent(criteria) {
   const search = validateEventSearchCriteria(criteria);
@@ -527,17 +595,14 @@ export async function findVenuesForEvent(criteria) {
 
   if (candidates.length === 0) return [];
 
-  const occupancies = await findOccupancies(
+  const free = await findAvailableVenueIds(
     candidates.map((venue) => venue.id),
     search.startsAt,
     search.endsAt,
   );
 
   return candidates
-    .filter((venue) => {
-      const { bookings, blocks } = occupancies.get(venue.id);
-      return isVenueFree(venue, search, bookings, blocks);
-    })
+    .filter((venue) => free.has(venue.id))
     .map((venue) => ({
       id: venue.id,
       name: venue.name,
