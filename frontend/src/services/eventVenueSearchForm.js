@@ -10,7 +10,12 @@
 //
 //   { date: "YYYY-MM-DD", startTime: "HH:mm", endTime: "HH:mm",
 //     expectedAttendance: "120", location: "", layout: "",
-//     accessibility: [], facilities: [] }
+//     accessibility: [], facilities: [], spansDays: false }
+//
+// spansDays is not an input. seedFromEvent sets it when the event's own start
+// and end fall on different Singapore dates, so the component can say why
+// End starts blank. It describes the event, not the search: nothing
+// validates it and toSearchCriteria never sends it.
 //
 // One date and two times rather than two datetime-local inputs: an event that
 // crosses Singapore midnight can never match, because no venue's opening
@@ -41,6 +46,7 @@ export const EMPTY_EVENT_SEARCH_FORM = Object.freeze({
   layout: "",
   accessibility: Object.freeze([]),
   facilities: Object.freeze([]),
+  spansDays: false,
 });
 
 /**
@@ -105,7 +111,9 @@ function isValidDate(date) {
  * - The end time is filled only when the end falls on that Singapore date. A
  *   request running past Singapore midnight cannot be searched as one period
  *   (see the header), so its end is left for the coordinator to decide rather
- *   than silently moved onto the start's date.
+ *   than silently moved onto the start's date. spansDays says so: true only
+ *   when both dates are known and differ, so a missing end is not mistaken
+ *   for a second day.
  * - expectedAttendance is filled only when it is a whole number of at least 1;
  *   the column is nullable.
  * - Location, layout, accessibility and facilities start empty. The event
@@ -131,6 +139,7 @@ export function seedFromEvent(request) {
       Number.isInteger(attendance) && attendance >= 1 ? String(attendance) : "",
     accessibility: [],
     facilities: [],
+    spansDays: start.date !== "" && end.date !== "" && start.date !== end.date,
   };
 }
 

@@ -117,14 +117,27 @@ async function sentCriteria() {
   return vi.mocked(findVenuesForEvent).mock.calls[0][0];
 }
 
-/** The error list a control's aria-describedby points at. */
+/** The elements a control's aria-describedby names, in order. */
+function describedBy(control) {
+  const ids = (control.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean);
+  return ids.map((id) => document.getElementById(id));
+}
+
+/**
+ * The error list a control's aria-describedby points at. It may name hints
+ * too (Location always does), so the list is the one <ul> among them.
+ */
 function describedErrors(control) {
-  const id = control.getAttribute("aria-describedby");
-  expect(id).toBeTruthy();
-  const list = document.getElementById(id);
-  expect(list).not.toBeNull();
+  const elements = describedBy(control);
+  expect(elements).not.toContain(null);
+  const list = elements.find((el) => el.tagName === "UL");
+  expect(list).toBeTruthy();
   return [...list.querySelectorAll("li")].map((li) => li.textContent);
 }
+
+const LOCATION_HINT = "Matches part of the venue's location (building or area), not its name.";
+const multiDayHint = (date) =>
+  `This event runs over more than one day. Venue search checks one day at a time — set the end time for ${date}.`;
 
 beforeEach(() => {
   vi.mocked(findVenuesForEvent).mockReset();
@@ -233,6 +246,59 @@ describe("SCRUM20_AC2 pre-filled from the event", () => {
     expect(screen.getByText("Times are Singapore time (Asia/Singapore), the venues' local time."))
       .toBeInTheDocument();
     expect(screen.queryByText(/device/)).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM20 hints that explain the form", () => {
+  it("SCRUM20_AC1_location_hint_says_it_matches_location_not_name", () => {
+    renderFinder();
+
+    const hint = screen.getByText(LOCATION_HINT);
+    expect(field.location()).not.toHaveAttribute("aria-invalid");
+    expect(describedBy(field.location())).toEqual([hint]);
+  });
+
+  it("SCRUM20_AC1_location_hint_stays_described_beside_a_server_error", async () => {
+    vi.mocked(findVenuesForEvent).mockRejectedValue(httpError(400, {
+      details: [{ field: "location", message: "must be text" }],
+    }));
+    const { user } = renderFinder();
+    await user.click(searchButton());
+
+    await waitFor(() => expect(field.location()).toHaveAttribute("aria-invalid", "true"));
+    const [errors, hint] = describedBy(field.location());
+    expect(errors.tagName).toBe("UL");
+    expect(errors).toHaveTextContent("must be text");
+    expect(hint).toBe(screen.getByText(LOCATION_HINT));
+  });
+
+  it("SCRUM20_AC3_multi_day_event_explains_the_blank_end", async () => {
+    const { user } = renderFinder({ ...EVENT, proposedEnd: "2026-11-13T12:00:00+08:00" });
+
+    const hint = screen.getByText(multiDayHint(START.date));
+    expect(hint).not.toHaveAttribute("role");
+    expect(describedBy(field.end())).toEqual([hint]);
+
+    // Search names End as required; the hint is still there and still read.
+    await user.click(searchButton());
+    expect(findVenuesForEvent).not.toHaveBeenCalled();
+    expect(describedErrors(field.end())).toEqual(["is required"]);
+    expect(describedBy(field.end())).toContain(hint);
+  });
+
+  it("SCRUM20_AC3_multi_day_hint_describes_the_event_not_the_edited_date", () => {
+    renderFinder({ ...EVENT, proposedEnd: "2026-11-13T12:00:00+08:00" });
+
+    fireEvent.change(field.date(), { target: { value: "2026-11-20" } });
+
+    expect(screen.getByText(multiDayHint(START.date))).toBeInTheDocument();
+  });
+
+  it("SCRUM20_AC3_single_day_event_has_no_multi_day_hint", () => {
+    renderFinder();
+
+    expect(screen.queryByText(/more than one day/)).not.toBeInTheDocument();
+    expect(field.end()).not.toHaveAttribute("aria-describedby");
   });
 });
 
