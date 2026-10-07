@@ -308,6 +308,9 @@ async function main() {
       event_request_id: eventId,
       starts_at: '2026-06-01T09:00:00+00:00',
       ends_at: '2026-06-01T17:00:00+00:00',
+      // Explicit: this is a past, approved booking. Since SCRUM-251 an omitted
+      // status means 'pending'.
+      status: 'approved',
     })
     .select().single();
   if (bookingError) throw new Error(`could not create test booking: ${bookingError.message}`);

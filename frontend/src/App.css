@@ -431,6 +431,26 @@ button { cursor: pointer; }
 .venue-search__retired label { align-items: center; color: var(--muted); display: inline-flex; font-size: 0.9rem; gap: 8px; }
 .venue-search__badge { margin-left: 10px; }
 .venue-search__hint, .venue-search__window-note { color: var(--muted); font-size: 0.84rem; margin: 8px 0; }
+/* SCRUM-254: "Request this venue" and the request panel it opens. */
+.venue-search__request { margin-left: 12px; }
+.venue-search__request:disabled, .booking-request button:disabled { cursor: not-allowed; opacity: 0.55; }
+.booking-request { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; margin: 18px 0; padding: 14px 16px; }
+.booking-request h3 { margin: 0 0 10px; }
+.booking-request button { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 16px; }
+.booking-request__details { display: grid; gap: 6px 16px; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 0 0 14px; }
+.booking-request__details dt { color: var(--muted); font-size: 0.9rem; }
+.booking-request__details dd { margin: 0; }
+.booking-request__notes { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; }
+.booking-request__notes textarea { border: 1px solid var(--line); border-radius: 6px; font: inherit; padding: 10px 12px; }
+.booking-request__field-error { color: #a43c32; font-size: 0.84rem; list-style: none; margin: 6px 0 0; padding: 0; }
+.booking-request__warning { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 8px; margin: 14px 0; padding: 12px 14px; }
+.booking-request__warning h4 { color: #8a5a00; margin: 0 0 8px; }
+.booking-request__warning label { align-items: flex-start; display: flex; gap: 8px; }
+.booking-request__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 12px 0 0; padding: 8px 12px; }
+.booking-request__conflicts { list-style: none; margin: 10px 0 0; padding: 0; }
+.booking-request__conflicts li { border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 8px 0; }
+.booking-request__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.booking-request__success { background: #e8f7f1; border-radius: 6px; color: #17684f; padding: 10px 14px; }
 .my-event-requests__details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 10px; }
 .my-event-requests__details summary { color: var(--teal-dark); cursor: pointer; font-size: 0.9rem; font-weight: 700; }
 .my-event-requests__details dl { display: grid; gap: 8px 16px; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 14px 0 4px; }

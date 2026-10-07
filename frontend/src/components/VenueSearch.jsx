@@ -44,6 +44,17 @@
 //     once, on first render, and its presence alone triggers the auto-search.
 //   - A retired row's "View calendar" opens on the week the venue retired,
 //     which is where its past bookings end.
+//
+// SCRUM-254 (part of SCRUM-243) adds "Request this venue". It exists only when
+// the search was opened from an event (the eventRequestContext above, which now
+// carries the event's id and details), and never on a retired row. Both are
+// router state, so a reload drops the buttons along with the banner; the search
+// itself is untouched. A click opens BookingRequestPanel for that row, the same
+// flow the suitability panel (SCRUM-191) mounts. The buttons are disabled, with
+// the reason shown once, when the signed-in coordinator cannot request for this
+// event, and once a request has been sent or the server says the event already
+// has one. userId is a prop for the reason role is: useAuth throws without an
+// AuthProvider, and this page's tests render without one.
 
 import { useState, useCallback, useEffect, useId, useRef } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -53,6 +64,8 @@ import { formatRange } from "../services/displayFormat";
 import { normaliseRole } from "../auth/normaliseRole";
 import { searchActiveVenues } from "../services/venueService";
 import { toSearchWindow, validateSearchWindow } from "../services/venueSearchValidation";
+import { bookingRequestEligibility } from "../services/bookingRequestEligibility";
+import BookingRequestPanel from "./BookingRequestPanel";
 
 /** The window's fields. A 400 naming anything else gets the generic message. */
 const DATE_FIELDS = ["startsAt", "endsAt"];
@@ -66,7 +79,7 @@ const RETIRED_SEARCH_ROLES = ["event_coordinator", "venue_staff"].map(normaliseR
 /** The query-string value that seeds the checkbox. */
 const INCLUDE_RETIRED_PARAM = "true";
 
-export default function VenueSearch({ role } = {}) {
+export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
   const [searchParams] = useSearchParams();
   const canIncludeRetired = RETIRED_SEARCH_ROLES.includes(normaliseRole(role));
   const location = useLocation();
@@ -75,6 +88,16 @@ export default function VenueSearch({ role } = {}) {
   // The banner's copy, or undefined on an ordinary visit. Router state, so it
   // is gone after a reload by design — see the header.
   const context = location.state?.eventRequestContext;
+
+  // SCRUM-254. The event a request would be for: the context, when it carries
+  // an id. Older context (a name and requirements only) has none, and then no
+  // request button is offered.
+  const requestEvent = context?.id ? context : null;
+  const eligibility = bookingRequestEligibility(requestEvent, userId);
+  // The venue whose panel is open, and whether this event now has a live
+  // request (just sent, or reported by the server) so no second can be started.
+  const [requestingVenue, setRequestingVenue] = useState(null);
+  const [eventRequested, setEventRequested] = useState(false);
 
   // A lazy initialiser, not a plain object. useState's argument is evaluated
   // on every render even though only the first result is kept, so building
@@ -359,6 +382,31 @@ export default function VenueSearch({ role } = {}) {
 
       {error && <p className="venue-search__error">{error}</p>}
 
+      {requestEvent && !eligibility.eligible && (
+        <p className="venue-search__hint" role="status">
+          {eligibility.reason}
+        </p>
+      )}
+      {requestEvent && eligibility.eligible && eventRequested && (
+        <p className="venue-search__hint" role="status">
+          This event already has a venue request, so another cannot be started.
+        </p>
+      )}
+
+      {requestEvent && requestingVenue && (
+        <BookingRequestPanel
+          key={requestingVenue.id}
+          event={requestEvent}
+          venue={requestingVenue}
+          onSubmitted={(request) => {
+            setEventRequested(true);
+            onRequestSubmitted?.(request);
+          }}
+          onEventAlreadyRequested={() => setEventRequested(true)}
+          onClose={() => setRequestingVenue(null)}
+        />
+      )}
+
       {appliedWindow && (
         <p className="venue-search__window-note" role="status">
           {`Venues blocked between ${formatRange(appliedWindow.startsAt, appliedWindow.endsAt)} are not shown.`}
@@ -374,6 +422,17 @@ export default function VenueSearch({ role } = {}) {
             <Link to={calendarHref(venue)} className="venue-search__calendar-link">
               View calendar
             </Link>
+            {requestEvent && !venue.retiredAt && (
+              <button
+                type="button"
+                className="venue-search__request"
+                aria-label={`Request this venue: ${venue.name}`}
+                disabled={!eligibility.eligible || eventRequested}
+                onClick={() => setRequestingVenue(venue)}
+              >
+                Request this venue
+              </button>
+            )}
           </li>
         ))}
         {searched && !loading && results.length === 0 && (
