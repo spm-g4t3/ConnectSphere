@@ -3,7 +3,7 @@
 **Story:** Approve or Reject a Submitted Event Request — Event Coordinator
 **Subtask:** SCRUM-95 (this document)
 **Schema:** `backend/db/migrations/025_event_request_decisions.sql` (columns and constraints; renamed from 010 on 6 October 2026) and `029_event_request_decisions_functions.sql` (the two functions)
-**Rewritten:** 7 October 2026, replacing the September version written against eight criteria and a claim-on-review design
+**Rewritten:** 7 October 2026, replacing the September version written against eight criteria and a claim-on-review design. Updated the same day for SCRUM-134, which added 025 and 029 to the PGlite suite
 
 This document is the written layer between SCRUM-19's acceptance criteria and the
 Vitest files that implement them. Deliverable #3 requires test cases traceable
@@ -190,25 +190,43 @@ The decider and the time are never taken from the body.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC1-01 | `submitted`, held by ASSIGNED | ASSIGNED starts the review | 200. Status `under_review`; `reviewing_coordinator_id` is ASSIGNED; one call to `start_event_review`, nothing else | svc `SCRUM19_AC1_starts_the_review_through_the_function_alone`, `SCRUM19_AC1_returns_the_request_with_its_reviewer`; route `SCRUM19_AC1_the_assigned_coordinator_starts_the_review`; detail `SCRUM19_AC1_starting_the_review_moves_the_panel_on_to_the_decision` |
-| AC1-02 | `submitted`, held by ASSIGNED | OTHER_COORD starts the review | 403 with the function's message | svc and route `SCRUM19_AC1_only_the_assigned_coordinator_starts_the_review` |
-| AC1-03 | Any status but `submitted` | ASSIGNED starts the review | 409 naming the status | svc `SCRUM19_AC1_only_a_submitted_request_can_be_put_under_review`; route `SCRUM19_AC1_a_request_that_is_not_submitted_cannot_be_put_under_review` |
+| AC1-01 | `submitted`, held by ASSIGNED | ASSIGNED starts the review | 200. Status `under_review`; `reviewing_coordinator_id` is ASSIGNED; one call to `start_event_review`, nothing else | svc `SCRUM19_AC1_starts_the_review_through_the_function_alone`, `SCRUM19_AC1_returns_the_request_with_its_reviewer`; route `SCRUM19_AC1_the_assigned_coordinator_starts_the_review`; detail `SCRUM19_AC1_starting_the_review_moves_the_panel_on_to_the_decision`; pglite `SCRUM19_AC1_starts_the_review_writing_the_status_the_reviewer_and_one_history_row` (the stored row, and one `submitted → under_review` history row by ASSIGNED) |
+| AC1-02 | `submitted`, held by ASSIGNED | OTHER_COORD starts the review | 403 with the function's message | svc and route `SCRUM19_AC1_only_the_assigned_coordinator_starts_the_review`; pglite `SCRUM19_AC1_start_review_refuses_%s_and_writes_nothing` (`a_coordinator_who_is_not_assigned`: 42501, nothing written) |
+| AC1-03 | Any status but `submitted` | ASSIGNED starts the review | 409 naming the status, for every status past draft. **A draft is 403, not 409** (see below the table) | svc `SCRUM19_AC1_only_a_submitted_request_can_be_put_under_review` and route `SCRUM19_AC1_a_request_that_is_not_submitted_cannot_be_put_under_review`, through a fake that returns `approved`'s refusal; pglite `SCRUM19_AC1_start_review_refuses_%s_and_writes_nothing`, the seven `a_request_that_is_…` rows (55000 naming the status, for `under_review`, `pending_clarification`, `approved`, `rejected`, `confirmed`, `completed` and `cancelled`) and `a_draft_which_has_no_coordinator` (42501) |
 | AC1-04 | Any | ORGANISER calls either route | 403 from `coordinatorOnly`, nothing queried | route `SCRUM19_AC1_an_organiser_cannot_start_a_review_and_nothing_is_queried`, `SCRUM19_AC1_an_organiser_cannot_decide_and_nothing_is_queried` |
 | AC1-05 | Any | No token, either route | 401, nothing queried | route `SCRUM19_AC1_starting_a_review_returns_401_without_a_token`, `SCRUM19_AC1_deciding_returns_401_without_a_token` |
 | AC1-06 | Any | Body names someone else as the coordinator or decider | Ignored; the caller is the token's user | route `SCRUM19_AC1_the_assigned_coordinator_starts_the_review`, `SCRUM19_AC7_the_assigned_coordinator_approves` |
 | AC1-07 | Any | Missing or blank coordinator or decider id | 400 before any call | svc `SCRUM19_AC1_refuses_a_coordinator_id_that_is_%s_before_any_call`, `SCRUM19_AC1_refuses_a_decider_id_that_is_%s_before_any_call` |
-| AC1-08 | `under_review`, held by ASSIGNED | OTHER_COORD decides | 403 | svc and route `SCRUM19_AC1_only_the_assigned_coordinator_decides`; detail `SCRUM19_AC1_a_403_on_a_decision_says_the_request_is_not_theirs` |
-| AC1-09 | `under_review`, held by ASSIGNED, someone else recorded as reviewer | ASSIGNED decides | 403; the reviewer is never overwritten | svc `SCRUM19_AC1_only_the_reviewing_coordinator_decides` |
+| AC1-08 | `under_review`, held by ASSIGNED | OTHER_COORD decides | 403 | svc and route `SCRUM19_AC1_only_the_assigned_coordinator_decides`; detail `SCRUM19_AC1_a_403_on_a_decision_says_the_request_is_not_theirs`; pglite `SCRUM19_AC3_refuses_a_decision_when_%s_and_writes_nothing` (`the_caller_is_a_coordinator_who_is_not_assigned` and `the_caller_is_null`: 42501, nothing written) |
+| AC1-09 | `under_review`, held by ASSIGNED, someone else recorded as reviewer | ASSIGNED decides | 403; the reviewer is never overwritten | svc `SCRUM19_AC1_only_the_reviewing_coordinator_decides`; pglite `SCRUM19_AC1_never_overwrites_a_reviewer_who_is_someone_else`, and `SCRUM19_AC3_refuses_a_decision_when_%s_and_writes_nothing` (`someone_else_is_recorded_as_the_reviewer`) |
 | AC1-10 | `submitted`, held by ASSIGNED | ASSIGNED asks for clarification | The review is started through `start_event_review` first, so the reviewer is set | svc `SCRUM19_AC1_clarification_starts_the_review_so_the_reviewer_is_set` |
 | AC1-11 | `under_review` | ASSIGNED asks for clarification | Not started again; one status change only | svc `SCRUM19_AC1_a_request_already_under_review_is_not_started_again` |
 | AC1-12 | `submitted`, signed in as ASSIGNED | Open the event | Start review is the only action | detail `SCRUM19_AC1_a_submitted_request_offers_the_assigned_coordinator_start_review_only` |
 | AC1-13 | `submitted` or `under_review`, signed in as OTHER_COORD | Open the event | No action buttons; a line saying who can act | detail `SCRUM19_AC1_a_%s_request_offers_another_coordinator_nothing_to_press` |
 | AC1-14 | Start review refused with 403 | — | The screen explains in words, not ids | detail `SCRUM19_AC1_a_refused_start_says_why_in_words_not_ids` |
-| AC1-15 | Any | `start_event_review` called directly with a null caller | 42501 | **Not implemented.** The service always sends a caller; only a direct call reaches this, and no test makes one. `check-coordinator-assignment.js` proves the same guard for 018, not 029 |
-| AC1-16 | No such event | Start the review | 404 | svc `SCRUM19_AC1_reports_an_event_that_does_not_exist_as_not_found` |
+| AC1-15 | Any | `start_event_review` called directly with a null caller | 42501 | pglite `SCRUM19_AC1_start_review_refuses_%s_and_writes_nothing` (`a_null_caller`). The service always sends a caller, so only a direct call reaches this |
+| AC1-16 | No such event | Start the review | 404 | svc `SCRUM19_AC1_reports_an_event_that_does_not_exist_as_not_found`; pglite `SCRUM19_AC1_start_review_reports_a_missing_request_as_not_found` (P0002) |
 | AC1-17 | The guarded update matches no row | Start the review | 409 | svc `SCRUM19_AC1_reports_a_review_started_in_a_race_as_a_conflict` |
 | AC1-18 | Any | Start the review | No update or insert outside the function | svc `SCRUM19_AC1_writes_nothing_outside_the_function` |
 | AC1-19 | Any | POST to `/start-review` and `/decision` | Neither path is read as an id | route `SCRUM19_AC1_the_start_review_path_is_not_read_as_an_id`, `SCRUM19_AC7_the_decision_path_is_not_read_as_an_id` |
+
+**Why a draft is 403 (AC1-03).** `start_event_review` checks the caller before
+the status. A draft has no assigned coordinator, so nobody is its assigned
+coordinator, and the caller check refuses it (42501, 403) before the status
+check is reached. 018's `reassign_event_request` orders its checks the same
+way. The order is deliberate: whether a request is in a state that can be
+reviewed is a question only its coordinator has reason to ask, so anyone else
+is told it is not theirs rather than what state it is in. pglite's
+`a_draft_which_has_no_coordinator` row proves the 403.
+
+**The reviewer is filled in, never overwritten.** `decide_event_request` sets
+an empty `reviewing_coordinator_id` to the decider in the same statement as
+the decision (*Design decisions*). pglite
+`SCRUM19_AC1_fills_in_an_empty_reviewer_with_the_decider` takes a request to
+`under_review` through `change_event_request_status`, which leaves the reviewer
+empty, then decides it; `SCRUM19_AC1_leaves_a_reviewer_who_is_the_decider_as_they_are`
+and `SCRUM19_AC1_never_overwrites_a_reviewer_who_is_someone_else` cover the
+other two cases.
 
 ---
 
@@ -217,7 +235,7 @@ The decider and the time are never taken from the body.
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
 | AC2-01 | `under_review`, held and reviewed by ASSIGNED | ASSIGNED decides | 200; one call to `decide_event_request` with all five arguments | svc `SCRUM19_AC7_decides_through_the_function_alone`; route `SCRUM19_AC7_the_assigned_coordinator_approves` |
-| AC2-02 | `submitted` | ASSIGNED decides without starting the review | 409 naming `submitted` | svc `SCRUM19_AC2_refuses_a_decision_on_a_request_not_yet_under_review` |
+| AC2-02 | `submitted` | ASSIGNED decides without starting the review | 409 naming `submitted` | svc `SCRUM19_AC2_refuses_a_decision_on_a_request_not_yet_under_review`; pglite `SCRUM19_AC3_refuses_a_decision_when_%s_and_writes_nothing` (`the_request_is_submitted_not_under_review`: 55000, nothing written) |
 | AC2-03 | No such event | Decide | 404 | svc `SCRUM19_AC2_reports_an_event_that_does_not_exist_as_not_found` |
 | AC2-04 | `under_review`, signed in as ASSIGNED | Open the event | Approve, Reject and Return for amendment | detail `SCRUM19_AC7_under_review_offers_approve_reject_and_return` |
 | AC2-05 | A future event; the decision is refused with 409 | — | The screen says the request has changed, not that the date has passed | detail `SCRUM19_AC2_a_409_on_a_future_event_says_the_request_changed` |
@@ -228,10 +246,10 @@ The decider and the time are never taken from the body.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC3-01 | `pending_clarification` | ASSIGNED decides | 409 naming the status | svc and route `SCRUM19_AC3_refuses_a_decision_on_a_request_awaiting_clarification` |
-| AC3-02 | Already `approved` or `rejected` | ASSIGNED decides again | 409; the first decision unchanged | **Not implemented** as its own test. The same 55000 path as AC3-01, raised by 029's status check; no test feeds an already-decided status |
+| AC3-01 | `pending_clarification` | ASSIGNED decides | 409 naming the status | svc and route `SCRUM19_AC3_refuses_a_decision_on_a_request_awaiting_clarification`; pglite `SCRUM19_AC3_refuses_a_decision_when_%s_and_writes_nothing` (`the_request_is_pending_clarification`), `SCRUM19_AC3_names_the_current_status_when_the_request_is_not_under_review` |
+| AC3-02 | Already `approved` or `rejected` | ASSIGNED decides again | 409; the first decision unchanged | pglite `SCRUM19_AC3_refuses_a_decision_when_%s_and_writes_nothing` (`the_request_is_already_approved`, which tries a rejection, and `the_request_is_already_rejected`, which tries an approval): 55000, and the row, its decision fields and its history as they were |
 | AC3-03 | `pending_clarification`, signed in as ASSIGNED | Open the event | The waiting-for-amendment panel; no decision actions | detail `SCRUM19_AC3_pending_clarification_shows_the_waiting_panel_and_no_decision_actions` |
-| AC3-04 | Any refused decision | Read the row afterwards | Unchanged | **Not implemented.** A refusal rolls back inside 029's function, which a fake client cannot observe; no test runs 029 against a real database |
+| AC3-04 | Any refused decision | Read the row afterwards | Unchanged | pglite `SCRUM19_AC3_refuses_a_decision_when_%s_and_writes_nothing` (all eleven rows) and `SCRUM19_AC6_refuses_an_approval_whose_start_%s_and_writes_nothing` (all three). Each reads the row before and after and compares the whole of it, so status, the four decision fields and `reviewing_coordinator_id` are unchanged, and the status history is still empty. Every refusal in 029 is raised before the function's first write, so there is never a write to roll back: the tests prove that nothing is written, not that a partial write is undone |
 
 ---
 
@@ -265,10 +283,10 @@ half there:
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC5-01 | `under_review` | Reject with a reason | 200; the reason sent as `p_decision_note` and returned as `decisionNote` | svc `SCRUM19_AC7_decides_through_the_function_alone`; route `SCRUM19_AC9_the_response_carries_the_recorded_decision`; detail `SCRUM19_AC5_a_rejection_sends_its_reason` |
+| AC5-01 | `under_review` | Reject with a reason | 200; the reason sent as `p_decision_note` and returned as `decisionNote` | svc `SCRUM19_AC7_decides_through_the_function_alone`; route `SCRUM19_AC9_the_response_carries_the_recorded_decision`; detail `SCRUM19_AC5_a_rejection_sends_its_reason`; pglite `SCRUM19_AC7_records_%s_with_the_status_all_four_decision_fields_and_one_history_row` (`rejected`: the reason stored as `decision_note`) |
 | AC5-02 | `under_review` | Reject with no reason, or a blank one | 400 naming `decisionNote`, before any call | svc `SCRUM19_AC5_refuses_a_rejection_whose_reason_is_%s_before_any_call`; route `SCRUM19_AC5_a_rejection_with_no_reason_is_a_400_naming_the_field`; detail `SCRUM19_AC5_a_rejection_with_no_reason_is_refused_before_the_call` |
-| AC5-03 | The function itself refuses a missing reason (22023) | — | Still 400, with the function's message | svc `SCRUM19_AC5_the_functions_refusal_of_a_missing_reason_is_still_a_400` |
-| AC5-04 | `under_review` | Approve with no note, or a blank one | Sent as null | svc `SCRUM19_AC5_sends_an_omitted_or_blank_note_on_an_approval_as_null` |
+| AC5-03 | The function itself refuses a missing reason (22023) | — | Still 400, with the function's message | svc `SCRUM19_AC5_the_functions_refusal_of_a_missing_reason_is_still_a_400`; pglite `SCRUM19_AC3_refuses_a_decision_when_%s_and_writes_nothing` (`a_rejection_has_no_reason`, `a_rejection_has_a_blank_reason`), which proves 029 does raise 22023 |
+| AC5-04 | `under_review` | Approve with no note, or a blank one | Sent as null | svc `SCRUM19_AC5_sends_an_omitted_or_blank_note_on_an_approval_as_null`; pglite `SCRUM19_AC5_stores_a_blank_approval_note_as_null_and_still_records_the_approval` (029 trims a blank note to null itself, so the history row's `reason_not_blank` check never sees it) |
 | AC5-05 | `under_review` | Approve with a note | The note sent and shown | route `SCRUM19_AC7_the_assigned_coordinator_approves`; detail `SCRUM19_AC7_approving_sends_the_decision_and_shows_it_read_only` |
 
 ---
@@ -277,12 +295,15 @@ half there:
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC6-01 | `under_review`, start date passed | Approve | 409 with 029's message: agree a new date or reject | svc and route `SCRUM19_AC6_refuses_an_approval_when_the_start_date_has_passed` |
+| AC6-01 | `under_review`, start date passed | Approve | 409 with 029's message: agree a new date or reject | svc and route `SCRUM19_AC6_refuses_an_approval_when_the_start_date_has_passed`; pglite `SCRUM19_AC6_refuses_an_approval_whose_start_%s_and_writes_nothing` (`has_passed`: 55000 with that message, nothing written) |
 | AC6-02 | As above, on the screen | Approve | The screen says the start date has passed and what to do | detail `SCRUM19_AC6_a_409_on_an_approval_whose_start_date_has_passed_says_to_agree_a_new_date` |
 | AC6-03 | Any | Decide | `p_decided_at` is the service's injected clock | svc `SCRUM19_AC7_decides_through_the_function_alone` |
-| AC6-04 | `under_review`, start date passed | Reject | Allowed | **Not implemented.** The date rule is inside 029; no test runs it |
-| AC6-05 | `under_review`, no start date | Approve | 409 | **Not implemented**, for the same reason |
-| AC6-06 | Start date exactly equal to the decision time | Approve | 409: a start at the decision time counts as passed | **Not implemented**, for the same reason |
+| AC6-04 | `under_review`, start date passed | Reject | Allowed | pglite `SCRUM19_AC6_allows_a_rejection_whatever_the_start_date` |
+| AC6-05 | `under_review`, no start date | Approve | 409 | pglite `SCRUM19_AC6_refuses_an_approval_whose_start_%s_and_writes_nothing` (`is_missing`) |
+| AC6-06 | Start date exactly equal to the decision time | Approve | 409: a start at the decision time counts as passed | pglite `SCRUM19_AC6_refuses_an_approval_whose_start_%s_and_writes_nothing` (`is_exactly_the_decision_time`) |
+
+The pglite cases pass a fixed `p_decided_at` (1 June 2026, 09:00 UTC) and fixed
+start dates either side of it, so each gives the same result whenever it runs.
 
 ---
 
@@ -290,16 +311,22 @@ half there:
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC7-01 | `under_review` | Approve | 200, status `approved` | route `SCRUM19_AC7_the_assigned_coordinator_approves` |
-| AC7-02 | `under_review` | Reject with a reason | 200, status `rejected` | route `SCRUM19_AC9_the_response_carries_the_recorded_decision` |
+| AC7-01 | `under_review` | Approve | 200, status `approved` | route `SCRUM19_AC7_the_assigned_coordinator_approves`; pglite `SCRUM19_AC7_records_%s_with_the_status_all_four_decision_fields_and_one_history_row` (`approved`) |
+| AC7-02 | `under_review` | Reject with a reason | 200, status `rejected` | route `SCRUM19_AC9_the_response_carries_the_recorded_decision`; pglite `SCRUM19_AC7_records_%s_with_the_status_all_four_decision_fields_and_one_history_row` (`rejected`) |
 | AC7-03 | Any | Decision of `Approved`, `REJECTED`, an unknown word, empty, missing, null or a number | 400 naming `decision`, before any call | svc `SCRUM19_AC7_refuses_a_decision_that_is_%s_before_any_call` |
 | AC7-04 | The guarded update matches no row | Decide | 409 | svc `SCRUM19_AC7_reports_a_decision_made_in_a_race_as_a_conflict` |
-| AC7-05 | The function receives a null time | — | Untyped, a 500 | svc `SCRUM19_AC7_a_null_decision_time_is_a_server_fault` |
+| AC7-05 | The function receives a null time | — | Untyped, a 500 | svc `SCRUM19_AC7_a_null_decision_time_is_a_server_fault`; pglite `SCRUM19_AC3_refuses_a_decision_when_%s_and_writes_nothing` (`the_decision_time_is_null`, and `the_decision_is_null`), which proves 029 raises 22004 and writes nothing |
 | AC7-06 | Any | Decide | No update or insert outside the function: one statement inside it | svc `SCRUM19_AC9_writes_nothing_outside_the_function` |
 
-The status written is proved only through what the fake returns. That 029 writes
-`approved` or `rejected` in the same statement as the decision is proved by the
-function's own text and the live verification (see *What cannot be tested*).
+The status and the decision are written together, and that is proved against
+a real database: pglite's `SCRUM19_AC7_records_%s_…` reads the stored row and
+finds the status, all four decision fields and the reviewer set, with one
+history row. Why they have to be written together is proved too:
+`SCRUM19_AC7_the_status_function_cannot_move_a_request_to_%s` moves an
+under-review request to `approved` and to `rejected` through
+`change_event_request_status`, which writes the status alone, and 025's
+`decided_status_has_decision` refuses both (23514), leaving the row and the
+history as they were.
 
 ---
 
@@ -323,9 +350,9 @@ no caller.
 | AC9-02 | Decided and undecided requests | Read either through an ordinary read | Every read selects all five columns; an undecided request reads them as null | svc `SCRUM19_AC9_every_read_carries_the_decision` |
 | AC9-03 | Decided | ASSIGNED or OTHER_COORD opens it | The decision read-only, with the decider's name; no actions | detail `SCRUM19_AC9_a_decided_request_shows_its_decision_read_only_to_%s` |
 | AC9-04 | Approved, then confirmed | Open it | The decision still shown | detail `SCRUM19_AC9_a_decision_stays_on_show_after_the_status_moves_on` |
-| AC9-05 | Decided | Decide again | Refused, the first decision intact | **Not implemented**; the same gap as AC3-02 |
-| AC9-06 | Any decision | Read the status history | One row, `under_review → approved/rejected`, by the decider, with the note as its reason | **Not implemented**; written inside 029, which no test runs |
-| AC9-07 | Rejected, with a decision recorded | Reopen as a draft | The four decision fields cleared with the status | pglite `SCRUM318_clears_the_decision_with_the_status_and_runs_022_again_without_error`, against hand-made copies of two of 025's constraints, not 025 itself |
+| AC9-05 | Decided | Decide again | Refused, the first decision intact | pglite `SCRUM19_AC3_refuses_a_decision_when_%s_and_writes_nothing` (`the_request_is_already_approved`, `the_request_is_already_rejected`), the same tests as AC3-02 |
+| AC9-06 | Any decision | Read the status history | One row, `under_review → approved/rejected`, by the decider, with the note as its reason | pglite `SCRUM19_AC7_records_%s_with_the_status_all_four_decision_fields_and_one_history_row`; `SCRUM19_AC5_stores_a_blank_approval_note_as_null_and_still_records_the_approval` for a reason of null |
+| AC9-07 | Rejected, with a decision recorded | Reopen as a draft | The four decision fields cleared with the status | pglite `SCRUM318_clears_the_decision_with_the_status_and_runs_022_again_without_error`, against 025 itself (until SCRUM-134 it ran against hand-made copies of two of 025's constraints) |
 
 AC9-07 is the second of the two transitions named in *Design decisions*. It is
 proved because it is what 022 does; whether it should happen is an open question.
@@ -368,22 +395,24 @@ part. Nobody owns E8 (notifications for events), the epic this belongs to.
 ## Database constraints — the second line of defence
 
 025 adds five constraints. Every case above is refused by the service or by 029
-before a write, so none of them exercises a constraint directly.
+before a write, so none of them reaches a constraint. The constraints are
+proved separately, by writing straight to the table in pglite: since SCRUM-134
+the PGlite suite applies 025 itself (before 014, as on the live database), and
+020's rewrite of two of them, so these are the constraints as they stand in
+production.
+
+Each direct write in `SCRUM19_AC9_event_requests_%s_refuses_%s` breaks exactly
+one constraint and satisfies the other four, and the test checks both the code
+(23514) and the constraint's name in the error, so the named constraint is the
+only one that could have fired.
 
 | Constraint | Rule | Proved by |
 |---|---|---|
-| `event_requests_decided_status_has_decision` | approved, rejected, confirmed and completed require a decision | mig `requires a decision for the decided statuses, without planning` checks 020's rewrite of its status list as text. pglite's `SCRUM318_clears_the_decision_…` runs a hand-made copy. **Nothing runs 025's own definition** |
-| `event_requests_decision_has_decided_status` | a decision only on a decided status, or cancelled | The same two, the same caveat |
-| `event_requests_rejection_has_reason` | a rejection has a non-blank note | **Nothing** |
-| `event_requests_decided_by_is_reviewer` | `decided_by` is null or equals `reviewing_coordinator_id` | **Nothing** |
-| `event_requests_decision_fields_together` | decision, decided_by and decided_at all set or all null | **Nothing** |
-
-**The fix is within reach.** The PGlite suite applies the real migrations to an
-in-process Postgres, in CI, with no credentials. It skipped SCRUM-19's migration
-because, its header says, that migration "is not on this branch". It is now (025),
-and so is 029. Adding both to the PGlite suite would prove all five constraints
-and both functions, AC3-04, AC6-04 to AC6-06, AC9-05 and AC9-06 included, in CI.
-That is the single most valuable follow-up to this document.
+| `event_requests_decided_status_has_decision` | approved, rejected, confirmed and completed require a decision | pglite `SCRUM19_AC9_event_requests_%s_refuses_%s` (`decided_status_has_decision`, `a_decided_status_with_no_decision`); `SCRUM19_AC7_the_status_function_cannot_move_a_request_to_%s`, where the status function trips it. mig `requires a decision for the decided statuses, without planning` checks 020's rewrite of the status list as text |
+| `event_requests_decision_has_decided_status` | a decision only on a decided status, or cancelled | pglite `SCRUM19_AC9_event_requests_%s_refuses_%s` (`decision_has_decided_status`, `a_decision_on_a_request_still_under_review`); the cancelled half by `SCRUM19_AC9_a_cancelled_request_may_keep_an_earlier_approval` and `SCRUM19_AC9_a_cancelled_request_may_carry_no_decision`. mig `admits a decision on the decided statuses and cancelled, without planning` checks 020's rewrite as text |
+| `event_requests_rejection_has_reason` | a rejection has a non-blank note | pglite `SCRUM19_AC9_event_requests_%s_refuses_%s` (`rejection_has_reason`: `a_rejection_with_no_note`, `a_rejection_with_a_blank_note`) |
+| `event_requests_decided_by_is_reviewer` | `decided_by` is null or equals `reviewing_coordinator_id` | pglite `SCRUM19_AC9_event_requests_%s_refuses_%s` (`decided_by_is_reviewer`: `a_decider_who_is_not_the_reviewer`, `a_decider_while_the_reviewer_is_null`) |
+| `event_requests_decision_fields_together` | decision, decided_by and decided_at all set or all null | pglite `SCRUM19_AC9_event_requests_%s_refuses_%s` (`decision_fields_together`, `a_decision_without_decided_by_or_decided_at`) |
 
 ---
 
@@ -403,6 +432,19 @@ That is the single most valuable follow-up to this document.
    only by the Organiser and the assigned coordinator, while every coordinator
    can read the event itself (SCRUM-332). A coordinator covering for someone
    cannot see the clarification history.
+5. **Should `rejected → draft` also clear `reviewing_coordinator_id`?** 022
+   clears the four decision fields but leaves the reviewer, so a reopened draft
+   still names whoever reviewed it last. On resubmission, 016 may assign a
+   different coordinator, and 015's selection does not look at the old
+   reviewer. Every path the application has today repairs this: starting the
+   review (directly, or through asking for clarification on a submitted
+   request) goes through `start_event_review`, which overwrites the reviewer,
+   and a handover (018) moves an undecided reviewer to the new coordinator. It
+   would bite only if a resubmitted request reached `under_review` through
+   `change_event_request_status` directly, which 022 allows and no route does:
+   the new assigned coordinator's decision would then be refused as "under
+   review by another coordinator". Found by reading 022, 016, 018 and the
+   service, not by a failing test.
 
 ---
 
@@ -415,10 +457,12 @@ That is the single most valuable follow-up to this document.
   handover, rest on 029's row lock. A single-threaded test cannot provoke it, and
   PGlite runs one query at a time. The 40001 refusals (AC1-17, AC7-04) are proved
   only through a fake.
-- **Everything inside 029** (AC1-15, AC3-02, AC3-04, AC6-04 to AC6-06, AC9-05,
-  AC9-06), until 029 is added to the PGlite suite. 029 was verified against the
-  live database when it was applied, but that verification is not a script or a
-  test in this repository, so it cannot be re-run or cited here.
+- **AC4-02 and AC4-06**, on the coordinator's screen. AC4-02 is testable but has
+  no test yet. AC4-06 has nothing to test, because the screen does not read the
+  status history. AC4-05 is blocked further back: the reply is not stored.
+
+029's two functions are no longer on this list. Since SCRUM-134 they run in the
+PGlite suite, in CI, against the real 025 constraints.
 
 ---
 
@@ -426,7 +470,8 @@ That is the single most valuable follow-up to this document.
 
 | Cases | Subtask |
 |---|---|
-| The two functions, and every case marked "not implemented" for that reason | SCRUM-109, SCRUM-122 (`029_event_request_decisions_functions.sql`) |
+| The two functions | SCRUM-109, SCRUM-122 (`029_event_request_decisions_functions.sql`) |
+| pglite tests of 025's constraints and 029's functions | SCRUM-134 |
 | AC1 start-review cases, AC1-10 and AC1-11 | SCRUM-346 |
 | AC1 decide cases, AC2, AC3, AC5, AC6, AC7, AC9-01 and AC9-02 | SCRUM-119, SCRUM-121 |
 | detail cases (AC1-12 to AC1-14, AC2-04, AC2-05, AC3-03, AC6-02, AC9-03, AC9-04) | SCRUM-129 |
@@ -434,5 +479,7 @@ That is the single most valuable follow-up to this document.
 | AC11 | SCRUM-173 (deferred, unassigned) |
 | This document | SCRUM-95 |
 
-**Tally:** 64 cases. 52 map to at least one existing test; 12 are not implemented.
-AC8 has no cases, by design.
+**Tally:** 64 cases. 60 map to at least one existing test; 4 are not implemented
+(AC4-02, AC4-05, AC4-06, AC11-01). AC8 has no cases, by design. Counted from the
+tables, not estimated: SCRUM-134 moved eight cases (AC1-15, AC3-02, AC3-04,
+AC6-04, AC6-05, AC6-06, AC9-05, AC9-06) from not implemented to pglite.
