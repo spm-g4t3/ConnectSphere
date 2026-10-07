@@ -4,6 +4,7 @@
  * SCRUM-94: validate venue creation and update input.
  * SCRUM-110: the venue id retirement is given.
  * SCRUM-111: the filters a venue search may be narrowed by.
+ * SCRUM-138 (SCRUM-20 AC1): a search against an event's requirements.
  *
  * Describe blocks are named after the acceptance criteria they cover, so a
  * requirement traces to the test proving it.
@@ -16,6 +17,7 @@ import {
   validateUpdateVenue,
   validateVenueId,
   validateSearchFilters,
+  validateEventSearchCriteria,
 } from '../../src/validation/venueValidation.js';
 import { ValidationError } from '../../src/errors.js';
 
@@ -751,5 +753,525 @@ describe('SCRUM186 operating hours model limits', () => {
       }),
     );
     expect(err.details[0].message).toMatch(/repeats day 2/);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-137 (SCRUM-20): the setup time before an event, one of a fixed list
+// of minutes (src/domain/setupOptions.js, mirroring 023's CHECK). Checked
+// exactly like turnaround, but reported on its own field.
+// ---------------------------------------------------------------------------
+describe('SCRUM20_SCRUM137 setup time', () => {
+  const OPTIONS = [0, 15, 30, 45, 60, 90, 120];
+  const MESSAGE = 'must be one of 0, 15, 30, 45, 60, 90, 120 minutes';
+
+  it.each(OPTIONS)('SCRUM20_SCRUM137_create_accepts_setup_%s', (minutes) => {
+    expect(validateCreateVenue({ ...VALID, setupMinutes: minutes }).setupMinutes)
+      .toBe(minutes);
+  });
+
+  it.each(OPTIONS)('SCRUM20_SCRUM137_update_accepts_setup_%s', (minutes) => {
+    expect(validateUpdateVenue({ setupMinutes: minutes })).toEqual({
+      setupMinutes: minutes,
+    });
+  });
+
+  it('SCRUM20_SCRUM137_create_leaves_an_omitted_setup_out_of_the_result', () => {
+    const result = validateCreateVenue({ ...VALID });
+    expect(result).not.toHaveProperty('setupMinutes');
+  });
+
+  it('SCRUM20_SCRUM137_create_treats_an_explicit_undefined_as_omitted', () => {
+    const result = validateCreateVenue({ ...VALID, setupMinutes: undefined });
+    expect(result).not.toHaveProperty('setupMinutes');
+  });
+
+  it('SCRUM20_SCRUM137_update_leaves_an_omitted_setup_out_of_the_result', () => {
+    expect(validateUpdateVenue({ name: 'x' })).toEqual({ name: 'x' });
+    expect(validateUpdateVenue({ turnaroundMinutes: 30 })).toEqual({ turnaroundMinutes: 30 });
+  });
+
+  it('SCRUM20_SCRUM137_update_setup_0_alone_is_a_valid_change', () => {
+    // 0 is falsy, but it is a real choice ("none"), not "no change supplied".
+    expect(validateUpdateVenue({ setupMinutes: 0 })).toEqual({ setupMinutes: 0 });
+  });
+
+  it('SCRUM20_SCRUM137_setup_and_turnaround_are_kept_separate', () => {
+    expect(
+      validateCreateVenue({ ...VALID, setupMinutes: 15, turnaroundMinutes: 60 }),
+    ).toMatchObject({ setupMinutes: 15, turnaroundMinutes: 60 });
+    expect(validateUpdateVenue({ setupMinutes: 120, turnaroundMinutes: 0 })).toEqual({
+      setupMinutes: 120,
+      turnaroundMinutes: 0,
+    });
+  });
+
+  const BAD = [
+    ['null', null],
+    ['a numeric string', '30'],
+    ['a value between options', 25],
+    ['a negative option', -15],
+    ['a lead time longer than two hours', 180],
+    ['a fractional number', 1.5],
+    ['NaN', NaN],
+    ['Infinity', Infinity],
+    ['an object', {}],
+    ['an array holding an option', [30]],
+    ['a boolean', true],
+  ];
+
+  it.each(BAD)('SCRUM20_SCRUM137_create_rejects_%s_on_field_setupMinutes', (_label, value) => {
+    const err = errorFrom(() => validateCreateVenue({ ...VALID, setupMinutes: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'setupMinutes', message: MESSAGE }]);
+  });
+
+  it.each(BAD)('SCRUM20_SCRUM137_update_rejects_%s_on_field_setupMinutes', (_label, value) => {
+    const err = errorFrom(() => validateUpdateVenue({ setupMinutes: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'setupMinutes', message: MESSAGE }]);
+  });
+
+  it('SCRUM20_SCRUM137_update_null_setup_is_refused_rather_than_read_as_keep', () => {
+    // update_venue reads NULL as "keep", so a deliberate null must not pass
+    // validation and silently do nothing.
+    const err = errorFrom(() => validateUpdateVenue({ setupMinutes: null }));
+    expect(fieldsIn(err)).toEqual(['setupMinutes']);
+  });
+
+  it('SCRUM20_SCRUM137_create_null_setup_is_refused', () => {
+    const err = errorFrom(() => validateCreateVenue({ ...VALID, setupMinutes: null }));
+    expect(fieldsIn(err)).toEqual(['setupMinutes']);
+  });
+
+  it('SCRUM20_SCRUM137_a_bad_setup_is_not_reported_as_turnaround', () => {
+    const err = errorFrom(() =>
+      validateCreateVenue({ ...VALID, setupMinutes: 25, turnaroundMinutes: 30 }),
+    );
+    expect(fieldsIn(err)).toEqual(['setupMinutes']);
+  });
+
+  it('SCRUM20_SCRUM137_create_reports_a_bad_setup_together_with_a_bad_name', () => {
+    const err = errorFrom(() =>
+      validateCreateVenue({ ...VALID, name: '  ', setupMinutes: 25 }),
+    );
+    expect(err.details).toHaveLength(2);
+    expect(fieldsIn(err).sort()).toEqual(['name', 'setupMinutes']);
+  });
+
+  it('SCRUM20_SCRUM137_update_reports_a_bad_setup_together_with_a_bad_turnaround', () => {
+    const err = errorFrom(() =>
+      validateUpdateVenue({ name: '', setupMinutes: 25, turnaroundMinutes: 25 }),
+    );
+    expect(err.details).toHaveLength(3);
+    expect(fieldsIn(err).sort()).toEqual(['name', 'setupMinutes', 'turnaroundMinutes']);
+  });
+
+  it('SCRUM20_SCRUM137_the_summary_message_names_the_field', () => {
+    const err = errorFrom(() => validateCreateVenue({ ...VALID, setupMinutes: 25 }));
+    expect(err.message).toContain(`setupMinutes: ${MESSAGE}`);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-138, for SCRUM-20 AC1: "Search by event date, start time, end time and
+// expected attendance. Room layout, accessibility features and facilities are
+// optional." Cases B-AC1-01..10, 14 (shape half) and 15 of
+// SCRUM-20-test-cases.md. Whether a code EXISTS (B-AC1-11..13) is the
+// service's check and is tested in venueService.test.js.
+// ---------------------------------------------------------------------------
+describe('SCRUM20_AC1 event search criteria', () => {
+  /** The required fields only: Wednesday 2026-11-11, 10:00-12:00 Singapore, 80 people. */
+  const REQUIRED = Object.freeze({
+    startsAt: '2026-11-11T10:00:00+08:00',
+    endsAt: '2026-11-11T12:00:00+08:00',
+    expectedAttendance: 80,
+  });
+
+  const detailsFor = (input) => errorFrom(() => validateEventSearchCriteria(input))?.details;
+
+  it('SCRUM20_AC1_required_fields_only_is_valid', () => {
+    // B-AC1-01: accepted, and no optional key appears.
+    expect(validateEventSearchCriteria({ ...REQUIRED })).toEqual({ ...REQUIRED });
+  });
+
+  it('SCRUM20_AC1_every_criterion_supplied_is_valid', () => {
+    const input = {
+      ...REQUIRED,
+      layout: 'theatre',
+      accessibility: ['step_free_entrance'],
+      facilities: ['projector', 'wifi'],
+    };
+    expect(validateEventSearchCriteria(input)).toEqual(input);
+  });
+
+  it('SCRUM20_AC1_timestamps_and_codes_are_trimmed', () => {
+    const result = validateEventSearchCriteria({
+      startsAt: '  2026-11-11T10:00:00+08:00 ',
+      endsAt: ' 2026-11-11T12:00:00+08:00',
+      expectedAttendance: 80,
+      layout: '  theatre ',
+      accessibility: [' lift_access '],
+      facilities: ['wifi  '],
+    });
+    expect(result).toEqual({
+      ...REQUIRED,
+      layout: 'theatre',
+      accessibility: ['lift_access'],
+      facilities: ['wifi'],
+    });
+  });
+
+  it('SCRUM20_AC1_utc_timestamps_are_accepted', () => {
+    const input = { ...REQUIRED, startsAt: '2026-11-11T02:00:00Z', endsAt: '2026-11-11T04:00:00Z' };
+    expect(validateEventSearchCriteria(input)).toEqual(input);
+  });
+
+  it.each([
+    ['SCRUM20_AC1_missing_start_is_an_error', 'startsAt'],
+    ['SCRUM20_AC1_missing_end_is_an_error', 'endsAt'],
+    ['SCRUM20_AC1_missing_attendance_is_an_error', 'expectedAttendance'],
+  ])('%s', (_name, field) => {
+    const input = { ...REQUIRED };
+    delete input[field];
+
+    const err = errorFrom(() => validateEventSearchCriteria(input));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field, message: 'is required' }]);
+  });
+
+  it.each([
+    ['null', null],
+    ['an empty string', ''],
+    ['a blank string', '   '],
+  ])('SCRUM20_AC1_start_given_as_%s_is_required', (_label, value) => {
+    expect(detailsFor({ ...REQUIRED, startsAt: value }))
+      .toEqual([{ field: 'startsAt', message: 'is required' }]);
+  });
+
+  it.each([
+    ['null', null],
+    ['an empty string', ''],
+  ])('SCRUM20_AC1_end_given_as_%s_is_required', (_label, value) => {
+    expect(detailsFor({ ...REQUIRED, endsAt: value }))
+      .toEqual([{ field: 'endsAt', message: 'is required' }]);
+  });
+
+  it('SCRUM20_AC1_missing_period_reports_both_ends', () => {
+    expect(detailsFor({ expectedAttendance: 80 })).toEqual([
+      { field: 'startsAt', message: 'is required' },
+      { field: 'endsAt', message: 'is required' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_missing_end_and_malformed_start_are_reported_together', () => {
+    const details = detailsFor({ startsAt: 'tomorrow', expectedAttendance: 80 });
+    expect(details.map((d) => d.field).sort()).toEqual(['endsAt', 'startsAt']);
+    expect(details).toContainEqual({ field: 'endsAt', message: 'is required' });
+  });
+
+  it('SCRUM20_AC1_missing_start_and_malformed_end_are_reported_together', () => {
+    const details = detailsFor({ endsAt: '2026-11-11T12:00:00', expectedAttendance: 80 });
+    expect(details).toEqual([
+      { field: 'startsAt', message: 'is required' },
+      { field: 'endsAt', message: 'must include a UTC offset, such as Z or +08:00' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_missing_start_with_a_valid_end_reports_only_the_start', () => {
+    expect(detailsFor({ endsAt: REQUIRED.endsAt, expectedAttendance: 80 }))
+      .toEqual([{ field: 'startsAt', message: 'is required' }]);
+  });
+
+  it('SCRUM20_AC1_invalid_date_is_an_error', () => {
+    // B-AC1-05: there is no 31 November.
+    const details = detailsFor({ ...REQUIRED, startsAt: '2026-11-31T10:00:00+08:00' });
+    expect(details.map((d) => d.field)).toEqual(['startsAt']);
+  });
+
+  it('SCRUM20_AC1_timestamp_without_offset_is_an_error', () => {
+    // B-AC1-06
+    expect(detailsFor({ ...REQUIRED, startsAt: '2026-11-11T10:00:00' })).toEqual([
+      { field: 'startsAt', message: 'must include a UTC offset, such as Z or +08:00' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_timestamp_as_a_number_is_an_error', () => {
+    const details = detailsFor({ ...REQUIRED, endsAt: Date.parse(REQUIRED.endsAt) });
+    expect(details.map((d) => d.field)).toEqual(['endsAt']);
+  });
+
+  it('SCRUM20_AC1_end_equal_to_start_is_an_error', () => {
+    // B-AC1-07
+    expect(detailsFor({ ...REQUIRED, endsAt: REQUIRED.startsAt })).toEqual([
+      { field: 'endsAt', message: 'must be later than the start' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_end_before_start_is_an_error', () => {
+    // B-AC1-08
+    expect(detailsFor({ ...REQUIRED, endsAt: '2026-11-11T09:00:00+08:00' })).toEqual([
+      { field: 'endsAt', message: 'must be later than the start' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_end_before_start_is_judged_as_instants_across_offsets', () => {
+    // The start 10:00+08:00 is 02:00Z; an end of 03:00Z is an hour later, so
+    // the window is valid even though "03:00" reads earlier than "10:00".
+    expect(() => validateEventSearchCriteria({
+      ...REQUIRED,
+      endsAt: '2026-11-11T03:00:00Z',
+    })).not.toThrow();
+    // 01:00Z is 09:00 Singapore: before the 10:00 start.
+    expect(detailsFor({ ...REQUIRED, endsAt: '2026-11-11T01:00:00Z' })).toEqual([
+      { field: 'endsAt', message: 'must be later than the start' },
+    ]);
+  });
+
+  it.each([
+    ['SCRUM20_AC1_attendance_below_one_is_an_error (0)', 0, 'must be greater than zero'],
+    ['SCRUM20_AC1_attendance_below_one_is_an_error (-1)', -1, 'must be greater than zero'],
+    ['SCRUM20_AC1_attendance_below_one_is_an_error (-5)', -5, 'must be greater than zero'],
+    ['SCRUM20_AC1_fractional_attendance_is_an_error (1.5)', 1.5, 'must be a whole number'],
+    ['SCRUM20_AC1_fractional_attendance_is_an_error (80.5)', 80.5, 'must be a whole number'],
+    ['SCRUM20_AC1_attendance_as_text_is_an_error', '40', 'must be a number'],
+    ['SCRUM20_AC1_attendance_nan_is_an_error', NaN, 'must be a number'],
+    ['SCRUM20_AC1_attendance_null_is_required', null, 'is required'],
+  ])('%s', (_name, value, message) => {
+    expect(detailsFor({ ...REQUIRED, expectedAttendance: value }))
+      .toEqual([{ field: 'expectedAttendance', message }]);
+  });
+
+  it('SCRUM20_AC1_attendance_of_one_is_valid', () => {
+    expect(validateEventSearchCriteria({ ...REQUIRED, expectedAttendance: 1 }).expectedAttendance)
+      .toBe(1);
+  });
+
+  it.each([
+    ['a number', 3],
+    ['an array', ['theatre']],
+    ['an object', { code: 'theatre' }],
+    ['a boolean', true],
+  ])('SCRUM20_AC1_layout_as_%s_is_an_error', (_label, value) => {
+    expect(detailsFor({ ...REQUIRED, layout: value }))
+      .toEqual([{ field: 'layout', message: 'must be a single layout code' }]);
+  });
+
+  it.each(['accessibility', 'facilities'])('SCRUM20_AC1_%s_not_an_array_is_an_error', (field) => {
+    expect(detailsFor({ ...REQUIRED, [field]: 'wifi' }))
+      .toEqual([{ field, message: 'must be an array of codes' }]);
+  });
+
+  it.each(['accessibility', 'facilities'])('SCRUM20_AC1_%s_with_blank_entries_is_an_error', (field) => {
+    expect(detailsFor({ ...REQUIRED, [field]: ['ok', '', '  ', 7] })).toEqual([
+      { field, message: 'entry 1 must be a non-empty code' },
+      { field, message: 'entry 2 must be a non-empty code' },
+      { field, message: 'entry 3 must be a non-empty code' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_every_fault_is_reported_at_once', () => {
+    // B-AC1-14, shape half: no endsAt, attendance 0, and a malformed facility
+    // list come back in one ValidationError. (The unknown-code half cannot
+    // join them: validation throws before the service looks codes up -- see
+    // venueService.test.js.)
+    const err = errorFrom(() => validateEventSearchCriteria({
+      startsAt: REQUIRED.startsAt,
+      expectedAttendance: 0,
+      layout: 7,
+      facilities: [''],
+    }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([
+      { field: 'endsAt', message: 'is required' },
+      { field: 'expectedAttendance', message: 'must be greater than zero' },
+      { field: 'layout', message: 'must be a single layout code' },
+      { field: 'facilities', message: 'entry 0 must be a non-empty code' },
+    ]);
+  });
+
+  it('SCRUM20_AC1_the_summary_message_names_each_field', () => {
+    const err = errorFrom(() => validateEventSearchCriteria({ startsAt: REQUIRED.startsAt }));
+    expect(err.message).toContain('endsAt: is required');
+    expect(err.message).toContain('expectedAttendance: is required');
+  });
+
+  it('SCRUM20_AC1_unknown_keys_are_ignored', () => {
+    expect(validateEventSearchCriteria({
+      ...REQUIRED,
+      attendance: 999,
+      includeRetired: true,
+      eventName: 'Gala',
+    })).toEqual({ ...REQUIRED });
+  });
+
+  it('SCRUM20_AC1_empty_optional_criteria_mean_not_filtered', () => {
+    // B-AC1-15: an unfilled form field is not a criterion.
+    const result = validateEventSearchCriteria({
+      ...REQUIRED,
+      layout: '',
+      accessibility: [],
+      facilities: [],
+    });
+    expect(result).toEqual({ ...REQUIRED });
+    expect(result).not.toHaveProperty('layout');
+    expect(result).not.toHaveProperty('accessibility');
+    expect(result).not.toHaveProperty('facilities');
+  });
+
+  it('SCRUM20_AC1_null_or_blank_optional_criteria_mean_not_filtered', () => {
+    expect(validateEventSearchCriteria({
+      ...REQUIRED,
+      layout: '   ',
+      accessibility: null,
+      facilities: undefined,
+    })).toEqual({ ...REQUIRED });
+    expect(validateEventSearchCriteria({ ...REQUIRED, layout: null })).toEqual({ ...REQUIRED });
+  });
+
+  it('SCRUM20_AC1_does_not_mutate_its_input', () => {
+    const input = { ...REQUIRED, layout: ' theatre ', facilities: [' wifi '] };
+    const snapshot = structuredClone(input);
+    validateEventSearchCriteria(input);
+    expect(input).toEqual(snapshot);
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['an array', [REQUIRED]],
+    ['a string', 'startsAt=...'],
+    ['a number', 80],
+  ])('SCRUM20_AC1_criteria_given_as_%s_are_refused', (_label, value) => {
+    const err = errorFrom(() => validateEventSearchCriteria(value));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toMatch(/expected an object/);
+  });
+});
+
+
+describe('SCRUM20_AC1 SCRUM141 event search location', () => {
+  const REQUIRED = Object.freeze({
+    startsAt: '2026-11-11T10:00:00+08:00',
+    endsAt: '2026-11-11T12:00:00+08:00',
+    expectedAttendance: 80,
+  });
+
+  const detailsFor = (input) => errorFrom(() => validateEventSearchCriteria(input))?.details;
+
+  it('SCRUM20_AC1_location_is_optional', () => {
+    const result = validateEventSearchCriteria({ ...REQUIRED });
+    expect(result).toEqual({ ...REQUIRED });
+    expect(result).not.toHaveProperty('location');
+  });
+
+  it('SCRUM20_AC1_location_is_kept_when_supplied', () => {
+    expect(validateEventSearchCriteria({ ...REQUIRED, location: 'Level 2' }))
+      .toEqual({ ...REQUIRED, location: 'Level 2' });
+  });
+
+  it('SCRUM20_AC1_location_is_trimmed', () => {
+    expect(validateEventSearchCriteria({ ...REQUIRED, location: '  Orchard Road \t' }).location)
+      .toBe('Orchard Road');
+  });
+
+  it('SCRUM20_AC1_location_keeps_its_case_and_inner_spaces', () => {
+    expect(validateEventSearchCriteria({ ...REQUIRED, location: ' LEVEL  1 ' }).location)
+      .toBe('LEVEL  1');
+  });
+
+  it('SCRUM20_AC1_location_keeps_percent_and_underscore_as_typed', () => {
+    expect(validateEventSearchCriteria({ ...REQUIRED, location: '100%_Hall' }).location)
+      .toBe('100%_Hall');
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['an empty string', ''],
+    ['a blank string', '   '],
+  ])('SCRUM20_AC1_location_given_as_%s_means_not_filtered', (_label, value) => {
+    const result = validateEventSearchCriteria({ ...REQUIRED, location: value });
+    expect(result).toEqual({ ...REQUIRED });
+    expect(result).not.toHaveProperty('location');
+  });
+
+  it.each([
+    ['a number', 42],
+    ['a boolean', true],
+    ['an array', ['Level 1']],
+    ['an object', { contains: 'Level' }],
+  ])('SCRUM20_AC1_location_given_as_%s_must_be_text', (_label, value) => {
+    const err = errorFrom(() => validateEventSearchCriteria({ ...REQUIRED, location: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'location', message: 'must be text' }]);
+    expect(err.message).toMatch(/^Invalid venue search -- /);
+  });
+
+  it('SCRUM20_AC1_a_bad_location_is_reported_with_every_other_fault', () => {
+    const details = detailsFor({ startsAt: REQUIRED.startsAt, location: 7 });
+    expect(details).toEqual(expect.arrayContaining([
+      { field: 'endsAt', message: 'is required' },
+      { field: 'expectedAttendance', message: 'is required' },
+      { field: 'location', message: 'must be text' },
+    ]));
+  });
+
+  it('SCRUM20_AC1_every_criterion_with_location_is_valid', () => {
+    const input = {
+      ...REQUIRED,
+      layout: 'theatre',
+      accessibility: ['step_free_entrance'],
+      facilities: ['projector'],
+      location: 'Level 1',
+    };
+    expect(validateEventSearchCriteria(input)).toEqual(input);
+  });
+
+  it('SCRUM20_AC1_location_does_not_mutate_its_input', () => {
+    const input = { ...REQUIRED, location: '  Level 1  ' };
+    validateEventSearchCriteria(input);
+    expect(input.location).toBe('  Level 1  ');
+  });
+});
+
+
+describe('SCRUM20 SCRUM140 a refused search is not reported as bad venue details', () => {
+  const REQUIRED = Object.freeze({
+    startsAt: '2026-11-11T10:00:00+08:00',
+    endsAt: '2026-11-11T12:00:00+08:00',
+    expectedAttendance: 80,
+  });
+
+  it('SCRUM20_AC1_event_search_errors_start_with_Invalid_venue_search', () => {
+    const err = errorFrom(() => validateEventSearchCriteria({ ...REQUIRED, expectedAttendance: 0 }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message.startsWith('Invalid venue search -- ')).toBe(true);
+    expect(err.message).not.toMatch(/venue details/);
+    expect(fieldsIn(err)).toEqual(['expectedAttendance']);
+  });
+
+  it('SCRUM20_AC1_every_search_fault_is_listed_after_the_search_label', () => {
+    const err = errorFrom(() => validateEventSearchCriteria({}));
+
+    expect(err.message).toMatch(/^Invalid venue search -- /);
+    expect(err.message).toContain('startsAt: is required');
+    expect(err.message).toContain('expectedAttendance: is required');
+  });
+
+  it('SCRUM20_SCRUM140_venue_create_errors_still_start_with_Invalid_venue_details', () => {
+    const err = errorFrom(() => validateCreateVenue({ ...VALID, maxCapacity: -5 }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message.startsWith('Invalid venue details -- ')).toBe(true);
+  });
+
+  it('SCRUM20_SCRUM140_venue_update_errors_still_start_with_Invalid_venue_details', () => {
+    const err = errorFrom(() => validateUpdateVenue({ maxCapacity: -5 }));
+
+    expect(err.message.startsWith('Invalid venue details -- ')).toBe(true);
   });
 });

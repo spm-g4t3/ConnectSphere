@@ -15,8 +15,17 @@
  * SCRUM-186 adds the turnaround between events, one of a fixed list of
  * minutes (domain/turnaroundOptions.js).
  *
+ * SCRUM-137 (SCRUM-20) adds the setup time before an event, checked the same
+ * way against its own list (domain/setupOptions.js).
+ *
  * SCRUM-185 (SCRUM-178 AC1) adds includeRetired to the search filters, so a
  * retired venue's calendar can be reached from search.
+ *
+ * SCRUM-138 (SCRUM-20 AC1) adds validateEventSearchCriteria, the shape of a
+ * search against an event's requirements; SCRUM-141 adds an optional location
+ * to it. Code existence is still not checked
+ * here, for the reason below; for a search there is no foreign key to fall
+ * back on, so venueService.assertKnownCodes does it against the lookup tables.
  *
  * Deliberately NOT checked here: whether a layout or facility code exists.
  * That is referential integrity, the foreign keys enforce it, and
@@ -26,11 +35,12 @@
  */
 
 import { ValidationError } from '../errors.js';
-import { checkTimeWindow } from './timestampValidation.js';
+import { checkTimeWindow, checkTimestamp } from './timestampValidation.js';
 import {
   TURNAROUND_MINUTES_OPTIONS,
   isTurnaroundOption,
 } from '../domain/turnaroundOptions.js';
+import { SETUP_MINUTES_OPTIONS, isSetupOption } from '../domain/setupOptions.js';
 
 /** HH:MM or HH:MM:SS, with real hour and minute ranges. */
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)(:([0-5]\d))?$/;
@@ -59,14 +69,21 @@ function createErrorCollector() {
   };
 }
 
-function throwIfInvalid(errors) {
+/**
+ * Throw one ValidationError carrying every collected problem, if there are any.
+ *
+ * The label opens the message. It defaults to the venue form's, which every
+ * caller used until SCRUM-140; a search passes its own so a refused search is
+ * not reported as bad venue details (the wrong prefix SCRUM-138 noted).
+ */
+function throwIfInvalid(errors, label = 'Invalid venue details') {
   if (!errors.hasErrors) return;
 
   const summary = errors.details
     .map(({ field, message }) => `${field}: ${message}`)
     .join('; ');
 
-  throw new ValidationError(`Invalid venue details -- ${summary}`, errors.details);
+  throw new ValidationError(`${label} -- ${summary}`, errors.details);
 }
 
 /** Required text: must be a string with something in it once trimmed. */
@@ -214,6 +231,25 @@ function checkTurnaround(errors, value) {
   return value;
 }
 
+/**
+ * SCRUM-137: setup time before an event, one of the allowed minute values.
+ *
+ * A separate check from checkTurnaround, not a shared one, because the two
+ * lists are separate (each mirrors its own CHECK in the database) and the
+ * error must name the field the caller actually sent. Null is refused for the
+ * same reason as there: update_venue reads NULL as "keep the current value".
+ */
+function checkSetup(errors, value) {
+  if (!isSetupOption(value)) {
+    errors.add(
+      'setupMinutes',
+      `must be one of ${SETUP_MINUTES_OPTIONS.join(', ')} minutes`,
+    );
+    return null;
+  }
+  return value;
+}
+
 
 /**
  * Validate input for creating a venue.
@@ -246,6 +282,10 @@ export function validateCreateVenue(input) {
 
   if (input.turnaroundMinutes !== undefined) {
     normalised.turnaroundMinutes = checkTurnaround(errors, input.turnaroundMinutes);
+  }
+
+  if (input.setupMinutes !== undefined) {
+    normalised.setupMinutes = checkSetup(errors, input.setupMinutes);
   }
 
   throwIfInvalid(errors);
@@ -305,6 +345,13 @@ export function validateUpdateVenue(changes) {
   // on its own is a change and passes the "no changes supplied" rule above.
   if (changes.turnaroundMinutes !== undefined) {
     normalised.turnaroundMinutes = checkTurnaround(errors, changes.turnaroundMinutes);
+  }
+
+  // Same rule for setup: {setupMinutes: 0} alone is a change. The "no changes
+  // supplied" count above already sees it, because it counts every key whose
+  // value is not undefined -- so no field list there needs updating.
+  if (changes.setupMinutes !== undefined) {
+    normalised.setupMinutes = checkSetup(errors, changes.setupMinutes);
   }
 
   throwIfInvalid(errors);
@@ -439,4 +486,128 @@ function checkIncludeRetired(errors, value) {
   if (value === true || value === 'true') return true;
   errors.add('includeRetired', 'must be true or false');
   return false;
+}
+
+/**
+ * Validate a search against an event's requirements.
+ *
+ * SCRUM-138, for SCRUM-20 AC1: "search by event date, start time, end time and
+ * expected attendance; room layout, accessibility features and facilities are
+ * optional." The date and times travel as two instants, startsAt and endsAt,
+ * because an instant with an offset is the one wire format this system
+ * accepts for a moment in time (timestampValidation.js).
+ *
+ * Unlike validateSearchFilters, the period and attendance are REQUIRED: AC3's
+ * hours and capacity checks have nothing to compare without them, and a
+ * default would quietly search for an event nobody described.
+ *
+ * Every fault is reported at once, as everywhere else in this module. Unknown
+ * keys are ignored, as everywhere else too.
+ *
+ * SCRUM-141 adds location, the one criterion the Week 4 instructions list that
+ * AC1 does not. It is optional, like layout and the code lists.
+ *
+ * Leaving an optional criterion out means it is not filtered on. A blank
+ * layout or location and an empty list are treated the same as leaving it
+ * out (B-AC1-15): an unfilled form field is not a criterion, and "provides
+ * every one of nothing" filters nothing anyway. So the normalised object carries an
+ * optional key only when there is something to filter by.
+ *
+ * Whether each code exists is NOT checked here -- see the header. The service
+ * checks it (assertKnownCodes) after this has passed.
+ *
+ * @param {object} input
+ * @param {string} input.startsAt            ISO 8601 with an offset
+ * @param {string} input.endsAt              ISO 8601 with an offset; later than startsAt
+ * @param {number} input.expectedAttendance  a positive whole number
+ * @param {string} [input.layout]            one room layout code
+ * @param {string[]} [input.accessibility]   accessibility feature codes
+ * @param {string[]} [input.facilities]      facility codes
+ * @param {string} [input.location]          SCRUM-141: text the venue's
+ *                                           location must contain
+ * @returns {object} a normalised copy: startsAt and endsAt trimmed, codes
+ *                   and location trimmed, optional keys only when something
+ *                   was supplied
+ * @throws {ValidationError} listing every problem found
+ */
+export function validateEventSearchCriteria(input) {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new ValidationError('Invalid venue search -- expected an object');
+  }
+
+  const errors = createErrorCollector();
+  const normalised = {};
+
+  checkRequiredPeriod(errors, input.startsAt, input.endsAt, normalised);
+
+  normalised.expectedAttendance = checkCapacity(
+    errors,
+    'expectedAttendance',
+    input.expectedAttendance,
+  );
+
+  if (!isUnset(input.layout)) {
+    // isUnset has already ruled out a blank string, so a string here is a code.
+    if (typeof input.layout === 'string') {
+      normalised.layout = input.layout.trim();
+    } else {
+      errors.add('layout', 'must be a single layout code');
+    }
+  }
+
+  for (const field of ['accessibility', 'facilities']) {
+    if (input[field] === undefined || input[field] === null) continue;
+    const codes = checkCodeArray(errors, field, input[field]);
+    if (codes !== null && codes.length > 0) normalised[field] = codes;
+  }
+
+  // SCRUM-141: location, optional like the codes above. Shaped like layout:
+  // isUnset has ruled out a blank string, so a string here is something to
+  // match, trimmed; anything else gets checkRequiredText's wording for a
+  // text field that is not text.
+  if (!isUnset(input.location)) {
+    if (typeof input.location === 'string') {
+      normalised.location = input.location.trim();
+    } else {
+      errors.add('location', 'must be text');
+    }
+  }
+
+  throwIfInvalid(errors, 'Invalid venue search');
+  return normalised;
+}
+
+/**
+ * The event's period: both ends required, each a valid instant, end after start.
+ *
+ * checkTimeWindow treats a window as optional -- neither end given is "no
+ * window" and records nothing -- and its message for one missing end is "is
+ * required when a start is given". Here the period is required outright, so a
+ * missing end is reported as plainly "is required", whatever the other end did.
+ *
+ * Both given: checkTimeWindow does the whole job, including "must be later
+ * than the start". One or none given: each missing end is reported, and any
+ * end that was given is still checked on its own, so a missing endsAt and a
+ * malformed startsAt come back together rather than one per round trip.
+ */
+function checkRequiredPeriod(errors, startValue, endValue, normalised) {
+  const fields = ['startsAt', 'endsAt'];
+  const values = [startValue, endValue];
+
+  if (values.every((value) => !isUnset(value))) {
+    const window = checkTimeWindow(errors, fields, startValue, endValue);
+    if (window !== null) {
+      normalised.startsAt = window.start;
+      normalised.endsAt = window.end;
+    }
+    return;
+  }
+
+  fields.forEach((field, index) => {
+    if (isUnset(values[index])) {
+      errors.add(field, 'is required');
+    } else {
+      checkTimestamp(errors, field, values[index]);
+    }
+  });
 }

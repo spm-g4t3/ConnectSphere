@@ -1,8 +1,13 @@
 // CoordinatorRequestDetail.jsx
 //
 // SCRUM-45: one event request, read by the Event Coordinator who has to
-// decide something about it, plus the single action this story gives them --
-// jumping into venue search with the capacity already filtered.
+// decide something about it. SCRUM-45 also gave it a "Find a venue" button
+// that jumped to /venue-search with the capacity filtered; SCRUM-141 (SCRUM-20)
+// replaced that with EventVenueFinder, a search pre-filled from this event
+// that runs in place, so finding a venue stays part of handling the event.
+// SCRUM-254's "Request this venue" used to be reached through that old
+// handoff; it is now offered on each of the finder's results instead, so the
+// coordinator finds and requests a venue without leaving the event.
 //
 // Takes the request as a prop and fetches nothing. That is a decision, not a
 // shortcut: GET /event-requests/queue selects exactly the columns GET /:id
@@ -29,9 +34,10 @@
 // read-only (DecisionOutcome). See the comment above the decision section.
 
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import AssignmentHistory from "./AssignmentHistory";
+import EventVenueFinder from "./EventVenueFinder";
 import DecisionOutcome from "./DecisionOutcome";
 import ReassignEventPanel from "./ReassignEventPanel";
 import ClarificationHistory from "./ClarificationHistory";
@@ -89,13 +95,14 @@ function orNotSpecified(value) {
 }
 
 /**
- * Is this a capacity worth seeding the venue search with?
+ * Is this an attendance figure worth showing as one?
  *
- * expected_attendance is nullable, and the whole point of the guard is that
- * `/venue-search?minCapacity=null` would arrive at the backend's
- * parseSearchFilters as Number("null") -> NaN and silently filter out
- * everything. A request with no attendance figure produces a bare
- * /venue-search instead: no filter is honest, an impossible filter is not.
+ * expected_attendance is nullable. A missing or non-positive figure reads as
+ * "Not specified" under Requirements rather than as "null people".
+ *
+ * Until SCRUM-141 it also guarded the /venue-search?minCapacity= link, where
+ * Number("null") -> NaN would have filtered out everything. EventVenueFinder
+ * now seeds its own attendance field (eventVenueSearchForm.seedFromEvent).
  */
 function seedableCapacity(value) {
   return Number.isFinite(value) && value > 0 ? value : null;
@@ -154,8 +161,6 @@ export default function CoordinatorRequestDetail({
   onReviewDecisionProcessed,
   onChangeRequestProcessed,
 }) {
-  const navigate = useNavigate();
-
   // SCRUM-19. The request as this panel last saw it change. Starting a review
   // or deciding returns the updated request, and the panel stays open on it,
   // showing the next step or the recorded decision, rather than closing and
@@ -234,46 +239,6 @@ export default function CoordinatorRequestDetail({
       cancelled = true;
     };
   }, [request.id]);
-
-  /**
-   * Hand off to venue search (workflow step 3).
-   *
-   * Filters travel in the query string and context travels in router state,
-   * and the split is deliberate. The capacity filter must survive a reload
-   * and the back button -- a Coordinator comparing venues will do both, and
-   * silently losing the filter is the exact bug this handoff exists to
-   * prevent -- so it belongs in the URL, which is also the vocabulary the
-   * backend's parseSearchFilters already speaks.
-   *
-   * The event name and the requirements prose do NOT go in the URL. Putting a
-   * request's title into an address bar leaks it into browser history and
-   * into any link that gets pasted somewhere, for a string that is only
-   * decoration. In router state it disappears on reload, which is correct:
-   * the filters are the contract, the banner is the courtesy.
-   */
-  function handleFindVenue() {
-    const query = capacity === null ? "" : `?minCapacity=${capacity}`;
-
-    navigate(`/venue-search${query}`, {
-      state: {
-        eventRequestContext: {
-          // SCRUM-254: enough for venue search to offer "Request this venue"
-          // for this event without another read. The server re-reads the
-          // event and sends nothing of this onwards.
-          id: request.id,
-          status: request.status,
-          assignedCoordinatorId: assignedCoordinatorId ?? null,
-          proposedStart: request.proposedStart ?? null,
-          proposedEnd: request.proposedEnd ?? null,
-          expectedAttendance: request.expectedAttendance ?? null,
-          accessibilityRequirements: request.accessibilityRequirements ?? null,
-          eventName: request.eventName,
-          venueRequirements: request.venueRequirements ?? null,
-        },
-          returnToReview: { request },
-      },
-    });
-  }
 
   async function handleReturnForAmendment() {
     const note = reviewNote.trim();
@@ -838,14 +803,29 @@ export default function CoordinatorRequestDetail({
         </section>
       )}
 
+      {/* SCRUM-141: the search runs here, pre-filled from this event. Keyed
+          by the id AND the three fields it seeds from, so opening a
+          different event re-seeds the form, and so does an approved change
+          request that moves this event's period or attendance -- the form
+          must never offer stale event values as if they were current. A
+          refresh that changes nothing else keeps the coordinator's edits.
+          It gets `current`, not `request`, so an event approved in this
+          panel can have a venue requested for it straight away (SCRUM-254:
+          each result's "Request this venue"). userId is passed only while
+          this user is the assigned coordinator, so a handover made here
+          (handedOverTo) turns the request buttons off even though `current`
+          still names this user. A sent request refreshes the parent's list. */}
       <section>
         <h3>Find a venue</h3>
-        <p>
-          {capacity === null
-            ? "This request gives no expected attendance, so venue search opens unfiltered."
-            : `Venue search will open filtered to venues seating at least ${capacity}.`}
+        <EventVenueFinder
+          key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}`}
+          request={current}
+          userId={isAssignedCoordinator ? user.id : undefined}
+          onRequestSubmitted={() => onChangeRequestProcessed?.()}
+        />
+        <p className="event-venue-finder__browse">
+          <Link to="/venue-search">Browse all venues</Link>
         </p>
-        <button onClick={handleFindVenue}>Find a venue for this event</button>
       </section>
     </div>
   );

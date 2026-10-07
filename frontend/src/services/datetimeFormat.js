@@ -136,3 +136,65 @@ export function toOffsetIsoString(localValue) {
 export function deviceTimeZoneLabel() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
+
+// ---------------------------------------------------------------------------
+// Venue time (SCRUM-20)
+//
+// The helpers above speak the DEVICE's wall clock, which suits a form about
+// the Organiser's own day. A venue search does not: the backend reads a
+// period against each venue's opening hours on the Singapore wall clock, and
+// needs start and end on one Singapore date (venueMatching.coversPeriod). A
+// coordinator in New York reading 20:00-00:00 for a 09:00-13:00 event could
+// neither recognise the period nor type it back. So a form about venue time
+// reads and writes it here, whatever the device is set to.
+//
+// One fixed offset, both ways. Singapore has kept +08:00 all year since 1982,
+// with no daylight saving, so adding eight hours on the way in and stamping
+// "+08:00" on the way out are exact inverses, with no Intl zone data to
+// disagree between browsers.
+
+/** The zone every venue's hours are kept in, as an IANA name. */
+export const VENUE_TIME_ZONE = "Asia/Singapore";
+
+/** Its UTC offset, which never changes (no DST; see above). */
+export const VENUE_UTC_OFFSET = "+08:00";
+
+const VENUE_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+/**
+ * An instant as Singapore wall-clock, in the shape toDatetimeLocalValue gives.
+ *
+ * Shifted by the fixed offset and read through the UTC getters (toISOString),
+ * so the device's own zone never enters into it.
+ *
+ * @param {string} [isoString]  an instant from the API, with an offset
+ * @returns {string} "YYYY-MM-DDTHH:mm" in Singapore, or "" when unreadable
+ */
+export function toVenueWallClock(isoString) {
+  if (!isoString) return "";
+
+  const instant = new Date(isoString);
+  if (Number.isNaN(instant.getTime())) return "";
+
+  return new Date(instant.getTime() + VENUE_OFFSET_MS).toISOString().slice(0, 16);
+}
+
+/**
+ * Stamp Singapore's offset onto a Singapore wall-clock value, for the wire.
+ *
+ * The venue-time counterpart of toOffsetIsoString, with the same rules: the
+ * typed string is kept as typed, seconds are added only when absent, a value
+ * that already carries an offset is left alone, anything else unreadable is
+ * returned unchanged for the backend to name, and an empty value is
+ * undefined.
+ *
+ * @param {string} [localValue]  "YYYY-MM-DDTHH:mm", Singapore wall-clock
+ * @returns {string|undefined} e.g. "2026-11-11T09:00:00+08:00"
+ */
+export function toVenueOffsetIsoString(localValue) {
+  if (!localValue) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(localValue)) return localValue;
+
+  const seconds = /T\d{2}:\d{2}:\d{2}$/.test(localValue) ? "" : ":00";
+  return `${localValue}${seconds}${VENUE_UTC_OFFSET}`;
+}

@@ -14,6 +14,10 @@
 // SCRUM-186 adds the turnaround between events: one select from a fixed list
 // of durations (turnaroundOptions.js), sent on create and, like every other
 // field, on edit only when it moved.
+//
+// SCRUM-137 (SCRUM-20) adds the setup time before an event the same way: its
+// own select (setupOptions.js), placed just before turnaround so the two read
+// in time order -- before the event, then after it.
 
 import { useCallback, useEffect, useId, useState } from "react";
 import { createVenue, getVenueDetails, updateVenue } from "../services/venueService";
@@ -29,6 +33,7 @@ import {
   DEFAULT_TURNAROUND_MINUTES,
   turnaroundOptionsWith,
 } from "../services/turnaroundOptions";
+import { DEFAULT_SETUP_MINUTES, setupOptionsWith } from "../services/setupOptions";
 
 // Keyed by status, like RETIRE_ERROR_MESSAGES and AuthContext's
 // LOGIN_ERROR_MESSAGES.
@@ -144,6 +149,7 @@ const EMPTY_FORM = {
   hours: toHourRows([]),
   // A string because <select> values are strings; Number() at submit.
   turnaroundMinutes: String(DEFAULT_TURNAROUND_MINUTES),
+  setupMinutes: String(DEFAULT_SETUP_MINUTES),
 };
 
 /** One vocabulary's checkboxes, including any code this build has never met. */
@@ -175,6 +181,7 @@ function CodeCheckboxes({ legend, options, selected, onToggle, disabled }) {
 export default function VenueForm({ venueId = null, onSaved }) {
   const isEdit = Boolean(venueId);
   const turnaroundHelpId = useId();
+  const setupHelpId = useId();
 
   const [form, setForm] = useState(EMPTY_FORM);
 
@@ -215,6 +222,8 @@ export default function VenueForm({ venueId = null, onSaved }) {
         // default, which is also what buildChanges compares against -- so an
         // untouched select sends nothing.
         turnaroundMinutes: String(venue.turnaroundMinutes ?? DEFAULT_TURNAROUND_MINUTES),
+        // Same `??` reasoning; a backend before 023 omits setupMinutes.
+        setupMinutes: String(venue.setupMinutes ?? DEFAULT_SETUP_MINUTES),
       });
       setLoadError(null);
     } catch {
@@ -260,6 +269,7 @@ export default function VenueForm({ venueId = null, onSaved }) {
       hours: fromHourRows(form.hours),
       // Always sent, even at the default, so what is saved is what was shown.
       turnaroundMinutes: Number(form.turnaroundMinutes),
+      setupMinutes: Number(form.setupMinutes),
     };
   }
 
@@ -312,6 +322,11 @@ export default function VenueForm({ venueId = null, onSaved }) {
     const turnaround = Number(form.turnaroundMinutes);
     if (turnaround !== (baseline.turnaroundMinutes ?? DEFAULT_TURNAROUND_MINUTES)) {
       changes.turnaroundMinutes = turnaround;
+    }
+
+    const setup = Number(form.setupMinutes);
+    if (setup !== (baseline.setupMinutes ?? DEFAULT_SETUP_MINUTES)) {
+      changes.setupMinutes = setup;
     }
 
     return changes;
@@ -388,6 +403,7 @@ export default function VenueForm({ venueId = null, onSaved }) {
   // From the BASELINE for the same reason: a saved value the list lacks keeps
   // its option even after another one is chosen.
   const turnaroundOptions = turnaroundOptionsWith(baseline?.turnaroundMinutes);
+  const setupOptions = setupOptionsWith(baseline?.setupMinutes);
 
   return (
     <form className="venue-form" onSubmit={handleSubmit}>
@@ -486,6 +502,27 @@ export default function VenueForm({ venueId = null, onSaved }) {
       </fieldset>
 
       <label>
+        Setup before events
+        <select
+          value={form.setupMinutes}
+          onChange={(e) => updateField("setupMinutes", e.target.value)}
+          disabled={saving}
+          aria-describedby={setupHelpId}
+        >
+          {setupOptions.map((option) => (
+            <option key={option.minutes} value={String(option.minutes)}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {/* Same pattern as the turnaround help below: outside the label, tied
+          back by aria-describedby, and silent on enforcement (SCRUM-139). */}
+      <p className="venue-form__help" id={setupHelpId}>
+        Time Venue Staff need to prepare the room before an event starts.
+      </p>
+
+      <label>
         Turnaround between events
         <select
           value={form.turnaroundMinutes}
@@ -504,8 +541,7 @@ export default function VenueForm({ venueId = null, onSaved }) {
           aria-describedby ties it back. Says what the field means, not that
           anything enforces it -- nothing does yet (SCRUM-139). */}
       <p className="venue-form__help" id={turnaroundHelpId}>
-        Time the venue needs between one event ending and the next starting, for
-        set-up and clear-down.
+        Time Venue Staff need to reset the room after an event ends.
       </p>
 
       {saveError && (

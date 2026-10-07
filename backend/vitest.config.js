@@ -39,9 +39,21 @@ export default defineConfig({
         // SCRUM-186: a new file only this story owns, so it can gate without
         // pulling in SCRUM-15's shared venueService.js or venueValidation.js.
         'src/domain/turnaroundOptions.js': FULL,
+        // SCRUM-137: the same reasoning -- setupOptions.js is new and owned
+        // outright, while the validation and service edits sit in shared files.
+        'src/domain/setupOptions.js': FULL,
         // SCRUM-178 (SCRUM-179): the calendar read is a new file only this
         // story owns, so it gates without pulling in routes/venues.js.
         'src/services/venueCalendarService.js': FULL,
+        // SCRUM-138 (SCRUM-20 AC3/AC4): the matching rule is a new pure file
+        // only this story owns. The service and validation edits sit in
+        // SCRUM-15's shared files, so they are reported but do not gate.
+        'src/domain/venueMatching.js': FULL,
+        // SCRUM-139 (SCRUM-20 AC5/AC6): the occupancy rule and its read are
+        // new files only this story owns; the findVenuesForEvent edit sits in
+        // SCRUM-15's shared venueService.js and does not gate.
+        'src/domain/venueOccupancy.js': FULL,
+        'src/services/venueOccupancyService.js': FULL,
       },
     },
   },

@@ -1,6 +1,6 @@
 /**
  * End-to-end proof for the venue service (SCRUM-106, SCRUM-110, SCRUM-111,
- * SCRUM-186).
+ * SCRUM-186, SCRUM-137).
  *
  * Run with: npm run venue:check
  *
@@ -15,6 +15,7 @@
  *
  * SCRUM-186's turnaround steps run last, on a second venue of their own, so
  * every count and "latest row" read above sees exactly what it did before.
+ * SCRUM-137's setup steps follow, on a third venue, for the same reason.
  *
  * Exits non-zero on any failure.
  */
@@ -33,6 +34,7 @@ const LOCATION = 'Level 2, SCIS';
 
 let created = null;
 let turnaroundVenue = null;
+let setupVenue = null;
 let failures = 0;
 
 function check(label, passed, detail = '') {
@@ -41,7 +43,7 @@ function check(label, passed, detail = '') {
 }
 
 async function cleanup() {
-  for (const venue of [created, turnaroundVenue]) {
+  for (const venue of [created, turnaroundVenue, setupVenue]) {
     if (!venue) continue;
     // History first: ON DELETE RESTRICT blocks deleting a venue that has any.
     await supabase.from('venue_change_history').delete().eq('venue_id', venue.id);
@@ -236,6 +238,7 @@ async function main() {
   check('retiring twice raises ConflictError', conflictStatus === 409, `status ${conflictStatus}`);
 
   await checkTurnaround();
+  await checkSetup();
 }
 
 /**
@@ -293,6 +296,63 @@ async function checkTurnaround() {
     `code ${rejectedTurnaround?.code ?? 'none'}`);
 }
 
+/**
+ * SCRUM-137: the setup column (023), checked step for step like turnaround.
+ * A venue of its own, so the "find the row whose old_values has the key"
+ * reads below cannot pick up a turnaround row by mistake.
+ */
+async function checkSetup() {
+  // --- default: a venue created without one reads back 0 -------------------
+  setupVenue = await createVenue({
+    name: `${NAME}_setup`,
+    location: LOCATION,
+    maxCapacity: 20,
+  });
+  check('new venue defaults to no setup time (023)', setupVenue.setupMinutes === 0,
+    `got ${setupVenue.setupMinutes}`);
+
+  // 008's creation trigger snapshots the whole row with to_jsonb, so the new
+  // column is in it with no change to 008.
+  const { data: creation } = await supabase
+    .from('venue_change_history')
+    .select('old_values, new_values')
+    .eq('venue_id', setupVenue.id);
+  const setupCreation = creation?.find((h) => Object.keys(h.old_values).length === 0);
+  check(
+    'the creation row stores the initial setup time',
+    setupCreation?.new_values?.setup_minutes === 0,
+    JSON.stringify(setupCreation?.new_values?.setup_minutes ?? null),
+  );
+
+  // --- a change is audited by 003's diff trigger, with no snapshot change --
+  const thirty = await updateVenue(setupVenue.id, { setupMinutes: 30 }, null);
+  check('setup time updated to 30', thirty.setupMinutes === 30, `got ${thirty.setupMinutes}`);
+
+  const { data: changes } = await supabase
+    .from('venue_change_history')
+    .select('old_values, new_values')
+    .eq('venue_id', setupVenue.id);
+  const setupRow = changes?.find((h) => h.old_values?.setup_minutes !== undefined);
+  check(
+    'setup change recorded as 0 -> 30',
+    JSON.stringify(setupRow?.old_values) === '{"setup_minutes":0}' &&
+      JSON.stringify(setupRow?.new_values) === '{"setup_minutes":30}',
+    `${JSON.stringify(setupRow?.old_values)} -> ${JSON.stringify(setupRow?.new_values)}`,
+  );
+
+  // --- back to 0: the ?? null pitfall, end to end --------------------------
+  const none = await updateVenue(setupVenue.id, { setupMinutes: 0 }, null);
+  check('setup time set back to 0', none.setupMinutes === 0, `got ${none.setupMinutes}`);
+
+  // --- the CHECK holds without validation in front of it -------------------
+  const { error: rejectedSetup } = await supabase.rpc('update_venue', {
+    p_id: setupVenue.id,
+    p_setup_minutes: 25,
+  });
+  check('database refuses a setup time of 25', rejectedSetup?.code === '23514',
+    `code ${rejectedSetup?.code ?? 'none'}`);
+}
+
 async function countVenues() {
   const { count } = await supabase.from('venues').select('*', { count: 'exact', head: true });
   return count ?? 0;
@@ -309,5 +369,5 @@ main()
       console.error(`\n${failures} check(s) failed.\n`);
       process.exit(1);
     }
-    console.log('\nAll checks passed. Created, updated, audited, searched, retired, turnaround checked, cleaned up.\n');
+    console.log('\nAll checks passed. Created, updated, audited, searched, retired, turnaround and setup checked, cleaned up.\n');
   });

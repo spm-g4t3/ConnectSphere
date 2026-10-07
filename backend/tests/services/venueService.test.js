@@ -4,6 +4,7 @@
  * SCRUM-106: Create and update venue records.
  * SCRUM-110: Implement venue retirement handling.
  * SCRUM-111: Update venue search to use current active venue details.
+ * SCRUM-138: Search venues against an event's requirements (SCRUM-20).
  *
  * Describe blocks are named after the acceptance criteria they cover, so a
  * requirement can be traced to the test that proves it.
@@ -28,6 +29,7 @@ import {
   searchVenues,
   getVenueHistory,
   getBookingsForVenue,
+  findVenuesForEvent,
 } from '../../src/services/venueService.js';
 import { ValidationError, NotFoundError, ConflictError } from '../../src/errors.js';
 import { getBookingStatusDisplay } from '../../src/domain/bookingStatus.js';
@@ -100,7 +102,7 @@ function queryStub(result) {
       Promise.resolve(result).then(onFulfilled, onRejected),
   };
 
-  for (const method of ['select', 'eq', 'is', 'ilike', 'gte', 'order', 'limit', 'delete', 'lt', 'gt', 'lte', 'not']) {
+  for (const method of ['select', 'eq', 'is', 'in', 'ilike', 'gte', 'order', 'limit', 'delete', 'lt', 'gt', 'lte', 'not']) {
     stub[method] = (...args) => {
       calls.push([method, ...args]);
       return stub;
@@ -1461,6 +1463,7 @@ describe('SCRUM186 turnaround is written by create and update and read by id', (
       p_facilities: null,
       p_hours: null,
       p_turnaround_minutes: 90,
+      p_setup_minutes: null,
       p_user_id: STAFF_ID,
     });
   });
@@ -1515,5 +1518,985 @@ describe('SCRUM186 turnaround is written by create and update and read by id', (
     expect(err.status).toBe(400);
     expect(err.message).toContain('venues_turnaround_minutes_allowed');
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-137 (SCRUM-20): the setup time before an event follows turnaround's
+// path exactly -- written by create and update, read back by getVenueById.
+// ---------------------------------------------------------------------------
+describe('SCRUM20_SCRUM137 setup time is written by create and update and read by id', () => {
+  const NEW_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const MINIMAL = Object.freeze({
+    name: 'Seminar Room 2-1',
+    location: 'Level 2, SCIS',
+    maxCapacity: 40,
+  });
+
+  it('SCRUM20_SCRUM137_getVenueById_selects_setup_minutes', async () => {
+    const read = queryStub({ data: populatedVenueRow({ setup_minutes: 30 }), error: null });
+    from.mockReturnValue(read);
+
+    await getVenueById(VENUE_ID);
+
+    expect(read.args('select')[0]).toMatch(/\bsetup_minutes\b/);
+  });
+
+  it('SCRUM20_SCRUM137_getVenueById_maps_setup_minutes_to_setupMinutes', async () => {
+    from.mockReturnValue(
+      queryStub({ data: populatedVenueRow({ setup_minutes: 30 }), error: null }),
+    );
+
+    const venue = await getVenueById(VENUE_ID);
+
+    expect(venue.setupMinutes).toBe(30);
+    expect(venue).not.toHaveProperty('setup_minutes');
+  });
+
+  it('SCRUM20_SCRUM137_getVenueById_maps_a_zero_setup_as_0_not_missing', async () => {
+    from.mockReturnValue(queryStub({ data: retiredVenueRow({ setup_minutes: 0 }), error: null }));
+
+    const venue = await getVenueById(VENUE_ID);
+
+    expect(venue.setupMinutes).toBe(0);
+  });
+
+  it('SCRUM20_SCRUM137_getVenueById_keeps_setup_and_turnaround_apart', async () => {
+    from.mockReturnValue(
+      queryStub({
+        data: populatedVenueRow({ setup_minutes: 15, turnaround_minutes: 90 }),
+        error: null,
+      }),
+    );
+
+    const venue = await getVenueById(VENUE_ID);
+
+    expect(venue.setupMinutes).toBe(15);
+    expect(venue.turnaroundMinutes).toBe(90);
+  });
+
+  it('SCRUM20_SCRUM137_create_sends_the_default_0_when_setup_is_omitted', async () => {
+    givenWriteSucceeds(populatedVenueRow(), NEW_ID);
+
+    await createVenue(MINIMAL, STAFF_ID);
+
+    expect(rpcArgs().p_setup_minutes).toBe(0);
+  });
+
+  it.each([0, 15, 30, 45, 60, 90, 120])(
+    'SCRUM20_SCRUM137_create_sends_the_given_setup_%s',
+    async (minutes) => {
+      givenWriteSucceeds(populatedVenueRow(), NEW_ID);
+
+      await createVenue({ ...MINIMAL, setupMinutes: minutes }, STAFF_ID);
+
+      expect(rpcArgs().p_setup_minutes).toBe(minutes);
+    },
+  );
+
+  it('SCRUM20_SCRUM137_create_sends_setup_and_turnaround_as_separate_params', async () => {
+    givenWriteSucceeds(populatedVenueRow(), NEW_ID);
+
+    await createVenue({ ...MINIMAL, setupMinutes: 30, turnaroundMinutes: 45 }, STAFF_ID);
+
+    expect(rpcArgs().p_setup_minutes).toBe(30);
+    expect(rpcArgs().p_turnaround_minutes).toBe(45);
+  });
+
+  it('SCRUM20_SCRUM137_create_returns_the_setup_read_back', async () => {
+    givenWriteSucceeds(populatedVenueRow({ id: NEW_ID, setup_minutes: 120 }), NEW_ID);
+
+    const venue = await createVenue({ ...MINIMAL, setupMinutes: 120 }, STAFF_ID);
+
+    expect(venue.setupMinutes).toBe(120);
+  });
+
+  it('SCRUM20_SCRUM137_update_sends_null_when_setup_is_omitted', async () => {
+    givenWriteSucceeds(populatedVenueRow());
+
+    await updateVenue(VENUE_ID, { name: 'x' }, STAFF_ID);
+
+    expect(rpcArgs()).toHaveProperty('p_setup_minutes', null);
+  });
+
+  it('SCRUM20_SCRUM137_update_sends_0_when_setup_is_set_back_to_none', async () => {
+    // Catches a `|| null` regression: update_venue reads NULL as "keep", so
+    // turning 0 into null would leave the old setup time in place.
+    givenWriteSucceeds(populatedVenueRow({ setup_minutes: 0 }));
+
+    await updateVenue(VENUE_ID, { setupMinutes: 0 }, STAFF_ID);
+
+    expect(rpcArgs().p_setup_minutes).toBe(0);
+    expect(rpcArgs().p_setup_minutes).not.toBeNull();
+  });
+
+  it('SCRUM20_SCRUM137_update_setup_alone_leaves_every_other_field_null', async () => {
+    givenWriteSucceeds(populatedVenueRow({ setup_minutes: 60 }));
+
+    await updateVenue(VENUE_ID, { setupMinutes: 60 }, STAFF_ID);
+
+    expect(rpcArgs()).toEqual({
+      p_id: VENUE_ID,
+      p_name: null,
+      p_location: null,
+      p_max_capacity: null,
+      p_layouts: null,
+      p_accessibility: null,
+      p_facilities: null,
+      p_hours: null,
+      p_turnaround_minutes: null,
+      p_setup_minutes: 60,
+      p_user_id: STAFF_ID,
+    });
+  });
+
+  it('SCRUM20_SCRUM137_update_returns_the_setup_read_back', async () => {
+    givenWriteSucceeds(populatedVenueRow({ setup_minutes: 30 }));
+
+    const venue = await updateVenue(VENUE_ID, { setupMinutes: 30 }, STAFF_ID);
+
+    expect(venue.setupMinutes).toBe(30);
+  });
+
+  it('SCRUM20_SCRUM137_create_rejects_setup_25_before_any_rpc', async () => {
+    const err = await errorFromAsync(() =>
+      createVenue({ ...MINIMAL, setupMinutes: 25 }, STAFF_ID),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toEqual(['setupMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM20_SCRUM137_update_rejects_setup_25_before_any_rpc', async () => {
+    const err = await errorFromAsync(() =>
+      updateVenue(VENUE_ID, { setupMinutes: 25 }, STAFF_ID),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toEqual(['setupMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['createVenue', () => createVenue(MINIMAL, STAFF_ID)],
+    ['updateVenue', () => updateVenue(VENUE_ID, { setupMinutes: 30 }, STAFF_ID)],
+  ])('SCRUM20_SCRUM137_%s_reports_23514_on_venues_setup_minutes_allowed_as_a_validation_error', async (_name, call) => {
+    // The database CHECK (023) is the backstop for writes that bypass validation.
+    rpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: '23514',
+        message:
+          'new row for relation "venues" violates check constraint ' +
+          '"venues_setup_minutes_allowed"',
+      },
+    });
+
+    const err = await errorFromAsync(call);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('venues_setup_minutes_allowed');
+    expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-138, for SCRUM-20 (Search Venues Against Event Requirements):
+//  AC1 required period and attendance, optional layout/accessibility/facilities;
+//      an unknown code is a 400 naming it (B-AC1-11..13, B-AC1-16)
+//  AC3/AC4 only venues meeting EVERY supplied criterion are returned (the rule
+//      itself is unit-tested in tests/domain/venueMatching.test.js)
+//  AC7 each result carries the display fields (B-AC7-01/02)
+// Fixtures follow SCRUM-20-test-cases.md: Harbour Room and the base request.
+// ---------------------------------------------------------------------------
+describe('SCRUM20 findVenuesForEvent', () => {
+  const HARBOUR_ID = '6c1a2d3e-0000-4000-8000-000000000001';
+
+  /** Base request: Wednesday 2026-11-11, 10:00-12:00 Singapore. */
+  const REQUIRED = Object.freeze({
+    startsAt: '2026-11-11T10:00:00+08:00',
+    endsAt: '2026-11-11T12:00:00+08:00',
+    expectedAttendance: 80,
+  });
+  const BASE = Object.freeze({
+    ...REQUIRED,
+    layout: 'theatre',
+    accessibility: ['step_free_entrance'],
+    facilities: ['projector', 'wifi'],
+  });
+
+  /** Every code the lookup tables hold in these tests. */
+  const KNOWN = {
+    room_layouts: ['banquet', 'classroom', 'theatre'],
+    accessibility_features: ['hearing_loop', 'lift_access', 'step_free_entrance'],
+    facilities: ['catering', 'pa_system', 'projector', 'wifi'],
+  };
+
+  /** A venues row (as VENUE_WITH_ATTRIBUTES_SELECT returns it) for Harbour Room. */
+  function harbourRow(overrides = {}) {
+    return {
+      id: HARBOUR_ID,
+      name: 'Harbour Room',
+      location: 'Level 1, Harbour Wing',
+      max_capacity: 100,
+      turnaround_minutes: 0,
+      setup_minutes: 0,
+      retired_at: null,
+      created_at: '2026-09-12T09:00:00+00:00',
+      updated_at: '2026-09-12T09:00:00+00:00',
+      last_modified_by: STAFF_ID,
+      venue_room_layouts: [{ room_layout_code: 'theatre' }, { room_layout_code: 'classroom' }],
+      venue_accessibility_features: [
+        { accessibility_feature_code: 'step_free_entrance' },
+        { accessibility_feature_code: 'lift_access' },
+      ],
+      venue_facilities: [
+        { facility_code: 'wifi' },
+        { facility_code: 'projector' },
+        { facility_code: 'pa_system' },
+      ],
+      venue_operating_hours: [{ day_of_week: 3, opens_at: '09:00:00', closes_at: '18:00:00' }],
+      ...overrides,
+    };
+  }
+
+  /**
+   * Wire `from` per table: each lookup table answers with the KNOWN codes
+   * that were asked for (as .in('code', ...) would), and `venues` with
+   * `rows`. Any table can be given an error instead.
+   */
+  function givenEventSearch({ rows = [], errors = {}, known = KNOWN, bookings = [], blocks = [] } = {}) {
+    const stubs = {};
+    from.mockImplementation((table) => {
+      if (table === 'venues') {
+        stubs.venues = queryStub(
+          errors.venues ? { data: null, error: errors.venues } : { data: rows, error: null },
+        );
+        return stubs.venues;
+      }
+      // SCRUM-139: the occupancy reads. Empty by default, so a venue that
+      // passes the attributes is still returned; a test passes `bookings` /
+      // `blocks` rows (or errors.bookings / errors.venue_blocks) to change
+      // that. The stub returns every row it is given: it does not apply the
+      // filters, it records them (all of them -- .in is called twice).
+      if (table === 'bookings' || table === 'venue_blocks') {
+        const occupied = table === 'bookings' ? bookings : blocks;
+        const stub = queryStub(
+          errors[table] ? { data: null, error: errors[table] } : { data: occupied, error: null },
+        );
+        stub.calls = [];
+        for (const method of ['select', 'in', 'is', 'lt', 'gt']) {
+          const inner = stub[method];
+          stub[method] = (...args) => {
+            stub.calls.push([method, ...args]);
+            return inner(...args);
+          };
+        }
+        stubs[table] = stub;
+        return stub;
+      }
+      if (!(table in known)) throw new Error(`unexpected table ${table}`);
+      // The stub resolves to a fixed result, so filter lazily on .in's argument.
+      const stub = queryStub(null);
+      const inner = stub.in;
+      stub.in = (column, codes) => {
+        inner(column, codes);
+        const result = errors[table]
+          ? { data: null, error: errors[table] }
+          : { data: known[table].filter((c) => codes.includes(c)).map((code) => ({ code })), error: null };
+        stub.then = (ok, ko) => Promise.resolve(result).then(ok, ko);
+        return stub;
+      };
+      stubs[table] = stub;
+      return stub;
+    });
+    return stubs;
+  }
+
+  // The venue and lookup-table reads (AC1/AC3). SCRUM-139's occupancy reads
+  // (bookings, venue_blocks) are left out here and checked by occupancyTablesRead,
+  // so the AC1 "which lookup tables were read" assertions keep their meaning.
+  const OCCUPANCY_TABLES = ['bookings', 'venue_blocks'];
+  const tablesRead = () =>
+    from.mock.calls.map(([table]) => table).filter((table) => !OCCUPANCY_TABLES.includes(table));
+  const occupancyTablesRead = () =>
+    from.mock.calls.map(([table]) => table).filter((table) => OCCUPANCY_TABLES.includes(table));
+
+  // --- AC1: inputs ---------------------------------------------------------
+
+  it('SCRUM20_AC1_invalid_criteria_are_refused_before_any_database_call', async () => {
+    givenEventSearch();
+
+    const err = await errorFromAsync(() =>
+      findVenuesForEvent({ startsAt: REQUIRED.startsAt, expectedAttendance: 0 }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(err.details.map((d) => d.field)).toEqual(['endsAt', 'expectedAttendance']);
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM20_AC1_non_object_criteria_are_refused_before_any_database_call', async () => {
+    const err = await errorFromAsync(() => findVenuesForEvent(undefined));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM20_AC1_omitted_optional_criteria_do_not_filter', async () => {
+    // B-AC1-16: no lookup table is read, and Harbour Room comes back.
+    givenEventSearch({ rows: [harbourRow({ venue_room_layouts: [], venue_facilities: [] })] });
+
+    const result = await findVenuesForEvent({ ...REQUIRED });
+
+    expect(tablesRead()).toEqual(['venues']);
+    expect(result.map((v) => v.name)).toEqual(['Harbour Room']);
+  });
+
+  it('SCRUM20_AC1_blank_optional_criteria_read_no_lookup_table', async () => {
+    // B-AC1-15 at the service: blank / empty is "not supplied".
+    givenEventSearch({ rows: [harbourRow()] });
+
+    const result = await findVenuesForEvent({ ...REQUIRED, layout: ' ', accessibility: [], facilities: [] });
+
+    expect(tablesRead()).toEqual(['venues']);
+    expect(result).toHaveLength(1);
+  });
+
+  it('SCRUM20_AC1_only_the_supplied_kinds_are_looked_up', async () => {
+    const stubs = givenEventSearch({ rows: [] });
+
+    await findVenuesForEvent({ ...REQUIRED, facilities: ['wifi'] });
+
+    expect(tablesRead()).toEqual(['facilities', 'venues']);
+    expect(stubs.facilities.args('select')).toEqual(['code']);
+    expect(stubs.facilities.args('in')).toEqual(['code', ['wifi']]);
+  });
+
+  it('SCRUM20_AC1_known_codes_are_checked_against_each_lookup_table', async () => {
+    const stubs = givenEventSearch({ rows: [] });
+
+    await findVenuesForEvent({ ...BASE });
+
+    expect(tablesRead()).toEqual(['room_layouts', 'accessibility_features', 'facilities', 'venues']);
+    expect(stubs.room_layouts.args('in')).toEqual(['code', ['theatre']]);
+    expect(stubs.accessibility_features.args('in')).toEqual(['code', ['step_free_entrance']]);
+    expect(stubs.facilities.args('in')).toEqual(['code', ['projector', 'wifi']]);
+  });
+
+  it('SCRUM20_AC1_unknown_layout_code_is_an_error', async () => {
+    // B-AC1-11
+    givenEventSearch({ rows: [harbourRow()] });
+
+    const err = await errorFromAsync(() => findVenuesForEvent({ ...REQUIRED, layout: 'x' }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(err.details).toEqual([{ field: 'layout', message: 'unknown code "x"' }]);
+    expect(tablesRead()).not.toContain('venues');
+  });
+
+  it('SCRUM20_AC1_unknown_accessibility_code_is_an_error', async () => {
+    // B-AC1-12
+    givenEventSearch({ rows: [harbourRow()] });
+
+    const err = await errorFromAsync(() =>
+      findVenuesForEvent({ ...REQUIRED, accessibility: ['ramp'] }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'accessibility', message: 'unknown code "ramp"' }]);
+    expect(tablesRead()).not.toContain('venues');
+  });
+
+  it('SCRUM20_AC1_unknown_facility_code_is_an_error', async () => {
+    // B-AC1-13: only the unknown one is named.
+    givenEventSearch({ rows: [harbourRow()] });
+
+    const err = await errorFromAsync(() =>
+      findVenuesForEvent({ ...REQUIRED, facilities: ['projector', 'jacuzzi'] }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'facilities', message: 'unknown code "jacuzzi"' }]);
+    expect(err.message).toContain('facilities: unknown code "jacuzzi"');
+    expect(tablesRead()).not.toContain('venues');
+  });
+
+  it('SCRUM20_AC1_unknown_codes_across_kinds_are_reported_together', async () => {
+    givenEventSearch({ rows: [harbourRow()] });
+
+    const err = await errorFromAsync(() =>
+      findVenuesForEvent({ ...REQUIRED, layout: 'ballroom', facilities: ['jacuzzi', 'wifi', 'sauna'] }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([
+      { field: 'layout', message: 'unknown code "ballroom"' },
+      { field: 'facilities', message: 'unknown code "jacuzzi"' },
+      { field: 'facilities', message: 'unknown code "sauna"' },
+    ]);
+    expect(tablesRead()).not.toContain('venues');
+  });
+
+  it('SCRUM20_AC1_a_repeated_unknown_code_is_reported_once', async () => {
+    const stubs = givenEventSearch({ rows: [] });
+
+    const err = await errorFromAsync(() =>
+      findVenuesForEvent({ ...REQUIRED, facilities: ['jacuzzi', ' jacuzzi'] }),
+    );
+
+    expect(stubs.facilities.args('in')).toEqual(['code', ['jacuzzi']]);
+    expect(err.details).toEqual([{ field: 'facilities', message: 'unknown code "jacuzzi"' }]);
+  });
+
+  it('SCRUM20_AC1_every_fault_is_reported_at_once (shape faults stop before the code lookup)', async () => {
+    // B-AC1-14, adjusted: shape errors and unknown-code errors cannot arrive
+    // together, because validation throws before any code is looked up.
+    givenEventSearch({ rows: [] });
+
+    const shape = await errorFromAsync(() =>
+      findVenuesForEvent({ startsAt: REQUIRED.startsAt, expectedAttendance: 0, facilities: ['jacuzzi'] }),
+    );
+    expect(shape).toBeInstanceOf(ValidationError);
+    expect(shape.details.map((d) => d.field)).toEqual(['endsAt', 'expectedAttendance']);
+    expect(from).not.toHaveBeenCalled();
+
+    // Once the shape is fixed, the unknown code is the remaining fault.
+    const codes = await errorFromAsync(() =>
+      findVenuesForEvent({ ...REQUIRED, facilities: ['jacuzzi'] }),
+    );
+    expect(codes.details).toEqual([{ field: 'facilities', message: 'unknown code "jacuzzi"' }]);
+  });
+
+  it('SCRUM20_AC1_a_lookup_without_data_treats_every_code_as_unknown', async () => {
+    // data: null with no error must not crash the check.
+    from.mockImplementation(() => queryStub({ data: null, error: null }));
+
+    const err = await errorFromAsync(() => findVenuesForEvent({ ...REQUIRED, layout: 'theatre' }));
+
+    expect(err.details).toEqual([{ field: 'layout', message: 'unknown code "theatre"' }]);
+  });
+
+  it('SCRUM20_AC1_a_lookup_database_error_is_translated', async () => {
+    givenEventSearch({
+      errors: { accessibility_features: { code: 'XX000', message: 'lookup failed' } },
+    });
+
+    const err = await errorFromAsync(() => findVenuesForEvent({ ...BASE }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('lookup failed');
+    expect(tablesRead()).not.toContain('venues');
+    expect(tablesRead()).not.toContain('facilities');
+  });
+
+  it('SCRUM20_AC1_a_lookup_not_found_error_is_translated_to_a_typed_error', async () => {
+    givenEventSearch({
+      errors: { room_layouts: { code: 'P0002', message: 'relation not found' } },
+    });
+
+    const err = await errorFromAsync(() => findVenuesForEvent({ ...REQUIRED, layout: 'theatre' }));
+
+    expect(err).toBeInstanceOf(NotFoundError);
+  });
+
+  // --- AC3/AC4: every supplied criterion -----------------------------------
+
+  it('SCRUM20_AC3_search_reads_active_venues_in_name_order', async () => {
+    // Retired venues never come back: the query itself excludes them.
+    const stubs = givenEventSearch({ rows: [] });
+
+    await findVenuesForEvent({ ...BASE });
+
+    expect(stubs.venues.args('is')).toEqual(['retired_at', null]);
+    expect(stubs.venues.args('order')).toEqual(['name']);
+  });
+
+  it('SCRUM20_AC3_search_selects_the_same_columns_as_getVenueById', async () => {
+    const stubs = givenEventSearch({ rows: [] });
+    await findVenuesForEvent({ ...REQUIRED });
+    const searchSelect = stubs.venues.args('select')[0];
+
+    vi.resetAllMocks();
+    const read = queryStub({ data: harbourRow(), error: null });
+    from.mockReturnValue(read);
+    await getVenueById(HARBOUR_ID);
+
+    expect(searchSelect).toBe(read.args('select')[0]);
+    for (const column of ['max_capacity', 'setup_minutes', 'turnaround_minutes', 'venue_operating_hours']) {
+      expect(searchSelect).toContain(column);
+    }
+  });
+
+  it('SCRUM20_AC3_venue_meeting_every_criterion_is_returned', async () => {
+    // B-AC3-19
+    givenEventSearch({ rows: [harbourRow()] });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
+  });
+
+  it('SCRUM20_AC3_utc_timestamp_is_read_as_singapore_time', async () => {
+    // B-AC3-08 through the service.
+    givenEventSearch({ rows: [harbourRow()] });
+
+    const result = await findVenuesForEvent({
+      ...BASE,
+      startsAt: '2026-11-11T02:00:00Z',
+      endsAt: '2026-11-11T04:00:00Z',
+    });
+
+    expect(result).toHaveLength(1);
+  });
+
+  it('SCRUM20_AC3_filtering_keeps_only_full_matches_in_name_order', async () => {
+    // The database returns rows already ordered by name; the service keeps
+    // that order and drops each venue failing any one criterion.
+    givenEventSearch({
+      rows: [
+        harbourRow({ id: 'a', name: 'Atrium' }),
+        harbourRow({ id: 'b', name: 'Boardroom', max_capacity: 79 }),
+        harbourRow({ id: 'c', name: 'Cove', venue_facilities: [{ facility_code: 'projector' }] }),
+        harbourRow({ id: 'd', name: 'Dockside' }),
+        harbourRow({
+          id: 'e',
+          name: 'Esplanade',
+          venue_operating_hours: [{ day_of_week: 3, opens_at: '11:00:00', closes_at: '18:00:00' }],
+        }),
+        harbourRow({ id: 'f', name: 'Foyer' }),
+      ],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.name)).toEqual(['Atrium', 'Dockside', 'Foyer']);
+  });
+
+  it.each([
+    ['SCRUM20_AC4_venue_failing_only_capacity_is_excluded', { max_capacity: 79 }],
+    [
+      'SCRUM20_AC4_venue_failing_only_operating_hours_is_excluded',
+      { venue_operating_hours: [{ day_of_week: 3, opens_at: '11:00:00', closes_at: '18:00:00' }] },
+    ],
+    ['SCRUM20_AC4_venue_failing_only_layout_is_excluded', { venue_room_layouts: [{ room_layout_code: 'classroom' }] }],
+    [
+      'SCRUM20_AC4_venue_failing_only_accessibility_is_excluded',
+      { venue_accessibility_features: [{ accessibility_feature_code: 'lift_access' }] },
+    ],
+    [
+      'SCRUM20_AC4_venue_failing_only_facilities_is_excluded',
+      { venue_facilities: [{ facility_code: 'projector' }, { facility_code: 'pa_system' }] },
+    ],
+  ])('%s (service)', async (_name, change) => {
+    // Control meets the base request; Candidate differs by exactly one thing.
+    givenEventSearch({
+      rows: [
+        harbourRow({ id: 'candidate', name: 'Candidate', ...change }),
+        harbourRow({ id: 'control', name: 'Control' }),
+      ],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.name)).toEqual(['Control']);
+  });
+
+  it('SCRUM20_AC8_no_match_returns_an_empty_list', async () => {
+    givenEventSearch({ rows: [harbourRow({ max_capacity: 10 })] });
+
+    await expect(findVenuesForEvent({ ...BASE })).resolves.toEqual([]);
+  });
+
+  it('SCRUM20_AC8_no_venues_at_all_returns_an_empty_list', async () => {
+    givenEventSearch({ rows: null });
+
+    await expect(findVenuesForEvent({ ...REQUIRED })).resolves.toEqual([]);
+  });
+
+  it('SCRUM20_AC3_a_venues_database_error_is_translated', async () => {
+    givenEventSearch({ errors: { venues: { code: 'XX000', message: 'venues read failed' } } });
+
+    const err = await errorFromAsync(() => findVenuesForEvent({ ...BASE }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('venues read failed');
+  });
+
+  it('SCRUM20_AC3_a_venues_check_violation_is_translated_to_a_validation_error', async () => {
+    givenEventSearch({ errors: { venues: { code: '23514', message: 'check "x"' } } });
+
+    const err = await errorFromAsync(() => findVenuesForEvent({ ...REQUIRED }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+  });
+
+  // --- AC7: result shape ---------------------------------------------------
+
+  it('SCRUM20_AC7_each_result_has_the_six_display_fields', async () => {
+    // B-AC7-01. Plus the id to book by; codes come back sorted.
+    givenEventSearch({ rows: [harbourRow()] });
+
+    const [venue] = await findVenuesForEvent({ ...BASE });
+
+    expect(venue).toMatchObject({
+      id: HARBOUR_ID,
+      name: 'Harbour Room',
+      location: 'Level 1, Harbour Wing',
+      maxCapacity: 100,
+      layouts: ['classroom', 'theatre'],
+      accessibility: ['lift_access', 'step_free_entrance'],
+      facilities: ['pa_system', 'projector', 'wifi'],
+    });
+  });
+
+  it('SCRUM20_AC7_result_keys_are_exactly_the_projected_set', async () => {
+    // Pins the projection so audit columns (retiredAt, createdAt, updatedAt,
+    // lastModifiedBy) cannot leak into search results by accident.
+    givenEventSearch({ rows: [harbourRow({ setup_minutes: 30, turnaround_minutes: 45 })] });
+
+    const [venue] = await findVenuesForEvent({ ...BASE });
+
+    expect(Object.keys(venue).sort()).toEqual([
+      'accessibility',
+      'facilities',
+      'hours',
+      'id',
+      'layouts',
+      'location',
+      'maxCapacity',
+      'name',
+      'setupMinutes',
+      'turnaroundMinutes',
+    ]);
+    expect(venue.hours).toEqual([{ day_of_week: 3, opens_at: '09:00:00', closes_at: '18:00:00' }]);
+    expect(venue.setupMinutes).toBe(30);
+    expect(venue.turnaroundMinutes).toBe(45);
+  });
+
+  it('SCRUM20_AC7_empty_attribute_set_is_an_empty_array', async () => {
+    // B-AC7-02
+    givenEventSearch({
+      rows: [harbourRow({ venue_facilities: [], venue_room_layouts: [], venue_accessibility_features: [] })],
+    });
+
+    const [venue] = await findVenuesForEvent({ ...REQUIRED });
+
+    expect(venue.facilities).toEqual([]);
+    expect(venue.layouts).toEqual([]);
+    expect(venue.accessibility).toEqual([]);
+  });
+
+  // --- SCRUM-139 AC5/AC6: bookings and blocks ------------------------------
+  // The overlap rule itself is unit-tested in tests/domain/venueOccupancy.test.js
+  // and the read in tests/services/venueOccupancyService.test.js; these prove
+  // findVenuesForEvent wires them together. Stub rows are returned as given:
+  // the stub records the filters, it does not apply them.
+
+  const RIVERSIDE_ID = '6c1a2d3e-0000-4000-8000-000000000002';
+  /** Harbour Room and Riverside Hall, both meeting the base request. */
+  const twoMatchingRows = () => [
+    harbourRow(),
+    harbourRow({ id: RIVERSIDE_ID, name: 'Riverside Hall' }),
+  ];
+  const occupancy = (venueId, from, to, extra = {}) => ({
+    venue_id: venueId,
+    starts_at: `2026-11-11T${from}:00+08:00`,
+    ends_at: `2026-11-11T${to}:00+08:00`,
+    ...extra,
+  });
+
+  it('SCRUM20_AC6_overlapping_approved_booking_excludes_the_venue', async () => {
+    // B-AC6-01
+    givenEventSearch({
+      rows: twoMatchingRows(),
+      bookings: [occupancy(HARBOUR_ID, '10:30', '11:30', { status: 'approved' })],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.name)).toEqual(['Riverside Hall']);
+  });
+
+  it('SCRUM20_AC6_booking_at_another_venue_does_not_exclude', async () => {
+    // B-AC6-08
+    givenEventSearch({
+      rows: twoMatchingRows(),
+      bookings: [occupancy(RIVERSIDE_ID, '10:30', '11:30', { status: 'approved' })],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.name)).toEqual(['Harbour Room']);
+  });
+
+  it('SCRUM20_AC6_flagged_booking_without_block_still_excludes_the_venue', async () => {
+    // B-AC6-03, inverted by decision: a flagged_for_review booking still holds
+    // its venue even when no block covers it any more.
+    const stubs = givenEventSearch({
+      rows: [harbourRow()],
+      bookings: [occupancy(HARBOUR_ID, '10:30', '11:30', { status: 'flagged_for_review' })],
+      blocks: [],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result).toEqual([]);
+    expect(stubs.bookings.calls).toContainEqual(['in', 'status', ['approved', 'flagged_for_review']]);
+  });
+
+  it('SCRUM20_AC6_flagged_bookings_block_still_excludes_the_venue', async () => {
+    // B-AC6-04: flagged booking under its active block.
+    givenEventSearch({
+      rows: [harbourRow()],
+      bookings: [occupancy(HARBOUR_ID, '10:30', '11:30', { status: 'flagged_for_review' })],
+      blocks: [occupancy(HARBOUR_ID, '10:00', '12:00')],
+    });
+
+    await expect(findVenuesForEvent({ ...BASE })).resolves.toEqual([]);
+  });
+
+  it('SCRUM20_AC6_cancelled_booking_does_not_exclude', async () => {
+    // B-AC6-02. The status filter keeps a cancelled booking out of the read,
+    // so the stub answers nothing for it -- and the filter sent is checked.
+    const stubs = givenEventSearch({ rows: [harbourRow()], bookings: [] });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
+    const statusFilter = stubs.bookings.calls.find(([m, col]) => m === 'in' && col === 'status');
+    expect(statusFilter).toEqual(['in', 'status', ['approved', 'flagged_for_review']]);
+    expect(statusFilter[2]).not.toContain('cancelled');
+  });
+
+  it('SCRUM20_AC6_overlapping_active_block_excludes_the_venue', async () => {
+    // B-AC6-05
+    givenEventSearch({ rows: twoMatchingRows(), blocks: [occupancy(HARBOUR_ID, '10:00', '12:00')] });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.name)).toEqual(['Riverside Hall']);
+  });
+
+  it('SCRUM20_AC6_removed_block_does_not_exclude', async () => {
+    // B-AC6-06. .is('removed_at', null) keeps a removed block out of the read.
+    const stubs = givenEventSearch({ rows: [harbourRow()], blocks: [] });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
+    expect(stubs.venue_blocks.calls).toContainEqual(['is', 'removed_at', null]);
+  });
+
+  it('SCRUM20_AC5_touching_booking_and_block_do_not_exclude (service)', async () => {
+    // B-AC5-01/02 and 08/09 through the service, zero buffers.
+    givenEventSearch({
+      rows: [harbourRow()],
+      bookings: [occupancy(HARBOUR_ID, '08:00', '10:00')],
+      blocks: [occupancy(HARBOUR_ID, '12:00', '14:00')],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
+  });
+
+  it('SCRUM20_AC5_the_venues_own_setup_and_turnaround_pad_the_check (service)', async () => {
+    // Worked example: setup 30, turnaround 45, booking 10:00-12:00. Request
+    // 13:15 is kept (edge), 13:14 is excluded.
+    const row = harbourRow({ setup_minutes: 30, turnaround_minutes: 45 });
+    const bookings = [occupancy(HARBOUR_ID, '10:00', '12:00')];
+
+    givenEventSearch({ rows: [row], bookings });
+    const kept = await findVenuesForEvent({
+      ...BASE,
+      startsAt: '2026-11-11T13:15:00+08:00',
+      endsAt: '2026-11-11T14:00:00+08:00',
+    });
+
+    givenEventSearch({ rows: [row], bookings });
+    const excluded = await findVenuesForEvent({
+      ...BASE,
+      startsAt: '2026-11-11T13:14:00+08:00',
+      endsAt: '2026-11-11T14:00:00+08:00',
+    });
+
+    expect(kept.map((v) => v.id)).toEqual([HARBOUR_ID]);
+    expect(excluded).toEqual([]);
+  });
+
+  it('SCRUM20_AC5_operating_hours_ignore_setup_and_turnaround', async () => {
+    // B-AC5-26: hours 09:00-18:00, setup 30, turnaround 45, no bookings.
+    // Request 09:00-18:00 (padded 08:30-18:45) is still returned.
+    givenEventSearch({ rows: [harbourRow({ setup_minutes: 30, turnaround_minutes: 45 })] });
+
+    const result = await findVenuesForEvent({
+      ...BASE,
+      startsAt: '2026-11-11T09:00:00+08:00',
+      endsAt: '2026-11-11T18:00:00+08:00',
+    });
+
+    expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
+  });
+
+  it('SCRUM20_AC5_occupancy_reads_are_widened_by_240_minutes', async () => {
+    const stubs = givenEventSearch({ rows: [harbourRow()] });
+
+    await findVenuesForEvent({ ...BASE });
+
+    for (const table of ['bookings', 'venue_blocks']) {
+      expect(stubs[table].calls).toContainEqual(['lt', 'starts_at', '2026-11-11T08:00:00.000Z']);
+      expect(stubs[table].calls).toContainEqual(['gt', 'ends_at', '2026-11-10T22:00:00.000Z']);
+    }
+  });
+
+  it('SCRUM20_AC6_no_candidates_reads_no_bookings_or_blocks', async () => {
+    // No venues at all, and venues failing the attributes: neither reads.
+    givenEventSearch({ rows: [] });
+    await findVenuesForEvent({ ...BASE });
+    expect(occupancyTablesRead()).toEqual([]);
+
+    vi.resetAllMocks();
+    givenEventSearch({ rows: [harbourRow({ max_capacity: 10 })] });
+    await expect(findVenuesForEvent({ ...BASE })).resolves.toEqual([]);
+    expect(occupancyTablesRead()).toEqual([]);
+  });
+
+  it('SCRUM20_AC6_occupancy_is_read_only_for_attribute_matching_venues', async () => {
+    const stubs = givenEventSearch({
+      rows: [
+        harbourRow({ id: 'a', name: 'Atrium' }),
+        harbourRow({ id: 'b', name: 'Boardroom', max_capacity: 79 }),
+        harbourRow({ id: 'c', name: 'Cove' }),
+      ],
+    });
+
+    await findVenuesForEvent({ ...BASE });
+
+    expect(occupancyTablesRead().sort()).toEqual(['bookings', 'venue_blocks']);
+    expect(stubs.bookings.calls).toContainEqual(['in', 'venue_id', ['a', 'c']]);
+    expect(stubs.venue_blocks.calls).toContainEqual(['in', 'venue_id', ['a', 'c']]);
+  });
+
+  it.each([
+    ['bookings', 'bookings read failed'],
+    ['venue_blocks', 'blocks read failed'],
+  ])('SCRUM20_AC6_a_%s_read_error_propagates', async (table, message) => {
+    givenEventSearch({ rows: [harbourRow()], errors: { [table]: { code: 'XX000', message } } });
+
+    const err = await errorFromAsync(() => findVenuesForEvent({ ...BASE }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err.message).toBe(message);
+  });
+
+  it('SCRUM20_AC6_an_occupancy_22P02_propagates_as_a_validation_error', async () => {
+    givenEventSearch({ rows: [harbourRow()], errors: { bookings: { code: '22P02', message: 'bad uuid' } } });
+
+    const err = await errorFromAsync(() => findVenuesForEvent({ ...BASE }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+  });
+
+  it('SCRUM20_AC6_exclusion_keeps_name_order_and_the_projection', async () => {
+    givenEventSearch({
+      rows: [
+        harbourRow({ id: 'a', name: 'Atrium' }),
+        harbourRow({ id: 'b', name: 'Boardroom' }),
+        harbourRow({ id: 'c', name: 'Cove' }),
+        harbourRow({ id: 'd', name: 'Dockside' }),
+      ],
+      bookings: [occupancy('b', '11:00', '13:00')],
+      blocks: [occupancy('d', '09:00', '10:01')],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE });
+
+    expect(result.map((v) => v.name)).toEqual(['Atrium', 'Cove']);
+    for (const venue of result) {
+      expect(Object.keys(venue).sort()).toEqual([
+        'accessibility',
+        'facilities',
+        'hours',
+        'id',
+        'layouts',
+        'location',
+        'maxCapacity',
+        'name',
+        'setupMinutes',
+        'turnaroundMinutes',
+      ]);
+    }
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-138 lifted getVenueById's row mapping into toVenueWithAttributes.
+// No existing test pinned the WHOLE object (they use toMatchObject or single
+// fields), so this does, with the exact keys the pre-refactor code returned.
+// ---------------------------------------------------------------------------
+describe('SCRUM20 SCRUM138 getVenueById is unchanged by the refactor', () => {
+  it('SCRUM20_SCRUM138_getVenueById_returns_exactly_the_pre_refactor_shape', async () => {
+    from.mockReturnValue(queryStub({
+      data: populatedVenueRow({ setup_minutes: 15 }),
+      error: null,
+    }));
+
+    const venue = await getVenueById(VENUE_ID);
+
+    expect(venue).toStrictEqual({
+      id: VENUE_ID,
+      name: 'Seminar Room 2-1',
+      location: 'Level 2, SCIS',
+      maxCapacity: 40,
+      turnaroundMinutes: 45,
+      setupMinutes: 15,
+      retiredAt: null,
+      createdAt: '2026-09-12T09:00:00+00:00',
+      updatedAt: RETIRED_AT,
+      lastModifiedBy: STAFF_ID,
+      layouts: ['classroom', 'theatre'],
+      accessibility: ['hearing_loop', 'lift_access'],
+      facilities: ['projector', 'wifi'],
+      hours: [
+        { day_of_week: 1, opens_at: '08:00:00', closes_at: '17:00:00' },
+        { day_of_week: 3, opens_at: '09:00:00', closes_at: '18:00:00' },
+      ],
+    });
+    // Same key order as before, too.
+    expect(Object.keys(venue)).toEqual([
+      'id', 'name', 'location', 'maxCapacity', 'turnaroundMinutes', 'setupMinutes',
+      'retiredAt', 'createdAt', 'updatedAt', 'lastModifiedBy',
+      'layouts', 'accessibility', 'facilities', 'hours',
+    ]);
+  });
+
+  it('SCRUM20_SCRUM138_getVenueById_still_selects_every_attribute_join', async () => {
+    const read = queryStub({ data: populatedVenueRow(), error: null });
+    from.mockReturnValue(read);
+
+    await getVenueById(VENUE_ID);
+
+    const select = read.args('select')[0].replace(/\s+/g, ' ').trim();
+    expect(select).toBe(
+      'id, name, location, max_capacity, turnaround_minutes, setup_minutes, ' +
+      'retired_at, created_at, updated_at, last_modified_by, ' +
+      'venue_room_layouts ( room_layout_code ), ' +
+      'venue_accessibility_features ( accessibility_feature_code ), ' +
+      'venue_facilities ( facility_code ), ' +
+      'venue_operating_hours ( day_of_week, opens_at, closes_at )',
+    );
   });
 });

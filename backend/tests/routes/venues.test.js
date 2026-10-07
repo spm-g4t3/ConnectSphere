@@ -37,9 +37,26 @@ vi.mock('../../src/config/supabaseClient.js', () => {
   return { supabase: client, default: client };
 });
 
+// SCRUM-140: three service functions are wrapped in vi.fn so the event-search
+// tests at the bottom can see what the route called. Each wrapper calls the
+// real function unless a test scripts otherwise, so every other test in this
+// file still runs the real service against the mocked supabase client.
+vi.mock('../../src/services/venueService.js', async (importOriginal) => {
+  const real = await importOriginal();
+  return {
+    ...real,
+    findVenuesForEvent: vi.fn(real.findVenuesForEvent),
+    getVenueById: vi.fn(real.getVenueById),
+    searchVenues: vi.fn(real.searchVenues),
+  };
+});
+
 const { createVenueRouter } = await import('../../src/routes/venues.js');
 const { supabase } = await import('../../src/config/supabaseClient.js');
 const { ROLE } = await import('../../src/domain/userRole.js');
+const { ValidationError } = await import('../../src/errors.js');
+const serviceSpies = await import('../../src/services/venueService.js');
+const realService = await vi.importActual('../../src/services/venueService.js');
 
 
 const VENUE_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
@@ -2110,5 +2127,447 @@ describe('SCRUM178_AC6 Organisers and Attendees cannot search retired venues', (
 
     expect(res.status).toBe(401);
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-137 (SCRUM-20): the setup time before an event reaches the API
+// ---------------------------------------------------------------------------
+describe('SCRUM20_SCRUM137 setup time through the venue routes', () => {
+  it('SCRUM20_SCRUM137_POST_with_setup_25_answers_400_on_setupMinutes_with_no_rpc', async () => {
+    const res = await request(appWith()).post('/api/venues').send({
+      name: 'Hall A',
+      location: 'SCIS',
+      maxCapacity: 40,
+      setupMinutes: 25,
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(['setupMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM20_SCRUM137_POST_with_setup_30_sends_30_and_answers_201', async () => {
+    rpc.mockResolvedValueOnce(ok(VENUE_ID));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ setup_minutes: 30 }))));
+
+    const res = await request(appWith()).post('/api/venues').send({
+      name: 'Hall A',
+      location: 'SCIS',
+      maxCapacity: 40,
+      setupMinutes: 30,
+    });
+
+    expect(res.status).toBe(201);
+    const [fn, payload] = rpc.mock.calls[0];
+    expect(fn).toBe('create_venue');
+    expect(payload.p_setup_minutes).toBe(30);
+    expect(res.body.setupMinutes).toBe(30);
+  });
+
+  it('SCRUM20_SCRUM137_POST_without_setup_sends_the_default_0', async () => {
+    rpc.mockResolvedValueOnce(ok(VENUE_ID));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ setup_minutes: 0 }))));
+
+    const res = await request(appWith()).post('/api/venues').send({
+      name: 'Hall A',
+      location: 'SCIS',
+      maxCapacity: 40,
+    });
+
+    expect(res.status).toBe(201);
+    expect(rpc.mock.calls[0][1].p_setup_minutes).toBe(0);
+  });
+
+  it('SCRUM20_SCRUM137_PATCH_setup_0_answers_200_and_the_rpc_gets_0', async () => {
+    rpc.mockResolvedValueOnce(ok(null));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ setup_minutes: 0 }))));
+
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ setupMinutes: 0 });
+
+    expect(res.status).toBe(200);
+    const [fn, payload] = rpc.mock.calls[0];
+    expect(fn).toBe('update_venue');
+    expect(payload.p_setup_minutes).toBe(0);
+    expect(res.body.setupMinutes).toBe(0);
+  });
+
+  it('SCRUM20_SCRUM137_PATCH_with_a_string_setup_answers_400_with_no_rpc', async () => {
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ setupMinutes: '30' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(['setupMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM20_SCRUM137_PATCH_with_null_setup_answers_400_with_no_rpc', async () => {
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ setupMinutes: null });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(['setupMinutes']);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM20_SCRUM137_PATCH_setup_from_a_non_venue_staff_role_is_refused', async () => {
+    const res = await request(appWith(signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID)))
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ setupMinutes: 30 });
+
+    expect(res.status).toBe(403);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM20_SCRUM137_GET_by_id_includes_setupMinutes', async () => {
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ setup_minutes: 45 }))));
+
+    const res = await request(appWith()).get(`/api/venues/${VENUE_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.setupMinutes).toBe(45);
+    expect(res.body).not.toHaveProperty('setup_minutes');
+  });
+});
+
+
+/**
+ * SCRUM-140 (for SCRUM-20): GET /api/venues/event-search.
+ *
+ * The service functions this block watches are vi.fn wrappers around the real
+ * ones (the vi.mock of venueService.js near the top), so every other test in
+ * this file still runs the real service. Here, a test either scripts
+ * findVenuesForEvent's answer to check transport alone, or leaves it real to
+ * check that a bad query reaches the real validator.
+ *
+ * Cases: B-AC1-17 to 19 (route), B-AC8-02/03, against the new route rather
+ * than /search -- SCRUM-140 gave the event search its own path -- and
+ * B-AC6-09 (SCRUM-144: includeRetired is ignored, not honoured).
+ */
+describe('SCRUM20 GET /api/venues/event-search', () => {
+  const COORDINATOR_ID = '33333333-3333-4333-8333-333333333333';
+  const asCoordinator = () => appWith(signedInAs(ROLE.EVENT_COORDINATOR, COORDINATOR_ID));
+
+  // Wednesday 11 November 2026, 10:00-12:00 Singapore. Encoded, because an
+  // unencoded '+' arrives as a space.
+  const STARTS_AT = '2026-11-11T10:00:00+08:00';
+  const ENDS_AT = '2026-11-11T12:00:00+08:00';
+  const PERIOD = `startsAt=${encodeURIComponent(STARTS_AT)}&endsAt=${encodeURIComponent(ENDS_AT)}`;
+  const URL = '/api/venues/event-search';
+
+  const RESULT = [{
+    id: VENUE_ID,
+    name: 'Seminar Room 2-1',
+    location: 'Level 2, SCIS',
+    maxCapacity: 40,
+    layouts: ['theatre'],
+    accessibility: [],
+    facilities: ['wifi'],
+    hours: [{ day_of_week: 3, opens_at: '08:00:00', closes_at: '22:00:00' }],
+    setupMinutes: 0,
+    turnaroundMinutes: 30,
+  }];
+
+  const find = vi.mocked(serviceSpies.findVenuesForEvent);
+  const byId = vi.mocked(serviceSpies.getVenueById);
+  const search = vi.mocked(serviceSpies.searchVenues);
+
+  beforeEach(() => {
+    for (const [spy, real] of [
+      [find, realService.findVenuesForEvent],
+      [byId, realService.getVenueById],
+      [search, realService.searchVenues],
+    ]) {
+      spy.mockReset();
+      spy.mockImplementation(real);
+    }
+  });
+
+  /** The criteria the route handed the service on its only call. */
+  const criteriaSent = () => {
+    expect(find).toHaveBeenCalledTimes(1);
+    return find.mock.calls[0][0];
+  };
+
+  describe('access', () => {
+    it('SCRUM20_AC1_coordinator_gets_200_with_the_service_result_passed_through', async () => {
+      find.mockResolvedValueOnce(RESULT);
+
+      const res = await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=40`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual(RESULT);
+    });
+
+    it('SCRUM20_AC1_unauthenticated_search_is_401', async () => {
+      const res = await request(appWith(signedOut)).get(`${URL}?${PERIOD}&expectedAttendance=40`);
+
+      expect(res.status).toBe(401);
+      expect(find).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['Venue Staff', ROLE.VENUE_STAFF],
+      ['an Event Organiser', ROLE.EVENT_ORGANISER],
+      ['an Attendee', ROLE.ATTENDEE],
+      ['Technical Support Staff', ROLE.TECHNICAL_SUPPORT_STAFF],
+    ])('SCRUM20_AC1_%s_is_refused_with_403_before_the_service', async (_label, role) => {
+      const res = await request(appWith(signedInAs(role)))
+        .get(`${URL}?${PERIOD}&expectedAttendance=40`);
+
+      expect(res.status).toBe(403);
+      expect(find).not.toHaveBeenCalled();
+      expect(from).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('parsing the query string', () => {
+    beforeEach(() => find.mockResolvedValue([]));
+
+    it('SCRUM20_AC1_query_string_is_parsed_into_typed_filters', async () => {
+      // B-AC1-19, against the new route.
+      await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=80&layout=theatre&facilities=projector&facilities=wifi`);
+
+      expect(criteriaSent()).toEqual({
+        startsAt: STARTS_AT,
+        endsAt: ENDS_AT,
+        expectedAttendance: 80,
+        layout: 'theatre',
+        facilities: ['projector', 'wifi'],
+      });
+    });
+
+    it('SCRUM20_AC1_comma_list_is_split_and_blank_pieces_dropped', async () => {
+      await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=80&accessibility=${encodeURIComponent('a, b,,c')}`);
+
+      expect(criteriaSent().accessibility).toEqual(['a', 'b', 'c']);
+    });
+
+    it('SCRUM20_AC1_repeated_and_comma_lists_combine_into_one_array', async () => {
+      await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=80&facilities=a&facilities=b,c`);
+
+      expect(criteriaSent().facilities).toEqual(['a', 'b', 'c']);
+    });
+
+    it('SCRUM20_AC1_an_all_blank_list_leaves_the_key_out', async () => {
+      await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=80&facilities=${encodeURIComponent(' , ,')}&accessibility=`);
+
+      const criteria = criteriaSent();
+      expect(criteria).not.toHaveProperty('facilities');
+      expect(criteria).not.toHaveProperty('accessibility');
+    });
+
+    it('SCRUM20_AC1_a_blank_attendance_leaves_the_key_out', async () => {
+      await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=%20`);
+
+      expect(criteriaSent()).not.toHaveProperty('expectedAttendance');
+    });
+
+    it('SCRUM20_AC1_an_absent_optional_criterion_is_not_sent', async () => {
+      await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=80`);
+
+      expect(criteriaSent()).toEqual({ startsAt: STARTS_AT, endsAt: ENDS_AT, expectedAttendance: 80 });
+    });
+
+    it('SCRUM20_AC1_SCRUM141_location_is_passed_through_as_sent', async () => {
+      await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=80&location=${encodeURIComponent('  Level 2, SCIS ')}`);
+
+      // Trimmed by the real validator inside the real service, not by the route.
+      expect(criteriaSent()).toEqual({
+        startsAt: STARTS_AT,
+        endsAt: ENDS_AT,
+        expectedAttendance: 80,
+        location: '  Level 2, SCIS ',
+      });
+    });
+
+    it('SCRUM20_AC1_SCRUM141_percent_and_underscore_in_location_arrive_unchanged', async () => {
+      await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=80&location=${encodeURIComponent('100%_Hall')}`);
+
+      expect(criteriaSent().location).toBe('100%_Hall');
+    });
+
+    it('SCRUM20_AC1_SCRUM141_no_location_leaves_the_key_out', async () => {
+      await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=80&layout=theatre`);
+
+      expect(criteriaSent()).not.toHaveProperty('location');
+    });
+
+    it('SCRUM20_AC1_SCRUM141_an_empty_location_reaches_the_service_as_sent', async () => {
+      // The route converts nothing; the validator turns blank into absent.
+      await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=80&location=`);
+
+      expect(criteriaSent().location).toBe('');
+    });
+  });
+
+  describe('bad input reaches the real validator and is 400 with details', () => {
+    const fieldsOf = (res) => res.body.details.map((d) => d.field);
+
+    it('SCRUM20_AC1_a_blank_attendance_is_reported_as_required', async () => {
+      const res = await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toEqual([{ field: 'expectedAttendance', message: 'is required' }]);
+      expect(res.body.error).toMatch(/^Invalid venue search -- /);
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM20_AC1_missing_fields_are_400_naming_each', async () => {
+      const res = await request(asCoordinator()).get(URL);
+
+      expect(res.status).toBe(400);
+      expect(fieldsOf(res).sort()).toEqual(['endsAt', 'expectedAttendance', 'startsAt']);
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM20_AC1_bad_query_is_400_with_details', async () => {
+      // B-AC1-17, against the new route.
+      const res = await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=abc`);
+
+      expect(res.status).toBe(400);
+      expect(fieldsOf(res)).toEqual(['expectedAttendance']);
+    });
+
+    it('SCRUM20_AC1_SCRUM141_a_repeated_location_is_400_must_be_text', async () => {
+      // ?location=a&location=b arrives as an array, which is not text.
+      const res = await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=80&location=a&location=b`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toEqual([{ field: 'location', message: 'must be text' }]);
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM20_AC1_fractional_attendance_is_400', async () => {
+      const res = await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=12.5`);
+
+      expect(res.status).toBe(400);
+      expect(fieldsOf(res)).toEqual(['expectedAttendance']);
+    });
+
+    it('SCRUM20_AC1_an_unencoded_plus_in_an_offset_is_400', async () => {
+      // '+08:00' unencoded arrives as ' 08:00', which is not a valid offset.
+      const res = await request(asCoordinator())
+        .get(`${URL}?startsAt=${STARTS_AT}&endsAt=${ENDS_AT}&expectedAttendance=40`);
+
+      expect(res.status).toBe(400);
+      expect(fieldsOf(res)).toEqual(expect.arrayContaining(['startsAt']));
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM20_AC1_an_unknown_code_is_400_naming_it', async () => {
+      from.mockReturnValueOnce(queryStub(ok([{ code: 'projector' }])));
+
+      const res = await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=40&facilities=projector,jacuzzi`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toEqual([{ field: 'facilities', message: 'unknown code "jacuzzi"' }]);
+      expect(from).toHaveBeenCalledTimes(1);
+      expect(from).toHaveBeenCalledWith('facilities');
+    });
+  });
+
+  describe('service outcomes', () => {
+    it('SCRUM20_AC1_a_service_ValidationError_is_400_with_error_and_details', async () => {
+      const details = [{ field: 'layout', message: 'unknown code "ballroom"' }];
+      find.mockRejectedValueOnce(
+        new ValidationError('Invalid venue search -- layout: unknown code "ballroom"', details),
+      );
+
+      const res = await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=40&layout=ballroom`);
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        error: 'Invalid venue search -- layout: unknown code "ballroom"',
+        details,
+      });
+    });
+
+    it('SCRUM20_AC8_no_match_is_200_with_an_empty_array', async () => {
+      find.mockResolvedValueOnce([]);
+
+      const res = await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=40`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('SCRUM20_AC8_no_match_does_not_name_a_criterion', async () => {
+      find.mockResolvedValueOnce([]);
+
+      const res = await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=40`);
+
+      // Exactly [], so no reason / excludedBy field can be hiding in it.
+      expect(res.text).toBe('[]');
+    });
+
+    it('SCRUM20_AC1_an_untyped_error_is_500_without_leaking_it', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      find.mockRejectedValueOnce(new Error('relation "bookings" does not exist'));
+
+      const res = await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=40`);
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: 'Unexpected server error' });
+      expect(JSON.stringify(res.body)).not.toMatch(/relation|bookings/);
+      consoleError.mockRestore();
+    });
+  });
+
+  describe('routing', () => {
+    it('SCRUM20_AC1_event_search_is_not_mistaken_for_an_id', async () => {
+      find.mockResolvedValueOnce([]);
+
+      const res = await request(asCoordinator()).get(`${URL}?${PERIOD}&expectedAttendance=40`);
+
+      expect(res.status).toBe(200);
+      expect(find).toHaveBeenCalledTimes(1);
+      expect(byId).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM20_AC1_the_old_search_still_reaches_searchVenues', async () => {
+      from.mockReturnValueOnce(queryStub(ok([])));
+
+      const res = await request(appWith()).get('/api/venues/search?location=SCIS');
+
+      expect(res.status).toBe(200);
+      expect(search).toHaveBeenCalledTimes(1);
+      expect(search.mock.calls[0][0]).toEqual({ location: 'SCIS' });
+      expect(find).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('retired venues', () => {
+    it('SCRUM20_AC6_include_retired_with_event_search_is_ignored', async () => {
+      // B-AC6-09 (SCRUM-144). parseEventSearch copies only the keys it knows,
+      // so the flag never reaches the service: 200, not 400, and the real
+      // service still reads active venues only.
+      const venues = queryStub(ok([]));
+      from.mockReturnValueOnce(venues);
+
+      const res = await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=40&includeRetired=true`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+      expect(criteriaSent()).toEqual({ startsAt: STARTS_AT, endsAt: ENDS_AT, expectedAttendance: 40 });
+      expect(from).toHaveBeenCalledTimes(1);
+      expect(from).toHaveBeenCalledWith('venues');
+      expect(venues.args('is')).toEqual(['retired_at', null]);
+    });
   });
 });

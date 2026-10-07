@@ -1,5 +1,19 @@
 // CoordinatorRequestDetail.test.jsx
 //
+// SCRUM-141 (SCRUM-20 AC2): the coordinator's event view now carries the venue
+// search itself. "Find a venue" is EventVenueFinder pre-filled from this
+// event, replacing SCRUM-45's button that navigated to
+// /venue-search?minCapacity=. A plain "Browse all venues" link remains.
+//
+// Only this panel's share is tested here; EventVenueFinder.test.jsx covers
+// the form itself. Every service the panel's tree reaches is mocked, and
+// useAuth is mocked so no AuthProvider (and no Supabase) is needed.
+//
+// Timezone-proof: the finder shows Singapore (venue) time on every device, so
+// expected input values are the Singapore wall clock as literals, and the
+// suite passes unchanged under TZ=UTC, Asia/Singapore and America/New_York.
+// Date inputs are set with fireEvent.change.
+//
 // SCRUM-129, for SCRUM-19 (Approve or Reject a Submitted Event Request): the
 // coordinator's decision section. Which action each status offers, to whom,
 // what is sent, and what a refusal says.
@@ -17,9 +31,9 @@
 // and the live checks against migration 029 prove the gate.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 import CoordinatorRequestDetail from "../../src/components/CoordinatorRequestDetail.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
@@ -31,6 +45,8 @@ import {
   requestEventClarification,
   startEventReview,
 } from "../../src/services/eventRequestService";
+import { findVenuesForEvent } from "../../src/services/venueService";
+import { createBookingRequest } from "../../src/services/bookingRequestService";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -49,6 +65,82 @@ vi.mock("../../src/services/eventRequestService", () => ({
   requestEventClarification: vi.fn(),
   startEventReview: vi.fn(),
 }));
+
+vi.mock("../../src/services/venueService", () => ({
+  findVenuesForEvent: vi.fn(),
+}));
+
+vi.mock("../../src/services/bookingRequestService", () => ({
+  createBookingRequest: vi.fn(),
+}));
+
+const COORDINATOR = { id: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d", role: "event_coordinator" };
+
+// Wednesday 11 November 2026, 10:00-12:00 Singapore.
+const START_ISO = "2026-11-11T10:00:00+08:00";
+const END_ISO = "2026-11-11T12:00:00+08:00";
+
+const EVENT = Object.freeze({
+  id: "e1",
+  eventName: "Tech Talk",
+  status: "submitted",
+  purpose: "Talk",
+  proposedStart: START_ISO,
+  proposedEnd: END_ISO,
+  expectedAttendance: 80,
+  venueRequirements: "A large room",
+  organiserName: "Olive Organiser",
+  assignedCoordinatorId: COORDINATOR.id,
+  submittedAt: "2026-10-01T09:00:00+08:00",
+});
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
+}
+
+function VenueSearchProbe() {
+  const location = useLocation();
+  return <div data-testid="venue-search">{`${location.pathname}${location.search}`}</div>;
+}
+
+function ui(request) {
+  return (
+    <MemoryRouter initialEntries={["/coordinator"]}>
+      <Routes>
+        <Route
+          path="/coordinator"
+          element={
+            <>
+              <CoordinatorRequestDetail request={request} />
+              <LocationProbe />
+            </>
+          }
+        />
+        <Route path="/venue-search" element={<VenueSearchProbe />} />
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
+function renderDetail(request = EVENT) {
+  const user = userEvent.setup();
+  const utils = render(ui(request));
+  return { user, ...utils, rerenderWith: (next) => utils.rerender(ui(next)) };
+}
+
+/** The "Find a venue" section, so the panel's other inputs never match. */
+function finderSection() {
+  return screen.getByRole("heading", { name: "Find a venue" }).closest("section");
+}
+
+const inFinder = {
+  date: () => within(finderSection()).getByLabelText("Date"),
+  start: () => within(finderSection()).getByLabelText("Start"),
+  end: () => within(finderSection()).getByLabelText("End"),
+  attendance: () => within(finderSection()).getByLabelText("Expected attendance"),
+  location: () => within(finderSection()).getByLabelText("Location"),
+};
 
 const ASSIGNED = "44444444-4444-4444-8444-444444444444";
 const OTHER = "66666666-6666-4666-8666-666666666666";
@@ -109,6 +201,7 @@ function actionButtonsShown() {
 
 beforeEach(() => {
   vi.mocked(useAuth).mockReset();
+  vi.mocked(useAuth).mockReturnValue({ user: COORDINATOR });
   vi.mocked(startEventReview).mockReset();
   vi.mocked(decideEventRequest).mockReset();
   vi.mocked(requestEventClarification).mockReset();
@@ -116,12 +209,136 @@ beforeEach(() => {
   vi.mocked(getCoordinatorChangeRequests).mockResolvedValue([]);
   vi.mocked(getAssignmentHistoryForReview).mockReset();
   vi.mocked(getAssignmentHistoryForReview).mockResolvedValue([]);
+  vi.mocked(findVenuesForEvent).mockReset();
+  vi.mocked(findVenuesForEvent).mockResolvedValue([]);
+  vi.mocked(createBookingRequest).mockReset();
   // ClarificationHistory calls .then() on this the moment it mounts, so it
   // has to hand back a promise, not undefined.
   vi.mocked(getEventClarificationHistory).mockReset();
   vi.mocked(getEventClarificationHistory).mockResolvedValue([]);
 });
 
+describe("SCRUM20_AC2 the event view holds the venue search", () => {
+  it("SCRUM20_AC2_find_a_venue_renders_the_form_prefilled_from_the_event", async () => {
+    renderDetail();
+
+    expect(screen.getByRole("heading", { name: "Find a venue" })).toBeInTheDocument();
+    expect(inFinder.date()).toHaveValue("2026-11-11");
+    expect(inFinder.start()).toHaveValue("10:00");
+    expect(inFinder.end()).toHaveValue("12:00");
+    expect(inFinder.attendance()).toHaveValue(80);
+    expect(within(finderSection()).getByRole("button", { name: "Search venues" })).toBeInTheDocument();
+    await waitFor(() => expect(getCoordinatorChangeRequests).toHaveBeenCalledWith("e1"));
+  });
+
+  it("SCRUM20_AC2_opening_the_event_sends_no_search", async () => {
+    renderDetail();
+
+    await waitFor(() => expect(getCoordinatorChangeRequests).toHaveBeenCalled());
+    expect(findVenuesForEvent).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM20_AC2_the_old_navigate_button_is_gone", () => {
+    renderDetail();
+
+    expect(screen.queryByRole("button", { name: /Find a venue for this event/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Venue search will open filtered/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/venue search opens unfiltered/i)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM20_AC2_browse_all_venues_links_to_venue_search_without_filters", async () => {
+    const { user } = renderDetail();
+
+    const link = within(finderSection()).getByRole("link", { name: "Browse all venues" });
+    expect(link).toHaveAttribute("href", "/venue-search");
+
+    await user.click(link);
+    expect(screen.getByTestId("venue-search")).toHaveTextContent(/^\/venue-search$/);
+  });
+
+  it("SCRUM20_AC2_searching_stays_on_the_event_view", async () => {
+    vi.mocked(findVenuesForEvent).mockResolvedValue([{ id: "v1", name: "Hall A" }]);
+    const { user } = renderDetail();
+
+    await user.click(within(finderSection()).getByRole("button", { name: "Search venues" }));
+
+    expect(await within(finderSection()).findByRole("list", { name: "Matching venues" }))
+      .toHaveTextContent("Hall A");
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/coordinator$/);
+    expect(screen.queryByTestId("venue-search")).not.toBeInTheDocument();
+    expect(findVenuesForEvent).toHaveBeenCalledTimes(1);
+    expect(findVenuesForEvent.mock.calls[0][0].expectedAttendance).toBe(80);
+  });
+
+  it("SCRUM20_AC2_an_event_with_no_attendance_leaves_the_field_empty", () => {
+    renderDetail({ ...EVENT, expectedAttendance: null });
+
+    expect(inFinder.attendance()).toHaveValue(null);
+    // The Requirements list still says so in words.
+    expect(screen.queryByText(/null people/)).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM20_AC2 re-seeding when the event changes", () => {
+  it("SCRUM20_AC2_a_different_event_reseeds_the_form", () => {
+    const { rerenderWith } = renderDetail();
+    fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
+
+    rerenderWith({ ...EVENT, id: "e2", eventName: "Gala", expectedAttendance: 30 });
+
+    expect(inFinder.attendance()).toHaveValue(30);
+  });
+
+  it("SCRUM20_AC2_a_changed_attendance_reseeds_the_form", () => {
+    // An approved change request moved the attendance: the edit is dropped
+    // rather than shown as if it were the event's figure.
+    const { rerenderWith } = renderDetail();
+    fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
+    fireEvent.change(inFinder.location(), { target: { value: "Level 2" } });
+
+    rerenderWith({ ...EVENT, expectedAttendance: 200 });
+
+    expect(inFinder.attendance()).toHaveValue(200);
+    expect(inFinder.location()).toHaveValue("");
+  });
+
+  it("SCRUM20_AC2_a_changed_start_reseeds_the_form", () => {
+    const { rerenderWith } = renderDetail();
+    fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
+
+    const movedStart = "2026-11-11T11:00:00+08:00";
+    rerenderWith({ ...EVENT, proposedStart: movedStart });
+
+    expect(inFinder.start()).toHaveValue("11:00");
+    expect(inFinder.attendance()).toHaveValue(80);
+  });
+
+  it("SCRUM20_AC2_a_changed_end_reseeds_the_form", () => {
+    const { rerenderWith } = renderDetail();
+    fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
+
+    const movedEnd = "2026-11-11T11:30:00+08:00";
+    rerenderWith({ ...EVENT, proposedEnd: movedEnd });
+
+    expect(inFinder.end()).toHaveValue("11:30");
+    expect(inFinder.attendance()).toHaveValue(80);
+  });
+
+  it("SCRUM20_AC2_a_refresh_with_the_same_values_keeps_the_edits", () => {
+    // The parent refetches after a change request is processed; if the event's
+    // period and attendance did not move, the coordinator's edits stay.
+    const { rerenderWith } = renderDetail();
+    fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
+    fireEvent.change(inFinder.location(), { target: { value: "Level 2" } });
+    fireEvent.change(inFinder.date(), { target: { value: "2026-11-12" } });
+
+    rerenderWith({ ...EVENT, status: "under_review", purpose: "Updated purpose" });
+
+    expect(inFinder.attendance()).toHaveValue(150);
+    expect(inFinder.location()).toHaveValue("Level 2");
+    expect(inFinder.date()).toHaveValue("2026-11-12");
+  });
+});
 
 describe("SCRUM19_AC1 starting the review", () => {
   it("SCRUM19_AC1_a_submitted_request_offers_the_assigned_coordinator_start_review_only", async () => {
@@ -422,5 +639,86 @@ describe("SCRUM19 statuses with nothing to decide", () => {
     expect(within(record).getByText("Approved")).toBeInTheDocument();
     expect(within(record).getByText("No note was left.")).toBeInTheDocument();
     expect(actionButtonsShown()).toEqual([]);
+  });
+});
+
+// SCRUM-254: the finder's results offer "Request this venue", fed the request
+// as this panel last saw it change, so approving here makes it available
+// straight away.
+describe("SCRUM254 requesting a venue from the event view", () => {
+  const HALL = { id: "v1", name: "Hall A", location: "Level 2", maxCapacity: 200 };
+  // eventRequest()'s future() start and end are the same instant, which the
+  // finder refuses to search, so these carry a real two-hour period.
+  const PERIOD = { proposedStart: START_ISO, proposedEnd: END_ISO };
+
+  async function searchInFinder(user) {
+    await user.click(within(finderSection()).getByRole("button", { name: "Search venues" }));
+    return within(finderSection()).findByRole("button", { name: "Request this venue: Hall A" });
+  }
+
+  it("SCRUM254_approving_here_enables_request_this_venue", async () => {
+    vi.mocked(decideEventRequest).mockResolvedValue(eventRequest({
+      ...PERIOD,
+      status: "approved",
+      reviewingCoordinatorId: ASSIGNED,
+      decision: "approved",
+      decisionNote: "Approved.",
+      decidedBy: ASSIGNED,
+      decidedAt: "2026-01-15T09:00:00+08:00",
+    }));
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest({ ...PERIOD, status: "under_review", reviewingCoordinatorId: ASSIGNED }));
+
+    await user.type(await screen.findByLabelText("Note for the Organiser"), "Approved.");
+    await user.click(screen.getByRole("button", { name: "Approve request" }));
+    await screen.findByText("Outcome");
+
+    expect(await searchInFinder(user)).toBeEnabled();
+  });
+
+  it("SCRUM254_a_submitted_event_cannot_have_a_venue_requested", async () => {
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest(PERIOD));
+
+    expect(await searchInFinder(user)).toBeDisabled();
+    expect(within(finderSection()).getByRole("status")).toHaveTextContent(
+      "A venue can only be requested for an approved or confirmed event. This event is submitted.",
+    );
+  });
+
+  it("SCRUM254_a_coordinator_who_is_not_assigned_cannot_request", async () => {
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    const user = userEvent.setup();
+    renderAs(OTHER, eventRequest({ ...PERIOD, status: "approved" }));
+
+    expect(await searchInFinder(user)).toBeDisabled();
+    expect(within(finderSection()).getByRole("status")).toHaveTextContent(
+      "Only the coordinator assigned to this event can request a venue for it.",
+    );
+  });
+
+  it("SCRUM254_a_sent_request_refreshes_the_parent", async () => {
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    vi.mocked(createBookingRequest).mockResolvedValue({ id: "b1", status: "pending" });
+    vi.mocked(useAuth).mockReturnValue({ user: { id: ASSIGNED, role: "event_coordinator" } });
+    const onChangeRequestProcessed = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <CoordinatorRequestDetail
+          request={eventRequest({ ...PERIOD, status: "approved" })}
+          onChangeRequestProcessed={onChangeRequestProcessed}
+        />
+      </MemoryRouter>,
+    );
+
+    await user.click(await searchInFinder(user));
+    const panel = screen.getByRole("region", { name: "Request Hall A" });
+    await user.click(within(panel).getByRole("button", { name: "Request this venue" }));
+
+    await waitFor(() => expect(onChangeRequestProcessed).toHaveBeenCalledTimes(1));
+    expect(createBookingRequest).toHaveBeenCalledWith({ eventRequestId: REQUEST_ID, venueId: "v1" });
   });
 });
