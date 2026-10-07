@@ -997,11 +997,12 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
   it('allows a Coordinator to request clarification with a required note', async () => {
     // SCRUM-332: the event is now assigned to the signed-in coordinator, and
     // the fixture says so. Without it the row has no coordinator, which only
-    // worked while the service ignored who was asking. What this test asserts
-    // is unchanged.
+    // worked while the service ignored who was asking.
+    //
+    // Under review, not submitted as in dev before SCRUM-162: clarification is
+    // asked for from under_review only, and a submitted request is refused.
     const note = 'Please clarify the proposed event purpose.';
     const client = createWritableFakeClient([
-      ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: OTHER_ORGANISER_ID })),
       ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: OTHER_ORGANISER_ID })),
       ok(storedRow({
         status: STATUS.PENDING_CLARIFICATION,
@@ -1018,19 +1019,11 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
     expect(res.body.status).toBe(STATUS.PENDING_CLARIFICATION);
     expect(res.body.clarificationNote).toBe(note);
 
-    // SCRUM-318: a submitted request is first moved to under_review, then to
-    // pending_clarification, both recorded against the signed-in coordinator,
-    // with the note as the second's reason. SCRUM-19: the first move starts
-    // the review through start_event_review (029), so the coordinator who
-    // asks is recorded as the reviewer and can later decide.
-    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc', 'rpc']);
-    expect(client.calls[1].fn).toBe('start_event_review');
+    // One call to the status function, recorded against the signed-in
+    // coordinator, with the note as its reason.
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
+    expect(client.calls[1].fn).toBe('change_event_request_status');
     expect(client.calls[1].args).toEqual({
-      p_event_request_id: REQUEST_ID,
-      p_coordinator_id: OTHER_ORGANISER_ID,
-    });
-    expect(client.calls[2].fn).toBe('change_event_request_status');
-    expect(client.calls[2].args).toEqual({
       p_event_request_id: REQUEST_ID,
       p_expected_status: STATUS.UNDER_REVIEW,
       p_new_status: STATUS.PENDING_CLARIFICATION,
@@ -2374,7 +2367,6 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
     // function is told to refuse unless the event is still theirs, taken from
     // the token.
     const client = createWritableFakeClient([
-      ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: NEW_COORDINATOR_ID })),
       ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: NEW_COORDINATOR_ID })),
       ok(storedRow({
         status: STATUS.PENDING_CLARIFICATION,
@@ -2391,14 +2383,12 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe(STATUS.PENDING_CLARIFICATION);
-    // Both changes are made as, and guarded on, the coordinator in the token:
-    // the review is started by them (SCRUM-19, 029), then the clarification.
-    const [startReview, clarify] = client.calls.slice(1);
-    expect(startReview.fn).toBe('start_event_review');
-    expect(startReview.args.p_coordinator_id).toBe(NEW_COORDINATOR_ID);
-    expect(clarify.fn).toBe('change_event_request_status');
-    expect(clarify.args.p_expected_coordinator).toBe(NEW_COORDINATOR_ID);
-    expect(clarify.args.p_changed_by).toBe(NEW_COORDINATOR_ID);
+    expect(client.calls.slice(1)).toHaveLength(1);
+    for (const call of client.calls.slice(1)) {
+      expect(call.fn).toBe('change_event_request_status');
+      expect(call.args.p_expected_coordinator).toBe(NEW_COORDINATOR_ID);
+      expect(call.args.p_changed_by).toBe(NEW_COORDINATOR_ID);
+    }
   });
 
   it('SCRUM332_AC7_takes_the_coordinator_from_the_token_not_the_body', async () => {

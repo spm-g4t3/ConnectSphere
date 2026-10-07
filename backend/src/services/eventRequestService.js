@@ -757,21 +757,28 @@ export async function changeEventRequestStatus(
  *     and gives the true reason. It comes before the status check, as in 018:
  *     whether the event could be sent for clarification is a question only
  *     its coordinator has any reason to ask.
- *  3. The writes. A request that is still submitted is first put under
- *     review, because clarification is asked for from under_review only
- *     (SCRUM-318). Since SCRUM-19 that first step is startEventReview, which
- *     also makes the caller the reviewing coordinator (see the comment at the
- *     call). Then changeEventRequestStatus, which asks canTransition and
- *     writes under_review -> pending_clarification. Two recorded transitions,
- *     each its own database call. If the second is refused the request stays
- *     under_review, a legal status the coordinator can act on, and the first
- *     row is a true record of what happened. The note travels as the reason
- *     for the second: it is why the request changed status, and the function
- *     stores it as the clarification note too (021). Both calls refuse a
- *     caller who no longer holds the event: start_event_review with a 403,
- *     since it checks the caller under its lock, and the status change with a
- *     409, since it compares an expected coordinator. A refresh shows which it
- *     was.
+ *  3. The status. Clarification is asked for from under_review only; any
+ *     other status is a ConflictError naming it, before anything is written.
+ *     This is SCRUM-162 AC2, and the same check dev's version of this
+ *     function makes, with the same message. A submitted request has to be
+ *     started first, through the Start review action (startEventReview,
+ *     SCRUM-19 AC1), which also makes the caller its reviewing coordinator.
+ *  4. The write, through changeEventRequestStatus: under_review ->
+ *     pending_clarification, with the note as the reason, which the function
+ *     also stores as the clarification note (021). The caller is passed as
+ *     the expected coordinator, so an event handed to someone else between
+ *     the read and the write is a 409.
+ *
+ * Why there is no longer a path from submitted. This function used to move a
+ * submitted request to under_review itself, first through
+ * changeEventRequestStatus and then, for SCRUM-19, through startEventReview.
+ * The first left reviewing_coordinator_id empty, so 025's
+ * decided_by_is_reviewer refused every later decision; the second fixed that
+ * by setting the reviewer. With clarification refused outside under_review,
+ * every request that reaches it was started through start_event_review, so
+ * neither step is needed. decide_event_request (029) still fills in an empty
+ * reviewer, for requests that reached under_review the old way before this
+ * change.
  *
  * @param {string} id
  * @param {string} note           what the Organiser is asked to clarify
@@ -807,25 +814,16 @@ export async function requestEventClarification(id, note, coordinatorId, { clien
     );
   }
 
-  let expectedStatus = current.status;
-
-  // A submitted request is put under review first, through startEventReview
-  // (start_event_review, 029), not changeEventRequestStatus. The old path
-  // wrote only the status, so reviewing_coordinator_id stayed null, and 025's
-  // decided_by_is_reviewer then refused every decision on that request: the
-  // coordinator who asked the question could never approve or reject it.
-  // start_event_review sets the reviewer in the same statement as the status,
-  // and refuses anyone but the assigned coordinator under its row lock, so it
-  // carries the same guard the expected coordinator gave the old call.
-  if (expectedStatus === STATUS.SUBMITTED) {
-    await startEventReview(id, coordinatorId, { client: db });
-    expectedStatus = STATUS.UNDER_REVIEW;
+  if (current.status !== STATUS.UNDER_REVIEW) {
+    throw new ConflictError(
+      `An event request with status '${current.status}' cannot change to '${STATUS.PENDING_CLARIFICATION}'.`,
+    );
   }
 
   return changeEventRequestStatus(
     id,
     {
-      expectedStatus,
+      expectedStatus: STATUS.UNDER_REVIEW,
       newStatus: STATUS.PENDING_CLARIFICATION,
       changedBy: coordinatorId,
       reason: clarificationNote,

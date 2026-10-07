@@ -112,12 +112,21 @@ assigned coordinator becomes the reviewer. It is its own function, not a call to
 reviewer, and giving it a parameter would change a signature SCRUM-318 owns. The
 same argument 021 makes for `submit_event_request` writing its own history row.
 
-**Asking for clarification also starts the review.** `requestEventClarification`
-used to move a submitted request to under review through
-`change_event_request_status`, which left the reviewer empty, so that request
-could never be decided. It now starts the review through `startEventReview`
-first. `decide_event_request` also fills in an empty reviewer, for any request
-that reached under review before this change.
+**Clarification is asked for only from under review; the review is started
+explicitly.** Before SCRUM-19, `requestEventClarification` accepted a submitted
+request and moved it to under review itself, through `change_event_request_status`,
+which leaves the reviewer empty, so that request could never be decided. SCRUM-346
+fixed that by having clarification start the review through `startEventReview`.
+PR review then removed that auto-start as redundant: SCRUM-162 AC2 allows
+clarification only on a request already under review, and AC1 gives the
+coordinator an explicit Start review action. `requestEventClarification` now
+refuses any other status with a 409 before anything is written, then makes one
+`change_event_request_status` call. So a submitted request reaches under review
+only through `start_event_review`, which sets the reviewer. This branch had not
+yet merged SCRUM-162, so the guard was added here, with dev's message word for
+word. `decide_event_request` still fills in an empty reviewer, as the backstop for
+requests that reached under review the old way before this change.
+(`docs/SCRUM-19.md`, D11.)
 
 **The status and the decision are written in one statement.** 025's five
 constraints are row-level: Postgres checks each against the whole row after every
@@ -199,8 +208,8 @@ The decider and the time are never taken from the body.
 | AC1-07 | Any | Missing or blank coordinator or decider id | 400 before any call | svc `SCRUM19_AC1_refuses_a_coordinator_id_that_is_%s_before_any_call`, `SCRUM19_AC1_refuses_a_decider_id_that_is_%s_before_any_call` |
 | AC1-08 | `under_review`, held by ASSIGNED | OTHER_COORD decides | 403 | svc and route `SCRUM19_AC1_only_the_assigned_coordinator_decides`; detail `SCRUM19_AC1_a_403_on_a_decision_says_the_request_is_not_theirs`; pglite `SCRUM19_AC3_refuses_a_decision_when_%s_and_writes_nothing` (`the_caller_is_a_coordinator_who_is_not_assigned` and `the_caller_is_null`: 42501, nothing written) |
 | AC1-09 | `under_review`, held by ASSIGNED, someone else recorded as reviewer | ASSIGNED decides | 403; the reviewer is never overwritten | svc `SCRUM19_AC1_only_the_reviewing_coordinator_decides`; pglite `SCRUM19_AC1_never_overwrites_a_reviewer_who_is_someone_else`, and `SCRUM19_AC3_refuses_a_decision_when_%s_and_writes_nothing` (`someone_else_is_recorded_as_the_reviewer`) |
-| AC1-10 | `submitted`, held by ASSIGNED | ASSIGNED asks for clarification | The review is started through `start_event_review` first, so the reviewer is set | svc `SCRUM19_AC1_clarification_starts_the_review_so_the_reviewer_is_set` |
-| AC1-11 | `under_review` | ASSIGNED asks for clarification | Not started again; one status change only | svc `SCRUM19_AC1_a_request_already_under_review_is_not_started_again` |
+| AC1-10 | `submitted`, held by ASSIGNED | ASSIGNED asks for clarification | 409: "An event request with status 'submitted' cannot change to 'pending_clarification'." Only the read is made; nothing is written. The review must be started first (AC1-01) | svc `refuses a submitted request before anything is written` |
+| AC1-11 | `under_review`, held by ASSIGNED | ASSIGNED asks for clarification | One read, then one call to `change_event_request_status` (`under_review → pending_clarification`, the note as its reason); `start_event_review` is not called | svc `moves a request under review to pending clarification and stores the note`, `moves a request already under review to pending clarification in one change`; route `allows a Coordinator to request clarification with a required note` |
 | AC1-12 | `submitted`, signed in as ASSIGNED | Open the event | Start review is the only action | detail `SCRUM19_AC1_a_submitted_request_offers_the_assigned_coordinator_start_review_only` |
 | AC1-13 | `submitted` or `under_review`, signed in as OTHER_COORD | Open the event | No action buttons; a line saying who can act | detail `SCRUM19_AC1_a_%s_request_offers_another_coordinator_nothing_to_press` |
 | AC1-14 | Start review refused with 403 | — | The screen explains in words, not ids | detail `SCRUM19_AC1_a_refused_start_says_why_in_words_not_ids` |
@@ -472,7 +481,8 @@ PGlite suite, in CI, against the real 025 constraints.
 |---|---|
 | The two functions | SCRUM-109, SCRUM-122 (`029_event_request_decisions_functions.sql`) |
 | pglite tests of 025's constraints and 029's functions | SCRUM-134 |
-| AC1 start-review cases, AC1-10 and AC1-11 | SCRUM-346 |
+| AC1 start-review cases | SCRUM-346 |
+| AC1-10 and AC1-11 (clarification only from under review) | SCRUM-19, PR review: removal of the clarification auto-start |
 | AC1 decide cases, AC2, AC3, AC5, AC6, AC7, AC9-01 and AC9-02 | SCRUM-119, SCRUM-121 |
 | detail cases (AC1-12 to AC1-14, AC2-04, AC2-05, AC3-03, AC6-02, AC9-03, AC9-04) | SCRUM-129 |
 | list cases (AC10-01 to AC10-04) | SCRUM-133 |

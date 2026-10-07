@@ -21,7 +21,7 @@ Where the two overlap, the test-case document is the finer-grained record.
 |---|---|---|
 | SCRUM-163 | The decision columns, the decision enum and five row-level constraints | `db/migrations/025_event_request_decisions.sql` (applied live as `010_…`, renamed 6 October 2026) |
 | SCRUM-109, SCRUM-122 | The two functions | `029_event_request_decisions_functions.sql` — `start_event_review`, `decide_event_request` |
-| SCRUM-346 | Starting a review; clarification now starts it too | `startEventReview`, `POST /:id/start-review`, the change to `requestEventClarification` |
+| SCRUM-346 | Starting a review | `startEventReview`, `POST /:id/start-review`. It also made clarification start the review; that was removed after PR review (D11) |
 | SCRUM-119, SCRUM-121 | Approving and rejecting | `decideEventRequest`, `POST /:id/decision`; the four decision fields in `COLUMNS` and `toEventRequest` |
 | SCRUM-129 | The coordinator's decision screen | `CoordinatorRequestDetail.jsx` (decision section), `DecisionOutcome.jsx` |
 | SCRUM-133 | The Organiser's view of the outcome | `MyEventRequests.jsx`, `DecisionOutcome.jsx` with `view="organiser"` |
@@ -35,9 +35,9 @@ Where the two overlap, the test-case document is the finer-grained record.
 
 | Evidence | Result |
 |---|---|
-| Backend suite (`npm test` in `backend`) | 2829 tests passing across 45 files |
-| Frontend suite (`npm test` in `frontend`) | 879 tests passing across 38 files |
-| SCRUM-19's own tests | 119 named `SCRUM19_…`: 39 service, 15 route, 45 PGlite, 16 coordinator screen, 4 Organiser list |
+| Backend suite (`npm test` in `backend`) | 2827 tests passing across 45 files |
+| Frontend suite (`npm test` in `frontend`) | 882 tests passing across 38 files |
+| SCRUM-19's own tests | 120 named `SCRUM19_…`: 37 service, 15 route, 45 PGlite, 19 coordinator screen, 4 Organiser list |
 | PGlite suite | Applies 001 to 029 (the ones it needs) to an in-process Postgres and calls the real functions; runs in CI with no credentials |
 | Live database | 025 (as `010_…`) and 029 applied by hand in the Supabase SQL editor. **No check script exercises 029** against the live database; there is no `decision:check` beside `assignment:check` |
 | Manual UI walkthrough | **Not recorded.** See *Before the examination* at the end |
@@ -92,7 +92,7 @@ which layers carry the proof.
 
 | AC | Migration | Service / route | Screen | Real database (PGlite) | Cases |
 |---|---|---|---|---|---|
-| AC1 | 029 `start_event_review`; `decide_event_request`'s caller and reviewer checks | `startEventReview`, `decideEventRequest`, `requestEventClarification`; both routes behind `coordinatorOnly` | Start review only for the assigned coordinator; nothing to press for anyone else | Yes | AC1-01 to AC1-19 |
+| AC1 | 029 `start_event_review`; `decide_event_request`'s caller and reviewer checks | `startEventReview`, `decideEventRequest`; both routes behind `coordinatorOnly` | Start review only for the assigned coordinator; nothing to press for anyone else | Yes | AC1-01 to AC1-19 |
 | AC2 | 029, `status <> 'under_review'` refused | `decideEventRequest` | Approve, Reject, Return only when under review | Yes | AC2-01 to AC2-05 |
 | AC3 | 029, the same check, naming the status | translateError: 55000 → 409 | Waiting panel on pending clarification | Yes, including "writes nothing" for every refusal | AC3-01 to AC3-04 |
 | AC4 | — (021's history stores the question) | `getEventRequestForCoordinator`, `getEventRequestStatusHistory` | Requirements shown; history **not** shown | The question stored as the history reason | AC4-01, 03, 04 done; 02, 05, 06 not |
@@ -167,7 +167,7 @@ coordinator becomes the reviewer (D1).
 | `SCRUM19_AC1_fills_in_an_empty_reviewer_with_the_decider` | PGlite | A request reaching `under_review` through the status function, with no reviewer, can still be decided |
 | `SCRUM19_AC1_starts_the_review_through_the_function_alone` | service suite | One rpc, the caller as `p_coordinator_id`, nothing else written |
 | `SCRUM19_AC1_only_the_assigned_coordinator_starts_the_review` | service and route suites | 42501 becomes 403 with the function's message |
-| `SCRUM19_AC1_clarification_starts_the_review_so_the_reviewer_is_set` | service suite | Asking for clarification on a submitted request calls `start_event_review` first, then the status change |
+| `refuses a submitted request before anything is written` | service suite | Clarification is refused on a submitted request (409, only the read made), so Start review is the one way from submitted to under review (D11) |
 | `SCRUM19_AC1_an_organiser_cannot_start_a_review_and_nothing_is_queried` | route suite | The role gate refuses before the database is touched |
 | `SCRUM19_AC1_a_submitted_request_offers_the_assigned_coordinator_start_review_only` | screen | Start review is the only action |
 | `SCRUM19_AC1_a_%s_request_offers_another_coordinator_nothing_to_press` | screen | Anyone else sees who can act, and no buttons |
@@ -416,10 +416,13 @@ says "You" and makes no request.
 
 `decide_event_request` sets `reviewing_coordinator_id = coalesce(reviewing_coordinator_id, p_decided_by)`.
 
-- **Empty:** a request could reach `under_review` without a reviewer, through the
-  status function, before `requestEventClarification` was changed. Trusting
-  start-review to have run would make every such request undecidable. The person
-  deciding is, at that moment, the person reviewing; recording it is true.
+- **Empty:** a request could reach `under_review` without a reviewer before
+  SCRUM-19: asking for clarification on a submitted request moved it there through
+  the status function, which sets no reviewer. The live database has such
+  requests. Trusting start-review to have run would make every one of them
+  undecidable. The person deciding is, at that moment, the person reviewing;
+  recording it is true. PGlite's `SCRUM19_AC1_fills_in_an_empty_reviewer_with_the_decider`
+  proves it on exactly that path.
 - **Someone else:** refused with 42501, never rewritten. 018 makes this
   unreachable through the application; the check makes the refusal a readable 403
   rather than a constraint error.
@@ -436,14 +439,37 @@ the form. It maps to the same 409 and its message says what to do. A code of its
 own would need a new `translateError` branch for no difference in the API's
 behaviour. The cost is D7's heuristic.
 
-### D11. Asking for clarification starts the review first
+### D11. Clarification only from under review; the review is started explicitly
 
-`requestEventClarification` used to move a submitted request to `under_review`
-through `changeEventRequestStatus`, leaving the reviewer empty. 025 then refused
-every decision on that request: the coordinator who asked the question could
-never approve or reject it. It now calls `startEventReview` first, then moves the
-request to pending clarification, so whoever asks is the one who can later decide.
-A request already under review is not started again.
+**Why there was an auto-start.** Before SCRUM-19, `requestEventClarification`
+accepted a submitted request and moved it to `under_review` itself, through
+`changeEventRequestStatus`, before moving it on to pending clarification. The
+status function never sets `reviewing_coordinator_id`, so 025's
+`decided_by_is_reviewer` then refused every decision on that request: the
+coordinator who asked the question could never approve or reject it. SCRUM-346
+fixed that by starting the review through `startEventReview` instead, which sets
+the reviewer.
+
+**Why it went.** PR review pointed out that the fix answers a question the
+design no longer asks. SCRUM-162 AC2 allows clarification only on a request that
+is already under review, and AC1 gives the coordinator an explicit Start review
+action. So `requestEventClarification` now refuses any other status with a 409
+before anything is written, and makes one status change. A request reaches
+`under_review` from submitted only through `start_event_review`, which sets the
+reviewer, so the bug cannot occur.
+
+The guard was added here, not inherited. This branch last merged dev before
+SCRUM-162, so dev's version of this function at that point still had the
+two-step path. Restoring it would have brought the bug's cousin back: a reopened
+request keeps its old reviewer (open question 5), and a two-step clarification
+would leave that stale reviewer in place for the newly assigned coordinator. The
+guard's message is dev's, word for word, so the behaviour matches when dev is
+merged.
+
+**What stays.** `decide_event_request` (029) still fills in an empty reviewer
+with the decider (D9). It is the backstop for requests that reached
+`under_review` the old way, before this change, and the live database has some.
+Removing the auto-start does not remove them.
 
 ### D12. The caller is checked before the status, so a draft is a 403
 
@@ -510,7 +536,7 @@ Both were listed above when this document was written, and were fixed in commit
 | 025's header argues for claim-on-review | It says the codebase has no assignment model and that a reviewer *claims* a request by starting it. Both have been false since 014. 025 is applied and append-only, so it is correctly left unedited; 029's header records the change |
 | 025's header on immutability | Says SCRUM-121 would guard "on the row still being undecided". What was built guards on `status = 'under_review'` (D13). Equivalent in effect, different in mechanism; also left unedited |
 | 022's header on the decision columns | Says they "are not created by any migration in this folder", and so updates them through a dynamic statement. 025 is in the folder now. The dynamic statement still works; only the comment is stale. Applied, append-only |
-| 029's own header, (b) | Says `requestEventClarification` moves a submitted request through `change_event_request_status`, and lists changing that as a follow-up. That follow-up is done (D11). Applied, append-only |
+| 029's own header, (b) | Says `requestEventClarification` moves a submitted request through `change_event_request_status`, and recommends starting the review through `start_event_review` instead. Both are now out of date: that was done, then removed, because clarification is no longer accepted on a submitted request (D11). The fill-in it argues for is still right. Applied, append-only |
 | No guard against a direct write to the decision columns | D13 |
 | `translateError`'s 23503 branch | Still calls every foreign-key failure "Unknown organiser", and `decided_by` is one more user reference it would misname. Unreachable today. Carried from SCRUM-327 |
 | `onChangeRequestProcessed` used for every refresh | Starting a review and deciding now refresh the parent through it too. The rename to `onEventChanged` recorded in SCRUM-327 is more overdue |

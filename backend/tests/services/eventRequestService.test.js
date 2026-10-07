@@ -1618,14 +1618,17 @@ describe('SCRUM-11: a draft is updated in place', () => {
 });
 
 describe('SCRUM-46: Coordinator clarification and Organiser response', () => {
-  it('moves a submitted request to pending clarification and stores the note', async () => {
+  it('moves a request under review to pending clarification and stores the note', async () => {
     // SCRUM-332: the caller is now this event's assigned coordinator, and the
     // fixture says so. It used to pass ORGANISER_ID as the coordinator against
     // a row with no coordinator at all, which only worked while the service
-    // ignored who was asking. What this test asserts is unchanged.
+    // ignored who was asking.
+    //
+    // Under review, not submitted as in dev before SCRUM-162: clarification is
+    // asked for from under_review only, and a submitted request is refused
+    // (see the next-but-one test). What this asserts about the note is unchanged.
     const note = 'Please clarify the accessibility arrangements.';
     const client = createFakeClient([
-      ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: COORDINATOR_ID })),
       ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: COORDINATOR_ID })),
       ok(storedRow({
         status: STATUS.PENDING_CLARIFICATION,
@@ -1638,22 +1641,10 @@ describe('SCRUM-46: Coordinator clarification and Organiser response', () => {
 
     expect(result.status).toBe(STATUS.PENDING_CLARIFICATION);
     expect(result.clarificationNote).toBe(note);
-    // SCRUM-318: clarification is asked for from under_review only, so a
-    // submitted request is moved there first. One read, then two recorded
-    // status changes. The note is the reason for the second only, and the
-    // function stores it as the clarification note.
-    //
-    // SCRUM-19: the first change now starts the review through
-    // start_event_review (029) instead of change_event_request_status, so the
-    // caller becomes the reviewing coordinator. See
-    // SCRUM19_AC1_clarification_starts_the_review_so_the_reviewer_is_set.
-    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc', 'rpc']);
-    expect(client.calls[1].fn).toBe('start_event_review');
+    // One read, then one status change, recorded by the status function. The
+    // note is its reason, and the function stores it as the clarification note.
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
     expect(client.calls[1].args).toEqual({
-      p_event_request_id: REQUEST_ID,
-      p_coordinator_id: COORDINATOR_ID,
-    });
-    expect(client.calls[2].args).toEqual({
       p_event_request_id: REQUEST_ID,
       p_expected_status: STATUS.UNDER_REVIEW,
       p_new_status: STATUS.PENDING_CLARIFICATION,
@@ -1683,10 +1674,33 @@ describe('SCRUM-46: Coordinator clarification and Organiser response', () => {
     });
   });
 
-  it('stops after the first change when it is refused, and asks for nothing more', async () => {
+  it('refuses a submitted request before anything is written', async () => {
+    // SCRUM-162 AC2: clarification is asked for from under_review only. A
+    // submitted request has to be started first, through Start review
+    // (SCRUM-19 AC1), which makes the caller its reviewer. This replaces dev's
+    // two-step path, which moved a submitted request to under_review itself
+    // and left the reviewer empty. Only the read is queued, so an attempted
+    // write would fail with "no result queued" rather than pass by accident.
     const client = createFakeClient([
       ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: COORDINATOR_ID })),
-      dbError('55000', 'event request has status approved, not submitted'),
+    ]);
+
+    const err = await errorFrom(
+      requestEventClarification(REQUEST_ID, 'Please clarify.', COORDINATOR_ID, { client }),
+    );
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.status).toBe(409);
+    expect(err.message).toBe("An event request with status 'submitted' cannot change to 'pending_clarification'.");
+    expect(client.calls.map((call) => call.operation)).toEqual(['select']);
+  });
+
+  it('reports a change the status function refuses as a conflict, and asks for nothing more', async () => {
+    // The read said under review; by the time of the write it was not. One
+    // change, refused, so one call and nothing after it.
+    const client = createFakeClient([
+      ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: COORDINATOR_ID })),
+      dbError('55000', `event request ${REQUEST_ID} has status approved, not under_review`),
     ]);
 
     const err = await errorFrom(
@@ -1695,22 +1709,6 @@ describe('SCRUM-46: Coordinator clarification and Organiser response', () => {
 
     expect(err).toBeInstanceOf(ConflictError);
     expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
-  });
-
-  it('leaves the request under review when the second change is refused', async () => {
-    const client = createFakeClient([
-      ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: COORDINATOR_ID })),
-      ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: COORDINATOR_ID })),
-      dbError('40001', `event request ${REQUEST_ID} is no longer assigned to this coordinator`),
-    ]);
-
-    const err = await errorFrom(
-      requestEventClarification(REQUEST_ID, 'Please clarify.', COORDINATOR_ID, { client }),
-    );
-
-    // The first change happened and was recorded; the second was refused.
-    expect(err).toBeInstanceOf(ConflictError);
-    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc', 'rpc']);
   });
 
   it('rejects a blank clarification note before querying', async () => {
@@ -2149,33 +2147,26 @@ const askForClarification = (client, coordinatorId = COORDINATOR_ID) =>
 describe('SCRUM-327 AC7: only the assigned coordinator can request clarification', () => {
   it('SCRUM332_AC7_only_the_assigned_coordinator_can_request_clarification', async () => {
     const client = createFakeClient([
-      ok(assignedRow()),
       ok(assignedRow({ status: STATUS.UNDER_REVIEW })),
       ok(assignedRow({ status: STATUS.PENDING_CLARIFICATION, clarification_note: CLARIFICATION_NOTE })),
     ]);
 
     await askForClarification(client);
 
-    // A submitted event takes two status changes (SCRUM-318: clarification is
-    // asked for from under_review only), and each is guarded on the caller
-    // holding the event, which is AC7. The service does not write the status
-    // column itself.
-    //  - The first starts the review through start_event_review (SCRUM-19,
-    //    029), which refuses anyone but the assigned coordinator under its
-    //    row lock, and makes the caller the reviewing coordinator.
-    //  - The second goes through change_event_request_status, carrying the
-    //    caller as the person who made the change, the status just read, and
-    //    the caller as the expected coordinator, so a handover after the read
-    //    is refused.
-    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc', 'rpc']);
-    const [first, second] = rpcCallsOf(client);
-    expect(first.fn).toBe('start_event_review');
-    expect(first.args).toEqual({
-      p_event_request_id: REQUEST_ID,
-      p_coordinator_id: COORDINATOR_ID,
-    });
-    expect(second.fn).toBe('change_event_request_status');
-    expect(second.args).toMatchObject({
+    // The status change is a call to change_event_request_status, and it
+    // carries what each part of AC7 needs:
+    //  - the caller as the person who made the change, for the history.
+    //  - the status the caller read, which the function refuses to change if
+    //    it has moved since: the guard on the status.
+    //  - the caller as the expected coordinator, so the function refuses if a
+    //    handover landed after the read: AC7. The service does not write the
+    //    status column itself.
+    // One change, from under_review: since SCRUM-162 a submitted event is
+    // refused rather than moved there first.
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
+    const [change] = rpcCallsOf(client);
+    expect(change.fn).toBe('change_event_request_status');
+    expect(change.args).toMatchObject({
       p_expected_status: STATUS.UNDER_REVIEW,
       p_new_status: STATUS.PENDING_CLARIFICATION,
       p_changed_by: COORDINATOR_ID,
@@ -2201,7 +2192,6 @@ describe('SCRUM-327 AC7: only the assigned coordinator can request clarification
   it('SCRUM332_AC7_the_new_coordinator_can_request_clarification', async () => {
     // The other half of AC7: the person the event was handed to can act on it.
     const client = createFakeClient([
-      ok(assignedRow({ assigned_coordinator_id: NEW_COORDINATOR_ID })),
       ok(assignedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: NEW_COORDINATOR_ID })),
       ok(assignedRow({
         status: STATUS.PENDING_CLARIFICATION,
@@ -2213,12 +2203,11 @@ describe('SCRUM-327 AC7: only the assigned coordinator can request clarification
     const result = await askForClarification(client, NEW_COORDINATOR_ID);
 
     expect(result.status).toBe(STATUS.PENDING_CLARIFICATION);
-    // Both changes are made as, and guarded on, the new coordinator: the
-    // review is started by them (SCRUM-19), and the clarification is theirs.
-    const [startReview, clarify] = rpcCallsOf(client);
-    expect(startReview.args.p_coordinator_id).toBe(NEW_COORDINATOR_ID);
-    expect(clarify.args.p_expected_coordinator).toBe(NEW_COORDINATOR_ID);
-    expect(clarify.args.p_changed_by).toBe(NEW_COORDINATOR_ID);
+    expect(rpcCallsOf(client)).toHaveLength(1);
+    for (const call of rpcCallsOf(client)) {
+      expect(call.args.p_expected_coordinator).toBe(NEW_COORDINATOR_ID);
+      expect(call.args.p_changed_by).toBe(NEW_COORDINATOR_ID);
+    }
   });
 
   it('SCRUM332_AC7_checks_the_caller_before_the_status', async () => {
@@ -2239,16 +2228,13 @@ describe('SCRUM-327 AC7: only the assigned coordinator can request clarification
 
   it('SCRUM332_AC7_reports_a_handover_after_the_read_as_a_conflict', async () => {
     // The read said the caller held the event and it was under review. The
-    // status function then refused with 40001: it was handed on, or changed
-    // status, in between. A race, so a 409 telling them to refresh -- see the
-    // block comment above for why not a 403.
+    // function then refused with 40001: it was handed on, or changed status,
+    // in between. A race, so a 409 telling them to refresh -- see the block
+    // comment above for why not a 403.
     //
-    // Under review, not submitted, since SCRUM-19: a submitted request is
-    // first put under review by start_event_review (029), which refuses a
-    // caller who no longer holds the event with 42501, a 403, because it
-    // checks the caller under its lock rather than comparing an expected
-    // coordinator. The 40001 race is change_event_request_status's, so it is
-    // tested on the path that reaches that function first.
+    // Under review, where dev had submitted: a submitted read is now refused
+    // by the service's own status check before the function is called, so on
+    // a submitted row this test would pass without reaching the 40001 at all.
     const client = createFakeClient([
       ok(assignedRow({ status: STATUS.UNDER_REVIEW })),
       dbError('40001', `event request ${REQUEST_ID} is no longer assigned to this coordinator`),
@@ -4328,54 +4314,5 @@ describe("SCRUM-19: decide_event_request's refusals become typed errors", () => 
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(ValidationError);
     expect(err.status).toBeUndefined();
-  });
-});
-
-
-describe('SCRUM-19 AC1: asking for clarification starts the review', () => {
-  it('SCRUM19_AC1_clarification_starts_the_review_so_the_reviewer_is_set', async () => {
-    // Why requestEventClarification changed. It used to move a submitted
-    // request to under_review through change_event_request_status, which
-    // writes the status and nothing else, so reviewing_coordinator_id stayed
-    // null. 025's decided_by_is_reviewer then refused every decision on that
-    // request: the coordinator who asked the question could never approve or
-    // reject it. Starting the review through start_event_review sets the
-    // reviewer in the same statement as the status, so the coordinator who
-    // asks for clarification is the one who can later decide.
-    const client = createFakeClient([
-      ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: COORDINATOR_ID })),
-      ok(underReviewRow()),
-      ok(storedRow({
-        status: STATUS.PENDING_CLARIFICATION,
-        assigned_coordinator_id: COORDINATOR_ID,
-        reviewing_coordinator_id: COORDINATOR_ID,
-        clarification_note: 'Please clarify.',
-      })),
-    ]);
-
-    await requestEventClarification(REQUEST_ID, 'Please clarify.', COORDINATOR_ID, { client });
-
-    const [start, clarify] = rpcCallsOf(client);
-    expect(start.fn).toBe('start_event_review');
-    expect(start.args).toEqual({ p_event_request_id: REQUEST_ID, p_coordinator_id: COORDINATOR_ID });
-    expect(clarify.fn).toBe('change_event_request_status');
-    expect(clarify.args).toMatchObject({
-      p_expected_status: STATUS.UNDER_REVIEW,
-      p_new_status: STATUS.PENDING_CLARIFICATION,
-    });
-  });
-
-  it('SCRUM19_AC1_a_request_already_under_review_is_not_started_again', async () => {
-    // Already under review means the review has been started, so there is
-    // nothing for start_event_review to do, and it would refuse anyway
-    // (55000: only a submitted request can be put under review).
-    const client = createFakeClient([
-      ok(underReviewRow()),
-      ok(storedRow({ status: STATUS.PENDING_CLARIFICATION, assigned_coordinator_id: COORDINATOR_ID })),
-    ]);
-
-    await requestEventClarification(REQUEST_ID, 'Please clarify.', COORDINATOR_ID, { client });
-
-    expect(rpcCallsOf(client).map((call) => call.fn)).toEqual(['change_event_request_status']);
   });
 });
