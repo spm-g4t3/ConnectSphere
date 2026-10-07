@@ -64,6 +64,7 @@ describe("EMPTY_EVENT_SEARCH_FORM", () => {
       layout: "",
       accessibility: [],
       facilities: [],
+      spansDays: false,
     });
     expect(Object.isFrozen(EMPTY_EVENT_SEARCH_FORM)).toBe(true);
     expect(Object.isFrozen(EMPTY_EVENT_SEARCH_FORM.accessibility)).toBe(true);
@@ -82,6 +83,7 @@ describe("SCRUM20_AC2 seedFromEvent", () => {
       layout: "",
       accessibility: [],
       facilities: [],
+      spansDays: false,
     });
   });
 
@@ -184,6 +186,39 @@ describe("SCRUM20_AC2 seedFromEvent", () => {
       startTime: START.time,
       endTime: "",
     });
+  });
+
+  it("SCRUM20_AC3_same_day_event_does_not_span_days", () => {
+    expect(seedFromEvent(EVENT).spansDays).toBe(false);
+  });
+
+  it.each([
+    ["on a later date", "2026-11-13T12:00:00+08:00"],
+    ["across singapore midnight", "2026-11-12T01:00:00+08:00"],
+  ])("SCRUM20_AC3_end_%s_spans_days", (_label, proposedEnd) => {
+    expect(seedFromEvent({ ...EVENT, proposedEnd })).toMatchObject({
+      date: START.date,
+      endTime: "",
+      spansDays: true,
+    });
+  });
+
+  it("SCRUM20_AC3_days_are_compared_in_singapore_not_utc", () => {
+    // 23:00 UTC on the 10th is 07:00 on the 11th in Singapore: one day there.
+    expect(seedFromEvent({
+      ...EVENT,
+      proposedStart: "2026-11-10T23:00:00Z",
+      proposedEnd: "2026-11-11T12:00:00+08:00",
+    })).toMatchObject({ date: "2026-11-11", spansDays: false });
+  });
+
+  it.each([
+    ["the end is missing", { proposedEnd: null }],
+    ["the start is missing", { proposedStart: null }],
+    ["the end is unreadable", { proposedEnd: "garbage" }],
+    ["both are missing", { proposedStart: null, proposedEnd: null }],
+  ])("SCRUM20_AC3_does_not_span_days_when_%s", (_label, overrides) => {
+    expect(seedFromEvent({ ...EVENT, ...overrides }).spansDays).toBe(false);
   });
 
   it.each([
@@ -400,6 +435,14 @@ describe("SCRUM20_AC1 toSearchCriteria", () => {
 
     expect(criteria.startsAt).toBe("2026-11-11T10:00:30+08:00");
     expect(criteria.endsAt).toBe("2026-11-11T12:00:00+08:00");
+  });
+
+  it("SCRUM20_AC3_spans_days_is_never_sent", () => {
+    const form = { ...validForm(), spansDays: true };
+    expect(validateEventSearchForm(form)).toEqual([]);
+    const criteria = toSearchCriteria(form);
+    expect(criteria).not.toHaveProperty("spansDays");
+    expect(Object.keys(criteria).sort()).toEqual(["endsAt", "expectedAttendance", "startsAt"]);
   });
 
   it("SCRUM20_AC2_a_seeded_form_sends_the_event_instants_back", () => {

@@ -42,6 +42,19 @@
 // device's, because the backend checks them against venue hours in Singapore
 // (eventVenueSearchForm.js explains). The hint under them says so.
 //
+// Two more hints answer what would otherwise look like a fault:
+//
+//   - Location matches part of the venue's location attribute (the backend's
+//     matchesLocation), not its name, so "room" does not find "Meeting room"
+//     in Singapore. The hint under the input says so, and the input's
+//     aria-describedby names it alongside any errors.
+//   - An event whose start and end fall on different Singapore dates seeds
+//     with End blank (seedFromEvent's spansDays), because the search checks
+//     one date at a time. A hint by the times says so and names the seeded
+//     date, so the "is required" beside End has a reason. It is read from the
+//     seed, stored once, and stays even if the coordinator changes the date:
+//     it describes the event, not the form.
+//
 // The event's free-text requirements are already shown under "Requirements"
 // in the same panel, so this section does not repeat them.
 //
@@ -144,7 +157,8 @@ const CODE_GROUPS = [
 
 export default function EventVenueFinder({ request, userId, onRequestSubmitted }) {
   // Lazy: the function runs on the first render only. See the header.
-  const [values, setValues] = useState(() => seedFromEvent(request));
+  const [seed] = useState(() => seedFromEvent(request));
+  const [values, setValues] = useState(seed);
   const [fieldErrors, setFieldErrors] = useState([]);
   const [serverFieldErrors, setServerFieldErrors] = useState([]);
   const [error, setError] = useState(null);
@@ -162,6 +176,7 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
   const idPrefix = useId();
   const idFor = (field) => `${idPrefix}-${field}`;
   const errorId = (field) => `${idPrefix}-${field}-error`;
+  const hintId = (field) => `${idPrefix}-${field}-hint`;
 
   /** Editing a field retires that field's errors, client and server alike. */
   function clearErrorsFor(field) {
@@ -229,12 +244,17 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
       .map((err) => err.message);
   }
 
-  /** aria wiring for one control, the same way VenueSearch does it. */
-  function ariaFor(field) {
+  /**
+   * aria wiring for one control, the same way VenueSearch does it, plus the
+   * ids of any hints that describe it. Errors come first, so they are read
+   * before the standing hint.
+   */
+  function ariaFor(field, hintIds = []) {
     const hasErrors = messagesFor(field).length > 0;
+    const describedBy = [...(hasErrors ? [errorId(field)] : []), ...hintIds];
     return {
       "aria-invalid": hasErrors ? "true" : undefined,
-      "aria-describedby": hasErrors ? errorId(field) : undefined,
+      "aria-describedby": describedBy.length > 0 ? describedBy.join(" ") : undefined,
     };
   }
 
@@ -288,7 +308,7 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
               value={values.endTime}
               onChange={(e) => update("endTime", e.target.value)}
               disabled={loading}
-              {...ariaFor("endTime")}
+              {...ariaFor("endTime", seed.spansDays ? [hintId("spansDays")] : [])}
             />
             {renderFieldErrors("endTime")}
           </div>
@@ -298,6 +318,13 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
         <p className="event-venue-finder__hint">
           Times are Singapore time ({VENUE_TIME_ZONE}), the venues' local time.
         </p>
+        {/* A plain hint, not a status: it describes the event (see the header). */}
+        {seed.spansDays && (
+          <p className="event-venue-finder__hint" id={hintId("spansDays")}>
+            This event runs over more than one day. Venue search checks one day at a
+            time — set the end time for {seed.date}.
+          </p>
+        )}
 
         <div className="event-venue-finder__row">
           <div className="event-venue-finder__field">
@@ -322,8 +349,11 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
               value={values.location}
               onChange={(e) => update("location", e.target.value)}
               disabled={loading}
-              {...ariaFor("location")}
+              {...ariaFor("location", [hintId("location")])}
             />
+            <p className="event-venue-finder__hint" id={hintId("location")}>
+              Matches part of the venue's location (building or area), not its name.
+            </p>
             {renderFieldErrors("location")}
           </div>
           <div className="event-venue-finder__field">
