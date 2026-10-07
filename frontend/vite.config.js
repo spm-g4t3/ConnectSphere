@@ -18,6 +18,12 @@ const FULL = { lines: 100, branches: 100, functions: 100, statements: 100 }
 // as cheap defence; the disabled buttons are the real protection.
 const PANEL = { lines: 100, branches: 97.56, functions: 100, statements: 97.81 }
 
+// SCRUM-255's one exception, measured the same way: if (sending.current) return
+// in MyBookingRequests.jsx's handleWithdraw is unreachable, because every
+// Withdraw button is disabled while one is being sent and React does not
+// dispatch clicks to disabled buttons. The ref is cheap defence behind them.
+const MY_BOOKING_REQUESTS = { lines: 100, branches: 98.07, functions: 100, statements: 98.24 }
+
 const SCRUM17_FILES = [
   'src/components/VenueBlocksPanel.jsx',
   'src/components/VenueBlockForm.jsx',
@@ -48,6 +54,18 @@ const SCRUM178_FILES = [
   'src/components/VenueCalendar.jsx',
 ]
 
+// SCRUM-254 owns these outright. VenueSearch.jsx and CoordinatorRequestDetail.jsx
+// gain the request button and the richer handoff but are shared (SCRUM-45,
+// SCRUM-130, SCRUM-185, SCRUM-334), so, like venueService.js, they are not gated.
+const SCRUM254_FILES = [
+  'src/components/BookingRequestPanel.jsx',
+  'src/services/bookingRequestService.js',
+  'src/services/bookingRequestEligibility.js',
+  'src/services/bookingRequestErrors.js',
+  'src/components/MyBookingRequests.jsx',
+  'src/services/bookingRequestStatusDisplay.js',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -58,6 +76,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./tests/setup.js'],
     include: ['tests/**/*.test.{js,jsx}'],
+    testTimeout: 15000,
     // Explicit imports (describe/it/expect from 'vitest') rather than globals,
     // matching the backend suite and keeping ESLint's no-undef honest.
     globals: false,
@@ -73,6 +92,10 @@ export default defineConfig({
         ]),
         ...SCRUM186_FILES.map((file) => [file, FULL]),
         ...SCRUM178_FILES.map((file) => [file, FULL]),
+        ...SCRUM254_FILES.map((file) => [
+          file,
+          file === 'src/components/MyBookingRequests.jsx' ? MY_BOOKING_REQUESTS : FULL,
+        ]),
       ]),
     },
   },

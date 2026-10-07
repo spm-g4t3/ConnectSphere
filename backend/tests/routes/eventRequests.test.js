@@ -994,7 +994,7 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
     next();
   };
 
-  it('allows a Coordinator to request clarification with a required note', async () => {
+  it('allows the assigned Coordinator to request clarification with a required note and optional reply-by date', async () => {
     // SCRUM-332: the event is now assigned to the signed-in coordinator, and
     // the fixture says so. Without it the row has no coordinator, which only
     // worked while the service ignored who was asking.
@@ -1002,34 +1002,35 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
     // Under review, not submitted as in dev before SCRUM-162: clarification is
     // asked for from under_review only, and a submitted request is refused.
     const note = 'Please clarify the proposed event purpose.';
+    const replyByDate = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
     const client = createWritableFakeClient([
       ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: OTHER_ORGANISER_ID })),
       ok(storedRow({
         status: STATUS.PENDING_CLARIFICATION,
         clarification_note: note,
+        clarification_reply_by_date: replyByDate,
         assigned_coordinator_id: OTHER_ORGANISER_ID,
       })),
     ]);
 
     const res = await request(appWith({ client, requireAuth: coordinatorAuth }))
       .post(`/api/event-requests/${REQUEST_ID}/clarification`)
-      .send({ note });
+      .send({ note, replyByDate, requestedFields: ['purpose', 'proposedStart'] });
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe(STATUS.PENDING_CLARIFICATION);
     expect(res.body.clarificationNote).toBe(note);
+    expect(res.body.clarificationReplyByDate).toBe(replyByDate);
 
-    // One call to the status function, recorded against the signed-in
-    // coordinator, with the note as its reason.
     expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
-    expect(client.calls[1].fn).toBe('change_event_request_status');
+    expect(client.calls[1].fn).toBe('request_event_clarification_with_fields');
     expect(client.calls[1].args).toEqual({
       p_event_request_id: REQUEST_ID,
-      p_expected_status: STATUS.UNDER_REVIEW,
-      p_new_status: STATUS.PENDING_CLARIFICATION,
       p_changed_by: OTHER_ORGANISER_ID,
-      p_reason: note,
       p_expected_coordinator: OTHER_ORGANISER_ID,
+      p_reason: note,
+      p_reply_by_date: replyByDate,
+      p_requested_fields: ['purpose', 'proposedStart'],
     });
   });
 
@@ -1043,40 +1044,41 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
     expect(client.calls).toHaveLength(0);
   });
 
-  it('allows only the owning Organiser to send amendments for review', async () => {
+  it('allows the owning Organiser to reply and return the request to review', async () => {
     const client = createWritableFakeClient([
       ok(storedRow({ status: STATUS.PENDING_CLARIFICATION, clarification_note: 'Clarify purpose.' })),
       ok(storedRow({
-        status: STATUS.PENDING_CLARIFICATION,
-        clarification_note: 'Clarify purpose.',
-        description: 'Updated description.',
-      })),
-      ok(storedRow({
         status: STATUS.UNDER_REVIEW,
         clarification_note: null,
-        description: 'Updated description.',
       })),
     ]);
 
     const res = await request(appWith({ client }))
       .patch(`/api/event-requests/${REQUEST_ID}/clarification-response`)
-      .send({ description: 'Updated description.' });
+      .send({ message: 'The event is invitation-only.', amendments: {} });
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe(STATUS.UNDER_REVIEW);
-    expect(res.body.description).toBe('Updated description.');
     expect(res.body.clarificationNote).toBeNull();
-    expect(client.calls[1].filters).toContainEqual(['organiser_id', ORGANISER_ID]);
-
-    // SCRUM-321: the amendments are saved without touching the status, and the
-    // status moves through the function, recorded against the Organiser.
-    expect(client.calls[1].payload).not.toHaveProperty('status');
-    expect(client.calls[2].fn).toBe('change_event_request_status');
-    expect(client.calls[2].args).toMatchObject({
-      p_expected_status: STATUS.PENDING_CLARIFICATION,
-      p_new_status: STATUS.UNDER_REVIEW,
-      p_changed_by: ORGANISER_ID,
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
+    expect(client.calls[1].fn).toBe('reply_to_event_clarification_with_amendments');
+    expect(client.calls[1].args).toEqual({
+      p_event_request_id: REQUEST_ID,
+      p_organiser_id: ORGANISER_ID,
+      p_reply: 'The event is invitation-only.',
+      p_updates: {},
     });
+  });
+
+  it('does not accept request-field payloads outside the amendments object', async () => {
+    const client = createWritableFakeClient([]);
+    const res = await request(appWith({ client }))
+      .patch(`/api/event-requests/${REQUEST_ID}/clarification-response`)
+      .send({ description: 'Changed the event description.' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/reply is required/i);
+    expect(client.calls).toHaveLength(0);
   });
 });
 
@@ -2364,8 +2366,8 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
 
   it('SCRUM332_AC7_the_new_coordinator_can_request_clarification', async () => {
     // The coordinator the event was handed to can act on it, and the status
-    // function is told to refuse unless the event is still theirs, taken from
-    // the token.
+    // atomic clarification function is told to refuse unless the event is
+    // still theirs, taken from the token.
     const client = createWritableFakeClient([
       ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: NEW_COORDINATOR_ID })),
       ok(storedRow({
@@ -2383,12 +2385,9 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe(STATUS.PENDING_CLARIFICATION);
-    expect(client.calls.slice(1)).toHaveLength(1);
-    for (const call of client.calls.slice(1)) {
-      expect(call.fn).toBe('change_event_request_status');
-      expect(call.args.p_expected_coordinator).toBe(NEW_COORDINATOR_ID);
-      expect(call.args.p_changed_by).toBe(NEW_COORDINATOR_ID);
-    }
+    expect(client.calls[1].fn).toBe('request_event_clarification_with_fields');
+    expect(client.calls[1].args.p_expected_coordinator).toBe(NEW_COORDINATOR_ID);
+    expect(client.calls[1].args.p_changed_by).toBe(NEW_COORDINATOR_ID);
   });
 
   it('SCRUM332_AC7_takes_the_coordinator_from_the_token_not_the_body', async () => {

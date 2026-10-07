@@ -21,6 +21,11 @@ const NAV_LINKS_BY_ROLE = {
     // question for this role, but a different target: /events is the
     // Organiser's page.
     { to: "/my-events", label: "My Events" },
+    // SCRUM-255. The venue requests this coordinator has raised, and where each
+    // stands. Beside "Find a Venue", where a request starts, and distinct from
+    // Venue Staff's "Booking Requests", which is the other side of the same
+    // requests.
+    { to: "/my-venue-requests", label: "Venue Requests" },
     // "/review-queue", not "/events" (SCRUM-45). /events renders
     // MyEventRequests, which reads the organiser-scoped endpoint, so this
     // link used to promise a Coordinator "Events" and hand them "You haven't
@@ -48,6 +53,7 @@ const NAV_LINKS_BY_ROLE = {
     { to: "/tickets", label: "Support Tickets" },
     { to: "/equipment", label: "Equipment Requests" },
     { to: "/equipment-catalogue", label: "Equipment Catalogue" },
+    { to: "/equipment-availability", label: "Check Availability" },
   ],
 };
 

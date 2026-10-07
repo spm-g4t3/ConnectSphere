@@ -1,0 +1,253 @@
+// BookingRequestPanel.jsx
+//
+// SCRUM-254 (part of SCRUM-243). The one "Request this venue" flow, for the
+// event and venue it is given. Venue search mounts it today; the suitability
+// panel (SCRUM-191) mounts the same component, passing the result it already
+// holds as `suitability`, so both entry points behave identically.
+//
+// What the coordinator sees and chooses:
+//   - the event's own details, because they are what the request will carry:
+//     the period, expected attendance and requirements come from the stored
+//     event on the server, never from this form;
+//   - the venue;
+//   - optional setup notes, the only free text sent.
+//
+// Suitability (N10) is computed by the server. When the venue fails it, a
+// warning lists the criteria not met and the coordinator must tick an explicit
+// confirmation before the request can be sent. That happens in two ways: up
+// front, when the caller passes a `suitability` that says it failed, or after
+// the first send, when the server answers SUITABILITY_CONFIRMATION_REQUIRED.
+// Either way confirmUnsuitable is sent only once the box is ticked.
+//
+// A request is sent once at a time: the button is disabled while saving, and a
+// ref guards the handler, because state updates are not visible to a second
+// click that lands before the next render.
+//
+// Presentational about the outcome: it calls onSubmitted(request) and
+// onEventAlreadyRequested() and leaves refreshing whatever they show to the
+// parent. data.error is never shown; see bookingRequestErrors.js.
+
+import { useId, useRef, useState } from "react";
+import { createBookingRequest } from "../services/bookingRequestService";
+import {
+  bookingRequestErrorMessage,
+  fieldErrorsFrom,
+  isEventAlreadyRequested,
+  isSuitabilityConfirmationRequired,
+  periodConflicts,
+  unmetCriteria,
+} from "../services/bookingRequestErrors";
+import { formatRange, shortId } from "../services/displayFormat";
+
+/** Mirrors bookings_setup_notes_length in migration 030. */
+const SETUP_NOTES_MAX_LENGTH = 1000;
+
+const NOTES_FIELDS = ["setupNotes"];
+
+function orNotSpecified(value) {
+  const text = typeof value === "string" ? value.trim() : value;
+  return text ? text : "Not specified";
+}
+
+function failedCriteria(suitability) {
+  const criteria = Array.isArray(suitability?.criteria) ? suitability.criteria : [];
+  return criteria.filter((criterion) => criterion?.met === false);
+}
+
+function criterionText(criterion) {
+  const name = criterion?.criterion || "A requirement";
+  return criterion?.detail ? `${name}: ${criterion.detail}` : name;
+}
+
+export default function BookingRequestPanel({
+  event,
+  venue,
+  suitability,
+  onSubmitted,
+  onEventAlreadyRequested,
+  onClose,
+}) {
+  const idPrefix = useId();
+  const [setupNotes, setSetupNotes] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  // The criteria the server said were not met, once it has said so.
+  const [serverCriteria, setServerCriteria] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const [conflicts, setConflicts] = useState([]);
+  const [fieldErrors, setFieldErrors] = useState([]);
+  const [submitted, setSubmitted] = useState(null);
+  const sending = useRef(false);
+
+  const suitabilityFailed = suitability?.suitable === false;
+  const needsConfirmation = suitabilityFailed || serverCriteria !== null;
+  const unmet = serverCriteria ?? failedCriteria(suitability);
+  const notesTooLong = Array.from(setupNotes.trim()).length > SETUP_NOTES_MAX_LENGTH;
+  const notesErrorId = `${idPrefix}-notes-error`;
+  const notesMessages = [
+    ...(notesTooLong ? [`Setup notes must be ${SETUP_NOTES_MAX_LENGTH} characters or fewer.`] : []),
+    ...fieldErrors.map((d) => d.message),
+  ];
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (sending.current || submitted) return;
+    if (notesTooLong) return;
+    if (needsConfirmation && !confirmed) return;
+
+    sending.current = true;
+    setSubmitting(true);
+    setError(null);
+    setConflicts([]);
+    setFieldErrors([]);
+    try {
+      const request = await createBookingRequest({
+        eventRequestId: event.id,
+        venueId: venue.id,
+        ...(setupNotes.trim() ? { setupNotes: setupNotes.trim() } : {}),
+        ...(needsConfirmation && confirmed ? { confirmUnsuitable: true } : {}),
+      });
+      setSubmitted(request);
+      onSubmitted?.(request);
+    } catch (err) {
+      if (isSuitabilityConfirmationRequired(err)) {
+        // Warn, and wait for the coordinator to tick the box and send again.
+        setServerCriteria(unmetCriteria(err));
+        setConfirmed(false);
+      } else {
+        setError(bookingRequestErrorMessage(err));
+        setConflicts(periodConflicts(err));
+        setFieldErrors(fieldErrorsFrom(err, NOTES_FIELDS));
+        if (isEventAlreadyRequested(err)) onEventAlreadyRequested?.();
+      }
+    } finally {
+      sending.current = false;
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="booking-request" aria-label={`Request ${venue.name}`}>
+      <h3>Request {venue.name}</h3>
+
+      <dl className="booking-request__details">
+        <dt>Event</dt>
+        <dd>{event.eventName || "Unnamed event"}</dd>
+        <dt>When</dt>
+        <dd>{formatRange(event.proposedStart, event.proposedEnd, "Not set")}</dd>
+        <dt>Expected attendance</dt>
+        <dd>{event.expectedAttendance ?? "Not specified"}</dd>
+        <dt>Venue requirements</dt>
+        <dd>{orNotSpecified(event.venueRequirements)}</dd>
+        <dt>Accessibility requirements</dt>
+        <dd>{orNotSpecified(event.accessibilityRequirements)}</dd>
+        <dt>Venue</dt>
+        <dd>
+          {venue.name}
+          {venue.location ? `, ${venue.location}` : ""}
+          {venue.maxCapacity != null ? `, seats up to ${venue.maxCapacity}` : ""}
+        </dd>
+      </dl>
+
+      {submitted ? (
+        <div className="booking-request__success" role="status">
+          <p>
+            Request sent to Venue Staff for {venue.name}. Its status is <strong>Pending</strong>.
+          </p>
+          {onClose && (
+            <button type="button" onClick={onClose}>
+              Close
+            </button>
+          )}
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} noValidate>
+          <label className="booking-request__notes">
+            Setup notes (optional)
+            <textarea
+              value={setupNotes}
+              onChange={(e) => {
+                setSetupNotes(e.target.value);
+                setFieldErrors([]);
+              }}
+              rows={3}
+              disabled={submitting}
+              aria-invalid={notesMessages.length > 0 ? "true" : undefined}
+              aria-describedby={notesMessages.length > 0 ? notesErrorId : undefined}
+            />
+          </label>
+          {notesMessages.length > 0 && (
+            <ul className="booking-request__field-error" id={notesErrorId}>
+              {notesMessages.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </ul>
+          )}
+
+          {needsConfirmation && (
+            <div className="booking-request__warning" role="alert">
+              <h4>This venue does not meet this event&apos;s requirements</h4>
+              {unmet.length > 0 && (
+                <ul>
+                  {unmet.map((criterion, i) => (
+                    <li key={`${criterion?.criterion ?? "criterion"}-${i}`}>{criterionText(criterion)}</li>
+                  ))}
+                </ul>
+              )}
+              <label>
+                <input
+                  type="checkbox"
+                  checked={confirmed}
+                  onChange={(e) => setConfirmed(e.target.checked)}
+                  disabled={submitting}
+                />
+                I understand this venue does not meet the requirements and want to request it anyway
+              </label>
+            </div>
+          )}
+
+          {error && (
+            <p className="booking-request__error" role="alert">
+              {error}
+            </p>
+          )}
+
+          {conflicts.length > 0 && (
+            <ul className="booking-request__conflicts" aria-label="What is in the way">
+              {conflicts.map((conflict, i) =>
+                conflict.kind === "block" ? (
+                  <li key={conflict.blockId ?? i}>
+                    <strong>Blocked</strong>
+                    <span>{formatRange(conflict.startsAt, conflict.endsAt)}</span>
+                  </li>
+                ) : (
+                  <li key={conflict.bookingId ?? i}>
+                    <strong>{conflict.eventName || "Unnamed event"}</strong>
+                    <span>{formatRange(conflict.startsAt, conflict.endsAt)}</span>
+                    {conflict.eventRequestId && (
+                      <code title={conflict.eventRequestId}>{shortId(conflict.eventRequestId)}</code>
+                    )}
+                  </li>
+                ),
+              )}
+            </ul>
+          )}
+
+          <div className="booking-request__actions">
+            <button
+              type="submit"
+              disabled={submitting || notesTooLong || (needsConfirmation && !confirmed)}
+            >
+              {submitting ? "Requesting..." : "Request this venue"}
+            </button>
+            {onClose && (
+              <button type="button" onClick={onClose} disabled={submitting}>
+                Cancel
+              </button>
+            )}
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}

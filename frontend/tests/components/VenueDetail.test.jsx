@@ -51,6 +51,19 @@ describe("SCRUM17 VenueDetail after the display helpers moved", () => {
     expect(getVenueBookings).toHaveBeenCalledWith(VENUE.id);
   });
 
+  it("SCRUM257_labels_a_booking_request_with_its_status_so_it_does_not_read_as_a_hold", async () => {
+    vi.mocked(getVenueBookings).mockResolvedValue([
+      { ...BOOKING, statusDisplay: { status: "pending", label: "Pending", group: "PENDING" } },
+      { ...BOOKING, id: "b0000000-0000-4000-8000-000000000002", eventRequestId: "f1b2c3d4-5678-4000-8000-000000000002", statusDisplay: { status: "withdrawn", label: "Withdrawn", group: "WITHDRAWN" } },
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    const pending = (await screen.findByText("e1b2c3d4")).closest("li");
+    expect(within(pending).getByText("Pending")).toBeInTheDocument();
+    expect(within(screen.getByText("f1b2c3d4").closest("li")).getByText("Withdrawn")).toBeInTheDocument();
+  });
+
   it("renders unknown and no event for a booking missing its times and event", async () => {
     vi.mocked(getVenueBookings).mockResolvedValue([
       { id: BOOKING.id, eventRequestId: null, startsAt: null, endsAt: null },

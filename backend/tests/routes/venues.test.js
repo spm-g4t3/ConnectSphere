@@ -28,6 +28,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { getBookingStatusDisplay } from '../../src/domain/bookingStatus.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -322,7 +323,7 @@ describe('AC3: a venue can be retired, leaves search, and keeps its bookings', (
       {
         id: 'b1', venue_id: VENUE_ID, event_request_id: EVENT_ID,
         starts_at: '2026-06-01T09:00:00+00:00', ends_at: '2026-06-01T17:00:00+00:00',
-        created_at: '2026-05-01T09:00:00+00:00',
+        status: 'approved', created_at: '2026-05-01T09:00:00+00:00',
       },
     ])));
 
@@ -334,6 +335,7 @@ describe('AC3: a venue can be retired, leaves search, and keeps its bookings', (
     expect(res.body).toEqual([{
       id: 'b1', venueId: VENUE_ID, eventRequestId: EVENT_ID,
       startsAt: '2026-06-01T09:00:00+00:00', endsAt: '2026-06-01T17:00:00+00:00',
+      status: 'approved', statusDisplay: getBookingStatusDisplay('approved'),
       createdAt: '2026-05-01T09:00:00+00:00',
     }]);
   });
@@ -1927,11 +1929,13 @@ describe('SCRUM178_AC6 the bookings read is refused to Organisers and Attendees,
   const bookingRow = {
     id: 'b1', venue_id: VENUE_ID, event_request_id: EVENT_ID,
     starts_at: '2026-06-01T09:00:00+00:00', ends_at: '2026-06-01T17:00:00+00:00',
-    created_at: '2026-05-01T09:00:00+00:00',
+    status: 'pending', created_at: '2026-05-01T09:00:00+00:00',
   };
   const bookingBody = {
     id: 'b1', venueId: VENUE_ID, eventRequestId: EVENT_ID,
     startsAt: '2026-06-01T09:00:00+00:00', endsAt: '2026-06-01T17:00:00+00:00',
+    // SCRUM-243: a booking request is listed with its status, so it is not read as a hold.
+    status: 'pending', statusDisplay: getBookingStatusDisplay('pending'),
     createdAt: '2026-05-01T09:00:00+00:00',
   };
 

@@ -1,0 +1,47 @@
+/* SCRUM-70. The availability screen's own styling.
+ *
+ * Every selector starts from .availability-check so it outranks the app's
+ * `.dashboard h2` and `.dashboard section` rules without !important. A bare
+ * .availability-result--partially is weaker than `.dashboard section` and
+ * loses, which left the result box untinted and its heading the default teal.
+ *
+ * Fully available stays green. Partially available is orange and Unavailable
+ * is red, in the border, the tint, the heading and the final "Available" figure,
+ * so the result reads at a glance. The label is always written out as well, so
+ * the colour is never the only signal. */
+
+.availability-check form { display: grid; gap: 14px; max-width: 520px; }
+.availability-check .availability-check__field { display: grid; gap: 4px; }
+.availability-check .availability-check__field select, .availability-check .availability-check__field input { font: inherit; padding: 8px; }
+.availability-check .availability-check__hint { color: var(--muted, #64757a); font-size: 0.85rem; margin: 0; }
+.availability-check .availability-check__errors { color: #a12a2a; margin: 0; }
+.availability-check .availability-check__errors li { border-top: 0; padding: 2px 0; }
+
+/* ---- the result box ---- */
+.availability-check .availability-result { border-left: 6px solid #d9e4e0; border-radius: 8px; margin-top: 22px; padding: 14px 18px; }
+.availability-check .availability-result h2 { font-size: 1.35rem; margin: 0 0 4px; }
+.availability-check .availability-result p { margin: 0; }
+
+.availability-check .availability-result--fully { background: #eef7f1; border-left-color: #2e7d4f; }
+
+.availability-check .availability-result--partially { background: #fff3e6; border-left-color: #ea7a1a; }
+.availability-check .availability-result--partially h2 { color: #b45309; }
+.availability-check .availability-result--partially .availability-breakdown tr:last-child th,
+.availability-check .availability-result--partially .availability-breakdown tr:last-child td { color: #b45309; }
+
+.availability-check .availability-result--unavailable { background: #fdecea; border-left-color: #c0362c; }
+.availability-check .availability-result--unavailable h2 { color: #a8271d; }
+.availability-check .availability-result--unavailable .availability-breakdown tr:last-child th,
+.availability-check .availability-result--unavailable .availability-breakdown tr:last-child td { color: #a8271d; }
+
+/* ---- the breakdown and the reservations ---- */
+.availability-check h3 { font-size: 1rem; margin: 22px 0 8px; }
+.availability-check .availability-breakdown, .availability-check .availability-reservations { border-collapse: collapse; width: 100%; }
+.availability-check .availability-breakdown { max-width: 520px; }
+.availability-check .availability-breakdown th, .availability-check .availability-breakdown td,
+.availability-check .availability-reservations th, .availability-check .availability-reservations td { border-top: 1px solid var(--line, #d9e4e0); padding: 9px 10px; text-align: left; }
+.availability-check .availability-breakdown td { font-variant-numeric: tabular-nums; text-align: right; }
+.availability-check .availability-breakdown tr:last-child th, .availability-check .availability-breakdown tr:last-child td { color: var(--teal-dark, #075c5a); font-weight: 800; }
+.availability-check .availability-reservations thead th { border-bottom: 2px solid var(--line, #d9e4e0); color: var(--muted, #64757a); font-size: 0.74rem; letter-spacing: 0.05em; text-transform: uppercase; }
+.availability-check .availability-reservations td.availability-reservations__number { font-variant-numeric: tabular-nums; text-align: right; }
+.availability-check .availability-reservations__flag { color: #b45309; font-weight: 600; }

@@ -21,7 +21,6 @@ import {
   createEventRequest,
   updateEventRequest,
   submitEventRequest,
-  respondToEventClarification,
 } from "../services/eventRequestService";
 import {
   toDatetimeLocalValue,
@@ -32,7 +31,6 @@ import {
 export default function EventRequestForm({
   existingRequest = null,
   onSaved,
-  clarificationResponse = false,
 }) {
   const [requestId, setRequestId] = useState(existingRequest?.id ?? null);
   const [status, setStatus] = useState(existingRequest?.status ?? "draft");
@@ -129,9 +127,7 @@ export default function EventRequestForm({
     setDraftSavedMessage(null);
 
     try {
-      const result = clarificationResponse
-        ? await respondToEventClarification(requestId, buildPayload())
-        : await submitEventRequest(requestId);
+      const result = await submitEventRequest(requestId);
       setStatus(result.status);
       setConfirmation(result);
       onSaved?.(result);
@@ -153,41 +149,26 @@ export default function EventRequestForm({
   if (confirmation) {
     return (
       <div className="event-request-form__confirmation">
-        <h1>{clarificationResponse ? "Updates sent for review" : "Request submitted"}</h1>
+        <h1>Request submitted</h1>
         <p>
-          {clarificationResponse
-            ? "Your amendments have been sent back to the Event Coordinator."
-            : "Your event request has been received. Your reference number is:"}
+          Your event request has been received. Your reference number is:
         </p>
-        {!clarificationResponse && (
-          <>
-            <p className="event-request-form__reference">{confirmation.id}</p>
-            <p>Keep this reference for tracking your request's status.</p>
-          </>
-        )}
+        <p className="event-request-form__reference">{confirmation.id}</p>
+        <p>Keep this reference for tracking your request's status.</p>
       </div>
     );
   }
 
   const isDraft = status === "draft";
-  const isEditable = isDraft || clarificationResponse;
+  const isEditable = isDraft;
 
   return (
     <form className="event-request-form">
       <h1>
-        {clarificationResponse
-          ? "Amend your event request"
-          : requestId
+        {requestId
             ? "Edit draft request"
             : "Create event request"}
       </h1>
-
-      {clarificationResponse && existingRequest?.clarificationNote && (
-        <div className="event-request-form__notice" role="status">
-          <strong>Clarification requested by the Event Coordinator</strong>
-          <p>{existingRequest.clarificationNote}</p>
-        </div>
-      )}
 
       {!isEditable && requestId && (
         <p className="event-request-form__notice">
@@ -344,13 +325,6 @@ export default function EventRequestForm({
         </div>
       )}
 
-      {clarificationResponse && (
-        <div className="event-request-form__actions">
-          <button type="button" onClick={handleSubmit} disabled={submitting}>
-            {submitting ? "Sending updates..." : "Send updates to Coordinator"}
-          </button>
-        </div>
-      )}
     </form>
   );
 }

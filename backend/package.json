@@ -19,7 +19,9 @@
     "equipment:check": "node scripts/check-equipment-service.js",
     "equipment:seed": "node db/seeds/equipment.js",
     "venue-blocks:check": "node scripts/check-venue-blocks.js",
-    "venue-calendar:check": "node scripts/check-venue-calendar.js"
+    "venue-calendar:check": "node scripts/check-venue-calendar.js",
+    "booking-requests:check": "node scripts/check-booking-requests.js",
+    "equipment-availability:check": "node scripts/check-equipment-availability.js"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",

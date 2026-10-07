@@ -8,6 +8,9 @@
 // touches the network. Every function the panel's component tree can reach
 // is on the mock: a vi.mock factory is strict, and AssignmentHistory and
 // DecisionOutcome read their two history functions when their modules load.
+// ClarificationHistory (SCRUM-162) reads the clarification history when it
+// mounts, on every status, and the panel's Close clarification action calls
+// closeEventClarification, so both are on the mock too.
 //
 // What these tests do not prove: that the server refuses the wrong person or
 // the wrong status. The screen's checks are a convenience; the backend tests
@@ -24,6 +27,7 @@ import {
   decideEventRequest,
   getAssignmentHistoryForReview,
   getCoordinatorChangeRequests,
+  getEventClarificationHistory,
   requestEventClarification,
   startEventReview,
 } from "../../src/services/eventRequestService";
@@ -33,10 +37,12 @@ vi.mock("../../src/auth/AuthContext", () => ({
 }));
 
 vi.mock("../../src/services/eventRequestService", () => ({
+  closeEventClarification: vi.fn(),
   decideEventRequest: vi.fn(),
   getAssignmentHistory: vi.fn(),
   getAssignmentHistoryForReview: vi.fn(),
   getCoordinatorChangeRequests: vi.fn(),
+  getEventClarificationHistory: vi.fn(),
   listCoordinators: vi.fn(),
   processCoordinatorChangeRequest: vi.fn(),
   reassignEventRequest: vi.fn(),
@@ -110,6 +116,10 @@ beforeEach(() => {
   vi.mocked(getCoordinatorChangeRequests).mockResolvedValue([]);
   vi.mocked(getAssignmentHistoryForReview).mockReset();
   vi.mocked(getAssignmentHistoryForReview).mockResolvedValue([]);
+  // ClarificationHistory calls .then() on this the moment it mounts, so it
+  // has to hand back a promise, not undefined.
+  vi.mocked(getEventClarificationHistory).mockReset();
+  vi.mocked(getEventClarificationHistory).mockResolvedValue([]);
 });
 
 
@@ -284,7 +294,10 @@ describe("SCRUM19 deciding a request under review", () => {
     await user.type(await screen.findByLabelText("Note for the Organiser"), "Please confirm numbers.");
     await user.click(screen.getByRole("button", { name: "Return for amendment" }));
 
-    await waitFor(() => expect(requestEventClarification).toHaveBeenCalledWith(REQUEST_ID, "Please confirm numbers."));
+    // SCRUM-162 added the reply-by date and the fields to amend, which the
+    // screen sends as the third and fourth arguments. Neither is chosen here,
+    // so they go as the defaults: no date, no fields.
+    await waitFor(() => expect(requestEventClarification).toHaveBeenCalledWith(REQUEST_ID, "Please confirm numbers.", null, []));
     expect(decideEventRequest).not.toHaveBeenCalled();
   });
 
@@ -356,7 +369,9 @@ describe("SCRUM19 statuses with nothing to decide", () => {
       clarificationNote: "Please confirm whether the event is public.",
     }));
 
-    expect(await screen.findByText("Waiting for organiser amendment")).toBeInTheDocument();
+    // "reply", not "amendment": SCRUM-162 renamed it when the Organiser's
+    // answer became a text reply with optional amendments.
+    expect(await screen.findByText("Waiting for organiser reply")).toBeInTheDocument();
     expect(screen.getByText("Please confirm whether the event is public.")).toBeInTheDocument();
     expect(actionButtonsShown()).toEqual([]);
   });

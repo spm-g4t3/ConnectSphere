@@ -138,6 +138,7 @@ Cancelled: from Submitted, Under review, Pending clarification, Approved or Conf
 - **One mechanism.** `changeEventRequestStatus` (`backend/src/services/eventRequestService.js`) asks `canTransition`, then calls the Postgres function `change_event_request_status` (migration `021`) through RPC. In one transaction that function locks the row, refuses if the status is no longer the one the caller last saw, writes the new status and inserts the history row. Every story that changes a status calls this; none writes the status column itself.
 - **Draft → Submitted is the one exception, and it is its own path.** Submitting also assigns a coordinator and sets `submitted_at`, so it goes through `submitEventRequest` and the Postgres function `submit_event_request` (SCRUM-327, replaced in `021`). In one transaction it checks the request is a draft, picks the coordinator with `pick_event_coordinator`, sets the status, `submitted_at` and `assigned_coordinator_id`, writes the assignment history row and writes the status history row. `change_event_request_status` refuses `submitted` as a target, so there is exactly one way to submit, and `event_requests_assigned_when_submitted` (migration `017`) refuses a submitted request with no coordinator.
 - **Creating a draft** is not a transition: the row is inserted as `draft` and there is no previous status to record.
+- **Clarification conversation.** Only the assigned coordinator can ask a non-blank question while the event is `under_review`; the optional reply-by date must be in the future. The coordinator may select which event fields the organiser can amend in their reply. The owning Organiser can send a non-blank reply and update only those selected fields, atomically; the assigned Coordinator can instead close the open question with a required note. Both return the request to `under_review` and append immutable history. Questions, replies and closures notify the relevant recipient. While a question is open, approval/rejection is unavailable but cancellation remains allowed. Expired reply-by dates are shown as overdue, surfaced in the Coordinator's Needs attention list, and do not automatically change status. Migration `030_event_clarification_reply_by.sql` installs the base history and notifications; `026_clarification_amendment_fields.sql` adds scoped amendments.
 
 ### Status history
 
@@ -173,8 +174,8 @@ They are different facts and the code never uses one for the other.
 
 ### Where the implementation differs from the story
 
-- Submitted → Pending clarification is also allowed. The table above does not list it, but clarification works from Submitted today (SCRUM-46) and nothing yet moves a request to Under review. It should be removed once the coordinator can start a review.
-- "The assigned coordinator closes the request" (Pending clarification → Under review) has no endpoint yet.
+- A clarification can be requested only from Under review. The request cannot be approved or rejected while clarification is open; it may be cancelled.
+- Clarification history is separate from status history: it records every question, organiser reply and coordinator closure, oldest first, and entries cannot be edited or deleted.
 - `planning` is no longer a status in the code, but it is still a value of the database enum, which Postgres cannot shrink. Migration `020` moves any such row to Approved and a constraint refuses the value.
 - No endpoint deletes a draft yet.
 - Moving a request to Approved, Rejected or Confirmed needs the decision columns from SCRUM-19. `change_event_request_status` does not write them, so those transitions will need that story to extend it.
@@ -229,6 +230,7 @@ A story is done when its acceptance criteria are met, it has tests, it has been 
 | `npm run venue-routes:check` | The venue catalogue routes end to end, one block per SCRUM-15 acceptance criterion: creation, an authorised change reaching the search, retirement leaving the search while its bookings survive, and the audit trail naming the editing user. | Yes |
 | `npm run venue-blocks:check` | Venue blocks end to end, against a real database: half-open periods, an override flagging the booking and notifying every Event Coordinator, amend and remove recording the acting user, the audit trail, and a blocked venue leaving search. | Yes |
 | `npm run venue-calendar:check` | The venue calendar route end to end, one block per SCRUM-178 acceptance criterion: real tokens for Venue Staff and Event Coordinators on an active and a retired venue, approved and flagged bookings and blocks soonest first, a pending request, cancelled booking, removed block and edge-touching block left out, and Organisers and Attendees refused. | Yes |
+| `npm run booking-requests:check` | Venue booking requests (SCRUM-243) against the live database, needing migrations 027 to 031: the pending default, the coordinator's list scoped to the assigned coordinator, and real concurrent races (one event at several venues, a request against a venue block, two withdrawals, a withdrawal against a status change and against a handover). What it proves and cannot is in `docs/SCRUM-243-test-map.md`. | Yes |
 
 Run them all from `backend/`.
 

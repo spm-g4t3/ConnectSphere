@@ -34,12 +34,14 @@ import { useAuth } from "../auth/AuthContext";
 import AssignmentHistory from "./AssignmentHistory";
 import DecisionOutcome from "./DecisionOutcome";
 import ReassignEventPanel from "./ReassignEventPanel";
+import ClarificationHistory from "./ClarificationHistory";
 import {
   decideEventRequest,
   getCoordinatorChangeRequests,
   processCoordinatorChangeRequest,
   requestEventClarification,
   startEventReview,
+  closeEventClarification,
 } from "../services/eventRequestService";
 import {
   readStatusDisplay,
@@ -60,6 +62,18 @@ function formatTimestamp(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
+
+const CLARIFICATION_FIELDS = [
+  ["eventName", "Event name"],
+  ["purpose", "Purpose"],
+  ["description", "Description"],
+  ["proposedStart", "Proposed start"],
+  ["proposedEnd", "Proposed end"],
+  ["expectedAttendance", "Expected attendance"],
+  ["venueRequirements", "Venue requirements"],
+  ["accessibilityRequirements", "Accessibility requirements"],
+  ["equipmentRequirements", "Equipment requirements"],
+];
 
 /**
  * A free-text requirement, or an explicit statement that there is none.
@@ -153,9 +167,17 @@ export default function CoordinatorRequestDetail({
 
   const display = readStatusDisplay(current);
   const capacity = seedableCapacity(request.expectedAttendance);
+  const earliestReplyDate = new Date();
+  earliestReplyDate.setUTCDate(earliestReplyDate.getUTCDate() + 1);
+  const minReplyByDate = earliestReplyDate.toISOString().slice(0, 10);
   const [reviewNote, setReviewNote] = useState("");
+  const [replyByDate, setReplyByDate] = useState("");
+  const [requestedFields, setRequestedFields] = useState([]);
   const [processingReviewDecision, setProcessingReviewDecision] = useState(false);
   const [reviewDecisionError, setReviewDecisionError] = useState(null);
+  const [closureNote, setClosureNote] = useState("");
+  const [closingClarification, setClosingClarification] = useState(false);
+  const [closureError, setClosureError] = useState(null);
   const [changeRequests, setChangeRequests] = useState([]);
   const [changeRequestsLoading, setChangeRequestsLoading] = useState(true);
   const [changeRequestsError, setChangeRequestsError] = useState(null);
@@ -181,15 +203,15 @@ export default function CoordinatorRequestDetail({
   // not the gate: it saves everyone else from a button that can only be
   // refused. The server checks again, under a lock, and if the row this panel
   // holds is stale, ReassignEventPanel turns the 403 into a message.
-  const canReassign = Boolean(user?.id) && assignedCoordinatorId === user.id;
+  const isAssignedCoordinator = Boolean(user?.id) && assignedCoordinatorId === user.id;
+  const canReassign = isAssignedCoordinator;
 
-  // SCRUM-19. The same comparison decides who sees the review and decision
-  // actions, and for the same reason: a convenience, not the gate. 029's
-  // start_event_review and decide_event_request refuse anyone but the
+  // SCRUM-19. isAssignedCoordinator also decides who sees the review and
+  // decision actions, and for the same reason: a convenience, not the gate.
+  // 029's start_event_review and decide_event_request refuse anyone but the
   // assigned coordinator (and, for a decision, the recorded reviewer) under
   // the row lock, whatever this screen shows. docs/SCRUM-327.md makes the
   // same argument for the hand-over button.
-  const isAssignedCoordinator = canReassign;
 
   const [startingReview, setStartingReview] = useState(false);
   const [startReviewError, setStartReviewError] = useState(null);
@@ -235,6 +257,16 @@ export default function CoordinatorRequestDetail({
     navigate(`/venue-search${query}`, {
       state: {
         eventRequestContext: {
+          // SCRUM-254: enough for venue search to offer "Request this venue"
+          // for this event without another read. The server re-reads the
+          // event and sends nothing of this onwards.
+          id: request.id,
+          status: request.status,
+          assignedCoordinatorId: assignedCoordinatorId ?? null,
+          proposedStart: request.proposedStart ?? null,
+          proposedEnd: request.proposedEnd ?? null,
+          expectedAttendance: request.expectedAttendance ?? null,
+          accessibilityRequirements: request.accessibilityRequirements ?? null,
           eventName: request.eventName,
           venueRequirements: request.venueRequirements ?? null,
         },
@@ -254,7 +286,12 @@ export default function CoordinatorRequestDetail({
     setReviewDecisionError(null);
     setDecisionError(null);
     try {
-      await requestEventClarification(request.id, note);
+      await requestEventClarification(
+        request.id,
+        note,
+        replyByDate || null,
+        requestedFields,
+      );
       onReviewDecisionProcessed?.();
     } catch (error) {
       setReviewDecisionError(
@@ -344,6 +381,27 @@ export default function CoordinatorRequestDetail({
       }
     } finally {
       setProcessingReviewDecision(false);
+    }
+  }
+
+  async function handleCloseClarification(event) {
+    event.preventDefault();
+    const note = closureNote.trim();
+    if (!note) {
+      setClosureError("A note is required to close the clarification request.");
+      return;
+    }
+    setClosingClarification(true);
+    setClosureError(null);
+    try {
+      await closeEventClarification(request.id, note);
+      onReviewDecisionProcessed?.();
+    } catch (error) {
+      setClosureError(
+        error.response?.data?.error || "Could not close the clarification request.",
+      );
+    } finally {
+      setClosingClarification(false);
     }
   }
 
@@ -643,8 +701,38 @@ export default function CoordinatorRequestDetail({
         </section>
       ) : current.status === "pending_clarification" ? (
         <section>
-          <h3>Waiting for organiser amendment</h3>
+          <h3>Waiting for organiser reply</h3>
           <p>{current.clarificationNote || "No clarification note was recorded."}</p>
+          {current.clarificationReplyByDate && (
+            <p>
+              Reply by: {current.clarificationReplyByDate}
+              {current.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
+                <strong className="clarification-overdue"> Overdue</strong>
+              )}
+            </p>
+          )}
+          <ClarificationHistory
+            eventRequestId={request.id}
+            isOpen
+          />
+          {isAssignedCoordinator && (
+            <form className="coordinator-clarification" onSubmit={handleCloseClarification}>
+              <label>
+                Note explaining why you are closing this request
+                <textarea
+                  value={closureNote}
+                  onChange={(event) => setClosureNote(event.target.value)}
+                  rows={3}
+                  maxLength={2000}
+                  required
+                />
+              </label>
+              {closureError && <p role="alert">{closureError}</p>}
+              <button type="submit" disabled={closingClarification || !closureNote.trim()}>
+                {closingClarification ? "Closing..." : "Close clarification"}
+              </button>
+            </form>
+          )}
         </section>
       ) : current.status === "submitted" ? (
         <section>
@@ -687,6 +775,36 @@ export default function CoordinatorRequestDetail({
                   placeholder="Required to reject or to return for amendment; optional when approving."
                 />
               </label>
+              <details className="coordinator-clarification__amendments" open>
+                <summary>Let the Organiser amend specific fields (optional)</summary>
+                <fieldset className="coordinator-clarification__fields">
+                  <legend>Fields that need changing</legend>
+                  <p>Leave all fields unchecked for a question-only clarification.</p>
+                  {CLARIFICATION_FIELDS.map(([field, label]) => (
+                    <label key={field}>
+                      <input
+                        type="checkbox"
+                        checked={requestedFields.includes(field)}
+                        onChange={(event) => {
+                          setRequestedFields((previous) => event.target.checked
+                            ? [...previous, field]
+                            : previous.filter((item) => item !== field));
+                        }}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </fieldset>
+              </details>
+              <label>
+                Optional reply-by date
+                <input
+                  type="date"
+                  min={minReplyByDate}
+                  value={replyByDate}
+                  onChange={(event) => setReplyByDate(event.target.value)}
+                />
+              </label>
               {(decisionError || reviewDecisionError) && (
                 <p className="coordinator-clarification__error" role="alert">
                   {decisionError || reviewDecisionError}
@@ -709,6 +827,16 @@ export default function CoordinatorRequestDetail({
           )}
         </section>
       ) : null}
+
+      {request.status !== "pending_clarification" && (
+        <section className="coordinator-clarification-history">
+          <h3>Clarification history</h3>
+          <details>
+            <summary>View questions, replies and closures</summary>
+            <ClarificationHistory eventRequestId={request.id} />
+          </details>
+        </section>
+      )}
 
       <section>
         <h3>Find a venue</h3>

@@ -14,6 +14,8 @@ import authRoutes from './routes/auth.js';
 import eventRequestRoutes from './routes/eventRequests.js';
 import venueRoutes from './routes/venues.js';
 import notificationRoutes from './routes/notifications.js';
+import bookingRequestRoutes from './routes/bookingRequests.js';
+import equipmentAvailabilityRoutes from './routes/equipmentAvailability.js';
 import equipmentRoutes from './routes/equipment.js';
 
 const app = express();
@@ -38,6 +40,13 @@ app.use('/api/equipment', equipmentRoutes);
 // SCRUM-128: the signed-in user's own notifications. Behind requireAuth and
 // scoped to the caller; see the route file for why there is no role gate.
 app.use('/api/notifications', notificationRoutes);
+
+// SCRUM-23: the equipment availability check. Mounted BEFORE /api/equipment so a
+// later GET /api/equipment/:id can never answer "availability" as an id.
+app.use('/api/equipment/availability', equipmentAvailabilityRoutes);
+
+// SCRUM-252: an Event Coordinator requests a venue for an approved event.
+app.use('/api/booking-requests', bookingRequestRoutes);
 
 const PORT = process.env.PORT || 5000;
 

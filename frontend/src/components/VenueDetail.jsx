@@ -222,6 +222,12 @@ export default function VenueDetail({ venue }) {
                   <code title={booking.eventRequestId ?? undefined}>
                     {booking.eventRequestId ? shortId(booking.eventRequestId) : "no event"}
                   </code>
+                  {/* SCRUM-243: a booking request that is not (or no longer) a
+                      hold -- pending, rejected, withdrawn -- must not read as
+                      one. Absent from older responses, so shown only when sent. */}
+                  {booking.statusDisplay?.label && (
+                    <span className="venue-detail__booking-status">{booking.statusDisplay.label}</span>
+                  )}
                 </li>
               ))}
             </ul>
