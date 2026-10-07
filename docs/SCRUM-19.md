@@ -488,11 +488,19 @@ proves it.
 | AC11 | No notification; the table cannot take one | SCRUM-173 |
 | Concurrency untested | Two coordinators at once, a decision racing a handover: both rest on 029's row lock, which PGlite cannot provoke. The 40001 refusals (AC1-17, AC7-04) are proved only through a fake | None; argued in 029 and 018 |
 | No live check script for 029 | `assignment:check` covers 018; nothing runs `start_event_review` or `decide_event_request` against Supabase. PGlite now covers the function's behaviour; the live script would prove the deployed copy matches the file | Follow-up: `decision:check` |
-| Return for amendment shows raw server errors | `handleReturnForAmendment` displays `error.response.data.error`, and the service's messages name the event's uuid (e.g. "Only the coordinator assigned to event request 2f…"). Start review and the decision use tables keyed by status; this handler predates them | Follow-up: give it a table like `DECISION_ERROR_MESSAGES` |
-| The decision grid at phone width | `.decision-outcome` is a fixed two-column grid (`minmax(110px, 160px)` for the labels) with no override in either `@media (max-width: 720px)` block, unlike `.my-event-requests__details dl` beside it, which collapses to one column | Follow-up: one CSS rule. Not checked on a device |
 | One history read per decided row | `MyEventRequests` mounts a `DecisionOutcome` per decided row, and each reads the assignment history once per page visit to find a name | Follow-up: the backend returns `decidedByName` with the request, as `/mine` does `organiserName` |
 | A rejection's 409 on a past event | D7 says it always shows the "changed" message; no screen test feeds that combination | Follow-up: one test |
 | The screen's 409 on a request both decided and past | Shows the date message although the server refused for the status (D7) | Accepted; a distinct server signal would fix it |
+
+### Fixed since the review
+
+Both were listed above when this document was written, and were fixed in commit
+`354bd70`. They are kept here so the record shows what was found and what was done.
+
+| Gap, as found | Fixed |
+|---|---|
+| **Return for amendment showed raw server errors.** `handleReturnForAmendment` displayed `error.response.data.error`, and the service's messages name the event's uuid (e.g. "Only the coordinator assigned to event request 2f…"). Start review and the decision already used tables keyed by status; this handler predated them | `CoordinatorRequestDetail.jsx` now has `RETURN_FOR_AMENDMENT_ERROR_MESSAGES`, keyed by status like `DECISION_ERROR_MESSAGES`: 400 (blank or overlong note), 403 (not the assigned coordinator), 404 (no such event), and 409 (status moved, or handed over mid-flight, one message for both). Any other status gets a fixed sentence, never the server's text. Proved by `SCRUM19_AC1_a_refused_return_for_amendment_says_why_in_words_not_ids`, `SCRUM19_AC3_a_conflicting_return_for_amendment_says_the_request_changed_in_words_not_ids` and `SCRUM19_AC1_a_return_for_amendment_refused_for_another_reason_still_names_no_id`, each of which rejects with the server's real message, uuid included, and asserts the alert names no uuid. All three failed against the old handler |
+| **The decision grid at phone width.** `.decision-outcome` was a fixed two-column grid (`minmax(110px, 160px)` for the labels) with no override in either `@media (max-width: 720px)` block, unlike `.my-event-requests__details dl` beside it, which collapses to one column | `App.css` now collapses it to one column (`grid-template-columns: 1fr; gap: 3px`, with `margin-bottom: 8px` on each `dd`), in the app-wide 720px block beside `.my-event-requests__details dl`, the rule it matches. The other 720px block holds only a venue staff form rule. Still not checked on a device |
 
 ### Technical debt, including things this story did not cause
 
