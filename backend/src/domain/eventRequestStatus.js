@@ -179,9 +179,8 @@ export const STATUS_DISPLAY = Object.freeze({
  *  - completed and cancelled are terminal: nothing leads out of them. A
  *    cancelled event is never reinstated; a new request is submitted instead.
  *
- * Clarification is asked for from under_review only. A coordinator who asks
- * for it on a submitted request moves it to under_review first, as two
- * recorded transitions (requestEventClarification).
+ * Clarification is requested from under_review only; submitted requests must
+ * first be moved into review through the coordinator's review workflow.
  *
  * Migration 022 holds this same table in SQL, so the database function refuses
  * an illegal move whoever calls it. A test compares the two.

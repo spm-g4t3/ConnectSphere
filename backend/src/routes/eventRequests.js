@@ -71,6 +71,8 @@ import {
   getEventRequestForOrganiser,
   getEventRequestForCoordinator,
   getEventRequestStatusHistory,
+  getEventClarificationHistory,
+  closeEventClarification,
   listEventRequestsForReview,
   listEventRequestsForCoordinator,
   listCoordinators,
@@ -81,6 +83,8 @@ import {
   requestEventClarification,
   respondToEventClarification,
   reassignEventRequest,
+  startEventReview,
+  decideEventRequest,
 } from '../services/eventRequestService.js';
 import {
   createChangeRequestFromClient,
@@ -337,6 +341,20 @@ export function createEventRequestRouter({
   router.get('/:id/status-history', async (req, res) => {
     try {
       const history = await getEventRequestStatusHistory(req.params.id, req.user.id, { client });
+      res.status(200).json(history);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  router.get('/:id/clarification-history', async (req, res) => {
+    try {
+      const history = await getEventClarificationHistory(
+        req.params.id,
+        req.user.id,
+        req.user.role,
+        { client },
+      );
       res.status(200).json(history);
     } catch (err) {
       handleError(err, res);
@@ -604,6 +622,24 @@ export function createEventRequestRouter({
         req.params.id,
         req.body?.note,
         req.user.id,
+        {
+          replyByDate: req.body?.replyByDate,
+          requestedFields: req.body?.requestedFields,
+          client,
+        },
+      );
+      res.status(200).json(withStatusDisplay(updated));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  router.post('/:id/clarification/close', coordinatorOnly, async (req, res) => {
+    try {
+      const updated = await closeEventClarification(
+        req.params.id,
+        req.body?.note,
+        req.user.id,
         { client },
       );
       res.status(200).json(withStatusDisplay(updated));
@@ -657,12 +693,74 @@ export function createEventRequestRouter({
     }
   });
 
+  /**
+   * SCRUM-346 (SCRUM-19 AC1): the assigned coordinator starts reviewing a
+   * submitted request, which moves it to under_review and makes them its
+   * reviewing coordinator, the person 025 allows to decide it.
+   *
+   * /start-review, not POST /:id/review. GET /:id/review already exists: it
+   * is the coordinator's read of one event (SCRUM-332). Two verbs on one path
+   * for unrelated actions, one reading the event and one changing its status,
+   * would read as one resource and mislead whoever adds the next route.
+   * /start-review says what it does.
+   *
+   * Behind coordinatorOnly, with no ownership pre-check, for the reason
+   * POST /:id/reassign gives above: whether the caller is this event's
+   * assigned coordinator is what start_event_review (029) checks under the
+   * row lock. Nothing is read from the body. The caller is always
+   * req.user.id, from the token.
+   *
+   * 200 and the whole request. Refusals through translateError: 403 (not the
+   * assigned coordinator), 409 (not submitted), 404 (no such event).
+   */
+  router.post('/:id/start-review', coordinatorOnly, async (req, res) => {
+    try {
+      const updated = await startEventReview(req.params.id, req.user.id, { client });
+      res.status(200).json(withStatusDisplay(updated));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-119 and SCRUM-121 (SCRUM-19): the assigned coordinator approves or
+   * rejects a request under review. Body: { decision, decisionNote }.
+   *
+   * Cannot collide with POST /change-requests/:changeRequestId/decision
+   * below: that path has three segments and this one two.
+   *
+   * Behind coordinatorOnly, with no pre-check, for the reason given at
+   * /start-review. Only decision and decisionNote are taken from the body, so
+   * a body naming someone else as the decider changes nothing: decidedBy is
+   * always req.user.id. The decision time is the server's clock (the
+   * service's default `now`), never the client's.
+   *
+   * 200 and the whole request, decision fields included. Refusals: 400 (a bad
+   * decision value, or a rejection with no reason, with details naming the
+   * field), 403 (not the assigned coordinator or reviewer), 409 (not under
+   * review, or an approval whose start date has passed), 404 (no such event).
+   */
+  router.post('/:id/decision', coordinatorOnly, async (req, res) => {
+    try {
+      const updated = await decideEventRequest(
+        req.params.id,
+        { decision: req.body?.decision, decisionNote: req.body?.decisionNote },
+        req.user.id,
+        { client },
+      );
+      res.status(200).json(withStatusDisplay(updated));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
   router.patch('/:id/clarification-response', async (req, res) => {
     try {
       const updated = await respondToEventClarification(
         req.params.id,
-        req.body,
+        req.body?.message,
         req.user.id,
+        req.body?.amendments,
         { client },
       );
       res.status(200).json(withStatusDisplay(updated));

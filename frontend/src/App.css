@@ -269,6 +269,62 @@ button { cursor: pointer; }
 .my-assigned-events__summary { display: grid; gap: 4px; min-width: 0; }
 .my-assigned-events__title { align-items: center; display: flex; flex-wrap: wrap; gap: 6px 0; }
 .my-assigned-events__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
+/* SCRUM-255. The coordinator's venue requests. Rows inherit `.dashboard li`
+   like My events, so these lay out the left side and the withdraw controls.
+   The booking status groups get their own classes, since an event's status
+   classes above describe event stages, not a booking's. */
+.my-booking-requests__summary { display: grid; gap: 4px; min-width: 0; }
+.my-booking-requests__title { align-items: center; display: flex; flex-wrap: wrap; gap: 6px 0; }
+.my-booking-requests__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
+.my-booking-requests__note { color: var(--muted); font-size: 0.85rem; }
+.my-booking-requests__flag { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 6px; color: #8a5a00; font-size: 0.85rem; padding: 6px 10px; }
+.my-booking-requests__confirm { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 10px; }
+.my-booking-requests__confirm span { color: var(--muted); font-size: 0.9rem; }
+.my-booking-requests__notice { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 6px 0 0; padding: 8px 12px; }
+.dashboard--coordinator .my-booking-requests button:disabled { cursor: not-allowed; opacity: 0.55; }
+.dashboard--coordinator .status--booking-pending { background: #fff6e5; color: #8a5a00; }
+.dashboard--coordinator .status--booking-approved { background: #e8f7f1; color: #17684f; }
+.dashboard--coordinator .status--booking-flagged { background: #fff0ee; color: #a43c32; }
+.dashboard--coordinator .status--booking-rejected { background: #fff0ee; color: #a43c32; }
+.dashboard--coordinator .status--booking-withdrawn, .dashboard--coordinator .status--booking-cancelled, .dashboard--coordinator .status--booking-unknown { background: #eef2f1; color: var(--muted); }
+.clarification-overdue { color: #a43c32; font-weight: 700; }
+.my-assigned-events__needs-attention { background: #fff6e5; border-left: 3px solid #bb7a12; margin-top: 16px; padding: 12px; }
+.clarification-history { display: grid; gap: 12px; list-style: none; margin: 12px 0; padding: 0; }
+.clarification-history__entry { border-left: 3px solid var(--line); padding: 4px 12px; }
+.clarification-history__entry p { margin: 6px 0; white-space: pre-wrap; }
+.clarification-history__entry--overdue { border-color: #a43c32; }
+.clarification-reply { display: grid; gap: 12px; }
+.clarification-reply label { display: grid; gap: 7px; }
+.clarification-reply__history { border-top: 1px solid var(--line); padding-top: 10px; }
+.clarification-reply__history > summary, .coordinator-clarification-history summary { color: var(--teal-dark); cursor: pointer; font-size: 0.9rem; font-weight: 700; }
+.coordinator-clarification-history details { margin-top: 8px; }
+.clarification-reply textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; resize: vertical; }
+.clarification-reply__amendments { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 12px; margin: 0; padding: 16px; }
+.clarification-reply__amendments legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
+.clarification-reply__amendments p { color: var(--muted); margin: 0; }
+.clarification-reply__notice { background: #eef6f3; border-radius: 6px; margin: 0; padding: 10px 12px; }
+.clarification-reply input, .clarification-reply__amendments textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
+.clarification-amendments { background: #f7faf9; border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 16px; padding: 18px; }
+.clarification-amendments__heading { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+.clarification-amendments__heading h3 { color: var(--ink); font-size: 1rem; margin: 0; }
+.clarification-amendments__heading p { font-size: 0.88rem; margin: 5px 0 0; }
+.clarification-amendments__badge { background: #e8edf0; border-radius: 999px; color: #42545a; font-size: 0.76rem; font-weight: 700; padding: 5px 10px; white-space: nowrap; }
+.clarification-amendments__badge--active { background: #e8f7f1; color: #17684f; }
+.clarification-amendments .clarification-reply__amendments { background: var(--paper); }
+.clarification-amendments__grid { display: grid; gap: 12px 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); }
+.clarification-amendments__empty { background: var(--paper); border: 1px dashed #c7d6d1; border-radius: 8px; display: grid; gap: 6px; padding: 14px; }
+.clarification-amendments__empty strong { color: var(--ink); font-size: 0.92rem; }
+.clarification-amendments__empty span { color: var(--muted); font-size: 0.88rem; line-height: 1.5; }
+.clarification-amendments__readonly { border-top: 1px solid var(--line); padding-top: 12px; }
+.clarification-amendments__readonly summary { color: var(--teal-dark); cursor: pointer; font-size: 0.88rem; font-weight: 700; }
+.clarification-amendments__readonly dl { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); margin: 14px 0 0; }
+.clarification-amendments__readonly dl > div { background: var(--paper); border: 1px solid var(--line); border-radius: 7px; min-width: 0; padding: 10px 12px; }
+.clarification-amendments__readonly dt { color: var(--muted); font-size: 0.76rem; font-weight: 700; margin-bottom: 4px; }
+.clarification-amendments__readonly dd { color: var(--ink); font-size: 0.88rem; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.coordinator-clarification__fields { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 8px; margin: 0; padding: 14px; }
+.coordinator-clarification__fields legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
+.coordinator-clarification__fields p { color: var(--muted); font-size: 0.86rem; margin: 0; }
+.coordinator-clarification__fields label { align-items: center; display: flex; gap: 8px; }
 /* An organiser with no name on record is shown by id, which must read as an
    identifier, not prose. The same treatment venue history gives its uuids. */
 .dashboard--coordinator .my-assigned-events code { background: #eef2f1; border-radius: 4px; color: var(--muted); font-size: 0.78rem; padding: 2px 6px; }
@@ -321,6 +377,22 @@ button { cursor: pointer; }
 .dashboard--coordinator .reassign-event__form select:focus, .dashboard--coordinator .reassign-event__form textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .dashboard--coordinator .reassign-event__hint { font-size: 0.84rem; margin: -6px 0 0; }
 .dashboard--coordinator .reassign-event__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* SCRUM-19. DecisionOutcome renders on the coordinator's event panel
+   (.dashboard--coordinator) and on the Organiser's list (.my-event-requests),
+   so, like .assignment-history above, it is scoped to its own class rather
+   than to either screen. A two-column definition list, label then value, the
+   shape .my-event-requests__details dl already uses for the event details.
+   The values are content, not commentary, so they keep --ink against
+   `.dashboard p`'s grey (they are <dd>, which that rule does not reach). */
+.decision-outcome { display: grid; gap: 6px 16px; grid-template-columns: minmax(110px, 160px) minmax(0, 1fr); margin: 8px 0 0; }
+.decision-outcome dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.decision-outcome dd { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* The Organiser's decision block sits on the row itself, so it is set off from
+   the description above it the way the clarification note is. */
+.my-event-requests__decision { background: #f6f9f8; border-left: 3px solid var(--teal); margin: 12px 0; padding: 10px 12px; }
+.my-event-requests__decision > strong { color: var(--ink); display: block; font-size: 0.92rem; }
+.dashboard--coordinator .coordinator-start-review { display: grid; gap: 10px; justify-items: start; }
+.dashboard--coordinator .coordinator-start-review p { margin: 0; }
 .my-event-requests .status-badge { border-radius: 999px; display: inline-block; flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; line-height: 1.3; padding: 4px 10px; text-transform: uppercase; }
 .my-event-requests .status--draft { background: #eef2f1; color: #42545a; }
 .my-event-requests .status--awaiting-review { background: #fff6e5; color: #8a5a00; }
@@ -375,6 +447,26 @@ button { cursor: pointer; }
 .venue-search__retired label { align-items: center; color: var(--muted); display: inline-flex; font-size: 0.9rem; gap: 8px; }
 .venue-search__badge { margin-left: 10px; }
 .venue-search__hint, .venue-search__window-note { color: var(--muted); font-size: 0.84rem; margin: 8px 0; }
+/* SCRUM-254: "Request this venue" and the request panel it opens. */
+.venue-search__request { margin-left: 12px; }
+.venue-search__request:disabled, .booking-request button:disabled { cursor: not-allowed; opacity: 0.55; }
+.booking-request { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; margin: 18px 0; padding: 14px 16px; }
+.booking-request h3 { margin: 0 0 10px; }
+.booking-request button { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 16px; }
+.booking-request__details { display: grid; gap: 6px 16px; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 0 0 14px; }
+.booking-request__details dt { color: var(--muted); font-size: 0.9rem; }
+.booking-request__details dd { margin: 0; }
+.booking-request__notes { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; }
+.booking-request__notes textarea { border: 1px solid var(--line); border-radius: 6px; font: inherit; padding: 10px 12px; }
+.booking-request__field-error { color: #a43c32; font-size: 0.84rem; list-style: none; margin: 6px 0 0; padding: 0; }
+.booking-request__warning { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 8px; margin: 14px 0; padding: 12px 14px; }
+.booking-request__warning h4 { color: #8a5a00; margin: 0 0 8px; }
+.booking-request__warning label { align-items: flex-start; display: flex; gap: 8px; }
+.booking-request__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 12px 0 0; padding: 8px 12px; }
+.booking-request__conflicts { list-style: none; margin: 10px 0 0; padding: 0; }
+.booking-request__conflicts li { border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 8px 0; }
+.booking-request__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.booking-request__success { background: #e8f7f1; border-radius: 6px; color: #17684f; padding: 10px 14px; }
 .my-event-requests__details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 10px; }
 .my-event-requests__details summary { color: var(--teal-dark); cursor: pointer; font-size: 0.9rem; font-weight: 700; }
 .my-event-requests__details dl { display: grid; gap: 8px 16px; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 14px 0 4px; }
@@ -386,6 +478,8 @@ button { cursor: pointer; }
 .coordinator-clarification textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 96px; padding: 10px 12px; resize: vertical; }
 .coordinator-clarification textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .coordinator-clarification__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
+.coordinator-clarification__amendments > summary { color: var(--teal-dark); cursor: pointer; font-size: 0.9rem; font-weight: 700; }
+.coordinator-clarification__amendments[open] { display: grid; gap: 10px; }
 .coordinator-review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .coordinator-review-actions button { transition: background-color 140ms ease, box-shadow 140ms ease; }
 .coordinator-review-actions__approve { background: #17684f !important; }
@@ -486,6 +580,8 @@ button { cursor: pointer; }
    .event-request-form__row, .venue-search__filters, .venue-search__window { grid-template-columns: 1fr; }
    .my-event-requests__details dl { grid-template-columns: 1fr; gap: 3px; }
    .my-event-requests__details dd { margin-bottom: 8px; }
+   .decision-outcome { grid-template-columns: 1fr; gap: 3px; }
+   .decision-outcome dd { margin-bottom: 8px; }
    .venue-calendar-page { padding: 30px 18px; }
    .venue-calendar__toolbar { align-items: flex-start; flex-direction: column; }
 }

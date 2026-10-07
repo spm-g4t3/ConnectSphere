@@ -83,6 +83,8 @@ import {
   getEventRequestForOrganiser,
   requestEventClarification,
   respondToEventClarification,
+  closeEventClarification,
+  getEventClarificationHistory,
   reassignEventRequest,
 } from '../../src/services/eventRequestService.js';
 import {
@@ -93,6 +95,7 @@ import {
   ServiceUnavailableError,
   ForbiddenError,
 } from '../../src/errors.js';
+import { ROLE } from '../../src/domain/userRole.js';
 import { STATUS, canTransition } from '../../src/domain/eventRequestStatus.js';
 
 
@@ -148,6 +151,10 @@ function createFakeClient(results = []) {
       },
       eq(column, value) {
         call.filters.push([column, value]);
+        return chain;
+      },
+      in(column, values) {
+        call.filters.push([column, values]);
         return chain;
       },
       // SCRUM-42. Recorded in call order, because which column is sorted on
@@ -1617,74 +1624,61 @@ describe('SCRUM-11: a draft is updated in place', () => {
   });
 });
 
-describe('SCRUM-46: Coordinator clarification and Organiser response', () => {
-  it('moves a submitted request to pending clarification and stores the note', async () => {
-    // SCRUM-332: the caller is now this event's assigned coordinator, and the
-    // fixture says so. It used to pass ORGANISER_ID as the coordinator against
-    // a row with no coordinator at all, which only worked while the service
-    // ignored who was asking. What this test asserts is unchanged.
+describe('SCRUM-162: assigned Coordinator requests clarification', () => {
+  it('moves an under-review request to pending clarification with a note and reply-by date', async () => {
     const note = 'Please clarify the accessibility arrangements.';
+    const replyByDate = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
     const client = createFakeClient([
-      ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: COORDINATOR_ID })),
       ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: COORDINATOR_ID })),
       ok(storedRow({
         status: STATUS.PENDING_CLARIFICATION,
         clarification_note: note,
+        clarification_reply_by_date: replyByDate,
         assigned_coordinator_id: COORDINATOR_ID,
       })),
     ]);
 
-    const result = await requestEventClarification(REQUEST_ID, note, COORDINATOR_ID, { client });
+    const result = await requestEventClarification(REQUEST_ID, note, COORDINATOR_ID, {
+      replyByDate,
+      requestedFields: ['purpose', 'proposedStart'],
+      client,
+    });
 
     expect(result.status).toBe(STATUS.PENDING_CLARIFICATION);
     expect(result.clarificationNote).toBe(note);
-    // SCRUM-318: clarification is asked for from under_review only, so a
-    // submitted request is moved there first. One read, then two status
-    // changes, each recorded by the status function. The note is the reason
-    // for the second only, and the function stores it as the clarification note.
-    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc', 'rpc']);
+    expect(result.clarificationReplyByDate).toBe(replyByDate);
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
+    expect(client.calls[1].fn).toBe('request_event_clarification_with_fields');
     expect(client.calls[1].args).toEqual({
       p_event_request_id: REQUEST_ID,
-      p_expected_status: STATUS.SUBMITTED,
-      p_new_status: STATUS.UNDER_REVIEW,
       p_changed_by: COORDINATOR_ID,
-      p_reason: null,
       p_expected_coordinator: COORDINATOR_ID,
-    });
-    expect(client.calls[2].args).toEqual({
-      p_event_request_id: REQUEST_ID,
-      p_expected_status: STATUS.UNDER_REVIEW,
-      p_new_status: STATUS.PENDING_CLARIFICATION,
-      p_changed_by: COORDINATOR_ID,
       p_reason: note,
-      p_expected_coordinator: COORDINATOR_ID,
+      p_reply_by_date: replyByDate,
+      p_requested_fields: ['purpose', 'proposedStart'],
     });
   });
 
-  it('moves a request already under review to pending clarification in one change', async () => {
-    const note = 'Please clarify the accessibility arrangements.';
-    const client = createFakeClient([
-      ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: COORDINATOR_ID })),
-      ok(storedRow({
-        status: STATUS.PENDING_CLARIFICATION,
-        clarification_note: note,
-        assigned_coordinator_id: COORDINATOR_ID,
-      })),
-    ]);
-
-    await requestEventClarification(REQUEST_ID, note, COORDINATOR_ID, { client });
-
-    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
-    expect(client.calls[1].args).toMatchObject({
-      p_expected_status: STATUS.UNDER_REVIEW,
-      p_new_status: STATUS.PENDING_CLARIFICATION,
-    });
-  });
-
-  it('stops after the first change when it is refused, and asks for nothing more', async () => {
+  it('does not send a clarification for a request that is not under review', async () => {
     const client = createFakeClient([
       ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: COORDINATOR_ID })),
-      dbError('55000', 'event request has status approved, not submitted'),
+    ]);
+
+    const err = await errorFrom(
+      requestEventClarification(REQUEST_ID, 'Please clarify.', COORDINATOR_ID, { client }),
+    );
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.message).toMatch(/submitted.*pending_clarification/i);
+    expect(client.calls.map((call) => call.operation)).toEqual(['select']);
+  });
+
+  it('reports a change the status function refuses as a conflict, and asks for nothing more', async () => {
+    // The read said under review; by the time of the write it was not. One
+    // write attempted, refused, so one call and nothing after it.
+    const client = createFakeClient([
+      ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: COORDINATOR_ID })),
+      dbError('55000', `event request ${REQUEST_ID} has status approved, not under_review`),
     ]);
 
     const err = await errorFrom(
@@ -1693,22 +1687,6 @@ describe('SCRUM-46: Coordinator clarification and Organiser response', () => {
 
     expect(err).toBeInstanceOf(ConflictError);
     expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
-  });
-
-  it('leaves the request under review when the second change is refused', async () => {
-    const client = createFakeClient([
-      ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: COORDINATOR_ID })),
-      ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: COORDINATOR_ID })),
-      dbError('40001', `event request ${REQUEST_ID} is no longer assigned to this coordinator`),
-    ]);
-
-    const err = await errorFrom(
-      requestEventClarification(REQUEST_ID, 'Please clarify.', COORDINATOR_ID, { client }),
-    );
-
-    // The first change happened and was recorded; the second was refused.
-    expect(err).toBeInstanceOf(ConflictError);
-    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc', 'rpc']);
   });
 
   it('rejects a blank clarification note before querying', async () => {
@@ -1722,47 +1700,163 @@ describe('SCRUM-46: Coordinator clarification and Organiser response', () => {
     expect(client.calls).toHaveLength(0);
   });
 
-  it('saves an organiser amendment and returns the request to review', async () => {
+  it('rejects clarification amendment fields outside the editable field list', async () => {
+    const client = createFakeClient([]);
+    const err = await errorFrom(
+      requestEventClarification(REQUEST_ID, 'Please clarify.', COORDINATOR_ID, {
+        requestedFields: ['status'],
+        client,
+      }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ['malformed', 'not-a-date'],
+    ['impossible', '2026-02-30'],
+    ['today', new Date().toISOString().slice(0, 10)],
+  ])('rejects a %s reply-by date before querying', async (_label, replyByDate) => {
+    const client = createFakeClient([]);
+    const err = await errorFrom(
+      requestEventClarification(REQUEST_ID, 'Please clarify.', COORDINATOR_ID, {
+        replyByDate,
+        client,
+      }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toMatch(/replyByDate.*future/i);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('records an organiser reply and scoped amendments, returning the request to review', async () => {
     const client = createFakeClient([
       ok(storedRow({ status: STATUS.PENDING_CLARIFICATION, clarification_note: 'Clarify purpose.' })),
       ok(storedRow({
-        status: STATUS.PENDING_CLARIFICATION,
-        clarification_note: 'Clarify purpose.',
-        description: 'Updated event description.',
-      })),
-      ok(storedRow({
         status: STATUS.UNDER_REVIEW,
         clarification_note: null,
-        description: 'Updated event description.',
       })),
     ]);
 
     const result = await respondToEventClarification(
       REQUEST_ID,
-      { description: 'Updated event description.' },
+      '  The event will be invitation-only.  ',
       ORGANISER_ID,
+      { purpose: 'Celebration' },
       { client },
     );
 
     expect(result.status).toBe(STATUS.UNDER_REVIEW);
-    expect(result.description).toBe('Updated event description.');
     expect(result.clarificationNote).toBeNull();
-
-    // SCRUM-321: the amendments are saved first, in an update that does not
-    // write the status, and only while the request is still pending
-    // clarification. The status then moves through the status function.
-    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'update', 'rpc']);
-    expect(client.calls[1].payload).toEqual({ description: 'Updated event description.' });
-    expect(client.calls[1].filters).toContainEqual(['organiser_id', ORGANISER_ID]);
-    expect(client.calls[1].filters).toContainEqual(['status', STATUS.PENDING_CLARIFICATION]);
-    expect(client.calls[2].args).toEqual({
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
+    expect(client.calls[1].fn).toBe('reply_to_event_clarification_with_amendments');
+    expect(client.calls[1].args).toEqual({
       p_event_request_id: REQUEST_ID,
-      p_expected_status: STATUS.PENDING_CLARIFICATION,
-      p_new_status: STATUS.UNDER_REVIEW,
-      p_changed_by: ORGANISER_ID,
-      p_reason: null,
-      p_expected_coordinator: null,
+      p_organiser_id: ORGANISER_ID,
+      p_reply: 'The event will be invitation-only.',
+      p_updates: { purpose: 'Celebration' },
     });
+  });
+
+  it('rejects blank or non-text replies without database writes', async () => {
+    for (const reply of ['', '  ', { description: 'Changed field' }]) {
+      const client = createFakeClient([]);
+      const err = await errorFrom(
+        respondToEventClarification(REQUEST_ID, reply, ORGANISER_ID, {}, { client }),
+      );
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(client.calls).toHaveLength(0);
+    }
+  });
+
+  it('closes only an open clarification with a required coordinator note', async () => {
+    const client = createFakeClient([
+      ok(assignedRow({ status: STATUS.PENDING_CLARIFICATION })),
+      ok(assignedRow({ status: STATUS.UNDER_REVIEW, clarification_note: null })),
+    ]);
+    const result = await closeEventClarification(
+      REQUEST_ID,
+      'We resolved this by phone.',
+      COORDINATOR_ID,
+      { client },
+    );
+
+    expect(result.status).toBe(STATUS.UNDER_REVIEW);
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
+    expect(client.calls[1].fn).toBe('close_event_clarification');
+    expect(client.calls[1].args).toEqual({
+      p_event_request_id: REQUEST_ID,
+      p_coordinator_id: COORDINATOR_ID,
+      p_expected_coordinator: COORDINATOR_ID,
+      p_message: 'We resolved this by phone.',
+    });
+  });
+
+  it('rejects blank closure notes before querying', async () => {
+    const client = createFakeClient([]);
+    const err = await errorFrom(
+      closeEventClarification(REQUEST_ID, '  ', COORDINATOR_ID, { client }),
+    );
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('returns clarification entries oldest first with the author name for any Coordinator', async () => {
+    const firstEntry = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      entry_type: 'question',
+      message: CLARIFICATION_NOTE,
+      created_by: COORDINATOR_ID,
+      reply_by_date: '2026-10-10',
+      created_at: '2026-10-01T00:00:00Z',
+    };
+    const secondEntry = {
+      ...firstEntry,
+      id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      entry_type: 'reply',
+      message: 'Confirmed.',
+      created_by: ORGANISER_ID,
+      reply_by_date: null,
+      created_at: '2026-10-02T00:00:00Z',
+    };
+    const client = createFakeClient([
+      ok(assignedRow()),
+      ok([firstEntry, secondEntry]),
+      ok([
+        { id: COORDINATOR_ID, full_name: 'Review Coordinator' },
+        { id: ORGANISER_ID, full_name: 'Event Organiser' },
+      ]),
+    ]);
+
+    const history = await getEventClarificationHistory(
+      REQUEST_ID,
+      NEW_COORDINATOR_ID,
+      ROLE.EVENT_COORDINATOR,
+      { client },
+    );
+
+    expect(history).toEqual([
+      {
+        id: firstEntry.id,
+        type: 'question',
+        message: CLARIFICATION_NOTE,
+        authorName: 'Review Coordinator',
+        createdAt: firstEntry.created_at,
+        replyByDate: '2026-10-10',
+        requestedFields: [],
+      },
+      {
+        id: secondEntry.id,
+        type: 'reply',
+        message: 'Confirmed.',
+        authorName: 'Event Organiser',
+        createdAt: secondEntry.created_at,
+        replyByDate: null,
+        requestedFields: [],
+      },
+    ]);
   });
 });
 
@@ -2147,38 +2241,19 @@ const askForClarification = (client, coordinatorId = COORDINATOR_ID) =>
 describe('SCRUM-327 AC7: only the assigned coordinator can request clarification', () => {
   it('SCRUM332_AC7_only_the_assigned_coordinator_can_request_clarification', async () => {
     const client = createFakeClient([
-      ok(assignedRow()),
       ok(assignedRow({ status: STATUS.UNDER_REVIEW })),
       ok(assignedRow({ status: STATUS.PENDING_CLARIFICATION, clarification_note: CLARIFICATION_NOTE })),
     ]);
 
     await askForClarification(client);
 
-    // Each status change is a call to change_event_request_status, and each
-    // carries what each part of AC7 needs:
-    //  - the caller as the person who made the change, for the history.
-    //  - the status the caller read, which the function refuses to change if
-    //    it has moved since: the guard on the status.
-    //  - the caller as the expected coordinator, so the function refuses if a
-    //    handover landed after the read: AC7. The service does not write the
-    //    status column itself.
-    // A submitted event takes two (SCRUM-318: clarification is asked for from
-    // under_review only), and both carry the guard.
-    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc', 'rpc']);
-    const [first, second] = rpcCallsOf(client);
-    expect(first.fn).toBe('change_event_request_status');
-    expect(first.args).toMatchObject({
-      p_expected_status: STATUS.SUBMITTED,
-      p_new_status: STATUS.UNDER_REVIEW,
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
+    const [call] = rpcCallsOf(client);
+    expect(call.fn).toBe('request_event_clarification_with_fields');
+    expect(call.args).toMatchObject({
       p_changed_by: COORDINATOR_ID,
       p_expected_coordinator: COORDINATOR_ID,
-    });
-    expect(second.fn).toBe('change_event_request_status');
-    expect(second.args).toMatchObject({
-      p_expected_status: STATUS.UNDER_REVIEW,
-      p_new_status: STATUS.PENDING_CLARIFICATION,
-      p_changed_by: COORDINATOR_ID,
-      p_expected_coordinator: COORDINATOR_ID,
+      p_reason: CLARIFICATION_NOTE,
     });
   });
 
@@ -2200,7 +2275,6 @@ describe('SCRUM-327 AC7: only the assigned coordinator can request clarification
   it('SCRUM332_AC7_the_new_coordinator_can_request_clarification', async () => {
     // The other half of AC7: the person the event was handed to can act on it.
     const client = createFakeClient([
-      ok(assignedRow({ assigned_coordinator_id: NEW_COORDINATOR_ID })),
       ok(assignedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: NEW_COORDINATOR_ID })),
       ok(assignedRow({
         status: STATUS.PENDING_CLARIFICATION,
@@ -2212,6 +2286,7 @@ describe('SCRUM-327 AC7: only the assigned coordinator can request clarification
     const result = await askForClarification(client, NEW_COORDINATOR_ID);
 
     expect(result.status).toBe(STATUS.PENDING_CLARIFICATION);
+    expect(rpcCallsOf(client)).toHaveLength(1);
     for (const call of rpcCallsOf(client)) {
       expect(call.args.p_expected_coordinator).toBe(NEW_COORDINATOR_ID);
       expect(call.args.p_changed_by).toBe(NEW_COORDINATOR_ID);
@@ -2235,12 +2310,16 @@ describe('SCRUM-327 AC7: only the assigned coordinator can request clarification
   });
 
   it('SCRUM332_AC7_reports_a_handover_after_the_read_as_a_conflict', async () => {
-    // The read said the caller held the event and it was submitted. The
+    // The read said the caller held the event and it was under review. The
     // function then refused with 40001: it was handed on, or changed status,
     // in between. A race, so a 409 telling them to refresh -- see the block
     // comment above for why not a 403.
+    //
+    // Under review, where dev had submitted: a submitted read is now refused
+    // by the service's own status check before the function is called, so on
+    // a submitted row this test would pass without reaching the 40001 at all.
     const client = createFakeClient([
-      ok(assignedRow()),
+      ok(assignedRow({ status: STATUS.UNDER_REVIEW })),
       dbError('40001', `event request ${REQUEST_ID} is no longer assigned to this coordinator`),
     ]);
 
@@ -3451,31 +3530,27 @@ describe('SCRUM-321: the other status changes go through the same function', () 
     expect(client.calls.map((call) => call.operation)).toEqual(['select']);
   });
 
-  it('SCRUM321_an_organiser_response_that_cannot_save_its_amendments_changes_no_status', async () => {
+  it('SCRUM321_an_organiser_reply_that_is_no_longer_open_changes_no_status', async () => {
     const client = createFakeClient([
-      ok(storedRow({ status: STATUS.PENDING_CLARIFICATION })),
-      dbError('PGRST116', 'JSON object requested, multiple (or no) rows returned'),
+      ok(storedRow({ status: STATUS.UNDER_REVIEW })),
     ]);
 
     const err = await errorFrom(
-      respondToEventClarification(REQUEST_ID, { description: 'Updated.' }, ORGANISER_ID, { client }),
+      respondToEventClarification(REQUEST_ID, 'Answered.', ORGANISER_ID, {}, { client }),
     );
 
     expect(err).toBeInstanceOf(ConflictError);
     expect(rpcCallsOf(client)).toHaveLength(0);
   });
 
-  it('SCRUM321_an_organiser_response_that_cannot_change_status_reports_it', async () => {
-    // The amendments were saved, the status function refused. The request is
-    // still pending clarification, so the Organiser can send them again.
+  it('SCRUM321_an_organiser_reply_race_reports_the_status_conflict', async () => {
     const client = createFakeClient([
-      ok(storedRow({ status: STATUS.PENDING_CLARIFICATION })),
       ok(storedRow({ status: STATUS.PENDING_CLARIFICATION })),
       dbError('55000', `event request ${REQUEST_ID} has status approved, not pending_clarification`),
     ]);
 
     const err = await errorFrom(
-      respondToEventClarification(REQUEST_ID, { description: 'Updated.' }, ORGANISER_ID, { client }),
+      respondToEventClarification(REQUEST_ID, 'Answered.', ORGANISER_ID, {}, { client }),
     );
 
     expect(err).toBeInstanceOf(ConflictError);
@@ -3861,5 +3936,462 @@ describe('SCRUM-325 AC4: nothing leaves a final status', () => {
   it('SCRUM325_AC4_lets_a_rejected_request_go_back_to_a_draft_and_nowhere_else', () => {
     // Rejected is not final: the Organiser can reopen it.
     expect(EVERY_STATUS.filter((to) => canTransition(STATUS.REJECTED, to))).toEqual([STATUS.DRAFT]);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-19 -- starting a review, and deciding a request
+// ---------------------------------------------------------------------------
+/**
+ * SCRUM-346 (start review), SCRUM-119 and SCRUM-121 (decide), subtasks of
+ * SCRUM-19 (Approve or Reject a Submitted Event Request).
+ *
+ *   startEventReview(id, coordinatorId, { client })
+ *     -> rpc('start_event_review', { p_event_request_id, p_coordinator_id })
+ *   decideEventRequest(id, { decision, decisionNote }, decidedBy, { client, now })
+ *     -> rpc('decide_event_request', { p_event_request_id, p_decision,
+ *          p_decision_note, p_decided_by, p_decided_at })
+ *
+ * Both writes happen inside migration 029's functions. No decision could be
+ * recorded before them: change_event_request_status writes only the status,
+ * and 025's decided_status_has_decision refuses an approved or rejected row
+ * with no decision, so the status and the decision must go in one statement.
+ * And nothing set reviewing_coordinator_id, which 025's decided_by_is_reviewer
+ * requires the decider to equal. 029's header argues both in full.
+ *
+ * These tests prove what the service does around the call: what it validates
+ * before calling, exactly what it sends, and how each SQLSTATE comes back. The
+ * functions' own logic (the lock, the checks, the single statement) is 029's,
+ * and was proved against the live database, where a fake cannot reach.
+ *
+ * AC numbers follow the current ticket: AC1 starting the review and only the
+ * assigned coordinator acting; AC2 and AC3 deciding only under review, AC3
+ * including a request awaiting clarification; AC5 a rejection needs a reason;
+ * AC6 no approval once the start date has passed; AC7 the status becomes
+ * Approved or Rejected; AC9 the outcome, note, decider and time are recorded.
+ *
+ * Imports appended, for the reason the SCRUM-11 block gives.
+ */
+import { startEventReview, decideEventRequest } from '../../src/services/eventRequestService.js';
+
+const DECISION_NOTE = 'Venue capacity cannot meet the expected attendance.';
+
+/** The row start_event_review returns: under review, with the caller as reviewer. */
+const underReviewRow = () => storedRow({
+  status: STATUS.UNDER_REVIEW,
+  submitted_at: NOW.toISOString(),
+  assigned_coordinator_id: COORDINATOR_ID,
+  reviewing_coordinator_id: COORDINATOR_ID,
+});
+
+/** The row decide_event_request returns, decided as asked. */
+const decidedRow = (decision = 'rejected', note = DECISION_NOTE) => storedRow({
+  status: decision,
+  submitted_at: NOW.toISOString(),
+  assigned_coordinator_id: COORDINATOR_ID,
+  reviewing_coordinator_id: COORDINATOR_ID,
+  decision,
+  decision_note: note,
+  decided_by: COORDINATOR_ID,
+  decided_at: NOW.toISOString(),
+});
+
+const startReview = (client, coordinatorId = COORDINATOR_ID) =>
+  startEventReview(REQUEST_ID, coordinatorId, { client });
+
+const decide = (client, input = { decision: 'rejected', decisionNote: DECISION_NOTE }, decidedBy = COORDINATOR_ID) =>
+  decideEventRequest(REQUEST_ID, input, decidedBy, { client, now: NOW });
+
+
+describe('SCRUM-19 AC1: the assigned coordinator starts the review', () => {
+  it('SCRUM19_AC1_starts_the_review_through_the_function_alone', async () => {
+    // One call to the function, and nothing else, not even a read. Every
+    // question a read could answer (does the event exist, is the caller its
+    // coordinator, is it submitted) start_event_review answers under its row
+    // lock, where the answer cannot change before the write. A read here
+    // could only give an answer already out of date, as reassignEventRequest's
+    // tests argue for the same shape. toEqual, so an extra argument fails as
+    // surely as a missing one.
+    const client = createFakeClient([ok(underReviewRow())]);
+
+    await startReview(client);
+
+    expect(client.calls.map((call) => call.operation)).toEqual(['rpc']);
+    const [rpc] = rpcCallsOf(client);
+    expect(rpc.fn).toBe('start_event_review');
+    expect(rpc.args).toEqual({
+      p_event_request_id: REQUEST_ID,
+      p_coordinator_id: COORDINATOR_ID,
+    });
+  });
+
+  it('SCRUM19_AC1_returns_the_request_with_its_reviewer', async () => {
+    // The point of starting a review in its own function: the caller becomes
+    // the reviewing coordinator, which 025's decided_by_is_reviewer requires
+    // before any decision can be recorded. The row comes back through
+    // toEventRequest like every other, so the reviewer is visible at once.
+    const client = createFakeClient([ok(underReviewRow())]);
+
+    const record = await startReview(client);
+
+    expect(record.status).toBe(STATUS.UNDER_REVIEW);
+    expect(record.reviewingCoordinatorId).toBe(COORDINATOR_ID);
+    expect(Object.keys(record).some((key) => key.includes('_'))).toBe(false);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['blank', '   '],
+  ])('SCRUM19_AC1_refuses_a_coordinator_id_that_is_%s_before_any_call', async (_label, value) => {
+    // The caller comes from the token, so a missing one is a caller bug. The
+    // function would refuse a null with 42501, but a blank string never
+    // reaches it as a uuid at all: PostgREST fails to read it (22P02) and the
+    // caller would get a 500 for what is a bad request.
+    const client = createFakeClient([]);
+
+    const err = await errorFrom(startEventReview(REQUEST_ID, value, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM19_AC1_writes_nothing_outside_the_function', async () => {
+    // The status, the reviewer and the history row are all written inside the
+    // function's transaction. An update or insert from the service beside the
+    // rpc would be a write outside it.
+    const client = createFakeClient([ok(underReviewRow())]);
+
+    await startReview(client);
+
+    expect(client.calls.some((call) => call.operation === 'update')).toBe(false);
+    expect(client.calls.some((call) => call.operation === 'insert')).toBe(false);
+  });
+});
+
+
+describe("SCRUM-19: start_event_review's refusals become typed errors", () => {
+  // One row per SQLSTATE 029 raises from start_event_review, each asserting
+  // the function was called, so a refusal cannot pass by coming from
+  // somewhere else. The messages are 029's own, passed through unchanged.
+  it.each([
+    {
+      name: 'SCRUM19_AC1_reports_an_event_that_does_not_exist_as_not_found',
+      code: 'P0002',
+      message: `event request ${REQUEST_ID} not found`,
+      Err: NotFoundError,
+      status: 404,
+    },
+    {
+      // AC1 itself. 403, not 404: the caller is a coordinator who can already
+      // see the event, so the refusal reveals nothing (errors.js).
+      name: 'SCRUM19_AC1_only_the_assigned_coordinator_starts_the_review',
+      code: '42501',
+      message: `only the coordinator assigned to event request ${REQUEST_ID} can start reviewing it`,
+      Err: ForbiddenError,
+      status: 403,
+    },
+    {
+      name: 'SCRUM19_AC1_only_a_submitted_request_can_be_put_under_review',
+      code: '55000',
+      message: `event request ${REQUEST_ID} has status approved, and only a submitted request can be put under review`,
+      Err: ConflictError,
+      status: 409,
+    },
+    {
+      name: 'SCRUM19_AC1_reports_a_review_started_in_a_race_as_a_conflict',
+      code: '40001',
+      message: `event request ${REQUEST_ID} changed status while the review was being started`,
+      Err: ConflictError,
+      status: 409,
+    },
+  ])('$name', async ({ code, message, Err, status }) => {
+    const client = createFakeClient([dbError(code, message)]);
+
+    const err = await errorFrom(startReview(client));
+
+    expect(rpcCallsOf(client)).toHaveLength(1);
+    expect(err).toBeInstanceOf(Err);
+    expect(err.status).toBe(status);
+    expect(err.message).toBe(message);
+  });
+});
+
+
+/**
+ * Two judgement calls the tests below pin.
+ *
+ * The decision must be exactly 'approved' or 'rejected', lowercase. No
+ * case-folding. Those are the values of 025's event_request_decision enum and
+ * of the status each leads to, and the frontend sends one of them from a
+ * button, never from typed text, so there is nobody for leniency to help.
+ * Accepting 'Approved' would invent a second spelling the API then has to
+ * honour forever, and validateProcessChangeRequest takes the same strict line
+ * for change-request decisions. Anything else, including a non-string, is a
+ * ValidationError naming the field, before any call: PostgREST would otherwise
+ * fail to read it as the enum (22P02), which translateError does not map, and
+ * the coordinator would get a 500.
+ *
+ * A rejection with no reason is refused by the service too, although 029
+ * refuses it with 22023. The function's refusal is one sentence in a Postgres
+ * exception; the service's is a ValidationError whose details name
+ * decisionNote, which is what lets the form put the message beside the field
+ * that needs filling in, the way every other form fault in this API is
+ * reported. It also saves a round trip and a row lock for a fault visible in
+ * the request alone. The function's check stays as the backstop for any
+ * caller that does not come through here, and its 22023 still maps to a 400.
+ */
+describe('SCRUM-19: the assigned coordinator decides a request under review', () => {
+  it('SCRUM19_AC7_decides_through_the_function_alone', async () => {
+    // One call, all five arguments, compared with toEqual. p_decided_at is the
+    // injected clock as an ISO string, for 016's reason for p_submitted_at:
+    // the service owns the clock so a test can state the exact instant. Here
+    // it decides an outcome, because AC6 measures "has the start date
+    // passed" at that instant. p_decided_by is the caller passed in, never
+    // anything from the body.
+    const client = createFakeClient([ok(decidedRow())]);
+
+    await decide(client);
+
+    expect(client.calls.map((call) => call.operation)).toEqual(['rpc']);
+    const [rpc] = rpcCallsOf(client);
+    expect(rpc.fn).toBe('decide_event_request');
+    expect(rpc.args).toEqual({
+      p_event_request_id: REQUEST_ID,
+      p_decision: 'rejected',
+      p_decision_note: DECISION_NOTE,
+      p_decided_by: COORDINATOR_ID,
+      p_decided_at: NOW.toISOString(),
+    });
+  });
+
+  it('SCRUM19_AC9_returns_the_recorded_decision_in_camelCase', async () => {
+    // SCRUM-121: the first time any of 025's four decision columns reaches an
+    // API response. The decision, the note, who decided and when, as AC9
+    // asks, under their camelCase names.
+    const client = createFakeClient([ok(decidedRow('rejected'))]);
+
+    const record = await decide(client);
+
+    expect(record).toMatchObject({
+      status: 'rejected',
+      decision: 'rejected',
+      decisionNote: DECISION_NOTE,
+      decidedBy: COORDINATOR_ID,
+      decidedAt: NOW.toISOString(),
+      reviewingCoordinatorId: COORDINATOR_ID,
+    });
+    expect(Object.keys(record).some((key) => key.includes('_'))).toBe(false);
+  });
+
+  it('SCRUM19_AC9_every_read_carries_the_decision', async () => {
+    // Not only the decision's own response: any read has to carry it, or the
+    // Organiser reading their request a moment later would not see the
+    // outcome. COLUMNS is what every read selects, so it is pinned through an
+    // ordinary read, as SCRUM331_AC7_every_read_carries_the_reviewer does.
+    // An undecided row reads them as null, not undefined.
+    const decided = createFakeClient([ok(decidedRow('approved', 'Approved as submitted.'))]);
+    const undecided = createFakeClient([ok(storedRow())]);
+
+    const record = await getEventRequestById(REQUEST_ID, { client: decided });
+    const fresh = await getEventRequestById(REQUEST_ID, { client: undecided });
+
+    for (const column of ['reviewing_coordinator_id', 'decision', 'decision_note', 'decided_by', 'decided_at']) {
+      expect(decided.calls[0].select).toContain(column);
+    }
+    expect(record).toMatchObject({
+      decision: 'approved',
+      decisionNote: 'Approved as submitted.',
+      decidedBy: COORDINATOR_ID,
+      decidedAt: NOW.toISOString(),
+    });
+    expect(fresh).toMatchObject({ decision: null, decisionNote: null, decidedBy: null, decidedAt: null });
+  });
+
+  it.each([
+    ['capitalised', 'Approved'],
+    ['upper case', 'REJECTED'],
+    ['an unknown word', 'maybe'],
+    ['empty', ''],
+    ['missing', undefined],
+    ['null', null],
+    ['a number', 1],
+  ])('SCRUM19_AC7_refuses_a_decision_that_is_%s_before_any_call', async (_label, value) => {
+    const client = createFakeClient([]);
+
+    const err = await errorFrom(decide(client, { decision: value, decisionNote: DECISION_NOTE }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(fieldsIn(err)).toContain('decision');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['blank', '   '],
+  ])('SCRUM19_AC5_refuses_a_rejection_whose_reason_is_%s_before_any_call', async (_label, value) => {
+    // See the block comment above for why the service checks this as well as
+    // the function.
+    const client = createFakeClient([]);
+
+    const err = await errorFrom(decide(client, { decision: 'rejected', decisionNote: value }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(fieldsIn(err)).toEqual(['decisionNote']);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM19_AC5_sends_an_omitted_or_blank_note_on_an_approval_as_null', async () => {
+    // An approval's note is optional. A blank one says nothing, and sent as
+    // spaces it would fail 021's reason_not_blank on the history row, so it
+    // goes as null, as reassignEventRequest does for a blank handover note.
+    const omitted = createFakeClient([ok(decidedRow('approved', null))]);
+    const blank = createFakeClient([ok(decidedRow('approved', null))]);
+
+    await decide(omitted, { decision: 'approved' });
+    await decide(blank, { decision: 'approved', decisionNote: '   ' });
+
+    expect(rpcCallsOf(omitted)[0].args.p_decision_note).toBeNull();
+    expect(rpcCallsOf(blank)[0].args.p_decision_note).toBeNull();
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['blank', '   '],
+  ])('SCRUM19_AC1_refuses_a_decider_id_that_is_%s_before_any_call', async (_label, value) => {
+    const client = createFakeClient([]);
+
+    const err = await errorFrom(
+      decideEventRequest(REQUEST_ID, { decision: 'approved' }, value, { client, now: NOW }),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM19_AC9_writes_nothing_outside_the_function', async () => {
+    // The status, the four decision fields and the history row are written
+    // in one statement and one transaction inside 029. A write from the
+    // service beside it would break the single statement 025's constraints
+    // require.
+    const client = createFakeClient([ok(decidedRow())]);
+
+    await decide(client);
+
+    expect(client.calls.some((call) => call.operation === 'update')).toBe(false);
+    expect(client.calls.some((call) => call.operation === 'insert')).toBe(false);
+  });
+});
+
+
+describe("SCRUM-19: decide_event_request's refusals become typed errors", () => {
+  // One row per SQLSTATE 029 raises from decide_event_request. Every input
+  // here passes the service's own checks, so each refusal can only have come
+  // from the function, and each asserts the function was called.
+  it.each([
+    {
+      name: 'SCRUM19_AC2_reports_an_event_that_does_not_exist_as_not_found',
+      code: 'P0002',
+      message: `event request ${REQUEST_ID} not found`,
+      Err: NotFoundError,
+      status: 404,
+      exact: true,
+    },
+    {
+      name: 'SCRUM19_AC1_only_the_assigned_coordinator_decides',
+      code: '42501',
+      message: `only the coordinator assigned to event request ${REQUEST_ID} can decide it`,
+      Err: ForbiddenError,
+      status: 403,
+      exact: true,
+    },
+    {
+      // 029 refuses a decided-by who is not the recorded reviewer with the
+      // same code, and the same 403.
+      name: 'SCRUM19_AC1_only_the_reviewing_coordinator_decides',
+      code: '42501',
+      message: `event request ${REQUEST_ID} is under review by another coordinator, who must decide it`,
+      Err: ForbiddenError,
+      status: 403,
+      exact: true,
+    },
+    {
+      // AC3's "including Pending clarification", refused by the function's
+      // under_review check with the status named.
+      name: 'SCRUM19_AC3_refuses_a_decision_on_a_request_awaiting_clarification',
+      code: '55000',
+      message: `event request ${REQUEST_ID} has status pending_clarification, and only a request under review can be decided`,
+      Err: ConflictError,
+      status: 409,
+      exact: true,
+    },
+    {
+      name: 'SCRUM19_AC2_refuses_a_decision_on_a_request_not_yet_under_review',
+      code: '55000',
+      message: `event request ${REQUEST_ID} has status submitted, and only a request under review can be decided`,
+      Err: ConflictError,
+      status: 409,
+      exact: true,
+    },
+    {
+      // AC6. The same 409 as a wrong status, with 029's message telling the
+      // coordinator what to do next. 029's header argues the shared code.
+      name: 'SCRUM19_AC6_refuses_an_approval_when_the_start_date_has_passed',
+      code: '55000',
+      message: `event request ${REQUEST_ID} cannot be approved because its proposed start date has passed or is missing. Agree a new date with the organiser, or reject the request`,
+      Err: ConflictError,
+      status: 409,
+      exact: true,
+    },
+    {
+      // The function's own check for a missing reason, the backstop behind
+      // the service's. Still a 400, with the function's sentence.
+      name: 'SCRUM19_AC5_the_functions_refusal_of_a_missing_reason_is_still_a_400',
+      code: '22023',
+      message: `a reason is required to reject event request ${REQUEST_ID}`,
+      Err: ValidationError,
+      status: 400,
+      exact: true,
+    },
+    {
+      name: 'SCRUM19_AC7_reports_a_decision_made_in_a_race_as_a_conflict',
+      code: '40001',
+      message: `event request ${REQUEST_ID} changed status while it was being decided`,
+      Err: ConflictError,
+      status: 409,
+      exact: true,
+    },
+  ])('$name', async ({ code, message, Err, status }) => {
+    const client = createFakeClient([dbError(code, message)]);
+
+    const err = await errorFrom(decide(client, { decision: 'approved' }));
+
+    expect(rpcCallsOf(client)).toHaveLength(1);
+    expect(err).toBeInstanceOf(Err);
+    expect(err.status).toBe(status);
+    expect(err.message).toBe(message);
+  });
+
+  it('SCRUM19_AC7_a_null_decision_time_is_a_server_fault', async () => {
+    // 22004: the decision or the time was null. Only a caller bug can do
+    // that, since the service always sends its clock, so it stays untyped,
+    // as 021's 22004 does: a 500 that is logged, not a 400 telling a
+    // coordinator to fix a form they filled in correctly.
+    const client = createFakeClient([
+      dbError('22004', 'decide_event_request needs the decision and the time it was made'),
+    ]);
+
+    const err = await errorFrom(decide(client, { decision: 'approved' }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ValidationError);
+    expect(err.status).toBeUndefined();
   });
 });
