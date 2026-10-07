@@ -19,6 +19,7 @@ import userEvent from "@testing-library/user-event";
 
 import EventVenueFinder from "../../src/components/EventVenueFinder.jsx";
 import { findVenuesForEvent } from "../../src/services/venueService";
+import { createBookingRequest } from "../../src/services/bookingRequestService";
 import {
   ACCESSIBILITY_FEATURES,
   FACILITIES,
@@ -27,6 +28,10 @@ import {
 
 vi.mock("../../src/services/venueService", () => ({
   findVenuesForEvent: vi.fn(),
+}));
+
+vi.mock("../../src/services/bookingRequestService", () => ({
+  createBookingRequest: vi.fn(),
 }));
 
 const GENERIC_ERROR = "Could not search venues. Please try again.";
@@ -89,9 +94,9 @@ function httpError(status, data) {
   });
 }
 
-function renderFinder(request = EVENT) {
+function renderFinder(request = EVENT, props = {}) {
   const user = userEvent.setup();
-  const utils = render(<EventVenueFinder request={request} />);
+  const utils = render(<EventVenueFinder request={request} {...props} />);
   return { user, ...utils };
 }
 
@@ -124,6 +129,7 @@ function describedErrors(control) {
 beforeEach(() => {
   vi.mocked(findVenuesForEvent).mockReset();
   vi.mocked(findVenuesForEvent).mockResolvedValue([]);
+  vi.mocked(createBookingRequest).mockReset();
 });
 
 describe("SCRUM20_AC2 pre-filled from the event", () => {
@@ -772,7 +778,10 @@ describe("SCRUM20 venue details on each result (SCRUM-142)", () => {
 
 describe("SCRUM20_AC8 no venue matched (SCRUM-143)", () => {
   const NO_MATCH = "No venue matched your criteria.";
-  const noMatch = () => screen.queryByRole("status");
+  // By its text: with results on screen, SCRUM-254's eligibility reason is a
+  // status too.
+  const noMatch = () =>
+    screen.queryAllByRole("status").find((el) => el.textContent.includes(NO_MATCH)) ?? null;
 
   it("SCRUM20_AC8_empty_response_shows_the_no_match_message", async () => {
     const { user } = renderFinder();
@@ -878,5 +887,167 @@ describe("SCRUM20_AC8 no venue matched (SCRUM-143)", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(GENERIC_ERROR);
     expect(noMatch()).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM254 request this venue from the event's search", () => {
+  const COORDINATOR = "u-coord";
+  const APPROVED = Object.freeze({
+    ...EVENT,
+    status: "approved",
+    assignedCoordinatorId: COORDINATOR,
+  });
+  const PENDING_BOOKING = { id: "b1", status: "pending" };
+  const NOT_APPROVED =
+    /A venue can only be requested for an approved or confirmed event\. This event is/;
+  const ALREADY = "This event already has a venue request, so another cannot be started.";
+
+  const requestButton = (name) =>
+    screen.getByRole("button", { name: `Request this venue: ${name}` });
+  const allRequestButtons = () => screen.getAllByRole("button", { name: /^Request this venue: / });
+  const panel = (name) => screen.queryByRole("region", { name: `Request ${name}` });
+
+  /** Renders the finder, searches, and waits for HALL and ANNEX. */
+  async function searched(request = APPROVED, props = { userId: COORDINATOR }) {
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL, ANNEX]);
+    const utils = renderFinder(request, props);
+    await utils.user.click(searchButton());
+    await screen.findByRole("heading", { name: "Hall A" });
+    return utils;
+  }
+
+  it("SCRUM254_each_result_offers_a_request_button", async () => {
+    await searched();
+    expect(allRequestButtons()).toHaveLength(2);
+    expect(requestButton("Hall A")).toHaveTextContent("Request this venue");
+    expect(requestButton("Annex")).toHaveAttribute("type", "button");
+  });
+
+  it.each(["approved", "confirmed"])(
+    "SCRUM254_enabled_for_the_assigned_coordinator_on_a_%s_event_with_no_reason",
+    async (status) => {
+      await searched({ ...APPROVED, status });
+      for (const button of allRequestButtons()) expect(button).toBeEnabled();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    ["a submitted event", { ...APPROVED, status: "submitted" }, COORDINATOR, NOT_APPROVED],
+    ["an event under review", { ...APPROVED, status: "under_review" }, COORDINATOR, /This event is under review\./],
+    ["a different coordinator", APPROVED, "someone-else", /Only the coordinator assigned to this event/],
+    ["no signed-in user", APPROVED, undefined, /Only the coordinator assigned to this event/],
+    ["no proposed start", { ...APPROVED, proposedStart: null }, COORDINATOR, /no proposed start and end yet/],
+    ["no proposed end", { ...APPROVED, proposedEnd: null }, COORDINATOR, /no proposed start and end yet/],
+  ])("SCRUM254_disabled_with_the_reason_shown_once_for_%s", async (_label, request, userId, reason) => {
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL, ANNEX]);
+    const { user } = renderFinder(request, { userId });
+    // A missing start or end leaves the date blank, so fill it in to search.
+    if (!request.proposedStart || !request.proposedEnd) {
+      fireEvent.change(field.date(), { target: { value: START.date } });
+      fireEvent.change(field.start(), { target: { value: START.time } });
+      fireEvent.change(field.end(), { target: { value: END.time } });
+    }
+    await user.click(searchButton());
+    await screen.findByRole("heading", { name: "Hall A" });
+
+    for (const button of allRequestButtons()) expect(button).toBeDisabled();
+    const statuses = screen.getAllByRole("status");
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0]).toHaveTextContent(reason);
+  });
+
+  it("SCRUM254_no_reason_before_any_results", () => {
+    renderFinder(EVENT);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM254_clicking_opens_the_panel_for_that_venue_without_searching_again", async () => {
+    const { user } = await searched();
+    expect(findVenuesForEvent).toHaveBeenCalledTimes(1);
+
+    await user.click(requestButton("Annex"));
+
+    expect(screen.getByRole("heading", { name: "Request Annex" })).toBeInTheDocument();
+    expect(panel("Annex")).toBeInTheDocument();
+    expect(panel("Hall A")).not.toBeInTheDocument();
+    expect(findVenuesForEvent).toHaveBeenCalledTimes(1);
+    // The panel's own form is not nested in the search form.
+    const searchForm = searchButton().closest("form");
+    expect(searchForm.contains(panel("Annex"))).toBe(false);
+  });
+
+  it("SCRUM254_a_sent_request_reaches_the_parent_and_disables_every_button", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING_BOOKING);
+    const onRequestSubmitted = vi.fn();
+    const { user } = await searched(APPROVED, { userId: COORDINATOR, onRequestSubmitted });
+
+    await user.click(requestButton("Hall A"));
+    await user.click(within(panel("Hall A")).getByRole("button", { name: "Request this venue" }));
+
+    await waitFor(() => expect(onRequestSubmitted).toHaveBeenCalledWith(PENDING_BOOKING));
+    expect(createBookingRequest).toHaveBeenCalledWith({ eventRequestId: "e1", venueId: "v1" });
+    for (const button of allRequestButtons()) expect(button).toBeDisabled();
+    expect(screen.getByText(ALREADY)).toBeInTheDocument();
+  });
+
+  it("SCRUM254_a_sent_request_without_a_parent_callback_still_disables_the_buttons", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING_BOOKING);
+    const { user } = await searched();
+
+    await user.click(requestButton("Hall A"));
+    await user.click(within(panel("Hall A")).getByRole("button", { name: "Request this venue" }));
+
+    await waitFor(() => {
+      for (const button of allRequestButtons()) expect(button).toBeDisabled();
+    });
+  });
+
+  it("SCRUM254_an_already_requested_answer_disables_every_button", async () => {
+    vi.mocked(createBookingRequest).mockRejectedValue(
+      httpError(409, { error: "prose", code: "BOOKING_REQUEST_EXISTS" }),
+    );
+    const onRequestSubmitted = vi.fn();
+    const { user } = await searched(APPROVED, { userId: COORDINATOR, onRequestSubmitted });
+
+    await user.click(requestButton("Annex"));
+    await user.click(within(panel("Annex")).getByRole("button", { name: "Request this venue" }));
+
+    await waitFor(() => {
+      for (const button of allRequestButtons()) expect(button).toBeDisabled();
+    });
+    expect(onRequestSubmitted).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM254_cancel_closes_the_panel", async () => {
+    const { user } = await searched();
+
+    await user.click(requestButton("Hall A"));
+    await user.click(within(panel("Hall A")).getByRole("button", { name: "Cancel" }));
+
+    expect(panel("Hall A")).not.toBeInTheDocument();
+    expect(requestButton("Hall A")).toBeEnabled();
+  });
+
+  it("SCRUM254_a_new_search_closes_an_open_panel_but_keeps_the_sent_state", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING_BOOKING);
+    const { user } = await searched();
+
+    await user.click(requestButton("Hall A"));
+    expect(panel("Hall A")).toBeInTheDocument();
+    await user.click(searchButton());
+
+    await waitFor(() => expect(findVenuesForEvent).toHaveBeenCalledTimes(2));
+    await screen.findByRole("heading", { name: "Hall A" });
+    expect(panel("Hall A")).not.toBeInTheDocument();
+
+    // Send, then search again: the buttons stay off.
+    await user.click(requestButton("Annex"));
+    await user.click(within(panel("Annex")).getByRole("button", { name: "Request this venue" }));
+    await screen.findByText(ALREADY);
+    await user.click(searchButton());
+    await waitFor(() => expect(findVenuesForEvent).toHaveBeenCalledTimes(3));
+    await screen.findByRole("heading", { name: "Annex" });
+    for (const button of allRequestButtons()) expect(button).toBeDisabled();
   });
 });

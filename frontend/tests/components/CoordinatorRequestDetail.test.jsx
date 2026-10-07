@@ -46,6 +46,7 @@ import {
   startEventReview,
 } from "../../src/services/eventRequestService";
 import { findVenuesForEvent } from "../../src/services/venueService";
+import { createBookingRequest } from "../../src/services/bookingRequestService";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -67,6 +68,10 @@ vi.mock("../../src/services/eventRequestService", () => ({
 
 vi.mock("../../src/services/venueService", () => ({
   findVenuesForEvent: vi.fn(),
+}));
+
+vi.mock("../../src/services/bookingRequestService", () => ({
+  createBookingRequest: vi.fn(),
 }));
 
 const COORDINATOR = { id: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d", role: "event_coordinator" };
@@ -206,6 +211,7 @@ beforeEach(() => {
   vi.mocked(getAssignmentHistoryForReview).mockResolvedValue([]);
   vi.mocked(findVenuesForEvent).mockReset();
   vi.mocked(findVenuesForEvent).mockResolvedValue([]);
+  vi.mocked(createBookingRequest).mockReset();
   // ClarificationHistory calls .then() on this the moment it mounts, so it
   // has to hand back a promise, not undefined.
   vi.mocked(getEventClarificationHistory).mockReset();
@@ -633,5 +639,86 @@ describe("SCRUM19 statuses with nothing to decide", () => {
     expect(within(record).getByText("Approved")).toBeInTheDocument();
     expect(within(record).getByText("No note was left.")).toBeInTheDocument();
     expect(actionButtonsShown()).toEqual([]);
+  });
+});
+
+// SCRUM-254: the finder's results offer "Request this venue", fed the request
+// as this panel last saw it change, so approving here makes it available
+// straight away.
+describe("SCRUM254 requesting a venue from the event view", () => {
+  const HALL = { id: "v1", name: "Hall A", location: "Level 2", maxCapacity: 200 };
+  // eventRequest()'s future() start and end are the same instant, which the
+  // finder refuses to search, so these carry a real two-hour period.
+  const PERIOD = { proposedStart: START_ISO, proposedEnd: END_ISO };
+
+  async function searchInFinder(user) {
+    await user.click(within(finderSection()).getByRole("button", { name: "Search venues" }));
+    return within(finderSection()).findByRole("button", { name: "Request this venue: Hall A" });
+  }
+
+  it("SCRUM254_approving_here_enables_request_this_venue", async () => {
+    vi.mocked(decideEventRequest).mockResolvedValue(eventRequest({
+      ...PERIOD,
+      status: "approved",
+      reviewingCoordinatorId: ASSIGNED,
+      decision: "approved",
+      decisionNote: "Approved.",
+      decidedBy: ASSIGNED,
+      decidedAt: "2026-01-15T09:00:00+08:00",
+    }));
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest({ ...PERIOD, status: "under_review", reviewingCoordinatorId: ASSIGNED }));
+
+    await user.type(await screen.findByLabelText("Note for the Organiser"), "Approved.");
+    await user.click(screen.getByRole("button", { name: "Approve request" }));
+    await screen.findByText("Outcome");
+
+    expect(await searchInFinder(user)).toBeEnabled();
+  });
+
+  it("SCRUM254_a_submitted_event_cannot_have_a_venue_requested", async () => {
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest(PERIOD));
+
+    expect(await searchInFinder(user)).toBeDisabled();
+    expect(within(finderSection()).getByRole("status")).toHaveTextContent(
+      "A venue can only be requested for an approved or confirmed event. This event is submitted.",
+    );
+  });
+
+  it("SCRUM254_a_coordinator_who_is_not_assigned_cannot_request", async () => {
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    const user = userEvent.setup();
+    renderAs(OTHER, eventRequest({ ...PERIOD, status: "approved" }));
+
+    expect(await searchInFinder(user)).toBeDisabled();
+    expect(within(finderSection()).getByRole("status")).toHaveTextContent(
+      "Only the coordinator assigned to this event can request a venue for it.",
+    );
+  });
+
+  it("SCRUM254_a_sent_request_refreshes_the_parent", async () => {
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    vi.mocked(createBookingRequest).mockResolvedValue({ id: "b1", status: "pending" });
+    vi.mocked(useAuth).mockReturnValue({ user: { id: ASSIGNED, role: "event_coordinator" } });
+    const onChangeRequestProcessed = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <CoordinatorRequestDetail
+          request={eventRequest({ ...PERIOD, status: "approved" })}
+          onChangeRequestProcessed={onChangeRequestProcessed}
+        />
+      </MemoryRouter>,
+    );
+
+    await user.click(await searchInFinder(user));
+    const panel = screen.getByRole("region", { name: "Request Hall A" });
+    await user.click(within(panel).getByRole("button", { name: "Request this venue" }));
+
+    await waitFor(() => expect(onChangeRequestProcessed).toHaveBeenCalledTimes(1));
+    expect(createBookingRequest).toHaveBeenCalledWith({ eventRequestId: REQUEST_ID, venueId: "v1" });
   });
 });

@@ -5,6 +5,9 @@
 // that jumped to /venue-search with the capacity filtered; SCRUM-141 (SCRUM-20)
 // replaced that with EventVenueFinder, a search pre-filled from this event
 // that runs in place, so finding a venue stays part of handling the event.
+// SCRUM-254's "Request this venue" used to be reached through that old
+// handoff; it is now offered on each of the finder's results instead, so the
+// coordinator finds and requests a venue without leaving the event.
 //
 // Takes the request as a prop and fetches nothing. That is a decision, not a
 // shortcut: GET /event-requests/queue selects exactly the columns GET /:id
@@ -805,12 +808,20 @@ export default function CoordinatorRequestDetail({
           different event re-seeds the form, and so does an approved change
           request that moves this event's period or attendance -- the form
           must never offer stale event values as if they were current. A
-          refresh that changes nothing else keeps the coordinator's edits. */}
+          refresh that changes nothing else keeps the coordinator's edits.
+          It gets `current`, not `request`, so an event approved in this
+          panel can have a venue requested for it straight away (SCRUM-254:
+          each result's "Request this venue"). userId is passed only while
+          this user is the assigned coordinator, so a handover made here
+          (handedOverTo) turns the request buttons off even though `current`
+          still names this user. A sent request refreshes the parent's list. */}
       <section>
         <h3>Find a venue</h3>
         <EventVenueFinder
-          key={`${request.id}|${request.proposedStart}|${request.proposedEnd}|${request.expectedAttendance}`}
-          request={request}
+          key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}`}
+          request={current}
+          userId={isAssignedCoordinator ? user.id : undefined}
+          onRequestSubmitted={() => onChangeRequestProcessed?.()}
         />
         <p className="event-venue-finder__browse">
           <Link to="/venue-search">Browse all venues</Link>

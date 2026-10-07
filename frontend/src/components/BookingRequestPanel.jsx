@@ -1,9 +1,10 @@
 // BookingRequestPanel.jsx
 //
 // SCRUM-254 (part of SCRUM-243). The one "Request this venue" flow, for the
-// event and venue it is given. Venue search mounts it today; the suitability
-// panel (SCRUM-191) mounts the same component, passing the result it already
-// holds as `suitability`, so both entry points behave identically.
+// event and venue it is given. Venue search mounts it today, and so does
+// EventVenueFinder, the search inside the coordinator's event view; the
+// suitability panel (SCRUM-191) mounts the same component, passing the result
+// it already holds as `suitability`, so every entry point behaves identically.
 //
 // What the coordinator sees and chooses:
 //   - the event's own details, because they are what the request will carry:

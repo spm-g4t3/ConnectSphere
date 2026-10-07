@@ -44,9 +44,25 @@
 //
 // The event's free-text requirements are already shown under "Requirements"
 // in the same panel, so this section does not repeat them.
+//
+// SCRUM-254: each result offers "Request this venue", which opens
+// BookingRequestPanel in place, under the search. The button lives here
+// because this finder replaced the old navigate handoff to /venue-search,
+// which was the only way into that panel; without it a coordinator could find
+// a venue for the event and then have no way to ask for it. The panel has its
+// own <form>, so it renders beside this one, never inside it, and the button
+// is type="button" so it never runs the search.
+// bookingRequestEligibility is a convenience, not the gate: it saves a
+// coordinator a button that can only be refused, and when it says no, its
+// reason shows once above the results. The server checks everything again
+// under a lock (create_booking_request, migration 030). eventRequested
+// disables every button once a request is sent, or once the server answers
+// that the event already has one, so a second cannot be started; a new search
+// closes an open panel but does not undo that.
 
 import { useId, useState } from "react";
 import { VENUE_TIME_ZONE } from "../services/datetimeFormat";
+import { bookingRequestEligibility } from "../services/bookingRequestEligibility";
 import {
   mapServerDetails,
   searchErrorMessage,
@@ -60,6 +76,7 @@ import {
   FACILITIES,
   ROOM_LAYOUTS,
 } from "../services/venueLookups";
+import BookingRequestPanel from "./BookingRequestPanel";
 
 /** The three code lists on a result, in the order they are shown. */
 const RESULT_CODE_LISTS = [
@@ -81,8 +98,11 @@ function codesText(codes, options) {
     .join(", ");
 }
 
-/** One matching venue: its name as the heading, the rest as a <dl>. */
-function VenueResult({ venue, headingId }) {
+/**
+ * One matching venue: its name as the heading, the rest as a <dl>, then the
+ * SCRUM-254 request button.
+ */
+function VenueResult({ venue, headingId, requestDisabled, onRequest }) {
   const rows = [
     { term: "Location", value: venue.location },
     { term: "Maximum capacity", value: venue.maxCapacity },
@@ -102,6 +122,16 @@ function VenueResult({ venue, headingId }) {
           </div>
         ))}
       </dl>
+      {/* type="button": this sits inside the search form and must not submit it. */}
+      <button
+        type="button"
+        className="event-venue-finder__request"
+        aria-label={`Request this venue: ${venue.name}`}
+        disabled={requestDisabled}
+        onClick={() => onRequest(venue)}
+      >
+        Request this venue
+      </button>
     </article>
   );
 }
@@ -112,7 +142,7 @@ const CODE_GROUPS = [
   { field: "facilities", legend: "Facilities", options: FACILITIES },
 ];
 
-export default function EventVenueFinder({ request }) {
+export default function EventVenueFinder({ request, userId, onRequestSubmitted }) {
   // Lazy: the function runs on the first render only. See the header.
   const [values, setValues] = useState(() => seedFromEvent(request));
   const [fieldErrors, setFieldErrors] = useState([]);
@@ -122,6 +152,12 @@ export default function EventVenueFinder({ request }) {
   // null until a search has succeeded, so "not searched yet" (no message) and
   // "searched, nothing matched" (the no-match message) stay distinguishable.
   const [results, setResults] = useState(null);
+
+  // SCRUM-254. See the header: the venue whose panel is open, and whether
+  // this event now has a live request, so no second one can be started.
+  const eligibility = bookingRequestEligibility(request, userId);
+  const [requestingVenue, setRequestingVenue] = useState(null);
+  const [eventRequested, setEventRequested] = useState(false);
 
   const idPrefix = useId();
   const idFor = (field) => `${idPrefix}-${field}`;
@@ -164,6 +200,8 @@ export default function EventVenueFinder({ request }) {
     setFieldErrors([]);
     setServerFieldErrors([]);
     setError(null);
+    // The results are about to change, so a panel for one of them closes.
+    setRequestingVenue(null);
     setLoading(true);
     try {
       setResults(await findVenuesForEvent(toSearchCriteria(values)));
@@ -212,147 +250,182 @@ export default function EventVenueFinder({ request }) {
     );
   }
 
+  const hasResults = results !== null && results.length > 0;
+
   return (
-    <form className="event-venue-finder" onSubmit={handleSearch} noValidate>
-      <div className="event-venue-finder__row">
-        <div className="event-venue-finder__field">
-          <label htmlFor={idFor("date")}>Date</label>
-          <input
-            id={idFor("date")}
-            type="date"
-            value={values.date}
-            onChange={(e) => update("date", e.target.value)}
-            disabled={loading}
-            {...ariaFor("date")}
-          />
-          {renderFieldErrors("date")}
-        </div>
-        <div className="event-venue-finder__field">
-          <label htmlFor={idFor("startTime")}>Start</label>
-          <input
-            id={idFor("startTime")}
-            type="time"
-            value={values.startTime}
-            onChange={(e) => update("startTime", e.target.value)}
-            disabled={loading}
-            {...ariaFor("startTime")}
-          />
-          {renderFieldErrors("startTime")}
-        </div>
-        <div className="event-venue-finder__field">
-          <label htmlFor={idFor("endTime")}>End</label>
-          <input
-            id={idFor("endTime")}
-            type="time"
-            value={values.endTime}
-            onChange={(e) => update("endTime", e.target.value)}
-            disabled={loading}
-            {...ariaFor("endTime")}
-          />
-          {renderFieldErrors("endTime")}
-        </div>
-      </div>
-
-      {/* Disclosure, not a picker: venue time on every device (see the header). */}
-      <p className="event-venue-finder__hint">
-        Times are Singapore time ({VENUE_TIME_ZONE}), the venues' local time.
-      </p>
-
-      <div className="event-venue-finder__row">
-        <div className="event-venue-finder__field">
-          <label htmlFor={idFor("expectedAttendance")}>Expected attendance</label>
-          <input
-            id={idFor("expectedAttendance")}
-            type="number"
-            min="1"
-            step="1"
-            value={values.expectedAttendance}
-            onChange={(e) => update("expectedAttendance", e.target.value)}
-            disabled={loading}
-            {...ariaFor("expectedAttendance")}
-          />
-          {renderFieldErrors("expectedAttendance")}
-        </div>
-        <div className="event-venue-finder__field">
-          <label htmlFor={idFor("location")}>Location</label>
-          <input
-            id={idFor("location")}
-            type="text"
-            value={values.location}
-            onChange={(e) => update("location", e.target.value)}
-            disabled={loading}
-            {...ariaFor("location")}
-          />
-          {renderFieldErrors("location")}
-        </div>
-        <div className="event-venue-finder__field">
-          <label htmlFor={idFor("layout")}>Layout</label>
-          <select
-            id={idFor("layout")}
-            value={values.layout}
-            onChange={(e) => update("layout", e.target.value)}
-            disabled={loading}
-            {...ariaFor("layout")}
-          >
-            <option value="">Any layout</option>
-            {ROOM_LAYOUTS.map((layout) => (
-              <option key={layout.code} value={layout.code}>
-                {layout.label}
-              </option>
-            ))}
-          </select>
-          {renderFieldErrors("layout")}
-        </div>
-      </div>
-
-      {CODE_GROUPS.map(({ field, legend, options }) => (
-        <fieldset key={field} className="event-venue-finder__group" {...ariaFor(field)}>
-          <legend>{legend}</legend>
-          <div className="event-venue-finder__options">
-            {options.map((option) => (
-              <label key={option.code} className="event-venue-finder__option">
-                <input
-                  type="checkbox"
-                  checked={values[field].includes(option.code)}
-                  onChange={(e) => toggleCode(field, option.code, e.target.checked)}
-                  disabled={loading}
-                />
-                {option.label}
-              </label>
-            ))}
+    <>
+      <form className="event-venue-finder" onSubmit={handleSearch} noValidate>
+        <div className="event-venue-finder__row">
+          <div className="event-venue-finder__field">
+            <label htmlFor={idFor("date")}>Date</label>
+            <input
+              id={idFor("date")}
+              type="date"
+              value={values.date}
+              onChange={(e) => update("date", e.target.value)}
+              disabled={loading}
+              {...ariaFor("date")}
+            />
+            {renderFieldErrors("date")}
           </div>
-          {renderFieldErrors(field)}
-        </fieldset>
-      ))}
+          <div className="event-venue-finder__field">
+            <label htmlFor={idFor("startTime")}>Start</label>
+            <input
+              id={idFor("startTime")}
+              type="time"
+              value={values.startTime}
+              onChange={(e) => update("startTime", e.target.value)}
+              disabled={loading}
+              {...ariaFor("startTime")}
+            />
+            {renderFieldErrors("startTime")}
+          </div>
+          <div className="event-venue-finder__field">
+            <label htmlFor={idFor("endTime")}>End</label>
+            <input
+              id={idFor("endTime")}
+              type="time"
+              value={values.endTime}
+              onChange={(e) => update("endTime", e.target.value)}
+              disabled={loading}
+              {...ariaFor("endTime")}
+            />
+            {renderFieldErrors("endTime")}
+          </div>
+        </div>
 
-      <div className="event-venue-finder__actions">
-        <button type="submit" disabled={loading}>
-          {loading ? "Searching..." : "Search venues"}
-        </button>
-      </div>
-
-      {error && (
-        <p className="event-venue-finder__error" role="alert">
-          {error}
+        {/* Disclosure, not a picker: venue time on every device (see the header). */}
+        <p className="event-venue-finder__hint">
+          Times are Singapore time ({VENUE_TIME_ZONE}), the venues' local time.
         </p>
-      )}
 
-      {results !== null && results.length > 0 && (
-        <ul className="event-venue-finder__results" aria-label="Matching venues">
-          {results.map((venue) => (
-            <li key={venue.id}>
-              <VenueResult venue={venue} headingId={`${idPrefix}-venue-${venue.id}`} />
-            </li>
-          ))}
-        </ul>
-      )}
+        <div className="event-venue-finder__row">
+          <div className="event-venue-finder__field">
+            <label htmlFor={idFor("expectedAttendance")}>Expected attendance</label>
+            <input
+              id={idFor("expectedAttendance")}
+              type="number"
+              min="1"
+              step="1"
+              value={values.expectedAttendance}
+              onChange={(e) => update("expectedAttendance", e.target.value)}
+              disabled={loading}
+              {...ariaFor("expectedAttendance")}
+            />
+            {renderFieldErrors("expectedAttendance")}
+          </div>
+          <div className="event-venue-finder__field">
+            <label htmlFor={idFor("location")}>Location</label>
+            <input
+              id={idFor("location")}
+              type="text"
+              value={values.location}
+              onChange={(e) => update("location", e.target.value)}
+              disabled={loading}
+              {...ariaFor("location")}
+            />
+            {renderFieldErrors("location")}
+          </div>
+          <div className="event-venue-finder__field">
+            <label htmlFor={idFor("layout")}>Layout</label>
+            <select
+              id={idFor("layout")}
+              value={values.layout}
+              onChange={(e) => update("layout", e.target.value)}
+              disabled={loading}
+              {...ariaFor("layout")}
+            >
+              <option value="">Any layout</option>
+              {ROOM_LAYOUTS.map((layout) => (
+                <option key={layout.code} value={layout.code}>
+                  {layout.label}
+                </option>
+              ))}
+            </select>
+            {renderFieldErrors("layout")}
+          </div>
+        </div>
 
-      {/* status, not alert: an empty result is an answer, not a failure. */}
-      {results !== null && results.length === 0 && !loading && (
-        <p className="event-venue-finder__no-match" role="status">
-          No venue matched your criteria. Adjust the criteria above and search again.
-        </p>
+        {CODE_GROUPS.map(({ field, legend, options }) => (
+          <fieldset key={field} className="event-venue-finder__group" {...ariaFor(field)}>
+            <legend>{legend}</legend>
+            <div className="event-venue-finder__options">
+              {options.map((option) => (
+                <label key={option.code} className="event-venue-finder__option">
+                  <input
+                    type="checkbox"
+                    checked={values[field].includes(option.code)}
+                    onChange={(e) => toggleCode(field, option.code, e.target.checked)}
+                    disabled={loading}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+            {renderFieldErrors(field)}
+          </fieldset>
+        ))}
+
+        <div className="event-venue-finder__actions">
+          <button type="submit" disabled={loading}>
+            {loading ? "Searching..." : "Search venues"}
+          </button>
+        </div>
+
+        {error && (
+          <p className="event-venue-finder__error" role="alert">
+            {error}
+          </p>
+        )}
+
+        {hasResults && !eligibility.eligible && (
+          <p className="event-venue-finder__hint" role="status">
+            {eligibility.reason}
+          </p>
+        )}
+        {hasResults && eligibility.eligible && eventRequested && (
+          <p className="event-venue-finder__hint" role="status">
+            This event already has a venue request, so another cannot be started.
+          </p>
+        )}
+
+        {hasResults && (
+          <ul className="event-venue-finder__results" aria-label="Matching venues">
+            {results.map((venue) => (
+              <li key={venue.id}>
+                <VenueResult
+                  venue={venue}
+                  headingId={`${idPrefix}-venue-${venue.id}`}
+                  requestDisabled={!eligibility.eligible || eventRequested}
+                  onRequest={setRequestingVenue}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* status, not alert: an empty result is an answer, not a failure. */}
+        {results !== null && results.length === 0 && !loading && (
+          <p className="event-venue-finder__no-match" role="status">
+            No venue matched your criteria. Adjust the criteria above and search again.
+          </p>
+        )}
+      </form>
+
+      {/* Beside the search form, not in it: the panel has a <form> of its own. */}
+      {requestingVenue && (
+        <BookingRequestPanel
+          key={requestingVenue.id}
+          event={request}
+          venue={requestingVenue}
+          onSubmitted={(created) => {
+            setEventRequested(true);
+            onRequestSubmitted?.(created);
+          }}
+          onEventAlreadyRequested={() => setEventRequested(true)}
+          onClose={() => setRequestingVenue(null)}
+        />
       )}
-    </form>
+    </>
   );
 }

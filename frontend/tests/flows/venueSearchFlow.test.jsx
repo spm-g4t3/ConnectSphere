@@ -53,6 +53,8 @@ vi.mock("../../src/services/eventRequestService", () => ({
   getAssignmentHistory: vi.fn(),
   getAssignmentHistoryForReview: vi.fn(),
   reassignEventRequest: vi.fn(),
+  // Dev's SCRUM-162 ClarificationHistory reads this when the panel mounts.
+  getEventClarificationHistory: vi.fn(),
 }));
 
 vi.mock("../../src/services/venueService", () => ({
@@ -128,6 +130,9 @@ const fakeEventBackend = {
     return [];
   },
   async getAssignmentHistoryForReview() {
+    return [];
+  },
+  async getEventClarificationHistory() {
     return [];
   },
 };
@@ -219,7 +224,9 @@ describe("SCRUM20_AC2_AC7_AC8 venue search flow from the event view (SCRUM-144)"
 
     // ---- 4. AC7: Harbour Room with its six fields; the message is gone -----
     const list = await within(finderSection()).findByRole("list", { name: "Matching venues" });
-    expect(within(finderSection()).queryByRole("status")).not.toBeInTheDocument();
+    // The only status left is SCRUM-254's reason this submitted event cannot
+    // have a venue requested yet; the no-match message is gone.
+    expect(within(finderSection()).getByRole("status")).not.toHaveTextContent(NO_MATCH);
     expect(screen.queryByText(NO_MATCH)).not.toBeInTheDocument();
 
     const article = within(list).getByRole("article", { name: "Harbour Room" });

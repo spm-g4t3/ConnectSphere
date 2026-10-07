@@ -617,4 +617,5 @@ button { cursor: pointer; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__result-row { display: grid; gap: 2px 16px; grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__result dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__result dd { font-size: 0.9rem; margin: 0; overflow-wrap: anywhere; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__request { margin-top: 8px; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__browse { font-size: 0.9rem; margin: 12px 0 0; }
