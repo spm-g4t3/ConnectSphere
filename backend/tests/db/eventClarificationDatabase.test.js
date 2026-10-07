@@ -106,7 +106,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
       language sql
       as $$ select null::event_requests $$;
     `);
-    await db.exec(migration("023_event_clarification_reply_by.sql"));
+    await db.exec(migration("030_event_clarification_reply_by.sql"));
     await db.exec(migration("026_clarification_amendment_fields.sql"));
 
     organiser = (await one("insert into auth.users(email) values ('organiser@example.test') returning id")).id;

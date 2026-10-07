@@ -123,6 +123,28 @@ describe("describeNotification: other types", () => {
     });
   });
 
+  it("describes a clarification notification without a reply-by date", () => {
+    expect(describeNotification({
+      id: "n4",
+      type: "clarification_replied",
+      payload: { eventName: "Tech Talk", message: "The organiser replied." },
+    })).toEqual({
+      headline: "The Organiser replied about Tech Talk",
+      detail: "The organiser replied.",
+    });
+  });
+
+  it("uses clarification defaults when event context and message are missing", () => {
+    expect(describeNotification({
+      id: "n5",
+      type: "clarification_requested",
+      payload: {},
+    })).toEqual({
+      headline: "A Coordinator has a question about the event request",
+      detail: "Open the event request to review the conversation.",
+    });
+  });
+
   it("SCRUM17_AC3_an_unknown_type_is_shown_generically_not_hidden", () => {
     expect(describeNotification({ id: "n2", type: "something_new", payload: PAYLOAD })).toEqual({
       headline: "New notification",
