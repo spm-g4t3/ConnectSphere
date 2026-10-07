@@ -28,12 +28,10 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import AssignmentHistory from "./AssignmentHistory";
 import ReassignEventPanel from "./ReassignEventPanel";
-import ClarificationHistory from "./ClarificationHistory";
 import {
   getCoordinatorChangeRequests,
   processCoordinatorChangeRequest,
   requestEventClarification,
-  closeEventClarification,
 } from "../services/eventRequestService";
 import {
   readStatusDisplay,
@@ -54,18 +52,6 @@ function formatTimestamp(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
-
-const CLARIFICATION_FIELDS = [
-  ["eventName", "Event name"],
-  ["purpose", "Purpose"],
-  ["description", "Description"],
-  ["proposedStart", "Proposed start"],
-  ["proposedEnd", "Proposed end"],
-  ["expectedAttendance", "Expected attendance"],
-  ["venueRequirements", "Venue requirements"],
-  ["accessibilityRequirements", "Accessibility requirements"],
-  ["equipmentRequirements", "Equipment requirements"],
-];
 
 /**
  * A free-text requirement, or an explicit statement that there is none.
@@ -101,17 +87,9 @@ export default function CoordinatorRequestDetail({
   const navigate = useNavigate();
   const display = readStatusDisplay(request);
   const capacity = seedableCapacity(request.expectedAttendance);
-  const earliestReplyDate = new Date();
-  earliestReplyDate.setUTCDate(earliestReplyDate.getUTCDate() + 1);
-  const minReplyByDate = earliestReplyDate.toISOString().slice(0, 10);
   const [reviewNote, setReviewNote] = useState("");
-  const [replyByDate, setReplyByDate] = useState("");
-  const [requestedFields, setRequestedFields] = useState([]);
   const [processingReviewDecision, setProcessingReviewDecision] = useState(false);
   const [reviewDecisionError, setReviewDecisionError] = useState(null);
-  const [closureNote, setClosureNote] = useState("");
-  const [closingClarification, setClosingClarification] = useState(false);
-  const [closureError, setClosureError] = useState(null);
   const [changeRequests, setChangeRequests] = useState([]);
   const [changeRequestsLoading, setChangeRequestsLoading] = useState(true);
   const [changeRequestsError, setChangeRequestsError] = useState(null);
@@ -137,8 +115,7 @@ export default function CoordinatorRequestDetail({
   // not the gate: it saves everyone else from a button that can only be
   // refused. The server checks again, under a lock, and if the row this panel
   // holds is stale, ReassignEventPanel turns the 403 into a message.
-  const isAssignedCoordinator = Boolean(user?.id) && assignedCoordinatorId === user.id;
-  const canReassign = isAssignedCoordinator;
+  const canReassign = Boolean(user?.id) && assignedCoordinatorId === user.id;
 
   useEffect(() => {
     let cancelled = false;
@@ -210,12 +187,7 @@ export default function CoordinatorRequestDetail({
     setProcessingReviewDecision(true);
     setReviewDecisionError(null);
     try {
-      await requestEventClarification(
-        request.id,
-        note,
-        replyByDate || null,
-        requestedFields,
-      );
+      await requestEventClarification(request.id, note);
       onReviewDecisionProcessed?.();
     } catch (error) {
       setReviewDecisionError(
@@ -223,27 +195,6 @@ export default function CoordinatorRequestDetail({
       );
     } finally {
       setProcessingReviewDecision(false);
-    }
-  }
-
-  async function handleCloseClarification(event) {
-    event.preventDefault();
-    const note = closureNote.trim();
-    if (!note) {
-      setClosureError("A note is required to close the clarification request.");
-      return;
-    }
-    setClosingClarification(true);
-    setClosureError(null);
-    try {
-      await closeEventClarification(request.id, note);
-      onReviewDecisionProcessed?.();
-    } catch (error) {
-      setClosureError(
-        error.response?.data?.error || "Could not close the clarification request.",
-      );
-    } finally {
-      setClosingClarification(false);
     }
   }
 
@@ -522,115 +473,41 @@ export default function CoordinatorRequestDetail({
 
       {request.status === "pending_clarification" ? (
         <section>
-          <h3>Waiting for organiser reply</h3>
+          <h3>Waiting for organiser amendment</h3>
           <p>{request.clarificationNote || "No clarification note was recorded."}</p>
-          {request.clarificationReplyByDate && (
-            <p>
-              Reply by: {request.clarificationReplyByDate}
-              {request.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
-                <strong className="clarification-overdue"> Overdue</strong>
-              )}
-            </p>
-          )}
-          <ClarificationHistory
-            eventRequestId={request.id}
-            isOpen
-          />
-          {isAssignedCoordinator && (
-            <form className="coordinator-clarification" onSubmit={handleCloseClarification}>
-              <label>
-                Note explaining why you are closing this request
-                <textarea
-                  value={closureNote}
-                  onChange={(event) => setClosureNote(event.target.value)}
-                  rows={3}
-                  maxLength={2000}
-                  required
-                />
-              </label>
-              {closureError && <p role="alert">{closureError}</p>}
-              <button type="submit" disabled={closingClarification || !closureNote.trim()}>
-                {closingClarification ? "Closing..." : "Close clarification"}
-              </button>
-            </form>
-          )}
         </section>
       ) : (
         <section>
           <h3>Coordinator decision</h3>
           <p>Approve and reject are not available yet. To request updates, return the event to the Organiser for amendment.</p>
-          {request.status === "under_review" && isAssignedCoordinator && (
-            <div className="coordinator-clarification">
-              <label>
-                Clarification question
-                <textarea
-                  value={reviewNote}
-                  onChange={(event) => setReviewNote(event.target.value)}
-                  rows={4}
-                  maxLength={2000}
-                  placeholder="Explain what you need the Organiser to clarify."
-                />
-              </label>
-              <details className="coordinator-clarification__amendments" open>
-                <summary>Let the Organiser amend specific fields (optional)</summary>
-                <fieldset className="coordinator-clarification__fields">
-                  <legend>Fields that need changing</legend>
-                  <p>Leave all fields unchecked for a question-only clarification.</p>
-                  {CLARIFICATION_FIELDS.map(([field, label]) => (
-                    <label key={field}>
-                      <input
-                        type="checkbox"
-                        checked={requestedFields.includes(field)}
-                        onChange={(event) => {
-                          setRequestedFields((current) => event.target.checked
-                            ? [...current, field]
-                            : current.filter((item) => item !== field));
-                        }}
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </fieldset>
-              </details>
-              <label>
-                Optional reply-by date
-                <input
-                  type="date"
-                  min={minReplyByDate}
-                  value={replyByDate}
-                  onChange={(event) => setReplyByDate(event.target.value)}
-                />
-              </label>
-              {reviewDecisionError && (
-                <p className="coordinator-clarification__error" role="alert">
-                  {reviewDecisionError}
-                </p>
-              )}
-            </div>
-          )}
-          <div className="coordinator-review-actions">
-            <button className="coordinator-review-actions__approve" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("approved")}>
-              {processingReviewDecision ? "Saving..." : "Approve request"}
-            </button>
-            <button className="coordinator-review-actions__reject" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("rejected")}>
-              Reject request
-            </button>
-            {request.status === "under_review" && isAssignedCoordinator && (
+          <div className="coordinator-clarification">
+            <label>
+              Amendment instructions
+              <textarea
+                value={reviewNote}
+                onChange={(event) => setReviewNote(event.target.value)}
+                rows={4}
+                maxLength={2000}
+                placeholder="Explain what the Organiser needs to clarify or amend."
+              />
+            </label>
+            {reviewDecisionError && (
+              <p className="coordinator-clarification__error" role="alert">
+                {reviewDecisionError}
+              </p>
+            )}
+            <div className="coordinator-review-actions">
+              <button className="coordinator-review-actions__approve" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("approved")}>
+                {processingReviewDecision ? "Saving..." : "Approve request"}
+              </button>
+              <button className="coordinator-review-actions__reject" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("rejected")}>
+                Reject request
+              </button>
               <button className="coordinator-review-actions__return" type="button" disabled={processingReviewDecision} onClick={() => handleReviewDecision("returned_for_amendment")}>
                 Return for amendment
               </button>
-            )}
+            </div>
           </div>
-        </section>
-      )}
-
-      {request.status !== "pending_clarification" && (
-        <section className="coordinator-clarification-history">
-          <h3>Clarification history</h3>
-          <details>
-            <summary>View questions, replies and closures</summary>
-            <ClarificationHistory eventRequestId={request.id} />
-          </details>
         </section>
       )}
 

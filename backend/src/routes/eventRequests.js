@@ -71,8 +71,6 @@ import {
   getEventRequestForOrganiser,
   getEventRequestForCoordinator,
   getEventRequestStatusHistory,
-  getEventClarificationHistory,
-  closeEventClarification,
   listEventRequestsForReview,
   listEventRequestsForCoordinator,
   listCoordinators,
@@ -345,20 +343,6 @@ export function createEventRequestRouter({
     }
   });
 
-  router.get('/:id/clarification-history', async (req, res) => {
-    try {
-      const history = await getEventClarificationHistory(
-        req.params.id,
-        req.user.id,
-        req.user.role,
-        { client },
-      );
-      res.status(200).json(history);
-    } catch (err) {
-      handleError(err, res);
-    }
-  });
-
   /**
    * SCRUM-34 AC4: which of this event's change requests are outstanding, in
    * progress or processed.
@@ -620,24 +604,6 @@ export function createEventRequestRouter({
         req.params.id,
         req.body?.note,
         req.user.id,
-        {
-          replyByDate: req.body?.replyByDate,
-          requestedFields: req.body?.requestedFields,
-          client,
-        },
-      );
-      res.status(200).json(withStatusDisplay(updated));
-    } catch (err) {
-      handleError(err, res);
-    }
-  });
-
-  router.post('/:id/clarification/close', coordinatorOnly, async (req, res) => {
-    try {
-      const updated = await closeEventClarification(
-        req.params.id,
-        req.body?.note,
-        req.user.id,
         { client },
       );
       res.status(200).json(withStatusDisplay(updated));
@@ -695,9 +661,8 @@ export function createEventRequestRouter({
     try {
       const updated = await respondToEventClarification(
         req.params.id,
-        req.body?.message,
+        req.body,
         req.user.id,
-        req.body?.amendments,
         { client },
       );
       res.status(200).json(withStatusDisplay(updated));
