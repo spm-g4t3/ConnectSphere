@@ -102,6 +102,20 @@ const DECISION_ERROR_MESSAGES = {
   409: "This request has changed since you opened it: it may already be decided, or waiting on a clarification. Go back and reopen it to see where it stands.",
 };
 
+// Return for amendment (POST /:id/clarification), keyed by status for the
+// same reason: requestEventClarification's refusals name the event's id. 400
+// is a blank or overlong note, which this screen already prevents (the
+// handler checks for a blank one, the textarea caps the length), so it can
+// only arrive from a note the server counts differently. 404 is a missing
+// event. 409 covers both of its causes, a status that moved and a handover
+// mid-flight, because both have the same remedy.
+const RETURN_FOR_AMENDMENT_ERROR_MESSAGES = {
+  400: "The instructions could not be sent as written. Check they are not empty and are 2,000 characters or fewer, then try again.",
+  403: "This request is no longer assigned to you, so you cannot return it for amendment. Go back and reopen it to see who holds it now.",
+  404: "This request no longer exists.",
+  409: "This request has changed since you opened it: it may already be decided, waiting on a clarification, or handed to another coordinator. Go back and reopen it to see where it stands.",
+};
+
 // AC6, said in this screen's words. The server's own refusal says the same:
 // agree a new date or reject.
 const START_DATE_PASSED_MESSAGE =
@@ -244,7 +258,8 @@ export default function CoordinatorRequestDetail({
       onReviewDecisionProcessed?.();
     } catch (error) {
       setReviewDecisionError(
-        error.response?.data?.error || "Could not return the request for amendment.",
+        RETURN_FOR_AMENDMENT_ERROR_MESSAGES[error.response?.status] ||
+          "The request could not be returned for amendment. Please try again.",
       );
     } finally {
       setProcessingReviewDecision(false);

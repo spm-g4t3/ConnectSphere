@@ -501,6 +501,8 @@ button { cursor: pointer; }
    .event-request-form__row, .venue-search__filters, .venue-search__window { grid-template-columns: 1fr; }
    .my-event-requests__details dl { grid-template-columns: 1fr; gap: 3px; }
    .my-event-requests__details dd { margin-bottom: 8px; }
+   .decision-outcome { grid-template-columns: 1fr; gap: 3px; }
+   .decision-outcome dd { margin-bottom: 8px; }
    .venue-calendar-page { padding: 30px 18px; }
    .venue-calendar__toolbar { align-items: flex-start; flex-direction: column; }
 }

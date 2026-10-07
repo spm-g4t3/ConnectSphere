@@ -287,6 +287,65 @@ describe("SCRUM19 deciding a request under review", () => {
     await waitFor(() => expect(requestEventClarification).toHaveBeenCalledWith(REQUEST_ID, "Please confirm numbers."));
     expect(decideEventRequest).not.toHaveBeenCalled();
   });
+
+  // The refusals carry the server's own message, which names the event's id,
+  // so these prove the screen shows its table's sentence instead of that.
+  const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+  function serverRefusal(status, message) {
+    return Object.assign(httpError(status), {
+      response: { status, data: { error: message } },
+    });
+  }
+
+  async function returnForAmendment() {
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, underReview());
+    await user.type(await screen.findByLabelText("Note for the Organiser"), "Please confirm numbers.");
+    await user.click(screen.getByRole("button", { name: "Return for amendment" }));
+    return screen.findByRole("alert");
+  }
+
+  it("SCRUM19_AC1_a_refused_return_for_amendment_says_why_in_words_not_ids", async () => {
+    vi.mocked(requestEventClarification).mockRejectedValue(serverRefusal(
+      403,
+      `Only the coordinator assigned to event request ${REQUEST_ID} can request clarification on it.`,
+    ));
+
+    const alert = await returnForAmendment();
+
+    expect(alert).toHaveTextContent(/no longer assigned to you, so you cannot return it for amendment/i);
+    expect(alert.textContent).not.toMatch(UUID);
+  });
+
+  it("SCRUM19_AC3_a_conflicting_return_for_amendment_says_the_request_changed_in_words_not_ids", async () => {
+    // One message for both causes of the 409: the status moved, or the event
+    // was handed over between the read and the write.
+    vi.mocked(requestEventClarification).mockRejectedValue(serverRefusal(
+      409,
+      `event request ${REQUEST_ID} is no longer assigned to this coordinator`,
+    ));
+
+    const alert = await returnForAmendment();
+
+    expect(alert).toHaveTextContent(/changed since you opened it/i);
+    expect(alert).toHaveTextContent(/handed to another coordinator/i);
+    expect(alert.textContent).not.toMatch(UUID);
+  });
+
+  it("SCRUM19_AC1_a_return_for_amendment_refused_for_another_reason_still_names_no_id", async () => {
+    // A status the table does not list falls back to a sentence of its own,
+    // never to the server's message.
+    vi.mocked(requestEventClarification).mockRejectedValue(serverRefusal(
+      500,
+      `event request ${REQUEST_ID} could not be changed`,
+    ));
+
+    const alert = await returnForAmendment();
+
+    expect(alert).toHaveTextContent(/could not be returned for amendment/i);
+    expect(alert.textContent).not.toMatch(UUID);
+  });
 });
 
 
