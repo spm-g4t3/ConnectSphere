@@ -23,7 +23,6 @@ vi.mock("../../src/services/eventRequestService", () => ({
   getCoordinatorChangeRequests: vi.fn(),
   processCoordinatorChangeRequest: vi.fn(),
   requestEventClarification: vi.fn(),
-  getEventClarificationHistory: vi.fn().mockResolvedValue([]),
   getAssignmentHistoryForReview: vi.fn(),
   getAssignmentHistory: vi.fn(),
   listCoordinators: vi.fn(),

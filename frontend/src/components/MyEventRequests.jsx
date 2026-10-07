@@ -20,8 +20,6 @@ import EventRequestForm from "./EventRequestForm";
 import ChangeRequestForm from "./ChangeRequestForm";
 import ChangeRequestStatusList from "./ChangeRequestStatusList";
 import AssignmentHistory from "./AssignmentHistory";
-import ClarificationHistory from "./ClarificationHistory";
-import ClarificationReplyForm from "./ClarificationReplyForm";
 
 function formatEventDate(value) {
   if (!value) return "Not specified";
@@ -67,22 +65,6 @@ function CoordinatorDetails({ eventRequestId }) {
     >
       <summary>Your coordinator and assignment history</summary>
       {opened && <AssignmentHistory eventRequestId={eventRequestId} view="organiser" />}
-    </details>
-  );
-}
-
-function ClarificationHistoryDetails({ eventRequestId, isOpen }) {
-  const [opened, setOpened] = useState(false);
-
-  return (
-    <details
-      className="my-event-requests__details"
-      onToggle={(event) => {
-        if (event.currentTarget.open) setOpened(true);
-      }}
-    >
-      <summary>Clarification history</summary>
-      {opened && <ClarificationHistory eventRequestId={eventRequestId} isOpen={isOpen} />}
     </details>
   );
 }
@@ -187,7 +169,11 @@ export default function MyEventRequests() {
     return (
       <div className="my-event-requests">
         <button className="my-event-requests__back" onClick={handleSaved}>&larr; Back to my requests</button>
-        <ClarificationReplyForm request={activePanel.request} onSaved={handleSaved} />
+        <EventRequestForm
+          existingRequest={activePanel.request}
+          clarificationResponse
+          onSaved={handleSaved}
+        />
       </div>
     );
   }
@@ -244,14 +230,6 @@ export default function MyEventRequests() {
                   <strong>Coordinator clarification:</strong> {req.clarificationNote}
                 </p>
               )}
-              {req.status === "pending_clarification" && req.clarificationReplyByDate && (
-                <p className="my-event-requests__clarification">
-                  Please respond by {req.clarificationReplyByDate}.
-                  {req.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
-                    <strong className="clarification-overdue"> Overdue</strong>
-                  )}
-                </p>
-              )}
 
               <details className="my-event-requests__details">
                 <summary>Current event details</summary>
@@ -278,12 +256,6 @@ export default function MyEventRequests() {
               {/* Not on a draft: a coordinator is assigned at submission, so a
                   draft has nobody and no history to show. */}
               {req.status !== "draft" && <CoordinatorDetails eventRequestId={req.id} />}
-              {req.status !== "draft" && (
-                <ClarificationHistoryDetails
-                  eventRequestId={req.id}
-                  isOpen={req.status === "pending_clarification"}
-                />
-              )}
 
               <div className="my-event-requests__item-actions">
                 {req.status === "draft" && (

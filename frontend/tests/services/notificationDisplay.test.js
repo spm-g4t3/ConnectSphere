@@ -104,47 +104,6 @@ describe("describeNotification: booking_flagged", () => {
 });
 
 describe("describeNotification: other types", () => {
-  it.each([
-    ["clarification_requested", "A Coordinator has a question about Tech Talk"],
-    ["clarification_replied", "The Organiser replied about Tech Talk"],
-    ["clarification_closed", "A Coordinator closed the clarification for Tech Talk"],
-  ])("describes %s with event context", (type, headline) => {
-    expect(describeNotification({
-      id: "n3",
-      type,
-      payload: {
-        eventName: "Tech Talk",
-        message: "Please confirm the details.",
-        replyByDate: "2026-10-10",
-      },
-    })).toEqual({
-      headline,
-      detail: "Please confirm the details. Reply by 2026-10-10.",
-    });
-  });
-
-  it("describes a clarification notification without a reply-by date", () => {
-    expect(describeNotification({
-      id: "n4",
-      type: "clarification_replied",
-      payload: { eventName: "Tech Talk", message: "The organiser replied." },
-    })).toEqual({
-      headline: "The Organiser replied about Tech Talk",
-      detail: "The organiser replied.",
-    });
-  });
-
-  it("uses clarification defaults when event context and message are missing", () => {
-    expect(describeNotification({
-      id: "n5",
-      type: "clarification_requested",
-      payload: {},
-    })).toEqual({
-      headline: "A Coordinator has a question about the event request",
-      detail: "Open the event request to review the conversation.",
-    });
-  });
-
   it("SCRUM17_AC3_an_unknown_type_is_shown_generically_not_hidden", () => {
     expect(describeNotification({ id: "n2", type: "something_new", payload: PAYLOAD })).toEqual({
       headline: "New notification",

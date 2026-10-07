@@ -157,9 +157,6 @@ function OrganiserName({ event }) {
 function EventRow({ event, onOpen }) {
   // Labels come from the API, so this component never interprets a status.
   const display = readStatusDisplay(event);
-  const overdue = event.status === "pending_clarification" &&
-    event.clarificationReplyByDate &&
-    event.clarificationReplyByDate < new Date().toISOString().slice(0, 10);
 
   return (
     <li className="my-assigned-events__row">
@@ -172,7 +169,6 @@ function EventRow({ event, onOpen }) {
         </span>
         <span className="my-assigned-events__meta">
           <span>{formatEventDate(event.proposedStart)}</span>
-          {overdue && <strong className="clarification-overdue">Overdue</strong>}
           <span>
             Organiser: <OrganiserName event={event} />
           </span>
@@ -267,14 +263,6 @@ export default function MyAssignedEvents() {
 
   const groups = groupByStatus(events);
   const openEvent = (request) => setActivePanel({ mode: "detail", request });
-  const today = new Date().toISOString().slice(0, 10);
-  const overdueClarifications = events
-    .filter((event) =>
-      event.status === "pending_clarification" &&
-      event.clarificationReplyByDate &&
-      event.clarificationReplyByDate < today)
-    .sort((first, second) =>
-      first.clarificationReplyByDate.localeCompare(second.clarificationReplyByDate));
 
   return (
     <section className="my-assigned-events">
@@ -285,17 +273,6 @@ export default function MyAssignedEvents() {
         <p className="review-queue__error" role="alert">
           {error}
         </p>
-      )}
-      {!loading && !error && overdueClarifications.length > 0 && (
-        <div className="my-assigned-events__needs-attention" role="region" aria-label="Needs attention">
-          <h3>Needs attention</h3>
-          <p>Clarification reply dates have passed. No status change has been made.</p>
-          <ul>
-            {overdueClarifications.map((event) => (
-              <EventRow key={event.id} event={event} onOpen={openEvent} />
-            ))}
-          </ul>
-        </div>
       )}
       {/* Nothing assigned is the good state, not a missing resource. */}
       {!loading && !error && events.length === 0 && (

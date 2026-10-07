@@ -118,7 +118,9 @@ export default function CoordinatorNotifications() {
 
   return (
     <section className="coordinator-notifications">
-      <h2>Notifications{unreadCount > 0 && ` (${unreadCount} unread)`}</h2>
+      <h2>
+        Notifications{unreadCount > 0 && ` (${unreadCount} unread)`}
+      </h2>
 
       {loading && <p>Loading...</p>}
       {error && (

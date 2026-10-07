@@ -1,13 +1,12 @@
 // EventOrganiserDashboard.jsx
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getMyEventRequests } from "../services/eventRequestService";
 import {
   readStatusDisplay,
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
-import CoordinatorNotifications from "./CoordinatorNotifications";
 
 function formatEventDate(value) {
   if (!value) return "Date not set";
@@ -21,44 +20,34 @@ export default function EventOrganiserDashboard({ user }) {
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState(null);
 
-  const fetchEvents = useCallback(async () => {
-    setEventsLoading(true);
-    try {
-      setEvents(await getMyEventRequests());
-      setEventsError(null);
-    } catch {
-      setEventsError("Could not load your event requests.");
-    } finally {
-      setEventsLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    fetchEvents();
-  }, [fetchEvents, user.id]);
+    let cancelled = false;
 
-  useEffect(() => {
-    function refetchIfVisible() {
-      if (document.visibilityState === "visible") fetchEvents();
-    }
-    window.addEventListener("focus", refetchIfVisible);
-    document.addEventListener("visibilitychange", refetchIfVisible);
+    getMyEventRequests()
+      .then((requests) => {
+        if (!cancelled) {
+          setEvents(requests);
+          setEventsError(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setEventsError("Could not load your event requests.");
+      })
+      .finally(() => {
+        if (!cancelled) setEventsLoading(false);
+      });
+
     return () => {
-      window.removeEventListener("focus", refetchIfVisible);
-      document.removeEventListener("visibilitychange", refetchIfVisible);
+      cancelled = true;
     };
-  }, [fetchEvents]);
+  }, [user.id]);
 
   const deadlines = events
     .filter((event) => event.status === "pending_clarification")
     .sort((first, second) => {
-      const firstDeadline = first.clarificationReplyByDate
-        ? new Date(`${first.clarificationReplyByDate}T00:00:00.000Z`).getTime()
-        : first.proposedStart ? new Date(first.proposedStart).getTime() : Infinity;
-      const secondDeadline = second.clarificationReplyByDate
-        ? new Date(`${second.clarificationReplyByDate}T00:00:00.000Z`).getTime()
-        : second.proposedStart ? new Date(second.proposedStart).getTime() : Infinity;
-      return firstDeadline - secondDeadline;
+      const firstStart = first.proposedStart ? new Date(first.proposedStart).getTime() : Infinity;
+      const secondStart = second.proposedStart ? new Date(second.proposedStart).getTime() : Infinity;
+      return firstStart - secondStart;
     });
 
   return (
@@ -109,14 +98,6 @@ export default function EventOrganiserDashboard({ user }) {
                       <strong>Coordinator clarification:</strong> {event.clarificationNote}
                     </p>
                   )}
-                  {event.clarificationReplyByDate && (
-                    <p className="dashboard--organiser__clarification">
-                      Reply by {event.clarificationReplyByDate}
-                      {event.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
-                        <strong className="clarification-overdue"> — Overdue</strong>
-                      )}
-                    </p>
-                  )}
                   <Link to="/events" className="dashboard--organiser__manage-event">
                     Open in My Events
                   </Link>
@@ -150,14 +131,8 @@ export default function EventOrganiserDashboard({ user }) {
                   <p>{event.clarificationNote || "The Event Coordinator requested an amendment."}</p>
                 </div>
                 <div className="dashboard--organiser__deadline-meta">
-                  <span className="deadline-tag">
-                    {event.clarificationReplyByDate
-                      ? event.clarificationReplyByDate < new Date().toISOString().slice(0, 10)
-                        ? "Overdue since"
-                        : "Reply by"
-                      : "Amend before event starts"}
-                  </span>
-                  <span>{event.clarificationReplyByDate || formatEventDate(event.proposedStart)}</span>
+                  <span className="deadline-tag">Amend before event starts</span>
+                  <span>{formatEventDate(event.proposedStart)}</span>
                 </div>
                 <Link
                   to="/events"
@@ -176,7 +151,6 @@ export default function EventOrganiserDashboard({ user }) {
           {eventsError && <p className="dashboard--organiser__error" role="alert">{eventsError}</p>}
         </ul>
       </section>
-      <CoordinatorNotifications />
     </div>
   );
 }
