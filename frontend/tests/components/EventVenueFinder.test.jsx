@@ -956,6 +956,21 @@ describe("SCRUM20_AC8 no venue matched (SCRUM-143)", () => {
   });
 });
 
+describe("SCRUM484_AC7 search still hides venues without a reason", () => {
+  it("SCRUM484_AC7_search_no_match_does_not_explain_setup", async () => {
+    // Search counts each venue's setup and turnaround but gives no reason per
+    // venue (SCRUM-143/145), so an empty result never blames either.
+    vi.mocked(findVenuesForEvent).mockResolvedValue([]);
+    const { user } = renderFinder();
+    await user.click(searchButton());
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("No venue matched your criteria.");
+    expect(status).not.toHaveTextContent(/setup|turnaround/i);
+    expect(screen.queryByRole("list", { name: "Matching venues" })).not.toBeInTheDocument();
+  });
+});
+
 describe("SCRUM254 request this venue from the event's search", () => {
   const COORDINATOR = "u-coord";
   const APPROVED = Object.freeze({

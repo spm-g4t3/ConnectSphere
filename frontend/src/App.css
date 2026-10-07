@@ -465,6 +465,9 @@ button { cursor: pointer; }
 .booking-request__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 12px 0 0; padding: 8px 12px; }
 .booking-request__conflicts { list-style: none; margin: 10px 0 0; padding: 0; }
 .booking-request__conflicts li { border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 8px 0; }
+/* SCRUM-484 (AC7). The setup/turnaround note on a block row takes a line of
+   its own, so the .dashboard li spread does not push it to the far edge. */
+.booking-request__conflicts .booking-request__conflict-note { color: var(--muted); flex-basis: 100%; font-size: 0.84rem; }
 .booking-request__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .booking-request__success { background: #e8f7f1; border-radius: 6px; color: #17684f; padding: 10px 14px; }
 .my-event-requests__details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 10px; }

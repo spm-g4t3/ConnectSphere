@@ -39,6 +39,7 @@ import {
   unmetCriteria,
 } from "../services/bookingRequestErrors";
 import { formatRange, shortId } from "../services/displayFormat";
+import { formatOccupiedPeriod, requestPaddingNote } from "../services/occupiedPeriodDisplay";
 
 /** Mirrors bookings_setup_notes_length in migration 030. */
 const SETUP_NOTES_MAX_LENGTH = 1000;
@@ -215,22 +216,29 @@ export default function BookingRequestPanel({
 
           {conflicts.length > 0 && (
             <ul className="booking-request__conflicts" aria-label="What is in the way">
-              {conflicts.map((conflict, i) =>
-                conflict.kind === "block" ? (
-                  <li key={conflict.blockId ?? i}>
-                    <strong>Blocked</strong>
-                    <span>{formatRange(conflict.startsAt, conflict.endsAt)}</span>
-                  </li>
-                ) : (
+              {conflicts.map((conflict, i) => {
+                if (conflict.kind === "block") {
+                  // The venue's setup and turnaround around this event count
+                  // against a block too, so say when they were part of it.
+                  const note = requestPaddingNote(conflict);
+                  return (
+                    <li key={conflict.blockId ?? i}>
+                      <strong>Blocked</strong>
+                      <span>{formatRange(conflict.startsAt, conflict.endsAt)}</span>
+                      {note && <span className="booking-request__conflict-note">{note}</span>}
+                    </li>
+                  );
+                }
+                return (
                   <li key={conflict.bookingId ?? i}>
                     <strong>{conflict.eventName || "Unnamed event"}</strong>
-                    <span>{formatRange(conflict.startsAt, conflict.endsAt)}</span>
+                    <span>{formatOccupiedPeriod(conflict)}</span>
                     {conflict.eventRequestId && (
                       <code title={conflict.eventRequestId}>{shortId(conflict.eventRequestId)}</code>
                     )}
                   </li>
-                ),
-              )}
+                );
+              })}
             </ul>
           )}
 

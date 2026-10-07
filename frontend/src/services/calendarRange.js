@@ -154,16 +154,37 @@ export function daysIn({ start, end }) {
  * shows on every day it covers, and an entry ending exactly at midnight does
  * not leak onto the following day.
  *
- * @param {Array<{startsAt: string, endsAt: string}>} entries
+ * A booking is placed by its occupied period -- setup through turnaround --
+ * when it carries one that parses (SCRUM-484, AC7). The calendar endpoint
+ * returns a booking whose setup or turnaround alone reaches into the window,
+ * and placing it by its event times would drop it from the very day it makes
+ * the venue unavailable. Without usable occupied fields, and for blocks,
+ * startsAt/endsAt are used as before.
+ *
+ * @param {Array<{kind?: string, startsAt: string, endsAt: string,
+ *                occupiedStartsAt?: string, occupiedEndsAt?: string}>} entries
  * @param {Date} day
  * @returns {Array<Object>}
  */
 export function entriesOnDay(entries, day) {
   const dayStart = startOfDay(day);
   const dayEnd = addDays(dayStart, 1);
-  return entries.filter(
-    (entry) => new Date(entry.startsAt) < dayEnd && new Date(entry.endsAt) > dayStart,
-  );
+  return entries.filter((entry) => {
+    const { start, end } = placementOf(entry);
+    return start < dayEnd && end > dayStart;
+  });
+}
+
+/** The period entriesOnDay places an entry by; see its comment. */
+function placementOf(entry) {
+  if (entry.kind === "booking") {
+    const start = new Date(entry.occupiedStartsAt ?? NaN);
+    const end = new Date(entry.occupiedEndsAt ?? NaN);
+    if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+      return { start, end };
+    }
+  }
+  return { start: new Date(entry.startsAt), end: new Date(entry.endsAt) };
 }
 
 /**

@@ -302,3 +302,53 @@ describe("BlockConflictList coverage gaps (SCRUM-132)", () => {
     errorSpy.mockRestore();
   });
 });
+
+describe("SCRUM484_AC7 the conflict list shows setup and turnaround", () => {
+  // Orientation 10:00-12:00 at a venue with 30 minutes of setup and 45 of
+  // turnaround: the venue is held 09:30-12:45.
+  const PADDED = {
+    bookingId: "a1b2c3d4-0000-4000-8000-000000000484",
+    eventRequestId: "0a1b2c3d-0000-4000-8000-000000000484",
+    eventName: "Orientation",
+    startsAt: "2026-10-01T10:00:00+08:00",
+    endsAt: "2026-10-01T12:00:00+08:00",
+    occupiedStartsAt: "2026-10-01T09:30:00+08:00",
+    occupiedEndsAt: "2026-10-01T12:45:00+08:00",
+    setupMinutes: 30,
+    turnaroundMinutes: 45,
+  };
+
+  it("SCRUM484_AC7_block_override_list_shows_parts", async () => {
+    const { user, onConfirmOverride } = renderList({ conflicts: [PADDED] });
+
+    const row = within(screen.getByRole("list")).getByRole("listitem");
+    expect(within(row).getByText("Orientation")).toBeInTheDocument();
+    expect(
+      within(row).getByText(
+        `Setup ${range(PADDED.occupiedStartsAt, PADDED.startsAt)} · ` +
+          `Event ${range(PADDED.startsAt, PADDED.endsAt)} · ` +
+          `Turnaround ${range(PADDED.endsAt, PADDED.occupiedEndsAt)}`,
+      ),
+    ).toBeInTheDocument();
+    expect(within(row).getByText("0a1b2c3d")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Override and flag 1 booking" }));
+    await user.click(screen.getByRole("button", { name: "Yes, override" }));
+    expect(onConfirmOverride).toHaveBeenCalledWith([PADDED.bookingId]);
+  });
+
+  it("SCRUM484_AC7_block_override_list_zero_minutes_show_event_only", () => {
+    const zero = {
+      ...PADDED,
+      occupiedStartsAt: PADDED.startsAt,
+      occupiedEndsAt: PADDED.endsAt,
+      setupMinutes: 0,
+      turnaroundMinutes: 0,
+    };
+    renderList({ conflicts: [zero] });
+
+    const row = within(screen.getByRole("list")).getByRole("listitem");
+    expect(within(row).getByText(range(zero.startsAt, zero.endsAt))).toBeInTheDocument();
+    expect(row).not.toHaveTextContent(/Setup|Turnaround/);
+  });
+});

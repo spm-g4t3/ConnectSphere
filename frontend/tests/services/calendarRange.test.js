@@ -257,6 +257,90 @@ describe("SCRUM178_AC2 entriesOnDay", () => {
   });
 });
 
+describe("SCRUM484_AC7 entriesOnDay places bookings by their occupied period", () => {
+  /** A booking whose venue holds it from occStart to occEnd. */
+  function booking(id, start, end, occStart, occEnd) {
+    return {
+      kind: "booking",
+      id,
+      startsAt: start.toISOString(),
+      endsAt: end.toISOString(),
+      occupiedStartsAt: occStart.toISOString(),
+      occupiedEndsAt: occEnd.toISOString(),
+      setupMinutes: Math.round((start - occStart) / 60000),
+      turnaroundMinutes: Math.round((occEnd - end) / 60000),
+    };
+  }
+
+  // Tuesday 6 Oct 22:00-23:30, 45 minutes of turnaround into Wednesday.
+  const lateTurnaround = booking(
+    "late",
+    local(2026, 9, 6, 22),
+    local(2026, 9, 6, 23, 30),
+    local(2026, 9, 6, 21, 30),
+    local(2026, 9, 7, 0, 15),
+  );
+
+  // Wednesday 7 Oct 00:15-02:00, 30 minutes of setup back into Tuesday.
+  const earlySetup = booking(
+    "early",
+    local(2026, 9, 7, 0, 15),
+    local(2026, 9, 7, 2),
+    local(2026, 9, 6, 23, 45),
+    local(2026, 9, 7, 2),
+  );
+
+  it("SCRUM484_AC7_a_turnaround_past_midnight_puts_the_booking_on_the_next_day", () => {
+    expect(entriesOnDay([lateTurnaround], local(2026, 9, 6))).toEqual([lateTurnaround]);
+    expect(entriesOnDay([lateTurnaround], local(2026, 9, 7))).toEqual([lateTurnaround]);
+    expect(entriesOnDay([lateTurnaround], local(2026, 9, 8))).toEqual([]);
+  });
+
+  it("SCRUM484_AC7_a_setup_before_midnight_puts_the_booking_on_the_previous_day", () => {
+    expect(entriesOnDay([earlySetup], local(2026, 9, 6))).toEqual([earlySetup]);
+    expect(entriesOnDay([earlySetup], local(2026, 9, 7))).toEqual([earlySetup]);
+  });
+
+  it("SCRUM484_AC7_an_occupied_period_ending_at_midnight_does_not_leak", () => {
+    const toMidnight = booking(
+      "to-midnight",
+      local(2026, 9, 6, 22),
+      local(2026, 9, 6, 23),
+      local(2026, 9, 6, 22),
+      local(2026, 9, 7),
+    );
+    expect(entriesOnDay([toMidnight], local(2026, 9, 7))).toEqual([]);
+  });
+
+  it("SCRUM484_AC7_blocks_keep_their_own_times_even_with_occupied_fields", () => {
+    // A block has no setup or turnaround; stray occupied fields are ignored.
+    const block = {
+      kind: "block",
+      id: "k1",
+      startsAt: local(2026, 9, 6, 22).toISOString(),
+      endsAt: local(2026, 9, 6, 23, 30).toISOString(),
+      occupiedStartsAt: local(2026, 9, 6, 21).toISOString(),
+      occupiedEndsAt: local(2026, 9, 7, 1).toISOString(),
+    };
+    expect(entriesOnDay([block], local(2026, 9, 6))).toEqual([block]);
+    expect(entriesOnDay([block], local(2026, 9, 7))).toEqual([]);
+  });
+
+  it.each([
+    ["missing", {}],
+    ["null", { occupiedStartsAt: null, occupiedEndsAt: null }],
+    ["unparseable", { occupiedStartsAt: "not a date", occupiedEndsAt: "not a date" }],
+  ])("SCRUM484_AC7_%s_occupied_fields_fall_back_to_the_event_times", (_label, occupied) => {
+    const legacy = { ...lateTurnaround, ...occupied };
+    if (!("occupiedStartsAt" in occupied)) {
+      delete legacy.occupiedStartsAt;
+      delete legacy.occupiedEndsAt;
+    }
+    expect(entriesOnDay([legacy], local(2026, 9, 6))).toEqual([legacy]);
+    expect(entriesOnDay([legacy], local(2026, 9, 7))).toEqual([]);
+  });
+});
+
 describe("SCRUM178_AC4 toWireWindow", () => {
   it("SCRUM178_AC4_both_ends_carry_an_explicit_offset_and_name_the_same_instants", () => {
     const range = rangeFor("week", local(2026, 9, 7));
