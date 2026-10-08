@@ -106,9 +106,14 @@ const BLOCK_VS_BLOCK = {
  * periods, so it is no copy of the overlap rule; the overlap itself is asked
  * of venue_occupancy_conflicts(). Only this exact predicate, only in
  * update_venue: any other strict comparison there is still an offender.
+ *
+ * 035 (latest update_venue) writes it exactly twice: once in the old-clash
+ * set collected before the venues row is updated, once in the new set after.
+ * The count is pinned, so a third copy -- or a stray one elsewhere in the
+ * body -- fails instead of being swallowed by the exception.
  */
 const NOT_STARTED = {
-  update_venue: 'b.starts_at > now()',
+  update_venue: { text: 'b.starts_at > now()', count: 2 },
 };
 
 
@@ -137,9 +142,9 @@ describe('SCRUM484_AC4 no copy of the overlap rule in SQL', () => {
     }
     // And the raw helper is not.
     expect(LATEST.has('venue_block_booking_conflicts')).toBe(false);
-    // The scan replays every migration in the folder, so 034's update_venue
-    // (the AC8 re-check) is the definition read here.
-    expect(LATEST.get('update_venue')?.file).toBe('034_setup_change_recheck.sql');
+    // The scan replays every migration in the folder, so 035's update_venue
+    // (034's AC8 re-check, refined) is the definition read here.
+    expect(LATEST.get('update_venue')?.file).toBe('035_setup_change_recheck_refine.sql');
 
     const offenders = [];
     for (const [name, { file, body }] of LATEST) {
@@ -150,8 +155,10 @@ describe('SCRUM484_AC4 no copy of the overlap rule in SQL', () => {
         rest = rest.split(BLOCK_VS_BLOCK[name]).join(' ');
       }
       if (NOT_STARTED[name]) {
-        expect(rest, `${file} ${name}: not-started filter`).toContain(NOT_STARTED[name]);
-        rest = rest.split(NOT_STARTED[name]).join(' ');
+        const { text, count } = NOT_STARTED[name];
+        const parts = rest.split(text);
+        expect(parts.length - 1, `${file} ${name}: not-started filter, exactly ${count}x`).toBe(count);
+        rest = parts.join(' ');
       }
       for (const m of rest.matchAll(OVERLAP)) {
         offenders.push(`${file} ${name}: ...${rest.slice(Math.max(0, m.index - 50), m.index + 50)}...`);

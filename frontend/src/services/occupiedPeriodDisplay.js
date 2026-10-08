@@ -106,12 +106,7 @@ function isPadding(minutes) {
  * @returns {string|null}  null when the venue needs neither
  */
 export function requestPaddingNote(conflict) {
-  const setup = isPadding(conflict?.setupMinutes)
-    ? `${formatTurnaround(conflict.setupMinutes)} of setup`
-    : null;
-  const turnaround = isPadding(conflict?.turnaroundMinutes)
-    ? `${formatTurnaround(conflict.turnaroundMinutes)} of turnaround`
-    : null;
+  const { setup, turnaround } = paddingPhrases(conflict);
 
   if (setup && turnaround) {
     return `Includes the ${setup} and ${turnaround} this venue needs around your event.`;
@@ -119,4 +114,45 @@ export function requestPaddingNote(conflict) {
   if (setup) return `Includes the ${setup} this venue needs before your event.`;
   if (turnaround) return `Includes the ${turnaround} this venue needs after your event.`;
   return null;
+}
+
+/**
+ * The note under a booking that a booking request ran into, or null.
+ *
+ * Its own wording, not requestPaddingNote's: under a booking row, "Includes
+ * the 30 minutes of setup…" reads as describing that booking's period, which
+ * the row already shows as Setup · Event · Turnaround. The minutes the note
+ * has to explain are the requester's own. At a 30/45 venue a 13:14 request
+ * clashes with a booking whose turnaround ends at 12:45, because the request's
+ * setup starts at 12:44 -- without saying so, the refusal looks wrong:
+ *
+ *   "Your event's own 30 minutes of setup and 45 minutes of turnaround count
+ *    as well."
+ *
+ * @param {{setupMinutes?: number, turnaroundMinutes?: number}} conflict
+ * @returns {string|null}  null when the venue needs neither
+ */
+export function bookingPaddingNote(conflict) {
+  const { setup, turnaround } = paddingPhrases(conflict);
+
+  if (setup && turnaround) return `Your event's own ${setup} and ${turnaround} count as well.`;
+  if (setup) return `Your event's own ${setup} counts as well.`;
+  if (turnaround) return `Your event's own ${turnaround} counts as well.`;
+  return null;
+}
+
+/**
+ * "30 minutes of setup" / "45 minutes of turnaround", or null for a part the
+ * venue does not need. Shared so the block and booking notes name the
+ * minutes the same way.
+ */
+function paddingPhrases(conflict) {
+  return {
+    setup: isPadding(conflict?.setupMinutes)
+      ? `${formatTurnaround(conflict.setupMinutes)} of setup`
+      : null,
+    turnaround: isPadding(conflict?.turnaroundMinutes)
+      ? `${formatTurnaround(conflict.turnaroundMinutes)} of turnaround`
+      : null,
+  };
 }

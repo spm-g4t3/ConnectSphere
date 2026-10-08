@@ -31,13 +31,19 @@ export function reviewReasonLabel(code) {
 
 /**
  * The heading of the notice after a venue save flagged bookings:
- * "1 booking flagged for review: Setup or turnaround time changed" /
- * "3 bookings flagged for review: Setup or turnaround time changed".
+ * "2 bookings at Harbour Room flagged for review: Setup or turnaround time
+ * changed". The venue is named because the notice outlives the form: once it
+ * closes, the catalogue lists every venue and nothing else says which one
+ * was edited. Without a name (a blank or missing one) it reads
+ * "1 booking flagged for review: …", as before.
  *
  * @param {number} count
+ * @param {string} [venueName]
  * @returns {string}
  */
-export function flaggedBookingsHeading(count) {
+export function flaggedBookingsHeading(count, venueName) {
   const bookings = count === 1 ? "1 booking" : `${count} bookings`;
-  return `${bookings} flagged for review: ${REVIEW_REASON_LABELS.setup_or_turnaround_changed}`;
+  const name = typeof venueName === "string" ? venueName.trim() : "";
+  const where = name ? ` at ${name}` : "";
+  return `${bookings}${where} flagged for review: ${REVIEW_REASON_LABELS.setup_or_turnaround_changed}`;
 }

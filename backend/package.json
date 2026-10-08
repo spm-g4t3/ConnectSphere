@@ -21,7 +21,8 @@
     "venue-blocks:check": "node scripts/check-venue-blocks.js",
     "venue-calendar:check": "node scripts/check-venue-calendar.js",
     "booking-requests:check": "node scripts/check-booking-requests.js",
-    "equipment-availability:check": "node scripts/check-equipment-availability.js"
+    "equipment-availability:check": "node scripts/check-equipment-availability.js",
+    "venue-occupancy:check": "node scripts/check-venue-occupancy.js"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",

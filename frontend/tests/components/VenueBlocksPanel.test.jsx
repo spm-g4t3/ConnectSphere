@@ -22,6 +22,7 @@ import {
   updateVenueBlock,
 } from "../../src/services/venueService";
 import { formatRange } from "../../src/services/displayFormat";
+import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay";
 import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
 import { getVenueBlockHistory } from "../../src/services/venueService";
 import { formatTimestamp } from "../../src/services/displayFormat";
@@ -573,6 +574,50 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
         "1 booking was flagged for review and Event Coordinators were notified:",
       ),
     );
+  });
+
+  it("SCRUM484_AC7_block_saved_notice_shows_occupied_parts", async () => {
+    // A 30/45 venue: the flagged booking holds the venue from 30 minutes
+    // before its event until 45 minutes after it.
+    const shift = (iso, minutes) => new Date(new Date(iso).getTime() + minutes * 60_000).toISOString();
+    const padded = {
+      ...BOOKING_A,
+      occupiedStartsAt: shift(BOOKING_A.startsAt, -30),
+      occupiedEndsAt: shift(BOOKING_A.endsAt, 45),
+    };
+    const { user } = await renderPanel();
+    await reachConflict(user, [padded]);
+    vi.mocked(createVenueBlock).mockResolvedValueOnce({ block: UPCOMING, flaggedBookings: [padded] });
+    await confirmOverride(user, 1);
+
+    await waitFor(() => expect(noticeEl()).toHaveTextContent(MSG.saved));
+    const item = within(noticeEl()).getByRole("listitem");
+    expect(within(item).getByText("Tech Talk")).toBeInTheDocument();
+    expect(within(item).getByText(formatOccupiedPeriod(padded))).toBeInTheDocument();
+    expect(formatOccupiedPeriod(padded)).toBe(
+      `Setup ${formatRange(padded.occupiedStartsAt, padded.startsAt)} · ` +
+        `Event ${formatRange(padded.startsAt, padded.endsAt)} · ` +
+        `Turnaround ${formatRange(padded.endsAt, padded.occupiedEndsAt)}`,
+    );
+  });
+
+  it("SCRUM484_AC7_block_saved_notice_shows_the_plain_range_without_padding", async () => {
+    const unpadded = {
+      ...BOOKING_A,
+      occupiedStartsAt: BOOKING_A.startsAt,
+      occupiedEndsAt: BOOKING_A.endsAt,
+    };
+    const { user } = await renderPanel();
+    await reachConflict(user, [unpadded]);
+    vi.mocked(createVenueBlock).mockResolvedValueOnce({ block: UPCOMING, flaggedBookings: [unpadded] });
+    await confirmOverride(user, 1);
+
+    await waitFor(() => expect(noticeEl()).toHaveTextContent(MSG.saved));
+    const item = within(noticeEl()).getByRole("listitem");
+    expect(
+      within(item).getByText(formatRange(unpadded.startsAt, unpadded.endsAt)),
+    ).toBeInTheDocument();
+    expect(item).not.toHaveTextContent(/Setup |Turnaround |·/);
   });
 
   it("SCRUM17_AC3_an_override_that_flags_nothing_says_No_bookings_were_flagged", async () => {

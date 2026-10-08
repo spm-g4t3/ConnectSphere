@@ -39,7 +39,11 @@ import {
   unmetCriteria,
 } from "../services/bookingRequestErrors";
 import { formatRange, shortId } from "../services/displayFormat";
-import { formatOccupiedPeriod, requestPaddingNote } from "../services/occupiedPeriodDisplay";
+import {
+  bookingPaddingNote,
+  formatOccupiedPeriod,
+  requestPaddingNote,
+} from "../services/occupiedPeriodDisplay";
 
 /** Mirrors bookings_setup_notes_length in migration 030. */
 const SETUP_NOTES_MAX_LENGTH = 1000;
@@ -229,10 +233,17 @@ export default function BookingRequestPanel({
                     </li>
                   );
                 }
+                // The same minutes pad this event against a booking too: a
+                // request can clash with a turnaround that ended before it
+                // starts, because its own setup reaches back into it.
+                const bookingNote = bookingPaddingNote(conflict);
                 return (
                   <li key={conflict.bookingId ?? i}>
                     <strong>{conflict.eventName || "Unnamed event"}</strong>
                     <span>{formatOccupiedPeriod(conflict)}</span>
+                    {bookingNote && (
+                      <span className="booking-request__conflict-note">{bookingNote}</span>
+                    )}
                     {conflict.eventRequestId && (
                       <code title={conflict.eventRequestId}>{shortId(conflict.eventRequestId)}</code>
                     )}

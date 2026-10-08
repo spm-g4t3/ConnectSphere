@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event";
 import BookingRequestPanel from "../../src/components/BookingRequestPanel.jsx";
 import { createBookingRequest } from "../../src/services/bookingRequestService";
 import { formatRange } from "../../src/services/displayFormat.js";
+import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay.js";
 
 vi.mock("../../src/services/bookingRequestService", () => ({
   createBookingRequest: vi.fn(),
@@ -537,6 +538,73 @@ describe("SCRUM484_AC7 setup and turnaround in what is in the way", () => {
     const row = within(list).getByRole("listitem");
     expect(within(row).getByText(formatRange(zero.startsAt, zero.endsAt))).toBeInTheDocument();
     expect(row).not.toHaveTextContent(/Setup|Turnaround/);
+  });
+
+  it("SCRUM484_AC7_booking_request_booking_row_names_the_requests_own_padding", async () => {
+    // The worked example: a 30/45 venue. A booking from 11:00 to 12:00 holds
+    // the venue until 12:45 with its turnaround; this event starts at 13:14,
+    // so its own 30 minutes of setup begin at 12:44 and reach back into it.
+    const lunch = {
+      kind: "booking",
+      bookingId: "bk-lunch",
+      eventRequestId: "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+      eventName: "Lunch Talk",
+      startsAt: "2026-12-01T11:00:00+08:00",
+      endsAt: "2026-12-01T12:00:00+08:00",
+      occupiedStartsAt: "2026-12-01T10:30:00+08:00",
+      occupiedEndsAt: "2026-12-01T12:45:00+08:00",
+      setupMinutes: 30,
+      turnaroundMinutes: 45,
+    };
+    const event = {
+      ...EVENT,
+      proposedStart: "2026-12-01T13:14:00+08:00",
+      proposedEnd: "2026-12-01T15:00:00+08:00",
+    };
+    vi.mocked(createBookingRequest).mockRejectedValue(conflict409("BOOKING_PERIOD_CONFLICT", [lunch]));
+    const { user } = renderPanel({ event });
+    await user.click(submit());
+    const list = await screen.findByRole("list", { name: "What is in the way" });
+
+    const row = within(list).getByRole("listitem");
+    expect(within(row).getByText("Lunch Talk")).toBeInTheDocument();
+    expect(within(row).getByText(formatOccupiedPeriod(lunch))).toBeInTheDocument();
+    expect(formatOccupiedPeriod(lunch)).toBe(
+      `Setup ${formatRange(lunch.occupiedStartsAt, lunch.startsAt)} · ` +
+        `Event ${formatRange(lunch.startsAt, lunch.endsAt)} · ` +
+        `Turnaround ${formatRange(lunch.endsAt, lunch.occupiedEndsAt)}`,
+    );
+    expect(
+      within(row).getByText(
+        "Your event's own 30 minutes of setup and 45 minutes of turnaround count as well.",
+      ),
+    ).toHaveClass("booking-request__conflict-note");
+    // Not the block note's wording, which would read as the booking's own minutes.
+    expect(row).not.toHaveTextContent(/Includes the/);
+    expect(within(row).getByText("bbbbbbbb")).toBeInTheDocument();
+  });
+
+  it("SCRUM484_AC7_booking_request_booking_row_names_only_the_minutes_above_zero", async () => {
+    const list = await showConflicts([{ ...ORIENTATION, setupMinutes: 0 }]);
+    expect(
+      within(list).getByText("Your event's own 45 minutes of turnaround counts as well."),
+    ).toBeInTheDocument();
+  });
+
+  it("SCRUM484_AC7_booking_request_booking_row_has_no_note_at_zero_minutes", async () => {
+    const zero = {
+      ...ORIENTATION,
+      occupiedStartsAt: ORIENTATION.startsAt,
+      occupiedEndsAt: ORIENTATION.endsAt,
+      setupMinutes: 0,
+      turnaroundMinutes: 0,
+    };
+    const list = await showConflicts([zero]);
+
+    const row = within(list).getByRole("listitem");
+    expect(within(row).getByText(formatRange(zero.startsAt, zero.endsAt))).toBeInTheDocument();
+    expect(row.querySelector(".booking-request__conflict-note")).toBeNull();
+    expect(row).not.toHaveTextContent(/Your event's own|counts? as well/);
   });
 
   it("SCRUM484_AC7_booking_request_lists_a_padded_booking_and_a_block_together", async () => {

@@ -20,9 +20,17 @@
  * [15:30, 17:45) is clear; E [18:45, 20:45) overlaps K. Every test builds its
  * own venue and coordinators, so no test sees another's rows.
  *
+ * 035_setup_change_recheck_refine.sql replaces 034's update_venue with the
+ * two decisions of the 2026-10-08 AC review: a flagged_for_review booking
+ * counts as the other booking (it still occupies the room), and only clashes
+ * the change CREATED are flagged -- a candidate already clashing under the old
+ * minutes is left alone, so reducing the minutes never flags anything. These
+ * tests run against 035's definition; the ones that depend on the two
+ * decisions say so.
+ *
  * Applied in order: the migrations venueBlockOccupancyDatabase.test.js
  * applies, plus 003, 004, 005_venue_retirement and 008 (the venue audit that
- * update_venue writes, AC9), then 034.
+ * update_venue writes, AC9), then 034 and 035.
  *
  * Dates: update_venue uses now() for "not started", so D is the Singapore
  * date 10 days from when the test runs (at least 7, per the doc's Rules), and
@@ -66,6 +74,7 @@ const MIGRATIONS = [
   '032_venue_occupancy.sql',
   '033_venue_occupancy_callers.sql',
   '034_setup_change_recheck.sql',
+  '035_setup_change_recheck_refine.sql',
 ];
 
 /** What 014 reads from SCRUM-19's migration, which is not on this branch. */
@@ -89,7 +98,7 @@ const REASON_CODE = 'setup_or_turnaround_changed';
 const REASON_TEXT = 'Setup or turnaround time changed';
 const SETUP_TYPE = 'booking_flagged_setup_change';
 
-describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaround change (034)', () => {
+describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaround change (034, refined by 035)', () => {
   let db;
   let organiser;
   let staff;
@@ -333,6 +342,10 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
       const before = { constraints: await constraints(), columns: await columns() };
 
       await db.exec(migration('034_setup_change_recheck.sql'));
+      // Re-running 034 also puts 034's update_venue back. 035 is re-run
+      // straight after, as the chain would, so every later test in this file
+      // still runs 035's re-check -- and 035 is shown to be re-runnable too.
+      await db.exec(migration('035_setup_change_recheck_refine.sql'));
 
       expect(await constraints()).toEqual(before.constraints);
       expect(await columns()).toEqual(before.columns);
@@ -457,6 +470,10 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
 
       const result = await change(f.V);
 
+      // Since 035 F also counts as the other booking. Padded it occupies
+      // [13:45, 15:30): it meets B (flagged anyway, for A) and only touches
+      // C's [15:30, 17:45), so the flagged set is the fixture's A, B, E.
+      expect(flaggedIds(result).sort()).toEqual([f.A, f.B, f.E].sort());
       const after = await booking(F);
       expect(after).toEqual(before);
       expect(after.review_block_id).not.toBeNull();
@@ -465,21 +482,36 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
       expect(await notificationsFor([F])).toEqual([]);
     });
 
-    it('SCRUM484_AC8_flagged_booking_is_not_the_other_booking', async () => {
-      // AC8: a booking is flagged when it now overlaps another APPROVED
-      // booking or a block. G (approved) and H (already flagged) are 30
-      // minutes apart; after padding they overlap, but H is not approved, so
-      // neither is flagged.
+    it('SCRUM484_AC8_flagged_booking_counts_as_the_other_booking', async () => {
+      // Reversed by the user's 2026-10-08 AC review decision (035): this was
+      // SCRUM484_AC8_flagged_booking_is_not_the_other_booking, which held
+      // under 034's "another APPROVED booking". A flagged booking still holds
+      // the room everywhere else (032), so it holds it here too.
+      //
+      // At 0/0, A (approved) 10:00-12:00 and F (already flagged) 12:30-13:00
+      // are 30 minutes apart: no clash before the change. At 30/45, A
+      // occupies [09:30, 12:45) and F [12:00, 13:45): they now overlap, so A
+      // is flagged. F is already flagged, so it is never a candidate and is
+      // left exactly as it was.
       const V = await makeVenue();
-      const G = await makeBooking(V, 'approved', at('10:00'), at('12:00'));
-      const H = await makeBooking(V, 'flagged_for_review', at('12:30'), at('13:00'));
-      const hBefore = await booking(H);
+      const C1 = await makeUser('event_coordinator');
+      const A = await makeBooking(V, 'approved', at('10:00'), at('12:00'), C1);
+      const F = await makeBooking(V, 'flagged_for_review', at('12:30'), at('13:00'), C1);
+      const fBefore = await booking(F);
 
       const result = await change(V);
 
-      expect(await status(G)).toBe('approved');
-      expect(await booking(H)).toEqual(hBefore);
-      expect(result.flagged_bookings).toEqual([]);
+      const a = await booking(A);
+      expect(a.status).toBe('flagged_for_review');
+      expect(a.review_reason).toBe(REASON_CODE);
+      expect(a.review_block_id).toBeNull();
+      expect(flaggedIds(result)).toEqual([A]);
+      expect(ms(result.flagged_bookings[0].occupied_starts_at)).toBe(ms(at('09:30')));
+      expect(ms(result.flagged_bookings[0].occupied_ends_at)).toBe(ms(at('12:45')));
+      expect(await booking(F)).toEqual(fBefore);
+      // A's coordinator is told about A; nothing is written for F.
+      expect((await notificationsFor([A])).map((n) => n.recipient_id)).toEqual([C1]);
+      expect(await notificationsFor([F])).toEqual([]);
     });
 
     it('SCRUM484_AC8_cancelled_and_pending_neither_change_nor_cause_flags', async () => {
@@ -560,6 +592,193 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
     it('SCRUM484_AC8_unknown_venue_raises_no_data_found', async () => {
       const missing = (await one('select gen_random_uuid() as id')).id;
       await refused(change(missing), 'P0002');
+    });
+  });
+
+
+  describe('behaviour (035): only clashes the change created are flagged', () => {
+    // The user's 2026-10-08 AC review decision: a booking already clashing
+    // under the OLD minutes was not put there by this change, so it is left
+    // alone; reducing the minutes therefore never flags anything.
+
+    it('SCRUM484_AC8_a_clash_that_existed_before_the_change_is_not_flagged', async () => {
+      // V at 30/45. A 10:00-12:00 occupies [09:30, 12:45); B 12:30-14:00
+      // occupies [12:00, 14:45): they already overlap by 45 minutes. Turnaround
+      // 45 -> 60: A [09:30, 13:00), B [12:00, 15:00) -- still overlapping, but
+      // the clash is not new, so neither is flagged.
+      const V = await makeVenue(30, 45);
+      const C1 = await makeUser('event_coordinator');
+      const C2 = await makeUser('event_coordinator');
+      const A = await makeBooking(V, 'approved', at('10:00'), at('12:00'), C1);
+      const B = await makeBooking(V, 'approved', at('12:30'), at('14:00'), C2);
+      const period = async (id, setup, turnaround) => {
+        const r = await one(
+          `select lower(p) as s, upper(p) as e
+             from (select venue_occupied_period(starts_at, ends_at, $2, $3) as p from bookings where id = $1) x`,
+          [id, setup, turnaround],
+        );
+        return [ms(r.s), ms(r.e)];
+      };
+      // The arithmetic above, checked against 032's function.
+      expect(await period(A, 30, 45)).toEqual([ms(at('09:30')), ms(at('12:45'))]);
+      expect(await period(B, 30, 45)).toEqual([ms(at('12:00')), ms(at('14:45'))]);
+      expect(await period(A, 30, 60)).toEqual([ms(at('09:30')), ms(at('13:00'))]);
+      expect(await period(B, 30, 60)).toEqual([ms(at('12:00')), ms(at('15:00'))]);
+      const before = [await booking(A), await booking(B)];
+
+      const result = await updateVenue(V, { turnaround_minutes: 60 });
+
+      expect(result).toEqual({ flagged_bookings: [] });
+      expect([await booking(A), await booking(B)]).toEqual(before);
+      expect(await notificationsFor([A, B])).toEqual([]);
+      // The change itself went through.
+      expect(await one('select setup_minutes, turnaround_minutes from venues where id = $1', [V])).toEqual({
+        setup_minutes: 30,
+        turnaround_minutes: 60,
+      });
+    });
+
+    it('SCRUM484_AC8_reducing_never_flags_even_with_an_existing_clash', async () => {
+      // V at 30/45 with A [09:30, 12:45) and B [12:00, 14:45) already
+      // overlapping. Setup 30 -> 15: A [09:45, 12:45), B [12:15, 14:45) still
+      // overlap. 034 flagged both here (it looked only at the new minutes);
+      // 035 flags nothing, because reducing can only shrink the clashing set.
+      const V = await makeVenue(30, 45);
+      const C1 = await makeUser('event_coordinator');
+      const A = await makeBooking(V, 'approved', at('10:00'), at('12:00'), C1);
+      const B = await makeBooking(V, 'approved', at('12:30'), at('14:00'), C1);
+      const before = [await booking(A), await booking(B)];
+
+      const result = await updateVenue(V, { setup_minutes: 15 });
+
+      expect(result).toEqual({ flagged_bookings: [] });
+      expect([await booking(A), await booking(B)]).toEqual(before);
+      expect(await notificationsFor([A, B])).toEqual([]);
+      expect(await rows('select 1 from notifications where recipient_id = $1', [C1])).toEqual([]);
+      expect((await one('select setup_minutes from venues where id = $1', [V])).setup_minutes).toBe(15);
+    });
+
+    it('SCRUM484_AC8_only_the_new_member_of_a_clash_is_flagged', async () => {
+      // V at 30/45 (setup 30, turnaround 45).
+      //   A 10:00-12:00 -> [09:30, 12:45)
+      //   B 12:30-14:00 -> [12:00, 14:45)   A and B already overlap.
+      //   C 15:20-16:00 -> [14:50, 16:45)   clear of B by 5 minutes.
+      // Turnaround 45 -> 60:
+      //   A -> [09:30, 13:00), B -> [12:00, 15:00), C -> [14:50, 17:00).
+      //   A and B still overlap (old clash: neither flagged); C now overlaps
+      //   B on [14:50, 15:00) -- a clash this change created -- so only C is
+      //   flagged. B is in the new clash too, but it already clashed with A
+      //   under the old minutes, so it is in the old set and left alone.
+      const V = await makeVenue(30, 45);
+      const C1 = await makeUser('event_coordinator');
+      const C2 = await makeUser('event_coordinator');
+      const C3 = await makeUser('event_coordinator');
+      const A = await makeBooking(V, 'approved', at('10:00'), at('12:00'), C1);
+      const B = await makeBooking(V, 'approved', at('12:30'), at('14:00'), C2);
+      const C = await makeBooking(V, 'approved', at('15:20'), at('16:00'), C3);
+      // Before: C clears B; A and B clash (032's function, padded, at 30/45).
+      const clashes = async (id) =>
+        (
+          await rows(
+            `select c.id from bookings b, venue_occupancy_conflicts(b.venue_id, b.starts_at, b.ends_at, true) c
+              where b.id = $1 and c.kind = 'booking' and c.id <> b.id order by c.id`,
+            [id],
+          )
+        ).map((r) => r.id);
+      expect(await clashes(A)).toEqual([B]);
+      expect(await clashes(C)).toEqual([]);
+      const before = { A: await booking(A), B: await booking(B) };
+
+      const result = await updateVenue(V, { turnaround_minutes: 60 });
+
+      // After: C meets B, and A and B still meet.
+      expect(await clashes(C)).toEqual([B]);
+      expect(await clashes(A)).toEqual([B]);
+
+      expect(flaggedIds(result)).toEqual([C]);
+      const [row] = result.flagged_bookings;
+      expect(ms(row.starts_at)).toBe(ms(at('15:20')));
+      expect(ms(row.ends_at)).toBe(ms(at('16:00')));
+      expect(ms(row.occupied_starts_at)).toBe(ms(at('14:50')));
+      expect(ms(row.occupied_ends_at)).toBe(ms(at('17:00')));
+      expect(row.setup_minutes).toBe(30);
+      expect(row.turnaround_minutes).toBe(60);
+
+      const c = await booking(C);
+      expect(c.status).toBe('flagged_for_review');
+      expect(c.review_reason).toBe(REASON_CODE);
+      expect(c.flagged_by).toBe(staff);
+      expect(await booking(A)).toEqual(before.A);
+      expect(await booking(B)).toEqual(before.B);
+
+      // Only C's coordinator is told, with C's new occupied period.
+      const notes = await notificationsFor([A, B, C]);
+      expect(notes.map((n) => [n.recipient_id, n.booking_id])).toEqual([[C3, C]]);
+      expect(ms(notes[0].payload.occupiedStartsAt)).toBe(ms(at('14:50')));
+      expect(ms(notes[0].payload.occupiedEndsAt)).toBe(ms(at('17:00')));
+      expect(notes[0].payload.turnaroundMinutes).toBe(60);
+    });
+
+    it('SCRUM484_AC8_name_only_edit_skips_the_old_clash_check', async () => {
+      // Observed by wrapping venue_occupancy_conflicts, inside a transaction
+      // that is rolled back, with a stand-in that logs the venue's minutes at
+      // the moment it is asked and then calls the real function. A call made
+      // with the OLD minutes can only be 035's old-set check (step 0b, before
+      // the venues row is updated); one with the new minutes is the re-check.
+      const V = await makeVenue(0, 0);
+      const A = await makeBooking(V, 'approved', at('10:00'), at('12:00'));
+      await makeBooking(V, 'approved', at('12:30'), at('14:00'));
+
+      await db.exec('begin');
+      try {
+        await db.exec(`
+          create temp table occupancy_calls (n serial, setup integer, turnaround integer);
+          alter function venue_occupancy_conflicts(uuid, timestamptz, timestamptz, boolean)
+            rename to venue_occupancy_conflicts_real;
+          create function venue_occupancy_conflicts(
+            p_venue_id uuid, p_starts_at timestamptz, p_ends_at timestamptz, p_pad_requested boolean
+          )
+          returns table (
+            kind text, id uuid, status booking_status, event_request_id uuid, event_name text,
+            reason venue_block_reason, starts_at timestamptz, ends_at timestamptz,
+            occupied_starts_at timestamptz, occupied_ends_at timestamptz,
+            setup_minutes integer, turnaround_minutes integer
+          )
+          language plpgsql volatile as $w$
+          begin
+            insert into occupancy_calls (setup, turnaround)
+            select v.setup_minutes, v.turnaround_minutes from venues v where v.id = p_venue_id;
+            return query select * from venue_occupancy_conflicts_real(p_venue_id, p_starts_at, p_ends_at, p_pad_requested);
+          end;
+          $w$;
+        `);
+        const calls = async () => rows('select setup, turnaround from occupancy_calls order by n');
+
+        // A name-only edit, and one that passes the same minutes: neither
+        // asks the shared function anything.
+        await updateVenue(V, { name: `Renamed ${V}` });
+        await updateVenue(V, { setup_minutes: 0, turnaround_minutes: 0 });
+        expect(await calls()).toEqual([]);
+
+        // Control: a real change asks it once per candidate with the old
+        // minutes (the old set, 0/0), then once per candidate with the new
+        // (the re-check, 30/45). Two approved candidates here.
+        const result = await change(V);
+        expect(await calls()).toEqual([
+          { setup: 0, turnaround: 0 },
+          { setup: 0, turnaround: 0 },
+          { setup: 30, turnaround: 45 },
+          { setup: 30, turnaround: 45 },
+        ]);
+        // And the wrapper changed nothing about the answer.
+        expect(flaggedIds(result)).toContain(A);
+      } finally {
+        await db.exec('rollback');
+      }
+      // The real function is back under its own name.
+      expect(
+        (await one("select count(*)::int as n from pg_proc where proname = 'venue_occupancy_conflicts_real'")).n,
+      ).toBe(0);
     });
   });
 

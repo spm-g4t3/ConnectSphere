@@ -2712,3 +2712,41 @@ describe('SCRUM484_AC8 PATCH returns the bookings a setup change flagged', () =>
     expect(rpc).not.toHaveBeenCalled();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-484 AC2: only Venue Staff may set a venue's setup or turnaround time
+// ---------------------------------------------------------------------------
+describe('SCRUM484_AC2 setup and turnaround are set by Venue Staff only', () => {
+  const VENUE_STAFF_ONLY = 'This action is restricted to Venue Staff';
+  const NEW_VENUE = { name: 'Hall A', location: 'SCIS', maxCapacity: 40, setupMinutes: 30 };
+
+  it.each([
+    ['an Event Organiser', ROLE.EVENT_ORGANISER],
+    ['an Event Coordinator', ROLE.EVENT_COORDINATOR],
+    ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+    ['an attendee', ROLE.ATTENDEE],
+  ])('SCRUM484_AC2_POST_with_setup_from_a_non_venue_staff_role_is_refused (%s)', async (_label, role) => {
+    const res = await request(appWith(signedInAs(role, ORGANISER_ID))).post('/api/venues').send(NEW_VENUE);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe(VENUE_STAFF_ONLY);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM484_AC2_event_coordinator_cannot_set_setup_or_turnaround', async () => {
+    const app = appWith(signedInAs(ROLE.EVENT_COORDINATOR, ORGANISER_ID));
+
+    const created = await request(app).post('/api/venues').send(NEW_VENUE);
+    const setup = await request(app).patch(`/api/venues/${VENUE_ID}`).send({ setupMinutes: 30 });
+    const turnaround = await request(app).patch(`/api/venues/${VENUE_ID}`).send({ turnaroundMinutes: 45 });
+
+    for (const res of [created, setup, turnaround]) {
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe(VENUE_STAFF_ONLY);
+    }
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+});

@@ -21,6 +21,40 @@ import { formatRange } from "./displayFormat";
 import { reasonLabel } from "./venueBlockReasons";
 import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
 
+/** True when `value` is a time that will parse. */
+function isInstant(value) {
+  if (value === null || value === undefined || value === "") return false;
+  return !Number.isNaN(new Date(value).getTime());
+}
+
+/**
+ * The sentence after "Setup or turnaround time changed." in a
+ * booking_flagged_setup_change notification, with its leading space, or "".
+ *
+ * formatOccupiedPeriod falls back to the event times, so with those missing
+ * it would read "unknown – unknown" even when the occupied times are there.
+ * Each case says only what the payload actually has:
+ *   - event times present: the labelled period, "It now occupies Setup … ·
+ *     Event … · Turnaround …." (or the bare event range at a venue with none);
+ *   - only the occupied times: "It now occupies <that range>.";
+ *   - neither: nothing, rather than a sentence about an unknown time.
+ */
+function setupChangePeriod(payload) {
+  if (isInstant(payload.startsAt) && isInstant(payload.endsAt)) {
+    const period = formatOccupiedPeriod({
+      startsAt: payload.startsAt,
+      endsAt: payload.endsAt,
+      occupiedStartsAt: payload.occupiedStartsAt,
+      occupiedEndsAt: payload.occupiedEndsAt,
+    });
+    return ` It now occupies ${period}.`;
+  }
+  if (isInstant(payload.occupiedStartsAt) && isInstant(payload.occupiedEndsAt)) {
+    return ` It now occupies ${formatRange(payload.occupiedStartsAt, payload.occupiedEndsAt)}.`;
+  }
+  return "";
+}
+
 /**
  * A notification as a headline and a detail line.
  *
@@ -51,16 +85,10 @@ export function describeNotification(notification) {
   if (notification?.type === "booking_flagged_setup_change") {
     const eventName = payload.eventName || "Unnamed event";
     const venueName = payload.venueName || "Unknown venue";
-    const period = formatOccupiedPeriod({
-      startsAt: payload.startsAt,
-      endsAt: payload.endsAt,
-      occupiedStartsAt: payload.occupiedStartsAt,
-      occupiedEndsAt: payload.occupiedEndsAt,
-    });
 
     return {
       headline: `${eventName} at ${venueName} needs review`,
-      detail: `Setup or turnaround time changed. It now occupies ${period}.`,
+      detail: `Setup or turnaround time changed.${setupChangePeriod(payload)}`,
     };
   }
 

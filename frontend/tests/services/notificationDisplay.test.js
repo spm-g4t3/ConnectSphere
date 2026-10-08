@@ -159,8 +159,35 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
   it("SCRUM484_AC8_setup_change_notification_tolerates_missing_fields", () => {
     const { headline, detail } = describeNotification(setupChange({}));
     expect(headline).toBe("Unnamed event at Unknown venue needs review");
-    expect(detail).toBe("Setup or turnaround time changed. It now occupies unknown – unknown.");
+    // Nothing usable: no time sentence at all, rather than "unknown – unknown".
+    expect(detail).toBe("Setup or turnaround time changed.");
+    expect(detail).not.toContain("unknown");
     expect(`${headline} ${detail}`).not.toContain("undefined");
+  });
+
+  it("SCRUM484_AC8_occupied_times_only_name_the_occupied_range", () => {
+    const { detail } = describeNotification(
+      setupChange({ ...SETUP_PAYLOAD, startsAt: undefined, endsAt: undefined }),
+    );
+    expect(detail).toBe(
+      `Setup or turnaround time changed. It now occupies ${formatRange(SETUP_PAYLOAD.occupiedStartsAt, SETUP_PAYLOAD.occupiedEndsAt)}.`,
+    );
+    expect(detail).not.toContain("unknown");
+    expect(detail).not.toContain("Setup 0");
+    expect(detail).not.toContain("·");
+  });
+
+  it.each([
+    ["missing", { startsAt: undefined, endsAt: undefined, occupiedStartsAt: undefined, occupiedEndsAt: undefined }],
+    ["null", { startsAt: null, endsAt: null, occupiedStartsAt: null, occupiedEndsAt: null }],
+    ["empty", { startsAt: "", endsAt: "", occupiedStartsAt: "", occupiedEndsAt: "" }],
+    ["unparseable", { startsAt: "soon", endsAt: "later", occupiedStartsAt: "soon", occupiedEndsAt: "later" }],
+    ["half-present", { startsAt: SETUP_PAYLOAD.startsAt, endsAt: null, occupiedStartsAt: null, occupiedEndsAt: SETUP_PAYLOAD.occupiedEndsAt }],
+  ])("SCRUM484_AC8_%s_times_give_no_time_sentence", (_label, overrides) => {
+    const { headline, detail } = describeNotification(setupChange({ ...SETUP_PAYLOAD, ...overrides }));
+    expect(headline).toBe("Orientation at Harbour Room needs review");
+    expect(detail).toBe("Setup or turnaround time changed.");
+    expect(detail).not.toContain("Invalid Date");
   });
 
   it.each([

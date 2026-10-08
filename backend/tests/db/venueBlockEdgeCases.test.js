@@ -34,6 +34,14 @@
  * compares a start with the clock, not two periods: it is named below
  * (NOT_STARTED) and kept out of the overlap predicates. The overlap itself is
  * 032's, asked with pad = true, and 034's rules get their own describe block.
+ *
+ * SCRUM-484 (AC8, 2026-10-08 AC review) adds 035, which replaces 034's
+ * update_venue: it also collects the bookings that already clashed under the
+ * OLD minutes, before the venues row is updated, and flags only the new
+ * clashes. It still flags bookings, so it is in the list and both rules apply.
+ * Adapted: the not-started filter now appears twice in 035's update_venue
+ * (the old set and the new set), so NOT_STARTED names an exact count per
+ * function, and 035 gets the same describe block as 034.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -50,14 +58,22 @@ const MIGRATIONS = [
   '032_venue_occupancy.sql',
   '033_venue_occupancy_callers.sql',
   '034_setup_change_recheck.sql',
+  '035_setup_change_recheck_refine.sql',
 ];
 
 /**
  * SCRUM-484 (AC8): the one booking-period comparison that is not an overlap
- * -- update_venue's "event has not started" filter in 034. Only this exact
- * text, only in that function.
+ * -- update_venue's "event has not started" filter. Only this exact text,
+ * only in these functions, and exactly this many times in each: once in
+ * 034's update_venue, twice in 035's (the old-clash set and the new set).
  */
-const NOT_STARTED = { fn: '034_setup_change_recheck.sql:update_venue', text: 'b.starts_at > now()' };
+const NOT_STARTED = {
+  text: 'b.starts_at > now()',
+  counts: {
+    '034_setup_change_recheck.sql:update_venue': 1,
+    '035_setup_change_recheck_refine.sql:update_venue': 2,
+  },
+};
 
 /**
  * SCRUM-484: 032's venue_occupancy_conflicts() is the shared READER every
@@ -123,7 +139,7 @@ const ALL_PREDICATES = MIGRATIONS.flatMap((name) =>
   ),
 );
 
-const isNotStarted = (p) => `${p.name}:${p.fn}` === NOT_STARTED.fn && p.full === NOT_STARTED.text;
+const isNotStarted = (p) => `${p.name}:${p.fn}` in NOT_STARTED.counts && p.full === NOT_STARTED.text;
 
 /** The overlap predicates the two rules are about. */
 const PREDICATES = ALL_PREDICATES.filter((p) => !isNotStarted(p));
@@ -145,8 +161,14 @@ describe('SCRUM17_AC3 booking-period predicates in the block migrations', () => 
       SHARED_READER,
     ]));
     // SCRUM-484 (AC8): 034's update_venue contributes only the named
-    // not-started filter, exactly once; its overlap is 032's.
-    expect(ALL_PREDICATES.filter(isNotStarted)).toHaveLength(1);
+    // not-started filter, exactly once; its overlap is 032's. 035's
+    // contributes it exactly twice (old set and new set), and nothing else.
+    const notStarted = {};
+    for (const p of ALL_PREDICATES.filter(isNotStarted)) {
+      const key = `${p.name}:${p.fn}`;
+      notStarted[key] = (notStarted[key] ?? 0) + 1;
+    }
+    expect(notStarted).toEqual(NOT_STARTED.counts);
   });
 
   it('SCRUM17_AC3_touching_booking_is_never_a_conflict', () => {
@@ -212,32 +234,41 @@ describe('SCRUM484 the block functions in 033 keep both rules through the shared
 });
 
 
-describe('SCRUM484 the AC8 re-check in 034 keeps both rules through the shared function', () => {
-  const BODY = functionBodies(normalised('034_setup_change_recheck.sql')).find(
-    ({ fn }) => fn === 'update_venue',
-  )?.body;
+// SCRUM-484 (AC8): the same two checks for 034's update_venue and for 035's,
+// which replaces it (old-clash set before the update, new set after).
+for (const file of ['034_setup_change_recheck.sql', '035_setup_change_recheck_refine.sql']) {
+  const expectedNotStarted = NOT_STARTED.counts[`${file}:update_venue`];
 
-  it('SCRUM484_AC8_recheck_writes_no_booking_period_predicate_of_its_own', () => {
-    // Rule 1 by construction: apart from the not-started filter, the only
-    // comparison is 032's, asked with the booking's own period padded.
-    expect(BODY).toBeDefined();
-    const own = [...BODY.matchAll(BOOKING_PERIOD_PREDICATE)].map(
-      (m) => BODY.slice(m.index, m.index + NOT_STARTED.text.length),
-    );
-    expect(own).toEqual([NOT_STARTED.text]);
-    expect(BODY).toMatch(/venue_occupancy_conflicts\(p_id, b\.starts_at, b\.ends_at, true\)/);
-  });
+  describe(`SCRUM484 the AC8 re-check in ${file.slice(0, 3)} keeps both rules through the shared function`, () => {
+    const BODY = functionBodies(normalised(file)).find(({ fn }) => fn === 'update_venue')?.body;
 
-  it('SCRUM484_AC8_recheck_only_takes_approved_bookings', () => {
-    // Rule 2: the candidate query, the lock and the flag UPDATE each require
-    // b.status = 'approved' in their own WHERE, so a booking already
-    // flagged_for_review is not flagged again.
-    const candidates = BODY.indexOf(NOT_STARTED.text);
-    expect(whereClause(BODY, candidates)).toContain("b.status = 'approved'");
-    for (const anchor of ['b.id = any (v_clashing)', 'b.id = any (v_locked)']) {
-      const at = BODY.indexOf(anchor);
-      expect(at, anchor).toBeGreaterThan(-1);
-      expect(whereClause(BODY, at), anchor).toContain("b.status = 'approved'");
-    }
+    it('SCRUM484_AC8_recheck_writes_no_booking_period_predicate_of_its_own', () => {
+      // Rule 1 by construction: apart from the not-started filter (once in
+      // 034, twice in 035), the only comparison is 032's, asked with the
+      // booking's own period padded.
+      expect(BODY).toBeDefined();
+      const own = [...BODY.matchAll(BOOKING_PERIOD_PREDICATE)].map(
+        (m) => BODY.slice(m.index, m.index + NOT_STARTED.text.length),
+      );
+      expect(own).toEqual(Array(expectedNotStarted).fill(NOT_STARTED.text));
+      expect(BODY).toMatch(/venue_occupancy_conflicts\(p_id, b\.starts_at, b\.ends_at, true\)/);
+    });
+
+    it('SCRUM484_AC8_recheck_only_takes_approved_bookings', () => {
+      // Rule 2: every candidate query (034: one; 035: the old set and the new
+      // set), the lock and the flag UPDATE each require b.status =
+      // 'approved' in their own WHERE, so a booking already
+      // flagged_for_review is not flagged again.
+      const candidates = [...BODY.matchAll(/b\.starts_at > now\(\)/g)].map((m) => m.index);
+      expect(candidates).toHaveLength(expectedNotStarted);
+      for (const at of candidates) {
+        expect(whereClause(BODY, at)).toContain("b.status = 'approved'");
+      }
+      for (const anchor of ['b.id = any (v_clashing)', 'b.id = any (v_locked)']) {
+        const at = BODY.indexOf(anchor);
+        expect(at, anchor).toBeGreaterThan(-1);
+        expect(whereClause(BODY, at), anchor).toContain("b.status = 'approved'");
+      }
+    });
   });
-});
+}

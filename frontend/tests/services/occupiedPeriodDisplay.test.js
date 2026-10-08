@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  bookingPaddingNote,
   formatOccupiedPeriod,
   occupiedPeriodParts,
   requestPaddingNote,
@@ -189,5 +190,59 @@ describe("SCRUM484_AC7 requestPaddingNote", () => {
   it("SCRUM484_AC7_a_missing_conflict_gives_no_note", () => {
     expect(requestPaddingNote(undefined)).toBeNull();
     expect(requestPaddingNote(null)).toBeNull();
+  });
+});
+
+describe("SCRUM484_AC7 bookingPaddingNote", () => {
+  // The note under a booking a request ran into names the requester's own
+  // minutes, because the row above it already shows the booking's parts.
+  it("SCRUM484_AC7_booking_note_names_both_setup_and_turnaround", () => {
+    expect(bookingPaddingNote({ kind: "booking", setupMinutes: 30, turnaroundMinutes: 45 })).toBe(
+      "Your event's own 30 minutes of setup and 45 minutes of turnaround count as well.",
+    );
+  });
+
+  it("SCRUM484_AC7_booking_note_names_setup_only", () => {
+    expect(bookingPaddingNote({ kind: "booking", setupMinutes: 30, turnaroundMinutes: 0 })).toBe(
+      "Your event's own 30 minutes of setup counts as well.",
+    );
+  });
+
+  it("SCRUM484_AC7_booking_note_names_turnaround_only", () => {
+    expect(bookingPaddingNote({ kind: "booking", setupMinutes: 0, turnaroundMinutes: 90 })).toBe(
+      "Your event's own 1 hour 30 minutes of turnaround counts as well.",
+    );
+  });
+
+  it("SCRUM484_AC7_booking_note_zero_minutes_give_no_note", () => {
+    expect(bookingPaddingNote({ kind: "booking", setupMinutes: 0, turnaroundMinutes: 0 })).toBeNull();
+  });
+
+  it.each([
+    ["missing minutes", {}],
+    ["null minutes", { setupMinutes: null, turnaroundMinutes: null }],
+    ["string minutes", { setupMinutes: "30", turnaroundMinutes: "45" }],
+    ["fractional minutes", { setupMinutes: 7.5, turnaroundMinutes: 2.5 }],
+    ["negative minutes", { setupMinutes: -15, turnaroundMinutes: -30 }],
+    ["NaN minutes", { setupMinutes: Number.NaN, turnaroundMinutes: Number.NaN }],
+  ])("SCRUM484_AC7_booking_note_%s_give_no_note", (_label, minutes) => {
+    expect(bookingPaddingNote({ kind: "booking", ...minutes })).toBeNull();
+  });
+
+  it("SCRUM484_AC7_booking_note_a_missing_conflict_gives_no_note", () => {
+    expect(bookingPaddingNote(undefined)).toBeNull();
+    expect(bookingPaddingNote(null)).toBeNull();
+  });
+
+  it("SCRUM484_AC7_booking_note_and_request_note_word_the_same_minutes_differently", () => {
+    const conflict = { setupMinutes: 30, turnaroundMinutes: 45 };
+    // requestPaddingNote's output is unchanged by the shared phrase helper.
+    expect(requestPaddingNote({ kind: "block", ...conflict })).toBe(
+      "Includes the 30 minutes of setup and 45 minutes of turnaround this venue needs around your event.",
+    );
+    expect(bookingPaddingNote({ kind: "booking", ...conflict })).not.toBe(
+      requestPaddingNote({ kind: "block", ...conflict }),
+    );
+    expect(bookingPaddingNote(conflict)).not.toContain("Includes");
   });
 });

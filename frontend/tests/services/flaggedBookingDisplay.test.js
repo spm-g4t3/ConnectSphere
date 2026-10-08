@@ -55,4 +55,31 @@ describe("flaggedBookingsHeading", () => {
   it("SCRUM484_AC8_heading_uses_the_same_label_as_reviewReasonLabel", () => {
     expect(flaggedBookingsHeading(2)).toContain(reviewReasonLabel("setup_or_turnaround_changed"));
   });
+
+  it("SCRUM484_AC8_heading_names_the_venue", () => {
+    expect(flaggedBookingsHeading(2, "Harbour Room")).toBe(
+      "2 bookings at Harbour Room flagged for review: Setup or turnaround time changed",
+    );
+    expect(flaggedBookingsHeading(1, "Harbour Room")).toBe(
+      "1 booking at Harbour Room flagged for review: Setup or turnaround time changed",
+    );
+  });
+
+  it("SCRUM484_AC8_heading_trims_the_venue_name", () => {
+    expect(flaggedBookingsHeading(1, "  Harbour Room  ")).toBe(
+      "1 booking at Harbour Room flagged for review: Setup or turnaround time changed",
+    );
+  });
+
+  it.each([
+    ["an empty name", ""],
+    ["a blank name", "   "],
+    ["a null name", null],
+    ["a missing name", undefined],
+    ["a non-string name", 42],
+  ])("SCRUM484_AC8_heading_with_%s_leaves_the_venue_out", (_label, venueName) => {
+    const heading = flaggedBookingsHeading(2, venueName);
+    expect(heading).toBe("2 bookings flagged for review: Setup or turnaround time changed");
+    expect(heading).not.toContain(" at ");
+  });
 });

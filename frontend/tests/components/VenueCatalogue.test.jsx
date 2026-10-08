@@ -268,7 +268,7 @@ describe("SCRUM484_AC8 VenueCatalogue flagged-bookings notice", () => {
     const region = notice();
     expect(region).toBeInTheDocument();
     expect(within(region).getByRole("heading", { level: 3 })).toHaveTextContent(
-      "2 bookings flagged for review: Setup or turnaround time changed",
+      "2 bookings at Hall A flagged for review: Setup or turnaround time changed",
     );
 
     const rows = within(region).getAllByRole("listitem");
@@ -287,7 +287,9 @@ describe("SCRUM484_AC8 VenueCatalogue flagged-bookings notice", () => {
     );
 
     expect(
-      within(region).getByText("Each event's assigned coordinator has been notified."),
+      within(region).getByText(
+        "Where an event has an assigned coordinator, they have been notified.",
+      ),
     ).toBeInTheDocument();
     expect(within(region).getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
   });
@@ -297,7 +299,7 @@ describe("SCRUM484_AC8 VenueCatalogue flagged-bookings notice", () => {
     await editAndSave(user, { ...ACTIVE, flaggedBookings: [TECH_TALK] });
 
     expect(within(notice()).getByRole("heading", { level: 3 })).toHaveTextContent(
-      "1 booking flagged for review: Setup or turnaround time changed",
+      "1 booking at Hall A flagged for review: Setup or turnaround time changed",
     );
     // Setup only: no Turnaround part is named.
     expect(within(notice()).getByText(formatOccupiedPeriod(TECH_TALK))).toHaveTextContent(
@@ -350,12 +352,50 @@ describe("SCRUM484_AC8 VenueCatalogue flagged-bookings notice", () => {
 
     const region = notice();
     expect(within(region).getByRole("heading", { level: 3 })).toHaveTextContent(
-      "1 booking flagged for review: Setup or turnaround time changed",
+      "1 booking at Hall A flagged for review: Setup or turnaround time changed",
     );
     expect(within(region).getAllByRole("listitem")).toHaveLength(1);
     expect(within(region).getByText("Tech Talk")).toBeInTheDocument();
     expect(within(region).queryByText("Orientation")).not.toBeInTheDocument();
     expect(within(region).queryByText("Career Fair")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM484_AC8_the_heading_names_the_venue_from_the_saved_venue", async () => {
+    const { user } = await renderCatalogue();
+    // The name comes from the save's response, not the catalogue row.
+    await editAndSave(user, { ...ACTIVE, name: "Harbour Room", flaggedBookings: [ORIENTATION] });
+
+    expect(within(notice()).getByRole("heading", { level: 3 })).toHaveTextContent(
+      "1 booking at Harbour Room flagged for review: Setup or turnaround time changed",
+    );
+  });
+
+  it("SCRUM484_AC8_a_second_flagging_save_on_another_venue_updates_the_name", async () => {
+    const SECOND = {
+      id: "3f2504e0-4f89-41d3-9a0c-0305e82c3303",
+      name: "Lecture Theatre 1",
+      location: "Level 1",
+      maxCapacity: 300,
+      retiredAt: null,
+    };
+    vi.mocked(getVenueCatalogue).mockResolvedValue([ACTIVE, SECOND, RETIRED]);
+    const { user } = await renderCatalogue();
+    await editAndSave(user, { ...ACTIVE, flaggedBookings: [ORIENTATION, CAREER_FAIR] });
+    expect(within(notice()).getByRole("heading", { level: 3 })).toHaveTextContent(
+      "2 bookings at Hall A flagged for review: Setup or turnaround time changed",
+    );
+
+    formStub.saved = { ...SECOND, flaggedBookings: [TECH_TALK] };
+    await user.click(within(rowFor("Lecture Theatre 1")).getByRole("button", { name: "Edit details" }));
+    expect(screen.getByTestId("venue-form")).toHaveAttribute("data-venue-id", SECOND.id);
+    await user.click(screen.getByRole("button", { name: "Stub save" }));
+    await screen.findByText("Lecture Theatre 1");
+
+    const heading = within(notice()).getByRole("heading", { level: 3 });
+    expect(heading).toHaveTextContent(
+      "1 booking at Lecture Theatre 1 flagged for review: Setup or turnaround time changed",
+    );
+    expect(heading).not.toHaveTextContent("Hall A");
   });
 
   it.each([
@@ -369,7 +409,7 @@ describe("SCRUM484_AC8 VenueCatalogue flagged-bookings notice", () => {
     const region = notice();
     expect(region).toBeInTheDocument();
     expect(within(region).getByRole("heading", { level: 3 })).toHaveTextContent(
-      "1 booking flagged for review: Setup or turnaround time changed",
+      "1 booking at Hall A flagged for review: Setup or turnaround time changed",
     );
     expect(within(region).getByText("Orientation")).toBeInTheDocument();
   });

@@ -72,6 +72,10 @@ export default function VenueCatalogue({ currentUserId } = {}) {
   // replaced by the next save, so it survives the refetch and stays readable
   // after the form closes. Empty means no notice.
   const [flaggedBookings, setFlaggedBookings] = useState([]);
+  // The name of the venue whose save flagged them, for the notice's heading.
+  // Kept beside the list, not looked up from venues, so it stays the name
+  // the save answered with even if the catalogue refetch has not landed.
+  const [flaggedVenueName, setFlaggedVenueName] = useState(null);
 
   const fetchVenues = useCallback(async () => {
     setLoadingVenues(true);
@@ -106,6 +110,7 @@ export default function VenueCatalogue({ currentUserId } = {}) {
     setActivePanel(null);
     if (Array.isArray(saved?.flaggedBookings) && saved.flaggedBookings.length > 0) {
       setFlaggedBookings(saved.flaggedBookings);
+      setFlaggedVenueName(saved.name ?? null);
     }
     fetchVenues();
   }
@@ -210,7 +215,7 @@ export default function VenueCatalogue({ currentUserId } = {}) {
           nothing to decide here, only something to know. */}
       {flaggedBookings.length > 0 && (
         <div className="venue-catalogue__flagged" role="status">
-          <h3>{flaggedBookingsHeading(flaggedBookings.length)}</h3>
+          <h3>{flaggedBookingsHeading(flaggedBookings.length, flaggedVenueName)}</h3>
           <ul className="venue-catalogue__flagged-list">
             {flaggedBookings.map((booking, i) => (
               <li key={booking.bookingId ?? i}>
@@ -219,7 +224,11 @@ export default function VenueCatalogue({ currentUserId } = {}) {
               </li>
             ))}
           </ul>
-          <p>Each event&apos;s assigned coordinator has been notified.</p>
+          {/* Qualified, because an event can have no coordinator assigned
+              yet, and then nobody was notified about it. */}
+          <p>
+            Where an event has an assigned coordinator, they have been notified.
+          </p>
           <button type="button" onClick={() => setFlaggedBookings([])}>
             Dismiss
           </button>
