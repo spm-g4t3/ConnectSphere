@@ -45,8 +45,9 @@
  *
  * SCRUM-130 (AC2) adds two read-side checks. validateBlockWindow is the
  * optional from/to window the venue calendar reads blocks through, capped at
- * BLOCK_WINDOW_MAX_DAYS. validatePeriod is the period findBlockedVenueIds is
- * asked about, where both ends are required. Neither has a future-end rule:
+ * BLOCK_WINDOW_MAX_DAYS. validatePeriod is a period where both ends are
+ * required (written for findBlockedVenueIds, which SCRUM-484 removed).
+ * Neither has a future-end rule:
  * these read blocks, they do not create them.
  */
 
@@ -487,7 +488,9 @@ export function validateBlockWindow({ from, to } = {}) {
 /**
  * Validate a period that must be given in full (SCRUM-130).
  *
- * What findBlockedVenueIds is asked about. Unlike a search or calendar window
+ * Written for findBlockedVenueIds, which SCRUM-484 replaced with
+ * available_venue_ids(); kept as the full-period check for any read that
+ * needs one. Unlike a search or calendar window
  * there is no "no period" here: asking which venues are blocked during nothing
  * is a caller bug, so neither end given reports both as required. No cap --
  * how long an event may run is SCRUM-20's rule, not this one's.

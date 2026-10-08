@@ -350,7 +350,8 @@ export function createVenueRouter({
    * swallow this with id === 'search'. The frontend already calls this path.
    *
    * SCRUM-17 AC2 (SCRUM-130): ?startsAt=&endsAt=, both or neither, leaves out
-   * venues blocked at any point in that window. The offsets must be
+   * venues blocked at any point in that window -- and, since SCRUM-484, venues
+   * booked in it too, setup and turnaround included. The offsets must be
    * URL-encoded: a raw '+' in a query string decodes to a space, so
    * '...T09:00:00+08:00' arrives as '...T09:00:00 08:00'. That is answered
    * with 400 rather than guessed back into '+' -- a guessed offset is a
@@ -388,9 +389,9 @@ export function createVenueRouter({
    * are provided, and the location contains the requested text; AC4 every
    * supplied criterion must match, a partial match is not returned; AC5/AC6
    * no occupying booking -- approved or flagged_for_review, the SCRUM-139
-   * decision in domain/venueOccupancy.js -- and no active block overlaps the
-   * event, on the strict rule, once the venue's setup and turnaround are
-   * added; AC7 each result carries the venue's details; AC8 no match is an
+   * decision -- and no active block overlaps the event, on the strict rule,
+   * once the venue's setup and turnaround are added (SCRUM-484: decided in
+   * Postgres by available_venue_ids, 033); AC7 each result carries the venue's details; AC8 no match is an
    * empty list. AC2's pre-fill is the client's.
    *
    * No includeRetired here: parseEventSearch copies only the keys it knows,
@@ -608,7 +609,12 @@ export function createVenueRouter({
     }
   });
 
-  /** AC2: an authorised change, saved and visible to the next search. */
+  /**
+   * AC2: an authorised change, saved and visible to the next search.
+   *
+   * SCRUM-484 (AC8): 200 with the venue plus flaggedBookings -- the approved
+   * bookings a setup or turnaround change flagged for review ([] when none).
+   */
   router.patch('/:id', venueStaffOnly, async (req, res) => {
     try {
       validateVenueId(req.params.id);

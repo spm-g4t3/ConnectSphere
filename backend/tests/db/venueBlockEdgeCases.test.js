@@ -19,6 +19,29 @@
  *     so a later amendment does not ask to override it a second time.
  *
  * The live proof of both is `npm run venue-blocks:check`.
+ *
+ * SCRUM-484 adds 032 and 033 to the list. 033 redefines all three block
+ * functions, and they no longer write a booking-period predicate of their own:
+ * they ask venue_occupancy_conflicts() (032) which bookings meet the block. So
+ * the predicates now live in 032's shared function, and rule 1 is checked
+ * there too. Rule 2 is adapted for 032 (see SHARED_READER below), and 033's
+ * own rules get their own describe block at the end.
+ *
+ * SCRUM-484 (AC8) adds 034, whose update_venue re-checks a venue's approved
+ * bookings when its setup or turnaround changes. It flags bookings, so both
+ * rules apply to it, and it is in the list. Its one booking-period
+ * comparison is the "not started" filter `b.starts_at > now()`, which
+ * compares a start with the clock, not two periods: it is named below
+ * (NOT_STARTED) and kept out of the overlap predicates. The overlap itself is
+ * 032's, asked with pad = true, and 034's rules get their own describe block.
+ *
+ * SCRUM-484 (AC8, 2026-10-08 AC review) adds 035, which replaces 034's
+ * update_venue: it also collects the bookings that already clashed under the
+ * OLD minutes, before the venues row is updated, and flags only the new
+ * clashes. It still flags bookings, so it is in the list and both rules apply.
+ * Adapted: the not-started filter now appears twice in 035's update_venue
+ * (the old set and the new set), so NOT_STARTED names an exact count per
+ * function, and 035 gets the same describe block as 034.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -32,7 +55,37 @@ const MIGRATIONS = [
   '013_venue_block_booking_conflicts.sql',
   '014_booking_review_notifications.sql',
   '015_venue_block_amend_remove.sql',
+  '032_venue_occupancy.sql',
+  '033_venue_occupancy_callers.sql',
+  '034_setup_change_recheck.sql',
+  '035_setup_change_recheck_refine.sql',
 ];
+
+/**
+ * SCRUM-484 (AC8): the one booking-period comparison that is not an overlap
+ * -- update_venue's "event has not started" filter. Only this exact text,
+ * only in these functions, and exactly this many times in each: once in
+ * 034's update_venue, twice in 035's (the old-clash set and the new set).
+ */
+const NOT_STARTED = {
+  text: 'b.starts_at > now()',
+  counts: {
+    '034_setup_change_recheck.sql:update_venue': 1,
+    '035_setup_change_recheck_refine.sql:update_venue': 2,
+  },
+};
+
+/**
+ * SCRUM-484: 032's venue_occupancy_conflicts() is the shared READER every
+ * caller asks, not a block's candidate list, so its booking predicates sit
+ * under `b.status in ('approved', 'flagged_for_review')` -- the occupying
+ * statuses (decision 2): a flagged booking still holds the venue for search,
+ * the booking request and the calendar. Rule 2 ("once flagged it no longer
+ * conflicts") is a rule of the block writers, so it is checked where they
+ * apply it: 033's locks keep b.status = 'approved' in their own WHERE (the
+ * describe block at the end).
+ */
+const SHARED_READER = '032_venue_occupancy.sql:venue_occupancy_conflicts';
 
 /** A migration with every `--` comment stripped, whitespace collapsed, lower-cased. */
 function normalised(name) {
@@ -71,7 +124,8 @@ function whereClause(body, index) {
   return body.slice(start, ends.length > 0 ? Math.min(...ends) : body.length);
 }
 
-const PREDICATES = MIGRATIONS.flatMap((name) =>
+/** Every booking-period predicate, the named not-started filter included. */
+const ALL_PREDICATES = MIGRATIONS.flatMap((name) =>
   functionBodies(normalised(name)).flatMap(({ fn, body }) =>
     [...body.matchAll(BOOKING_PERIOD_PREDICATE)].map((m) => ({
       name,
@@ -80,14 +134,22 @@ const PREDICATES = MIGRATIONS.flatMap((name) =>
       column: m[1],
       op: m[2],
       clause: whereClause(body, m.index),
+      full: body.slice(m.index, m.index + NOT_STARTED.text.length),
     })),
   ),
 );
+
+const isNotStarted = (p) => `${p.name}:${p.fn}` in NOT_STARTED.counts && p.full === NOT_STARTED.text;
+
+/** The overlap predicates the two rules are about. */
+const PREDICATES = ALL_PREDICATES.filter((p) => !isNotStarted(p));
 
 
 describe('SCRUM17_AC3 booking-period predicates in the block migrations', () => {
   it('SCRUM17_AC3_found_the_helper_both_locks_and_the_flag_update', () => {
     // 013 helper + lock, 014 flag update + lock, 015 lock: 5 functions x 2.
+    // SCRUM-484: plus 032's shared function, which is now where the overlap
+    // is written. 033 contributes none -- its block functions call 032.
     expect(PREDICATES.length).toBeGreaterThanOrEqual(4);
     const fns = new Set(PREDICATES.map((p) => `${p.name}:${p.fn}`));
     expect(fns).toEqual(new Set([
@@ -96,7 +158,17 @@ describe('SCRUM17_AC3 booking-period predicates in the block migrations', () => 
       '014_booking_review_notifications.sql:flag_bookings_for_block',
       '014_booking_review_notifications.sql:create_venue_block',
       '015_venue_block_amend_remove.sql:update_venue_block',
+      SHARED_READER,
     ]));
+    // SCRUM-484 (AC8): 034's update_venue contributes only the named
+    // not-started filter, exactly once; its overlap is 032's. 035's
+    // contributes it exactly twice (old set and new set), and nothing else.
+    const notStarted = {};
+    for (const p of ALL_PREDICATES.filter(isNotStarted)) {
+      const key = `${p.name}:${p.fn}`;
+      notStarted[key] = (notStarted[key] ?? 0) + 1;
+    }
+    expect(notStarted).toEqual(NOT_STARTED.counts);
   });
 
   it('SCRUM17_AC3_touching_booking_is_never_a_conflict', () => {
@@ -113,7 +185,90 @@ describe('SCRUM17_AC3 booking-period predicates in the block migrations', () => 
     expect(PREDICATES.length).toBeGreaterThanOrEqual(4);
     for (const p of PREDICATES) {
       expect(p.clause.startsWith(' where '), `${p.name} ${p.fn}: no where`).toBe(true);
+      if (`${p.name}:${p.fn}` === SHARED_READER) {
+        // Adapted (see SHARED_READER): the occupying allow-list, never "not
+        // cancelled", so pending/rejected/withdrawn occupy nothing.
+        expect(p.clause, `${p.name} ${p.fn}: ${p.text}`).toContain(
+          "b.status in ('approved', 'flagged_for_review')",
+        );
+        continue;
+      }
       expect(p.clause, `${p.name} ${p.fn}: ${p.text}`).toContain("b.status = 'approved'");
     }
   });
 });
+
+
+describe('SCRUM484 the block functions in 033 keep both rules through the shared function', () => {
+  const SQL033 = normalised('033_venue_occupancy_callers.sql');
+  const BODIES = Object.fromEntries(
+    functionBodies(SQL033).map(({ fn, body }) => [fn, body]),
+  );
+  const BLOCK_FUNCTIONS = ['create_venue_block', 'update_venue_block', 'flag_bookings_for_block'];
+
+  it('SCRUM484_AC5_block_functions_write_no_booking_period_predicate_of_their_own', () => {
+    // Rule 1 now holds by construction: the only comparison is 032's, which
+    // the predicates above already check is strict.
+    for (const fn of BLOCK_FUNCTIONS) {
+      expect(BODIES[fn], fn).toBeDefined();
+      expect([...BODIES[fn].matchAll(BOOKING_PERIOD_PREDICATE)], fn).toEqual([]);
+      expect(BODIES[fn], fn).toMatch(/venue_occupancy_conflicts\([^)]*, false\)/);
+    }
+  });
+
+  it('SCRUM484_AC6_block_functions_still_only_take_approved_bookings', () => {
+    // Rule 2: every query that picks bookings through the shared function
+    // also requires b.status = 'approved' in its own WHERE, so a booking
+    // already flagged_for_review (which the function still returns, as it
+    // occupies) is not listed or flagged again.
+    for (const fn of BLOCK_FUNCTIONS) {
+      const body = BODIES[fn];
+      for (const m of body.matchAll(/\bb\.id in \(\s*select c\.id from venue_occupancy_conflicts\(/g)) {
+        const clause = whereClause(body, m.index);
+        expect(clause, `${fn}: ${clause}`).toContain("b.status = 'approved'");
+      }
+      expect(body.match(/\bb\.id in \(\s*select c\.id from venue_occupancy_conflicts\(/g)?.length ?? 0, fn)
+        .toBeGreaterThan(0);
+    }
+  });
+});
+
+
+// SCRUM-484 (AC8): the same two checks for 034's update_venue and for 035's,
+// which replaces it (old-clash set before the update, new set after).
+for (const file of ['034_setup_change_recheck.sql', '035_setup_change_recheck_refine.sql']) {
+  const expectedNotStarted = NOT_STARTED.counts[`${file}:update_venue`];
+
+  describe(`SCRUM484 the AC8 re-check in ${file.slice(0, 3)} keeps both rules through the shared function`, () => {
+    const BODY = functionBodies(normalised(file)).find(({ fn }) => fn === 'update_venue')?.body;
+
+    it('SCRUM484_AC8_recheck_writes_no_booking_period_predicate_of_its_own', () => {
+      // Rule 1 by construction: apart from the not-started filter (once in
+      // 034, twice in 035), the only comparison is 032's, asked with the
+      // booking's own period padded.
+      expect(BODY).toBeDefined();
+      const own = [...BODY.matchAll(BOOKING_PERIOD_PREDICATE)].map(
+        (m) => BODY.slice(m.index, m.index + NOT_STARTED.text.length),
+      );
+      expect(own).toEqual(Array(expectedNotStarted).fill(NOT_STARTED.text));
+      expect(BODY).toMatch(/venue_occupancy_conflicts\(p_id, b\.starts_at, b\.ends_at, true\)/);
+    });
+
+    it('SCRUM484_AC8_recheck_only_takes_approved_bookings', () => {
+      // Rule 2: every candidate query (034: one; 035: the old set and the new
+      // set), the lock and the flag UPDATE each require b.status =
+      // 'approved' in their own WHERE, so a booking already
+      // flagged_for_review is not flagged again.
+      const candidates = [...BODY.matchAll(/b\.starts_at > now\(\)/g)].map((m) => m.index);
+      expect(candidates).toHaveLength(expectedNotStarted);
+      for (const at of candidates) {
+        expect(whereClause(BODY, at)).toContain("b.status = 'approved'");
+      }
+      for (const anchor of ['b.id = any (v_clashing)', 'b.id = any (v_locked)']) {
+        const at = BODY.indexOf(anchor);
+        expect(at, anchor).toBeGreaterThan(-1);
+        expect(whereClause(BODY, at), anchor).toContain("b.status = 'approved'");
+      }
+    });
+  });
+}

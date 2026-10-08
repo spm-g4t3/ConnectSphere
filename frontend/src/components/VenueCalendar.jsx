@@ -36,6 +36,7 @@ import {
 } from "../services/calendarRange";
 import { calendarEntryDisplay } from "../services/calendarEntryDisplay";
 import { formatRange } from "../services/displayFormat";
+import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
 
 // Keyed by status, the same shape as VenueDetail's BOOKINGS_ERROR_MESSAGES.
 // The server's `error` string is not surfaced: on the venue routes it is
@@ -62,10 +63,17 @@ function weekdayShort(day) {
 /**
  * One entry. `compact` (the month view) drops the visible time range to keep
  * a cell small; the range stays in the title either way.
+ *
+ * A booking's time is its whole occupied period -- setup, event, turnaround
+ * (SCRUM-484, AC7) -- because that is how long the venue is unavailable. A
+ * block has no setup or turnaround, so it keeps its own range.
  */
 function CalendarEntry({ entry, compact }) {
   const { label, detail, tone } = entry.display;
-  const when = formatRange(entry.startsAt, entry.endsAt);
+  const when =
+    entry.kind === "booking"
+      ? formatOccupiedPeriod(entry)
+      : formatRange(entry.startsAt, entry.endsAt);
   return (
     <li className={`venue-calendar__entry venue-calendar__entry--${tone}`} title={when}>
       {!compact && <span className="venue-calendar__entry-time">{when}</span>}

@@ -21,7 +21,8 @@
 // over a booking that arrived after they looked.
 
 import { useState } from "react";
-import { formatRange, shortId } from "../services/displayFormat";
+import { shortId } from "../services/displayFormat";
+import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
 
 /** "1 approved booking" / "3 approved bookings". */
 function countLabel(count, noun) {
@@ -69,7 +70,7 @@ export default function BlockConflictList({
         {conflicts.map((conflict, i) => (
           <li key={conflict.bookingId ?? i}>
             <strong>{conflict.eventName || "Unnamed event"}</strong>
-            <span>{formatRange(conflict.startsAt, conflict.endsAt)}</span>
+            <span>{formatOccupiedPeriod(conflict)}</span>
             <code title={conflict.eventRequestId ?? undefined}>
               {conflict.eventRequestId ? shortId(conflict.eventRequestId) : "no event"}
             </code>

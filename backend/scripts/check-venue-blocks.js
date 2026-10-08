@@ -22,7 +22,8 @@
  *    removed block, and leave flagged bookings flagged (015);
  *  - that the audit trigger writes the trail in the right order with the
  *    right authors (016);
- *  - that search and the calendar window leave a blocked venue out (SCRUM-130);
+ *  - that search, available_venue_ids (SCRUM-484) and the calendar window
+ *    leave a blocked venue out (SCRUM-130);
  *  - and that nothing here ever moves a booking's own period.
  *
  * It creates four throwaway auth users with profiles: two Venue Staff (so the
@@ -40,7 +41,6 @@ import { createVenue, searchVenues } from '../src/services/venueService.js';
 import {
   createVenueBlock,
   listVenueBlocks,
-  findBlockedVenueIds,
   getVenueBlock,
   updateVenueBlock,
   removeVenueBlock,
@@ -457,10 +457,24 @@ async function main() {
   check('a window touching M\'s end leaves M out', !edgeWindow.some((b) => b.id === M.id),
     `${edgeWindow.length} listed`);
 
-  const blockedDuring = await findBlockedVenueIds(at(11), at(12));
-  check('findBlockedVenueIds names the venue during M', blockedDuring.includes(venueId));
-  const blockedAfter = await findBlockedVenueIds(at(20), at(21));
-  check('and not outside it', !blockedAfter.includes(venueId));
+  // SCRUM-484: availability is asked of available_venue_ids() (033), the
+  // shared rule search uses, instead of the removed raw findBlockedVenueIds.
+  // 12:00-13:00 sits inside M but clear of both bookings -- B1 ends at 12:00
+  // (touching, and this venue has 0/0 setup and turnaround) and B2 starts at
+  // 14:00 -- so the venue can only be left out because of the block.
+  const freeIds = async (startsAt, endsAt) => {
+    const { data, error } = await supabase.rpc('available_venue_ids', {
+      p_venue_ids: [venueId],
+      p_starts_at: startsAt,
+      p_ends_at: endsAt,
+    });
+    if (error) throw new Error(`available_venue_ids: ${error.message}`);
+    return (data ?? []).map((row) => row.venue_id);
+  };
+  const freeDuring = await freeIds(at(12), at(13));
+  check('available_venue_ids leaves the venue out during M', !freeDuring.includes(venueId));
+  const freeAfter = await freeIds(at(20), at(21));
+  check('and returns it outside any block', freeAfter.includes(venueId));
 
   const searchDuring = await searchVenues({ location: LOCATION, startsAt: at(11), endsAt: at(12) });
   check('search leaves the venue out during M', !searchDuring.some((v) => v.id === venueId),

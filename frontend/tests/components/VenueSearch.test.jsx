@@ -50,7 +50,9 @@ function local(iso) {
 }
 
 function noteFor(startIso, endIso) {
-  return `Venues blocked between ${formatRange(startIso, endIso)} are not shown.`;
+  // SCRUM-484 (AC7): the note now names bookings and the venues' setup and
+  // turnaround, which search counts too.
+  return `Venues booked or blocked between ${formatRange(startIso, endIso)} are not shown, including each venue's setup and turnaround.`;
 }
 
 function deferred() {

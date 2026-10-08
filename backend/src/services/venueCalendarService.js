@@ -22,9 +22,23 @@
  * A flagged booking still holds the venue until a Coordinator resolves it
  * (SCRUM-128), so it is shown. A "not cancelled" filter would be shorter, but
  * it would show any status added later -- a pending one, say -- as booked
- * without anyone deciding it should be. Overlap is the same strict half-open
- * test listVenueBlocks uses, so an entry that only touches the window's edge
- * is not in it.
+ * without anyone deciding it should be.
+ *
+ * SCRUM-484 (Week 7): bookings are read through venue_occupancy_conflicts()
+ * (032), the one function that decides what occupies a venue (AC4), instead of
+ * a PostgREST filter of our own. Its booking rows are exactly that allow-list,
+ * so the calendar still shows what it showed -- but a booking is now in the
+ * window when its OCCUPIED period is, padded with the venue's setup and
+ * turnaround. A booking ending just before the window whose turnaround runs
+ * into it now appears, because the venue really is taken then. The window
+ * itself is not padded (p_pad_requested = false): it is a range of the
+ * calendar, not an event. Overlap is still strict half-open, so an occupied
+ * period that only touches the window's edge is not in it.
+ *
+ * Each booking entry carries its occupied period and the venue's minutes
+ * (AC7), so the frontend can draw "Setup · Event · Turnaround" without
+ * redoing the arithmetic. An entry is still placed by its event's own start:
+ * the setup is part of the entry, not a separate one.
  *
  * Blocks come from listVenueBlocks unchanged in meaning: removed blocks are
  * left out, ended ones are kept. The calendar shows the past too.
@@ -40,22 +54,15 @@
  *    viewable, so the calendar answers for it too.
  *
  * Imports both venueService.js and venueBlockService.js. That is not circular:
- * venueService imports venueBlockService, and neither imports this module.
+ * neither imports this module, and venueBlockService imports neither.
  */
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError } from '../errors.js';
 import { validateVenueId } from '../validation/venueValidation.js';
 import { validateBlockWindow } from '../validation/venueBlockValidation.js';
-import { BOOKING_STATUS } from '../domain/bookingStatus.js';
 import { getVenueById } from './venueService.js';
 import { listVenueBlocks } from './venueBlockService.js';
-
-/**
- * The booking statuses that occupy a venue on the calendar. An allow-list, so
- * a status added later is hidden until someone decides it belongs here.
- */
-const CALENDAR_BOOKING_STATUSES = [BOOKING_STATUS.APPROVED, BOOKING_STATUS.FLAGGED_FOR_REVIEW];
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -102,20 +109,24 @@ function validateCalendarWindow({ from, to }) {
 }
 
 /**
- * A bookings row, with its event request's name, as a calendar entry.
+ * A booking row from venue_occupancy_conflicts() as a calendar entry.
  *
- * eventName is read defensively: bookings.event_request_id is a many-to-one
- * reference, so PostgREST embeds event_requests as an object, but some
- * client and schema-cache setups return a one-element array instead. Either
- * way a missing name is null, not an error -- the booking still occupies the
- * venue.
+ * The function returns the event's name flat, joined in SQL, so there is no
+ * PostgREST embed to unwrap. A missing name is still null, not an error -- the
+ * booking occupies the venue either way.
  *
- * @param {object} row  snake_case, from PostgREST
+ * SCRUM-484 (AC7): occupiedStartsAt/occupiedEndsAt are the booking's period
+ * padded with the venue's setup and turnaround, and setupMinutes and
+ * turnaroundMinutes the minutes that padded it. Passed through as the
+ * database computed them, never recomputed here.
+ *
+ * @param {object} row  snake_case, a kind = 'booking' row
  * @returns {{kind: 'booking', id: string, startsAt: string, endsAt: string,
- *            status: string, eventRequestId: string, eventName: string|null}}
+ *            status: string, eventRequestId: string, eventName: string|null,
+ *            occupiedStartsAt: string, occupiedEndsAt: string,
+ *            setupMinutes: number, turnaroundMinutes: number}}
  */
 export function toBookingEntry(row) {
-  const request = Array.isArray(row.event_requests) ? row.event_requests[0] : row.event_requests;
   return {
     kind: 'booking',
     id: row.id,
@@ -123,7 +134,11 @@ export function toBookingEntry(row) {
     endsAt: row.ends_at,
     status: row.status,
     eventRequestId: row.event_request_id,
-    eventName: request?.event_name ?? null,
+    eventName: row.event_name ?? null,
+    occupiedStartsAt: row.occupied_starts_at,
+    occupiedEndsAt: row.occupied_ends_at,
+    setupMinutes: row.setup_minutes,
+    turnaroundMinutes: row.turnaround_minutes,
   };
 }
 
@@ -194,22 +209,28 @@ export async function getVenueCalendar(venueId, { from, to } = {}) {
 }
 
 /**
- * The venue's calendar bookings overlapping the window, as raw rows.
+ * The venue's occupying bookings whose occupied period overlaps the window,
+ * as raw rows.
  *
- * Strict lt/gt, the same half-open overlap listVenueBlocks uses.
+ * Through venue_occupancy_conflicts() (032), so the calendar and every
+ * availability check share one rule (AC4). p_pad_requested is false because
+ * the window is not an event and has no setup or turnaround of its own; each
+ * booking is still padded with the venue's minutes.
+ *
+ * Only kind = 'booking' rows are kept. The function returns blocks too, but
+ * the calendar reads blocks through listVenueBlocks: that keeps their notes,
+ * which the shared function does not return, and keeps ended blocks visible
+ * exactly as before. Order is left to getVenueCalendar's sort.
  */
 async function readBookings(venueId, window) {
-  const { data, error } = await supabase
-    .from('bookings')
-    .select('id, event_request_id, starts_at, ends_at, status, event_requests(event_name)')
-    .eq('venue_id', venueId)
-    .in('status', CALENDAR_BOOKING_STATUSES)
-    .lt('starts_at', window.to)
-    .gt('ends_at', window.from)
-    .order('starts_at')
-    .order('id');
+  const { data, error } = await supabase.rpc('venue_occupancy_conflicts', {
+    p_venue_id: venueId,
+    p_starts_at: window.from,
+    p_ends_at: window.to,
+    p_pad_requested: false,
+  });
 
   if (error) throw translateError(error);
 
-  return data ?? [];
+  return (data ?? []).filter((row) => row.kind === 'booking');
 }

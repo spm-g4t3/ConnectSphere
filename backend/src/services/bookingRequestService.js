@@ -28,6 +28,11 @@
  *  - What the function raises or answers is turned into typed errors, with the
  *    conflicting records in `conflicts` for the UI.
  *
+ * SCRUM-484: 033_venue_occupancy_callers.sql redefines the function's period
+ * check to call venue_occupancy_conflicts() (032), so the event's period and
+ * every occupying booking's are padded with the venue's setup and turnaround,
+ * and flagged bookings count as occupying. This module only maps the result.
+ *
  * Not here: notifying Venue Staff. SCRUM-174 owns the types and recipients and
  * it is not built; 030 marks where its insert goes.
  *
@@ -122,11 +127,25 @@ function translateError(error) {
 
 /**
  * One thing in the way of the period, in camelCase: a venue block, or an
- * approved booking.
+ * occupying booking (approved or flagged_for_review, SCRUM-484).
+ *
+ * SCRUM-484 (AC7): both kinds carry the occupied period and the venue's
+ * setup and turnaround minutes from venue_occupancy_conflicts() (032/033).
+ * For a booking, occupiedStartsAt/occupiedEndsAt are its period padded by the
+ * venue's minutes, so the screen can show "Setup · Event · Turnaround". For a
+ * block they equal its own period -- a block is never padded -- and the
+ * minutes say how far this event's own setup and turnaround reached into it.
+ * Mapped here, not recomputed, so the formula stays in one place (AC4).
  *
  * @param {object} entry  from create_booking_request's conflicts list
  */
 function toPeriodConflict(entry) {
+  const occupied = {
+    occupiedStartsAt: entry.occupied_starts_at,
+    occupiedEndsAt: entry.occupied_ends_at,
+    setupMinutes: entry.setup_minutes,
+    turnaroundMinutes: entry.turnaround_minutes,
+  };
   if (entry.kind === 'block') {
     return {
       kind: 'block',
@@ -134,6 +153,7 @@ function toPeriodConflict(entry) {
       startsAt: entry.starts_at,
       endsAt: entry.ends_at,
       reason: entry.reason,
+      ...occupied,
     };
   }
   return {
@@ -143,6 +163,7 @@ function toPeriodConflict(entry) {
     eventName: entry.event_name,
     startsAt: entry.starts_at,
     endsAt: entry.ends_at,
+    ...occupied,
   };
 }
 
@@ -157,7 +178,7 @@ function one(embedded) {
 /** What the list reads: the booking, with its event and its venue embedded. */
 const LIST_COLUMNS = `
   id, event_request_id, venue_id, starts_at, ends_at, status,
-  room_layout_code, setup_notes, suitability_overridden, created_at, flagged_at,
+  room_layout_code, setup_notes, suitability_overridden, created_at, flagged_at, review_reason,
   venues(name, location),
   event_requests!inner(event_name, status, assigned_coordinator_id)
 `;
@@ -169,6 +190,9 @@ const LIST_COLUMNS = `
  * statusDisplay is the label and group for the status (domain/bookingStatus.js),
  * so the screen keeps no copy of the vocabulary. flaggedAt is the review
  * indicator for a booking a venue block has flagged (014); null otherwise.
+ * reviewReason is the code a setup or turnaround change stored when it
+ * flagged the booking (034, 'setup_or_turnaround_changed'); null for a block
+ * flag or an unflagged booking.
  *
  * @param {object} row  from LIST_COLUMNS
  */
@@ -191,6 +215,7 @@ function toBookingRequestListItem(row) {
     setupNotes: row.setup_notes ?? null,
     suitabilityOverridden: row.suitability_overridden ?? false,
     flaggedAt: row.flagged_at ?? null,
+    reviewReason: row.review_reason ?? null,
     createdAt: row.created_at,
   };
 }
@@ -253,8 +278,9 @@ function checkedSuitability(result) {
  *                           VENUE_RETIRED, BOOKING_REQUEST_EXISTS and
  *                           BOOKING_FLAGGED_FOR_REVIEW (conflicts name the
  *                           existing booking), BOOKING_PERIOD_CONFLICT
- *                           (conflicts are blocks and approved bookings, shaped
- *                           by toPeriodConflict), SUITABILITY_CONFIRMATION_REQUIRED
+ *                           (conflicts are blocks and occupying bookings,
+ *                           each with its occupied period, shaped by
+ *                           toPeriodConflict), SUITABILITY_CONFIRMATION_REQUIRED
  *                           (conflicts are the criteria not met)
  * @throws {ServiceUnavailableError} the suitability check is not available
  */
@@ -306,7 +332,9 @@ export async function createBookingRequest(
 
   if (error) throw translateError(error);
 
-  // Blocks or approved bookings overlap the event's period; nothing was written.
+  // Blocks or occupying bookings meet the event's occupied period -- both
+  // padded with the venue's setup and turnaround (SCRUM-484, 033); nothing
+  // was written.
   if (data?.outcome === 'conflict') {
     throw new ConflictError('The venue is not available for the whole of this event', {
       code: 'BOOKING_PERIOD_CONFLICT',

@@ -193,6 +193,15 @@ button { cursor: pointer; }
    name, period and id would be thrown to opposite edges of the notice. */
 .dashboard--venue-staff .venue-blocks__flagged li { display: flex; justify-content: flex-start; flex-wrap: wrap; gap: 6px 12px; border-top: 0; padding: 4px 0; }
 .dashboard--venue-staff .venue-blocks__current { margin-top: 22px; }
+/* SCRUM-484 (AC8). Bookings a setup or turnaround change flagged. The amber
+   of .block-conflicts, not the green notice: these need someone's attention. */
+.dashboard--venue-staff .venue-catalogue__flagged { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 8px; margin: 12px 0 18px; padding: 14px 16px; }
+.dashboard--venue-staff .venue-catalogue__flagged h3 { color: #8a5a00; font-size: 1rem; margin: 0 0 8px; }
+.dashboard--venue-staff .venue-catalogue__flagged p { color: #8a5a00; font-size: 0.9rem; margin: 8px 0; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above. Name and period stay together on the left. */
+.dashboard--venue-staff .venue-catalogue__flagged-list { list-style: none; margin: 0; padding: 0; }
+.dashboard--venue-staff .venue-catalogue__flagged-list li { border-top: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: flex-start; padding: 4px 0; }
 .dashboard--venue-staff .venue-blocks__current h3 { font-size: 1rem; margin: 0 0 8px; }
 /* Rows keep the .dashboard li spread -- details left, actions right, as in
    the catalogue -- but top-aligned, because notes can wrap to several lines. */
@@ -465,6 +474,9 @@ button { cursor: pointer; }
 .booking-request__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 12px 0 0; padding: 8px 12px; }
 .booking-request__conflicts { list-style: none; margin: 10px 0 0; padding: 0; }
 .booking-request__conflicts li { border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 8px 0; }
+/* SCRUM-484 (AC7). The setup/turnaround note on a block row takes a line of
+   its own, so the .dashboard li spread does not push it to the far edge. */
+.booking-request__conflicts .booking-request__conflict-note { color: var(--muted); flex-basis: 100%; font-size: 0.84rem; }
 .booking-request__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .booking-request__success { background: #e8f7f1; border-radius: 6px; color: #17684f; padding: 10px 14px; }
 .my-event-requests__details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 10px; }

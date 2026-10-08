@@ -27,6 +27,7 @@ import VenueCalendar from "../../src/components/VenueCalendar.jsx";
 import { getVenueCalendar, getVenueDetails } from "../../src/services/venueService";
 import { blockCalendarLabel } from "../../src/services/venueBlockDisplay";
 import { VENUE_BLOCK_REASONS } from "../../src/services/venueBlockReasons";
+import { formatRange } from "../../src/services/displayFormat";
 
 vi.mock("../../src/services/venueService", () => ({
   getVenueCalendar: vi.fn(),
@@ -1065,5 +1066,118 @@ describe("SCRUM178_AC1 VenueCalendar stale responses and unmounting", () => {
 
     expect(consoleError).not.toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+});
+
+describe("SCRUM484_AC7 VenueCalendar shows setup and turnaround on bookings", () => {
+  // Tuesday 6 October, 10:00-12:00, at a venue with 30 minutes of setup and
+  // 45 of turnaround: the venue is held 09:30-12:45.
+  const PADDED = {
+    ...APPROVED,
+    id: "b-padded",
+    eventName: "Orientation",
+    startsAt: oct(6, 10),
+    endsAt: oct(6, 12),
+    occupiedStartsAt: oct(6, 9, 30),
+    occupiedEndsAt: oct(6, 12, 45),
+    setupMinutes: 30,
+    turnaroundMinutes: 45,
+  };
+
+  const ZERO_PADDING = {
+    ...APPROVED,
+    id: "b-zero",
+    eventName: "Board Meeting",
+    startsAt: oct(8, 14),
+    endsAt: oct(8, 16),
+    occupiedStartsAt: oct(8, 14),
+    occupiedEndsAt: oct(8, 16),
+    setupMinutes: 0,
+    turnaroundMinutes: 0,
+  };
+
+  function threeParts(entry) {
+    return (
+      `Setup ${formatRange(entry.occupiedStartsAt, entry.startsAt)} · ` +
+      `Event ${formatRange(entry.startsAt, entry.endsAt)} · ` +
+      `Turnaround ${formatRange(entry.endsAt, entry.occupiedEndsAt)}`
+    );
+  }
+
+  it("SCRUM484_AC7_calendar_week_entry_shows_three_parts", async () => {
+    vi.mocked(getVenueCalendar).mockResolvedValue([PADDED]);
+    await renderCalendar();
+
+    const item = within(weekCells()[1]).getByRole("listitem");
+    const time = item.querySelector(".venue-calendar__entry-time");
+    expect(time.textContent).toBe(threeParts(PADDED));
+    expect(time).toHaveTextContent(`Setup ${formatRange(PADDED.occupiedStartsAt, PADDED.startsAt)}`);
+    expect(time).toHaveTextContent(`Event ${formatRange(PADDED.startsAt, PADDED.endsAt)}`);
+    expect(time).toHaveTextContent(`Turnaround ${formatRange(PADDED.endsAt, PADDED.occupiedEndsAt)}`);
+    expect(item).toHaveAttribute("title", threeParts(PADDED));
+    expect(item.querySelector(".venue-calendar__entry-detail")).toHaveTextContent("Orientation");
+  });
+
+  it("SCRUM484_AC7_calendar_month_title_shows_the_parts", async () => {
+    vi.mocked(getVenueCalendar).mockResolvedValue([PADDED]);
+    const { user } = await renderCalendar();
+    await showView(user, "month");
+
+    const item = within(cellOfDay(local(2026, 9, 6))).getByRole("listitem");
+    expect(item.querySelector(".venue-calendar__entry-time")).toBeNull();
+    expect(item).toHaveAttribute("title", threeParts(PADDED));
+    expect(item).not.toHaveTextContent(/Setup|Turnaround/);
+  });
+
+  it("SCRUM484_AC7_calendar_zero_minutes_and_blocks_show_no_parts", async () => {
+    vi.mocked(getVenueCalendar).mockResolvedValue([ZERO_PADDING, BLOCK]);
+    await renderCalendar();
+    const cells = weekCells();
+
+    const booked = within(cells[3]).getByRole("listitem");
+    const bookedTime = booked.querySelector(".venue-calendar__entry-time");
+    expect(bookedTime.textContent).toBe(formatRange(ZERO_PADDING.startsAt, ZERO_PADDING.endsAt));
+    expect(booked).toHaveAttribute("title", formatRange(ZERO_PADDING.startsAt, ZERO_PADDING.endsAt));
+
+    const blocked = within(cells[4]).getByRole("listitem");
+    const blockedTime = blocked.querySelector(".venue-calendar__entry-time");
+    expect(blockedTime.textContent).toBe(expectedRange(BLOCK));
+    expect(blocked).toHaveAttribute("title", expectedRange(BLOCK));
+
+    for (const item of [booked, blocked]) {
+      expect(item.getAttribute("title")).not.toMatch(/Setup|Event |Turnaround/);
+      expect(item).not.toHaveTextContent(/Setup|Turnaround/);
+    }
+  });
+
+  it("SCRUM484_AC7_a_turnaround_past_midnight_shows_the_booking_on_the_next_day", async () => {
+    // Tuesday 22:00-23:30 with 45 minutes of turnaround to Wednesday 00:15.
+    const late = {
+      ...PADDED,
+      id: "b-late",
+      eventName: "Late Show",
+      startsAt: oct(6, 22),
+      endsAt: oct(6, 23, 30),
+      occupiedStartsAt: oct(6, 21, 30),
+      occupiedEndsAt: oct(7, 0, 15),
+    };
+    vi.mocked(getVenueCalendar).mockResolvedValue([late]);
+    await renderCalendar();
+
+    const counts = weekCells().map((cell) => within(cell).queryAllByRole("listitem").length);
+    expect(counts).toEqual([0, 1, 1, 0, 0, 0, 0]);
+
+    const wednesday = within(weekCells()[2]).getByRole("listitem");
+    expect(wednesday.querySelector(".venue-calendar__entry-detail")).toHaveTextContent("Late Show");
+    expect(wednesday.querySelector(".venue-calendar__entry-time").textContent).toBe(threeParts(late));
+  });
+
+  it("SCRUM484_AC7_an_older_payload_without_occupied_fields_shows_the_event_range", async () => {
+    vi.mocked(getVenueCalendar).mockResolvedValue([APPROVED]);
+    await renderCalendar();
+
+    const item = within(weekCells()[1]).getByRole("listitem");
+    expect(item.querySelector(".venue-calendar__entry-time").textContent).toBe(expectedRange(APPROVED));
+    expect(document.body).not.toHaveTextContent(/Invalid Date/);
   });
 });

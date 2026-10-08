@@ -8,11 +8,18 @@
  * this proves WIRING AND CONTRACTS. The real venues router, role gate, query
  * parsing, validator, service, matching and occupancy rules and error handler
  * run on every request, and every Supabase call they make is checked against
- * a scripted queue -- the exact table, in order, with its filters. It does
- * NOT prove database behaviour: the rows below are what Postgres is specified
- * to return, and each bookings/blocks row is checked against the range
- * filters the service sent (satisfiesFilters), so a response cannot
- * contradict its own query.
+ * a scripted queue -- the exact table or rpc, in order, with its filters or
+ * arguments. It does NOT prove database behaviour: the answers below are what
+ * Postgres is specified to return.
+ *
+ * SCRUM-484 (AC4): availability is no longer two reads (bookings,
+ * venue_blocks) and a JavaScript rule. It is one rpc, available_venue_ids()
+ * (033), which calls the shared venue_occupancy_conflicts() (032). The queue
+ * therefore scripts that rpc's answer -- which venues are free -- and checks
+ * the ids and period the service asked about. Whether a touching booking or
+ * block leaves a venue free is decided by Postgres, and is proved against a
+ * real one in tests/db/venueSearchOccupancyDatabase.test.js under the same
+ * SCRUM20_AC5_/SCRUM20_AC6_ names.
  *
  * Cases: B-E2E-01 (one search over several criteria returns exactly the
  * venues meeting all of them), B-E2E-02 (the same search with no match is
@@ -52,7 +59,6 @@ const LAKESIDE = '3f2504e0-4f89-41d3-9a0c-0305e82c3305';
 
 /** Wednesday 11 November 2026, Singapore time. */
 const at = (hhmm) => `2026-11-11T${hhmm}:00+08:00`;
-const utc = (hhmm) => new Date(at(hhmm)).toISOString().replace('.000Z', '+00:00');
 
 const WEDNESDAY = 3;
 
@@ -102,14 +108,13 @@ const VENUE_ROWS = [
 /** Venues still in the running after the attribute check. */
 const ATTRIBUTE_MATCHES = [ATRIUM, BOARDROOM, CONCOURSE, HARBOUR];
 
-const BOOKING_ROWS = [
-  { venue_id: CONCOURSE, starts_at: utc('11:00'), ends_at: utc('13:00') },
-  { venue_id: HARBOUR, starts_at: utc('15:00'), ends_at: utc('16:00') },
-];
-
-const BLOCK_ROWS = [
-  { venue_id: BOARDROOM, starts_at: utc('11:00'), ends_at: utc('11:30') },
-];
+/**
+ * What available_venue_ids answers for ATTRIBUTE_MATCHES: Boardroom 3 (a block
+ * 11:00-11:30 inside the event) and Concourse Room (an approved booking
+ * 11:00-13:00) are occupied; Atrium Hall and Harbour Room (a booking
+ * 15:00-16:00, clear even with setup and turnaround) are free.
+ */
+const FREE_MATCHES = [ATRIUM, HARBOUR];
 
 /** The base request: every criterion supplied. */
 const BASE = {
@@ -166,35 +171,40 @@ function queryStub(step) {
   return stub;
 }
 
-rpc.mockImplementation((name) => {
-  failures.push(new Error(`unexpected rpc('${name}'): a search writes nothing`));
-  return Promise.resolve({ data: null, error: { message: 'unscripted' } });
+const describeStep = (s) => (s.kind === 'rpc' ? `rpc('${s.name}')` : `from('${s.name}')`);
+
+// SCRUM-484: rpc calls are scripted in the same queue as from() calls, so
+// their order is checked too. A search still writes nothing; the only rpc it
+// may make is the scripted available_venue_ids read.
+rpc.mockImplementation((name, args) => {
+  const step = queue.shift();
+  if (step === undefined) {
+    failures.push(new Error(`unexpected rpc('${name}'): the queue is empty`));
+  } else if (step.kind !== 'rpc' || step.name !== name) {
+    failures.push(new Error(`expected ${describeStep(step)}, got rpc('${name}')`));
+  } else {
+    try {
+      step.assert?.(args);
+    } catch (err) {
+      failures.push(err);
+    }
+  }
+  return Promise.resolve(step?.respond ?? { data: null, error: { message: 'unscripted' } });
 });
 
 from.mockImplementation((table) => {
   const step = queue.shift();
   if (step === undefined) {
     failures.push(new Error(`unexpected from('${table}'): the queue is empty`));
-  } else if (step.name !== table) {
-    failures.push(new Error(`expected from('${step.name}'), got from('${table}')`));
+  } else if (step.kind !== 'from' || step.name !== table) {
+    failures.push(new Error(`expected ${describeStep(step)}, got from('${table}')`));
   }
   return queryStub(step ?? { respond: { data: null, error: { message: 'unscripted' } } });
 });
 
-const fromStep = (name, respond, assert) => ({ name, respond, assert });
+const fromStep = (name, respond, assert) => ({ kind: 'from', name, respond, assert });
+const rpcStep = (name, respond, assert) => ({ kind: 'rpc', name, respond, assert });
 const ok = (data) => ({ data, error: null });
-
-const RANGE_OPS = {
-  lt: (a, b) => a < b,
-  gt: (a, b) => a > b,
-  lte: (a, b) => a <= b,
-  gte: (a, b) => a >= b,
-};
-function satisfiesFilters(q, row) {
-  return q.calls
-    .filter(([method]) => method in RANGE_OPS)
-    .every(([method, column, value]) => RANGE_OPS[method](Date.parse(row[column]), Date.parse(value)));
-}
 
 /** A lookup-table read answering that every requested code exists. */
 function lookupStep(table, codes) {
@@ -217,22 +227,19 @@ function venuesStep(rows) {
   });
 }
 
-/** The bookings and blocks reads, for the venues still in the running. */
-function occupancySteps(venueIds, bookings, blocks) {
-  return [
-    fromStep('bookings', ok(bookings), (q) => {
-      expect(q.allArgs('in')).toEqual([
-        ['venue_id', venueIds],
-        ['status', ['approved', 'flagged_for_review']],
-      ]);
-      for (const row of bookings) expect(satisfiesFilters(q, row), row.starts_at).toBe(true);
-    }),
-    fromStep('venue_blocks', ok(blocks), (q) => {
-      expect(q.args('in')).toEqual(['venue_id', venueIds]);
-      expect(q.args('is')).toEqual(['removed_at', null]);
-      for (const row of blocks) expect(satisfiesFilters(q, row), row.starts_at).toBe(true);
-    }),
-  ];
+/**
+ * SCRUM-484: the one availability call, for the venues still in the running.
+ * Asserts the ids and the event's own period (unpadded: the database pads)
+ * reach it, and answers `freeIds` as PostgREST returns a table result.
+ */
+function availabilityStep(venueIds, freeIds, period = { startsAt: BASE.startsAt, endsAt: BASE.endsAt }) {
+  return rpcStep('available_venue_ids', ok(freeIds.map((id) => ({ venue_id: id }))), (args) => {
+    expect(args).toEqual({
+      p_venue_ids: venueIds,
+      p_starts_at: period.startsAt,
+      p_ends_at: period.endsAt,
+    });
+  });
 }
 
 function script(...steps) {
@@ -261,7 +268,7 @@ async function asCoordinator(url) {
 }
 
 afterEach(() => {
-  const leftover = queue.splice(0).map((s) => `from('${s.name}')`);
+  const leftover = queue.splice(0).map(describeStep);
   const caught = failures.splice(0);
   expect(caught).toEqual([]);
   expect(leftover, 'scripted calls never made').toEqual([]);
@@ -284,7 +291,7 @@ describe('SCRUM20 event search through the HTTP layer', () => {
       lookupStep('accessibility_features', ['step_free_entrance']),
       lookupStep('facilities', ['projector', 'wifi']),
       venuesStep(VENUE_ROWS),
-      occupancySteps(ATTRIBUTE_MATCHES, BOOKING_ROWS, BLOCK_ROWS),
+      availabilityStep(ATTRIBUTE_MATCHES, FREE_MATCHES),
     );
 
     const res = await asCoordinator(searchUrl(BASE));
@@ -315,7 +322,7 @@ describe('SCRUM20 event search through the HTTP layer', () => {
 
   it('SCRUM20_E2E_AC4_AC8_search_with_no_match_returns_empty', async () => {
     // B-E2E-02: no venue seats 150, so nothing passes the attribute check and
-    // bookings and blocks are never read.
+    // availability is never asked.
     script(
       lookupStep('room_layouts', ['theatre']),
       lookupStep('accessibility_features', ['step_free_entrance']),
@@ -332,7 +339,7 @@ describe('SCRUM20 event search through the HTTP layer', () => {
   it('SCRUM20_E2E_AC4_SCRUM141_location_narrows_the_search_case_insensitively', async () => {
     // Only Harbour Room's location ("Harbour Room, SCIS") contains "HARBOUR".
     // The match is made in matchesAllCriteria, not by an ilike on the venues
-    // read, so only Harbour Room's bookings and blocks are read afterwards.
+    // read, so only Harbour Room's availability is asked afterwards.
     script(
       lookupStep('room_layouts', ['theatre']),
       lookupStep('accessibility_features', ['step_free_entrance']),
@@ -340,7 +347,7 @@ describe('SCRUM20 event search through the HTTP layer', () => {
       fromStep('venues', ok(VENUE_ROWS), (q) => {
         expect(q.called('ilike')).toBe(false);
       }),
-      occupancySteps([HARBOUR], [BOOKING_ROWS[1]], []),
+      availabilityStep([HARBOUR], [HARBOUR]),
     );
 
     const res = await asCoordinator(searchUrl({ ...BASE, location: '  HARBOUR ' }));
@@ -368,21 +375,16 @@ describe('SCRUM20 event search through the HTTP layer', () => {
 /**
  * SCRUM-144: AC5's touching edges and AC6's retired rule, end to end.
  *
- * The padding arithmetic, from domain/venueOccupancy.js. Every venue here has
- * setup 15 and turnaround 30, and the request is 10:00-12:00, so it occupies
- * [09:45, 12:30) at each venue.
- *
- *  - A booking is padded the same way, [start - 15, end + 30). It touches the
- *    request when its padded end is 09:45 (it ends at 09:15) or its padded
- *    start is 12:30 (it starts at 12:45). One minute further in -- ending
- *    09:16, starting 12:44 -- overlaps.
- *  - A block is a closure and is compared raw against the padded request. It
- *    touches when it ends at 09:45 or starts at 12:30; ending 09:46 or
- *    starting 12:29 overlaps.
- *
- * Every row sits inside the read window (the request widened by the largest
- * setup plus turnaround, 06:00-16:00), so satisfiesFilters passes them all
- * and only the occupancy rule decides.
+ * Every venue here has setup 15 and turnaround 30, and the request is
+ * 10:00-12:00, so it occupies [09:45, 12:30) at each venue. Before SCRUM-484
+ * the flow fed booking and block rows to the JavaScript rule; since then the
+ * rule is Postgres's (available_venue_ids, 033), so the flow scripts the
+ * answer that rule gives for the rows described in each test and checks the
+ * service asks about the right venues and period, and keeps exactly the ones
+ * answered free. The arithmetic of each edge -- a booking padded to touch at
+ * 09:45 or 12:30 is clear, one minute further in is not; a block is compared
+ * raw -- is proved against real Postgres in
+ * tests/db/venueSearchOccupancyDatabase.test.js.
  */
 describe('SCRUM20 availability edges and retired venues through the HTTP layer', () => {
   /** Just the period and attendance: no codes, so no lookup reads. */
@@ -396,18 +398,14 @@ describe('SCRUM20 availability edges and retired venues through the HTTP layer',
   const IDS = [ATRIUM, BOARDROOM, CONCOURSE];
 
   it('SCRUM20_AC5_touching_booking_venue_appears_in_the_flow', async () => {
-    // B-E2E-03, bookings: padded, they touch at 09:15 and 12:45.
+    // B-E2E-03, bookings. In the database: Atrium Hall has bookings
+    // 08:00-09:15 and 12:45-14:00 (padded 07:45-09:45 and 12:30-14:30, both
+    // touching [09:45, 12:30)); Boardroom 3 one ending 09:16 (padded to
+    // 09:46); Concourse Room one starting 12:44 (padded from 12:29). Only
+    // Atrium Hall is answered free.
     script(
       venuesStep(ROWS),
-      occupancySteps(IDS, [
-        // Padded 07:45-09:45 and 12:30-14:30: both touch [09:45, 12:30).
-        { venue_id: ATRIUM, starts_at: utc('08:00'), ends_at: utc('09:15') },
-        { venue_id: ATRIUM, starts_at: utc('12:45'), ends_at: utc('14:00') },
-        // Padded to 09:46: one minute into the request's setup.
-        { venue_id: BOARDROOM, starts_at: utc('08:00'), ends_at: utc('09:16') },
-        // Padded from 12:29: one minute into the request's turnaround.
-        { venue_id: CONCOURSE, starts_at: utc('12:44'), ends_at: utc('14:00') },
-      ], []),
+      availabilityStep(IDS, [ATRIUM]),
     );
 
     const res = await asCoordinator(searchUrl(PERIOD_ONLY));
@@ -417,18 +415,13 @@ describe('SCRUM20 availability edges and retired venues through the HTTP layer',
   });
 
   it('SCRUM20_AC5_touching_block_venue_appears_in_the_flow', async () => {
-    // B-E2E-03, blocks: raw, they touch at 09:45 and 12:30.
+    // B-E2E-03, blocks, compared raw. In the database: Atrium Hall has
+    // blocks 08:00-09:45 and 12:30-14:00 (touching the padded request);
+    // Boardroom 3 one ending 09:46; Concourse Room one starting 12:29. Only
+    // Atrium Hall is answered free.
     script(
       venuesStep(ROWS),
-      occupancySteps(IDS, [], [
-        // Ends where the padded request starts, starts where it ends.
-        { venue_id: ATRIUM, starts_at: utc('08:00'), ends_at: utc('09:45') },
-        { venue_id: ATRIUM, starts_at: utc('12:30'), ends_at: utc('14:00') },
-        // One minute into the request's setup.
-        { venue_id: BOARDROOM, starts_at: utc('08:00'), ends_at: utc('09:46') },
-        // One minute into the request's turnaround.
-        { venue_id: CONCOURSE, starts_at: utc('12:29'), ends_at: utc('14:00') },
-      ]),
+      availabilityStep(IDS, [ATRIUM]),
     );
 
     const res = await asCoordinator(searchUrl(PERIOD_ONLY));
@@ -445,7 +438,7 @@ describe('SCRUM20 availability edges and retired venues through the HTTP layer',
       fromStep('venues', ok([TOUCHING]), (q) => {
         expect(q.allArgs('is')).toEqual([['retired_at', null]]);
       }),
-      occupancySteps([ATRIUM], [], []),
+      availabilityStep([ATRIUM], [ATRIUM]),
     );
 
     const res = await asCoordinator(searchUrl(PERIOD_ONLY));

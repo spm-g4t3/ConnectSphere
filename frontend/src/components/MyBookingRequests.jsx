@@ -35,6 +35,7 @@ import {
   readBookingStatusDisplay,
 } from "../services/bookingRequestStatusDisplay";
 import { formatRange, formatTimestamp } from "../services/displayFormat";
+import { reviewReasonLabel } from "../services/flaggedBookingDisplay";
 
 // Keyed by status, the same shape as MyAssignedEvents' table. GET /mine is gated
 // on the coordinator role, so a 403 means the account's role is wrong.
@@ -50,6 +51,9 @@ const FLAGGED_FOR_REVIEW = "flagged_for_review";
 function RequestRow({ item, confirming, withdrawing, busy, onAsk, onCancel, onConfirm }) {
   const display = readBookingStatusDisplay(item);
   const isPending = item.status === PENDING;
+  // Only a setup or turnaround change stores a reason code (SCRUM-484); a
+  // booking flagged by a venue block has none, and reads as before.
+  const reason = reviewReasonLabel(item.reviewReason);
 
   return (
     <li className="my-booking-requests__row">
@@ -70,8 +74,8 @@ function RequestRow({ item, confirming, withdrawing, busy, onAsk, onCancel, onCo
         </span>
         {item.status === FLAGGED_FOR_REVIEW && (
           <span className="my-booking-requests__flag">
-            Flagged for review{item.flaggedAt ? ` on ${formatTimestamp(item.flaggedAt)}` : ""}. It
-            needs to be resolved.
+            Flagged for review{item.flaggedAt ? ` on ${formatTimestamp(item.flaggedAt)}` : ""}
+            {reason ? ` (${reason})` : ""}. It needs to be resolved.
           </span>
         )}
         {item.suitabilityOverridden && (

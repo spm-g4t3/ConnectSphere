@@ -44,6 +44,7 @@ import { blockAuditSummary } from "../services/venueBlockHistoryDisplay";
 import VenueBlockForm from "./VenueBlockForm";
 import BlockConflictList from "./BlockConflictList";
 import BlockHistory, { BlockActor } from "./BlockHistory";
+import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
 
 /** "1 booking was" / "3 bookings were". */
 function bookingsWere(count) {
@@ -260,7 +261,10 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
               {flagged.map((booking, i) => (
                 <li key={booking.bookingId ?? i}>
                   <strong>{booking.eventName || "Unnamed event"}</strong>
-                  <span>{formatRange(booking.startsAt, booking.endsAt)}</span>
+                  {/* The whole period the booking holds the venue, setup and
+                      turnaround included (AC7): that is what the block
+                      overlapped, which the event times alone may not show. */}
+                  <span>{formatOccupiedPeriod(booking)}</span>
                   <code title={booking.eventRequestId ?? undefined}>
                     {booking.eventRequestId ? shortId(booking.eventRequestId) : "no event"}
                   </code>

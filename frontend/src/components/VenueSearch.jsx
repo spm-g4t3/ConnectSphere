@@ -6,9 +6,10 @@
 // SCRUM-130 (part of SCRUM-17, AC2) added the window: with both dates set,
 // venues blocked at any point in [From, To) are left out. It is optional and
 // both-or-neither, so blank dates send exactly the search this page always
-// sent. It only excludes blocks — overlapping bookings are SCRUM-139's, and
-// operating hours SCRUM-20's. The dates are not read from the URL: prefilling
-// them from an event request belongs to SCRUM-141.
+// sent. Venues booked in the window are left out too, and both checks count
+// each venue's setup and turnaround (SCRUM-484); the note under the form says
+// so, though search gives no reason per venue. The dates are not read from
+// the URL: prefilling them from an event request belongs to SCRUM-141.
 //
 // SCRUM-45 added the seeded arrival: a Coordinator reaching this page from an
 // event request lands with ?minCapacity=<expected attendance> already applied
@@ -409,7 +410,7 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
 
       {appliedWindow && (
         <p className="venue-search__window-note" role="status">
-          {`Venues blocked between ${formatRange(appliedWindow.startsAt, appliedWindow.endsAt)} are not shown.`}
+          {`Venues booked or blocked between ${formatRange(appliedWindow.startsAt, appliedWindow.endsAt)} are not shown, including each venue's setup and turnaround.`}
         </p>
       )}
 

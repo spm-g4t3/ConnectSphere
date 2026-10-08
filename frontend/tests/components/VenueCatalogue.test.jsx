@@ -4,6 +4,12 @@
 // opens VenueBlocksPanel for one venue. The venue service is mocked, and the
 // panel is a stub that shows which venue it was opened for, so these tests
 // cover only the catalogue's wiring.
+//
+// SCRUM-484 (AC8) adds the flagged-bookings notice shown after an edit save.
+// VenueForm is a stub here too: its Save button hands the catalogue whatever
+// the test put in formStub.saved, as the real form passes updateVenue's
+// response to onSaved. Timezone-safe: expected times are built with
+// formatOccupiedPeriod / formatRange from the same instants.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -12,6 +18,10 @@ import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-route
 
 import VenueCatalogue from "../../src/components/VenueCatalogue.jsx";
 import { getVenueCatalogue } from "../../src/services/venueService";
+import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay.js";
+import { formatRange } from "../../src/services/displayFormat.js";
+
+const formStub = vi.hoisted(() => ({ saved: undefined }));
 
 vi.mock("../../src/services/venueService", () => ({
   getVenueCatalogue: vi.fn(),
@@ -35,6 +45,16 @@ vi.mock("../../src/components/VenueBlocksPanel", () => ({
   ),
 }));
 
+vi.mock("../../src/components/VenueForm", () => ({
+  default: ({ venueId, onSaved }) => (
+    <div data-testid="venue-form" data-venue-id={venueId ?? ""}>
+      <button type="button" onClick={() => onSaved?.(formStub.saved)}>
+        Stub save
+      </button>
+    </div>
+  ),
+}));
+
 const ACTIVE = {
   id: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
   name: "Hall A",
@@ -53,6 +73,7 @@ const RETIRED = {
 let confirmSpy;
 
 beforeEach(() => {
+  formStub.saved = undefined;
   vi.mocked(getVenueCatalogue).mockReset();
   vi.mocked(getVenueCatalogue).mockResolvedValue([ACTIVE, RETIRED]);
   confirmSpy = vi.spyOn(window, "confirm").mockImplementation(() => true);
@@ -196,5 +217,228 @@ describe("SCRUM178_AC1 VenueCatalogue View calendar (SCRUM-181)", () => {
     expect(probe).toHaveTextContent(`Calendar route for ${venue.id}`);
     expect(probe).toHaveAttribute("data-search", "");
     expect(screen.queryByRole("heading", { name: "Venue catalogue" })).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM484_AC8 VenueCatalogue flagged-bookings notice", () => {
+  // Hall A has 30 minutes of setup and 15 of turnaround after the edit.
+  const ORIENTATION = {
+    bookingId: "b0000000-0000-4000-8000-000000000001",
+    eventRequestId: "e0000000-0000-4000-8000-000000000001",
+    eventName: "Orientation",
+    startsAt: "2026-11-02T10:00:00+08:00",
+    endsAt: "2026-11-02T12:00:00+08:00",
+    occupiedStartsAt: "2026-11-02T09:30:00+08:00",
+    occupiedEndsAt: "2026-11-02T12:15:00+08:00",
+  };
+  const CAREER_FAIR = {
+    bookingId: "b0000000-0000-4000-8000-000000000002",
+    eventRequestId: "e0000000-0000-4000-8000-000000000002",
+    eventName: "Career Fair",
+    startsAt: "2026-11-03T14:00:00+08:00",
+    endsAt: "2026-11-03T16:00:00+08:00",
+    occupiedStartsAt: "2026-11-03T13:30:00+08:00",
+    occupiedEndsAt: "2026-11-03T16:15:00+08:00",
+  };
+  const TECH_TALK = {
+    bookingId: "b0000000-0000-4000-8000-000000000003",
+    eventRequestId: "e0000000-0000-4000-8000-000000000003",
+    eventName: "Tech Talk",
+    startsAt: "2026-11-04T10:00:00+08:00",
+    endsAt: "2026-11-04T11:00:00+08:00",
+    occupiedStartsAt: "2026-11-04T09:00:00+08:00",
+    occupiedEndsAt: "2026-11-04T11:00:00+08:00",
+  };
+
+  const notice = () => screen.queryByRole("status");
+
+  /** Opens Hall A's edit form and saves it with this response. */
+  async function editAndSave(user, saved) {
+    formStub.saved = saved;
+    await user.click(within(rowFor("Hall A")).getByRole("button", { name: "Edit details" }));
+    expect(screen.getByTestId("venue-form")).toHaveAttribute("data-venue-id", ACTIVE.id);
+    await user.click(screen.getByRole("button", { name: "Stub save" }));
+    await screen.findByText("Hall A");
+  }
+
+  it("SCRUM484_AC8_save_with_flagged_bookings_shows_the_notice", async () => {
+    const { user } = await renderCatalogue();
+    await editAndSave(user, { ...ACTIVE, flaggedBookings: [ORIENTATION, CAREER_FAIR] });
+
+    const region = notice();
+    expect(region).toBeInTheDocument();
+    expect(within(region).getByRole("heading", { level: 3 })).toHaveTextContent(
+      "2 bookings at Hall A flagged for review: Setup or turnaround time changed",
+    );
+
+    const rows = within(region).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByText("Orientation")).toBeInTheDocument();
+    expect(within(rows[0]).getByText(formatOccupiedPeriod(ORIENTATION))).toBeInTheDocument();
+    expect(within(rows[1]).getByText("Career Fair")).toBeInTheDocument();
+    expect(within(rows[1]).getByText(formatOccupiedPeriod(CAREER_FAIR))).toBeInTheDocument();
+
+    // The occupied parts, each built from the same instants.
+    const orientationPeriod = within(rows[0]).getByText(/^Setup /).textContent;
+    expect(orientationPeriod).toBe(
+      `Setup ${formatRange(ORIENTATION.occupiedStartsAt, ORIENTATION.startsAt)} · ` +
+        `Event ${formatRange(ORIENTATION.startsAt, ORIENTATION.endsAt)} · ` +
+        `Turnaround ${formatRange(ORIENTATION.endsAt, ORIENTATION.occupiedEndsAt)}`,
+    );
+
+    expect(
+      within(region).getByText(
+        "Where an event has an assigned coordinator, they have been notified.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(region).getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+  });
+
+  it("SCRUM484_AC8_one_flagged_booking_uses_the_singular_heading", async () => {
+    const { user } = await renderCatalogue();
+    await editAndSave(user, { ...ACTIVE, flaggedBookings: [TECH_TALK] });
+
+    expect(within(notice()).getByRole("heading", { level: 3 })).toHaveTextContent(
+      "1 booking at Hall A flagged for review: Setup or turnaround time changed",
+    );
+    // Setup only: no Turnaround part is named.
+    expect(within(notice()).getByText(formatOccupiedPeriod(TECH_TALK))).toHaveTextContent(
+      `Setup ${formatRange(TECH_TALK.occupiedStartsAt, TECH_TALK.startsAt)} · ` +
+        `Event ${formatRange(TECH_TALK.startsAt, TECH_TALK.endsAt)}`,
+    );
+  });
+
+  it("SCRUM484_AC8_a_flagged_booking_without_a_name_reads_as_unnamed", async () => {
+    const { user } = await renderCatalogue();
+    await editAndSave(user, { ...ACTIVE, flaggedBookings: [{ ...ORIENTATION, eventName: null }] });
+
+    expect(within(notice()).getByText("Unnamed event")).toBeInTheDocument();
+    expect(notice()).not.toHaveTextContent("null");
+  });
+
+  it("SCRUM484_AC8_Dismiss_removes_the_notice", async () => {
+    const { user } = await renderCatalogue();
+    await editAndSave(user, { ...ACTIVE, flaggedBookings: [ORIENTATION] });
+    expect(notice()).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    expect(notice()).not.toBeInTheDocument();
+    expect(screen.queryByText("Orientation")).not.toBeInTheDocument();
+    // The catalogue itself is untouched.
+    expect(screen.getByText("Hall A")).toBeInTheDocument();
+  });
+
+  it("SCRUM484_AC8_no_notice_before_any_save", async () => {
+    await renderCatalogue();
+    expect(notice()).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["an empty flaggedBookings", { ...ACTIVE, flaggedBookings: [] }],
+    ["no flaggedBookings key", { ...ACTIVE }],
+    ["no response at all", undefined],
+    ["a non-array flaggedBookings", { ...ACTIVE, flaggedBookings: { 0: ORIENTATION } }],
+  ])("SCRUM484_AC8_no_notice_after_a_save_with_%s", async (_label, saved) => {
+    const { user } = await renderCatalogue();
+    await editAndSave(user, saved);
+    expect(notice()).not.toBeInTheDocument();
+  });
+
+  it("SCRUM484_AC8_a_second_flagging_save_replaces_the_list", async () => {
+    const { user } = await renderCatalogue();
+    await editAndSave(user, { ...ACTIVE, flaggedBookings: [ORIENTATION, CAREER_FAIR] });
+    await editAndSave(user, { ...ACTIVE, flaggedBookings: [TECH_TALK] });
+
+    const region = notice();
+    expect(within(region).getByRole("heading", { level: 3 })).toHaveTextContent(
+      "1 booking at Hall A flagged for review: Setup or turnaround time changed",
+    );
+    expect(within(region).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(region).getByText("Tech Talk")).toBeInTheDocument();
+    expect(within(region).queryByText("Orientation")).not.toBeInTheDocument();
+    expect(within(region).queryByText("Career Fair")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM484_AC8_the_heading_names_the_venue_from_the_saved_venue", async () => {
+    const { user } = await renderCatalogue();
+    // The name comes from the save's response, not the catalogue row.
+    await editAndSave(user, { ...ACTIVE, name: "Harbour Room", flaggedBookings: [ORIENTATION] });
+
+    expect(within(notice()).getByRole("heading", { level: 3 })).toHaveTextContent(
+      "1 booking at Harbour Room flagged for review: Setup or turnaround time changed",
+    );
+  });
+
+  it("SCRUM484_AC8_a_second_flagging_save_on_another_venue_updates_the_name", async () => {
+    const SECOND = {
+      id: "3f2504e0-4f89-41d3-9a0c-0305e82c3303",
+      name: "Lecture Theatre 1",
+      location: "Level 1",
+      maxCapacity: 300,
+      retiredAt: null,
+    };
+    vi.mocked(getVenueCatalogue).mockResolvedValue([ACTIVE, SECOND, RETIRED]);
+    const { user } = await renderCatalogue();
+    await editAndSave(user, { ...ACTIVE, flaggedBookings: [ORIENTATION, CAREER_FAIR] });
+    expect(within(notice()).getByRole("heading", { level: 3 })).toHaveTextContent(
+      "2 bookings at Hall A flagged for review: Setup or turnaround time changed",
+    );
+
+    formStub.saved = { ...SECOND, flaggedBookings: [TECH_TALK] };
+    await user.click(within(rowFor("Lecture Theatre 1")).getByRole("button", { name: "Edit details" }));
+    expect(screen.getByTestId("venue-form")).toHaveAttribute("data-venue-id", SECOND.id);
+    await user.click(screen.getByRole("button", { name: "Stub save" }));
+    await screen.findByText("Lecture Theatre 1");
+
+    const heading = within(notice()).getByRole("heading", { level: 3 });
+    expect(heading).toHaveTextContent(
+      "1 booking at Lecture Theatre 1 flagged for review: Setup or turnaround time changed",
+    );
+    expect(heading).not.toHaveTextContent("Hall A");
+  });
+
+  it.each([
+    ["an empty list", { ...ACTIVE, flaggedBookings: [] }],
+    ["no flaggedBookings key", { ...ACTIVE }],
+  ])("SCRUM484_AC8_a_save_with_%s_leaves_an_existing_notice", async (_label, saved) => {
+    const { user } = await renderCatalogue();
+    await editAndSave(user, { ...ACTIVE, flaggedBookings: [ORIENTATION] });
+    await editAndSave(user, saved);
+
+    const region = notice();
+    expect(region).toBeInTheDocument();
+    expect(within(region).getByRole("heading", { level: 3 })).toHaveTextContent(
+      "1 booking at Hall A flagged for review: Setup or turnaround time changed",
+    );
+    expect(within(region).getByText("Orientation")).toBeInTheDocument();
+  });
+
+  it("SCRUM484_AC8_the_blocks_panel_Back_button_leaves_an_existing_notice", async () => {
+    const { user } = await renderCatalogue();
+    await editAndSave(user, { ...ACTIVE, flaggedBookings: [ORIENTATION] });
+
+    await user.click(within(rowFor("Hall A")).getByRole("button", { name: "Manage blocks" }));
+    await user.click(screen.getByRole("button", { name: "← Back to the venue catalogue" }));
+    await screen.findByText("Hall A");
+
+    expect(within(notice()).getByText("Orientation")).toBeInTheDocument();
+  });
+
+  it("SCRUM484_AC8_a_flagging_save_still_closes_the_form_and_refetches", async () => {
+    const { user } = await renderCatalogue();
+    expect(getVenueCatalogue).toHaveBeenCalledTimes(1);
+
+    formStub.saved = { ...ACTIVE, flaggedBookings: [ORIENTATION] };
+    await user.click(within(rowFor("Hall A")).getByRole("button", { name: "Edit details" }));
+    vi.mocked(getVenueCatalogue).mockResolvedValue([{ ...ACTIVE, name: "Hall A (renamed)" }, RETIRED]);
+    await user.click(screen.getByRole("button", { name: "Stub save" }));
+
+    expect(screen.queryByTestId("venue-form")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Venue catalogue" })).toBeInTheDocument();
+    await waitFor(() => expect(getVenueCatalogue).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Hall A (renamed)")).toBeInTheDocument();
+    // The notice survives the refetch.
+    expect(within(notice()).getByText("Orientation")).toBeInTheDocument();
   });
 });

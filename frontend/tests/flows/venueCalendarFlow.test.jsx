@@ -24,6 +24,10 @@
 //
 // SCRUM-185 (for SCRUM-178 AC1): the fake search honours includeRetired, and a
 // coordinator reaches a retired venue's past bookings from search.
+//
+// SCRUM-484 (AC7): a booking at a venue with setup and turnaround shows the
+// three parts in every view. Its expected text is built with formatRange from
+// the same instants, so it holds in all three zones above.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -32,6 +36,7 @@ import userEvent from "@testing-library/user-event";
 import App from "../../src/App.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
 import * as venueService from "../../src/services/venueService";
+import { formatRange } from "../../src/services/displayFormat";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   AuthProvider: ({ children }) => children,
@@ -130,8 +135,14 @@ function createFakeVenueBackend({ venues, entriesByVenue }) {
     async getVenueCalendar(venueId, { from, to }) {
       const start = new Date(from).getTime();
       const end = new Date(to).getTime();
+      // SCRUM-484: a booking overlaps the window by its occupied period
+      // (setup through turnaround) when it has one, as the endpoint does.
       return (entriesByVenue[venueId] ?? [])
-        .filter((e) => new Date(e.startsAt).getTime() < end && new Date(e.endsAt).getTime() > start)
+        .filter(
+          (e) =>
+            new Date(e.occupiedStartsAt ?? e.startsAt).getTime() < end &&
+            new Date(e.occupiedEndsAt ?? e.endsAt).getTime() > start,
+        )
         .map((e) => ({ ...e }));
     },
   };
@@ -434,5 +445,67 @@ describe("SCRUM178_AC6 venue calendar flow is refused to external roles (SCRUM-1
     // Give any stray effect a chance to fire before asserting nothing was asked.
     await waitFor(() => expect(venueService.getVenueCalendar).not.toHaveBeenCalled());
     expect(venueService.getVenueDetails).not.toHaveBeenCalled();
+  });
+});
+
+describe("SCRUM484_AC7 venue calendar flow shows setup and turnaround", () => {
+  /** `day` at local hh:mm as the wire ISO string. */
+  function atMinute(day, hour, minute) {
+    return new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute).toISOString();
+  }
+
+  it("SCRUM484_AC7_parts_are_timezone_safe", async () => {
+    // Wednesday 10:00-12:00 at a venue with 30 minutes of setup and 45 of
+    // turnaround, as GET /venues/:id/calendar sends it.
+    const wednesday = dayAfter(monday, 2);
+    const padded = {
+      kind: "booking",
+      id: "b-orientation",
+      startsAt: atMinute(wednesday, 10, 0),
+      endsAt: atMinute(wednesday, 12, 0),
+      occupiedStartsAt: atMinute(wednesday, 9, 30),
+      occupiedEndsAt: atMinute(wednesday, 12, 45),
+      setupMinutes: 30,
+      turnaroundMinutes: 45,
+      status: "approved",
+      eventRequestId: "e-orientation",
+      eventName: "Orientation",
+    };
+    backend = createFakeVenueBackend({
+      venues: [VENUE],
+      entriesByVenue: { [VENUE.id]: [padded] },
+    });
+    const expected =
+      `Setup ${formatRange(padded.occupiedStartsAt, padded.startsAt)} · ` +
+      `Event ${formatRange(padded.startsAt, padded.endsAt)} · ` +
+      `Turnaround ${formatRange(padded.endsAt, padded.occupiedEndsAt)}`;
+
+    const user = userEvent.setup();
+    signIn("event_coordinator");
+    renderAppAt(`/venues/${VENUE.id}/calendar`);
+    expect(await screen.findByRole("heading", { level: 1, name: "Hall A" })).toBeInTheDocument();
+    await settled();
+
+    // Week: the visible time and the title both carry the three parts.
+    const cells = within(screen.getByRole("table")).getAllByRole("cell");
+    const item = within(cells[2]).getByRole("listitem");
+    expect(item).toHaveTextContent("Orientation");
+    expect(item.querySelector(".venue-calendar__entry-time").textContent).toBe(expected);
+    expect(item).toHaveAttribute("title", expected);
+    expect(document.body).not.toHaveTextContent(/Invalid Date/);
+
+    // Month: compact, so the parts are in the title only.
+    await user.click(screen.getByRole("button", { name: "Month" }));
+    await settled();
+    const cell = screen.getByRole("button", { name: dayButtonName(wednesday) }).closest("td");
+    const compact = within(cell).getByRole("listitem");
+    expect(compact.querySelector(".venue-calendar__entry-time")).toBeNull();
+    expect(compact).toHaveAttribute("title", expected);
+
+    // Day: the same text again.
+    await user.click(screen.getByRole("button", { name: dayButtonName(wednesday) }));
+    await settled();
+    const dayItem = within(document.querySelector(".venue-calendar")).getByRole("listitem");
+    expect(dayItem.querySelector(".venue-calendar__entry-time").textContent).toBe(expected);
   });
 });

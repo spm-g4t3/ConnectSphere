@@ -14,6 +14,13 @@
  * That half is proven against a live Supabase by `npm run venue-blocks:check`
  * (scripts/check-venue-blocks.js).
  *
+ * SCRUM-484: a dated search now reads the venues first and then asks
+ * rpc('available_venue_ids') (033) which of them are free, instead of a raw
+ * venue_blocks read before the venues query. The scripted answers below stand
+ * in for that function; its real rule (bookings padded with the venue's setup
+ * and turnaround, blocks raw, touching is clear) is tested against PGlite in
+ * tests/db/venueSearchOccupancyDatabase.test.js.
+ *
  * The tests in this file share one journey and run in order; each `it` scripts
  * only the calls its own requests make, and afterEach asserts the queue is
  * empty, so an unexpected or missing call fails the step that caused it.
@@ -442,24 +449,28 @@ describe('SCRUM17 venue block journey: create, override, amend, remove', () => {
   it('SCRUM17_AC2_dated_search_leaves_the_blocked_venue_out', async () => {
     const startsAt = at('12:00');
     const endsAt = at('13:00');
+    // Block M, extended to [10:00, 16:30), covers [12:00, 13:00), so the
+    // shared function leaves VENUE_ID out of its answer.
     script(
-      fromStep('venue_blocks', ok([{ venue_id: VENUE_ID }]), (q) => {
-        expect(q.args('select')).toEqual(['venue_id']);
-        expect(q.args('is')).toEqual(['removed_at', null]);
-        // Strict both ways: a block touching the window's edge is not in it.
-        expect(q.args('lt')).toEqual(['starts_at', endsAt]);
-        expect(q.args('gt')).toEqual(['ends_at', startsAt]);
-        expect(q.called('lte')).toBe(false);
-        expect(q.called('gte')).toBe(false);
-      }),
       fromStep(
         'venues',
-        ok([{ id: OTHER_VENUE_ID, name: 'Lecture Hall', location: 'SOE', max_capacity: 200 }]),
+        ok([
+          { id: OTHER_VENUE_ID, name: 'Lecture Hall', location: 'SOE', max_capacity: 200 },
+          { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'SCIS', max_capacity: 40 },
+        ]),
         (q) => {
           expect(q.args('is')).toEqual(['retired_at', null]);
-          expect(q.args('not')).toEqual(['id', 'in', `(${VENUE_ID})`]);
+          // Availability is no longer a PostgREST filter on the venues query.
+          expect(q.called('not')).toBe(false);
         },
       ),
+      rpcStep('available_venue_ids', ok([{ venue_id: OTHER_VENUE_ID }]), (args) => {
+        expect(args).toEqual({
+          p_venue_ids: [OTHER_VENUE_ID, VENUE_ID],
+          p_starts_at: startsAt,
+          p_ends_at: endsAt,
+        });
+      }),
     );
 
     // '+' must be URL-encoded, or it arrives as a space.
@@ -522,10 +533,11 @@ describe('SCRUM17 venue block journey: create, override, amend, remove', () => {
   });
 
   it('SCRUM17_AC2_after_removal_dated_search_includes_the_venue_again', async () => {
+    // With M removed, nothing occupies [12:00, 13:00): B1 ends at 12:00 and
+    // this fixture's venue has no turnaround, so it only touches; the scripted
+    // answer frees both venues. (That a removed block occupies nothing is
+    // tested against PGlite in tests/db/venueSearchOccupancyDatabase.test.js.)
     script(
-      fromStep('venue_blocks', ok([]), (q) => {
-        expect(q.args('is')).toEqual(['removed_at', null]);
-      }),
       fromStep(
         'venues',
         ok([
@@ -533,8 +545,19 @@ describe('SCRUM17 venue block journey: create, override, amend, remove', () => {
           { id: VENUE_ID, name: 'Seminar Room 2-1', location: 'SCIS', max_capacity: 40 },
         ]),
         (q) => {
-          // Nothing blocked, so the query is exactly the dateless one.
+          // The venues query is exactly the dateless one.
           expect(q.called('not')).toBe(false);
+        },
+      ),
+      rpcStep(
+        'available_venue_ids',
+        ok([{ venue_id: OTHER_VENUE_ID }, { venue_id: VENUE_ID }]),
+        (args) => {
+          expect(args).toEqual({
+            p_venue_ids: [OTHER_VENUE_ID, VENUE_ID],
+            p_starts_at: at('12:00'),
+            p_ends_at: at('13:00'),
+          });
         },
       ),
     );

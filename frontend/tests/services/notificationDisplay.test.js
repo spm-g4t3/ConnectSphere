@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 
 import { describeNotification } from "../../src/services/notificationDisplay.js";
 import { formatRange } from "../../src/services/displayFormat.js";
+import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay.js";
 
 const PAYLOAD = {
   venueName: "Hall A",
@@ -100,6 +101,167 @@ describe("describeNotification: booking_flagged", () => {
   it("shows an unparseable time as the raw string", () => {
     const { detail } = describeNotification(flagged({ ...PAYLOAD, startsAt: "soon" }));
     expect(detail).toContain("Booked soon – ");
+  });
+});
+
+// SCRUM-484 (AC8). The payload 034 writes when a setup or turnaround change
+// flags a booking (B-AC8-21's shape).
+const SETUP_PAYLOAD = {
+  venueName: "Harbour Room",
+  eventName: "Orientation",
+  startsAt: "2026-11-02T10:00:00+08:00",
+  endsAt: "2026-11-02T12:00:00+08:00",
+  occupiedStartsAt: "2026-11-02T09:30:00+08:00",
+  occupiedEndsAt: "2026-11-02T12:15:00+08:00",
+  setupMinutes: 30,
+  turnaroundMinutes: 15,
+  reason: "The venue's setup or turnaround time changed.",
+};
+
+function setupChange(payload = SETUP_PAYLOAD) {
+  return { id: "n6", type: "booking_flagged_setup_change", payload };
+}
+
+describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", () => {
+  it("SCRUM484_AC8_setup_change_notification_wording", () => {
+    const { headline, detail } = describeNotification(setupChange());
+
+    expect(headline).toBe("Orientation at Harbour Room needs review");
+    expect(detail).toBe(
+      `Setup or turnaround time changed. It now occupies ${formatOccupiedPeriod(SETUP_PAYLOAD)}.`,
+    );
+    // The parts, each from the same instants.
+    expect(detail).toContain(
+      `Setup ${formatRange(SETUP_PAYLOAD.occupiedStartsAt, SETUP_PAYLOAD.startsAt)}`,
+    );
+    expect(detail).toContain(`Event ${formatRange(SETUP_PAYLOAD.startsAt, SETUP_PAYLOAD.endsAt)}`);
+    expect(detail).toContain(
+      `Turnaround ${formatRange(SETUP_PAYLOAD.endsAt, SETUP_PAYLOAD.occupiedEndsAt)}`,
+    );
+    expect(headline).not.toBe("New notification");
+  });
+
+  it("SCRUM484_AC8_setup_change_detail_does_not_repeat_the_backend_reason", () => {
+    expect(describeNotification(setupChange()).detail).not.toContain(SETUP_PAYLOAD.reason);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["empty", ""],
+  ])("SCRUM484_AC8_falls_back_for_a_%s_event_and_venue_name", (_label, value) => {
+    const { headline } = describeNotification(
+      setupChange({ ...SETUP_PAYLOAD, eventName: value, venueName: value }),
+    );
+    expect(headline).toBe("Unnamed event at Unknown venue needs review");
+  });
+
+  it("SCRUM484_AC8_setup_change_notification_tolerates_missing_fields", () => {
+    const { headline, detail } = describeNotification(setupChange({}));
+    expect(headline).toBe("Unnamed event at Unknown venue needs review");
+    // Nothing usable: no time sentence at all, rather than "unknown – unknown".
+    expect(detail).toBe("Setup or turnaround time changed.");
+    expect(detail).not.toContain("unknown");
+    expect(`${headline} ${detail}`).not.toContain("undefined");
+  });
+
+  it("SCRUM484_AC8_occupied_times_only_name_the_occupied_range", () => {
+    const { detail } = describeNotification(
+      setupChange({ ...SETUP_PAYLOAD, startsAt: undefined, endsAt: undefined }),
+    );
+    expect(detail).toBe(
+      `Setup or turnaround time changed. It now occupies ${formatRange(SETUP_PAYLOAD.occupiedStartsAt, SETUP_PAYLOAD.occupiedEndsAt)}.`,
+    );
+    expect(detail).not.toContain("unknown");
+    expect(detail).not.toContain("Setup 0");
+    expect(detail).not.toContain("·");
+  });
+
+  it.each([
+    ["missing", { startsAt: undefined, endsAt: undefined, occupiedStartsAt: undefined, occupiedEndsAt: undefined }],
+    ["null", { startsAt: null, endsAt: null, occupiedStartsAt: null, occupiedEndsAt: null }],
+    ["empty", { startsAt: "", endsAt: "", occupiedStartsAt: "", occupiedEndsAt: "" }],
+    ["unparseable", { startsAt: "soon", endsAt: "later", occupiedStartsAt: "soon", occupiedEndsAt: "later" }],
+    ["half-present", { startsAt: SETUP_PAYLOAD.startsAt, endsAt: null, occupiedStartsAt: null, occupiedEndsAt: SETUP_PAYLOAD.occupiedEndsAt }],
+  ])("SCRUM484_AC8_%s_times_give_no_time_sentence", (_label, overrides) => {
+    const { headline, detail } = describeNotification(setupChange({ ...SETUP_PAYLOAD, ...overrides }));
+    expect(headline).toBe("Orientation at Harbour Room needs review");
+    expect(detail).toBe("Setup or turnaround time changed.");
+    expect(detail).not.toContain("Invalid Date");
+  });
+
+  it.each([
+    ["null", null],
+    ["undefined", undefined],
+  ])("SCRUM484_AC8_survives_a_%s_payload", (_label, payload) => {
+    const result = describeNotification({ id: "n6", type: "booking_flagged_setup_change", payload });
+    expect(result.headline).toBe("Unnamed event at Unknown venue needs review");
+    expect(result.detail).not.toContain("undefined");
+  });
+
+  it.each([
+    ["missing occupied fields", { occupiedStartsAt: undefined, occupiedEndsAt: undefined }],
+    ["null occupied fields", { occupiedStartsAt: null, occupiedEndsAt: null }],
+    ["unparseable occupied fields", { occupiedStartsAt: "soon", occupiedEndsAt: "later" }],
+  ])("SCRUM484_AC8_%s_fall_back_to_the_plain_range", (_label, overrides) => {
+    const { detail } = describeNotification(setupChange({ ...SETUP_PAYLOAD, ...overrides }));
+    expect(detail).toBe(
+      `Setup or turnaround time changed. It now occupies ${formatRange(SETUP_PAYLOAD.startsAt, SETUP_PAYLOAD.endsAt)}.`,
+    );
+    expect(detail).not.toContain("·");
+    expect(detail).not.toContain("Turnaround ");
+    expect(detail).not.toContain("Invalid Date");
+  });
+});
+
+// 031. Sent to Venue Staff when a coordinator withdraws a pending request.
+const WITHDRAWN_PAYLOAD = {
+  eventRequestId: "e0000000-0000-4000-8000-000000000001",
+  eventName: "Tech Talk",
+  venueId: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+  venueName: "Hall A",
+  startsAt: "2026-10-01T10:00:00+08:00",
+  endsAt: "2026-10-01T12:00:00+08:00",
+};
+
+function withdrawn(payload = WITHDRAWN_PAYLOAD) {
+  return { id: "n7", type: "booking_request_withdrawn", payload };
+}
+
+describe("describeNotification: booking_request_withdrawn", () => {
+  it("SCRUM484_withdrawn_request_headline_and_detail", () => {
+    expect(describeNotification(withdrawn())).toEqual({
+      headline: "The request for Tech Talk at Hall A was withdrawn",
+      detail:
+        `It was for ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
+        "It no longer needs a decision.",
+    });
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["empty", ""],
+  ])("SCRUM484_withdrawn_falls_back_for_a_%s_event_and_venue_name", (_label, value) => {
+    const { headline } = describeNotification(
+      withdrawn({ ...WITHDRAWN_PAYLOAD, eventName: value, venueName: value }),
+    );
+    expect(headline).toBe("The request for Unnamed event at Unknown venue was withdrawn");
+  });
+
+  it.each([
+    ["an empty", {}],
+    ["a null", null],
+    ["an undefined", undefined],
+  ])("SCRUM484_withdrawn_tolerates_%s_payload", (_label, payload) => {
+    const { headline, detail } = describeNotification({
+      id: "n7",
+      type: "booking_request_withdrawn",
+      payload,
+    });
+    expect(headline).toBe("The request for Unnamed event at Unknown venue was withdrawn");
+    expect(detail).toBe("It was for unknown – unknown. It no longer needs a decision.");
+    expect(`${headline} ${detail}`).not.toContain("undefined");
   });
 });
 
