@@ -18,6 +18,9 @@
  * SCRUM-137 (SCRUM-20) adds the setup time before an event, checked the same
  * way against its own list (domain/setupOptions.js).
  *
+ * SCRUM-493 (AC1) adds emergencyAccess and knownRestrictions, optional free
+ * text of up to SAFETY_TEXT_MAX_LENGTH characters each (checkSafetyText).
+ *
  * SCRUM-185 (SCRUM-178 AC1) adds includeRetired to the search filters, so a
  * retired venue's calendar can be reached from search.
  *
@@ -50,6 +53,15 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ATTRIBUTE_FIELDS = ['layouts', 'accessibility', 'facilities'];
+
+/**
+ * SCRUM-493: the two venue safety facts, optional free text.
+ *
+ * SAFETY_TEXT_MAX_LENGTH mirrors venues_emergency_access_length and
+ * venues_known_restrictions_length in 036_venue_safety_facts.sql.
+ */
+export const SAFETY_TEXT_MAX_LENGTH = 2000;
+const SAFETY_TEXT_FIELDS = ['emergencyAccess', 'knownRestrictions'];
 
 /** 'HH:MM' -> 'HH:MM:SS', so two times are always compared in the same shape. */
 function withSeconds(time) {
@@ -250,6 +262,41 @@ function checkSetup(errors, value) {
   return value;
 }
 
+/**
+ * SCRUM-493 (AC1): emergency access or known restrictions -- optional text,
+ * trimmed, blank becomes null, at most SAFETY_TEXT_MAX_LENGTH characters.
+ *
+ * The same shape as venueBlockValidation.js checkNotes. Only called when the
+ * field was supplied. Unlike setup and turnaround, null is accepted: it
+ * means "nothing recorded" (AC2), so on an update null and a blank string
+ * both normalise to null, which the service sends as a clear.
+ *
+ * Length is counted in code points (Array.from), not UTF-16 units
+ * (String.length), because that is what Postgres char_length() counts. With
+ * .length an emoji counts twice, so 1,001 emoji would be refused here while
+ * the column happily stores them.
+ *
+ * @returns {string|null} the trimmed text, or null for "not recorded" (and
+ *          when the value was refused)
+ */
+function checkSafetyText(errors, field, value) {
+  if (value === null) return null;
+
+  if (typeof value !== 'string') {
+    errors.add(field, 'must be text');
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+
+  if (Array.from(trimmed).length > SAFETY_TEXT_MAX_LENGTH) {
+    errors.add(field, `must be ${SAFETY_TEXT_MAX_LENGTH} characters or fewer`);
+  }
+
+  return trimmed;
+}
+
 
 /**
  * Validate input for creating a venue.
@@ -286,6 +333,13 @@ export function validateCreateVenue(input) {
 
   if (input.setupMinutes !== undefined) {
     normalised.setupMinutes = checkSetup(errors, input.setupMinutes);
+  }
+
+  // SCRUM-493: optional; null or blank means nothing recorded.
+  for (const field of SAFETY_TEXT_FIELDS) {
+    if (input[field] !== undefined) {
+      normalised[field] = checkSafetyText(errors, field, input[field]);
+    }
   }
 
   throwIfInvalid(errors);
@@ -352,6 +406,17 @@ export function validateUpdateVenue(changes) {
   // value is not undefined -- so no field list there needs updating.
   if (changes.setupMinutes !== undefined) {
     normalised.setupMinutes = checkSetup(errors, changes.setupMinutes);
+  }
+
+  // SCRUM-493: supplied means changed. null or blank normalises to null,
+  // which here means "clear it" (the service sends it as ''), so the key is
+  // kept even when its value is null. {knownRestrictions: null} on its own is
+  // therefore a change: the "no changes supplied" count above looks at keys
+  // whose value is not undefined, and null is not undefined.
+  for (const field of SAFETY_TEXT_FIELDS) {
+    if (changes[field] !== undefined) {
+      normalised[field] = checkSafetyText(errors, field, changes[field]);
+    }
   }
 
   throwIfInvalid(errors);

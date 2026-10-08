@@ -2750,3 +2750,161 @@ describe('SCRUM484_AC2 setup and turnaround are set by Venue Staff only', () => 
     expect(from).not.toHaveBeenCalled();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-493: emergency access and known restrictions through the venue
+// routes. AC1: only Venue Staff may add or change them, so POST and PATCH
+// carrying either field are refused to every other role before any database
+// call. AC4: a PATCH with only one of them sends only that one.
+// ---------------------------------------------------------------------------
+describe('SCRUM493 emergency access and known restrictions through the venue routes', () => {
+  const EXITS = 'Two exits on Level 2; assemble at the SCIS lawn.';
+  const NOT_VENUE_STAFF = Object.entries(ROLE).filter(([, role]) => role !== ROLE.VENUE_STAFF);
+  const FIELDS = [
+    ['emergencyAccess', EXITS],
+    ['knownRestrictions', 'No rigging from the ceiling.'],
+  ];
+  const ROLE_X_FIELD = NOT_VENUE_STAFF.flatMap(([label, role]) =>
+    FIELDS.map(([field, value]) => [label, field, role, value]),
+  );
+
+  it('SCRUM493_AC1_every_role_but_venue_staff_is_covered', () => {
+    // So a role added later is caught by the cases below, not left out.
+    expect(NOT_VENUE_STAFF.map(([, role]) => role).sort()).toEqual(
+      Object.values(ROLE).filter((r) => r !== ROLE.VENUE_STAFF).sort(),
+    );
+    expect(NOT_VENUE_STAFF.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it.each(ROLE_X_FIELD)('SCRUM493_AC1_POST_from_%s_with_%s_answers_403_with_no_rpc', async (_label, field, role, value) => {
+    const res = await request(appWith(signedInAs(role, ORGANISER_ID))).post('/api/venues').send({
+      name: 'Hall A',
+      location: 'SCIS',
+      maxCapacity: 40,
+      [field]: value,
+    });
+
+    expect(res.status).toBe(403);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it.each(ROLE_X_FIELD)('SCRUM493_AC1_PATCH_from_%s_with_%s_answers_403_with_no_rpc', async (_label, field, role, value) => {
+    const res = await request(appWith(signedInAs(role, ORGANISER_ID)))
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ [field]: value });
+
+    expect(res.status).toBe(403);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM493_AC1_POST_from_venue_staff_sends_both_fields_and_answers_201', async () => {
+    rpc.mockResolvedValueOnce(ok(VENUE_ID));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({
+      emergency_access: EXITS,
+      known_restrictions: null,
+    }))));
+
+    const res = await request(appWith()).post('/api/venues').send({
+      name: 'Hall A',
+      location: 'SCIS',
+      maxCapacity: 40,
+      emergencyAccess: `  ${EXITS}  `,
+      knownRestrictions: '   ',
+    });
+
+    expect(res.status).toBe(201);
+    const [fn, payload] = rpc.mock.calls[0];
+    expect(fn).toBe('create_venue');
+    expect(payload.p_emergency_access).toBe(EXITS);
+    expect(payload.p_known_restrictions).toBeNull();
+    expect(payload.p_user_id).toBe(STAFF_ID);
+    expect(res.body.emergencyAccess).toBe(EXITS);
+    expect(res.body.knownRestrictions).toBeNull();
+  });
+
+  it('SCRUM493_AC4_PATCH_with_only_emergencyAccess_sends_only_that_field', async () => {
+    rpc.mockResolvedValueOnce(ok({ flagged_bookings: [] }));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ emergency_access: EXITS }))));
+
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ emergencyAccess: EXITS });
+
+    expect(res.status).toBe(200);
+    const [fn, payload] = rpc.mock.calls[0];
+    expect(fn).toBe('update_venue');
+    // Every other p_ is null ("keep"); the user is the signed-in one.
+    expect(payload).toEqual({
+      p_id: VENUE_ID,
+      p_name: null,
+      p_location: null,
+      p_max_capacity: null,
+      p_layouts: null,
+      p_accessibility: null,
+      p_facilities: null,
+      p_hours: null,
+      p_turnaround_minutes: null,
+      p_setup_minutes: null,
+      p_emergency_access: EXITS,
+      p_known_restrictions: null,
+      p_user_id: STAFF_ID,
+    });
+    expect(res.body.emergencyAccess).toBe(EXITS);
+    // AC6: a text-only change flags nothing.
+    expect(res.body.flaggedBookings).toEqual([]);
+  });
+
+  it('SCRUM493_AC4_PATCH_clearing_knownRestrictions_sends_an_empty_string', async () => {
+    rpc.mockResolvedValueOnce(ok({ flagged_bookings: [] }));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ known_restrictions: null }))));
+
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ knownRestrictions: null });
+
+    expect(res.status).toBe(200);
+    const payload = rpc.mock.calls[0][1];
+    expect(payload.p_known_restrictions).toBe('');
+    expect(payload.p_emergency_access).toBeNull();
+    expect(res.body.knownRestrictions).toBeNull();
+  });
+
+  it.each(FIELDS)('SCRUM493_AC1_POST_with_an_over_long_%s_answers_400_with_no_rpc', async (field) => {
+    const res = await request(appWith()).post('/api/venues').send({
+      name: 'Hall A',
+      location: 'SCIS',
+      maxCapacity: 40,
+      [field]: 'x'.repeat(2001),
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field, message: 'must be 2000 characters or fewer' }]);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it.each(FIELDS)('SCRUM493_AC1_PATCH_with_an_over_long_%s_answers_400_with_no_rpc', async (field) => {
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ [field]: 'x'.repeat(2001) });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field, message: 'must be 2000 characters or fewer' }]);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM493_AC2_GET_by_id_returns_null_for_nothing_recorded', async () => {
+    from.mockReturnValueOnce(queryStub(ok(venueRow())));
+
+    const res = await request(appWith()).get(`/api/venues/${VENUE_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.emergencyAccess).toBeNull();
+    expect(res.body.knownRestrictions).toBeNull();
+    expect(res.body).not.toHaveProperty('emergency_access');
+  });
+});
