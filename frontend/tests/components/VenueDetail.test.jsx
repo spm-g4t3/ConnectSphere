@@ -287,6 +287,9 @@ describe("SCRUM493 the Safety information section", () => {
     vi.mocked(getVenueBookings).mockResolvedValue([]);
   });
 
+  // SCRUM-493 sub-task 3: the facts now render through the shared
+  // VenueSafetyFacts component, so the muted class is that component's
+  // venue-safety-facts__not-recorded (was venue-detail__not-recorded).
   it("SCRUM493_AC1_shows_both_values_with_line_breaks_kept", async () => {
     vi.mocked(getVenueDetails).mockResolvedValue(
       detailsWith({
@@ -305,8 +308,8 @@ describe("SCRUM493 the Safety information section", () => {
     expect(valueOf("Known restrictions").textContent).toBe(
       "No open flames\nNo rigging from the ceiling",
     );
-    expect(valueOf("Emergency access")).not.toHaveClass("venue-detail__not-recorded");
-    expect(valueOf("Known restrictions")).not.toHaveClass("venue-detail__not-recorded");
+    expect(valueOf("Emergency access")).not.toHaveClass("venue-safety-facts__not-recorded");
+    expect(valueOf("Known restrictions")).not.toHaveClass("venue-safety-facts__not-recorded");
   });
 
   it.each([
@@ -321,7 +324,7 @@ describe("SCRUM493 the Safety information section", () => {
     await screen.findByText("Emergency access", { selector: "dt" });
     for (const label of ["Emergency access", "Known restrictions"]) {
       expect(valueOf(label)).toHaveTextContent("Not recorded");
-      expect(valueOf(label)).toHaveClass("venue-detail__not-recorded");
+      expect(valueOf(label)).toHaveClass("venue-safety-facts__not-recorded");
     }
   });
 
@@ -334,8 +337,8 @@ describe("SCRUM493 the Safety information section", () => {
 
     await screen.findByText("Emergency access", { selector: "dt" });
     expect(valueOf("Emergency access")).toHaveTextContent("Not recorded");
-    expect(valueOf("Emergency access")).not.toHaveClass("venue-detail__not-recorded");
-    expect(valueOf("Known restrictions")).toHaveClass("venue-detail__not-recorded");
+    expect(valueOf("Emergency access")).not.toHaveClass("venue-safety-facts__not-recorded");
+    expect(valueOf("Known restrictions")).toHaveClass("venue-safety-facts__not-recorded");
   });
 
   it("SCRUM493_AC1_shows_loading_then_the_values", async () => {

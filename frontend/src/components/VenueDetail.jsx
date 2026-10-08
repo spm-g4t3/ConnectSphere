@@ -19,6 +19,9 @@
 //
 // SCRUM-493 adds a "Safety information" section -- emergency access and known
 // restrictions -- above the bookings, and labels both columns in the history.
+// The facts themselves render through VenueSafetyFacts, the same component the
+// Safety Officer's review will use; the loading, error and retry states stay
+// here.
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -28,7 +31,8 @@ import {
 } from "../services/venueService";
 import { formatTimestamp, shortId } from "../services/displayFormat";
 import { formatTurnaround } from "../services/turnaroundOptions";
-import { SAFETY_FACTS, safetyFactText } from "../services/venueSafetyFacts";
+import { safetyFactText } from "../services/venueSafetyFacts";
+import VenueSafetyFacts from "./VenueSafetyFacts";
 
 const BOOKINGS_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
@@ -266,24 +270,10 @@ export default function VenueDetail({ venue }) {
         )}
 
         {!loadingDetails && !detailsError && details && (
-          <dl className="venue-detail__safety">
-            {SAFETY_FACTS.map(({ key, label }) => {
-              // Muted, so "Not recorded" cannot be mistaken for text someone
-              // typed. Decided from the value, not by comparing the rendered
-              // string, so a venue whose notes literally say "Not recorded"
-              // still reads as entered text.
-              const value = details[key];
-              const recorded = typeof value === "string" && value.trim() !== "";
-              return (
-                <div key={key}>
-                  <dt>{label}</dt>
-                  <dd className={recorded ? undefined : "venue-detail__not-recorded"}>
-                    {safetyFactText(value)}
-                  </dd>
-                </div>
-              );
-            })}
-          </dl>
+          <VenueSafetyFacts
+            emergencyAccess={details.emergencyAccess}
+            knownRestrictions={details.knownRestrictions}
+          />
         )}
       </section>
 
