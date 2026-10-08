@@ -196,7 +196,7 @@ describe('SCRUM484_AC4 no copy of the overlap rule in the services', () => {
         const before = code.slice(0, m.index);
         const fns = [...before.matchAll(/(?:async\s+)?function\s+(\w+)\s*\(/g)];
         const fn = fns.length > 0 ? fns[fns.length - 1][1] : '(top level)';
-        found.push(`${relative(BACKEND, path)}:${fn}`);
+        found.push(`${relative(BACKEND, path)}:${fn}`.replaceAll('\\', '/'));
 
         // Never on bookings: the nearest .from(...) before it is not 'bookings'.
         const froms = [...before.matchAll(/\.from\(\s*['"](\w+)['"]/g)];

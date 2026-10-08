@@ -17,6 +17,7 @@ import notificationRoutes from './routes/notifications.js';
 import bookingRequestRoutes from './routes/bookingRequests.js';
 import equipmentAvailabilityRoutes from './routes/equipmentAvailability.js';
 import equipmentRoutes from './routes/equipment.js';
+import eventEquipmentRoutes from './routes/eventEquipment.js';
 
 const app = express();
 
@@ -24,6 +25,9 @@ app.use(cors());
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
+
+app.use('/api/event-requests/:id/equipment', eventEquipmentRoutes)
+
 app.use('/api/event-requests', eventRequestRoutes);
 
 // Mounted by SCRUM-15. It was withheld until it stopped taking the acting user
