@@ -738,6 +738,7 @@ describe('SCRUM-255: the coordinator lists their booking requests', () => {
         setupNotes: 'Extra tables',
         suitabilityOverridden: false,
         flaggedAt: null,
+        reviewReason: null,
         createdAt: '2026-10-06T10:00:00+00:00',
       },
     ]);

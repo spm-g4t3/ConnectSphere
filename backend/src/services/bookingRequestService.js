@@ -178,7 +178,7 @@ function one(embedded) {
 /** What the list reads: the booking, with its event and its venue embedded. */
 const LIST_COLUMNS = `
   id, event_request_id, venue_id, starts_at, ends_at, status,
-  room_layout_code, setup_notes, suitability_overridden, created_at, flagged_at,
+  room_layout_code, setup_notes, suitability_overridden, created_at, flagged_at, review_reason,
   venues(name, location),
   event_requests!inner(event_name, status, assigned_coordinator_id)
 `;
@@ -190,6 +190,9 @@ const LIST_COLUMNS = `
  * statusDisplay is the label and group for the status (domain/bookingStatus.js),
  * so the screen keeps no copy of the vocabulary. flaggedAt is the review
  * indicator for a booking a venue block has flagged (014); null otherwise.
+ * reviewReason is the code a setup or turnaround change stored when it
+ * flagged the booking (034, 'setup_or_turnaround_changed'); null for a block
+ * flag or an unflagged booking.
  *
  * @param {object} row  from LIST_COLUMNS
  */
@@ -212,6 +215,7 @@ function toBookingRequestListItem(row) {
     setupNotes: row.setup_notes ?? null,
     suitabilityOverridden: row.suitability_overridden ?? false,
     flaggedAt: row.flagged_at ?? null,
+    reviewReason: row.review_reason ?? null,
     createdAt: row.created_at,
   };
 }

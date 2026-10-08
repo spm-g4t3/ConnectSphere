@@ -274,3 +274,65 @@ describe('SCRUM484 booking request conflicts carry the occupied period', () => {
     expect(block).not.toHaveProperty('eventName');
   });
 });
+
+describe('SCRUM484_AC8 the coordinator list carries the review reason', () => {
+  /** A bookings row as LIST_COLUMNS reads it, assigned to USER. */
+  const listRow = (overrides = {}) => ({
+    id: BOOKING,
+    event_request_id: EVENT,
+    venue_id: VENUE,
+    starts_at: '2026-12-01T09:00:00+00:00',
+    ends_at: '2026-12-01T17:00:00+00:00',
+    status: 'flagged_for_review',
+    room_layout_code: null,
+    setup_notes: null,
+    suitability_overridden: false,
+    created_at: '2026-10-06T10:00:00+00:00',
+    flagged_at: '2026-10-07T10:00:00+00:00',
+    venues: { name: 'Harbour Room', location: 'Block A' },
+    event_requests: { event_name: 'Gala', status: 'approved', assigned_coordinator_id: USER },
+    ...overrides,
+  });
+
+  /** A client whose list read answers `rows`, recording the select it was sent. */
+  function listClient(rows) {
+    const selects = [];
+    const chain = {
+      select: (columns) => {
+        selects.push(columns);
+        return chain;
+      },
+      eq: () => chain,
+      order: () => chain,
+      then: (a, b) => Promise.resolve({ data: rows, error: null }).then(a, b),
+    };
+    return { selects, from: () => chain };
+  }
+
+  it('SCRUM484_AC8_reviewReason_is_mapped_from_review_reason', async () => {
+    const client = listClient([listRow({ review_reason: 'setup_or_turnaround_changed' })]);
+
+    const [item] = await listBookingRequestsForCoordinator(USER, { client });
+
+    expect(item.reviewReason).toBe('setup_or_turnaround_changed');
+    expect(item.flaggedAt).toBe('2026-10-07T10:00:00+00:00');
+    expect(item).not.toHaveProperty('review_reason');
+    // The column is asked for, so the mapping has something to read.
+    expect(client.selects[0]).toMatch(/\breview_reason\b/);
+  });
+
+  it.each([
+    ['null', { review_reason: null }],
+    ['absent', {}],
+  ])('SCRUM484_AC8_reviewReason_is_null_when_review_reason_is_%s', async (_label, overrides) => {
+    // A block flag (014) has no reason; neither has an unflagged booking.
+    const client = listClient([
+      listRow(overrides),
+      listRow({ ...overrides, id: '66666666-6666-4666-8666-666666666666', status: 'pending', flagged_at: null }),
+    ]);
+
+    const items = await listBookingRequestsForCoordinator(USER, { client });
+
+    expect(items.map((i) => i.reviewReason)).toEqual([null, null]);
+  });
+});

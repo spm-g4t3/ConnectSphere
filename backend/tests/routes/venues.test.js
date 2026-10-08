@@ -2637,3 +2637,78 @@ describe('SCRUM20 GET /api/venues/event-search', () => {
     });
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-484 AC8: PATCH /api/venues/:id answers the venue plus flaggedBookings
+// -- the approved bookings update_venue (034) flagged because the setup or
+// turnaround change made them clash. Additive, so the existing PATCH tests
+// above (SCRUM15_AC2_saves_an_authorised_change,
+// SCRUM20_SCRUM137_PATCH_setup_0_...) keep passing unchanged.
+// ---------------------------------------------------------------------------
+describe('SCRUM484_AC8 PATCH returns the bookings a setup change flagged', () => {
+  const FLAGGED_ROW = {
+    booking_id: 'b0000000-0000-4000-8000-00000000000a',
+    event_request_id: 'e0000000-0000-4000-8000-00000000000a',
+    event_name: 'Orientation Briefing',
+    starts_at: '2026-11-11T02:00:00+00:00',
+    ends_at: '2026-11-11T04:00:00+00:00',
+    occupied_starts_at: '2026-11-11T01:30:00+00:00',
+    occupied_ends_at: '2026-11-11T04:45:00+00:00',
+    setup_minutes: 30,
+    turnaround_minutes: 45,
+  };
+
+  it('SCRUM484_AC8_PATCH_returns_the_flagged_list', async () => {
+    rpc.mockResolvedValueOnce(ok({ flagged_bookings: [FLAGGED_ROW] }));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ setup_minutes: 30 }))));
+
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ setupMinutes: 30 });
+
+    expect(res.status).toBe(200);
+    expect(rpc.mock.calls[0][0]).toBe('update_venue');
+    expect(rpc.mock.calls[0][1].p_setup_minutes).toBe(30);
+    expect(rpc.mock.calls[0][1].p_user_id).toBe(STAFF_ID);
+    // The venue, as before...
+    expect(res.body.id).toBe(VENUE_ID);
+    expect(res.body.setupMinutes).toBe(30);
+    // ...plus the flagged bookings.
+    expect(res.body.flaggedBookings).toEqual([
+      {
+        bookingId: 'b0000000-0000-4000-8000-00000000000a',
+        eventRequestId: 'e0000000-0000-4000-8000-00000000000a',
+        eventName: 'Orientation Briefing',
+        startsAt: '2026-11-11T02:00:00+00:00',
+        endsAt: '2026-11-11T04:00:00+00:00',
+        occupiedStartsAt: '2026-11-11T01:30:00+00:00',
+        occupiedEndsAt: '2026-11-11T04:45:00+00:00',
+        setupMinutes: 30,
+        turnaroundMinutes: 45,
+      },
+    ]);
+  });
+
+  it('SCRUM484_AC8_PATCH_answers_an_empty_flagged_list_when_nothing_clashes', async () => {
+    rpc.mockResolvedValueOnce(ok({ flagged_bookings: [] }));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ location: 'Level 3, SCIS' }))));
+
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ location: 'Level 3, SCIS' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.location).toBe('Level 3, SCIS');
+    expect(res.body.flaggedBookings).toEqual([]);
+  });
+
+  it('SCRUM484_AC8_PATCH_from_a_non_venue_staff_role_flags_nothing', async () => {
+    const res = await request(appWith(signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID)))
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ setupMinutes: 30 });
+
+    expect(res.status).toBe(403);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+});

@@ -99,6 +99,18 @@ const BLOCK_VS_BLOCK = {
   update_venue_block: "tstzrange(vb.starts_at, vb.ends_at, '[)') && tstzrange(v_starts_at, v_ends_at, '[)')",
 };
 
+/**
+ * The other named exception: AC8's "not started" filter (034). update_venue
+ * re-checks only approved bookings whose event has not started yet, written
+ * `b.starts_at > now()`. It compares a booking's start with the clock, not two
+ * periods, so it is no copy of the overlap rule; the overlap itself is asked
+ * of venue_occupancy_conflicts(). Only this exact predicate, only in
+ * update_venue: any other strict comparison there is still an offender.
+ */
+const NOT_STARTED = {
+  update_venue: 'b.starts_at > now()',
+};
+
 
 describe('SCRUM484_AC4 the JavaScript copy of the rule is gone', () => {
   it('SCRUM484_AC4_the_javascript_overlap_rule_is_removed', () => {
@@ -125,6 +137,9 @@ describe('SCRUM484_AC4 no copy of the overlap rule in SQL', () => {
     }
     // And the raw helper is not.
     expect(LATEST.has('venue_block_booking_conflicts')).toBe(false);
+    // The scan replays every migration in the folder, so 034's update_venue
+    // (the AC8 re-check) is the definition read here.
+    expect(LATEST.get('update_venue')?.file).toBe('034_setup_change_recheck.sql');
 
     const offenders = [];
     for (const [name, { file, body }] of LATEST) {
@@ -133,6 +148,10 @@ describe('SCRUM484_AC4 no copy of the overlap rule in SQL', () => {
       if (BLOCK_VS_BLOCK[name]) {
         expect(rest, `${file} ${name}: block-vs-block`).toContain(BLOCK_VS_BLOCK[name]);
         rest = rest.split(BLOCK_VS_BLOCK[name]).join(' ');
+      }
+      if (NOT_STARTED[name]) {
+        expect(rest, `${file} ${name}: not-started filter`).toContain(NOT_STARTED[name]);
+        rest = rest.split(NOT_STARTED[name]).join(' ');
       }
       for (const m of rest.matchAll(OVERLAP)) {
         offenders.push(`${file} ${name}: ...${rest.slice(Math.max(0, m.index - 50), m.index + 50)}...`);

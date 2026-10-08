@@ -2658,3 +2658,141 @@ describe('SCRUM20 SCRUM138 getVenueById is unchanged by the refactor', () => {
     );
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-484 AC8: a setup or turnaround change re-checks the venue's approved
+// bookings inside update_venue (034), which returns {flagged_bookings}. The
+// service hands them back beside the venue, shaped like the block-conflict
+// rows (toBookingConflict), so no existing caller of updateVenue breaks.
+// ---------------------------------------------------------------------------
+describe('SCRUM484_AC8 updateVenue returns the bookings the change flagged', () => {
+  const FLAGGED_ROWS = [
+    {
+      booking_id: 'b0000000-0000-4000-8000-00000000000a',
+      event_request_id: 'e0000000-0000-4000-8000-00000000000a',
+      event_name: 'Orientation Briefing',
+      starts_at: '2026-11-11T02:00:00+00:00',
+      ends_at: '2026-11-11T04:00:00+00:00',
+      occupied_starts_at: '2026-11-11T01:30:00+00:00',
+      occupied_ends_at: '2026-11-11T04:45:00+00:00',
+      setup_minutes: 30,
+      turnaround_minutes: 45,
+    },
+    {
+      booking_id: 'b0000000-0000-4000-8000-00000000000b',
+      event_request_id: 'e0000000-0000-4000-8000-00000000000b',
+      event_name: 'Alumni Talk',
+      starts_at: '2026-11-11T04:30:00+00:00',
+      ends_at: '2026-11-11T06:00:00+00:00',
+      occupied_starts_at: '2026-11-11T04:00:00+00:00',
+      occupied_ends_at: '2026-11-11T06:45:00+00:00',
+      setup_minutes: 30,
+      turnaround_minutes: 45,
+    },
+  ];
+
+  /** update_venue answers `data`; the read-back answers the venue row. */
+  function givenUpdateAnswers(data, row = populatedVenueRow({ setup_minutes: 30 })) {
+    rpc.mockResolvedValue({ data, error: null });
+    const read = queryStub({ data: row, error: null });
+    from.mockReturnValue(read);
+    return read;
+  }
+
+  it('SCRUM484_AC8_updateVenue_returns_the_flagged_bookings', async () => {
+    givenUpdateAnswers({ flagged_bookings: FLAGGED_ROWS });
+
+    const venue = await updateVenue(VENUE_ID, { setupMinutes: 30 }, STAFF_ID);
+
+    // Still the venue, read back as before...
+    expect(venue.id).toBe(VENUE_ID);
+    expect(venue.setupMinutes).toBe(30);
+    // ...plus the flagged bookings, camelCase, in the order the function gave.
+    expect(venue.flaggedBookings).toEqual([
+      {
+        bookingId: 'b0000000-0000-4000-8000-00000000000a',
+        eventRequestId: 'e0000000-0000-4000-8000-00000000000a',
+        eventName: 'Orientation Briefing',
+        startsAt: '2026-11-11T02:00:00+00:00',
+        endsAt: '2026-11-11T04:00:00+00:00',
+        occupiedStartsAt: '2026-11-11T01:30:00+00:00',
+        occupiedEndsAt: '2026-11-11T04:45:00+00:00',
+        setupMinutes: 30,
+        turnaroundMinutes: 45,
+      },
+      {
+        bookingId: 'b0000000-0000-4000-8000-00000000000b',
+        eventRequestId: 'e0000000-0000-4000-8000-00000000000b',
+        eventName: 'Alumni Talk',
+        startsAt: '2026-11-11T04:30:00+00:00',
+        endsAt: '2026-11-11T06:00:00+00:00',
+        occupiedStartsAt: '2026-11-11T04:00:00+00:00',
+        occupiedEndsAt: '2026-11-11T06:45:00+00:00',
+        setupMinutes: 30,
+        turnaroundMinutes: 45,
+      },
+    ]);
+    // No snake_case leaks through.
+    for (const booking of venue.flaggedBookings) {
+      expect(Object.keys(booking).some((k) => k.includes('_'))).toBe(false);
+    }
+  });
+
+  it('SCRUM484_AC8_updateVenue_flags_nothing_gives_an_empty_list', async () => {
+    givenUpdateAnswers({ flagged_bookings: [] });
+
+    const venue = await updateVenue(VENUE_ID, { setupMinutes: 30 }, STAFF_ID);
+
+    expect(venue.flaggedBookings).toEqual([]);
+  });
+
+  it.each([
+    ['no flagged_bookings key', {}],
+    ['null data', null],
+    ['undefined data', undefined],
+  ])('SCRUM484_AC8_updateVenue_missing_flagged_bookings_gives_an_empty_list (%s)', async (_label, data) => {
+    givenUpdateAnswers(data);
+
+    const venue = await updateVenue(VENUE_ID, { name: 'Harbour Room 2' }, STAFF_ID);
+
+    expect(venue.flaggedBookings).toEqual([]);
+    expect(venue.id).toBe(VENUE_ID);
+  });
+
+  it('SCRUM484_AC8_updateVenue_rpc_error_path_is_unchanged', async () => {
+    rpc.mockResolvedValue({
+      data: null,
+      error: { code: 'P0002', message: `venue ${VENUE_ID} not found` },
+    });
+
+    const err = await errorFromAsync(() => updateVenue(VENUE_ID, { setupMinutes: 30 }, STAFF_ID));
+
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.status).toBe(404);
+    // Nothing is read back when the write failed.
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM484_AC8_updateVenue_still_sends_the_same_rpc_payload', async () => {
+    givenUpdateAnswers({ flagged_bookings: [] });
+
+    await updateVenue(VENUE_ID, { setupMinutes: 30, turnaroundMinutes: 45 }, STAFF_ID);
+
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc.mock.calls[0][0]).toBe('update_venue');
+    expect(rpcArgs()).toEqual({
+      p_id: VENUE_ID,
+      p_name: null,
+      p_location: null,
+      p_max_capacity: null,
+      p_layouts: null,
+      p_accessibility: null,
+      p_facilities: null,
+      p_hours: null,
+      p_turnaround_minutes: 45,
+      p_setup_minutes: 30,
+      p_user_id: STAFF_ID,
+    });
+  });
+});

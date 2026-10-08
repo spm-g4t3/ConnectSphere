@@ -609,7 +609,12 @@ export function createVenueRouter({
     }
   });
 
-  /** AC2: an authorised change, saved and visible to the next search. */
+  /**
+   * AC2: an authorised change, saved and visible to the next search.
+   *
+   * SCRUM-484 (AC8): 200 with the venue plus flaggedBookings -- the approved
+   * bookings a setup or turnaround change flagged for review ([] when none).
+   */
   router.patch('/:id', venueStaffOnly, async (req, res) => {
     try {
       validateVenueId(req.params.id);

@@ -65,6 +65,7 @@ import { DEFAULT_TURNAROUND_MINUTES } from '../domain/turnaroundOptions.js';
 import { DEFAULT_SETUP_MINUTES } from '../domain/setupOptions.js';
 import { matchesAllCriteria } from '../domain/venueMatching.js';
 import { getBookingStatusDisplay } from '../domain/bookingStatus.js';
+import { toBookingConflict } from './venueBlockService.js';
 
 /**
  * The venue columns with every attribute joined: four join tables, flattened
@@ -186,15 +187,23 @@ export async function createVenue(input, userId = null) {
  *
  * SCRUM-137: so does setupMinutes.
  *
+ * SCRUM-484 (AC8): when setup or turnaround really changes, update_venue
+ * (034) re-checks the venue's approved, not-yet-started bookings in the same
+ * transaction, flags any whose occupied period now overlaps another approved
+ * booking or a block, and notifies each event's assigned coordinator. The
+ * flagged bookings come back as flaggedBookings, shaped by toBookingConflict
+ * like the block-override lists; [] when nothing was flagged (including
+ * every edit that leaves both minutes alone).
+ *
  * @param {string} id
  * @param {object} changes  same shape as createVenue input, all optional
  * @param {string|null} userId
- * @returns {Promise<object>} the updated venue
+ * @returns {Promise<object>} the updated venue, plus flaggedBookings
  */
 export async function updateVenue(id, changes, userId = null) {
   const update = validateUpdateVenue(changes);
 
-  const { error } = await supabase.rpc('update_venue', {
+  const { data, error } = await supabase.rpc('update_venue', {
     p_id: id,
     p_name: update.name ?? null,
     p_location: update.location ?? null,
@@ -214,7 +223,8 @@ export async function updateVenue(id, changes, userId = null) {
 
   if (error) throw translateError(error);
 
-  return getVenueById(id);
+  const flaggedBookings = (data?.flagged_bookings ?? []).map(toBookingConflict);
+  return { ...(await getVenueById(id)), flaggedBookings };
 }
 
 /**

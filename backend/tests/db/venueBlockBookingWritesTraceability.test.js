@@ -17,6 +17,13 @@
  *  - 033 also redefines create_booking_request (030's body, step 7 replaced),
  *    which inserts the booking REQUEST: a pending row with the event's own
  *    period. That is the one insert allowed; no block function inserts.
+ *
+ * SCRUM-484 (AC8) adds 034, whose update_venue flags a venue's approved
+ * bookings that a setup or turnaround change made clash. It writes bookings,
+ * so it is in the list and every period rule applies to it unchanged. One
+ * rule is adapted: its UPDATE of bookings is the third one, and the only one
+ * outside flag_bookings_for_block -- still the review flag, still
+ * approved-only, but its cause is review_reason instead of review_block_id.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -34,10 +41,34 @@ const MIGRATIONS = [
   '015_venue_block_amend_remove.sql',
   '032_venue_occupancy.sql',
   '033_venue_occupancy_callers.sql',
+  '034_setup_change_recheck.sql',
 ];
 
 /** The two files that define flag_bookings_for_block, in order. */
 const FLAG_FILES = ['014_booking_review_notifications.sql', '033_venue_occupancy_callers.sql'];
+
+/**
+ * SCRUM-484 (AC8): the file whose update_venue flags bookings after a setup
+ * or turnaround change, and what that UPDATE assigns: the reason code in
+ * place of the block.
+ */
+const SETUP_CHANGE_FILE = '034_setup_change_recheck.sql';
+
+/** Where each flag UPDATE must live, and the columns it sets. */
+const FLAG_UPDATE = {
+  '014_booking_review_notifications.sql': {
+    fn: 'flag_bookings_for_block',
+    columns: ['status', 'review_block_id', 'flagged_at', 'flagged_by'],
+  },
+  '033_venue_occupancy_callers.sql': {
+    fn: 'flag_bookings_for_block',
+    columns: ['status', 'review_block_id', 'flagged_at', 'flagged_by'],
+  },
+  [SETUP_CHANGE_FILE]: {
+    fn: 'update_venue',
+    columns: ['status', 'review_reason', 'flagged_at', 'flagged_by'],
+  },
+};
 
 /** A migration with every `--` comment stripped, whitespace collapsed, lower-cased. */
 function normalised(name) {
@@ -84,7 +115,7 @@ const ALL_UPDATES = MIGRATIONS.flatMap((name) =>
 
 describe('SCRUM17_AC4 the block migrations never write a booking period', () => {
   it('SCRUM17_AC4_all_five_migrations_were_read', () => {
-    // SCRUM-484: seven since 032 and 033 joined the list.
+    // SCRUM-484: eight since 032, 033 and 034 joined the list.
     for (const name of MIGRATIONS) {
       expect(SQL[name].length, name).toBeGreaterThan(0);
     }
@@ -141,26 +172,25 @@ describe('SCRUM17_AC4 the block migrations never write a booking period', () => 
 describe('SCRUM17_AC4 the only update of bookings is the review flag', () => {
   // Adapted for SCRUM-484: 033 redefines flag_bookings_for_block (only its
   // overlap test changes), so there is one such UPDATE per definition -- 014's
-  // and 033's -- and each one is checked below.
+  // and 033's -- and each one is checked below. SCRUM-484 (AC8): plus 034's
+  // setup-change flag in update_venue, the third.
   it('SCRUM17_AC4_there_is_exactly_one_update_of_bookings_and_it_is_in_014', () => {
-    expect(ALL_UPDATES.map(({ name }) => name)).toEqual(FLAG_FILES);
+    expect(ALL_UPDATES.map(({ name }) => name)).toEqual([...FLAG_FILES, SETUP_CHANGE_FILE]);
   });
 
   it("SCRUM17_AC4_it_sets_status_to_flagged_for_review_and_nothing_of_the_period", () => {
     for (const { name, setClause } of ALL_UPDATES) {
       expect(setClause, name).toMatch(/^status\s*=\s*'flagged_for_review'\s*,/);
-      expect(assignedColumns(setClause), name).toEqual([
-        'status',
-        'review_block_id',
-        'flagged_at',
-        'flagged_by',
-      ]);
+      // 034's flag names its cause as review_reason, not a block.
+      expect(assignedColumns(setClause), name).toEqual(FLAG_UPDATE[name].columns);
     }
   });
 
   it('SCRUM17_AC4_it_lives_inside_flag_bookings_for_block', () => {
+    // Adapted for SCRUM-484 (AC8): 034's lives inside update_venue, where the
+    // re-check runs in the same transaction as the minutes change.
     for (const { name, index } of ALL_UPDATES) {
-      const span = functionSpan(SQL[name], 'flag_bookings_for_block');
+      const span = functionSpan(SQL[name], FLAG_UPDATE[name].fn);
       expect(span, name).not.toBeNull();
       expect(index, name).toBeGreaterThan(span.from);
       expect(index, name).toBeLessThan(span.to);
