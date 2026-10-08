@@ -41,6 +41,7 @@ import EventVenueFinder from "./EventVenueFinder";
 import DecisionOutcome from "./DecisionOutcome";
 import ReassignEventPanel from "./ReassignEventPanel";
 import ClarificationHistory from "./ClarificationHistory";
+import EventEquipmentSection from "./EventEquipmentSection";
 import {
   decideEventRequest,
   getCoordinatorChangeRequests,
@@ -486,6 +487,12 @@ export default function CoordinatorRequestDetail({
           </li>
         </ul>
       </section>
+
+      <EventEquipmentSection
+        requestId={request.id}
+        status={current.status}
+        canEdit={isAssignedCoordinator}
+      />
 
       <section>
         <h3>Organiser change requests</h3>
