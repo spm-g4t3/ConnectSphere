@@ -1558,6 +1558,11 @@ describe('SCRUM186 turnaround is written by create and update and read by id', (
       p_hours: null,
       p_turnaround_minutes: 90,
       p_setup_minutes: null,
+      // Changed for SCRUM-493: update_venue (036) takes two more parameters.
+      // Left out of the edit, each is sent as null, "keep" -- so this edit
+      // still touches nothing but turnaround.
+      p_emergency_access: null,
+      p_known_restrictions: null,
       p_user_id: STAFF_ID,
     });
   });
@@ -1741,6 +1746,11 @@ describe('SCRUM20_SCRUM137 setup time is written by create and update and read b
       p_hours: null,
       p_turnaround_minutes: null,
       p_setup_minutes: 60,
+      // Changed for SCRUM-493: update_venue (036) takes two more parameters.
+      // Left out of the edit, each is sent as null, "keep" -- so this edit
+      // still touches nothing but setup.
+      p_emergency_access: null,
+      p_known_restrictions: null,
       p_user_id: STAFF_ID,
     });
   });
@@ -2621,6 +2631,10 @@ describe('SCRUM20 SCRUM138 getVenueById is unchanged by the refactor', () => {
       maxCapacity: 40,
       turnaroundMinutes: 45,
       setupMinutes: 15,
+      // Changed for SCRUM-493: the read now carries the two safety facts,
+      // null when nothing is recorded (this row has neither column).
+      emergencyAccess: null,
+      knownRestrictions: null,
       retiredAt: null,
       createdAt: '2026-09-12T09:00:00+00:00',
       updatedAt: RETIRED_AT,
@@ -2636,6 +2650,8 @@ describe('SCRUM20 SCRUM138 getVenueById is unchanged by the refactor', () => {
     // Same key order as before, too.
     expect(Object.keys(venue)).toEqual([
       'id', 'name', 'location', 'maxCapacity', 'turnaroundMinutes', 'setupMinutes',
+      // SCRUM-493: added straight after setupMinutes, everything else in place.
+      'emergencyAccess', 'knownRestrictions',
       'retiredAt', 'createdAt', 'updatedAt', 'lastModifiedBy',
       'layouts', 'accessibility', 'facilities', 'hours',
     ]);
@@ -2648,8 +2664,11 @@ describe('SCRUM20 SCRUM138 getVenueById is unchanged by the refactor', () => {
     await getVenueById(VENUE_ID);
 
     const select = read.args('select')[0].replace(/\s+/g, ' ').trim();
+    // Changed for SCRUM-493: the select gains emergency_access and
+    // known_restrictions after setup_minutes; every join is still there.
     expect(select).toBe(
       'id, name, location, max_capacity, turnaround_minutes, setup_minutes, ' +
+      'emergency_access, known_restrictions, ' +
       'retired_at, created_at, updated_at, last_modified_by, ' +
       'venue_room_layouts ( room_layout_code ), ' +
       'venue_accessibility_features ( accessibility_feature_code ), ' +
@@ -2792,7 +2811,161 @@ describe('SCRUM484_AC8 updateVenue returns the bookings the change flagged', () 
       p_hours: null,
       p_turnaround_minutes: 45,
       p_setup_minutes: 30,
+      // Changed for SCRUM-493: update_venue (036) takes two more parameters.
+      // Left out of the edit, each is sent as null, "keep" -- so this edit
+      // still touches nothing but setup and turnaround.
+      p_emergency_access: null,
+      p_known_restrictions: null,
       p_user_id: STAFF_ID,
     });
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-493: emergency access and known restrictions. create_venue and
+// update_venue (036) take p_emergency_access and p_known_restrictions; on an
+// update NULL keeps the current value and '' clears it, so the service maps
+// omitted -> null, null (sent null or blank) -> '', text -> text
+// (toSafetyTextParam). The read maps both columns, null when not recorded.
+// ---------------------------------------------------------------------------
+describe('SCRUM493 the safety facts are sent to the database and read back', () => {
+  const NEW_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const MINIMAL = Object.freeze({
+    name: 'Seminar Room 2-1',
+    location: 'Level 2, SCIS',
+    maxCapacity: 40,
+  });
+  const EXITS = 'Two exits on Level 2; assemble at the SCIS lawn.';
+  const NO_RIGGING = 'No rigging from the ceiling.';
+
+  it('SCRUM493_AC1_createVenue_sends_both_fields_trimmed', async () => {
+    givenWriteSucceeds(populatedVenueRow(), NEW_ID);
+
+    await createVenue(
+      { ...MINIMAL, emergencyAccess: `  ${EXITS}\n`, knownRestrictions: `\t${NO_RIGGING}` },
+      STAFF_ID,
+    );
+
+    expect(rpc.mock.calls[0][0]).toBe('create_venue');
+    expect(rpcArgs()).toMatchObject({
+      p_emergency_access: EXITS,
+      p_known_restrictions: NO_RIGGING,
+      p_user_id: STAFF_ID,
+    });
+  });
+
+  it('SCRUM493_AC1_createVenue_sends_null_for_omitted_and_blank_fields', async () => {
+    givenWriteSucceeds(populatedVenueRow(), NEW_ID);
+
+    await createVenue({ ...MINIMAL, knownRestrictions: '   ' }, STAFF_ID);
+
+    // Both keys are always sent, so the call never depends on a default.
+    expect(rpcArgs()).toHaveProperty('p_emergency_access', null);
+    expect(rpcArgs()).toHaveProperty('p_known_restrictions', null);
+  });
+
+  it('SCRUM493_AC1_createVenue_rejects_an_over_long_field_before_any_rpc', async () => {
+    const err = await errorFromAsync(() =>
+      createVenue({ ...MINIMAL, emergencyAccess: 'x'.repeat(2001) }, STAFF_ID),
+    );
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toEqual(['emergencyAccess']);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM493_AC4_updateVenue_omitted_fields_are_sent_as_null_keep', async () => {
+    givenWriteSucceeds(populatedVenueRow());
+
+    await updateVenue(VENUE_ID, { name: 'Harbour Room' }, STAFF_ID);
+
+    expect(rpcArgs()).toHaveProperty('p_emergency_access', null);
+    expect(rpcArgs()).toHaveProperty('p_known_restrictions', null);
+  });
+
+  it.each([
+    ['null', null],
+    ['an empty string', ''],
+    ['whitespace only', ' \n\t '],
+  ])('SCRUM493_AC4_updateVenue_clearing_with_%s_is_sent_as_an_empty_string', async (_label, value) => {
+    // Not null: update_venue reads NULL as "keep", so a clear sent as null
+    // would silently leave the old text in place.
+    givenWriteSucceeds(populatedVenueRow());
+
+    await updateVenue(VENUE_ID, { knownRestrictions: value }, STAFF_ID);
+
+    expect(rpcArgs().p_known_restrictions).toBe('');
+    expect(rpcArgs().p_emergency_access).toBeNull();
+  });
+
+  it('SCRUM493_AC4_updateVenue_text_is_sent_trimmed_and_alone', async () => {
+    givenWriteSucceeds(populatedVenueRow({ emergency_access: EXITS }));
+
+    await updateVenue(VENUE_ID, { emergencyAccess: `  ${EXITS}  ` }, STAFF_ID);
+
+    expect(rpcArgs()).toEqual({
+      p_id: VENUE_ID,
+      p_name: null,
+      p_location: null,
+      p_max_capacity: null,
+      p_layouts: null,
+      p_accessibility: null,
+      p_facilities: null,
+      p_hours: null,
+      p_turnaround_minutes: null,
+      p_setup_minutes: null,
+      p_emergency_access: EXITS,
+      p_known_restrictions: null,
+      p_user_id: STAFF_ID,
+    });
+  });
+
+  it('SCRUM493_AC6_updateVenue_text_only_edit_returns_no_flagged_bookings', async () => {
+    rpc.mockResolvedValue({ data: { flagged_bookings: [] }, error: null });
+    from.mockReturnValue(queryStub({ data: populatedVenueRow(), error: null }));
+
+    const venue = await updateVenue(VENUE_ID, { knownRestrictions: NO_RIGGING }, STAFF_ID);
+
+    expect(venue.flaggedBookings).toEqual([]);
+  });
+
+  it('SCRUM493_AC2_getVenueById_maps_both_fields', async () => {
+    from.mockReturnValue(queryStub({
+      data: populatedVenueRow({ emergency_access: EXITS, known_restrictions: NO_RIGGING }),
+      error: null,
+    }));
+
+    const venue = await getVenueById(VENUE_ID);
+
+    expect(venue.emergencyAccess).toBe(EXITS);
+    expect(venue.knownRestrictions).toBe(NO_RIGGING);
+    expect(venue).not.toHaveProperty('emergency_access');
+    expect(venue).not.toHaveProperty('known_restrictions');
+  });
+
+  it.each([
+    ['null columns', { emergency_access: null, known_restrictions: null }],
+    ['absent columns', {}],
+  ])('SCRUM493_AC2_getVenueById_returns_null_when_not_recorded (%s)', async (_label, overrides) => {
+    from.mockReturnValue(queryStub({ data: populatedVenueRow(overrides), error: null }));
+
+    const venue = await getVenueById(VENUE_ID);
+
+    expect(venue.emergencyAccess).toBeNull();
+    expect(venue.knownRestrictions).toBeNull();
+  });
+
+  it('SCRUM493_AC5_a_retired_venue_still_returns_both_fields', async () => {
+    from.mockReturnValue(queryStub({
+      data: retiredVenueRow({ emergency_access: EXITS, known_restrictions: NO_RIGGING }),
+      error: null,
+    }));
+
+    const venue = await getVenueById(VENUE_ID);
+
+    expect(venue.retiredAt).toBe(RETIRED_AT);
+    expect(venue.emergencyAccess).toBe(EXITS);
+    expect(venue.knownRestrictions).toBe(NO_RIGGING);
   });
 });

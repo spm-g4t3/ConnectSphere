@@ -30,6 +30,12 @@
  * writes bookings, so it is in the list and every period rule applies
  * unchanged. Adapted as for 034: its UPDATE of bookings is the fourth one,
  * also inside update_venue, with the same four columns as 034's.
+ *
+ * SCRUM-493 adds 036, which redefines update_venue again: 035's body word for
+ * word plus the two safety-text fields, which it writes to venues, not
+ * bookings. It carries 035's re-check, so it is in the list and every period
+ * rule applies unchanged. Adapted as for 035: its UPDATE of bookings is the
+ * fifth one, inside update_venue, with the same four columns.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -49,6 +55,7 @@ const MIGRATIONS = [
   '033_venue_occupancy_callers.sql',
   '034_setup_change_recheck.sql',
   '035_setup_change_recheck_refine.sql',
+  '036_venue_safety_facts.sql',
 ];
 
 /** The two files that define flag_bookings_for_block, in order. */
@@ -63,6 +70,9 @@ const SETUP_CHANGE_FILE = '034_setup_change_recheck.sql';
 
 /** SCRUM-484 (AC8): 035 redefines that update_venue; its flag is the same. */
 const SETUP_CHANGE_REFINE_FILE = '035_setup_change_recheck_refine.sql';
+
+/** SCRUM-493: 036 redefines update_venue with 035's re-check unchanged. */
+const SAFETY_FACTS_FILE = '036_venue_safety_facts.sql';
 
 /** Where each flag UPDATE must live, and the columns it sets. */
 const FLAG_UPDATE = {
@@ -79,6 +89,10 @@ const FLAG_UPDATE = {
     columns: ['status', 'review_reason', 'flagged_at', 'flagged_by'],
   },
   [SETUP_CHANGE_REFINE_FILE]: {
+    fn: 'update_venue',
+    columns: ['status', 'review_reason', 'flagged_at', 'flagged_by'],
+  },
+  [SAFETY_FACTS_FILE]: {
     fn: 'update_venue',
     columns: ['status', 'review_reason', 'flagged_at', 'flagged_by'],
   },
@@ -130,6 +144,7 @@ const ALL_UPDATES = MIGRATIONS.flatMap((name) =>
 describe('SCRUM17_AC4 the block migrations never write a booking period', () => {
   it('SCRUM17_AC4_all_five_migrations_were_read', () => {
     // SCRUM-484: nine since 032, 033, 034 and 035 joined the list.
+    // SCRUM-493: ten, with 036.
     for (const name of MIGRATIONS) {
       expect(SQL[name].length, name).toBeGreaterThan(0);
     }
@@ -188,22 +203,26 @@ describe('SCRUM17_AC4 the only update of bookings is the review flag', () => {
   // overlap test changes), so there is one such UPDATE per definition -- 014's
   // and 033's -- and each one is checked below. SCRUM-484 (AC8): plus 034's
   // setup-change flag in update_venue, the third, and 035's redefinition of
-  // it, the fourth -- exactly one per file.
+  // it, the fourth -- exactly one per file. SCRUM-493: 036's copy of 035's
+  // update_venue, the fifth.
   it('SCRUM17_AC4_there_is_exactly_one_update_of_bookings_and_it_is_in_014', () => {
-    expect(ALL_UPDATES.map(({ name }) => name)).toEqual([...FLAG_FILES, SETUP_CHANGE_FILE, SETUP_CHANGE_REFINE_FILE]);
+    expect(ALL_UPDATES.map(({ name }) => name)).toEqual([
+      ...FLAG_FILES, SETUP_CHANGE_FILE, SETUP_CHANGE_REFINE_FILE, SAFETY_FACTS_FILE,
+    ]);
   });
 
   it("SCRUM17_AC4_it_sets_status_to_flagged_for_review_and_nothing_of_the_period", () => {
     for (const { name, setClause } of ALL_UPDATES) {
       expect(setClause, name).toMatch(/^status\s*=\s*'flagged_for_review'\s*,/);
-      // 034's and 035's flags name their cause as review_reason, not a block.
+      // 034's, 035's and 036's flags name their cause as review_reason, not a block.
       expect(assignedColumns(setClause), name).toEqual(FLAG_UPDATE[name].columns);
     }
   });
 
   it('SCRUM17_AC4_it_lives_inside_flag_bookings_for_block', () => {
     // Adapted for SCRUM-484 (AC8): 034's and 035's live inside update_venue, where the
-    // re-check runs in the same transaction as the minutes change.
+    // re-check runs in the same transaction as the minutes change. SCRUM-493:
+    // so does 036's.
     for (const { name, index } of ALL_UPDATES) {
       const span = functionSpan(SQL[name], FLAG_UPDATE[name].fn);
       expect(span, name).not.toBeNull();

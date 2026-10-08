@@ -107,8 +107,10 @@ const BLOCK_VS_BLOCK = {
  * of venue_occupancy_conflicts(). Only this exact predicate, only in
  * update_venue: any other strict comparison there is still an offender.
  *
- * 035 (latest update_venue) writes it exactly twice: once in the old-clash
- * set collected before the venues row is updated, once in the new set after.
+ * 035 writes it exactly twice: once in the old-clash set collected before
+ * the venues row is updated, once in the new set after. SCRUM-493: 036 is
+ * now the latest update_venue -- 035's body word for word plus the two
+ * safety-text fields -- so it still writes it exactly twice.
  * The count is pinned, so a third copy -- or a stray one elsewhere in the
  * body -- fails instead of being swallowed by the exception.
  */
@@ -142,9 +144,12 @@ describe('SCRUM484_AC4 no copy of the overlap rule in SQL', () => {
     }
     // And the raw helper is not.
     expect(LATEST.has('venue_block_booking_conflicts')).toBe(false);
-    // The scan replays every migration in the folder, so 035's update_venue
-    // (034's AC8 re-check, refined) is the definition read here.
-    expect(LATEST.get('update_venue')?.file).toBe('035_setup_change_recheck_refine.sql');
+    // The scan replays every migration in the folder, so the latest
+    // update_venue is the definition read here. Changed for SCRUM-493: 036
+    // redefines update_venue (035's body plus emergency_access and
+    // known_restrictions), so 036, not 035, is now the latest. Its re-check
+    // is 035's unchanged, and NOT_STARTED's count of 2 still holds exactly.
+    expect(LATEST.get('update_venue')?.file).toBe('036_venue_safety_facts.sql');
 
     const offenders = [];
     for (const [name, { file, body }] of LATEST) {

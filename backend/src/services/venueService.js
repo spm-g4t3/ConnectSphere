@@ -76,6 +76,7 @@ import { toBookingConflict } from './venueBlockService.js';
  */
 const VENUE_WITH_ATTRIBUTES_SELECT = `
       id, name, location, max_capacity, turnaround_minutes, setup_minutes,
+      emergency_access, known_restrictions,
       retired_at, created_at, updated_at, last_modified_by,
       venue_room_layouts ( room_layout_code ),
       venue_accessibility_features ( accessibility_feature_code ),
@@ -150,6 +151,9 @@ function translateError(error) {
  *                                            60, 90, 120; defaults to 0 (none)
  * @param {number} [input.setupMinutes]  SCRUM-137: one of 0, 15, 30, 45, 60,
  *                                       90, 120; defaults to 0 (none)
+ * @param {string|null} [input.emergencyAccess]    SCRUM-493: optional text, at
+ *                                                 most 2,000 characters
+ * @param {string|null} [input.knownRestrictions]  SCRUM-493: likewise
  * @param {string|null} userId  the Venue Staff member making the change
  * @returns {Promise<object>} the created venue, fully populated
  */
@@ -167,12 +171,39 @@ export async function createVenue(input, userId = null) {
     p_hours: venue.hours ?? [],
     p_turnaround_minutes: venue.turnaroundMinutes ?? DEFAULT_TURNAROUND_MINUTES,
     p_setup_minutes: venue.setupMinutes ?? DEFAULT_SETUP_MINUTES,
+    // SCRUM-493: null (left out, or blank) stores NULL, "not recorded".
+    p_emergency_access: venue.emergencyAccess ?? null,
+    p_known_restrictions: venue.knownRestrictions ?? null,
     p_user_id: userId,
   });
 
   if (error) throw translateError(error);
 
   return getVenueById(data);
+}
+
+/**
+ * SCRUM-493: one safety-text field of a validated update, as update_venue's
+ * parameter.
+ *
+ * update_venue (036) reads NULL as "keep the current value" and '' as "clear
+ * it", so the three states map as:
+ *
+ *   undefined (left out)      -> null  keep
+ *   null (sent null or blank) -> ''    clear, stored as NULL ("not recorded")
+ *   text                      -> text  store it
+ *
+ * Not `?? null` like the fields around it: ?? turns the clear (null) into
+ * null too, so clearing a field would silently keep the old text.
+ *
+ * @param {object} update  the output of validateUpdateVenue
+ * @param {string} field   'emergencyAccess' or 'knownRestrictions'
+ * @returns {string|null}
+ */
+function toSafetyTextParam(update, field) {
+  if (update[field] === undefined) return null;
+  if (update[field] === null) return '';
+  return update[field];
 }
 
 /**
@@ -186,6 +217,10 @@ export async function createVenue(input, userId = null) {
  * 0 sets it to none.
  *
  * SCRUM-137: so does setupMinutes.
+ *
+ * SCRUM-493: emergencyAccess and knownRestrictions -- omitted keeps them, and
+ * null or blank clears them (toSafetyTextParam). A change to only these
+ * fields never re-checks or flags bookings (AC6), so flaggedBookings is [].
  *
  * SCRUM-484 (AC8): when setup or turnaround really changes, update_venue
  * (034) re-checks the venue's approved, not-yet-started bookings in the same
@@ -218,6 +253,9 @@ export async function updateVenue(id, changes, userId = null) {
     // Same pitfall, same fix: ?? never ||, or setting setup back to 0 would
     // silently keep the old value.
     p_setup_minutes: update.setupMinutes ?? null,
+    // Not ?? null: a clear must reach the database as '', see toSafetyTextParam.
+    p_emergency_access: toSafetyTextParam(update, 'emergencyAccess'),
+    p_known_restrictions: toSafetyTextParam(update, 'knownRestrictions'),
     p_user_id: userId,
   });
 
@@ -235,6 +273,8 @@ export async function updateVenue(id, changes, userId = null) {
  *
  * SCRUM-186: includes turnaroundMinutes, which the edit form prefills from.
  * SCRUM-137: likewise setupMinutes.
+ * SCRUM-493: emergencyAccess and knownRestrictions, null when not recorded.
+ * A retired venue keeps and returns both (AC5).
  *
  * @param {string} id
  * @returns {Promise<object>}
@@ -275,6 +315,9 @@ function toVenueWithAttributes(data) {
     maxCapacity: data.max_capacity,
     turnaroundMinutes: data.turnaround_minutes,
     setupMinutes: data.setup_minutes,
+    // SCRUM-493: null means "not recorded" (AC2); blank is never stored (036).
+    emergencyAccess: data.emergency_access ?? null,
+    knownRestrictions: data.known_restrictions ?? null,
     retiredAt: data.retired_at,
     createdAt: data.created_at,
     updatedAt: data.updated_at,
