@@ -8,12 +8,21 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import VenueDetail from "../../src/components/VenueDetail.jsx";
-import { getVenueBookings, getVenueHistory } from "../../src/services/venueService";
+import {
+  getVenueBookings,
+  getVenueDetails,
+  getVenueHistory,
+} from "../../src/services/venueService";
 
+// SCRUM-493: VenueDetail also fetches getVenueDetails for its safety section.
+// The default (set in beforeEach) is a venue with neither fact recorded, so
+// the older tests run against the realistic state, not the section's error.
 vi.mock("../../src/services/venueService", () => ({
   getVenueBookings: vi.fn(),
+  getVenueDetails: vi.fn(),
   getVenueHistory: vi.fn(),
 }));
 
@@ -30,6 +39,12 @@ beforeEach(() => {
   vi.mocked(getVenueBookings).mockReset();
   vi.mocked(getVenueHistory).mockReset();
   vi.mocked(getVenueHistory).mockResolvedValue([]);
+  vi.mocked(getVenueDetails).mockReset();
+  vi.mocked(getVenueDetails).mockResolvedValue({
+    ...VENUE,
+    emergencyAccess: null,
+    knownRestrictions: null,
+  });
 });
 
 describe("SCRUM17 VenueDetail after the display helpers moved", () => {
@@ -253,5 +268,198 @@ describe("SCRUM20_SCRUM137 setup time in the change history", () => {
 
     expect(await screen.findByText("Venue created")).toBeInTheDocument();
     expect(screen.queryByText("Setup before events")).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM493 the Safety information section", () => {
+  /** The <dd> holding a fact's value, found from its <dt> label. */
+  function valueOf(label) {
+    const section = screen.getByRole("heading", { name: "Safety information" }).closest("section");
+    const dt = within(section).getByText(label, { selector: "dt" });
+    return dt.parentElement.querySelector("dd");
+  }
+
+  function detailsWith(fields) {
+    return { ...VENUE, ...fields };
+  }
+
+  beforeEach(() => {
+    vi.mocked(getVenueBookings).mockResolvedValue([]);
+  });
+
+  it("SCRUM493_AC1_shows_both_values_with_line_breaks_kept", async () => {
+    vi.mocked(getVenueDetails).mockResolvedValue(
+      detailsWith({
+        emergencyAccess: "Exit A via the east stairwell\nAssembly point: car park B",
+        knownRestrictions: "No open flames\nNo rigging from the ceiling",
+      }),
+    );
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Emergency access", { selector: "dt" });
+    expect(getVenueDetails).toHaveBeenCalledWith(VENUE.id);
+    expect(valueOf("Emergency access").textContent).toBe(
+      "Exit A via the east stairwell\nAssembly point: car park B",
+    );
+    expect(valueOf("Known restrictions").textContent).toBe(
+      "No open flames\nNo rigging from the ceiling",
+    );
+    expect(valueOf("Emergency access")).not.toHaveClass("venue-detail__not-recorded");
+    expect(valueOf("Known restrictions")).not.toHaveClass("venue-detail__not-recorded");
+  });
+
+  it.each([
+    ["null", { emergencyAccess: null, knownRestrictions: null }],
+    ["missing", {}],
+    ["blank", { emergencyAccess: "", knownRestrictions: "   \n  " }],
+  ])("SCRUM493_AC2_shows_not_recorded_muted_when_%s", async (_case, fields) => {
+    vi.mocked(getVenueDetails).mockResolvedValue(detailsWith(fields));
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Emergency access", { selector: "dt" });
+    for (const label of ["Emergency access", "Known restrictions"]) {
+      expect(valueOf(label)).toHaveTextContent("Not recorded");
+      expect(valueOf(label)).toHaveClass("venue-detail__not-recorded");
+    }
+  });
+
+  it("SCRUM493_AC2_entered_text_reading_not_recorded_is_not_muted", async () => {
+    vi.mocked(getVenueDetails).mockResolvedValue(
+      detailsWith({ emergencyAccess: "Not recorded", knownRestrictions: null }),
+    );
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Emergency access", { selector: "dt" });
+    expect(valueOf("Emergency access")).toHaveTextContent("Not recorded");
+    expect(valueOf("Emergency access")).not.toHaveClass("venue-detail__not-recorded");
+    expect(valueOf("Known restrictions")).toHaveClass("venue-detail__not-recorded");
+  });
+
+  it("SCRUM493_AC1_shows_loading_then_the_values", async () => {
+    let finish;
+    vi.mocked(getVenueDetails).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+
+    render(<VenueDetail venue={VENUE} />);
+
+    const section = screen.getByRole("heading", { name: "Safety information" }).closest("section");
+    expect(within(section).getByText("Loading...")).toBeInTheDocument();
+    expect(within(section).queryByText("Emergency access")).not.toBeInTheDocument();
+
+    finish(detailsWith({ emergencyAccess: "Exit A", knownRestrictions: null }));
+
+    expect(await within(section).findByText("Exit A")).toBeInTheDocument();
+    expect(within(section).queryByText("Loading...")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM493_AC1_an_error_shows_its_message_and_try_again_refetches", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails)
+      .mockRejectedValueOnce({ response: { status: 404 } })
+      .mockResolvedValueOnce(detailsWith({ emergencyAccess: "Exit A", knownRestrictions: null }));
+
+    render(<VenueDetail venue={VENUE} />);
+
+    const message = await screen.findByText(
+      "That venue no longer exists. Go back and refresh the catalogue.",
+    );
+    expect(message).toHaveAttribute("role", "alert");
+    expect(message).toHaveClass("venue-detail__error");
+
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("Exit A")).toBeInTheDocument();
+    expect(getVenueDetails).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByText("That venue no longer exists. Go back and refresh the catalogue."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM493_AC1_a_failure_here_does_not_blank_the_bookings", async () => {
+    vi.mocked(getVenueDetails).mockRejectedValue({ response: { status: 500 } });
+    vi.mocked(getVenueBookings).mockResolvedValue([BOOKING]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    expect(
+      await screen.findByText("The safety information could not be loaded. Please try again."),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("e1b2c3d4")).toBeInTheDocument();
+  });
+
+  it("SCRUM493_AC5_a_retired_venue_still_shows_its_values", async () => {
+    const retired = { ...VENUE, retiredAt: "2026-09-30T10:00:00+08:00" };
+    vi.mocked(getVenueDetails).mockResolvedValue({
+      ...retired,
+      emergencyAccess: "Exit A",
+      knownRestrictions: "No confetti",
+    });
+
+    render(<VenueDetail venue={retired} />);
+
+    await screen.findByText("Emergency access", { selector: "dt" });
+    expect(valueOf("Emergency access")).toHaveTextContent("Exit A");
+    expect(valueOf("Known restrictions")).toHaveTextContent("No confetti");
+  });
+});
+
+describe("SCRUM493 safety facts in the change history", () => {
+  const EDITOR = "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d";
+  const CHANGED_AT = "2026-10-07T08:15:00+08:00";
+
+  function historyEntry(oldValues, newValues) {
+    return { id: "h493", changedAt: CHANGED_AT, changedBy: EDITOR, oldValues, newValues };
+  }
+
+  /** The value span next to a history field label. */
+  function historyValueFor(label) {
+    const labelSpan = screen.getByText(label, { selector: "li > span" });
+    return labelSpan.closest("li").querySelector(".venue-history__value");
+  }
+
+  beforeEach(() => {
+    vi.mocked(getVenueBookings).mockResolvedValue([]);
+  });
+
+  it("SCRUM493_AC4_labels_both_fields_and_shows_not_recorded_to_text", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry(
+        { emergency_access: null, known_restrictions: null },
+        { emergency_access: "Exit A via the east stairwell", known_restrictions: "No confetti" },
+      ),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Exit A via the east stairwell", { exact: false });
+    expect(screen.queryByText("emergency_access")).not.toBeInTheDocument();
+    expect(screen.queryByText("known_restrictions")).not.toBeInTheDocument();
+    expect(historyValueFor("Emergency access")).toHaveTextContent(
+      "Not recorded → Exit A via the east stairwell",
+    );
+    expect(historyValueFor("Known restrictions")).toHaveTextContent("Not recorded → No confetti");
+    expect(historyValueFor("Emergency access")).not.toHaveTextContent("not set");
+  });
+
+  it("SCRUM493_AC4_shows_text_to_not_recorded_when_cleared", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry(
+        { emergency_access: "Exit A", known_restrictions: "No confetti" },
+        { emergency_access: null, known_restrictions: null },
+      ),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Exit A", { exact: false });
+    expect(historyValueFor("Emergency access")).toHaveTextContent("Exit A → Not recorded");
+    expect(historyValueFor("Known restrictions")).toHaveTextContent("No confetti → Not recorded");
   });
 });

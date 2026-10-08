@@ -18,8 +18,13 @@
 // SCRUM-137 (SCRUM-20) adds the setup time before an event the same way: its
 // own select (setupOptions.js), placed just before turnaround so the two read
 // in time order -- before the event, then after it.
+//
+// SCRUM-493 adds emergency access and known restrictions: two optional text
+// boxes after turnaround, labelled from SAFETY_FACTS (venueSafetyFacts.js) so
+// the details screen and the Safety Officer's view use the same words. Like
+// every other field, an edit sends them only when they changed.
 
-import { useCallback, useEffect, useId, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useState } from "react";
 import { createVenue, getVenueDetails, updateVenue } from "../services/venueService";
 import {
   ACCESSIBILITY_FEATURES,
@@ -34,6 +39,11 @@ import {
   turnaroundOptionsWith,
 } from "../services/turnaroundOptions";
 import { DEFAULT_SETUP_MINUTES, setupOptionsWith } from "../services/setupOptions";
+import {
+  SAFETY_FACTS,
+  SAFETY_TEXT_MAX_LENGTH,
+  codePointLength,
+} from "../services/venueSafetyFacts";
 
 // Keyed by status, like RETIRE_ERROR_MESSAGES and AuthContext's
 // LOGIN_ERROR_MESSAGES.
@@ -150,6 +160,9 @@ const EMPTY_FORM = {
   // A string because <select> values are strings; Number() at submit.
   turnaroundMinutes: String(DEFAULT_TURNAROUND_MINUTES),
   setupMinutes: String(DEFAULT_SETUP_MINUTES),
+  // SCRUM-493: "" in the box, whatever the server holds (null = not recorded).
+  emergencyAccess: "",
+  knownRestrictions: "",
 };
 
 /** One vocabulary's checkboxes, including any code this build has never met. */
@@ -182,6 +195,8 @@ export default function VenueForm({ venueId = null, onSaved }) {
   const isEdit = Boolean(venueId);
   const turnaroundHelpId = useId();
   const setupHelpId = useId();
+  // One base id for both safety boxes; each field's key is appended.
+  const safetyHelpId = useId();
 
   const [form, setForm] = useState(EMPTY_FORM);
 
@@ -224,6 +239,10 @@ export default function VenueForm({ venueId = null, onSaved }) {
         turnaroundMinutes: String(venue.turnaroundMinutes ?? DEFAULT_TURNAROUND_MINUTES),
         // Same `??` reasoning; a backend before 023 omits setupMinutes.
         setupMinutes: String(venue.setupMinutes ?? DEFAULT_SETUP_MINUTES),
+        // SCRUM-493: null means not recorded, and a backend before 036 omits
+        // the keys; both prefill an empty box.
+        emergencyAccess: venue.emergencyAccess ?? "",
+        knownRestrictions: venue.knownRestrictions ?? "",
       });
       setLoadError(null);
     } catch {
@@ -270,6 +289,11 @@ export default function VenueForm({ venueId = null, onSaved }) {
       // Always sent, even at the default, so what is saved is what was shown.
       turnaroundMinutes: Number(form.turnaroundMinutes),
       setupMinutes: Number(form.setupMinutes),
+      // SCRUM-493: an empty box is left out rather than sent as "", so the
+      // payload says only what was entered; the server stores not recorded
+      // either way.
+      emergencyAccess: form.emergencyAccess.trim() || undefined,
+      knownRestrictions: form.knownRestrictions.trim() || undefined,
     };
   }
 
@@ -327,6 +351,20 @@ export default function VenueForm({ venueId = null, onSaved }) {
     const setup = Number(form.setupMinutes);
     if (setup !== (baseline.setupMinutes ?? DEFAULT_SETUP_MINUTES)) {
       changes.setupMinutes = setup;
+    }
+
+    // SCRUM-493. Compared trimmed against the baseline, which the server has
+    // already trimmed, so whitespace typed into a field that is not recorded
+    // ("" vs "") sends nothing.
+    //
+    // A cleared box is sent as null, NOT left undefined. On PATCH a missing
+    // key means "keep the current value" (venueValidation checkSafetyText,
+    // venueService toSafetyTextParam), so `|| undefined` here would drop the
+    // key and the old text would survive a save that looked like it removed
+    // it. null is the API's "clear it".
+    for (const { key } of SAFETY_FACTS) {
+      const text = form[key].trim();
+      if (text !== (baseline[key] ?? "")) changes[key] = text === "" ? null : text;
     }
 
     return changes;
@@ -543,6 +581,51 @@ export default function VenueForm({ venueId = null, onSaved }) {
       <p className="venue-form__help" id={turnaroundHelpId}>
         Time Venue Staff need to reset the room after an event ends.
       </p>
+
+      {SAFETY_FACTS.map(({ key, label, help }) => {
+        const helpId = `${safetyHelpId}-${key}`;
+        const length = codePointLength(form[key]);
+        const overLimit = length > SAFETY_TEXT_MAX_LENGTH;
+        return (
+          // A Fragment, not a wrapper div, so the label stays a direct child
+          // of the form and keeps the `.venue-form > label` grid.
+          <Fragment key={key}>
+            <label>
+              {label}
+              {/*
+                No maxLength, for VenueBlockForm's notes reason: the browser
+                counts UTF-16 units, so an emoji would use up two of the 2,000
+                while the server counts it once. And no client check either,
+                as with capacity: the server's details[] already says
+                "must be 2000 characters or fewer" against this field. The
+                counter is the early warning.
+              */}
+              <textarea
+                value={form[key]}
+                onChange={(e) => updateField(key, e.target.value)}
+                rows={4}
+                disabled={saving}
+                aria-describedby={helpId}
+              />
+            </label>
+            {/* Help and counter in one described-by line, outside the label
+                like the setup and turnaround help, so neither becomes part of
+                the textarea's name. */}
+            <p className="venue-form__help" id={helpId}>
+              {help}{" "}
+              <span
+                className={
+                  overLimit
+                    ? "venue-form__counter venue-form__counter--over"
+                    : "venue-form__counter"
+                }
+              >
+                {length}/{SAFETY_TEXT_MAX_LENGTH}
+              </span>
+            </p>
+          </Fragment>
+        );
+      })}
 
       {saveError && (
         <p className="venue-form__error" role="alert">

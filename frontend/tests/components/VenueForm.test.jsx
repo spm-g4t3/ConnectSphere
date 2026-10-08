@@ -5,7 +5,7 @@
 // nothing touches the network.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import VenueForm from "../../src/components/VenueForm.jsx";
@@ -597,5 +597,181 @@ describe("SCRUM20_SCRUM137 VenueForm setup on edit", () => {
     expect(setupSelect()).toBeDisabled();
     finish({ id: VENUE_ID });
     await vi.waitFor(() => expect(setupSelect()).toBeEnabled());
+  });
+});
+
+// SCRUM-493. Emergency access and known restrictions: two optional textareas
+// with a code-point counter. Create leaves empty boxes out; edit sends only a
+// changed field, and null to clear a recorded one.
+describe("SCRUM493 VenueForm safety facts", () => {
+  const emergencyBox = () => screen.getByRole("textbox", { name: "Emergency access" });
+  const restrictionsBox = () => screen.getByRole("textbox", { name: "Known restrictions" });
+
+  /** The help line (and so the counter) the textarea is described by. */
+  function helpLineFor(textarea) {
+    const id = textarea.getAttribute("aria-describedby");
+    return document.getElementById(id);
+  }
+
+  async function renderEdit(overrides = {}) {
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue(overrides));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+  }
+
+  it("SCRUM493_AC1_create_sends_trimmed_text_for_both_fields", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.type(emergencyBox(), "  Exit A via the east stairwell  ");
+    await user.type(restrictionsBox(), " No open flames ");
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(createVenue).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(createVenue).mock.calls[0][0];
+    expect(payload.emergencyAccess).toBe("Exit A via the east stairwell");
+    expect(payload.knownRestrictions).toBe("No open flames");
+  });
+
+  it("SCRUM493_AC1_create_leaves_out_empty_and_whitespace_boxes", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.type(restrictionsBox(), "   ");
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const payload = vi.mocked(createVenue).mock.calls[0][0];
+    expect(payload.emergencyAccess).toBeUndefined();
+    expect(payload.knownRestrictions).toBeUndefined();
+    // Gone from the wire, not sent as "".
+    expect(JSON.parse(JSON.stringify(payload))).not.toHaveProperty("emergencyAccess");
+    expect(JSON.parse(JSON.stringify(payload))).not.toHaveProperty("knownRestrictions");
+  });
+
+  it("SCRUM493_AC1_edit_prefills_both_fields", async () => {
+    await renderEdit({
+      emergencyAccess: "Exit A\nExit B",
+      knownRestrictions: "No confetti",
+    });
+
+    expect(emergencyBox()).toHaveValue("Exit A\nExit B");
+    expect(restrictionsBox()).toHaveValue("No confetti");
+  });
+
+  it("SCRUM493_AC1_edit_prefills_empty_from_null_and_from_an_older_payload", async () => {
+    await renderEdit({ emergencyAccess: null });
+    expect(emergencyBox()).toHaveValue("");
+    // savedVenue() has no knownRestrictions key at all.
+    expect(restrictionsBox()).toHaveValue("");
+  });
+
+  it("SCRUM493_AC4_changing_only_emergency_access_sends_only_that_field", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A", knownRestrictions: "No confetti" });
+
+    await user.clear(emergencyBox());
+    await user.type(emergencyBox(), "  Exit B via the car park  ");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, {
+      emergencyAccess: "Exit B via the car park",
+    });
+  });
+
+  it("SCRUM493_AC4_clearing_a_recorded_field_sends_null", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A", knownRestrictions: "No confetti" });
+
+    await user.clear(restrictionsBox());
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { knownRestrictions: null });
+  });
+
+  it("SCRUM493_AC4_whitespace_in_an_unrecorded_field_is_nothing_changed", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: null, knownRestrictions: null });
+
+    await user.type(emergencyBox(), "   ");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nothing has changed, so there is nothing to save.",
+    );
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM493_AC1_the_counter_counts_code_points", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    const counter = () => helpLineFor(emergencyBox()).querySelector(".venue-form__counter");
+    expect(counter()).toHaveTextContent("0/2000");
+
+    await user.type(emergencyBox(), "Exit 🚪");
+    expect(emergencyBox().value.length).toBe(7);
+    expect(counter()).toHaveTextContent("6/2000");
+    expect(counter()).not.toHaveClass("venue-form__counter--over");
+  });
+
+  it("SCRUM493_AC1_the_counter_turns_over_only_above_2000", () => {
+    render(<VenueForm />);
+    const counter = () => helpLineFor(restrictionsBox()).querySelector(".venue-form__counter");
+
+    // 2,000 emoji: 4,000 UTF-16 units but exactly at the limit in code points.
+    fireEvent.change(restrictionsBox(), { target: { value: "🚪".repeat(2000) } });
+    expect(counter()).toHaveTextContent("2000/2000");
+    expect(counter()).not.toHaveClass("venue-form__counter--over");
+
+    fireEvent.change(restrictionsBox(), { target: { value: "a".repeat(2001) } });
+    expect(counter()).toHaveTextContent("2001/2000");
+    expect(counter()).toHaveClass("venue-form__counter", "venue-form__counter--over");
+  });
+
+  it("SCRUM493_AC1_server_400_emergency_access_detail_is_listed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createVenue).mockRejectedValue({
+      response: {
+        status: 400,
+        data: {
+          error: "Validation failed",
+          details: [{ field: "emergencyAccess", message: "must be 2000 characters or fewer" }],
+        },
+      },
+    });
+    render(<VenueForm />);
+
+    fireEvent.change(emergencyBox(), { target: { value: "a".repeat(2001) } });
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This venue can't be saved yet:");
+    expect(
+      within(alert).getByText("emergencyAccess: must be 2000 characters or fewer"),
+    ).toBeInTheDocument();
+  });
+
+  it("SCRUM493_AC1_each_textarea_is_described_by_its_help_line", () => {
+    render(<VenueForm />);
+
+    const emergency = emergencyBox();
+    const restrictions = restrictionsBox();
+    expect(emergency.tagName).toBe("TEXTAREA");
+    expect(restrictions.tagName).toBe("TEXTAREA");
+    expect(emergency.getAttribute("aria-describedby")).not.toBe(
+      restrictions.getAttribute("aria-describedby"),
+    );
+
+    const emergencyHelp = helpLineFor(emergency);
+    expect(emergencyHelp).toHaveClass("venue-form__help");
+    expect(emergencyHelp).toHaveTextContent("Exits, routes and assembly points.");
+    expect(emergency).toHaveAccessibleDescription("Exits, routes and assembly points. 0/2000");
+
+    const restrictionsHelp = helpLineFor(restrictions);
+    expect(restrictionsHelp).toHaveTextContent(
+      "Anything that limits how the venue can be used, such as limits on equipment, noise or structures.",
+    );
   });
 });

@@ -16,11 +16,19 @@
 //
 // SCRUM-137: setup_minutes (023) arrives the same way and is rendered with the
 // same formatter -- formatTurnaround formats any number of minutes.
+//
+// SCRUM-493 adds a "Safety information" section -- emergency access and known
+// restrictions -- above the bookings, and labels both columns in the history.
 
 import { useCallback, useEffect, useState } from "react";
-import { getVenueBookings, getVenueHistory } from "../services/venueService";
+import {
+  getVenueBookings,
+  getVenueDetails,
+  getVenueHistory,
+} from "../services/venueService";
 import { formatTimestamp, shortId } from "../services/displayFormat";
 import { formatTurnaround } from "../services/turnaroundOptions";
+import { SAFETY_FACTS, safetyFactText } from "../services/venueSafetyFacts";
 
 const BOOKINGS_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
@@ -34,6 +42,13 @@ const BOOKINGS_ERROR_MESSAGES = {
   // as a bare 500. Rendering that as "something went wrong" would send
   // somebody debugging a system that is working exactly as built.
   500: "Bookings are not available yet. The booking feature is still being built.",
+};
+
+const SAFETY_ERROR_MESSAGES = {
+  400: "That venue id was not recognised. Please go back and refresh.",
+  401: "Your session has expired. Please sign in again.",
+  404: "That venue no longer exists. Go back and refresh the catalogue.",
+  500: "The safety information could not be loaded. Please try again.",
 };
 
 const HISTORY_ERROR_MESSAGES = {
@@ -57,6 +72,8 @@ const HISTORY_FIELD_LABELS = {
   max_capacity: "Maximum capacity",
   turnaround_minutes: "Turnaround between events",
   setup_minutes: "Setup before events",
+  emergency_access: "Emergency access",
+  known_restrictions: "Known restrictions",
   retired_at: "Retired at",
   created_at: "Created at",
   room_layouts: "Room layouts",
@@ -114,9 +131,14 @@ function fmt(value) {
 
 // Per-field renderers, for a column whose raw value reads badly through fmt:
 // "30 minutes -> 1 hour", not "30 -> 60". A key not listed here uses fmt.
+//
+// SCRUM-493: the safety facts use safetyFactText, so a cleared field reads
+// "Not recorded" -- the words the details section uses -- not fmt's "not set".
 const HISTORY_VALUE_FORMATTERS = {
   turnaround_minutes: formatTurnaround,
   setup_minutes: formatTurnaround,
+  emergency_access: safetyFactText,
+  known_restrictions: safetyFactText,
 };
 
 /**
@@ -146,6 +168,15 @@ export default function VenueDetail({ venue }) {
   const [loadingBookings, setLoadingBookings] = useState(true);
   const [bookingsError, setBookingsError] = useState(null);
 
+  // SCRUM-493: a third fetcher, for the safety facts. The `venue` prop is the
+  // catalogue's list row, which does not select these columns, so the full
+  // venue comes from GET /venues/:id. Separate from the other two for the
+  // same reason they are separate from each other: a failure here must not
+  // blank the bookings or the history.
+  const [details, setDetails] = useState(null);
+  const [loadingDetails, setLoadingDetails] = useState(true);
+  const [detailsError, setDetailsError] = useState(null);
+
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [historyError, setHistoryError] = useState(null);
@@ -163,6 +194,27 @@ export default function VenueDetail({ venue }) {
       setLoadingBookings(false);
     }
   }, [venueId]);
+
+  const fetchDetails = useCallback(async () => {
+    try {
+      setDetails(await getVenueDetails(venueId));
+      setDetailsError(null);
+    } catch (err) {
+      setDetailsError(
+        SAFETY_ERROR_MESSAGES[err.response?.status] ||
+          "Could not load this venue's safety information. Please try again.",
+      );
+    } finally {
+      setLoadingDetails(false);
+    }
+  }, [venueId]);
+
+  /** "Try again": back to Loading... so a second failure is visibly a new one. */
+  function retryDetails() {
+    setDetailsError(null);
+    setLoadingDetails(true);
+    fetchDetails();
+  }
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -183,6 +235,10 @@ export default function VenueDetail({ venue }) {
   }, [fetchBookings]);
 
   useEffect(() => {
+    fetchDetails();
+  }, [fetchDetails]);
+
+  useEffect(() => {
     fetchHistory();
   }, [fetchHistory]);
 
@@ -191,6 +247,45 @@ export default function VenueDetail({ venue }) {
       <h2>
         {venue.name} &mdash; {venue.location}
       </h2>
+
+      <section>
+        <h3>Safety information</h3>
+        {/* No filter on retirement: a retired venue keeps its safety facts
+            (SCRUM-493 AC5), and this shows them like everything else here. */}
+
+        {loadingDetails && <p>Loading...</p>}
+        {detailsError && (
+          <>
+            <p className="venue-detail__error" role="alert">
+              {detailsError}
+            </p>
+            <button type="button" onClick={retryDetails}>
+              Try again
+            </button>
+          </>
+        )}
+
+        {!loadingDetails && !detailsError && details && (
+          <dl className="venue-detail__safety">
+            {SAFETY_FACTS.map(({ key, label }) => {
+              // Muted, so "Not recorded" cannot be mistaken for text someone
+              // typed. Decided from the value, not by comparing the rendered
+              // string, so a venue whose notes literally say "Not recorded"
+              // still reads as entered text.
+              const value = details[key];
+              const recorded = typeof value === "string" && value.trim() !== "";
+              return (
+                <div key={key}>
+                  <dt>{label}</dt>
+                  <dd className={recorded ? undefined : "venue-detail__not-recorded"}>
+                    {safetyFactText(value)}
+                  </dd>
+                </div>
+              );
+            })}
+          </dl>
+        )}
+      </section>
 
       <section>
         <h3>Bookings</h3>
