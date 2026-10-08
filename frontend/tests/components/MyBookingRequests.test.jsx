@@ -15,7 +15,7 @@ import { MemoryRouter } from "react-router-dom";
 
 import MyBookingRequests from "../../src/components/MyBookingRequests.jsx";
 import { getMyBookingRequests, withdrawBookingRequest } from "../../src/services/bookingRequestService";
-import { formatRange } from "../../src/services/displayFormat.js";
+import { formatRange, formatTimestamp } from "../../src/services/displayFormat.js";
 
 vi.mock("../../src/services/bookingRequestService", () => ({
   getMyBookingRequests: vi.fn(),
@@ -217,6 +217,66 @@ describe("statuses and details", () => {
     vi.mocked(getMyBookingRequests).mockResolvedValue([item("6", "flagged_for_review")]);
     renderList();
     expect(await screen.findByText("Flagged for review. It needs to be resolved.")).toBeInTheDocument();
+  });
+
+  // SCRUM-484 (AC8). A setup or turnaround change stores a review reason on
+  // the booking it flags; the flag line names it. Any other flag reads as
+  // before.
+  it("SCRUM484_AC8_a_setup_change_flag_names_its_reason", async () => {
+    const flaggedAt = "2026-10-05T09:00:00Z";
+    vi.mocked(getMyBookingRequests).mockResolvedValue([
+      item("6", "flagged_for_review", { flaggedAt, reviewReason: "setup_or_turnaround_changed" }),
+    ]);
+    renderList();
+    await screen.findByText("Event 6");
+
+    const flag = rowFor("Event 6").querySelector(".my-booking-requests__flag");
+    expect(flag.textContent).toBe(
+      `Flagged for review on ${formatTimestamp(flaggedAt)} (Setup or turnaround time changed). It needs to be resolved.`,
+    );
+  });
+
+  it("SCRUM484_AC8_a_setup_change_flag_with_no_flag_time_still_names_its_reason", async () => {
+    vi.mocked(getMyBookingRequests).mockResolvedValue([
+      item("6", "flagged_for_review", { reviewReason: "setup_or_turnaround_changed" }),
+    ]);
+    renderList();
+    expect(
+      await screen.findByText(
+        "Flagged for review (Setup or turnaround time changed). It needs to be resolved.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    ["null", null],
+    ["missing", undefined],
+    ["an unknown code", "flood"],
+  ])("SCRUM484_AC8_a_flag_with_a_%s_reason_reads_exactly_as_before", async (_label, reviewReason) => {
+    const flaggedAt = "2026-10-05T09:00:00Z";
+    vi.mocked(getMyBookingRequests).mockResolvedValue([
+      item("6", "flagged_for_review", { flaggedAt, reviewReason }),
+      item("7", "flagged_for_review", { reviewReason }),
+    ]);
+    renderList();
+    await screen.findByText("Event 6");
+
+    expect(rowFor("Event 6").querySelector(".my-booking-requests__flag").textContent).toBe(
+      `Flagged for review on ${formatTimestamp(flaggedAt)}. It needs to be resolved.`,
+    );
+    expect(rowFor("Event 7").querySelector(".my-booking-requests__flag").textContent).toBe(
+      "Flagged for review. It needs to be resolved.",
+    );
+    expect(rowFor("Event 6")).not.toHaveTextContent("flood");
+  });
+
+  it("SCRUM484_AC8_a_review_reason_on_an_unflagged_booking_shows_nothing", async () => {
+    vi.mocked(getMyBookingRequests).mockResolvedValue([
+      item("2", "approved", { reviewReason: "setup_or_turnaround_changed" }),
+    ]);
+    renderList();
+    await screen.findByText("Event 2");
+    expect(within(rowFor("Event 2")).queryByText(/Setup or turnaround time changed/)).not.toBeInTheDocument();
   });
 
   it("SCRUM255_shows_setup_notes_and_an_overridden_suitability_check", async () => {

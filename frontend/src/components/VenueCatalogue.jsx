@@ -23,6 +23,8 @@ import { getVenueCatalogue, retireVenue } from "../services/venueService";
 import VenueForm from "./VenueForm";
 import VenueDetail from "./VenueDetail";
 import VenueBlocksPanel from "./VenueBlocksPanel";
+import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
+import { flaggedBookingsHeading } from "../services/flaggedBookingDisplay";
 
 // Keyed by status, the same shape as AuthContext's LOGIN_ERROR_MESSAGES.
 //
@@ -65,6 +67,12 @@ export default function VenueCatalogue({ currentUserId } = {}) {
   // introduce the first.
   const [activePanel, setActivePanel] = useState(null);
 
+  // SCRUM-484 (AC8). The bookings the last save flagged for review, because a
+  // new setup or turnaround time made them overlap. Kept until dismissed or
+  // replaced by the next save, so it survives the refetch and stays readable
+  // after the form closes. Empty means no notice.
+  const [flaggedBookings, setFlaggedBookings] = useState([]);
+
   const fetchVenues = useCallback(async () => {
     setLoadingVenues(true);
     try {
@@ -89,8 +97,16 @@ export default function VenueCatalogue({ currentUserId } = {}) {
   // Close the panel, then refetch. Refetch rather than splice for the same
   // reason handleRetire does it: create and update both answer with
   // getVenueById's fat shape while these rows are the flat five-field one.
-  function handleSaved() {
+  //
+  // An update also answers with flaggedBookings (AC8). A save that flagged
+  // some replaces the notice; one that flagged none leaves the old notice as
+  // it was, since it carries no news either way. Called with no argument by
+  // the blocks panel's Back button, which leaves it alone as well.
+  function handleSaved(saved) {
     setActivePanel(null);
+    if (Array.isArray(saved?.flaggedBookings) && saved.flaggedBookings.length > 0) {
+      setFlaggedBookings(saved.flaggedBookings);
+    }
     fetchVenues();
   }
 
@@ -188,6 +204,27 @@ export default function VenueCatalogue({ currentUserId } = {}) {
   return (
     <section>
       <h2>Venue catalogue</h2>
+
+      {/* A status region on the catalogue itself, not a modal or a page of
+          its own: the coordinators have already been notified, so there is
+          nothing to decide here, only something to know. */}
+      {flaggedBookings.length > 0 && (
+        <div className="venue-catalogue__flagged" role="status">
+          <h3>{flaggedBookingsHeading(flaggedBookings.length)}</h3>
+          <ul className="venue-catalogue__flagged-list">
+            {flaggedBookings.map((booking, i) => (
+              <li key={booking.bookingId ?? i}>
+                <strong>{booking.eventName || "Unnamed event"}</strong>
+                <span>{formatOccupiedPeriod(booking)}</span>
+              </li>
+            ))}
+          </ul>
+          <p>Each event&apos;s assigned coordinator has been notified.</p>
+          <button type="button" onClick={() => setFlaggedBookings([])}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {loadingVenues && <p>Loading...</p>}
       {venuesError && (

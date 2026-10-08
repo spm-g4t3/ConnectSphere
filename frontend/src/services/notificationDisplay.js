@@ -5,14 +5,21 @@
 // wording is testable without rendering, the same split as
 // eventRequestStatusDisplay.js.
 //
-// The payload is the snapshot 014_booking_review_notifications.sql writes:
-// { venueName, eventName, startsAt, endsAt, reason, blockStartsAt,
-//   blockEndsAt }. Every field is read defensively -- a notification outlives
-// the build that wrote it, and a missing name should read as "Unknown venue",
-// not as "undefined".
+// Each type's payload is a snapshot its migration writes:
+//   booking_flagged (014): { venueName, eventName, startsAt, endsAt, reason,
+//     blockStartsAt, blockEndsAt }
+//   booking_request_withdrawn (031): { eventRequestId, eventName, venueId,
+//     venueName, startsAt, endsAt }
+//   booking_flagged_setup_change (034, SCRUM-484): { venueName, eventName,
+//     startsAt, endsAt, occupiedStartsAt, occupiedEndsAt, setupMinutes,
+//     turnaroundMinutes, reason }
+// Every field is read defensively -- a notification outlives the build that
+// wrote it, and a missing name should read as "Unknown venue", not as
+// "undefined".
 
 import { formatRange } from "./displayFormat";
 import { reasonLabel } from "./venueBlockReasons";
+import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
 
 /**
  * A notification as a headline and a detail line.
@@ -33,6 +40,40 @@ export function describeNotification(notification) {
       detail:
         `Booked ${formatRange(payload.startsAt, payload.endsAt)}. ` +
         `The venue is blocked for ${reason}, ${formatRange(payload.blockStartsAt, payload.blockEndsAt)}.`,
+    };
+  }
+
+  // SCRUM-484 (AC8). The same headline as booking_flagged: to the reader it
+  // is the same thing, a booking that needs review. The detail gives the
+  // period the booking now holds the venue for, with its setup and
+  // turnaround parts, since that is what changed. payload.reason is the
+  // backend's own sentence for the cause and is not repeated here.
+  if (notification?.type === "booking_flagged_setup_change") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+    const period = formatOccupiedPeriod({
+      startsAt: payload.startsAt,
+      endsAt: payload.endsAt,
+      occupiedStartsAt: payload.occupiedStartsAt,
+      occupiedEndsAt: payload.occupiedEndsAt,
+    });
+
+    return {
+      headline: `${eventName} at ${venueName} needs review`,
+      detail: `Setup or turnaround time changed. It now occupies ${period}.`,
+    };
+  }
+
+  // 031. Sent to Venue Staff when a coordinator withdraws a pending request.
+  if (notification?.type === "booking_request_withdrawn") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+
+    return {
+      headline: `The request for ${eventName} at ${venueName} was withdrawn`,
+      detail:
+        `It was for ${formatRange(payload.startsAt, payload.endsAt)}. ` +
+        "It no longer needs a decision.",
     };
   }
 

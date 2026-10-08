@@ -231,6 +231,40 @@ describe("SCRUM17_AC3 rows", () => {
     expect(within(row).getByRole("button", { name: "Mark as read" })).toBeInTheDocument();
   });
 
+  it("SCRUM484_AC8_coordinator_sees_the_setup_change_notification", async () => {
+    // SCRUM-484 (AC8). The payload 034 writes; no blockId, since no block
+    // caused it.
+    const setupChange = notification({
+      id: "7c9e6679-7425-40de-944b-e07fc1f90af0",
+      type: "booking_flagged_setup_change",
+      blockId: null,
+      payload: {
+        venueName: "Harbour Room",
+        eventName: "Orientation",
+        startsAt: "2026-11-02T10:00:00+08:00",
+        endsAt: "2026-11-02T12:00:00+08:00",
+        occupiedStartsAt: "2026-11-02T09:30:00+08:00",
+        occupiedEndsAt: "2026-11-02T12:15:00+08:00",
+        setupMinutes: 30,
+        turnaroundMinutes: 15,
+        reason: "The venue's setup or turnaround time changed.",
+      },
+    });
+    vi.mocked(listNotifications).mockResolvedValue([setupChange, UNREAD]);
+
+    render(<CoordinatorNotifications />);
+
+    const { headline, detail } = describeNotification(setupChange);
+    expect(headline).toBe("Orientation at Harbour Room needs review");
+    const row = (await screen.findByText(headline)).closest("li");
+    expect(within(row).getByText(detail)).toBeInTheDocument();
+    expect(detail).toMatch(/^Setup or turnaround time changed\. It now occupies /);
+    expect(within(row).getByRole("button", { name: "Mark as read" })).toBeInTheDocument();
+    expect(screen.queryByText("New notification")).not.toBeInTheDocument();
+    // The block notification beside it is unaffected.
+    expect(screen.getByText("Tech Talk at Hall A needs review")).toBeInTheDocument();
+  });
+
   it("SCRUM17_AC3_keeps_the_backend_order", async () => {
     // Deliberately not sorted by createdAt: the card must not re-sort.
     vi.mocked(listNotifications).mockResolvedValue([READ, UNREAD, UNREAD_2]);
