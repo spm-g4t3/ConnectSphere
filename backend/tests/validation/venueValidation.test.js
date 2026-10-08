@@ -19,6 +19,7 @@ import {
   validateSearchFilters,
   validateEventSearchCriteria,
   SAFETY_TEXT_MAX_LENGTH,
+  SAFETY_TEXT_BLANK_PATTERN,
 } from '../../src/validation/venueValidation.js';
 import { ValidationError } from '../../src/errors.js';
 
@@ -1407,5 +1408,168 @@ describe('SCRUM493 emergency access and known restrictions', () => {
     expect(
       validateCreateVenue({ ...VALID, emergencyAccess: 'Exit A', knownRestrictions: null }),
     ).toMatchObject({ ...VALID, emergencyAccess: 'Exit A', knownRestrictions: null });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-493 review fixes: invisible-only text is blank (AC2), and characters
+// Postgres cannot store (U+0000, unpaired UTF-16 surrogates) are refused as a
+// field error rather than reaching the database as a 500 (AC1).
+// ---------------------------------------------------------------------------
+describe('SCRUM493 invisible-only text and unsupported characters', () => {
+  const SAFETY_FIELDS = ['emergencyAccess', 'knownRestrictions'];
+  const UNSUPPORTED = 'must not contain unsupported characters';
+  const MODES = [
+    ['create', (field, value) => validateCreateVenue({ ...VALID, [field]: value })],
+    ['update', (field, value) => validateUpdateVenue({ [field]: value })],
+  ];
+  const CASES = MODES.flatMap(([mode, run]) => SAFETY_FIELDS.map((field) => [mode, field, run]));
+
+  /** The characters that draw nothing, each named for a readable failure. */
+  const INVISIBLES = [
+    ['U+200B zero width space', '​'],
+    ['U+2060 word joiner', '⁠'],
+    ['U+FEFF byte order mark', '﻿'],
+    ['U+00AD soft hyphen', '­'],
+    ['U+180E mongolian vowel separator', '᠎'],
+    ['U+2800 braille blank', '⠀'],
+    ['U+3164 hangul filler', 'ㅤ'],
+    ['U+115F hangul choseong filler', 'ᅟ'],
+    ['U+1160 hangul jungseong filler', 'ᅠ'],
+    ['U+FFA0 halfwidth hangul filler', 'ﾠ'],
+  ];
+
+  it('SCRUM493_AC2_SAFETY_TEXT_BLANK_PATTERN_is_exported_and_matches_every_invisible', () => {
+    expect(SAFETY_TEXT_BLANK_PATTERN).toBeInstanceOf(RegExp);
+    expect(SAFETY_TEXT_BLANK_PATTERN.flags).toContain('u');
+    for (const [label, ch] of INVISIBLES) {
+      expect(SAFETY_TEXT_BLANK_PATTERN.test(ch), label).toBe(true);
+      expect(SAFETY_TEXT_BLANK_PATTERN.test(` ${ch}\n${ch}\t`), label).toBe(true);
+    }
+    expect(SAFETY_TEXT_BLANK_PATTERN.test(INVISIBLES.map(([, ch]) => ch).join(''))).toBe(true);
+    expect(SAFETY_TEXT_BLANK_PATTERN.test('')).toBe(true);
+    expect(SAFETY_TEXT_BLANK_PATTERN.test(' \r\n\t')).toBe(true);
+  });
+
+  it('SCRUM493_AC2_SAFETY_TEXT_BLANK_PATTERN_does_not_match_a_visible_character', () => {
+    for (const text of ['a', '​a', 'a​', '.', '\u{1F6AA}', 'ㅤx', '\u0000', '\uD800']) {
+      expect(SAFETY_TEXT_BLANK_PATTERN.test(text), JSON.stringify(text)).toBe(false);
+    }
+  });
+
+  it.each(CASES)('SCRUM493_AC2_%s_%s_each_invisible_alone_becomes_null', (_mode, field, run) => {
+    for (const [label, ch] of INVISIBLES) {
+      expect(run(field, ch), label).toHaveProperty(field, null);
+      expect(run(field, ch.repeat(3)), label).toHaveProperty(field, null);
+    }
+  });
+
+  it.each(CASES)('SCRUM493_AC2_%s_%s_each_invisible_mixed_with_spaces_becomes_null', (_mode, field, run) => {
+    for (const [label, ch] of INVISIBLES) {
+      expect(run(field, ` ${ch} ${ch} `), label).toHaveProperty(field, null);
+      expect(run(field, `\t${ch} `), label).toHaveProperty(field, null);
+    }
+  });
+
+  it.each(CASES)('SCRUM493_AC2_%s_%s_each_invisible_mixed_with_newlines_becomes_null', (_mode, field, run) => {
+    for (const [label, ch] of INVISIBLES) {
+      expect(run(field, `\n${ch}\r\n${ch}\n`), label).toHaveProperty(field, null);
+    }
+  });
+
+  it.each(CASES)('SCRUM493_AC2_%s_%s_all_invisibles_together_become_null', (_mode, field, run) => {
+    const all = INVISIBLES.map(([, ch]) => ch).join(' \n');
+    expect(run(field, all)).toHaveProperty(field, null);
+  });
+
+  it.each(CASES)('SCRUM493_AC1_%s_%s_visible_text_keeps_its_invisibles_trimmed_only_by_js_trim', (_mode, field, run) => {
+    for (const [label, ch] of INVISIBLES) {
+      const value = `  ${ch}Exit${ch} A${ch}  `;
+      expect(run(field, value), label).toHaveProperty(field, value.trim());
+    }
+    // trim() strips U+FEFF (it is whitespace to ECMAScript) but not U+200B.
+    expect(run(field, '﻿Exit A﻿')).toHaveProperty(field, 'Exit A');
+    expect(run(field, '​Exit A​')).toHaveProperty(field, '​Exit A​');
+    expect(run(field, ' ⠀\n.\n')).toHaveProperty(field, '⠀\n.');
+  });
+
+  it.each(CASES)('SCRUM493_AC1_%s_%s_U+0000_anywhere_is_refused', (_mode, field, run) => {
+    for (const value of ['\u0000', 'a\u0000b', '\u0000Exit A', 'Exit A\u0000', '  \u0000  ', '​\u0000', '\u0000\u0000']) {
+      const err = errorFrom(() => run(field, value));
+      expect(err, JSON.stringify(value)).toBeInstanceOf(ValidationError);
+      expect(err.details).toEqual([{ field, message: UNSUPPORTED }]);
+    }
+  });
+
+  it.each(CASES)('SCRUM493_AC1_%s_%s_an_unpaired_surrogate_is_refused', (_mode, field, run) => {
+    const values = [
+      ['lone high', '\uD800'],
+      ['lone low', '\uDC00'],
+      ['high inside', 'Exit\uD83DA'],
+      ['low inside', 'Exit\uDEAAA'],
+      ['high at start', '\uDBFFExit A'],
+      ['high at end', 'Exit A\uD83D'],
+      ['low at start', '\uDFFFExit A'],
+      ['low at end', 'Exit A\uDC00'],
+      ['reversed pair', 'Exit \uDEAA\uD83D'],
+      ['high beside an invisible', '​\uD800'],
+    ];
+    for (const [label, value] of values) {
+      const err = errorFrom(() => run(field, value));
+      expect(err, label).toBeInstanceOf(ValidationError);
+      expect(err.details, label).toEqual([{ field, message: UNSUPPORTED }]);
+    }
+  });
+
+  it.each(CASES)('SCRUM493_AC1_%s_%s_a_valid_emoji_surrogate_pair_is_accepted', (_mode, field, run) => {
+    const door = '🚪'; // U+1F6AA DOOR
+    expect(door).toBe('\u{1F6AA}');
+    expect(run(field, `${door} Exit A ${door}`)).toHaveProperty(field, `${door} Exit A ${door}`);
+    expect(run(field, door)).toHaveProperty(field, door);
+    expect(run(field, '\u{10FFFF}\u{10000}')).toHaveProperty(field, '\u{10FFFF}\u{10000}');
+  });
+
+  it.each(CASES)('SCRUM493_AC1_%s_%s_unsupported_beats_the_length_check', (_mode, field, run) => {
+    // One problem per field: the character, not the length.
+    const err = errorFrom(() => run(field, `${'x'.repeat(2001)}\u0000`));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field, message: UNSUPPORTED }]);
+  });
+
+  it('SCRUM493_AC1_create_reports_unsupported_characters_alongside_other_errors', () => {
+    const err = errorFrom(() =>
+      validateCreateVenue({
+        ...VALID,
+        name: '',
+        emergencyAccess: 'a\u0000b',
+        knownRestrictions: 'Exit\uD800',
+      }),
+    );
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toEqual(expect.arrayContaining(['name', 'emergencyAccess', 'knownRestrictions']));
+    expect(err.details).toEqual(
+      expect.arrayContaining([
+        { field: 'emergencyAccess', message: UNSUPPORTED },
+        { field: 'knownRestrictions', message: UNSUPPORTED },
+      ]),
+    );
+  });
+
+  it('SCRUM493_AC1_update_reports_unsupported_characters_alongside_other_errors', () => {
+    const err = errorFrom(() =>
+      validateUpdateVenue({
+        maxCapacity: -1,
+        emergencyAccess: 'x'.repeat(2001),
+        knownRestrictions: '\uDC00',
+      }),
+    );
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toEqual(expect.arrayContaining(['maxCapacity', 'emergencyAccess', 'knownRestrictions']));
+    expect(err.details).toEqual(
+      expect.arrayContaining([
+        { field: 'emergencyAccess', message: 'must be 2000 characters or fewer' },
+        { field: 'knownRestrictions', message: UNSUPPORTED },
+      ]),
+    );
   });
 });

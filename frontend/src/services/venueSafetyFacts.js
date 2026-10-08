@@ -32,18 +32,43 @@ export function codePointLength(text) {
 export const NOT_RECORDED = "Not recorded";
 
 /**
+ * Text with nothing a reader can see: whitespace plus format characters
+ * (\p{Cf}: zero-width space and joiners, BOM, bidi marks) and the blank
+ * "letters" that render as empty space (Braille blank U+2800, Hangul fillers
+ * U+3164, U+115F, U+1160, U+FFA0). The same regex as the backend's in
+ * backend/src/validation/venueValidation.js, so the screens and the server
+ * agree on what counts as "nothing recorded". Keep the two in step.
+ */
+const INVISIBLE_ONLY = /^[\s\p{Cf}\u2800\u3164\u115F\u1160\uFFA0]*$/u;
+
+/**
+ * True only for a string that, after trim(), contains a visible character.
+ * null, undefined, non-strings, "" and whitespace-or-invisible-only text are
+ * all "not recorded".
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isRecordedText(value) {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  return trimmed !== "" && !INVISIBLE_ONLY.test(trimmed);
+}
+
+/**
  * A safety fact as it should read on screen: the text, or NOT_RECORDED.
  *
  * The API sends null when nothing is recorded (036 never stores blank), but a
- * backend before 036 omits the key and a hand edit could leave whitespace, so
- * all three read as "Not recorded" rather than as an empty line that looks
- * like the screen failed to load.
+ * backend before 036 omits the key and a hand edit could leave whitespace or
+ * invisible characters (isRecordedText), so all of these read as "Not
+ * recorded" rather than as an empty line that looks like the screen failed to
+ * load.
  *
  * @param {string|null|undefined} value
  * @returns {string}
  */
 export function safetyFactText(value) {
-  if (typeof value !== "string" || value.trim() === "") return NOT_RECORDED;
+  if (!isRecordedText(value)) return NOT_RECORDED;
   return value;
 }
 

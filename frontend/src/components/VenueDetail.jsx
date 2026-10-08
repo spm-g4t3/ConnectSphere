@@ -23,7 +23,7 @@
 // Safety Officer's review will use; the loading, error and retry states stay
 // here.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import {
   getVenueBookings,
   getVenueDetails,
@@ -161,6 +161,10 @@ function fmtField(key, value) {
 }
 
 export default function VenueDetail({ venue }) {
+  // Names the "Safety information" section by its h3, so the page has exactly
+  // one region of that name. VenueSafetyFacts inside it, given no venueName,
+  // is a plain div and does not repeat it.
+  const safetyHeadingId = useId();
   const venueId = venue.id;
 
   // Two fetchers, two error states, two loading flags -- on purpose. History
@@ -252,8 +256,8 @@ export default function VenueDetail({ venue }) {
         {venue.name} &mdash; {venue.location}
       </h2>
 
-      <section>
-        <h3>Safety information</h3>
+      <section aria-labelledby={safetyHeadingId}>
+        <h3 id={safetyHeadingId}>Safety information</h3>
         {/* No filter on retirement: a retired venue keeps its safety facts
             (SCRUM-493 AC5), and this shows them like everything else here. */}
 

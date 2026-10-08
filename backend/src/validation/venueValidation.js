@@ -63,6 +63,33 @@ const ATTRIBUTE_FIELDS = ['layouts', 'accessibility', 'facilities'];
 export const SAFETY_TEXT_MAX_LENGTH = 2000;
 const SAFETY_TEXT_FIELDS = ['emergencyAccess', 'knownRestrictions'];
 
+/**
+ * SCRUM-493 (AC2): text with no visible character counts as blank.
+ *
+ * Matches a string made only of whitespace and invisible format or filler
+ * characters: \p{Cf} (U+200B-U+200F, U+2060, U+FEFF, U+00AD, U+180E among
+ * them) plus the Braille blank U+2800 and the Hangul fillers U+3164, U+115F,
+ * U+1160 and U+FFA0, which are letters or symbols to Unicode but draw nothing.
+ * AC2 must let the Safety Officer tell a missing entry from a recorded one, so
+ * a paste of only invisible characters is stored as null and reads "Not
+ * recorded" rather than as an entry that looks empty.
+ *
+ * Exported so the frontend can mirror it. The database CHECK in
+ * 036_venue_safety_facts.sql is not widened to match: a direct SQL write can
+ * still store such text, an accepted and recorded limit.
+ */
+export const SAFETY_TEXT_BLANK_PATTERN = /^[\s\p{Cf}⠀ㅤᅟᅠﾠ]*$/u;
+
+/**
+ * SCRUM-493: an unpaired UTF-16 surrogate, a high one with no low after it or
+ * a low one with no high before it. Together with U+0000 these are the
+ * characters Postgres refuses: text cannot hold NUL, and PostgREST's JSON cast
+ * rejects both. Left to the database they come back as a 500 through
+ * venueService.translateError, so they are refused here as a field error.
+ */
+const UNPAIRED_SURROGATE_PATTERN =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
 /** 'HH:MM' -> 'HH:MM:SS', so two times are always compared in the same shape. */
 function withSeconds(time) {
   return time.length === 5 ? `${time}:00` : time;
@@ -264,7 +291,8 @@ function checkSetup(errors, value) {
 
 /**
  * SCRUM-493 (AC1): emergency access or known restrictions -- optional text,
- * trimmed, blank becomes null, at most SAFETY_TEXT_MAX_LENGTH characters.
+ * trimmed, blank (including invisible-only) becomes null, no character
+ * Postgres refuses, at most SAFETY_TEXT_MAX_LENGTH characters.
  *
  * The same shape as venueBlockValidation.js checkNotes. Only called when the
  * field was supplied. Unlike setup and turnaround, null is accepted: it
@@ -287,8 +315,17 @@ function checkSafetyText(errors, field, value) {
     return null;
   }
 
+  // Blank includes invisible-only text (SAFETY_TEXT_BLANK_PATTERN). Text with
+  // a visible character is kept exactly as trimmed, invisible ones and all.
   const trimmed = value.trim();
-  if (trimmed === '') return null;
+  if (SAFETY_TEXT_BLANK_PATTERN.test(trimmed)) return null;
+
+  // Before the length check: a character Postgres cannot store is the
+  // problem to report, whatever the length.
+  if (trimmed.includes('\u0000') || UNPAIRED_SURROGATE_PATTERN.test(trimmed)) {
+    errors.add(field, 'must not contain unsupported characters');
+    return null;
+  }
 
   if (Array.from(trimmed).length > SAFETY_TEXT_MAX_LENGTH) {
     errors.add(field, `must be ${SAFETY_TEXT_MAX_LENGTH} characters or fewer`);

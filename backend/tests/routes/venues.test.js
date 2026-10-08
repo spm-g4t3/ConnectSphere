@@ -2907,4 +2907,61 @@ describe('SCRUM493 emergency access and known restrictions through the venue rou
     expect(res.body.knownRestrictions).toBeNull();
     expect(res.body).not.toHaveProperty('emergency_access');
   });
+
+  // G-05 (B-AC3-01). The read SCRUM-490's review will use has no role gate
+  // today. If SCRUM-490 adds one, this fails on purpose and is updated with
+  // that story, so the gate is a visible decision.
+  it.each(Object.entries(ROLE))('SCRUM493_AC3_GET_by_id_returns_both_fields_to_every_signed_in_role (%s)', async (_label, role) => {
+    from.mockReturnValueOnce(queryStub(ok(venueRow({
+      emergency_access: EXITS,
+      known_restrictions: 'No rigging from the ceiling.',
+    }))));
+
+    const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(`/api/venues/${VENUE_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(VENUE_ID);
+    expect(res.body.emergencyAccess).toBe(EXITS);
+    expect(res.body.knownRestrictions).toBe('No rigging from the ceiling.');
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM493_AC3_GET_by_id_signed_out_answers_401', async () => {
+    const res = await request(appWith(signedOut)).get(`/api/venues/${VENUE_ID}`);
+
+    expect(res.status).toBe(401);
+    expect(res.body).not.toHaveProperty('emergencyAccess');
+    expect(res.body).not.toHaveProperty('knownRestrictions');
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM493_AC1_PATCH_with_a_NUL_character_answers_400_with_no_rpc', async () => {
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .set('Content-Type', 'application/json')
+      .send('{"emergencyAccess":"a\\u0000b"}');
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([
+      { field: 'emergencyAccess', message: 'must not contain unsupported characters' },
+    ]);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM493_AC2_PATCH_with_only_a_zero_width_space_sends_a_clear', async () => {
+    rpc.mockResolvedValueOnce(ok({ flagged_bookings: [] }));
+    from.mockReturnValueOnce(queryStub(ok(venueRow({ emergency_access: null }))));
+
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ emergencyAccess: '\u200B' });
+
+    expect(res.status).toBe(200);
+    const payload = rpc.mock.calls[0][1];
+    expect(payload.p_emergency_access).toBe('');
+    expect(payload.p_known_restrictions).toBeNull();
+    expect(res.body.emergencyAccess).toBeNull();
+  });
 });

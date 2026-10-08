@@ -316,6 +316,7 @@ describe("SCRUM493 the Safety information section", () => {
     ["null", { emergencyAccess: null, knownRestrictions: null }],
     ["missing", {}],
     ["blank", { emergencyAccess: "", knownRestrictions: "   \n  " }],
+    ["invisible-only", { emergencyAccess: "\u200B\uFEFF", knownRestrictions: " \u3164 " }],
   ])("SCRUM493_AC2_shows_not_recorded_muted_when_%s", async (_case, fields) => {
     vi.mocked(getVenueDetails).mockResolvedValue(detailsWith(fields));
 
@@ -326,6 +327,25 @@ describe("SCRUM493 the Safety information section", () => {
       expect(valueOf(label)).toHaveTextContent("Not recorded");
       expect(valueOf(label)).toHaveClass("venue-safety-facts__not-recorded");
     }
+  });
+
+  // Review fix: the section is labelled by its h3, and VenueSafetyFacts
+  // inside it (no venueName) is a plain div, so the page has exactly one
+  // region of that name.
+  it("SCRUM493_AC3_the_page_has_exactly_one_region_named_safety_information", async () => {
+    vi.mocked(getVenueDetails).mockResolvedValue(
+      detailsWith({ emergencyAccess: "Exit A", knownRestrictions: "No confetti" }),
+    );
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Emergency access", { selector: "dt" });
+    const regions = screen.getAllByRole("region", { name: "Safety information" });
+    expect(regions).toHaveLength(1);
+    const heading = screen.getByRole("heading", { name: "Safety information" });
+    expect(regions[0]).toHaveAttribute("aria-labelledby", heading.id);
+    expect(regions[0]).toContainElement(heading);
+    expect(within(regions[0]).queryAllByRole("region")).toHaveLength(0);
   });
 
   it("SCRUM493_AC2_entered_text_reading_not_recorded_is_not_muted", async () => {

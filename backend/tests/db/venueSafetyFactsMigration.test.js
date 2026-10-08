@@ -267,3 +267,17 @@ describe('SCRUM-493 (036): PostgREST is told to reload', () => {
   });
 });
 
+
+// The operator warning lives only in a comment, so it is read from the raw
+// file (SQL above strips comments). A weak, text-only pin: it keeps the
+// warning from being dropped, not from being wrong.
+describe('SCRUM493 036 header warns against re-running 035 or 034', () => {
+  const RAW = readFileSync(resolve(MIGRATIONS_DIR, '036_venue_safety_facts.sql'), 'utf8');
+  const HEADER = RAW.slice(0, RAW.search(/^[^-\n]/m)).replace(/--\s?/g, '').replace(/\s+/g, ' ');
+
+  it('SCRUM493_AC1_header_names_the_re_run_hazard_and_its_repair', () => {
+    expect(HEADER).toContain('OPERATOR WARNING: never re-run 035 (or 034) after this file.');
+    expect(HEADER).toContain('PGRST203');
+    expect(HEADER).toContain('To repair, re-run this file');
+  });
+});

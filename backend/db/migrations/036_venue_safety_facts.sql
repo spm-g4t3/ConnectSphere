@@ -12,6 +12,13 @@
 -- again, and both functions are dropped by their exact old signature before
 -- being recreated.
 --
+-- OPERATOR WARNING: never re-run 035 (or 034) after this file. Both
+-- `create or replace` the old 11-argument update_venue, which would sit
+-- beside this file's version as a second overload, and PostgREST then
+-- refuses every venue update with PGRST203 (it cannot choose between them).
+-- To repair, re-run this file: it drops the old signature by name and
+-- recreates the current one.
+--
 -- What it serves:
 --   AC1  "Only Venue Staff can add or change these two fields, on the
 --        venue's create and edit screens: Emergency access, free text of up

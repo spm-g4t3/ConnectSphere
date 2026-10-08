@@ -391,6 +391,26 @@ describe('SCRUM-493: emergency access and known restrictions (036)', () => {
       await db.query('update venues set emergency_access = $2 where id = $1', [id, ' Exit A ']);
       expect((await facts(id)).emergency_access).toBe(' Exit A ');
     });
+
+    it('SCRUM493_AC1_a_direct_nbsp_only_write_is_stored_known_limit', async () => {
+      // Known, accepted limit, pinned as a PASSING test so a change in PGlite
+      // or Postgres behaviour is noticed. U+00A0 (non-breaking space) is not
+      // in [[:space:]], so the CHECK sees a non-whitespace character and a
+      // direct SQL write of only U+00A0 is stored -- a "recorded" value that
+      // shows blank. The API path cannot produce it: validation trims with
+      // String.prototype.trim(), which does strip U+00A0, so the value reaches
+      // the database as null. That is proved in
+      // tests/validation/venueValidation.test.js ::
+      // SCRUM493_AC1_%s_%s_trims_a_non_breaking_space.
+      const nbsp = '  ';
+      const id = await makeVenue();
+      await db.query('update venues set emergency_access = $2 where id = $1', [id, nbsp]);
+      await db.query('update venues set known_restrictions = $2 where id = $1', [id, nbsp]);
+
+      const stored = await facts(id);
+      expect(stored.emergency_access).toBe(nbsp);
+      expect(stored.known_restrictions).toBe(nbsp);
+    });
   });
 
 

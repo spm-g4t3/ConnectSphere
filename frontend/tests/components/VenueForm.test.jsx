@@ -703,6 +703,43 @@ describe("SCRUM493 VenueForm safety facts", () => {
     expect(updateVenue).not.toHaveBeenCalled();
   });
 
+  // G-03 (F-AC4-05). The older name-only tests start from a savedVenue() with
+  // no safety facts; this one starts from both recorded, so it proves a
+  // recorded fact is not re-sent when another field changes.
+  it("SCRUM493_AC4_changing_only_the_name_sends_neither_safety_field", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A", knownRestrictions: "No confetti" });
+
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "Hall B");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { name: "Hall B" });
+    const [, changes] = vi.mocked(updateVenue).mock.calls[0];
+    expect(Object.keys(changes)).toEqual(["name"]);
+  });
+
+  // G-04 (F-AC4-04). The trimmed comparison against a recorded baseline, not
+  // just an empty one: surrounding spaces and a trailing newline are no change.
+  it("SCRUM493_AC4_recorded_text_with_added_surrounding_space_is_nothing_changed", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A", knownRestrictions: "No confetti" });
+
+    await user.clear(emergencyBox());
+    await user.type(emergencyBox(), "  Exit A  {Enter}");
+    await user.type(restrictionsBox(), "{Enter}");
+    expect(emergencyBox()).toHaveValue("  Exit A  \n");
+    expect(restrictionsBox()).toHaveValue("No confetti\n");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nothing has changed, so there is nothing to save.",
+    );
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
   it("SCRUM493_AC1_the_counter_counts_code_points", async () => {
     const user = userEvent.setup();
     render(<VenueForm />);
@@ -749,7 +786,7 @@ describe("SCRUM493 VenueForm safety facts", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("This venue can't be saved yet:");
     expect(
-      within(alert).getByText("emergencyAccess: must be 2000 characters or fewer"),
+      within(alert).getByText("Emergency access: must be 2000 characters or fewer"),
     ).toBeInTheDocument();
   });
 
@@ -773,5 +810,158 @@ describe("SCRUM493 VenueForm safety facts", () => {
     expect(restrictionsHelp).toHaveTextContent(
       "Anything that limits how the venue can be used, such as limits on equipment, noise or structures.",
     );
+  });
+
+  // Review fix: the baseline is trimmed too, not trusted to be. A row stored
+  // with padding (before the server trimmed, or a hand edit) is no change
+  // when the box is left alone.
+  it("SCRUM493_AC4_stored_value_with_surrounding_whitespace_untouched_is_nothing_changed", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "  Exit A  \n", knownRestrictions: "\tNo confetti " });
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nothing has changed, so there is nothing to save.",
+    );
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM493_AC4_stored_padded_values_are_not_resent_on_a_name_only_edit", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "  Exit A  \n", knownRestrictions: "\tNo confetti " });
+
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "Hall B");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    const [, changes] = vi.mocked(updateVenue).mock.calls[0];
+    expect(changes).toEqual({ name: "Hall B" });
+  });
+
+  // Review fix: the textarea reports LF after an edit while the stored text
+  // may hold CRLF, so an edit reverted to the same lines is no change.
+  it("SCRUM493_AC4_stored_crlf_value_edited_then_reverted_sends_nothing", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A\r\nExit B", knownRestrictions: "No confetti" });
+
+    fireEvent.change(emergencyBox(), { target: { value: "Exit A\nExit C" } });
+    fireEvent.change(emergencyBox(), { target: { value: "Exit A\nExit B" } });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nothing has changed, so there is nothing to save.",
+    );
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM493_AC4_stored_crlf_value_with_a_real_edit_sends_the_new_text", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A\r\nExit B", knownRestrictions: "No confetti" });
+
+    fireEvent.change(emergencyBox(), { target: { value: "Exit A\nExit C" } });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { emergencyAccess: "Exit A\nExit C" });
+  });
+
+  // Review fix: a box with nothing visible in it counts as empty.
+  it("SCRUM493_AC4_invisible_only_box_clears_a_recorded_field", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A", knownRestrictions: "No confetti" });
+
+    fireEvent.change(emergencyBox(), { target: { value: " ​⁠ ﻿ " } });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { emergencyAccess: null });
+  });
+
+  it("SCRUM493_AC4_invisible_only_box_in_an_unrecorded_field_is_nothing_changed", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A", knownRestrictions: null });
+
+    fireEvent.change(restrictionsBox(), { target: { value: "ㅤ ⠀" } });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nothing has changed, so there is nothing to save.",
+    );
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM493_AC1_create_leaves_out_invisible_only_boxes", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    fireEvent.change(emergencyBox(), { target: { value: "​​" } });
+    fireEvent.change(restrictionsBox(), { target: { value: " ­\nᅟᅠﾠ " } });
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(createVenue).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(JSON.stringify(vi.mocked(createVenue).mock.calls[0][0]));
+    expect(payload).not.toHaveProperty("emergencyAccess");
+    expect(payload).not.toHaveProperty("knownRestrictions");
+  });
+
+  // Review fix: the counter counts what the server checks (trimmed), so
+  // trailing whitespace cannot turn it red for text that will be accepted.
+  it("SCRUM493_AC1_the_counter_ignores_trailing_whitespace", () => {
+    render(<VenueForm />);
+    const counter = () => helpLineFor(emergencyBox()).querySelector(".venue-form__counter");
+
+    fireEvent.change(emergencyBox(), { target: { value: "a".repeat(1995) + "\n".repeat(10) } });
+    expect(emergencyBox().value).toHaveLength(2005);
+    expect(counter()).toHaveTextContent("1995/2000");
+    expect(counter()).not.toHaveClass("venue-form__counter--over");
+  });
+
+  it("SCRUM493_AC1_server_400_marks_the_named_textarea_aria_invalid_only", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createVenue).mockRejectedValue({
+      response: {
+        status: 400,
+        data: {
+          error: "Validation failed",
+          details: [{ field: "emergencyAccess", message: "must be 2000 characters or fewer" }],
+        },
+      },
+    });
+    render(<VenueForm />);
+
+    expect(emergencyBox()).not.toHaveAttribute("aria-invalid");
+    fireEvent.change(emergencyBox(), { target: { value: "a".repeat(2001) } });
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    await screen.findByRole("alert");
+    expect(emergencyBox()).toHaveAttribute("aria-invalid", "true");
+    expect(restrictionsBox()).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("SCRUM493_AC1_server_400_other_fields_keep_their_raw_name", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createVenue).mockRejectedValue({
+      response: {
+        status: 400,
+        data: {
+          error: "Validation failed",
+          details: [
+            { field: "maxCapacity", message: "must be a positive integer" },
+            { field: "knownRestrictions", message: "must be a string" },
+          ],
+        },
+      },
+    });
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("maxCapacity: must be a positive integer")).toBeInTheDocument();
+    expect(within(alert).getByText("Known restrictions: must be a string")).toBeInTheDocument();
+    expect(restrictionsBox()).toHaveAttribute("aria-invalid", "true");
+    expect(emergencyBox()).not.toHaveAttribute("aria-invalid");
   });
 });
