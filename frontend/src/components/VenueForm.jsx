@@ -18,8 +18,13 @@
 // SCRUM-137 (SCRUM-20) adds the setup time before an event the same way: its
 // own select (setupOptions.js), placed just before turnaround so the two read
 // in time order -- before the event, then after it.
+//
+// SCRUM-493 adds emergency access and known restrictions: two optional text
+// boxes after turnaround, labelled from SAFETY_FACTS (venueSafetyFacts.js) so
+// the details screen and the Safety Officer's view use the same words. Like
+// every other field, an edit sends them only when they changed.
 
-import { useCallback, useEffect, useId, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useState } from "react";
 import { createVenue, getVenueDetails, updateVenue } from "../services/venueService";
 import {
   ACCESSIBILITY_FEATURES,
@@ -34,6 +39,44 @@ import {
   turnaroundOptionsWith,
 } from "../services/turnaroundOptions";
 import { DEFAULT_SETUP_MINUTES, setupOptionsWith } from "../services/setupOptions";
+import {
+  SAFETY_FACTS,
+  SAFETY_TEXT_MAX_LENGTH,
+  codePointLength,
+  isRecordedText,
+} from "../services/venueSafetyFacts";
+
+/**
+ * SCRUM-493. CRLF and lone CR as LF. A textarea reports its line breaks as LF
+ * once edited, while the stored text may hold CRLF (an import, an API
+ * client), so comparing the raw strings would see a change in a box nobody
+ * touched.
+ */
+function normaliseLineBreaks(text) {
+  return String(text ?? "").replace(/\r\n?/g, "\n");
+}
+
+/**
+ * SCRUM-493. A safety box's text as the server will keep it: trimmed, and ""
+ * when nothing in it is visible (isRecordedText, the server's own test), so a
+ * box holding only whitespace or zero-width characters counts as empty.
+ */
+function safetyTextToSave(raw) {
+  const text = String(raw ?? "").trim();
+  return isRecordedText(text) ? text : "";
+}
+
+/**
+ * SCRUM-493. A server detail's field as the form shows it. The two safety
+ * facts read by their visible label from SAFETY_FACTS ("Emergency access",
+ * not "emergencyAccess"), so the fault names the box the user can see. Every
+ * other field keeps its existing wording, the raw field name.
+ */
+const SAFETY_LABELS = Object.fromEntries(SAFETY_FACTS.map(({ key, label }) => [key, label]));
+
+function detailFieldName(field) {
+  return Object.hasOwn(SAFETY_LABELS, field) ? SAFETY_LABELS[field] : field;
+}
 
 // Keyed by status, like RETIRE_ERROR_MESSAGES and AuthContext's
 // LOGIN_ERROR_MESSAGES.
@@ -150,6 +193,9 @@ const EMPTY_FORM = {
   // A string because <select> values are strings; Number() at submit.
   turnaroundMinutes: String(DEFAULT_TURNAROUND_MINUTES),
   setupMinutes: String(DEFAULT_SETUP_MINUTES),
+  // SCRUM-493: "" in the box, whatever the server holds (null = not recorded).
+  emergencyAccess: "",
+  knownRestrictions: "",
 };
 
 /** One vocabulary's checkboxes, including any code this build has never met. */
@@ -182,6 +228,8 @@ export default function VenueForm({ venueId = null, onSaved }) {
   const isEdit = Boolean(venueId);
   const turnaroundHelpId = useId();
   const setupHelpId = useId();
+  // One base id for both safety boxes; each field's key is appended.
+  const safetyHelpId = useId();
 
   const [form, setForm] = useState(EMPTY_FORM);
 
@@ -224,6 +272,10 @@ export default function VenueForm({ venueId = null, onSaved }) {
         turnaroundMinutes: String(venue.turnaroundMinutes ?? DEFAULT_TURNAROUND_MINUTES),
         // Same `??` reasoning; a backend before 023 omits setupMinutes.
         setupMinutes: String(venue.setupMinutes ?? DEFAULT_SETUP_MINUTES),
+        // SCRUM-493: null means not recorded, and a backend before 036 omits
+        // the keys; both prefill an empty box.
+        emergencyAccess: venue.emergencyAccess ?? "",
+        knownRestrictions: venue.knownRestrictions ?? "",
       });
       setLoadError(null);
     } catch {
@@ -270,6 +322,12 @@ export default function VenueForm({ venueId = null, onSaved }) {
       // Always sent, even at the default, so what is saved is what was shown.
       turnaroundMinutes: Number(form.turnaroundMinutes),
       setupMinutes: Number(form.setupMinutes),
+      // SCRUM-493: an empty box -- including one with nothing visible in it
+      // (safetyTextToSave) -- is left out rather than sent as "", so the
+      // payload says only what was entered; the server stores not recorded
+      // either way.
+      emergencyAccess: safetyTextToSave(form.emergencyAccess) || undefined,
+      knownRestrictions: safetyTextToSave(form.knownRestrictions) || undefined,
     };
   }
 
@@ -327,6 +385,30 @@ export default function VenueForm({ venueId = null, onSaved }) {
     const setup = Number(form.setupMinutes);
     if (setup !== (baseline.setupMinutes ?? DEFAULT_SETUP_MINUTES)) {
       changes.setupMinutes = setup;
+    }
+
+    // SCRUM-493. Send a safety fact only when it really changed:
+    //   - both sides trimmed. The baseline is trimmed too, not trusted to be:
+    //     a row stored before the server trimmed (or edited by hand) would
+    //     otherwise differ by its padding alone;
+    //   - both sides LF-normalised (normaliseLineBreaks), because the
+    //     textarea reports LF after an edit while the stored text may hold
+    //     CRLF. What is sent is still the trimmed form text;
+    //   - a box with nothing visible in it (safetyTextToSave) counts as
+    //     empty, on either side: it clears a recorded field, and sends
+    //     nothing when the field was already unrecorded.
+    //
+    // A cleared box is sent as null, NOT left undefined. On PATCH a missing
+    // key means "keep the current value" (venueValidation checkSafetyText,
+    // venueService toSafetyTextParam), so `|| undefined` here would drop the
+    // key and the old text would survive a save that looked like it removed
+    // it. null is the API's "clear it".
+    for (const { key } of SAFETY_FACTS) {
+      const text = safetyTextToSave(form[key]);
+      const before = safetyTextToSave(baseline[key]);
+      if (normaliseLineBreaks(text) !== normaliseLineBreaks(before)) {
+        changes[key] = text === "" ? null : text;
+      }
     }
 
     return changes;
@@ -544,6 +626,59 @@ export default function VenueForm({ venueId = null, onSaved }) {
         Time Venue Staff need to reset the room after an event ends.
       </p>
 
+      {SAFETY_FACTS.map(({ key, label, help }) => {
+        const helpId = `${safetyHelpId}-${key}`;
+        // Counts what the server will check: trimmed, LF-normalised, in code
+        // points. So trailing whitespace the server strips, or a CRLF it
+        // would count once as LF after an edit, cannot turn the counter red
+        // for text that will be accepted.
+        const length = codePointLength(normaliseLineBreaks(form[key].trim()));
+        // A server detail naming this box marks it invalid, so a screen
+        // reader hears the fault on the field itself, not only in the list.
+        const invalid = saveDetails.some((err) => err.field === key);
+        const overLimit = length > SAFETY_TEXT_MAX_LENGTH;
+        return (
+          // A Fragment, not a wrapper div, so the label stays a direct child
+          // of the form and keeps the `.venue-form > label` grid.
+          <Fragment key={key}>
+            <label>
+              {label}
+              {/*
+                No maxLength, for VenueBlockForm's notes reason: the browser
+                counts UTF-16 units, so an emoji would use up two of the 2,000
+                while the server counts it once. And no client check either,
+                as with capacity: the server's details[] already says
+                "must be 2000 characters or fewer" against this field. The
+                counter is the early warning.
+              */}
+              <textarea
+                value={form[key]}
+                onChange={(e) => updateField(key, e.target.value)}
+                rows={4}
+                disabled={saving}
+                aria-describedby={helpId}
+                aria-invalid={invalid ? "true" : undefined}
+              />
+            </label>
+            {/* Help and counter in one described-by line, outside the label
+                like the setup and turnaround help, so neither becomes part of
+                the textarea's name. */}
+            <p className="venue-form__help" id={helpId}>
+              {help}{" "}
+              <span
+                className={
+                  overLimit
+                    ? "venue-form__counter venue-form__counter--over"
+                    : "venue-form__counter"
+                }
+              >
+                {length}/{SAFETY_TEXT_MAX_LENGTH}
+              </span>
+            </p>
+          </Fragment>
+        );
+      })}
+
       {saveError && (
         <p className="venue-form__error" role="alert">
           {saveError}
@@ -556,7 +691,7 @@ export default function VenueForm({ venueId = null, onSaved }) {
           <ul>
             {saveDetails.map((err, i) => (
               <li key={i}>
-                {err.field ? `${err.field}: ` : ""}
+                {err.field ? `${detailFieldName(err.field)}: ` : ""}
                 {err.message}
               </li>
             ))}

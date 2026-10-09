@@ -18,6 +18,9 @@
  * SCRUM-137 (SCRUM-20) adds the setup time before an event, checked the same
  * way against its own list (domain/setupOptions.js).
  *
+ * SCRUM-493 (AC1) adds emergencyAccess and knownRestrictions, optional free
+ * text of up to SAFETY_TEXT_MAX_LENGTH characters each (checkSafetyText).
+ *
  * SCRUM-185 (SCRUM-178 AC1) adds includeRetired to the search filters, so a
  * retired venue's calendar can be reached from search.
  *
@@ -50,6 +53,42 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ATTRIBUTE_FIELDS = ['layouts', 'accessibility', 'facilities'];
+
+/**
+ * SCRUM-493: the two venue safety facts, optional free text.
+ *
+ * SAFETY_TEXT_MAX_LENGTH mirrors venues_emergency_access_length and
+ * venues_known_restrictions_length in 036_venue_safety_facts.sql.
+ */
+export const SAFETY_TEXT_MAX_LENGTH = 2000;
+const SAFETY_TEXT_FIELDS = ['emergencyAccess', 'knownRestrictions'];
+
+/**
+ * SCRUM-493 (AC2): text with no visible character counts as blank.
+ *
+ * Matches a string made only of whitespace and invisible format or filler
+ * characters: \p{Cf} (U+200B-U+200F, U+2060, U+FEFF, U+00AD, U+180E among
+ * them) plus the Braille blank U+2800 and the Hangul fillers U+3164, U+115F,
+ * U+1160 and U+FFA0, which are letters or symbols to Unicode but draw nothing.
+ * AC2 must let the Safety Officer tell a missing entry from a recorded one, so
+ * a paste of only invisible characters is stored as null and reads "Not
+ * recorded" rather than as an entry that looks empty.
+ *
+ * Exported so the frontend can mirror it. The database CHECK in
+ * 036_venue_safety_facts.sql is not widened to match: a direct SQL write can
+ * still store such text, an accepted and recorded limit.
+ */
+export const SAFETY_TEXT_BLANK_PATTERN = /^[\s\p{Cf}⠀ㅤᅟᅠﾠ]*$/u;
+
+/**
+ * SCRUM-493: an unpaired UTF-16 surrogate, a high one with no low after it or
+ * a low one with no high before it. Together with U+0000 these are the
+ * characters Postgres refuses: text cannot hold NUL, and PostgREST's JSON cast
+ * rejects both. Left to the database they come back as a 500 through
+ * venueService.translateError, so they are refused here as a field error.
+ */
+const UNPAIRED_SURROGATE_PATTERN =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 /** 'HH:MM' -> 'HH:MM:SS', so two times are always compared in the same shape. */
 function withSeconds(time) {
@@ -250,6 +289,51 @@ function checkSetup(errors, value) {
   return value;
 }
 
+/**
+ * SCRUM-493 (AC1): emergency access or known restrictions -- optional text,
+ * trimmed, blank (including invisible-only) becomes null, no character
+ * Postgres refuses, at most SAFETY_TEXT_MAX_LENGTH characters.
+ *
+ * The same shape as venueBlockValidation.js checkNotes. Only called when the
+ * field was supplied. Unlike setup and turnaround, null is accepted: it
+ * means "nothing recorded" (AC2), so on an update null and a blank string
+ * both normalise to null, which the service sends as a clear.
+ *
+ * Length is counted in code points (Array.from), not UTF-16 units
+ * (String.length), because that is what Postgres char_length() counts. With
+ * .length an emoji counts twice, so 1,001 emoji would be refused here while
+ * the column happily stores them.
+ *
+ * @returns {string|null} the trimmed text, or null for "not recorded" (and
+ *          when the value was refused)
+ */
+function checkSafetyText(errors, field, value) {
+  if (value === null) return null;
+
+  if (typeof value !== 'string') {
+    errors.add(field, 'must be text');
+    return null;
+  }
+
+  // Blank includes invisible-only text (SAFETY_TEXT_BLANK_PATTERN). Text with
+  // a visible character is kept exactly as trimmed, invisible ones and all.
+  const trimmed = value.trim();
+  if (SAFETY_TEXT_BLANK_PATTERN.test(trimmed)) return null;
+
+  // Before the length check: a character Postgres cannot store is the
+  // problem to report, whatever the length.
+  if (trimmed.includes('\u0000') || UNPAIRED_SURROGATE_PATTERN.test(trimmed)) {
+    errors.add(field, 'must not contain unsupported characters');
+    return null;
+  }
+
+  if (Array.from(trimmed).length > SAFETY_TEXT_MAX_LENGTH) {
+    errors.add(field, `must be ${SAFETY_TEXT_MAX_LENGTH} characters or fewer`);
+  }
+
+  return trimmed;
+}
+
 
 /**
  * Validate input for creating a venue.
@@ -286,6 +370,13 @@ export function validateCreateVenue(input) {
 
   if (input.setupMinutes !== undefined) {
     normalised.setupMinutes = checkSetup(errors, input.setupMinutes);
+  }
+
+  // SCRUM-493: optional; null or blank means nothing recorded.
+  for (const field of SAFETY_TEXT_FIELDS) {
+    if (input[field] !== undefined) {
+      normalised[field] = checkSafetyText(errors, field, input[field]);
+    }
   }
 
   throwIfInvalid(errors);
@@ -352,6 +443,17 @@ export function validateUpdateVenue(changes) {
   // value is not undefined -- so no field list there needs updating.
   if (changes.setupMinutes !== undefined) {
     normalised.setupMinutes = checkSetup(errors, changes.setupMinutes);
+  }
+
+  // SCRUM-493: supplied means changed. null or blank normalises to null,
+  // which here means "clear it" (the service sends it as ''), so the key is
+  // kept even when its value is null. {knownRestrictions: null} on its own is
+  // therefore a change: the "no changes supplied" count above looks at keys
+  // whose value is not undefined, and null is not undefined.
+  for (const field of SAFETY_TEXT_FIELDS) {
+    if (changes[field] !== undefined) {
+      normalised[field] = checkSafetyText(errors, field, changes[field]);
+    }
   }
 
   throwIfInvalid(errors);

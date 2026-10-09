@@ -42,6 +42,13 @@
  * Adapted: the not-started filter now appears twice in 035's update_venue
  * (the old set and the new set), so NOT_STARTED names an exact count per
  * function, and 035 gets the same describe block as 034.
+ *
+ * SCRUM-493 adds 036, which redefines update_venue once more: 035's body word
+ * for word, plus the two safety-text parameters and SET lines. It updates
+ * venues, not bookings, but it carries 035's re-check, which still flags
+ * bookings, so it is in the list and both rules apply. Adapted as for 035:
+ * its not-started filter is counted (twice), and it gets the same describe
+ * block.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -59,19 +66,22 @@ const MIGRATIONS = [
   '033_venue_occupancy_callers.sql',
   '034_setup_change_recheck.sql',
   '035_setup_change_recheck_refine.sql',
+  '036_venue_safety_facts.sql',
 ];
 
 /**
  * SCRUM-484 (AC8): the one booking-period comparison that is not an overlap
  * -- update_venue's "event has not started" filter. Only this exact text,
  * only in these functions, and exactly this many times in each: once in
- * 034's update_venue, twice in 035's (the old-clash set and the new set).
+ * 034's update_venue, twice in 035's (the old-clash set and the new set),
+ * and twice in 036's (SCRUM-493: 035's re-check copied unchanged).
  */
 const NOT_STARTED = {
   text: 'b.starts_at > now()',
   counts: {
     '034_setup_change_recheck.sql:update_venue': 1,
     '035_setup_change_recheck_refine.sql:update_venue': 2,
+    '036_venue_safety_facts.sql:update_venue': 2,
   },
 };
 
@@ -163,6 +173,7 @@ describe('SCRUM17_AC3 booking-period predicates in the block migrations', () => 
     // SCRUM-484 (AC8): 034's update_venue contributes only the named
     // not-started filter, exactly once; its overlap is 032's. 035's
     // contributes it exactly twice (old set and new set), and nothing else.
+    // SCRUM-493: so does 036's, which copies 035's re-check unchanged.
     const notStarted = {};
     for (const p of ALL_PREDICATES.filter(isNotStarted)) {
       const key = `${p.name}:${p.fn}`;
@@ -236,7 +247,12 @@ describe('SCRUM484 the block functions in 033 keep both rules through the shared
 
 // SCRUM-484 (AC8): the same two checks for 034's update_venue and for 035's,
 // which replaces it (old-clash set before the update, new set after).
-for (const file of ['034_setup_change_recheck.sql', '035_setup_change_recheck_refine.sql']) {
+// SCRUM-493: and for 036's, which carries 035's re-check word for word.
+for (const file of [
+  '034_setup_change_recheck.sql',
+  '035_setup_change_recheck_refine.sql',
+  '036_venue_safety_facts.sql',
+]) {
   const expectedNotStarted = NOT_STARTED.counts[`${file}:update_venue`];
 
   describe(`SCRUM484 the AC8 re-check in ${file.slice(0, 3)} keeps both rules through the shared function`, () => {

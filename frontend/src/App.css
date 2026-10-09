@@ -153,6 +153,28 @@ button { cursor: pointer; }
    bug SCRUM-110 fixed at :24-30. Scoped to .venue-form so the catalogue's
    own rows keep the spread layout they want. */
 .dashboard--venue-staff .venue-form li { border-top: 0; display: block; padding: 4px 0; }
+/* SCRUM-493. The safety-fact boxes. They are the form's only textareas, so
+   they get the block form's control look here rather than a new shared rule.
+   The help line under each carries the code-point counter, which turns red
+   past 2,000 -- the server refuses at that point, so staff see it before
+   they save rather than after. */
+.dashboard--venue-staff .venue-form textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; resize: vertical; }
+.dashboard--venue-staff .venue-form__counter { white-space: nowrap; }
+.dashboard--venue-staff .venue-form__counter--over { color: #a43c32; font-weight: 700; }
+/* SCRUM-493. VenueSafetyFacts: label then value, the .decision-outcome shape.
+   Values keep the line breaks staff typed (a list of exits reads as a list)
+   and wrap rather than overflowing the card. "Not recorded" is muted and
+   italic so it cannot pass for entered text. A <dl>, not a list, so the
+   .dashboard li flex rule never reaches it.
+   NOT dashboard-scoped, on purpose: .venue-safety-facts is a unique BEM block
+   that nothing else uses, so it cannot leak, and it must look the same on
+   SCRUM-490's Safety Officer dashboard as on the venue staff one. */
+.venue-safety-facts { margin: 8px 0 0; }
+.venue-safety-facts__heading { margin: 0 0 6px; }
+.venue-safety-facts dl { display: grid; gap: 10px; margin: 0; }
+.venue-safety-facts dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.venue-safety-facts dd { color: var(--ink); margin: 2px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.venue-safety-facts .venue-safety-facts__not-recorded { color: var(--muted); font-style: italic; }
 /* SCRUM-126. The block form, scoped like .venue-form above. The label grid is
    the same shape as .venue-form > label; the start and end sit side by side on
    a __row, which collapses to one column on a phone. Field errors are red
