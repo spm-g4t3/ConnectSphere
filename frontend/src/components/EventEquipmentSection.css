@@ -1,0 +1,19 @@
+/* SCRUM-247: the coordinator's equipment section. Uses the sheet's own
+   variables (--ink, --muted, --line) so it matches the panels around it. */
+.event-equipment h3 { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
+.event-equipment__status { background: #eef3f1; border-radius: 999px; color: var(--muted); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; padding: 3px 10px; text-transform: uppercase; }
+.event-equipment__lines { list-style: none; margin: 0; padding: 0; }
+.event-equipment__lines > li { border-top: 1px solid var(--line); display: block; padding: 12px 0; }
+.event-equipment__lines > li:first-child { border-top: 0; }
+.event-equipment__summary { align-items: baseline; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.event-equipment__summary small { color: var(--muted); }
+.event-equipment__notes { color: var(--ink); margin: 6px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.event-equipment__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.event-equipment__form { display: grid; gap: 10px; max-width: 520px; }
+.event-equipment__form label { display: grid; gap: 4px; }
+.event-equipment__form textarea { min-height: 72px; resize: vertical; }
+.event-equipment__add { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
+.event-equipment__add h4 { margin: 0; }
+.event-equipment__confirm p { margin: 6px 0; }
+.event-equipment__notice { color: var(--ink); margin: 8px 0; }
+.event-equipment__why { color: var(--muted); margin: 8px 0 0; }
