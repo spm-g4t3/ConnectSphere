@@ -149,10 +149,34 @@ describe('AC2 to AC5: adding a line', () => {
       quantity: 2,
       technicalNotes: 'x',
       typeRetired: false,
+      reserved: 0,
+      outcome: null,
+      outcomeNote: null,
       createdAt: '2026-10-08T09:00:00+00:00',
       updatedAt: '2026-10-08T09:00:00+00:00',
     });
-    expect(JSON.stringify(state)).not.toMatch(/equipment_type_id|technical_notes|type_retired/);
+    expect(JSON.stringify(state)).not.toMatch(/equipment_type_id|technical_notes|type_retired|outcome_note/);
+  });
+
+  it('SCRUM290_AC10_carries_reserved_and_the_reviewers_outcome_to_the_coordinator', async () => {
+    client = fakeClient({
+      rpc: {
+        equipment_for_event: ok(
+          stateRow({
+            status: 'cannot_be_fully_arranged',
+            lines: [lineRow({ reserved: 1, outcome: 'cannot_be_provided', outcome_note: 'Only one in stock' })],
+          }),
+        ),
+      },
+    });
+
+    const state = await listEventEquipment(EVENT_ID, { client });
+
+    expect(state.request.lines[0]).toMatchObject({
+      reserved: 1,
+      outcome: 'cannot_be_provided',
+      outcomeNote: 'Only one in stock',
+    });
   });
 
   it('SCRUM21_AC3_refuses_a_bad_quantity_before_any_write', async () => {

@@ -316,6 +316,17 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
         )}
       </h3>
 
+      {request?.status === "cannot_be_fully_arranged" && (
+        <p className="event-equipment__alert" role="status">
+          Technical support could not arrange all of this equipment. The reasons are shown against each line below.
+        </p>
+      )}
+      {request?.status === "arranged" && (
+        <p className="event-equipment__arranged" role="status">
+          All of this equipment has been arranged.
+        </p>
+      )}
+
       {loading && <p>Loading equipment...</p>}
       {loadError && (
         <p className="coordinator-clarification__error" role="status">
@@ -373,6 +384,9 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
                   <div className="event-equipment__summary">
                     <strong>{line.name}</strong>
                     <span>{`Quantity: ${line.quantity}`}</span>
+                    {typeof line.reserved === "number" && (
+                      <span>{`Reserved: ${line.reserved} of ${line.quantity}`}</span>
+                    )}
                     {line.typeRetired && (
                       <small>This equipment type has been retired.</small>
                     )}
@@ -380,6 +394,12 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
                   <p className="event-equipment__notes">
                     {line.technicalNotes ?? "No technical notes."}
                   </p>
+                  {line.outcome === "cannot_be_provided" && (
+                    <div className="event-equipment__outcome">
+                      <strong>Cannot be provided</strong>
+                      <p>{line.outcomeNote}</p>
+                    </div>
+                  )}
                   {editable && removingId !== line.id && (
                     <div className="event-equipment__actions">
                       <button

@@ -123,6 +123,12 @@ function toLine(row) {
     quantity: row.quantity,
     technicalNotes: row.technical_notes ?? null,
     typeRetired: row.type_retired === true,
+    // SCRUM-297: what technical support has done with the line (038). reserved
+    // is how many are held for it; outcome is 'cannot_be_provided' once a
+    // reviewer has marked it, with the reason in outcomeNote.
+    reserved: row.reserved ?? 0,
+    outcome: row.outcome ?? null,
+    outcomeNote: row.outcome_note ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
