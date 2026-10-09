@@ -18,6 +18,7 @@ import bookingRequestRoutes from './routes/bookingRequests.js';
 import equipmentAvailabilityRoutes from './routes/equipmentAvailability.js';
 import equipmentRoutes from './routes/equipment.js';
 import eventEquipmentRoutes from './routes/eventEquipment.js';
+import equipmentReviewRoutes from './routes/equipmentReview.js';
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 
 app.use('/api/event-requests/:id/equipment', eventEquipmentRoutes)
+app.use('/api/event-requests/:id/equipment-review', equipmentReviewRoutes);
 
 app.use('/api/event-requests', eventRequestRoutes);
 
