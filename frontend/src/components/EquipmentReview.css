@@ -1,0 +1,30 @@
+/* SCRUM-296: the equipment review screen. Selectors start from
+   .equipment-review so they outrank the app's `.dashboard h2` and
+   `.dashboard section` rules without !important. Colours match the
+   availability check, and a label is always written as well as coloured. */
+.equipment-review section { margin-top: 18px; }
+.equipment-review h2 { margin: 0 0 6px; }
+.equipment-review__muted { color: var(--muted, #64757a); font-size: 0.85rem; margin: 4px 0; }
+.equipment-review .equipment-review__status-row { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.equipment-review .equipment-review__status { background: #eef3f1; border-radius: 999px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; padding: 3px 12px; text-transform: uppercase; }
+.equipment-review .equipment-review__status--under { background: #e3eefb; color: #1d4f91; }
+.equipment-review .equipment-review__status--arranged { background: #eef7f1; color: #2e7d4f; }
+.equipment-review .equipment-review__status--cannot { background: #fdecea; color: #a8271d; }
+.equipment-review__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.equipment-review__error { color: #a12a2a; margin: 10px 0; }
+.equipment-review__notice { margin: 10px 0; }
+.equipment-review__lines ul { list-style: none; margin: 0; padding: 0; }
+.equipment-review .equipment-review__line { border-top: 1px solid var(--line, #d9e4e0); display: block; padding: 14px 0; }
+.equipment-review__line-head { align-items: baseline; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.equipment-review__notes { margin: 6px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.equipment-review .equipment-review__availability { border-left: 6px solid #d9e4e0; border-radius: 8px; display: grid; gap: 2px; margin: 8px 0; padding: 10px 14px; }
+.equipment-review .equipment-review__availability p { margin: 0; }
+.equipment-review .equipment-review__availability--fully { background: #eef7f1; border-left-color: #2e7d4f; }
+.equipment-review .equipment-review__availability--partially { background: #fff3e6; border-left-color: #ea7a1a; }
+.equipment-review .equipment-review__availability--unavailable { background: #fdecea; border-left-color: #c0362c; }
+.equipment-review .equipment-review__outcome { background: #fdecea; border-left: 6px solid #c0362c; border-radius: 8px; margin: 8px 0; padding: 10px 14px; }
+.equipment-review .equipment-review__outcome p { margin: 4px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.equipment-review__form { display: grid; gap: 10px; max-width: 520px; }
+.equipment-review__form label { display: grid; gap: 4px; }
+.equipment-review__form textarea { min-height: 72px; resize: vertical; }
+.equipment-review__confirm p { margin: 6px 0; }

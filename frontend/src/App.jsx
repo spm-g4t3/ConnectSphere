@@ -15,6 +15,7 @@ import EquipmentCatalogue from "./components/EquipmentCatalogue";
 import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
 import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck";
+import EquipmentReview from "./components/EquipmentReview";
 import "./App.css";
 
 function LoadingScreen() {
@@ -167,6 +168,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["technical_support_staff"]}>
               <EquipmentCatalogue />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/equipment-review/:eventId"
+          element={
+            <ProtectedRoute allowedRoles={["technical_support_staff"]}>
+              <EquipmentReview />
             </ProtectedRoute>
           }
         />
