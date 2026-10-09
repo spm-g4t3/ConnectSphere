@@ -8,6 +8,7 @@ import EventOrganiserDashboard from "./EventOrganiserDashboard";
 import EventCoordinatorDashboard from "./EventCoordinatorDashboard";
 import VenueStaffDashboard from "./VenueStaffDashboard";
 import TechnicalSupportDashboard from "./TechnicalSupportDashboard";
+import AttendeeDashboard from "./AttendeeDashboard";
 
 const DASHBOARD_BY_ROLE = {
   EVENT_ORGANISER: EventOrganiserDashboard,
@@ -17,6 +18,7 @@ const DASHBOARD_BY_ROLE = {
   // normaliseRole produces from the token's role, and the short form matched
   // nothing — Technical Support saw "No dashboard available for your role".
   TECHNICAL_SUPPORT_STAFF: TechnicalSupportDashboard,
+  ATTENDEE: AttendeeDashboard,
 };
 
 export default function Dashboard() {
