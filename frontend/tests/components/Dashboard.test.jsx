@@ -32,6 +32,14 @@ describe("Dashboard role map", () => {
     expect(screen.getByRole("heading", { name: "Welcome, user@example.com" })).toBeInTheDocument();
   });
 
+  it("shows the Browse Open Events entry, with no invented event data", () => {
+    renderAs("attendee");
+
+    expect(screen.getByRole("heading", { name: "Browse Open Events" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("not available yet");
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+  });
+
   it("falls back for an unrecognised role", () => {
     const { container } = renderAs("guest");
 
