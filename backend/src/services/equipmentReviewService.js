@@ -16,6 +16,11 @@
  * The caller is always the signed-in user, passed in as userId from the token.
  * Nothing about who is acting is ever read from a body.
  *
+ * The functions return ids. The names the screen shows (the reviewer, the
+ * assigned coordinator and the booked venue, AC3 and AC4) are read here from the
+ * tables that own them, after the database call, so a lookup can never hold the
+ * review's locks.
+ *
  * SQLSTATEs the functions raise, and what they become:
  *   42501  not the current reviewer, or no caller             ForbiddenError   403
  *   55000  the request is not in a status that allows this    ConflictError    409
@@ -169,6 +174,68 @@ export function toReviewState(data) {
 }
 
 
+/** Names for the people on the screen, by id. A person with no name gets null. */
+async function readNames(db, ids) {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return new Map();
+
+  const { data, error } = await db.from('profiles').select('id, full_name').in('id', unique);
+  if (error) throw translateError(error);
+
+  return new Map((data ?? []).map((row) => [row.id, row.full_name ?? null]));
+}
+
+/** The statuses under which a booking holds the venue (as venue_occupancy reads them). */
+const BOOKED_STATUSES = ['approved', 'flagged_for_review'];
+
+/**
+ * The venue the event is booked into, or null. If it somehow holds more than
+ * one, the earliest booking's venue is the one shown.
+ */
+async function readBookedVenue(db, eventRequestId) {
+  const { data: bookings, error } = await db
+    .from('bookings')
+    .select('venue_id, starts_at')
+    .eq('event_request_id', eventRequestId)
+    .in('status', BOOKED_STATUSES)
+    .order('starts_at', { ascending: true })
+    .limit(1);
+  if (error) throw translateError(error);
+
+  const venueId = bookings?.[0]?.venue_id;
+  if (!venueId) return null;
+
+  const { data: venues, error: venueError } = await db
+    .from('venues')
+    .select('id, name')
+    .in('id', [venueId]);
+  if (venueError) throw translateError(venueError);
+
+  const venue = venues?.[0];
+  return venue ? { id: venue.id, name: venue.name } : null;
+}
+
+/** Add the names to a review state. An event with no request has nothing to add. */
+async function addNames(db, state) {
+  if (!state.request) return state;
+
+  const names = await readNames(db, [state.event.assignedCoordinatorId, state.request.reviewerId]);
+  const venue = await readBookedVenue(db, state.event.id);
+
+  return {
+    event: {
+      ...state.event,
+      assignedCoordinatorName: names.get(state.event.assignedCoordinatorId) ?? null,
+      venue,
+    },
+    request: {
+      ...state.request,
+      reviewerName: state.request.reviewerId ? (names.get(state.request.reviewerId) ?? null) : null,
+    },
+  };
+}
+
+
 /**
  * The review screen's data (AC3, AC4). Reading never changes anything (AC2).
  *
@@ -187,7 +254,7 @@ export async function getEquipmentReview(eventRequestId, { client } = {}) {
   });
   if (error) throw translateError(error);
 
-  return toReviewState(data);
+  return addNames(db, toReviewState(data));
 }
 
 /** Run one of the review write functions and return the screen's data. */
@@ -196,7 +263,7 @@ async function callReviewFunction(name, args, client) {
   const { data, error } = await db.rpc(name, args);
   if (error) throw translateError(error);
 
-  return toReviewState(data);
+  return addNames(db, toReviewState(data));
 }
 
 /**

@@ -32,6 +32,7 @@ const LINE_ID = '22222222-2222-4222-8222-222222222222';
 const TYPE_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
 const REVIEWER_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
 const SOMEONE_ELSE = '77777777-7777-4777-8777-777777777777';
+const VENUE_ID = '88888888-8888-4888-8888-888888888888';
 
 const BASE = `/api/event-requests/${EVENT_ID}/equipment-review`;
 
@@ -72,16 +73,33 @@ const reviewRow = (status = 'under_review') => ({
 const ok = (data) => ({ data, error: null });
 const dbError = (code, message) => ({ data: null, error: { code, message } });
 
-/** A client whose rpc answers by function name. */
+
+/** A chainable query whose awaited result is `result`, as supabase-js builds them. */
+function query(result) {
+  const chain = {};
+  for (const method of ['select', 'in', 'eq', 'order', 'limit']) chain[method] = vi.fn(() => chain);
+  chain.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
+  return chain;
+}
+
+const NAMES = ok([
+  { id: SOMEONE_ELSE, full_name: 'Casey Coordinator' },
+  { id: REVIEWER_ID, full_name: 'Riley Reviewer' },
+]);
+const BOOKING = ok([{ venue_id: VENUE_ID, starts_at: '2026-12-01T09:00:00+00:00' }]);
+const VENUES = ok([{ id: VENUE_ID, name: 'Hall A' }]);
+
+/** A client whose rpc answers by function name and whose from answers the name lookups. */
 function fakeClient(rpc = {}) {
   const rpcCalls = [];
+  const answers = { profiles: NAMES, bookings: BOOKING, venues: VENUES };
   return {
     rpcCalls,
     rpc: vi.fn(async (name, args) => {
       rpcCalls.push({ name, args });
       return rpc[name] ?? ok(reviewRow());
     }),
-    from: vi.fn(),
+    from: vi.fn((table) => query(answers[table] ?? ok([]))),
   };
 }
 
@@ -125,6 +143,7 @@ describe('AC1: only Technical Support Staff reach any route', () => {
       expect(res.status).toBe(403);
       expect(res.body.error).toMatch(/Technical Support Staff/);
       expect(client.rpc).not.toHaveBeenCalled();
+      expect(client.from).not.toHaveBeenCalled();
     },
   );
 
@@ -149,6 +168,11 @@ describe('the routes for Technical Support Staff', () => {
     expect(res.body.event.name).toBe('Annual Dinner');
     expect(res.body.request).toMatchObject({ status: 'under_review', reviewerId: REVIEWER_ID });
     expect(res.body.request.lines[0]).toMatchObject({ reserved: 2, shortBy: 3 });
+    expect(res.body.request.reviewerName).toBe('Riley Reviewer');
+    expect(res.body.event).toMatchObject({
+      assignedCoordinatorName: 'Casey Coordinator',
+      venue: { id: VENUE_ID, name: 'Hall A' },
+    });
     expect(client.rpcCalls.map((c) => c.name)).toEqual(['equipment_review_for_event']);
   });
 

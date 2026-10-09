@@ -44,6 +44,7 @@ const TYPE_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
 const REQUEST_ID = '55555555-5555-4555-8555-555555555555';
 const COORDINATOR_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
 const REVIEWER_ID = '66666666-6666-4666-8666-666666666666';
+const VENUE_ID = '88888888-8888-4888-8888-888888888888';
 
 const availability = (overrides = {}) => ({
   found: true,
@@ -96,16 +97,41 @@ const reviewRow = ({ status = 'under_review', lines = [lineRow()], ...request } 
 const ok = (data) => ({ data, error: null });
 const dbError = (code, message) => ({ data: null, error: { code, message } });
 
-/** A client whose rpc answers by function name. */
-function fakeClient(rpc = {}) {
+
+/** A chainable query whose awaited result is `result`, as supabase-js builds them. */
+function query(result) {
+  const chain = {};
+  for (const method of ['select', 'in', 'eq', 'order', 'limit']) chain[method] = vi.fn(() => chain);
+  chain.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
+  return chain;
+}
+
+const NAMES = ok([
+  { id: COORDINATOR_ID, full_name: 'Casey Coordinator' },
+  { id: REVIEWER_ID, full_name: 'Riley Reviewer' },
+]);
+const BOOKING = ok([{ venue_id: VENUE_ID, starts_at: '2026-12-01T09:00:00+00:00' }]);
+const VENUES = ok([{ id: VENUE_ID, name: 'Hall A' }]);
+
+/**
+ * A client whose rpc answers by function name and whose from answers by table
+ * (profiles, bookings, venues), as the names the screen shows are read.
+ */
+function fakeClient(rpc = {}, tables = {}) {
   const rpcCalls = [];
+  const fromCalls = [];
+  const answers = { profiles: NAMES, bookings: BOOKING, venues: VENUES, ...tables };
   return {
     rpcCalls,
+    fromCalls,
     rpc: vi.fn(async (name, args) => {
       rpcCalls.push({ name, args });
       return rpc[name] ?? ok(reviewRow());
     }),
-    from: vi.fn(),
+    from: vi.fn((table) => {
+      fromCalls.push(table);
+      return query(answers[table] ?? ok([]));
+    }),
   };
 }
 
@@ -128,7 +154,7 @@ describe('AC4: the review data', () => {
     expect(client.rpcCalls).toEqual([
       { name: 'equipment_review_for_event', args: { p_event_request_id: EVENT_ID } },
     ]);
-    expect(state.event).toEqual({
+    expect(state.event).toMatchObject({
       id: EVENT_ID,
       name: 'Annual Dinner',
       proposedStart: '2026-12-01T10:00:00+00:00',
@@ -475,5 +501,89 @@ describe('AC7: marking a line and completing', () => {
 
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toMatch(/^A value was rejected by the database:/);
+  });
+});
+
+
+describe('AC3 and AC4: the names on the screen', () => {
+  it('N14_AC3_names_the_reviewer_and_the_assigned_coordinator', async () => {
+    const state = await getEquipmentReview(EVENT_ID, { client: fakeClient() });
+
+    expect(state.request.reviewerName).toBe('Riley Reviewer');
+    expect(state.event.assignedCoordinatorName).toBe('Casey Coordinator');
+  });
+
+  it('N14_AC4_names_the_booked_venue', async () => {
+    const state = await getEquipmentReview(EVENT_ID, { client: fakeClient() });
+
+    expect(state.event.venue).toEqual({ id: VENUE_ID, name: 'Hall A' });
+  });
+
+  it('N14_AC4_only_approved_or_flagged_bookings_count_as_the_booked_venue', async () => {
+    const client = fakeClient();
+    const queries = [];
+    client.from.mockImplementation((table) => {
+      const q = query(table === 'bookings' ? BOOKING : table === 'venues' ? VENUES : NAMES);
+      queries.push({ table, q });
+      return q;
+    });
+
+    await getEquipmentReview(EVENT_ID, { client });
+
+    const bookings = queries.find((entry) => entry.table === 'bookings').q;
+    expect(bookings.eq).toHaveBeenCalledWith('event_request_id', EVENT_ID);
+    expect(bookings.in).toHaveBeenCalledWith('status', ['approved', 'flagged_for_review']);
+  });
+
+  it('N14_AC4_an_event_with_no_booking_has_no_venue', async () => {
+    const client = fakeClient({}, { bookings: ok([]) });
+
+    const state = await getEquipmentReview(EVENT_ID, { client });
+
+    expect(state.event.venue).toBeNull();
+    expect(client.fromCalls).not.toContain('venues');
+  });
+
+  it('N14_AC3_nobody_reviewing_means_no_reviewer_name', async () => {
+    const client = fakeClient({
+      equipment_review_for_event: ok(reviewRow({ status: 'pending_review', reviewer_id: null, review_started_at: null })),
+    });
+
+    const state = await getEquipmentReview(EVENT_ID, { client });
+
+    expect(state.request.reviewerName).toBeNull();
+  });
+
+  it('N14_AC3_a_person_without_a_name_comes_back_as_null_not_undefined', async () => {
+    const client = fakeClient({}, { profiles: ok([{ id: REVIEWER_ID, full_name: null }]) });
+
+    const state = await getEquipmentReview(EVENT_ID, { client });
+
+    expect(state.request.reviewerName).toBeNull();
+    expect(state.event.assignedCoordinatorName).toBeNull();
+  });
+
+  it('N14_AC3_the_names_are_added_to_every_write_too', async () => {
+    const state = await takeOverEquipmentReview(EVENT_ID, REVIEWER_ID, { client: fakeClient() });
+
+    expect(state.request.reviewerName).toBe('Riley Reviewer');
+    expect(state.event.venue.name).toBe('Hall A');
+  });
+
+  it('N14_an_event_with_no_equipment_request_reads_no_names_at_all', async () => {
+    const client = fakeClient({ equipment_review_for_event: ok({ request: null }) });
+
+    await getEquipmentReview(EVENT_ID, { client });
+
+    expect(client.from).not.toHaveBeenCalled();
+  });
+
+  it('N14_a_failed_name_lookup_is_a_500_not_a_blank_screen', async () => {
+    const client = fakeClient({}, { profiles: dbError('XX000', 'profiles is broken') });
+
+    const err = await failure(getEquipmentReview(EVENT_ID, { client }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(AppError);
   });
 });
