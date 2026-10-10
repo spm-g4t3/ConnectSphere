@@ -101,6 +101,16 @@ describe("periodConflicts", () => {
     expect(periodConflicts(conflict("BOOKING_PERIOD_CONFLICT", list))).toEqual(list.slice(0, 2));
   });
 
+  it("SCRUM491_AC5_keeps_another_events_hold_as_a_conflict", () => {
+    const list = [
+      { kind: "hold", holdId: "h1", eventName: "Product Launch" },
+      { kind: "booking", bookingId: "k1" },
+      { kind: "other" },
+      null,
+    ];
+    expect(periodConflicts(conflict("BOOKING_PERIOD_CONFLICT", list))).toEqual(list.slice(0, 2));
+  });
+
   it("SCRUM254_is_empty_for_any_other_error", () => {
     expect(periodConflicts(conflict("VENUE_RETIRED", [{ kind: "block" }]))).toEqual([]);
     expect(periodConflicts(undefined)).toEqual([]);

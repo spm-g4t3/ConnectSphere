@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 
 import { describeNotification } from "../../src/services/notificationDisplay.js";
-import { formatRange } from "../../src/services/displayFormat.js";
+import { formatRange, formatTimestamp } from "../../src/services/displayFormat.js";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay.js";
 
 const PAYLOAD = {
@@ -322,3 +322,39 @@ describe("describeNotification: other types", () => {
     expect(describeNotification(value).headline).toBe("New notification");
   });
 });
+
+describe("describeNotification: venue_hold_expired (SCRUM-491 AC8)", () => {
+  const EXPIRES = "2026-11-02T18:00:00+08:00";
+  const expired = (payload) => ({ id: "n9", type: "venue_hold_expired", venueHoldId: "h1", payload });
+
+  it("SCRUM491_AC8_names_the_event_the_venue_and_the_expiry", () => {
+    const { headline, detail } = describeNotification(
+      expired({
+        eventRequestId: "e1",
+        eventName: "Product Launch",
+        venueId: "v1",
+        venueName: "Hall A",
+        expiresAt: EXPIRES,
+      }),
+    );
+
+    expect(headline).toBe("The hold on Hall A for Product Launch has expired");
+    expect(detail).toContain(`It expired ${formatTimestamp(EXPIRES)}.`);
+  });
+
+  it("SCRUM491_AC7_says_the_hold_was_never_a_booking", () => {
+    const { detail } = describeNotification(
+      expired({ eventName: "Product Launch", venueName: "Hall A", expiresAt: EXPIRES }),
+    );
+    expect(detail).toMatch(/a hold is not a booking/);
+  });
+
+  it("SCRUM491_AC8_a_missing_payload_reads_as_unknown_not_undefined", () => {
+    const { headline, detail } = describeNotification({ type: "venue_hold_expired" });
+
+    expect(headline).toBe("The hold on Unknown venue for Unnamed event has expired");
+    expect(detail).toContain("It expired unknown.");
+    expect(`${headline} ${detail}`).not.toMatch(/undefined|null/);
+  });
+});
+

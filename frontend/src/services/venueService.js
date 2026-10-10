@@ -26,6 +26,9 @@
 //   - GET /venues/event-search searches against an event's requirements
 //     (SCRUM-140, for SCRUM-20). Event Coordinators only; see
 //     findVenuesForEvent below.
+//   - /venues/:id/holds lists and places tentative venue holds (SCRUM-491),
+//     Venue Staff only, and GET /event-requests/hold-candidates is the hold
+//     form's event picker. See the hold section below.
 
 import { apiClient } from "./apiClient"; // <-- replace with your actual API client
 
@@ -95,6 +98,9 @@ export async function searchActiveVenues(filters = {}) {
  * @param {string[]} [criteria.facilities]      facility codes
  * @param {string} [criteria.location]          SCRUM-141: text the venue's
  *                                              location must contain
+ * @param {string} [criteria.eventRequestId]    SCRUM-491: the event searched
+ *                                              for; its own holds do not
+ *                                              hide a venue (AC5)
  * @returns {Promise<Array<{id, name, location, maxCapacity, layouts, accessibility, facilities, hours, setupMinutes, turnaroundMinutes}>>}
  */
 export async function findVenuesForEvent(criteria) {
@@ -112,6 +118,12 @@ export async function findVenuesForEvent(criteria) {
   for (const field of ["accessibility", "facilities"]) {
     const codes = criteria[field];
     if (Array.isArray(codes) && codes.length > 0) params[field] = codes.join(",");
+  }
+  // SCRUM-491 (AC5): the event being searched for, so a venue it holds
+  // tentatively is not left out of its own search. Other events' holds still
+  // hide a venue either way.
+  if (typeof criteria.eventRequestId === "string" && criteria.eventRequestId.trim() !== "") {
+    params.eventRequestId = criteria.eventRequestId;
   }
 
   const response = await apiClient.get("/venues/event-search", { params });
@@ -374,7 +386,10 @@ export async function listVenueBlocks(venueId, { from, to } = {}) {
  * [from, to), merged into one array sorted by start. Each entry is either
  *   { kind: 'booking', id, startsAt, endsAt, status, eventRequestId, eventName }
  * with status 'approved' or 'flagged_for_review', or
- *   { kind: 'block', id, startsAt, endsAt, reason, notes }.
+ *   { kind: 'block', id, startsAt, endsAt, reason, notes }, or (SCRUM-491) an
+ * active tentative hold,
+ *   { kind: 'hold', id, startsAt, endsAt, eventRequestId, eventName,
+ *     occupiedStartsAt, occupiedEndsAt, setupMinutes, turnaroundMinutes }.
  * An empty window is 200 [].
  *
  * Unlike listVenueBlocks the window is REQUIRED -- a calendar always shows a
@@ -499,6 +514,70 @@ export async function removeVenueBlock(venueId, blockId) {
  */
 export async function getVenueBlockHistory(venueId, blockId) {
   const response = await apiClient.get(`/venues/${venueId}/blocks/${blockId}/history`);
+  return response.data;
+}
+
+// --- Tentative venue holds (SCRUM-491) ------------------------------------
+// Three calls, all Venue Staff only: a venue's active holds, placing one, and
+// the Approved events a hold can be placed for. As with blocks, the server's
+// `error` string is not for display; callers map status and `code` to their
+// own words (venueHoldErrors.js) and show only a 400's details[].message.
+
+/**
+ * One venue's active tentative holds, soonest expiry first. Active means not
+ * yet expired: a hold past its expiry is not listed, even before the expiry
+ * job has marked it (AC7).
+ *
+ * Each row is { id, eventRequestId, venueId, placedBy, placedAt, expiresAt,
+ * status, expiredAt, eventName, eventStartsAt, eventEndsAt, placedByName };
+ * the names are null when unknown.
+ *
+ * Failures: 400 (the id is not a uuid), 401, 403 (not Venue Staff), 404 (no
+ * such venue), 500.
+ *
+ * @param {string} venueId
+ * @returns {Promise<Array<Object>>} hold rows
+ */
+export async function listVenueHolds(venueId) {
+  const response = await apiClient.get(`/venues/${venueId}/holds`);
+  return response.data;
+}
+
+/**
+ * Places a tentative hold on a venue for one Approved event, until expiresAt
+ * (AC1-AC4). The period held is the event's own, padded by the venue's setup
+ * and turnaround; the placer is the signed-in user, never the body.
+ *
+ * Failures: 400 with details[] on eventRequestId or expiresAt (missing,
+ * malformed, or an expiry not in the future), 401, 403 (not Venue Staff:
+ * "This action is restricted to Venue Staff"), 404 (no such venue or event),
+ * and 409 with `code`: EVENT_NOT_APPROVED, EVENT_DATES_MISSING,
+ * VENUE_RETIRED, HOLD_EXISTS (this event already holds this venue) or
+ * HOLD_PERIOD_CONFLICT, whose `conflicts` lists each booking, block or other
+ * event's hold in the way, with its occupied period.
+ *
+ * @param {string} venueId
+ * @param {Object} input
+ * @param {string} input.eventRequestId  an Approved event's id
+ * @param {string} input.expiresAt       ISO with an explicit offset, in the future
+ * @returns {Promise<{hold: Object}>}
+ */
+export async function placeVenueHold(venueId, input) {
+  const response = await apiClient.post(`/venues/${venueId}/holds`, input);
+  return response.data;
+}
+
+/**
+ * The Approved events a hold can be placed for, soonest first: the hold
+ * form's event picker. Each is { id, eventName, proposedStart, proposedEnd,
+ * expectedAttendance, assignedCoordinatorId, assignedCoordinatorName }.
+ *
+ * Failures: 401, 403 (not Venue Staff), 500. None is 200 [].
+ *
+ * @returns {Promise<Array<Object>>}
+ */
+export async function getHoldCandidates() {
+  const response = await apiClient.get("/event-requests/hold-candidates");
   return response.data;
 }
 

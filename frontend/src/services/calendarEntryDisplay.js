@@ -5,6 +5,9 @@
 //   - an approved booking is "Booked", with the event name
 //   - a booking flagged for review is "Booked – under review"
 //   - a block is "Blocked", with its reason
+//   - (SCRUM-491, AC6) an active tentative hold is "Tentatively held", naming
+//     the holding event. The endpoint only returns holds still in force, so
+//     an expired one never reaches here (AC7).
 //
 // Blocks reuse blockCalendarLabel from venueBlockDisplay.js, which SCRUM-130
 // added for exactly this calendar, so the wording lives in one place. A
@@ -27,17 +30,23 @@ const BOOKING_DISPLAY = Object.freeze({
 /**
  * How one entry from GET /venues/:id/calendar is shown.
  *
- * `tone` is "booked", "review" or "blocked" and becomes a BEM modifier on the
- * entry; the label carries the same meaning in words, so colour is never the
- * only signal. `detail` is the booking's event name, or null when there is
- * none to show (always null for a block).
+ * `tone` is "booked", "review", "blocked" or "held" and becomes a BEM
+ * modifier on the entry; the label carries the same meaning in words, so
+ * colour is never the only signal. `detail` is the booking's or hold's event
+ * name, or null when there is none to show (always null for a block).
  *
  * @param {Object} entry  a calendar entry
- * @returns {{label: string, detail: string|null, tone: "booked"|"review"|"blocked"}|null}
+ * @returns {{label: string, detail: string|null, tone: "booked"|"review"|"blocked"|"held"}|null}
  */
 export function calendarEntryDisplay(entry) {
   if (entry?.kind === "block") {
     return { label: blockCalendarLabel(entry), detail: null, tone: "blocked" };
+  }
+
+  // SCRUM-491 (AC6). Its own label and tone, never "Booked": a hold is not a
+  // booking (AC7).
+  if (entry?.kind === "hold") {
+    return { label: "Tentatively held", detail: entry.eventName || null, tone: "held" };
   }
 
   // Object.hasOwn, not a plain lookup: a status of "toString" must not find
