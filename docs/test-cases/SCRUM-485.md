@@ -72,8 +72,13 @@ Quoted from the ticket.
    is accepted wherever roles are checked, including the database's list of
    valid roles.
 6. Existing users and roles are unchanged.
-7. Test accounts for both roles are added to the seed data used for demos and
-   tests.
+7. An account for each role exists in the shared Supabase project, created the
+   same way as every existing role's account: an auth user, plus a profiles row
+   with the role set at creation (AC8). The repository holds no account seed
+   data, for any role, so there is nothing to add to.
+
+   *Amended in Jira on 10 October. It first read: "Test accounts for both roles
+   are added to the seed data used for demos and tests." See AC7's section.*
 8. There is no screen for assigning roles. They are set when the account is
    created, as for the existing roles. Team decision, to confirm.
 
@@ -142,7 +147,8 @@ What follows from that:
 database, and two accounts were created by hand in Supabase, one per new role:
 `lead@connectsphere.com` (profile role `event_coordinator_lead`, full name
 "Event Coordinator Lead Test") and `safety@connectsphere.com` (`safety_officer`,
-"Safety Officer Test"). There is still no account seed script; see AC7.
+"Safety Officer Test"). There is no account seed script, and AC7, amended the same day, no longer
+asks for one; see AC7.
 
 **The two new roles are spelled `event_coordinator_lead` and `safety_officer`,**
 lowercase snake_case like every live value. `normaliseRole` turns them into
@@ -377,7 +383,7 @@ a route-level test, and the Implemented-by column says which do.
 | AC6-04 | THE FOUR | Render `Navigation` | Each role's links exactly as today, by href and **by count**: Organiser 2, Coordinator 5, Venue Staff 3, Technical Support 5. Extends the Organiser-only count to every role that has links | nav `SCRUM485_AC6_%s_keeps_exactly_its_links`; and `SCRUM485_AC6_an_attendee_still_has_no_links` |
 | AC6-05 | The existing route and guard suites | Run them | Every existing role-gate test passes unchanged. Lists of refused roles gain the two new roles; none loses one | Every existing test still passes, and the refused-role tables named in AC5-09 to AC5-15 each gained the two roles. Tables built from `Object.values(ROLE)` needed nothing: venues `SCRUM493_AC1_every_role_but_venue_staff_is_covered`, notifications `SCRUM17_AC3_a_%s_can_read_their_own_inbox` |
 | AC6-06 | A signed-in `attendee` | Open `/dashboard` | Still "No dashboard available for your role", as today. Attendee has no dashboard, and this story does not give it one | dash `SCRUM485_AC6_an_attendee_still_has_no_dashboard` |
-| AC6-07 | The live database, before and after 039 | Count profiles by role | Identical before and after: `event_coordinator` 2, and one each of `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee` | **Not proved.** The counts before 039 are recorded above (10 October). No count was taken after 039 and the two new accounts, so nothing shows the existing profiles unchanged. The expected after-figures are the same five rows plus one `event_coordinator_lead` and one `safety_officer` |
+| AC6-07 | The live database, before and after 039 | Count profiles by role | Identical before and after: `event_coordinator` 2, and one each of `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee` | **Manual (live check)**, 10 October, a query after 039 and both new accounts: `event_coordinator` 2, and one each of `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee`, `event_coordinator_lead`, `safety_officer`. The five existing rows are exactly the counts taken before 039 (see *Facts*); the only additions are the two new accounts |
 
 AC6-04 to AC6-06 are the regression half of AC6; the Week 7 change guide names
 regression tests as a deliverable. AC6-06 pins existing behaviour that is
@@ -385,26 +391,35 @@ arguably a gap, so that "unchanged" means what it says.
 
 ---
 
-## AC7 — test accounts for both roles in the seed data
+## AC7 — an account for each role exists (amended)
 
-**There is no account seed data today.** The repository's only seed is
-`backend/db/seeds/equipment.js`, which seeds equipment. The check scripts create
-throwaway accounts and delete them when they finish; the demo accounts exist
-only in the live Supabase project, made by hand. So AC7 cannot be met by adding
-to a list. It needs a seed for accounts. The cases assume one script that creates
-one account per new role, the same way the check scripts create accounts.
+**The criterion was amended in Jira on 10 October.** As first written it asked
+for test accounts "added to the seed data used for demos and tests". No account
+seed data exists in this repository, or ever has: the only seed is
+`backend/db/seeds/equipment.js`, and the check scripts create accounts they
+delete again. Every demo account for the four existing roles was made by hand in
+Supabase. Rather than build the project's first account seed inside a story
+about adding two roles, both accounts were created the way every other role's
+was, which is also what AC8 says: roles "are set when the account is created, as
+for the existing roles". The cases below are the amended criterion's. The two
+the original wording needed ("run the seed", "run it again") described a script
+that the amended criterion no longer asks for, and are replaced.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC7-01 | The live project without the two accounts | Run the account seed | One auth user and one `profiles` row per new role, with the role spelled as in AC1-01 | **Not proved: no seed script was built** (SCRUM-511). The two accounts exist, made by hand on 10 October: `lead@connectsphere.com` and `safety@connectsphere.com` (see *Facts*). So AC7 is partly met: the accounts are there for demos, but the seed data AC7 asks for is not |
-| AC7-02 | The two accounts already seeded | Run the seed again | No duplicate, no error, nothing else changed | **Not proved.** There is no seed to run twice |
-| AC7-03 | The seeded Lead account | Log in through the screen | Lands on the Lead's dashboard (AC3-04) | **Manual**, 10 October: logged in as `lead@connectsphere.com`; landed on the Lead's dashboard with one nav link, Dashboard; opening `/review-queue` by URL showed "Not available to your role" |
-| AC7-04 | The seeded Safety Officer account | Log in through the screen | Lands on the Safety Officer's dashboard (AC3-05) | **Manual**, 10 October: logged in as `safety@connectsphere.com`; landed on the Safety Officer's dashboard with one nav link, Dashboard |
-| AC7-05 | The seed's source | Read it | No password or secret in the repository; credentials come from the environment, as `SUPABASE_SECRET_KEY` does | **Manual (review)**, 10 October. There is no seed source to read. No credential for either account is in the repository: the two emails appear only as strings in auth and login, with a placeholder password |
+| AC7-01 | The shared Supabase project | Look for an account for each new role | An auth user `lead@connectsphere.com` with a `profiles` row: role `event_coordinator_lead`, full name "Event Coordinator Lead Test". An auth user `safety@connectsphere.com`: role `safety_officer`, "Safety Officer Test" | **Manual (live check)**, 10 October: both created by hand in Supabase, as every existing role's demo account was. The count after 039 (AC6-07) shows exactly one `event_coordinator_lead` and one `safety_officer` profile, and AC7-03 and AC7-04 show each account signs in as its role |
+| AC7-02 | — | Create a profile with each new role, and with a misspelling of one | The role is set by the `profiles` insert at creation and stored as given; a misspelt role is refused, 22P02 | role `SCRUM485_AC5_a_profile_can_hold_%s`, `SCRUM485_AC5_a_misspelt_role_is_refused_by_the_enum` (PGlite: the same tests as AC5-03 and AC5-04) |
+| AC7-03 | The Lead's account | Log in through the screen | Lands on the Lead's dashboard (AC3-04) | **Manual**, 10 October: logged in as `lead@connectsphere.com`; landed on the Lead's dashboard with one nav link, Dashboard; opening `/review-queue` by URL showed "Not available to your role" |
+| AC7-04 | The Safety Officer's account | Log in through the screen | Lands on the Safety Officer's dashboard (AC3-05) | **Manual**, 10 October: logged in as `safety@connectsphere.com`; landed on the Safety Officer's dashboard with one nav link, Dashboard |
+| AC7-05 | The repository | Search it for either account's credentials | No password or secret for either account in the repository | **Manual (review)**, 10 October. With no account seed (by the amended AC7), nothing in the repository creates or signs in to either account. The two emails appear only as strings in auth and login, which mock the sign-in and use a placeholder password |
 
-AC7 is the one criterion this story only partly meets: the accounts exist, the
-seed data does not. A seed script would write to the shared database, so even
-when SCRUM-511 builds one it is run deliberately, not in CI.
+AC7-03 and AC7-04 stand as first written, apart from their preconditions, which
+said "the seeded … account" and now name the account. AC7-05's expectation is
+unchanged; its reasoning is, since there is no seed source to read.
+
+Rebuilding these accounts, or any demo account, from the repository is not
+possible. That is true of every role, not of this story; see *What cannot be
+tested*.
 
 ---
 
@@ -415,7 +430,7 @@ when SCRUM-511 builds one it is run deliberately, not in CI.
 | AC8-01 | `backend/src` | Read every use of `profiles` | Every one is a read; no route or service writes `profiles.role` | **Manual (review)**, 10 October: the six uses of `from('profiles')` in `backend/src` (requireAuth.js, routes/auth.js, equipmentReviewService.js, three in eventRequestService.js) are all `.select(…)` |
 | AC8-02 | `frontend/src/App.jsx` | Read the routes | No route to a role-management screen | **Manual (review)**, 10 October: no route in App.jsx leads to a role, profile, user or account screen |
 
-How a role *is* set is AC7-01: the `profiles` insert at account creation, refused
+How a role *is* set is AC7-02: the `profiles` insert at account creation, refused
 by the enum if misspelt (AC5-04). These cases are negative on purpose. AC8 says
 the screen is not built, and nothing in this story builds one.
 
@@ -428,10 +443,11 @@ the screen is not built, and nothing in this story builds one.
   not what the live database holds. The live database has drifted once already
   (`technical_support`). Only a query, AC6-07's kind, can check the live enum.
 - **AC1's rule for other stories** (AC1-05). It is about the backlog.
-- **AC7 in CI.** A seed writes to the shared Supabase project. There is no seed
-  yet in any case.
-- **AC6-07 from the suite.** Profile counts are a fact about the live database;
-  only a query before and after shows them.
+- **The demo accounts, from the repository.** Every role's demo account was
+  made by hand in Supabase, and none can be rebuilt from this repository. AC7,
+  as amended, records that rather than changing it.
+- **AC6-07 and AC7-01 from the suite.** Profile counts and accounts are facts
+  about the live database; only a query shows them, which is what proved both.
 - **Anything another story grants.** By design: no case here says what a Lead or
   Safety Officer *can* do, only that they are recognised and refused.
 
@@ -481,7 +497,7 @@ the screen is not built, and nothing in this story builds one.
 | AC2-03, AC5-07 to AC5-15, AC6-05: the middleware tests and the refused-role tables | SCRUM-508 |
 | AC1-04, AC3-04 to AC3-08, AC6-03, AC6-06: the two dashboards | SCRUM-509 |
 | AC4-01 to AC4-06, AC6-04: navigation | SCRUM-510 |
-| AC7: the seed script | SCRUM-511 (not built) |
+| AC7: the two accounts, made by hand (the amended criterion) | SCRUM-511 |
 | AC2-02, AC3-01 to AC3-03, and this audit | SCRUM-512 |
 | What each role may do | SCRUM-486, 487, 489 and 490, not this story |
 
@@ -489,9 +505,9 @@ the screen is not built, and nothing in this story builds one.
 
 | | Cases |
 |---|---|
-| Proved by a named test | 41 |
-| Proved manually: a walkthrough (AC7-03, AC7-04) or a review (AC7-05, AC8-01, AC8-02), each dated 10 October | 5 |
-| Not proved: AC1-05 (a backlog review, not yet done), AC5-13 (deferred to open question 2), AC6-07 (no count after 039), AC7-01 and AC7-02 (no seed script) | 5 |
+| Proved by a named test | 42 |
+| Proved manually, each dated 10 October: a live check (AC6-07, AC7-01), a walkthrough (AC7-03, AC7-04) or a review (AC7-05, AC8-01, AC8-02) | 7 |
+| Not proved: AC1-05 (a backlog review, not yet done), AC5-13 (deferred to open question 2) | 2 |
 
 | AC | Cases | By a test | Manually | Not proved |
 |---|---|---|---|---|
@@ -500,11 +516,11 @@ the screen is not built, and nothing in this story builds one.
 | AC3 | 8 | 8 | 0 | 0 |
 | AC4 | 6 | 6 | 0 | 0 |
 | AC5 | 15 | 14 | 0 | 1 |
-| AC6 | 7 | 6 | 0 | 1 |
-| AC7 | 5 | 0 | 3 | 2 |
+| AC6 | 7 | 6 | 1 | 0 |
+| AC7 | 5 | 1 | 4 | 0 |
 | AC8 | 2 | 0 | 2 | 0 |
 
-Two of the 41 lean on more than one kind of evidence, and say so in their row:
+Two of the 42 lean on more than one kind of evidence, and say so in their row:
 AC1-03 is proved through the code that calls `normaliseRole` rather than by a
 test of it alone, and AC5-14's `/review-queue` and `/my-events` share a tested
 gate but have no test of their own.
