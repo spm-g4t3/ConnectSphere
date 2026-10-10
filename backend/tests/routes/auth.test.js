@@ -285,3 +285,34 @@ describe('AC: a valid token revokes the session', () => {
     expect(res.body).toEqual({ error: 'Failed to log out' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// SCRUM-485 AC3: login identifies the two new roles
+// ---------------------------------------------------------------------------
+// docs/test-cases/SCRUM-485.md, AC3-01 and AC3-02. The route keeps no list of
+// roles: it returns whatever profiles.role holds, and the frontend chooses the
+// dashboard from it (Dashboard.test.jsx). So these prove the new roles pass
+// through untouched, as the exact strings the enum stores, not that login
+// knows about them.
+describe('SCRUM-485 AC3: login returns the Event Coordinator Lead and Safety Officer roles', () => {
+  it.each([
+    ['event_coordinator_lead', 'lead@connectsphere.com'],
+    ['safety_officer', 'safety@connectsphere.com'],
+  ])('SCRUM485_AC3_a_%s_logs_in_and_gets_that_exact_role_back', async (role, email) => {
+    supabaseAuth.auth.signInWithPassword.mockResolvedValue({
+      data: { user: { id: 'user-485', email }, session: { access_token: 'token-485' } },
+      error: null,
+    });
+    mockProfileLookup({ data: { role } });
+
+    const res = await login({ email, password: 'password123' });
+
+    expect(res.statusCode).toBe(200);
+    // One role, as a string: AC2's one role per account, as login reports it.
+    expect(res.body.user.role).toBe(role);
+    expect(res.body).toEqual({
+      user: { id: 'user-485', email, role },
+      session: { access_token: 'token-485' },
+    });
+  });
+});

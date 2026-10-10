@@ -2,11 +2,12 @@
 
 **Story:** Add the Event Coordinator Lead and Safety Officer Roles — All Users
 **Subtask:** SCRUM-506 (this document)
-**Schema:** a new migration, `039_…` (not yet written), adding two values to the `user_role` enum from `007_user_roles.sql`
-**Written:** 10 October 2026, **before the code.** Every case below describes what will be built. None is implemented yet; SCRUM-512 fills in the test names.
+**Schema:** `039_coordinator_lead_and_safety_officer_roles.sql`, adding two values to the `user_role` enum from `007_user_roles.sql` (applied to the live database)
+**Written:** 10 October 2026, before the code (SCRUM-506).
+**Updated:** 10 October 2026 (SCRUM-512): every case now names the test that proves it, read from the test files, or says plainly that a manual check proves it, or that nothing does and why.
 
 This document is the written layer between SCRUM-485's acceptance criteria and the
-Vitest files that will implement them. Deliverable #3 requires test cases
+Vitest files that implement them. Deliverable #3 requires test cases
 traceable from user stories and acceptance criteria to tests; the chain is
 **user story → acceptance criteria → test case → test class → code**, and it is
 walked for a randomly chosen feature in the Week 13 Q&A.
@@ -16,30 +17,33 @@ walked for a randomly chosen feature in the Week 13 Q&A.
 ## How case IDs relate to test names
 
 As in `docs/test-cases/SCRUM-19.md`: each case has a short stable ID (`AC5-08`),
-and an **Implemented by** column. Here every one reads **not yet written**,
-because no test exists. When SCRUM-512 writes them, that column names every
-test that proves the case, read from the test files, and the tests are named
-`SCRUM485_ACn_…` so each traces back to its criterion by name alone.
+and an **Implemented by** column naming every test that proves it, read from
+the test files, not invented. Tests written for this story are named
+`SCRUM485_ACn_…`, so each traces back to its criterion by name alone. Where an
+older table of refused roles was extended with the two new roles rather than
+duplicated (SCRUM-508), its rows run under that table's original name, which
+is the name given.
 
-Where a case says *where* it is meant to be proved, these abbreviations name the
-planned file. "New" means the file does not exist yet.
+A case no test proves says so, in bold, and says why: **manual** (a walkthrough
+or a review, with its date) or **not proved**.
+
+`%s` in a name is a parameterised test (`it.each`); one name covers several
+rows.
 
 | Short | File |
 |---|---|
-| role | `backend/tests/domain/userRole.test.js` |
-| mig | a migration-text test for 039, in the pattern of `backend/tests/db/eventStatusLifecycleMigration.test.js` (new) |
-| pglite | a PGlite test applying 007 and 039 to an in-process Postgres (new) |
+| role | `backend/tests/domain/userRole.test.js`. Holds the migration-text and PGlite cases too: the plan put those in two new files, but SCRUM-507 could edit only this one, so they live here |
 | reqauth | `backend/tests/middleware/requireAuth.test.js` |
 | reqrole | `backend/tests/middleware/requireRole.test.js` |
 | auth | `backend/tests/routes/auth.test.js` |
-| routes | the route suites in `backend/tests/routes/` |
-| norm | `frontend/tests/auth/normaliseRole.test.js` (new) |
-| dash | `frontend/tests/components/Dashboard.test.jsx` (new) |
+| booking, equip, avail, review-r, event-equip, events, venues | `backend/tests/routes/` `bookingRequests`, `equipment`, `equipmentAvailability`, `equipmentReview`, `eventEquipment`, `eventRequests`, `venues` `.test.js` |
+| dash | `frontend/tests/components/Dashboard.test.jsx` |
 | nav | `frontend/tests/components/Navigation.test.jsx` |
-| guard | the route-guard suites in `frontend/tests/auth/` |
-| login | `frontend/tests/components/LoginForm.test.jsx` (new) |
-| live | a check against the live database: a query, or a script that leaves it as it found it |
-| review | a review check, not an automated test |
+| login | `frontend/tests/components/LoginForm.test.jsx` |
+| guard | `frontend/tests/auth/`: `myVenueRequestsRoute`, `venueCalendarRoute`, `venueCatalogueRouteGuard`, `venueSearchRouteGuard`, `equipmentRouteGuard` `.test.jsx` |
+
+The plan named a `normaliseRole.test.js`. It was never written; AC1-03 says what
+proves that case instead.
 
 ---
 
@@ -133,6 +137,12 @@ What follows from that:
 - **`alter type user_role add value` has already been applied to this database
   successfully.** That is the only way a sixth value could have arrived. It is
   the precedent the new migration follows.
+
+**After the story, also on 10 October:** migration 039 was applied to the live
+database, and two accounts were created by hand in Supabase, one per new role:
+`lead@connectsphere.com` (profile role `event_coordinator_lead`, full name
+"Event Coordinator Lead Test") and `safety@connectsphere.com` (`safety_officer`,
+"Safety Officer Test"). There is still no account seed script; see AC7.
 
 **The two new roles are spelled `event_coordinator_lead` and `safety_officer`,**
 lowercase snake_case like every live value. `normaliseRole` turns them into
@@ -251,11 +261,11 @@ count case is what forces the update.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC1-01 | — | Read `ROLE` in `domain/userRole.js` | `ROLE.EVENT_COORDINATOR_LEAD === 'event_coordinator_lead'` and `ROLE.SAFETY_OFFICER === 'safety_officer'` | not yet written (role) |
-| AC1-02 | — | Read `ROLE_LABEL` | `'Event Coordinator Leads'` and `'Safety Officers'`: the exact names, in the plural every existing label uses for a "restricted to …" message (`'Event Coordinators'`, `'Event Organisers'`) | not yet written (role) |
-| AC1-03 | — | `normaliseRole('event_coordinator_lead')`, `normaliseRole('safety_officer')` | `'EVENT_COORDINATOR_LEAD'` and `'SAFETY_OFFICER'`; neither equals `'EVENT_COORDINATOR'` | not yet written (norm) |
-| AC1-04 | BOTH | Open `/dashboard` | The heading names the role exactly: "Event Coordinator Lead", "Safety Officer" | not yet written (dash) |
-| AC1-05 | Every story touching these roles | Read its title, ACs and docs | Uses "Event Coordinator Lead" and "Safety Officer", never a variant ("Coordinator Lead", "Lead Coordinator", "Safety Inspector") | not yet written (review) |
+| AC1-01 | — | Read `ROLE` in `domain/userRole.js` | `ROLE.EVENT_COORDINATOR_LEAD === 'event_coordinator_lead'` and `ROLE.SAFETY_OFFICER === 'safety_officer'` | role `SCRUM485_AC1_the_two_roles_are_spelled_as_the_enum_spells_them` |
+| AC1-02 | — | Read `ROLE_LABEL` | `'Event Coordinator Leads'` and `'Safety Officers'`: the exact names, in the plural every existing label uses for a "restricted to …" message (`'Event Coordinators'`, `'Event Organisers'`) | role `SCRUM485_AC1_the_labels_are_the_exact_names_in_the_plural` |
+| AC1-03 | — | `normaliseRole('event_coordinator_lead')`, `normaliseRole('safety_officer')` | `'EVENT_COORDINATOR_LEAD'` and `'SAFETY_OFFICER'`; neither equals `'EVENT_COORDINATOR'` | Proved through the code that uses `normaliseRole`, not by a test of it alone (no `normaliseRole.test.js` exists): dash `SCRUM485_AC3_the_role_spelt_%j_reaches_the_%s_dashboard`, `SCRUM485_AC3_a_lead_does_not_get_the_coordinator_dashboard`; nav `SCRUM485_AC4_the_role_spelt_%j_reaches_the_same_single_link`; guard `SCRUM485_AC5_sends_%s_to_unauthorized_from_venue_search`. A Lead reaching the Lead's dashboard and refused the Coordinator's pages is only possible if the key is `EVENT_COORDINATOR_LEAD` and not `EVENT_COORDINATOR` |
+| AC1-04 | BOTH | Open `/dashboard` | The heading names the role exactly: "Event Coordinator Lead", "Safety Officer" | dash `SCRUM485_AC3_an_event_coordinator_lead_gets_the_lead_dashboard`, `SCRUM485_AC3_a_safety_officer_gets_the_safety_officer_dashboard` (each asserts the exact h1) |
+| AC1-05 | Every story touching these roles | Read its title, ACs and docs | Uses "Event Coordinator Lead" and "Safety Officer", never a variant ("Coordinator Lead", "Lead Coordinator", "Safety Inspector") | **Not proved.** A rule about the backlog, so a review at sprint review, not a test. Not yet performed |
 
 AC1-05 is AC1's second sentence, "Every story uses these exact names". It is a
 rule about the backlog, not about the code, so it is checked at review rather
@@ -267,9 +277,9 @@ than by a test.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC2-01 | PGlite with 007 and 039; a user with a `profiles` row | Insert a second `profiles` row for the same id, with another role | 23505 (primary key); the first row unchanged | not yet written (pglite) |
-| AC2-02 | A profile with role `event_coordinator_lead` | `POST /api/auth/login` | `user.role` is the single string `'event_coordinator_lead'`, not a list | not yet written (auth) |
-| AC2-03 | A profile with either new role | A request through `requireAuth` | `req.user.role` is that one string | not yet written (reqauth) |
+| AC2-01 | PGlite with 007 and 039; a user with a `profiles` row | Insert a second `profiles` row for the same id, with another role | 23505 (primary key); the first row unchanged | role `SCRUM485_AC2_a_second_role_for_the_same_account_is_refused` (PGlite) |
+| AC2-02 | A profile with role `event_coordinator_lead` | `POST /api/auth/login` | `user.role` is the single string `'event_coordinator_lead'`, not a list | auth `SCRUM485_AC3_a_%s_logs_in_and_gets_that_exact_role_back` (asserts `user.role` is the one string, for both roles) |
+| AC2-03 | A profile with either new role | A request through `requireAuth` | `req.user.role` is that one string | reqauth `SCRUM485_AC5_admits_%s_and_puts_the_exact_role_on_the_request` |
 
 Holding the Lead role is not also holding the Coordinator role. That is proved
 by AC5-08 and AC5-09, not repeated here.
@@ -280,14 +290,14 @@ by AC5-08 and AC5-09, not repeated here.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC3-01 | A profile with role `event_coordinator_lead` | `POST /api/auth/login` with valid credentials | 200; `user.role` is `'event_coordinator_lead'` | not yet written (auth) |
-| AC3-02 | A profile with role `safety_officer` | The same | 200; `user.role` is `'safety_officer'` | not yet written (auth) |
-| AC3-03 | BOTH | Log in through `LoginForm` | Navigates to `/dashboard`, as every role does | not yet written (login) |
-| AC3-04 | LEAD | Open `/dashboard` | The Lead's dashboard: says the role will see the unassigned queue and the coordinator overview here, once those stories are built | not yet written (dash) |
-| AC3-05 | SAFETY | Open `/dashboard` | The Safety Officer's dashboard: says the role will see the safety review list here, once that story is built | not yet written (dash) |
-| AC3-06 | BOTH | Open `/dashboard` | Never "No dashboard available for your role" | not yet written (dash) |
-| AC3-07 | LEAD | Open `/dashboard` | Not the Coordinator's dashboard: `EventCoordinatorDashboard` is not rendered, and no coordinator service (queue, my events) is called | not yet written (dash) |
-| AC3-08 | BOTH | Open `/dashboard` | The placeholder makes no API call | not yet written (dash) |
+| AC3-01 | A profile with role `event_coordinator_lead` | `POST /api/auth/login` with valid credentials | 200; `user.role` is `'event_coordinator_lead'` | auth `SCRUM485_AC3_a_%s_logs_in_and_gets_that_exact_role_back` |
+| AC3-02 | A profile with role `safety_officer` | The same | 200; `user.role` is `'safety_officer'` | auth `SCRUM485_AC3_a_%s_logs_in_and_gets_that_exact_role_back` |
+| AC3-03 | BOTH | Log in through `LoginForm` | Navigates to `/dashboard`, as every role does | login `SCRUM485_AC3_logging_in_as_%s_goes_to_the_dashboard`: the real App, from `/login` to `/dashboard` and that role's own h1 |
+| AC3-04 | LEAD | Open `/dashboard` | The Lead's dashboard: says the role will see the unassigned queue and the coordinator overview here, once those stories are built | dash `SCRUM485_AC3_an_event_coordinator_lead_gets_the_lead_dashboard` |
+| AC3-05 | SAFETY | Open `/dashboard` | The Safety Officer's dashboard: says the role will see the safety review list here, once that story is built | dash `SCRUM485_AC3_a_safety_officer_gets_the_safety_officer_dashboard` |
+| AC3-06 | BOTH | Open `/dashboard` | Never "No dashboard available for your role" | dash `SCRUM485_AC3_%s_never_sees_no_dashboard_available` |
+| AC3-07 | LEAD | Open `/dashboard` | Not the Coordinator's dashboard: `EventCoordinatorDashboard` is not rendered, and no coordinator service (queue, my events) is called | dash `SCRUM485_AC3_a_lead_does_not_get_the_coordinator_dashboard` (the Coordinator's page is not rendered); `SCRUM485_AC3_the_%s_dashboard_calls_no_service` (no service of any kind is called) |
+| AC3-08 | BOTH | Open `/dashboard` | The placeholder makes no API call | dash `SCRUM485_AC3_the_%s_dashboard_calls_no_service` (asserted on a mocked `apiClient` and `supportService`); also `SCRUM485_AC3_the_%s_dashboard_has_no_link_to_a_page_that_does_not_exist` |
 
 AC3-06 is the silent-failure case: a role key misspelt in `DASHBOARD_BY_ROLE`
 renders the "no dashboard" message and throws nothing. AC3-04, AC3-05, AC3-07 and
@@ -300,12 +310,12 @@ real screens.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC4-01 | LEAD | Render `Navigation` | Exactly one link: Dashboard → `/dashboard` | not yet written (nav) |
-| AC4-02 | SAFETY | Render `Navigation` | Exactly one link: Dashboard → `/dashboard` | not yet written (nav) |
-| AC4-03 | LEAD | Render `Navigation` | None of the Coordinator's links: My Events, Venue Requests, Review Queue, Find a Venue | not yet written (nav) |
-| AC4-04 | BOTH | Render `Navigation` | No link label from any other role's set appears (every label of every other role, generated from the map, not typed out) | not yet written (nav) |
-| AC4-05 | BOTH, the role spelt `'Safety Officer'`, `'safety-officer'`, `'EVENT_COORDINATOR_LEAD'` | Render `Navigation` | The same single link: `normaliseRole` absorbs case, spaces and hyphens, as the existing American-spelling test shows for the Organiser | not yet written (nav) |
-| AC4-06 | A misspelt role, `'saftey_officer'` | Render `Navigation` | An empty nav, and no error. Pins the failure mode so it is documented; AC4-01 and AC4-02 are what catch a misspelling in the code | not yet written (nav) |
+| AC4-01 | LEAD | Render `Navigation` | Exactly one link: Dashboard → `/dashboard` | nav `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link` |
+| AC4-02 | SAFETY | Render `Navigation` | Exactly one link: Dashboard → `/dashboard` | nav `SCRUM485_AC4_a_safety_officer_has_exactly_the_dashboard_link` |
+| AC4-03 | LEAD | Render `Navigation` | None of the Coordinator's links: My Events, Venue Requests, Review Queue, Find a Venue | nav `SCRUM485_AC4_a_lead_sees_none_of_the_coordinators_links` |
+| AC4-04 | BOTH | Render `Navigation` | No link label or target from any other role's set appears. Every other role's links are read by rendering that role's nav, not typed out, so a link added to any role later is checked too | nav `SCRUM485_AC4_%s_sees_no_link_from_any_other_role` |
+| AC4-05 | BOTH, the role spelt `'Safety Officer'`, `'safety officer'`, `'event-coordinator-lead'`, `'EVENT_COORDINATOR_LEAD'` | Render `Navigation` | The same single link: `normaliseRole` absorbs case, spaces and hyphens, as the existing American-spelling test shows for the Organiser | nav `SCRUM485_AC4_the_role_spelt_%j_reaches_the_same_single_link` |
+| AC4-06 | A misspelt role, `'saftey_officer'` | Render `Navigation` | An empty nav, and no error. Pins the failure mode so it is documented; AC4-01 and AC4-02 are what catch a misspelling in the code | nav `SCRUM485_AC4_an_unknown_role_renders_an_empty_nav_and_throws_nothing` |
 
 AC4-01 and AC4-02 are pinned by count, so a link leaking into either set fails
 them. They change when SCRUM-486, 487 and 490 add each role's real links.
@@ -318,26 +328,26 @@ them. They change when SCRUM-486, 487 and 490 add each role's real links.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC5-01 | — | Read migration 039 | Two `alter type user_role add value if not exists` statements, for `'event_coordinator_lead'` and `'safety_officer'`, and nothing else | not yet written (mig) |
-| AC5-02 | PGlite with 007 | Apply 039, then apply it again | No error the second time; the enum unchanged by the second run | not yet written (pglite) |
-| AC5-03 | PGlite with 007 and 039 | Insert a `profiles` row with each new role | Accepted | not yet written (pglite) |
-| AC5-04 | PGlite with 007 and 039 | Insert a `profiles` row with role `'event_coordinator_leader'` | Refused, 22P02 (invalid enum value) | not yet written (pglite) |
-| AC5-05 | — | Compare `ROLE` with the migrations | `ROLE`'s values equal 007's `create type` values plus every `alter type user_role add value` in a later migration: seven. Replaces `toHaveLength(5)` and the read of 007 alone, so a new migration is never invisible to the test | not yet written (role) |
-| AC5-06 | — | `isKnownRole`, `roleLabel` for each new role | `true`; the label from AC1-02, never `'another role'` | not yet written (role) |
-| AC5-07 | A profile with either new role | A request through `requireAuth` | Passes, `req.user.role` set; not the 403 "Your account has no role assigned" | not yet written (reqauth) |
+| AC5-01 | — | Read migration 039 | Two `alter type user_role add value if not exists` statements, for `'event_coordinator_lead'` and `'safety_officer'`, and nothing else | role `SCRUM485_AC5_039_adds_the_two_values_and_nothing_else` |
+| AC5-02 | PGlite with 007 | Apply 039, then apply it again | No error the second time; the enum unchanged by the second run | role `SCRUM485_AC5_running_039_again_changes_nothing` (PGlite) |
+| AC5-03 | PGlite with 007 and 039 | Insert a `profiles` row with each new role | Accepted | role `SCRUM485_AC5_a_profile_can_hold_%s` (PGlite) |
+| AC5-04 | PGlite with 007 and 039 | Insert a `profiles` row with role `'event_coordinator_leader'` | Refused, 22P02 (invalid enum value) | role `SCRUM485_AC5_a_misspelt_role_is_refused_by_the_enum` (PGlite) |
+| AC5-05 | — | Compare `ROLE` with the migrations | `ROLE`'s values equal 007's `create type` values plus every `alter type user_role add value` in a later migration: seven. Replaces `toHaveLength(5)` and the read of 007 alone, so a new migration is never invisible to the test | role `SCRUM15_AC2_the_javascript_roles_match_the_sql_enum` (now reads every migration), `SCRUM485_AC5_the_parse_finds_039_and_reads_no_comment_as_a_role`, `SCRUM485_AC5_the_javascript_roles_are_exactly_what_the_built_enum_holds`, `SCRUM485_AC1_there_are_exactly_seven_roles_and_no_duplicates` (replaced `SCRUM15_AC2_there_are_exactly_five_roles_and_no_duplicates`) |
+| AC5-06 | — | `isKnownRole`, `roleLabel` for each new role | `true`; the label from AC1-02, never `'another role'` | role `SCRUM485_AC5_%s_is_a_known_role_with_its_own_label`; and `SCRUM485_AC5_isKnownRole_refuses_%s` for near misses and the dead `technical_support` |
+| AC5-07 | A profile with either new role | A request through `requireAuth` | Passes, `req.user.role` set; not the 403 "Your account has no role assigned" | reqauth `SCRUM485_AC5_admits_%s_and_puts_the_exact_role_on_the_request` |
 
 ### The role is refused where it is not allowed
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC5-08 | `requireRole(ROLE.EVENT_COORDINATOR)` | A caller with role `event_coordinator_lead` | 403 "This action is restricted to Event Coordinators"; `next` not called. Exact match: `includes`, no prefix | not yet written (reqrole) |
-| AC5-09 | BOTH | Every `coordinatorOnly` route: on `/api/event-requests`, `GET /queue`, `/mine`, `/coordinators`, `/:id/review`, `/:id/assignments/review`, `/:id/change-requests/review`, `POST /:id/start-review`, `/:id/decision`, `/:id/clarification`, `/:id/clarification/close`, `/:id/reassign`, `/change-requests/:changeRequestId/decision`; on `/api/booking-requests`, `GET /mine`, `POST /`, `POST /:id/withdraw`; every route on `/api/event-requests/:id/equipment` | Refused, nothing queried | not yet written (routes) |
-| AC5-10 | BOTH | Every `venueStaffOnly` route on `/api/venues`, among them `GET /` (the full catalogue) and `GET /:id/history` | Refused, nothing queried | not yet written (routes) |
-| AC5-11 | BOTH | Every `technicalSupportOnly` route: `/api/equipment` (`GET /`, `POST /`, `/:id/history`, `/:id/retire`, `/:id/reinstate`, `/:id/condition`, `PATCH /:id`), `/api/equipment/availability`, and every route on `/api/event-requests/:id/equipment-review` | Refused, nothing queried | not yet written (routes) |
-| AC5-12 | BOTH | The two-role gates: `internalReaders` (`/api/venues/:id/bookings`, `/blocks`, `/calendar`), `activeReaders` (`/api/equipment/active`), `coordinatorsOnly` (`/api/venues/event-search`) | Refused, nothing queried | not yet written (routes) |
-| AC5-13 | BOTH | `POST /api/event-requests` (create a request), `PATCH /:id`, `POST /:id/submit` | Refused, nothing queried. **Needs a decision first: see open question 2.** No role gate protects these today; any signed-in user passes | not yet written (routes) |
-| AC5-14 | LEAD | Open each coordinator-gated page: `/review-queue`, `/my-events`, `/my-venue-requests`, `/venue-search`, `/venues/:venueId/calendar` | Redirected to `/unauthorized`. `ProtectedRoute` normalises both sides, and `EVENT_COORDINATOR_LEAD` is not `EVENT_COORDINATOR` | not yet written (guard) |
-| AC5-15 | BOTH | Open each Venue Staff and Technical Support page: `/venue-catalogue`, `/equipment-catalogue`, `/equipment-review/:eventId`, `/equipment-availability` | Redirected to `/unauthorized` | not yet written (guard) |
+| AC5-08 | `requireRole(ROLE.EVENT_COORDINATOR)` | A caller with role `event_coordinator_lead` | 403 "This action is restricted to Event Coordinators"; `next` not called. Exact match: `includes`, no prefix | reqrole `SCRUM485_AC5_the_coordinator_gate_refuses_%s`; and `SCRUM485_AC5_a_refusal_names_the_role_that_would_work_not_%s` |
+| AC5-09 | BOTH | Every `coordinatorOnly` route: on `/api/event-requests`, `GET /queue`, `/mine`, `/coordinators`, `/:id/review`, `/:id/assignments/review`, `/:id/change-requests/review`, `POST /:id/start-review`, `/:id/decision`, `/:id/clarification`, `/:id/clarification/close`, `/:id/reassign`, `/change-requests/:changeRequestId/decision`; on `/api/booking-requests`, `GET /mine`, `POST /`, `POST /:id/withdraw`; every route on `/api/event-requests/:id/equipment` | Refused, nothing queried | Per gate, not per route: reqrole `SCRUM485_AC5_the_coordinator_gate_refuses_%s` is the proof, since every route listed shares the one gate. Sampled on routes: events `SCRUM485_AC5_%s_refuses_%s_with_403_and_queries_nothing` (`GET /queue`, `GET /coordinators`, `POST /:id/start-review`); booking `SCRUM252_refuses_%s_with_403_and_never_queries`, `SCRUM253_refuses_%s_with_403_and_never_queries`, `SCRUM255_refuses_%s_with_403_and_never_queries`; event-equip `SCRUM21_AC1_refuses_%s_who_%s_with_403_and_reaches_nothing` |
+| AC5-10 | BOTH | Every `venueStaffOnly` route on `/api/venues`, among them `GET /` (the full catalogue) and `GET /:id/history` | Refused, nothing queried | reqrole `SCRUM485_AC5_the_%s_gate_refuses_%s` (Venue Staff); venues `SCRUM17_AC4_%s_answers_403_with_no_query` (`GET /:id/history`), `SCRUM484_AC2_POST_with_setup_from_a_non_venue_staff_role_is_refused (%s)` (`POST /`). `GET /` itself is not sampled |
+| AC5-11 | BOTH | Every `technicalSupportOnly` route: `/api/equipment` (`GET /`, `POST /`, `/:id/history`, `/:id/retire`, `/:id/reinstate`, `/:id/condition`, `PATCH /:id`), `/api/equipment/availability`, and every route on `/api/event-requests/:id/equipment-review` | Refused, nothing queried | reqrole `SCRUM485_AC5_the_%s_gate_refuses_%s` (Technical Support Staff); equip `SCRUM275_AC1_refuses_%s_on_create_with_403_and_changes_nothing`, `SCRUM275_AC1_refuses_%s_on_edit_with_403_and_changes_nothing`, `SCRUM275_AC8_refuses_%s_on_the_history_with_403`, `SCRUM275_AC1_refuses_%s_on_recording_damage_with_403_and_changes_nothing`, `SCRUM275_AC1_refuses_%s_on_retire_with_403_and_changes_nothing`, `SCRUM275_AC1_refuses_%s_on_reinstate_with_403_and_changes_nothing`; avail `SCRUM23_AC1_refuses_%s_with_403_and_runs_no_check`; review-r `N14_AC1_refuses_%s_who_%s_with_403_and_reaches_nothing`. `GET /api/equipment` itself is not sampled |
+| AC5-12 | BOTH | The two-role gates: `internalReaders` (`/api/venues/:id/bookings`, `/blocks`, `/calendar`), `activeReaders` (`/api/equipment/active`), `coordinatorsOnly` (`/api/venues/event-search`) | Refused, nothing queried | reqrole `SCRUM485_AC5_the_%s_gate_refuses_%s` (both two-role gates); venues `SCRUM17_AC2_%s_gets_403_with_no_query` (blocks), `SCRUM178_AC6_%s_gets_403_with_no_query` (calendar, bookings), `SCRUM178_AC6_%s_with_includeRetired_gets_403_with_no_query`, `SCRUM20_AC1_%s_is_refused_with_403_before_the_service` (event search); equip `SCRUM275_AC1_refuses_%s_on_the_active_list_with_403` |
+| AC5-13 | BOTH | `POST /api/event-requests` (create a request), `PATCH /:id`, `POST /:id/submit` | Refused, nothing queried. **Needs a decision first: see open question 2.** No role gate protects these today; any signed-in user passes | **Not proved, deliberately.** No role gate protects these routes today, for any role, so the expected 403 would fail. Gating them changes what existing roles can do (AC6), so it waits on open question 2 and its own ticket |
+| AC5-14 | LEAD | Open each coordinator-gated page: `/review-queue`, `/my-events`, `/my-venue-requests`, `/venue-search`, `/venues/:venueId/calendar` | Redirected to `/unauthorized`. `ProtectedRoute` normalises both sides, and `EVENT_COORDINATOR_LEAD` is not `EVENT_COORDINATOR` | guard `SCRUM255_sends_%s_to_unauthorized_and_never_mounts_the_list` (`/my-venue-requests`), `SCRUM178_AC6_%s_is_sent_to_unauthorized_and_never_mounts_the_calendar`, `SCRUM485_AC5_sends_%s_to_unauthorized_from_venue_search`. `/review-queue` and `/my-events` share `/my-venue-requests`' gate, `["event_coordinator"]`, but have no test of their own; `/review-queue` was checked by hand (AC7-03) |
+| AC5-15 | BOTH | Open each Venue Staff and Technical Support page: `/venue-catalogue`, `/equipment-catalogue`, `/equipment-review/:eventId`, `/equipment-availability` | Redirected to `/unauthorized` | guard `sends %s to /unauthorized` (`venueCatalogueRouteGuard`, `/venue-catalogue`), `SCRUM485_AC5_sends_%s_from_%s_to_unauthorized` (all three equipment pages, with `SCRUM485_AC5_technical_support_staff_still_opens_%s` as the control) |
 
 AC5's two halves pull in different directions, and the cases resolve it one way.
 "Accepted wherever roles are checked" is read as *recognised*: the enum stores
@@ -347,10 +357,13 @@ nowhere yet*, because no story has granted these roles anything. Read the other
 way, "accepted wherever roles are checked" would put both roles through every
 gate, which is exactly the permission-in-two-places the ticket rules out.
 
-AC5-09 to AC5-12 are generated from the gates, not typed route by route, where
-the suites allow it. The lists above are today's routes, read from
-`backend/src/routes/` on 10 October; a route added later behind one of these
-gates is covered automatically if the case is written that way.
+AC5-09 to AC5-12 are proved per gate, not per route. Every route file builds
+its gates from one factory, `createRequireRole`, so requireRole's own test of a
+gate (`SCRUM485_AC5_the_%s_gate_refuses_%s`) is the proof for every route behind
+it, a route added later included. The route-level tests sample each gate, one or
+more routes apiece, to prove the gate is actually mounted. The lists in the
+expected-result column are the routes on 10 October; not every one of them has
+a route-level test, and the Implemented-by column says which do.
 
 ---
 
@@ -358,13 +371,13 @@ gates is covered automatically if the case is written that way.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC6-01 | PGlite with 007 and 039 | Read the enum's values in order | 007's five first, in 007's order, then the two new ones; nothing removed or renamed | not yet written (pglite) |
-| AC6-02 | — | Read `ROLE` and `ROLE_LABEL` | The five existing keys, values and labels exactly as before | not yet written (role) |
-| AC6-03 | THE FOUR | Open `/dashboard` | Each gets the same dashboard as before: Organiser, Coordinator, Venue Staff, Technical Support | not yet written (dash) |
-| AC6-04 | THE FOUR | Render `Navigation` | Each role's links exactly as today, by href and **by count**: Organiser 2, Coordinator 5, Venue Staff 3, Technical Support 5. Extends the Organiser-only count to every role that has links | not yet written (nav) |
-| AC6-05 | The existing route and guard suites | Run them | Every existing role-gate test passes unchanged. Lists of refused roles gain the two new roles; none loses one | not yet written (routes, guard) |
-| AC6-06 | A signed-in `attendee` | Open `/dashboard` | Still "No dashboard available for your role", as today. Attendee has no dashboard, and this story does not give it one | not yet written (dash) |
-| AC6-07 | The live database, before and after 039 | Count profiles by role | Identical before and after: `event_coordinator` 2, and one each of `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee` | not yet written (live) |
+| AC6-01 | PGlite with 007 and 039 | Read the enum's values in order | 007's five first, in 007's order, then the two new ones; nothing removed or renamed | role `SCRUM485_AC6_the_enum_holds_the_five_then_the_two_in_that_order` (PGlite) |
+| AC6-02 | — | Read `ROLE` and `ROLE_LABEL` | The five existing keys, values and labels exactly as before | role `SCRUM485_AC6_the_five_existing_roles_and_their_labels_are_unchanged` |
+| AC6-03 | THE FOUR | Open `/dashboard` | Each gets the same dashboard as before: Organiser, Coordinator, Venue Staff, Technical Support | dash `SCRUM485_AC6_%s_still_gets_the_%s`. The four existing dashboards are stubs in that file: it proves Dashboard.jsx chooses the same page for each role, not those pages' content |
+| AC6-04 | THE FOUR | Render `Navigation` | Each role's links exactly as today, by href and **by count**: Organiser 2, Coordinator 5, Venue Staff 3, Technical Support 5. Extends the Organiser-only count to every role that has links | nav `SCRUM485_AC6_%s_keeps_exactly_its_links`; and `SCRUM485_AC6_an_attendee_still_has_no_links` |
+| AC6-05 | The existing route and guard suites | Run them | Every existing role-gate test passes unchanged. Lists of refused roles gain the two new roles; none loses one | Every existing test still passes, and the refused-role tables named in AC5-09 to AC5-15 each gained the two roles. Tables built from `Object.values(ROLE)` needed nothing: venues `SCRUM493_AC1_every_role_but_venue_staff_is_covered`, notifications `SCRUM17_AC3_a_%s_can_read_their_own_inbox` |
+| AC6-06 | A signed-in `attendee` | Open `/dashboard` | Still "No dashboard available for your role", as today. Attendee has no dashboard, and this story does not give it one | dash `SCRUM485_AC6_an_attendee_still_has_no_dashboard` |
+| AC6-07 | The live database, before and after 039 | Count profiles by role | Identical before and after: `event_coordinator` 2, and one each of `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee` | **Not proved.** The counts before 039 are recorded above (10 October). No count was taken after 039 and the two new accounts, so nothing shows the existing profiles unchanged. The expected after-figures are the same five rows plus one `event_coordinator_lead` and one `safety_officer` |
 
 AC6-04 to AC6-06 are the regression half of AC6; the Week 7 change guide names
 regression tests as a deliverable. AC6-06 pins existing behaviour that is
@@ -383,14 +396,15 @@ one account per new role, the same way the check scripts create accounts.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC7-01 | The live project without the two accounts | Run the account seed | One auth user and one `profiles` row per new role, with the role spelled as in AC1-01 | not yet written (live) |
-| AC7-02 | The two accounts already seeded | Run the seed again | No duplicate, no error, nothing else changed | not yet written (live) |
-| AC7-03 | The seeded Lead account | Log in through the screen | Lands on the Lead's dashboard (AC3-04) | not yet written (review: a manual walkthrough) |
-| AC7-04 | The seeded Safety Officer account | Log in through the screen | Lands on the Safety Officer's dashboard (AC3-05) | not yet written (review: a manual walkthrough) |
-| AC7-05 | The seed's source | Read it | No password or secret in the repository; credentials come from the environment, as `SUPABASE_SECRET_KEY` does | not yet written (review) |
+| AC7-01 | The live project without the two accounts | Run the account seed | One auth user and one `profiles` row per new role, with the role spelled as in AC1-01 | **Not proved: no seed script was built** (SCRUM-511). The two accounts exist, made by hand on 10 October: `lead@connectsphere.com` and `safety@connectsphere.com` (see *Facts*). So AC7 is partly met: the accounts are there for demos, but the seed data AC7 asks for is not |
+| AC7-02 | The two accounts already seeded | Run the seed again | No duplicate, no error, nothing else changed | **Not proved.** There is no seed to run twice |
+| AC7-03 | The seeded Lead account | Log in through the screen | Lands on the Lead's dashboard (AC3-04) | **Manual**, 10 October: logged in as `lead@connectsphere.com`; landed on the Lead's dashboard with one nav link, Dashboard; opening `/review-queue` by URL showed "Not available to your role" |
+| AC7-04 | The seeded Safety Officer account | Log in through the screen | Lands on the Safety Officer's dashboard (AC3-05) | **Manual**, 10 October: logged in as `safety@connectsphere.com`; landed on the Safety Officer's dashboard with one nav link, Dashboard |
+| AC7-05 | The seed's source | Read it | No password or secret in the repository; credentials come from the environment, as `SUPABASE_SECRET_KEY` does | **Manual (review)**, 10 October. There is no seed source to read. No credential for either account is in the repository: the two emails appear only as strings in auth and login, with a placeholder password |
 
-AC7-01 and AC7-02 write to the shared database, so they are run deliberately, not
-in CI.
+AC7 is the one criterion this story only partly meets: the accounts exist, the
+seed data does not. A seed script would write to the shared database, so even
+when SCRUM-511 builds one it is run deliberately, not in CI.
 
 ---
 
@@ -398,8 +412,8 @@ in CI.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC8-01 | `backend/src` | Read every use of `profiles` | Every one is a read; no route or service writes `profiles.role` | not yet written (review) |
-| AC8-02 | `frontend/src/App.jsx` | Read the routes | No route to a role-management screen | not yet written (review) |
+| AC8-01 | `backend/src` | Read every use of `profiles` | Every one is a read; no route or service writes `profiles.role` | **Manual (review)**, 10 October: the six uses of `from('profiles')` in `backend/src` (requireAuth.js, routes/auth.js, equipmentReviewService.js, three in eventRequestService.js) are all `.select(…)` |
+| AC8-02 | `frontend/src/App.jsx` | Read the routes | No route to a role-management screen | **Manual (review)**, 10 October: no route in App.jsx leads to a role, profile, user or account screen |
 
 How a role *is* set is AC7-01: the `profiles` insert at account creation, refused
 by the enum if misspelt (AC5-04). These cases are negative on purpose. AC8 says
@@ -414,7 +428,10 @@ the screen is not built, and nothing in this story builds one.
   not what the live database holds. The live database has drifted once already
   (`technical_support`). Only a query, AC6-07's kind, can check the live enum.
 - **AC1's rule for other stories** (AC1-05). It is about the backlog.
-- **AC7 in CI.** The seed writes to the shared Supabase project.
+- **AC7 in CI.** A seed writes to the shared Supabase project. There is no seed
+  yet in any case.
+- **AC6-07 from the suite.** Profile counts are a fact about the live database;
+  only a query before and after shows them.
 - **Anything another story grants.** By design: no case here says what a Lead or
   Safety Officer *can* do, only that they are recognised and refused.
 
@@ -433,12 +450,25 @@ the screen is not built, and nothing in this story builds one.
    refuses every route the role may not use, which these routes do not. Gating
    them is a small change, but it also stops the existing non-organiser roles,
    which touches AC6. AC5-13 is written for the gate and waits on this decision.
+
+   **Wider than the three API routes.** SCRUM-508's audit found the same gap on
+   the screen: `/events` (the Organiser's list and create form) is behind login
+   only, with no `allowedRoles`, so any role, the new ones included, can open
+   it and create a request through it. And the three placeholder pages,
+   `/booking-requests`, `/tickets` and `/equipment`, are reachable by any
+   signed-in role. Those render only text and load nothing, so the harm is
+   cosmetic, but showing Venue Staff's or Technical Support's page to a Lead
+   is against AC4's spirit.
 3. **Is the role assignment decision confirmed?** AC8 says "Team decision, to
    confirm". The team confirmed it on 10 October; the ticket should be updated
    to say so.
-4. **Should the dead `technical_support` value be recorded in a migration?** It
-   cannot be removed without recreating the type. A migration comment saying it
-   exists, and why, would stop the next audit from reading it as a broken role.
+4. **Should the dead `technical_support` value be recorded in a migration?**
+   Answered: 039's header now records that it is dead and why it stays.
+5. **What is the Lead's "unassigned queue" of?** Since SCRUM-330 every request is
+   assigned a coordinator the moment it is submitted, and a submission with no
+   coordinator available is refused and stays a draft. So no request is ever
+   unassigned, and the queue the Lead's dashboard promises would always be
+   empty. SCRUM-486 has to decide what it holds, or change assignment.
 
 ---
 
@@ -446,23 +476,35 @@ the screen is not built, and nothing in this story builds one.
 
 | Cases | Subtask |
 |---|---|
-| This document | SCRUM-506 |
-| Every test named here | SCRUM-512 |
+| This document | SCRUM-506 (written), SCRUM-512 (updated) |
+| AC1-01, AC1-02, AC2-01, AC5-01 to AC5-06, AC6-01, AC6-02: migration 039, `userRole.js`, `userRole.test.js` | SCRUM-507 |
+| AC2-03, AC5-07 to AC5-15, AC6-05: the middleware tests and the refused-role tables | SCRUM-508 |
+| AC1-04, AC3-04 to AC3-08, AC6-03, AC6-06: the two dashboards | SCRUM-509 |
+| AC4-01 to AC4-06, AC6-04: navigation | SCRUM-510 |
+| AC7: the seed script | SCRUM-511 (not built) |
+| AC2-02, AC3-01 to AC3-03, and this audit | SCRUM-512 |
 | What each role may do | SCRUM-486, 487, 489 and 490, not this story |
 
-**Tally:** 51 cases, all **not yet written**.
+**Tally:** 51 cases, counted from the tables.
 
-| AC | Cases |
+| | Cases |
 |---|---|
-| AC1 | 5 |
-| AC2 | 3 |
-| AC3 | 8 |
-| AC4 | 6 |
-| AC5 | 15 |
-| AC6 | 7 |
-| AC7 | 5 |
-| AC8 | 2 |
+| Proved by a named test | 41 |
+| Proved manually: a walkthrough (AC7-03, AC7-04) or a review (AC7-05, AC8-01, AC8-02), each dated 10 October | 5 |
+| Not proved: AC1-05 (a backlog review, not yet done), AC5-13 (deferred to open question 2), AC6-07 (no count after 039), AC7-01 and AC7-02 (no seed script) | 5 |
 
-Of the 51, 9 are not automated tests: AC1-05, AC7-03, AC7-04, AC7-05, AC8-01 and
-AC8-02 are review checks, and AC6-07, AC7-01 and AC7-02 run against the live
-database.
+| AC | Cases | By a test | Manually | Not proved |
+|---|---|---|---|---|
+| AC1 | 5 | 4 | 0 | 1 |
+| AC2 | 3 | 3 | 0 | 0 |
+| AC3 | 8 | 8 | 0 | 0 |
+| AC4 | 6 | 6 | 0 | 0 |
+| AC5 | 15 | 14 | 0 | 1 |
+| AC6 | 7 | 6 | 0 | 1 |
+| AC7 | 5 | 0 | 3 | 2 |
+| AC8 | 2 | 0 | 2 | 0 |
+
+Two of the 41 lean on more than one kind of evidence, and say so in their row:
+AC1-03 is proved through the code that calls `normaliseRole` rather than by a
+test of it alone, and AC5-14's `/review-queue` and `/my-events` share a tested
+gate but have no test of their own.
