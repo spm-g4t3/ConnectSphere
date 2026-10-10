@@ -88,4 +88,11 @@ describe("Navigation links by role", () => {
 
   expect(screen.getByRole("link", { name: "Check Availability" })).toHaveAttribute("href", "/equipment-availability");
 });
+
+  it("gives an Attendee only the Dashboard link, with no staff-facing pages", () => {
+    renderAs("attendee");
+
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+  });
 });
