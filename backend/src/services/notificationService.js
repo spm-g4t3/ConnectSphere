@@ -14,6 +14,11 @@
  * client holds the secret key, so that filter is the whole of the access
  * control: a function here that forgot it would read everyone's inbox.
  *
+ * SCRUM-491 (AC8): process_venue_hold_expiry (040) writes a
+ * 'venue_hold_expired' notice for the holding event's coordinator, naming the
+ * event, the venue and the expiry in its payload, and the hold in
+ * venue_hold_id. It is read here like any other.
+ *
  * Deliberately NOT done here:
  *
  *  - No role check. A notification belongs to its recipient, and ownership is
@@ -29,7 +34,7 @@ import { validateNotificationId } from '../validation/notificationValidation.js'
 
 /** Every column toNotification reads, so each read selects the same shape. */
 const NOTIFICATION_COLUMNS =
-  'id, recipient_id, type, booking_id, block_id, payload, read_at, created_at';
+  'id, recipient_id, type, booking_id, block_id, venue_hold_id, payload, read_at, created_at';
 
 /**
  * Enough for a dashboard card without paging. Read notifications stay in the
@@ -81,6 +86,9 @@ export function toNotification(row) {
     type: row.type,
     bookingId: row.booking_id,
     blockId: row.block_id,
+    // SCRUM-491: the hold a 'venue_hold_expired' notice is about (040); null
+    // for every other type.
+    venueHoldId: row.venue_hold_id,
     payload: row.payload ?? {},
     readAt: row.read_at,
     createdAt: row.created_at,

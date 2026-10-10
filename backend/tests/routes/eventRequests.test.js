@@ -85,6 +85,12 @@ function createFakeClient(results = []) {
         call.filters.push([column, value]);
         return chain;
       },
+      // SCRUM-491: the hold candidates read names with .in(), as
+      // equipmentReviewService does.
+      in(column, values) {
+        call.filters.push([column, values]);
+        return chain;
+      },
       order(column, options) {
         call.order.push([column, options]);
         return chain;
@@ -3354,4 +3360,78 @@ describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
     expect(res.status).toBe(401);
     expect(client.calls).toHaveLength(0);
   });
+});
+
+
+describe('SCRUM-491: GET /hold-candidates, the hold form event picker', () => {
+  const STAFF_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
+  const COORD_ID = '44444444-4444-4444-8444-444444444444';
+  const staff = (req, _res, next) => {
+    req.user = { id: STAFF_ID, role: 'venue_staff' };
+    next();
+  };
+
+  it('SCRUM491_AC2_lists_approved_events_with_their_coordinator_for_venue_staff', async () => {
+    const client = createFakeClient([
+      ok([{
+        id: REQUEST_ID,
+        event_name: 'IS212 Industry Night',
+        proposed_start: '2026-06-01T09:00:00+00:00',
+        proposed_end: '2026-06-01T17:00:00+00:00',
+        expected_attendance: 120,
+        assigned_coordinator_id: COORD_ID,
+      }]),
+      ok([{ id: COORD_ID, full_name: 'Casey Coord' }]),
+    ]);
+
+    const res = await request(appWith({ client, requireAuth: staff })).get('/api/event-requests/hold-candidates');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{
+      id: REQUEST_ID,
+      eventName: 'IS212 Industry Night',
+      proposedStart: '2026-06-01T09:00:00+00:00',
+      proposedEnd: '2026-06-01T17:00:00+00:00',
+      expectedAttendance: 120,
+      assignedCoordinatorId: COORD_ID,
+      assignedCoordinatorName: 'Casey Coord',
+    }]);
+    expect(client.calls[0].table).toBe('event_requests');
+    expect(client.calls[0].filters).toContainEqual(['status', 'approved']);
+  });
+
+  it('a failed read is 500 without the driver message', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const client = createFakeClient([{ data: null, error: { code: 'XX000', message: 'secret' } }]);
+
+    const res = await request(appWith({ client, requireAuth: staff })).get('/api/event-requests/hold-candidates');
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    spy.mockRestore();
+  });
+
+  it('is declared before /:id, so it is never read as an id', async () => {
+    const client = createFakeClient([ok([])]);
+    const res = await request(appWith({ client, requireAuth: staff })).get('/api/event-requests/hold-candidates');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it.each(['event_coordinator', 'event_organiser', 'technical_support_staff', 'attendee'])(
+    'SCRUM491_AC1_403_for_%s',
+    async (role) => {
+      const client = createFakeClient([]);
+      const requireAuth = (req, _res, next) => {
+        req.user = { id: STAFF_ID, role };
+        next();
+      };
+
+      const res = await request(appWith({ client, requireAuth })).get('/api/event-requests/hold-candidates');
+
+      expect(res.status).toBe(403);
+      expect(res.body).toEqual({ error: 'This action is restricted to Venue Staff' });
+      expect(client.calls).toHaveLength(0);
+    },
+  );
 });

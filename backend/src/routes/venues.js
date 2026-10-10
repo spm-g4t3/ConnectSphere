@@ -53,6 +53,11 @@
  *           results reveal when venues are busy: a venue left out is one
  *           with a booking or block in that period. Every other role gets
  *           403. Venue Staff keep the old /search, which is unchanged.
+ *   holds   Venue Staff only (SCRUM-491). Placing a tentative hold is the
+ *           story's whole seat (AC1), and the list of a venue's active holds
+ *           is the panel that places them. Everyone else sees a hold only as
+ *           "Tentatively held" on the calendar (AC6) and as a venue missing
+ *           from their search (AC5).
  */
 
 import express from 'express';
@@ -76,6 +81,7 @@ import {
   getVenueBlockHistory,
 } from '../services/venueBlockService.js';
 import { getVenueCalendar } from '../services/venueCalendarService.js';
+import { listActiveVenueHolds, placeVenueHold } from '../services/venueHoldService.js';
 import {
   validateVenueId,
   validateSearchFilters,
@@ -221,6 +227,13 @@ function parseEventSearch(query) {
     if (query[field] === undefined) continue;
     const codes = parseCodeList(query[field]);
     if (codes !== undefined) criteria[field] = codes;
+  }
+
+  // SCRUM-491 (AC5): the event being searched for, passed through as sent.
+  // The validator checks its shape; the service decides whether the caller
+  // may leave its holds out.
+  if (query.eventRequestId !== undefined) {
+    criteria.eventRequestId = query.eventRequestId;
   }
 
   return criteria;
@@ -409,6 +422,12 @@ export function createVenueRouter({
    * Declared before GET /:id, and like /search that order is load-bearing:
    * otherwise /:id would match this with id === 'event-search'.
    *
+   * SCRUM-491 (AC5): ?eventRequestId= optionally names the event being
+   * searched for. A venue another event holds tentatively is left out; one
+   * this event holds is not, but only when the caller is the event's
+   * assigned coordinator (venueService.findVenuesForEvent). A malformed id is
+   * 400.
+   *
    * Statuses: 200 with the matching venues, and 200 [] when none match (AC8)
    * -- never 404, since an empty result is an answer, not a missing resource;
    * 400 {error, details} for a missing or malformed period, a bad attendance,
@@ -416,7 +435,10 @@ export function createVenueRouter({
    */
   router.get('/event-search', coordinatorsOnly, async (req, res) => {
     try {
-      res.status(200).json(await findVenuesForEvent(parseEventSearch(req.query)));
+      // SCRUM-491: the caller, so an optional ?eventRequestId= leaves out
+      // that event's own holds only when they are its assigned coordinator.
+      const criteria = parseEventSearch(req.query);
+      res.status(200).json(await findVenuesForEvent(criteria, { userId: req.user.id }));
     } catch (err) {
       handleError(err, res);
     }
@@ -512,6 +534,47 @@ export function createVenueRouter({
     try {
       const window = { from: req.query.from, to: req.query.to };
       res.status(200).json(await getVenueCalendar(req.params.id, window));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-491: a venue's active tentative holds, soonest expiry first, each
+   * with its event's name and period and who placed it. A bare array; none
+   * is 200 []. A hold past its expiry is not listed, even before the expiry
+   * job has marked it (AC7).
+   *
+   * Statuses: 200; 400 for a malformed id; 401; 403 unless Venue Staff; 404
+   * for an unknown venue; 500.
+   */
+  router.get('/:id/holds', venueStaffOnly, async (req, res) => {
+    try {
+      res.status(200).json(await listActiveVenueHolds(req.params.id));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-491 AC1-AC4: place a tentative hold on the venue for an Approved
+   * event, until { expiresAt }. Body: { eventRequestId, expiresAt }; the
+   * placer is only ever actingUser(req).
+   *
+   * Venue Staff only. Any other role gets requireRole's 403, "This action is
+   * restricted to Venue Staff", which is AC1's message stating why.
+   *
+   * Statuses: 201 {hold}; 400 for a malformed id, a missing or malformed
+   * event, or an expiry that is missing, malformed or not in the future; 401;
+   * 403; 404 for an unknown venue or event; 409 with code EVENT_NOT_APPROVED,
+   * EVENT_DATES_MISSING, VENUE_RETIRED, HOLD_EXISTS or HOLD_PERIOD_CONFLICT
+   * (conflicts list each booking, block or hold in the way, with its
+   * occupied period); 500.
+   */
+  router.post('/:id/holds', venueStaffOnly, async (req, res) => {
+    try {
+      const hold = await placeVenueHold(req.params.id, req.body, actingUser(req));
+      res.status(201).json({ hold });
     } catch (err) {
       handleError(err, res);
     }
