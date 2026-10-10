@@ -15,6 +15,7 @@
  */
  
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ROLE, isKnownRole } from '../../src/domain/userRole.js';
  
 const supabaseAuth = {
   auth: {
@@ -103,6 +104,23 @@ describe('AC: a valid login returns the user and their role', () => {
     });
   });
  
+  it('SCRUM453_AC1_returns_the_attendee_role_unchanged_and_it_is_a_known_role', async () => {
+    supabaseAuth.auth.signInWithPassword.mockResolvedValue({
+      data: {
+        user: { id: 'user-2', email: 'attendee@connectsphere.com' },
+        session: { access_token: 'token-xyz' },
+      },
+      error: null,
+    });
+    mockProfileLookup({ data: { role: ROLE.ATTENDEE } });
+
+    const res = await login({ email: 'attendee@connectsphere.com', password: 'password123' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.user.role).toBe('attendee');
+    expect(isKnownRole(res.body.user.role)).toBe(true);
+  });
+
   it('authenticates with the credentials as given', async () => {
     supabaseAuth.auth.signInWithPassword.mockResolvedValue({
       data: { user: { id: 'user-1', email: 'a@b.com' }, session: {} },

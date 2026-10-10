@@ -3,6 +3,7 @@
 **Story:** Add the Event Coordinator Lead and Safety Officer Roles — All Users
 **Closing subtask:** SCRUM-513 (this document)
 **Status as of 10 October 2026:** closed, with the gaps in section 4 recorded rather than hidden.
+**Updated 11 October 2026:** dev merged in, bringing SCRUM-453 (the Attendee dashboard). Two AC6 tests and the counts below were updated; nothing else in this story changed.
 
 This document is the record of what SCRUM-485 delivered, how each acceptance
 criterion is proved, why the design looks the way it does, and what is still
@@ -37,8 +38,8 @@ gate. What each role may *do* is granted by SCRUM-486, 487, 489 and 490 (D1).
 
 | Evidence | Result |
 |---|---|
-| Backend suite (`npm test` in `backend`) | 4569 tests passing across 85 files |
-| Frontend suite (`npm test` in `frontend`) | 1822 tests passing across 70 files; coverage thresholds met, both new dashboards at 100% |
+| Backend suite (`npm test` in `backend`) | 4570 tests passing across 85 files (after merging dev on 11 October) |
+| Frontend suite (`npm test` in `frontend`) | 1861 tests passing and 1 todo across 72 files (after merging dev; the todo is SCRUM-453's, waiting on SCRUM-495); coverage thresholds met, both new dashboards at 100% |
 | SCRUM-485's own tests | 94 named `SCRUM485_…`. Backend 44: `userRole.test.js` 20, `requireRole.test.js` 14, `eventRequests.test.js` 6, `requireAuth.test.js` 2, `auth.test.js` 2. Frontend 50: `Dashboard.test.jsx` 22, `Navigation.test.jsx` 15, `equipmentRouteGuard.test.jsx` 9, `venueSearchRouteGuard.test.jsx` 2, `LoginForm.test.jsx` 2 |
 | Extended tables | The two roles were added to 18 existing refused-role lists, feeding 23 parametrised tests, in `backend/tests/routes/` and `frontend/tests/auth/`. They run under their original names (test-case document, AC5-09 to AC5-15) |
 | PGlite | `userRole.test.js` builds a real Postgres from 007 and every migration that adds a role, and proves what the enum accepts, in CI |
@@ -88,7 +89,7 @@ rather than assert the link.
 | AC3 | `POST /api/auth/login` returns `profiles.role` unchanged; `LoginForm` navigates to `/dashboard`; `DASHBOARD_BY_ROLE` has `EVENT_COORDINATOR_LEAD` and `SAFETY_OFFICER` | Section 2 |
 | AC4 | `NAV_LINKS_BY_ROLE` has one entry for each new role, Dashboard | `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link`, `SCRUM485_AC4_a_safety_officer_has_exactly_the_dashboard_link`, `SCRUM485_AC4_%s_sees_no_link_from_any_other_role`, `SCRUM485_AC4_a_lead_sees_none_of_the_coordinators_links` (`Navigation.test.jsx`) |
 | AC5 | 039; `requireAuth` (no role list); `createRequireRole` (`allowed.includes`) | Section 2 |
-| AC6 | 039 appends and removes nothing; no existing entry in `ROLE`, `DASHBOARD_BY_ROLE` or `NAV_LINKS_BY_ROLE` changed | `SCRUM485_AC6_the_enum_holds_the_five_then_the_two_in_that_order`, `SCRUM485_AC6_the_five_existing_roles_and_their_labels_are_unchanged` (`userRole.test.js`); `SCRUM485_AC6_%s_still_gets_the_%s`, `SCRUM485_AC6_an_attendee_still_has_no_dashboard` (`Dashboard.test.jsx`); `SCRUM485_AC6_%s_keeps_exactly_its_links` (`Navigation.test.jsx`); every existing test still passing; the live profile counts before and after (AC6-07) |
+| AC6 | 039 appends and removes nothing; no existing entry in `ROLE`, `DASHBOARD_BY_ROLE` or `NAV_LINKS_BY_ROLE` changed | `SCRUM485_AC6_the_enum_holds_the_five_then_the_two_in_that_order`, `SCRUM485_AC6_the_five_existing_roles_and_their_labels_are_unchanged` (`userRole.test.js`); `SCRUM485_AC6_%s_still_gets_the_%s`, `SCRUM485_AC6_an_attendee_gets_the_attendee_dashboard_scrum485_left_it_as_scrum453_built_it` (`Dashboard.test.jsx`); `SCRUM485_AC6_%s_keeps_exactly_its_links`, `SCRUM485_AC6_an_attendee_keeps_the_links_scrum453_gave_it` (`Navigation.test.jsx`). The two Attendee cases pin what SCRUM-453 built, since 11 October; before then they pinned that the Attendee had no dashboard and no links; every existing test still passing; the live profile counts before and after (AC6-07) |
 | AC7 | No code: an auth user and a `profiles` row per role, made in Supabase | AC7-01 (live check), AC7-03 and AC7-04 (walkthroughs, 10 October); AC7-02 by `SCRUM485_AC5_a_profile_can_hold_%s` and `SCRUM485_AC5_a_misspelt_role_is_refused_by_the_enum` (PGlite) |
 | AC8 | Nothing: every `from('profiles')` in `backend/src` is a read, and App.jsx has no role screen | AC8-01 and AC8-02, reviews dated 10 October |
 

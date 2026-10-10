@@ -88,6 +88,13 @@ describe("Navigation links by role", () => {
 
   expect(screen.getByRole("link", { name: "Check Availability" })).toHaveAttribute("href", "/equipment-availability");
 });
+
+  it("gives an Attendee only the Dashboard link, with no staff-facing pages", () => {
+    renderAs("attendee");
+
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+  });
 });
 
 
@@ -199,7 +206,8 @@ describe("SCRUM485_AC6 the existing roles keep exactly their links", () => {
   // AC6-04. Written out, in order, rather than read back from the component:
   // a regression test that derived its expectation from the code under test
   // would agree with any change. Until now only the Organiser's count was
-  // pinned; this pins every role that has links.
+  // pinned; this pins every role whose links predate SCRUM-485. The Attendee's
+  // are pinned in their own case below, because they are SCRUM-453's.
   it.each([
     ["event_organiser", [
       ["Dashboard", "/dashboard"],
@@ -231,8 +239,16 @@ describe("SCRUM485_AC6 the existing roles keep exactly their links", () => {
     expect(links).toEqual(expected);
   });
 
-  it("SCRUM485_AC6_an_attendee_still_has_no_links", () => {
-    // Unchanged: an attendee has no nav block today, and this story adds none.
-    expect(linksOf("attendee")).toEqual([]);
+  it("SCRUM485_AC6_an_attendee_keeps_the_links_scrum453_gave_it", () => {
+    // AC6-04 for the Attendee. When this story began an attendee had no nav
+    // block, and this case pinned an empty list. SCRUM-453 (merged into dev on
+    // 11 October) gave the Attendee one: Dashboard, with Browse Open Events to
+    // follow in SCRUM-495. That is another story's change, not one this story
+    // made, so the case now pins what SCRUM-453 built, exactly and by count,
+    // and SCRUM-485 must leave it so.
+    const links = linksOf("attendee");
+
+    expect(links).toHaveLength(1);
+    expect(links).toEqual([["Dashboard", "/dashboard"]]);
   });
 });

@@ -5,6 +5,7 @@
 **Schema:** `039_coordinator_lead_and_safety_officer_roles.sql`, adding two values to the `user_role` enum from `007_user_roles.sql` (applied to the live database)
 **Written:** 10 October 2026, before the code (SCRUM-506).
 **Updated:** 10 October 2026 (SCRUM-512): every case now names the test that proves it, read from the test files, or says plainly that a manual check proves it, or that nothing does and why.
+**Updated:** 11 October 2026, after dev was merged in: SCRUM-453 gave the Attendee a dashboard and navigation, so AC6-04 and AC6-06 now pin those (see AC6).
 
 This document is the written layer between SCRUM-485's acceptance criteria and the
 Vitest files that implement them. Deliverable #3 requires test cases
@@ -238,8 +239,10 @@ loudly.** On the frontend an unknown role fails silently.
 support." Neither throws. A role key misspelt in either map would look exactly
 like a user with no role. So AC3 and AC4 pin each new role to a named dashboard
 and to a link set **by exact count**. `Navigation.test.jsx` today asserts the
-count only for the Organiser; AC6-04 extends that to the four other roles that
-have links, so a link leaking from one role's set into another's fails a test.
+count only for the Organiser; AC6-04 extends that to every other role that has
+links (the four whose links predate this story, and since 11 October the
+Attendee's, from SCRUM-453), so a link leaking from one role's set into another's
+fails a test.
 
 **Until the abilities exist, each role's screen is a placeholder and its nav is
 one link.** AC3 asks for a screen "that says what the role will do there".
@@ -255,9 +258,12 @@ count case is what forces the update.
 - **LEAD** — a signed-in user whose profile role is `event_coordinator_lead`.
 - **SAFETY** — a signed-in user whose profile role is `safety_officer`.
 - **BOTH** — the case is run for LEAD and for SAFETY.
-- **THE FOUR** — the existing roles with a dashboard: `event_organiser`,
-  `event_coordinator`, `venue_staff`, `technical_support_staff`. `attendee` has
-  none today, which AC6-06 pins.
+- **THE FOUR** — the roles whose dashboards and links predate both this story
+  and SCRUM-453: `event_organiser`, `event_coordinator`, `venue_staff`,
+  `technical_support_staff`. Not five: `attendee` had no dashboard and no links
+  when this story began, and gained both from SCRUM-453 (merged into dev on
+  11 October). Those are another story's, so AC6-04 and AC6-06 pin them in cases
+  of their own rather than folding them into the four.
 - **Refused, nothing queried** — 403 from `requireRole`, and the fake Supabase
   client records no call.
 
@@ -380,14 +386,17 @@ a route-level test, and the Implemented-by column says which do.
 | AC6-01 | PGlite with 007 and 039 | Read the enum's values in order | 007's five first, in 007's order, then the two new ones; nothing removed or renamed | role `SCRUM485_AC6_the_enum_holds_the_five_then_the_two_in_that_order` (PGlite) |
 | AC6-02 | — | Read `ROLE` and `ROLE_LABEL` | The five existing keys, values and labels exactly as before | role `SCRUM485_AC6_the_five_existing_roles_and_their_labels_are_unchanged` |
 | AC6-03 | THE FOUR | Open `/dashboard` | Each gets the same dashboard as before: Organiser, Coordinator, Venue Staff, Technical Support | dash `SCRUM485_AC6_%s_still_gets_the_%s`. The four existing dashboards are stubs in that file: it proves Dashboard.jsx chooses the same page for each role, not those pages' content |
-| AC6-04 | THE FOUR | Render `Navigation` | Each role's links exactly as today, by href and **by count**: Organiser 2, Coordinator 5, Venue Staff 3, Technical Support 5. Extends the Organiser-only count to every role that has links | nav `SCRUM485_AC6_%s_keeps_exactly_its_links`; and `SCRUM485_AC6_an_attendee_still_has_no_links` |
+| AC6-04 | THE FOUR, and `attendee` | Render `Navigation` | Each role's links exactly as today, by href and **by count**: Organiser 2, Coordinator 5, Venue Staff 3, Technical Support 5, and the Attendee 1 (Dashboard), as SCRUM-453 built it. Extends the Organiser-only count to every role that has links | nav `SCRUM485_AC6_%s_keeps_exactly_its_links` (the four); `SCRUM485_AC6_an_attendee_keeps_the_links_scrum453_gave_it` (the Attendee). Until 11 October the Attendee's case was `SCRUM485_AC6_an_attendee_still_has_no_links`, pinning an empty list |
 | AC6-05 | The existing route and guard suites | Run them | Every existing role-gate test passes unchanged. Lists of refused roles gain the two new roles; none loses one | Every existing test still passes, and the refused-role tables named in AC5-09 to AC5-15 each gained the two roles. Tables built from `Object.values(ROLE)` needed nothing: venues `SCRUM493_AC1_every_role_but_venue_staff_is_covered`, notifications `SCRUM17_AC3_a_%s_can_read_their_own_inbox` |
-| AC6-06 | A signed-in `attendee` | Open `/dashboard` | Still "No dashboard available for your role", as today. Attendee has no dashboard, and this story does not give it one | dash `SCRUM485_AC6_an_attendee_still_has_no_dashboard` |
+| AC6-06 | A signed-in `attendee` | Open `/dashboard` | The Attendee's dashboard, as SCRUM-453 built it, and not the fallback or either new role's page. SCRUM-485 does not change it | dash `SCRUM485_AC6_an_attendee_gets_the_attendee_dashboard_scrum485_left_it_as_scrum453_built_it`. Until 11 October this case was `SCRUM485_AC6_an_attendee_still_has_no_dashboard`, pinning the "No dashboard" message, which was then true. SCRUM-453 merged into dev on 11 October and gave the Attendee a dashboard: a change by another story, not a regression this one caused, so the case now pins what is true and still says SCRUM-485 leaves it alone |
 | AC6-07 | The live database, before and after 039 | Count profiles by role | Identical before and after: `event_coordinator` 2, and one each of `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee` | **Manual (live check)**, 10 October, a query after 039 and both new accounts: `event_coordinator` 2, and one each of `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee`, `event_coordinator_lead`, `safety_officer`. The five existing rows are exactly the counts taken before 039 (see *Facts*); the only additions are the two new accounts |
 
 AC6-04 to AC6-06 are the regression half of AC6; the Week 7 change guide names
-regression tests as a deliverable. AC6-06 pins existing behaviour that is
-arguably a gap, so that "unchanged" means what it says.
+regression tests as a deliverable. "Unchanged" means unchanged *by SCRUM-485*.
+When AC6-06 was written it pinned the Attendee's lack of a dashboard; SCRUM-453
+then changed that on purpose. So AC6-04 and AC6-06 were updated on 11 October to
+pin what SCRUM-453 built, not weakened or deleted: they still fail if this story
+alters the Attendee's dashboard or links.
 
 ---
 
