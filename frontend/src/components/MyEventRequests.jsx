@@ -21,7 +21,7 @@ import ChangeRequestForm from "./ChangeRequestForm";
 import ChangeRequestStatusList from "./ChangeRequestStatusList";
 import AssignmentHistory from "./AssignmentHistory";
 import DecisionOutcome from "./DecisionOutcome";
-import ClarificationHistory from "./ClarificationHistory";
+import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import ClarificationReplyForm from "./ClarificationReplyForm";
 
 function formatEventDate(value) {
@@ -68,22 +68,6 @@ function CoordinatorDetails({ eventRequestId }) {
     >
       <summary>Your coordinator and assignment history</summary>
       {opened && <AssignmentHistory eventRequestId={eventRequestId} view="organiser" />}
-    </details>
-  );
-}
-
-function ClarificationHistoryDetails({ eventRequestId, isOpen }) {
-  const [opened, setOpened] = useState(false);
-
-  return (
-    <details
-      className="my-event-requests__details"
-      onToggle={(event) => {
-        if (event.currentTarget.open) setOpened(true);
-      }}
-    >
-      <summary>Clarification history</summary>
-      {opened && <ClarificationHistory eventRequestId={eventRequestId} isOpen={isOpen} />}
     </details>
   );
 }
@@ -241,13 +225,14 @@ export default function MyEventRequests() {
               </p>
 
               {req.status === "pending_clarification" && req.clarificationNote && (
-                <p className="my-event-requests__clarification" role="alert">
-                  <strong>Coordinator clarification:</strong> {req.clarificationNote}
-                </p>
+                <div className="my-event-requests__clarification" role="status">
+                  <strong>Coordinator question</strong>
+                  <p>{req.clarificationNote}</p>
+                </div>
               )}
               {req.status === "pending_clarification" && req.clarificationReplyByDate && (
                 <p className="my-event-requests__clarification">
-                  Please respond by {req.clarificationReplyByDate}.
+                  Please respond by {formatEventDate(req.clarificationReplyByDate)}.
                   {req.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
                     <strong className="clarification-overdue"> Overdue</strong>
                   )}
@@ -313,9 +298,11 @@ export default function MyEventRequests() {
                   draft has nobody and no history to show. */}
               {req.status !== "draft" && <CoordinatorDetails eventRequestId={req.id} />}
               {req.status !== "draft" && (
-                <ClarificationHistoryDetails
+                <ClarificationHistoryDialog
                   eventRequestId={req.id}
-                  isOpen={req.status === "pending_clarification"}
+                  eventName={req.eventName}
+                  isOpenQuestion={req.status === "pending_clarification"}
+                  latestQuestion={req.clarificationNote}
                 />
               )}
 

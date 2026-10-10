@@ -40,7 +40,7 @@ import AssignmentHistory from "./AssignmentHistory";
 import EventVenueFinder from "./EventVenueFinder";
 import DecisionOutcome from "./DecisionOutcome";
 import ReassignEventPanel from "./ReassignEventPanel";
-import ClarificationHistory from "./ClarificationHistory";
+import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import EventEquipmentSection from "./EventEquipmentSection";
 import EventCancellationPanel from "./EventCancellationPanel";
 import {
@@ -706,18 +706,23 @@ export default function CoordinatorRequestDetail({
       ) : current.status === "pending_clarification" ? (
         <section>
           <h3>Waiting for organiser reply</h3>
-          <p>{current.clarificationNote || "No clarification note was recorded."}</p>
-          {current.clarificationReplyByDate && (
-            <p>
-              Reply by: {current.clarificationReplyByDate}
-              {current.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
-                <strong className="clarification-overdue"> Overdue</strong>
-              )}
-            </p>
-          )}
-          <ClarificationHistory
+          <div className="clarification-current">
+            <strong>Current question</strong>
+            <p>{current.clarificationNote || "No clarification question was recorded."}</p>
+            {current.clarificationReplyByDate && (
+              <span>
+                Reply by {formatTimestamp(current.clarificationReplyByDate)}
+                {current.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
+                  <strong className="clarification-overdue"> · Overdue</strong>
+                )}
+              </span>
+            )}
+          </div>
+          <ClarificationHistoryDialog
             eventRequestId={request.id}
-            isOpen
+            eventName={request.eventName}
+            isOpenQuestion
+            latestQuestion={current.clarificationNote}
           />
           {isAssignedCoordinator && (
             <form className="coordinator-clarification" onSubmit={handleCloseClarification}>
@@ -835,10 +840,10 @@ export default function CoordinatorRequestDetail({
       {request.status !== "pending_clarification" && (
         <section className="coordinator-clarification-history">
           <h3>Clarification history</h3>
-          <details>
-            <summary>View questions, replies and closures</summary>
-            <ClarificationHistory eventRequestId={request.id} />
-          </details>
+          <ClarificationHistoryDialog
+            eventRequestId={request.id}
+            eventName={request.eventName}
+          />
         </section>
       )}
 
