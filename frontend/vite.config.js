@@ -77,6 +77,14 @@ const SCRUM254_FILES = [
   'src/services/bookingRequestStatusDisplay.js',
 ]
 
+// SCRUM-485 (SCRUM-509) owns the two new dashboards outright. Dashboard.jsx
+// gains their map entries but is shared by every role, so, like App.jsx, it
+// is not gated.
+const SCRUM485_FILES = [
+  'src/components/EventCoordinatorLeadDashboard.jsx',
+  'src/components/SafetyOfficerDashboard.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -109,6 +117,7 @@ export default defineConfig({
           file,
           file === 'src/components/MyBookingRequests.jsx' ? MY_BOOKING_REQUESTS : FULL,
         ]),
+        ...SCRUM485_FILES.map((file) => [file, FULL]),
       ]),
     },
   },
