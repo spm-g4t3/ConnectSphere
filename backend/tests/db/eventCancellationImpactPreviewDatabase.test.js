@@ -1,0 +1,187 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { PGlite } from '@electric-sql/pglite';
+import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
+const MIGRATIONS = [
+  '001_event_requests.sql',
+  '002_venues.sql',
+  '009_bookings.sql',
+  '011_venue_blocks.sql',
+  '022_equipment_schema.sql',
+  '027_booking_request_statuses.sql',
+  '043_release_event_arrangements.sql',
+  '044_event_cancellation_impact_preview.sql',
+];
+
+describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
+  let db;
+  let organiser;
+  let eventId;
+  let otherEventId;
+  let venueIds;
+  let equipmentTypeId;
+
+  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+
+  async function makeEvent(name) {
+    return (
+      await one(
+        'insert into event_requests (organiser_id, event_name) values ($1, $2) returning id',
+        [organiser, name],
+      )
+    ).id;
+  }
+
+  async function makeBooking(forEvent, venueId, status) {
+    return (
+      await one(
+        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
+         values ($1, $2, '2026-12-01T09:00:00Z', '2026-12-01T10:00:00Z', $3)
+         returning id`,
+        [venueId, forEvent, status],
+      )
+    ).id;
+  }
+
+  beforeAll(async () => {
+    db = new PGlite({ extensions: { btree_gist } });
+    await db.exec(`
+      create schema auth;
+      create table auth.users (
+        id uuid primary key default gen_random_uuid(),
+        email text
+      );
+      create role anon;
+      create role authenticated;
+    `);
+    for (const name of MIGRATIONS) await db.exec(migration(name));
+
+    organiser = (await one('insert into auth.users (email) values ($1) returning id', ['organiser@test'])).id;
+    eventId = await makeEvent('Preview event');
+    otherEventId = await makeEvent('Other event');
+    venueIds = await Promise.all(
+      ['Hall A', 'Hall B', 'Hall C'].map(async (name) =>
+        (await one(
+          'insert into venues (name, location, max_capacity) values ($1, $2, 100) returning id',
+          [name, 'Block A'],
+        )).id),
+    );
+    equipmentTypeId = (
+      await one("insert into equipment_types (name, total_quantity) values ('Projector', 10) returning id")
+    ).id;
+  });
+
+  afterAll(async () => {
+    await db?.close();
+  });
+
+  it('returns separate counts and details for active venue bookings and pending requests', async () => {
+    await makeBooking(eventId, venueIds[0], 'approved');
+    await makeBooking(eventId, venueIds[1], 'flagged_for_review');
+    await makeBooking(eventId, venueIds[2], 'pending');
+    await makeBooking(eventId, venueIds[0], 'rejected');
+    await makeBooking(otherEventId, venueIds[0], 'approved');
+
+    const { preview } = await one(
+      'select event_cancellation_impact_preview($1) as preview',
+      [eventId],
+    );
+
+    expect(preview.venueBookings.count).toBe(2);
+    expect(preview.venueBookings.details.map((booking) => booking.status).sort())
+      .toEqual(['approved', 'flagged_for_review']);
+    expect(preview.venueBookings.details.map((booking) => booking.venueName).sort())
+      .toEqual(['Hall A', 'Hall B']);
+    expect(preview.bookingRequests.count).toBe(1);
+    expect(preview.bookingRequests.details[0]).toMatchObject({
+      status: 'pending',
+      venueName: 'Hall C',
+      venueLocation: 'Block A',
+    });
+  });
+
+  it('returns equipment requests, their lines, and only active reservation impacts', async () => {
+    const requestId = (
+      await one(
+        `insert into equipment_requests (event_request_id, status)
+         values ($1, 'arranged') returning id`,
+        [eventId],
+      )
+    ).id;
+    const lineId = (
+      await one(
+        `insert into equipment_lines (equipment_request_id, equipment_type_id, quantity, technical_notes)
+         values ($1, $2, 2, 'HDMI required') returning id`,
+        [requestId, equipmentTypeId],
+      )
+    ).id;
+    await db.query(
+      `insert into equipment_reservations
+         (equipment_type_id, event_request_id, equipment_line_id, quantity, start_at, end_at)
+       values ($1, $2, $3, 2, '2026-12-01T09:00:00Z', '2026-12-01T10:00:00Z')`,
+      [equipmentTypeId, eventId, lineId],
+    );
+    await db.query(
+      `insert into equipment_reservations
+         (equipment_type_id, event_request_id, equipment_line_id, quantity, start_at, end_at,
+          released_at, release_reason)
+       values ($1, $2, $3, 1, '2026-12-01T09:00:00Z', '2026-12-01T10:00:00Z',
+               '2026-11-01T00:00:00Z', 'previous release')`,
+      [equipmentTypeId, eventId, lineId],
+    );
+
+    const { preview } = await one(
+      'select event_cancellation_impact_preview($1) as preview',
+      [eventId],
+    );
+
+    expect(preview.equipmentRequests.count).toBe(1);
+    expect(preview.equipmentRequests.details[0]).toMatchObject({
+      id: requestId,
+      status: 'arranged',
+      lines: [{
+        id: lineId,
+        equipmentName: 'Projector',
+        quantity: 2,
+        technicalNotes: 'HDMI required',
+      }],
+    });
+    expect(preview.equipmentReservations.count).toBe(1);
+    expect(preview.equipmentReservations.details[0]).toMatchObject({
+      equipmentName: 'Projector',
+      equipmentLineId: lineId,
+      quantity: 2,
+      flagged: false,
+    });
+  });
+
+  it('changes no database rows and rejects a missing event', async () => {
+    const before = await one(
+      `select
+         coalesce((select jsonb_agg(to_jsonb(b) order by b.id) from bookings b), '[]') as bookings,
+         coalesce((select jsonb_agg(to_jsonb(r) order by r.id) from equipment_requests r), '[]') as requests,
+         coalesce((select jsonb_agg(to_jsonb(r) order by r.id) from equipment_reservations r), '[]') as reservations`,
+    );
+
+    const first = await one('select event_cancellation_impact_preview($1) as preview', [eventId]);
+    const second = await one('select event_cancellation_impact_preview($1) as preview', [eventId]);
+    const after = await one(
+      `select
+         coalesce((select jsonb_agg(to_jsonb(b) order by b.id) from bookings b), '[]') as bookings,
+         coalesce((select jsonb_agg(to_jsonb(r) order by r.id) from equipment_requests r), '[]') as requests,
+         coalesce((select jsonb_agg(to_jsonb(r) order by r.id) from equipment_reservations r), '[]') as reservations`,
+    );
+
+    expect(first.preview).toEqual(second.preview);
+    expect(after).toEqual(before);
+    await expect(
+      db.query('select event_cancellation_impact_preview($1)', [randomUUID()]),
+    ).rejects.toMatchObject({ code: 'P0002' });
+  });
+});

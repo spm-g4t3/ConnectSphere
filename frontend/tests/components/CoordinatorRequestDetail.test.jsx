@@ -41,6 +41,7 @@ import {
   decideEventRequest,
   getAssignmentHistoryForReview,
   getCoordinatorChangeRequests,
+  getEventCancellationImpact,
   getEventClarificationHistory,
   requestEventClarification,
   startEventReview,
@@ -54,10 +55,12 @@ vi.mock("../../src/auth/AuthContext", () => ({
 
 vi.mock("../../src/services/eventRequestService", () => ({
   closeEventClarification: vi.fn(),
+  cancelEventRequest: vi.fn(),
   decideEventRequest: vi.fn(),
   getAssignmentHistory: vi.fn(),
   getAssignmentHistoryForReview: vi.fn(),
   getCoordinatorChangeRequests: vi.fn(),
+  getEventCancellationImpact: vi.fn(),
   getEventClarificationHistory: vi.fn(),
   listCoordinators: vi.fn(),
   processCoordinatorChangeRequest: vi.fn(),
@@ -207,6 +210,7 @@ beforeEach(() => {
   vi.mocked(requestEventClarification).mockReset();
   vi.mocked(getCoordinatorChangeRequests).mockReset();
   vi.mocked(getCoordinatorChangeRequests).mockResolvedValue([]);
+  vi.mocked(getEventCancellationImpact).mockReset();
   vi.mocked(getAssignmentHistoryForReview).mockReset();
   vi.mocked(getAssignmentHistoryForReview).mockResolvedValue([]);
   vi.mocked(findVenuesForEvent).mockReset();
@@ -216,6 +220,21 @@ beforeEach(() => {
   // has to hand back a promise, not undefined.
   vi.mocked(getEventClarificationHistory).mockReset();
   vi.mocked(getEventClarificationHistory).mockResolvedValue([]);
+});
+
+describe("SCRUM-375 coordinator cancellation page", () => {
+  it("replaces the event detail with a full cancellation page", async () => {
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest({ status: "approved" }));
+
+    await user.click(screen.getByRole("button", { name: "Cancel event" }));
+
+    expect(screen.getByRole("heading", { name: "Cancel IS212 Industry Night" })).toBeInTheDocument();
+    expect(screen.getByText(/Review the arrangements this will affect before confirming/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "The request" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Find a venue" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Back to event" })).toBeInTheDocument();
+  });
 });
 
 describe("SCRUM20_AC2 the event view holds the venue search", () => {

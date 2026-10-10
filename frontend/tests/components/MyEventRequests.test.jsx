@@ -33,6 +33,8 @@ vi.mock("../../src/services/eventRequestService", () => ({
   getAssignmentHistory: vi.fn(),
   getAssignmentHistoryForReview: vi.fn(),
   getMyEventRequests: vi.fn(),
+  getEventCancellationImpact: vi.fn(),
+  cancelEventRequest: vi.fn(),
   respondToEventClarification: vi.fn(),
   submitEventRequest: vi.fn(),
   updateEventRequest: vi.fn(),
@@ -80,6 +82,27 @@ beforeEach(() => {
 
 
 describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
+  it("shows the cancellation reason and recorded date without offering further changes", async () => {
+    renderList([
+      eventRequest({
+        status: "cancelled",
+        cancellationReason: "Organiser withdrew",
+        cancelledAt: "2026-06-01T09:00:00Z",
+        statusDisplay: { status: "cancelled", label: "Cancelled", group: "CANCELLED", description: "This event will not go ahead." },
+      }),
+    ]);
+
+    const row = await screen.findByText("IS212 Industry Night");
+    const item = row.closest("li");
+    expect(within(item).getByText("Event cancelled")).toBeInTheDocument();
+    expect(within(item).getByText("Organiser withdrew")).toBeInTheDocument();
+    expect(within(item).getByText(
+      new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
+        .format(new Date("2026-06-01T09:00:00Z")),
+    )).toBeInTheDocument();
+    expect(within(item).queryByRole("button", { name: "Request a change" })).not.toBeInTheDocument();
+  });
+
   it("SCRUM19_AC10_the_organiser_sees_the_outcome_the_reason_and_who_decided", async () => {
     renderList([
       eventRequest({

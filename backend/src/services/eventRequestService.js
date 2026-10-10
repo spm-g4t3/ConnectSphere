@@ -108,6 +108,7 @@ const COLUMNS = `
   status, clarification_note, clarification_reply_by_date,
   assigned_coordinator_id, reviewing_coordinator_id,
   decision, decision_note, decided_by, decided_at,
+  cancellation_reason, cancellation_initiator, cancelled_by, cancelled_at,
   created_at, updated_at, submitted_at
 `;
 
@@ -329,6 +330,10 @@ function toEventRequest(row) {
     decisionNote: row.decision_note ?? null,
     decidedBy: row.decided_by ?? null,
     decidedAt: row.decided_at ?? null,
+    cancellationReason: row.cancellation_reason ?? null,
+    cancellationInitiator: row.cancellation_initiator ?? null,
+    cancelledBy: row.cancelled_by ?? null,
+    cancelledAt: row.cancelled_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     submittedAt: row.submitted_at,
@@ -1200,6 +1205,65 @@ export async function decideEventRequest(
 
   if (error) throw translateError(error);
 
+  return toEventRequest(data);
+}
+
+const CANCELLATION_INITIATORS = Object.freeze([
+  'organiser_request',
+  'connectsphere_decision',
+]);
+
+/**
+ * Read the current cancellation impact. This is a preview only; its Postgres
+ * function is stable and does not write.
+ */
+export async function getEventCancellationImpact(id, { client } = {}) {
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('event_cancellation_impact_preview', {
+    p_event_request_id: id,
+  });
+
+  if (error) throw translateError(error);
+  return data;
+}
+
+/**
+ * Cancel an event through the transactional SCRUM-374 function.
+ *
+ * @param {string} id event request id
+ * @param {{reason: string, initiator: string, attendeeMessage?: string}} input
+ * @param {string} coordinatorId caller from the authenticated session
+ * @param {{client?: object}} options
+ */
+export async function cancelEventRequest(
+  id,
+  { reason, initiator, attendeeMessage } = {},
+  coordinatorId,
+  { client } = {},
+) {
+  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
+    throw new ValidationError('coordinatorId is required');
+  }
+  if (typeof reason !== 'string' || reason.trim() === '') {
+    throw new ValidationError('Cancellation reason is required and cannot be blank');
+  }
+  if (!CANCELLATION_INITIATORS.includes(initiator)) {
+    throw new ValidationError('Cancellation initiator must be organiser_request or connectsphere_decision');
+  }
+  if (attendeeMessage !== undefined && attendeeMessage !== null && typeof attendeeMessage !== 'string') {
+    throw new ValidationError('Attendee message must be text');
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('cancel_event_request', {
+    p_event_request_id: id,
+    p_coordinator_id: coordinatorId,
+    p_reason: reason.trim(),
+    p_initiator: initiator,
+    p_attendee_message: typeof attendeeMessage === 'string' ? attendeeMessage.trim() || null : null,
+  });
+
+  if (error) throw translateError(error);
   return toEventRequest(data);
 }
 

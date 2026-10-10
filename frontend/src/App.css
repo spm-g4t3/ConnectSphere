@@ -356,6 +356,31 @@ button { cursor: pointer; }
 .coordinator-clarification__fields legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
 .coordinator-clarification__fields p { color: var(--muted); font-size: 0.86rem; margin: 0; }
 .coordinator-clarification__fields label { align-items: center; display: flex; gap: 8px; }
+.dashboard--coordinator .coordinator-request-detail__cancel { background: #a43c32; margin: 0 0 8px; }
+.dashboard--coordinator .coordinator-request-detail__cancel:hover { background: #842e27; }
+.event-cancellation-page { display: grid; gap: 18px; }
+.event-cancellation-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.event-cancellation-page__back { background: transparent !important; color: var(--teal-dark) !important; justify-self: start; padding: 6px 0 !important; text-decoration: underline; }
+.event-cancellation-page__intro { margin: 0; }
+.event-cancellation { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
+.event-cancellation form { display: grid; gap: 16px; }
+.event-cancellation form > label { color: var(--muted); display: grid; gap: 7px; }
+.event-cancellation textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 86px; padding: 10px 12px; resize: vertical; }
+.event-cancellation textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
+.event-cancellation fieldset { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 10px; margin: 0; padding: 14px; }
+.event-cancellation fieldset legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
+.event-cancellation fieldset label, .event-cancellation__confirmation label { align-items: flex-start; color: var(--ink); display: flex; gap: 9px; }
+.event-cancellation input[type="radio"], .event-cancellation input[type="checkbox"] { flex: 0 0 auto; margin-top: 4px; }
+.event-cancellation__impact { border-top: 1px solid var(--line); display: grid; gap: 10px; padding-top: 18px; }
+.event-cancellation__impact h3 { color: var(--teal-dark); margin: 0; }
+.event-cancellation__impact h4 { margin: 0 0 6px; }
+.event-cancellation__impact section ul { margin: 0; padding-left: 22px; }
+.event-cancellation__impact section li { line-height: 1.5; }
+.event-cancellation__impact p { color: var(--muted); font-size: 0.9rem; line-height: 1.5; margin: 0; }
+.event-cancellation__confirmation { border-top: 1px solid var(--line); display: grid; gap: 14px; padding-top: 18px; }
+.event-cancellation dl { display: grid; gap: 8px 16px; grid-template-columns: minmax(130px, 180px) minmax(0, 1fr); margin: 0; }
+.event-cancellation dt { color: var(--muted); font-weight: 700; }
+.event-cancellation dd { margin: 0; overflow-wrap: anywhere; }
 /* An organiser with no name on record is shown by id, which must read as an
    identifier, not prose. The same treatment venue history gives its uuids. */
 .dashboard--coordinator .my-assigned-events code { background: #eef2f1; border-radius: 4px; color: var(--muted); font-size: 0.78rem; padding: 2px 6px; }

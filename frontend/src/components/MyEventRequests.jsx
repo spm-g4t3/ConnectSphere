@@ -275,6 +275,18 @@ export default function MyEventRequests() {
                 </div>
               )}
 
+              {req.status === "cancelled" && (
+                <div className="my-event-requests__cancellation">
+                  <strong>Event cancelled</strong>
+                  <dl>
+                    <dt>Reason</dt>
+                    <dd>{req.cancellationReason || "No reason recorded."}</dd>
+                    <dt>Cancelled on</dt>
+                    <dd>{formatEventDate(req.cancelledAt)}</dd>
+                  </dl>
+                </div>
+              )}
+
               <details className="my-event-requests__details">
                 <summary>Current event details</summary>
                 <dl>
@@ -324,7 +336,9 @@ export default function MyEventRequests() {
                   </button>
                 )}
 
-                {req.status !== "draft" && req.status !== "pending_clarification" && (
+                {req.status !== "draft" &&
+                  req.status !== "pending_clarification" &&
+                  req.status !== "cancelled" && (
                   <button
                     onClick={() => setActivePanel({ mode: "change-request", request: req })}
                   >
