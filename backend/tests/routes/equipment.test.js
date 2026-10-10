@@ -79,7 +79,7 @@ function appWith(requireAuth = signedInAs(ROLE.TECHNICAL_SUPPORT_STAFF)) {
     .use('/api/equipment', createEquipmentRouter({ requireAuth }));
 }
 
-const OTHER_ROLES = [ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.ATTENDEE, ROLE.EVENT_COORDINATOR];
+const OTHER_ROLES = [ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.ATTENDEE, ROLE.EVENT_COORDINATOR, ROLE.EVENT_COORDINATOR_LEAD, ROLE.SAFETY_OFFICER];
 
 beforeEach(() => {
   from.mockReset();
@@ -140,7 +140,7 @@ describe('AC1: who can read', () => {
     expect(res.body).toEqual([]);
   });
 
-  it.each([ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.ATTENDEE])(
+  it.each([ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.ATTENDEE, ROLE.EVENT_COORDINATOR_LEAD, ROLE.SAFETY_OFFICER])(
     'SCRUM275_AC1_refuses_%s_on_the_active_list_with_403',
     async (role) => {
       const res = await request(appWith(signedInAs(role))).get('/api/equipment/active');

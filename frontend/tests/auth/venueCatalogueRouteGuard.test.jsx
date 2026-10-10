@@ -30,7 +30,7 @@ vi.mock("../../src/components/VenueCatalogue", () => ({
   default: () => <p data-testid="venue-catalogue-stub">Venue catalogue page</p>,
 }));
 
-const OTHER_ROLES = ["event_organiser", "event_coordinator", "technical_support_staff", "attendee"];
+const OTHER_ROLES = ["event_organiser", "event_coordinator", "technical_support_staff", "attendee", "event_coordinator_lead", "safety_officer"];
 
 function renderAppAt(path, role) {
   vi.mocked(useAuth).mockReturnValue({

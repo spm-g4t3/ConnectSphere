@@ -49,6 +49,18 @@ describe("/venue-search route guard", () => {
     expect(window.location.pathname).toBe("/unauthorized");
   });
 
+  it.each(["event_coordinator_lead", "safety_officer"])(
+    "SCRUM485_AC5_sends_%s_to_unauthorized_from_venue_search",
+    (role) => {
+      // AC5-14. ProtectedRoute normalises both sides, and EVENT_COORDINATOR_LEAD
+      // is not EVENT_COORDINATOR: the Lead inherits no coordinator page.
+      renderAppAt("/venue-search", role);
+
+      expect(screen.queryByTestId("venue-search-stub")).not.toBeInTheDocument();
+      expect(window.location.pathname).toBe("/unauthorized");
+    },
+  );
+
   it.each(["event_coordinator", "venue_staff"])("lets %s see the venue search page", (role) => {
     renderAppAt("/venue-search", role);
 

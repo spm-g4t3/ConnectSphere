@@ -143,3 +143,77 @@ describe('a wiring mistake is reported as a fault, not as a refusal', () => {
     expect(() => createRequireRole()).toThrow(/at least one role/);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-485 AC5: the two new roles pass no existing gate
+// ---------------------------------------------------------------------------
+// docs/test-cases/SCRUM-485.md, AC5-08, and the decision "The Lead inherits
+// nothing from Event Coordinator". These are the real proof that every route is
+// refused: each route file builds its gate from this one factory (coordinatorOnly,
+// venueStaffOnly, technicalSupportOnly, internalReaders, activeReaders), so a
+// role this middleware refuses is refused on every route behind that gate. The
+// route suites sample one route per gate to prove the gate is mounted.
+describe('SCRUM-485 AC5: the Event Coordinator Lead and the Safety Officer pass no existing gate', () => {
+  const NEW_ROLES = [ROLE.EVENT_COORDINATOR_LEAD, ROLE.SAFETY_OFFICER];
+
+  it.each(NEW_ROLES)('SCRUM485_AC5_the_coordinator_gate_refuses_%s', (role) => {
+    // AC5-08. The case an examiner asks about: event_coordinator_lead begins
+    // with event_coordinator, and is still refused, because the gate compares
+    // the whole value with includes, never a prefix.
+    const res = createFakeResponse();
+    const next = vi.fn();
+
+    createRequireRole(ROLE.EVENT_COORDINATOR)(req({ id: 'u1', role }), res, next);
+
+    expect(res.statusCode).toBe(403);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.body).toEqual({ error: 'This action is restricted to Event Coordinators' });
+  });
+
+  // Every gate the routes build, as the route files build them.
+  const GATES = [
+    ['Venue Staff', [ROLE.VENUE_STAFF]],
+    ['Technical Support Staff', [ROLE.TECHNICAL_SUPPORT_STAFF]],
+    ['Venue Staff or Event Coordinators', [ROLE.VENUE_STAFF, ROLE.EVENT_COORDINATOR]],
+    ['Technical Support Staff or Event Coordinators', [ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.EVENT_COORDINATOR]],
+  ];
+  const CASES = GATES.flatMap(([named, allowed]) => NEW_ROLES.map((role) => [named, role, allowed]));
+
+  it.each(CASES)('SCRUM485_AC5_the_%s_gate_refuses_%s', (named, role, allowed) => {
+    // The same for the other single-role gates, and for the two two-role
+    // gates (internalReaders on the venue routes, activeReaders on the
+    // equipment routes).
+    const res = createFakeResponse();
+    const next = vi.fn();
+
+    createRequireRole(...allowed)(req({ id: 'u1', role }), res, next);
+
+    expect(res.statusCode).toBe(403);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.body).toEqual({ error: `This action is restricted to ${named}` });
+  });
+
+  it.each(NEW_ROLES)('SCRUM485_AC5_a_refusal_names_the_role_that_would_work_not_%s', (role) => {
+    // As for every role: the caller's own label is not actionable, so it is
+    // never echoed. The labels themselves are tested in userRole.test.js.
+    const res = createFakeResponse();
+
+    createRequireRole(ROLE.EVENT_COORDINATOR)(req({ id: 'u1', role }), res, vi.fn());
+
+    expect(res.body.error).not.toMatch(/Lead|Safety/);
+  });
+
+  it.each(NEW_ROLES)('SCRUM485_AC5_a_gate_that_names_%s_lets_it_through', (role) => {
+    // The other half: the role is recognised by the gate, not refused because
+    // it is new. No route builds this gate yet; the stories that grant each
+    // role an ability will (SCRUM-486, 487, 489, 490).
+    const res = createFakeResponse();
+    const next = vi.fn();
+
+    createRequireRole(role)(req({ id: 'u1', role }), res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBeNull();
+  });
+});
