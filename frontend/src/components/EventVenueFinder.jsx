@@ -219,7 +219,9 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
     setRequestingVenue(null);
     setLoading(true);
     try {
-      setResults(await findVenuesForEvent(toSearchCriteria(values)));
+      // SCRUM-491 (AC5): this event's id, so a venue it holds is not hidden
+      // from its own search.
+      setResults(await findVenuesForEvent(toSearchCriteria(values, { eventRequestId: request?.id })));
     } catch (err) {
       // A failed search leaves no results behind: the ones from before would
       // sit under criteria that have since changed.

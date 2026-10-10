@@ -792,7 +792,7 @@ describe("SCRUM178_AC5 VenueCalendar hidden entries", () => {
       APPROVED,
       { ...APPROVED, id: "p1", status: "pending", eventName: "Pending Party" },
       { ...APPROVED, id: "c1", status: "cancelled", eventName: "Cancelled Concert" },
-      { ...BLOCK, id: "h1", kind: "hold", reason: "other" },
+      { ...BLOCK, id: "h1", kind: "reservation", reason: "other" },
     ]);
     await renderCalendar();
 
@@ -806,7 +806,7 @@ describe("SCRUM178_AC5 VenueCalendar hidden entries", () => {
   it("SCRUM178_AC5_a_period_of_only_hidden_entries_shows_the_empty_state", async () => {
     vi.mocked(getVenueCalendar).mockResolvedValue([
       { ...APPROVED, status: "pending" },
-      { ...APPROVED, id: "x", kind: "hold" },
+      { ...APPROVED, id: "x", kind: "reservation" },
     ]);
     const { user } = await renderCalendar();
 
@@ -821,14 +821,14 @@ describe("SCRUM178_AC5 VenueCalendar hidden entries", () => {
   });
 
   it.each(["day", "month"])(
-    "SCRUM178_AC5_cancelled_unknown_kind_and_hold_entries_are_hidden_in_the_%s_view",
+    "SCRUM178_AC5_cancelled_and_unknown_kind_entries_are_hidden_in_the_%s_view",
     async (view) => {
       const control = { ...APPROVED, id: "b-ok", startsAt: oct(7, 8), endsAt: oct(7, 9) };
       serveByWindow([
         control,
         { ...APPROVED, id: "c1", status: "cancelled", startsAt: oct(7, 10), endsAt: oct(7, 11), eventName: "Cancelled Concert" },
         { ...APPROVED, id: "u1", kind: "reservation", startsAt: oct(7, 12), endsAt: oct(7, 13), eventName: "Mystery Kind" },
-        { ...BLOCK, id: "h1", kind: "hold", reason: "other", startsAt: oct(7, 14), endsAt: oct(7, 15) },
+        { ...BLOCK, id: "h1", kind: "tentative", reason: "other", startsAt: oct(7, 14), endsAt: oct(7, 15) },
       ]);
       const { user } = await renderCalendar();
       await showView(user, view);
@@ -1179,5 +1179,52 @@ describe("SCRUM484_AC7 VenueCalendar shows setup and turnaround on bookings", ()
     const item = within(weekCells()[1]).getByRole("listitem");
     expect(item.querySelector(".venue-calendar__entry-time").textContent).toBe(expectedRange(APPROVED));
     expect(document.body).not.toHaveTextContent(/Invalid Date/);
+  });
+});
+
+describe("SCRUM491_AC6 VenueCalendar shows active tentative holds", () => {
+  // Thursday 8 October, 10:00-12:00, held with 30 minutes of setup and 45 of
+  // turnaround around it.
+  const HOLD = {
+    kind: "hold",
+    id: "h-launch",
+    eventRequestId: "e-launch",
+    eventName: "Product Launch",
+    startsAt: oct(8, 10),
+    endsAt: oct(8, 12),
+    occupiedStartsAt: oct(8, 9, 30),
+    occupiedEndsAt: oct(8, 12, 45),
+    setupMinutes: 30,
+    turnaroundMinutes: 45,
+  };
+
+  it("SCRUM491_AC6_a_hold_reads_Tentatively_held_naming_the_holding_event", async () => {
+    serveByWindow([HOLD]);
+    await renderCalendar();
+
+    const entry = document.querySelector(".venue-calendar__entry--held");
+    expect(entry).not.toBeNull();
+    expect(within(entry).getByText("Tentatively held")).toBeInTheDocument();
+    expect(within(entry).getByText("Product Launch")).toBeInTheDocument();
+    expect(screen.queryByText("Booked")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM491_AC6_a_hold_shows_its_whole_occupied_period", async () => {
+    serveByWindow([HOLD]);
+    await renderCalendar();
+
+    const entry = document.querySelector(".venue-calendar__entry--held");
+    const time = entry.querySelector(".venue-calendar__entry-time");
+    expect(time).toHaveTextContent(`Setup ${formatRange(HOLD.occupiedStartsAt, HOLD.startsAt)}`);
+    expect(time).toHaveTextContent(`Turnaround ${formatRange(HOLD.endsAt, HOLD.occupiedEndsAt)}`);
+  });
+
+  it("SCRUM491_AC6_a_hold_sits_beside_a_booking_and_a_block", async () => {
+    serveByWindow([APPROVED, HOLD, BLOCK]);
+    await renderCalendar();
+
+    expect(document.querySelectorAll(".venue-calendar__entry--booked")).toHaveLength(1);
+    expect(document.querySelectorAll(".venue-calendar__entry--held")).toHaveLength(1);
+    expect(document.querySelectorAll(".venue-calendar__entry--blocked")).toHaveLength(1);
   });
 });

@@ -13,11 +13,13 @@
 //   booking_flagged_setup_change (034, SCRUM-484): { venueName, eventName,
 //     startsAt, endsAt, occupiedStartsAt, occupiedEndsAt, setupMinutes,
 //     turnaroundMinutes, reason }
+//   venue_hold_expired (040, SCRUM-491): { eventRequestId, eventName,
+//     venueId, venueName, expiresAt }
 // Every field is read defensively -- a notification outlives the build that
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
 
-import { formatRange } from "./displayFormat";
+import { formatRange, formatTimestamp } from "./displayFormat";
 import { reasonLabel } from "./venueBlockReasons";
 import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
 
@@ -89,6 +91,21 @@ export function describeNotification(notification) {
     return {
       headline: `${eventName} at ${venueName} needs review`,
       detail: `Setup or turnaround time changed.${setupChangePeriod(payload)}`,
+    };
+  }
+
+  // SCRUM-491 (AC8). Sent to the holding event's assigned coordinator once a
+  // tentative hold's expiry has passed. Said plainly that it was never a
+  // booking (AC7), so nobody reads the venue as theirs.
+  if (notification?.type === "venue_hold_expired") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+
+    return {
+      headline: `The hold on ${venueName} for ${eventName} has expired`,
+      detail:
+        `It expired ${formatTimestamp(payload.expiresAt)}. ` +
+        "The venue is no longer held for this event; a hold is not a booking.",
     };
   }
 

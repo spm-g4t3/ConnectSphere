@@ -23,6 +23,7 @@ import { getVenueCatalogue, retireVenue } from "../services/venueService";
 import VenueForm from "./VenueForm";
 import VenueDetail from "./VenueDetail";
 import VenueBlocksPanel from "./VenueBlocksPanel";
+import VenueHoldsPanel from "./VenueHoldsPanel";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
 import { flaggedBookingsHeading } from "../services/flaggedBookingDisplay";
 
@@ -60,7 +61,8 @@ export default function VenueCatalogue({ currentUserId } = {}) {
   const [retireError, setRetireError] = useState(null);   // { id, message }
 
   // Which panel is open, if any: { mode: "create" } | { mode: "edit", venue }
-  // | { mode: "detail", venue } | { mode: "blocks", venue } | null. Copied from MyEventRequests, which is
+  // | { mode: "detail", venue } | { mode: "blocks", venue }
+  // | { mode: "holds", venue } (SCRUM-491) | null. Copied from MyEventRequests, which is
   // where this app decided that a full-page panel with a Back button is what
   // it does instead of a modal — there is not one modal, <dialog> or
   // window.confirm anywhere in this frontend and this is not the place to
@@ -206,6 +208,17 @@ export default function VenueCatalogue({ currentUserId } = {}) {
     );
   }
 
+  // SCRUM-491. The same shape as the blocks panel, and handleSaved on Back
+  // for the same reason: the hold panel can learn the venue was retired.
+  if (activePanel?.mode === "holds") {
+    return (
+      <section>
+        <button onClick={handleSaved}>&larr; Back to the venue catalogue</button>
+        <VenueHoldsPanel venue={activePanel.venue} currentUserId={currentUserId} />
+      </section>
+    );
+  }
+
   return (
     <section>
       <h2>Venue catalogue</h2>
@@ -311,6 +324,18 @@ export default function VenueCatalogue({ currentUserId } = {}) {
                   onClick={() => setActivePanel({ mode: "blocks", venue })}
                 >
                   Manage blocks
+                </button>
+
+                {/* SCRUM-491. Beside Manage blocks, because a tentative hold
+                    is the other way Venue Staff keep a venue for a while.
+                    Disabled on a retired venue for the same reason: the
+                    server refuses a hold there with VENUE_RETIRED (AC4). */}
+                <button
+                  disabled={retired}
+                  title={retired ? "A retired venue cannot be held." : undefined}
+                  onClick={() => setActivePanel({ mode: "holds", venue })}
+                >
+                  Place hold
                 </button>
 
                 {/* Two-step inline confirmation rather than a modal or

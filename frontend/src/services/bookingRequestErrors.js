@@ -79,13 +79,18 @@ export function unmetCriteria(err) {
   return conflictsOf(err).filter((criterion) => criterion && typeof criterion === "object");
 }
 
+/** The kinds a BOOKING_PERIOD_CONFLICT can list. 'hold' is SCRUM-491's (AC5). */
+const PERIOD_CONFLICT_KINDS = new Set(["block", "booking", "hold"]);
+
 /**
  * What is in the way of the period, from a BOOKING_PERIOD_CONFLICT answer:
- * venue blocks and approved bookings, as { kind, ... }.
+ * venue blocks, approved bookings and (SCRUM-491, AC5) another event's active
+ * tentative hold, as { kind, ... }. The event's own hold never appears: the
+ * backend leaves it out.
  */
 export function periodConflicts(err) {
   if (codeOf(err) !== "BOOKING_PERIOD_CONFLICT") return [];
-  return conflictsOf(err).filter((c) => c?.kind === "block" || c?.kind === "booking");
+  return conflictsOf(err).filter((c) => PERIOD_CONFLICT_KINDS.has(c?.kind));
 }
 
 /** Does the answer mean this event already has a pending, approved or flagged booking? */

@@ -328,7 +328,13 @@ describe("SCRUM20_AC1 searching", () => {
     await user.click(searchButton());
 
     const criteria = await sentCriteria();
-    expect(Object.keys(criteria).sort()).toEqual(["endsAt", "expectedAttendance", "startsAt"]);
+    // eventRequestId is the event's own id (SCRUM-491), not a search value.
+    expect(Object.keys(criteria).sort()).toEqual([
+      "endsAt",
+      "eventRequestId",
+      "expectedAttendance",
+      "startsAt",
+    ]);
     expect(criteria.startsAt).toBe(START_ISO);
     expect(criteria.endsAt).toBe(END_ISO);
     expect(criteria.expectedAttendance).toBe(80);
@@ -1130,5 +1136,23 @@ describe("SCRUM254 request this venue from the event's search", () => {
     await waitFor(() => expect(findVenuesForEvent).toHaveBeenCalledTimes(3));
     await screen.findByRole("heading", { name: "Annex" });
     for (const button of allRequestButtons()) expect(button).toBeDisabled();
+  });
+});
+
+describe("SCRUM491_AC5 the event's own hold does not hide a venue from its search", () => {
+  it("SCRUM491_AC5_the_search_names_the_event_it_is_for", async () => {
+    const { user } = renderFinder();
+    await user.click(searchButton());
+
+    const criteria = await sentCriteria();
+    expect(criteria.eventRequestId).toBe(EVENT.id);
+  });
+
+  it("SCRUM491_AC5_without_an_event_id_none_is_sent", async () => {
+    const { user } = renderFinder({ ...EVENT, id: undefined });
+    await user.click(searchButton());
+
+    const criteria = await sentCriteria();
+    expect(criteria).not.toHaveProperty("eventRequestId");
   });
 });

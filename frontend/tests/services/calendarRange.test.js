@@ -477,3 +477,27 @@ describe("SCRUM178_AC1 toCalendarDateParam (SCRUM-181)", () => {
     expect(parseCalendarDate(toCalendarDateParam(moment))).toEqual(startOfDay(moment));
   });
 });
+
+describe("SCRUM491_AC6 entriesOnDay places holds by their occupied period", () => {
+  const hold = {
+    kind: "hold",
+    id: "h1",
+    startsAt: local(2026, 9, 6, 22).toISOString(),
+    endsAt: local(2026, 9, 6, 23, 30).toISOString(),
+    occupiedStartsAt: local(2026, 9, 6, 21, 30).toISOString(),
+    occupiedEndsAt: local(2026, 9, 7, 0, 15).toISOString(),
+    eventName: "Product Launch",
+  };
+
+  it("SCRUM491_AC6_a_hold_turnaround_past_midnight_puts_it_on_the_next_day", () => {
+    expect(entriesOnDay([hold], local(2026, 9, 6))).toEqual([hold]);
+    expect(entriesOnDay([hold], local(2026, 9, 7))).toEqual([hold]);
+    expect(entriesOnDay([hold], local(2026, 9, 8))).toEqual([]);
+  });
+
+  it("SCRUM491_AC6_a_hold_without_occupied_fields_falls_back_to_the_event_times", () => {
+    const bare = { ...hold, occupiedStartsAt: null, occupiedEndsAt: null };
+    expect(entriesOnDay([bare], local(2026, 9, 6))).toEqual([bare]);
+    expect(entriesOnDay([bare], local(2026, 9, 7))).toEqual([]);
+  });
+});

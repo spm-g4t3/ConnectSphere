@@ -2607,6 +2607,92 @@ describe('SCRUM20 findVenuesForEvent', () => {
     expect(result).toEqual([]);
     expect(JSON.stringify(result)).not.toMatch(/setup|turnaround|booking/i);
   });
+
+  // --- SCRUM-491 AC5: an event's own holds ---------------------------------
+  // A tentative hold occupies its venue for every other event (040, proved in
+  // tests/db/venueHoldsDatabase.test.js). A search may name its event so that
+  // event's own holds are left out -- but only when the caller is the event's
+  // assigned coordinator. Anyone else naming it is ignored, not refused.
+
+  const HOLD_EVENT_ID = '7a7a7a7a-0000-4000-8000-000000000001';
+  const OWNER_ID = '8b8b8b8b-0000-4000-8000-000000000002';
+
+  /** givenEventSearch, plus an event_requests read answering `event`. */
+  function givenHoldEventSearch({ event, eventError, ...options } = {}) {
+    const stubs = givenEventSearch(options);
+    const base = from.getMockImplementation();
+    from.mockImplementation((table) => {
+      if (table !== 'event_requests') return base(table);
+      stubs.event_requests = queryStub(eventError ? { data: null, error: eventError } : { data: event, error: null });
+      return stubs.event_requests;
+    });
+    return stubs;
+  }
+
+  it('SCRUM491_AC5_the_assigned_coordinator_search_leaves_out_its_own_holds', async () => {
+    const stubs = givenHoldEventSearch({
+      rows: [harbourRow()],
+      event: { id: HOLD_EVENT_ID, assigned_coordinator_id: OWNER_ID },
+    });
+
+    const result = await findVenuesForEvent({ ...BASE, eventRequestId: HOLD_EVENT_ID.toUpperCase() }, { userId: OWNER_ID });
+
+    expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
+    expect(stubs.event_requests.args('eq')).toEqual(['id', HOLD_EVENT_ID]);
+    expect(availabilityCalls()).toEqual([
+      ['available_venue_ids', {
+        p_venue_ids: [HARBOUR_ID],
+        p_starts_at: BASE.startsAt,
+        p_ends_at: BASE.endsAt,
+        p_exclude_hold_event_id: HOLD_EVENT_ID,
+      }],
+    ]);
+  });
+
+  it('SCRUM491_AC5_another_coordinator_naming_the_event_is_ignored', async () => {
+    givenHoldEventSearch({
+      rows: [harbourRow()],
+      event: { id: HOLD_EVENT_ID, assigned_coordinator_id: OWNER_ID },
+      occupied: [HARBOUR_ID],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE, eventRequestId: HOLD_EVENT_ID }, { userId: 'someone-else' });
+
+    // The holds count like anyone else's: the held venue stays out, and the
+    // call carries no exclusion.
+    expect(result).toEqual([]);
+    expect(Object.keys(availabilityCalls()[0][1]).sort()).toEqual(['p_ends_at', 'p_starts_at', 'p_venue_ids']);
+  });
+
+  it('SCRUM491_AC5_an_unknown_event_or_no_caller_excludes_nothing', async () => {
+    givenHoldEventSearch({ rows: [harbourRow()], event: null });
+    await findVenuesForEvent({ ...BASE, eventRequestId: HOLD_EVENT_ID }, { userId: OWNER_ID });
+    expect(availabilityCalls()[0][1]).not.toHaveProperty('p_exclude_hold_event_id');
+
+    vi.resetAllMocks();
+    givenHoldEventSearch({ rows: [harbourRow()] });
+    await findVenuesForEvent({ ...BASE, eventRequestId: HOLD_EVENT_ID });
+    expect(tablesRead()).not.toContain('event_requests');
+    expect(availabilityCalls()[0][1]).not.toHaveProperty('p_exclude_hold_event_id');
+  });
+
+  it('SCRUM491_AC5_a_failed_event_read_is_passed_on', async () => {
+    givenHoldEventSearch({ rows: [harbourRow()], eventError: { code: 'XX000', message: 'down' } });
+
+    await expect(
+      findVenuesForEvent({ ...BASE, eventRequestId: HOLD_EVENT_ID }, { userId: OWNER_ID }),
+    ).rejects.toThrow('down');
+  });
+
+  it('SCRUM491_AC5_a_malformed_event_id_is_400_before_any_read', async () => {
+    givenHoldEventSearch({ rows: [harbourRow()] });
+
+    const err = await findVenuesForEvent({ ...BASE, eventRequestId: 'nope' }, { userId: OWNER_ID }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'eventRequestId', message: 'must be a valid event id' }]);
+    expect(from).not.toHaveBeenCalled();
+  });
 });
 
 

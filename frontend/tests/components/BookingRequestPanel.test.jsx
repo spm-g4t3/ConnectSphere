@@ -616,3 +616,56 @@ describe("SCRUM484_AC7 setup and turnaround in what is in the way", () => {
     expect(rows[1]).toHaveTextContent(`Turnaround ${formatRange(ORIENTATION.endsAt, ORIENTATION.occupiedEndsAt)}`);
   });
 });
+
+describe("SCRUM491_AC5 another event's tentative hold in what is in the way", () => {
+  // Another event's hold, 10:00-12:00Z, padded 30/45 like a booking.
+  const HOLD = {
+    kind: "hold",
+    holdId: "h-launch",
+    eventRequestId: "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+    eventName: "Product Launch",
+    startsAt: "2026-12-01T10:00:00Z",
+    endsAt: "2026-12-01T12:00:00Z",
+    occupiedStartsAt: "2026-12-01T09:30:00Z",
+    occupiedEndsAt: "2026-12-01T12:45:00Z",
+    setupMinutes: 30,
+    turnaroundMinutes: 45,
+  };
+
+  async function showConflicts(conflicts) {
+    vi.mocked(createBookingRequest).mockRejectedValue(conflict409("BOOKING_PERIOD_CONFLICT", conflicts));
+    const { user } = renderPanel();
+    await user.click(submit());
+    return screen.findByRole("list", { name: "What is in the way" });
+  }
+
+  it("SCRUM491_AC5_a_hold_conflict_reads_Tentatively_held_with_its_event_and_occupied_period", async () => {
+    const list = await showConflicts([HOLD]);
+
+    const row = within(list).getByRole("listitem");
+    expect(within(row).getByText("Tentatively held")).toBeInTheDocument();
+    expect(within(row).getByText("Product Launch")).toBeInTheDocument();
+    expect(
+      within(row).getByText(
+        `Setup ${formatRange(HOLD.occupiedStartsAt, HOLD.startsAt)} · ` +
+          `Event ${formatRange(HOLD.startsAt, HOLD.endsAt)} · ` +
+          `Turnaround ${formatRange(HOLD.endsAt, HOLD.occupiedEndsAt)}`,
+      ),
+    ).toBeInTheDocument();
+    expect(within(row).getByText("bbbbbbbb")).toBeInTheDocument();
+  });
+
+  it("SCRUM491_AC5_a_booking_conflict_is_not_labelled_as_a_hold", async () => {
+    const list = await showConflicts([{ ...HOLD, kind: "booking", bookingId: "bk-1", holdId: undefined }]);
+
+    expect(within(list).queryByText("Tentatively held")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM491_AC5_a_hold_without_an_id_still_renders", async () => {
+    const list = await showConflicts([{ ...HOLD, holdId: undefined, eventName: "" }]);
+
+    expect(within(list).getByText("Tentatively held")).toBeInTheDocument();
+    expect(within(list).getByText("Unnamed event")).toBeInTheDocument();
+  });
+});
+

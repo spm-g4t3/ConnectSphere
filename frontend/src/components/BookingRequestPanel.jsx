@@ -236,9 +236,13 @@ export default function BookingRequestPanel({
                 // The same minutes pad this event against a booking too: a
                 // request can clash with a turnaround that ended before it
                 // starts, because its own setup reaches back into it.
+                // SCRUM-491 (AC5): another event's tentative hold occupies
+                // the venue the same way, so it reads the same, labelled.
                 const bookingNote = bookingPaddingNote(conflict);
+                const held = conflict.kind === "hold";
                 return (
-                  <li key={conflict.bookingId ?? i}>
+                  <li key={(held ? conflict.holdId : conflict.bookingId) ?? i}>
+                    {held && <strong>Tentatively held</strong>}
                     <strong>{conflict.eventName || "Unnamed event"}</strong>
                     <span>{formatOccupiedPeriod(conflict)}</span>
                     {bookingNote && (

@@ -20,7 +20,9 @@
  * may start is 13:15. Each test makes its own venue.
  *
  * Migrations: the same list as venueBlockOccupancyDatabase.test.js, through
- * 033.
+ * 033, then 040 (SCRUM-491), whose create_booking_request is 033's with step
+ * 7 also counting other events' active holds. Every case above the hold one
+ * holds no venue, so each still tests 033's rule unchanged.
  *
  * Dates: D is the Singapore date 10 days from when the test runs, never
  * hard-coded. Instants are compared with getTime().
@@ -58,6 +60,7 @@ const MIGRATIONS = [
   '031_withdraw_booking_request.sql',
   '032_venue_occupancy.sql',
   '033_venue_occupancy_callers.sql',
+  '040_venue_holds.sql',
 ];
 
 /** What 014 reads from SCRUM-19's migration, which is not on this branch. */
@@ -333,6 +336,34 @@ describe('SCRUM-484: create_booking_request uses the occupied period (033)', () 
       expect(result.outcome).toBe('conflict');
       const row = await one('select count(*)::int as n from bookings where event_request_id = $1', [eventId]);
       expect(row.n).toBe(0);
+    });
+  });
+
+  describe('SCRUM-491: another event\'s active hold conflicts like a booking', () => {
+    it('SCRUM491_AC5_booking_request_over_another_events_hold_conflicts_with_its_period', async () => {
+      const venueId = await makeVenue(30, 45);
+      const holderId = await makeEvent(at('10:00'), at('12:00'));
+      const holdId = (
+        await one(
+          `insert into venue_holds (event_request_id, venue_id, placed_by, expires_at)
+           values ($1, $2, $3, now() + interval '1 hour') returning id`,
+          [holderId, venueId, coordinator],
+        )
+      ).id;
+
+      const clash = await requestFor(venueId, at('13:14'), at('14:00'));
+      const clear = await requestFor(venueId, at('13:15'), at('14:00'));
+
+      expect(clash.result.outcome).toBe('conflict');
+      expect(clash.result.conflicts).toHaveLength(1);
+      const [hold] = clash.result.conflicts;
+      expect(hold.kind).toBe('hold');
+      expect(hold.hold_id).toBe(holdId);
+      expect(hold.event_request_id).toBe(holderId);
+      expect(ms(hold.occupied_starts_at)).toBe(ms(at('09:30')));
+      expect(ms(hold.occupied_ends_at)).toBe(ms(at('12:45')));
+      expect(Object.keys(hold)).toEqual(expect.arrayContaining(OCCUPIED_KEYS));
+      expect(clear.result.outcome).toBe('created');
     });
   });
 });

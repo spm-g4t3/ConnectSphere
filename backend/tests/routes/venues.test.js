@@ -2629,6 +2629,52 @@ describe('SCRUM20 GET /api/venues/event-search', () => {
     });
   });
 
+  describe('SCRUM-491: the event being searched for', () => {
+    const HOLD_EVENT_ID = '7a7a7a7a-0000-4000-8000-000000000001';
+
+    it('SCRUM491_AC5_eventRequestId_and_the_caller_reach_the_service', async () => {
+      find.mockResolvedValueOnce([]);
+
+      const res = await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=40&eventRequestId=${HOLD_EVENT_ID}`);
+
+      expect(res.status).toBe(200);
+      expect(criteriaSent()).toEqual({
+        startsAt: STARTS_AT,
+        endsAt: ENDS_AT,
+        expectedAttendance: 40,
+        eventRequestId: HOLD_EVENT_ID,
+      });
+      expect(find.mock.calls[0][1]).toEqual({ userId: COORDINATOR_ID });
+    });
+
+    it('SCRUM491_AC5_the_holding_coordinator_search_excludes_its_own_holds', async () => {
+      // The real service: the event is read, it is the caller's, so its id is
+      // sent as the exclusion.
+      from.mockImplementation((table) => {
+        if (table === 'event_requests') return queryStub(ok({ id: HOLD_EVENT_ID, assigned_coordinator_id: COORDINATOR_ID }));
+        return queryStub(ok([]));
+      });
+
+      const res = await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=40&eventRequestId=${HOLD_EVENT_ID}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('SCRUM491_AC5_a_malformed_eventRequestId_is_400', async () => {
+      find.mockImplementation(realService.findVenuesForEvent);
+
+      const res = await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=40&eventRequestId=nope`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toEqual([{ field: 'eventRequestId', message: 'must be a valid event id' }]);
+      expect(from).not.toHaveBeenCalled();
+    });
+  });
+
   describe('retired venues', () => {
     it('SCRUM20_AC6_include_retired_with_event_search_is_ignored', async () => {
       // B-AC6-09 (SCRUM-144). parseEventSearch copies only the keys it knows,

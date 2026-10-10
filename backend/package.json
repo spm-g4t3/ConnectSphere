@@ -18,6 +18,7 @@
     "venue-routes:check": "node scripts/check-venue-routes.js",
     "equipment:check": "node scripts/check-equipment-service.js",
     "equipment:seed": "node db/seeds/equipment.js",
+    "venue-holds:seed": "node db/seeds/venueHolds.js",
     "venue-blocks:check": "node scripts/check-venue-blocks.js",
     "venue-calendar:check": "node scripts/check-venue-calendar.js",
     "booking-requests:check": "node scripts/check-booking-requests.js",

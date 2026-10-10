@@ -84,7 +84,8 @@ describe("SCRUM178_AC5 calendarEntryDisplay hidden entries", () => {
     },
   );
 
-  it.each(["hold", "Booking", undefined])("SCRUM178_AC5_an_entry_of_kind_%s_is_hidden", (kind) => {
+  // "hold" left this list with SCRUM-491, which made it a kind of its own.
+  it.each(["reservation", "Hold", "Booking", undefined])("SCRUM178_AC5_an_entry_of_kind_%s_is_hidden", (kind) => {
     expect(calendarEntryDisplay({ ...BOOKING, kind })).toBeNull();
   });
 
@@ -102,5 +103,37 @@ describe("SCRUM178_AC3 calendarEntryDisplay pending requests", () => {
     // was turned down) has no approved booking, so it must not read "Booked".
     expect(calendarEntryDisplay({ ...BOOKING, status })).toBeNull();
     expect(calendarEntryDisplay({ ...BOOKING, status, eventName: "Pending Party" })).toBeNull();
+  });
+});
+
+describe("SCRUM491_AC6 calendarEntryDisplay tentative holds", () => {
+  const HOLD = {
+    kind: "hold",
+    id: "h1",
+    startsAt: "2026-10-08T09:00:00+08:00",
+    endsAt: "2026-10-08T17:00:00+08:00",
+    eventRequestId: "e2",
+    eventName: "Product Launch",
+  };
+
+  it("SCRUM491_AC6_an_active_hold_reads_Tentatively_held_naming_the_holding_event", () => {
+    expect(calendarEntryDisplay(HOLD)).toEqual({
+      label: "Tentatively held",
+      detail: "Product Launch",
+      tone: "held",
+    });
+  });
+
+  it("SCRUM491_AC7_a_hold_is_never_labelled_Booked", () => {
+    expect(calendarEntryDisplay(HOLD).label).not.toMatch(/Booked/);
+    expect(calendarEntryDisplay({ ...HOLD, status: "approved" }).tone).toBe("held");
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["empty", ""],
+  ])("SCRUM491_AC6_a_hold_with_a_%s_eventName_has_a_null_detail", (_, eventName) => {
+    expect(calendarEntryDisplay({ ...HOLD, eventName }).detail).toBeNull();
   });
 });

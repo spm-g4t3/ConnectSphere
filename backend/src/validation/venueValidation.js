@@ -627,6 +627,10 @@ function checkIncludeRetired(errors, value) {
  * @param {string[]} [input.facilities]      facility codes
  * @param {string} [input.location]          SCRUM-141: text the venue's
  *                                           location must contain
+ * @param {string} [input.eventRequestId]    SCRUM-491: the event being
+ *                                           searched for, so its own holds
+ *                                           can be left out (the service
+ *                                           decides whether they are)
  * @returns {object} a normalised copy: startsAt and endsAt trimmed, codes
  *                   and location trimmed, optional keys only when something
  *                   was supplied
@@ -672,6 +676,17 @@ export function validateEventSearchCriteria(input) {
       normalised.location = input.location.trim();
     } else {
       errors.add('location', 'must be text');
+    }
+  }
+
+  // SCRUM-491 (AC5): optional, and only the shape is checked here. Whether
+  // the caller may leave this event's holds out is the service's question
+  // (venueService.findVenuesForEvent), because it needs the stored event.
+  if (!isUnset(input.eventRequestId)) {
+    if (typeof input.eventRequestId === 'string' && UUID_PATTERN.test(input.eventRequestId.trim())) {
+      normalised.eventRequestId = input.eventRequestId.trim().toLowerCase();
+    } else {
+      errors.add('eventRequestId', 'must be a valid event id');
     }
   }
 

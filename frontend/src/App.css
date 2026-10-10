@@ -145,7 +145,7 @@ button { cursor: pointer; }
 /* The rule above makes every .dashboard p muted grey, which would render a
    failed retire in exactly the same voice as the empty-state text. Same
    colour pair as .app-nav__error. */
-.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .venue-block-form__error, .dashboard .coordinator-notifications__error, .dashboard .coordinator-notifications__row-error, .dashboard .venue-blocks__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .venue-block-form__error, .dashboard .coordinator-notifications__error, .dashboard .coordinator-notifications__row-error, .dashboard .venue-blocks__error, .dashboard .venue-hold-form__error, .dashboard .venue-holds__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 /* NECESSARY, not cosmetic. .dashboard li above forces flex with
    justify-content: space-between, which on a checkbox row throws the box to
    one edge of the card and its label to the other with the whole width
@@ -243,6 +243,30 @@ button { cursor: pointer; }
    the row's details and actions. */
 .dashboard--venue-staff .venue-blocks__list > li { flex-wrap: wrap; }
 .dashboard--venue-staff .venue-blocks__audit { color: var(--muted); flex-basis: 100%; font-size: 0.84rem; margin: 0; overflow-wrap: anywhere; }
+/* SCRUM-491. The hold panel and form, scoped and shaped like the block ones
+   above: the same label grid, red field errors, the amber warning for what
+   is in the way, and the green notice for a hold placed. */
+.dashboard--venue-staff .venue-hold-form label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0 0; }
+.dashboard--venue-staff .venue-hold-form input, .dashboard--venue-staff .venue-hold-form select { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
+.dashboard--venue-staff .venue-hold-form [aria-invalid="true"] { border-color: #a43c32; }
+.dashboard--venue-staff .venue-hold-form__field-error { color: #a43c32; font-size: 0.84rem; margin: 6px 0 0; }
+.dashboard--venue-staff .venue-hold-form__hint { color: var(--muted); font-size: 0.84rem; margin: 6px 0 0; }
+.dashboard--venue-staff .venue-hold-form button { margin: 20px 10px 0 0; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above, on the field-error lists and the alert's list. */
+.dashboard--venue-staff .venue-hold-form li { border-top: 0; display: block; padding: 2px 0; }
+.dashboard--venue-staff .venue-holds__conflicts { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 8px; margin: 18px 0; padding: 14px 16px; }
+.dashboard--venue-staff .venue-holds__conflicts h3 { color: #8a5a00; font-size: 1rem; margin: 0 0 8px; }
+.dashboard--venue-staff .venue-holds__conflict-list li { border-top: 1px solid rgba(138, 90, 0, 0.18); display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: flex-start; padding: 8px 0; }
+.dashboard--venue-staff .venue-holds__conflict-list li:first-child { border-top: 0; }
+.dashboard--venue-staff .venue-holds__notice { background: #e8f7f1; border-radius: 8px; margin: 12px 0; padding: 10px 14px; }
+.dashboard--venue-staff .venue-holds__notice p { color: #17684f; margin: 4px 0; }
+.dashboard--venue-staff .venue-holds__current { margin-top: 22px; }
+.dashboard--venue-staff .venue-holds__current h3 { font-size: 1rem; margin: 0 0 8px; }
+.dashboard--venue-staff .venue-holds__list li { align-items: flex-start; }
+.dashboard--venue-staff .venue-holds__item-main { align-items: center; display: flex; flex: 1; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.dashboard--venue-staff .venue-holds__item-main .status-badge { margin-left: 0; }
+.dashboard--venue-staff .venue-holds__audit { color: var(--muted); flex-basis: 100%; font-size: 0.84rem; margin: 0; overflow-wrap: anywhere; }
 .dashboard--venue-staff .block-history { border-top: 1px solid var(--line); flex-basis: 100%; margin-top: 6px; padding-top: 8px; width: 100%; }
 .dashboard--venue-staff .block-history ul { list-style: none; margin: 0; padding: 0; }
 /* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
@@ -254,6 +278,8 @@ button { cursor: pointer; }
 .dashboard--venue-staff .status--block-upcoming { background: #e9f1fb; color: #2b5285; }
 .dashboard--venue-staff .status--block-in_effect { background: #fff6e5; color: #8a5a00; }
 .dashboard--venue-staff .status--block-ended { background: #eef2f1; color: var(--muted); }
+/* SCRUM-491. The same blue as the calendar's --held entry. */
+.dashboard--venue-staff .status--hold-active { background: #e9f1fb; color: #2b5285; }
 /* History values are raw jsonb turned into text: long joined code lists, a
    whole week of opening hours, a JSON.stringify of last resort. Without
    these they overflow the card rather than wrapping, and the <pre> fallback
@@ -591,6 +617,9 @@ button { cursor: pointer; }
 .venue-calendar__entry--booked { background: #e8f7f1; border-color: #17684f; color: #17684f; }
 .venue-calendar__entry--review { background: #fff6e5; border-color: #8a5a00; border-left-style: dashed; color: #8a5a00; }
 .venue-calendar__entry--blocked { background: #fff0ee; border-color: #a43c32; border-left-style: double; border-left-width: 6px; color: #a43c32; }
+/* SCRUM-491 (AC6). A tentative hold: blue, and dotted, so it reads as
+   provisional beside a solid booking even without colour. */
+.venue-calendar__entry--held { background: #e9f1fb; border-color: #2b5285; border-left-style: dotted; color: #2b5285; }
 .venue-calendar__grid--month .venue-calendar__entry { font-size: 0.76rem; padding: 3px 6px; }
 @media (max-width: 720px) {
    .app-nav { align-items: flex-start; flex-wrap: wrap; gap: 12px 16px; padding: 14px 18px; }
