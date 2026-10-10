@@ -61,6 +61,26 @@ const NAV_LINKS_BY_ROLE = {
     // route, page or branch, and /events is the Organiser's page. Add it here
     // with the path SCRUM-495 registers.
   ],
+  // SCRUM-485 (SCRUM-510). One link each, deliberately: Dashboard, where
+  // SCRUM-509 put each role's own screen. The pages that dashboard describes,
+  // the unassigned queue and coordinator overview for the Lead and the safety
+  // review list for the Safety Officer, have no route in App.jsx yet. A link
+  // to a route that does not exist still renders and is clickable, and lands
+  // on the catch-all redirect, so it promises a page and delivers another.
+  // SCRUM-486 and 487 (the Lead) and SCRUM-490 (the Safety Officer) each add
+  // their link here when they add the route.
+  //
+  // The keys are the whole normalised role, as TECHNICAL_SUPPORT_STAFF above
+  // learned the hard way. EVENT_COORDINATOR would be the Coordinator's block,
+  // and any other spelling matches nothing: the `|| []` below would give this
+  // role an empty nav and throw nothing. Navigation.test.jsx pins each block
+  // by its exact count so that cannot pass unnoticed.
+  EVENT_COORDINATOR_LEAD: [
+    { to: "/dashboard", label: "Dashboard" },
+  ],
+  SAFETY_OFFICER: [
+    { to: "/dashboard", label: "Dashboard" },
+  ],
 };
 
 export default function Navigation() {

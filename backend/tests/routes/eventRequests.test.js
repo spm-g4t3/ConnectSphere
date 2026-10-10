@@ -3363,6 +3363,38 @@ describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
 });
 
 
+// ---------------------------------------------------------------------------
+// SCRUM-485 AC5: the new roles are refused by this file's coordinator gate
+// ---------------------------------------------------------------------------
+// The other route suites carry a table of refused roles per gate, and the two
+// new roles were added to those. coordinatorOnly here had only single-role
+// refusals, so this is a sample of it rather than every route: the proof that
+// every coordinatorOnly route refuses both roles is requireRole's own test
+// (SCRUM485_AC5_the_coordinator_gate_refuses_%s), because every route here
+// shares the one gate. A read, a write, and /coordinators, the list SCRUM-486's
+// assignment picker will read: whether a Lead may be assigned events is an open
+// question, so as of SCRUM-485 they are refused it like any non-coordinator.
+describe('SCRUM-485 AC5: the coordinator gate on /api/event-requests refuses the new roles', () => {
+  const ROUTES = [
+    ['GET /queue', (app) => request(app).get('/api/event-requests/queue')],
+    ['GET /coordinators', (app) => request(app).get('/api/event-requests/coordinators')],
+    ['POST /:id/start-review', (app) => request(app).post(`/api/event-requests/${REQUEST_ID}/start-review`).send({})],
+  ];
+  const CASES = [ROLE.EVENT_COORDINATOR_LEAD, ROLE.SAFETY_OFFICER]
+    .flatMap((role) => ROUTES.map(([route, call]) => [route, role, call]));
+
+  it.each(CASES)('SCRUM485_AC5_%s_refuses_%s_with_403_and_queries_nothing', async (_route, role, call) => {
+    // Nothing queued: a query that slipped past the gate would fail with "no
+    // result queued" instead of passing by accident.
+    const client = createWritableFakeClient([]);
+
+    const res = await call(appWith({ client, requireAuth: signedInWithRole(role, COORDINATOR_ID) }));
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'This action is restricted to Event Coordinators' });
+    expect(client.calls).toHaveLength(0);
+  });
+});
 describe('SCRUM-491: GET /hold-candidates, the hold form event picker', () => {
   const STAFF_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
   const COORD_ID = '44444444-4444-4444-8444-444444444444';

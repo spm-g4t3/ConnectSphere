@@ -77,6 +77,14 @@ const SCRUM254_FILES = [
   'src/services/bookingRequestStatusDisplay.js',
 ]
 
+// SCRUM-485 (SCRUM-509) owns the two new dashboards outright. Dashboard.jsx
+// gains their map entries but is shared by every role, so, like App.jsx, it
+// is not gated.
+const SCRUM485_FILES = [
+  'src/components/EventCoordinatorLeadDashboard.jsx',
+  'src/components/SafetyOfficerDashboard.jsx',
+]
+
 // SCRUM-491 owns the tentative-hold panel, form and their two services
 // outright. The edits it makes to shared files are gated where those files
 // already are (calendarEntryDisplay.js, calendarRange.js, VenueCalendar.jsx,
@@ -122,6 +130,7 @@ export default defineConfig({
           file,
           file === 'src/components/MyBookingRequests.jsx' ? MY_BOOKING_REQUESTS : FULL,
         ]),
+        ...SCRUM485_FILES.map((file) => [file, FULL]),
         ...SCRUM491_FILES.map((file) => [file, FULL]),
       ]),
     },

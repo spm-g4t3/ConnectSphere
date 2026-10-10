@@ -344,3 +344,27 @@ describe('the middleware is loadable without credentials', () => {
     expect(typeof module.default).toBe('function');
   });
 });
+
+
+describe('SCRUM-485 AC5: requireAuth admits the two new roles', () => {
+  it.each([ROLE.EVENT_COORDINATOR_LEAD, ROLE.SAFETY_OFFICER])(
+    'SCRUM485_AC5_admits_%s_and_puts_the_exact_role_on_the_request',
+    async (role) => {
+      // AC5-07. requireAuth takes whatever profiles.role holds; it keeps no
+      // list of roles, so a role the enum accepts is admitted here with no
+      // change. Not the 403 "Your account has no role assigned", which is only
+      // for an account with no profile row. What the role may then do is
+      // requireRole's question, not this one's.
+      const { verifyToken } = createFakeVerifier({ id: 'new-1', email: 'new@example.com' });
+      const request = req({ authorization: 'Bearer good.token.here' });
+      const res = createFakeResponse();
+      const next = vi.fn();
+
+      await createRequireAuth({ verifyToken, ...withRole(role) })(request, res, next);
+
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(res.statusCode).toBeNull();
+      expect(request.user).toEqual({ id: 'new-1', email: 'new@example.com', role });
+    },
+  );
+});

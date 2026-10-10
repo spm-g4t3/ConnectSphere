@@ -1278,6 +1278,8 @@ describe('SCRUM17_AC2 search window and block reads', () => {
       ['an attendee', ROLE.ATTENDEE],
       ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
       ['an Event Organiser', ROLE.EVENT_ORGANISER],
+      ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+      ['a Safety Officer', ROLE.SAFETY_OFFICER],
     ])('SCRUM17_AC2_%s_gets_403_with_no_query', async (_label, role) => {
       const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(BLOCKS);
 
@@ -1500,6 +1502,8 @@ describe('SCRUM17_AC4 GET /api/venues/:id/blocks/:blockId/history', () => {
     ['an Event Organiser', ROLE.EVENT_ORGANISER],
     ['an attendee', ROLE.ATTENDEE],
     ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+    ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+    ['a Safety Officer', ROLE.SAFETY_OFFICER],
   ])('SCRUM17_AC4_%s_answers_403_with_no_query', async (_label, role) => {
     const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(HISTORY);
 
@@ -1983,6 +1987,8 @@ describe('SCRUM178_AC6 Organisers and Attendees are refused the calendar', () =>
     ['an Event Organiser', ROLE.EVENT_ORGANISER],
     ['an attendee', ROLE.ATTENDEE],
     ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+    ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+    ['a Safety Officer', ROLE.SAFETY_OFFICER],
   ])('SCRUM178_AC6_%s_gets_403_with_no_query', async (_label, role) => {
     const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(`${CALENDAR}${CALENDAR_WINDOW_QS}`);
 
@@ -2039,6 +2045,8 @@ describe('SCRUM178_AC6 the bookings read is refused to Organisers and Attendees,
     ['an Event Organiser', ROLE.EVENT_ORGANISER],
     ['an attendee', ROLE.ATTENDEE],
     ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+    ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+    ['a Safety Officer', ROLE.SAFETY_OFFICER],
   ])('SCRUM178_AC6_%s_gets_403_with_no_query', async (_label, role) => {
     const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(BOOKINGS);
 
@@ -2179,6 +2187,8 @@ describe('SCRUM178_AC6 Organisers and Attendees cannot search retired venues', (
     ['an Event Organiser', ROLE.EVENT_ORGANISER],
     ['an attendee', ROLE.ATTENDEE],
     ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+    ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+    ['a Safety Officer', ROLE.SAFETY_OFFICER],
   ])('SCRUM178_AC6_%s_with_includeRetired_gets_403_with_no_query', async (_label, role) => {
     const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(`${SEARCH}?includeRetired=true`);
 
@@ -2383,6 +2393,8 @@ describe('SCRUM20 GET /api/venues/event-search', () => {
       ['an Event Organiser', ROLE.EVENT_ORGANISER],
       ['an Attendee', ROLE.ATTENDEE],
       ['Technical Support Staff', ROLE.TECHNICAL_SUPPORT_STAFF],
+      ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+      ['a Safety Officer', ROLE.SAFETY_OFFICER],
     ])('SCRUM20_AC1_%s_is_refused_with_403_before_the_service', async (_label, role) => {
       const res = await request(appWith(signedInAs(role)))
         .get(`${URL}?${PERIOD}&expectedAttendance=40`);
@@ -2772,6 +2784,8 @@ describe('SCRUM484_AC2 setup and turnaround are set by Venue Staff only', () => 
     ['an Event Coordinator', ROLE.EVENT_COORDINATOR],
     ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
     ['an attendee', ROLE.ATTENDEE],
+    ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+    ['a Safety Officer', ROLE.SAFETY_OFFICER],
   ])('SCRUM484_AC2_POST_with_setup_from_a_non_venue_staff_role_is_refused (%s)', async (_label, role) => {
     const res = await request(appWith(signedInAs(role, ORGANISER_ID))).post('/api/venues').send(NEW_VENUE);
 

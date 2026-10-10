@@ -276,7 +276,7 @@ describe('SCRUM-252: who may request', () => {
     expect(client.calls).toHaveLength(0);
   });
 
-  it.each([ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.ATTENDEE])(
+  it.each([ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.ATTENDEE, ROLE.EVENT_COORDINATOR_LEAD, ROLE.SAFETY_OFFICER])(
     'SCRUM252_refuses_%s_with_403_and_never_queries',
     async (role) => {
       const client = clientFor();
@@ -599,7 +599,7 @@ describe('SCRUM-253: a coordinator withdraws a pending request', () => {
     expect(client.calls).toHaveLength(0);
   });
 
-  it.each([ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.ATTENDEE])(
+  it.each([ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.ATTENDEE, ROLE.EVENT_COORDINATOR_LEAD, ROLE.SAFETY_OFFICER])(
     'SCRUM253_refuses_%s_with_403_and_never_queries',
     async (role) => {
       const client = createFakeClient([withdrawn()]);
@@ -896,7 +896,7 @@ describe('SCRUM-255: a coordinator sees only requests on their own events', () =
     expect(client.calls).toHaveLength(0);
   });
 
-  it.each([ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.ATTENDEE, null])(
+  it.each([ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.ATTENDEE, ROLE.EVENT_COORDINATOR_LEAD, ROLE.SAFETY_OFFICER, null])(
     'SCRUM255_refuses_%s_with_403_and_never_queries',
     async (role) => {
       const client = createFakeClient([ok([])]);

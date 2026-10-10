@@ -21,7 +21,7 @@ vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
 }));
 
-const OTHER_ROLES = ["event_organiser", "event_coordinator", "venue_staff", "technical_support_staff"];
+const OTHER_ROLES = ["event_organiser", "event_coordinator", "venue_staff", "technical_support_staff", "event_coordinator_lead", "safety_officer"];
 
 function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>;
