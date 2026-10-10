@@ -126,8 +126,9 @@ function translateError(error) {
 }
 
 /**
- * One thing in the way of the period, in camelCase: a venue block, or an
- * occupying booking (approved or flagged_for_review, SCRUM-484).
+ * One thing in the way of the period, in camelCase: a venue block, an
+ * occupying booking (approved or flagged_for_review, SCRUM-484), or another
+ * event's active hold (SCRUM-491).
  *
  * SCRUM-484 (AC7): both kinds carry the occupied period and the venue's
  * setup and turnaround minutes from venue_occupancy_conflicts() (032/033).
@@ -137,9 +138,16 @@ function translateError(error) {
  * minutes say how far this event's own setup and turnaround reached into it.
  * Mapped here, not recomputed, so the formula stays in one place (AC4).
  *
- * @param {object} entry  from create_booking_request's conflicts list
+ * SCRUM-491 (AC4, AC5): a third kind, 'hold', is another event's active
+ * tentative hold (040). It carries the holding event and its occupied period,
+ * padded like a booking. Exported so venueHoldService.js maps the conflicts
+ * place_venue_hold returns the same way; both lists are built by
+ * occupancy_conflict_json() in 040.
+ *
+ * @param {object} entry  from create_booking_request's or place_venue_hold's
+ *                        conflicts list
  */
-function toPeriodConflict(entry) {
+export function toPeriodConflict(entry) {
   const occupied = {
     occupiedStartsAt: entry.occupied_starts_at,
     occupiedEndsAt: entry.occupied_ends_at,
@@ -153,6 +161,17 @@ function toPeriodConflict(entry) {
       startsAt: entry.starts_at,
       endsAt: entry.ends_at,
       reason: entry.reason,
+      ...occupied,
+    };
+  }
+  if (entry.kind === 'hold') {
+    return {
+      kind: 'hold',
+      holdId: entry.hold_id,
+      eventRequestId: entry.event_request_id,
+      eventName: entry.event_name,
+      startsAt: entry.starts_at,
+      endsAt: entry.ends_at,
       ...occupied,
     };
   }
@@ -278,7 +297,8 @@ function checkedSuitability(result) {
  *                           VENUE_RETIRED, BOOKING_REQUEST_EXISTS and
  *                           BOOKING_FLAGGED_FOR_REVIEW (conflicts name the
  *                           existing booking), BOOKING_PERIOD_CONFLICT
- *                           (conflicts are blocks and occupying bookings,
+ *                           (conflicts are blocks, occupying bookings and
+ *                           other events' active holds (SCRUM-491),
  *                           each with its occupied period, shaped by
  *                           toPeriodConflict), SUITABILITY_CONFIRMATION_REQUIRED
  *                           (conflicts are the criteria not met)

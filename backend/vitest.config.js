@@ -20,6 +20,12 @@ const FULL = { lines: 100, branches: 100, functions: 100, statements: 100 };
 
 export default defineConfig({
   test: {
+    // Point supertest's requests at the loopback of the family its server is
+    // bound to ('[::1]' for the default dual-stack listener), not always
+    // 127.0.0.1. Without this, parallel workers occasionally reach each
+    // other's servers (a stray 401/404 or a 5000ms timeout in a random route
+    // test); see the file's header for the evidence.
+    setupFiles: ['tests/setup/loopbackServers.js'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.js'],
@@ -54,6 +60,14 @@ export default defineConfig({
         // SCRUM-15's shared venueService.js and does not gate.
         'src/domain/venueOccupancy.js': FULL,
         'src/services/venueOccupancyService.js': FULL,
+        // SCRUM-491: the hold files are new and owned outright. The edits to
+        // shared files (venueService.js, bookingRequestService.js, the
+        // routes) are reported but do not gate; venueCalendarService.js and
+        // notificationService.js already gate above.
+        'src/domain/venueHoldStatus.js': FULL,
+        'src/validation/venueHoldValidation.js': FULL,
+        'src/services/venueHoldService.js': FULL,
+        'src/jobs/venueHoldExpiryScheduler.js': FULL,
       },
     },
   },

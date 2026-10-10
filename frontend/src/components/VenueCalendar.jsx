@@ -2,7 +2,8 @@
 //
 // SCRUM-180 (part of SCRUM-178): one venue's availability over a day, a
 // week or a month -- approved bookings as "Booked", flagged ones as "Booked –
-// under review", blocks as "Blocked" with their reason -- with Previous, Today
+// under review", blocks as "Blocked" with their reason, and (SCRUM-491)
+// active tentative holds as "Tentatively held" -- with Previous, Today
 // and Next to move through time. It reads GET /venues/:id/calendar
 // (SCRUM-179), which merges bookings and blocks into one sorted array.
 //
@@ -65,13 +66,14 @@ function weekdayShort(day) {
  * a cell small; the range stays in the title either way.
  *
  * A booking's time is its whole occupied period -- setup, event, turnaround
- * (SCRUM-484, AC7) -- because that is how long the venue is unavailable. A
- * block has no setup or turnaround, so it keeps its own range.
+ * (SCRUM-484, AC7) -- because that is how long the venue is unavailable. So
+ * is a tentative hold's (SCRUM-491). A block has no setup or turnaround, so
+ * it keeps its own range.
  */
 function CalendarEntry({ entry, compact }) {
   const { label, detail, tone } = entry.display;
   const when =
-    entry.kind === "booking"
+    entry.kind === "booking" || entry.kind === "hold"
       ? formatOccupiedPeriod(entry)
       : formatRange(entry.startsAt, entry.endsAt);
   return (

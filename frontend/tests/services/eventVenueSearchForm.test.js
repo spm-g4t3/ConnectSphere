@@ -416,6 +416,19 @@ describe("SCRUM20_AC1 validateEventSearchForm", () => {
 });
 
 describe("SCRUM20_AC1 toSearchCriteria", () => {
+  it("SCRUM491_AC5_the_event_id_travels_with_the_criteria", () => {
+    const criteria = toSearchCriteria(validForm(), { eventRequestId: " e1 " });
+    expect(criteria.eventRequestId).toBe("e1");
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["blank", "  "],
+    ["not text", 42],
+  ])("SCRUM491_AC5_a_%s_event_id_is_not_sent", (_, eventRequestId) => {
+    expect(toSearchCriteria(validForm(), { eventRequestId })).not.toHaveProperty("eventRequestId");
+  });
+
   it("SCRUM20_AC1_required_fields_only_send_exactly_three_keys", () => {
     const criteria = toSearchCriteria(validForm());
     expect(Object.keys(criteria).sort()).toEqual(["endsAt", "expectedAttendance", "startsAt"]);

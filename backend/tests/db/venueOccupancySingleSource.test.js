@@ -138,10 +138,12 @@ describe('SCRUM484_AC4 the JavaScript copy of the rule is gone', () => {
 
 describe('SCRUM484_AC4 no copy of the overlap rule in SQL', () => {
   it('SCRUM484_AC4_no_copy_of_the_overlap_rule_remains_in_sql', () => {
-    // The rule itself is there, defined last in 032.
-    for (const name of THE_RULE) {
-      expect(LATEST.get(name)?.file, name).toBe('032_venue_occupancy.sql');
-    }
+    // The rule itself is there. The formula is defined last in 032. Changed
+    // for SCRUM-491: 040 drops the 4-argument venue_occupancy_conflicts and
+    // recreates it with holds as a third kind and a fifth parameter, so the
+    // one function that decides what occupies a venue now lives in 040.
+    expect(LATEST.get('venue_occupied_period')?.file).toBe('032_venue_occupancy.sql');
+    expect(LATEST.get('venue_occupancy_conflicts')?.file).toBe('040_venue_holds.sql');
     // And the raw helper is not.
     expect(LATEST.has('venue_block_booking_conflicts')).toBe(false);
     // The scan replays every migration in the folder, so the latest

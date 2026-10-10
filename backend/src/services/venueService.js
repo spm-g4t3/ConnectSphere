@@ -382,20 +382,31 @@ export async function retireVenue(id, userId = null) {
  * question the same way. An empty candidate list answers an empty Set without
  * a call.
  *
+ * SCRUM-491 (AC5): an active tentative hold occupies its venue too (040).
+ * excludeHoldEventId leaves that one event's holds out, so an event's own
+ * hold does not hide the venue from its own search. The key is sent only
+ * when there is an event to exclude, so every other search sends exactly
+ * the three arguments it always has.
+ *
  * @param {string[]} venueIds  ids just read from venues
  * @param {string} startsAt    ISO 8601 with an offset, validated by the caller
  * @param {string} endsAt      ISO 8601 with an offset, validated by the caller
+ * @param {string|null} [excludeHoldEventId]  SCRUM-491: an event whose holds
+ *                             do not count; the caller has checked it may
  * @returns {Promise<Set<string>>} the ids that are free
  * @throws {Error} a failed call, through translateError
  */
-async function findAvailableVenueIds(venueIds, startsAt, endsAt) {
+async function findAvailableVenueIds(venueIds, startsAt, endsAt, excludeHoldEventId = null) {
   if (venueIds.length === 0) return new Set();
 
-  const { data, error } = await supabase.rpc('available_venue_ids', {
+  const args = {
     p_venue_ids: venueIds,
     p_starts_at: startsAt,
     p_ends_at: endsAt,
-  });
+  };
+  if (excludeHoldEventId) args.p_exclude_hold_event_id = excludeHoldEventId;
+
+  const { data, error } = await supabase.rpc('available_venue_ids', args);
 
   // 22P02 (invalid text representation: a bad uuid or timestamp reached the
   // cast) is the caller's input, not a server fault, so it is a 400 -- what
@@ -621,7 +632,18 @@ async function assertKnownCodes(criteria) {
  * booking request inside their transactions, which can only call SQL, so SQL
  * is the one place it can live once.
  *
+ * SCRUM-491 (AC5): an active tentative hold leaves its venue out of every
+ * other event's search, through the same available_venue_ids() call. When
+ * the search names its event (criteria.eventRequestId) AND the caller is that
+ * event's assigned coordinator, the event's own holds are left out, so a
+ * held venue still appears for the event holding it. Anyone else naming the
+ * event is ignored rather than refused: the search then treats its holds
+ * like any other event's, so naming someone else's event can never reveal a
+ * venue it holds as free.
+ *
  * @param {object} criteria  see validateEventSearchCriteria
+ * @param {object} [options]
+ * @param {string} [options.userId]  SCRUM-491: the caller, from the JWT
  * @returns {Promise<object[]>} matching active venues, ordered by name, each
  *   { id, name, location, maxCapacity, layouts, accessibility, facilities,
  *     hours, setupMinutes, turnaroundMinutes }; [] when nothing matches
@@ -630,7 +652,7 @@ async function assertKnownCodes(criteria) {
  * @throws {Error} a failed availability call (SCRUM-484), through
  *   translateError
  */
-export async function findVenuesForEvent(criteria) {
+export async function findVenuesForEvent(criteria, { userId } = {}) {
   const search = validateEventSearchCriteria(criteria);
   await assertKnownCodes(search);
 
@@ -652,6 +674,7 @@ export async function findVenuesForEvent(criteria) {
     candidates.map((venue) => venue.id),
     search.startsAt,
     search.endsAt,
+    await ownHoldEventId(search.eventRequestId, userId),
   );
 
   return candidates
@@ -668,6 +691,34 @@ export async function findVenuesForEvent(criteria) {
       setupMinutes: venue.setupMinutes,
       turnaroundMinutes: venue.turnaroundMinutes,
     }));
+}
+
+
+/**
+ * SCRUM-491 (AC5): the event whose own holds a search may leave out, or null.
+ *
+ * Only when the caller is the event's assigned coordinator. Read from the
+ * stored event, never trusted from the request: a search naming another
+ * coordinator's event, or an event that does not exist, gets null, and the
+ * search then counts that event's holds like anyone else's. No error either
+ * way, so the answer never says whose event an id is.
+ *
+ * @param {string|undefined} eventRequestId  validated shape, or absent
+ * @param {string|undefined} userId          the caller, from the JWT
+ * @returns {Promise<string|null>}
+ */
+async function ownHoldEventId(eventRequestId, userId) {
+  if (!eventRequestId || !userId) return null;
+
+  const { data, error } = await supabase
+    .from('event_requests')
+    .select('id, assigned_coordinator_id')
+    .eq('id', eventRequestId)
+    .maybeSingle();
+
+  if (error) throw translateError(error);
+
+  return data && data.assigned_coordinator_id === userId ? data.id : null;
 }
 
 

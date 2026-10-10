@@ -35,6 +35,7 @@ import {
   getVenueCalendar,
   toBookingEntry,
   toBlockEntry,
+  toHoldEntry,
 } from '../../src/services/venueCalendarService.js';
 import { ValidationError, NotFoundError, AppError } from '../../src/errors.js';
 import { BOOKING_STATUS } from '../../src/domain/bookingStatus.js';
@@ -852,5 +853,67 @@ describe('SCRUM484 the calendar reads bookings through the shared occupancy func
     for (const key of ['occupiedStartsAt', 'occupiedEndsAt', 'setupMinutes', 'turnaroundMinutes']) {
       expect(entry).not.toHaveProperty(key);
     }
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-491 (AC6, AC7): tentative holds are the third kind of entry. They
+// arrive from the same venue_occupancy_conflicts() call as bookings, which
+// (040) returns only active holds whose expiry is still ahead, so the
+// calendar shows exactly the holds that occupy the venue.
+// ---------------------------------------------------------------------------
+const HOLD_A = 'd0000000-0000-4000-8000-00000000000a';
+
+/** A kind = 'hold' row as venue_occupancy_conflicts() (040) returns it. */
+function holdRow(overrides = {}) {
+  return {
+    kind: 'hold',
+    id: HOLD_A,
+    status: null,
+    event_request_id: REQUEST_B,
+    event_name: 'Career Fair',
+    reason: null,
+    starts_at: '2026-10-06T02:00:00+00:00',
+    ends_at: '2026-10-06T04:00:00+00:00',
+    occupied_starts_at: '2026-10-06T01:30:00+00:00',
+    occupied_ends_at: '2026-10-06T04:45:00+00:00',
+    setup_minutes: 30,
+    turnaround_minutes: 45,
+    ...overrides,
+  };
+}
+
+describe('SCRUM491_AC6 holds on the calendar', () => {
+  it('SCRUM491_AC6_an_active_hold_is_a_hold_entry_naming_the_holding_event', async () => {
+    givenTables({ bookings: ok([bookingRow(), holdRow(), occupancyBlockRow()]), blocks: ok([blockRow()]) });
+
+    const entries = await getVenueCalendar(VENUE_ID, WINDOW);
+
+    expect(entries.map((e) => e.kind)).toEqual(['block', 'booking', 'hold']);
+    expect(entries[2]).toEqual({
+      kind: 'hold',
+      id: HOLD_A,
+      startsAt: '2026-10-06T02:00:00+00:00',
+      endsAt: '2026-10-06T04:00:00+00:00',
+      eventRequestId: REQUEST_B,
+      eventName: 'Career Fair',
+      occupiedStartsAt: '2026-10-06T01:30:00+00:00',
+      occupiedEndsAt: '2026-10-06T04:45:00+00:00',
+      setupMinutes: 30,
+      turnaroundMinutes: 45,
+    });
+  });
+
+  it('SCRUM491_AC7_the_calendar_asks_with_four_arguments_so_no_hold_is_excluded', async () => {
+    givenTables({ bookings: ok([holdRow()]) });
+
+    await getVenueCalendar(VENUE_ID, WINDOW);
+
+    expect(Object.keys(occupancyArgs()).sort()).toEqual(['p_ends_at', 'p_pad_requested', 'p_starts_at', 'p_venue_id']);
+  });
+
+  it('SCRUM491_AC6_toHoldEntry_reads_a_missing_event_name_as_null', () => {
+    expect(toHoldEntry(holdRow({ event_name: undefined })).eventName).toBeNull();
   });
 });

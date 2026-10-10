@@ -40,7 +40,8 @@ const BLOCK_ID = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
 const FROZEN_NOW = new Date('2026-09-28T06:30:00.000Z');
 const FIRST_READ = '2026-09-27T01:00:00+00:00';
 
-const COLUMNS = 'id, recipient_id, type, booking_id, block_id, payload, read_at, created_at';
+// SCRUM-491 added venue_hold_id, the hold a 'venue_hold_expired' notice is about.
+const COLUMNS = 'id, recipient_id, type, booking_id, block_id, venue_hold_id, payload, read_at, created_at';
 
 const PAYLOAD = {
   venueName: 'Seminar Room 2-1',
@@ -68,6 +69,7 @@ function notificationRow(overrides = {}) {
     type: 'booking_flagged',
     booking_id: BOOKING_ID,
     block_id: BLOCK_ID,
+    venue_hold_id: null,
     payload: PAYLOAD,
     read_at: null,
     created_at: '2026-09-26T03:00:00+00:00',
@@ -80,6 +82,7 @@ const CAMEL_NOTIFICATION = {
   type: 'booking_flagged',
   bookingId: BOOKING_ID,
   blockId: BLOCK_ID,
+  venueHoldId: null,
   payload: PAYLOAD,
   readAt: null,
   createdAt: '2026-09-26T03:00:00+00:00',
@@ -139,8 +142,29 @@ describe('toNotification', () => {
     const mapped = toNotification(notificationRow());
     expect(mapped).toEqual(CAMEL_NOTIFICATION);
     expect(Object.keys(mapped).sort()).toEqual(
-      ['blockId', 'bookingId', 'createdAt', 'id', 'payload', 'readAt', 'type'],
+      ['blockId', 'bookingId', 'createdAt', 'id', 'payload', 'readAt', 'type', 'venueHoldId'],
     );
+  });
+
+  it('SCRUM491_AC8_maps_an_expired_hold_notice_with_its_hold_id', () => {
+    const HOLD_ID = '7d3c1b2a-1111-4222-8333-444455556666';
+    const payload = {
+      eventRequestId: 'e1',
+      eventName: 'Tech Talk',
+      venueId: 'v1',
+      venueName: 'Seminar Room 2-1',
+      expiresAt: '2026-10-01T02:00:00+00:00',
+    };
+    const mapped = toNotification(
+      notificationRow({ type: 'venue_hold_expired', booking_id: null, block_id: null, venue_hold_id: HOLD_ID, payload }),
+    );
+    expect(mapped).toMatchObject({
+      type: 'venue_hold_expired',
+      bookingId: null,
+      blockId: null,
+      venueHoldId: HOLD_ID,
+      payload,
+    });
   });
 
   it('SCRUM17_AC3_leaves_out_recipient_id', () => {

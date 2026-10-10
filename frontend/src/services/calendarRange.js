@@ -154,7 +154,8 @@ export function daysIn({ start, end }) {
  * shows on every day it covers, and an entry ending exactly at midnight does
  * not leak onto the following day.
  *
- * A booking is placed by its occupied period -- setup through turnaround --
+ * A booking -- and a tentative hold (SCRUM-491), which occupies the venue the
+ * same way -- is placed by its occupied period, setup through turnaround,
  * when it carries one that parses (SCRUM-484, AC7). The calendar endpoint
  * returns a booking whose setup or turnaround alone reaches into the window,
  * and placing it by its event times would drop it from the very day it makes
@@ -177,7 +178,7 @@ export function entriesOnDay(entries, day) {
 
 /** The period entriesOnDay places an entry by; see its comment. */
 function placementOf(entry) {
-  if (entry.kind === "booking") {
+  if (entry.kind === "booking" || entry.kind === "hold") {
     const start = new Date(entry.occupiedStartsAt ?? NaN);
     const end = new Date(entry.occupiedEndsAt ?? NaN);
     if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
