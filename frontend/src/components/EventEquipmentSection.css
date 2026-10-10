@@ -17,3 +17,8 @@
 .event-equipment__confirm p { margin: 6px 0; }
 .event-equipment__notice { color: var(--ink); margin: 8px 0; }
 .event-equipment__why { color: var(--muted); margin: 8px 0 0; }
+/* SCRUM-297: the technical support outcome. A label is always written as well as coloured. */
+.event-equipment__alert { background: #fdecea; border-left: 6px solid #c0362c; border-radius: 8px; margin: 10px 0; padding: 10px 14px; }
+.event-equipment__arranged { background: #eef7f1; border-left: 6px solid #2e7d4f; border-radius: 8px; margin: 10px 0; padding: 10px 14px; }
+.event-equipment__outcome { background: #fdecea; border-radius: 8px; margin: 6px 0; padding: 8px 12px; }
+.event-equipment__outcome p { margin: 4px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }

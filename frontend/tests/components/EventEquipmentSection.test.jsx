@@ -70,7 +70,7 @@ function state({ status = "pending_review", lines = [line()] } = {}) {
     request: {
       id: "55555555-5555-4555-8555-555555555555",
       status,
-      statusLabel: { pending_review: "Pending review", arranged: "Arranged", cancelled: "Cancelled" }[status] ?? status,
+      statusLabel: { pending_review: "Pending review", arranged: "Arranged", cancelled: "Cancelled", cannot_be_fully_arranged: "Cannot be fully arranged" }[status] ?? status,
       createdAt: "2026-10-08T09:00:00+00:00",
       updatedAt: "2026-10-08T09:00:00+00:00",
       lines,
@@ -645,5 +645,46 @@ describe("AC6 and AC8: removing a line", () => {
     expect(screen.getByRole("button", { name: "Keep it" })).toBeDisabled();
     finish(state({ status: "cancelled", lines: [] }));
     await screen.findByText("Projector removed.");
+  });
+});
+
+
+describe("SCRUM-297: what technical support decided", () => {
+  it("SCRUM290_AC10_shows_reserved_against_requested_on_each_line", async () => {
+    getEventEquipment.mockResolvedValue(state({ lines: [line({ quantity: 3, reserved: 1 })] }));
+
+    renderSection();
+
+    expect(await screen.findByText("Reserved: 1 of 3")).toBeInTheDocument();
+  });
+
+  it("SCRUM290_AC10_shows_the_reason_a_line_cannot_be_provided_and_the_outcome_above_the_lines", async () => {
+    getEventEquipment.mockResolvedValue(state({
+      status: "cannot_be_fully_arranged",
+      lines: [line({ quantity: 3, reserved: 1, outcome: "cannot_be_provided", outcomeNote: "Only one in stock that week" })],
+    }));
+
+    renderSection();
+
+    expect(await screen.findByText("Cannot be provided")).toBeInTheDocument();
+    expect(screen.getByText("Only one in stock that week")).toBeInTheDocument();
+    expect(screen.getByText(/could not arrange all of this equipment/)).toBeInTheDocument();
+  });
+
+  it("SCRUM290_AC10_says_so_when_everything_is_arranged", async () => {
+    getEventEquipment.mockResolvedValue(state({ status: "arranged", lines: [line({ quantity: 2, reserved: 2 })] }));
+
+    renderSection();
+
+    expect(await screen.findByText("All of this equipment has been arranged.")).toBeInTheDocument();
+    expect(screen.queryByText("Cannot be provided")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM290_AC10_a_line_with_no_mark_shows_no_outcome", async () => {
+    renderSection();
+
+    await screen.findByText("Projector");
+    expect(screen.queryByText("Cannot be provided")).not.toBeInTheDocument();
+    expect(screen.queryByText(/could not arrange/)).not.toBeInTheDocument();
   });
 });
