@@ -629,13 +629,25 @@ describe('AC4: an incomplete or missing request is not submitted', () => {
 //   - the history row's contents: it is written inside the function and never
 //     reaches the client, so there is nothing for the fake to observe.
 //   - reassignment: a separate subtask.
+//
+// SCRUM-486 (SCRUM-522). Everything above about choosing a coordinator was
+// SCRUM-327's requirement, and right until the customer changed it on
+// 11 October: 041's submit_event_request chooses nobody, writes no assignment
+// row, and leaves the request for the Event Coordinator Lead. The service call
+// itself did not change -- one read, one rpc, the same three arguments -- so
+// the tests below keep their assertions about it; what moved is the row the
+// function returns, and the names and fixtures that said "assigned".
 
-/** The row submit_event_request returns: submitted, timed and assigned. */
+/**
+ * The row submit_event_request returns: submitted and timed, with no
+ * coordinator. Until SCRUM-486 it was "submitted, timed and assigned", with
+ * assigned_coordinator_id set, because 016 assigned one. 041 does not.
+ */
 function submittedRow() {
   return storedRow({
     status: STATUS.SUBMITTED,
     submitted_at: NOW.toISOString(),
-    assigned_coordinator_id: COORDINATOR_ID,
+    assigned_coordinator_id: null,
   });
 }
 
@@ -643,14 +655,19 @@ function submittedRow() {
 const submittingWith = (rpcResult, row = storedRow()) =>
   createFakeClient([ok(row), rpcResult]);
 
-describe('SCRUM-327 AC1: a coordinator is assigned as part of submission', () => {
-  it('SCRUM330_AC1_never_assigns_a_coordinator_to_an_incomplete_draft', async () => {
+describe('SCRUM-327 AC1, as amended by SCRUM-486: submission is one call, and assigns nobody', () => {
+  it('SCRUM330_AC1_never_submits_an_incomplete_draft', async () => {
+    // Was SCRUM330_AC1_never_assigns_a_coordinator_to_an_incomplete_draft.
+    // Right when written, and trivially still true, since nothing assigns a
+    // coordinator on submission any more; renamed to what it proves, that an
+    // incomplete draft is never submitted at all (the function is not called).
+    //
     // Validation stays in the service, before the function, for two reasons.
     // First, validateSubmitEventRequest reports every gap at once, which a
     // Postgres exception cannot. Second, and more importantly here: 016's
     // function has no completeness check of its own (its header says so), so
     // this validation is the only thing that stops an incomplete draft being
-    // submitted and given a coordinator. The assertion that matters is
+    // submitted (and, before SCRUM-486, given a coordinator). The assertion that matters is
     // therefore that the function is never called, not merely that an error
     // came back.
     const client = createFakeClient([
@@ -664,12 +681,17 @@ describe('SCRUM-327 AC1: a coordinator is assigned as part of submission', () =>
     expect(rpcCallsOf(client)).toHaveLength(0);
   });
 
-  it('SCRUM330_AC1_assigns_a_coordinator_on_submission', async () => {
+  it('SCRUM330_AC1_submits_through_one_call_that_names_no_coordinator', async () => {
+    // Was SCRUM330_AC1_assigns_a_coordinator_on_submission. Its assertions
+    // all still hold and are unchanged; its name and the reason it gave --
+    // "the service does not choose one, the function does (015)" -- became
+    // false when 041 stopped the function choosing. The reason it still holds
+    // now: nobody is chosen at submission; the Lead chooses later
+    // (assign_event_request). SCRUM-486 AC1-03.
+    //
     // One read, then exactly one call to the function, and nothing else. The
     // arguments are compared with toEqual, so an extra argument fails the test
-    // as surely as a missing one. In particular, nothing names a coordinator:
-    // the service does not choose one, the function does, and the rule lives
-    // in one place (015).
+    // as surely as a missing one. In particular, nothing names a coordinator.
     //
     // p_submitted_at is the injected `now` as an ISO string. The clock stays
     // in the service, as 005 and 016 both record, so this test can state the
@@ -690,12 +712,17 @@ describe('SCRUM-327 AC1: a coordinator is assigned as part of submission', () =>
     });
   });
 
-  it('SCRUM330_AC1_returns_the_assigned_coordinator_in_camelCase', async () => {
+  it('SCRUM330_AC1_returns_the_submitted_request_in_camelCase_with_no_coordinator', async () => {
+    // Was SCRUM330_AC1_returns_the_assigned_coordinator_in_camelCase, with a
+    // fixture whose coordinator it expected back. Right when written: 016
+    // returned every submitted row with one. Since 041 the row comes back with
+    // none (SCRUM-486 AC1-03), so the fixture says so and the expectation is
+    // null -- the key present, not missing, which is what lets the Organiser's
+    // screen say "waiting for the Lead" (SCRUM-520) rather than nothing.
+    //
     // The row the function returns goes through toEventRequest like every
     // other row this module returns, so the caller sees camelCase and never
-    // assigned_coordinator_id. This is the start of "the Organiser sees their
-    // coordinator": the id has to survive the mapping before anything can
-    // turn it into a name.
+    // assigned_coordinator_id.
     //
     // This needs two changes in the implementation, not just the rpc call:
     // toEventRequest has to map the new column, and COLUMNS has to select it,
@@ -707,7 +734,8 @@ describe('SCRUM-327 AC1: a coordinator is assigned as part of submission', () =>
 
     const record = await submitEventRequest(REQUEST_ID, { client, now: NOW });
 
-    expect(record.assignedCoordinatorId).toBe(COORDINATOR_ID);
+    expect(record).toHaveProperty('assignedCoordinatorId', null);
+    expect(record).toHaveProperty('reviewingCoordinatorId', null);
     expect(record.status).toBe(STATUS.SUBMITTED);
     expect(instantOf(record.submittedAt)).toBe(NOW.getTime());
     expect(Object.keys(record).some((key) => key.includes('_'))).toBe(false);

@@ -30,6 +30,9 @@ import {
   requestEventClarification,
   listEventRequestsForReview,
   getEventClarificationHistory,
+  listAssignmentHistory,
+  startEventReview,
+  decideEventRequest,
 } from '../../src/services/eventRequestService.js';
 import {
   ValidationError,
@@ -38,6 +41,7 @@ import {
   ForbiddenError,
 } from '../../src/errors.js';
 import { STATUS, COORDINATOR_QUEUE_STATUSES } from '../../src/domain/eventRequestStatus.js';
+import { listBookingRequestsForCoordinator } from '../../src/services/bookingRequestService.js';
 
 
 // ---------------------------------------------------------------------------
@@ -525,6 +529,10 @@ describe('SCRUM-486 AC2-06: the shared review queue lists only requests someone 
     held('held-pending-clarification', STATUS.PENDING_CLARIFICATION),
     held('held-approved', STATUS.APPROVED),
     unassignedRow({ id: 'draft', status: STATUS.DRAFT }),
+    // AC2-03's other draft: one that keeps a coordinator from before it was
+    // reopened (022's reopen leaves the coordinator on the row). Neither queue
+    // may list it: it is the Organiser's again.
+    unassignedRow({ id: 'draft-stale-coordinator', status: STATUS.DRAFT, assigned_coordinator_id: COORDINATOR_A }),
   ];
 
   it('SCRUM486_AC2_the_review_queue_leaves_out_a_submitted_request_nobody_holds', async () => {
@@ -558,6 +566,27 @@ describe('SCRUM-486 AC2-06: the shared review queue lists only requests someone 
     });
 
     expect(leadsQueue.map((request) => request.id)).toEqual(['unassigned-submitted']);
+  });
+
+  it('SCRUM486_AC2_neither_queue_lists_a_draft_even_one_with_a_stale_coordinator', async () => {
+    // AC2-03. The Lead's queue reads status = submitted and the coordinators'
+    // the three review statuses, so a draft is out of both, whatever its
+    // coordinator column says. Run against the same table as above, through
+    // the real queries.
+    const shared = await listEventRequestsForReview({ client: createTableFakeClient(TABLE) });
+    const client = createTableFakeClient(TABLE);
+    const leads = await listUnassignedEventRequests({
+      client: {
+        from: (table) => (table === 'profiles'
+          ? { select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }
+          : client.from(table)),
+      },
+    });
+
+    for (const id of ['draft', 'draft-stale-coordinator']) {
+      expect(shared.map((request) => request.id)).not.toContain(id);
+      expect(leads.map((request) => request.id)).not.toContain(id);
+    }
   });
 });
 
@@ -644,5 +673,153 @@ describe("SCRUM-486 AC6: the Lead reads an event's clarification history", () =>
     const err = await errorFrom(read(role, status));
 
     expect(err).toBeInstanceOf(NotFoundError);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-522: AC9-03, the history label across the old rows and the new
+// ---------------------------------------------------------------------------
+describe('SCRUM-486 AC9: an old automatic row and a Lead\'s row, in one history', () => {
+  it('SCRUM486_AC9_an_old_row_reads_automatic_and_a_leads_row_names_the_lead', async () => {
+    // AC9-03. Events assigned before SCRUM-486 have a history row with
+    // assigned_by null, written by 016 on submission; the Lead's rows name the
+    // Lead. The live data now holds both, often on the same event: assigned
+    // automatically in September, handed on by a Lead in October. `automatic`
+    // is derived from assigned_by alone, so the old row must still read true
+    // and the Lead's false, with the Lead's name.
+    const rows = [
+      {
+        id: 'h1', previous_coordinator_id: null, new_coordinator_id: COORDINATOR_A,
+        assigned_by: null, handover_note: null, created_at: '2026-09-20T03:00:00+00:00',
+      },
+      {
+        id: 'h2', previous_coordinator_id: COORDINATOR_A, new_coordinator_id: COORDINATOR_B,
+        assigned_by: LEAD_ID, handover_note: 'Priya is on leave.', created_at: '2026-10-11T03:00:00+00:00',
+      },
+    ];
+    const client = createFakeClient([
+      ok(rows),
+      ok([profileRow(COORDINATOR_A, 'Priya Nair'), profileRow(COORDINATOR_B, 'Omar Okafor'), profileRow(LEAD_ID, 'Lena Lead')]),
+    ]);
+
+    const history = await listAssignmentHistory(REQUEST_ID, { includeNotes: true }, { client });
+
+    expect(history[0]).toMatchObject({ automatic: true, assignedById: null, assignedByName: null, newCoordinatorName: 'Priya Nair' });
+    expect(history[1]).toMatchObject({
+      automatic: false,
+      assignedById: LEAD_ID,
+      assignedByName: 'Lena Lead',
+      previousCoordinatorName: 'Priya Nair',
+      newCoordinatorName: 'Omar Okafor',
+      handoverNote: 'Priya is on leave.',
+    });
+  });
+
+  it('SCRUM486_AC9_a_lead_with_no_name_is_still_not_automatic', async () => {
+    // The reason `automatic` exists (SCRUM-334): a null name is also what a
+    // person with no full_name has, and the two must not read the same.
+    const client = createFakeClient([
+      ok([{
+        id: 'h1', previous_coordinator_id: null, new_coordinator_id: COORDINATOR_A,
+        assigned_by: LEAD_ID, handover_note: null, created_at: '2026-10-11T03:00:00+00:00',
+      }]),
+      ok([profileRow(COORDINATOR_A, 'Priya Nair'), profileRow(LEAD_ID, null)]),
+    ]);
+
+    const [entry] = await listAssignmentHistory(REQUEST_ID, {}, { client });
+
+    expect(entry).toMatchObject({ automatic: false, assignedById: LEAD_ID, assignedByName: null });
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-522: AC7-06, a flagged booking follows its event to the new coordinator
+// ---------------------------------------------------------------------------
+describe('SCRUM-486 AC7: a booking flagged before the Lead moved its event is the new coordinator\'s', () => {
+  // Two flagged bookings, both requested by A. The Lead then moved the first
+  // event to B. Nothing in a booking names who holds its event; the list reads
+  // the event's current coordinator, so the booking follows the event. This
+  // fake answers rows the way the embedded read would after the move, and
+  // records the filter, so both the query and the service's own narrowing are
+  // seen.
+  const booking = (id, holder) => ({
+    id,
+    event_request_id: `event-${id}`,
+    venue_id: 'v1',
+    starts_at: '2026-11-01T01:00:00+00:00',
+    ends_at: '2026-11-01T09:00:00+00:00',
+    status: 'pending',
+    room_layout_code: null,
+    setup_notes: null,
+    suitability_overridden: false,
+    created_at: '2026-10-06T10:00:00+00:00',
+    flagged_at: '2026-10-07T10:00:00+00:00',
+    review_reason: null,
+    venues: { name: 'Harbour Room', location: 'Block A' },
+    event_requests: { event_name: `Event ${id}`, status: 'approved', assigned_coordinator_id: holder },
+  });
+  const ROWS = [booking('moved', COORDINATOR_B), booking('kept', COORDINATOR_A)];
+
+  function bookingsClient() {
+    const filters = [];
+    const chain = {
+      select: () => chain,
+      eq: (column, value) => { filters.push([column, value]); return chain; },
+      order: () => chain,
+      then: (resolve, reject) => Promise.resolve({
+        data: ROWS.filter((row) => filters.every(([column, value]) =>
+          column === 'event_requests.assigned_coordinator_id' && row.event_requests.assigned_coordinator_id === value)),
+        error: null,
+      }).then(resolve, reject),
+    };
+    return { filters, from: () => chain };
+  }
+
+  it('SCRUM486_AC7_the_new_coordinator_lists_the_booking_and_the_previous_one_does_not', async () => {
+    const asB = bookingsClient();
+    const asA = bookingsClient();
+
+    const forB = await listBookingRequestsForCoordinator(COORDINATOR_B, { client: asB });
+    const forA = await listBookingRequestsForCoordinator(COORDINATOR_A, { client: asA });
+
+    expect(forB.map((item) => item.id)).toEqual(['moved']);
+    expect(forA.map((item) => item.id)).toEqual(['kept']);
+    // The filter is the event's current holder, never who made the request.
+    expect(asB.filters).toEqual([['event_requests.assigned_coordinator_id', COORDINATOR_B]]);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-522: AC8-03, 041's "waiting for the Lead" refusal reaches the caller
+// ---------------------------------------------------------------------------
+describe('SCRUM-486 AC8: the review of a request waiting for the Lead is refused in its own words', () => {
+  // 041 refuses start_event_review and decide_event_request on a submitted
+  // request with no coordinator, with 55000 and a message naming the Lead,
+  // before the caller check. The service must pass that message through as a
+  // 409, not dress it as "not yours" (403). The texts are 041's exactly.
+  it.each([
+    [
+      'starting the review',
+      (client) => startEventReview(REQUEST_ID, COORDINATOR_A, { client }),
+      `event request ${REQUEST_ID} is waiting for the Event Coordinator Lead to assign it a coordinator, so its review cannot start yet`,
+    ],
+    [
+      'deciding it',
+      (client) => decideEventRequest(REQUEST_ID, { decision: 'approved' }, COORDINATOR_A, { client, now: new Date('2026-10-12T00:00:00Z') }),
+      `event request ${REQUEST_ID} is waiting for the Event Coordinator Lead to assign it a coordinator, so it cannot be decided yet`,
+    ],
+  ])('SCRUM486_AC8_%s_is_a_409_with_the_functions_message', async (_label, call, message) => {
+    const client = createFakeClient([dbError('55000', message)]);
+
+    const err = await errorFrom(call(client));
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err).not.toBeInstanceOf(ForbiddenError);
+    expect(err.status).toBe(409);
+    expect(err.message).toBe(message);
+    expect(trail(client)).toHaveLength(1);
   });
 });

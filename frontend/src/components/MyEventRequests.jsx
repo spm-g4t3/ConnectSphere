@@ -56,7 +56,7 @@ function formatEventDate(value) {
  * backend change and a follow-up. Once opened it stays loaded; closing and
  * reopening does not read it again.
  */
-function CoordinatorDetails({ eventRequestId }) {
+function CoordinatorDetails({ eventRequestId, currentCoordinatorId }) {
   const [opened, setOpened] = useState(false);
 
   return (
@@ -67,7 +67,12 @@ function CoordinatorDetails({ eventRequestId }) {
       }}
     >
       <summary>Your coordinator and assignment history</summary>
-      {opened && <AssignmentHistory eventRequestId={eventRequestId} view="organiser" />}
+      {/* SCRUM-486 TR-03: who holds it now comes from the request, so a
+          resubmitted request waiting for the Lead is not shown as still
+          held by its old coordinator. */}
+      {opened && (
+        <AssignmentHistory eventRequestId={eventRequestId} view="organiser" currentCoordinatorId={currentCoordinatorId} />
+      )}
     </details>
   );
 }
@@ -342,7 +347,9 @@ export default function MyEventRequests() {
                   no history to show. (Since 041 a submitted request may not
                   have one yet either; its history then says so, and the line
                   above has already told the Organiser why.) */}
-              {req.status !== "draft" && <CoordinatorDetails eventRequestId={req.id} />}
+              {req.status !== "draft" && (
+                <CoordinatorDetails eventRequestId={req.id} currentCoordinatorId={req.assignedCoordinatorId ?? null} />
+              )}
               {req.status !== "draft" && (
                 <ClarificationHistoryDetails
                   eventRequestId={req.id}

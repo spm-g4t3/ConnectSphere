@@ -2,9 +2,10 @@
 
 **Story:** Assign and Reassign Event Coordinators from an Unassigned Queue — Event Coordinator Lead
 **Subtask:** SCRUM-514 (this document)
-**Schema:** a new migration, `041_…` (not yet written). 040 is taken (`040_venue_holds.sql`)
+**Schema:** `041_lead_assignment.sql` (SCRUM-515 to SCRUM-518). 040 is `040_venue_holds.sql`
 **Written:** 11 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; SCRUM-522 fills in the test names.
 **Corrected:** 11 October 2026, after the audit of SCRUM-491 (venue holds, migration 040): which suites need 041, 040's notification types and their failure mode, and the error codes 041 uses.
+**Marked:** 12 October 2026, SCRUM-522: every case's **Implemented by** names the tests that prove it, or says why none does yet. The cases themselves are unchanged.
 
 This document is the written layer between SCRUM-486's acceptance criteria and the
 Vitest files that will implement them. Deliverable #3 requires test cases
@@ -20,9 +21,12 @@ carries more argument than usual. Section *Design decisions* is that argument.
 ## How case IDs relate to test names
 
 As in `docs/test-cases/SCRUM-485.md`: each case has a short stable ID (`AC3-02`)
-and an **Implemented by** column. Here every one reads **not yet written**. When
-SCRUM-522 writes the tests, that column names every test that proves the case,
-read from the test files, and the tests are named `SCRUM486_ACn_…`.
+and an **Implemented by** column, which names every test that proves the case,
+read from the test files (SCRUM-522). New tests are named `SCRUM486_ACn_…`. An
+older test that this story moved keeps its own story's prefix
+(`SCRUM330_…`, `SCRUM45_…`, `SCRUM10_…`, `SCRUM331_…`), so its history can be
+followed; each records in a comment why it changed. A case not yet proved says so
+in bold, and is listed under the tally.
 
 The audit before this story found eight places where removing automatic
 assignment would break if nobody tested it. They are not acceptance criteria;
@@ -250,12 +254,12 @@ as an insert from a select, so zero Leads writes zero rows and fails nothing
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC1-01 | A complete draft; A and B exist | `submit_event_request` | `submitted`, `submitted_at` set, `assigned_coordinator_id` null; one status-history row `draft → submitted`; **no** assignment-history row | not yet written (pglite) |
-| AC1-02 | A complete draft | The same | `pick_event_coordinator` is not called (no P0001 path; a database with no Event Coordinator at all still submits) | not yet written (pglite, mig) |
-| AC1-03 | — | `submitEventRequest` | One rpc with the same three arguments as today; returns `assignedCoordinatorId: null`; no `ServiceUnavailableError` path | not yet written (svc) |
-| AC1-04 | ORG's complete draft | `POST /api/event-requests/:id/submit` | 200, `assignedCoordinatorId` null | not yet written (route) |
-| AC1-05 | ORG; one UNASSIGNED request | Open their requests list | The row itself says it is waiting for a coordinator to be assigned, without opening anything | not yet written (screen) |
-| AC1-06 | ORG; the same request, now HELD BY A | Open their requests list | The row names A instead; no "waiting" line | not yet written (screen) |
+| AC1-01 | A complete draft; A and B exist | `submit_event_request` | `submitted`, `submitted_at` set, `assigned_coordinator_id` null; one status-history row `draft → submitted`; **no** assignment-history row | Proved (pglite): `SCRUM486_AC1_submits_with_no_coordinator_even_when_coordinators_exist` |
+| AC1-02 | A complete draft | The same | `pick_event_coordinator` is not called (no P0001 path; a database with no Event Coordinator at all still submits) | Proved (pglite, mig): `SCRUM486_AC1_the_submission_function_in_force_does_not_call_pick_event_coordinator`, `SCRUM486_AC11_submits_when_no_event_coordinator_and_no_lead_exists` |
+| AC1-03 | — | `submitEventRequest` | One rpc with the same three arguments as today; returns `assignedCoordinatorId: null`; no `ServiceUnavailableError` path | Proved (svc): `SCRUM330_AC1_submits_through_one_call_that_names_no_coordinator`, `SCRUM330_AC1_returns_the_submitted_request_in_camelCase_with_no_coordinator` (both moved in SCRUM-522), `SCRUM486_AC11_submission_no_longer_reports_a_missing_coordinator_as_a_503` |
+| AC1-04 | ORG's complete draft | `POST /api/event-requests/:id/submit` | 200, `assignedCoordinatorId` null | Proved (route): `SCRUM10_AC5_returns_200_and_the_submitted_request`, re-expected in SCRUM-522 to a null coordinator |
+| AC1-05 | ORG; one UNASSIGNED request | Open their requests list | The row itself says it is waiting for a coordinator to be assigned, without opening anything | Proved (screen): `SCRUM486_AC1_a_submitted_request_with_no_coordinator_says_it_is_waiting_for_the_lead`, `SCRUM486_AC1_the_two_are_visibly_different_on_rows_that_share_a_status` |
+| AC1-06 | ORG; the same request, now HELD BY A | Open their requests list | The row names A instead; no "waiting" line | **Partly unmet.** The "waiting" line goes and the row says a coordinator is assigned (`SCRUM486_AC1_a_submitted_request_with_a_coordinator_says_it_is_waiting_for_review`), but it does not name A: the Organiser's list carries no coordinator name (SCRUM-334 left that as a backend follow-up). SCRUM-523 to report |
 
 ---
 
@@ -263,14 +267,14 @@ as an insert from a select, so zero Leads writes zero rows and fails nothing
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC2-01 | — | The queue read in the service | Selects `status = 'submitted'` and `assigned_coordinator_id is null`, ordered by `submitted_at` ascending, then `id` | not yet written (svc) |
-| AC2-02 | — | The queue read | Each row carries the event name, the organiser's name, proposed start and end, expected attendance, and `submittedAt` (from which "how long it has waited" is computed) | not yet written (svc) |
-| AC2-03 | A draft (with or without a stale coordinator), an UNASSIGNED request, a request HELD BY A | Read the queue | Only the UNASSIGNED request | not yet written (pglite) |
-| AC2-04 | LEAD | `GET` the queue route | 200 | not yet written (route) |
-| AC2-05 | A, ORG, venue staff, technical support, SAFETY | `GET` the queue route | 403 from the role gate, nothing queried; no token is 401 | not yet written (route) |
-| AC2-06 | — | The coordinators' shared review queue (`listEventRequestsForReview`) | Adds `assigned_coordinator_id is not null`; every other status it listed is still listed | not yet written (svc, pglite) |
-| AC2-07 | LEAD; two UNASSIGNED requests, submitted three days and one hour before an injected `now` | Open the Lead's dashboard | Both rows, oldest first, with name, organiser, period, attendance and "waiting 3 days" / "waiting 1 hour" | not yet written (screen) |
-| AC2-08 | LEAD; no UNASSIGNED request | Open the dashboard | Says the queue is empty; no invented rows | not yet written (screen) |
+| AC2-01 | — | The queue read in the service | Selects `status = 'submitted'` and `assigned_coordinator_id is null`, ordered by `submitted_at` ascending, then `id` | Proved (svc): `SCRUM486_AC2_reads_submitted_requests_with_no_coordinator_oldest_first` |
+| AC2-02 | — | The queue read | Each row carries the event name, the organiser's name, proposed start and end, expected attendance, and `submittedAt` (from which "how long it has waited" is computed) | Proved (svc): `SCRUM486_AC2_each_row_carries_name_organiser_period_attendance_and_when_it_was_submitted` |
+| AC2-03 | A draft (with or without a stale coordinator), an UNASSIGNED request, a request HELD BY A | Read the queue | Only the UNASSIGNED request | Proved (svc, not pglite): `SCRUM486_AC2_neither_queue_lists_a_draft_even_one_with_a_stale_coordinator`, `SCRUM486_AC2_the_unassigned_request_is_the_leads_and_appears_in_the_leads_queue`, through a fake that applies the query's own filters to a mixed table. The read is a PostgREST query, which PGlite cannot run. Live: `check-coordinator-assignment.js` section 1 |
+| AC2-04 | LEAD | `GET` the queue route | 200 | Proved (route): `SCRUM486_AC2_a_lead_reads_the_unassigned_queue` |
+| AC2-05 | A, ORG, venue staff, technical support, SAFETY | `GET` the queue route | 403 from the role gate, nothing queried; no token is 401 | Proved (route): `SCRUM486_AC2_%s_refuses_%s_with_403_and_queries_nothing`, `SCRUM486_AC2_%s_answers_401_without_a_token` |
+| AC2-06 | — | The coordinators' shared review queue (`listEventRequestsForReview`) | Adds `assigned_coordinator_id is not null`; every other status it listed is still listed | Proved (svc): `SCRUM486_AC2_the_review_queue_leaves_out_a_submitted_request_nobody_holds`, `SCRUM486_AC2_the_review_queue_still_lists_a_held_request_in_every_status_it_listed_before`, `SCRUM45_AC1_filters_on_the_three_review_statuses_and_on_a_coordinator_holding_the_request`. The pglite half as AC2-03 |
+| AC2-07 | LEAD; two UNASSIGNED requests, submitted three days and one hour before an injected `now` | Open the Lead's dashboard | Both rows, oldest first, with name, organiser, period, attendance and "waiting 3 days" / "waiting 1 hour" | Proved (screen): `SCRUM486_AC2_lists_each_request_oldest_first_with_what_the_lead_needs_to_choose`; the wording `SCRUM486_AC2_a_request_submitted_%s_ago_reads_%j` |
+| AC2-08 | LEAD; no UNASSIGNED request | Open the dashboard | Says the queue is empty; no invented rows | Proved (screen): `SCRUM486_AC2_an_empty_queue_says_nothing_is_waiting_and_invents_no_rows` |
 
 ---
 
@@ -278,13 +282,13 @@ as an insert from a select, so zero Leads writes zero rows and fails nothing
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC3-01 | UNASSIGNED | LEAD assigns it to A, note "Over to you" | `assigned_coordinator_id` A; one assignment-history row: previous null, new A, `assigned_by` LEAD, the note | not yet written (pglite) |
-| AC3-02 | UNASSIGNED | LEAD assigns it to LEAD2, to SAFETY, or to ORG | Refused 22023 ("not an Event Coordinator"); nothing written | not yet written (pglite) |
-| AC3-03 | UNASSIGNED | A, ORG, SAFETY, or a null caller, makes the first assignment | Refused 42501; nothing written. Only a Lead assigns | not yet written (pglite) |
-| AC3-04 | — | The service call for an assignment | One rpc with the request, the chosen coordinator, the caller from the token and the note; a blank note sent as null | not yet written (svc) |
-| AC3-05 | — | The assignment route | Gated on `event_coordinator_lead`; another role is 403 with nothing queried; the caller is the token's user, never the body | not yet written (route) |
-| AC3-06 | A holds two active events, B none | The picker's coordinator list | Every `event_coordinator`, each with their active-event count (A 2, B 0); no Lead in the list | not yet written (svc, pglite) |
-| AC3-07 | — | Open the picker | Ordered by name, nothing pre-selected, no "recommended" mark | not yet written (screen) |
+| AC3-01 | UNASSIGNED | LEAD assigns it to A, note "Over to you" | `assigned_coordinator_id` A; one assignment-history row: previous null, new A, `assigned_by` LEAD, the note | Proved (pglite): `SCRUM486_AC3_a_lead_assigns_an_unassigned_submitted_request` |
+| AC3-02 | UNASSIGNED | LEAD assigns it to LEAD2, to SAFETY, or to ORG | Refused 22023 ("not an Event Coordinator"); nothing written | Proved (pglite): `SCRUM486_AC3_refuses_%s_as_the_assignee_and_writes_nothing` |
+| AC3-03 | UNASSIGNED | A, ORG, SAFETY, or a null caller, makes the first assignment | Refused 42501; nothing written. Only a Lead assigns | Proved (pglite): `SCRUM486_AC3_refuses_%s_as_the_caller_and_writes_nothing` |
+| AC3-04 | — | The service call for an assignment | One rpc with the request, the chosen coordinator, the caller from the token and the note; a blank note sent as null | Proved (svc): `SCRUM486_AC3_an_assignment_is_one_rpc_with_the_caller_and_the_note`, `SCRUM486_AC3_a_note_that_is_%s_is_sent_as_null` |
+| AC3-05 | — | The assignment route | Gated on `event_coordinator_lead`; another role is 403 with nothing queried; the caller is the token's user, never the body | Proved (route): `SCRUM486_AC3_a_lead_assigns_and_is_recorded_from_the_token_not_the_body`, and the `POST /:id/assign` rows of `SCRUM486_AC2_%s_refuses_%s_with_403_and_queries_nothing` |
+| AC3-06 | A holds two active events, B none | The picker's coordinator list | Every `event_coordinator`, each with their active-event count (A 2, B 0); no Lead in the list | Proved (svc), by SCRUM-519's workload read: `SCRUM486_AC3_lists_every_event_coordinator_with_their_active_count`, `SCRUM486_AC3_only_the_event_coordinator_role_is_read_so_no_lead_is_listed`, `SCRUM486_AC3_counts_only_the_active_statuses_of_the_coordinators_listed`. The pglite half (the counts against real rows) is `check-coordinator-assignment.js` section 6, live |
+| AC3-07 | — | Open the picker | Ordered by name, nothing pre-selected, no "recommended" mark | Proved (screen): `SCRUM486_AC3_lists_every_coordinator_with_their_active_events_in_the_servers_order`, `SCRUM486_AC3_nothing_is_chosen_for_the_lead_and_nothing_is_recommended` |
 
 ---
 
@@ -292,11 +296,11 @@ as an insert from a select, so zero Leads writes zero rows and fails nothing
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC4-01 | UNASSIGNED | An assignment whose history insert fails (a missing user as `assigned_by`) | 23503; `assigned_coordinator_id` still null; no history row. The two writes stand or fall together | not yet written (pglite) |
-| AC4-02 | UNASSIGNED, then assigned to A | LEAD assigns it to B (the second of two) | Refused, with a message naming A as the coordinator already assigned; nothing written | not yet written (pglite) |
-| AC4-03 | The function refuses as in AC4-02 | The service | A 409 carrying the function's message, so the name reaches the screen | not yet written (svc) |
-| AC4-04 | LEAD; the assignment comes back 409 | — | The screen says who was assigned, and the request leaves the queue on refresh | not yet written (screen) |
-| AC4-05 | Two connections, the same UNASSIGNED request | Both assign at once | Exactly one succeeds; the other is refused as in AC4-02 | not yet written (live) |
+| AC4-01 | UNASSIGNED | An assignment whose history insert fails (a missing user as `assigned_by`) | 23503; `assigned_coordinator_id` still null; no history row. The two writes stand or fall together | Proved (pglite): `SCRUM486_AC4_the_coordinator_and_its_history_row_stand_or_fall_together` |
+| AC4-02 | UNASSIGNED, then assigned to A | LEAD assigns it to B (the second of two) | Refused, with a message naming A as the coordinator already assigned; nothing written | Proved (pglite): `SCRUM486_AC4_refuses_a_second_assignment_and_names_who_got_there_first` |
+| AC4-03 | The function refuses as in AC4-02 | The service | A 409 carrying the function's message, so the name reaches the screen | Proved (svc, route): `SCRUM486_AC4_a_lost_race_is_a_409_that_names_who_holds_it`, `SCRUM486_AC4_a_lost_race_arrives_as_a_409_with_the_holder_as_data` |
+| AC4-04 | LEAD; the assignment comes back 409 | — | The screen says who was assigned, and the request leaves the queue on refresh | Proved (screen): `SCRUM486_AC4_a_lost_race_names_who_was_assigned_and_offers_only_the_way_back`, `SCRUM486_AC4_after_a_lost_race_the_request_leaves_the_queue_on_the_way_back` |
+| AC4-05 | Two connections, the same UNASSIGNED request | Both assign at once | Exactly one succeeds; the other is refused as in AC4-02 | **Written, not run.** PGlite proves two calls issued together end with one winner and a named refusal (`SCRUM486_AC4_of_two_leads_assigning_at_once_exactly_one_wins_and_the_other_is_told_who`), not the row lock under true overlap (one connection). The real race is `check-coordinator-assignment.js` section 2, five rounds of two Leads; it runs against the live database and has not been run |
 
 AC4-02 is the proof that the second assignment is refused: PGlite runs one query at
 a time, so it shows the refusal of an assignment that arrives after another, which
@@ -309,11 +313,11 @@ provokes two at once, and needs two real connections.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC5-01 | HELD BY A, at each of `submitted`, `under_review`, `pending_clarification`, `approved`, `confirmed` | Reassign to B | Allowed: B holds it; one history row | not yet written (pglite) |
-| AC5-02 | HELD BY A, at each of `rejected`, `completed`, `cancelled` | Reassign to B | Refused 55000 naming the status; nothing written | not yet written (pglite) |
-| AC5-03 | — | Reassign at `safety_review` or `safety_approved` | **Cannot be written as specified**: neither status exists (see *What cannot be tested*) | not yet written (pglite, once the statuses exist) |
-| AC5-04 | — | Reassign with no note, or a blank one | Allowed; the note stored as null | not yet written (svc, pglite) |
-| AC5-05 | UNASSIGNED | Reassign it | Refused, with a message saying it has no coordinator yet and must be assigned, not a 40001 "changed hands" | not yet written (pglite) |
+| AC5-01 | HELD BY A, at each of `submitted`, `under_review`, `pending_clarification`, `approved`, `confirmed` | Reassign to B | Allowed: B holds it; one history row | Proved (pglite): `SCRUM486_AC5_a_lead_reassigns_a_request_that_is_%s` |
+| AC5-02 | HELD BY A, at each of `rejected`, `completed`, `cancelled` | Reassign to B | Refused 55000 naming the status; nothing written | Proved (pglite): `SCRUM486_AC5_refuses_to_reassign_a_request_that_is_%s_and_writes_nothing` |
+| AC5-03 | — | Reassign at `safety_review` or `safety_approved` | **Cannot be written as specified**: neither status exists (see *What cannot be tested*) | **Cannot be written yet** (see *What cannot be tested*). `SCRUM486_AC5_the_status_list_names_the_safety_statuses_before_they_exist` pins that 041 names them; the behaviour waits for the statuses |
+| AC5-04 | — | Reassign with no note, or a blank one | Allowed; the note stored as null | Proved (pglite, svc): `SCRUM486_AC5_a_handover_with_no_note_stores_null`, `SCRUM331_AC9_sends_an_omitted_or_blank_note_as_null` |
+| AC5-05 | UNASSIGNED | Reassign it | Refused, with a message saying it has no coordinator yet and must be assigned, not a 40001 "changed hands" | Proved (pglite): `SCRUM486_AC5_an_unassigned_request_is_assigned_not_reassigned` |
 
 ---
 
@@ -321,12 +325,12 @@ provokes two at once, and needs two real connections.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC6-01 | HELD BY A | A reassigns to B | Allowed (SCRUM-327 AC6, unchanged); history `assigned_by` A | not yet written (pglite) |
-| AC6-02 | HELD BY A | LEAD, who does not hold it, reassigns to B | Allowed; history previous A, new B, `assigned_by` LEAD. No 40001 from the guarded update | not yet written (pglite) |
-| AC6-03 | HELD BY A | B (not the holder), SAFETY, ORG, or a null caller reassigns | Refused 42501; nothing written | not yet written (pglite) |
-| AC6-04 | — | `POST /:id/reassign` | Admits `event_coordinator` and `event_coordinator_lead`; every other role 403 with nothing queried | not yet written (route) |
-| AC6-05 | HELD BY A, open on the event screen | As A, as LEAD, as B | The hand-over action for A and for LEAD; none for B | not yet written (screen) |
-| AC6-06 | HELD BY A, `under_review`, A the reviewer, no decision | LEAD reassigns to B | The reviewer follows to B, as 018 does for a holder's handover. A decided event keeps its reviewer | not yet written (pglite) |
+| AC6-01 | HELD BY A | A reassigns to B | Allowed (SCRUM-327 AC6, unchanged); history `assigned_by` A | Proved (pglite): `SCRUM486_AC6_the_holder_reassigns_as_scrum327_allowed` |
+| AC6-02 | HELD BY A | LEAD, who does not hold it, reassigns to B | Allowed; history previous A, new B, `assigned_by` LEAD. No 40001 from the guarded update | Proved (pglite): `SCRUM486_AC6_a_lead_who_does_not_hold_the_event_reassigns_it`; over HTTP, `SCRUM486_AC7_after_a_lead_hands_a_to_b_a_is_refused_and_b_reviews_and_decides` |
+| AC6-03 | HELD BY A | B (not the holder), SAFETY, ORG, or a null caller reassigns | Refused 42501; nothing written | Proved (pglite): `SCRUM486_AC6_refuses_%s_as_the_caller_and_writes_nothing` |
+| AC6-04 | — | `POST /:id/reassign` | Admits `event_coordinator` and `event_coordinator_lead`; every other role 403 with nothing queried | Proved (route): `SCRUM486_AC6_a_lead_reaches_the_handover_function`, `SCRUM486_AC6_%s_is_refused_the_handover_with_403_and_queries_nothing` |
+| AC6-05 | HELD BY A, open on the event screen | As A, as LEAD, as B | The hand-over action for A and for LEAD; none for B | Proved (screen): `SCRUM486_AC6_a_lead_sees_the_hand_over_action_on_an_event_they_do_not_hold`, `SCRUM486_AC6_the_holder_still_sees_it`, `SCRUM486_AC6_a_coordinator_who_holds_nothing_does_not` |
+| AC6-06 | HELD BY A, `under_review`, A the reviewer, no decision | LEAD reassigns to B | The reviewer follows to B, as 018 does for a holder's handover. A decided event keeps its reviewer | Proved (pglite): `SCRUM486_AC6_the_reviewer_follows_an_undecided_event_the_lead_moves`, `SCRUM486_AC6_a_decided_event_keeps_its_reviewer_when_the_lead_moves_it` |
 
 ---
 
@@ -334,12 +338,12 @@ provokes two at once, and needs two real connections.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC7-01 | Reassigned from A to B by LEAD | B starts the review, asks for clarification, decides | Each allowed | not yet written (pglite) |
-| AC7-02 | The same | A tries each of those | Refused 42501 / 403 | not yet written (pglite, svc) |
-| AC7-03 | The same | A reads the event | Allowed (any coordinator reads any event, SCRUM-332) | not yet written (route) |
-| AC7-04 | A clarification request open when LEAD reassigned A → B | B closes it; A tries to | B allowed; A refused | not yet written (pglite) |
-| AC7-05 | A change request pending when LEAD reassigned A → B | B decides it; A tries to | B allowed (019 checks the holder); A refused | not yet written (pglite) |
-| AC7-06 | A booking flagged before LEAD reassigned A → B | B reads their booking requests | The flagged booking is listed for B, not A | not yet written (svc) |
+| AC7-01 | Reassigned from A to B by LEAD | B starts the review, asks for clarification, decides | Each allowed | Proved (pglite, route): `SCRUM486_AC7_the_new_coordinator_reviews_and_decides_and_the_previous_one_cannot`, `SCRUM486_AC7_after_a_lead_hands_a_to_b_a_is_refused_and_b_reviews_and_decides` |
+| AC7-02 | The same | A tries each of those | Refused 42501 / 403 | Proved (pglite, route): the same two |
+| AC7-03 | The same | A reads the event | Allowed (any coordinator reads any event, SCRUM-332) | Proved (route, on a real database): `SCRUM486_AC7_after_a_lead_hands_a_to_b_a_is_refused_and_b_reviews_and_decides` |
+| AC7-04 | A clarification request open when LEAD reassigned A → B | B closes it; A tries to | B allowed; A refused | Proved (pglite): `SCRUM486_AC7_an_open_clarification_follows_the_event_to_its_new_coordinator` |
+| AC7-05 | A change request pending when LEAD reassigned A → B | B decides it; A tries to | B allowed (019 checks the holder); A refused | Proved (pglite): `SCRUM486_AC7_a_pending_change_request_follows_the_event_to_its_new_coordinator` |
+| AC7-06 | A booking flagged before LEAD reassigned A → B | B reads their booking requests | The flagged booking is listed for B, not A | Proved (svc): `SCRUM486_AC7_the_new_coordinator_lists_the_booking_and_the_previous_one_does_not` |
 
 ---
 
@@ -347,11 +351,11 @@ provokes two at once, and needs two real connections.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC8-01 | UNASSIGNED | A calls `start_event_review` | Refused with a message that the request is waiting for the Event Coordinator Lead to assign it. Not 42501 "only the coordinator assigned … can start reviewing it", which is today's answer and tells A the wrong thing | not yet written (pglite) |
-| AC8-02 | UNASSIGNED | `start_event_review` with a null caller, and with LEAD | The same waiting message: the check comes before the caller check, so nobody is told it is "not theirs" | not yet written (pglite) |
-| AC8-03 | The function refuses as in AC8-01 | The service | 409 with the function's message | not yet written (svc) |
-| AC8-04 | UNASSIGNED, opened by A by id | The event screen | "Waiting for the Event Coordinator Lead to assign this request"; no Start review button, for anyone | not yet written (screen) |
-| AC8-05 | Start review refused with 409 | — | The screen tells "waiting for assignment" from "no longer waiting to be reviewed" by the request's own `assignedCoordinatorId`, not by the server's message text | not yet written (screen) |
+| AC8-01 | UNASSIGNED | A calls `start_event_review` | Refused with a message that the request is waiting for the Event Coordinator Lead to assign it. Not 42501 "only the coordinator assigned … can start reviewing it", which is today's answer and tells A the wrong thing | Proved (pglite): `SCRUM486_AC8_starting_the_review_of_an_unassigned_request_is_refused_naming_the_lead_for_%s` |
+| AC8-02 | UNASSIGNED | `start_event_review` with a null caller, and with LEAD | The same waiting message: the check comes before the caller check, so nobody is told it is "not theirs" | Proved (pglite): the same, its Lead and null-caller rows |
+| AC8-03 | The function refuses as in AC8-01 | The service | 409 with the function's message | Proved (svc): `SCRUM486_AC8_%s_is_a_409_with_the_functions_message` |
+| AC8-04 | UNASSIGNED, opened by A by id | The event screen | "Waiting for the Event Coordinator Lead to assign this request"; no Start review button, for anyone | Proved (screen): `SCRUM486_AC8_an_unassigned_request_opened_by_%s_says_it_is_waiting_for_the_lead` |
+| AC8-05 | Start review refused with 409 | — | The screen tells "waiting for assignment" from "no longer waiting to be reviewed" by the request's own `assignedCoordinatorId`, not by the server's message text | **Met differently.** The screen never reads the message (`SCRUM486_AC8_a_409_on_start_review_says_it_may_be_waiting_for_the_lead`), but it does not choose between the two causes either: SCRUM-517 gave the 409 one message naming both. Choosing by the request's own `assignedCoordinatorId` cannot work at click time, because the button shows only to the holder, so that field always names them. SCRUM-523 to report the deviation |
 
 ---
 
@@ -359,12 +363,12 @@ provokes two at once, and needs two real connections.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC9-01 | — | LEAD's first assignment | Row: previous null, new A, `assigned_by` LEAD, note, `created_at` | not yet written (pglite) |
-| AC9-02 | — | LEAD's reassignment A → B | Row: previous A, new B, `assigned_by` LEAD, note | not yet written (pglite) |
-| AC9-03 | A history with one system row (from before this story) and one LEAD row | `listAssignmentHistory` | The old row `automatic: true`; the LEAD row `automatic: false`, `assignedByName` the Lead's name | not yet written (svc) |
-| AC9-04 | The same | The organiser's history route | Both rows, and no `handoverNote` key on either | not yet written (route) |
-| AC9-05 | The same | The assigned coordinator's history route | Both rows, with the note | not yet written (route) |
-| AC9-06 | The same | Open the history on screen | The old row "by ConnectSphere, automatically on submission"; the LEAD row "by" the Lead's name | not yet written (screen) |
+| AC9-01 | — | LEAD's first assignment | Row: previous null, new A, `assigned_by` LEAD, note, `created_at` | Proved (pglite): `SCRUM486_AC3_a_lead_assigns_an_unassigned_submitted_request`, `SCRUM486_AC9_reads_correctly_across_a_submission_an_assignment_and_two_reassignments` |
+| AC9-02 | — | LEAD's reassignment A → B | Row: previous A, new B, `assigned_by` LEAD, note | Proved (pglite): `SCRUM486_AC9_reads_correctly_across_a_submission_an_assignment_and_two_reassignments` |
+| AC9-03 | A history with one system row (from before this story) and one LEAD row | `listAssignmentHistory` | The old row `automatic: true`; the LEAD row `automatic: false`, `assignedByName` the Lead's name | Proved (svc): `SCRUM486_AC9_an_old_row_reads_automatic_and_a_leads_row_names_the_lead`, `SCRUM486_AC9_a_lead_with_no_name_is_still_not_automatic`; live, `check-coordinator-assignment.js` section 6 |
+| AC9-04 | The same | The organiser's history route | Both rows, and no `handoverNote` key on either | Proved (route): `SCRUM486_AC9_the_organisers_route_has_both_rows_and_no_note_on_either` |
+| AC9-05 | The same | The assigned coordinator's history route | Both rows, with the note | Proved (route): `SCRUM486_AC9_the_coordinators_route_has_both_rows_with_the_note` |
+| AC9-06 | The same | Open the history on screen | The old row "by ConnectSphere, automatically on submission"; the LEAD row "by" the Lead's name | Proved (screen): `SCRUM486_AC9_an_old_automatic_row_and_a_leads_row_read_differently_in_one_history` |
 
 ---
 
@@ -372,13 +376,13 @@ provokes two at once, and needs two real connections.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC10-01 | LEAD and LEAD2 exist | Submit a request | One notice to each Lead, of a new type, with `eventRequestId` and the event name in the payload | not yet written (pglite) |
-| AC10-02 | UNASSIGNED | LEAD assigns it to A | One notice to A, and one to ORG naming A | not yet written (pglite) |
-| AC10-03 | HELD BY A | LEAD (or A) reassigns to B | One notice to B, and one to ORG naming B | not yet written (pglite) |
-| AC10-04 | — | Read 041's `notifications_type_known` | All seven of 040's types, `booking_flagged`, `booking_request_withdrawn`, `clarification_requested`, `clarification_replied`, `clarification_closed`, `booking_flagged_setup_change`, `venue_hold_expired`, plus the new ones. Not 034's six, which lack `venue_hold_expired` | not yet written (mig, pglite) |
-| AC10-05 | An assignment refused (AC4-02, AC3-02) | — | No notice written | not yet written (pglite) |
-| AC10-06 | A notice of each new type | Each recipient opens their notifications | Shown in words, not as a raw type | not yet written (screen) |
-| AC10-07 | 041 applied after 040; an active hold whose expiry has passed | `process_venue_hold_expiry` | The hold is marked expired and its `venue_hold_expired` notice written, as before 041 | not yet written (pglite) |
+| AC10-01 | LEAD and LEAD2 exist | Submit a request | One notice to each Lead, of a new type, with `eventRequestId` and the event name in the payload | Proved (pglite): `SCRUM486_AC10_submission_tells_every_lead_a_request_is_waiting` |
+| AC10-02 | UNASSIGNED | LEAD assigns it to A | One notice to A, and one to ORG naming A | Proved (pglite): `SCRUM486_AC10_an_assignment_tells_the_coordinator_and_the_organiser_by_name` |
+| AC10-03 | HELD BY A | LEAD (or A) reassigns to B | One notice to B, and one to ORG naming B | Proved (pglite): `SCRUM486_AC10_a_reassignment_tells_the_new_coordinator_and_the_organiser_who_held_it` |
+| AC10-04 | — | Read 041's `notifications_type_known` | All seven of 040's types, `booking_flagged`, `booking_request_withdrawn`, `clarification_requested`, `clarification_replied`, `clarification_closed`, `booking_flagged_setup_change`, `venue_hold_expired`, plus the new ones. Not 034's six, which lack `venue_hold_expired` | Proved (mig, pglite): `SCRUM486_AC10_041_keeps_every_type_040_allows_and_adds_three` |
+| AC10-05 | An assignment refused (AC4-02, AC3-02) | — | No notice written | Proved (pglite): `SCRUM486_AC10_a_refused_assignment_notifies_nobody_when_%s` |
+| AC10-06 | A notice of each new type | Each recipient opens their notifications | Shown in words, not as a raw type | **Unmet.** Each new type is shown, counted and markable, but as "New notification / This notification type cannot be displayed yet" (`SCRUM486_AC10_each_new_type_is_shown_as_a_notification_that_cannot_be_displayed_yet`), not in words. The wording is SCRUM-172's. SCRUM-523 to report |
+| AC10-07 | 041 applied after 040; an active hold whose expiry has passed | `process_venue_hold_expiry` | The hold is marked expired and its `venue_hold_expired` notice written, as before 041 | Proved (pglite): `SCRUM486_AC10_a_lapsed_hold_still_expires_and_is_notified_after_041` |
 
 **Why AC10-04 and AC10-07 matter beyond this story.** `notifications_type_known`
 is restated whole every time a type is added: 041 drops it and adds it again with
@@ -401,9 +405,9 @@ untouched.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC11-01 | No profile holds `event_coordinator_lead` | Submit a request | Succeeds, the request UNASSIGNED; zero notices; no error | not yet written (pglite) |
-| AC11-02 | No Event Coordinator either | Submit a request | Succeeds as in AC11-01. The old P0001 refusal is gone | not yet written (pglite) |
-| AC11-03 | — | `submitEventRequest` when the database raises nothing | No `ServiceUnavailableError`; the P0001 branch of `translateError` is no longer reached by submission | not yet written (svc) |
+| AC11-01 | No profile holds `event_coordinator_lead` | Submit a request | Succeeds, the request UNASSIGNED; zero notices; no error | Proved (pglite): `SCRUM486_AC11_submits_when_no_event_coordinator_and_no_lead_exists` |
+| AC11-02 | No Event Coordinator either | Submit a request | Succeeds as in AC11-01. The old P0001 refusal is gone | Proved (pglite): the same |
+| AC11-03 | — | `submitEventRequest` when the database raises nothing | No `ServiceUnavailableError`; the P0001 branch of `translateError` is no longer reached by submission | Proved (svc): `SCRUM486_AC11_submission_no_longer_reports_a_missing_coordinator_as_a_503` |
 
 ---
 
@@ -427,13 +431,13 @@ Where a criterion owns a trap, the case is above and named here; the rest are
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| TR-01 | 041 applied | Write a request at `submitted` with no coordinator; then at `under_review`, `pending_clarification`, `approved`, `confirmed` with none | `submitted` accepted; every other status refused 23514 naming the relaxed constraint. `draft` and `cancelled` still accepted with none | not yet written (pglite) |
-| TR-02 | HELD BY A, rejected, reopened to draft by 022 (which leaves A and the reviewer on it) | Submit again | `assigned_coordinator_id` null and `reviewing_coordinator_id` null; the request is in the queue, not back with A | not yet written (pglite) |
-| TR-03 | TR-02's request | Open its assignment history | "Current coordinator" reads not assigned, although the newest history row names A. Today `AssignmentHistory` takes the current coordinator from the newest row, which after TR-02 would be wrong | not yet written (screen) |
-| TR-04 | UNASSIGNED | Migration 037's equipment-lines function with a null caller | Refused 42501. Today `v_assigned is distinct from p_coordinator_id` lets null meet null through; safe only while 017 guaranteed a coordinator | not yet written (pglite) |
-| TR-05 | UNASSIGNED at `pending_clarification` is impossible, so: a request whose coordinator is null, by a direct write | Migration 030's close-clarification function with a null caller | Refused 42501 before the status check. The same `is distinct from` hole as TR-04 | not yet written (pglite) |
-| TR-06 | — | The two suites that apply migrations to a real PGlite database and include 016, 017 or 021: `eventStatusLifecycleDatabase.test.js`, `eventClarificationDatabase.test.js` | Each also applies 041, after 040, so its database is the one production will have | not yet written (pglite) |
-| TR-07 | — | The two text tests that read every migration: `draftToSubmittedSinglePath.test.js`, `eventStatusHistoryMigration.test.js` | Their expectations change to include 041 (see *Existing tests this story must change*). `venueSetupTimeMigration.test.js` needs nothing: its mention of 021 is in a fixed list of 018 to 022 about the venue functions, not the status history | not yet written (mig) |
+| TR-01 | 041 applied | Write a request at `submitted` with no coordinator; then at `under_review`, `pending_clarification`, `approved`, `confirmed` with none | `submitted` accepted; every other status refused 23514 naming the relaxed constraint. `draft` and `cancelled` still accepted with none | Proved (pglite): `SCRUM486_TR01_accepts_a_submitted_request_with_no_coordinator`, `SCRUM486_TR01_still_refuses_a_request_that_is_%s_with_no_coordinator`, `SCRUM486_TR01_still_accepts_a_request_that_is_%s_with_no_coordinator` |
+| TR-02 | HELD BY A, rejected, reopened to draft by 022 (which leaves A and the reviewer on it) | Submit again | `assigned_coordinator_id` null and `reviewing_coordinator_id` null; the request is in the queue, not back with A | Proved (pglite): `SCRUM486_TR02_a_resubmitted_request_reaches_the_queue_with_no_coordinator_and_no_reviewer` |
+| TR-03 | TR-02's request | Open its assignment history | "Current coordinator" reads not assigned, although the newest history row names A. Today `AssignmentHistory` takes the current coordinator from the newest row, which after TR-02 would be wrong | Proved (screen), with the fix made in SCRUM-522: `SCRUM486_TR03_a_resubmitted_request_waiting_for_the_lead_reads_not_assigned`. `AssignmentHistory` now takes the current coordinator from the request |
+| TR-04 | UNASSIGNED | Migration 037's equipment-lines function with a null caller | Refused 42501. Today `v_assigned is distinct from p_coordinator_id` lets null meet null through; safe only while 017 guaranteed a coordinator | Proved (pglite): `SCRUM486_TR04_refuses_a_null_caller_on_a_request_with_no_coordinator` and its two companions |
+| TR-05 | UNASSIGNED at `pending_clarification` is impossible, so: a request whose coordinator is null, by a direct write | Migration 030's close-clarification function with a null caller | Refused 42501 before the status check. The same `is distinct from` hole as TR-04 | Proved (pglite): `SCRUM486_TR05_closing_refuses_a_null_caller_before_the_status_check` |
+| TR-06 | — | The two suites that apply migrations to a real PGlite database and include 016, 017 or 021: `eventStatusLifecycleDatabase.test.js`, `eventClarificationDatabase.test.js` | Each also applies 041, after 040, so its database is the one production will have | Proved (pglite), by setup: both suites apply 041 last, so every case in them runs on it |
+| TR-07 | — | The two text tests that read every migration: `draftToSubmittedSinglePath.test.js`, `eventStatusHistoryMigration.test.js` | Their expectations change to include 041 (see *Existing tests this story must change*). `venueSetupTimeMigration.test.js` needs nothing: its mention of 021 is in a fixed list of 018 to 022 about the venue functions, not the status history | Proved (mig): both text tests' expectations include 041 (SCRUM-515) |
 
 **Two kinds of suite, and why a text test can break without being wrong.** A PGlite
 suite applies the migrations to a real database, so it needs 041 in its list to
@@ -537,7 +541,19 @@ deleted to make room.
 | Every test named here | SCRUM-522 |
 | The implementation | The SCRUM-486 subtasks between them |
 
-**Tally:** 71 cases (64 under the criteria, 7 traps), all **not yet written**, counted from the tables.
+**Tally:** 71 cases (64 under the criteria, 7 traps), counted from the tables.
+After SCRUM-522: **66 proved**; **5 not**, each marked in its row and listed here
+for SCRUM-523 to report:
+
+- **AC1-06**, partly unmet: the Organiser's row does not name the coordinator.
+- **AC4-05**, written, not run: the real race is in the live script.
+- **AC5-03**, cannot be written: the safety statuses do not exist yet.
+- **AC8-05**, met differently: one 409 message names both causes.
+- **AC10-06**, unmet: the new notices are not yet worded (SCRUM-172).
+
+Three were proved at a different layer than planned, each with its reason in
+its row: AC2-03 and AC2-06's pglite halves (the reads are PostgREST queries),
+and AC3-06's pglite half (in the live script).
 
 | Section | Cases |
 |---|---|

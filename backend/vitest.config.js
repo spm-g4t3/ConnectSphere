@@ -20,6 +20,37 @@ const FULL = { lines: 100, branches: 100, functions: 100, statements: 100 };
 
 export default defineConfig({
   test: {
+    // SCRUM-486 (SCRUM-522): one worker per physical core, not per logical one.
+    //
+    // The fault: during SCRUM-520, full runs failed a different test each
+    // time -- three in one run, one in the next on a 5000ms timeout -- and
+    // every one passed alone. They were migration-text tests that only read
+    // files and run regexes, so they were not slow; they were waiting for a
+    // CPU. Vitest's default pool runs each test file in its own process, and
+    // in run mode it starts availableParallelism() - 1 of them: 19 processes
+    // on a 10-core, 20-thread machine. SCRUM-486 added PGlite suites, which are
+    // CPU-bound WebAssembly, and two of them sharing one physical core (SMT)
+    // each run at well under its full speed. A test's clock keeps running
+    // while its process waits, so a cheap test lands on the timeout.
+    //
+    // Measured on that machine, the same full suite both ways:
+    //   SCRUM484_AC6_latest_block_definitions_supersede_013_to_015 (regex only)
+    //     221 ms alone, 3137 ms with the default, 382 ms with '50%';
+    //   SCRUM318_clears_the_decision_..._runs_022_again (PGlite)
+    //     1427 ms alone, 3556 ms with the default, 2806 ms with '50%';
+    //   whole run 34 s with the default, 33 s with '50%'.
+    //
+    // Why this and not a higher testTimeout. A higher timeout only widens the
+    // margin while the cause stays: each PGlite suite added makes the
+    // contention worse, and the margin would have to grow with it. Capping the
+    // workers removes the oversubscription itself, costs no wall time here
+    // (the run is as long as its slowest file), and on a machine without SMT
+    // it still leaves half the cores free. '50%' rather than a number so it
+    // scales with whoever runs it.
+    //
+    // (Vitest 5 has no poolOptions.threads.maxThreads; maxWorkers is the
+    // top-level setting for every pool.)
+    maxWorkers: '50%',
     // Point supertest's requests at the loopback of the family its server is
     // bound to ('[::1]' for the default dual-stack listener), not always
     // 127.0.0.1. Without this, parallel workers occasionally reach each

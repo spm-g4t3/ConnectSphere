@@ -412,3 +412,52 @@ describe('SCRUM-486 AC6: the event screen\'s reads admit the Lead, so the hand-o
     expect(client.calls).toHaveLength(0);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-522: AC9-04, AC9-05 -- the two history routes over an old automatic
+// row and a Lead's row
+// ---------------------------------------------------------------------------
+describe('SCRUM-486 AC9: both history routes carry the old row and the Lead\'s', () => {
+  const rows = () => [
+    {
+      id: 'h1', previous_coordinator_id: null, new_coordinator_id: COORDINATOR_A,
+      assigned_by: null, handover_note: null, created_at: '2026-09-20T03:00:00+00:00',
+    },
+    {
+      id: 'h2', previous_coordinator_id: COORDINATOR_A, new_coordinator_id: COORDINATOR_B,
+      assigned_by: LEAD_ID, handover_note: 'Priya is on leave.', created_at: '2026-10-11T03:00:00+00:00',
+    },
+  ];
+  const names = () => [
+    { id: COORDINATOR_A, full_name: 'Priya Nair' },
+    { id: COORDINATOR_B, full_name: 'Omar Okafor' },
+    { id: LEAD_ID, full_name: 'Lena Lead' },
+  ];
+  const event = () => row({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: COORDINATOR_B });
+
+  it('SCRUM486_AC9_the_organisers_route_has_both_rows_and_no_note_on_either', async () => {
+    // AC9-04. The Lead is named to the Organiser (who moved their event is
+    // theirs to know); the note is not (AC9: written for coordinators).
+    const client = createFakeClient([ok(event()), ok(rows()), ok(names())]);
+
+    const res = await request(appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID) }))
+      .get(`/api/event-requests/${REQUEST_ID}/assignments`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((entry) => [entry.automatic, entry.assignedByName])).toEqual([[true, null], [false, 'Lena Lead']]);
+    for (const entry of res.body) expect(entry).not.toHaveProperty('handoverNote');
+  });
+
+  it('SCRUM486_AC9_the_coordinators_route_has_both_rows_with_the_note', async () => {
+    // AC9-05, as the coordinator who now holds it.
+    const client = createFakeClient([ok(event()), ok(rows()), ok(names())]);
+
+    const res = await request(appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_B) }))
+      .get(`/api/event-requests/${REQUEST_ID}/assignments/review`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((entry) => [entry.automatic, entry.assignedByName, entry.handoverNote]))
+      .toEqual([[true, null, null], [false, 'Lena Lead', 'Priya is on leave.']]);
+  });
+});

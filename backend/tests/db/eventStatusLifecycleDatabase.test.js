@@ -1008,6 +1008,55 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       expect(await assignmentHistory(id)).toHaveLength(1);
     });
 
+    it('SCRUM486_AC4_of_two_leads_assigning_at_once_exactly_one_wins_and_the_other_is_told_who', async () => {
+      // AC4-05, as far as PGlite can take it, by the technique
+      // SCRUM325_lets_exactly_one_of_two_simultaneous_transitions_from_the_
+      // same_status_succeed uses: both calls are issued together and neither
+      // is awaited before the other starts.
+      //
+      // What this proves, and what it cannot. PGlite is one connection and
+      // runs one statement at a time, so the two calls queue and run back to
+      // back; they never interleave. So this proves that each call's check and
+      // write are one unit -- the second, issued before the first finished,
+      // still sees the first's coordinator and is refused, writing nothing --
+      // and that exactly one of two concurrent attempts wins. It cannot prove
+      // the row lock (`for update`) holding the second transaction while the
+      // first commits, because nothing here can make them overlap; PGlite
+      // cannot open a second connection to the same database. That half is
+      // proved against real Postgres, where each call is its own connection,
+      // by section 2 of scripts/check-coordinator-assignment.js (several
+      // rounds of two Leads assigning at once).
+      const id = await unassigned();
+
+      const outcomes = await Promise.allSettled([
+        assign(id, coordinator, lead),
+        assign(id, otherCoordinator, lead2),
+      ]);
+
+      const won = outcomes.filter((o) => o.status === 'fulfilled');
+      const lost = outcomes.filter((o) => o.status === 'rejected');
+      expect(won).toHaveLength(1);
+      expect(lost).toHaveLength(1);
+
+      const winner = won[0].value.rows[0].assigned_coordinator_id;
+      const winnerName = winner === coordinator ? 'Priya Nair' : 'Omar Okafor';
+      expect(lost[0].reason.code).toBe('55000');
+      expect(lost[0].reason.message).toContain(`already assigned to ${winnerName}`);
+
+      // One coordinator, one history row naming them, and only the winner's
+      // two notices: the loser wrote nothing.
+      expect((await row(id)).assigned_coordinator_id).toBe(winner);
+      const history = await assignmentHistory(id);
+      expect(history).toHaveLength(1);
+      expect(history[0].new_coordinator_id).toBe(winner);
+      const { rows: notices } = await db.query(
+        `select type from notifications
+          where payload->>'eventRequestId' = $1 and type <> 'event_request_awaiting_assignment'`,
+        [id],
+      );
+      expect(notices.map((n) => n.type).sort()).toEqual(['event_request_assigned', 'event_request_coordinator_assigned']);
+    });
+
     it('SCRUM486_AC4_the_coordinator_and_its_history_row_stand_or_fall_together', async () => {
       // AC4-01. A constraint added for this test refuses one history row, so
       // the insert fails after the update has run. The update must not stand.

@@ -650,7 +650,12 @@ export default function CoordinatorRequestDetail({
           panel was opened from is a little out of date. */}
       <section>
         <h3>Coordinator</h3>
-        <AssignmentHistory key={historyVersion} eventRequestId={request.id} view="coordinator" />
+        <AssignmentHistory
+          key={historyVersion}
+          eventRequestId={request.id}
+          view="coordinator"
+          currentCoordinatorId={assignedCoordinatorId}
+        />
 
         {handedOverTo && (
           <p className="coordinator-reassign__notice" role="status">

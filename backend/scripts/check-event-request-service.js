@@ -21,6 +21,18 @@
  * business exposing: listing users, bypassing the service to attack a
  * constraint directly, counting, and cleaning up.
  *
+ * SCRUM-486 (SCRUM-522). The customer changed what submission does on
+ * 11 October: it no longer assigns a coordinator; the request waits for the
+ * Event Coordinator Lead, and every Lead is told (migration 041). Step 4 used
+ * to check that a coordinator was chosen and one assignment-history row
+ * written by "the system", and was right until then. It now checks that none
+ * was, that no row was written, and that every Lead was notified. Those
+ * notices go to real Leads in a shared project, so they are deleted at
+ * cleanup and counted before and after like every other table. Step 7b's race
+ * needs a coordinator to act as, which submission used to supply; it now sets
+ * one as a fixture (see there). Assignment itself is proved by
+ * check-coordinator-assignment.js.
+ *
  * Exits non-zero on any failure.
  */
 
@@ -94,6 +106,13 @@ async function cleanup() {
   // must outlive a careless delete. Deleting the events first is refused. And
   // because the events go in one statement, a single refused row keeps every
   // row in that statement -- which is how this script left two behind.
+  // SCRUM-486: every Lead's "a request is waiting" notice for this run's
+  // submissions, real Leads' included. Notifications reference the user, not
+  // the event, so nothing else would remove them.
+  await remove(
+    'notifications',
+    supabase.from('notifications').delete().in('payload->>eventRequestId', createdIds),
+  );
   await remove(
     'assignment history',
     supabase.from('event_request_assignment_history').delete().in('event_request_id', createdIds),
@@ -113,13 +132,24 @@ async function countRows(table) {
   return count ?? 0;
 }
 
-/** The three tables this script writes to. */
+/** The tables this script writes to. Notifications since SCRUM-486 (041). */
 async function countAll() {
   return {
     requests: await countRows('event_requests'),
     history: await countRows('event_request_assignment_history'),
     statusHistory: await countRows('event_request_status_history'),
+    notifications: await countRows('notifications'),
   };
+}
+
+/** The notifications about one event, from the table. */
+async function noticesFor(eventRequestId) {
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('recipient_id, type')
+    .eq('payload->>eventRequestId', eventRequestId);
+  if (error) throw new Error(`could not read notifications: ${error.message}`);
+  return data ?? [];
 }
 
 /** The assignment history rows written for one event, oldest first. */
@@ -166,7 +196,7 @@ async function main() {
 
   const organiserId = organiser.id;
   console.log(`  organiser:   ${organiser.email ?? '(no email)'}  ${organiserId}`);
-  console.log(`  rows before: ${rowsBefore.requests} requests, ${rowsBefore.history} history\n`);
+  console.log(`  rows before: ${rowsBefore.requests} requests, ${rowsBefore.history} history, ${rowsBefore.notifications} notifications\n`);
 
   // --- 1. a minimal draft -------------------------------------------------
   // Proves the permissive half of the design against the real schema: a request
@@ -275,20 +305,24 @@ async function main() {
   );
   check('the status history row has a timestamp', Boolean(statusAfterSubmit[0]?.created_at));
 
-  // SCRUM-327 / SCRUM-318: the one production path assigns the coordinator and
-  // records it, exactly once. Read back from the tables rather than from the
-  // service's return value, so this proves what was stored.
-  check('a coordinator is assigned', Boolean(submitted.assignedCoordinatorId), submitted.assignedCoordinatorId);
+  // SCRUM-486 (041). Until 11 October the one production path chose a
+  // coordinator and recorded it, and these checks said so: "a coordinator is
+  // assigned", and one history row "assigned by the system". The customer moved
+  // that choice to the Event Coordinator Lead. So submission now assigns
+  // nobody and writes no assignment row, and every Lead is told it is waiting.
+  // Read back from the tables, so this proves what was stored.
+  check('no coordinator is assigned on submission', submitted.assignedCoordinatorId === null, String(submitted.assignedCoordinatorId));
+  check('nor a reviewer', submitted.reviewingCoordinatorId === null, String(submitted.reviewingCoordinatorId));
 
   const historyAfterSubmit = await historyFor(complete.id);
-  check('exactly one history row written', historyAfterSubmit.length === 1, String(historyAfterSubmit.length));
-  check(
-    'the history row names the assigned coordinator, assigned by the system',
-    historyAfterSubmit[0]?.new_coordinator_id === submitted.assignedCoordinatorId
-      && historyAfterSubmit[0]?.previous_coordinator_id === null
-      && historyAfterSubmit[0]?.assigned_by === null,
-    JSON.stringify(historyAfterSubmit[0] ?? null),
-  );
+  check('no assignment-history row written: nothing was assigned', historyAfterSubmit.length === 0, String(historyAfterSubmit.length));
+
+  const { count: leadCount } = await supabase
+    .from('profiles')
+    .select('id', { count: 'exact', head: true })
+    .eq('role', 'event_coordinator_lead');
+  const waiting = (await noticesFor(complete.id)).filter((n) => n.type === 'event_request_awaiting_assignment');
+  check('every Lead is told it is waiting, once each', waiting.length === leadCount, `${waiting.length} notice(s), ${leadCount} Lead(s)`);
 
   // --- 5. the constraint from 005 is real ---------------------------------
   // Deliberately bypasses the service and attacks the table directly, which is
@@ -342,22 +376,49 @@ async function main() {
   check('reported as 409', again?.status === 409, String(again?.status));
   check('message names the current status', /submitted/i.test(again?.message ?? ''), again?.message ?? '');
 
-  // The refused second submit changes nothing: same coordinator, still one row.
+  // The refused second submit changes nothing. Before SCRUM-486 that meant
+  // "kept the coordinator, still one assignment row"; there is no coordinator
+  // to keep now, so: still none, still no assignment row, still one status
+  // row, and no second round of Lead notices.
   const afterAgain = await getEventRequestById(complete.id);
   check(
-    'the refused second submit kept the coordinator',
-    afterAgain.assignedCoordinatorId === submitted.assignedCoordinatorId,
+    'the refused second submit assigned nobody',
+    afterAgain.assignedCoordinatorId === null,
     String(afterAgain.assignedCoordinatorId),
   );
-  check('the refused second submit wrote no history row', (await historyFor(complete.id)).length === 1);
+  check('the refused second submit wrote no history row', (await historyFor(complete.id)).length === 0);
   check('the refused second submit wrote no status history row', (await statusHistoryFor(complete.id)).length === 1);
+  check(
+    'and notified no Lead a second time',
+    (await noticesFor(complete.id)).filter((n) => n.type === 'event_request_awaiting_assignment').length === leadCount,
+  );
 
   // --- 7b. two simultaneous transitions from the same status --------------
   // SCRUM-325. Two real connections to Postgres, so the row lock in
   // change_event_request_status is what decides. Exactly one may succeed: the
   // other finds the request no longer submitted and is refused, and only the
   // winner leaves a history row.
-  const holderId = afterAgain.assignedCoordinatorId;
+  //
+  // The race needs a coordinator who holds the request, to act as. Submission
+  // used to supply one; since SCRUM-486 a Lead does, by hand. Assigning through
+  // assign_event_request here would notify a real coordinator and the Organiser
+  // for a request that is about to be deleted, and assignment is proved by
+  // check-coordinator-assignment.js, so a real coordinator is set directly, as
+  // a fixture. Read rather than hardcoded, as the Organiser is.
+  const { data: someCoordinator } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('role', 'event_coordinator')
+    .limit(1)
+    .maybeSingle();
+  if (!someCoordinator) throw new Error('no event_coordinator profile exists, so the race in 7b has no one to act as');
+  const holderId = someCoordinator.id;
+  const { error: fixtureError } = await supabase
+    .from('event_requests')
+    .update({ assigned_coordinator_id: holderId })
+    .eq('id', complete.id);
+  if (fixtureError) throw new Error(`could not give the request a coordinator: ${fixtureError.message}`);
+
   const race = await Promise.allSettled([
     changeEventRequestStatus(complete.id, {
       expectedStatus: 'submitted',
@@ -443,7 +504,8 @@ main()
 
     // Counted after cleanup so the script proves it left the tables as it found
     // them, rather than asserting it and hoping. Assignment history is counted
-    // too, since SCRUM-330: the submission in step 4 writes a row there.
+    // since SCRUM-330; notifications since SCRUM-486, because the submission in
+    // step 4 now notifies every Lead.
     check('cleanup ran without errors', cleanupErrors.length === 0, cleanupErrors.join('; '));
     if (rowsBefore !== null) {
       const rowsAfter = await countAll();
@@ -451,10 +513,12 @@ main()
         'nothing left behind',
         rowsAfter.requests === rowsBefore.requests
           && rowsAfter.history === rowsBefore.history
-          && rowsAfter.statusHistory === rowsBefore.statusHistory,
+          && rowsAfter.statusHistory === rowsBefore.statusHistory
+          && rowsAfter.notifications === rowsBefore.notifications,
         `requests ${rowsBefore.requests} -> ${rowsAfter.requests}, `
           + `history ${rowsBefore.history} -> ${rowsAfter.history}, `
-          + `status history ${rowsBefore.statusHistory} -> ${rowsAfter.statusHistory}`,
+          + `status history ${rowsBefore.statusHistory} -> ${rowsAfter.statusHistory}, `
+          + `notifications ${rowsBefore.notifications} -> ${rowsAfter.notifications}`,
       );
     }
 

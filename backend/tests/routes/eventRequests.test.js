@@ -1182,12 +1182,14 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
       ok(submittableRow()),
       // submitEventRequest's own read.
       ok(submittableRow()),
-      // submit_event_request (016): the row as the function leaves it --
-      // submitted, timed, and assigned a coordinator (SCRUM-330).
+      // submit_event_request (041): the row as the function leaves it --
+      // submitted and timed, with no coordinator. Until SCRUM-486 this was
+      // "and assigned a coordinator (SCRUM-330)", and the fixture carried one,
+      // because 016 assigned it. 041 leaves that to the Lead.
       ok(submittableRow({
         status: STATUS.SUBMITTED,
         submitted_at: '2026-01-15T09:00:00+00:00',
-        assigned_coordinator_id: COORDINATOR_ID,
+        assigned_coordinator_id: null,
       })),
     ]);
 
@@ -1222,10 +1224,12 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
     expect(typeof client.calls[2].args.p_submitted_at).toBe('string');
     expect(Number.isNaN(new Date(client.calls[2].args.p_submitted_at).getTime())).toBe(false);
 
-    // SCRUM-327: the Organiser sees their coordinator. The id survives the
-    // service mapping and the route's withStatusDisplay projection, so it
-    // reaches the response. Turning it into a name is a later subtask.
-    expect(res.body.assignedCoordinatorId).toBe(COORDINATOR_ID);
+    // SCRUM-486 AC1-04: the response says nobody is assigned yet -- the key
+    // present and null, which is what the Organiser's screen reads to say the
+    // request is waiting for the Lead. Until SCRUM-486 this asserted the
+    // coordinator 016 had assigned ("the Organiser sees their coordinator",
+    // SCRUM-327), and was right then.
+    expect(res.body).toHaveProperty('assignedCoordinatorId', null);
   });
 
   it('SCRUM10_AC5_returns_404_for_another_organisers_draft', async () => {
