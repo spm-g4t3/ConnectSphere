@@ -15,7 +15,7 @@
 //
 // Full events stay in the list, marked "Full". An event the caller already
 // holds a place on is marked "Registered". Selecting an event goes to its
-// details page, a later subtask (see services/openEventRoutes.js).
+// details page (BrowseEventDetails.jsx).
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";

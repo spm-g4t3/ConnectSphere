@@ -1,7 +1,8 @@
 /**
  * Open events route.
  *
- * SCRUM-495: GET / lists the events an Attendee can register for.
+ * SCRUM-495: GET / lists the events an Attendee can register for, and GET /:id
+ * opens one of them.
  *
  * Attendee only (SCRUM-453 AC3, SCRUM-495 AC1): requireAuth establishes who is
  * calling from the token and the role comes from profiles, never from the
@@ -18,7 +19,7 @@ import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js'
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorHandler } from '../http/handleError.js';
-import { listOpenEvents } from '../services/openEventService.js';
+import { listOpenEvents, getOpenEvent } from '../services/openEventService.js';
 
 const handleError = createErrorHandler('open events route');
 
@@ -40,6 +41,8 @@ export function createOpenEventRouter({
 
   router.use(requireAuth);
 
+  const attendeeOnly = requireRole(ROLE.ATTENDEE);
+
   /**
    * A bare array, like the other lists; none open is 200 [], never 404. Each
    * event says how many places are left, whether it is full, and whether the
@@ -52,11 +55,37 @@ export function createOpenEventRouter({
    * Statuses: 200, 401, 403 for any role but Attendee (or no role), 500 for
    * anything untyped.
    */
-  router.get('/', requireRole(ROLE.ATTENDEE), async (req, res) => {
+  router.get('/', attendeeOnly, async (req, res) => {
     try {
       const events = await listOpenEvents({ attendeeId: req.user.id, client, now: now() });
       res.set('Cache-Control', 'no-store');
       res.status(200).json(events);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * One open event, for the details page. The same eligibility as the list,
+   * judged now, so a direct URL gets no more than the list would show: an
+   * event that is missing, not Confirmed, switched off, outside its window or
+   * already started is 404 with one message for all of them.
+   *
+   * The browse preview: no venue and no internal planning information. The
+   * registered-attendee view (SCRUM-24) is a separate endpoint and page.
+   *
+   * Statuses: 200, 401, 403 for any role but Attendee, 404, 500.
+   */
+  router.get('/:id', attendeeOnly, async (req, res) => {
+    try {
+      const event = await getOpenEvent({
+        attendeeId: req.user.id,
+        eventId: req.params.id,
+        client,
+        now: now(),
+      });
+      res.set('Cache-Control', 'no-store');
+      res.status(200).json(event);
     } catch (err) {
       handleError(err, res);
     }

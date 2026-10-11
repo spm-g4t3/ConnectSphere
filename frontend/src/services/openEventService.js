@@ -24,3 +24,19 @@ export async function getOpenEvents() {
   const response = await apiClient.get("/open-events");
   return response.data;
 }
+
+/**
+ * One open event, for the details page (GET /open-events/:id): the same
+ * eligibility as the list, judged by the server at this moment, with the same
+ * fields. Read afresh each time it is called.
+ *
+ * Failures: 401, 403 (not an Attendee), 404 (the event is not open for
+ * registration, for whatever reason) and 500.
+ *
+ * @param {string} eventId
+ * @returns {Promise<Object>}
+ */
+export async function getOpenEvent(eventId) {
+  const response = await apiClient.get(`/open-events/${encodeURIComponent(eventId)}`);
+  return response.data;
+}

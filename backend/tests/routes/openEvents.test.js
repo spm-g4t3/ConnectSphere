@@ -709,3 +709,219 @@ describe('SCRUM495 freshness and failures', () => {
     spy.mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// GET /api/open-events/:id, the details page's read
+// ---------------------------------------------------------------------------
+
+function getOne(client, eventId, { requireAuth = signedInWithRole(ROLE.ATTENDEE), now = () => NOW } = {}) {
+  const app = express().use('/api/open-events', createOpenEventRouter({ client, requireAuth, now }));
+  return request(app).get(`/api/open-events/${eventId}`);
+}
+
+const NOT_OPEN = { error: 'This event is not open for registration' };
+
+describe('SCRUM495_AC1 only Attendees can open one event', () => {
+  it('lets an Attendee in', async () => {
+    const row = eventRow();
+
+    const res = await getOne(createFakeClient([row]), row.id);
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(row.id);
+  });
+
+  it.each([
+    ROLE.EVENT_ORGANISER,
+    ROLE.EVENT_COORDINATOR,
+    ROLE.VENUE_STAFF,
+    ROLE.TECHNICAL_SUPPORT_STAFF,
+    ROLE.EVENT_COORDINATOR_LEAD,
+    ROLE.SAFETY_OFFICER,
+    'something_unknown',
+    null,
+  ])('refuses role %s with 403 before reading anything', async (role) => {
+    const row = eventRow();
+    const client = createFakeClient([row]);
+
+    const res = await getOne(client, row.id, { requireAuth: signedInWithRole(role) });
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('refuses an unauthenticated caller with 401 before reading anything', async () => {
+    const row = eventRow();
+    const client = createFakeClient([row]);
+
+    const res = await getOne(client, row.id, { requireAuth: signedOut });
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+describe('SCRUM495_AC2 one event follows the same eligibility as the list', () => {
+  it('returns the same entry the list gives for that event', async () => {
+    const row = eventRow({ registration_capacity: 4 });
+    const registrations = [registration(row.id, OTHER_ATTENDEE_ID), registration(row.id, ATTENDEE_ID)];
+
+    const listed = (await get(createFakeClient([row], { registrations }))).body[0];
+    const opened = (await getOne(createFakeClient([row], { registrations }), row.id)).body;
+
+    expect(opened).toEqual(listed);
+    expect(opened).toMatchObject({ placesLeft: 2, isRegistered: true, canRegister: false });
+  });
+
+  it.each([
+    ['not Confirmed', { status: 'approved' }],
+    ['registration off', { registration_enabled: false }],
+    ['not yet open', { registration_opens_at: '2026-10-13T00:00:00+00:00' }],
+    ['closed', { registration_closes_at: '2026-10-12T10:00:00+00:00' }],
+    ['already started', { proposed_start: '2026-10-12T09:00:00+00:00', proposed_end: '2026-10-12T17:00:00+00:00', registration_closes_at: '2026-10-12T23:00:00+00:00' }],
+    ['no window set', { registration_opens_at: null, registration_closes_at: null }],
+  ])('answers 404 for an event that is %s, by direct URL', async (_label, overrides) => {
+    const row = eventRow(overrides);
+
+    const res = await getOne(createFakeClient([row]), row.id);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual(NOT_OPEN);
+  });
+
+  it('answers the same 404 for an event that does not exist', async () => {
+    const res = await getOne(createFakeClient([eventRow()]), 'ffffffff-ffff-4fff-8fff-ffffffffffff');
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual(NOT_OPEN);
+  });
+
+  it('answers the same 404 for a malformed id, without reading anything', async () => {
+    const client = createFakeClient([eventRow()]);
+
+    const res = await getOne(client, 'not-an-id');
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual(NOT_OPEN);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('still drops an ineligible or different row even if the query returned it', async () => {
+    const wanted = eventRow({ status: 'approved' });
+    const other = eventRow();
+
+    const res = await getOne(createFakeClient([other, wanted], { ignoreFilters: true }), wanted.id);
+
+    expect(res.status).toBe(404);
+  });
+
+  it('asks the database for exactly the list conditions plus the id, at the clock instant', async () => {
+    const row = eventRow();
+    const client = createFakeClient([row]);
+
+    await getOne(client, row.id);
+
+    expect(client.calls[0].filters).toEqual([
+      ['eq', 'status', 'confirmed'],
+      ['eq', 'registration_enabled', true],
+      ['lte', 'registration_opens_at', '2026-10-12T10:00:00.000Z'],
+      ['gt', 'registration_closes_at', '2026-10-12T10:00:00.000Z'],
+      ['gt', 'proposed_start', '2026-10-12T10:00:00.000Z'],
+      ['eq', 'id', row.id],
+    ]);
+  });
+
+  it('judges eligibility afresh on every request, so an event drops out when its window closes', async () => {
+    const row = eventRow();
+    const client = createFakeClient([row]);
+    let clock = new Date('2026-10-19T23:59:59.999Z');
+
+    const before = await getOne(client, row.id, { now: () => clock });
+    clock = new Date('2026-10-20T00:00:00.000Z');
+    const after = await getOne(client, row.id, { now: () => clock });
+
+    expect(before.status).toBe(200);
+    expect(after.status).toBe(404);
+  });
+
+  it('tells the browser not to store it', async () => {
+    const row = eventRow();
+
+    const res = await getOne(createFakeClient([row]), row.id);
+
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+});
+
+describe('SCRUM495_AC3_AC6 availability and registration state on one event', () => {
+  it('shows Full for an event at capacity, and it is still reachable', async () => {
+    const row = eventRow({ registration_capacity: 1 });
+
+    const res = await getOne(createFakeClient([row], { registrations: [registration(row.id, OTHER_ATTENDEE_ID)] }), row.id);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ placesLeft: 0, isFull: true, canRegister: false });
+  });
+
+  it('shows no limit for an event with no capacity', async () => {
+    const row = eventRow({ registration_capacity: null });
+
+    const res = await getOne(createFakeClient([row]), row.id);
+
+    expect(res.body).toMatchObject({ capacity: null, placesLeft: null, isFull: false, canRegister: true });
+  });
+
+  it('shows Registered for the caller\'s own registration only', async () => {
+    const row = eventRow();
+
+    const mine = await getOne(createFakeClient([row], { registrations: [registration(row.id, ATTENDEE_ID)] }), row.id);
+    const theirs = await getOne(createFakeClient([row], { registrations: [registration(row.id, OTHER_ATTENDEE_ID)] }), row.id);
+
+    expect(mine.body).toMatchObject({ isRegistered: true, canRegister: false });
+    expect(theirs.body).toMatchObject({ isRegistered: false, canRegister: true });
+  });
+
+  it.each(['withdrawn', 'cancelled'])('does not count a %s registration', async (status) => {
+    const row = eventRow({ registration_capacity: 1 });
+
+    const res = await getOne(createFakeClient([row], { registrations: [registration(row.id, ATTENDEE_ID, status)] }), row.id);
+
+    expect(res.body).toMatchObject({ placesLeft: 1, isFull: false, isRegistered: false, canRegister: true });
+  });
+
+  it('reads the registrations of this one event, in one query', async () => {
+    const row = eventRow();
+    const client = createFakeClient([row]);
+
+    await getOne(client, row.id);
+
+    expect(client.calls.filter((call) => call.table === 'registrations')).toHaveLength(1);
+    expect(client.calls[1].filters).toEqual([['in', 'event_request_id', [row.id]], ['eq', 'status', 'registered']]);
+  });
+});
+
+describe('SCRUM495_AC8 one event carries no internal planning information', () => {
+  it('returns exactly the allowlisted fields, and no venue, coordinator or other attendee', async () => {
+    const row = eventRow();
+    const registrations = [registration(row.id, OTHER_ATTENDEE_ID), registration(row.id, ATTENDEE_ID)];
+
+    const res = await getOne(createFakeClient([row], { registrations }), row.id);
+    const text = JSON.stringify(res.body);
+
+    expect(Object.keys(res.body).sort()).toEqual(ALLOWED_KEYS);
+    for (const secret of ['Grand Hall', '33333333-3333-4333-8333-333333333333', '55555555-5555-4555-8555-555555555555', 'Main hall', 'AV Co', 'Internal purpose', OTHER_ATTENDEE_ID]) {
+      expect(text).not.toContain(secret);
+    }
+  });
+
+  it('answers a generic 500 without the driver message when a read fails', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const row = eventRow();
+
+    const res = await getOne(createFakeClient([row], { error: { code: '42703', message: 'column registration_enabled does not exist' } }), row.id);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    spy.mockRestore();
+  });
+});

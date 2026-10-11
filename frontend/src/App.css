@@ -352,6 +352,18 @@ button { cursor: pointer; }
 .browse-open-events__availability--full { color: #a43c32; }
 .browse-open-events__error { align-items: center; background: #fff0ee; border-radius: 6px; color: #a43c32; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; padding: 8px 12px; }
 .dashboard .browse-open-events__error p { color: #a43c32; margin: 0; }
+/* SCRUM-495. One open event. Its facts are a definition list, not .dashboard li
+   rows, and the description keeps the organiser's line breaks. */
+.browse-event-details__facts { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin: 0 0 18px; }
+.browse-event-details__facts dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.browse-event-details__facts dd { align-items: center; color: var(--ink); display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 2px 0 0; overflow-wrap: anywhere; }
+.dashboard .browse-event-details h3 { color: var(--teal-dark); font-size: 1rem; margin: 0 0 8px; }
+.browse-event-details__description { color: var(--ink) !important; overflow-wrap: anywhere; white-space: pre-wrap; }
+.browse-event-details__register { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 18px 0; }
+.browse-event-details__register p { margin: 0; }
+.browse-event-details button:disabled { cursor: not-allowed; opacity: 0.55; }
+.browse-event-details__unavailable, .browse-event-details__error { background: #fff0ee; border-radius: 6px; color: #a43c32; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; margin: 0 0 12px; padding: 8px 12px; }
+.dashboard .browse-event-details__unavailable p, .dashboard .browse-event-details__error p { color: #a43c32; margin: 0; }
 .dashboard--coordinator .my-booking-requests button:disabled { cursor: not-allowed; opacity: 0.55; }
 .dashboard--coordinator .status--booking-pending { background: #fff6e5; color: #8a5a00; }
 .dashboard--coordinator .status--booking-approved { background: #e8f7f1; color: #17684f; }

@@ -216,6 +216,78 @@ describe("SCRUM453_AC3 the browse page is refused to every other role", () => {
     expect(window.location.pathname).toBe("/open-events");
   });
 });
+
+const EVENT_ID = "9c1d1f0e-5a0e-4c3e-8d3a-1f5f6a7b8c9d";
+
+describe("SCRUM495 the browse details route", () => {
+  it.each(OTHER_ROLES)("SCRUM495_%s_at_an_event's_details_URL_is_sent_to_unauthorized_and_nothing_is_fetched", async (role) => {
+    restoreSession(role);
+    renderAppAt(`/open-events/${EVENT_ID}`);
+
+    expect(await screen.findByRole("heading", { name: "Not available to your role" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/unauthorized");
+    expect(apiClient.get).not.toHaveBeenCalledWith(`/open-events/${EVENT_ID}`);
+  });
+
+  it("SCRUM495_a_signed_out_visitor_at_an_event's_details_URL_is_sent_to_login", async () => {
+    renderAppAt(`/open-events/${EVENT_ID}`);
+
+    await waitFor(() => expect(window.location.pathname).toBe("/login"));
+    expect(apiClient.get).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM495_an_attendee_opening_the_details_URL_directly_reads_that_event_afresh", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: {
+        id: EVENT_ID, eventName: "Open Day", description: "Come along.", startsAt: "2026-10-25T01:00:00.000Z",
+        endsAt: "2026-10-25T03:00:00.000Z", capacity: null, placesLeft: null, isFull: false, isRegistered: false, canRegister: true,
+      },
+    });
+    restoreSession("attendee");
+    renderAppAt(`/open-events/${EVENT_ID}`);
+
+    expect(await screen.findByRole("heading", { name: "Open Day", level: 1 })).toBeInTheDocument();
+    expect(apiClient.get).toHaveBeenCalledWith(`/open-events/${EVENT_ID}`);
+    expect(window.location.pathname).toBe(`/open-events/${EVENT_ID}`);
+  });
+
+  it("SCRUM495_a_direct_URL_for_an_event_that_is_not_open_says_so_and_links_back", async () => {
+    vi.mocked(apiClient.get).mockRejectedValue({ response: { status: 404 } });
+    restoreSession("attendee");
+    renderAppAt(`/open-events/${EVENT_ID}`);
+
+    expect(await screen.findByText("This event is not open for registration.")).toBeInTheDocument();
+    expect(window.location.pathname).toBe(`/open-events/${EVENT_ID}`);
+    expect(screen.getByRole("link", { name: "Back to open events" })).toHaveAttribute("href", "/open-events");
+  });
+
+  it("SCRUM495_selecting_an_event_in_the_list_opens_its_details", async () => {
+    vi.mocked(apiClient.get).mockImplementation(async (url) => {
+      if (url === "/open-events") {
+        return {
+          data: [{
+            id: EVENT_ID, eventName: "Open Day", startsAt: "2026-10-25T01:00:00.000Z", endsAt: "2026-10-25T03:00:00.000Z",
+            capacity: 5, placesLeft: 2, isFull: false, isRegistered: false, canRegister: true,
+          }],
+        };
+      }
+      return {
+        data: {
+          id: EVENT_ID, eventName: "Open Day", description: "Details text", startsAt: "2026-10-25T01:00:00.000Z",
+          endsAt: "2026-10-25T03:00:00.000Z", capacity: 5, placesLeft: 2, isFull: false, isRegistered: false, canRegister: true,
+        },
+      };
+    });
+    restoreSession("attendee");
+    renderAppAt("/open-events");
+
+    await userEvent.click(await screen.findByRole("link", { name: "Open Day" }));
+
+    expect(await screen.findByText("Details text")).toBeInTheDocument();
+    expect(window.location.pathname).toBe(`/open-events/${EVENT_ID}`);
+    expect(apiClient.get).toHaveBeenCalledWith(`/open-events/${EVENT_ID}`);
+  });
+});
 describe("SCRUM453_AC3 other roles, unknown roles and signed-out visitors", () => {
   it.each(OTHER_ROLES)(
     "SCRUM453_AC3_%s_at_/dashboard_sees_their_own_view_and_no_attendee_content",

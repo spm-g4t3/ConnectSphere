@@ -54,7 +54,10 @@
 import { STATUS } from '../domain/eventRequestStatus.js';
 import { isOpenForRegistration } from '../domain/registrationWindow.js';
 import { availability, holdsAPlace, ACTIVE_REGISTRATION_STATUS } from '../domain/registrationAvailability.js';
-import { ValidationError } from '../errors.js';
+import { ValidationError, NotFoundError } from '../errors.js';
+// The repository's one uuid check, a pure module, so this service stays loadable
+// without credentials.
+import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
 
 const SETTINGS_COLUMNS = `
   registration_enabled, registration_opens_at, registration_closes_at,
@@ -129,6 +132,47 @@ function tally(registrations, attendeeId) {
   return { counts, mine };
 }
 
+function assertAttendee(attendeeId) {
+  if (typeof attendeeId !== 'string' || attendeeId.trim() === '') {
+    throw new ValidationError(
+      'Invalid request -- attendeeId: is required',
+      [{ field: 'attendeeId', message: 'is required' }],
+    );
+  }
+}
+
+/** The eligibility conditions, as filters on one query. Shared by the list and one event. */
+function openEventsQuery(db, instant) {
+  return db
+    .from('event_requests')
+    .select(COLUMNS)
+    .eq('status', STATUS.CONFIRMED)
+    .eq('registration_enabled', true)
+    .lte('registration_opens_at', instant)
+    .gt('registration_closes_at', instant)
+    .gt('proposed_start', instant);
+}
+
+/**
+ * Add availability and the caller's own state to eligible rows, reading every
+ * event's registrations in one query.
+ */
+async function withRegistrationState(db, rows, attendeeId) {
+  if (rows.length === 0) return [];
+
+  const { data: registrations, error } = await db
+    .from('registrations')
+    .select(REGISTRATION_COLUMNS)
+    .in('event_request_id', rows.map((row) => row.id))
+    .eq('status', ACTIVE_REGISTRATION_STATUS);
+
+  if (error) throw error;
+
+  const { counts, mine } = tally(registrations ?? [], attendeeId);
+
+  return rows.map((row) => toOpenEvent(row, counts.get(row.id) ?? 0, mine.has(row.id)));
+}
+
 /**
  * Events open for registration right now, earliest start first.
  *
@@ -142,24 +186,11 @@ function tally(registrations, attendeeId) {
  * @throws {ValidationError} when no attendee was supplied, before any read
  */
 export async function listOpenEvents({ attendeeId, client, now = new Date() } = {}) {
-  if (typeof attendeeId !== 'string' || attendeeId.trim() === '') {
-    throw new ValidationError(
-      'Invalid request -- attendeeId: is required',
-      [{ field: 'attendeeId', message: 'is required' }],
-    );
-  }
+  assertAttendee(attendeeId);
 
   const db = await resolveClient(client);
-  const instant = now.toISOString();
 
-  const { data, error } = await db
-    .from('event_requests')
-    .select(COLUMNS)
-    .eq('status', STATUS.CONFIRMED)
-    .eq('registration_enabled', true)
-    .lte('registration_opens_at', instant)
-    .gt('registration_closes_at', instant)
-    .gt('proposed_start', instant)
+  const { data, error } = await openEventsQuery(db, now.toISOString())
     .order('proposed_start', { ascending: true })
     .order('id', { ascending: true });
 
@@ -168,17 +199,48 @@ export async function listOpenEvents({ attendeeId, client, now = new Date() } = 
   if (error) throw error;
 
   const events = (data ?? []).filter((row) => isOpenForRegistration(toSettings(row), now));
-  if (events.length === 0) return [];
 
-  const { data: registrations, error: registrationError } = await db
-    .from('registrations')
-    .select(REGISTRATION_COLUMNS)
-    .in('event_request_id', events.map((row) => row.id))
-    .eq('status', ACTIVE_REGISTRATION_STATUS);
+  return withRegistrationState(db, events, attendeeId);
+}
 
-  if (registrationError) throw registrationError;
+/**
+ * One open event, for the details page: the same eligibility rule as the
+ * list, judged afresh at this instant, with the same fields.
+ *
+ * An event that does not exist and one that is not open (not Confirmed,
+ * registration off, window closed, already started) are the same NotFoundError
+ * with the same message, so this cannot be used to probe for events that are
+ * not on offer. A malformed id is answered the same way, without a read.
+ *
+ * This is the browse preview. It carries no venue and no internal planning
+ * information, and it is not the registered-attendee view of SCRUM-24.
+ *
+ * @param {object} options
+ * @param {string} options.attendeeId  the caller, from the verified token
+ * @param {string} options.eventId
+ * @param {object} [options.client]
+ * @param {Date} [options.now]
+ * @returns {Promise<object>} the same shape as one list entry
+ * @throws {ValidationError} when no attendee was supplied
+ * @throws {NotFoundError}   when the event is not open for registration
+ */
+export async function getOpenEvent({ attendeeId, eventId, client, now = new Date() } = {}) {
+  assertAttendee(attendeeId);
 
-  const { counts, mine } = tally(registrations ?? [], attendeeId);
+  const notOpen = () => new NotFoundError('This event is not open for registration');
+  if (typeof eventId !== 'string' || !isPlausibleId(eventId)) throw notOpen();
 
-  return events.map((row) => toOpenEvent(row, counts.get(row.id) ?? 0, mine.has(row.id)));
+  const db = await resolveClient(client);
+
+  const { data, error } = await openEventsQuery(db, now.toISOString()).eq('id', eventId);
+
+  if (error) throw error;
+
+  const rows = (data ?? []).filter(
+    (row) => row.id === eventId && isOpenForRegistration(toSettings(row), now),
+  );
+  if (rows.length === 0) throw notOpen();
+
+  const [event] = await withRegistrationState(db, rows, attendeeId);
+  return event;
 }

@@ -5,13 +5,10 @@
 
 export const BROWSE_OPEN_EVENTS_PATH = "/open-events";
 
-/**
- * The details page for one open event.
- *
- * Not registered in App.jsx yet: the details page is a later SCRUM-495
- * subtask, so until then following one of these links reaches the catch-all
- * and lands on /dashboard.
- */
+/** The route pattern for one event's details, as App.jsx registers it. */
+export const OPEN_EVENT_DETAILS_ROUTE = `${BROWSE_OPEN_EVENTS_PATH}/:eventId`;
+
+/** The details page for one open event. */
 export function openEventDetailsPath(eventId) {
   return `${BROWSE_OPEN_EVENTS_PATH}/${encodeURIComponent(eventId)}`;
 }

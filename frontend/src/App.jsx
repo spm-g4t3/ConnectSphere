@@ -17,7 +17,8 @@ import { parseCalendarDate } from "./services/calendarRange";
 import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck";
 import EquipmentReview from "./components/EquipmentReview";
 import BrowseOpenEvents from "./components/BrowseOpenEvents";
-import { BROWSE_OPEN_EVENTS_PATH } from "./services/openEventRoutes";
+import BrowseEventDetails from "./components/BrowseEventDetails";
+import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE } from "./services/openEventRoutes";
 import "./App.css";
 
 function LoadingScreen() {
@@ -170,14 +171,24 @@ function AppRoutes() {
             other role. Belt to the backend's braces: what this buys is that a
             direct URL from another role lands on /unauthorized rather than on a
             page whose only content is an error. The .dashboard wrapper is what
-            gives the list its card styling. The details page
-            (/open-events/:eventId) is a later subtask and not registered yet. */}
+            gives the list its card styling. The details page below is guarded
+            the same way, so a direct URL cannot skip the role check. */}
         <Route
           path={BROWSE_OPEN_EVENTS_PATH}
           element={
             <ProtectedRoute allowedRoles={["attendee"]}>
               <div className="dashboard dashboard--attendee">
                 <BrowseOpenEvents />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path={OPEN_EVENT_DETAILS_ROUTE}
+          element={
+            <ProtectedRoute allowedRoles={["attendee"]}>
+              <div className="dashboard dashboard--attendee">
+                <BrowseEventDetails />
               </div>
             </ProtectedRoute>
           }
