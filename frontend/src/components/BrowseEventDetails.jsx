@@ -25,10 +25,26 @@
 // of its own. With no handler the button stays disabled and says so: it never
 // pretends to have registered anyone. SCRUM-22 supplies the handler, and the
 // page then reads the event again, because availability may have changed.
+//
+// REFRESH AND STALE STATE. Nothing is cached. The event is read when the page
+// opens, after every registration attempt, and whenever the reader returns to
+// the tab, and the server's answer replaces what is shown. So an event that
+// has since filled shows Full, one that has gone back to Approved (or closed,
+// or started) turns into the not-open message with no Register action, and a
+// registration made elsewhere shows as Registered. The displayed capacity is
+// never treated as authority: Register only asks SCRUM-22's flow, which checks
+// capacity and duplicates itself, and what happened is then taken from the
+// refreshed event rather than guessed from the failure. A refresh does not
+// blank the page; only the first read shows "Loading...". If a refresh cannot
+// reach the server the last details stay up with a notice and Register is
+// disabled, because they can no longer be confirmed; a lost session or a
+// refused role replaces them with the error. Overlapping reads are settled by
+// recency, so a slow old answer never overwrites a newer one.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getOpenEvent } from "../services/openEventService";
+import useRefreshOnReturn from "./useRefreshOnReturn";
 import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import {
   availabilityLabel,
@@ -53,7 +69,7 @@ function BackLink() {
   );
 }
 
-function RegisterAction({ event, onRegister, registering, onClick }) {
+function RegisterAction({ event, onRegister, registering, stale, onClick }) {
   if (event.isRegistered) {
     return (
       <div className="browse-event-details__register">
@@ -78,13 +94,21 @@ function RegisterAction({ event, onRegister, registering, onClick }) {
 
   return (
     <div className="browse-event-details__register">
-      <button type="button" onClick={onClick} disabled={!onRegister || registering}>
+      <button type="button" onClick={onClick} disabled={!onRegister || registering || stale}>
         {registering ? "Registering..." : "Register"}
       </button>
       {!onRegister && <p>Registering for events is not available yet.</p>}
+      {onRegister && stale && <p>Registration is paused until this event can be checked again.</p>}
     </div>
   );
 }
+
+const FILLED_MESSAGE = "Sorry, this event filled up before your registration went through. It is now full.";
+const ALREADY_MESSAGE = "You are already registered for this event.";
+const GENERIC_REGISTER_MESSAGE = "Registration could not be completed. Please try again.";
+
+// A refusal is not transient: keeping the details on screen after one would be wrong.
+const REFUSALS = [401, 403];
 
 export default function BrowseEventDetails({ onRegister }) {
   const { eventId } = useParams();
@@ -92,49 +116,113 @@ export default function BrowseEventDetails({ onRegister }) {
   const [loading, setLoading] = useState(true);
   const [notOpen, setNotOpen] = useState(false);
   const [error, setError] = useState(null);
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const latest = useRef(0);
+  const loaded = useRef(false);
+  const sending = useRef(false);
 
+  // Reads the event and shows the answer. Resolves to what was found, so a
+  // caller that needs the fresh state (a failed registration) can act on it:
+  // { kind: "open", event }, { kind: "not-open" } or { kind: "error" }, or
+  // { kind: "superseded" } when a newer read took over.
   const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setNotOpen(false);
-    try {
-      setEvent(await getOpenEvent(eventId));
-    } catch (err) {
+    const mine = ++latest.current;
+    const background = loaded.current;
+    if (!background) {
+      setLoading(true);
+      setError(null);
+      setNotOpen(false);
       setEvent(null);
-      if (err.response?.status === 404) {
+    }
+
+    try {
+      const fresh = await getOpenEvent(eventId);
+      if (mine !== latest.current) return { kind: "superseded" };
+      loaded.current = true;
+      setEvent(fresh);
+      setNotOpen(false);
+      setError(null);
+      setRefreshFailed(false);
+      return { kind: "open", event: fresh };
+    } catch (err) {
+      if (mine !== latest.current) return { kind: "superseded" };
+      const status = err.response?.status;
+
+      if (status === 404) {
+        // No longer open, for whatever reason: nothing may still offer to register.
+        loaded.current = true;
+        setEvent(null);
         setNotOpen(true);
-      } else {
-        setError(
-          LOAD_ERROR_MESSAGES[err.response?.status] ||
-            "This event could not be loaded. Please try again.",
-        );
+        setError(null);
+        setRefreshFailed(false);
+        return { kind: "not-open" };
       }
+
+      if (background && !REFUSALS.includes(status)) {
+        setRefreshFailed(true);
+        return { kind: "error" };
+      }
+
+      loaded.current = false;
+      setEvent(null);
+      setNotOpen(false);
+      setRefreshFailed(false);
+      setError(
+        LOAD_ERROR_MESSAGES[status] || "This event could not be loaded. Please try again.",
+      );
+      return { kind: "error" };
     } finally {
-      setLoading(false);
+      if (mine === latest.current) setLoading(false);
     }
   }, [eventId]);
 
   useEffect(() => {
+    loaded.current = false;
     load();
   }, [load]);
 
+  // Not while a registration is in flight: that attempt refreshes when it ends.
+  const refreshOnReturn = useCallback(() => {
+    if (!sending.current) load();
+  }, [load]);
+  useRefreshOnReturn(refreshOnReturn);
+
   async function handleRegister() {
-    if (!onRegister || registering) return;
+    if (!onRegister || sending.current || !event) return;
+    sending.current = true;
     setRegistering(true);
     setRegisterError(null);
+    setNotice(null);
+
+    const name = event.eventName || "this event";
+    let registered;
     try {
       await onRegister(event.id);
+      registered = true;
     } catch {
-      setRegisterError("Registration could not be completed. Please try again.");
-    } finally {
-      setRegistering(false);
+      registered = false;
     }
-    // Success or not, what is on offer may have changed.
-    await load();
-  }
 
+    // Success or not, what is on offer may have changed, and the server's
+    // answer, not this page's copy, says what happened.
+    const fresh = await load();
+    sending.current = false;
+    setRegistering(false);
+
+    if (registered) {
+      setNotice(`You are registered for ${name}.`);
+    } else if (fresh.kind === "open" && fresh.event.isRegistered) {
+      setRegisterError(ALREADY_MESSAGE);
+    } else if (fresh.kind === "open" && fresh.event.isFull) {
+      setRegisterError(FILLED_MESSAGE);
+    } else if (fresh.kind !== "not-open") {
+      // When the event is no longer open, the not-open message already says so.
+      setRegisterError(GENERIC_REGISTER_MESSAGE);
+    }
+  }
   return (
     <>
       <h1>{event ? event.eventName || "Unnamed event" : "Event details"}</h1>
@@ -153,6 +241,15 @@ export default function BrowseEventDetails({ onRegister }) {
         {!loading && error && (
           <div className="browse-event-details__error" role="alert">
             <p>{error}</p>
+            <button type="button" onClick={load}>
+              Try again
+            </button>
+          </div>
+        )}
+
+        {refreshFailed && (
+          <div className="browse-event-details__notice" role="status">
+            <p>Could not refresh this event. Showing the details as last loaded.</p>
             <button type="button" onClick={load}>
               Try again
             </button>
@@ -204,8 +301,14 @@ export default function BrowseEventDetails({ onRegister }) {
               event={event}
               onRegister={onRegister}
               registering={registering}
+              stale={refreshFailed}
               onClick={handleRegister}
             />
+            {notice && (
+              <div className="browse-event-details__success" role="status">
+                <p>{notice}</p>
+              </div>
+            )}
             {registerError && (
               <div className="browse-event-details__error" role="alert">
                 <p>{registerError}</p>
