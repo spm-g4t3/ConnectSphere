@@ -4,6 +4,7 @@
 **Subtask:** SCRUM-514 (this document)
 **Schema:** a new migration, `041_…` (not yet written). 040 is taken (`040_venue_holds.sql`)
 **Written:** 11 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; SCRUM-522 fills in the test names.
+**Corrected:** 11 October 2026, after the audit of SCRUM-491 (venue holds, migration 040): which suites need 041, 040's notification types and their failure mode, and the error codes 041 uses.
 
 This document is the written layer between SCRUM-486's acceptance criteria and the
 Vitest files that will implement them. Deliverable #3 requires test cases
@@ -210,6 +211,19 @@ status covers both "waiting for the Lead to assign" and "assigned, waiting to be
 reviewed". So the organiser's waiting line is derived from the request having no
 `assignedCoordinatorId`, and the status display is left to describe the status.
 
+**041 raises 018's and 029's codes, not 040's.** Two conventions now exist in the
+schema. 018 and 029 raise standard SQLSTATEs (55000 for a state that does not
+allow the action, 42501 for the wrong caller, 22023 for a bad value, 40001 for a
+lost race) and leave the HTTP status to `translateError` in
+`eventRequestService.js`, which maps each code once. 040, the venue holds, raises
+`errcode = 'PT409'` with a hint (`EVENT_NOT_APPROVED`), a PostgREST code that sets
+the HTTP status itself. 041's functions follow 018 and 029, because they sit
+beside them: `assign_event_request` is the first-assignment twin of
+`reassign_event_request` (018), and the not-yet-assigned refusal is added to
+`start_event_review` (029). A reader comparing the assign and reassign functions
+should find the same codes for the same refusals, and the service should go on
+translating one convention, not two. The cases below assert those codes.
+
 **Notices are written inside the functions.** Every notification in this schema is
 written by a Postgres function, in the transaction that causes it, so a request
 and its notice cannot part. AC10's three notices follow: the Lead's inside
@@ -361,9 +375,25 @@ provokes two at once, and needs two real connections.
 | AC10-01 | LEAD and LEAD2 exist | Submit a request | One notice to each Lead, of a new type, with `eventRequestId` and the event name in the payload | not yet written (pglite) |
 | AC10-02 | UNASSIGNED | LEAD assigns it to A | One notice to A, and one to ORG naming A | not yet written (pglite) |
 | AC10-03 | HELD BY A | LEAD (or A) reassigns to B | One notice to B, and one to ORG naming B | not yet written (pglite) |
-| AC10-04 | — | Read 041's `notifications_type_known` | 040's seven types, all still there, plus the new ones | not yet written (mig, pglite) |
+| AC10-04 | — | Read 041's `notifications_type_known` | All seven of 040's types, `booking_flagged`, `booking_request_withdrawn`, `clarification_requested`, `clarification_replied`, `clarification_closed`, `booking_flagged_setup_change`, `venue_hold_expired`, plus the new ones. Not 034's six, which lack `venue_hold_expired` | not yet written (mig, pglite) |
 | AC10-05 | An assignment refused (AC4-02, AC3-02) | — | No notice written | not yet written (pglite) |
 | AC10-06 | A notice of each new type | Each recipient opens their notifications | Shown in words, not as a raw type | not yet written (screen) |
+| AC10-07 | 041 applied after 040; an active hold whose expiry has passed | `process_venue_hold_expiry` | The hold is marked expired and its `venue_hold_expired` notice written, as before 041 | not yet written (pglite) |
+
+**Why AC10-04 and AC10-07 matter beyond this story.** `notifications_type_known`
+is restated whole every time a type is added: 041 drops it and adds it again with
+the new types beside the old. The last restatement is 040's, with seven types.
+An earlier list, 034's, has six and lacks `venue_hold_expired`. If 041 restated
+that one, one of two things would follow. If any hold has already expired on the
+live database, its notice row would fail the new constraint, so 041 would not
+apply at all. If none has, 041 would apply cleanly and every later run of
+`process_venue_hold_expiry` would fail with 23514 on its notice insert, and
+because the expiry and the notice are one statement, **venue holds would silently
+stop expiring**. AC10-04 catches the list; AC10-07 catches the effect. 041 leaves
+040's other notification objects (`notifications_hold_expired_needs_hold` and the
+partial index `notifications_one_per_expired_hold`) as they are; both are
+written `type <> 'venue_hold_expired' or …`, so the new types pass them
+untouched.
 
 ---
 
@@ -392,6 +422,7 @@ Where a criterion owns a trap, the case is above and named here; the rest are
 | `start_event_review` must name the Lead, not say "not assigned to you" | AC8-01, AC8-02 |
 | The two null-caller holes must close (037 equipment lines, 030 close clarification) | TR-04, TR-05 |
 | Submission must succeed with no Lead, writing no notice | AC11-01 |
+| The suites that build or read the database must know about 041 | TR-06, TR-07 |
 | Of two simultaneous assignments, one succeeds and the other names the winner | AC4-02, AC4-05 |
 
 | Case | Preconditions | Action | Expected result | Implemented by |
@@ -401,7 +432,19 @@ Where a criterion owns a trap, the case is above and named here; the rest are
 | TR-03 | TR-02's request | Open its assignment history | "Current coordinator" reads not assigned, although the newest history row names A. Today `AssignmentHistory` takes the current coordinator from the newest row, which after TR-02 would be wrong | not yet written (screen) |
 | TR-04 | UNASSIGNED | Migration 037's equipment-lines function with a null caller | Refused 42501. Today `v_assigned is distinct from p_coordinator_id` lets null meet null through; safe only while 017 guaranteed a coordinator | not yet written (pglite) |
 | TR-05 | UNASSIGNED at `pending_clarification` is impossible, so: a request whose coordinator is null, by a direct write | Migration 030's close-clarification function with a null caller | Refused 42501 before the status check. The same `is distinct from` hole as TR-04 | not yet written (pglite) |
-| TR-06 | — | Every PGlite suite that applies 016, 017 or 021 | Also applies 041, so its database is the one production will have | not yet written (pglite) |
+| TR-06 | — | The two suites that apply migrations to a real PGlite database and include 016, 017 or 021: `eventStatusLifecycleDatabase.test.js`, `eventClarificationDatabase.test.js` | Each also applies 041, after 040, so its database is the one production will have | not yet written (pglite) |
+| TR-07 | — | The two text tests that read every migration: `draftToSubmittedSinglePath.test.js`, `eventStatusHistoryMigration.test.js` | Their expectations change to include 041 (see *Existing tests this story must change*). `venueSetupTimeMigration.test.js` needs nothing: its mention of 021 is in a fixed list of 018 to 022 about the venue functions, not the status history | not yet written (mig) |
+
+**Two kinds of suite, and why a text test can break without being wrong.** A PGlite
+suite applies the migrations to a real database, so it needs 041 in its list to
+test the database production will have; leave it out and it goes on passing
+against the old behaviour, which is the dangerous case. A text test reads the
+migration files and pins a fact about them, such as "only 016 and 021 set
+`status = 'submitted'`". Both of these scan every migration with `readdirSync`,
+so they pick 041 up on their own, and the moment 041 adds a third definition of
+`submit_event_request` the fact they pin stops being true. That failure is the
+test working: it was written to notice exactly a new writer of the status, and the
+fix is to add 041 to its expectation, with the reason, not to loosen it.
 
 ---
 
@@ -426,6 +469,7 @@ deleted to make room.
 | `SCRUM325_gives_no_other_way_to_submit_without_a_coordinator` | pglite | Pins the constraint TR-01 relaxes. Reverses |
 | `SCRUM318_lets_the_reopened_draft_be_submitted_again_through_the_one_submission_path` | pglite | Asserts the resubmitted request is given a coordinator again. Reverses: TR-02 |
 | `sets status = 'submitted' only in the two definitions of submit_event_request`; `chooses the coordinator once, with the one selection rule`; `sets status, submitted_at and the coordinator in one statement`; `writes the assignment history once, after the update, in the same function`; `stops before writing when no coordinator is available`; `is backed by the constraint that refuses a submitted request with no coordinator` | `backend/tests/db/draftToSubmittedSinglePath.test.js` | They read 016's and 021's text and pin assignment on submission. 041 adds a third definition, without a selection, and relaxes the constraint |
+| `has no other writer in any migration` | `backend/tests/db/eventStatusHistoryMigration.test.js` | Lists the files whose functions write the status history (`021_event_status_history.sql: 2`, `022_event_status_transitions.sql: 1`, `029_event_request_decisions_functions.sql: 2`). 041 redefines `submit_event_request` and `start_event_review`, both of which write a history row, so 041 joins the list with its count. Right when written: it pinned every writer there was |
 | `SCRUM485_AC5_%s_refuses_%s_with_403_and_queries_nothing` (its `GET /coordinators` rows) | route | Asserts a Lead is refused the coordinator list. If the picker reads that route, this row changes (open question 1) |
 | `SCRUM485_AC3_an_event_coordinator_lead_gets_the_lead_dashboard`, `SCRUM485_AC3_the_%s_dashboard_calls_no_service`, `SCRUM485_AC3_the_%s_dashboard_has_no_link_to_a_page_that_does_not_exist` | `frontend/tests/components/Dashboard.test.jsx` | They pin the Lead's dashboard as a placeholder that fetches nothing. The queue makes it real (AC2-07), for the Lead only; the Safety Officer's cases stand |
 | `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link` | `frontend/tests/components/Navigation.test.jsx` | Pins one link. Changes if the queue gets a route and a link of its own; SCRUM-485's design said the count case would force exactly this update |
@@ -493,7 +537,7 @@ deleted to make room.
 | Every test named here | SCRUM-522 |
 | The implementation | The SCRUM-486 subtasks between them |
 
-**Tally:** 69 cases (63 under the criteria, 6 traps), all **not yet written**, counted from the tables.
+**Tally:** 71 cases (64 under the criteria, 7 traps), all **not yet written**, counted from the tables.
 
 | Section | Cases |
 |---|---|
@@ -506,10 +550,11 @@ deleted to make room.
 | AC7 | 6 |
 | AC8 | 5 |
 | AC9 | 6 |
-| AC10 | 6 |
+| AC10 | 7 |
 | AC11 | 3 |
-| Traps (TR) | 6 |
+| Traps (TR) | 7 |
 
-By where each is proved: **39 need PGlite**, by themselves or beside another
-layer; **17** use a fake client alone (svc, route); the rest are the screen, or
-the live database. AC4-05 is the one case only the live database can prove.
+By where each is proved: **40 need PGlite**, by themselves or beside another
+layer; **17** use a fake client alone (svc, route); **1** is a text test alone
+(TR-07); the rest are the screen, or the live database. AC4-05 is the one case
+only the live database can prove.
