@@ -283,6 +283,16 @@ describe("describeNotification: event_cancelled (SCRUM-374)", () => {
     );
   });
 
+  it("uses safe defaults when the Organiser cancellation details are missing", () => {
+    expect(describeNotification({
+      type: "event_cancelled",
+      payload: { audience: "organiser", reason: "", cancelledAt: null },
+    })).toEqual({
+      headline: "Unnamed event was cancelled",
+      detail: "Reason: No reason recorded.",
+    });
+  });
+
   it("uses audience-specific details for venue and technical support staff", () => {
     expect(describeNotification({
       type: "event_cancelled",
