@@ -375,6 +375,23 @@ describe("SCRUM19_AC1 starting the review", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/no longer assigned to you/i);
   });
+
+  it("SCRUM486_AC8_a_409_on_start_review_says_it_may_be_waiting_for_the_lead", async () => {
+    // AC8-05. Since migration 041, starting the review of a request with no
+    // coordinator is refused with 409 (55000), not 403. The 409 entry names
+    // both of its causes, the Lead's assignment among them; the screen does
+    // not read the server's message to choose between them.
+    vi.mocked(startEventReview).mockRejectedValue(httpError(409));
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest());
+
+    await user.click(await screen.findByRole("button", { name: "Start review" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/waiting for the Event Coordinator Lead to assign it a coordinator/);
+    expect(alert).toHaveTextContent(/no longer be waiting to be reviewed/);
+    expect(alert).not.toHaveTextContent(/no longer assigned to you/);
+  });
 });
 
 

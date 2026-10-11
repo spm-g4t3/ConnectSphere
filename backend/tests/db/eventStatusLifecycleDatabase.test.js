@@ -1240,6 +1240,85 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     });
   });
 
+  describe('SCRUM-486 AC8: nobody reviews or decides a request waiting for the Lead', () => {
+    // SCRUM-517. Before 041 these were refused by 029's caller check, with
+    // 42501 "only the coordinator assigned ...", which was never wrong while
+    // every submitted request had a coordinator. 041 refuses them first, with
+    // 55000 and a message naming the Lead.
+    const WAITING = 'waiting for the Event Coordinator Lead to assign it a coordinator';
+    const startReview = (id, by) => db.query('select * from start_event_review($1, $2)', [id, by]);
+
+    it.each([
+      ['an Event Coordinator', () => coordinator],
+      ['the Lead', () => lead],
+      ['nobody (a null caller)', () => null],
+    ])('SCRUM486_AC8_starting_the_review_of_an_unassigned_request_is_refused_naming_the_lead_for_%s', async (_who, caller) => {
+      // AC8-01 and AC8-02: the same answer for every caller, because there is
+      // no coordinator for any of them to be wrong about.
+      const id = await unassigned();
+      const before = await row(id);
+
+      const err = await refusal(startReview(id, caller()));
+
+      expect(err.code).toBe('55000');
+      expect(err.message).toContain(WAITING);
+      expect(err.message).toContain('its review cannot start yet');
+      expect(await row(id)).toEqual(before);
+      expect(await statusHistory(id)).toHaveLength(0);
+    });
+
+    it('SCRUM486_AC8_a_request_held_by_someone_else_is_still_refused_as_not_yours', async () => {
+      // The other refusal, unchanged and told apart from the new one: by its
+      // code (42501, not 55000) and by its words.
+      const id = await request(STATUS.SUBMITTED);
+
+      const err = await refusal(startReview(id, otherCoordinator));
+
+      expect(err.code).toBe('42501');
+      expect(err.message).toContain('only the coordinator assigned');
+      expect(err.message).not.toContain('Lead');
+    });
+
+    it('SCRUM486_AC8_once_assigned_the_coordinator_starts_the_review', async () => {
+      // The refusal lasts only until the Lead assigns the request.
+      const id = await unassigned();
+      await assign(id, coordinator);
+
+      const { rows: [started] } = await startReview(id, coordinator);
+
+      expect(started).toMatchObject({ status: STATUS.UNDER_REVIEW, reviewing_coordinator_id: coordinator });
+    });
+
+    it('SCRUM486_AC8_a_draft_is_still_answered_as_not_yours', async () => {
+      // Draft is left out of the new check on purpose: it has no coordinator
+      // either, but it is not waiting for the Lead. SCRUM-19 answers it with
+      // the caller check's 403 (AC1-03), and still does.
+      const id = await request(STATUS.DRAFT);
+
+      const err = await refusal(startReview(id, coordinator));
+
+      expect(err.code).toBe('42501');
+    });
+
+    it('SCRUM486_AC8_deciding_an_unassigned_request_is_refused_naming_the_lead', async () => {
+      // decide_event_request had the same fault: it checks the caller before
+      // the status, so a decision on an unassigned submitted request was the
+      // caller check's 42501. Reachable by a direct call, so guarded.
+      const id = await unassigned();
+      const before = await row(id);
+
+      const err = await refusal(db.query(
+        "select * from decide_event_request($1, 'rejected', 'Not viable.', $2, now())", [id, coordinator],
+      ));
+
+      expect(err.code).toBe('55000');
+      expect(err.message).toContain(WAITING);
+      expect(err.message).toContain('it cannot be decided yet');
+      expect(await row(id)).toEqual(before);
+      expect(await statusHistory(id)).toHaveLength(0);
+    });
+  });
+
   // -------------------------------------------------------------------------
   // SCRUM-19 (SCRUM-134): 025's constraints and 029's two functions
   // -------------------------------------------------------------------------

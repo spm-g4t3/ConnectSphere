@@ -111,10 +111,18 @@ function seedableCapacity(value) {
 
 // SCRUM-19. Keyed by status, as ReviewQueue's table is, because the server's
 // messages are written by the database and name ids.
+// SCRUM-486 (SCRUM-517): 409 now has two causes. The request has moved on and
+// is no longer waiting to be reviewed, or it has no coordinator and is waiting
+// for the Event Coordinator Lead to assign it (migration 041 refuses that with
+// 55000, a 409, rather than 029's 403, which told the coordinator it was
+// someone else's when it was nobody's). One message names both: they share a
+// remedy, and telling them apart would mean reading the server's message text,
+// which this screen never does. The return-for-amendment table below does the
+// same with its 409.
 const START_REVIEW_ERROR_MESSAGES = {
   403: "This request is no longer assigned to you, so you cannot start its review. Go back and reopen it to see who holds it now.",
   404: "This request no longer exists.",
-  409: "This request is no longer waiting to be reviewed. Go back and reopen it to see where it stands.",
+  409: "This request cannot be reviewed yet: it may be waiting for the Event Coordinator Lead to assign it a coordinator, or it may no longer be waiting to be reviewed. Go back and reopen it to see where it stands.",
 };
 
 const DECISION_ERROR_MESSAGES = {

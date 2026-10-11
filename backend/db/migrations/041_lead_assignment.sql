@@ -1,6 +1,6 @@
 -- ---------------------------------------------------------------------------
 -- 041_lead_assignment.sql
--- SCRUM-515, SCRUM-516: the Event Coordinator Lead assigns, and reassigns
+-- SCRUM-515 to SCRUM-517: the Event Coordinator Lead assigns, and reassigns
 --
 -- Part of SCRUM-486 "Assign and Reassign Event Coordinators from an Unassigned
 -- Queue - Event Coordinator Lead". This story's one migration, built across
@@ -9,13 +9,13 @@
 --                     of submission, and closes two null-caller holes.
 --   SCRUM-516 (done)  the Lead's first assignment, assign_event_request, and
 --                     reassign_event_request opened to the Lead.
---   SCRUM-517         the refusal to review an unassigned request.
+--   SCRUM-517 (done)  the refusal to review or decide an unassigned request,
+--                     in words that name the Lead.
 --   SCRUM-518         the notifications.
 --
--- DO NOT APPLY THIS to the live database until SCRUM-517 and SCRUM-518 have
--- landed in this file. Without them an unassigned request could not be
--- refused a review with the right message, and nobody would be told one was
--- waiting. The PGlite tests read it from disk, so
+-- DO NOT APPLY THIS to the live database until SCRUM-518 has landed in this
+-- file. Without it nobody is told a request is waiting, so a submission would
+-- sit in the Lead's queue unseen. The PGlite tests read it from disk, so
 -- they run against it whether or not it has been applied.
 --
 -- Run it once in the Supabase SQL Editor, after 040_venue_holds.sql, and after
@@ -53,6 +53,8 @@
 --         Approved, Safety review, Safety approved or Confirmed; refused
 --         otherwise.
 --   AC6   The event's holder, or a Lead, may reassign it.
+--   AC8   Nobody starts the review of, or decides, a submitted request with
+--         no coordinator, and the refusal says it is waiting for the Lead.
 --   AC9   Each assignment's history row names who made it: assigned_by is the
 --         Lead, so new rows are told apart from SCRUM-327's automatic ones,
 --         whose null assigned_by still reads "automatically on submission".
@@ -140,6 +142,46 @@
 --     yet have: SCRUM-488 adds them. 037's assert_equipment_editable is the
 --     precedent, comparing status::text for exactly that reason. Compared as
 --     the enum, the list would fail to run while those values are missing.
+--
+--   * Refusing an unassigned request (SCRUM-517). 029's start_event_review
+--     and decide_event_request already refused a submitted request with no
+--     coordinator, by accident: their caller check, `assigned_coordinator_id
+--     is distinct from <caller>`, is true when the column is null. But it
+--     refused with 42501, "only the coordinator assigned to event request ...",
+--     which tells the caller the request is someone else's when it is
+--     nobody's. Until this story a submitted request always had a coordinator,
+--     so that message was never wrong; now every coordinator can see requests
+--     nobody holds. Each function gains one check, after the lock and before
+--     the caller check, for a submitted request with no coordinator.
+--
+--     Before the caller check, although 029 puts the caller before the status
+--     on 018's argument that only an event's coordinator has reason to ask
+--     whether it can be acted on. That argument is about telling a stranger
+--     nothing beyond "not yours". Here there is no coordinator, so there is no
+--     "yours" to be wrong about, and the answer is the same for every caller.
+--     Draft is left out on purpose: it has no coordinator either, but it is
+--     not waiting for the Lead, and SCRUM-19 answers it with the 403
+--     (docs/test-cases/SCRUM-19.md, AC1-03).
+--
+--     The SQLSTATE is 55000 (object_not_in_prerequisite_state), a 409, not
+--     42501, a 403. 403 says "not you", which is the fault. 409 says "not in a
+--     state that allows this", which is the truth: nobody may start it yet.
+--     The trade, decided with the screen in view: on CoordinatorRequestDetail
+--     the error moves from the 403 entry of START_REVIEW_ERROR_MESSAGES to the
+--     409 entry, which already meant "no longer waiting to be reviewed". That
+--     entry now names both causes. They share a remedy (go back and reopen
+--     the request), and telling them apart would mean the screen reading the
+--     server's message text, which it deliberately never does; one message
+--     for both causes of a 409 is the screen's existing practice
+--     (docs/SCRUM-327.md D15, and its return-for-amendment table). Keeping
+--     42501 would have kept the 403 entry, "no longer assigned to you", true
+--     of the wrong case.
+--
+--     decide_event_request had the same fault and is fixed the same way. A
+--     request cannot be under review without a coordinator, but the function
+--     checks the caller before the status, so a decision attempted on an
+--     unassigned submitted request (a direct call to the decision route) was
+--     answered by the caller check's misleading 403.
 --
 --   * Error codes follow 018 and 029: standard SQLSTATEs (22004, P0002, 55000,
 --     42501, 22023, 23514, 40001), which translateError in
@@ -686,7 +728,248 @@ $$;
 
 
 -- ---------------------------------------------------------------------
--- 7. Tell the API about the changed functions
+-- 7. No review or decision of a request that is waiting for the Lead (SCRUM-517)
+-- ---------------------------------------------------------------------
+-- 029's start_event_review and decide_event_request, each with one check
+-- added after the row lock and before the caller check, and nothing else
+-- changed. See the header, "Refusing an unassigned request", for the order
+-- and the SQLSTATE.
+
+create or replace function start_event_review(
+  p_event_request_id uuid,
+  p_coordinator_id   uuid
+)
+returns event_requests
+language plpgsql
+as $$
+declare
+  v_request event_requests;
+begin
+  -- Lock first, then read: nothing can change the row between the checks
+  -- below and the update that relies on them. A handover (018) takes the same
+  -- lock, so the two take turns.
+  select *
+    into v_request
+    from event_requests
+   where id = p_event_request_id
+     for update;
+
+  if not found then
+    raise exception 'event request % not found', p_event_request_id
+      using errcode = 'no_data_found';
+  end if;
+
+  -- SCRUM-486 AC8: a submitted request nobody has been assigned is waiting for
+  -- the Lead. Before the caller check, unlike 029's other checks, and on
+  -- purpose: 029 asks "is it yours?" before "is it reviewable?" because only
+  -- its coordinator has reason to ask the second (018's argument). Here there
+  -- is no coordinator, so there is no "yours" to be wrong about; the answer is
+  -- the same for every caller, the Lead included. Without this the caller
+  -- check below would answer it, as 42501 "only the coordinator assigned ...",
+  -- telling the caller the request is someone else's when it is nobody's.
+  --
+  -- Submitted only. A draft has no coordinator either, but it is not waiting
+  -- for the Lead; it is still the Organiser's, and SCRUM-19 answers it with
+  -- the caller check's 403 on purpose (docs/test-cases/SCRUM-19.md, AC1-03).
+  if v_request.status = 'submitted' and v_request.assigned_coordinator_id is null then
+    raise exception 'event request % is waiting for the Event Coordinator Lead to assign it a coordinator, so its review cannot start yet',
+      p_event_request_id
+      using errcode = 'object_not_in_prerequisite_state';
+  end if;
+
+  -- AC1: only the assigned coordinator starts the review.
+  --
+  -- A null caller is refused explicitly, as 018 does. `is distinct from` alone
+  -- would compare a null caller with an event that has no coordinator, find
+  -- them not distinct, and let the caller through.
+  if p_coordinator_id is null
+     or v_request.assigned_coordinator_id is distinct from p_coordinator_id then
+    raise exception 'only the coordinator assigned to event request % can start reviewing it', p_event_request_id
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  if v_request.status <> 'submitted' then
+    raise exception 'event request % has status %, and only a submitted request can be put under review',
+      p_event_request_id, v_request.status
+      using errcode = 'object_not_in_prerequisite_state';
+  end if;
+
+  -- Always true today; asked so the database's transition table stays the one
+  -- authority (see (a) in the header).
+  if not event_request_status_allows('submitted', 'under_review') then
+    raise exception 'event request % has status submitted, which cannot change to under_review', p_event_request_id
+      using errcode = 'object_not_in_prerequisite_state';
+  end if;
+
+  -- The status and the reviewer in one statement. `and status = 'submitted'`
+  -- cannot fail to match while the lock is held; it makes the statement itself
+  -- unable to move a row that is not in the status checked, as 018's and 022's
+  -- guards do.
+  update event_requests
+     set status                   = 'under_review',
+         reviewing_coordinator_id = p_coordinator_id
+   where id = p_event_request_id
+     and status = 'submitted'
+  returning * into v_request;
+
+  if not found then
+    raise exception 'event request % changed status while the review was being started', p_event_request_id
+      using errcode = 'serialization_failure';
+  end if;
+
+  -- The same row shape change_event_request_status writes. No reason: starting
+  -- a review needs none.
+  insert into event_request_status_history
+    (event_request_id, previous_status, new_status, changed_by, reason)
+  values
+    (p_event_request_id, 'submitted', 'under_review', p_coordinator_id, null);
+
+  return v_request;
+end;
+$$;
+
+
+create or replace function decide_event_request(
+  p_event_request_id uuid,
+  p_decision         event_request_decision,
+  p_decision_note    text,
+  p_decided_by       uuid,
+  p_decided_at       timestamptz
+)
+returns event_requests
+language plpgsql
+as $$
+declare
+  v_request    event_requests;
+  v_new_status event_request_status;
+  v_note       text := nullif(btrim(p_decision_note), '');
+begin
+  if p_decision is null or p_decided_at is null then
+    raise exception 'decide_event_request needs the decision and the time it was made'
+      using errcode = 'null_value_not_allowed';
+  end if;
+
+  -- The decision names the status it leads to: approved or rejected.
+  v_new_status := p_decision::text::event_request_status;
+
+  select *
+    into v_request
+    from event_requests
+   where id = p_event_request_id
+     for update;
+
+  if not found then
+    raise exception 'event request % not found', p_event_request_id
+      using errcode = 'no_data_found';
+  end if;
+
+  -- SCRUM-486 AC8, the same check as start_event_review's and for the same
+  -- reason. A request cannot be under review without a coordinator (041's
+  -- constraint still requires one past submitted), but this function checks
+  -- the caller before the status, so a decision attempted on an unassigned
+  -- submitted request would otherwise be answered by the caller check, as 42501
+  -- "only the coordinator assigned ... can decide it". Reachable by a direct
+  -- call to the decision route; not unreachable, so guarded.
+  if v_request.status = 'submitted' and v_request.assigned_coordinator_id is null then
+    raise exception 'event request % is waiting for the Event Coordinator Lead to assign it a coordinator, so it cannot be decided yet',
+      p_event_request_id
+      using errcode = 'object_not_in_prerequisite_state';
+  end if;
+
+  -- Only the assigned coordinator decides. A null caller is refused
+  -- explicitly, for the reason start_event_review gives.
+  if p_decided_by is null
+     or v_request.assigned_coordinator_id is distinct from p_decided_by then
+    raise exception 'only the coordinator assigned to event request % can decide it', p_event_request_id
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  -- AC2 and AC3: a decision is made only on a request under review. This is
+  -- what refuses a request awaiting clarification, one not yet under review,
+  -- and one already decided, each with its current status named.
+  if v_request.status <> 'under_review' then
+    raise exception 'event request % has status %, and only a request under review can be decided',
+      p_event_request_id, v_request.status
+      using errcode = 'object_not_in_prerequisite_state';
+  end if;
+
+  -- See (a) in the header.
+  if not event_request_status_allows(v_request.status, v_new_status) then
+    raise exception 'event request % has status %, which cannot change to %',
+      p_event_request_id, v_request.status, v_new_status
+      using errcode = 'object_not_in_prerequisite_state';
+  end if;
+
+  -- And only the reviewer. A recorded reviewer who is someone else is refused,
+  -- never overwritten; an empty one is filled in below. See (b) in the header.
+  --
+  -- After the status check, not before it. A decided event keeps the reviewer
+  -- who decided it, even after a handover (018), so on an approved event this
+  -- check would refuse the new coordinator for the wrong reason. The status is
+  -- the true reason a decided event cannot be decided again.
+  if v_request.reviewing_coordinator_id is not null
+     and v_request.reviewing_coordinator_id <> p_decided_by then
+    raise exception 'event request % is under review by another coordinator, who must decide it', p_event_request_id
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  -- A rejection must say why. Checked here so the coordinator gets this
+  -- sentence rather than 025's constraint name.
+  if p_decision = 'rejected' and v_note is null then
+    raise exception 'a reason is required to reject event request %', p_event_request_id
+      using errcode = 'invalid_parameter_value';
+  end if;
+
+  -- AC6: an event whose proposed start has passed cannot be approved. Measured
+  -- at p_decided_at, the service's clock (see the comment above the function).
+  -- A start exactly at the decision time counts as passed: the event would
+  -- already be under way. A missing start is refused too, rather than approved
+  -- unchecked: submission requires one, so a missing start means a row made
+  -- outside the application, and approving it would approve an event whose
+  -- date nobody could confirm. A rejection is allowed whatever the date.
+  if p_decision = 'approved'
+     and (v_request.proposed_start is null or v_request.proposed_start <= p_decided_at) then
+    raise exception 'event request % cannot be approved because its proposed start date has passed or is missing. Agree a new date with the organiser, or reject the request',
+      p_event_request_id
+      using errcode = 'object_not_in_prerequisite_state';
+  end if;
+
+  -- The status and the whole decision in one statement, for the reason in the
+  -- header: 025's constraints are checked against the row after the statement,
+  -- and any split would leave a row one of them refuses. The reviewer is
+  -- filled in here, in the same statement, so decided_by_is_reviewer sees the
+  -- two equal.
+  update event_requests
+     set status                   = v_new_status,
+         decision                 = p_decision,
+         decision_note            = v_note,
+         decided_by               = p_decided_by,
+         decided_at               = p_decided_at,
+         reviewing_coordinator_id = coalesce(reviewing_coordinator_id, p_decided_by)
+   where id = p_event_request_id
+     and status = 'under_review'
+  returning * into v_request;
+
+  if not found then
+    raise exception 'event request % changed status while it was being decided', p_event_request_id
+      using errcode = 'serialization_failure';
+  end if;
+
+  -- The same row shape change_event_request_status writes. The note is the
+  -- reason: for a rejection it is why the request was rejected, which is
+  -- exactly what the status history's reason records.
+  insert into event_request_status_history
+    (event_request_id, previous_status, new_status, changed_by, reason)
+  values
+    (p_event_request_id, 'under_review', v_new_status, p_decided_by, v_note);
+
+  return v_request;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 8. Tell the API about the changed functions
 -- ---------------------------------------------------------------------
 -- PostgREST caches function definitions. 016, 018, 021, 029 and 030 end the
 -- same way.
