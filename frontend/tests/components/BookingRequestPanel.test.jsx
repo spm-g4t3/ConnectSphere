@@ -669,3 +669,63 @@ describe("SCRUM491_AC5 another event's tentative hold in what is in the way", ()
   });
 });
 
+
+describe("SCRUM-191 the coordinator's requirement codes travel with the request", () => {
+  it("SCRUM191_sends_the_layout_accessibility_and_facilities_when_given", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel({
+      requirements: { layout: "theatre", accessibility: ["hearing_loop"], facilities: ["projector", "wifi"] },
+    });
+
+    await user.click(submit());
+
+    expect(createBookingRequest).toHaveBeenCalledWith({
+      eventRequestId: "e1",
+      venueId: "v1",
+      roomLayoutCode: "theatre",
+      accessibility: ["hearing_loop"],
+      facilities: ["projector", "wifi"],
+    });
+  });
+
+  it.each([
+    ["blank", { layout: "", accessibility: [], facilities: [] }],
+    ["null", { layout: null, accessibility: null, facilities: null }],
+    ["absent", undefined],
+  ])("SCRUM191_leaves_them_out_when_%s", async (_label, requirements) => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel({ requirements });
+
+    await user.click(submit());
+
+    expect(createBookingRequest).toHaveBeenCalledWith({ eventRequestId: "e1", venueId: "v1" });
+  });
+
+  it("SCRUM191_sends_only_the_lists_that_have_codes", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel({ requirements: { layout: "", accessibility: [], facilities: ["wifi"] } });
+
+    await user.click(submit());
+
+    expect(createBookingRequest).toHaveBeenCalledWith({
+      eventRequestId: "e1",
+      venueId: "v1",
+      facilities: ["wifi"],
+    });
+  });
+
+  it("SCRUM191_codes_and_the_unsuitable_confirmation_go_together", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel({ suitability: UNSUITABLE, requirements: { layout: "theatre" } });
+
+    await user.click(confirmBox());
+    await user.click(submit());
+
+    expect(createBookingRequest).toHaveBeenCalledWith({
+      eventRequestId: "e1",
+      venueId: "v1",
+      roomLayoutCode: "theatre",
+      confirmUnsuitable: true,
+    });
+  });
+});

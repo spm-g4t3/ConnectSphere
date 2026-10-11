@@ -2,14 +2,22 @@
 //
 // SCRUM-254 (part of SCRUM-243). The one "Request this venue" flow, for the
 // event and venue it is given. Venue search mounts it today, and so does
-// EventVenueFinder, the search inside the coordinator's event view; the
-// suitability panel (SCRUM-191) mounts the same component, passing the result
-// it already holds as `suitability`, so every entry point behaves identically.
+// EventVenueFinder, the search inside the coordinator's event view; from
+// there the suitability panel (SCRUM-191, VenueSuitabilityPanel) opens the
+// same component, passing the result it already holds as `suitability`, so
+// every entry point behaves identically.
+//
+// SCRUM-191: the optional `requirements` ({ layout, accessibility,
+// facilities }) are the coordinator's requirement codes from EventVenueFinder,
+// the same ones the suitability check was given. They are sent as
+// roomLayoutCode, accessibility and facilities so the server's check on submit
+// judges the coordinator's codes rather than "None requested". A blank layout
+// and empty lists are left out of the body.
 //
 // What the coordinator sees and chooses:
 //   - the event's own details, because they are what the request will carry:
-//     the period, expected attendance and requirements come from the stored
-//     event on the server, never from this form;
+//     the period, expected attendance and free-text requirements come from
+//     the stored event on the server, never from this form;
 //   - the venue;
 //   - optional setup notes, the only free text sent.
 //
@@ -65,10 +73,21 @@ function criterionText(criterion) {
   return criterion?.detail ? `${name}: ${criterion.detail}` : name;
 }
 
+/** SCRUM-191: the coordinator's codes as body fields, each only when set. */
+function requirementsBody(requirements) {
+  const { layout, accessibility, facilities } = requirements ?? {};
+  return {
+    ...(layout ? { roomLayoutCode: layout } : {}),
+    ...(Array.isArray(accessibility) && accessibility.length > 0 ? { accessibility } : {}),
+    ...(Array.isArray(facilities) && facilities.length > 0 ? { facilities } : {}),
+  };
+}
+
 export default function BookingRequestPanel({
   event,
   venue,
   suitability,
+  requirements,
   onSubmitted,
   onEventAlreadyRequested,
   onClose,
@@ -110,6 +129,7 @@ export default function BookingRequestPanel({
       const request = await createBookingRequest({
         eventRequestId: event.id,
         venueId: venue.id,
+        ...requirementsBody(requirements),
         ...(setupNotes.trim() ? { setupNotes: setupNotes.trim() } : {}),
         ...(needsConfirmation && confirmed ? { confirmUnsuitable: true } : {}),
       });
