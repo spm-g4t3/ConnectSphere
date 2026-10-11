@@ -133,8 +133,18 @@ describe('SCRUM-327 / SCRUM-318: the database has one draft -> submitted path', 
     const setters = migrations.filter((name) => /set status = 'submitted'/.test(sql(name)));
 
     // 016 created it and 021 replaced it with the version that also records
-    // the status history. Each is the one definition in force at its time.
-    expect(setters).toEqual(['016_submit_event_request.sql', '021_event_status_history.sql']);
+    // the status history. 041 (SCRUM-486) replaced it again, without the
+    // coordinator: a new request now waits for the Event Coordinator Lead.
+    // Each is the one definition in force at its time, and all three are
+    // submit_event_request: this test failing when 041 arrived was it doing its
+    // job, noticing a new writer of 'submitted', and the fix is to name 041
+    // here, not to loosen the check. Any other file setting the status would
+    // still fail it.
+    expect(setters).toEqual([
+      '016_submit_event_request.sql',
+      '021_event_status_history.sql',
+      '041_lead_assignment.sql',
+    ]);
   });
 
   const fn = sql('021_event_status_history.sql');

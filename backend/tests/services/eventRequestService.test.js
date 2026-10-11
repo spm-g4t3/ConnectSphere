@@ -805,31 +805,21 @@ describe("SCRUM-330: the function's refusals become typed errors", () => {
     expect(err.message).toMatch(/cancelled/);
   });
 
-  it('SCRUM330_AC5_refuses_when_no_coordinator_is_available', async () => {
-    // P0001: pick_event_coordinator found nobody. 503, not 409: the request is
-    // valid and the Organiser did nothing wrong, and trying again later may
-    // succeed, which is what the AC's own message says. errors.test.js gives
-    // the full argument for the new class.
-    //
-    // The message is asserted exactly, because it is the AC's text. It is
-    // also exactly what 016 raises, so the service must pass it through
-    // without adding to it, not wrap it the way translateError wraps a check
-    // violation ("A value was rejected by the database: ...").
-    //
-    // "The request stays a draft" is guaranteed by the function: it raises
-    // inside its own transaction, so nothing it did is kept. This fake cannot
-    // observe that, and SCRUM-335's database tests do. What the fake can
-    // observe is the service's half: after the refusal, the service makes no
-    // write of its own to "tidy up".
-    const message = 'No coordinator is available; please try again later';
-    const client = submittingWith(dbError('P0001', message));
+  it('SCRUM486_AC11_submission_no_longer_reports_a_missing_coordinator_as_a_503', async () => {
+    // AC11-03. Was SCRUM330_AC5_refuses_when_no_coordinator_is_available,
+    // which pinned SCRUM-327 AC5: P0001 from pick_event_coordinator finding
+    // nobody became a ServiceUnavailableError, a 503 with the AC's message.
+    // Right then. Since 041 submission chooses no coordinator, so it cannot
+    // raise that, and translateError has no P0001 branch. A P0001 arriving here
+    // now would be unexpected, and is reported as the untyped server fault it
+    // is, not as "try again later".
+    const client = submittingWith(dbError('P0001', 'No coordinator is available; please try again later'));
 
     const err = await errorFrom(submitEventRequest(REQUEST_ID, { client, now: NOW }));
 
     expect(rpcCallsOf(client)).toHaveLength(1);
-    expect(err).toBeInstanceOf(ServiceUnavailableError);
-    expect(err.status).toBe(503);
-    expect(err.message).toBe(message);
+    expect(err).not.toBeInstanceOf(ServiceUnavailableError);
+    expect(err.status).toBeUndefined();
     expect(client.calls.some((call) => call.operation === 'update')).toBe(false);
   });
 
@@ -3588,14 +3578,18 @@ describe('SCRUM-321 with SCRUM-327: Draft -> Submitted keeps its own path and ga
   });
 
   it('SCRUM321_a_refused_submission_still_calls_the_function_once_and_writes_nothing_else', async () => {
+    // The refusal used to be P0001, "No coordinator is available", which
+    // submission raised until SCRUM-486. It can no longer, so the refusal here
+    // is one it still can: the request is no longer a draft (55000). What the
+    // test proves is unchanged: one call, and no write after a refusal.
     const client = createFakeClient([
       ok(storedRow()),
-      dbError('P0001', 'No coordinator is available; please try again later'),
+      dbError('55000', `event request ${REQUEST_ID} has status submitted, and only a draft can be submitted`),
     ]);
 
     const err = await errorFrom(submitEventRequest(REQUEST_ID, { client, now: NOW }));
 
-    expect(err).toBeInstanceOf(ServiceUnavailableError);
+    expect(err).toBeInstanceOf(ConflictError);
     expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
   });
 });

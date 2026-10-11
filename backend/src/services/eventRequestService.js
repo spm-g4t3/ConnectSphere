@@ -57,7 +57,6 @@ import {
   ValidationError,
   NotFoundError,
   ConflictError,
-  ServiceUnavailableError,
   ForbiddenError,
 } from '../errors.js';
 import {
@@ -211,19 +210,18 @@ function translateError(error) {
     return new ConflictError(`That record already exists: ${detail}`);
   }
 
-  // The next two are raised by submit_event_request (migration 016), each with
-  // its own SQLSTATE so they can be told apart by code rather than by matching
+  // The next is raised by submit_event_request (016, then 021 and 041), with
+  // its own SQLSTATE so it is told apart by code rather than by matching
   // message text.
   //
-  // Both pass the database's message through unchanged, with no prefix,
+  // It passes the database's message through unchanged, with no prefix,
   // unlike 23514 above. A check violation's message is written by the Postgres
   // driver for a developer ('new row violates check constraint ...'), so it is
-  // wrapped in a sentence a caller can make sense of. These two come from
-  // `raise exception` in our own function, and their text was written to be
-  // read by whoever made the request. The no-coordinator message is SCRUM-327
-  // AC5's exact wording. The not-a-draft message names the status the function
-  // saw while holding the row lock, which is more accurate than anything this
-  // service read a moment earlier.
+  // wrapped in a sentence a caller can make sense of. This one comes from
+  // `raise exception` in our own function, and its text was written to be read
+  // by whoever made the request: it names the status the function saw while
+  // holding the row lock, which is more accurate than anything this service
+  // read a moment earlier.
 
   // object_not_in_prerequisite_state: the request is no longer a draft. Most
   // likely a second submit that waited on the first one's row lock.
@@ -231,16 +229,14 @@ function translateError(error) {
     return new ConflictError(detail);
   }
 
-  // raise_exception: no Event Coordinator is available (AC5). 016 raises
-  // P0001 for that and nothing else. Nothing else this module calls raises
-  // P0001; 006's process_change_request does, for a change request already
-  // processed, but that goes through eventChangeRequestService and its own
-  // translator, not this one. A future function that raises P0001 for another
-  // reason and is called from here would need its own SQLSTATE, or it would
-  // arrive as a 503.
-  if (code === 'P0001') {
-    return new ServiceUnavailableError(detail);
-  }
+  // No P0001 branch, since SCRUM-486 (migration 041). P0001 was submission's
+  // "No coordinator is available" (SCRUM-327 AC5), a 503. Submission no
+  // longer looks for a coordinator, so it can no longer raise it, and nothing
+  // else this module calls raises P0001: 006's process_change_request does,
+  // for a change request already processed, but that goes through
+  // eventChangeRequestService and its own translator, not this one. A P0001
+  // reaching here now is unexpected, so it falls through to the untyped error
+  // at the end, a 500, rather than being reported as "try again later".
 
   // The next three are raised by reassign_event_request (migration 018), and
   // pass the message through unchanged for the same reason as the two above:
@@ -457,23 +453,25 @@ export async function getEventRequestById(id, { client } = {}) {
 }
 
 /**
- * Submit a draft request for review, moving it draft -> submitted and
- * assigning it an Event Coordinator.
+ * Submit a draft request for review, moving it draft -> submitted, with no
+ * coordinator.
  *
- * SCRUM-10 created this. SCRUM-330 (SCRUM-327 AC1 and AC5) changed how it
- * writes. It reads the row and validates it here, then hands the write to the
- * Postgres function submit_event_request (migration 016) through rpc. In one
- * transaction, that function locks the row, checks it is still a draft, picks
- * a coordinator with pick_event_coordinator (015), writes status, submitted_at
- * and assigned_coordinator_id, and inserts the assignment history row.
+ * SCRUM-10 created this. SCRUM-330 (SCRUM-327 AC1 and AC5) moved the write
+ * into the Postgres function submit_event_request, called through rpc.
+ * SCRUM-486 (migration 041) took the assignment back out of that function: the
+ * customer's Week 7 change 5 sends a new request to the Event Coordinator
+ * Lead's unassigned queue instead. In one transaction the function now locks
+ * the row, checks it is still a draft, writes status and submitted_at, sets
+ * the coordinator and the reviewer to null (a draft reopened from rejected
+ * still carries both), and inserts the status history row. It no longer
+ * chooses a coordinator, and so it can no longer refuse for want of one. The
+ * Lead's assignment is a separate step.
  *
- * Why the write moved: a submission now writes to two tables, and every part
- * has to happen or none of it. The request must not end up submitted without a
- * coordinator, and the coordinator must not be recorded without the history
- * row. supabase-js has no transactions, since every call is its own HTTP
- * request, so the service cannot guarantee that. A function body can. This is
- * the reasoning venueService.js and process_change_request (006) already
- * follow.
+ * Why the write stays in a function: a submission still writes to two tables,
+ * the request and its status history, and both must happen or neither.
+ * supabase-js has no transactions, since every call is its own HTTP request,
+ * so the service cannot guarantee that. A function body can. This is the
+ * reasoning venueService.js and process_change_request (006) already follow.
  *
  * What left this function with the write, and why it must not come back:
  *
@@ -494,9 +492,9 @@ export async function getEventRequestById(id, { client } = {}) {
  *
  *  - The read, for the NotFoundError and because validation needs the row.
  *  - validateSubmitEventRequest. It reports every gap at once, which a raised
- *    exception cannot. And 016's function makes no completeness check of its
+ *    exception cannot. And the function makes no completeness check of its
  *    own, so this is the only thing that stops an incomplete draft being
- *    submitted and given a coordinator.
+ *    submitted.
  *  - The clock. `now` is passed in as p_submitted_at, so tests can state the
  *    exact instant, as 005 and 016 both record.
  *
@@ -507,15 +505,13 @@ export async function getEventRequestById(id, { client } = {}) {
  *                              tests are deterministic
  * @param {string} [options.changedBy]  who is submitting, for the status
  *                              history; defaults to the draft's Organiser
- * @returns {Promise<object>} the submitted request, in camelCase, including
- *                            assignedCoordinatorId
+ * @returns {Promise<object>} the submitted request, in camelCase;
+ *                            assignedCoordinatorId is null until the Lead assigns
  * @throws {NotFoundError}           when no request has that id, at the read or
  *                                   because it vanished before the function ran
  * @throws {ValidationError}         when the stored draft is not complete enough
  *                                   to submit, listing every gap at once
  * @throws {ConflictError}           when the request is no longer a draft
- * @throws {ServiceUnavailableError} when no Event Coordinator is available;
- *                                   the request stays a draft (AC5)
  */
 export async function submitEventRequest(id, { client, now = new Date(), changedBy } = {}) {
   const db = await resolveClient(client);
@@ -535,7 +531,7 @@ export async function submitEventRequest(id, { client, now = new Date(), changed
 
   // One call, and no write of this service's own before or after it. A raised
   // refusal rolls back everything the function did, so on any error the row
-  // is exactly as it was -- AC5's "the request stays a draft".
+  // is exactly as it was: a refused submission leaves a draft.
   //
   // now.toISOString(), as before: the parameter is timestamptz, and an instant
   // with an explicit offset is unambiguous on the wire.

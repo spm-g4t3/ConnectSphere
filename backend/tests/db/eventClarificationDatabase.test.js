@@ -108,6 +108,10 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     `);
     await db.exec(migration("030_event_clarification_reply_by.sql"));
     await db.exec(migration("026_clarification_amendment_fields.sql"));
+    // SCRUM-486's migration, last: it redefines close_event_clarification with
+    // a null-caller guard (SCRUM-515), so the version tested here is the one
+    // production will have.
+    await db.exec(migration("041_lead_assignment.sql"));
 
     organiser = (await one("insert into auth.users(email) values ('organiser@example.test') returning id")).id;
     coordinator = (await one("insert into auth.users(email) values ('coordinator@example.test') returning id")).id;
@@ -280,5 +284,27 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     );
     expect(cancel.rows[0].status).toBe("cancelled");
     expect((await history(id))[0]).toEqual(entry);
+  });
+
+  it("SCRUM486_TR05_closing_refuses_a_null_caller_before_the_status_check", async () => {
+    // TR-05. Since 041 a submitted request may have no coordinator. 030's
+    // check, `assigned_coordinator_id is distinct from p_coordinator_id`, finds
+    // a null caller and a null coordinator not distinct, so before 041 a null
+    // caller got past it here and was refused only by the status check that
+    // follows (55000). 041 refuses the null caller first, as 018 and 029 do.
+    // A request at pending_clarification cannot have no coordinator even
+    // now, so a submitted one is what reaches the hole.
+    const id = (await one(
+      `insert into event_requests (organiser_id, event_name, status, submitted_at, assigned_coordinator_id)
+       values ($1, 'Unassigned', 'submitted', now(), null) returning id`,
+      [organiser],
+    )).id;
+
+    const err = await refused(
+      db.query("select * from close_event_clarification($1, null, null, 'Close it.')", [id]),
+    );
+
+    expect(err?.code).toBe("42501");
+    expect(await history(id)).toEqual([]);
   });
 });

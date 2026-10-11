@@ -190,6 +190,13 @@ describe('SCRUM-321: only the lifecycle and decision functions write the status 
       // columns. The same argument 021 makes for submit_event_request. One
       // row per function, so two.
       '029_event_request_decisions_functions.sql: 2',
+      // SCRUM-486. 041 redefines submit_event_request without the coordinator,
+      // and it still writes its own draft -> submitted row, for 021's reason:
+      // submitting sets submitted_at in the same statement, which
+      // change_event_request_status cannot. It supersedes 021's copy, so one
+      // live writer, not a second. Right when written, the list named every
+      // writer there was; 041 is a new one, so it is named, not hidden.
+      '041_lead_assignment.sql: 1',
     ]);
   });
 });
