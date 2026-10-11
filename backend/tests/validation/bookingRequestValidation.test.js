@@ -27,6 +27,8 @@ describe('validateCreateBookingRequest', () => {
       roomLayoutCode: null,
       setupNotes: null,
       confirmUnsuitable: false,
+      accessibility: [],
+      facilities: [],
     });
   });
 
@@ -44,6 +46,8 @@ describe('validateCreateBookingRequest', () => {
       roomLayoutCode: 'u_shape',
       setupNotes: 'Extra tables',
       confirmUnsuitable: true,
+      accessibility: [],
+      facilities: [],
     });
   });
 
@@ -64,6 +68,50 @@ describe('validateCreateBookingRequest', () => {
 
   it('SCRUM252_refuses_a_layout_that_is_not_text', () => {
     expect(() => validateCreateBookingRequest({ ...BASE, roomLayoutCode: 5 })).toThrow(ValidationError);
+  });
+});
+
+
+describe('SCRUM188_AC1 validateCreateBookingRequest carries the requirement codes (SCRUM-190)', () => {
+  it('SCRUM188_AC1_trims_each_code_and_keeps_the_order_given', () => {
+    const result = validateCreateBookingRequest({
+      ...BASE,
+      accessibility: [' wheelchair_access ', 'hearing_loop'],
+      facilities: ['projector'],
+    });
+    expect(result.accessibility).toEqual(['wheelchair_access', 'hearing_loop']);
+    expect(result.facilities).toEqual(['projector']);
+  });
+
+  it.each([undefined, null])('SCRUM188_AC1_%j_lists_are_empty_not_missing', (value) => {
+    const result = validateCreateBookingRequest({ ...BASE, accessibility: value, facilities: value });
+    expect(result).toMatchObject({ accessibility: [], facilities: [] });
+  });
+
+  it('SCRUM188_AC1_a_list_that_is_not_an_array_is_refused_by_the_search_rule', () => {
+    const err = (() => {
+      try {
+        validateCreateBookingRequest({ ...BASE, accessibility: 'wheelchair_access' });
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'accessibility', message: 'must be an array of codes' }]);
+  });
+
+  it('SCRUM188_AC1_every_bad_entry_is_reported_with_the_other_faults', () => {
+    let err;
+    try {
+      validateCreateBookingRequest({ ...BASE, venueId: 'nope', facilities: ['projector', '  ', 7] });
+    } catch (e) {
+      err = e;
+    }
+    expect(err.details).toEqual([
+      { field: 'venueId', message: 'must be a valid venue id' },
+      { field: 'facilities', message: 'entry 1 must be a non-empty code' },
+      { field: 'facilities', message: 'entry 2 must be a non-empty code' },
+    ]);
   });
 });
 

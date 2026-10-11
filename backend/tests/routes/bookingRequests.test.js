@@ -22,6 +22,12 @@ import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
+// SCRUM-190: the default checker loads venueService.js lazily, and that module
+// imports the Supabase client statically, which throws without a .env. Every
+// query in these tests goes to the injected fake, so the real client is never
+// wanted; this only lets the module load.
+vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: {}, supabaseAdmin: {}, default: {} }));
+
 import { createBookingRequestRouter } from '../../src/routes/bookingRequests.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
 import { ROLE } from '../../src/domain/userRole.js';
@@ -91,6 +97,36 @@ function bookingRow(overrides = {}) {
   };
 }
 
+/**
+ * SCRUM-190: the venue as getVenueById selects it, open 08:00-22:00 every day
+ * (Singapore), large enough for the event and with nothing set up around it.
+ */
+function venueRow(overrides = {}) {
+  return {
+    id: VENUE_ID,
+    name: 'Hall A',
+    location: 'Level 1',
+    max_capacity: 200,
+    turnaround_minutes: 0,
+    setup_minutes: 0,
+    emergency_access: null,
+    known_restrictions: null,
+    retired_at: null,
+    created_at: '2026-01-01T00:00:00+00:00',
+    updated_at: '2026-01-01T00:00:00+00:00',
+    last_modified_by: null,
+    venue_room_layouts: [{ room_layout_code: 'theatre' }],
+    venue_accessibility_features: [],
+    venue_facilities: [],
+    venue_operating_hours: [0, 1, 2, 3, 4, 5, 6].map((day) => ({
+      day_of_week: day,
+      opens_at: '08:00:00',
+      closes_at: '22:00:00',
+    })),
+    ...overrides,
+  };
+}
+
 const ok = (data) => ({ data, error: null });
 const created = (overrides) => ok({ outcome: 'created', booking: bookingRow(overrides) });
 const dbFailure = (code, message, extra = {}) => ({ data: null, error: { code, message, ...extra } });
@@ -120,6 +156,10 @@ function createFakeClient(results = []) {
         },
         order: (column, options) => {
           (call.order ??= []).push([column, options]);
+          return chain;
+        },
+        in: (column, values) => {
+          call.filters.push([column, values]);
           return chain;
         },
         maybeSingle: () => settle(call),
@@ -216,6 +256,9 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
       eventRequestId: EVENT_ID,
       venueId: VENUE_ID,
       roomLayoutCode: 'theatre',
+      accessibility: [],
+      facilities: [],
+      userId: COORDINATOR_ID,
       client,
     });
   });
@@ -523,10 +566,21 @@ describe('SCRUM-252: the suitability check (N10)', () => {
     expect(rpcCall(client).args.p_suitability).toEqual(UNSUITABLE);
   });
 
-  it('SCRUM252_fails_closed_with_503_until_N10_exists', async () => {
-    const client = createFakeClient([ok(eventRow())]);
+  it('SCRUM190_the_default_checker_judges_the_stored_event_and_venue_and_its_result_is_stored', async () => {
+    // No checkSuitability supplied: the router falls back to the real check.
+    // Reads: the event (booking service), the event again (the check), the
+    // venue, then the occupancy function, then create_booking_request.
+    // 09:00-17:00 in Singapore, inside the venue's hours. START and END are
+    // 17:00-01:00 there, which would fail operating hours for crossing midnight.
+    const daytime = { proposed_start: '2026-12-01T01:00:00+00:00', proposed_end: '2026-12-01T09:00:00+00:00' };
+    const client = createFakeClient([
+      ok(eventRow(daytime)),
+      ok(eventRow(daytime)),
+      ok(venueRow()),
+      ok([]),
+      created(),
+    ]);
 
-    // No checkSuitability supplied: the router falls back to the real default.
     const res = await request(
       express()
         .use(express.json())
@@ -538,8 +592,46 @@ describe('SCRUM-252: the suitability check (N10)', () => {
       .post('/api/booking-requests')
       .send(BODY);
 
-    expect(res.status).toBe(503);
-    expect(client.calls.map((c) => c.operation)).toEqual(['select']);
+    expect(res.status).toBe(201);
+    expect(client.calls.map((c) => c.fn ?? c.table)).toEqual([
+      'event_requests',
+      'event_requests',
+      'venues',
+      'venue_occupancy_conflicts',
+      'create_booking_request',
+    ]);
+    const stored = client.calls.at(-1).args.p_suitability;
+    expect(stored.suitable).toBe(true);
+    expect(stored.criteria.map((c) => c.criterion)).toEqual([
+      'Capacity', 'Operating hours', 'Layout', 'Accessibility', 'Facilities', 'Availability',
+    ]);
+    expect(stored.checked).toEqual({
+      startsAt: daytime.proposed_start,
+      endsAt: daytime.proposed_end,
+      expectedAttendance: 150,
+      layout: null,
+      accessibility: [],
+      facilities: [],
+    });
+  });
+
+  it('SCRUM190_an_unknown_requirement_code_is_400_and_nothing_is_written', async () => {
+    const client = createFakeClient([ok(eventRow()), ok(eventRow()), ok([])]);
+
+    const res = await request(
+      express()
+        .use(express.json())
+        .use(
+          '/api/booking-requests',
+          createBookingRequestRouter({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }),
+        ),
+    )
+      .post('/api/booking-requests')
+      .send({ ...BODY, facilities: ['teleporter'] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'facilities', message: 'unknown code "teleporter"' }]);
+    expect(client.calls.some((c) => c.operation === 'rpc')).toBe(false);
   });
 
   it.each([

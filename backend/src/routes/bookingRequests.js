@@ -80,11 +80,12 @@ export function createBookingRequestRouter({
    * Request a venue. 201 and the new request, which is always pending.
    *
    * Body: { eventRequestId, venueId, roomLayoutCode?, setupNotes?,
-   * confirmUnsuitable? }.
+   * confirmUnsuitable?, accessibility?, facilities? } -- the two code lists
+   * are SCRUM-190's, judged by the suitability check and stored in its result.
    *
-   * Statuses: 400 bad input; 401; 403 wrong role, or not this event's
-   * coordinator; 404 no such event or venue; 409 with `code` and `conflicts`
-   * (see createBookingRequest); 503 while suitability checking is unavailable.
+   * Statuses: 400 bad input, or an unknown requirement code; 401; 403 wrong
+   * role, or not this event's coordinator; 404 no such event or venue; 409
+   * with `code` and `conflicts` (see createBookingRequest).
    */
   router.post('/', coordinatorOnly, async (req, res) => {
     try {

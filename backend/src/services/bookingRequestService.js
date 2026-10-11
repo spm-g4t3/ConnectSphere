@@ -23,8 +23,10 @@
  *    that is the answer that counts.
  *  - Suitability (N10) is computed here, server-side, through an injectable
  *    checker, and passed to the function. A venue that is not suitable is
- *    requested only with confirmUnsuitable. N10 is not built, so the default
- *    checker fails closed; see venueSuitabilityService.js.
+ *    requested only with confirmUnsuitable. The default checker is
+ *    venueSuitabilityService.js (SCRUM-190); the request carries the
+ *    accessibility and facility codes it judges, and the caller, so the
+ *    check enforces the assigned coordinator itself.
  *  - What the function raises or answers is turned into typed errors, with the
  *    conflicting records in `conflicts` for the UI.
  *
@@ -264,9 +266,15 @@ export function toBookingRequest(row) {
 }
 
 /**
- * The checker's answer, checked. It crosses a module boundary that N10 will
- * own, and it is stored as given, so a malformed one is a fault here and not
+ * The checker's answer, checked. It crosses a module boundary that N10 owns,
+ * and it is stored as given, so a malformed one is a fault here and not
  * something to pass to the database.
+ *
+ * SCRUM-190: `checked` -- the period, attendance and requirement codes the
+ * check judged -- is kept when the checker gives it, so suitability_result
+ * records what was assessed and Venue Staff read the verdict against it. It
+ * is optional so a checker that gives none (a test double) still passes; only
+ * suitable and criteria are required, as before.
  */
 function checkedSuitability(result) {
   if (
@@ -277,7 +285,11 @@ function checkedSuitability(result) {
   ) {
     throw new Error('The suitability check returned an unusable result');
   }
-  return { suitable: result.suitable, criteria: result.criteria };
+  const suitability = { suitable: result.suitable, criteria: result.criteria };
+  if (typeof result.checked === 'object' && result.checked !== null) {
+    suitability.checked = result.checked;
+  }
+  return suitability;
 }
 
 /**
@@ -302,7 +314,10 @@ function checkedSuitability(result) {
  *                           each with its occupied period, shaped by
  *                           toPeriodConflict), SUITABILITY_CONFIRMATION_REQUIRED
  *                           (conflicts are the criteria not met)
- * @throws {ServiceUnavailableError} the suitability check is not available
+ *
+ * SCRUM-190: input may also carry accessibility and facilities, code lists
+ * passed to the checker with the caller. An unknown code is a ValidationError
+ * from the check, before anything is written.
  */
 export async function createBookingRequest(
   input,
@@ -336,6 +351,9 @@ export async function createBookingRequest(
       eventRequestId: request.eventRequestId,
       venueId: request.venueId,
       roomLayoutCode: request.roomLayoutCode,
+      accessibility: request.accessibility,
+      facilities: request.facilities,
+      userId,
       client: db,
     }),
   );

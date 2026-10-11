@@ -276,11 +276,18 @@ export async function updateVenue(id, changes, userId = null) {
  * SCRUM-493: emergencyAccess and knownRestrictions, null when not recorded.
  * A retired venue keeps and returns both (AC5).
  *
+ * SCRUM-190: takes an optional client, as the booking and event services do,
+ * so the suitability check reads the venue over the same client it reads the
+ * event with (and its tests over a fake one). Without one it uses this
+ * module's client, so every existing caller is unchanged.
+ *
  * @param {string} id
+ * @param {object} [options]
+ * @param {object} [options.client]  a Supabase client; defaults to this module's
  * @returns {Promise<object>}
  */
-export async function getVenueById(id) {
-  const { data, error } = await supabase
+export async function getVenueById(id, { client = supabase } = {}) {
+  const { data, error } = await client
     .from('venues')
     .select(VENUE_WITH_ATTRIBUTES_SELECT)
     .eq('id', id)
@@ -553,11 +560,24 @@ const CRITERION_LOOKUPS = [
  * kind is collected into one ValidationError, the same "every fault at once"
  * rule validation follows.
  *
+ * SCRUM-190: exported, because the suitability check takes the same three
+ * kinds of code from the coordinator (they are not stored on the event) and
+ * an unknown one there would otherwise read as "Missing: x" -- a venue fault
+ * -- when the real fault is the request's. The options let that caller name
+ * its own client and its own message; a search passes neither and is
+ * unchanged.
+ *
  * @param {object} criteria  validated, so optional keys are present only when
  *                           they hold something to check
+ * @param {object} [options]
+ * @param {object} [options.client]  a Supabase client; defaults to this module's
+ * @param {string} [options.label]   opens the error message
  * @throws {ValidationError} details [{ field, message: 'unknown code "x"' }]
  */
-async function assertKnownCodes(criteria) {
+export async function assertKnownCodes(
+  criteria,
+  { client = supabase, label = 'Invalid venue search' } = {},
+) {
   const details = [];
 
   for (const { field, table } of CRITERION_LOOKUPS) {
@@ -567,7 +587,7 @@ async function assertKnownCodes(criteria) {
     // in the request from being reported twice.
     const requested = [...new Set([criteria[field]].flat())];
 
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from(table)
       .select('code')
       .in('code', requested);
@@ -582,7 +602,7 @@ async function assertKnownCodes(criteria) {
 
   if (details.length > 0) {
     const summary = details.map(({ field, message }) => `${field}: ${message}`).join('; ');
-    throw new ValidationError(`Invalid venue search -- ${summary}`, details);
+    throw new ValidationError(`${label} -- ${summary}`, details);
   }
 }
 
