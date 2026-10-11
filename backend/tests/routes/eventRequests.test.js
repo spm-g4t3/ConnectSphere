@@ -1728,6 +1728,13 @@ function createQueueFakeClient(results = []) {
         call.inFilters.push([column, values]);
         return chain;
       },
+      // SCRUM-486 (SCRUM-520): the review queue now also reads
+      // .not('assigned_coordinator_id', 'is', null). Recorded on its own, as
+      // in the service tests' fake.
+      not(column, operator, value) {
+        call.notFilters.push([column, operator, value]);
+        return chain;
+      },
       order(column, options) {
         call.order.push([column, options]);
         return chain;
@@ -1748,6 +1755,7 @@ function createQueueFakeClient(results = []) {
         select: null,
         filters: [],
         inFilters: [],
+        notFilters: [],
         order: [],
       };
       calls.push(call);
@@ -1762,25 +1770,36 @@ const signedInWithRole = (role, id = COORDINATOR_ID) => (req, _res, next) => {
   next();
 };
 
-/** A queue as PostgREST would hand it back: two Organisers, three statuses. */
+/**
+ * A queue as PostgREST would hand it back: two Organisers, three statuses.
+ *
+ * SCRUM-486 (SCRUM-520): each row now has a coordinator. These rows had none,
+ * which was right when written, because the queue did not select on the
+ * coordinator. Since 041 it reads only requests someone holds (AC2-06), so a
+ * row without one is a response the route can no longer receive, and a test
+ * passing on it would pass on data production cannot produce.
+ */
 const queueRows = () => [
   storedRow({
     id: 'queue-1',
     organiser_id: ORGANISER_ID,
     status: STATUS.SUBMITTED,
     submitted_at: '2026-01-11T03:00:00+00:00',
+    assigned_coordinator_id: COORDINATOR_ID,
   }),
   storedRow({
     id: 'queue-2',
     organiser_id: OTHER_ORGANISER_ID,
     status: STATUS.UNDER_REVIEW,
     submitted_at: '2026-01-12T03:00:00+00:00',
+    assigned_coordinator_id: COORDINATOR_ID,
   }),
   storedRow({
     id: 'queue-3',
     organiser_id: OTHER_ORGANISER_ID,
     status: STATUS.PENDING_CLARIFICATION,
     submitted_at: null,
+    assigned_coordinator_id: COORDINATOR_ID,
   }),
 ];
 

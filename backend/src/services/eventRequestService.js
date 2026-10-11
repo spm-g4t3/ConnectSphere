@@ -7,10 +7,12 @@
  * draft to submitted. Most writes go through plain table calls rather than a
  * Postgres function: they touch a single row in a single table, so there is no
  * partly-written record to protect against. Submission is the exception.
- * Since SCRUM-330 it also assigns an Event Coordinator and records that in a
- * second table, and supabase-js has no transactions, so it calls
- * submit_event_request (migration 016) through rpc. The reasoning is at
- * submitEventRequest. Since SCRUM-321 every other status change goes through
+ * SCRUM-330 made it assign an Event Coordinator and record that in a second
+ * table, and supabase-js has no transactions, so it calls submit_event_request
+ * (migration 016) through rpc. Since SCRUM-486 (041) submission assigns
+ * nobody -- the Event Coordinator Lead does, through assignEventRequest -- but
+ * it still writes the status, its history row and the Lead's notices in one
+ * transaction, so it stays an rpc. The reasoning is at submitEventRequest. Since SCRUM-321 every other status change goes through
  * changeEventRequestStatus, which writes the status and its history row in
  * one transaction (migration 021), and submission writes its history row too.
  *
@@ -1489,6 +1491,30 @@ export async function getEventClarificationHistory(id, userId, role, { client } 
  * that, and its docstring carries the argument -- including that excluding
  * `draft` is the access control for a queue every Coordinator can see.
  *
+ * SCRUM-486 (SCRUM-520), AC2-06: only requests someone holds. Since 041 a
+ * submitted request has no coordinator until the Event Coordinator Lead
+ * assigns one, and until then it is the Lead's alone: it is listed in the
+ * Lead's unassigned queue (listUnassignedEventRequests), and every coordinator
+ * action on it is refused (041's start_event_review and decide_event_request,
+ * and requestEventClarification here). Listed in this queue it would be a row
+ * every coordinator can open and do nothing with. So the read also requires
+ * assigned_coordinator_id is not null, and every status it listed before is
+ * still listed for a request that has a coordinator.
+ *
+ * Why there is still a shared queue at all, when every request in it now
+ * belongs to somebody. Because the customer distinguishes managing an event
+ * from viewing one. Managing is restricted: only the coordinator assigned to
+ * an event may act on it (SCRUM-327 AC6, AC7). Viewing is not: SCRUM-444 AC1
+ * lets any coordinator view any event, which GET /:id/review already serves
+ * (SCRUM-332). This queue is that viewing right as a worklist -- what
+ * colleagues have waiting -- and it is what a coordinator covering for a
+ * colleague, or choosing who to hand an event to, needs to see. Taking it
+ * away would remove something the customer allowed in order to enforce a
+ * restriction the customer never made. What SCRUM-486 does reserve is the
+ * choice of who takes a new request, which is the Lead's; so the only
+ * requests kept out are the ones that belong to nobody. That is a customer
+ * distinction, not a preference, and it is the whole of the filter.
+ *
  * Four choices worth defending:
  *
  *  - The same COLUMNS every other read uses, so a queue row is byte-identical
@@ -1520,8 +1546,8 @@ export async function getEventClarificationHistory(id, userId, role, { client } 
  * contact about it. Render it as an identifier.
  *
  * listEventRequestsForCoordinator, below, does show the organiser's name, and
- * that is not a contradiction. The floor is for a queue of work nobody has
- * taken on, which every coordinator sees. "My events" holds only the events
+ * that is not a contradiction. The floor is for a queue every coordinator
+ * sees, of work most of them do not hold. "My events" holds only the events
  * the caller is responsible for, where contacting the organiser is the job.
  * Its docstring gives the argument in full.
  *
@@ -1540,6 +1566,8 @@ export async function listEventRequestsForReview({ client } = {}) {
     .from('event_requests')
     .select(COLUMNS)
     .in('status', COORDINATOR_QUEUE_STATUSES)
+    // SCRUM-486 AC2-06: a request nobody holds is the Lead's (see above).
+    .not('assigned_coordinator_id', 'is', null)
     .order('submitted_at', { ascending: true, nullsFirst: false })
     .order('id', { ascending: true });
 
@@ -1557,9 +1585,11 @@ export async function listEventRequestsForReview({ client } = {}) {
  *
  * SCRUM-333, for SCRUM-327 AC11: each coordinator has a "My events" list
  * showing the events assigned to them, grouped by status, earliest event
- * first. It sits beside the shared queue, which is unchanged: the queue is the
- * view of work nobody holds yet, and this is the view of work one person does
- * hold.
+ * first. It sits beside the shared queue: the queue is every coordinator's
+ * view of work awaiting a decision, whoever holds it, and this is the view of
+ * work one person does hold. (Before SCRUM-486 the queue was described as work
+ * nobody holds yet; since 041 that work is the Lead's unassigned queue, and
+ * this queue lists only requests someone holds.)
  *
  * No status filter. The queue leaves decided statuses out because it is a
  * worklist, and a worklist that kept them would never empty. This is a list

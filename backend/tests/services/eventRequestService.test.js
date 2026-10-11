@@ -1974,6 +1974,13 @@ function createQueueFakeClient(results = []) {
         call.inFilters.push([column, values]);
         return chain;
       },
+      // SCRUM-486 (SCRUM-520): the review queue's "has a coordinator",
+      // .not('assigned_coordinator_id', 'is', null). Its own list too, so
+      // "no eq at all" above still means what it says.
+      not(column, operator, value) {
+        call.notFilters.push([column, operator, value]);
+        return chain;
+      },
       order(column, options) {
         call.order.push([column, options]);
         return chain;
@@ -1995,6 +2002,7 @@ function createQueueFakeClient(results = []) {
         select: null,
         filters: [],
         inFilters: [],
+        notFilters: [],
         order: [],
       };
       calls.push(call);
@@ -2004,9 +2012,27 @@ function createQueueFakeClient(results = []) {
 }
 
 
+/**
+ * A row the review queue can return. SCRUM-486 (SCRUM-520): since 041 the
+ * queue reads only requests someone holds, so every row it returns has a
+ * coordinator. The SCRUM-45 fixtures below used storedRow, which has none:
+ * right when written, because the coordinator was not part of what the queue
+ * selected on, and wrong to keep, because a fixture the read can no longer
+ * return would let these tests pass on data production cannot produce.
+ */
+const heldRow = (overrides = {}) => storedRow({ assigned_coordinator_id: COORDINATOR_ID, ...overrides });
+
 describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers', () => {
-  it('SCRUM45_AC1_filters_on_the_three_review_statuses_and_nothing_else', async () => {
-    const client = createQueueFakeClient([ok([storedRow({ status: STATUS.SUBMITTED })])]);
+  it('SCRUM45_AC1_filters_on_the_three_review_statuses_and_on_a_coordinator_holding_the_request', async () => {
+    // Was SCRUM45_AC1_filters_on_the_three_review_statuses_and_nothing_else.
+    // Right when written: from SCRUM-330 until SCRUM-486 every submitted
+    // request was given a coordinator in the same transaction, so a status
+    // filter alone already meant "held by someone". Migration 041 removed
+    // that: a submitted request now waits with no coordinator until the Lead
+    // assigns one, and it is the Lead's alone (AC2-06). So the read gained one
+    // filter, and "nothing else" is no longer true. Renamed for that; the
+    // two halves below are unchanged and still asserted in full.
+    const client = createQueueFakeClient([ok([heldRow({ status: STATUS.SUBMITTED })])]);
 
     await listEventRequestsForReview({ client });
 
@@ -2017,6 +2043,10 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
     // Half one: the status filter is present, and it is the domain's list
     // rather than three literals copied into the service.
     expect(call.inFilters).toEqual([['status', COORDINATOR_QUEUE_STATUSES]]);
+
+    // SCRUM-486 AC2-06: and the request has a coordinator. Exactly this one
+    // negative filter, so an unassigned request cannot reach the shared queue.
+    expect(call.notFilters).toEqual([['assigned_coordinator_id', 'is', null]]);
 
     // Half two, and the more important half: there is no organiser filter at
     // all. Every other read in this module narrows to one organiser_id, and
@@ -2029,7 +2059,7 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
 
   it('SCRUM45_AC1_selects_the_same_columns_as_the_organisers_own_list', async () => {
     const client = createQueueFakeClient([
-      ok([storedRow({ status: STATUS.SUBMITTED })]),
+      ok([heldRow({ status: STATUS.SUBMITTED })]),
       ok([storedRow()]),
     ]);
 
@@ -2052,8 +2082,8 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
   it('SCRUM45_AC1_returns_requests_belonging_to_more_than_one_organiser', async () => {
     const client = createQueueFakeClient([
       ok([
-        storedRow({ id: 'a', organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
-        storedRow({ id: 'b', organiser_id: OTHER_ORGANISER_ID, status: STATUS.UNDER_REVIEW }),
+        heldRow({ id: 'a', organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
+        heldRow({ id: 'b', organiser_id: OTHER_ORGANISER_ID, status: STATUS.UNDER_REVIEW }),
       ]),
     ]);
 
@@ -2069,8 +2099,8 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
   it('SCRUM45_AC1_maps_every_row_into_camelCase', async () => {
     const client = createQueueFakeClient([
       ok([
-        storedRow({ id: 'a', status: STATUS.SUBMITTED }),
-        storedRow({ id: 'b', status: STATUS.PENDING_CLARIFICATION }),
+        heldRow({ id: 'a', status: STATUS.SUBMITTED }),
+        heldRow({ id: 'b', status: STATUS.PENDING_CLARIFICATION }),
       ]),
     ]);
 
@@ -2092,7 +2122,7 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
   });
 
   it('SCRUM45_AC1_orders_by_oldest_waiting_first_with_nulls_last', async () => {
-    const client = createQueueFakeClient([ok([storedRow({ status: STATUS.SUBMITTED })])]);
+    const client = createQueueFakeClient([ok([heldRow({ status: STATUS.SUBMITTED })])]);
 
     await listEventRequestsForReview({ client });
 
@@ -2123,7 +2153,7 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
   });
 
   it('SCRUM45_AC1_takes_no_organiser_and_asserts_none', async () => {
-    const client = createQueueFakeClient([ok([storedRow({ status: STATUS.SUBMITTED })])]);
+    const client = createQueueFakeClient([ok([heldRow({ status: STATUS.SUBMITTED })])]);
 
     // Called with no organiser at all, and both the call and the signature
     // are checked. The missing parameter is not an oversight: the module

@@ -72,6 +72,43 @@ function CoordinatorDetails({ eventRequestId }) {
   );
 }
 
+/**
+ * SCRUM-486 (SCRUM-520), AC1-05: where a submitted request stands with its
+ * coordinator, said on the row, or null when there is nothing to add.
+ *
+ * Since migration 041 "submitted" covers two situations an Organiser needs to
+ * tell apart: nobody has been assigned yet (the Event Coordinator Lead will
+ * choose someone), or a coordinator has been and has not started the review.
+ * Before SCRUM-486 they were one situation, because a coordinator was assigned
+ * in the same transaction as the submission.
+ *
+ * A line of its own, beside the status, rather than a status display that
+ * takes the assignment into account. The display (getStatusDisplay in the
+ * backend's domain/eventRequestStatus.js, SCRUM-14's) is keyed on the status
+ * alone and is "the one definition of these words" for every screen: it has
+ * three call sites in the backend, one of which (withStatusDisplay) puts it on
+ * all sixteen event-request responses, and five frontend screens render it,
+ * three of them the coordinators' (ReviewQueue, MyAssignedEvents,
+ * CoordinatorRequestDetail). Making it depend on the assignment
+ * would mean every one of those passing the coordinator in, including
+ * GET /:id/status, which reads only the status, or two responses describing
+ * the same request differently. And the assignment is not a status: 041
+ * deliberately added none. The shared description, "waiting to be picked up
+ * by a Coordinator", is still true in both situations; this line says which.
+ *
+ * Only for "submitted". Under review, pending clarification, approved and
+ * confirmed always have a coordinator (041's relaxed constraint still requires
+ * one), and the status itself says what is happening; a draft or a cancelled
+ * request is waiting for nobody.
+ */
+function assignmentLine(request) {
+  if (request.status !== "submitted") return null;
+
+  return request.assignedCoordinatorId == null
+    ? "Waiting for the Event Coordinator Lead to assign a coordinator to your request."
+    : "A coordinator has been assigned. Your request is waiting for them to start the review.";
+}
+
 function ClarificationHistoryDetails({ eventRequestId, isOpen }) {
   const [opened, setOpened] = useState(false);
 
@@ -228,6 +265,7 @@ export default function MyEventRequests() {
           // The labels and descriptions come from the API now (SCRUM-42), so
           // this component no longer interprets a status itself.
           const display = readStatusDisplay(req);
+          const assignment = assignmentLine(req);
           return (
             <li key={req.id} className="my-event-requests__item">
               <div className="my-event-requests__item-main">
@@ -239,6 +277,9 @@ export default function MyEventRequests() {
               <p className="my-event-requests__item-description">
                 {display.description}
               </p>
+              {assignment && (
+                <p className="my-event-requests__assignment">{assignment}</p>
+              )}
 
               {req.status === "pending_clarification" && req.clarificationNote && (
                 <p className="my-event-requests__clarification" role="alert">
@@ -297,8 +338,10 @@ export default function MyEventRequests() {
                 </dl>
               </details>
 
-              {/* Not on a draft: a coordinator is assigned at submission, so a
-                  draft has nobody and no history to show. */}
+              {/* Not on a draft: a draft has never had a coordinator, so it has
+                  no history to show. (Since 041 a submitted request may not
+                  have one yet either; its history then says so, and the line
+                  above has already told the Organiser why.) */}
               {req.status !== "draft" && <CoordinatorDetails eventRequestId={req.id} />}
               {req.status !== "draft" && (
                 <ClarificationHistoryDetails

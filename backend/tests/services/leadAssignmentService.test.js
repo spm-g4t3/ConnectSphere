@@ -6,6 +6,7 @@
  *   listCoordinatorWorkload      AC3-06          the picker's list
  *   assignEventRequest           AC3-04, AC4-03  the assignment, and a lost race
  *   requestEventClarification    AC8             the wrong-reason fault 041 left
+ *   listEventRequestsForReview   AC2-06          the shared queue leaves the unassigned out (SCRUM-520)
  *
  * A file of its own rather than more blocks in eventRequestService.test.js,
  * because neither fake there can answer these reads: createFakeClient has no
@@ -26,6 +27,7 @@ import {
   listCoordinatorWorkload,
   assignEventRequest,
   requestEventClarification,
+  listEventRequestsForReview,
 } from '../../src/services/eventRequestService.js';
 import {
   ValidationError,
@@ -33,7 +35,7 @@ import {
   ConflictError,
   ForbiddenError,
 } from '../../src/errors.js';
-import { STATUS } from '../../src/domain/eventRequestStatus.js';
+import { STATUS, COORDINATOR_QUEUE_STATUSES } from '../../src/domain/eventRequestStatus.js';
 
 
 // ---------------------------------------------------------------------------
@@ -471,6 +473,89 @@ describe('SCRUM-486 AC3, AC4: the Lead assigns a request', () => {
     expect(err).toBeInstanceOf(Type);
     expect(err.status).toBe(status);
     expect(trail(client)).toEqual(['rpc:assign_event_request']);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// AC2-06: the coordinators' shared queue leaves unassigned requests out
+// ---------------------------------------------------------------------------
+/**
+ * A fake that applies the filters it is given to a table of rows, instead of
+ * only recording them. The recording fakes can show which filter was sent;
+ * this shows what that filter does to a mix of rows: which come back, which
+ * do not. It understands exactly the four filters the read uses, and throws
+ * on anything else so a new one cannot be silently ignored.
+ */
+function createTableFakeClient(rows) {
+  return {
+    from() {
+      const keep = [];
+      const chain = {
+        select() { return chain; },
+        eq(column, value) { keep.push((row) => row[column] === value); return chain; },
+        in(column, values) { keep.push((row) => values.includes(row[column])); return chain; },
+        is(column, value) { keep.push((row) => (row[column] ?? null) === value); return chain; },
+        not(column, operator, value) {
+          if (operator !== 'is' || value !== null) throw new Error(`fake: unsupported not(${operator}, ${value})`);
+          keep.push((row) => (row[column] ?? null) !== null);
+          return chain;
+        },
+        order() { return chain; },
+        then: (resolve, reject) =>
+          Promise.resolve({ data: rows.filter((row) => keep.every((test) => test(row))), error: null }).then(resolve, reject),
+      };
+      return chain;
+    },
+  };
+}
+
+describe('SCRUM-486 AC2-06: the shared review queue lists only requests someone holds', () => {
+  const held = (id, status) => unassignedRow({ id, status, assigned_coordinator_id: COORDINATOR_A });
+
+  // Every status the queue listed before SCRUM-520, each held by a coordinator;
+  // one submitted request held by nobody; and two the status filter always
+  // kept out, so the new filter is seen working beside the old one.
+  const TABLE = [
+    unassignedRow({ id: 'unassigned-submitted' }),
+    held('held-submitted', STATUS.SUBMITTED),
+    held('held-under-review', STATUS.UNDER_REVIEW),
+    held('held-pending-clarification', STATUS.PENDING_CLARIFICATION),
+    held('held-approved', STATUS.APPROVED),
+    unassignedRow({ id: 'draft', status: STATUS.DRAFT }),
+  ];
+
+  it('SCRUM486_AC2_the_review_queue_leaves_out_a_submitted_request_nobody_holds', async () => {
+    const queue = await listEventRequestsForReview({ client: createTableFakeClient(TABLE) });
+
+    expect(queue.map((request) => request.id)).not.toContain('unassigned-submitted');
+    for (const request of queue) expect(request.assignedCoordinatorId).not.toBeNull();
+  });
+
+  it('SCRUM486_AC2_the_review_queue_still_lists_a_held_request_in_every_status_it_listed_before', async () => {
+    // Submitted, under review, pending clarification: COORDINATOR_QUEUE_STATUSES,
+    // unchanged. Approved and draft stay out, as they always did.
+    const queue = await listEventRequestsForReview({ client: createTableFakeClient(TABLE) });
+
+    expect(queue.map((request) => request.id).sort()).toEqual(
+      ['held-pending-clarification', 'held-submitted', 'held-under-review'],
+    );
+    expect(queue.map((request) => request.status).sort()).toEqual([...COORDINATOR_QUEUE_STATUSES].sort());
+  });
+
+  it('SCRUM486_AC2_the_unassigned_request_is_the_leads_and_appears_in_the_leads_queue', async () => {
+    // The other half of the same rule: what leaves the shared queue is not
+    // lost. It is in the Lead's queue, and only there.
+    const client = createTableFakeClient(TABLE);
+    const leadsQueue = await listUnassignedEventRequests({
+      client: {
+        from: (table) => (table === 'profiles'
+          ? { select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }
+          : client.from(table)),
+      },
+    });
+
+    expect(leadsQueue.map((request) => request.id)).toEqual(['unassigned-submitted']);
   });
 });
 
