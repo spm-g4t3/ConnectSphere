@@ -1,22 +1,28 @@
 -- ---------------------------------------------------------------------------
 -- 041_lead_assignment.sql
--- SCRUM-515: submission no longer assigns a coordinator
+-- SCRUM-515, SCRUM-516: the Event Coordinator Lead assigns, and reassigns
 --
 -- Part of SCRUM-486 "Assign and Reassign Event Coordinators from an Unassigned
 -- Queue - Event Coordinator Lead". This story's one migration, built across
--- four subtasks: SCRUM-515 (this part) relaxes the assignment constraint and
--- takes assignment out of submission; SCRUM-516 adds the Lead's assign
--- function; SCRUM-517 the refusal to review an unassigned request; SCRUM-518
--- the notifications.
+-- four subtasks:
+--   SCRUM-515 (done)  relaxes the assignment constraint, takes assignment out
+--                     of submission, and closes two null-caller holes.
+--   SCRUM-516 (done)  the Lead's first assignment, assign_event_request, and
+--                     reassign_event_request opened to the Lead.
+--   SCRUM-517         the refusal to review an unassigned request.
+--   SCRUM-518         the notifications.
 --
--- DO NOT APPLY THIS to the live database until SCRUM-516 to SCRUM-518 have
--- landed in this file. On its own it would leave every new submission in a
--- queue nobody can yet assign from. The PGlite tests read it from disk, so
+-- DO NOT APPLY THIS to the live database until SCRUM-517 and SCRUM-518 have
+-- landed in this file. Without them an unassigned request could not be
+-- refused a review with the right message, and nobody would be told one was
+-- waiting. The PGlite tests read it from disk, so
 -- they run against it whether or not it has been applied.
 --
--- Run it once in the Supabase SQL Editor, after 040_venue_holds.sql. Safe to
--- re-run: the constraint is dropped by name and added again, and every
--- function is `create or replace` with an unchanged signature.
+-- Run it once in the Supabase SQL Editor, after 040_venue_holds.sql, and after
+-- 039 (the Lead's role, which assign_event_request and reassign_event_request
+-- name). Safe to re-run: the constraint is dropped by name and added again,
+-- every changed function is `create or replace` with an unchanged signature,
+-- and the one new function is `create or replace` too.
 --
 -- Why. The customer's Week 7 change 5: "Newly submitted event requests should
 -- no longer be assigned directly to an Event Coordinator. Instead, they first
@@ -37,6 +43,19 @@
 --         the queue with no coordinator, not its old one.
 --   TR-04, TR-05  Two functions that would let a null caller through once a
 --         request can have no coordinator are closed.
+--   AC3   The Lead assigns a submitted, unassigned request to one Event
+--         Coordinator, with an optional note. Only the Lead may; only an Event
+--         Coordinator may be chosen.
+--   AC4   The coordinator and its history row are written in one statement. A
+--         second assignment of the same request is refused, and the refusal
+--         names the coordinator who got there first.
+--   AC5   Reassignment in Submitted, Under review, Pending clarification,
+--         Approved, Safety review, Safety approved or Confirmed; refused
+--         otherwise.
+--   AC6   The event's holder, or a Lead, may reassign it.
+--   AC9   Each assignment's history row names who made it: assigned_by is the
+--         Lead, so new rows are told apart from SCRUM-327's automatic ones,
+--         whose null assigned_by still reads "automatically on submission".
 --
 --
 -- Order, and why this file is not split the way 016 and 017 were.
@@ -85,8 +104,46 @@
 --     assignment-history row: nothing is assigned, so there is nothing to
 --     record. The Lead's assignment writes the first one (SCRUM-516).
 --
+--   * The first assignment is a function of its own, assign_event_request,
+--     beside reassign_event_request, not a branch inside it. 018's guarded
+--     update ends `and assigned_coordinator_id = p_assigned_by`. A Lead who
+--     does not hold the event matches no row, and on a first assignment both
+--     sides would be null, where `null = null` matches nothing either. One way
+--     out was to rewrite 018's guard to compare with the outgoing coordinator
+--     using `is not distinct from`, and let one function do both jobs. That
+--     was weighed and not taken. The two jobs differ in everything but the
+--     history row: who may do it (only a Lead assigns; the holder or a Lead
+--     reassigns), what must be true first (no coordinator and Submitted,
+--     against a coordinator and one of seven statuses), and what a refusal
+--     must say (AC4's "already assigned to X", against 018's "changed
+--     hands"). One function would have to branch on whether a holder exists,
+--     and a reassignment aimed at an event whose holder had just gone would
+--     silently become a first assignment instead of being refused. Two
+--     functions keep each set of rules readable on its own, at the cost of
+--     repeating one role check, which is a single `perform ... for share`.
+--
+--   * The reassignment's guarded update compares with the outgoing coordinator
+--     the function read under its lock (v_outgoing), not with the caller. With
+--     a Lead as caller the caller is not the holder, and the guard's job was
+--     never "the caller holds it" but "nobody moved it in between".
+--     reassign_event_request refuses a request with no coordinator before the
+--     update, so v_outgoing is never null there and `=` is enough.
+--
+--   * The Lead cannot be assigned events (the team's 11 October decision,
+--     which answers SCRUM-485's open question 3). The incoming person must
+--     hold event_coordinator. One role per account (SCRUM-485 AC2: profiles.id
+--     is the primary key, with one role column) means that check alone
+--     excludes every Lead; no second check for "and not a Lead" is needed.
+--
+--   * The reassignment status list is compared as text, so it can name
+--     safety_review and safety_approved, which AC5 lists and the enum does not
+--     yet have: SCRUM-488 adds them. 037's assert_equipment_editable is the
+--     precedent, comparing status::text for exactly that reason. Compared as
+--     the enum, the list would fail to run while those values are missing.
+--
 --   * Error codes follow 018 and 029: standard SQLSTATEs (22004, P0002, 55000,
---     42501), which translateError in eventRequestService.js maps once. 040,
+--     42501, 22023, 23514, 40001), which translateError in
+--     eventRequestService.js maps once. 040,
 --     the venue holds, raises errcode 'PT409' with a hint instead, a PostgREST
 --     code that sets the HTTP status itself. That was considered, not
 --     overlooked: these functions sit beside 018's and 029's, the Lead's
@@ -116,9 +173,15 @@
 --     header describes a rule the application no longer applies; it is
 --     applied and append-only, so this note is the correction.
 --
---   * Assign anything, add the Lead's queue, refuse the review of an
---     unassigned request, or write any notification. Those are SCRUM-516,
---     517, 518 and 519, in this file.
+--   * Add the Lead's queue, refuse the review of an unassigned request, or
+--     write any notification. Those are SCRUM-517, 518 and 519; 517 and 518
+--     in this file.
+--
+--   * Change anything about who acts on an event after a reassignment (AC7).
+--     Open clarifications, change requests and flagged bookings reference the
+--     event, not the coordinator, and every function that acts on them checks
+--     the event's assigned_coordinator_id when it runs. So the new holder can
+--     act at once and the previous one cannot, with no code here.
 --
 --   * Change the assignment history. Old rows keep assigned_by null, which
 --     014 defines as "the system did it"; they are a true record of what
@@ -356,7 +419,274 @@ $$;
 
 
 -- ---------------------------------------------------------------------
--- 5. Tell the API about the changed functions
+-- 5. The Lead's first assignment (SCRUM-516)
+-- ---------------------------------------------------------------------
+-- SQLSTATEs, as 018 and 029, mapped by translateError:
+--   no_data_found (P0002)             no such event. 404.
+--   insufficient_privilege (42501)    the caller is null, or does not hold
+--                                     event_coordinator_lead. 403.
+--   object_not_in_prerequisite_state  the request already has a coordinator
+--   (55000)                           (the message names them: AC4), or it is
+--                                     not Submitted. 409.
+--   invalid_parameter_value (22023)   the chosen person does not hold
+--                                     event_coordinator. 400.
+--   serialization_failure (40001)     the guarded update matched no row; it
+--                                     cannot while the lock is held, so it is a
+--                                     backstop, as in 018. 409.
+--
+-- Checks run in this order: who is asking (the caller), then whether there is
+-- anything to assign (a coordinator already, then the status), then whom it
+-- goes to. Caller first, as in 018 and 029: whether a request can be assigned
+-- is a question only a Lead has reason to ask.
+
+create or replace function assign_event_request(
+  p_event_request_id uuid,
+  p_coordinator_id   uuid,
+  p_assigned_by      uuid,
+  p_note             text
+)
+returns event_requests
+language plpgsql
+as $$
+declare
+  v_request event_requests;
+  v_holder  text;
+begin
+  -- Lock first, then read: a second assignment of the same request waits here
+  -- for the first to commit, then sees its coordinator (AC4).
+  select *
+    into v_request
+    from event_requests
+   where id = p_event_request_id
+     for update;
+
+  if not found then
+    raise exception 'event request % not found', p_event_request_id
+      using errcode = 'no_data_found';
+  end if;
+
+  -- Only a Lead. Checked under for share, as 018 checks the incoming
+  -- coordinator's role: a role revoked at the same moment either waits for
+  -- this assignment or refuses it. A null caller is refused explicitly.
+  if p_assigned_by is null then
+    raise exception 'only the Event Coordinator Lead can assign event request %', p_event_request_id
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  perform 1
+     from profiles p
+    where p.id = p_assigned_by
+      and p.role = 'event_coordinator_lead'
+      for share;
+
+  if not found then
+    raise exception 'only the Event Coordinator Lead can assign event request %', p_event_request_id
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  -- AC4: if someone got there first, say who. The name is read from profiles,
+  -- with the id as a fallback for a coordinator with no name on record, so the
+  -- Lead is never told "already assigned" without being told to whom.
+  if v_request.assigned_coordinator_id is not null then
+    select coalesce(nullif(btrim(p.full_name), ''), p.id::text)
+      into v_holder
+      from profiles p
+     where p.id = v_request.assigned_coordinator_id;
+
+    raise exception 'event request % is already assigned to %',
+      p_event_request_id, coalesce(v_holder, v_request.assigned_coordinator_id::text)
+      using errcode = 'object_not_in_prerequisite_state';
+  end if;
+
+  if v_request.status <> 'submitted' then
+    raise exception 'event request % has status %, and only a submitted request can be assigned',
+      p_event_request_id, v_request.status
+      using errcode = 'object_not_in_prerequisite_state';
+  end if;
+
+  -- Only an Event Coordinator, which with one role per account excludes every
+  -- Lead (see the header). Under for share, as 018.
+  perform 1
+     from profiles p
+    where p.id = p_coordinator_id
+      and p.role = 'event_coordinator'
+      for share;
+
+  if not found then
+    raise exception 'user % is not an Event Coordinator, so cannot be assigned event request %',
+      p_coordinator_id, p_event_request_id
+      using errcode = 'invalid_parameter_value';
+  end if;
+
+  -- The coordinator and the history row in one statement (AC4): the insert
+  -- reads the update's returned row, so a row is written only if the update
+  -- matched, and neither stands without the other. The guard repeats the
+  -- checks above at the statement itself, as 018's and 022's do.
+  -- assigned_by names the Lead, so this row reads as a person's, not as
+  -- SCRUM-327's automatic assignment (AC9). A blank note is stored as null.
+  with assigned as (
+    update event_requests
+       set assigned_coordinator_id = p_coordinator_id
+     where id = p_event_request_id
+       and status = 'submitted'
+       and assigned_coordinator_id is null
+    returning *
+  ), recorded as (
+    insert into event_request_assignment_history
+      (event_request_id, previous_coordinator_id, new_coordinator_id,
+       assigned_by, handover_note)
+    select a.id, null, a.assigned_coordinator_id,
+           p_assigned_by, nullif(btrim(p_note), '')
+      from assigned a
+    returning 1
+  )
+  select * into v_request from assigned;
+
+  if not found then
+    raise exception 'event request % changed while it was being assigned', p_event_request_id
+      using errcode = 'serialization_failure';
+  end if;
+
+  return v_request;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 6. Reassignment, opened to the Lead (SCRUM-516)
+-- ---------------------------------------------------------------------
+-- 018's reassign_event_request, widened in three places and nothing else:
+--
+--   * Who may call it: the event's current holder, as 018 and SCRUM-327 AC6
+--     allowed, or anyone holding event_coordinator_lead (AC6 as amended on
+--     11 October). The role is checked under for share, only when the caller
+--     is not the holder.
+--   * A request with no coordinator is refused with a message saying it must
+--     be assigned, not reassigned (AC5-05), where 018 would have raised a
+--     misleading 40001 "changed hands". It comes after the caller check, so
+--     only someone entitled to reassign learns why.
+--   * The guarded update compares with the outgoing coordinator read under
+--     the lock, not with the caller (see the header).
+--   * The status list is compared as text and names SCRUM-488's two safety
+--     statuses (see the header, and 037).
+--
+-- Unchanged from 018: the row lock, the null-caller refusal, the incoming
+-- coordinator's role check under for share, the refusal to hand an event to
+-- its current holder, the reviewer following an undecided handover and
+-- staying on a decided one, the history row, and every SQLSTATE.
+
+create or replace function reassign_event_request(
+  p_event_request_id   uuid,
+  p_new_coordinator_id uuid,
+  p_assigned_by        uuid,
+  p_handover_note      text
+)
+returns event_requests
+language plpgsql
+as $$
+declare
+  v_request  event_requests;
+  v_outgoing uuid;
+  v_is_lead  boolean := false;
+begin
+  select *
+    into v_request
+    from event_requests
+   where id = p_event_request_id
+     for update;
+
+  if not found then
+    raise exception 'event request % not found', p_event_request_id
+      using errcode = 'no_data_found';
+  end if;
+
+  v_outgoing := v_request.assigned_coordinator_id;
+
+  -- The holder, or a Lead. A null caller is refused explicitly, as in 018.
+  -- The Lead's role is looked up only when the caller is not the holder, so
+  -- the holder's handover reads exactly as it did in 018.
+  if p_assigned_by is not null and v_outgoing is distinct from p_assigned_by then
+    perform 1
+       from profiles p
+      where p.id = p_assigned_by
+        and p.role = 'event_coordinator_lead'
+        for share;
+    v_is_lead := found;
+  end if;
+
+  if p_assigned_by is null or (v_outgoing is distinct from p_assigned_by and not v_is_lead) then
+    raise exception 'only the coordinator assigned to event request %, or the Event Coordinator Lead, can hand it over',
+      p_event_request_id
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  -- A request nobody holds is assigned, not reassigned.
+  if v_outgoing is null then
+    raise exception 'event request % has no coordinator yet, so it must be assigned, not reassigned',
+      p_event_request_id
+      using errcode = 'object_not_in_prerequisite_state';
+  end if;
+
+  -- AC5's seven, compared as text so safety_review and safety_approved can be
+  -- named before SCRUM-488 adds them to the enum (037 does the same).
+  if v_request.status::text not in ('submitted', 'under_review', 'pending_clarification',
+                                    'approved', 'safety_review', 'safety_approved',
+                                    'confirmed') then
+    raise exception 'event request % has status %, and cannot be handed over in that status',
+      p_event_request_id, v_request.status
+      using errcode = 'object_not_in_prerequisite_state';
+  end if;
+
+  perform 1
+     from profiles p
+    where p.id = p_new_coordinator_id
+      and p.role = 'event_coordinator'
+      for share;
+
+  if not found then
+    raise exception 'user % is not an Event Coordinator, so cannot be handed event request %',
+      p_new_coordinator_id, p_event_request_id
+      using errcode = 'invalid_parameter_value';
+  end if;
+
+  if p_new_coordinator_id = v_outgoing then
+    raise exception 'event request % is already assigned to that coordinator', p_event_request_id
+      using errcode = 'check_violation';
+  end if;
+
+  -- 018's update, guarded on the outgoing coordinator read under the lock
+  -- rather than on the caller: a Lead is not the holder, and the guard's job
+  -- is "nobody moved it in between". The reviewer rule is 018's.
+  update event_requests
+     set assigned_coordinator_id  = p_new_coordinator_id,
+         reviewing_coordinator_id = case
+           when decision is null and reviewing_coordinator_id is not null
+             then p_new_coordinator_id
+           else reviewing_coordinator_id
+         end
+   where id = p_event_request_id
+     and assigned_coordinator_id = v_outgoing
+  returning * into v_request;
+
+  if not found then
+    raise exception 'event request % changed hands while this handover was being made', p_event_request_id
+      using errcode = 'serialization_failure';
+  end if;
+
+  insert into event_request_assignment_history
+    (event_request_id, previous_coordinator_id, new_coordinator_id,
+     assigned_by, handover_note)
+  values
+    (p_event_request_id, v_outgoing, p_new_coordinator_id,
+     p_assigned_by, p_handover_note);
+
+  return v_request;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 7. Tell the API about the changed functions
 -- ---------------------------------------------------------------------
 -- PostgREST caches function definitions. 016, 018, 021, 029 and 030 end the
 -- same way.

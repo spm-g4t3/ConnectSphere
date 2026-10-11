@@ -20,10 +20,13 @@ const ASSIGNMENT = [
   "016_submit_event_request.sql",
   "017_require_assigned_coordinator.sql",
 ];
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users(id);
-`;
+// SCRUM-19's decision columns, applied for real (025) rather than the
+// stand-in this suite used to add by hand, which created only
+// reviewing_coordinator_id. SCRUM-486's reassignment (041, from 018) reads
+// `decision` to decide whether the reviewer follows a handover, so the stand-in
+// no longer described the table. Before 014, whose prerequisite guard needs
+// reviewing_coordinator_id, as in eventStatusLifecycleDatabase.test.js.
+const DECISIONS = "025_event_request_decisions.sql";
 const STATUS_LIFECYCLE = [
   "020_event_status_lifecycle.sql",
   "021_event_status_history.sql",
@@ -35,6 +38,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
   let organiser;
   let coordinator;
   let otherCoordinator;
+  let lead;
 
   const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
   const event = async (status = "under_review") =>
@@ -77,7 +81,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
       );
     `);
     for (const name of BASE) await db.exec(migration(name));
-    await db.exec(DECISION_STAND_IN);
+    await db.exec(migration(DECISIONS));
     for (const name of ASSIGNMENT) await db.exec(migration(name));
     for (const name of STATUS_LIFECYCLE) await db.exec(migration(name));
     await db.exec(`
@@ -110,15 +114,18 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     await db.exec(migration("026_clarification_amendment_fields.sql"));
     // SCRUM-486's migration, last: it redefines close_event_clarification with
     // a null-caller guard (SCRUM-515), so the version tested here is the one
-    // production will have.
+    // production will have. 039 first, for the Lead's role, which 041's
+    // reassignment names (SCRUM-516).
+    await db.exec(migration("039_coordinator_lead_and_safety_officer_roles.sql"));
     await db.exec(migration("041_lead_assignment.sql"));
 
     organiser = (await one("insert into auth.users(email) values ('organiser@example.test') returning id")).id;
     coordinator = (await one("insert into auth.users(email) values ('coordinator@example.test') returning id")).id;
     otherCoordinator = (await one("insert into auth.users(email) values ('other@example.test') returning id")).id;
+    lead = (await one("insert into auth.users(email) values ('lead@example.test') returning id")).id;
     await db.query(
-      "insert into profiles (id, role) values ($1, 'event_organiser'), ($2, 'event_coordinator'), ($3, 'event_coordinator')",
-      [organiser, coordinator, otherCoordinator],
+      "insert into profiles (id, role) values ($1, 'event_organiser'), ($2, 'event_coordinator'), ($3, 'event_coordinator'), ($4, 'event_coordinator_lead')",
+      [organiser, coordinator, otherCoordinator, lead],
     );
   }, 30000);
 
@@ -306,5 +313,33 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
 
     expect(err?.code).toBe("42501");
     expect(await history(id)).toEqual([]);
+  });
+
+  it("SCRUM486_AC7_an_open_clarification_follows_the_event_to_its_new_coordinator", async () => {
+    // AC7-04. The clarification belongs to the event, and
+    // close_event_clarification checks the event's holder when it runs, so
+    // after the Lead moves the event the new coordinator closes it and the
+    // previous one cannot. Nothing in 041 does this; it is proved, not built.
+    const id = await event();
+    await db.query(
+      "select * from request_event_clarification($1, $2, $2, 'Please confirm the attendee count.', null)",
+      [id, coordinator],
+    );
+    await db.query("select * from reassign_event_request($1, $2, $3, null)", [id, otherCoordinator, lead]);
+
+    const previous = await refused(
+      db.query("select * from close_event_clarification($1, $2, $2, 'Closing.')", [id, coordinator]),
+    );
+    const closed = await one(
+      "select * from close_event_clarification($1, $2, $2, 'Confirmed by phone.')",
+      [id, otherCoordinator],
+    );
+
+    expect(previous?.code).toBe("42501");
+    expect(closed.status).toBe("under_review");
+    expect((await history(id)).map((entry) => [entry.entry_type, entry.created_by])).toEqual([
+      ["question", coordinator],
+      ["closure", otherCoordinator],
+    ]);
   });
 });
