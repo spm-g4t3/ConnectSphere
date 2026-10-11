@@ -43,7 +43,7 @@ create unique index if not exists notifications_event_cancelled_once_per_recipie
   on notifications (recipient_id, event_request_id)
   where type = 'event_cancelled';
 
-drop function release_event_arrangements(uuid, text);
+drop function if exists release_event_arrangements(uuid, text);
 
 create function release_event_arrangements(
   p_event_request_id uuid,
