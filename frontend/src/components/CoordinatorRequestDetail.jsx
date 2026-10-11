@@ -46,8 +46,9 @@ import EventVenueFinder from "./EventVenueFinder";
 import EventVenueSuitability from "./EventVenueSuitability";
 import DecisionOutcome from "./DecisionOutcome";
 import ReassignEventPanel from "./ReassignEventPanel";
-import ClarificationHistory from "./ClarificationHistory";
+import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import EventEquipmentSection from "./EventEquipmentSection";
+import EventCancellationPanel from "./EventCancellationPanel";
 import {
   decideEventRequest,
   getCoordinatorChangeRequests,
@@ -149,6 +150,14 @@ const RETURN_FOR_AMENDMENT_ERROR_MESSAGES = {
 const START_DATE_PASSED_MESSAGE =
   "This request cannot be approved because its proposed start date has passed or is missing. Agree a new date with the organiser, or reject the request.";
 
+const CANCELLABLE_STATUSES = new Set([
+  "submitted",
+  "under_review",
+  "pending_clarification",
+  "approved",
+  "confirmed",
+]);
+
 /**
  * Has this event's proposed start passed, by this browser's clock?
  *
@@ -205,6 +214,7 @@ export default function CoordinatorRequestDetail({
   // AssignmentHistory key, bumped to make it read the history again.
   const { user } = useAuth();
   const [reassigning, setReassigning] = useState(false);
+  const [cancellationPage, setCancellationPage] = useState(false);
   const [handedOverTo, setHandedOverTo] = useState(null);
   const [historyVersion, setHistoryVersion] = useState(0);
   // SCRUM-192. Bumped when a booking request is sent from "Find a venue", so
@@ -226,7 +236,7 @@ export default function CoordinatorRequestDetail({
   // refused. The server checks again, under a lock, and if the row this panel
   // holds is stale, ReassignEventPanel turns the 403 into a message.
   const isAssignedCoordinator = Boolean(user?.id) && assignedCoordinatorId === user.id;
-  const canReassign = isAssignedCoordinator;
+  const canReassign = isAssignedCoordinator && current.status !== "cancelled";
 
   // SCRUM-19. isAssignedCoordinator also decides who sees the review and
   // decision actions, and for the same reason: a convenience, not the gate.
@@ -447,6 +457,19 @@ export default function CoordinatorRequestDetail({
     );
   }
 
+  if (cancellationPage) {
+    return (
+      <EventCancellationPanel
+        eventRequest={current}
+        onBack={() => setCancellationPage(false)}
+        onCancelled={(updated) => {
+          setUpdatedRequest(updated);
+          onChangeRequestProcessed?.();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="coordinator-request-detail">
       <h2>
@@ -456,6 +479,15 @@ export default function CoordinatorRequestDetail({
         </span>
       </h2>
       <p>{display.description}</p>
+      {isAssignedCoordinator && CANCELLABLE_STATUSES.has(current.status) && (
+        <button
+          className="coordinator-request-detail__cancel"
+          type="button"
+          onClick={() => setCancellationPage(true)}
+        >
+          Cancel event
+        </button>
+      )}
 
       <section>
         <h3>The request</h3>
@@ -507,7 +539,7 @@ export default function CoordinatorRequestDetail({
       <EventEquipmentSection
         requestId={request.id}
         status={current.status}
-        canEdit={isAssignedCoordinator}
+        canEdit={isAssignedCoordinator && current.status !== "cancelled"}
       />
 
       <section>
@@ -543,7 +575,7 @@ export default function CoordinatorRequestDetail({
                       )}
                     </p>
                   )}
-                  {isOpen && (
+                  {isOpen && current.status !== "cancelled" && isAssignedCoordinator && (
                     <div className="coordinator-change-requests__actions">
                       <button
                         type="button"
@@ -690,18 +722,23 @@ export default function CoordinatorRequestDetail({
       ) : current.status === "pending_clarification" ? (
         <section>
           <h3>Waiting for organiser reply</h3>
-          <p>{current.clarificationNote || "No clarification note was recorded."}</p>
-          {current.clarificationReplyByDate && (
-            <p>
-              Reply by: {current.clarificationReplyByDate}
-              {current.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
-                <strong className="clarification-overdue"> Overdue</strong>
-              )}
-            </p>
-          )}
-          <ClarificationHistory
+          <div className="clarification-current">
+            <strong>Current question</strong>
+            <p>{current.clarificationNote || "No clarification question was recorded."}</p>
+            {current.clarificationReplyByDate && (
+              <span>
+                Reply by {formatTimestamp(current.clarificationReplyByDate)}
+                {current.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
+                  <strong className="clarification-overdue"> · Overdue</strong>
+                )}
+              </span>
+            )}
+          </div>
+          <ClarificationHistoryDialog
             eventRequestId={request.id}
-            isOpen
+            eventName={request.eventName}
+            isOpenQuestion
+            latestQuestion={current.clarificationNote}
           />
           {isAssignedCoordinator && (
             <form className="coordinator-clarification" onSubmit={handleCloseClarification}>
@@ -819,10 +856,10 @@ export default function CoordinatorRequestDetail({
       {request.status !== "pending_clarification" && (
         <section className="coordinator-clarification-history">
           <h3>Clarification history</h3>
-          <details>
-            <summary>View questions, replies and closures</summary>
-            <ClarificationHistory eventRequestId={request.id} />
-          </details>
+          <ClarificationHistoryDialog
+            eventRequestId={request.id}
+            eventName={request.eventName}
+          />
         </section>
       )}
 
@@ -863,7 +900,7 @@ export default function CoordinatorRequestDetail({
         <EventVenueFinder
           key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}`}
           request={current}
-          userId={isAssignedCoordinator ? user.id : undefined}
+          userId={isAssignedCoordinator && current.status !== "cancelled" ? user.id : undefined}
           hasLiveRequest={liveVenueRequest.eventId === current.id && liveVenueRequest.live}
           onRequestSubmitted={() => {
             setVenueVersion((n) => n + 1);

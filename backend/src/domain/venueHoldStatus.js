@@ -2,12 +2,11 @@
  * Venue hold status vocabulary.
  *
  * SCRUM-491 (Place a Tentative Venue Hold with Expiry - Venue Staff): a hold
- * is active until its expiry passes, then expired. An expired hold occupies
- * nothing and is never a booking (AC7); it is kept as a record.
+ * is active until its expiry passes, then expired. Event cancellation can
+ * release an active hold early. Expired and released holds occupy nothing.
  *
- * Mirrors the Postgres enum `venue_hold_status` in 040_venue_holds.sql
- * exactly, in the same order. These two lists must stay identical -- a test
- * asserts the match.
+ * Mirrors the Postgres enum `venue_hold_status` in 040 and its 047 extension,
+ * in the same order. These lists must stay identical -- a test asserts match.
  *
  * Deliberately free of imports, database calls and framework code -- pure data
  * and pure functions, the same shape as domain/venueBlockReason.js.
@@ -16,6 +15,7 @@
 export const VENUE_HOLD_STATUS = Object.freeze({
   ACTIVE: 'active',
   EXPIRED: 'expired',
+  RELEASED: 'released',
 });
 
 // Keyed by value, so the membership check below is a single own-property test.

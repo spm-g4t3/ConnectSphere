@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import { getPendingBookingRequests } from "../services/venueService";
 import VenueCatalogue from "./VenueCatalogue";
+import CoordinatorNotifications from "./CoordinatorNotifications";
 
 export default function VenueStaffDashboard({ user }) {
   const [pendingRequests, setPendingRequests] = useState([]);
@@ -47,6 +48,8 @@ export default function VenueStaffDashboard({ user }) {
           {pendingRequests.length === 0 && <p>No pending requests.</p>}
         </ul>
       </section>
+
+      <CoordinatorNotifications />
 
       {/* Rendered as a direct child of .dashboard so its <section> root still
           picks up the `.dashboard > section` card styling it had inline.
