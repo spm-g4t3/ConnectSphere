@@ -16,10 +16,22 @@
 // Full events stay in the list, marked "Full". An event the caller already
 // holds a place on is marked "Registered". Selecting an event goes to its
 // details page (BrowseEventDetails.jsx).
+//
+// REFRESH. The list is read when the page opens and again whenever the reader
+// returns to the tab, so an event that has since filled, closed, started or
+// gone back to Approved drops out (or shows Full), and a registration made
+// elsewhere shows as Registered. Opening the page again, for instance after
+// registering on the details page, is also a fresh read. A refresh does not
+// blank the list: only the first read shows "Loading...". If a refresh fails
+// for a transient reason the last list stays up with a notice, because
+// removing it would be no more true than keeping it; a lost session or a
+// refused role replaces it with the error, as on first load. Overlapping reads
+// are settled by recency, so a slow old answer never overwrites a newer one.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getOpenEvents } from "../services/openEventService";
+import useRefreshOnReturn from "./useRefreshOnReturn";
 import { openEventDetailsPath } from "../services/openEventRoutes";
 import {
   availabilityLabel,
@@ -67,24 +79,47 @@ function EventRow({ event }) {
   );
 }
 
+// A refusal is not transient: keeping the list on screen after one would be wrong.
+const REFUSALS = [401, 403];
+
 export default function BrowseOpenEvents() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const latest = useRef(0);
+  const loaded = useRef(false);
 
   const fetchEvents = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+    const mine = ++latest.current;
+    const background = loaded.current;
+    if (!background) {
+      setLoading(true);
+      setError(null);
+    }
+
     try {
-      setEvents(await getOpenEvents());
+      const data = await getOpenEvents();
+      if (mine !== latest.current) return;
+      loaded.current = true;
+      setEvents(data);
+      setError(null);
+      setRefreshFailed(false);
     } catch (err) {
+      if (mine !== latest.current) return;
+      const status = err.response?.status;
+      if (background && !REFUSALS.includes(status)) {
+        setRefreshFailed(true);
+        return;
+      }
+      loaded.current = false;
       setEvents([]);
+      setRefreshFailed(false);
       setError(
-        LIST_ERROR_MESSAGES[err.response?.status] ||
-          "Open events could not be loaded. Please try again.",
+        LIST_ERROR_MESSAGES[status] || "Open events could not be loaded. Please try again.",
       );
     } finally {
-      setLoading(false);
+      if (mine === latest.current) setLoading(false);
     }
   }, []);
 
@@ -92,6 +127,7 @@ export default function BrowseOpenEvents() {
     fetchEvents();
   }, [fetchEvents]);
 
+  useRefreshOnReturn(fetchEvents);
   return (
     <>
       <h1>Browse Open Events</h1>
@@ -104,6 +140,15 @@ export default function BrowseOpenEvents() {
         {error && (
           <div className="browse-open-events__error" role="alert">
             <p>{error}</p>
+            <button type="button" onClick={fetchEvents}>
+              Try again
+            </button>
+          </div>
+        )}
+
+        {refreshFailed && (
+          <div className="browse-open-events__notice" role="status">
+            <p>Could not refresh the list. Showing the events as last loaded.</p>
             <button type="button" onClick={fetchEvents}>
               Try again
             </button>

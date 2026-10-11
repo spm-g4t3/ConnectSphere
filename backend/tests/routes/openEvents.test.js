@@ -925,3 +925,176 @@ describe('SCRUM495_AC8 one event carries no internal planning information', () =
     spy.mockRestore();
   });
 });
+// ---------------------------------------------------------------------------
+// Refresh: the same event read at successive moments
+// ---------------------------------------------------------------------------
+
+describe('SCRUM495_AC9 Confirmed to Approved and back, registrations kept', () => {
+  it('drops the event from the list and the details while it is Approved, and brings it back when reconfirmed, with its registrations', async () => {
+    const row = eventRow({ registration_capacity: 5 });
+    const registrations = [registration(row.id, ATTENDEE_ID), registration(row.id, OTHER_ATTENDEE_ID)];
+    const before = JSON.stringify(registrations);
+    const client = createFakeClient([row], { registrations });
+
+    const first = await get(client);
+    expect(first.body).toHaveLength(1);
+    expect(first.body[0]).toMatchObject({ placesLeft: 3, isRegistered: true });
+
+    row.status = 'approved'; // a significant change returns it to Approved (SCRUM-395)
+    const whileApproved = await get(client);
+    const detailsWhileApproved = await getOne(client, row.id);
+    expect(whileApproved.body).toEqual([]);
+    expect(detailsWhileApproved.status).toBe(404);
+    expect(detailsWhileApproved.body).toEqual(NOT_OPEN);
+    expect(JSON.stringify(registrations)).toBe(before);
+
+    row.status = 'confirmed'; // reconfirmed
+    const again = await get(client);
+    const detailsAgain = await getOne(client, row.id);
+    expect(again.body).toEqual(first.body);
+    expect(detailsAgain.status).toBe(200);
+    expect(detailsAgain.body).toMatchObject({ placesLeft: 3, isRegistered: true });
+    expect(JSON.stringify(registrations)).toBe(before);
+  });
+
+  it('does not read, count or touch the registrations of an event while it is Approved', async () => {
+    const row = eventRow({ status: 'approved' });
+    const client = createFakeClient([row], { registrations: [registration(row.id, ATTENDEE_ID)] });
+
+    await get(client);
+    await getOne(client, row.id);
+
+    expect(client.calls.map((call) => call.table)).toEqual(['event_requests', 'event_requests']);
+  });
+
+  it.each([
+    ['registration is off', { registration_enabled: false }],
+    ['its window has closed', { registration_closes_at: '2026-10-12T09:59:59+00:00' }],
+    ['its window has not opened', { registration_opens_at: '2026-10-12T10:00:01+00:00' }],
+    ['it has started', { proposed_start: '2026-10-12T09:00:00+00:00', proposed_end: '2026-10-12T17:00:00+00:00', registration_closes_at: '2026-10-12T23:00:00+00:00' }],
+  ])('after reconfirmation the event is still left out if %s', async (_label, overrides) => {
+    const row = eventRow({ status: 'approved', ...overrides });
+    const client = createFakeClient([row]);
+
+    row.status = 'confirmed';
+
+    expect((await get(client)).body).toEqual([]);
+    expect((await getOne(client, row.id)).status).toBe(404);
+  });
+
+  it('lists the event after reconfirmation only once every other condition holds', async () => {
+    const row = eventRow({ status: 'approved', registration_enabled: false });
+    const client = createFakeClient([row]);
+
+    row.status = 'confirmed';
+    expect((await get(client)).body).toEqual([]);
+
+    row.registration_enabled = true;
+    expect((await get(client)).body).toHaveLength(1);
+  });
+});
+
+describe('SCRUM495_AC4 availability is current on every read', () => {
+  it('shows a place taken by another attendee, then freed by a withdrawal, on the next read', async () => {
+    const row = eventRow({ registration_capacity: 1 });
+    const registrations = [];
+    const client = createFakeClient([row], { registrations });
+
+    expect((await getOne(client, row.id)).body).toMatchObject({ placesLeft: 1, isFull: false, canRegister: true });
+
+    const taken = registration(row.id, OTHER_ATTENDEE_ID);
+    registrations.push(taken);
+    expect((await getOne(client, row.id)).body).toMatchObject({ placesLeft: 0, isFull: true, canRegister: false });
+    expect((await get(client)).body[0]).toMatchObject({ placesLeft: 0, isFull: true });
+
+    taken.status = 'withdrawn';
+    expect((await getOne(client, row.id)).body).toMatchObject({ placesLeft: 1, isFull: false, canRegister: true });
+  });
+
+  it('shows the caller as Registered as soon as their registration exists, in the list and the details', async () => {
+    const row = eventRow({ registration_capacity: 3 });
+    const registrations = [];
+    const client = createFakeClient([row], { registrations });
+
+    expect((await get(client)).body[0].isRegistered).toBe(false);
+
+    registrations.push(registration(row.id, ATTENDEE_ID));
+
+    expect((await get(client)).body[0]).toMatchObject({ isRegistered: true, placesLeft: 2 });
+    expect((await getOne(client, row.id)).body).toMatchObject({ isRegistered: true, placesLeft: 2 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Boundaries and time zones, on both endpoints
+// ---------------------------------------------------------------------------
+// NOW is 2026-10-12T10:00:00.000Z, which is 18:00 in Singapore. The window is
+// [opens, closes) and an event is listed only while start > now. The same
+// instant written with a +08:00 offset must give the same answer, whatever
+// zone the server runs in, because every comparison is between instants.
+
+describe('SCRUM495_AC2_AC3 registration window and start boundaries', () => {
+  const afterNow = '2026-10-12T10:00:00.001Z';
+  const beforeNow = '2026-10-12T09:59:59.999Z';
+  const nowZ = '2026-10-12T10:00:00.000Z';
+  const nowSg = '2026-10-12T18:00:00+08:00';
+  const startLater = { proposed_end: '2026-10-30T17:00:00+00:00' };
+
+  const cases = [
+    ['opens exactly now', { registration_opens_at: nowZ }, true],
+    ['opens exactly now, written at +08:00', { registration_opens_at: nowSg }, true],
+    ['opens one millisecond ago', { registration_opens_at: beforeNow }, true],
+    ['opens one millisecond from now', { registration_opens_at: afterNow }, false],
+    ['opens one second from now, written at +08:00', { registration_opens_at: '2026-10-12T18:00:01+08:00' }, false],
+    ['closes exactly now', { registration_closes_at: nowZ }, false],
+    ['closes exactly now, written at +08:00', { registration_closes_at: nowSg }, false],
+    ['closes one millisecond ago', { registration_closes_at: beforeNow }, false],
+    ['closes one millisecond from now', { registration_closes_at: afterNow }, true],
+    ['closes one second from now, written at +08:00', { registration_closes_at: '2026-10-12T18:00:01+08:00' }, true],
+    ['starts exactly now', { proposed_start: nowZ, registration_closes_at: '2026-10-12T23:00:00+00:00', ...startLater }, false],
+    ['starts exactly now, written at +08:00', { proposed_start: nowSg, registration_closes_at: '2026-10-12T23:00:00+00:00', ...startLater }, false],
+    ['started one millisecond ago', { proposed_start: beforeNow, registration_closes_at: '2026-10-12T23:00:00+00:00', ...startLater }, false],
+    ['starts one millisecond from now', { proposed_start: afterNow, registration_closes_at: '2026-10-12T23:00:00+00:00', ...startLater }, true],
+    ['starts one second from now, written at +08:00', { proposed_start: '2026-10-12T18:00:01+08:00', registration_closes_at: '2026-10-12T23:00:00+00:00', ...startLater }, true],
+  ];
+
+  it.each(cases)('the list: an event that %s is listed: %s', async (_label, overrides, listed) => {
+    const res = await get(createFakeClient([eventRow(overrides)]));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(listed ? 1 : 0);
+  });
+
+  it.each(cases)('the details URL: an event that %s is opened: %s', async (_label, overrides, opened) => {
+    const row = eventRow(overrides);
+
+    const res = await getOne(createFakeClient([row]), row.id);
+
+    expect(res.status).toBe(opened ? 200 : 404);
+  });
+
+  it('gives the same answers whatever zone the server process runs in', async () => {
+    const original = process.env.TZ;
+    try {
+      for (const zone of ['UTC', 'Asia/Singapore', 'America/New_York', 'Pacific/Auckland']) {
+        process.env.TZ = zone;
+        const open = eventRow({ registration_closes_at: '2026-10-12T18:00:01+08:00' });
+        const closed = eventRow({ registration_closes_at: '2026-10-12T18:00:00+08:00' });
+
+        expect((await get(createFakeClient([open, closed]))).body.map((e) => e.id)).toEqual([open.id]);
+      }
+    } finally {
+      if (original === undefined) delete process.env.TZ;
+      else process.env.TZ = original;
+    }
+  });
+
+  it('finds an event by an upper-case id, as Postgres would', async () => {
+    const row = eventRow({ id: 'abcdef12-3456-4789-8abc-def123456789' });
+
+    const res = await getOne(createFakeClient([row]), row.id.toUpperCase());
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(row.id);
+  });
+});

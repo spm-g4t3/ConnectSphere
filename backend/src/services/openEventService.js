@@ -231,13 +231,16 @@ export async function getOpenEvent({ attendeeId, eventId, client, now = new Date
   if (typeof eventId !== 'string' || !isPlausibleId(eventId)) throw notOpen();
 
   const db = await resolveClient(client);
+  // Postgres compares uuids without regard to case, so a pasted upper-case id
+  // must find the same event, and the check below must agree with it.
+  const wanted = eventId.trim().toLowerCase();
 
-  const { data, error } = await openEventsQuery(db, now.toISOString()).eq('id', eventId);
+  const { data, error } = await openEventsQuery(db, now.toISOString()).eq('id', wanted);
 
   if (error) throw error;
 
   const rows = (data ?? []).filter(
-    (row) => row.id === eventId && isOpenForRegistration(toSettings(row), now),
+    (row) => row.id === wanted && isOpenForRegistration(toSettings(row), now),
   );
   if (rows.length === 0) throw notOpen();
 

@@ -8,7 +8,7 @@
 // test does not depend on the machine's time zone.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
@@ -260,6 +260,171 @@ describe("SCRUM495 errors and retry", () => {
 
     expect(await screen.findByRole("link", { name: "Back again" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(getOpenEvents).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Refresh and stale state
+// ---------------------------------------------------------------------------
+
+const returnToTab = () => fireEvent(window, new Event("focus"));
+
+function pending() {
+  let resolve;
+  const promise = new Promise((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+describe("SCRUM495_AC6_AC7_AC8 the list is refreshed from the server", () => {
+  it("drops an event that is no longer open, and keeps the rest, when the reader returns", async () => {
+    vi.mocked(getOpenEvents).mockResolvedValueOnce([
+      event({ id: "a", eventName: "Stays" }),
+      event({ id: "b", eventName: "Goes back to Approved" }),
+    ]).mockResolvedValueOnce([event({ id: "a", eventName: "Stays" })]);
+
+    renderPage();
+    await screen.findByRole("link", { name: "Goes back to Approved" });
+
+    returnToTab();
+
+    await waitFor(() => expect(screen.queryByRole("link", { name: "Goes back to Approved" })).not.toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "Stays" })).toBeInTheDocument();
+  });
+
+  it("shows the empty message when the refresh finds nothing open", async () => {
+    vi.mocked(getOpenEvents).mockResolvedValueOnce([event()]).mockResolvedValueOnce([]);
+
+    renderPage();
+    await screen.findByRole("link", { name: "Open Day" });
+
+    returnToTab();
+
+    expect(await screen.findByText("No events are currently open for registration.")).toBeInTheDocument();
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+  });
+
+  it("brings an event back after reconfirmation, with the registration it already had", async () => {
+    vi.mocked(getOpenEvents)
+      .mockResolvedValueOnce([event({ id: "a", eventName: "Gala", isRegistered: true, canRegister: false })])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([event({ id: "a", eventName: "Gala", isRegistered: true, canRegister: false })]);
+
+    renderPage();
+    await screen.findByRole("link", { name: "Gala" });
+    returnToTab();
+    await screen.findByText("No events are currently open for registration.");
+    returnToTab();
+
+    const row = (await screen.findByRole("link", { name: "Gala" })).closest("li");
+    expect(within(row).getByText("Registered")).toBeInTheDocument();
+  });
+
+  it("shows new availability, and a new Registered mark, after the reader returns from registering", async () => {
+    vi.mocked(getOpenEvents)
+      .mockResolvedValueOnce([event({ placesLeft: 1 })])
+      .mockResolvedValueOnce([event({ placesLeft: 0, isFull: true, isRegistered: true, canRegister: false })]);
+
+    renderPage();
+    await screen.findByText("1 place left");
+
+    returnToTab();
+
+    const row = (await screen.findByText("Full")).closest("li");
+    expect(within(row).getByText("Registered")).toBeInTheDocument();
+    expect(screen.queryByText("1 place left")).not.toBeInTheDocument();
+  });
+
+  it("does not blank the list while it refreshes", async () => {
+    const refresh = pending();
+    vi.mocked(getOpenEvents).mockResolvedValueOnce([event()]).mockReturnValueOnce(refresh.promise);
+
+    renderPage();
+    await screen.findByRole("link", { name: "Open Day" });
+
+    returnToTab();
+
+    expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Day" })).toBeInTheDocument();
+    refresh.resolve([event({ eventName: "Renamed" })]);
+    expect(await screen.findByRole("link", { name: "Renamed" })).toBeInTheDocument();
+  });
+
+  it("keeps the last list with a notice when a refresh cannot reach the server, and recovers on 'Try again'", async () => {
+    vi.mocked(getOpenEvents)
+      .mockResolvedValueOnce([event()])
+      .mockRejectedValueOnce({ response: { status: 500 } })
+      .mockResolvedValueOnce([event({ eventName: "Fresh" })]);
+
+    renderPage();
+    await screen.findByRole("link", { name: "Open Day" });
+    returnToTab();
+
+    expect(await screen.findByText(/Could not refresh the list/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Day" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByRole("link", { name: "Fresh" })).toBeInTheDocument();
+    expect(screen.queryByText(/Could not refresh the list/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [401, "Your session has expired. Please sign in again."],
+    [403, "Only Attendees can browse open events."],
+  ])("replaces the list with the error when a refresh is refused with %i", async (status, message) => {
+    vi.mocked(getOpenEvents)
+      .mockResolvedValueOnce([event()])
+      .mockRejectedValueOnce({ response: { status } });
+
+    renderPage();
+    await screen.findByRole("link", { name: "Open Day" });
+
+    returnToTab();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.queryByRole("link", { name: "Open Day" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the newest answer when an older read finishes after it", async () => {
+    const slow = pending();
+    const fast = pending();
+    vi.mocked(getOpenEvents)
+      .mockResolvedValueOnce([event({ eventName: "First read" })])
+      .mockReturnValueOnce(slow.promise)
+      .mockReturnValueOnce(fast.promise);
+
+    renderPage();
+    await screen.findByRole("link", { name: "First read" });
+    returnToTab();
+    returnToTab();
+
+    fast.resolve([event({ eventName: "Newest" })]);
+    await screen.findByRole("link", { name: "Newest" });
+    slow.resolve([event({ eventName: "Stale" })]);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(screen.getByRole("link", { name: "Newest" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Stale" })).not.toBeInTheDocument();
+  });
+
+  it("opening the page again reads the server again, so a registration made on the details page shows", async () => {
+    vi.mocked(getOpenEvents)
+      .mockResolvedValueOnce([event({ placesLeft: 2 })])
+      .mockResolvedValueOnce([event({ placesLeft: 1, isRegistered: true, canRegister: false })]);
+
+    const first = renderPage();
+    await screen.findByText("2 places left");
+    first.unmount();
+    renderPage();
+
+    const row = (await screen.findByText("1 place left")).closest("li");
+    expect(within(row).getByText("Registered")).toBeInTheDocument();
     expect(getOpenEvents).toHaveBeenCalledTimes(2);
   });
 });
