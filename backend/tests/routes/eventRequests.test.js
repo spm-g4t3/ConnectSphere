@@ -2140,14 +2140,20 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
     expect(client.calls).toHaveLength(0);
   });
 
-  it('SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over', async () => {
-    // A coordinator, so past coordinatorOnly, but not this event's coordinator.
+  it('SCRUM331_AC6_a_coordinator_who_does_not_hold_the_event_cannot_hand_it_over', async () => {
+    // A coordinator, so past the route's gate, but not this event's coordinator.
     // Only the function can tell, because only it reads the row under lock,
     // and it answers 42501. The route turns that into a 403, not a 404: the
     // caller can see this event in the shared queue already, so "not found"
     // would be false and would hide nothing (errors.test.js gives the full
     // argument).
-    const message = `only the coordinator assigned to event request ${REQUEST_ID} can hand it over`;
+    //
+    // Was SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over, with
+    // 018's message. Right when written: the holder was the only one who
+    // could. Since 041 a Lead may too (SCRUM-486 AC6; the Lead's case is in
+    // leadAssignmentRoutes.test.js), so the name now says the case it proves,
+    // a coordinator who is not the holder, and the message is 041's.
+    const message = `only the coordinator assigned to event request ${REQUEST_ID}, or the Event Coordinator Lead, can hand it over`;
     const client = createWritableFakeClient([dbFailure('42501', message)]);
 
     const res = await handOver(client, { newCoordinatorId: NEW_COORDINATOR_ID });

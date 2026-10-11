@@ -36,6 +36,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { normaliseRole } from "../auth/normaliseRole";
 import AssignmentHistory from "./AssignmentHistory";
 import EventVenueFinder from "./EventVenueFinder";
 import DecisionOutcome from "./DecisionOutcome";
@@ -218,7 +219,15 @@ export default function CoordinatorRequestDetail({
   // refused. The server checks again, under a lock, and if the row this panel
   // holds is stale, ReassignEventPanel turns the 403 into a message.
   const isAssignedCoordinator = Boolean(user?.id) && assignedCoordinatorId === user.id;
-  const canReassign = isAssignedCoordinator;
+  // SCRUM-486 (SCRUM-521), AC6: the Event Coordinator Lead may hand over any
+  // event, as 041's reassign_event_request allows, so the button shows for
+  // the holder or a Lead. Only while someone holds it: a request with no
+  // coordinator is assigned from the Lead's queue, not handed over (041
+  // refuses that, AC5-05). The Lead is never isAssignedCoordinator (only
+  // event_coordinator can be assigned), so every other action on this screen
+  // stays the holder's.
+  const isLead = normaliseRole(user?.role) === "EVENT_COORDINATOR_LEAD";
+  const canReassign = assignedCoordinatorId != null && (isAssignedCoordinator || isLead);
 
   // SCRUM-19. isAssignedCoordinator also decides who sees the review and
   // decision actions, and for the same reason: a convenience, not the gate.
@@ -433,6 +442,7 @@ export default function CoordinatorRequestDetail({
     return (
       <ReassignEventPanel
         request={request}
+        outgoingCoordinatorId={assignedCoordinatorId}
         onCancel={() => setReassigning(false)}
         onReassigned={handleReassigned}
       />
@@ -644,8 +654,10 @@ export default function CoordinatorRequestDetail({
 
         {handedOverTo && (
           <p className="coordinator-reassign__notice" role="status">
-            Handed over to {handedOverTo.fullName ?? "the coordinator you chose"}. You can still
-            view this event, but not change it.
+            Handed over to {handedOverTo.fullName ?? "the coordinator you chose"}.
+            {/* Said to the coordinator who handed it over. A Lead never could
+                change it, and can hand it over again (SCRUM-521). */}
+            {isLead ? "" : " You can still view this event, but not change it."}
           </p>
         )}
 

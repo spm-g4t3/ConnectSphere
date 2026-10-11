@@ -338,3 +338,77 @@ describe('SCRUM-486 AC6: POST /:id/reassign admits the Lead as well as a coordin
     expect(client.calls).toHaveLength(0);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-521: the reads the event screen makes on mount admit the Lead
+// ---------------------------------------------------------------------------
+describe('SCRUM-486 AC6: the event screen\'s reads admit the Lead, so the hand-over is reachable', () => {
+  // The reassign route admitted the Lead in SCRUM-519, but the screen a
+  // handover is made from loads with these three reads, and each was
+  // coordinatorOnly: the Lead could not open the screen at all. The fourth
+  // mount read, the clarification history, has no route gate; its service
+  // check is pinned in leadAssignmentService.test.js.
+  const held = () => row({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: COORDINATOR_A });
+  const historyRow = {
+    id: 'h1',
+    previous_coordinator_id: null,
+    new_coordinator_id: COORDINATOR_A,
+    assigned_by: LEAD_ID,
+    handover_note: 'Yours from today',
+    created_at: '2026-10-09T03:00:00+00:00',
+  };
+
+  const READS = [
+    ['GET /:id/review', `/api/event-requests/${REQUEST_ID}/review`, () => [ok(held())]],
+    [
+      'GET /:id/assignments/review',
+      `/api/event-requests/${REQUEST_ID}/assignments/review`,
+      () => [ok(held()), ok([historyRow]), ok([{ id: COORDINATOR_A, full_name: 'Priya Nair' }, { id: LEAD_ID, full_name: 'Lena Lead' }])],
+    ],
+    ['GET /:id/change-requests/review', `/api/event-requests/${REQUEST_ID}/change-requests/review`, () => [ok([])]],
+  ];
+
+  it.each(READS)('SCRUM486_AC6_a_lead_who_holds_nothing_reads_%s', async (_route, path, results) => {
+    const client = createFakeClient(results());
+
+    const res = await request(appWith({ client })).get(path);
+
+    expect(res.status).toBe(200);
+  });
+
+  it('SCRUM486_AC6_the_lead_opens_the_event_as_a_coordinator_does', async () => {
+    const client = createFakeClient([ok(held())]);
+
+    const res = await request(appWith({ client })).get(`/api/event-requests/${REQUEST_ID}/review`);
+
+    expect(res.body).toMatchObject({ id: REQUEST_ID, assignedCoordinatorId: COORDINATOR_A });
+    expect(res.body.statusDisplay.label).toBeTruthy();
+  });
+
+  it('SCRUM486_AC6_the_lead_reads_the_history_with_its_notes', async () => {
+    // The Lead writes handover notes (041 records theirs), so reads them; the
+    // Organiser's route still never carries them.
+    const [, path, results] = READS[1];
+    const client = createFakeClient(results());
+
+    const res = await request(appWith({ client })).get(path);
+
+    expect(res.body).toEqual([expect.objectContaining({ assignedByName: 'Lena Lead', handoverNote: 'Yours from today' })]);
+  });
+
+  it.each(
+    READS.flatMap(([route, path]) =>
+      [ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.ATTENDEE, ROLE.SAFETY_OFFICER, null]
+        .map((role) => [route, String(role), role, path])),
+  )('SCRUM486_AC6_%s_still_refuses_%s_and_reads_nothing', async (_route, _label, role, path) => {
+    // Widened by exactly one role.
+    const client = createFakeClient([]);
+
+    const res = await request(appWith({ client, requireAuth: signedInWithRole(role, ORGANISER_ID) })).get(path);
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'This action is restricted to Event Coordinators or Event Coordinator Leads' });
+    expect(client.calls).toHaveLength(0);
+  });
+});

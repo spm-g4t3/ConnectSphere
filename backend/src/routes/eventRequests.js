@@ -180,7 +180,10 @@ export function createEventRequestRouter({
   // SCRUM-486 AC6: a handover may be made by the coordinator who holds the
   // event or by a Lead. requireRole is an exact match on one role per
   // account, so the Lead has to be named; coordinatorOnly refused them before
-  // reassign_event_request (041) could say yes.
+  // reassign_event_request (041) could say yes. Since SCRUM-521 it also gates
+  // the three reads the event screen makes on mount (/:id/review,
+  // /:id/assignments/review, /:id/change-requests/review), so the Lead can
+  // open the screen they hand an event over from.
   const coordinatorOrLead = requireRole(ROLE.EVENT_COORDINATOR, ROLE.EVENT_COORDINATOR_LEAD);
 
   // Authentication is applied to the whole router rather than per route.
@@ -496,7 +499,11 @@ export function createEventRequestRouter({
     }
   });
 
-  router.get('/:id/change-requests/review', coordinatorOnly, async (req, res) => {
+  // SCRUM-486 (SCRUM-521): coordinatorOrLead, for the reason GET /:id/review
+  // gives. The event screen reads this on mount; deciding a change request
+  // (POST /change-requests/:id/decision) stays coordinatorOnly, and 019 still
+  // checks the caller holds the event.
+  router.get('/:id/change-requests/review', coordinatorOrLead, async (req, res) => {
     try {
       const changeRequests = await getChangeRequestsForCoordinator(req.params.id, { client });
       res.status(200).json(changeRequests);
@@ -540,8 +547,16 @@ export function createEventRequestRouter({
    * Cannot collide with GET /:id: that matches one segment and this two.
    * Same withStatusDisplay as GET /:id, so the coordinator's screen renders it
    * with the same helper.
+   *
+   * SCRUM-486 (SCRUM-521): behind coordinatorOrLead, not coordinatorOnly. The
+   * Lead may hand over any event (041, AC6), and the event screen they do it
+   * from (CoordinatorRequestDetail) makes this read on mount. Left
+   * coordinatorOnly, it refused the Lead the screen the reassign route had
+   * already been opened for: the reassign gate's fault, one layer up. A read
+   * only; every write beside it keeps its own gate, and the database still
+   * decides who may act.
    */
-  router.get('/:id/review', coordinatorOnly, async (req, res) => {
+  router.get('/:id/review', coordinatorOrLead, async (req, res) => {
     try {
       const request = await getEventRequestForCoordinator(req.params.id, { client });
       res.status(200).json(withStatusDisplay(request));
@@ -603,8 +618,19 @@ export function createEventRequestRouter({
    *
    * Reads the event through getEventRequestForCoordinator first, so a draft or
    * a missing id is a 404 here as it is on GET /:id/review.
+   *
+   * SCRUM-486 (SCRUM-521): behind coordinatorOrLead, not coordinatorOnly. The
+   * Lead may hand over any event (041, AC6), and the event screen they do it
+   * from (CoordinatorRequestDetail) makes this read on mount. Left
+   * coordinatorOnly, it refused the Lead the screen the reassign route had
+   * already been opened for: the reassign gate's fault, one layer up. A read
+   * only; every write beside it keeps its own gate, and the database still
+   * decides who may act.
+   * The Lead gets the notes too: they write them when they hand an event over
+   * (041 records theirs), and the reader the note is kept from is the
+   * Organiser, whom this gate still refuses.
    */
-  router.get('/:id/assignments/review', coordinatorOnly, async (req, res) => {
+  router.get('/:id/assignments/review', coordinatorOrLead, async (req, res) => {
     try {
       await getEventRequestForCoordinator(req.params.id, { client });
 

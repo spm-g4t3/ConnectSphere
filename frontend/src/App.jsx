@@ -11,6 +11,7 @@ import VenueCatalogue from "./components/VenueCatalogue";
 import ReviewQueue from "./components/ReviewQueue";
 import MyAssignedEvents from "./components/MyAssignedEvents";
 import UnassignedQueue from "./components/UnassignedQueue";
+import EventRequestReviewPage from "./components/EventRequestReviewPage";
 import MyBookingRequests from "./components/MyBookingRequests";
 import EquipmentCatalogue from "./components/EquipmentCatalogue";
 import VenueCalendar from "./components/VenueCalendar";
@@ -164,6 +165,25 @@ function AppRoutes() {
             <ProtectedRoute allowedRoles={["event_coordinator_lead"]}>
               <div className="dashboard dashboard--coordinator-lead">
                 <UnassignedQueue />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* SCRUM-486 (SCRUM-521): one event's coordinator screen by its address,
+            so the Event Coordinator Lead can open an event they do not hold and
+            hand it over (AC6). Coordinators may open it too. allowedRoles
+            mirrors GET /event-requests/:id/review's gate; the API answers 403
+            to anyone else regardless. No list leads here yet: the Lead's
+            coordinator overview is SCRUM-487's (see the page's header).
+
+            The coordinator wrapper for both roles, because App.css colours the
+            status badge under .dashboard--coordinator only. */}
+        <Route
+          path="/event-requests/:eventRequestId"
+          element={
+            <ProtectedRoute allowedRoles={["event_coordinator", "event_coordinator_lead"]}>
+              <div className="dashboard dashboard--coordinator">
+                <EventRequestReviewPage />
               </div>
             </ProtectedRoute>
           }

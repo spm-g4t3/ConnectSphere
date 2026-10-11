@@ -7,6 +7,7 @@
  *   assignEventRequest           AC3-04, AC4-03  the assignment, and a lost race
  *   requestEventClarification    AC8             the wrong-reason fault 041 left
  *   listEventRequestsForReview   AC2-06          the shared queue leaves the unassigned out (SCRUM-520)
+ *   getEventClarificationHistory AC6             the Lead reads it, so the event screen loads (SCRUM-521)
  *
  * A file of its own rather than more blocks in eventRequestService.test.js,
  * because neither fake there can answer these reads: createFakeClient has no
@@ -28,6 +29,7 @@ import {
   assignEventRequest,
   requestEventClarification,
   listEventRequestsForReview,
+  getEventClarificationHistory,
 } from '../../src/services/eventRequestService.js';
 import {
   ValidationError,
@@ -589,5 +591,58 @@ describe('SCRUM-486 AC8: an unassigned request is waiting for the Lead, not some
 
     expect(err).toBeInstanceOf(ForbiddenError);
     expect(err.message).toMatch(/Only the coordinator assigned/);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-521: the clarification history, one of the event screen's mount reads
+// ---------------------------------------------------------------------------
+describe("SCRUM-486 AC6: the Lead reads an event's clarification history", () => {
+  // Its route has no role gate; this check is the gate. Before SCRUM-521 it
+  // admitted the Organiser and event_coordinator only, so the Lead got a 404
+  // and that section of the screen they hand an event over from failed.
+  const ENTRY = {
+    id: 'c1',
+    entry_type: 'question',
+    message: 'How many will attend?',
+    created_by: COORDINATOR_A,
+    reply_by_date: null,
+    requested_fields: [],
+    created_at: '2026-10-09T03:00:00+00:00',
+  };
+  const read = (role, status = STATUS.UNDER_REVIEW) => getEventClarificationHistory(
+    REQUEST_ID,
+    LEAD_ID,
+    role,
+    {
+      client: createFakeClient([
+        ok(unassignedRow({ status, assigned_coordinator_id: COORDINATOR_A })),
+        ok([ENTRY]),
+        ok([profileRow(COORDINATOR_A, 'Priya Nair')]),
+      ]),
+    },
+  );
+
+  it('SCRUM486_AC6_a_lead_who_did_not_write_it_reads_it', async () => {
+    await expect(read('event_coordinator_lead')).resolves.toEqual([
+      expect.objectContaining({ id: 'c1', message: 'How many will attend?', authorName: 'Priya Nair' }),
+    ]);
+  });
+
+  it('SCRUM486_AC6_a_coordinator_still_reads_it', async () => {
+    await expect(read('event_coordinator')).resolves.toHaveLength(1);
+  });
+
+  it.each([
+    ['a safety officer', 'safety_officer', STATUS.UNDER_REVIEW],
+    ['venue staff', 'venue_staff', STATUS.UNDER_REVIEW],
+    ['a lead, on a draft', 'event_coordinator_lead', STATUS.DRAFT],
+  ])('SCRUM486_AC6_%s_who_did_not_organise_it_gets_not_found', async (_label, role, status) => {
+    // Widened by one role, and not to drafts: a draft is the Organiser's
+    // private copy, as it is for a coordinator.
+    const err = await errorFrom(read(role, status));
+
+    expect(err).toBeInstanceOf(NotFoundError);
   });
 });

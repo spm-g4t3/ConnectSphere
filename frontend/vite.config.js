@@ -108,6 +108,8 @@ const SCRUM486_FILES = [
   'src/components/UnassignedQueue.jsx',
   'src/components/AssignCoordinatorPanel.jsx',
   'src/services/waitingTime.js',
+  // SCRUM-521: an event's coordinator screen by its address.
+  'src/components/EventRequestReviewPage.jsx',
 ]
 
 // https://vite.dev/config/

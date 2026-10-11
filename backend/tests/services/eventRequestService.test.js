@@ -1035,9 +1035,17 @@ describe("SCRUM-331: the function's refusals become typed errors", () => {
       // AC6 itself. Raised under the row lock, so it is also how the second of
       // two simultaneous handovers is refused: by the time it runs, the caller
       // no longer holds the event (see 018's header).
-      name: 'SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over',
+      //
+      // Was SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over, with
+      // 018's message. Right when written: only the holder could hand over.
+      // Since 041 (SCRUM-486 AC6) the Lead may too, so "only the assigned
+      // coordinator" is no longer the rule, and the message the function
+      // raises names both. Renamed to the refusal that is still true, with
+      // 041's text; what is asserted (a 42501 becomes a 403 with the message
+      // passed through untouched) is unchanged.
+      name: 'SCRUM331_AC6_a_caller_who_neither_holds_the_event_nor_leads_is_refused',
       code: '42501',
-      message: `only the coordinator assigned to event request ${REQUEST_ID} can hand it over`,
+      message: `only the coordinator assigned to event request ${REQUEST_ID}, or the Event Coordinator Lead, can hand it over`,
       Err: ForbiddenError,
       status: 403,
       exact: true,

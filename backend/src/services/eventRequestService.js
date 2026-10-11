@@ -1446,8 +1446,14 @@ export async function getEventClarificationHistory(id, userId, role, { client } 
   const db = await resolveClient(client);
   const request = await getEventRequestById(id, { client: db });
   const isOwner = request.organiserId === userId;
-  const isCoordinator = role === ROLE.EVENT_COORDINATOR && request.status !== STATUS.DRAFT;
-  if (!isOwner && !isCoordinator) {
+  // SCRUM-486 (SCRUM-521): the Lead reads it as a coordinator does. The event
+  // screen the Lead hands an event over from shows this history, and the
+  // route has no role gate of its own, so this check is the gate; with the
+  // Lead left out it answered 404 and that section of the screen failed.
+  const isCoordinatorTeam =
+    (role === ROLE.EVENT_COORDINATOR || role === ROLE.EVENT_COORDINATOR_LEAD)
+    && request.status !== STATUS.DRAFT;
+  if (!isOwner && !isCoordinatorTeam) {
     throw new NotFoundError(`Event request ${id} not found`);
   }
 
