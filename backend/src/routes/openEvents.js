@@ -41,7 +41,10 @@ export function createOpenEventRouter({
   router.use(requireAuth);
 
   /**
-   * A bare array, like the other lists; none open is 200 [], never 404.
+   * A bare array, like the other lists; none open is 200 [], never 404. Each
+   * event says how many places are left, whether it is full, and whether the
+   * caller is already registered; the caller is always req.user.id, never
+   * anything in the query string or body.
    *
    * no-store: eligibility changes with the clock and with the organiser's
    * settings, so a stored copy would keep listing an event that has closed.
@@ -51,7 +54,7 @@ export function createOpenEventRouter({
    */
   router.get('/', requireRole(ROLE.ATTENDEE), async (req, res) => {
     try {
-      const events = await listOpenEvents({ client, now: now() });
+      const events = await listOpenEvents({ attendeeId: req.user.id, client, now: now() });
       res.set('Cache-Control', 'no-store');
       res.status(200).json(events);
     } catch (err) {

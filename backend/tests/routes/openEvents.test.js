@@ -17,6 +17,7 @@ import express from 'express';
 import request from 'supertest';
 
 import { createOpenEventRouter } from '../../src/routes/openEvents.js';
+import { listOpenEvents } from '../../src/services/openEventService.js';
 import { ROLE } from '../../src/domain/userRole.js';
 
 const NOW = new Date('2026-10-12T10:00:00.000Z');
@@ -60,7 +61,10 @@ function eventRow(overrides = {}) {
 const at = (value) => new Date(value).getTime();
 
 /** In-memory event_requests that applies what the service asks of it. */
-function createFakeClient(rows, { error = null, ignoreFilters = false } = {}) {
+function createFakeClient(
+  rows,
+  { error = null, ignoreFilters = false, registrations = [], registrationError = null } = {},
+) {
   const calls = [];
 
   return {
@@ -68,6 +72,8 @@ function createFakeClient(rows, { error = null, ignoreFilters = false } = {}) {
     from(table) {
       const call = { table, selected: null, filters: [], orders: [] };
       calls.push(call);
+      const source = table === 'registrations' ? registrations : rows;
+      const failure = table === 'registrations' ? registrationError : error;
 
       const chain = {
         select: (columns) => {
@@ -76,6 +82,10 @@ function createFakeClient(rows, { error = null, ignoreFilters = false } = {}) {
         },
         eq: (column, value) => {
           call.filters.push(['eq', column, value]);
+          return chain;
+        },
+        in: (column, value) => {
+          call.filters.push(['in', column, value]);
           return chain;
         },
         lte: (column, value) => {
@@ -91,14 +101,15 @@ function createFakeClient(rows, { error = null, ignoreFilters = false } = {}) {
           return chain;
         },
         then: (resolve, reject) => {
-          if (error) return Promise.resolve({ data: null, error }).then(resolve, reject);
+          if (failure) return Promise.resolve({ data: null, error: failure }).then(resolve, reject);
 
           let result = ignoreFilters
-            ? [...rows]
-            : rows.filter((row) =>
+            ? [...source]
+            : source.filter((row) =>
                 call.filters.every(([op, column, value]) => {
                   const cell = row[column];
                   if (op === 'eq') return cell === value;
+                  if (op === 'in') return value.includes(cell);
                   if (cell === null || cell === undefined) return false;
                   return op === 'lte' ? at(cell) <= at(value) : at(cell) > at(value);
                 }),
@@ -130,7 +141,10 @@ function get(client, { requireAuth = signedInWithRole(ROLE.ATTENDEE), now = () =
   return request(app).get('/api/open-events');
 }
 
-const ALLOWED_KEYS = ['capacity', 'description', 'endsAt', 'eventName', 'id', 'startsAt'];
+const ALLOWED_KEYS = [
+  'canRegister', 'capacity', 'description', 'endsAt', 'eventName', 'id',
+  'isFull', 'isRegistered', 'placesLeft', 'startsAt',
+];
 
 describe('SCRUM495_AC1 only Attendees can open the list', () => {
   it('lets an Attendee in', async () => {
@@ -195,6 +209,10 @@ describe('SCRUM495_AC2 only open Confirmed events are listed', () => {
         startsAt: '2026-10-25T09:00:00+00:00',
         endsAt: '2026-10-25T17:00:00+00:00',
         capacity: 50,
+        placesLeft: 50,
+        isFull: false,
+        isRegistered: false,
+        canRegister: true,
       },
     ]);
   });
@@ -303,20 +321,235 @@ describe('SCRUM495_AC2 only open Confirmed events are listed', () => {
 });
 
 describe('SCRUM495_AC3 full events stay in the list', () => {
-  it('lists an event at capacity; it is not removed, and no registration is read or written', async () => {
-    const client = createFakeClient([eventRow({ registration_capacity: 1 })]);
+  it('lists an event at capacity as Full; it is not removed', async () => {
+    const row = eventRow({ registration_capacity: 1 });
+    const client = createFakeClient([row], { registrations: [registration(row.id, OTHER_ATTENDEE_ID)] });
 
     const res = await get(client);
 
     expect(res.body).toHaveLength(1);
-    expect(res.body[0].capacity).toBe(1);
-    expect(client.calls.map((call) => call.table)).toEqual(['event_requests']);
+    expect(res.body[0]).toMatchObject({ capacity: 1, placesLeft: 0, isFull: true, canRegister: false });
   });
 
   it('returns a null capacity for an event with no limit', async () => {
     const res = await get(createFakeClient([eventRow({ registration_capacity: null })]));
 
     expect(res.body[0].capacity).toBeNull();
+  });
+});
+
+const OTHER_ATTENDEE_ID = '99999999-9999-4999-8999-999999999999';
+const THIRD_ATTENDEE_ID = '88888888-8888-4888-8888-888888888888';
+
+function registration(eventId, attendeeId, status = 'registered') {
+  return { id: id(), event_request_id: eventId, attendee_id: attendeeId, status, registered_at: '2026-10-05T00:00:00+00:00' };
+}
+
+describe('SCRUM495_AC3 places left', () => {
+  it('counts only the registrations that hold a place', async () => {
+    const row = eventRow({ registration_capacity: 10 });
+    const registrations = [
+      registration(row.id, OTHER_ATTENDEE_ID),
+      registration(row.id, THIRD_ATTENDEE_ID),
+      registration(row.id, ATTENDEE_ID, 'withdrawn'),
+      registration(row.id, '77777777-7777-4777-8777-777777777777', 'cancelled'),
+    ];
+
+    const res = await get(createFakeClient([row], { registrations }));
+
+    expect(res.body[0]).toMatchObject({ capacity: 10, placesLeft: 8, isFull: false, canRegister: true });
+  });
+
+  it('frees the place when a registration is withdrawn or cancelled, so a full event is no longer Full', async () => {
+    const row = eventRow({ registration_capacity: 2 });
+    const registrations = [registration(row.id, OTHER_ATTENDEE_ID), registration(row.id, THIRD_ATTENDEE_ID, 'withdrawn')];
+
+    const res = await get(createFakeClient([row], { registrations }));
+
+    expect(res.body[0]).toMatchObject({ placesLeft: 1, isFull: false, canRegister: true });
+  });
+
+  it('is Full when every place is taken, and offers no registration', async () => {
+    const row = eventRow({ registration_capacity: 2 });
+    const registrations = [registration(row.id, OTHER_ATTENDEE_ID), registration(row.id, THIRD_ATTENDEE_ID)];
+
+    const res = await get(createFakeClient([row], { registrations }));
+
+    expect(res.body[0]).toMatchObject({ placesLeft: 0, isFull: true, canRegister: false });
+  });
+
+  it('never reports negative places when the capacity was lowered below the number registered', async () => {
+    const row = eventRow({ registration_capacity: 1 });
+    const registrations = [
+      registration(row.id, OTHER_ATTENDEE_ID),
+      registration(row.id, THIRD_ATTENDEE_ID),
+      registration(row.id, '77777777-7777-4777-8777-777777777777'),
+    ];
+
+    const res = await get(createFakeClient([row], { registrations }));
+
+    expect(res.body[0].placesLeft).toBe(0);
+    expect(res.body[0].isFull).toBe(true);
+  });
+
+  it('has no limit, and is never Full, when no capacity is set, however many are registered', async () => {
+    const row = eventRow({ registration_capacity: null });
+    const registrations = Array.from({ length: 500 }, (_, n) => registration(row.id, `attendee-${n}`));
+
+    const res = await get(createFakeClient([row], { registrations }));
+
+    expect(res.body[0]).toMatchObject({ capacity: null, placesLeft: null, isFull: false, canRegister: true });
+  });
+
+  it('counts each event on its own', async () => {
+    const small = eventRow({ event_name: 'Small', registration_capacity: 1, proposed_start: '2026-10-20T09:00:00+00:00', proposed_end: '2026-10-20T10:00:00+00:00' });
+    const large = eventRow({ event_name: 'Large', registration_capacity: 5, proposed_start: '2026-10-21T09:00:00+00:00', proposed_end: '2026-10-21T10:00:00+00:00' });
+    const registrations = [registration(small.id, OTHER_ATTENDEE_ID), registration(large.id, OTHER_ATTENDEE_ID), registration(large.id, THIRD_ATTENDEE_ID)];
+
+    const res = await get(createFakeClient([small, large], { registrations }));
+
+    expect(res.body.map((e) => [e.eventName, e.placesLeft, e.isFull])).toEqual([
+      ['Small', 0, true],
+      ['Large', 3, false],
+    ]);
+  });
+
+  it('ignores registrations for events that are not listed', async () => {
+    const listed = eventRow({ registration_capacity: 3 });
+    const unlisted = eventRow({ status: 'approved' });
+    const registrations = [registration(unlisted.id, OTHER_ATTENDEE_ID), registration(unlisted.id, THIRD_ATTENDEE_ID)];
+
+    const res = await get(createFakeClient([listed, unlisted], { registrations }));
+
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].placesLeft).toBe(3);
+  });
+
+  it('reads all registrations in one query for the listed events, not one per event', async () => {
+    const rows = [eventRow(), eventRow(), eventRow()];
+    const client = createFakeClient(rows);
+
+    await get(client);
+
+    const reads = client.calls.filter((call) => call.table === 'registrations');
+    expect(reads).toHaveLength(1);
+    expect(reads[0].filters).toEqual([
+      ['in', 'event_request_id', rows.map((r) => r.id)],
+      ['eq', 'status', 'registered'],
+    ]);
+  });
+
+  it('does not read registrations at all when no event is listed', async () => {
+    const client = createFakeClient([eventRow({ status: 'approved' })]);
+
+    await get(client);
+
+    expect(client.calls.map((call) => call.table)).toEqual(['event_requests']);
+  });
+
+  it('still ignores a withdrawn registration if the query returned it', async () => {
+    const row = eventRow({ registration_capacity: 1 });
+    const registrations = [registration(row.id, ATTENDEE_ID, 'withdrawn')];
+
+    const res = await get(createFakeClient([row], { registrations, ignoreFilters: true }));
+
+    expect(res.body[0]).toMatchObject({ placesLeft: 1, isRegistered: false, canRegister: true });
+  });
+});
+
+describe('SCRUM495_AC6 the signed-in attendee\'s own registration', () => {
+  it('marks an event the caller holds a place on as Registered, and offers no registration', async () => {
+    const row = eventRow({ registration_capacity: 5 });
+    const registrations = [registration(row.id, ATTENDEE_ID)];
+
+    const res = await get(createFakeClient([row], { registrations }));
+
+    expect(res.body[0]).toMatchObject({ isRegistered: true, canRegister: false, placesLeft: 4 });
+  });
+
+  it('marks a Full event the caller is registered on as both Full and Registered', async () => {
+    const row = eventRow({ registration_capacity: 1 });
+    const registrations = [registration(row.id, ATTENDEE_ID)];
+
+    const res = await get(createFakeClient([row], { registrations }));
+
+    expect(res.body[0]).toMatchObject({ isRegistered: true, isFull: true, canRegister: false });
+  });
+
+  it('marks an unlimited event the caller is registered on as Registered', async () => {
+    const row = eventRow({ registration_capacity: null });
+
+    const res = await get(createFakeClient([row], { registrations: [registration(row.id, ATTENDEE_ID)] }));
+
+    expect(res.body[0]).toMatchObject({ isRegistered: true, placesLeft: null, canRegister: false });
+  });
+
+  it.each(['withdrawn', 'cancelled'])('does not call a %s registration Registered, so the caller may register again', async (status) => {
+    const row = eventRow({ registration_capacity: 5 });
+
+    const res = await get(createFakeClient([row], { registrations: [registration(row.id, ATTENDEE_ID, status)] }));
+
+    expect(res.body[0]).toMatchObject({ isRegistered: false, canRegister: true, placesLeft: 5 });
+  });
+
+  it('does not mark an event Registered because someone else is', async () => {
+    const row = eventRow();
+
+    const res = await get(createFakeClient([row], { registrations: [registration(row.id, OTHER_ATTENDEE_ID)] }));
+
+    expect(res.body[0].isRegistered).toBe(false);
+  });
+
+  it('marks only the events the caller is registered on', async () => {
+    const a = eventRow({ event_name: 'A', proposed_start: '2026-10-20T09:00:00+00:00', proposed_end: '2026-10-20T10:00:00+00:00' });
+    const b = eventRow({ event_name: 'B', proposed_start: '2026-10-21T09:00:00+00:00', proposed_end: '2026-10-21T10:00:00+00:00' });
+
+    const res = await get(createFakeClient([a, b], { registrations: [registration(b.id, ATTENDEE_ID)] }));
+
+    expect(res.body.map((e) => [e.eventName, e.isRegistered])).toEqual([['A', false], ['B', true]]);
+  });
+
+  it('takes the caller from the verified token, never from the request', async () => {
+    const row = eventRow();
+    const client = createFakeClient([row], { registrations: [registration(row.id, OTHER_ATTENDEE_ID)] });
+    const app = express().use('/api/open-events', createOpenEventRouter({ client, requireAuth: signedInWithRole(ROLE.ATTENDEE), now: () => NOW }));
+
+    const res = await request(app)
+      .get('/api/open-events')
+      .query({ attendeeId: OTHER_ATTENDEE_ID, userId: OTHER_ATTENDEE_ID })
+      .set('X-User-Id', OTHER_ATTENDEE_ID);
+
+    expect(res.body[0].isRegistered).toBe(false);
+  });
+
+  it('never returns another attendee\'s identity or any registration record', async () => {
+    const row = eventRow({ registration_capacity: 5 });
+    const registrations = [registration(row.id, OTHER_ATTENDEE_ID), registration(row.id, THIRD_ATTENDEE_ID), registration(row.id, ATTENDEE_ID)];
+
+    const res = await get(createFakeClient([row], { registrations }));
+    const text = JSON.stringify(res.body);
+
+    expect(text).not.toContain(OTHER_ATTENDEE_ID);
+    expect(text).not.toContain(THIRD_ATTENDEE_ID);
+    expect(text).not.toContain('registered_at');
+    expect(Object.keys(res.body[0]).sort()).toEqual(ALLOWED_KEYS);
+  });
+
+  it('selects only the event, attendee and status columns of a registration', async () => {
+    const client = createFakeClient([eventRow()]);
+
+    await get(client);
+
+    const read = client.calls.find((call) => call.table === 'registrations');
+    expect(read.selected).toBe('event_request_id, attendee_id, status');
+  });
+
+  it('never writes: the stand-in client has no write methods, and a clean run proves none was called', async () => {
+    const client = createFakeClient([eventRow()]);
+    const chainMethods = Object.keys(client.from('registrations'));
+
+    expect(chainMethods).not.toEqual(expect.arrayContaining(['insert', 'update', 'delete', 'upsert']));
+    expect((await get(client)).status).toBe(200);
   });
 });
 
@@ -424,7 +657,7 @@ describe('SCRUM495 freshness and failures', () => {
 
     rows[0].status = 'approved';
     expect((await get(client)).body).toEqual([]);
-    expect(client.calls).toHaveLength(2);
+    expect(client.calls.filter((call) => call.table === 'event_requests')).toHaveLength(2);
   });
 
   it('uses the clock on each request, so an event drops out when its window closes', async () => {
@@ -443,6 +676,25 @@ describe('SCRUM495 freshness and failures', () => {
     const res = await get(createFakeClient([eventRow()]));
 
     expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('refuses to run without an attendee, before any read', async () => {
+    const client = createFakeClient([eventRow()]);
+
+    await expect(listOpenEvents({ client, now: NOW })).rejects.toThrow(/attendeeId/);
+    await expect(listOpenEvents({ attendeeId: '  ', client, now: NOW })).rejects.toThrow(/attendeeId/);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('answers a generic 500 when the registrations read fails', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const client = createFakeClient([eventRow()], { registrationError: { code: '42P01', message: 'relation "registrations" does not exist' } });
+
+    const res = await get(client);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    spy.mockRestore();
   });
 
   it('answers a generic 500 without the driver message when the read fails', async () => {
