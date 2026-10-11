@@ -48,6 +48,9 @@
  *           them, which made the calendar's 403 a formality: an Organiser
  *           could fetch the bookings half of it here. A retired venue's
  *           bookings stay readable (SCRUM-15 AC3).
+ *           Only Venue Staff get each booking's suitability record
+ *           (SCRUM-188 AC7); Coordinators get the plain rows, since the list
+ *           covers other coordinators' events.
  *   event-search  Event Coordinators only (SCRUM-140, for SCRUM-20). The
  *           story is written from the Event Coordinator's seat, and its
  *           results reveal when venues are busy: a venue left out is one
@@ -438,12 +441,23 @@ export function createVenueRouter({
    * it; left open, this route would be a side door to what the calendar's
    * 403 refuses.
    *
+   * SCRUM-188 AC7: Venue Staff get each booking with its suitability record
+   * -- the stored result, whether the coordinator overrode it and which
+   * criteria, the layout requested and the event's name -- because they are
+   * who decide the request and AC7 says the result is attached for them.
+   * Event Coordinators get the shape they had before: this list holds every
+   * event's bookings on the venue, and a coordinator has no business reading
+   * the suitability record of an event that is not theirs. They see their
+   * own through the event screen (SCRUM-191, SCRUM-192). The role decides
+   * the shape, not a query parameter, so a coordinator cannot ask for it.
+   *
    * Statuses: 200; 400 for a malformed id (the service validates it); 401;
    * 403 unless Venue Staff or an Event Coordinator; 500.
    */
   router.get('/:id/bookings', internalReaders, async (req, res) => {
     try {
-      res.status(200).json(await getBookingsForVenue(req.params.id));
+      const includeSuitability = req.user.role === ROLE.VENUE_STAFF;
+      res.status(200).json(await getBookingsForVenue(req.params.id, { includeSuitability }));
     } catch (err) {
       handleError(err, res);
     }

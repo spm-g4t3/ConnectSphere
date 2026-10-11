@@ -65,6 +65,7 @@ import { DEFAULT_TURNAROUND_MINUTES } from '../domain/turnaroundOptions.js';
 import { DEFAULT_SETUP_MINUTES } from '../domain/setupOptions.js';
 import { matchesAllCriteria } from '../domain/venueMatching.js';
 import { getBookingStatusDisplay } from '../domain/bookingStatus.js';
+import { toSuitabilityRecord } from '../domain/suitabilityRecord.js';
 import { toBookingConflict } from './venueBlockService.js';
 
 /**
@@ -850,31 +851,69 @@ export async function getVenueHistory(venueId) {
  * Reads the provisional bookings table from 009. The booking story owns that
  * table and this function will grow with it.
  *
+ * SCRUM-188 AC7: with includeSuitability, each row also carries what Venue
+ * Staff need to judge the request -- the stored suitability result, whether
+ * the coordinator overrode it and which criteria they overrode
+ * (domain/suitabilityRecord.js), the layout requested and the event's name.
+ * It is opt-in, and the route turns it on for Venue Staff only: an Event
+ * Coordinator reads this list too (SCRUM-182) and must not see the
+ * suitability record of another coordinator's event. Without the flag the
+ * select and the row are exactly as before, so no existing reader changes.
+ *
+ * The event is a plain embed, not !inner: a booking whose event cannot be
+ * read is still a booking on this venue, and SCRUM-15 AC3 is that a venue's
+ * bookings stay viewable. Its eventName is then null.
+ *
  * @param {string} venueId
+ * @param {object} [options]
+ * @param {boolean} [options.includeSuitability=false]  add the AC7 fields
  * @returns {Promise<object[]>} possibly empty, in camelCase
  * @throws {ValidationError} when the id is malformed, before any network call
  */
-export async function getBookingsForVenue(venueId) {
+export async function getBookingsForVenue(venueId, { includeSuitability = false } = {}) {
   validateVenueId(venueId);
 
   const { data, error } = await supabase
     .from('bookings')
-    .select('id, venue_id, event_request_id, starts_at, ends_at, status, created_at')
+    .select(includeSuitability ? BOOKING_SUITABILITY_COLUMNS : BOOKING_COLUMNS)
     .eq('venue_id', venueId)
     .order('starts_at', { ascending: false });
 
   if (error) throw translateError(error);
 
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    venueId: row.venue_id,
-    eventRequestId: row.event_request_id,
-    startsAt: row.starts_at,
-    endsAt: row.ends_at,
-    // SCRUM-243: a row here may be a venue booking request (pending, rejected,
-    // withdrawn) and not only a hold, so the status travels with it.
-    status: row.status,
-    statusDisplay: getBookingStatusDisplay(row.status),
-    createdAt: row.created_at,
-  }));
+  return (data ?? []).map((row) => {
+    const booking = {
+      id: row.id,
+      venueId: row.venue_id,
+      eventRequestId: row.event_request_id,
+      startsAt: row.starts_at,
+      endsAt: row.ends_at,
+      // SCRUM-243: a row here may be a venue booking request (pending, rejected,
+      // withdrawn) and not only a hold, so the status travels with it.
+      status: row.status,
+      statusDisplay: getBookingStatusDisplay(row.status),
+      createdAt: row.created_at,
+    };
+    if (!includeSuitability) return booking;
+
+    const event = Array.isArray(row.event_requests) ? row.event_requests[0] : row.event_requests;
+    return {
+      ...booking,
+      roomLayoutCode: row.room_layout_code ?? null,
+      eventName: event?.event_name ?? null,
+      ...toSuitabilityRecord(row),
+    };
+  });
 }
+
+/** What getBookingsForVenue reads for every caller (SCRUM-15 AC3, SCRUM-243). */
+const BOOKING_COLUMNS = 'id, venue_id, event_request_id, starts_at, ends_at, status, created_at';
+
+/**
+ * SCRUM-188 AC7: the same, plus what Venue Staff read the request by. The
+ * event embed is many-to-one, so PostgREST answers an object; it is read
+ * defensively above in case it is ever an array, as bookingRequestService's
+ * one() does.
+ */
+const BOOKING_SUITABILITY_COLUMNS = `${BOOKING_COLUMNS}, `
+  + 'room_layout_code, suitability_result, suitability_overridden, event_requests(event_name)';

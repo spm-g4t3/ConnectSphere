@@ -155,3 +155,31 @@ describe("SCRUM-191 what was checked", () => {
     expect(checkedValue("Facilities")).toHaveTextContent("None requested");
   });
 });
+
+describe("SCRUM-188 AC7 overridden criteria", () => {
+  it("SCRUM188_AC7_an_overridden_unmet_criterion_says_overridden_by_coordinator", () => {
+    render(<VenueSuitabilityResult result={UNSUITABLE} overridden={["Capacity"]} />);
+
+    const items = criteriaItems();
+    expect(within(items[0]).getByText("Not met — overridden by coordinator")).toBeInTheDocument();
+    expect(items[0]).toHaveClass("venue-suitability__criterion--overridden");
+    // Availability is unmet but not overridden: plain "Not met".
+    expect(within(items[5]).getByText("Not met")).toBeInTheDocument();
+    expect(items[5]).not.toHaveClass("venue-suitability__criterion--overridden");
+  });
+
+  it("SCRUM188_AC7_a_met_criterion_in_the_overridden_list_still_says_met", () => {
+    render(<VenueSuitabilityResult result={UNSUITABLE} overridden={["Layout"]} />);
+
+    expect(within(criteriaItems()[2]).getByText("Met")).toBeInTheDocument();
+    expect(screen.queryByText(/overridden by coordinator/)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM188_AC7_without_the_prop_the_output_is_unchanged", () => {
+    const { container: without } = render(<VenueSuitabilityResult result={UNSUITABLE} />);
+    const before = without.innerHTML;
+    const { container: empty } = render(<VenueSuitabilityResult result={UNSUITABLE} overridden={[]} />);
+    expect(empty.innerHTML).toBe(before);
+    expect(before).not.toContain("overridden");
+  });
+});

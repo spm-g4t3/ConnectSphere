@@ -708,6 +708,23 @@ button { cursor: pointer; }
 .venue-suitability__checked-row { display: grid; gap: 2px 16px; grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); }
 .venue-suitability__checked dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
 .venue-suitability__checked dd { font-size: 0.9rem; margin: 0; overflow-wrap: anywhere; }
+/* SCRUM-188 AC7. An overridden criterion: amber, the "warning to act on"
+   pair, so it reads differently from a plain unmet one. */
+.venue-suitability__criterion--overridden strong { color: #8a5a00; }
+/* SCRUM-188 AC7. The suitability summary on a Venue Staff booking row. The
+   row keeps the .dashboard li spread for its time, id and status, and wraps
+   so the summary takes a full line beneath them. Not dashboard-scoped beyond
+   that override, so SCRUM-258's review screen gets the same look. */
+.dashboard li.venue-detail__booking--with-suitability { flex-wrap: wrap; }
+.venue-detail__booking-event { flex: 1 1 100%; }
+.booking-suitability { flex: 1 1 100%; min-width: 0; }
+.booking-suitability p { margin: 0 0 6px; }
+.booking-suitability__verdict-value { border-radius: 6px; padding: 0 8px; }
+.booking-suitability__verdict-value--met { background: #e8f7f1; color: #17684f; }
+.booking-suitability__verdict-value--unmet { background: #fff6e5; color: #8a5a00; }
+.booking-suitability .booking-suitability__override { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 6px; color: #8a5a00; font-weight: 700; padding: 6px 10px; }
+.booking-suitability .booking-suitability__none { color: var(--muted); font-style: italic; }
+.booking-suitability__details summary { cursor: pointer; margin-bottom: 8px; }
 /* SCRUM-192: the live recheck of the event's requested venues. */
 .event-venue-suitability { display: grid; gap: 10px; justify-items: start; }
 .event-venue-suitability__list { list-style: none; margin: 0; padding: 0; width: 100%; }

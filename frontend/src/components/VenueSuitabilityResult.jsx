@@ -21,6 +21,11 @@
 //   - Codes show as venueLookups labels. That copy is known to be stale, so a
 //     code it has not heard of shows as itself, the same fallback
 //     EventVenueFinder's codesText uses, rather than vanishing.
+//
+// SCRUM-188 AC7: an optional `overridden` list of criterion names. An unmet
+// criterion the coordinator chose to override reads "Not met — overridden by
+// coordinator", so Venue Staff can tell an override from an oversight.
+// Without the prop the output is exactly what SCRUM-191 rendered.
 
 import { toVenueWallClock } from "../services/datetimeFormat";
 import {
@@ -54,7 +59,21 @@ function periodText(startsAt, endsAt) {
   return `${startDate} ${startTime} – ${endText} (Singapore time)`;
 }
 
-export default function VenueSuitabilityResult({ result }) {
+/** An unmet criterion the coordinator chose to go ahead without. */
+function isOverridden(criterion, overriddenNames) {
+  return !criterion?.met && overriddenNames.includes(criterion?.criterion);
+}
+
+/** "Met", "Not met", or -- for an overridden criterion -- says so. */
+function metText(criterion, overriddenNames) {
+  if (criterion?.met) return "Met";
+  return isOverridden(criterion, overriddenNames)
+    ? "Not met — overridden by coordinator"
+    : "Not met";
+}
+
+export default function VenueSuitabilityResult({ result, overridden }) {
+  const overriddenNames = Array.isArray(overridden) ? overridden : [];
   const criteria = Array.isArray(result?.criteria) ? result.criteria : [];
   const checked = result?.checked ?? {};
   const suitable = result?.suitable === true;
@@ -83,9 +102,9 @@ export default function VenueSuitabilityResult({ result }) {
         {criteria.map((criterion, i) => (
           <li
             key={`${criterion?.criterion ?? "criterion"}-${i}`}
-            className={`venue-suitability__criterion venue-suitability__criterion--${criterion?.met ? "met" : "unmet"}`}
+            className={`venue-suitability__criterion venue-suitability__criterion--${criterion?.met ? "met" : "unmet"}${isOverridden(criterion, overriddenNames) ? " venue-suitability__criterion--overridden" : ""}`}
           >
-            <strong>{criterion?.met ? "Met" : "Not met"}</strong>
+            <strong>{metText(criterion, overriddenNames)}</strong>
             <span className="venue-suitability__criterion-name">{criterion?.criterion}</span>
             {criterion?.detail && (
               <span className="venue-suitability__criterion-detail">{criterion.detail}</span>
