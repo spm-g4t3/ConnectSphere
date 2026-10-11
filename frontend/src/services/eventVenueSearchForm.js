@@ -206,10 +206,15 @@ export function validateEventSearchForm(values = {}) {
  * location and layout non-blank, the code lists non-empty -- so a search that
  * leaves them alone sends exactly the required three.
  *
+ * SCRUM-491 (AC5): eventRequestId, when given, travels with the criteria so
+ * the search does not hide a venue this event itself holds tentatively.
+ *
  * @param {object} values  form values
+ * @param {object} [options]
+ * @param {string} [options.eventRequestId]  the event being searched for
  * @returns {object} criteria for findVenuesForEvent
  */
-export function toSearchCriteria(values = {}) {
+export function toSearchCriteria(values = {}, { eventRequestId } = {}) {
   const date = text(values.date);
   const criteria = {
     startsAt: toVenueOffsetIsoString(`${date}T${text(values.startTime)}`),
@@ -227,6 +232,9 @@ export function toSearchCriteria(values = {}) {
     const selected = codes(values[field]);
     if (selected.length > 0) criteria[field] = selected;
   }
+
+  const eventId = text(eventRequestId);
+  if (eventId !== "") criteria.eventRequestId = eventId;
 
   return criteria;
 }

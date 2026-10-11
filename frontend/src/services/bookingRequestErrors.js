@@ -32,6 +32,20 @@ const STATUS_MESSAGES = {
 
 const DEFAULT_MESSAGE = "Could not submit the request. Please try again.";
 
+// SCRUM-188: a 400 naming the requirement codes means the server did not
+// recognise one of the layout, accessibility or facility codes the request
+// carried (or the criteria it acknowledged). They come from the search form,
+// so that is where to fix them.
+const REQUIREMENT_FIELDS = new Set(["accessibility", "facilities", "roomLayoutCode", "acknowledgedCriteria"]);
+const REQUIREMENTS_MESSAGE =
+  "The selected requirements were not recognised. Adjust the layout, accessibility features or facilities in the search form, then try again.";
+
+function namesRequirementField(err) {
+  if (err?.response?.status !== 400) return false;
+  const details = err.response.data?.details;
+  return Array.isArray(details) && details.some((d) => REQUIREMENT_FIELDS.has(d?.field));
+}
+
 /** The 409 codes meaning the event already has a live request or booking. */
 const EVENT_ALREADY_REQUESTED_CODES = new Set([
   "BOOKING_REQUEST_EXISTS",
@@ -58,6 +72,7 @@ function conflictsOf(err) {
 export function bookingRequestErrorMessage(err) {
   const code = codeOf(err);
   if (code && Object.hasOwn(CODE_MESSAGES, code)) return CODE_MESSAGES[code];
+  if (namesRequirementField(err)) return REQUIREMENTS_MESSAGE;
 
   const status = err?.response?.status;
   if (Object.hasOwn(STATUS_MESSAGES, status)) return STATUS_MESSAGES[status];
@@ -79,13 +94,18 @@ export function unmetCriteria(err) {
   return conflictsOf(err).filter((criterion) => criterion && typeof criterion === "object");
 }
 
+/** The kinds a BOOKING_PERIOD_CONFLICT can list. 'hold' is SCRUM-491's (AC5). */
+const PERIOD_CONFLICT_KINDS = new Set(["block", "booking", "hold"]);
+
 /**
  * What is in the way of the period, from a BOOKING_PERIOD_CONFLICT answer:
- * venue blocks and approved bookings, as { kind, ... }.
+ * venue blocks, approved bookings and (SCRUM-491, AC5) another event's active
+ * tentative hold, as { kind, ... }. The event's own hold never appears: the
+ * backend leaves it out.
  */
 export function periodConflicts(err) {
   if (codeOf(err) !== "BOOKING_PERIOD_CONFLICT") return [];
-  return conflictsOf(err).filter((c) => c?.kind === "block" || c?.kind === "booking");
+  return conflictsOf(err).filter((c) => PERIOD_CONFLICT_KINDS.has(c?.kind));
 }
 
 /** Does the answer mean this event already has a pending, approved or flagged booking? */

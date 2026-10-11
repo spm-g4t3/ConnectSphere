@@ -48,11 +48,19 @@
  *           them, which made the calendar's 403 a formality: an Organiser
  *           could fetch the bookings half of it here. A retired venue's
  *           bookings stay readable (SCRUM-15 AC3).
+ *           Only Venue Staff get each booking's suitability record
+ *           (SCRUM-188 AC7); Coordinators get the plain rows, since the list
+ *           covers other coordinators' events.
  *   event-search  Event Coordinators only (SCRUM-140, for SCRUM-20). The
  *           story is written from the Event Coordinator's seat, and its
  *           results reveal when venues are busy: a venue left out is one
  *           with a booking or block in that period. Every other role gets
  *           403. Venue Staff keep the old /search, which is unchanged.
+ *   holds   Venue Staff only (SCRUM-491). Placing a tentative hold is the
+ *           story's whole seat (AC1), and the list of a venue's active holds
+ *           is the panel that places them. Everyone else sees a hold only as
+ *           "Tentatively held" on the calendar (AC6) and as a venue missing
+ *           from their search (AC5).
  */
 
 import express from 'express';
@@ -76,6 +84,7 @@ import {
   getVenueBlockHistory,
 } from '../services/venueBlockService.js';
 import { getVenueCalendar } from '../services/venueCalendarService.js';
+import { listActiveVenueHolds, placeVenueHold } from '../services/venueHoldService.js';
 import {
   validateVenueId,
   validateSearchFilters,
@@ -84,6 +93,7 @@ import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js'
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorHandler } from '../http/handleError.js';
+import { parseCodeList } from '../http/parseCodeList.js';
 
 
 /** Map an error to a response; see src/http/handleError.js (SCRUM-127). */
@@ -137,43 +147,6 @@ function parseSearchFilters(query) {
 
 
 /**
- * Split comma-separated codes into one list, for accessibility and facilities.
- *
- * Why commas: axios's default serialisation of an array param is `key[]=a&
- * key[]=b`, and Express 5's default query parser ('simple', which is Node's
- * querystring.parse -- express/lib/application.js sets it, utils.js
- * compileQueryParser maps it) keeps that as a key literally named 'key[]', so
- * req.query.key would be undefined and the criterion silently lost. A single
- * `key=a,b` survives any client and any parser, and codes never contain
- * commas. A repeated `key=a&key=b`, which querystring.parse does turn into an
- * array, is accepted too and split the same way.
- *
- * Blank pieces are dropped (`a,,b`, a trailing comma, an untouched field), and
- * if nothing is left the result is undefined so the caller leaves the key out
- * -- the validator treats a missing list as "not filtered on".
- *
- * Only strings are split. Anything else -- a non-string array entry, or an
- * object a different query parser might build -- is passed through as it
- * came, so validateEventSearchCriteria reports it ("must be an array of
- * codes", "entry N must be a non-empty code") rather than this quietly
- * dropping it. The simple parser only produces strings, so in production that
- * is a guard, not a path.
- */
-function parseCodeList(value) {
-  if (typeof value !== 'string' && !Array.isArray(value)) return value;
-
-  const pieces = typeof value === 'string' ? [value] : value;
-  const codes = pieces.flatMap((piece) =>
-    typeof piece === 'string'
-      ? piece.split(',').map((code) => code.trim()).filter((code) => code !== '')
-      : [piece],
-  );
-
-  return codes.length > 0 ? codes : undefined;
-}
-
-
-/**
  * Turn an event search's query string into what validateEventSearchCriteria
  * expects (SCRUM-140, for SCRUM-20 AC1).
  *
@@ -188,7 +161,8 @@ function parseCodeList(value) {
  * than becoming 0 or NaN. Number('abc') is NaN and Number('12.5') 12.5, so
  * both still get the message they deserve.
  *
- * accessibility and facilities are comma-separated lists; see parseCodeList.
+ * accessibility and facilities are comma-separated lists; see parseCodeList
+ * (src/http/parseCodeList.js, shared with the suitability check since SCRUM-190).
  * Each key is set only when something is left to filter by.
  */
 function parseEventSearch(query) {
@@ -221,6 +195,13 @@ function parseEventSearch(query) {
     if (query[field] === undefined) continue;
     const codes = parseCodeList(query[field]);
     if (codes !== undefined) criteria[field] = codes;
+  }
+
+  // SCRUM-491 (AC5): the event being searched for, passed through as sent.
+  // The validator checks its shape; the service decides whether the caller
+  // may leave its holds out.
+  if (query.eventRequestId !== undefined) {
+    criteria.eventRequestId = query.eventRequestId;
   }
 
   return criteria;
@@ -409,6 +390,12 @@ export function createVenueRouter({
    * Declared before GET /:id, and like /search that order is load-bearing:
    * otherwise /:id would match this with id === 'event-search'.
    *
+   * SCRUM-491 (AC5): ?eventRequestId= optionally names the event being
+   * searched for. A venue another event holds tentatively is left out; one
+   * this event holds is not, but only when the caller is the event's
+   * assigned coordinator (venueService.findVenuesForEvent). A malformed id is
+   * 400.
+   *
    * Statuses: 200 with the matching venues, and 200 [] when none match (AC8)
    * -- never 404, since an empty result is an answer, not a missing resource;
    * 400 {error, details} for a missing or malformed period, a bad attendance,
@@ -416,7 +403,10 @@ export function createVenueRouter({
    */
   router.get('/event-search', coordinatorsOnly, async (req, res) => {
     try {
-      res.status(200).json(await findVenuesForEvent(parseEventSearch(req.query)));
+      // SCRUM-491: the caller, so an optional ?eventRequestId= leaves out
+      // that event's own holds only when they are its assigned coordinator.
+      const criteria = parseEventSearch(req.query);
+      res.status(200).json(await findVenuesForEvent(criteria, { userId: req.user.id }));
     } catch (err) {
       handleError(err, res);
     }
@@ -451,12 +441,23 @@ export function createVenueRouter({
    * it; left open, this route would be a side door to what the calendar's
    * 403 refuses.
    *
+   * SCRUM-188 AC7: Venue Staff get each booking with its suitability record
+   * -- the stored result, whether the coordinator overrode it and which
+   * criteria, the layout requested and the event's name -- because they are
+   * who decide the request and AC7 says the result is attached for them.
+   * Event Coordinators get the shape they had before: this list holds every
+   * event's bookings on the venue, and a coordinator has no business reading
+   * the suitability record of an event that is not theirs. They see their
+   * own through the event screen (SCRUM-191, SCRUM-192). The role decides
+   * the shape, not a query parameter, so a coordinator cannot ask for it.
+   *
    * Statuses: 200; 400 for a malformed id (the service validates it); 401;
    * 403 unless Venue Staff or an Event Coordinator; 500.
    */
   router.get('/:id/bookings', internalReaders, async (req, res) => {
     try {
-      res.status(200).json(await getBookingsForVenue(req.params.id));
+      const includeSuitability = req.user.role === ROLE.VENUE_STAFF;
+      res.status(200).json(await getBookingsForVenue(req.params.id, { includeSuitability }));
     } catch (err) {
       handleError(err, res);
     }
@@ -512,6 +513,47 @@ export function createVenueRouter({
     try {
       const window = { from: req.query.from, to: req.query.to };
       res.status(200).json(await getVenueCalendar(req.params.id, window));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-491: a venue's active tentative holds, soonest expiry first, each
+   * with its event's name and period and who placed it. A bare array; none
+   * is 200 []. A hold past its expiry is not listed, even before the expiry
+   * job has marked it (AC7).
+   *
+   * Statuses: 200; 400 for a malformed id; 401; 403 unless Venue Staff; 404
+   * for an unknown venue; 500.
+   */
+  router.get('/:id/holds', venueStaffOnly, async (req, res) => {
+    try {
+      res.status(200).json(await listActiveVenueHolds(req.params.id));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-491 AC1-AC4: place a tentative hold on the venue for an Approved
+   * event, until { expiresAt }. Body: { eventRequestId, expiresAt }; the
+   * placer is only ever actingUser(req).
+   *
+   * Venue Staff only. Any other role gets requireRole's 403, "This action is
+   * restricted to Venue Staff", which is AC1's message stating why.
+   *
+   * Statuses: 201 {hold}; 400 for a malformed id, a missing or malformed
+   * event, or an expiry that is missing, malformed or not in the future; 401;
+   * 403; 404 for an unknown venue or event; 409 with code EVENT_NOT_APPROVED,
+   * EVENT_DATES_MISSING, VENUE_RETIRED, HOLD_EXISTS or HOLD_PERIOD_CONFLICT
+   * (conflicts list each booking, block or hold in the way, with its
+   * occupied period); 500.
+   */
+  router.post('/:id/holds', venueStaffOnly, async (req, res) => {
+    try {
+      const hold = await placeVenueHold(req.params.id, req.body, actingUser(req));
+      res.status(201).json({ hold });
     } catch (err) {
       handleError(err, res);
     }

@@ -88,4 +88,167 @@ describe("Navigation links by role", () => {
 
   expect(screen.getByRole("link", { name: "Check Availability" })).toHaveAttribute("href", "/equipment-availability");
 });
+
+  it("gives an Attendee only the Dashboard link, with no staff-facing pages", () => {
+    renderAs("attendee");
+
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-485: the Event Coordinator Lead and the Safety Officer
+// ---------------------------------------------------------------------------
+// docs/test-cases/SCRUM-485.md, AC4 and AC6-04. NAV_LINKS_BY_ROLE does a
+// lookup that falls back to `|| []`, so a misspelt role key gives an empty nav
+// and throws nothing. Counting each role's links exactly is what turns that
+// into a failure.
+
+/** Every role the nav can be asked about, as the server sends it. */
+const ALL_ROLES = [
+  "event_organiser",
+  "event_coordinator",
+  "venue_staff",
+  "technical_support_staff",
+  "attendee",
+  "event_coordinator_lead",
+  "safety_officer",
+];
+
+/**
+ * The links a role's nav actually renders, as [label, href] in order.
+ *
+ * Read off the rendered component rather than typed out, so a link added to
+ * any role's set later is picked up by the cross-role check below without
+ * anyone editing this file. (NAV_LINKS_BY_ROLE is not exported: an object
+ * export from a component file fails react-refresh/only-export-components,
+ * and reading what renders is the stronger test anyway.)
+ */
+function linksOf(role) {
+  const { unmount } = renderAs(role);
+  const links = screen
+    .queryAllByRole("link")
+    .map((link) => [link.textContent, link.getAttribute("href")]);
+  unmount();
+  return links;
+}
+
+const DASHBOARD_ONLY = [["Dashboard", "/dashboard"]];
+
+describe("SCRUM485_AC4 each new role sees only its own links", () => {
+  it("SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link", () => {
+    // AC4-01. By count: a link leaking into this block fails here.
+    expect(linksOf("event_coordinator_lead")).toEqual(DASHBOARD_ONLY);
+  });
+
+  it("SCRUM485_AC4_a_safety_officer_has_exactly_the_dashboard_link", () => {
+    // AC4-02.
+    expect(linksOf("safety_officer")).toEqual(DASHBOARD_ONLY);
+  });
+
+  it("SCRUM485_AC4_a_lead_sees_none_of_the_coordinators_links", () => {
+    // AC4-03. The Lead inherits nothing from Event Coordinator, its links
+    // included. Dashboard is every role's, so it is not the Coordinator's.
+    const coordinatorOnly = linksOf("event_coordinator").filter(([, href]) => href !== "/dashboard");
+    const lead = linksOf("event_coordinator_lead");
+
+    expect(coordinatorOnly.length).toBeGreaterThan(0);
+    for (const [label, href] of coordinatorOnly) {
+      expect(lead).not.toContainEqual([label, href]);
+      expect(lead.map(([l]) => l)).not.toContain(label);
+    }
+  });
+
+  it.each(["event_coordinator_lead", "safety_officer"])(
+    "SCRUM485_AC4_%s_sees_no_link_from_any_other_role",
+    (role) => {
+      // AC4-04. Every other role's links, by label and by target, gathered by
+      // rendering each one. Dashboard is shared by every role, so it is left
+      // out; everything else belongs to someone.
+      const others = ALL_ROLES.filter((r) => r !== role)
+        .flatMap((r) => linksOf(r))
+        .filter(([, href]) => href !== "/dashboard");
+      const mine = linksOf(role);
+
+      // So the check cannot pass on an empty list. Not a fixed number: the
+      // exact sets are pinned by the AC6 cases below.
+      expect(others.length).toBeGreaterThan(0);
+      for (const [label, href] of others) {
+        expect(mine.map(([l]) => l)).not.toContain(label);
+        expect(mine.map(([, h]) => h)).not.toContain(href);
+      }
+    },
+  );
+
+  it.each(["Safety Officer", "event-coordinator-lead", "EVENT_COORDINATOR_LEAD", "safety officer"])(
+    "SCRUM485_AC4_the_role_spelt_%j_reaches_the_same_single_link",
+    (spelling) => {
+      // AC4-05. normaliseRole absorbs case, spaces and hyphens, as the
+      // American-spelling test above shows for the Organiser.
+      expect(linksOf(spelling)).toEqual(DASHBOARD_ONLY);
+    },
+  );
+
+  it("SCRUM485_AC4_an_unknown_role_renders_an_empty_nav_and_throws_nothing", () => {
+    // AC4-06. The failure mode a misspelt key produces, on record: the nav
+    // still renders, with no links and no error. The two count tests above
+    // are what catch it.
+    expect(() => renderAs("saftey_officer")).not.toThrow();
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument();
+  });
+});
+
+
+describe("SCRUM485_AC6 the existing roles keep exactly their links", () => {
+  // AC6-04. Written out, in order, rather than read back from the component:
+  // a regression test that derived its expectation from the code under test
+  // would agree with any change. Until now only the Organiser's count was
+  // pinned; this pins every role whose links predate SCRUM-485. The Attendee's
+  // are pinned in their own case below, because they are SCRUM-453's.
+  it.each([
+    ["event_organiser", [
+      ["Dashboard", "/dashboard"],
+      ["My Events", "/events"],
+    ]],
+    ["event_coordinator", [
+      ["Dashboard", "/dashboard"],
+      ["My Events", "/my-events"],
+      ["Venue Requests", "/my-venue-requests"],
+      ["Review Queue", "/review-queue"],
+      ["Find a Venue", "/venue-search"],
+    ]],
+    ["venue_staff", [
+      ["Dashboard", "/dashboard"],
+      ["Venue Catalogue", "/venue-catalogue"],
+      ["Booking Requests", "/booking-requests"],
+    ]],
+    ["technical_support_staff", [
+      ["Dashboard", "/dashboard"],
+      ["Support Tickets", "/tickets"],
+      ["Equipment Requests", "/equipment"],
+      ["Equipment Catalogue", "/equipment-catalogue"],
+      ["Check Availability", "/equipment-availability"],
+    ]],
+  ])("SCRUM485_AC6_%s_keeps_exactly_its_links", (role, expected) => {
+    const links = linksOf(role);
+
+    expect(links).toHaveLength(expected.length);
+    expect(links).toEqual(expected);
+  });
+
+  it("SCRUM485_AC6_an_attendee_keeps_the_links_scrum453_gave_it", () => {
+    // AC6-04 for the Attendee. When this story began an attendee had no nav
+    // block, and this case pinned an empty list. SCRUM-453 (merged into dev on
+    // 11 October) gave the Attendee one: Dashboard, with Browse Open Events to
+    // follow in SCRUM-495. That is another story's change, not one this story
+    // made, so the case now pins what SCRUM-453 built, exactly and by count,
+    // and SCRUM-485 must leave it so.
+    const links = linksOf("attendee");
+
+    expect(links).toHaveLength(1);
+    expect(links).toEqual([["Dashboard", "/dashboard"]]);
+  });
 });

@@ -43,7 +43,7 @@ const functionAnswer = (overrides = {}) => ({
   found: true, retired: false, total: 10, damaged: 1, under_maintenance: 1, reserved: 2, available: 6, reservations: [], ...overrides,
 });
 
-const OTHER_ROLES = [ROLE.EVENT_ORGANISER, ROLE.EVENT_COORDINATOR, ROLE.VENUE_STAFF, ROLE.ATTENDEE];
+const OTHER_ROLES = [ROLE.EVENT_ORGANISER, ROLE.EVENT_COORDINATOR, ROLE.VENUE_STAFF, ROLE.ATTENDEE, ROLE.EVENT_COORDINATOR_LEAD, ROLE.SAFETY_OFFICER];
 
 beforeEach(() => {
   rpc.mockReset();

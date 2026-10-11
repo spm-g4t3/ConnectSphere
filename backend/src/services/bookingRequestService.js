@@ -23,8 +23,12 @@
  *    that is the answer that counts.
  *  - Suitability (N10) is computed here, server-side, through an injectable
  *    checker, and passed to the function. A venue that is not suitable is
- *    requested only with confirmUnsuitable. N10 is not built, so the default
- *    checker fails closed; see venueSuitabilityService.js.
+ *    requested only with confirmUnsuitable and, since SCRUM-193/194, only
+ *    when acknowledgedCriteria names every criterion it does not meet. The
+ *    default checker is
+ *    venueSuitabilityService.js (SCRUM-190); the request carries the
+ *    accessibility and facility codes it judges, and the caller, so the
+ *    check enforces the assigned coordinator itself.
  *  - What the function raises or answers is turned into typed errors, with the
  *    conflicting records in `conflicts` for the UI.
  *
@@ -126,8 +130,9 @@ function translateError(error) {
 }
 
 /**
- * One thing in the way of the period, in camelCase: a venue block, or an
- * occupying booking (approved or flagged_for_review, SCRUM-484).
+ * One thing in the way of the period, in camelCase: a venue block, an
+ * occupying booking (approved or flagged_for_review, SCRUM-484), or another
+ * event's active hold (SCRUM-491).
  *
  * SCRUM-484 (AC7): both kinds carry the occupied period and the venue's
  * setup and turnaround minutes from venue_occupancy_conflicts() (032/033).
@@ -137,9 +142,16 @@ function translateError(error) {
  * minutes say how far this event's own setup and turnaround reached into it.
  * Mapped here, not recomputed, so the formula stays in one place (AC4).
  *
- * @param {object} entry  from create_booking_request's conflicts list
+ * SCRUM-491 (AC4, AC5): a third kind, 'hold', is another event's active
+ * tentative hold (040). It carries the holding event and its occupied period,
+ * padded like a booking. Exported so venueHoldService.js maps the conflicts
+ * place_venue_hold returns the same way; both lists are built by
+ * occupancy_conflict_json() in 040.
+ *
+ * @param {object} entry  from create_booking_request's or place_venue_hold's
+ *                        conflicts list
  */
-function toPeriodConflict(entry) {
+export function toPeriodConflict(entry) {
   const occupied = {
     occupiedStartsAt: entry.occupied_starts_at,
     occupiedEndsAt: entry.occupied_ends_at,
@@ -153,6 +165,17 @@ function toPeriodConflict(entry) {
       startsAt: entry.starts_at,
       endsAt: entry.ends_at,
       reason: entry.reason,
+      ...occupied,
+    };
+  }
+  if (entry.kind === 'hold') {
+    return {
+      kind: 'hold',
+      holdId: entry.hold_id,
+      eventRequestId: entry.event_request_id,
+      eventName: entry.event_name,
+      startsAt: entry.starts_at,
+      endsAt: entry.ends_at,
       ...occupied,
     };
   }
@@ -245,9 +268,15 @@ export function toBookingRequest(row) {
 }
 
 /**
- * The checker's answer, checked. It crosses a module boundary that N10 will
- * own, and it is stored as given, so a malformed one is a fault here and not
+ * The checker's answer, checked. It crosses a module boundary that N10 owns,
+ * and it is stored as given, so a malformed one is a fault here and not
  * something to pass to the database.
+ *
+ * SCRUM-190: `checked` -- the period, attendance and requirement codes the
+ * check judged -- is kept when the checker gives it, so suitability_result
+ * records what was assessed and Venue Staff read the verdict against it. It
+ * is optional so a checker that gives none (a test double) still passes; only
+ * suitable and criteria are required, as before.
  */
 function checkedSuitability(result) {
   if (
@@ -258,7 +287,11 @@ function checkedSuitability(result) {
   ) {
     throw new Error('The suitability check returned an unusable result');
   }
-  return { suitable: result.suitable, criteria: result.criteria };
+  const suitability = { suitable: result.suitable, criteria: result.criteria };
+  if (typeof result.checked === 'object' && result.checked !== null) {
+    suitability.checked = result.checked;
+  }
+  return suitability;
 }
 
 /**
@@ -278,11 +311,38 @@ function checkedSuitability(result) {
  *                           VENUE_RETIRED, BOOKING_REQUEST_EXISTS and
  *                           BOOKING_FLAGGED_FOR_REVIEW (conflicts name the
  *                           existing booking), BOOKING_PERIOD_CONFLICT
- *                           (conflicts are blocks and occupying bookings,
+ *                           (conflicts are blocks, occupying bookings and
+ *                           other events' active holds (SCRUM-491),
  *                           each with its occupied period, shaped by
  *                           toPeriodConflict), SUITABILITY_CONFIRMATION_REQUIRED
  *                           (conflicts are the criteria not met)
- * @throws {ServiceUnavailableError} the suitability check is not available
+ *
+ * SCRUM-190: input may also carry accessibility and facilities, code lists
+ * passed to the checker with the caller. An unknown code is a ValidationError
+ * from the check, before anything is written.
+ *
+ * SCRUM-193/194 (F2, SCRUM-188 AC7, "any criterion the coordinator chose to
+ * override"): input may carry acknowledgedCriteria, the criterion labels the
+ * coordinator accepts the venue does not meet. An unsuitable result counts as
+ * confirmed only when confirmUnsuitable is true AND every criterion the check
+ * (run here, now) found unmet is named there. Otherwise this throws
+ * SUITABILITY_CONFIRMATION_REQUIRED, with the unmet criteria as conflicts,
+ * before create_booking_request is called and so before anything is written.
+ * That is what stops a confirmation given against an earlier check -- one
+ * where only Capacity failed, say -- from also covering an Availability
+ * failure that has appeared since: the coordinator is asked again, naming
+ * the new criterion. confirmUnsuitable alone, without the names, is therefore
+ * asked again too. No migration was needed: the overridden criteria are the
+ * unmet ones of the stored result, and they are now exactly the ones the
+ * coordinator named (domain/suitabilityRecord.js derives them).
+ *
+ * The race that remains is small: between this check and the moment
+ * create_booking_request takes its locks, the venue's attributes (an
+ * update_venue) or the event's attendance could change. The function
+ * re-checks the period under its locks, so a new booking, block or hold is
+ * still refused as BOOKING_PERIOD_CONFLICT; an attribute change in that
+ * window is not re-judged, and the stored result is the one computed here.
+ * SCRUM-188 AC6's recheck-on-view then reports it on the event.
  */
 export async function createBookingRequest(
   input,
@@ -316,9 +376,28 @@ export async function createBookingRequest(
       eventRequestId: request.eventRequestId,
       venueId: request.venueId,
       roomLayoutCode: request.roomLayoutCode,
+      accessibility: request.accessibility,
+      facilities: request.facilities,
+      userId,
       client: db,
     }),
   );
+
+  // SCRUM-193/194 (F2): an unsuitable venue is confirmed only for the
+  // criteria the coordinator named; see the doc comment.
+  let confirmUnsuitable = request.confirmUnsuitable;
+  if (!suitability.suitable) {
+    const unmet = suitability.criteria.filter((criterion) => criterion?.met === false);
+    const acknowledged = new Set(request.acknowledgedCriteria);
+    confirmUnsuitable =
+      request.confirmUnsuitable && unmet.every((criterion) => acknowledged.has(criterion.criterion));
+    if (!confirmUnsuitable) {
+      throw new ConflictError(
+        'This venue does not meet the event\'s requirements; confirm to request it anyway',
+        { code: 'SUITABILITY_CONFIRMATION_REQUIRED', conflicts: unmet },
+      );
+    }
+  }
 
   const { data, error } = await db.rpc('create_booking_request', {
     p_event_request_id: request.eventRequestId,
@@ -327,7 +406,7 @@ export async function createBookingRequest(
     p_room_layout_code: request.roomLayoutCode,
     p_setup_notes: request.setupNotes,
     p_suitability: suitability,
-    p_confirm_unsuitable: request.confirmUnsuitable,
+    p_confirm_unsuitable: confirmUnsuitable,
   });
 
   if (error) throw translateError(error);

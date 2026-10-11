@@ -354,6 +354,10 @@ describe('AC3: a venue can be retired, leaves search, and keeps its bookings', (
       startsAt: '2026-06-01T09:00:00+00:00', endsAt: '2026-06-01T17:00:00+00:00',
       status: 'approved', statusDisplay: getBookingStatusDisplay('approved'),
       createdAt: '2026-05-01T09:00:00+00:00',
+      // SCRUM-188 AC7: appWith() signs in as Venue Staff, who get each
+      // booking's suitability record; this older row stored none.
+      roomLayoutCode: null, eventName: null,
+      suitability: null, suitabilityOverridden: false, overriddenCriteria: [],
     }]);
   });
 
@@ -1278,6 +1282,8 @@ describe('SCRUM17_AC2 search window and block reads', () => {
       ['an attendee', ROLE.ATTENDEE],
       ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
       ['an Event Organiser', ROLE.EVENT_ORGANISER],
+      ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+      ['a Safety Officer', ROLE.SAFETY_OFFICER],
     ])('SCRUM17_AC2_%s_gets_403_with_no_query', async (_label, role) => {
       const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(BLOCKS);
 
@@ -1500,6 +1506,8 @@ describe('SCRUM17_AC4 GET /api/venues/:id/blocks/:blockId/history', () => {
     ['an Event Organiser', ROLE.EVENT_ORGANISER],
     ['an attendee', ROLE.ATTENDEE],
     ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+    ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+    ['a Safety Officer', ROLE.SAFETY_OFFICER],
   ])('SCRUM17_AC4_%s_answers_403_with_no_query', async (_label, role) => {
     const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(HISTORY);
 
@@ -1983,6 +1991,8 @@ describe('SCRUM178_AC6 Organisers and Attendees are refused the calendar', () =>
     ['an Event Organiser', ROLE.EVENT_ORGANISER],
     ['an attendee', ROLE.ATTENDEE],
     ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+    ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+    ['a Safety Officer', ROLE.SAFETY_OFFICER],
   ])('SCRUM178_AC6_%s_gets_403_with_no_query', async (_label, role) => {
     const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(`${CALENDAR}${CALENDAR_WINDOW_QS}`);
 
@@ -2022,16 +2032,25 @@ describe('SCRUM178_AC6 the bookings read is refused to Organisers and Attendees,
     createdAt: '2026-05-01T09:00:00+00:00',
   };
 
+  // SCRUM-188 AC7: Venue Staff also get each booking's suitability record;
+  // bookingRow stored none, so it reads as null. Coordinators' shape is
+  // unchanged.
+  const staffBookingBody = {
+    ...bookingBody,
+    roomLayoutCode: null, eventName: null,
+    suitability: null, suitabilityOverridden: false, overriddenCriteria: [],
+  };
+
   it.each([
-    ['Venue Staff', ROLE.VENUE_STAFF],
-    ['an Event Coordinator', ROLE.EVENT_COORDINATOR],
-  ])('SCRUM178_AC6_%s_gets_200_with_the_bookings', async (_label, role) => {
+    ['Venue Staff', ROLE.VENUE_STAFF, staffBookingBody],
+    ['an Event Coordinator', ROLE.EVENT_COORDINATOR, bookingBody],
+  ])('SCRUM178_AC6_%s_gets_200_with_the_bookings', async (_label, role, body) => {
     from.mockReturnValueOnce(queryStub(ok([bookingRow])));
 
     const res = await request(appWith(signedInAs(role))).get(BOOKINGS);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([bookingBody]);
+    expect(res.body).toEqual([body]);
     expect(from).toHaveBeenCalledWith('bookings');
   });
 
@@ -2039,6 +2058,8 @@ describe('SCRUM178_AC6 the bookings read is refused to Organisers and Attendees,
     ['an Event Organiser', ROLE.EVENT_ORGANISER],
     ['an attendee', ROLE.ATTENDEE],
     ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+    ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+    ['a Safety Officer', ROLE.SAFETY_OFFICER],
   ])('SCRUM178_AC6_%s_gets_403_with_no_query', async (_label, role) => {
     const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(BOOKINGS);
 
@@ -2059,6 +2080,109 @@ describe('SCRUM178_AC6 the bookings read is refused to Organisers and Attendees,
     expect(res.status).toBe(200);
     expect(res.body).toEqual([bookingBody]);
     expect(from.mock.calls.map(([table]) => table)).toEqual(['bookings']);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-188 AC7: "The suitability result, including any criterion the
+// coordinator chose to override, is attached to the booking request so that
+// Venue Staff can see it." The venue's bookings list carries it to Venue
+// Staff; Event Coordinators, who read the same list across every event on the
+// venue, keep the plain rows.
+// ---------------------------------------------------------------------------
+describe('SCRUM188_AC7 Venue Staff see each booking request\'s suitability record', () => {
+  const BOOKINGS = `/api/venues/${VENUE_ID}/bookings`;
+  const PLAIN_SELECT = 'id, venue_id, event_request_id, starts_at, ends_at, status, created_at';
+
+  const CRITERIA = [
+    { criterion: 'Capacity', met: false, detail: 'Capacity 80 < expected attendance 150' },
+    { criterion: 'Operating hours', met: true, detail: 'Event runs 09:00–17:00 on Friday; venue open 08:00–22:00' },
+    { criterion: 'Layout', met: true, detail: 'Layout theatre offered' },
+    { criterion: 'Accessibility', met: true, detail: 'None requested' },
+    { criterion: 'Facilities', met: true, detail: 'None requested' },
+    { criterion: 'Availability', met: true, detail: 'Available', conflicts: [] },
+  ];
+  const CHECKED = {
+    startsAt: '2026-06-05T01:00:00+00:00', endsAt: '2026-06-05T09:00:00+00:00',
+    expectedAttendance: 150, layout: 'theatre', accessibility: [], facilities: [],
+  };
+
+  const overriddenRow = {
+    id: 'b1', venue_id: VENUE_ID, event_request_id: EVENT_ID,
+    starts_at: '2026-06-05T01:00:00+00:00', ends_at: '2026-06-05T09:00:00+00:00',
+    status: 'pending', created_at: '2026-05-01T09:00:00+00:00',
+    room_layout_code: 'theatre',
+    suitability_result: { suitable: false, criteria: CRITERIA, checked: CHECKED },
+    suitability_overridden: true,
+    event_requests: { event_name: 'Freshmen Orientation' },
+  };
+  const plainBody = {
+    id: 'b1', venueId: VENUE_ID, eventRequestId: EVENT_ID,
+    startsAt: '2026-06-05T01:00:00+00:00', endsAt: '2026-06-05T09:00:00+00:00',
+    status: 'pending', statusDisplay: getBookingStatusDisplay('pending'),
+    createdAt: '2026-05-01T09:00:00+00:00',
+  };
+
+  it('SCRUM188_AC7_venue_staff_get_the_result_and_the_overridden_criteria', async () => {
+    const stub = queryStub(ok([overriddenRow]));
+    from.mockReturnValueOnce(stub);
+
+    const res = await request(appWith(signedInAs(ROLE.VENUE_STAFF))).get(BOOKINGS);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{
+      ...plainBody,
+      roomLayoutCode: 'theatre',
+      eventName: 'Freshmen Orientation',
+      suitability: { suitable: false, criteria: CRITERIA, checked: CHECKED },
+      suitabilityOverridden: true,
+      overriddenCriteria: ['Capacity'],
+    }]);
+    expect(stub.args('select')[0]).toContain('suitability_result');
+  });
+
+  it('SCRUM188_AC7_an_event_coordinator_gets_todays_shape_and_no_suitability_is_read', async () => {
+    const stub = queryStub(ok([overriddenRow]));
+    from.mockReturnValueOnce(stub);
+
+    const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR))).get(BOOKINGS);
+
+    // The list covers other coordinators' events, so their suitability
+    // records are neither read nor returned -- not merely hidden.
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([plainBody]);
+    expect(stub.args('select')).toEqual([PLAIN_SELECT]);
+  });
+
+  it('SCRUM188_AC7_a_coordinator_cannot_ask_for_the_suitability_shape', async () => {
+    const stub = queryStub(ok([overriddenRow]));
+    from.mockReturnValueOnce(stub);
+
+    const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR)))
+      .get(`${BOOKINGS}?includeSuitability=true`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([plainBody]);
+    expect(stub.args('select')).toEqual([PLAIN_SELECT]);
+  });
+
+  it('SCRUM188_AC7_venue_staff_see_an_older_request_as_suitability_null', async () => {
+    from.mockReturnValueOnce(queryStub(ok([{
+      ...overriddenRow,
+      room_layout_code: null, suitability_result: null, suitability_overridden: false,
+    }])));
+
+    const res = await request(appWith(signedInAs(ROLE.VENUE_STAFF))).get(BOOKINGS);
+
+    expect(res.status).toBe(200);
+    expect(res.body[0]).toMatchObject({
+      roomLayoutCode: null,
+      eventName: 'Freshmen Orientation',
+      suitability: null,
+      suitabilityOverridden: false,
+      overriddenCriteria: [],
+    });
   });
 });
 
@@ -2179,6 +2303,8 @@ describe('SCRUM178_AC6 Organisers and Attendees cannot search retired venues', (
     ['an Event Organiser', ROLE.EVENT_ORGANISER],
     ['an attendee', ROLE.ATTENDEE],
     ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
+    ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+    ['a Safety Officer', ROLE.SAFETY_OFFICER],
   ])('SCRUM178_AC6_%s_with_includeRetired_gets_403_with_no_query', async (_label, role) => {
     const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(`${SEARCH}?includeRetired=true`);
 
@@ -2383,6 +2509,8 @@ describe('SCRUM20 GET /api/venues/event-search', () => {
       ['an Event Organiser', ROLE.EVENT_ORGANISER],
       ['an Attendee', ROLE.ATTENDEE],
       ['Technical Support Staff', ROLE.TECHNICAL_SUPPORT_STAFF],
+      ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+      ['a Safety Officer', ROLE.SAFETY_OFFICER],
     ])('SCRUM20_AC1_%s_is_refused_with_403_before_the_service', async (_label, role) => {
       const res = await request(appWith(signedInAs(role)))
         .get(`${URL}?${PERIOD}&expectedAttendance=40`);
@@ -2617,6 +2745,52 @@ describe('SCRUM20 GET /api/venues/event-search', () => {
     });
   });
 
+  describe('SCRUM-491: the event being searched for', () => {
+    const HOLD_EVENT_ID = '7a7a7a7a-0000-4000-8000-000000000001';
+
+    it('SCRUM491_AC5_eventRequestId_and_the_caller_reach_the_service', async () => {
+      find.mockResolvedValueOnce([]);
+
+      const res = await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=40&eventRequestId=${HOLD_EVENT_ID}`);
+
+      expect(res.status).toBe(200);
+      expect(criteriaSent()).toEqual({
+        startsAt: STARTS_AT,
+        endsAt: ENDS_AT,
+        expectedAttendance: 40,
+        eventRequestId: HOLD_EVENT_ID,
+      });
+      expect(find.mock.calls[0][1]).toEqual({ userId: COORDINATOR_ID });
+    });
+
+    it('SCRUM491_AC5_the_holding_coordinator_search_excludes_its_own_holds', async () => {
+      // The real service: the event is read, it is the caller's, so its id is
+      // sent as the exclusion.
+      from.mockImplementation((table) => {
+        if (table === 'event_requests') return queryStub(ok({ id: HOLD_EVENT_ID, assigned_coordinator_id: COORDINATOR_ID }));
+        return queryStub(ok([]));
+      });
+
+      const res = await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=40&eventRequestId=${HOLD_EVENT_ID}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('SCRUM491_AC5_a_malformed_eventRequestId_is_400', async () => {
+      find.mockImplementation(realService.findVenuesForEvent);
+
+      const res = await request(asCoordinator())
+        .get(`${URL}?${PERIOD}&expectedAttendance=40&eventRequestId=nope`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toEqual([{ field: 'eventRequestId', message: 'must be a valid event id' }]);
+      expect(from).not.toHaveBeenCalled();
+    });
+  });
+
   describe('retired venues', () => {
     it('SCRUM20_AC6_include_retired_with_event_search_is_ignored', async () => {
       // B-AC6-09 (SCRUM-144). parseEventSearch copies only the keys it knows,
@@ -2726,6 +2900,8 @@ describe('SCRUM484_AC2 setup and turnaround are set by Venue Staff only', () => 
     ['an Event Coordinator', ROLE.EVENT_COORDINATOR],
     ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
     ['an attendee', ROLE.ATTENDEE],
+    ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
+    ['a Safety Officer', ROLE.SAFETY_OFFICER],
   ])('SCRUM484_AC2_POST_with_setup_from_a_non_venue_staff_role_is_refused (%s)', async (_label, role) => {
     const res = await request(appWith(signedInAs(role, ORGANISER_ID))).post('/api/venues').send(NEW_VENUE);
 

@@ -4,10 +4,11 @@
  * SCRUM-179, the backend subtask of SCRUM-178 (View Venue Availability
  * Calendar - Venue Staff).
  *
- * One read answers the calendar for a window: a venue's bookings and its
- * blocks, merged into a single list of entries, soonest first. Each entry
- * carries a `kind` -- 'booking' or 'block' -- so the frontend can lay both on
- * one grid without a second request or a client-side join.
+ * One read answers the calendar for a window: a venue's bookings, its blocks
+ * and (SCRUM-491) its tentative holds, merged into a single list of entries,
+ * soonest first. Each entry carries a `kind` -- 'booking', 'block' or 'hold'
+ * -- so the frontend can lay them on one grid without a second request or a
+ * client-side join.
  *
  * The window is required. listVenueBlocks treats a missing window as "every
  * block", which is right for a block list but not for a calendar: a calendar
@@ -43,12 +44,18 @@
  * Blocks come from listVenueBlocks unchanged in meaning: removed blocks are
  * left out, ended ones are kept. The calendar shows the past too.
  *
+ * SCRUM-491 (AC6): tentative holds are the third kind, 'hold'. They come from
+ * the same venue_occupancy_conflicts() call as bookings (040 added them to
+ * it), so the calendar shows exactly the holds that occupy the venue: active
+ * ones whose expiry has not passed. Each is placed by its event's own period,
+ * padded like a booking, and names the holding event so the frontend can show
+ * "Tentatively held" with the event's name. A hold past its expiry is gone
+ * from the calendar at once (AC7), whether or not the expiry job has run.
+ *
  * Deliberately NOT here:
  *
  *  - Display labels. The backend returns kinds, statuses and reasons; the
  *    frontend owns the wording ("Booked", "Blocked", "Booked – under review").
- *  - Tentative holds. SCRUM-16 has not built them, so there is nothing to
- *    read; when it does, they become a third kind.
  *  - Whether the venue is retired. getVenueById returns retired venues, and a
  *    retired venue's past bookings are exactly what SCRUM-15 AC3 keeps
  *    viewable, so the calendar answers for it too.
@@ -143,6 +150,36 @@ export function toBookingEntry(row) {
 }
 
 /**
+ * A hold row from venue_occupancy_conflicts() as a calendar entry (SCRUM-491,
+ * AC6).
+ *
+ * startsAt and endsAt are the holding event's own period, and the occupied
+ * fields that period padded with the venue's minutes, as for a booking. The
+ * holding event's name comes flat from the function; a missing one is null,
+ * not an error -- the hold occupies the venue either way.
+ *
+ * @param {object} row  snake_case, a kind = 'hold' row
+ * @returns {{kind: 'hold', id: string, startsAt: string, endsAt: string,
+ *            eventRequestId: string, eventName: string|null,
+ *            occupiedStartsAt: string, occupiedEndsAt: string,
+ *            setupMinutes: number, turnaroundMinutes: number}}
+ */
+export function toHoldEntry(row) {
+  return {
+    kind: 'hold',
+    id: row.id,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    eventRequestId: row.event_request_id,
+    eventName: row.event_name ?? null,
+    occupiedStartsAt: row.occupied_starts_at,
+    occupiedEndsAt: row.occupied_ends_at,
+    setupMinutes: row.setup_minutes,
+    turnaroundMinutes: row.turnaround_minutes,
+  };
+}
+
+/**
  * A block, as listVenueBlocks returns it, as a calendar entry.
  *
  * Takes the camelCase block, not a row, so the calendar never reads
@@ -200,29 +237,35 @@ export async function getVenueCalendar(venueId, { from, to } = {}) {
   // look like a free one.
   await getVenueById(venueId);
 
-  const [bookings, blocks] = await Promise.all([
-    readBookings(venueId, window),
+  const [occupying, blocks] = await Promise.all([
+    readOccupying(venueId, window),
     listVenueBlocks(venueId, window),
   ]);
 
-  return [...bookings.map(toBookingEntry), ...blocks.map(toBlockEntry)].sort(compareEntries);
+  return [
+    ...occupying.filter((row) => row.kind === 'booking').map(toBookingEntry),
+    ...occupying.filter((row) => row.kind === 'hold').map(toHoldEntry),
+    ...blocks.map(toBlockEntry),
+  ].sort(compareEntries);
 }
 
 /**
- * The venue's occupying bookings whose occupied period overlaps the window,
- * as raw rows.
+ * The venue's occupying bookings and active holds (SCRUM-491) whose occupied
+ * period overlaps the window, as raw rows.
  *
  * Through venue_occupancy_conflicts() (032), so the calendar and every
  * availability check share one rule (AC4). p_pad_requested is false because
  * the window is not an event and has no setup or turnaround of its own; each
  * booking is still padded with the venue's minutes.
  *
- * Only kind = 'booking' rows are kept. The function returns blocks too, but
- * the calendar reads blocks through listVenueBlocks: that keeps their notes,
- * which the shared function does not return, and keeps ended blocks visible
- * exactly as before. Order is left to getVenueCalendar's sort.
+ * Only kind = 'booking' and kind = 'hold' rows are kept. The function returns
+ * blocks too, but the calendar reads blocks through listVenueBlocks: that
+ * keeps their notes, which the shared function does not return, and keeps
+ * ended blocks visible exactly as before. Order is left to getVenueCalendar's
+ * sort. No event is excluded: the calendar shows every hold (the fifth
+ * argument, 040, keeps its default).
  */
-async function readBookings(venueId, window) {
+async function readOccupying(venueId, window) {
   const { data, error } = await supabase.rpc('venue_occupancy_conflicts', {
     p_venue_id: venueId,
     p_starts_at: window.from,
@@ -232,5 +275,5 @@ async function readBookings(venueId, window) {
 
   if (error) throw translateError(error);
 
-  return (data ?? []).filter((row) => row.kind === 'booking');
+  return (data ?? []).filter((row) => row.kind === 'booking' || row.kind === 'hold');
 }

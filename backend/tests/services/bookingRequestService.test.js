@@ -336,3 +336,86 @@ describe('SCRUM484_AC8 the coordinator list carries the review reason', () => {
     expect(items.map((i) => i.reviewReason)).toEqual([null, null]);
   });
 });
+
+describe('SCRUM188 the booking request carries the requirement codes to the check (SCRUM-190)', () => {
+  const pendingRow = { id: BOOKING, event_request_id: EVENT, venue_id: VENUE, status: 'pending' };
+  const createdAnswer = { data: { outcome: 'created', booking: pendingRow }, error: null };
+
+  it('SCRUM188_AC1_forwards_the_codes_and_the_caller_to_the_checker', async () => {
+    const checkSuitability = checker();
+    const client = clientAnswering({ data: eventRow(), error: null }, createdAnswer);
+
+    await createBookingRequest(
+      {
+        eventRequestId: EVENT,
+        venueId: VENUE,
+        roomLayoutCode: 'theatre',
+        accessibility: ['wheelchair_access'],
+        facilities: [' projector '],
+      },
+      USER,
+      { client, checkSuitability },
+    );
+
+    expect(checkSuitability).toHaveBeenCalledWith({
+      eventRequestId: EVENT,
+      venueId: VENUE,
+      roomLayoutCode: 'theatre',
+      accessibility: ['wheelchair_access'],
+      facilities: ['projector'],
+      userId: USER,
+      client,
+    });
+  });
+
+  it('SCRUM188_AC1_no_codes_reach_the_checker_as_empty_lists', async () => {
+    const checkSuitability = checker();
+    await createBookingRequest({ eventRequestId: EVENT, venueId: VENUE }, USER, {
+      client: clientAnswering({ data: eventRow(), error: null }, createdAnswer),
+      checkSuitability,
+    });
+    expect(checkSuitability.mock.calls[0][0]).toMatchObject({ accessibility: [], facilities: [] });
+  });
+
+  it('SCRUM188_AC2_keeps_what_was_checked_in_the_stored_result', async () => {
+    const checked = {
+      startsAt: '2026-12-01T09:00:00+00:00',
+      endsAt: '2026-12-01T17:00:00+00:00',
+      expectedAttendance: 120,
+      layout: 'theatre',
+      accessibility: [],
+      facilities: ['projector'],
+    };
+    const result = { suitable: true, criteria: [{ criterion: 'Capacity', met: true, detail: 'x' }], checked };
+    const client = clientAnswering({ data: eventRow(), error: null }, createdAnswer);
+
+    await createBookingRequest({ eventRequestId: EVENT, venueId: VENUE }, USER, {
+      client,
+      checkSuitability: vi.fn(async () => result),
+    });
+
+    expect(client.calls.at(-1).args.p_suitability).toEqual(result);
+  });
+
+  it('SCRUM188_AC2_a_result_without_checked_is_stored_without_one', async () => {
+    const client = clientAnswering({ data: eventRow(), error: null }, createdAnswer);
+    await createBookingRequest({ eventRequestId: EVENT, venueId: VENUE }, USER, {
+      client,
+      checkSuitability: vi.fn(async () => ({ suitable: true, criteria: [], checked: null, extra: 'dropped' })),
+    });
+    expect(client.calls.at(-1).args.p_suitability).toEqual({ suitable: true, criteria: [] });
+  });
+
+  it('SCRUM188_AC1_an_error_from_the_check_stops_the_request_before_anything_is_written', async () => {
+    const client = clientAnswering({ data: eventRow(), error: null });
+    const refusal = new ValidationError('Invalid suitability check -- facilities: unknown code "x"');
+    const err = await createBookingRequest({ eventRequestId: EVENT, venueId: VENUE, facilities: ['x'] }, USER, {
+      client,
+      checkSuitability: vi.fn(async () => {
+        throw refusal;
+      }),
+    }).catch((e) => e);
+    expect(err).toBe(refusal);
+    expect(client.calls.filter((c) => c.fn)).toHaveLength(0);
+  });
+});

@@ -5,6 +5,9 @@
 // panel is a stub that shows which venue it was opened for, so these tests
 // cover only the catalogue's wiring.
 //
+// SCRUM-491 adds "Place hold" beside it, which opens VenueHoldsPanel the same
+// way; that panel is a stub here too.
+//
 // SCRUM-484 (AC8) adds the flagged-bookings notice shown after an edit save.
 // VenueForm is a stub here too: its Save button hands the catalogue whatever
 // the test put in formStub.saved, as the real form passes updateVenue's
@@ -41,6 +44,14 @@ vi.mock("../../src/components/VenueBlocksPanel", () => ({
   default: ({ venue, currentUserId }) => (
     <div data-testid="blocks-panel" data-current-user-id={currentUserId ?? ""}>
       Blocks panel for {venue.name}
+    </div>
+  ),
+}));
+
+vi.mock("../../src/components/VenueHoldsPanel", () => ({
+  default: ({ venue, currentUserId }) => (
+    <div data-testid="holds-panel" data-current-user-id={currentUserId ?? ""}>
+      Holds panel for {venue.name}
     </div>
   ),
 }));
@@ -442,3 +453,50 @@ describe("SCRUM484_AC8 VenueCatalogue flagged-bookings notice", () => {
     expect(within(notice()).getByText("Orientation")).toBeInTheDocument();
   });
 });
+
+describe("SCRUM491 VenueCatalogue Place hold", () => {
+  it("SCRUM491_AC1_Place_hold_sits_beside_Manage_blocks_on_an_active_venue", async () => {
+    await renderCatalogue();
+    const row = rowFor("Hall A");
+    const button = within(row).getByRole("button", { name: "Place hold" });
+    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute("title");
+
+    const buttons = within(row).getAllByRole("button").map((b) => b.textContent);
+    expect(buttons.indexOf("Place hold")).toBe(buttons.indexOf("Manage blocks") + 1);
+  });
+
+  it("SCRUM491_AC4_Place_hold_is_disabled_with_a_title_on_a_retired_venue", async () => {
+    await renderCatalogue();
+    const button = within(rowFor("Old Annex")).getByRole("button", { name: "Place hold" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "A retired venue cannot be held.");
+  });
+
+  it("SCRUM491_AC2_opens_the_holds_panel_for_that_venue_with_the_current_user", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <VenueCatalogue currentUserId="staff-1" />
+      </MemoryRouter>,
+    );
+    await screen.findByText("Hall A");
+    await user.click(within(rowFor("Hall A")).getByRole("button", { name: "Place hold" }));
+
+    const panel = screen.getByTestId("holds-panel");
+    expect(panel).toHaveTextContent("Holds panel for Hall A");
+    expect(panel).toHaveAttribute("data-current-user-id", "staff-1");
+    expect(screen.queryByRole("heading", { name: "Venue catalogue" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM491_Back_from_the_holds_panel_returns_to_the_catalogue_and_refetches_it", async () => {
+    const { user } = await renderCatalogue();
+    await user.click(within(rowFor("Hall A")).getByRole("button", { name: "Place hold" }));
+    await user.click(screen.getByRole("button", { name: "← Back to the venue catalogue" }));
+
+    expect(screen.queryByTestId("holds-panel")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Venue catalogue" })).toBeInTheDocument();
+    await waitFor(() => expect(getVenueCatalogue).toHaveBeenCalledTimes(2));
+  });
+});
+

@@ -65,6 +65,7 @@ import { DEFAULT_TURNAROUND_MINUTES } from '../domain/turnaroundOptions.js';
 import { DEFAULT_SETUP_MINUTES } from '../domain/setupOptions.js';
 import { matchesAllCriteria } from '../domain/venueMatching.js';
 import { getBookingStatusDisplay } from '../domain/bookingStatus.js';
+import { toSuitabilityRecord } from '../domain/suitabilityRecord.js';
 import { toBookingConflict } from './venueBlockService.js';
 
 /**
@@ -276,11 +277,18 @@ export async function updateVenue(id, changes, userId = null) {
  * SCRUM-493: emergencyAccess and knownRestrictions, null when not recorded.
  * A retired venue keeps and returns both (AC5).
  *
+ * SCRUM-190: takes an optional client, as the booking and event services do,
+ * so the suitability check reads the venue over the same client it reads the
+ * event with (and its tests over a fake one). Without one it uses this
+ * module's client, so every existing caller is unchanged.
+ *
  * @param {string} id
+ * @param {object} [options]
+ * @param {object} [options.client]  a Supabase client; defaults to this module's
  * @returns {Promise<object>}
  */
-export async function getVenueById(id) {
-  const { data, error } = await supabase
+export async function getVenueById(id, { client = supabase } = {}) {
+  const { data, error } = await client
     .from('venues')
     .select(VENUE_WITH_ATTRIBUTES_SELECT)
     .eq('id', id)
@@ -382,20 +390,31 @@ export async function retireVenue(id, userId = null) {
  * question the same way. An empty candidate list answers an empty Set without
  * a call.
  *
+ * SCRUM-491 (AC5): an active tentative hold occupies its venue too (040).
+ * excludeHoldEventId leaves that one event's holds out, so an event's own
+ * hold does not hide the venue from its own search. The key is sent only
+ * when there is an event to exclude, so every other search sends exactly
+ * the three arguments it always has.
+ *
  * @param {string[]} venueIds  ids just read from venues
  * @param {string} startsAt    ISO 8601 with an offset, validated by the caller
  * @param {string} endsAt      ISO 8601 with an offset, validated by the caller
+ * @param {string|null} [excludeHoldEventId]  SCRUM-491: an event whose holds
+ *                             do not count; the caller has checked it may
  * @returns {Promise<Set<string>>} the ids that are free
  * @throws {Error} a failed call, through translateError
  */
-async function findAvailableVenueIds(venueIds, startsAt, endsAt) {
+async function findAvailableVenueIds(venueIds, startsAt, endsAt, excludeHoldEventId = null) {
   if (venueIds.length === 0) return new Set();
 
-  const { data, error } = await supabase.rpc('available_venue_ids', {
+  const args = {
     p_venue_ids: venueIds,
     p_starts_at: startsAt,
     p_ends_at: endsAt,
-  });
+  };
+  if (excludeHoldEventId) args.p_exclude_hold_event_id = excludeHoldEventId;
+
+  const { data, error } = await supabase.rpc('available_venue_ids', args);
 
   // 22P02 (invalid text representation: a bad uuid or timestamp reached the
   // cast) is the caller's input, not a server fault, so it is a 400 -- what
@@ -542,11 +561,24 @@ const CRITERION_LOOKUPS = [
  * kind is collected into one ValidationError, the same "every fault at once"
  * rule validation follows.
  *
+ * SCRUM-190: exported, because the suitability check takes the same three
+ * kinds of code from the coordinator (they are not stored on the event) and
+ * an unknown one there would otherwise read as "Missing: x" -- a venue fault
+ * -- when the real fault is the request's. The options let that caller name
+ * its own client and its own message; a search passes neither and is
+ * unchanged.
+ *
  * @param {object} criteria  validated, so optional keys are present only when
  *                           they hold something to check
+ * @param {object} [options]
+ * @param {object} [options.client]  a Supabase client; defaults to this module's
+ * @param {string} [options.label]   opens the error message
  * @throws {ValidationError} details [{ field, message: 'unknown code "x"' }]
  */
-async function assertKnownCodes(criteria) {
+export async function assertKnownCodes(
+  criteria,
+  { client = supabase, label = 'Invalid venue search' } = {},
+) {
   const details = [];
 
   for (const { field, table } of CRITERION_LOOKUPS) {
@@ -556,7 +588,7 @@ async function assertKnownCodes(criteria) {
     // in the request from being reported twice.
     const requested = [...new Set([criteria[field]].flat())];
 
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from(table)
       .select('code')
       .in('code', requested);
@@ -571,7 +603,7 @@ async function assertKnownCodes(criteria) {
 
   if (details.length > 0) {
     const summary = details.map(({ field, message }) => `${field}: ${message}`).join('; ');
-    throw new ValidationError(`Invalid venue search -- ${summary}`, details);
+    throw new ValidationError(`${label} -- ${summary}`, details);
   }
 }
 
@@ -621,7 +653,18 @@ async function assertKnownCodes(criteria) {
  * booking request inside their transactions, which can only call SQL, so SQL
  * is the one place it can live once.
  *
+ * SCRUM-491 (AC5): an active tentative hold leaves its venue out of every
+ * other event's search, through the same available_venue_ids() call. When
+ * the search names its event (criteria.eventRequestId) AND the caller is that
+ * event's assigned coordinator, the event's own holds are left out, so a
+ * held venue still appears for the event holding it. Anyone else naming the
+ * event is ignored rather than refused: the search then treats its holds
+ * like any other event's, so naming someone else's event can never reveal a
+ * venue it holds as free.
+ *
  * @param {object} criteria  see validateEventSearchCriteria
+ * @param {object} [options]
+ * @param {string} [options.userId]  SCRUM-491: the caller, from the JWT
  * @returns {Promise<object[]>} matching active venues, ordered by name, each
  *   { id, name, location, maxCapacity, layouts, accessibility, facilities,
  *     hours, setupMinutes, turnaroundMinutes }; [] when nothing matches
@@ -630,7 +673,7 @@ async function assertKnownCodes(criteria) {
  * @throws {Error} a failed availability call (SCRUM-484), through
  *   translateError
  */
-export async function findVenuesForEvent(criteria) {
+export async function findVenuesForEvent(criteria, { userId } = {}) {
   const search = validateEventSearchCriteria(criteria);
   await assertKnownCodes(search);
 
@@ -652,6 +695,7 @@ export async function findVenuesForEvent(criteria) {
     candidates.map((venue) => venue.id),
     search.startsAt,
     search.endsAt,
+    await ownHoldEventId(search.eventRequestId, userId),
   );
 
   return candidates
@@ -668,6 +712,34 @@ export async function findVenuesForEvent(criteria) {
       setupMinutes: venue.setupMinutes,
       turnaroundMinutes: venue.turnaroundMinutes,
     }));
+}
+
+
+/**
+ * SCRUM-491 (AC5): the event whose own holds a search may leave out, or null.
+ *
+ * Only when the caller is the event's assigned coordinator. Read from the
+ * stored event, never trusted from the request: a search naming another
+ * coordinator's event, or an event that does not exist, gets null, and the
+ * search then counts that event's holds like anyone else's. No error either
+ * way, so the answer never says whose event an id is.
+ *
+ * @param {string|undefined} eventRequestId  validated shape, or absent
+ * @param {string|undefined} userId          the caller, from the JWT
+ * @returns {Promise<string|null>}
+ */
+async function ownHoldEventId(eventRequestId, userId) {
+  if (!eventRequestId || !userId) return null;
+
+  const { data, error } = await supabase
+    .from('event_requests')
+    .select('id, assigned_coordinator_id')
+    .eq('id', eventRequestId)
+    .maybeSingle();
+
+  if (error) throw translateError(error);
+
+  return data && data.assigned_coordinator_id === userId ? data.id : null;
 }
 
 
@@ -779,31 +851,69 @@ export async function getVenueHistory(venueId) {
  * Reads the provisional bookings table from 009. The booking story owns that
  * table and this function will grow with it.
  *
+ * SCRUM-188 AC7: with includeSuitability, each row also carries what Venue
+ * Staff need to judge the request -- the stored suitability result, whether
+ * the coordinator overrode it and which criteria they overrode
+ * (domain/suitabilityRecord.js), the layout requested and the event's name.
+ * It is opt-in, and the route turns it on for Venue Staff only: an Event
+ * Coordinator reads this list too (SCRUM-182) and must not see the
+ * suitability record of another coordinator's event. Without the flag the
+ * select and the row are exactly as before, so no existing reader changes.
+ *
+ * The event is a plain embed, not !inner: a booking whose event cannot be
+ * read is still a booking on this venue, and SCRUM-15 AC3 is that a venue's
+ * bookings stay viewable. Its eventName is then null.
+ *
  * @param {string} venueId
+ * @param {object} [options]
+ * @param {boolean} [options.includeSuitability=false]  add the AC7 fields
  * @returns {Promise<object[]>} possibly empty, in camelCase
  * @throws {ValidationError} when the id is malformed, before any network call
  */
-export async function getBookingsForVenue(venueId) {
+export async function getBookingsForVenue(venueId, { includeSuitability = false } = {}) {
   validateVenueId(venueId);
 
   const { data, error } = await supabase
     .from('bookings')
-    .select('id, venue_id, event_request_id, starts_at, ends_at, status, created_at')
+    .select(includeSuitability ? BOOKING_SUITABILITY_COLUMNS : BOOKING_COLUMNS)
     .eq('venue_id', venueId)
     .order('starts_at', { ascending: false });
 
   if (error) throw translateError(error);
 
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    venueId: row.venue_id,
-    eventRequestId: row.event_request_id,
-    startsAt: row.starts_at,
-    endsAt: row.ends_at,
-    // SCRUM-243: a row here may be a venue booking request (pending, rejected,
-    // withdrawn) and not only a hold, so the status travels with it.
-    status: row.status,
-    statusDisplay: getBookingStatusDisplay(row.status),
-    createdAt: row.created_at,
-  }));
+  return (data ?? []).map((row) => {
+    const booking = {
+      id: row.id,
+      venueId: row.venue_id,
+      eventRequestId: row.event_request_id,
+      startsAt: row.starts_at,
+      endsAt: row.ends_at,
+      // SCRUM-243: a row here may be a venue booking request (pending, rejected,
+      // withdrawn) and not only a hold, so the status travels with it.
+      status: row.status,
+      statusDisplay: getBookingStatusDisplay(row.status),
+      createdAt: row.created_at,
+    };
+    if (!includeSuitability) return booking;
+
+    const event = Array.isArray(row.event_requests) ? row.event_requests[0] : row.event_requests;
+    return {
+      ...booking,
+      roomLayoutCode: row.room_layout_code ?? null,
+      eventName: event?.event_name ?? null,
+      ...toSuitabilityRecord(row),
+    };
+  });
 }
+
+/** What getBookingsForVenue reads for every caller (SCRUM-15 AC3, SCRUM-243). */
+const BOOKING_COLUMNS = 'id, venue_id, event_request_id, starts_at, ends_at, status, created_at';
+
+/**
+ * SCRUM-188 AC7: the same, plus what Venue Staff read the request by. The
+ * event embed is many-to-one, so PostgREST answers an object; it is read
+ * defensively above in case it is ever an array, as bookingRequestService's
+ * one() does.
+ */
+const BOOKING_SUITABILITY_COLUMNS = `${BOOKING_COLUMNS}, `
+  + 'room_layout_code, suitability_result, suitability_overridden, event_requests(event_name)';

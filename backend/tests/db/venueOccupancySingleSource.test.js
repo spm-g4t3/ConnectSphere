@@ -138,10 +138,12 @@ describe('SCRUM484_AC4 the JavaScript copy of the rule is gone', () => {
 
 describe('SCRUM484_AC4 no copy of the overlap rule in SQL', () => {
   it('SCRUM484_AC4_no_copy_of_the_overlap_rule_remains_in_sql', () => {
-    // The rule itself is there, defined last in 032.
-    for (const name of THE_RULE) {
-      expect(LATEST.get(name)?.file, name).toBe('032_venue_occupancy.sql');
-    }
+    // The rule itself is there. The formula is defined last in 032. Changed
+    // for SCRUM-491: 040 drops the 4-argument venue_occupancy_conflicts and
+    // recreates it with holds as a third kind and a fifth parameter, so the
+    // one function that decides what occupies a venue now lives in 040.
+    expect(LATEST.get('venue_occupied_period')?.file).toBe('032_venue_occupancy.sql');
+    expect(LATEST.get('venue_occupancy_conflicts')?.file).toBe('040_venue_holds.sql');
     // And the raw helper is not.
     expect(LATEST.has('venue_block_booking_conflicts')).toBe(false);
     // The scan replays every migration in the folder, so the latest
@@ -213,5 +215,35 @@ describe('SCRUM484_AC4 no copy of the overlap rule in the services', () => {
     for (const where of found) {
       expect(ALLOWED.has(where), where).toBe(true);
     }
+  });
+});
+
+
+// SCRUM-188 AC3 (SCRUM-193/194, B-AC3-01; SCRUM-484's unwritten B-AC4-18):
+// the suitability check decides availability only through the shared
+// function, the same one the search uses.
+describe('SCRUM188_AC3 the suitability check uses the shared function', () => {
+  it('SCRUM188_AC3_suitability_asks_the_shared_function_and_has_no_overlap_of_its_own', () => {
+    const code = jsCode(resolve(SRC, 'services/venueSuitabilityService.js'));
+
+    // Exactly one rpc, and it is venue_occupancy_conflicts, padded, with the
+    // event's own holds excluded.
+    const rpcs = [...code.matchAll(/\.rpc\(\s*['"](\w+)['"]\s*,\s*\{([^}]*)\}/g)];
+    expect(rpcs.map((m) => m[1])).toEqual(['venue_occupancy_conflicts']);
+    expect(rpcs[0][2]).toMatch(/p_pad_requested:\s*true/);
+    expect(rpcs[0][2]).toMatch(/p_exclude_hold_event_id:\s*event\.id/);
+
+    // No direct read of what occupies a venue: the only table read here is
+    // the event's own bookings list (checkEventVenues), never blocks or holds.
+    const tables = [...code.matchAll(/\.from\(\s*['"](\w+)['"]/g)].map((m) => m[1]);
+    expect(tables).toEqual(['bookings']);
+
+    // That bookings read is narrowed by event and status only, never by period.
+    const read = code.slice(code.indexOf(".from('bookings')"), code.indexOf(".order('created_at')"));
+    expect(read).not.toMatch(/\.(lt|gt|lte|gte|overlaps|range\w*)\(/);
+    expect([...read.matchAll(/\.(eq|in)\(\s*['"](\w+)['"]/g)].map((m) => `${m[1]}:${m[2]}`)).toEqual([
+      'eq:event_request_id',
+      'in:status',
+    ]);
   });
 });

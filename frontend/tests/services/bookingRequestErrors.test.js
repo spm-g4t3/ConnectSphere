@@ -101,6 +101,16 @@ describe("periodConflicts", () => {
     expect(periodConflicts(conflict("BOOKING_PERIOD_CONFLICT", list))).toEqual(list.slice(0, 2));
   });
 
+  it("SCRUM491_AC5_keeps_another_events_hold_as_a_conflict", () => {
+    const list = [
+      { kind: "hold", holdId: "h1", eventName: "Product Launch" },
+      { kind: "booking", bookingId: "k1" },
+      { kind: "other" },
+      null,
+    ];
+    expect(periodConflicts(conflict("BOOKING_PERIOD_CONFLICT", list))).toEqual(list.slice(0, 2));
+  });
+
   it("SCRUM254_is_empty_for_any_other_error", () => {
     expect(periodConflicts(conflict("VENUE_RETIRED", [{ kind: "block" }]))).toEqual([]);
     expect(periodConflicts(undefined)).toEqual([]);
@@ -185,4 +195,25 @@ describe("isStaleWithdrawError (SCRUM-255)", () => {
       expect(isStaleWithdrawError(err)).toBe(false);
     },
   );
+});
+// SCRUM-188 review fix F11: a 400 about the requirement codes points at the
+// search form, where they were chosen.
+describe("SCRUM-188 unrecognised requirement codes", () => {
+  it.each(["accessibility", "facilities", "roomLayoutCode", "acknowledgedCriteria"])(
+    "SCRUM188_AC7_a_400_naming_%s_says_the_requirements_were_not_recognised",
+    (field) => {
+      const message = bookingRequestErrorMessage(
+        http(400, { error: "prose", details: [{ field, message: "Unknown code xyz" }] }),
+      );
+      expect(message).toBe(
+        "The selected requirements were not recognised. Adjust the layout, accessibility features or facilities in the search form, then try again.",
+      );
+    },
+  );
+
+  it("SCRUM188_AC7_a_400_about_other_fields_keeps_the_general_message", () => {
+    expect(
+      bookingRequestErrorMessage(http(400, { details: [{ field: "setupNotes", message: "Too long" }] })),
+    ).toBe("Some details were not accepted. Please check the form.");
+  });
 });

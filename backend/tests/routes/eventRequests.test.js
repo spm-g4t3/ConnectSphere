@@ -85,6 +85,12 @@ function createFakeClient(results = []) {
         call.filters.push([column, value]);
         return chain;
       },
+      // SCRUM-491: the hold candidates read names with .in(), as
+      // equipmentReviewService does.
+      in(column, values) {
+        call.filters.push([column, values]);
+        return chain;
+      },
       order(column, options) {
         call.order.push([column, options]);
         return chain;
@@ -3354,4 +3360,110 @@ describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
     expect(res.status).toBe(401);
     expect(client.calls).toHaveLength(0);
   });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-485 AC5: the new roles are refused by this file's coordinator gate
+// ---------------------------------------------------------------------------
+// The other route suites carry a table of refused roles per gate, and the two
+// new roles were added to those. coordinatorOnly here had only single-role
+// refusals, so this is a sample of it rather than every route: the proof that
+// every coordinatorOnly route refuses both roles is requireRole's own test
+// (SCRUM485_AC5_the_coordinator_gate_refuses_%s), because every route here
+// shares the one gate. A read, a write, and /coordinators, the list SCRUM-486's
+// assignment picker will read: whether a Lead may be assigned events is an open
+// question, so as of SCRUM-485 they are refused it like any non-coordinator.
+describe('SCRUM-485 AC5: the coordinator gate on /api/event-requests refuses the new roles', () => {
+  const ROUTES = [
+    ['GET /queue', (app) => request(app).get('/api/event-requests/queue')],
+    ['GET /coordinators', (app) => request(app).get('/api/event-requests/coordinators')],
+    ['POST /:id/start-review', (app) => request(app).post(`/api/event-requests/${REQUEST_ID}/start-review`).send({})],
+  ];
+  const CASES = [ROLE.EVENT_COORDINATOR_LEAD, ROLE.SAFETY_OFFICER]
+    .flatMap((role) => ROUTES.map(([route, call]) => [route, role, call]));
+
+  it.each(CASES)('SCRUM485_AC5_%s_refuses_%s_with_403_and_queries_nothing', async (_route, role, call) => {
+    // Nothing queued: a query that slipped past the gate would fail with "no
+    // result queued" instead of passing by accident.
+    const client = createWritableFakeClient([]);
+
+    const res = await call(appWith({ client, requireAuth: signedInWithRole(role, COORDINATOR_ID) }));
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'This action is restricted to Event Coordinators' });
+    expect(client.calls).toHaveLength(0);
+  });
+});
+describe('SCRUM-491: GET /hold-candidates, the hold form event picker', () => {
+  const STAFF_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
+  const COORD_ID = '44444444-4444-4444-8444-444444444444';
+  const staff = (req, _res, next) => {
+    req.user = { id: STAFF_ID, role: 'venue_staff' };
+    next();
+  };
+
+  it('SCRUM491_AC2_lists_approved_events_with_their_coordinator_for_venue_staff', async () => {
+    const client = createFakeClient([
+      ok([{
+        id: REQUEST_ID,
+        event_name: 'IS212 Industry Night',
+        proposed_start: '2026-06-01T09:00:00+00:00',
+        proposed_end: '2026-06-01T17:00:00+00:00',
+        expected_attendance: 120,
+        assigned_coordinator_id: COORD_ID,
+      }]),
+      ok([{ id: COORD_ID, full_name: 'Casey Coord' }]),
+    ]);
+
+    const res = await request(appWith({ client, requireAuth: staff })).get('/api/event-requests/hold-candidates');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{
+      id: REQUEST_ID,
+      eventName: 'IS212 Industry Night',
+      proposedStart: '2026-06-01T09:00:00+00:00',
+      proposedEnd: '2026-06-01T17:00:00+00:00',
+      expectedAttendance: 120,
+      assignedCoordinatorId: COORD_ID,
+      assignedCoordinatorName: 'Casey Coord',
+    }]);
+    expect(client.calls[0].table).toBe('event_requests');
+    expect(client.calls[0].filters).toContainEqual(['status', 'approved']);
+  });
+
+  it('a failed read is 500 without the driver message', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const client = createFakeClient([{ data: null, error: { code: 'XX000', message: 'secret' } }]);
+
+    const res = await request(appWith({ client, requireAuth: staff })).get('/api/event-requests/hold-candidates');
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    spy.mockRestore();
+  });
+
+  it('is declared before /:id, so it is never read as an id', async () => {
+    const client = createFakeClient([ok([])]);
+    const res = await request(appWith({ client, requireAuth: staff })).get('/api/event-requests/hold-candidates');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it.each(['event_coordinator', 'event_organiser', 'technical_support_staff', 'attendee'])(
+    'SCRUM491_AC1_403_for_%s',
+    async (role) => {
+      const client = createFakeClient([]);
+      const requireAuth = (req, _res, next) => {
+        req.user = { id: STAFF_ID, role };
+        next();
+      };
+
+      const res = await request(appWith({ client, requireAuth })).get('/api/event-requests/hold-candidates');
+
+      expect(res.status).toBe(403);
+      expect(res.body).toEqual({ error: 'This action is restricted to Venue Staff' });
+      expect(client.calls).toHaveLength(0);
+    },
+  );
 });

@@ -1113,6 +1113,178 @@ describe('AC3: a retired venue keeps its bookings', () => {
 
 
 // ---------------------------------------------------------------------------
+// SCRUM-188 AC7 -- "The suitability result, including any criterion the
+// coordinator chose to override, is attached to the booking request so that
+// Venue Staff can see it." getBookingsForVenue adds it on request only.
+// ---------------------------------------------------------------------------
+describe('SCRUM188_AC7 getBookingsForVenue attaches the suitability record on request', () => {
+  const PLAIN_SELECT = 'id, venue_id, event_request_id, starts_at, ends_at, status, created_at';
+  const EVENT_ID = '22222222-2222-4222-8222-222222222222';
+
+  const CRITERIA = [
+    { criterion: 'Capacity', met: false, detail: 'Capacity 80 < expected attendance 150' },
+    { criterion: 'Operating hours', met: true, detail: 'Event runs 09:00–17:00 on Friday; venue open 08:00–22:00' },
+    { criterion: 'Layout', met: true, detail: 'Layout theatre offered' },
+    { criterion: 'Accessibility', met: true, detail: 'None requested' },
+    { criterion: 'Facilities', met: true, detail: 'None requested' },
+    { criterion: 'Availability', met: true, detail: 'Available', conflicts: [] },
+  ];
+  const CHECKED = {
+    startsAt: '2026-06-05T01:00:00+00:00',
+    endsAt: '2026-06-05T09:00:00+00:00',
+    expectedAttendance: 150,
+    layout: 'theatre',
+    accessibility: [],
+    facilities: [],
+  };
+
+  /** A bookings row as the suitability select returns it. */
+  function suitabilityRow(overrides = {}) {
+    return {
+      id: 'b1',
+      venue_id: VENUE_ID,
+      event_request_id: EVENT_ID,
+      starts_at: '2026-06-05T01:00:00+00:00',
+      ends_at: '2026-06-05T09:00:00+00:00',
+      status: 'pending',
+      created_at: '2026-05-01T09:00:00+00:00',
+      room_layout_code: 'theatre',
+      suitability_result: { suitable: false, criteria: CRITERIA, checked: CHECKED },
+      suitability_overridden: true,
+      event_requests: { event_name: 'Freshmen Orientation' },
+      ...overrides,
+    };
+  }
+
+  const PLAIN_FIELDS = {
+    id: 'b1',
+    venueId: VENUE_ID,
+    eventRequestId: EVENT_ID,
+    startsAt: '2026-06-05T01:00:00+00:00',
+    endsAt: '2026-06-05T09:00:00+00:00',
+    status: 'pending',
+    statusDisplay: getBookingStatusDisplay('pending'),
+    createdAt: '2026-05-01T09:00:00+00:00',
+  };
+
+  it('SCRUM188_AC7_without_the_flag_selects_exactly_the_plain_columns', async () => {
+    const stub = queryStub({ data: [], error: null });
+    from.mockReturnValueOnce(stub);
+
+    await getBookingsForVenue(VENUE_ID);
+
+    expect(stub.args('select')).toEqual([PLAIN_SELECT]);
+  });
+
+  it('SCRUM188_AC7_includeSuitability_false_is_the_plain_read', async () => {
+    const stub = queryStub({ data: [suitabilityRow()], error: null });
+    from.mockReturnValueOnce(stub);
+
+    const [booking] = await getBookingsForVenue(VENUE_ID, { includeSuitability: false });
+
+    // Even when the row happens to carry the columns, none of them leak out.
+    expect(stub.args('select')).toEqual([PLAIN_SELECT]);
+    expect(booking).toEqual(PLAIN_FIELDS);
+  });
+
+  it('SCRUM188_AC7_with_the_flag_selects_the_result_override_layout_and_event_name', async () => {
+    const stub = queryStub({ data: [], error: null });
+    from.mockReturnValueOnce(stub);
+
+    await getBookingsForVenue(VENUE_ID, { includeSuitability: true });
+
+    const [columns] = stub.args('select');
+    expect(columns.startsWith(PLAIN_SELECT)).toBe(true);
+    for (const column of ['room_layout_code', 'suitability_result', 'suitability_overridden']) {
+      expect(columns).toContain(column);
+    }
+    // A plain embed: a booking whose event cannot be read must still be listed.
+    expect(columns).toContain('event_requests(event_name)');
+    expect(columns).not.toContain('!inner');
+    // Same venue, same order, no filter on the venue being active (SCRUM-15 AC3).
+    expect(stub.args('eq')).toEqual(['venue_id', VENUE_ID]);
+    expect(stub.args('order')).toEqual(['starts_at', { ascending: false }]);
+    expect(stub.called('is')).toBe(false);
+  });
+
+  it('SCRUM188_AC7_an_overridden_request_carries_its_result_and_the_overridden_criteria', async () => {
+    from.mockReturnValueOnce(queryStub({ data: [suitabilityRow()], error: null }));
+
+    const [booking] = await getBookingsForVenue(VENUE_ID, { includeSuitability: true });
+
+    expect(booking).toEqual({
+      ...PLAIN_FIELDS,
+      roomLayoutCode: 'theatre',
+      eventName: 'Freshmen Orientation',
+      suitability: { suitable: false, criteria: CRITERIA, checked: CHECKED },
+      suitabilityOverridden: true,
+      overriddenCriteria: ['Capacity'],
+    });
+  });
+
+  it('SCRUM188_AC7_a_suitable_request_names_no_overridden_criteria', async () => {
+    const criteria = CRITERIA.map((c) => ({ ...c, met: true }));
+    from.mockReturnValueOnce(queryStub({ data: [suitabilityRow({
+      suitability_result: { suitable: true, criteria, checked: CHECKED },
+      suitability_overridden: false,
+    })], error: null }));
+
+    const [booking] = await getBookingsForVenue(VENUE_ID, { includeSuitability: true });
+
+    expect(booking.suitability).toEqual({ suitable: true, criteria, checked: CHECKED });
+    expect(booking.suitabilityOverridden).toBe(false);
+    expect(booking.overriddenCriteria).toEqual([]);
+  });
+
+  it('SCRUM188_AC7_an_older_row_reads_as_suitability_null_with_nulls_not_undefined', async () => {
+    // A booking from before 030: no layout, no result, no override flag, and
+    // an event embed that came back empty.
+    from.mockReturnValueOnce(queryStub({ data: [suitabilityRow({
+      status: 'approved',
+      room_layout_code: null,
+      suitability_result: null,
+      suitability_overridden: null,
+      event_requests: null,
+    })], error: null }));
+
+    const [booking] = await getBookingsForVenue(VENUE_ID, { includeSuitability: true });
+
+    expect(booking).toEqual({
+      ...PLAIN_FIELDS,
+      status: 'approved',
+      statusDisplay: getBookingStatusDisplay('approved'),
+      roomLayoutCode: null,
+      eventName: null,
+      suitability: null,
+      suitabilityOverridden: false,
+      overriddenCriteria: [],
+    });
+  });
+
+  it('SCRUM188_AC7_a_result_stored_before_checked_was_recorded_has_checked_null', async () => {
+    from.mockReturnValueOnce(queryStub({ data: [suitabilityRow({
+      suitability_result: { suitable: false, criteria: CRITERIA },
+    })], error: null }));
+
+    const [booking] = await getBookingsForVenue(VENUE_ID, { includeSuitability: true });
+
+    expect(booking.suitability).toEqual({ suitable: false, criteria: CRITERIA, checked: null });
+    expect(booking.overriddenCriteria).toEqual(['Capacity']);
+  });
+
+  it('SCRUM188_AC7_reads_the_event_name_from_an_embed_returned_as_an_array', async () => {
+    from.mockReturnValueOnce(queryStub({ data: [suitabilityRow({
+      event_requests: [{ event_name: 'Freshmen Orientation' }],
+    })], error: null }));
+
+    const [booking] = await getBookingsForVenue(VENUE_ID, { includeSuitability: true });
+
+    expect(booking.eventName).toBe('Freshmen Orientation');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
 // SCRUM-130 (SCRUM-17 AC2): "The blocked period is excluded from venue search
 // results." from() is routed by table name, so the blocks read and the venues
 // read each get their own stub.
@@ -2606,6 +2778,92 @@ describe('SCRUM20 findVenuesForEvent', () => {
 
     expect(result).toEqual([]);
     expect(JSON.stringify(result)).not.toMatch(/setup|turnaround|booking/i);
+  });
+
+  // --- SCRUM-491 AC5: an event's own holds ---------------------------------
+  // A tentative hold occupies its venue for every other event (040, proved in
+  // tests/db/venueHoldsDatabase.test.js). A search may name its event so that
+  // event's own holds are left out -- but only when the caller is the event's
+  // assigned coordinator. Anyone else naming it is ignored, not refused.
+
+  const HOLD_EVENT_ID = '7a7a7a7a-0000-4000-8000-000000000001';
+  const OWNER_ID = '8b8b8b8b-0000-4000-8000-000000000002';
+
+  /** givenEventSearch, plus an event_requests read answering `event`. */
+  function givenHoldEventSearch({ event, eventError, ...options } = {}) {
+    const stubs = givenEventSearch(options);
+    const base = from.getMockImplementation();
+    from.mockImplementation((table) => {
+      if (table !== 'event_requests') return base(table);
+      stubs.event_requests = queryStub(eventError ? { data: null, error: eventError } : { data: event, error: null });
+      return stubs.event_requests;
+    });
+    return stubs;
+  }
+
+  it('SCRUM491_AC5_the_assigned_coordinator_search_leaves_out_its_own_holds', async () => {
+    const stubs = givenHoldEventSearch({
+      rows: [harbourRow()],
+      event: { id: HOLD_EVENT_ID, assigned_coordinator_id: OWNER_ID },
+    });
+
+    const result = await findVenuesForEvent({ ...BASE, eventRequestId: HOLD_EVENT_ID.toUpperCase() }, { userId: OWNER_ID });
+
+    expect(result.map((v) => v.id)).toEqual([HARBOUR_ID]);
+    expect(stubs.event_requests.args('eq')).toEqual(['id', HOLD_EVENT_ID]);
+    expect(availabilityCalls()).toEqual([
+      ['available_venue_ids', {
+        p_venue_ids: [HARBOUR_ID],
+        p_starts_at: BASE.startsAt,
+        p_ends_at: BASE.endsAt,
+        p_exclude_hold_event_id: HOLD_EVENT_ID,
+      }],
+    ]);
+  });
+
+  it('SCRUM491_AC5_another_coordinator_naming_the_event_is_ignored', async () => {
+    givenHoldEventSearch({
+      rows: [harbourRow()],
+      event: { id: HOLD_EVENT_ID, assigned_coordinator_id: OWNER_ID },
+      occupied: [HARBOUR_ID],
+    });
+
+    const result = await findVenuesForEvent({ ...BASE, eventRequestId: HOLD_EVENT_ID }, { userId: 'someone-else' });
+
+    // The holds count like anyone else's: the held venue stays out, and the
+    // call carries no exclusion.
+    expect(result).toEqual([]);
+    expect(Object.keys(availabilityCalls()[0][1]).sort()).toEqual(['p_ends_at', 'p_starts_at', 'p_venue_ids']);
+  });
+
+  it('SCRUM491_AC5_an_unknown_event_or_no_caller_excludes_nothing', async () => {
+    givenHoldEventSearch({ rows: [harbourRow()], event: null });
+    await findVenuesForEvent({ ...BASE, eventRequestId: HOLD_EVENT_ID }, { userId: OWNER_ID });
+    expect(availabilityCalls()[0][1]).not.toHaveProperty('p_exclude_hold_event_id');
+
+    vi.resetAllMocks();
+    givenHoldEventSearch({ rows: [harbourRow()] });
+    await findVenuesForEvent({ ...BASE, eventRequestId: HOLD_EVENT_ID });
+    expect(tablesRead()).not.toContain('event_requests');
+    expect(availabilityCalls()[0][1]).not.toHaveProperty('p_exclude_hold_event_id');
+  });
+
+  it('SCRUM491_AC5_a_failed_event_read_is_passed_on', async () => {
+    givenHoldEventSearch({ rows: [harbourRow()], eventError: { code: 'XX000', message: 'down' } });
+
+    await expect(
+      findVenuesForEvent({ ...BASE, eventRequestId: HOLD_EVENT_ID }, { userId: OWNER_ID }),
+    ).rejects.toThrow('down');
+  });
+
+  it('SCRUM491_AC5_a_malformed_event_id_is_400_before_any_read', async () => {
+    givenHoldEventSearch({ rows: [harbourRow()] });
+
+    const err = await findVenuesForEvent({ ...BASE, eventRequestId: 'nope' }, { userId: OWNER_ID }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'eventRequestId', message: 'must be a valid event id' }]);
+    expect(from).not.toHaveBeenCalled();
   });
 });
 

@@ -94,6 +94,9 @@ import {
   getChangeRequestsForEvent,
   processChangeRequest,
 } from '../services/eventChangeRequestService.js';
+// SCRUM-491. Credential-free like the two services above: it resolves the
+// client lazily and never imports venueService.js.
+import { listHoldCandidates } from '../services/venueHoldService.js';
 import { getStatusDisplay } from '../domain/eventRequestStatus.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 // Both of these are credential-free on purpose, and that is worth knowing
@@ -164,6 +167,8 @@ export function createEventRequestRouter({
   // build time is safe: createRequireRole only throws when handed zero roles,
   // and with one it just closes over the list.
   const coordinatorOnly = requireRole(ROLE.EVENT_COORDINATOR);
+  // SCRUM-491: the hold form's event picker is Venue Staff's alone.
+  const venueStaffOnly = requireRole(ROLE.VENUE_STAFF);
 
   // Authentication is applied to the whole router rather than per route.
   // Every Organiser read below is scoped to req.user.id, so a route reachable
@@ -284,6 +289,31 @@ export function createEventRequestRouter({
   router.get('/coordinators', coordinatorOnly, async (req, res) => {
     try {
       res.status(200).json(await listCoordinators({ client }));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-491 (AC2): the Approved events a tentative hold can be placed for,
+   * as { id, eventName, proposedStart, proposedEnd, expectedAttendance,
+   * assignedCoordinatorId, assignedCoordinatorName }, soonest first. The hold
+   * form's event picker.
+   *
+   * Venue Staff only: placing a hold is their seat (AC1), and the list names
+   * every Approved event and its coordinator, which no other role's screen
+   * needs.
+   *
+   * DECLARATION ORDER IS LOAD-BEARING, as for /queue, /mine and /coordinators
+   * above: '/hold-candidates' is one segment, so declared after GET /:id it
+   * would be read as an id. Do not move it below /:id.
+   *
+   * A bare array; none is 200 []. Statuses: 200, 401, 403 unless Venue
+   * Staff, 500.
+   */
+  router.get('/hold-candidates', venueStaffOnly, async (req, res) => {
+    try {
+      res.status(200).json(await listHoldCandidates({ client }));
     } catch (err) {
       handleError(err, res);
     }

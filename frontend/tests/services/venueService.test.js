@@ -107,3 +107,22 @@ describe("findVenuesForEvent", () => {
     });
   });
 });
+
+describe("SCRUM491_AC5 findVenuesForEvent names the event searched for", () => {
+  it("SCRUM491_AC5_sends_eventRequestId_when_given", async () => {
+    await findVenuesForEvent({ ...REQUIRED, eventRequestId: "e1" });
+
+    expect(paramsSent()).toStrictEqual({ ...REQUIRED, eventRequestId: "e1" });
+  });
+
+  it.each([
+    ["blank", "  "],
+    ["not text", 7],
+    ["null", null],
+  ])("SCRUM491_AC5_a_%s_eventRequestId_is_not_sent", async (_, eventRequestId) => {
+    await findVenuesForEvent({ ...REQUIRED, eventRequestId });
+
+    expect(paramsSent()).toStrictEqual({ ...REQUIRED });
+  });
+});
+

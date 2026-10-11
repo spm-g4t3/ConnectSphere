@@ -10,8 +10,11 @@ import userEvent from "@testing-library/user-event";
 
 import BookingRequestPanel from "../../src/components/BookingRequestPanel.jsx";
 import { createBookingRequest } from "../../src/services/bookingRequestService";
-import { formatRange } from "../../src/services/displayFormat.js";
+import { formatVenuePeriod, formatVenueRange } from "../../src/services/datetimeFormat.js";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay.js";
+
+// SCRUM-188 (F5): the panel reads periods on the venue's Singapore clock.
+const venueOccupied = (entry) => `${formatOccupiedPeriod(entry, formatVenueRange)} (Singapore time)`;
 
 vi.mock("../../src/services/bookingRequestService", () => ({
   createBookingRequest: vi.fn(),
@@ -72,7 +75,7 @@ describe("what the coordinator sees", () => {
 
     expect(screen.getByRole("heading", { name: "Request Hall A" })).toBeInTheDocument();
     expect(screen.getByText("Industry Night")).toBeInTheDocument();
-    expect(screen.getByText(formatRange(EVENT.proposedStart, EVENT.proposedEnd))).toBeInTheDocument();
+    expect(screen.getByText(formatVenuePeriod(EVENT.proposedStart, EVENT.proposedEnd))).toBeInTheDocument();
     expect(screen.getByText("150")).toBeInTheDocument();
     expect(screen.getByText("Tiered seating")).toBeInTheDocument();
     expect(screen.getByText("Hall A, Level 2, seats up to 200")).toBeInTheDocument();
@@ -90,7 +93,7 @@ describe("what the coordinator sees", () => {
       venue: { id: "v1", name: "Annex" },
     });
     expect(screen.getByText("Unnamed event")).toBeInTheDocument();
-    expect(screen.getByText("Not set – Not set")).toBeInTheDocument();
+    expect(screen.getByText("Not set")).toBeInTheDocument();
     expect(screen.getAllByText("Not specified")).toHaveLength(3);
     expect(screen.getByText("Annex")).toBeInTheDocument();
   });
@@ -255,6 +258,7 @@ describe("a venue that fails the suitability check", () => {
       eventRequestId: "e1",
       venueId: "v1",
       confirmUnsuitable: true,
+      acknowledgedCriteria: ["Capacity"],
     });
     await screen.findByRole("status");
   });
@@ -300,6 +304,7 @@ describe("a venue that fails the suitability check", () => {
       eventRequestId: "e1",
       venueId: "v1",
       confirmUnsuitable: true,
+      acknowledgedCriteria: ["Capacity"],
     });
     await screen.findByRole("status");
   });
@@ -347,7 +352,7 @@ describe("errors the coordinator can act on", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("not available for the whole of the event");
     const list = screen.getByRole("list", { name: "What is in the way" });
     expect(within(list).getByText("Blocked")).toBeInTheDocument();
-    expect(within(list).getByText(formatRange("2026-12-01T08:00:00Z", "2026-12-01T10:00:00Z"))).toBeInTheDocument();
+    expect(within(list).getByText(formatVenuePeriod("2026-12-01T08:00:00Z", "2026-12-01T10:00:00Z"))).toBeInTheDocument();
     expect(within(list).getByText("Careers Fair")).toBeInTheDocument();
     expect(within(list).getByText("11111111")).toBeInTheDocument();
     expect(within(list).getByText("Unnamed event")).toBeInTheDocument();
@@ -486,9 +491,9 @@ describe("SCRUM484_AC7 setup and turnaround in what is in the way", () => {
     expect(within(row).getByText("Orientation")).toBeInTheDocument();
     expect(
       within(row).getByText(
-        `Setup ${formatRange(ORIENTATION.occupiedStartsAt, ORIENTATION.startsAt)} · ` +
-          `Event ${formatRange(ORIENTATION.startsAt, ORIENTATION.endsAt)} · ` +
-          `Turnaround ${formatRange(ORIENTATION.endsAt, ORIENTATION.occupiedEndsAt)}`,
+        `Setup ${formatVenueRange(ORIENTATION.occupiedStartsAt, ORIENTATION.startsAt)} · ` +
+          `Event ${formatVenueRange(ORIENTATION.startsAt, ORIENTATION.endsAt)} · ` +
+          `Turnaround ${formatVenueRange(ORIENTATION.endsAt, ORIENTATION.occupiedEndsAt)} (Singapore time)`,
       ),
     ).toBeInTheDocument();
     expect(within(row).getByText("aaaaaaaa")).toBeInTheDocument();
@@ -499,7 +504,7 @@ describe("SCRUM484_AC7 setup and turnaround in what is in the way", () => {
 
     const row = within(list).getByRole("listitem");
     expect(within(row).getByText("Blocked")).toBeInTheDocument();
-    expect(within(row).getByText(formatRange(BLOCK.startsAt, BLOCK.endsAt))).toBeInTheDocument();
+    expect(within(row).getByText(formatVenuePeriod(BLOCK.startsAt, BLOCK.endsAt))).toBeInTheDocument();
     expect(row).not.toHaveTextContent(/Setup \d|Event |Turnaround \d/);
     expect(
       within(row).getByText(
@@ -520,7 +525,7 @@ describe("SCRUM484_AC7 setup and turnaround in what is in the way", () => {
     const list = await showConflicts([{ ...BLOCK, setupMinutes: 0, turnaroundMinutes: 0 }]);
 
     const row = within(list).getByRole("listitem");
-    expect(within(row).getByText(formatRange(BLOCK.startsAt, BLOCK.endsAt))).toBeInTheDocument();
+    expect(within(row).getByText(formatVenuePeriod(BLOCK.startsAt, BLOCK.endsAt))).toBeInTheDocument();
     expect(row.querySelector(".booking-request__conflict-note")).toBeNull();
     expect(row).not.toHaveTextContent(/Includes|setup|turnaround/i);
   });
@@ -536,7 +541,7 @@ describe("SCRUM484_AC7 setup and turnaround in what is in the way", () => {
     const list = await showConflicts([zero]);
 
     const row = within(list).getByRole("listitem");
-    expect(within(row).getByText(formatRange(zero.startsAt, zero.endsAt))).toBeInTheDocument();
+    expect(within(row).getByText(formatVenuePeriod(zero.startsAt, zero.endsAt))).toBeInTheDocument();
     expect(row).not.toHaveTextContent(/Setup|Turnaround/);
   });
 
@@ -568,11 +573,11 @@ describe("SCRUM484_AC7 setup and turnaround in what is in the way", () => {
 
     const row = within(list).getByRole("listitem");
     expect(within(row).getByText("Lunch Talk")).toBeInTheDocument();
-    expect(within(row).getByText(formatOccupiedPeriod(lunch))).toBeInTheDocument();
-    expect(formatOccupiedPeriod(lunch)).toBe(
-      `Setup ${formatRange(lunch.occupiedStartsAt, lunch.startsAt)} · ` +
-        `Event ${formatRange(lunch.startsAt, lunch.endsAt)} · ` +
-        `Turnaround ${formatRange(lunch.endsAt, lunch.occupiedEndsAt)}`,
+    expect(within(row).getByText(venueOccupied(lunch))).toBeInTheDocument();
+    expect(venueOccupied(lunch)).toBe(
+      `Setup ${formatVenueRange(lunch.occupiedStartsAt, lunch.startsAt)} · ` +
+        `Event ${formatVenueRange(lunch.startsAt, lunch.endsAt)} · ` +
+        `Turnaround ${formatVenueRange(lunch.endsAt, lunch.occupiedEndsAt)} (Singapore time)`,
     );
     expect(
       within(row).getByText(
@@ -602,7 +607,7 @@ describe("SCRUM484_AC7 setup and turnaround in what is in the way", () => {
     const list = await showConflicts([zero]);
 
     const row = within(list).getByRole("listitem");
-    expect(within(row).getByText(formatRange(zero.startsAt, zero.endsAt))).toBeInTheDocument();
+    expect(within(row).getByText(formatVenuePeriod(zero.startsAt, zero.endsAt))).toBeInTheDocument();
     expect(row.querySelector(".booking-request__conflict-note")).toBeNull();
     expect(row).not.toHaveTextContent(/Your event's own|counts? as well/);
   });
@@ -613,6 +618,278 @@ describe("SCRUM484_AC7 setup and turnaround in what is in the way", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]).toHaveTextContent("Blocked");
     expect(rows[1]).toHaveTextContent("Orientation");
-    expect(rows[1]).toHaveTextContent(`Turnaround ${formatRange(ORIENTATION.endsAt, ORIENTATION.occupiedEndsAt)}`);
+    expect(rows[1]).toHaveTextContent(`Turnaround ${formatVenueRange(ORIENTATION.endsAt, ORIENTATION.occupiedEndsAt)}`);
+  });
+});
+
+describe("SCRUM491_AC5 another event's tentative hold in what is in the way", () => {
+  // Another event's hold, 10:00-12:00Z, padded 30/45 like a booking.
+  const HOLD = {
+    kind: "hold",
+    holdId: "h-launch",
+    eventRequestId: "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+    eventName: "Product Launch",
+    startsAt: "2026-12-01T10:00:00Z",
+    endsAt: "2026-12-01T12:00:00Z",
+    occupiedStartsAt: "2026-12-01T09:30:00Z",
+    occupiedEndsAt: "2026-12-01T12:45:00Z",
+    setupMinutes: 30,
+    turnaroundMinutes: 45,
+  };
+
+  async function showConflicts(conflicts) {
+    vi.mocked(createBookingRequest).mockRejectedValue(conflict409("BOOKING_PERIOD_CONFLICT", conflicts));
+    const { user } = renderPanel();
+    await user.click(submit());
+    return screen.findByRole("list", { name: "What is in the way" });
+  }
+
+  it("SCRUM491_AC5_a_hold_conflict_reads_Tentatively_held_with_its_event_and_occupied_period", async () => {
+    const list = await showConflicts([HOLD]);
+
+    const row = within(list).getByRole("listitem");
+    expect(within(row).getByText("Tentatively held")).toBeInTheDocument();
+    expect(within(row).getByText("Product Launch")).toBeInTheDocument();
+    expect(
+      within(row).getByText(
+        `Setup ${formatVenueRange(HOLD.occupiedStartsAt, HOLD.startsAt)} · ` +
+          `Event ${formatVenueRange(HOLD.startsAt, HOLD.endsAt)} · ` +
+          `Turnaround ${formatVenueRange(HOLD.endsAt, HOLD.occupiedEndsAt)} (Singapore time)`,
+      ),
+    ).toBeInTheDocument();
+    expect(within(row).getByText("bbbbbbbb")).toBeInTheDocument();
+  });
+
+  it("SCRUM491_AC5_a_booking_conflict_is_not_labelled_as_a_hold", async () => {
+    const list = await showConflicts([{ ...HOLD, kind: "booking", bookingId: "bk-1", holdId: undefined }]);
+
+    expect(within(list).queryByText("Tentatively held")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM491_AC5_a_hold_without_an_id_still_renders", async () => {
+    const list = await showConflicts([{ ...HOLD, holdId: undefined, eventName: "" }]);
+
+    expect(within(list).getByText("Tentatively held")).toBeInTheDocument();
+    expect(within(list).getByText("Unnamed event")).toBeInTheDocument();
+  });
+});
+
+
+describe("SCRUM-191 the coordinator's requirement codes travel with the request", () => {
+  it("SCRUM191_sends_the_layout_accessibility_and_facilities_when_given", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel({
+      requirements: { layout: "theatre", accessibility: ["hearing_loop"], facilities: ["projector", "wifi"] },
+    });
+
+    await user.click(submit());
+
+    expect(createBookingRequest).toHaveBeenCalledWith({
+      eventRequestId: "e1",
+      venueId: "v1",
+      roomLayoutCode: "theatre",
+      accessibility: ["hearing_loop"],
+      facilities: ["projector", "wifi"],
+    });
+  });
+
+  it.each([
+    ["blank", { layout: "", accessibility: [], facilities: [] }],
+    ["null", { layout: null, accessibility: null, facilities: null }],
+    ["absent", undefined],
+  ])("SCRUM191_leaves_them_out_when_%s", async (_label, requirements) => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel({ requirements });
+
+    await user.click(submit());
+
+    expect(createBookingRequest).toHaveBeenCalledWith({ eventRequestId: "e1", venueId: "v1" });
+  });
+
+  it("SCRUM191_sends_only_the_lists_that_have_codes", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel({ requirements: { layout: "", accessibility: [], facilities: ["wifi"] } });
+
+    await user.click(submit());
+
+    expect(createBookingRequest).toHaveBeenCalledWith({
+      eventRequestId: "e1",
+      venueId: "v1",
+      facilities: ["wifi"],
+    });
+  });
+
+  it("SCRUM191_codes_and_the_unsuitable_confirmation_go_together", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel({ suitability: UNSUITABLE, requirements: { layout: "theatre" } });
+
+    await user.click(confirmBox());
+    await user.click(submit());
+
+    expect(createBookingRequest).toHaveBeenCalledWith({
+      eventRequestId: "e1",
+      venueId: "v1",
+      roomLayoutCode: "theatre",
+      confirmUnsuitable: true,
+      acknowledgedCriteria: ["Capacity"],
+    });
+  });
+});
+
+// SCRUM-188 review fix F2 (AC7): the override names what it accepts.
+describe("SCRUM-188 AC7 the confirmation names the criteria it accepts", () => {
+  const TWO_UNMET = {
+    suitable: false,
+    criteria: [
+      { criterion: "Capacity", met: false, detail: "Capacity 80 < expected attendance 150" },
+      { criterion: "Layout", met: false, detail: "Layout banquet not offered", layout: "banquet", offers: ["theatre"] },
+      { criterion: "Facilities", met: true },
+    ],
+  };
+
+  it("SCRUM188_AC7_sends_acknowledged_criteria_from_the_checked_result", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel({ suitability: TWO_UNMET });
+
+    await user.click(confirmBox());
+    await user.click(submit());
+
+    expect(createBookingRequest).toHaveBeenCalledWith({
+      eventRequestId: "e1",
+      venueId: "v1",
+      confirmUnsuitable: true,
+      acknowledgedCriteria: ["Capacity", "Layout"],
+    });
+  });
+
+  it("SCRUM188_AC7_sends_acknowledged_criteria_from_the_servers_list", async () => {
+    vi.mocked(createBookingRequest)
+      .mockRejectedValueOnce(conflict409("SUITABILITY_CONFIRMATION_REQUIRED", TWO_UNMET.criteria.slice(0, 2)))
+      .mockResolvedValueOnce(PENDING);
+    const { user } = renderPanel();
+
+    await user.click(submit());
+    await screen.findByRole("alert");
+    await user.click(confirmBox());
+    await user.click(submit());
+
+    expect(createBookingRequest).toHaveBeenNthCalledWith(2, {
+      eventRequestId: "e1",
+      venueId: "v1",
+      confirmUnsuitable: true,
+      acknowledgedCriteria: ["Capacity", "Layout"],
+    });
+  });
+
+  it("SCRUM188_AC7_a_different_unmet_list_from_the_server_replaces_the_warning_and_needs_a_new_confirmation", async () => {
+    vi.mocked(createBookingRequest)
+      .mockRejectedValueOnce(conflict409("SUITABILITY_CONFIRMATION_REQUIRED", TWO_UNMET.criteria.slice(0, 2)))
+      .mockResolvedValueOnce(PENDING);
+    const { user } = renderPanel({ suitability: UNSUITABLE });
+
+    await user.click(confirmBox());
+    await user.click(submit());
+    expect(createBookingRequest).toHaveBeenNthCalledWith(1, {
+      eventRequestId: "e1",
+      venueId: "v1",
+      confirmUnsuitable: true,
+      acknowledgedCriteria: ["Capacity"],
+    });
+
+    // The server now finds Layout unmet too: the new list shows, unticked.
+    const warning = await screen.findByRole("alert");
+    await waitFor(() => expect(within(warning).getByText(/^Layout: /)).toBeInTheDocument());
+    expect(confirmBox()).not.toBeChecked();
+    expect(submit()).toBeDisabled();
+
+    await user.click(confirmBox());
+    await user.click(submit());
+    expect(createBookingRequest).toHaveBeenNthCalledWith(2, {
+      eventRequestId: "e1",
+      venueId: "v1",
+      confirmUnsuitable: true,
+      acknowledgedCriteria: ["Capacity", "Layout"],
+    });
+  });
+
+  it("SCRUM188_AC2_the_warning_reads_structured_codes_as_labels", () => {
+    renderPanel({ suitability: TWO_UNMET });
+    expect(screen.getByText("Layout: Layout Banquet not offered (offers: Theatre)")).toBeInTheDocument();
+  });
+});
+
+// SCRUM-188 review fix F3 (AC4/AC7): Availability is never overridable.
+describe("SCRUM-188 AC7 an unavailable venue cannot be requested", () => {
+  const UNAVAILABLE = {
+    suitable: false,
+    criteria: [
+      { criterion: "Capacity", met: false, detail: "Capacity 80 < expected attendance 150" },
+      { criterion: "Availability", met: false, detail: "Needs 13:45–16:45 on Wed 11 Nov. Booked for Gala Night" },
+    ],
+  };
+  const UNAVAILABLE_TEXT = /This venue is not available for this event's period, so it can't be requested\./;
+
+  it("SCRUM188_AC7_unmet_availability_offers_no_confirmation_and_keeps_send_disabled", () => {
+    renderPanel({ suitability: UNAVAILABLE });
+
+    const warning = screen.getByRole("alert");
+    expect(within(warning).getByText(/^Availability: Needs 13:45–16:45/)).toBeInTheDocument();
+    expect(within(warning).getByText(UNAVAILABLE_TEXT)).toBeInTheDocument();
+    expect(confirmBox()).not.toBeInTheDocument();
+    expect(submit()).toBeDisabled();
+    fireEvent.submit(screen.getByLabelText("Setup notes (optional)").closest("form"));
+    expect(createBookingRequest).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM188_AC7_a_server_list_naming_availability_cannot_be_confirmed_either", async () => {
+    vi.mocked(createBookingRequest).mockRejectedValueOnce(
+      conflict409("SUITABILITY_CONFIRMATION_REQUIRED", UNAVAILABLE.criteria),
+    );
+    const { user } = renderPanel();
+
+    await user.click(submit());
+
+    expect(await screen.findByText(UNAVAILABLE_TEXT)).toBeInTheDocument();
+    expect(confirmBox()).not.toBeInTheDocument();
+    expect(submit()).toBeDisabled();
+    expect(createBookingRequest).toHaveBeenCalledTimes(1);
+  });
+});
+
+// SCRUM-188 review fix F5 (AC2/AC7): venue periods read on Singapore's clock.
+describe("SCRUM-188 periods in Singapore time", () => {
+  it("SCRUM188_AC2_when_reads_in_singapore_time", () => {
+    renderPanel();
+    // 09:00Z-17:00Z is 17:00 on 1 Dec to 01:00 on 2 Dec in Singapore.
+    expect(screen.getByText("2026-12-01 17:00 – 2026-12-02 01:00 (Singapore time)")).toBeInTheDocument();
+  });
+
+  it("SCRUM188_AC7_a_block_and_a_padded_booking_in_the_way_read_in_singapore_time", async () => {
+    vi.mocked(createBookingRequest).mockRejectedValue(
+      conflict409("BOOKING_PERIOD_CONFLICT", [
+        { kind: "block", blockId: "k1", startsAt: "2026-12-01T07:00:00Z", endsAt: "2026-12-01T08:45:00Z" },
+        {
+          kind: "booking",
+          bookingId: "b2",
+          eventName: "Orientation",
+          startsAt: "2026-12-01T07:00:00Z",
+          endsAt: "2026-12-01T08:30:00Z",
+          occupiedStartsAt: "2026-12-01T06:30:00Z",
+          occupiedEndsAt: "2026-12-01T09:15:00Z",
+          setupMinutes: 30,
+          turnaroundMinutes: 45,
+        },
+      ]),
+    );
+    const { user } = renderPanel();
+    await user.click(submit());
+
+    const rows = within(await screen.findByRole("list", { name: "What is in the way" })).getAllByRole("listitem");
+    expect(within(rows[0]).getByText("2026-12-01 15:00 – 16:45 (Singapore time)")).toBeInTheDocument();
+    expect(
+      within(rows[1]).getByText(
+        "Setup 2026-12-01 14:30 – 15:00 · Event 2026-12-01 15:00 – 16:30 · Turnaround 2026-12-01 16:30 – 17:15 (Singapore time)",
+      ),
+    ).toBeInTheDocument();
   });
 });

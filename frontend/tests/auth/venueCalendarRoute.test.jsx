@@ -116,6 +116,8 @@ describe("SCRUM178_AC6 /venues/:venueId/calendar route is limited to internal ro
     ["event_organiser"],
     ["attendee"],
     ["technical_support_staff"],
+    ["event_coordinator_lead"],
+    ["safety_officer"],
   ])("SCRUM178_AC6_%s_is_sent_to_unauthorized_and_never_mounts_the_calendar", (role) => {
     renderAppAt(`/venues/${VENUE_ID}/calendar?date=2026-11-03`, role);
 

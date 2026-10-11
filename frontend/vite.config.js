@@ -1,7 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
-// SCRUM-17, SCRUM-186, SCRUM-178 and SCRUM-137 files are gated at 100%
+// SCRUM-17, SCRUM-186, SCRUM-178, SCRUM-137 and SCRUM-491 files are gated at 100%
 // lines/branches/functions/statements each.
 // There is deliberately no global threshold: shared files -- venueService.js,
 // VenueCatalogue.jsx, VenueSearch.jsx (other stories) and datetimeFormat.js
@@ -77,6 +77,27 @@ const SCRUM254_FILES = [
   'src/services/bookingRequestStatusDisplay.js',
 ]
 
+// SCRUM-485 (SCRUM-509) owns the two new dashboards outright. Dashboard.jsx
+// gains their map entries but is shared by every role, so, like App.jsx, it
+// is not gated.
+const SCRUM485_FILES = [
+  'src/components/EventCoordinatorLeadDashboard.jsx',
+  'src/components/SafetyOfficerDashboard.jsx',
+]
+
+// SCRUM-491 owns the tentative-hold panel, form and their two services
+// outright. The edits it makes to shared files are gated where those files
+// already are (calendarEntryDisplay.js, calendarRange.js, VenueCalendar.jsx,
+// bookingRequestErrors.js, BookingRequestPanel.jsx, notificationDisplay.js,
+// eventVenueSearchForm.js, EventVenueFinder.jsx); VenueCatalogue.jsx and
+// venueService.js stay ungated, as above.
+const SCRUM491_FILES = [
+  'src/components/VenueHoldsPanel.jsx',
+  'src/components/VenueHoldForm.jsx',
+  'src/services/venueHoldErrors.js',
+  'src/services/venueHoldValidation.js',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -109,6 +130,8 @@ export default defineConfig({
           file,
           file === 'src/components/MyBookingRequests.jsx' ? MY_BOOKING_REQUESTS : FULL,
         ]),
+        ...SCRUM485_FILES.map((file) => [file, FULL]),
+        ...SCRUM491_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

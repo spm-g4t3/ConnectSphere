@@ -49,7 +49,7 @@ describe("SCRUM255 /my-venue-requests", () => {
     expect(window.location.pathname).toBe("/my-venue-requests");
   });
 
-  it.each(["event_organiser", "venue_staff", "technical_support_staff", "attendee"])(
+  it.each(["event_organiser", "venue_staff", "technical_support_staff", "attendee", "event_coordinator_lead", "safety_officer"])(
     "SCRUM255_sends_%s_to_unauthorized_and_never_mounts_the_list",
     (role) => {
       renderAppAt("/my-venue-requests", role);

@@ -486,3 +486,84 @@ describe("SCRUM493 safety facts in the change history", () => {
     expect(historyValueFor("Known restrictions")).toHaveTextContent("No confetti → Not recorded");
   });
 });
+
+describe("SCRUM-188 AC7 the suitability result on Venue Staff's booking rows", () => {
+  const SUITABILITY = {
+    suitable: false,
+    criteria: [
+      { criterion: "Capacity", met: false, detail: "Capacity 80 < expected attendance 150" },
+      { criterion: "Layout", met: true, detail: "Theatre is offered" },
+    ],
+    checked: {
+      startsAt: "2026-10-01T09:00:00+08:00",
+      endsAt: "2026-10-01T17:30:00+08:00",
+      expectedAttendance: 150,
+      layout: "theatre",
+      accessibility: [],
+      facilities: [],
+    },
+  };
+
+  const STAFF_ROW = {
+    ...BOOKING,
+    venueId: VENUE.id,
+    status: "pending",
+    statusDisplay: { status: "pending", label: "Pending", group: "PENDING" },
+    createdAt: "2026-09-20T08:15:00+08:00",
+    roomLayoutCode: "theatre",
+    eventName: "Annual Town Hall",
+    suitability: SUITABILITY,
+    suitabilityOverridden: true,
+    overriddenCriteria: ["Capacity"],
+  };
+
+  it("SCRUM188_AC7_a_venue_staff_row_shows_the_event_name_and_the_suitability_summary", async () => {
+    vi.mocked(getVenueBookings).mockResolvedValue([STAFF_ROW]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    const row = (await screen.findByText("e1b2c3d4")).closest("li");
+    expect(within(row).getByText("Annual Town Hall")).toBeInTheDocument();
+    expect(within(row).getByText(/Suitability when requested:/)).toHaveTextContent(
+      "Suitability when requested: Not suitable",
+    );
+    expect(within(row).getByText("Requested despite not meeting: Capacity")).toBeInTheDocument();
+    expect(within(row).getByText("Show the full check")).toBeInTheDocument();
+    expect(within(row).getByText("Not met — overridden by coordinator")).toBeInTheDocument();
+    // Every row is named, so the "names are not shown" note goes.
+    expect(screen.queryByText(/Event names are not shown/)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM188_AC7_a_venue_staff_row_with_no_recorded_result_says_so", async () => {
+    vi.mocked(getVenueBookings).mockResolvedValue([
+      { ...STAFF_ROW, eventName: null, suitability: null, suitabilityOverridden: false, overriddenCriteria: [] },
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    const row = (await screen.findByText("e1b2c3d4")).closest("li");
+    expect(within(row).getByText("No suitability result was recorded for this request.")).toBeInTheDocument();
+    expect(screen.getByText(/Event names are not shown/)).toBeInTheDocument();
+  });
+
+  it("SCRUM188_AC7_a_coordinator_row_shows_nothing_extra", async () => {
+    vi.mocked(getVenueBookings).mockResolvedValue([
+      {
+        ...BOOKING,
+        venueId: VENUE.id,
+        status: "pending",
+        statusDisplay: { status: "pending", label: "Pending", group: "PENDING" },
+        createdAt: "2026-09-20T08:15:00+08:00",
+      },
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    const row = (await screen.findByText("e1b2c3d4")).closest("li");
+    expect(row).not.toHaveClass("venue-detail__booking--with-suitability");
+    expect(row.querySelector(".booking-suitability")).toBeNull();
+    expect(screen.queryByText(/Suitability when requested/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No suitability result/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Event names are not shown/)).toBeInTheDocument();
+  });
+});
