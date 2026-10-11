@@ -362,10 +362,6 @@ button { cursor: pointer; }
 .browse-event-details__register { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 18px 0; }
 .browse-event-details__register p { margin: 0; }
 .browse-event-details button:disabled { cursor: not-allowed; opacity: 0.55; }
-.browse-open-events__notice, .browse-event-details__notice { align-items: center; background: #fff6e5; border-radius: 6px; color: #8a5a00; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; margin: 0 0 12px; padding: 8px 12px; }
-.dashboard .browse-open-events__notice p, .dashboard .browse-event-details__notice p { color: #8a5a00; margin: 0; }
-.browse-event-details__success { background: #e8f7f1; border-radius: 6px; margin: 0 0 12px; padding: 8px 12px; }
-.dashboard .browse-event-details__success p { color: #17684f; margin: 0; }
 .browse-event-details__unavailable, .browse-event-details__error { background: #fff0ee; border-radius: 6px; color: #a43c32; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; margin: 0 0 12px; padding: 8px 12px; }
 .dashboard .browse-event-details__unavailable p, .dashboard .browse-event-details__error p { color: #a43c32; margin: 0; }
 .dashboard--coordinator .my-booking-requests button:disabled { cursor: not-allowed; opacity: 0.55; }
