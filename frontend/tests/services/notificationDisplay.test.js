@@ -293,6 +293,16 @@ describe("describeNotification: event_cancelled (SCRUM-374)", () => {
     });
   });
 
+  it("uses the generic notification for an unknown cancellation audience", () => {
+    expect(describeNotification({
+      type: "event_cancelled",
+      payload: { audience: "unknown" },
+    })).toEqual({
+      headline: "New notification",
+      detail: "This notification type cannot be displayed yet.",
+    });
+  });
+
   it("uses audience-specific details for venue and technical support staff", () => {
     expect(describeNotification({
       type: "event_cancelled",

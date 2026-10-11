@@ -127,7 +127,7 @@ export function describeNotification(notification) {
   if (notification?.type === "event_cancelled") {
     const eventName = payload.eventName || "Unnamed event";
     if (payload.audience === "organiser") {
-      const reason = payload.reason || "No reason recorded.";
+      const reason = payload.reason || "No reason recorded";
       const cancelledAt = payload.cancelledAt
         ? ` Cancelled ${formatTimestamp(payload.cancelledAt)}.`
         : "";
