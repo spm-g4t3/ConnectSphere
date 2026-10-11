@@ -1,0 +1,515 @@
+# SCRUM-486 — Test Cases
+
+**Story:** Assign and Reassign Event Coordinators from an Unassigned Queue — Event Coordinator Lead
+**Subtask:** SCRUM-514 (this document)
+**Schema:** a new migration, `041_…` (not yet written). 040 is taken (`040_venue_holds.sql`)
+**Written:** 11 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; SCRUM-522 fills in the test names.
+
+This document is the written layer between SCRUM-486's acceptance criteria and the
+Vitest files that will implement them. Deliverable #3 requires test cases
+traceable from user stories and acceptance criteria to tests; the chain is
+**user story → acceptance criteria → test case → test class → code**, and it is
+walked for a randomly chosen feature in the Week 13 Q&A.
+
+This story reverses a decision the team built and defended in SCRUM-327, so it
+carries more argument than usual. Section *Design decisions* is that argument.
+
+---
+
+## How case IDs relate to test names
+
+As in `docs/test-cases/SCRUM-485.md`: each case has a short stable ID (`AC3-02`)
+and an **Implemented by** column. Here every one reads **not yet written**. When
+SCRUM-522 writes the tests, that column names every test that proves the case,
+read from the test files, and the tests are named `SCRUM486_ACn_…`.
+
+The audit before this story found eight places where removing automatic
+assignment would break if nobody tested it. They are not acceptance criteria;
+they are traps. Each is either a case under the criterion it belongs to, or, where
+no criterion owns it, a `TR-` case in *The traps* below.
+
+**Where each case is proved** matters more than usual here, because most of this
+story lives in Postgres functions:
+
+| Short | File | Proves |
+|---|---|---|
+| pglite | a PGlite suite applying the real migrations, 041 included (`backend/tests/db/`, beside `eventStatusLifecycleDatabase.test.js`) | What the database accepts and what the functions write. The only place that proves the constraint and the functions, rather than what a fake client was told |
+| mig | a migration-text test for 041 | What 041 contains |
+| svc | `backend/tests/services/eventRequestService.test.js` (fake client) | The service calls the right function with the right arguments, and maps each SQLSTATE to the right error |
+| route | `backend/tests/routes/eventRequests.test.js` (fake client) | Gates, status codes, the caller from the token |
+| screen | the component tests in `frontend/tests/components/` | What each person sees |
+| live | `backend/scripts/check-coordinator-assignment.js`, against Supabase | What a single-connection test cannot provoke |
+
+A fake client returns whatever it is given, so it can never prove that a
+function refuses a null, or that two writes happen in one statement. Every case
+marked **pglite** is one a fake client would pass whether or not the code was
+right.
+
+---
+
+## The story
+
+> **USER STORY:** As the Event Coordinator Lead, I want to assign each submitted
+> event request to a coordinator myself, and move events between coordinators, so
+> that every event has one clear point of contact chosen by a person.
+
+### Acceptance criteria
+
+Quoted from the ticket.
+
+1. Submitting an event request no longer assigns a coordinator. The request
+   becomes Submitted with no coordinator, and the organiser sees that it is
+   waiting for one. This supersedes SCRUM-327 AC1, AC2, AC3 and AC5.
+2. Only the Lead sees the unassigned queue: every Submitted request with no
+   coordinator, oldest first, showing the event name, the organiser, the proposed
+   period, the expected attendance and how long it has waited. Drafts never
+   appear. An unassigned request does not appear in the coordinators' shared
+   review queue either, because no coordinator can act on it.
+3. The Lead assigns a request to one Event Coordinator, with an optional note.
+   Only users holding the Event Coordinator role can be chosen; the Lead cannot be
+   assigned events. The picker shows each coordinator's current number of active
+   events, so the Lead can balance work. The system suggests nobody.
+4. An assignment gives the event its coordinator and writes its history row in one
+   step. If two assignments of the same request happen at the same moment, only
+   one succeeds, and the other is refused and shown who was assigned.
+5. An event can be reassigned to another coordinator while it is Submitted, Under
+   review, Pending clarification, Approved, Safety review, Safety approved or
+   Confirmed, with an optional handover note. Reassigning in any other status is
+   refused.
+6. Both the event's assigned coordinator and the Event Coordinator Lead can
+   reassign it. SCRUM-327 AC6 stands rather than being superseded. (Amended 11
+   October; the first wording removed the coordinator's ability. The customer says
+   the Lead can reassign, not that coordinators cannot.)
+7. After a reassignment the new coordinator can carry out every coordinator action
+   on the event, and the previous coordinator can still view it but change nothing
+   (SCRUM-327 AC7 stands). Open clarification requests, change requests and
+   flagged items belong to the event, so the new coordinator sees them straight
+   away.
+8. Nobody can start the review of a request that has no coordinator. The attempt
+   is refused with a message that the request is waiting for the Lead to assign it
+   (SCRUM-19).
+9. Every assignment and reassignment records the previous coordinator (none for
+   the first), the new coordinator, who made it, the date and time, and the note.
+   The organiser and the assigned coordinator can view this history, and the
+   organiser still does not see the note.
+10. The Lead is notified when a request is submitted and unassigned. The newly
+    assigned coordinator, and the organiser with the coordinator's name, are
+    notified when it is assigned or reassigned (SCRUM-173). "The Lead" means every
+    user holding the role, as migration 014 notifies every coordinator.
+11. If no Lead exists, submission still succeeds and the request waits in the
+    queue. This replaces the refusal in SCRUM-327 AC5. No notification is written,
+    and nothing fails.
+
+### The customer's words
+
+AC1 rests on the Week 7 changes document, change 5:
+
+> "ConnectSphere has introduced a new internal role, the Event Coordinator Lead,
+> who is responsible for overseeing incoming event requests and assigning them to
+> individual Event Coordinators. Newly submitted event requests should no longer be
+> assigned directly to an Event Coordinator. Instead, they first enter an
+> unassigned queue that can be viewed by the Event Coordinator Lead. The Lead can
+> review basic event information, assign a suitable Event Coordinator, and reassign
+> events where necessary. Event Coordinators should only be able to manage events
+> assigned to them, while the Event Coordinator Lead should be able to view all
+> coordinator assignments and active events under their supervision. Relevant
+> users should be notified when assignments or reassignments occur."
+
+---
+
+## What exists today, which this story changes
+
+Read from the code on 11 October, so the cases below describe a change from a
+known starting point.
+
+- **Submission assigns.** `submit_event_request` (redefined in 021; 016's
+  two-argument version is dropped) locks the row, checks it is a draft, calls
+  `pick_event_coordinator`, raises P0001 "No coordinator is available; please try
+  again later" if it finds nobody, then sets status, `submitted_at` and
+  `assigned_coordinator_id` in one update and writes one row to each history
+  table (`assigned_by` null: the system).
+- **The database forbids a submitted request with no coordinator.** 017's
+  `event_requests_assigned_when_submitted`:
+  `status in ('draft', 'cancelled') or assigned_coordinator_id is not null`.
+- **Only the holder hands over.** `reassign_event_request` (018) refuses any caller
+  but the current `assigned_coordinator_id` (42501), and its update is guarded
+  `and assigned_coordinator_id = p_assigned_by`.
+- **`pick_event_coordinator` has one live caller**, submission. The only other
+  callers are 016's and 017's one-off backfills, already run, and the live check
+  script.
+- **Every function that reads `assigned_coordinator_id` refuses or skips a null**,
+  except two that would let a null caller through (see TR-04, TR-05).
+- **The latest `notifications_type_known` is 040's**, seven types:
+  `booking_flagged`, `booking_request_withdrawn`, `clarification_requested`,
+  `clarification_replied`, `clarification_closed`, `booking_flagged_setup_change`,
+  `venue_hold_expired`. There is no `event_request_id` column; the clarification
+  notices carry `eventRequestId` in the payload. Every writer is a Postgres
+  function.
+
+---
+
+## Design decisions the cases rest on
+
+Each is stated as the argument, because each will be questioned.
+
+**Why automatic assignment is going, and why SCRUM-327 stays Done.** SCRUM-327
+built assignment on submission correctly, against the brief it had, and argued
+every part of it (`docs/SCRUM-327.md`). In Week 7 the customer changed the
+requirement: "Newly submitted event requests should no longer be assigned directly
+to an Event Coordinator." That is the change guide's scenario 2, a new
+requirement, not a missed one. So SCRUM-327 is not reopened, its tests were right
+when written, and this story carries the change and says which of 327's criteria
+it supersedes (AC1, AC2, AC3, AC5) and which stand (AC6, AC7).
+
+**A resubmitted request goes to the queue, and that is not automatic.** SCRUM-327
+AC4 sent a resubmitted request back to its previous coordinator; AC1 here says
+submission assigns nobody, which supersedes it. But simply deleting the assignment
+from `submit_event_request` would not achieve that. Migration 022's
+rejected → draft leaves `assigned_coordinator_id` on the draft (017 allows a draft
+to carry one), so a submission that merely stopped writing the column would hand
+the request straight back to its old coordinator, past the Lead. The submission
+function must **set the coordinator to null explicitly**. It also clears
+`reviewing_coordinator_id`, which 022 leaves behind too: that closes the stale
+reviewer question SCRUM-19 left open (its open question 5). TR-02 pins both.
+
+**Both the coordinator and the Lead reassign** (AC6 as amended on 11 October). The
+customer says the Lead can reassign, not that coordinators cannot. So 018's caller
+check widens from "the holder" to "the holder, or anyone holding
+`event_coordinator_lead`", and its guarded update stops comparing with the caller.
+
+**The first assignment is not a reassignment.** 018's update is guarded
+`and assigned_coordinator_id = p_assigned_by`. For a request with no coordinator,
+`null = x` is null, so it matches no row whatever the caller, and the assignment
+would fail as a 40001 "changed hands". The first assignment therefore has a path
+of its own that requires the request to have no coordinator, and that requirement
+is also what makes AC4's second, simultaneous assignment fail (AC4-02).
+Reassignment keeps 018's path, which requires one.
+
+**The Lead cannot be assigned events.** The customer describes supervision: the
+Lead "should be able to view all coordinator assignments and active events under
+their supervision". That is oversight of a caseload, not a caseload. So only
+`event_coordinator` profiles can be chosen, exactly as 018 already checks for a
+handover. This answers SCRUM-485's open question 3.
+
+**Coordinators keep the shared review queue, minus unassigned requests.** The
+customer restricted what coordinators may *manage* to their own events.
+SCRUM-444 AC1 explicitly allows any coordinator to *view* any event, and the queue
+is how a coordinator covering for a colleague sees their work. So the queue is not
+narrowed to "mine". Only requests that belong to nobody are filtered out, because
+no coordinator can act on them (AC2), and they are the Lead's to place.
+
+**The system suggests nobody.** The picker shows each coordinator's active-event
+count so the Lead can balance work, but pre-selects nobody and is ordered by name,
+not by count. Ordered by count, the top of the list would be a recommendation in
+all but name, which is the automatic selection AC1 removes.
+
+**The organiser's "waiting" line comes from the assignment, not the status.**
+`STATUS_DISPLAY` is decided by status alone, and `submitted` reads "Received by
+ConnectSphere and waiting to be picked up by a Coordinator." After this story one
+status covers both "waiting for the Lead to assign" and "assigned, waiting to be
+reviewed". So the organiser's waiting line is derived from the request having no
+`assignedCoordinatorId`, and the status display is left to describe the status.
+
+**Notices are written inside the functions.** Every notification in this schema is
+written by a Postgres function, in the transaction that causes it, so a request
+and its notice cannot part. AC10's three notices follow: the Lead's inside
+`submit_event_request`, the coordinator's and organiser's inside the assign and
+reassign functions. "The Lead" is every profile holding the role (AC10), written
+as an insert from a select, so zero Leads writes zero rows and fails nothing
+(AC11).
+
+---
+
+## Shorthand for preconditions
+
+- **LEAD** — a signed-in `event_coordinator_lead`. **LEAD2** — a second one.
+- **A**, **B** — two `event_coordinator` users. **SAFETY** — a `safety_officer`.
+- **ORG** — the request's own `event_organiser`.
+- **UNASSIGNED** — a request at `submitted` with `assigned_coordinator_id` null.
+- **HELD BY A** — a request whose `assigned_coordinator_id` is A.
+- **Nothing written** — the event row, both history tables and `notifications` are
+  exactly as they were.
+
+---
+
+## AC1 — submission no longer assigns; the organiser sees it waiting
+
+| Case | Preconditions | Action | Expected result | Implemented by |
+|---|---|---|---|---|
+| AC1-01 | A complete draft; A and B exist | `submit_event_request` | `submitted`, `submitted_at` set, `assigned_coordinator_id` null; one status-history row `draft → submitted`; **no** assignment-history row | not yet written (pglite) |
+| AC1-02 | A complete draft | The same | `pick_event_coordinator` is not called (no P0001 path; a database with no Event Coordinator at all still submits) | not yet written (pglite, mig) |
+| AC1-03 | — | `submitEventRequest` | One rpc with the same three arguments as today; returns `assignedCoordinatorId: null`; no `ServiceUnavailableError` path | not yet written (svc) |
+| AC1-04 | ORG's complete draft | `POST /api/event-requests/:id/submit` | 200, `assignedCoordinatorId` null | not yet written (route) |
+| AC1-05 | ORG; one UNASSIGNED request | Open their requests list | The row itself says it is waiting for a coordinator to be assigned, without opening anything | not yet written (screen) |
+| AC1-06 | ORG; the same request, now HELD BY A | Open their requests list | The row names A instead; no "waiting" line | not yet written (screen) |
+
+---
+
+## AC2 — only the Lead sees the unassigned queue; coordinators do not
+
+| Case | Preconditions | Action | Expected result | Implemented by |
+|---|---|---|---|---|
+| AC2-01 | — | The queue read in the service | Selects `status = 'submitted'` and `assigned_coordinator_id is null`, ordered by `submitted_at` ascending, then `id` | not yet written (svc) |
+| AC2-02 | — | The queue read | Each row carries the event name, the organiser's name, proposed start and end, expected attendance, and `submittedAt` (from which "how long it has waited" is computed) | not yet written (svc) |
+| AC2-03 | A draft (with or without a stale coordinator), an UNASSIGNED request, a request HELD BY A | Read the queue | Only the UNASSIGNED request | not yet written (pglite) |
+| AC2-04 | LEAD | `GET` the queue route | 200 | not yet written (route) |
+| AC2-05 | A, ORG, venue staff, technical support, SAFETY | `GET` the queue route | 403 from the role gate, nothing queried; no token is 401 | not yet written (route) |
+| AC2-06 | — | The coordinators' shared review queue (`listEventRequestsForReview`) | Adds `assigned_coordinator_id is not null`; every other status it listed is still listed | not yet written (svc, pglite) |
+| AC2-07 | LEAD; two UNASSIGNED requests, submitted three days and one hour before an injected `now` | Open the Lead's dashboard | Both rows, oldest first, with name, organiser, period, attendance and "waiting 3 days" / "waiting 1 hour" | not yet written (screen) |
+| AC2-08 | LEAD; no UNASSIGNED request | Open the dashboard | Says the queue is empty; no invented rows | not yet written (screen) |
+
+---
+
+## AC3 — the Lead assigns to one Event Coordinator; the system suggests nobody
+
+| Case | Preconditions | Action | Expected result | Implemented by |
+|---|---|---|---|---|
+| AC3-01 | UNASSIGNED | LEAD assigns it to A, note "Over to you" | `assigned_coordinator_id` A; one assignment-history row: previous null, new A, `assigned_by` LEAD, the note | not yet written (pglite) |
+| AC3-02 | UNASSIGNED | LEAD assigns it to LEAD2, to SAFETY, or to ORG | Refused 22023 ("not an Event Coordinator"); nothing written | not yet written (pglite) |
+| AC3-03 | UNASSIGNED | A, ORG, SAFETY, or a null caller, makes the first assignment | Refused 42501; nothing written. Only a Lead assigns | not yet written (pglite) |
+| AC3-04 | — | The service call for an assignment | One rpc with the request, the chosen coordinator, the caller from the token and the note; a blank note sent as null | not yet written (svc) |
+| AC3-05 | — | The assignment route | Gated on `event_coordinator_lead`; another role is 403 with nothing queried; the caller is the token's user, never the body | not yet written (route) |
+| AC3-06 | A holds two active events, B none | The picker's coordinator list | Every `event_coordinator`, each with their active-event count (A 2, B 0); no Lead in the list | not yet written (svc, pglite) |
+| AC3-07 | — | Open the picker | Ordered by name, nothing pre-selected, no "recommended" mark | not yet written (screen) |
+
+---
+
+## AC4 — one step; of two simultaneous assignments, one succeeds
+
+| Case | Preconditions | Action | Expected result | Implemented by |
+|---|---|---|---|---|
+| AC4-01 | UNASSIGNED | An assignment whose history insert fails (a missing user as `assigned_by`) | 23503; `assigned_coordinator_id` still null; no history row. The two writes stand or fall together | not yet written (pglite) |
+| AC4-02 | UNASSIGNED, then assigned to A | LEAD assigns it to B (the second of two) | Refused, with a message naming A as the coordinator already assigned; nothing written | not yet written (pglite) |
+| AC4-03 | The function refuses as in AC4-02 | The service | A 409 carrying the function's message, so the name reaches the screen | not yet written (svc) |
+| AC4-04 | LEAD; the assignment comes back 409 | — | The screen says who was assigned, and the request leaves the queue on refresh | not yet written (screen) |
+| AC4-05 | Two connections, the same UNASSIGNED request | Both assign at once | Exactly one succeeds; the other is refused as in AC4-02 | not yet written (live) |
+
+AC4-02 is the proof that the second assignment is refused: PGlite runs one query at
+a time, so it shows the refusal of an assignment that arrives after another, which
+is what the row lock turns a simultaneous one into. AC4-05 is the only case that
+provokes two at once, and needs two real connections.
+
+---
+
+## AC5 — reassignment in the listed statuses only
+
+| Case | Preconditions | Action | Expected result | Implemented by |
+|---|---|---|---|---|
+| AC5-01 | HELD BY A, at each of `submitted`, `under_review`, `pending_clarification`, `approved`, `confirmed` | Reassign to B | Allowed: B holds it; one history row | not yet written (pglite) |
+| AC5-02 | HELD BY A, at each of `rejected`, `completed`, `cancelled` | Reassign to B | Refused 55000 naming the status; nothing written | not yet written (pglite) |
+| AC5-03 | — | Reassign at `safety_review` or `safety_approved` | **Cannot be written as specified**: neither status exists (see *What cannot be tested*) | not yet written (pglite, once the statuses exist) |
+| AC5-04 | — | Reassign with no note, or a blank one | Allowed; the note stored as null | not yet written (svc, pglite) |
+| AC5-05 | UNASSIGNED | Reassign it | Refused, with a message saying it has no coordinator yet and must be assigned, not a 40001 "changed hands" | not yet written (pglite) |
+
+---
+
+## AC6 — both the assigned coordinator and the Lead reassign
+
+| Case | Preconditions | Action | Expected result | Implemented by |
+|---|---|---|---|---|
+| AC6-01 | HELD BY A | A reassigns to B | Allowed (SCRUM-327 AC6, unchanged); history `assigned_by` A | not yet written (pglite) |
+| AC6-02 | HELD BY A | LEAD, who does not hold it, reassigns to B | Allowed; history previous A, new B, `assigned_by` LEAD. No 40001 from the guarded update | not yet written (pglite) |
+| AC6-03 | HELD BY A | B (not the holder), SAFETY, ORG, or a null caller reassigns | Refused 42501; nothing written | not yet written (pglite) |
+| AC6-04 | — | `POST /:id/reassign` | Admits `event_coordinator` and `event_coordinator_lead`; every other role 403 with nothing queried | not yet written (route) |
+| AC6-05 | HELD BY A, open on the event screen | As A, as LEAD, as B | The hand-over action for A and for LEAD; none for B | not yet written (screen) |
+| AC6-06 | HELD BY A, `under_review`, A the reviewer, no decision | LEAD reassigns to B | The reviewer follows to B, as 018 does for a holder's handover. A decided event keeps its reviewer | not yet written (pglite) |
+
+---
+
+## AC7 — the new coordinator acts; the previous one only views
+
+| Case | Preconditions | Action | Expected result | Implemented by |
+|---|---|---|---|---|
+| AC7-01 | Reassigned from A to B by LEAD | B starts the review, asks for clarification, decides | Each allowed | not yet written (pglite) |
+| AC7-02 | The same | A tries each of those | Refused 42501 / 403 | not yet written (pglite, svc) |
+| AC7-03 | The same | A reads the event | Allowed (any coordinator reads any event, SCRUM-332) | not yet written (route) |
+| AC7-04 | A clarification request open when LEAD reassigned A → B | B closes it; A tries to | B allowed; A refused | not yet written (pglite) |
+| AC7-05 | A change request pending when LEAD reassigned A → B | B decides it; A tries to | B allowed (019 checks the holder); A refused | not yet written (pglite) |
+| AC7-06 | A booking flagged before LEAD reassigned A → B | B reads their booking requests | The flagged booking is listed for B, not A | not yet written (svc) |
+
+---
+
+## AC8 — nobody starts the review of an unassigned request
+
+| Case | Preconditions | Action | Expected result | Implemented by |
+|---|---|---|---|---|
+| AC8-01 | UNASSIGNED | A calls `start_event_review` | Refused with a message that the request is waiting for the Event Coordinator Lead to assign it. Not 42501 "only the coordinator assigned … can start reviewing it", which is today's answer and tells A the wrong thing | not yet written (pglite) |
+| AC8-02 | UNASSIGNED | `start_event_review` with a null caller, and with LEAD | The same waiting message: the check comes before the caller check, so nobody is told it is "not theirs" | not yet written (pglite) |
+| AC8-03 | The function refuses as in AC8-01 | The service | 409 with the function's message | not yet written (svc) |
+| AC8-04 | UNASSIGNED, opened by A by id | The event screen | "Waiting for the Event Coordinator Lead to assign this request"; no Start review button, for anyone | not yet written (screen) |
+| AC8-05 | Start review refused with 409 | — | The screen tells "waiting for assignment" from "no longer waiting to be reviewed" by the request's own `assignedCoordinatorId`, not by the server's message text | not yet written (screen) |
+
+---
+
+## AC9 — every assignment and reassignment is recorded
+
+| Case | Preconditions | Action | Expected result | Implemented by |
+|---|---|---|---|---|
+| AC9-01 | — | LEAD's first assignment | Row: previous null, new A, `assigned_by` LEAD, note, `created_at` | not yet written (pglite) |
+| AC9-02 | — | LEAD's reassignment A → B | Row: previous A, new B, `assigned_by` LEAD, note | not yet written (pglite) |
+| AC9-03 | A history with one system row (from before this story) and one LEAD row | `listAssignmentHistory` | The old row `automatic: true`; the LEAD row `automatic: false`, `assignedByName` the Lead's name | not yet written (svc) |
+| AC9-04 | The same | The organiser's history route | Both rows, and no `handoverNote` key on either | not yet written (route) |
+| AC9-05 | The same | The assigned coordinator's history route | Both rows, with the note | not yet written (route) |
+| AC9-06 | The same | Open the history on screen | The old row "by ConnectSphere, automatically on submission"; the LEAD row "by" the Lead's name | not yet written (screen) |
+
+---
+
+## AC10 — the Lead, the coordinator and the organiser are notified
+
+| Case | Preconditions | Action | Expected result | Implemented by |
+|---|---|---|---|---|
+| AC10-01 | LEAD and LEAD2 exist | Submit a request | One notice to each Lead, of a new type, with `eventRequestId` and the event name in the payload | not yet written (pglite) |
+| AC10-02 | UNASSIGNED | LEAD assigns it to A | One notice to A, and one to ORG naming A | not yet written (pglite) |
+| AC10-03 | HELD BY A | LEAD (or A) reassigns to B | One notice to B, and one to ORG naming B | not yet written (pglite) |
+| AC10-04 | — | Read 041's `notifications_type_known` | 040's seven types, all still there, plus the new ones | not yet written (mig, pglite) |
+| AC10-05 | An assignment refused (AC4-02, AC3-02) | — | No notice written | not yet written (pglite) |
+| AC10-06 | A notice of each new type | Each recipient opens their notifications | Shown in words, not as a raw type | not yet written (screen) |
+
+---
+
+## AC11 — with no Lead, submission still succeeds
+
+| Case | Preconditions | Action | Expected result | Implemented by |
+|---|---|---|---|---|
+| AC11-01 | No profile holds `event_coordinator_lead` | Submit a request | Succeeds, the request UNASSIGNED; zero notices; no error | not yet written (pglite) |
+| AC11-02 | No Event Coordinator either | Submit a request | Succeeds as in AC11-01. The old P0001 refusal is gone | not yet written (pglite) |
+| AC11-03 | — | `submitEventRequest` when the database raises nothing | No `ServiceUnavailableError`; the P0001 branch of `translateError` is no longer reached by submission | not yet written (svc) |
+
+---
+
+## The traps
+
+From the audit, where removing automatic assignment breaks if nobody tests it.
+Where a criterion owns a trap, the case is above and named here; the rest are
+`TR-` cases.
+
+| Trap | Covered by |
+|---|---|
+| The relaxed constraint must accept a submitted request with no coordinator and still refuse an under-review one | TR-01 |
+| A reopened and resubmitted request must reach the queue with no coordinator | TR-02 |
+| A first assignment must succeed although 018's guarded update cannot match a null | AC3-01, AC5-05 |
+| A Lead reassigning an event they do not hold must succeed, and so must the holder | AC6-01, AC6-02 |
+| `start_event_review` must name the Lead, not say "not assigned to you" | AC8-01, AC8-02 |
+| The two null-caller holes must close (037 equipment lines, 030 close clarification) | TR-04, TR-05 |
+| Submission must succeed with no Lead, writing no notice | AC11-01 |
+| Of two simultaneous assignments, one succeeds and the other names the winner | AC4-02, AC4-05 |
+
+| Case | Preconditions | Action | Expected result | Implemented by |
+|---|---|---|---|---|
+| TR-01 | 041 applied | Write a request at `submitted` with no coordinator; then at `under_review`, `pending_clarification`, `approved`, `confirmed` with none | `submitted` accepted; every other status refused 23514 naming the relaxed constraint. `draft` and `cancelled` still accepted with none | not yet written (pglite) |
+| TR-02 | HELD BY A, rejected, reopened to draft by 022 (which leaves A and the reviewer on it) | Submit again | `assigned_coordinator_id` null and `reviewing_coordinator_id` null; the request is in the queue, not back with A | not yet written (pglite) |
+| TR-03 | TR-02's request | Open its assignment history | "Current coordinator" reads not assigned, although the newest history row names A. Today `AssignmentHistory` takes the current coordinator from the newest row, which after TR-02 would be wrong | not yet written (screen) |
+| TR-04 | UNASSIGNED | Migration 037's equipment-lines function with a null caller | Refused 42501. Today `v_assigned is distinct from p_coordinator_id` lets null meet null through; safe only while 017 guaranteed a coordinator | not yet written (pglite) |
+| TR-05 | UNASSIGNED at `pending_clarification` is impossible, so: a request whose coordinator is null, by a direct write | Migration 030's close-clarification function with a null caller | Refused 42501 before the status check. The same `is distinct from` hole as TR-04 | not yet written (pglite) |
+| TR-06 | — | Every PGlite suite that applies 016, 017 or 021 | Also applies 041, so its database is the one production will have | not yet written (pglite) |
+
+---
+
+## Existing tests this story must change
+
+Each was right when written: it pinned SCRUM-327's requirement, which the customer
+has since changed (Week 7, change 5). They are updated to the new requirement, not
+deleted to make room.
+
+| Test | File | Why it changes |
+|---|---|---|
+| `SCRUM330_AC5_refuses_when_no_coordinator_is_available` | svc | Pins the P0001 → 503 refusal. AC11 removes it: submission no longer looks for a coordinator. Its replacement is AC11-03 |
+| `SCRUM330_AC1_assigns_a_coordinator_on_submission` | svc | Its assertions (one read, one rpc, three arguments, nothing naming a coordinator) still hold; its name and comment ("the function does [choose one]") become false. Renamed, and the fixture's returned row has no coordinator |
+| `SCRUM330_AC1_returns_the_assigned_coordinator_in_camelCase` | svc | The mapping still holds; the fixture and name assume a coordinator on every submitted row |
+| `SCRUM330_AC1_never_assigns_a_coordinator_to_an_incomplete_draft` | svc | Still true, trivially; renamed to what it proves, that an incomplete draft is not submitted |
+| The other `SCRUM330_AC1_*` (submits only through the function, leaves the draft check to the function, translates a vanished request, reports a non-draft as a conflict, treats a missing time as a server fault) | svc | Unchanged: none asserts anything about the coordinator |
+| `SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over` | svc, route | Still true for another coordinator, but no longer the whole rule: a Lead may too (AC6). Renamed and extended by AC6-02 and AC6-04 |
+| `SCRUM334_AC9_lists_every_event_coordinator`, `SCRUM334_AC9_returns_each_coordinator_as_an_id_and_a_name` | svc | AC3 adds each coordinator's active-event count to the list |
+| `SCRUM325_refuses_the_submission_when_no_coordinator_exists_and_leaves_the_draft_alone` | pglite | Pins P0001 with no coordinator. Reverses: AC11-02 |
+| `SCRUM325_assigns_exactly_one_coordinator_and_records_one_row_in_each_history` | pglite | Reverses: AC1-01 (no coordinator, no assignment row) |
+| `SCRUM325_refuses_a_second_submission_and_adds_no_assignment_and_no_history` | pglite | The 55000 holds; its assertion that the coordinator and the one assignment row are kept assumes the first submission assigned |
+| `SCRUM325_gives_no_other_way_to_submit_without_a_coordinator` | pglite | Pins the constraint TR-01 relaxes. Reverses |
+| `SCRUM318_lets_the_reopened_draft_be_submitted_again_through_the_one_submission_path` | pglite | Asserts the resubmitted request is given a coordinator again. Reverses: TR-02 |
+| `sets status = 'submitted' only in the two definitions of submit_event_request`; `chooses the coordinator once, with the one selection rule`; `sets status, submitted_at and the coordinator in one statement`; `writes the assignment history once, after the update, in the same function`; `stops before writing when no coordinator is available`; `is backed by the constraint that refuses a submitted request with no coordinator` | `backend/tests/db/draftToSubmittedSinglePath.test.js` | They read 016's and 021's text and pin assignment on submission. 041 adds a third definition, without a selection, and relaxes the constraint |
+| `SCRUM485_AC5_%s_refuses_%s_with_403_and_queries_nothing` (its `GET /coordinators` rows) | route | Asserts a Lead is refused the coordinator list. If the picker reads that route, this row changes (open question 1) |
+| `SCRUM485_AC3_an_event_coordinator_lead_gets_the_lead_dashboard`, `SCRUM485_AC3_the_%s_dashboard_calls_no_service`, `SCRUM485_AC3_the_%s_dashboard_has_no_link_to_a_page_that_does_not_exist` | `frontend/tests/components/Dashboard.test.jsx` | They pin the Lead's dashboard as a placeholder that fetches nothing. The queue makes it real (AC2-07), for the Lead only; the Safety Officer's cases stand |
+| `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link` | `frontend/tests/components/Navigation.test.jsx` | Pins one link. Changes if the queue gets a route and a link of its own; SCRUM-485's design said the count case would force exactly this update |
+| Sections 1 and 2 of `check-coordinator-assignment.js` (the selection rule; assignment on submission), and section 4's "previous coordinator can no longer hand it over" | live | Sections 1 and 2 test what this story removes. Section 4's refusal of the outgoing coordinator still holds, but needs a Lead case beside it |
+
+---
+
+## What cannot be tested as written
+
+- **Two simultaneous assignments in CI** (AC4-05). PGlite runs one query at a
+  time, so it proves the second, later assignment is refused (AC4-02), not that
+  two real connections take turns on the row lock. Only the live script can.
+- **AC5's Safety review and Safety approved** (AC5-03). Neither is a value of
+  `event_request_status`, nor of `domain/eventRequestStatus.js`. The only mention
+  in the code is 037's comparison of `status::text` with those strings, which can
+  never match. They presumably arrive with the Safety Officer's review
+  (SCRUM-490). Until then the case cannot be written; when they exist, both must
+  be added to 018's status list.
+- **Delivery of a notice beyond the table.** The cases prove a row is written; that
+  a person is told is the screen's job (AC10-06), and there is no email.
+
+---
+
+## Open questions for the team
+
+1. **Which route does the Lead's picker read?** `GET /api/event-requests/coordinators`
+   is behind `coordinatorOnly`, and SCRUM-485's
+   `SCRUM485_AC5_%s_refuses_%s_with_403_and_queries_nothing` asserts a Lead is
+   refused it. Opening it to the Lead changes that test and SCRUM-485's case
+   AC5-09; a route of the Lead's own, which also carries AC3's counts, changes
+   nothing of SCRUM-485's.
+2. **How does the Lead "review basic event information"?** The customer's words
+   say the Lead can. The coordinator's read, `GET /:id/review`, and the history,
+   `GET /:id/assignments/review`, are both `coordinatorOnly`, so a Lead is refused
+   both today. AC2's queue rows carry the basics; whether the Lead also opens the
+   full event, and its history, is a decision this story has to make.
+3. **What counts as an "active event"** in AC3's count? 015's selection rule
+   counted submitted, under review, pending clarification, approved, planning and
+   confirmed; 020 removed planning. SCRUM-327 AC2 named five statuses. The count
+   needs one definition, stated once.
+4. **Should `pick_event_coordinator` be dropped?** After this story nothing calls
+   it but the live check script. Leaving it means a function that implements
+   SCRUM-327 AC2 to AC4, which are superseded; dropping it means the check
+   script's section 1 goes too.
+5. **Does the previous coordinator hear about a reassignment?** AC10 names the new
+   coordinator and the organiser. A coordinator whose event the Lead moves away
+   is not mentioned.
+6. **Does a resubmission need a history row?** TR-02 clears the coordinator, but
+   the history table cannot record "back to nobody" (`new_coordinator_id` is not
+   null). So the history will read A, then later "Assigned to B", with nothing
+   between. TR-03 makes the screen honest; whether the record should say more is
+   open.
+7. **Does AC9's "the organiser and the assigned coordinator" narrow who sees the
+   history?** Today every coordinator can read it (SCRUM-334 AC9), and the Lead
+   cannot (open question 2). The cases above keep every coordinator's view, since
+   nothing in AC9 says to remove it.
+
+---
+
+## Case ownership
+
+| Cases | Subtask |
+|---|---|
+| This document | SCRUM-514 |
+| Every test named here | SCRUM-522 |
+| The implementation | The SCRUM-486 subtasks between them |
+
+**Tally:** 69 cases (63 under the criteria, 6 traps), all **not yet written**, counted from the tables.
+
+| Section | Cases |
+|---|---|
+| AC1 | 6 |
+| AC2 | 8 |
+| AC3 | 7 |
+| AC4 | 5 |
+| AC5 | 5 |
+| AC6 | 6 |
+| AC7 | 6 |
+| AC8 | 5 |
+| AC9 | 6 |
+| AC10 | 6 |
+| AC11 | 3 |
+| Traps (TR) | 6 |
+
+By where each is proved: **39 need PGlite**, by themselves or beside another
+layer; **17** use a fake client alone (svc, route); the rest are the screen, or
+the live database. AC4-05 is the one case only the live database can prove.
