@@ -93,8 +93,11 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Event Coordinator Lead" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Unassigned queue" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Coordinator overview" })).toBeInTheDocument();
-    // What the role will do there, and which story builds it.
-    expect(screen.getByText(/built by SCRUM-486/)).toBeInTheDocument();
+    // What the role will do there, and which story builds it. The overview
+    // is still a placeholder; the queue is not. This used to assert "built by
+    // SCRUM-486" too, right while the queue was a placeholder; SCRUM-519
+    // built it, so the placeholder line is gone and its absence is pinned.
+    expect(screen.queryByText(/built by SCRUM-486/)).not.toBeInTheDocument();
     expect(screen.getByText(/built by SCRUM-487/)).toBeInTheDocument();
   });
 
@@ -127,21 +130,47 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     expect(screen.queryByTestId("dashboard-stub")).not.toBeInTheDocument();
   });
 
-  it.each(["event_coordinator_lead", "safety_officer"])(
+  it.each(["safety_officer"])(
     "SCRUM485_AC3_the_%s_dashboard_calls_no_service",
     (role) => {
-      // AC3-08. Neither section has an endpoint yet; a call to one that does
-      // not exist would fail at every demo.
+      // AC3-08. The Safety Officer's section has no endpoint yet; a call to
+      // one that does not exist would fail at every demo.
+      //
+      // The event_coordinator_lead row was right when written: the Lead's
+      // sections had no endpoint either. SCRUM-486 (SCRUM-519) built the
+      // queue's and mounted the notifications card, so the Lead's dashboard
+      // now reads exactly those two; the case below pins that.
       renderDashboardAs(role);
 
       expect(anyServiceCalled()).toBe(false);
     },
   );
 
+  it("SCRUM486_AC2_the_lead_dashboard_reads_only_the_unassigned_queue_and_its_notifications", () => {
+    // Every call the Lead's dashboard makes on render, and nothing else: no
+    // write, no coordinator queue, no "my events", no support stub. Each read
+    // is one that exists and that the Lead is allowed.
+    renderDashboardAs("event_coordinator_lead");
+
+    expect(vi.mocked(apiClient.get).mock.calls.map(([path]) => path).sort()).toEqual([
+      "/event-requests/unassigned",
+      "/notifications",
+    ]);
+    for (const method of ["post", "put", "patch", "delete"]) {
+      expect(apiClient[method]).not.toHaveBeenCalled();
+    }
+    expect(getOpenTickets).not.toHaveBeenCalled();
+    expect(getEquipmentRequests).not.toHaveBeenCalled();
+  });
+
   it.each(["event_coordinator_lead", "safety_officer"])(
     "SCRUM485_AC3_the_%s_dashboard_has_no_link_to_a_page_that_does_not_exist",
     (role) => {
-      // App.jsx has no route for any of these sections yet.
+      // No link on either dashboard. For the Safety Officer, App.jsx has no
+      // route for the section yet. For the Lead, since SCRUM-519 the queue
+      // has one (/unassigned-queue), but it is mounted on the dashboard
+      // itself and its Assign actions are buttons, so it needs no link here;
+      // the nav carries it.
       renderDashboardAs(role);
 
       expect(screen.queryAllByRole("link")).toHaveLength(0);

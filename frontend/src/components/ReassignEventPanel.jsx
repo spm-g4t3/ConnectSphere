@@ -42,10 +42,17 @@ const LOAD_ERROR_MESSAGES = {
 // 400 likewise covers two: the person chosen is no longer an Event
 // Coordinator, or they already hold the event. The remedy is the same, choose
 // someone else, so one message.
+//
+// 403, since SCRUM-486 (SCRUM-519). It used to say "This event is no longer
+// assigned to you", which was the only way a coordinator could be refused
+// when only the holder could hand over. 041 lets the Event Coordinator Lead
+// hand over any event too, so a 403 now means the caller is neither the
+// holder nor a Lead, and "assigned to you" would be wrong said to a Lead.
+// The message says who may hand an event over, which is true for any caller.
 const REASSIGN_ERROR_MESSAGES = {
   400: "That person cannot take this event. They may no longer be an Event Coordinator. Choose someone else.",
   401: "Your session has expired. Please sign in again.",
-  403: "This event is no longer assigned to you, so you cannot hand it over. Go back and reopen it to see who holds it now.",
+  403: "You cannot hand this event over. Only the coordinator who holds it, or the Event Coordinator Lead, can do that, and it may have been handed to someone else. Go back and reopen it to see who holds it now.",
   404: "This event no longer exists.",
   409: "This event cannot be handed over right now. Its status may not allow a handover, or it changed while you were looking at it. Go back and reopen it to see where it stands.",
   500: "The event could not be handed over. Please try again.",

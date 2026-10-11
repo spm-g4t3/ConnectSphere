@@ -732,6 +732,14 @@ export default function CoordinatorRequestDetail({
                 {startingReview ? "Starting..." : "Start review"}
               </button>
             </div>
+          ) : current.assignedCoordinatorId == null ? (
+            // SCRUM-486 AC8-04 (SCRUM-519). Since 041 a submitted request can
+            // have no coordinator: it is in the Lead's unassigned queue. Every
+            // coordinator can still open it (SCRUM-332), and "waiting for the
+            // assigned coordinator" would name someone who does not exist.
+            // isAssignedCoordinator is false for everyone here, so nobody is
+            // offered Start review, which 041 would refuse anyway.
+            <p>Waiting for the Event Coordinator Lead to assign this request to a coordinator.</p>
           ) : (
             <p>Waiting for the assigned coordinator to start the review.</p>
           )}

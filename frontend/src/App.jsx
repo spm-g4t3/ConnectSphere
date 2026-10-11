@@ -10,6 +10,7 @@ import VenueSearch from "./components/VenueSearch";
 import VenueCatalogue from "./components/VenueCatalogue";
 import ReviewQueue from "./components/ReviewQueue";
 import MyAssignedEvents from "./components/MyAssignedEvents";
+import UnassignedQueue from "./components/UnassignedQueue";
 import MyBookingRequests from "./components/MyBookingRequests";
 import EquipmentCatalogue from "./components/EquipmentCatalogue";
 import VenueCalendar from "./components/VenueCalendar";
@@ -145,6 +146,24 @@ function AppRoutes() {
             <ProtectedRoute allowedRoles={["event_coordinator"]}>
               <div className="dashboard dashboard--coordinator">
                 <MyAssignedEvents />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* SCRUM-486 (SCRUM-519): the Event Coordinator Lead's unassigned queue,
+            also on the Lead's dashboard, given a route of its own as the review
+            queue is, so the Lead's nav can link to it. Gated as /review-queue
+            is, for the same reason: GET /event-requests/unassigned answers 403
+            to anyone else regardless, and allowedRoles turns them away at
+            /unauthorized instead of on a page of one error message. Wrapped in
+            the Lead's dashboard class so the card styling matches the
+            dashboard's. */}
+        <Route
+          path="/unassigned-queue"
+          element={
+            <ProtectedRoute allowedRoles={["event_coordinator_lead"]}>
+              <div className="dashboard dashboard--coordinator-lead">
+                <UnassignedQueue />
               </div>
             </ProtectedRoute>
           }

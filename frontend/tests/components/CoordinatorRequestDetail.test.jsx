@@ -408,6 +408,24 @@ describe("SCRUM19_AC1 a coordinator who is not assigned sees no actions", () => 
     expect(await screen.findByText(text)).toBeInTheDocument();
     expect(actionButtonsShown()).toEqual([]);
   });
+
+  it.each([
+    ["the coordinator who used to hold it", ASSIGNED],
+    ["any other coordinator", OTHER],
+  ])("SCRUM486_AC8_an_unassigned_request_opened_by_%s_says_it_is_waiting_for_the_lead", async (_label, viewer) => {
+    // AC8-04. Since 041 a submitted request can have no coordinator; any
+    // coordinator can still open it by id (SCRUM-332). "Waiting for the
+    // assigned coordinator" would name nobody, so it says who it is waiting
+    // for, and nobody is offered Start review, which 041 would refuse.
+    renderAs(viewer, eventRequest({ assignedCoordinatorId: null }));
+
+    expect(
+      await screen.findByText("Waiting for the Event Coordinator Lead to assign this request to a coordinator."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Waiting for the assigned coordinator to start the review.")).not.toBeInTheDocument();
+    expect(actionButtonsShown()).toEqual([]);
+    expect(screen.queryByRole("button", { name: /hand over|reassign/i })).not.toBeInTheDocument();
+  });
 });
 
 

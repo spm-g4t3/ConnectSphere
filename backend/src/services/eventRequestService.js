@@ -831,6 +831,19 @@ export async function requestEventClarification(
   const db = await resolveClient(client);
   const current = await getEventRequestForCoordinator(id, { client: db });
 
+  // SCRUM-486 (SCRUM-519): a submitted request nobody has been assigned is
+  // waiting for the Event Coordinator Lead. Checked before the caller, as 041
+  // checks it before the caller in start_event_review: there is no coordinator,
+  // so there is no "yours" to be wrong about. Without this the caller check
+  // below would answer "Only the coordinator assigned ..." about a request that
+  // is nobody's. A 409, as 041's 55000 is: not in a state that allows this.
+  if (current.status === STATUS.SUBMITTED && current.assignedCoordinatorId == null) {
+    throw new ConflictError(
+      'This request is waiting for the Event Coordinator Lead to assign it a coordinator, '
+        + 'so clarification cannot be requested yet.',
+    );
+  }
+
   if (current.assignedCoordinatorId !== coordinatorId) {
     throw new ForbiddenError(
       `Only the coordinator assigned to event request ${id} can request clarification on it.`,
@@ -1741,6 +1754,216 @@ export async function listCoordinators({ client } = {}) {
     id: profile.id,
     fullName: profile.full_name ?? null,
   }));
+}
+
+
+/**
+ * The Event Coordinator Lead's unassigned queue (SCRUM-486 AC2): every
+ * submitted request with no coordinator, oldest first.
+ *
+ * SCRUM-519. Oldest first by submitted_at, not soonest event as "My events"
+ * sorts: the Lead's question is what has waited longest for a person to pick
+ * it up, and AC2 says so. id breaks a tie, so two refetches of the same data
+ * never reshuffle. Drafts never appear: the filter is status = 'submitted', and
+ * a draft is not waiting for anyone yet.
+ *
+ * Two reads, as listEventRequestsForCoordinator does. event_requests and
+ * profiles both reference auth.users and not each other, so PostgREST cannot
+ * embed the organiser's name; a second read of profiles, narrowed to this
+ * list's organisers, supplies it. "How long it has waited" is submittedAt,
+ * left to the screen to show against its own clock.
+ *
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object[]>} each request in camelCase, plus organiserName
+ */
+export async function listUnassignedEventRequests({ client } = {}) {
+  const db = await resolveClient(client);
+
+  const { data, error } = await db
+    .from('event_requests')
+    .select(COLUMNS)
+    .eq('status', STATUS.SUBMITTED)
+    .is('assigned_coordinator_id', null)
+    .order('submitted_at', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true });
+
+  if (error) throw translateError(error);
+
+  const rows = data ?? [];
+
+  if (rows.length === 0) return [];
+
+  const nameOf = await readNames(db, rows.map((row) => row.organiser_id));
+
+  return rows.map((row) => ({
+    ...toEventRequest(row),
+    organiserName: nameOf(row.organiser_id),
+  }));
+}
+
+
+/**
+ * The statuses in which an event is a coordinator's current work, for the
+ * count beside each name in the Lead's picker (SCRUM-486 AC3).
+ *
+ * One definition, here, answering the test cases' open question 3. Submitted
+ * (assigned, not yet reviewed) through confirmed: everything that still needs
+ * the coordinator. Not draft, which nobody holds; not completed, rejected or
+ * cancelled, which are finished. 015's selection rule also counted planning,
+ * which 020 removed. SCRUM-488's safety_review and safety_approved belong here
+ * once the enum has them; named now, the read would fail on an unknown value.
+ */
+const ACTIVE_EVENT_STATUSES = Object.freeze([
+  STATUS.SUBMITTED,
+  STATUS.UNDER_REVIEW,
+  STATUS.PENDING_CLARIFICATION,
+  STATUS.APPROVED,
+  STATUS.CONFIRMED,
+]);
+
+/**
+ * Every Event Coordinator, with their count of active events, for the Lead's
+ * assignment picker (SCRUM-486 AC3).
+ *
+ * SCRUM-519. A read of its own rather than listCoordinators widened, for
+ * three reasons. listCoordinators is SCRUM-334's handover picker, read by
+ * every coordinator; adding workload to it would show every coordinator
+ * everyone's caseload, which no story asked for. Its route is behind
+ * coordinatorOnly, and SCRUM-485 pins that a Lead is refused it; widening the
+ * gate would undo that deliberately pinned refusal for a need a separate route
+ * meets without it. And a route of its own makes its gate say exactly who
+ * reads workload: the Lead.
+ *
+ * Only event_coordinator: the Lead cannot be assigned events (the team's
+ * 11 October decision), and one role per account means this excludes every
+ * Lead. Ordered by name, then id, never by workload: the system suggests
+ * nobody (AC3), and a list sorted by count would put a recommendation at the
+ * top in all but name.
+ *
+ * Two reads: the coordinators, then their active events, counted here. A
+ * coordinator with none is listed with 0, not left out.
+ *
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<Array<{ id: string, fullName: string|null, activeEvents: number }>>}
+ */
+export async function listCoordinatorWorkload({ client } = {}) {
+  const db = await resolveClient(client);
+
+  const { data: profiles, error: profilesError } = await db
+    .from('profiles')
+    .select('id, full_name')
+    .eq('role', ROLE.EVENT_COORDINATOR)
+    .order('full_name', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true });
+
+  if (profilesError) throw translateError(profilesError);
+
+  const coordinators = profiles ?? [];
+
+  if (coordinators.length === 0) return [];
+
+  const { data: events, error: eventsError } = await db
+    .from('event_requests')
+    .select('assigned_coordinator_id')
+    .in('assigned_coordinator_id', coordinators.map((profile) => profile.id))
+    .in('status', ACTIVE_EVENT_STATUSES);
+
+  if (eventsError) throw translateError(eventsError);
+
+  const countOf = new Map();
+  for (const event of events ?? []) {
+    countOf.set(event.assigned_coordinator_id, (countOf.get(event.assigned_coordinator_id) ?? 0) + 1);
+  }
+
+  return coordinators.map((profile) => ({
+    id: profile.id,
+    fullName: profile.full_name ?? null,
+    activeEvents: countOf.get(profile.id) ?? 0,
+  }));
+}
+
+
+/**
+ * The Lead assigns an unassigned submitted request to one Event Coordinator
+ * (SCRUM-486 AC3, AC4).
+ *
+ * SCRUM-519. The write is assign_event_request (041), through rpc: it locks
+ * the row, refuses anyone but a Lead, refuses a request that already has a
+ * coordinator or is not submitted, refuses an assignee who is not an Event
+ * Coordinator, then writes the coordinator, its history row and the two
+ * notices in one transaction. A blank note becomes null.
+ *
+ * AC4 asks for a lost race to be shown who was assigned. 041 says so in its
+ * message, but that message also names the event's id, and the screens never
+ * show raw server text. So on a 409 this reads who holds the request now and
+ * returns them as data: a ConflictError with code ALREADY_ASSIGNED and the
+ * coordinator in `conflicts`, which handleError serialises. A 409 for any
+ * other reason (the request is no longer submitted) passes through unchanged.
+ *
+ * @param {string} id
+ * @param {object} input
+ * @param {string} input.coordinatorId  the Event Coordinator chosen
+ * @param {string} [input.note]          optional; the history row's handover note
+ * @param {string} assignedBy            the caller, from the JWT -- never the body
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the request, now assigned, in camelCase
+ * @throws {ValidationError} no plausible coordinatorId, before any call
+ * @throws {ForbiddenError}  the caller is not a Lead
+ * @throws {ConflictError}   already assigned (code ALREADY_ASSIGNED), or not submitted
+ * @throws {NotFoundError}   no such request
+ */
+export async function assignEventRequest(id, { coordinatorId, note } = {}, assignedBy, { client } = {}) {
+  if (!isPlausibleId(coordinatorId)) {
+    const message = typeof coordinatorId === 'string' && coordinatorId.trim() !== ''
+      ? 'must be the id of an Event Coordinator'
+      : 'is required';
+    throw new ValidationError(
+      `Invalid assignment -- coordinatorId: ${message}`,
+      [{ field: 'coordinatorId', message }],
+    );
+  }
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('assign_event_request', {
+    p_event_request_id: id,
+    p_coordinator_id: coordinatorId.trim(),
+    p_assigned_by: assignedBy,
+    p_note: typeof note === 'string' && note.trim() !== '' ? note : null,
+  });
+
+  if (error) {
+    const translated = translateError(error);
+    if (translated instanceof ConflictError) {
+      const holder = await readHolder(db, id);
+      if (holder) {
+        throw new ConflictError(
+          `This request has already been assigned to ${holder.name ?? 'another coordinator'}.`,
+          { code: 'ALREADY_ASSIGNED', conflicts: [{ assignedCoordinatorId: holder.id, assignedCoordinatorName: holder.name }] },
+        );
+      }
+    }
+    throw translated;
+  }
+
+  return toEventRequest(data);
+}
+
+/** Who holds a request now, with their name, or null when nobody does. */
+async function readHolder(db, id) {
+  const { data, error } = await db
+    .from('event_requests')
+    .select('assigned_coordinator_id')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error || !data?.assigned_coordinator_id) return null;
+
+  const nameOf = await readNames(db, [data.assigned_coordinator_id]);
+  return { id: data.assigned_coordinator_id, name: nameOf(data.assigned_coordinator_id) };
 }
 
 
