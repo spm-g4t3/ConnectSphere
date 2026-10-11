@@ -16,6 +16,8 @@ import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
 import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck";
 import EquipmentReview from "./components/EquipmentReview";
+import BrowseOpenEvents from "./components/BrowseOpenEvents";
+import { BROWSE_OPEN_EVENTS_PATH } from "./services/openEventRoutes";
 import "./App.css";
 
 function LoadingScreen() {
@@ -159,6 +161,23 @@ function AppRoutes() {
             <ProtectedRoute allowedRoles={["event_coordinator"]}>
               <div className="dashboard dashboard--coordinator">
                 <MyBookingRequests />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* SCRUM-495: the Attendee's list of events open for registration.
+            Attendees only, matching GET /open-events, which answers 403 to every
+            other role. Belt to the backend's braces: what this buys is that a
+            direct URL from another role lands on /unauthorized rather than on a
+            page whose only content is an error. The .dashboard wrapper is what
+            gives the list its card styling. The details page
+            (/open-events/:eventId) is a later subtask and not registered yet. */}
+        <Route
+          path={BROWSE_OPEN_EVENTS_PATH}
+          element={
+            <ProtectedRoute allowedRoles={["attendee"]}>
+              <div className="dashboard dashboard--attendee">
+                <BrowseOpenEvents />
               </div>
             </ProtectedRoute>
           }

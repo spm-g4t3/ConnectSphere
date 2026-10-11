@@ -27,6 +27,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 import Dashboard from "../../src/components/Dashboard.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
@@ -69,7 +70,7 @@ const NO_DASHBOARD = "No dashboard available for your role. Please contact suppo
 
 function renderDashboardAs(role) {
   vi.mocked(useAuth).mockReturnValue({ user: { id: "u1", email: "someone@example.com", role } });
-  return render(<Dashboard />);
+  return render(<Dashboard />, { wrapper: MemoryRouter });
 }
 
 function anyServiceCalled() {
@@ -167,12 +168,12 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     // Login returns no name, so the email stands in. A name, if one is ever
     // sent, is used instead.
     vi.mocked(useAuth).mockReturnValue({ user: { email: "lead@example.com", role: "event_coordinator_lead" } });
-    const { unmount } = render(<Dashboard />);
+    const { unmount } = render(<Dashboard />, { wrapper: MemoryRouter });
     expect(screen.getByText("Signed in as lead@example.com.")).toBeInTheDocument();
     unmount();
 
     vi.mocked(useAuth).mockReturnValue({ user: { name: "Priya Nair", email: "so@example.com", role: "safety_officer" } });
-    render(<Dashboard />);
+    render(<Dashboard />, { wrapper: MemoryRouter });
     expect(screen.getByText("Signed in as Priya Nair.")).toBeInTheDocument();
   });
 });
@@ -231,7 +232,7 @@ function renderAs(role) {
   vi.mocked(useAuth).mockReturnValue({
     user: { id: "u1", email: "user@example.com", role },
   });
-  return render(<Dashboard />);
+  return render(<Dashboard />, { wrapper: MemoryRouter });
 }
 
 beforeEach(() => {
@@ -246,11 +247,12 @@ describe("Dashboard role map", () => {
     expect(screen.getByRole("heading", { name: "Welcome, user@example.com" })).toBeInTheDocument();
   });
 
-  it("shows the Browse Open Events entry, with no invented event data", () => {
+  it("shows the Browse Open Events entry as a link to the browse page, with no invented event data", () => {
+    // The entry is a router Link, which is why renderAs wraps in a MemoryRouter.
     renderAs("attendee");
 
     expect(screen.getByRole("heading", { name: "Browse Open Events" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("not available yet");
+    expect(screen.getByRole("link", { name: "Browse Open Events" })).toHaveAttribute("href", "/open-events");
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 

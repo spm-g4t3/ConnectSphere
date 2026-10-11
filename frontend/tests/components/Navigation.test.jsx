@@ -89,11 +89,12 @@ describe("Navigation links by role", () => {
   expect(screen.getByRole("link", { name: "Check Availability" })).toHaveAttribute("href", "/equipment-availability");
 });
 
-  it("gives an Attendee only the Dashboard link, with no staff-facing pages", () => {
+  it("gives an Attendee Dashboard and Browse Open Events, with no staff-facing pages", () => {
     renderAs("attendee");
 
     expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
-    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Browse Open Events" })).toHaveAttribute("href", "/open-events");
+    expect(screen.getAllByRole("link")).toHaveLength(2);
   });
 });
 
@@ -242,13 +243,16 @@ describe("SCRUM485_AC6 the existing roles keep exactly their links", () => {
   it("SCRUM485_AC6_an_attendee_keeps_the_links_scrum453_gave_it", () => {
     // AC6-04 for the Attendee. When this story began an attendee had no nav
     // block, and this case pinned an empty list. SCRUM-453 (merged into dev on
-    // 11 October) gave the Attendee one: Dashboard, with Browse Open Events to
-    // follow in SCRUM-495. That is another story's change, not one this story
-    // made, so the case now pins what SCRUM-453 built, exactly and by count,
-    // and SCRUM-485 must leave it so.
+    // 11 October) gave the Attendee one, and SCRUM-495 added Browse Open Events
+    // to it. Those are other stories' changes, not ones this story made, so the
+    // case pins what they built, exactly and by count, and SCRUM-485 must leave
+    // it so.
     const links = linksOf("attendee");
 
-    expect(links).toHaveLength(1);
-    expect(links).toEqual([["Dashboard", "/dashboard"]]);
+    expect(links).toHaveLength(2);
+    expect(links).toEqual([
+      ["Dashboard", "/dashboard"],
+      ["Browse Open Events", "/open-events"],
+    ]);
   });
 });
