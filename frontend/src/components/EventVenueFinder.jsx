@@ -98,6 +98,11 @@
 //     from a result card, with no check first, carries the form's current
 //     codes, so the server's check on submit still judges them.
 //   - A new search closes either panel, as it always closed the request one.
+//
+// SCRUM-188: `hasLiveRequest` is the parent's word, from the event's Venue
+// suitability section, that the event already has a live request when the
+// view loads. It counts as eventRequested, so the request buttons start
+// disabled with the same hint, rather than only after a refused send.
 
 import { useId, useRef, useState } from "react";
 import { VENUE_TIME_ZONE } from "../services/datetimeFormat";
@@ -287,7 +292,7 @@ const CODE_GROUPS = [
   { field: "facilities", legend: "Facilities", options: FACILITIES },
 ];
 
-export default function EventVenueFinder({ request, userId, onRequestSubmitted }) {
+export default function EventVenueFinder({ request, userId, hasLiveRequest = false, onRequestSubmitted }) {
   // Lazy: the function runs on the first render only. See the header.
   const [seed] = useState(() => seedFromEvent(request));
   const [values, setValues] = useState(seed);
@@ -305,7 +310,8 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
   // panel; suitability is set only when it was opened from a check (SCRUM-191).
   const eligibility = bookingRequestEligibility(request, userId);
   const [requesting, setRequesting] = useState(null);
-  const [eventRequested, setEventRequested] = useState(false);
+  const [requestSent, setRequestSent] = useState(false);
+  const eventRequested = requestSent || Boolean(hasLiveRequest);
 
   // SCRUM-191. See the header: the venue whose suitability panel is open,
   // with the requirements snapshot it checks and a per-check key, so pressing
@@ -640,10 +646,10 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
           suitability={requesting.suitability}
           requirements={requesting.requirements}
           onSubmitted={(created) => {
-            setEventRequested(true);
+            setRequestSent(true);
             onRequestSubmitted?.(created);
           }}
-          onEventAlreadyRequested={() => setEventRequested(true)}
+          onEventAlreadyRequested={() => setRequestSent(true)}
           onClose={() => setRequesting(null)}
         />
       )}

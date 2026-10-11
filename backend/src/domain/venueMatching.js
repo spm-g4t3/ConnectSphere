@@ -336,6 +336,21 @@ export const SUITABILITY_CRITERIA = Object.freeze([
   'Facilities',
 ]);
 
+/** The sixth criterion's label, judged by SQL and reported after the five. */
+export const AVAILABILITY_CRITERION = 'Availability';
+
+/**
+ * SCRUM-188 AC2: every criterion the suitability check reports, in order --
+ * the five above, then Availability. Defined here (and re-exported by
+ * venueSuitabilityService.js) so a pure module -- the booking request's
+ * validation of acknowledgedCriteria (SCRUM-193/194, F2) -- can name the
+ * criteria without importing a service.
+ */
+export const SUITABILITY_CHECK_CRITERIA = Object.freeze([
+  ...SUITABILITY_CRITERIA,
+  AVAILABILITY_CRITERION,
+]);
+
 /** day_of_week 0-6, 0 = Sunday, the convention toVenueLocal returns (002). */
 const DAY_NAMES = Object.freeze([
   'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
@@ -397,15 +412,15 @@ function describeHours(verdict) {
  */
 function itemsVerdict(criterion, venueCodes, requested) {
   const met = providesAll(venueCodes, requested);
-  if (requested === undefined || requested.length === 0) {
-    return { criterion, met, detail: NONE_REQUESTED };
+  const asked = requested ?? [];
+  const missing = asked.filter((code) => !venueCodes.includes(code));
+  let detail = NONE_REQUESTED;
+  if (asked.length > 0) {
+    detail = met ? `All ${asked.length} requested provided` : `Missing: ${missing.join(', ')}`;
   }
-  const missing = requested.filter((code) => !venueCodes.includes(code));
-  return {
-    criterion,
-    met,
-    detail: met ? `All ${requested.length} requested provided` : `Missing: ${missing.join(', ')}`,
-  };
+  // SCRUM-193/194 (F4): the codes as well as the words, so a screen can show
+  // its own labels for them; detail stays as the fallback.
+  return { criterion, met, detail, missing, requested: [...asked] };
 }
 
 /**
@@ -428,6 +443,13 @@ function itemsVerdict(criterion, venueCodes, requested) {
  * @param {object} venue  as described in the header
  * @param {{startsAt: string|Date, endsAt: string|Date, expectedAttendance: number,
  *   layout?: string, accessibility?: string[], facilities?: string[]}} criteria
+ * SCRUM-193/194 (F4): besides the words, the Layout entry carries `layout`
+ * (the code asked for, or null) and `offers` (the venue's layout codes), and
+ * the Accessibility and Facilities entries carry `requested` (the codes asked
+ * for) and `missing` (those the venue lacks, [] when met), so the screen can
+ * show its own labels for the codes. They describe the verdict; `met` is
+ * decided exactly as before.
+ *
  * @returns {Array<{criterion: string, met: boolean, detail: string}>}
  */
 export function evaluateCriteria(venue, criteria) {
@@ -456,7 +478,15 @@ export function evaluateCriteria(venue, criteria) {
       detail: `Capacity ${venue.maxCapacity} ${capacityMet ? '≥' : '<'} expected attendance ${attendance}`,
     },
     { criterion: hoursLabel, met: hours.met, detail: describeHours(hours) },
-    { criterion: layoutLabel, met: layoutMet, detail: layoutDetail },
+    {
+      criterion: layoutLabel,
+      met: layoutMet,
+      detail: layoutDetail,
+      // SCRUM-193/194 (F4): the code asked for (null: none) and the venue's
+      // layouts, for the screen's labels.
+      layout: layout ?? null,
+      offers: [...venue.layouts],
+    },
     itemsVerdict(accessibilityLabel, venue.accessibility, criteria.accessibility),
     itemsVerdict(facilitiesLabel, venue.facilities, criteria.facilities),
   ];

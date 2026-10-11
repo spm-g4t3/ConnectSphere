@@ -21,11 +21,30 @@
 //   - It renders as its own <section>, beside the search form and never in
 //     it, the same rule as BookingRequestPanel. data.error is never shown;
 //     see venueSuitabilityErrors.js.
+//
+// SCRUM-188 review fixes:
+//   - A venue whose Availability is not met is not offered for a request at
+//     all: its period is taken, so the server would refuse it whatever the
+//     coordinator confirmed. The panel says so instead (AC4/AC7).
+//   - A note says the check uses the event's saved date, time and attendance,
+//     not the search form's, since the form beside it can say otherwise (AC3).
+//   - On opening, focus moves to the heading and the panel scrolls into view,
+//     and the live status names the venue, so a keyboard or screen reader
+//     user knows the check opened and what it answered (AC1).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { checkVenueSuitability } from "../services/venueSuitabilityService";
 import { suitabilityErrorMessage } from "../services/venueSuitabilityErrors";
 import VenueSuitabilityResult from "./VenueSuitabilityResult";
+
+const UNAVAILABLE_MESSAGE =
+  "This venue is not available for this event's period, so it can't be requested.";
+
+/** Is the Availability criterion reported as not met? */
+function availabilityUnmet(result) {
+  const criteria = Array.isArray(result?.criteria) ? result.criteria : [];
+  return criteria.some((c) => c?.criterion === "Availability" && c?.met === false);
+}
 
 export default function VenueSuitabilityPanel({
   event,
@@ -40,8 +59,21 @@ export default function VenueSuitabilityPanel({
   // Bumped by "Check again" to run the effect once more.
   const [attempt, setAttempt] = useState(0);
 
+  const headingRef = useRef(null);
+
   const eventId = event?.id;
   const venueId = venue?.id;
+
+  // Each check mounts a fresh panel (see the header), so this runs once per
+  // check. scrollIntoView is guarded: jsdom does not implement it.
+  useEffect(() => {
+    const heading = headingRef.current;
+    if (!heading) return;
+    heading.focus();
+    if (typeof heading.scrollIntoView === "function") {
+      heading.scrollIntoView({ block: "nearest" });
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +90,8 @@ export default function VenueSuitabilityPanel({
     };
   }, [eventId, venueId, requirements, attempt]);
 
+  const unavailable = state.status === "done" && availabilityUnmet(state.result);
+
   function checkAgain() {
     setState({ status: "loading", result: null, error: null });
     setAttempt((n) => n + 1);
@@ -65,7 +99,14 @@ export default function VenueSuitabilityPanel({
 
   return (
     <section className="venue-suitability-panel" aria-label={`Suitability of ${venue.name}`}>
-      <h3>Suitability of {venue.name}</h3>
+      <h3 ref={headingRef} tabIndex={-1}>
+        Suitability of {venue.name}
+      </h3>
+      <p className="venue-suitability-panel__note">
+        Checked against this event&apos;s saved date, time and expected attendance, not the search
+        form&apos;s. The layout, accessibility features and facilities are the ones chosen in the
+        search form.
+      </p>
 
       {state.status === "loading" && (
         <p className="venue-suitability-panel__loading" role="status">
@@ -79,10 +120,14 @@ export default function VenueSuitabilityPanel({
         </p>
       )}
 
-      {state.status === "done" && <VenueSuitabilityResult result={state.result} />}
+      {state.status === "done" && <VenueSuitabilityResult result={state.result} subject={venue.name} />}
+
+      {state.status === "done" && canRequest && unavailable && (
+        <p className="venue-suitability-panel__unavailable">{UNAVAILABLE_MESSAGE}</p>
+      )}
 
       <div className="venue-suitability-panel__actions">
-        {state.status === "done" && canRequest && (
+        {state.status === "done" && canRequest && !unavailable && (
           <button type="button" onClick={() => onRequest?.(venue, state.result)}>
             Request this venue
           </button>

@@ -212,6 +212,11 @@ export default function CoordinatorRequestDetail({
   // refresh alone would not: a booking changes none of the event fields the
   // section is keyed by, and `current` can be this panel's own copy.
   const [venueVersion, setVenueVersion] = useState(0);
+  // SCRUM-188: whether the Venue suitability section found a live request
+  // for this event when it loaded, so Find a venue starts with its request
+  // buttons off instead of offering one the server would refuse.
+  // Kept with the event it was loaded for, so another event never inherits it.
+  const [liveVenueRequest, setLiveVenueRequest] = useState({ eventId: null, live: false });
 
   const assignedCoordinatorId = handedOverTo?.id ?? request.assignedCoordinatorId;
 
@@ -839,13 +844,16 @@ export default function CoordinatorRequestDetail({
           EventVenueFinder, so an approved change request that moves the
           period or attendance remounts it and the recheck happens as the
           change lands; venueVersion adds a booking just sent below. Shown
-          only to the assigned coordinator, the one the server answers. */}
+          only to the assigned coordinator, the one the server answers.
+          SCRUM-188: what it loads tells Find a venue whether a request is
+          already live (onLoaded -> hasLiveRequest). */}
       {isAssignedCoordinator && (
         <section className="event-venue-suitability-section">
           <h3>Venue suitability</h3>
           <EventVenueSuitability
             key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}|${venueVersion}`}
             eventRequestId={current.id}
+            onLoaded={(items) => setLiveVenueRequest({ eventId: current.id, live: items.length > 0 })}
           />
         </section>
       )}
@@ -856,6 +864,7 @@ export default function CoordinatorRequestDetail({
           key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}`}
           request={current}
           userId={isAssignedCoordinator ? user.id : undefined}
+          hasLiveRequest={liveVenueRequest.eventId === current.id && liveVenueRequest.live}
           onRequestSubmitted={() => {
             setVenueVersion((n) => n + 1);
             onChangeRequestProcessed?.();

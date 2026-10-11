@@ -267,3 +267,138 @@ describe("SCRUM-192 failures and rechecking (SCRUM188_AC6)", () => {
     expect(await screen.findByRole("heading", { name: "Hall A" })).toBeInTheDocument();
   });
 });
+
+// SCRUM-188 review fix F10 (AC6): the opened result marks what was overridden.
+describe("SCRUM-188 overridden criteria in the recheck", () => {
+  it("SCRUM188_AC6_an_overridden_criterion_reads_overridden_in_the_opened_result", async () => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([
+      item({
+        suitabilityOverridden: true,
+        current: { suitable: false, criteria: withUnmet(["Layout", "Capacity"]), checked: CHECKED },
+        atRequest: { suitable: false, unmet: ["Layout"] },
+        newlyUnmet: ["Capacity"],
+      }),
+    ]);
+    renderSection();
+
+    await screen.findByRole("heading", { name: "Hall A" });
+    const criteria = within(venueItem("Hall A")).getAllByRole("listitem");
+    const byName = (name) => criteria.find((li) => li.textContent.includes(name));
+    expect(within(byName("Layout")).getByText("Not met — overridden by coordinator")).toBeInTheDocument();
+    expect(within(byName("Capacity")).getByText("Not met")).toBeInTheDocument();
+  });
+
+  it("SCRUM188_AC6_without_an_override_nothing_reads_overridden", async () => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([
+      item({
+        suitabilityOverridden: false,
+        current: { suitable: false, criteria: withUnmet(["Layout"]), checked: CHECKED },
+        atRequest: { suitable: false, unmet: ["Layout"] },
+        newlyUnmet: ["Layout"],
+      }),
+    ]);
+    renderSection();
+
+    await screen.findByRole("heading", { name: "Hall A" });
+    expect(screen.queryByText(/overridden by coordinator/)).not.toBeInTheDocument();
+  });
+});
+
+// SCRUM-188 review fix F11: an item that could not be rechecked is worded
+// from its code; a 400 for the whole call is not about the layout.
+describe("SCRUM-188 items that could not be rechecked", () => {
+  it.each([
+    [
+      "STORED_REQUIREMENTS_INVALID",
+      "The requirements saved with this request can no longer be read, so it could not be rechecked.",
+    ],
+    ["RECHECK_FAILED", "This venue could not be rechecked right now. Try Recheck."],
+    ["SOMETHING_NEW", "This venue could not be rechecked. Press Recheck to try again."],
+  ])("SCRUM188_AC6_an_item_with_%s_says_so_in_fixed_copy", async (code, text) => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([
+      item({ current: null, newlyUnmet: [], error: { code, message: "Unknown code xyz for booking 1234" } }),
+      item({ bookingId: "b2", venueId: "v2", venueName: "Room B" }),
+    ]);
+    renderSection();
+
+    await screen.findByRole("heading", { name: "Hall A" });
+    expect(within(venueItem("Hall A")).getByRole("alert")).toHaveTextContent(text);
+    expect(screen.queryByText(/1234|xyz/)).not.toBeInTheDocument();
+    expect(venueItem("Hall A").querySelector("details")).toBeNull();
+    expect(within(venueItem("Room B")).getAllByText("Suitable").length).toBeGreaterThan(0);
+  });
+
+  it("SCRUM188_AC6_a_400_for_the_whole_recheck_has_its_own_message", async () => {
+    vi.mocked(getEventVenueSuitability).mockRejectedValue(httpError(400, { error: "Invalid id" }));
+    renderSection();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This event's venues could not be rechecked. Please try again.");
+    expect(alert).not.toHaveTextContent(/layout/i);
+  });
+
+  it("SCRUM188_AC6_an_event_with_no_attendance_says_so", async () => {
+    vi.mocked(getEventVenueSuitability).mockRejectedValue(
+      httpError(409, { code: "EVENT_ATTENDANCE_MISSING", error: "raw prose" }),
+    );
+    renderSection();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/no expected attendance/);
+  });
+});
+
+// F-WK7-1-01: the recheck shows the occupied period and its parts as sent.
+describe("SCRUM-188 Week 7 occupied period in the recheck", () => {
+  it("SCRUM188_WK7_1_a_recheck_shows_the_occupied_period_and_its_parts", async () => {
+    const detail =
+      "Booked for Gala Night 09:15–12:45 on Wed 11 Nov (setup 09:15–10:00, turnaround 12:00–12:45)";
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([
+      item({
+        current: {
+          suitable: false,
+          criteria: ALL_MET.map((c) => (c.criterion === "Availability" ? { ...c, met: false, detail } : c)),
+          checked: CHECKED,
+        },
+        newlyUnmet: ["Availability"],
+      }),
+    ]);
+    renderSection();
+
+    await screen.findByRole("heading", { name: "Hall A" });
+    const li = venueItem("Hall A");
+    expect(within(li).getByRole("alert")).toHaveTextContent(
+      "This venue no longer meets the event's requirements: Availability",
+    );
+    expect(li.querySelector("details")).toHaveAttribute("open");
+    expect(within(li).getByText(detail)).toBeInTheDocument();
+  });
+});
+
+// SCRUM-188 review fix F9: the parent learns what loaded.
+describe("SCRUM-188 onLoaded", () => {
+  it("SCRUM188_AC7_reports_the_loaded_items_to_the_parent_on_each_load", async () => {
+    const onLoaded = vi.fn();
+    const items = [item()];
+    vi.mocked(getEventVenueSuitability).mockResolvedValueOnce(items).mockResolvedValueOnce([]);
+    const user = userEvent.setup();
+    render(<EventVenueSuitability eventRequestId="e1" onLoaded={onLoaded} />);
+
+    await screen.findByRole("heading", { name: "Hall A" });
+    expect(onLoaded).toHaveBeenCalledTimes(1);
+    expect(onLoaded).toHaveBeenLastCalledWith(items);
+
+    await user.click(screen.getByRole("button", { name: "Recheck" }));
+    await screen.findByText("No venue has been requested for this event yet.");
+    expect(onLoaded).toHaveBeenCalledTimes(2);
+    expect(onLoaded).toHaveBeenLastCalledWith([]);
+  });
+
+  it("SCRUM188_AC7_a_failed_load_reports_nothing", async () => {
+    const onLoaded = vi.fn();
+    vi.mocked(getEventVenueSuitability).mockRejectedValue(httpError(500));
+    render(<EventVenueSuitability eventRequestId="e1" onLoaded={onLoaded} />);
+
+    await screen.findByRole("alert");
+    expect(onLoaded).not.toHaveBeenCalled();
+  });
+});

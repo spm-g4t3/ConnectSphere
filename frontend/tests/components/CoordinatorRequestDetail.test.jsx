@@ -822,3 +822,44 @@ describe("SCRUM192 venue suitability on the event view", () => {
     await waitFor(() => expect(getEventVenueSuitability).toHaveBeenCalledTimes(2));
   });
 });
+
+// SCRUM-188 review fix F9: an event that already has a live request does not
+// offer another one on reload; the Venue suitability section tells Find a
+// venue what it loaded.
+describe("SCRUM-188 a live request known on load", () => {
+  const PERIOD = { proposedStart: START_ISO, proposedEnd: END_ISO };
+  const HALL = { id: "v1", name: "Hall A", location: "Level 2", maxCapacity: 200 };
+  const LIVE_ITEM = {
+    bookingId: "b1",
+    venueId: "v9",
+    venueName: "Room B",
+    venueLocation: "Level 1",
+    status: "pending",
+    statusDisplay: { status: "pending", label: "Pending" },
+    suitabilityOverridden: false,
+    current: null,
+    atRequest: null,
+    newlyUnmet: [],
+    error: { code: "RECHECK_FAILED", message: "prose" },
+  };
+  const finderSection = () => screen.getByRole("heading", { name: "Find a venue" }).closest("section");
+  async function searchInFinder(user) {
+    await user.click(within(finderSection()).getByRole("button", { name: "Search venues" }));
+    return within(finderSection()).findByRole("button", { name: "Request this venue: Hall A" });
+  }
+
+  it("SCRUM188_AC7_request_buttons_start_disabled_when_the_event_already_has_a_live_request", async () => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([LIVE_ITEM]);
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest({ ...PERIOD, status: "approved" }));
+
+    await screen.findByRole("heading", { name: "Room B" });
+    const request = await searchInFinder(user);
+    expect(request).toBeDisabled();
+    expect(within(finderSection()).getByRole("status")).toHaveTextContent(
+      "This event already has a venue request, so another cannot be started.",
+    );
+    expect(createBookingRequest).not.toHaveBeenCalled();
+  });
+});

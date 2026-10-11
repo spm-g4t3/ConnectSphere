@@ -28,6 +28,21 @@
 // the first send, when the server answers SUITABILITY_CONFIRMATION_REQUIRED.
 // Either way confirmUnsuitable is sent only once the box is ticked.
 //
+// SCRUM-188 review fixes:
+//   - AC7: with confirmUnsuitable the request also sends acknowledgedCriteria,
+//     the names of the unmet criteria this warning listed when the box was
+//     ticked. The server accepts the override only when they cover every
+//     criterion it finds unmet; if they no longer do, it answers
+//     SUITABILITY_CONFIRMATION_REQUIRED again with its list, which replaces
+//     this one and un-ticks the box, so the coordinator confirms what is true
+//     now.
+//   - AC4/AC7: Availability is never offered as something to override. A
+//     venue whose period is taken cannot be requested, so the warning says so
+//     in place of the box and the send stays disabled.
+//   - AC2: "When" and the periods in "What is in the way" are Singapore wall
+//     clock, marked "(Singapore time)", the same as the suitability result:
+//     the server judged them on the venue's clock, whatever the device says.
+//
 // A request is sent once at a time: the button is disabled while saving, and a
 // ref guards the handler, because state updates are not visible to a second
 // click that lands before the next render.
@@ -46,12 +61,18 @@ import {
   periodConflicts,
   unmetCriteria,
 } from "../services/bookingRequestErrors";
-import { formatRange, shortId } from "../services/displayFormat";
+import { shortId } from "../services/displayFormat";
+import {
+  formatVenuePeriod,
+  formatVenueRange,
+  VENUE_TIME_NOTE,
+} from "../services/datetimeFormat";
 import {
   bookingPaddingNote,
   formatOccupiedPeriod,
   requestPaddingNote,
 } from "../services/occupiedPeriodDisplay";
+import { criterionDetailText } from "../services/venueSuitabilityDisplay";
 
 /** Mirrors bookings_setup_notes_length in migration 030. */
 const SETUP_NOTES_MAX_LENGTH = 1000;
@@ -70,7 +91,25 @@ function failedCriteria(suitability) {
 
 function criterionText(criterion) {
   const name = criterion?.criterion || "A requirement";
-  return criterion?.detail ? `${name}: ${criterion.detail}` : name;
+  const detail = criterionDetailText(criterion);
+  return detail ? `${name}: ${detail}` : name;
+}
+
+/** The criterion names a confirmation acknowledges, as the server reads them. */
+function criterionNames(criteria) {
+  return criteria
+    .map((criterion) => criterion?.criterion)
+    .filter((name) => typeof name === "string" && name !== "");
+}
+
+/** Availability is never overridable (see the header). */
+function includesAvailability(criteria) {
+  return criteria.some((criterion) => criterion?.criterion === "Availability");
+}
+
+/** A conflict's occupied period on the venue's clock, noted once. */
+function venueOccupiedPeriod(conflict) {
+  return `${formatOccupiedPeriod(conflict, formatVenueRange)} ${VENUE_TIME_NOTE}`;
 }
 
 /** SCRUM-191: the coordinator's codes as body fields, each only when set. */
@@ -107,6 +146,7 @@ export default function BookingRequestPanel({
   const suitabilityFailed = suitability?.suitable === false;
   const needsConfirmation = suitabilityFailed || serverCriteria !== null;
   const unmet = serverCriteria ?? failedCriteria(suitability);
+  const unavailable = needsConfirmation && includesAvailability(unmet);
   const notesTooLong = Array.from(setupNotes.trim()).length > SETUP_NOTES_MAX_LENGTH;
   const notesErrorId = `${idPrefix}-notes-error`;
   const notesMessages = [
@@ -119,6 +159,7 @@ export default function BookingRequestPanel({
     if (sending.current || submitted) return;
     if (notesTooLong) return;
     if (needsConfirmation && !confirmed) return;
+    if (unavailable) return;
 
     sending.current = true;
     setSubmitting(true);
@@ -131,7 +172,9 @@ export default function BookingRequestPanel({
         venueId: venue.id,
         ...requirementsBody(requirements),
         ...(setupNotes.trim() ? { setupNotes: setupNotes.trim() } : {}),
-        ...(needsConfirmation && confirmed ? { confirmUnsuitable: true } : {}),
+        ...(needsConfirmation && confirmed
+          ? { confirmUnsuitable: true, acknowledgedCriteria: criterionNames(unmet) }
+          : {}),
       });
       setSubmitted(request);
       onSubmitted?.(request);
@@ -160,7 +203,7 @@ export default function BookingRequestPanel({
         <dt>Event</dt>
         <dd>{event.eventName || "Unnamed event"}</dd>
         <dt>When</dt>
-        <dd>{formatRange(event.proposedStart, event.proposedEnd, "Not set")}</dd>
+        <dd>{formatVenuePeriod(event.proposedStart, event.proposedEnd)}</dd>
         <dt>Expected attendance</dt>
         <dd>{event.expectedAttendance ?? "Not specified"}</dd>
         <dt>Venue requirements</dt>
@@ -220,15 +263,22 @@ export default function BookingRequestPanel({
                   ))}
                 </ul>
               )}
-              <label>
-                <input
-                  type="checkbox"
-                  checked={confirmed}
-                  onChange={(e) => setConfirmed(e.target.checked)}
-                  disabled={submitting}
-                />
-                I understand this venue does not meet the requirements and want to request it anyway
-              </label>
+              {unavailable ? (
+                <p className="booking-request__unavailable">
+                  This venue is not available for this event&apos;s period, so it can&apos;t be
+                  requested. Choose another venue.
+                </p>
+              ) : (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={confirmed}
+                    onChange={(e) => setConfirmed(e.target.checked)}
+                    disabled={submitting}
+                  />
+                  I understand this venue does not meet the requirements and want to request it anyway
+                </label>
+              )}
             </div>
           )}
 
@@ -248,7 +298,7 @@ export default function BookingRequestPanel({
                   return (
                     <li key={conflict.blockId ?? i}>
                       <strong>Blocked</strong>
-                      <span>{formatRange(conflict.startsAt, conflict.endsAt)}</span>
+                      <span>{formatVenuePeriod(conflict.startsAt, conflict.endsAt)}</span>
                       {note && <span className="booking-request__conflict-note">{note}</span>}
                     </li>
                   );
@@ -264,7 +314,7 @@ export default function BookingRequestPanel({
                   <li key={(held ? conflict.holdId : conflict.bookingId) ?? i}>
                     {held && <strong>Tentatively held</strong>}
                     <strong>{conflict.eventName || "Unnamed event"}</strong>
-                    <span>{formatOccupiedPeriod(conflict)}</span>
+                    <span>{venueOccupiedPeriod(conflict)}</span>
                     {bookingNote && (
                       <span className="booking-request__conflict-note">{bookingNote}</span>
                     )}
@@ -280,7 +330,7 @@ export default function BookingRequestPanel({
           <div className="booking-request__actions">
             <button
               type="submit"
-              disabled={submitting || notesTooLong || (needsConfirmation && !confirmed)}
+              disabled={submitting || notesTooLong || unavailable || (needsConfirmation && !confirmed)}
             >
               {submitting ? "Requesting..." : "Request this venue"}
             </button>

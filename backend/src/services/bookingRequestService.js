@@ -23,7 +23,9 @@
  *    that is the answer that counts.
  *  - Suitability (N10) is computed here, server-side, through an injectable
  *    checker, and passed to the function. A venue that is not suitable is
- *    requested only with confirmUnsuitable. The default checker is
+ *    requested only with confirmUnsuitable and, since SCRUM-193/194, only
+ *    when acknowledgedCriteria names every criterion it does not meet. The
+ *    default checker is
  *    venueSuitabilityService.js (SCRUM-190); the request carries the
  *    accessibility and facility codes it judges, and the caller, so the
  *    check enforces the assigned coordinator itself.
@@ -318,6 +320,29 @@ function checkedSuitability(result) {
  * SCRUM-190: input may also carry accessibility and facilities, code lists
  * passed to the checker with the caller. An unknown code is a ValidationError
  * from the check, before anything is written.
+ *
+ * SCRUM-193/194 (F2, SCRUM-188 AC7, "any criterion the coordinator chose to
+ * override"): input may carry acknowledgedCriteria, the criterion labels the
+ * coordinator accepts the venue does not meet. An unsuitable result counts as
+ * confirmed only when confirmUnsuitable is true AND every criterion the check
+ * (run here, now) found unmet is named there. Otherwise this throws
+ * SUITABILITY_CONFIRMATION_REQUIRED, with the unmet criteria as conflicts,
+ * before create_booking_request is called and so before anything is written.
+ * That is what stops a confirmation given against an earlier check -- one
+ * where only Capacity failed, say -- from also covering an Availability
+ * failure that has appeared since: the coordinator is asked again, naming
+ * the new criterion. confirmUnsuitable alone, without the names, is therefore
+ * asked again too. No migration was needed: the overridden criteria are the
+ * unmet ones of the stored result, and they are now exactly the ones the
+ * coordinator named (domain/suitabilityRecord.js derives them).
+ *
+ * The race that remains is small: between this check and the moment
+ * create_booking_request takes its locks, the venue's attributes (an
+ * update_venue) or the event's attendance could change. The function
+ * re-checks the period under its locks, so a new booking, block or hold is
+ * still refused as BOOKING_PERIOD_CONFLICT; an attribute change in that
+ * window is not re-judged, and the stored result is the one computed here.
+ * SCRUM-188 AC6's recheck-on-view then reports it on the event.
  */
 export async function createBookingRequest(
   input,
@@ -358,6 +383,22 @@ export async function createBookingRequest(
     }),
   );
 
+  // SCRUM-193/194 (F2): an unsuitable venue is confirmed only for the
+  // criteria the coordinator named; see the doc comment.
+  let confirmUnsuitable = request.confirmUnsuitable;
+  if (!suitability.suitable) {
+    const unmet = suitability.criteria.filter((criterion) => criterion?.met === false);
+    const acknowledged = new Set(request.acknowledgedCriteria);
+    confirmUnsuitable =
+      request.confirmUnsuitable && unmet.every((criterion) => acknowledged.has(criterion.criterion));
+    if (!confirmUnsuitable) {
+      throw new ConflictError(
+        'This venue does not meet the event\'s requirements; confirm to request it anyway',
+        { code: 'SUITABILITY_CONFIRMATION_REQUIRED', conflicts: unmet },
+      );
+    }
+  }
+
   const { data, error } = await db.rpc('create_booking_request', {
     p_event_request_id: request.eventRequestId,
     p_venue_id: request.venueId,
@@ -365,7 +406,7 @@ export async function createBookingRequest(
     p_room_layout_code: request.roomLayoutCode,
     p_setup_notes: request.setupNotes,
     p_suitability: suitability,
-    p_confirm_unsuitable: request.confirmUnsuitable,
+    p_confirm_unsuitable: confirmUnsuitable,
   });
 
   if (error) throw translateError(error);

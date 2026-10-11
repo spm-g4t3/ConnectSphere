@@ -165,3 +165,85 @@ describe("SCRUM-191 carrying the result into a request", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });
+
+// SCRUM-188 review fix F3 (AC4/AC7): a venue whose period is taken is not
+// offered for a request at all.
+describe("SCRUM-188 an unavailable venue cannot be requested", () => {
+  const UNAVAILABLE = {
+    ...RESULT,
+    criteria: RESULT.criteria.map((c) =>
+      c.criterion === "Availability"
+        ? { ...c, met: false, detail: "Needs 13:45–16:45 on Wed 11 Nov (setup 13:45–14:00, turnaround 16:00–16:45). Blocked 15:00–18:00 for maintenance" }
+        : c,
+    ),
+  };
+  const UNAVAILABLE_TEXT = "This venue is not available for this event's period, so it can't be requested.";
+
+  it("SCRUM188_AC7_unmet_availability_offers_no_request_and_says_why", async () => {
+    vi.mocked(checkVenueSuitability).mockResolvedValue(UNAVAILABLE);
+    renderPanel();
+
+    await screen.findByText("Not suitable");
+    expect(requestButton()).not.toBeInTheDocument();
+    expect(screen.getByText(UNAVAILABLE_TEXT)).toBeInTheDocument();
+    // AC4: the server's detail, own occupied period first, is shown verbatim.
+    expect(screen.getByText(/^Needs 13:45–16:45 on Wed 11 Nov \(setup 13:45–14:00, turnaround 16:00–16:45\)\. Blocked/)).toBeInTheDocument();
+  });
+
+  it("SCRUM188_AC7_other_unmet_criteria_can_still_be_requested", async () => {
+    vi.mocked(checkVenueSuitability).mockResolvedValue(RESULT);
+    renderPanel();
+
+    await screen.findByText("Not suitable");
+    expect(requestButton()).toBeInTheDocument();
+    expect(screen.queryByText(UNAVAILABLE_TEXT)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM188_AC7_when_no_request_can_be_made_the_unavailable_note_is_not_shown_either", async () => {
+    vi.mocked(checkVenueSuitability).mockResolvedValue(UNAVAILABLE);
+    renderPanel({ canRequest: false });
+
+    await screen.findByText("Not suitable");
+    expect(screen.queryByText(UNAVAILABLE_TEXT)).not.toBeInTheDocument();
+  });
+});
+
+// SCRUM-188 review fix F7 (AC3): the check uses the saved event, not the form.
+describe("SCRUM-188 what the check is against", () => {
+  it("SCRUM188_AC3_says_it_checks_the_events_saved_date_time_and_attendance", () => {
+    vi.mocked(checkVenueSuitability).mockReturnValue(new Promise(() => {}));
+    renderPanel();
+    expect(
+      screen.getByText(/Checked against this event's saved date, time and expected attendance, not the search form's/),
+    ).toBeInTheDocument();
+  });
+});
+
+// SCRUM-188 review fix F8 (AC1): focus and the live status.
+describe("SCRUM-188 the panel announces itself", () => {
+  it("SCRUM188_AC1_focus_moves_to_the_heading_when_the_panel_opens", () => {
+    vi.mocked(checkVenueSuitability).mockReturnValue(new Promise(() => {}));
+    const scrollIntoView = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      renderPanel();
+      const heading = screen.getByRole("heading", { name: "Suitability of Hall A" });
+      expect(heading).toHaveAttribute("tabindex", "-1");
+      expect(heading).toHaveFocus();
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("SCRUM188_AC1_the_live_status_names_the_venue_while_checking_and_when_answered", async () => {
+    const pending = deferred();
+    vi.mocked(checkVenueSuitability).mockReturnValue(pending.promise);
+    renderPanel();
+
+    expect(screen.getByRole("status")).toHaveTextContent("Checking Hall A");
+    pending.resolve(RESULT);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Hall A: Not suitable$/));
+  });
+});

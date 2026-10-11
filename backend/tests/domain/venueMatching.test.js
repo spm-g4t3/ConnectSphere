@@ -482,10 +482,18 @@ describe('SCRUM188_AC2 evaluateCriteria shape', () => {
     const verdicts = evaluateCriteria(harbourRoom(), baseRequest());
     expect(verdicts.map((v) => v.criterion)).toEqual([...SUITABILITY_CRITERIA]);
     verdicts.forEach((v) => {
-      expect(Object.keys(v).sort()).toEqual(['criterion', 'detail', 'met']);
+      expect(Object.keys(v).slice(0, 3)).toEqual(['criterion', 'met', 'detail']);
       expect(typeof v.met).toBe('boolean');
       expect(typeof v.detail).toBe('string');
     });
+    // SCRUM-193/194 (F4): the structured codes beside the words.
+    expect(verdicts.map((v) => Object.keys(v).sort())).toEqual([
+      ['criterion', 'detail', 'met'],
+      ['criterion', 'detail', 'met'],
+      ['criterion', 'detail', 'layout', 'met', 'offers'],
+      ['criterion', 'detail', 'met', 'missing', 'requested'],
+      ['criterion', 'detail', 'met', 'missing', 'requested'],
+    ]);
   });
 
   it('SCRUM188_AC2_location_is_not_a_suitability_criterion', () => {
@@ -502,9 +510,27 @@ describe('SCRUM188_AC2 evaluateCriteria shape', () => {
         met: true,
         detail: 'Event runs 10:00–12:00 on Wednesday; venue open 09:00–18:00',
       },
-      { criterion: 'Layout', met: true, detail: 'Layout theatre offered' },
-      { criterion: 'Accessibility', met: true, detail: 'All 1 requested provided' },
-      { criterion: 'Facilities', met: true, detail: 'All 2 requested provided' },
+      {
+        criterion: 'Layout',
+        met: true,
+        detail: 'Layout theatre offered',
+        layout: 'theatre',
+        offers: ['classroom', 'theatre'],
+      },
+      {
+        criterion: 'Accessibility',
+        met: true,
+        detail: 'All 1 requested provided',
+        missing: [],
+        requested: ['step_free_entrance'],
+      },
+      {
+        criterion: 'Facilities',
+        met: true,
+        detail: 'All 2 requested provided',
+        missing: [],
+        requested: ['projector', 'wifi'],
+      },
     ]);
   });
 });
@@ -607,6 +633,8 @@ describe('SCRUM188_AC2 layout verdict', () => {
       criterion: 'Layout',
       met: true,
       detail: 'Layout theatre offered',
+      layout: 'theatre',
+      offers: ['classroom', 'theatre'],
     });
   });
 
@@ -617,6 +645,8 @@ describe('SCRUM188_AC2 layout verdict', () => {
       criterion: 'Layout',
       met: false,
       detail: 'Layout theatre not offered (offers: banquet, classroom)',
+      layout: 'theatre',
+      offers: ['banquet', 'classroom'],
     });
   });
 
@@ -636,6 +666,8 @@ describe('SCRUM188_AC2 accessibility and facilities verdicts', () => {
       criterion: 'Accessibility',
       met: false,
       detail: 'Missing: wheelchair_ramp, hearing_loop',
+      missing: ['wheelchair_ramp', 'hearing_loop'],
+      requested: ['wheelchair_ramp', 'step_free_entrance', 'hearing_loop'],
     });
   });
 
@@ -645,6 +677,8 @@ describe('SCRUM188_AC2 accessibility and facilities verdicts', () => {
       criterion: 'Accessibility',
       met: true,
       detail: 'All 2 requested provided',
+      missing: [],
+      requested: ['lift_access', 'step_free_entrance'],
     });
   });
 
@@ -654,6 +688,8 @@ describe('SCRUM188_AC2 accessibility and facilities verdicts', () => {
       criterion: 'Facilities',
       met: false,
       detail: 'Missing: catering',
+      missing: ['catering'],
+      requested: ['projector', 'catering'],
     });
   });
 
@@ -662,6 +698,8 @@ describe('SCRUM188_AC2 accessibility and facilities verdicts', () => {
       criterion: 'Facilities',
       met: true,
       detail: 'All 2 requested provided',
+      missing: [],
+      requested: ['projector', 'wifi'],
     });
   });
 });
@@ -674,18 +712,37 @@ describe('SCRUM188_AC2 optional criteria not requested', () => {
   it('SCRUM188_AC2_absent_optionals_read_none_requested', () => {
     const verdicts = evaluateCriteria(bare, required);
     expect(verdicts.slice(2)).toEqual([
-      { criterion: 'Layout', met: true, detail: 'None requested' },
-      { criterion: 'Accessibility', met: true, detail: 'None requested' },
-      { criterion: 'Facilities', met: true, detail: 'None requested' },
+      { criterion: 'Layout', met: true, detail: 'None requested', layout: null, offers: [] },
+      { criterion: 'Accessibility', met: true, detail: 'None requested', missing: [], requested: [] },
+      { criterion: 'Facilities', met: true, detail: 'None requested', missing: [], requested: [] },
     ]);
   });
 
   it('SCRUM188_AC2_empty_lists_read_none_requested', () => {
     const verdicts = evaluateCriteria(bare, { ...required, accessibility: [], facilities: [] });
     expect(verdicts.slice(3)).toEqual([
-      { criterion: 'Accessibility', met: true, detail: 'None requested' },
-      { criterion: 'Facilities', met: true, detail: 'None requested' },
+      { criterion: 'Accessibility', met: true, detail: 'None requested', missing: [], requested: [] },
+      { criterion: 'Facilities', met: true, detail: 'None requested', missing: [], requested: [] },
     ]);
+  });
+});
+
+
+// SCRUM-193/194 (F4): structured codes beside the words, so the frontend can
+// show its own labels. They never change `met`.
+describe('SCRUM188_AC2 structured codes on the criterion entries', () => {
+  it('SCRUM188_AC2_layout_entry_carries_the_code_asked_for_and_what_the_venue_offers', () => {
+    const verdict = verdictFor('Layout', harbourRoom({ layouts: ['banquet'] }), baseRequest({ layout: 'u_shape' }));
+    expect(verdict).toMatchObject({ met: false, layout: 'u_shape', offers: ['banquet'] });
+  });
+
+  it('SCRUM188_AC2_missing_and_requested_name_the_codes_for_accessibility_and_facilities', () => {
+    const verdicts = evaluateCriteria(
+      harbourRoom(),
+      baseRequest({ accessibility: ['hearing_loop', 'lift_access'], facilities: ['stage'] }),
+    );
+    expect(verdicts[3]).toMatchObject({ missing: ['hearing_loop'], requested: ['hearing_loop', 'lift_access'] });
+    expect(verdicts[4]).toMatchObject({ missing: ['stage'], requested: ['stage'] });
   });
 });
 
@@ -723,5 +780,21 @@ describe('SCRUM188_AC2 parity with the SCRUM-20 search rule', () => {
     expect(evaluateCriteria(venue, criteria).every((v) => v.met)).toBe(
       matchesAllCriteria(venue, criteria),
     );
+  });
+
+  // SCRUM-193/194, B-AC3-03: the rows above mostly test failures; these pin
+  // parity when what was asked for is provided.
+  it.each([
+    ['layout requested and offered', harbourRoom(), baseRequest({ layout: 'classroom' })],
+    [
+      'accessibility and facilities all provided',
+      harbourRoom(),
+      baseRequest({ accessibility: ['lift_access', 'step_free_entrance'], facilities: ['pa_system', 'projector', 'wifi'] }),
+    ],
+    ['capacity 0 attendance 0', harbourRoom({ maxCapacity: 0 }), baseRequest({ expectedAttendance: 0 })],
+  ])('SCRUM188_AC3_parity_also_holds_when_requested_items_are_provided (%s)', (_label, venue, criteria) => {
+    const verdicts = evaluateCriteria(venue, criteria);
+    expect(verdicts.every((v) => v.met)).toBe(true);
+    expect(matchesAllCriteria(venue, criteria)).toBe(true);
   });
 });

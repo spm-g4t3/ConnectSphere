@@ -690,6 +690,9 @@ button { cursor: pointer; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__other-row { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__other-row label { color: var(--muted); font-size: 0.9rem; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__other-row select { border: 1px solid var(--line); border-radius: 6px; max-width: 100%; min-width: 0; padding: 10px 12px; }
+/* SCRUM-188: read out, not shown (the verdict's venue name). */
+.visually-hidden { border: 0; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; }
+.venue-suitability-panel__note { color: var(--muted); font-size: 0.9em; margin: 0 0 10px; }
 .venue-suitability-panel { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; margin: 18px 0; padding: 14px 16px; }
 .venue-suitability-panel h3 { margin: 0 0 10px; }
 .venue-suitability-panel__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }

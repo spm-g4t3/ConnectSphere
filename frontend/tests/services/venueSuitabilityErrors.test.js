@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { suitabilityErrorMessage } from "../../src/services/venueSuitabilityErrors.js";
+import { recheckErrorMessage, suitabilityErrorMessage } from "../../src/services/venueSuitabilityErrors.js";
 
 const http = (status, data = {}) =>
   Object.assign(new Error(`status ${status}`), { response: { status, data } });
@@ -15,6 +15,8 @@ describe("SCRUM-191 suitabilityErrorMessage", () => {
   it.each([
     ["EVENT_DATES_MISSING", /no proposed start and end/],
     ["VENUE_RETIRED", /retired/],
+    // SCRUM-188 review fix F11.
+    ["EVENT_ATTENDANCE_MISSING", /^This event has no expected attendance, so no venue can be checked against it yet\.$/],
   ])("SCRUM188_AC1_explains_the_409_%s", (code, pattern) => {
     expect(suitabilityErrorMessage(conflict(code))).toMatch(pattern);
   });
@@ -41,5 +43,16 @@ describe("SCRUM-191 suitabilityErrorMessage", () => {
   it("SCRUM188_AC1_never_shows_the_servers_error_text", () => {
     const err = http(500, { error: "relation venues violates constraint 1234-uuid" });
     expect(suitabilityErrorMessage(err)).not.toMatch(/relation|uuid/);
+  });
+});
+
+// SCRUM-188 review fix F11.
+describe("SCRUM-188 the event recheck", () => {
+  it("SCRUM188_AC6_a_400_from_the_recheck_does_not_point_at_the_layout_or_features", () => {
+    const message = recheckErrorMessage(http(400, { error: "Invalid id", details: [{ field: "id" }] }));
+    expect(message).toBe("This event's venues could not be rechecked. Please try again.");
+    expect(message).not.toMatch(/layout|accessibility|facilities/i);
+    // A single check's 400 still does, since it sends those codes.
+    expect(suitabilityErrorMessage(http(400))).toMatch(/layout, accessibility features and facilities/);
   });
 });

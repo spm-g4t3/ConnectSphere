@@ -183,3 +183,126 @@ describe("SCRUM-188 AC7 overridden criteria", () => {
     expect(before).not.toContain("overridden");
   });
 });
+
+// SCRUM-188 review fix F4 (AC2): criteria that carry their codes read as
+// venueLookups labels; older stored results without them keep their detail.
+describe("SCRUM-188 AC2 criterion codes read as labels", () => {
+  function withCriterion(name, fields) {
+    return {
+      ...UNSUITABLE,
+      criteria: CRITERIA.map((c) => (c.criterion === name ? { ...c, ...fields } : c)),
+    };
+  }
+  const itemFor = (name) => criteriaItems().find((item) => item.textContent.includes(name));
+
+  it("SCRUM188_AC2_a_met_layout_with_codes_reads_its_label_offered", () => {
+    render(
+      <VenueSuitabilityResult
+        result={withCriterion("Layout", { met: true, detail: "Layout theatre offered", layout: "theatre", offers: ["theatre", "u_shape"] })}
+      />,
+    );
+    expect(itemFor("Layout")).toHaveTextContent("Layout Theatre offered");
+    expect(itemFor("Layout")).not.toHaveTextContent("theatre offered");
+  });
+
+  it("SCRUM188_AC2_an_unmet_layout_names_its_label_and_the_labels_on_offer", () => {
+    render(
+      <VenueSuitabilityResult
+        result={withCriterion("Layout", {
+          met: false,
+          detail: "Layout banquet not offered (offers: classroom, u_shape)",
+          layout: "banquet",
+          offers: ["classroom", "u_shape"],
+        })}
+      />,
+    );
+    expect(itemFor("Layout")).toHaveTextContent("Layout Banquet not offered (offers: Classroom, U-Shape)");
+    expect(itemFor("Layout")).not.toHaveTextContent("u_shape");
+  });
+
+  it("SCRUM188_AC2_an_unmet_layout_at_a_venue_offering_none_says_none", () => {
+    render(
+      <VenueSuitabilityResult
+        result={withCriterion("Layout", { met: false, detail: "x", layout: "banquet", offers: [] })}
+      />,
+    );
+    expect(itemFor("Layout")).toHaveTextContent("Layout Banquet not offered (offers: none)");
+  });
+
+  it("SCRUM188_AC2_no_layout_requested_keeps_the_detail", () => {
+    render(
+      <VenueSuitabilityResult
+        result={withCriterion("Layout", { met: true, detail: "No layout requested", layout: null, offers: ["theatre"] })}
+      />,
+    );
+    expect(itemFor("Layout")).toHaveTextContent("No layout requested");
+  });
+
+  it("SCRUM188_AC2_missing_accessibility_and_facilities_read_as_labels", () => {
+    const result = {
+      ...UNSUITABLE,
+      criteria: CRITERIA.map((c) => {
+        if (c.criterion === "Accessibility") {
+          return { ...c, met: false, detail: "Missing: hearing_loop", missing: ["hearing_loop"], requested: ["hearing_loop", "lift_access"] };
+        }
+        if (c.criterion === "Facilities") {
+          return { ...c, met: false, detail: "Missing: projector, wifi", missing: ["projector", "wifi"], requested: ["projector", "wifi"] };
+        }
+        return c;
+      }),
+    };
+    render(<VenueSuitabilityResult result={result} />);
+
+    expect(itemFor("Accessibility")).toHaveTextContent("Missing: Hearing loop");
+    expect(itemFor("Accessibility")).not.toHaveTextContent("hearing_loop");
+    expect(itemFor("Facilities")).toHaveTextContent("Missing: Projector, Wi-Fi");
+  });
+
+  it("SCRUM188_AC2_nothing_missing_keeps_the_detail", () => {
+    render(
+      <VenueSuitabilityResult
+        result={withCriterion("Facilities", { met: true, missing: [], requested: ["wifi"] })}
+      />,
+    );
+    expect(itemFor("Facilities")).toHaveTextContent("All requested facilities are provided");
+  });
+
+  it("SCRUM188_AC2_a_structured_code_the_lookup_copy_does_not_know_shows_as_itself", () => {
+    const result = {
+      ...UNSUITABLE,
+      criteria: CRITERIA.map((c) => {
+        if (c.criterion === "Layout") return { ...c, met: false, layout: "cabaret", offers: ["theatre", "stage_pit"] };
+        if (c.criterion === "Facilities") return { ...c, met: false, missing: ["stage"], requested: ["stage"] };
+        return c;
+      }),
+    };
+    render(<VenueSuitabilityResult result={result} />);
+
+    expect(itemFor("Layout")).toHaveTextContent("Layout cabaret not offered (offers: Theatre, stage_pit)");
+    expect(itemFor("Facilities")).toHaveTextContent("Missing: stage");
+  });
+
+});
+
+// F-AC5-01: the screen never defaults to or recomputes "Suitable".
+describe("SCRUM-188 AC5 the verdict is the server's", () => {
+  it.each([
+    ["missing", { criteria: CRITERIA, checked: CHECKED }],
+    ["the string true", { suitable: "true", criteria: CRITERIA, checked: CHECKED }],
+    ["false with every criterion met", { suitable: false, criteria: CRITERIA, checked: CHECKED }],
+  ])("SCRUM188_AC5_only_a_boolean_true_reads_suitable (%s)", (_label, result) => {
+    render(<VenueSuitabilityResult result={result} />);
+    expect(screen.getByRole("status")).toHaveTextContent(/^Not suitable$/);
+  });
+});
+
+// SCRUM-188 review fix F8 (AC1): the verdict names the venue for a screen
+// reader; it is visually hidden, the heading above already names it.
+describe("SCRUM-188 AC1 the verdict names its venue", () => {
+  it("SCRUM188_AC1_with_a_subject_the_status_reads_the_venue_and_verdict", () => {
+    render(<VenueSuitabilityResult result={UNSUITABLE} subject="Hall A" />);
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/^Hall A: Not suitable$/);
+    expect(within(status).getByText("Hall A:")).toHaveClass("visually-hidden");
+  });
+});

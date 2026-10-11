@@ -339,8 +339,10 @@ describe('SCRUM188_AC1 end to end over the real check', () => {
       ['Facilities', true],
       ['Availability', false],
     ]);
+    // SCRUM-193/194 (B4): the event's own occupied period first.
     expect(res.body.criteria[5].detail).toBe(
-      'Booked for Gala Night 09:30–12:45 on Wed 11 Nov (setup 09:30–10:00, turnaround 12:00–12:45)',
+      'Needs 09:30–12:45 on Wed 11 Nov (setup 09:30–10:00, turnaround 12:00–12:45). ' +
+        'Booked for Gala Night 09:30–12:45 on Wed 11 Nov (setup 09:30–10:00, turnaround 12:00–12:45)',
     );
     expect(res.body.checked).toEqual({
       startsAt: '2026-11-11T10:00:00+08:00',
@@ -373,6 +375,7 @@ describe('SCRUM188_AC1 end to end over the real check', () => {
 
   it.each([
     ['EVENT_DATES_MISSING', { event: eventRow({ proposed_end: null }) }],
+    ['EVENT_ATTENDANCE_MISSING', { event: eventRow({ expected_attendance: null }) }],
     ['VENUE_RETIRED', { venue: venueRow({ retired_at: '2026-09-01T00:00:00+00:00' }) }],
   ])('SCRUM188_AC1_%s_is_409', async (code, options) => {
     const res = await realGet({ venueId: VENUE }, { client: fakeClient(options) });
@@ -472,6 +475,10 @@ describe('SCRUM188_AC6 GET /bookings', () => {
       code: 'EVENT_DATES_MISSING',
       conflicts: [],
     }],
+    ['an event with no attendance', new ConflictError('No attendance', { code: 'EVENT_ATTENDANCE_MISSING' }), 409, {
+      code: 'EVENT_ATTENDANCE_MISSING',
+      conflicts: [],
+    }],
   ])('SCRUM188_AC6_%s_answers_its_status', async (_label, error, status, body) => {
     const checkEventVenues = vi.fn(async () => { throw error; });
     const res = await request(bookingsApp({ checkEventVenues })).get(BOOKINGS);
@@ -531,7 +538,13 @@ describe('SCRUM188_AC6 GET /bookings', () => {
     };
 
     /** Answers the event, the bookings, the venue, the code lookups and the occupancy function. */
-    function fakeClient({ event = eventRow(), venue = venueRow(), bookings = [bookingRow] } = {}) {
+    function fakeClient({
+      event = eventRow(),
+      venue = venueRow(),
+      bookings = [bookingRow],
+      rpcError = null,
+      unknownCodes = [],
+    } = {}) {
       return {
         from(table) {
           const chain = {
@@ -540,14 +553,17 @@ describe('SCRUM188_AC6 GET /bookings', () => {
             in: (_column, codes) =>
               table === 'bookings'
                 ? chain
-                : Promise.resolve({ data: codes.map((code) => ({ code })), error: null }),
+                : Promise.resolve({
+                  data: codes.filter((code) => !unknownCodes.includes(code)).map((code) => ({ code })),
+                  error: null,
+                }),
             order: () => Promise.resolve({ data: bookings, error: null }),
             maybeSingle: () =>
               Promise.resolve({ data: table === 'event_requests' ? event : venue, error: null }),
           };
           return chain;
         },
-        rpc: () => Promise.resolve({ data: [], error: null }),
+        rpc: () => Promise.resolve(rpcError ? { data: null, error: rpcError } : { data: [], error: null }),
       };
     }
 
@@ -597,6 +613,57 @@ describe('SCRUM188_AC6 GET /bookings', () => {
       const res = await realGet(fakeClient({ event: eventRow({ proposed_end: null }) }));
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('EVENT_DATES_MISSING');
+    });
+
+    // SCRUM-193/194 regressions, through the real router.
+    it('SCRUM188_AC3_EVENT_ATTENDANCE_MISSING_is_409_for_the_whole_recheck', async () => {
+      const res = await realGet(fakeClient({ event: eventRow({ expected_attendance: null }) }));
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('EVENT_ATTENDANCE_MISSING');
+    });
+
+    it('SCRUM188_AC6_a_stored_code_no_longer_known_is_200_with_STORED_REQUIREMENTS_INVALID', async () => {
+      const res = await realGet(fakeClient({ unknownCodes: ['projector'] }));
+      expect(res.status).toBe(200);
+      expect(res.body[0]).toMatchObject({
+        current: null,
+        newlyUnmet: [],
+        error: { code: 'STORED_REQUIREMENTS_INVALID' },
+      });
+      expect(res.body[0].error.message).toMatch(/facilities: unknown code "projector"/);
+    });
+
+    it('SCRUM188_AC6_a_failed_availability_read_is_200_with_RECHECK_FAILED_and_no_driver_text', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const res = await realGet(fakeClient({ rpcError: { message: 'driver detail' } }));
+      spy.mockRestore();
+      expect(res.status).toBe(200);
+      expect(res.body[0]).toMatchObject({ current: null, newlyUnmet: [], error: { code: 'RECHECK_FAILED' } });
+      expect(JSON.stringify(res.body)).not.toMatch(/driver detail/);
+    });
+
+    it('SCRUM188_AC6_a_booking_left_on_the_old_date_is_200_with_availability_newly_unmet', async () => {
+      const moved = {
+        ...bookingRow,
+        starts_at: '2026-11-11T10:00:00+08:00',
+        ends_at: '2026-11-11T12:00:00+08:00',
+      };
+      const event = eventRow({
+        proposed_start: '2026-11-11T14:00:00+08:00',
+        proposed_end: '2026-11-11T16:00:00+08:00',
+        expected_attendance: 90,
+      });
+      const res = await realGet(fakeClient({ event, bookings: [moved] }));
+      expect(res.status).toBe(200);
+      expect(res.body[0]).toMatchObject({
+        bookingStartsAt: '2026-11-11T10:00:00+08:00',
+        bookingEndsAt: '2026-11-11T12:00:00+08:00',
+        newlyUnmet: ['Availability'],
+      });
+      expect(res.body[0].current.criteria[5]).toMatchObject({
+        met: false,
+        detail: 'Booking covers Wed 11 Nov 10:00–12:00; the event is now Wed 11 Nov 14:00–16:00',
+      });
     });
 
     it('SCRUM192_no_live_bookings_is_200_with_an_empty_list', async () => {

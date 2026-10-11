@@ -32,6 +32,12 @@
  * reason, when none does.
  *
  * The requester is each event's assigned coordinator, as the RPC requires.
+ * The overridden request names its unmet criteria in acknowledgedCriteria,
+ * as the form does since SCRUM-193/194: confirmUnsuitable alone is asked
+ * again.
+ *
+ * Only events that have not started yet are used (SCRUM-193/194, B10): a
+ * demo request on a past event would sit among real history.
  *
  * Skips cleanly, changing nothing, when there is no active venue. Each kind
  * is otherwise reported as kept, created or "none" with the reason -- for
@@ -41,8 +47,10 @@
  *
  * Safe to run twice: each seeded request is marked in its setup notes, and a
  * kind already present as a live request (pending, approved, flagged) is left
- * exactly as it is. To seed one again, withdraw or delete that booking (in the
- * Supabase Table Editor) and run this again.
+ * exactly as it is. To seed one again, or to take the demo requests away,
+ * run npm run booking-suitability:unseed (bookingSuitabilityCleanup.js),
+ * which withdraws every live request carrying the marker, then run this
+ * again.
  */
 
 import { supabase } from '../../src/config/supabaseClient.js';
@@ -50,8 +58,13 @@ import { createBookingRequest } from '../../src/services/bookingRequestService.j
 import { checkVenueSuitability } from '../../src/services/venueSuitabilityService.js';
 import { ConflictError } from '../../src/errors.js';
 
-const SUITABLE_NOTE = 'Seeded demo (SCRUM-188 AC7): suitable request';
-const OVERRIDDEN_NOTE = 'Seeded demo (SCRUM-188 AC7): overridden request';
+/**
+ * What marks a seeded request. bookingSuitabilityCleanup.js finds them by the
+ * same text; change both together.
+ */
+const SEED_NOTE_PREFIX = 'Seeded demo (SCRUM-188 AC7)';
+const SUITABLE_NOTE = `${SEED_NOTE_PREFIX}: suitable request`;
+const OVERRIDDEN_NOTE = `${SEED_NOTE_PREFIX}: overridden request`;
 const LIVE_STATUSES = ['pending', 'approved', 'flagged_for_review'];
 const EVENT_LIMIT = 20;
 
@@ -73,13 +86,18 @@ async function seededRequest(note) {
   return data?.[0] ?? null;
 }
 
-/** Approved events that can take a request: dated, sized, coordinated, none live yet. */
+/**
+ * Approved events that can take a request: dated, not yet started, sized,
+ * coordinated, none live yet.
+ */
 async function requestableEvents() {
   const { data, error } = await supabase
     .from('event_requests')
     .select('id, event_name, expected_attendance, assigned_coordinator_id')
     .eq('status', 'approved')
     .not('proposed_start', 'is', null)
+    // SCRUM-193/194 (B10): never seed onto an event that has already started.
+    .gt('proposed_start', new Date().toISOString())
     .not('proposed_end', 'is', null)
     .not('expected_attendance', 'is', null)
     .not('assigned_coordinator_id', 'is', null)
@@ -116,7 +134,7 @@ async function activeVenues() {
 }
 
 /** Request through the real path; null when this venue cannot take it. */
-async function tryRequest(event, venue, { note, confirmUnsuitable }) {
+async function tryRequest(event, venue, { note, confirmUnsuitable, acknowledgedCriteria = [] }) {
   try {
     return await createBookingRequest(
       {
@@ -125,6 +143,7 @@ async function tryRequest(event, venue, { note, confirmUnsuitable }) {
         roomLayoutCode: venue.layouts[0] ?? null,
         setupNotes: note,
         confirmUnsuitable,
+        acknowledgedCriteria,
       },
       event.assigned_coordinator_id,
       { client: supabase },
@@ -191,14 +210,20 @@ async function seedOverridden(events, venues, avoidEventId) {
       });
       const unmet = unmetOf(result);
       if (unmet.includes('Capacity') && !unmet.includes('Availability')) {
-        candidates.push({ event, venue, capacityOnly: unmet.length === 1 });
+        candidates.push({ event, venue, unmet, capacityOnly: unmet.length === 1 });
       }
     }
   }
   candidates.sort((a, b) => Number(b.capacityOnly) - Number(a.capacityOnly));
 
-  for (const { event, venue } of candidates) {
-    const booking = await tryRequest(event, venue, { note: OVERRIDDEN_NOTE, confirmUnsuitable: true });
+  for (const { event, venue, unmet } of candidates) {
+    // The criteria the check found unmet, named as the form names them; if
+    // one more fails by the time of the request, it is asked again and skipped.
+    const booking = await tryRequest(event, venue, {
+      note: OVERRIDDEN_NOTE,
+      confirmUnsuitable: true,
+      acknowledgedCriteria: unmet,
+    });
     if (booking) {
       const capacity = booking.suitability.criteria.find((c) => c.criterion === 'Capacity');
       console.log(`  created  overridden request on ${venue.name} for ${event.event_name}`
@@ -207,8 +232,8 @@ async function seedOverridden(events, venues, avoidEventId) {
     }
   }
 
-  console.log('  none     no active venue is smaller than a remaining Approved event\'s expected'
-    + ' attendance and free for it; no overridden request');
+  console.log('  none     no active venue is smaller than a remaining upcoming Approved event\'s'
+    + ' expected attendance and free for it; no overridden request');
 }
 
 async function main() {
@@ -224,8 +249,8 @@ async function main() {
   // as kept, and one that cannot be placed says why.
   const events = await requestableEvents();
   if (events.length === 0) {
-    console.log('  note     no Approved event with dates, an expected attendance and an assigned'
-      + ' coordinator is free of live booking requests.\n');
+    console.log('  note     no upcoming Approved event with dates, an expected attendance and an'
+      + ' assigned coordinator is free of live booking requests.\n');
   }
 
   const suitableEventId = await seedSuitable(events, venues);

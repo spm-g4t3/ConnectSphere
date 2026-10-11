@@ -29,14 +29,37 @@
 //     venueSuitabilityErrors.js.
 //   - The criteria and checked values are VenueSuitabilityResult's (SCRUM-191),
 //     reused unchanged, so the recheck reads the same as the check.
+//
+// SCRUM-188 review fixes:
+//   - A criterion overridden at request time reads "Not met — overridden by
+//     coordinator" in the opened result too (AC6), the same as Venue Staff
+//     see it.
+//   - An item the server could not recheck says why in fixed copy, keyed by
+//     its code (STORED_REQUIREMENTS_INVALID, RECHECK_FAILED); never its prose.
+//   - onLoaded(items) tells the parent what came back, so the event's
+//     "Find a venue" knows on load that a request is already live and does
+//     not offer a second one (every item here is a live booking).
+//   - A failed call uses recheckErrorMessage: a 400 here is not about the
+//     coordinator's requirement codes, since none are sent.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getEventVenueSuitability } from "../services/venueSuitabilityService";
-import { suitabilityErrorMessage } from "../services/venueSuitabilityErrors";
+import { recheckErrorMessage } from "../services/venueSuitabilityErrors";
 import VenueSuitabilityResult from "./VenueSuitabilityResult";
 
 const RETIRED_MESSAGE = "It can no longer host this event, so request another venue.";
 const ITEM_ERROR_MESSAGE = "This venue could not be rechecked. Press Recheck to try again.";
+const ITEM_ERROR_MESSAGES = {
+  STORED_REQUIREMENTS_INVALID:
+    "The requirements saved with this request can no longer be read, so it could not be rechecked.",
+  RECHECK_FAILED: "This venue could not be rechecked right now. Try Recheck.",
+};
+
+/** Fixed copy for an item's error, by its code (never the server's message). */
+function itemErrorMessage(error) {
+  const code = error?.code;
+  return code && Object.hasOwn(ITEM_ERROR_MESSAGES, code) ? ITEM_ERROR_MESSAGES[code] : ITEM_ERROR_MESSAGE;
+}
 
 function namesText(names) {
   return Array.isArray(names) ? names.filter(Boolean).join(", ") : "";
@@ -49,7 +72,8 @@ function BookingSuitability({ item }) {
   const current = item?.current ?? null;
   const suitable = current?.suitable === true;
   const newlyUnmet = namesText(item?.newlyUnmet);
-  const acceptedUnmet = item?.suitabilityOverridden ? namesText(item?.atRequest?.unmet) : "";
+  const overridden = item?.suitabilityOverridden ? (item?.atRequest?.unmet ?? []) : [];
+  const acceptedUnmet = namesText(overridden);
 
   let verdict = null;
   if (current) verdict = suitable ? "Suitable" : "Not suitable";
@@ -77,7 +101,7 @@ function BookingSuitability({ item }) {
 
       {!retired && item?.error && (
         <p className="event-venue-suitability__alert" role="alert">
-          {ITEM_ERROR_MESSAGE}
+          {itemErrorMessage(item.error)}
         </p>
       )}
 
@@ -96,29 +120,37 @@ function BookingSuitability({ item }) {
       {current && (
         <details className="event-venue-suitability__details" open={!suitable}>
           <summary>Criteria for {name}</summary>
-          <VenueSuitabilityResult result={current} />
+          <VenueSuitabilityResult result={current} overridden={overridden} />
         </details>
       )}
     </li>
   );
 }
 
-export default function EventVenueSuitability({ eventRequestId }) {
+export default function EventVenueSuitability({ eventRequestId, onLoaded }) {
   // Starts as loading, so the effect never has to set state before its call.
   const [state, setState] = useState({ status: "loading", items: [], error: null });
   // Bumped by "Recheck" and "Try again" to run the effect once more.
   const [attempt, setAttempt] = useState(0);
+  // Read through a ref, so a parent passing a new function each render does
+  // not rerun the recheck.
+  const onLoadedRef = useRef(onLoaded);
+  useEffect(() => {
+    onLoadedRef.current = onLoaded;
+  });
 
   useEffect(() => {
     let cancelled = false;
     getEventVenueSuitability(eventRequestId)
       .then((items) => {
         if (!cancelled) {
-          setState({ status: "done", items: Array.isArray(items) ? items : [], error: null });
+          const list = Array.isArray(items) ? items : [];
+          setState({ status: "done", items: list, error: null });
+          onLoadedRef.current?.(list);
         }
       })
       .catch((err) => {
-        if (!cancelled) setState({ status: "error", items: [], error: suitabilityErrorMessage(err) });
+        if (!cancelled) setState({ status: "error", items: [], error: recheckErrorMessage(err) });
       });
     // An answer for an event this view has since left, or a superseded
     // recheck, is dropped.

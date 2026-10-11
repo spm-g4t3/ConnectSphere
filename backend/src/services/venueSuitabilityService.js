@@ -74,24 +74,26 @@
  * occupancy rows are mapped locally by toOccupancyConflict.
  */
 
-import { ConflictError, ForbiddenError } from '../errors.js';
-import { SUITABILITY_CRITERIA, evaluateCriteria, toVenueLocal } from '../domain/venueMatching.js';
+import { AppError, ConflictError, ForbiddenError, ValidationError } from '../errors.js';
+import {
+  AVAILABILITY_CRITERION,
+  SUITABILITY_CHECK_CRITERIA,
+  evaluateCriteria,
+  toVenueLocal,
+} from '../domain/venueMatching.js';
 import { BOOKING_STATUS, getBookingStatusDisplay } from '../domain/bookingStatus.js';
 import { getEventRequestForCoordinator } from './eventRequestService.js';
 
-/** The sixth criterion's label, reported after SCRUM-189's five. */
-export const AVAILABILITY_CRITERION = 'Availability';
-
 /**
- * SCRUM-188 AC2: every criterion the check reports, in the order it reports
- * them. SUITABILITY_CRITERIA stays the five attribute labels, frozen, because
- * evaluateCriteria destructures it; Availability is added here, beside the
- * SQL that judges it.
+ * SCRUM-188 AC2: the sixth criterion's label, and every criterion the check
+ * reports, in the order it reports them. SUITABILITY_CRITERIA stays the five
+ * attribute labels, frozen, because evaluateCriteria destructures it.
+ * SCRUM-193/194 moved both constants into domain/venueMatching.js, so the
+ * booking request's validation can name the criteria without importing a
+ * service; they are re-exported here, beside the SQL that judges
+ * Availability, so every existing import keeps working.
  */
-export const SUITABILITY_CHECK_CRITERIA = Object.freeze([
-  ...SUITABILITY_CRITERIA,
-  AVAILABILITY_CRITERION,
-]);
+export { AVAILABILITY_CRITERION, SUITABILITY_CHECK_CRITERIA };
 
 async function resolveClient(client) {
   if (client) return client;
@@ -181,6 +183,56 @@ function describePadding(conflict) {
   return parts.length > 0 ? ` (${parts.join(', ')})` : '';
 }
 
+/**
+ * A period as 'Wed 11 Nov 10:00–12:00', or 'Wed 11 Nov 23:00 – Thu 12 Nov
+ * 01:00' across midnight: the day first, for the stale-booking sentence
+ * (SCRUM-193/194, B2), where two periods are read side by side.
+ */
+function formatDayPeriod(startsAt, endsAt) {
+  const start = toVenueLocal(startsAt);
+  const end = toVenueLocal(endsAt);
+  if (start.date === end.date) return `${dayOf(start)} ${clockOf(start)}–${clockOf(end)}`;
+  return `${dayOf(start)} ${clockOf(start)} – ${dayOf(end)} ${clockOf(end)}`;
+}
+
+/** An instant moved by a number of minutes, for the display of the padding. */
+function shiftMinutes(instant, minutes) {
+  return new Date(new Date(instant).getTime() + minutes * 60_000);
+}
+
+/**
+ * The event's own occupied period and its parts, for an unmet Availability
+ * (SCRUM-193/194, B4, Week 7 WK7-1): 'Needs 13:45–16:45 on Wed 11 Nov (setup
+ * 13:45–14:15, turnaround 16:00–16:45)'. A part of zero minutes is left out.
+ * Display only, like the "Free" line: venue_occupancy_conflicts() padded the
+ * same period with the same minutes when it decided.
+ */
+function describeNeeds(event, venue) {
+  const setup = venue.setupMinutes ?? 0;
+  const turnaround = venue.turnaroundMinutes ?? 0;
+  const occupiedStart = shiftMinutes(event.proposedStart, -setup);
+  const occupiedEnd = shiftMinutes(event.proposedEnd, turnaround);
+
+  const parts = [];
+  if (setup > 0) parts.push(`setup ${formatClockRange(occupiedStart, event.proposedStart)}`);
+  if (turnaround > 0) parts.push(`turnaround ${formatClockRange(event.proposedEnd, occupiedEnd)}`);
+  const padding = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+
+  return `Needs ${formatPeriod(occupiedStart, occupiedEnd)}${padding}`;
+}
+
+/**
+ * Whether a booking's own period still matches the event's (SCRUM-193/194,
+ * B2). Compared as instants, so '+08:00' and 'Z' forms of one time agree.
+ */
+function bookingPeriodMoved(bookingPeriod, event) {
+  if (!bookingPeriod) return false;
+  return (
+    new Date(bookingPeriod.startsAt).getTime() !== new Date(event.proposedStart).getTime() ||
+    new Date(bookingPeriod.endsAt).getTime() !== new Date(event.proposedEnd).getTime()
+  );
+}
+
 /** One conflict in words; see describeAvailability. */
 function describeConflict(conflict) {
   if (conflict.kind === 'block') {
@@ -207,12 +259,20 @@ function describeConflict(conflict) {
  * is free was decided by venue_occupancy_conflicts(), which padded the same
  * period with the same minutes.
  *
- * Not free: one phrase per conflict, joined with '; ', each with the period
+ * Not free: the event's own occupied period and its parts (SCRUM-193/194,
+ * B4), then one phrase per conflict, joined with '; ', each with the period
  * it occupies --
+ *   'Needs 13:45–16:45 on Wed 11 Nov (setup 13:45–14:15, turnaround
+ *    16:00–16:45). ' followed by
  *   booking  'Booked for Gala Night 09:30–12:45 on Wed 11 Nov
  *            (setup 09:30–10:00, turnaround 12:00–12:45)'
  *   hold     'Held for Gala Night …' the same way (SCRUM-491)
  *   block    'Blocked (maintenance) 10:00–14:00 on Wed 11 Nov', unpadded
+ *
+ * A booking whose own period no longer matches the event's (SCRUM-193/194,
+ * B2; options.bookingPeriod) opens with 'Booking covers Wed 11 Nov
+ * 10:00–12:00; the event is now Thu 12 Nov 10:00–12:00', followed by '. ' and
+ * the conflicts text above when there are any.
  *
  * Every time is on the venue's Singapore clock (toVenueLocal), the clock its
  * opening hours are written in, whatever zone the server runs in.
@@ -221,15 +281,28 @@ function describeConflict(conflict) {
  *                              to what counts against the event
  * @param {{proposedStart: string, proposedEnd: string}} event
  * @param {{setupMinutes: number, turnaroundMinutes: number}} venue
+ * @param {object} [options]
+ * @param {{startsAt: string, endsAt: string}|null} [options.bookingPeriod]
+ *   the booking's own stored period, when rechecking a booking
  * @returns {string}
  */
-export function describeAvailability(conflicts, event, venue) {
-  if (conflicts.length > 0) return conflicts.map(describeConflict).join('; ');
+export function describeAvailability(conflicts, event, venue, { bookingPeriod = null } = {}) {
+  const sentences = [];
+  if (bookingPeriodMoved(bookingPeriod, event)) {
+    sentences.push(
+      `Booking covers ${formatDayPeriod(bookingPeriod.startsAt, bookingPeriod.endsAt)}; ` +
+        `the event is now ${formatDayPeriod(event.proposedStart, event.proposedEnd)}`,
+    );
+  }
+  if (conflicts.length > 0) {
+    sentences.push(`${describeNeeds(event, venue)}. ${conflicts.map(describeConflict).join('; ')}`);
+  }
+  if (sentences.length > 0) return sentences.join('. ');
 
   const setup = venue.setupMinutes ?? 0;
   const turnaround = venue.turnaroundMinutes ?? 0;
-  const occupiedStart = new Date(new Date(event.proposedStart).getTime() - setup * 60_000);
-  const occupiedEnd = new Date(new Date(event.proposedEnd).getTime() + turnaround * 60_000);
+  const occupiedStart = shiftMinutes(event.proposedStart, -setup);
+  const occupiedEnd = shiftMinutes(event.proposedEnd, turnaround);
 
   const parts = [];
   if (setup > 0) parts.push(`${setup} min setup`);
@@ -253,7 +326,9 @@ function asList(value) {
  *  2. When userId is given, the caller must be the event's assigned
  *     coordinator. The endpoint always gives it; so does the booking request.
  *  3. The event must have both ends of its period (EVENT_DATES_MISSING, the
- *     code create_booking_request uses), or there is nothing to judge.
+ *     code create_booking_request uses), or there is nothing to judge, and an
+ *     expected attendance (EVENT_ATTENDANCE_MISSING, SCRUM-193/194 B1), or
+ *     Capacity would be judged against nothing and could read as met.
  *  4. The requirement codes must exist (400, assertKnownCodes), so a typo
  *     reads as the request's fault rather than as the venue "missing" it.
  *  5. The venue, with its attributes: unknown is a NotFoundError, and a
@@ -280,7 +355,8 @@ function asList(value) {
  * @throws {NotFoundError}   no such event (or a draft), or no such venue
  * @throws {ForbiddenError}  userId is not the event's assigned coordinator
  * @throws {ValidationError} a requirement code that does not exist
- * @throws {ConflictError}   EVENT_DATES_MISSING or VENUE_RETIRED
+ * @throws {ConflictError}   EVENT_DATES_MISSING, EVENT_ATTENDANCE_MISSING or
+ *                           VENUE_RETIRED
  * @throws {Error}           the availability read failed
  */
 export async function checkVenueSuitability({
@@ -303,7 +379,13 @@ export async function checkVenueSuitability({
 /**
  * Steps 2 and 3 of checkVenueSuitability, shared with checkEventVenues: the
  * caller must be the event's assigned coordinator (when userId is given), and
- * the event must have both ends of its period, or there is nothing to judge.
+ * the event must have both ends of its period and an expected attendance, or
+ * there is nothing to judge.
+ *
+ * SCRUM-193/194 (B1, AC3): without an attendance, meetsCapacity compares the
+ * capacity with null, which JavaScript reads as 0, so every venue "met"
+ * Capacity -- a pass the search (which requires an attendance) would never
+ * give. Refused like a missing date instead.
  */
 function assertCheckable(event, userId) {
   if (userId !== undefined && userId !== null && event.assignedCoordinatorId !== userId) {
@@ -318,6 +400,13 @@ function assertCheckable(event, userId) {
       { code: 'EVENT_DATES_MISSING' },
     );
   }
+
+  if (event.expectedAttendance === null || event.expectedAttendance === undefined) {
+    throw new ConflictError(
+      'This event has no expected attendance yet, so no venue can be checked against it',
+      { code: 'EVENT_ATTENDANCE_MISSING' },
+    );
+  }
 }
 
 /**
@@ -328,12 +417,22 @@ function assertCheckable(event, userId) {
  * rule without the event being read again for each booking. Both entry points
  * call this and nothing else judges, so there is no second copy to drift.
  *
+ * SCRUM-193/194 (B2): bookingPeriod, given only by checkEventVenues, is the
+ * booking's own stored period. When it no longer matches the event's, the
+ * booking does not cover the event as it now stands, so Availability is not
+ * met whatever the occupancy says, and its detail says so.
+ *
  * @param {object} event  the stored event, in camelCase
  * @param {{venueId: string, roomLayoutCode?: string|null, accessibility?: string[],
- *          facilities?: string[]}} requirements
+ *          facilities?: string[], bookingPeriod?: {startsAt: string, endsAt: string}|null}}
+ *        requirements
  * @param {object} db     a resolved Supabase client
  */
-async function judgeVenue(event, { venueId, roomLayoutCode = null, accessibility, facilities }, db) {
+async function judgeVenue(
+  event,
+  { venueId, roomLayoutCode = null, accessibility, facilities, bookingPeriod = null },
+  db,
+) {
   const layout = roomLayoutCode ?? null;
   const requested = {
     accessibility: asList(accessibility),
@@ -386,8 +485,8 @@ async function judgeVenue(event, { venueId, roomLayoutCode = null, accessibility
 
   const availability = {
     criterion: AVAILABILITY_CRITERION,
-    met: conflicts.length === 0,
-    detail: describeAvailability(conflicts, event, venue),
+    met: conflicts.length === 0 && !bookingPeriodMoved(bookingPeriod, event),
+    detail: describeAvailability(conflicts, event, venue, { bookingPeriod }),
     conflicts,
   };
 
@@ -422,8 +521,8 @@ export const LIVE_BOOKING_STATUSES = Object.freeze([
 
 /** What checkEventVenues reads of each booking, with its venue embedded. */
 const EVENT_BOOKING_COLUMNS =
-  'id, venue_id, status, room_layout_code, suitability_result, suitability_overridden, created_at, ' +
-  'venues(name, location)';
+  'id, venue_id, status, starts_at, ends_at, room_layout_code, suitability_result, ' +
+  'suitability_overridden, created_at, venues(name, location)';
 
 /**
  * PostgREST embeds a many-to-one as an object, but an array if it were ever
@@ -484,11 +583,26 @@ function atRequestOf(stored) {
  * the screen can say what changed rather than repeat what the coordinator
  * already overrode. With no stored verdict, every unmet criterion is new.
  *
+ * SCRUM-193/194 (B2): each booking's own period (starts_at, ends_at) is read
+ * too and returned as bookingStartsAt/bookingEndsAt. create_booking_request
+ * copied the event's period into the booking, and nothing moves it when the
+ * event later moves, so a booking can cover a period the event no longer
+ * has. Such a booking is reported with Availability not met (see judgeVenue)
+ * and so counts in newlyUnmet; the stored booking is not changed here.
+ *
  * Errors: the event-wide ones (no such event, not the assigned coordinator,
- * EVENT_DATES_MISSING) refuse the whole request, as the one-venue check does.
- * A retired venue (VENUE_RETIRED) belongs to one booking, so that item carries
- * current: null and the error, and the others still return. Anything else is
- * rethrown.
+ * EVENT_DATES_MISSING, EVENT_ATTENDANCE_MISSING) and a failed bookings read
+ * refuse the whole request, as the one-venue check does. Anything that goes
+ * wrong for one booking belongs to that booking (SCRUM-193/194, B3/B7): its
+ * item carries current: null, newlyUnmet [] and an error, and the others
+ * still return --
+ *   VENUE_RETIRED                the venue was retired
+ *   STORED_REQUIREMENTS_INVALID  the stored accessibility or facility codes
+ *                                are not a list of codes, or a code is no
+ *                                longer known; the check is not run with
+ *                                some codes silently dropped
+ *   RECHECK_FAILED               anything else: the venue cannot be read, the
+ *                                availability read failed, ...
  *
  * An event with no live bookings is [], not a 404, for the same reason the
  * venue search answers [].
@@ -499,6 +613,7 @@ function atRequestOf(stored) {
  * @param {object} [options.client]  a Supabase client
  * @returns {Promise<Array<{bookingId: string, venueId: string, venueName: string|null,
  *   venueLocation: string|null, status: string, statusDisplay: object,
+ *   bookingStartsAt: string|null, bookingEndsAt: string|null,
  *   suitabilityOverridden: boolean,
  *   current: {suitable: boolean, criteria: object[], checked: object}|null,
  *   atRequest: {suitable: boolean, unmet: string[]}|null,
@@ -506,8 +621,8 @@ function atRequestOf(stored) {
  *   oldest booking first
  * @throws {NotFoundError}   no such event, or a draft
  * @throws {ForbiddenError}  userId is not the event's assigned coordinator
- * @throws {ConflictError}   EVENT_DATES_MISSING
- * @throws {Error}           the bookings or availability read failed
+ * @throws {ConflictError}   EVENT_DATES_MISSING or EVENT_ATTENDANCE_MISSING
+ * @throws {Error}           the bookings read failed
  */
 export async function checkEventVenues(eventRequestId, { userId, client } = {}) {
   const db = await resolveClient(client);
@@ -526,11 +641,85 @@ export async function checkEventVenues(eventRequestId, { userId, client } = {}) 
   return Promise.all((data ?? []).map((booking) => recheckBooking(event, booking, db)));
 }
 
-/** One booking of checkEventVenues, rechecked; see there. */
+/** Thrown inside recheckBooking for codes stored in a shape that cannot be judged. */
+class StoredRequirementsError extends Error {}
+
+/**
+ * The accessibility and facility codes stored with a booking's result, as
+ * the recheck judges them (SCRUM-193/194, B3).
+ *
+ * No stored result, or one without `checked` (stored before SCRUM-190), or a
+ * list that is absent or null: none asked for, as before. Anything else that
+ * is not a list of non-empty strings cannot be judged, and is refused rather
+ * than dropped, since judging fewer codes than were asked for could report a
+ * venue as suitable when it is not.
+ */
+function storedCodes(stored) {
+  const checked = typeof stored === 'object' && stored !== null ? stored.checked : undefined;
+  if (checked === undefined || checked === null) return { accessibility: [], facilities: [] };
+  if (typeof checked !== 'object' || Array.isArray(checked)) {
+    throw new StoredRequirementsError('the stored checked value is not an object');
+  }
+
+  const codes = {};
+  for (const field of ['accessibility', 'facilities']) {
+    const value = checked[field];
+    if (value === undefined || value === null) {
+      codes[field] = [];
+    } else if (
+      Array.isArray(value) &&
+      value.every((code) => typeof code === 'string' && code.trim() !== '')
+    ) {
+      codes[field] = value;
+    } else {
+      throw new StoredRequirementsError(`${field} is not a list of codes`);
+    }
+  }
+  return codes;
+}
+
+/** One booking's failure as its item's error; see checkEventVenues. */
+function toItemError(err, booking) {
+  if (err instanceof ConflictError && err.code === 'VENUE_RETIRED') {
+    return { code: err.code, message: err.message };
+  }
+  // A ValidationError here can only come from assertKnownCodes: the stored
+  // codes include one no longer in its lookup table.
+  if (err instanceof StoredRequirementsError || err instanceof ValidationError) {
+    return {
+      code: 'STORED_REQUIREMENTS_INVALID',
+      message:
+        'The requirement codes stored with this request cannot be checked ' +
+        `(${err instanceof ValidationError ? summariseDetails(err) : err.message})`,
+    };
+  }
+  // Untyped means unanticipated: logged for whoever is on call, and never
+  // passed on, as handleError does for a whole request.
+  if (!(err instanceof AppError)) {
+    console.error(`Recheck of booking ${booking.id} failed:`, err);
+  }
+  return {
+    code: 'RECHECK_FAILED',
+    message:
+      err instanceof AppError
+        ? err.message
+        : 'This venue could not be rechecked just now; try again later',
+  };
+}
+
+function summariseDetails(err) {
+  const details = Array.isArray(err.details) ? err.details : [];
+  if (details.length === 0) return err.message;
+  return details.map(({ field, message }) => `${field}: ${message}`).join('; ');
+}
+
+/** One booking of checkEventVenues, rechecked; see there. Never throws. */
 async function recheckBooking(event, booking, db) {
   const venue = one(booking.venues) ?? {};
   const stored = booking.suitability_result ?? null;
   const atRequest = atRequestOf(stored);
+  const bookingStartsAt = booking.starts_at ?? null;
+  const bookingEndsAt = booking.ends_at ?? null;
 
   const item = {
     bookingId: booking.id,
@@ -539,6 +728,8 @@ async function recheckBooking(event, booking, db) {
     venueLocation: venue.location ?? null,
     status: booking.status,
     statusDisplay: getBookingStatusDisplay(booking.status),
+    bookingStartsAt,
+    bookingEndsAt,
     suitabilityOverridden: booking.suitability_overridden ?? false,
     current: null,
     atRequest,
@@ -547,22 +738,25 @@ async function recheckBooking(event, booking, db) {
   };
 
   try {
+    const { accessibility, facilities } = storedCodes(stored);
     item.current = await judgeVenue(
       event,
       {
         venueId: booking.venue_id,
         roomLayoutCode: booking.room_layout_code ?? null,
-        accessibility: stored?.checked?.accessibility ?? [],
-        facilities: stored?.checked?.facilities ?? [],
+        accessibility,
+        facilities,
+        // Compared only when both ends were read.
+        bookingPeriod:
+          bookingStartsAt && bookingEndsAt
+            ? { startsAt: bookingStartsAt, endsAt: bookingEndsAt }
+            : null,
       },
       db,
     );
   } catch (err) {
-    if (err instanceof ConflictError && err.code === 'VENUE_RETIRED') {
-      item.error = { code: err.code, message: err.message };
-      return item;
-    }
-    throw err;
+    item.error = toItemError(err, booking);
+    return item;
   }
 
   const unmetAtRequest = new Set(atRequest ? atRequest.unmet : []);

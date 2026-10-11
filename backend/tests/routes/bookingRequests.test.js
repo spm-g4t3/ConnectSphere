@@ -45,11 +45,13 @@ const START = '2026-12-01T09:00:00+00:00';
 const END = '2026-12-01T17:00:00+00:00';
 
 const SUITABLE = { suitable: true, criteria: [{ criterion: 'capacity', met: true }] };
+// Criterion labels as the real check reports them, since SCRUM-193/194's
+// acknowledgedCriteria names the unmet ones by label.
 const UNSUITABLE = {
   suitable: false,
   criteria: [
-    { criterion: 'capacity', met: false, detail: 'Capacity 80 < expected attendance 150' },
-    { criterion: 'facilities', met: true },
+    { criterion: 'Capacity', met: false, detail: 'Capacity 80 < expected attendance 150' },
+    { criterion: 'Facilities', met: true },
   ],
 };
 
@@ -536,13 +538,14 @@ describe('SCRUM-252: the suitability check (N10)', () => {
     expect(res.body.code).toBe('SUITABILITY_CONFIRMATION_REQUIRED');
     // Only the criteria that were not met.
     expect(res.body.conflicts).toEqual([UNSUITABLE.criteria[0]]);
-    expect(rpcCall(client).args).toMatchObject({ p_suitability: UNSUITABLE, p_confirm_unsuitable: false });
+    // SCRUM-193/194: refused by the service before the function is called.
+    expect(rpcCall(client)).toBeUndefined();
   });
 
   it('SCRUM252_submits_once_the_coordinator_confirms', async () => {
     const client = clientFor(created({ suitability_result: UNSUITABLE, suitability_overridden: true }));
 
-    const res = await post(client, { ...BODY, confirmUnsuitable: true }, {
+    const res = await post(client, { ...BODY, confirmUnsuitable: true, acknowledgedCriteria: ['Capacity'] }, {
       checkSuitability: vi.fn(async () => UNSUITABLE),
     });
 
@@ -559,11 +562,93 @@ describe('SCRUM-252: the suitability check (N10)', () => {
 
   it('SCRUM252_the_result_is_computed_by_the_server_whatever_the_body_says', async () => {
     const checkSuitability = vi.fn(async () => UNSUITABLE);
-    const client = clientFor(ok({ outcome: 'suitability_confirmation_required', suitability: UNSUITABLE }));
+    const client = clientFor(created({ suitability_result: UNSUITABLE, suitability_overridden: true }));
 
-    await post(client, { ...BODY, suitable: true, suitability: SUITABLE }, { checkSuitability });
+    await post(
+      client,
+      { ...BODY, suitable: true, suitability: SUITABLE, confirmUnsuitable: true, acknowledgedCriteria: ['Capacity'] },
+      { checkSuitability },
+    );
 
     expect(rpcCall(client).args.p_suitability).toEqual(UNSUITABLE);
+  });
+
+  // SCRUM-193/194 (F2, SCRUM-188 AC7): an unsuitable venue is confirmed only
+  // for the criteria the coordinator names.
+  const TWO_UNMET = {
+    suitable: false,
+    criteria: [
+      { criterion: 'Capacity', met: false, detail: 'Capacity 80 < expected attendance 150' },
+      { criterion: 'Facilities', met: true, detail: 'None requested' },
+      { criterion: 'Availability', met: false, detail: 'Needs … Blocked …' },
+    ],
+  };
+
+  it.each([
+    ['confirmUnsuitable alone', { confirmUnsuitable: true }],
+    ['only some of the unmet criteria', { confirmUnsuitable: true, acknowledgedCriteria: ['Capacity'] }],
+    ['the criteria without confirmUnsuitable', { acknowledgedCriteria: ['Capacity', 'Availability'] }],
+    ['other criteria than the unmet ones', { confirmUnsuitable: true, acknowledgedCriteria: ['Layout', 'Capacity'] }],
+  ])('SCRUM188_AC7_%s_is_asked_again_and_nothing_is_written', async (_label, extra) => {
+    const client = clientFor();
+
+    const res = await post(client, { ...BODY, ...extra }, { checkSuitability: vi.fn(async () => TWO_UNMET) });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('SUITABILITY_CONFIRMATION_REQUIRED');
+    expect(res.body.conflicts).toEqual([TWO_UNMET.criteria[0], TWO_UNMET.criteria[2]]);
+    expect(rpcCall(client)).toBeUndefined();
+  });
+
+  it('SCRUM188_AC7_every_unmet_criterion_named_is_requested_as_overridden', async () => {
+    const client = clientFor(created({ suitability_result: TWO_UNMET, suitability_overridden: true }));
+
+    const res = await post(
+      client,
+      { ...BODY, confirmUnsuitable: true, acknowledgedCriteria: ['Availability', 'Capacity'] },
+      { checkSuitability: vi.fn(async () => TWO_UNMET) },
+    );
+
+    expect(res.status).toBe(201);
+    expect(rpcCall(client).args).toMatchObject({ p_suitability: TWO_UNMET, p_confirm_unsuitable: true });
+  });
+
+  it('SCRUM188_AC7_naming_more_than_the_unmet_criteria_is_still_confirmed', async () => {
+    const client = clientFor(created({ suitability_result: UNSUITABLE, suitability_overridden: true }));
+
+    const res = await post(
+      client,
+      { ...BODY, confirmUnsuitable: true, acknowledgedCriteria: ['Capacity', 'Availability'] },
+      { checkSuitability: vi.fn(async () => UNSUITABLE) },
+    );
+
+    expect(res.status).toBe(201);
+    expect(rpcCall(client).args.p_confirm_unsuitable).toBe(true);
+  });
+
+  it('SCRUM188_AC7_an_unknown_acknowledged_criterion_is_400_before_any_read', async () => {
+    const client = clientFor();
+    const checkSuitability = vi.fn(async () => UNSUITABLE);
+
+    const res = await post(
+      client,
+      { ...BODY, confirmUnsuitable: true, acknowledgedCriteria: ['capacity'] },
+      { checkSuitability },
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.details[0].field).toBe('acknowledgedCriteria');
+    expect(client.calls).toEqual([]);
+    expect(checkSuitability).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM188_AC7_acknowledging_criteria_for_a_suitable_venue_changes_nothing', async () => {
+    const client = clientFor();
+
+    const res = await post(client, { ...BODY, acknowledgedCriteria: ['Capacity'] });
+
+    expect(res.status).toBe(201);
+    expect(rpcCall(client).args.p_confirm_unsuitable).toBe(false);
   });
 
   it('SCRUM190_the_default_checker_judges_the_stored_event_and_venue_and_its_result_is_stored', async () => {

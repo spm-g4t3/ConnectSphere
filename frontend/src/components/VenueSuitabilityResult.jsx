@@ -26,37 +26,29 @@
 // criterion the coordinator chose to override reads "Not met — overridden by
 // coordinator", so Venue Staff can tell an override from an oversight.
 // Without the prop the output is exactly what SCRUM-191 rendered.
+//
+// SCRUM-188 review fixes:
+//   - A criterion that carries its codes (Layout's layout/offers,
+//     Accessibility's and Facilities' missing) reads as labels, not raw codes
+//     (venueSuitabilityDisplay.js). An older stored result without them shows
+//     its detail, as before.
+//   - An optional `subject` (the venue's name) is read out with the verdict,
+//     "Hall A: Not suitable", so a screen reader user hears which venue the
+//     answer is for. It is visually hidden: the heading above already says.
 
-import { toVenueWallClock } from "../services/datetimeFormat";
+import { formatVenuePeriod } from "../services/datetimeFormat";
 import {
   ACCESSIBILITY_FEATURES,
   FACILITIES,
   ROOM_LAYOUTS,
 } from "../services/venueLookups";
+import { criterionDetailText, labelFor } from "../services/venueSuitabilityDisplay";
 
 const NONE_REQUESTED = "None requested";
-
-function labelFor(code, options) {
-  return options.find((option) => option.code === code)?.label ?? code;
-}
 
 function codesText(codes, options) {
   if (!Array.isArray(codes) || codes.length === 0) return NONE_REQUESTED;
   return codes.map((code) => labelFor(code, options)).join(", ");
-}
-
-/**
- * "2026-11-11 10:00 – 12:00 (Singapore time)", or both dates in full when the
- * period crosses a Singapore midnight.
- */
-function periodText(startsAt, endsAt) {
-  const start = toVenueWallClock(startsAt);
-  const end = toVenueWallClock(endsAt);
-  if (!start || !end) return "Not set";
-  const [startDate, startTime] = start.split("T");
-  const [endDate, endTime] = end.split("T");
-  const endText = startDate === endDate ? endTime : `${endDate} ${endTime}`;
-  return `${startDate} ${startTime} – ${endText} (Singapore time)`;
 }
 
 /** An unmet criterion the coordinator chose to go ahead without. */
@@ -72,14 +64,15 @@ function metText(criterion, overriddenNames) {
     : "Not met";
 }
 
-export default function VenueSuitabilityResult({ result, overridden }) {
+export default function VenueSuitabilityResult({ result, overridden, subject }) {
   const overriddenNames = Array.isArray(overridden) ? overridden : [];
   const criteria = Array.isArray(result?.criteria) ? result.criteria : [];
   const checked = result?.checked ?? {};
   const suitable = result?.suitable === true;
+  const verdict = suitable ? "Suitable" : "Not suitable";
 
   const checkedRows = [
-    { term: "When", value: periodText(checked.startsAt, checked.endsAt) },
+    { term: "When", value: formatVenuePeriod(checked.startsAt, checked.endsAt) },
     { term: "Expected attendance", value: checked.expectedAttendance ?? "Not specified" },
     {
       term: "Layout",
@@ -95,22 +88,30 @@ export default function VenueSuitabilityResult({ result, overridden }) {
         className={`venue-suitability__verdict venue-suitability__verdict--${suitable ? "met" : "unmet"}`}
         role="status"
       >
-        {suitable ? "Suitable" : "Not suitable"}
+        {subject ? (
+          <>
+            <span className="visually-hidden">{subject}: </span>
+            <span>{verdict}</span>
+          </>
+        ) : (
+          verdict
+        )}
       </p>
 
       <ul className="venue-suitability__criteria" aria-label="Criteria">
-        {criteria.map((criterion, i) => (
-          <li
-            key={`${criterion?.criterion ?? "criterion"}-${i}`}
-            className={`venue-suitability__criterion venue-suitability__criterion--${criterion?.met ? "met" : "unmet"}${isOverridden(criterion, overriddenNames) ? " venue-suitability__criterion--overridden" : ""}`}
-          >
-            <strong>{metText(criterion, overriddenNames)}</strong>
-            <span className="venue-suitability__criterion-name">{criterion?.criterion}</span>
-            {criterion?.detail && (
-              <span className="venue-suitability__criterion-detail">{criterion.detail}</span>
-            )}
-          </li>
-        ))}
+        {criteria.map((criterion, i) => {
+          const detail = criterionDetailText(criterion);
+          return (
+            <li
+              key={`${criterion?.criterion ?? "criterion"}-${i}`}
+              className={`venue-suitability__criterion venue-suitability__criterion--${criterion?.met ? "met" : "unmet"}${isOverridden(criterion, overriddenNames) ? " venue-suitability__criterion--overridden" : ""}`}
+            >
+              <strong>{metText(criterion, overriddenNames)}</strong>
+              <span className="venue-suitability__criterion-name">{criterion?.criterion}</span>
+              {detail && <span className="venue-suitability__criterion-detail">{detail}</span>}
+            </li>
+          );
+        })}
       </ul>
 
       <h4>Checked against</h4>

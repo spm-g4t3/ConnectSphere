@@ -20,6 +20,7 @@
     "equipment:seed": "node db/seeds/equipment.js",
     "venue-holds:seed": "node db/seeds/venueHolds.js",
     "booking-suitability:seed": "node db/seeds/bookingSuitability.js",
+    "booking-suitability:unseed": "node db/seeds/bookingSuitabilityCleanup.js",
     "venue-blocks:check": "node scripts/check-venue-blocks.js",
     "venue-calendar:check": "node scripts/check-venue-calendar.js",
     "booking-requests:check": "node scripts/check-booking-requests.js",

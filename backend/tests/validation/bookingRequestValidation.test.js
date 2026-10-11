@@ -29,6 +29,7 @@ describe('validateCreateBookingRequest', () => {
       confirmUnsuitable: false,
       accessibility: [],
       facilities: [],
+      acknowledgedCriteria: [],
     });
   });
 
@@ -48,6 +49,7 @@ describe('validateCreateBookingRequest', () => {
       confirmUnsuitable: true,
       accessibility: [],
       facilities: [],
+      acknowledgedCriteria: [],
     });
   });
 
@@ -111,6 +113,65 @@ describe('SCRUM188_AC1 validateCreateBookingRequest carries the requirement code
       { field: 'venueId', message: 'must be a valid venue id' },
       { field: 'facilities', message: 'entry 1 must be a non-empty code' },
       { field: 'facilities', message: 'entry 2 must be a non-empty code' },
+    ]);
+  });
+});
+
+
+describe('SCRUM188_AC7 validateCreateBookingRequest reads acknowledgedCriteria (SCRUM-193/194)', () => {
+  const faultsOf = (input) => {
+    try {
+      validateCreateBookingRequest(input);
+    } catch (e) {
+      return e;
+    }
+    return null;
+  };
+
+  it.each([undefined, null])('SCRUM188_AC7_acknowledged_criteria_%j_is_none', (value) => {
+    expect(validateCreateBookingRequest({ ...BASE, acknowledgedCriteria: value }).acknowledgedCriteria).toEqual([]);
+  });
+
+  it('SCRUM188_AC7_acknowledged_criteria_are_kept_by_label_trimmed_and_once_each', () => {
+    const result = validateCreateBookingRequest({
+      ...BASE,
+      confirmUnsuitable: true,
+      acknowledgedCriteria: ['Capacity', ' Operating hours ', 'Capacity', 'Availability'],
+    });
+    expect(result.acknowledgedCriteria).toEqual(['Capacity', 'Operating hours', 'Availability']);
+  });
+
+  it('SCRUM188_AC7_all_six_criteria_can_be_acknowledged', () => {
+    const all = ['Capacity', 'Operating hours', 'Layout', 'Accessibility', 'Facilities', 'Availability'];
+    expect(validateCreateBookingRequest({ ...BASE, acknowledgedCriteria: all }).acknowledgedCriteria).toEqual(all);
+  });
+
+  it('SCRUM188_AC7_an_unknown_criterion_is_400_naming_it', () => {
+    const err = faultsOf({ ...BASE, acknowledgedCriteria: ['Capacity', 'capacity', 'Parking'] });
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toHaveLength(2);
+    expect(err.details.map((d) => d.field)).toEqual(['acknowledgedCriteria', 'acknowledgedCriteria']);
+    expect(err.details[0].message).toMatch(/^entry 1 is not a criterion: "capacity"/);
+    expect(err.details[1].message).toMatch(/^entry 2 is not a criterion: "Parking"/);
+  });
+
+  it.each([
+    ['a string', 'Capacity', 'must be a list of criterion names'],
+    ['an object', { Capacity: true }, 'must be a list of criterion names'],
+    ['seven entries', ['Capacity', 'Capacity', 'Capacity', 'Capacity', 'Capacity', 'Capacity', 'Capacity'],
+      'must name at most 6 criteria'],
+  ])('SCRUM188_AC7_acknowledged_criteria_as_%s_is_refused', (_label, value, message) => {
+    const err = faultsOf({ ...BASE, acknowledgedCriteria: value });
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'acknowledgedCriteria', message }]);
+  });
+
+  it('SCRUM188_AC7_blank_or_non_text_entries_are_refused_with_the_other_faults', () => {
+    const err = faultsOf({ ...BASE, venueId: 'nope', acknowledgedCriteria: ['  ', 7] });
+    expect(err.details).toEqual([
+      { field: 'venueId', message: 'must be a valid venue id' },
+      { field: 'acknowledgedCriteria', message: 'entry 0 must be a non-empty criterion name' },
+      { field: 'acknowledgedCriteria', message: 'entry 1 must be a non-empty criterion name' },
     ]);
   });
 });

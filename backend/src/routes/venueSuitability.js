@@ -33,7 +33,9 @@
  *
  * Statuses: 200; 400 a malformed id or code, or an unknown code; 401; 403
  * wrong role, or not the event's assigned coordinator; 404 no such event or
- * venue; 409 with code EVENT_DATES_MISSING or VENUE_RETIRED; 500.
+ * venue; 409 with code EVENT_DATES_MISSING, EVENT_ATTENDANCE_MISSING
+ * (SCRUM-193/194: an event with no expected attendance cannot be judged on
+ * Capacity) or VENUE_RETIRED; 500.
  *
  *   GET /bookings
  *
@@ -47,12 +49,20 @@
  *
  * Answers an array, oldest booking first, each with the live verdict
  * (current), the stored one (atRequest) and newlyUnmet. An event with no live
- * bookings is 200 with [], not 404. A retired venue is that item's error, not
- * the response's.
+ * bookings is 200 with [], not 404. Each item also carries its booking's own
+ * period (bookingStartsAt, bookingEndsAt); when that no longer matches the
+ * event's, Availability is not met and says so (SCRUM-193/194).
+ *
+ * A failure that belongs to one booking is that item's error, not the
+ * response's: the item has current null, newlyUnmet [] and error { code,
+ * message }, with code VENUE_RETIRED, STORED_REQUIREMENTS_INVALID (the stored
+ * accessibility or facility codes cannot be judged) or RECHECK_FAILED
+ * (anything else, such as a venue or availability read that failed).
  *
  * Statuses: 200; 400 a malformed event id; 401; 403 wrong role, or not the
  * event's assigned coordinator; 404 no such event; 409 with code
- * EVENT_DATES_MISSING; 500.
+ * EVENT_DATES_MISSING or EVENT_ATTENDANCE_MISSING; 500, including a failed
+ * read of the event's bookings.
  */
 
 import express from 'express';

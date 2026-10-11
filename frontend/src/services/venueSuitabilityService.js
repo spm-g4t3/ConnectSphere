@@ -23,7 +23,12 @@ import { apiClient } from "./apiClient";
  * Failures, as the backend answers them: 400 with details[] (a malformed id
  * or an unknown code), 401, 403 (not an Event Coordinator, or not the event's
  * assigned one), 404 (no such event or venue), and 409 with a `code`:
- * EVENT_DATES_MISSING or VENUE_RETIRED. venueSuitabilityErrors.js words them.
+ * EVENT_DATES_MISSING, EVENT_ATTENDANCE_MISSING or VENUE_RETIRED.
+ * venueSuitabilityErrors.js words them.
+ *
+ * SCRUM-188: a Layout entry may also carry { layout, offers } and an
+ * Accessibility or Facilities entry { missing, requested }, as codes;
+ * venueSuitabilityDisplay.js turns them into labels, falling back to detail.
  *
  * @param {string} eventRequestId
  * @param {string} venueId
@@ -64,14 +69,21 @@ export async function checkVenueSuitability(eventRequestId, venueId, requirement
  * venue comes back as an item with `error` (code VENUE_RETIRED) and
  * current: null, while the event's other bookings still come back.
  *
+ * SCRUM-188: each item also carries bookingStartsAt/bookingEndsAt, and an
+ * item's error.code may be VENUE_RETIRED, STORED_REQUIREMENTS_INVALID or
+ * RECHECK_FAILED (current: null, newlyUnmet: []). EventVenueSuitability words
+ * them from the code.
+ *
  * Failures: 400 (a malformed id), 401, 403 (not the event's assigned
- * coordinator), 404, and 409 EVENT_DATES_MISSING for the whole event.
+ * coordinator), 404, and 409 EVENT_DATES_MISSING or EVENT_ATTENDANCE_MISSING
+ * for the whole event.
  * venueSuitabilityErrors.js words them.
  *
  * @param {string} eventRequestId
  * @returns {Promise<Array<{bookingId: string, venueId: string,
  *   venueName: string, venueLocation: string, status: string,
  *   statusDisplay: Object, suitabilityOverridden: boolean,
+ *   bookingStartsAt: string, bookingEndsAt: string,
  *   current: Object|null, atRequest: {suitable: boolean, unmet: string[]}|null,
  *   newlyUnmet: string[], error?: {code: string, message: string}}>>}
  */

@@ -26,6 +26,7 @@
 import { ValidationError } from '../errors.js';
 import { isPlausibleId } from './eventChangeRequestValidation.js';
 import { checkCodeArray } from './venueValidation.js';
+import { SUITABILITY_CHECK_CRITERIA } from '../domain/venueMatching.js';
 
 /** Mirrors bookings_setup_notes_length in 030. */
 export const SETUP_NOTES_MAX_LENGTH = 1000;
@@ -99,6 +100,54 @@ export function checkOptionalCodeLists(errors, input) {
 }
 
 /**
+ * SCRUM-193/194 (F2, SCRUM-188 AC7): the criteria the coordinator says they
+ * accept the venue does not meet.
+ *
+ * Optional; absent or null is none, []. Otherwise a list of at most six
+ * criterion labels, each one of SUITABILITY_CHECK_CRITERIA exactly as the
+ * check reports it ('Capacity', 'Operating hours', ... 'Availability'). An
+ * unknown label is refused rather than ignored: it is a statement the
+ * coordinator made, and silently dropping it could leave them believing they
+ * had accepted something they had not. A label repeated counts once.
+ *
+ * @param {{add: Function}} errors  a collector
+ * @param {*} value
+ * @returns {string[]}
+ */
+function checkAcknowledgedCriteria(errors, value) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    errors.add('acknowledgedCriteria', 'must be a list of criterion names');
+    return [];
+  }
+  if (value.length > SUITABILITY_CHECK_CRITERIA.length) {
+    errors.add(
+      'acknowledgedCriteria',
+      `must name at most ${SUITABILITY_CHECK_CRITERIA.length} criteria`,
+    );
+    return [];
+  }
+  const names = [];
+  let valid = true;
+  value.forEach((entry, index) => {
+    if (typeof entry !== 'string' || entry.trim() === '') {
+      errors.add('acknowledgedCriteria', `entry ${index} must be a non-empty criterion name`);
+      valid = false;
+    } else if (!SUITABILITY_CHECK_CRITERIA.includes(entry.trim())) {
+      errors.add(
+        'acknowledgedCriteria',
+        `entry ${index} is not a criterion: "${entry.trim()}" (expected one of ` +
+          `${SUITABILITY_CHECK_CRITERIA.join(', ')})`,
+      );
+      valid = false;
+    } else if (!names.includes(entry.trim())) {
+      names.push(entry.trim());
+    }
+  });
+  return valid ? names : [];
+}
+
+/**
  * SCRUM-253: which booking request is being withdrawn must at least be shaped
  * like an id, so a value that can never match one costs no round trip.
  *
@@ -128,10 +177,15 @@ export function validateBookingRequestId(id) {
  * @param {string[]} [input.accessibility] SCRUM-190: accessibility feature
  *                                        codes to judge the venue against
  * @param {string[]} [input.facilities]   SCRUM-190: facility codes, likewise
+ * @param {string[]} [input.acknowledgedCriteria] SCRUM-193/194: the criteria the
+ *                                        coordinator accepts the venue does not
+ *                                        meet, by label; see
+ *                                        checkAcknowledgedCriteria
  * @returns {{eventRequestId: string, venueId: string, roomLayoutCode: string|null,
  *            setupNotes: string|null, confirmUnsuitable: boolean,
- *            accessibility: string[], facilities: string[]}}  the code lists
- *            trimmed, and [] when none were sent
+ *            accessibility: string[], facilities: string[],
+ *            acknowledgedCriteria: string[]}}  the code lists trimmed, and []
+ *            when none were sent
  * @throws {ValidationError} listing every problem found, not just the first
  */
 export function validateCreateBookingRequest(input) {
@@ -168,6 +222,8 @@ export function validateCreateBookingRequest(input) {
   // accepts is a list a booking request accepts.
   const { accessibility, facilities } = checkOptionalCodeLists(errors, input);
 
+  const acknowledgedCriteria = checkAcknowledgedCriteria(errors, input.acknowledgedCriteria);
+
   if (errors.hasErrors) {
     const summary = errors.details.map(({ field, message }) => `${field}: ${message}`).join('; ');
     throw new ValidationError(`Invalid booking request -- ${summary}`, errors.details);
@@ -181,5 +237,6 @@ export function validateCreateBookingRequest(input) {
     confirmUnsuitable,
     accessibility,
     facilities,
+    acknowledgedCriteria,
   };
 }

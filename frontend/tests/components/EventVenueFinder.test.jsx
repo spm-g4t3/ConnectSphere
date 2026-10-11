@@ -1271,6 +1271,7 @@ describe("SCRUM-191 check a venue's suitability from the event (SCRUM188_AC1/AC2
       accessibility: ["hearing_loop"],
       facilities: ["projector"],
       confirmUnsuitable: true,
+      acknowledgedCriteria: ["Capacity"],
     });
   });
 

@@ -33,6 +33,10 @@ import { apiClient } from "./apiClient";
  * @param {string[]} [input.facilities]     SCRUM-191, facility codes
  * @param {string} [input.setupNotes]
  * @param {boolean} [input.confirmUnsuitable]
+ * @param {string[]} [input.acknowledgedCriteria]  SCRUM-188 (AC7), the names of
+ *   the unmet criteria the coordinator confirmed; sent with confirmUnsuitable.
+ *   The server accepts the override only when they cover every criterion it
+ *   finds unmet, otherwise it answers SUITABILITY_CONFIRMATION_REQUIRED again.
  * @returns {Promise<Object>} the new request, always status "pending"
  */
 export async function createBookingRequest(input) {
