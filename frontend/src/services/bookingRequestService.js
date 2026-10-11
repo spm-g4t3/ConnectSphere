@@ -9,10 +9,12 @@ import { apiClient } from "./apiClient";
 /**
  * Requests a venue for an event (POST /booking-requests).
  *
- * Only the coordinator's choices go in the body. The period and the event's
- * requirements come from the stored event, the requester from the token, the
- * suitability result from the server, and the status is always pending, so
- * none of them is sent.
+ * Only the coordinator's choices go in the body: the venue, setup notes, and
+ * (SCRUM-191) the room layout and accessibility and facility codes the
+ * suitability check judges, each left out when blank or empty. The period and
+ * the event's free-text requirements come from the stored event, the
+ * requester from the token, the suitability result from the server, and the
+ * status is always pending, so none of them is sent.
  *
  * Failures, as the backend answers them: 400 with details[], 401, 403 (not the
  * event's assigned coordinator), 404 (no such event or venue), 503 (suitability
@@ -26,8 +28,15 @@ import { apiClient } from "./apiClient";
  * @param {Object} input
  * @param {string} input.eventRequestId
  * @param {string} input.venueId
+ * @param {string} [input.roomLayoutCode]   SCRUM-191, one room layout code
+ * @param {string[]} [input.accessibility]  SCRUM-191, accessibility feature codes
+ * @param {string[]} [input.facilities]     SCRUM-191, facility codes
  * @param {string} [input.setupNotes]
  * @param {boolean} [input.confirmUnsuitable]
+ * @param {string[]} [input.acknowledgedCriteria]  SCRUM-188 (AC7), the names of
+ *   the unmet criteria the coordinator confirmed; sent with confirmUnsuitable.
+ *   The server accepts the override only when they cover every criterion it
+ *   finds unmet, otherwise it answers SUITABILITY_CONFIRMATION_REQUIRED again.
  * @returns {Promise<Object>} the new request, always status "pending"
  */
 export async function createBookingRequest(input) {

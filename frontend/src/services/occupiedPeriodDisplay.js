@@ -74,14 +74,19 @@ export function occupiedPeriodParts(entry) {
  * labels exist to tell parts apart; with one part there is nothing to tell
  * apart, so a booking at such a venue reads exactly as it did before AC7.
  *
+ * SCRUM-188: `formatPart` writes each range instead, for a screen that reads
+ * venue periods on the Singapore wall clock (datetimeFormat's
+ * formatVenueRange); the caller then adds the zone note once.
+ *
  * @param {Object} entry  as occupiedPeriodParts takes it
+ * @param {(startsAt: string, endsAt: string) => string} [formatPart=formatRange]
  * @returns {string}
  */
-export function formatOccupiedPeriod(entry) {
+export function formatOccupiedPeriod(entry, formatPart = formatRange) {
   const parts = occupiedPeriodParts(entry);
-  if (parts.length === 1) return formatRange(parts[0].startsAt, parts[0].endsAt);
+  if (parts.length === 1) return formatPart(parts[0].startsAt, parts[0].endsAt);
   return parts
-    .map((part) => `${part.label} ${formatRange(part.startsAt, part.endsAt)}`)
+    .map((part) => `${part.label} ${formatPart(part.startsAt, part.endsAt)}`)
     .join(" · ");
 }
 

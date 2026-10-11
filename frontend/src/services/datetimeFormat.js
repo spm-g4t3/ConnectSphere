@@ -198,3 +198,44 @@ export function toVenueOffsetIsoString(localValue) {
   const seconds = /T\d{2}:\d{2}:\d{2}$/.test(localValue) ? "" : ":00";
   return `${localValue}${seconds}${VENUE_UTC_OFFSET}`;
 }
+
+/**
+ * SCRUM-188: a venue period as Singapore wall clock, without the zone note:
+ * "2026-11-11 10:00 – 12:00", or both dates in full when the period crosses
+ * a Singapore midnight ("2026-11-11 22:00 – 2026-11-12 01:00").
+ *
+ * Read the same on every device, because the server judged it against venue
+ * hours kept in Singapore time. formatVenuePeriod adds the note once; a line
+ * made of several ranges (setup · event · turnaround) adds it once at the end.
+ *
+ * @param {string} [startsAt]  an instant from the API, with an offset
+ * @param {string} [endsAt]
+ * @param {string} [fallback="Not set"]  when either end is unreadable
+ * @returns {string}
+ */
+export function formatVenueRange(startsAt, endsAt, fallback = "Not set") {
+  const start = toVenueWallClock(startsAt);
+  const end = toVenueWallClock(endsAt);
+  if (!start || !end) return fallback;
+  const [startDate, startTime] = start.split("T");
+  const [endDate, endTime] = end.split("T");
+  const endText = startDate === endDate ? endTime : `${endDate} ${endTime}`;
+  return `${startDate} ${startTime} – ${endText}`;
+}
+
+/** The note every venue-time period carries. */
+export const VENUE_TIME_NOTE = "(Singapore time)";
+
+/**
+ * formatVenueRange plus " (Singapore time)", or the fallback alone when either
+ * end is unreadable: "2026-11-11 10:00 – 12:00 (Singapore time)".
+ *
+ * @param {string} [startsAt]
+ * @param {string} [endsAt]
+ * @param {string} [fallback="Not set"]
+ * @returns {string}
+ */
+export function formatVenuePeriod(startsAt, endsAt, fallback = "Not set") {
+  if (!toVenueWallClock(startsAt) || !toVenueWallClock(endsAt)) return fallback;
+  return `${formatVenueRange(startsAt, endsAt)} ${VENUE_TIME_NOTE}`;
+}

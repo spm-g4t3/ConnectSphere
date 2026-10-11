@@ -354,6 +354,10 @@ describe('AC3: a venue can be retired, leaves search, and keeps its bookings', (
       startsAt: '2026-06-01T09:00:00+00:00', endsAt: '2026-06-01T17:00:00+00:00',
       status: 'approved', statusDisplay: getBookingStatusDisplay('approved'),
       createdAt: '2026-05-01T09:00:00+00:00',
+      // SCRUM-188 AC7: appWith() signs in as Venue Staff, who get each
+      // booking's suitability record; this older row stored none.
+      roomLayoutCode: null, eventName: null,
+      suitability: null, suitabilityOverridden: false, overriddenCriteria: [],
     }]);
   });
 
@@ -2028,16 +2032,25 @@ describe('SCRUM178_AC6 the bookings read is refused to Organisers and Attendees,
     createdAt: '2026-05-01T09:00:00+00:00',
   };
 
+  // SCRUM-188 AC7: Venue Staff also get each booking's suitability record;
+  // bookingRow stored none, so it reads as null. Coordinators' shape is
+  // unchanged.
+  const staffBookingBody = {
+    ...bookingBody,
+    roomLayoutCode: null, eventName: null,
+    suitability: null, suitabilityOverridden: false, overriddenCriteria: [],
+  };
+
   it.each([
-    ['Venue Staff', ROLE.VENUE_STAFF],
-    ['an Event Coordinator', ROLE.EVENT_COORDINATOR],
-  ])('SCRUM178_AC6_%s_gets_200_with_the_bookings', async (_label, role) => {
+    ['Venue Staff', ROLE.VENUE_STAFF, staffBookingBody],
+    ['an Event Coordinator', ROLE.EVENT_COORDINATOR, bookingBody],
+  ])('SCRUM178_AC6_%s_gets_200_with_the_bookings', async (_label, role, body) => {
     from.mockReturnValueOnce(queryStub(ok([bookingRow])));
 
     const res = await request(appWith(signedInAs(role))).get(BOOKINGS);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([bookingBody]);
+    expect(res.body).toEqual([body]);
     expect(from).toHaveBeenCalledWith('bookings');
   });
 
@@ -2067,6 +2080,109 @@ describe('SCRUM178_AC6 the bookings read is refused to Organisers and Attendees,
     expect(res.status).toBe(200);
     expect(res.body).toEqual([bookingBody]);
     expect(from.mock.calls.map(([table]) => table)).toEqual(['bookings']);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-188 AC7: "The suitability result, including any criterion the
+// coordinator chose to override, is attached to the booking request so that
+// Venue Staff can see it." The venue's bookings list carries it to Venue
+// Staff; Event Coordinators, who read the same list across every event on the
+// venue, keep the plain rows.
+// ---------------------------------------------------------------------------
+describe('SCRUM188_AC7 Venue Staff see each booking request\'s suitability record', () => {
+  const BOOKINGS = `/api/venues/${VENUE_ID}/bookings`;
+  const PLAIN_SELECT = 'id, venue_id, event_request_id, starts_at, ends_at, status, created_at';
+
+  const CRITERIA = [
+    { criterion: 'Capacity', met: false, detail: 'Capacity 80 < expected attendance 150' },
+    { criterion: 'Operating hours', met: true, detail: 'Event runs 09:00–17:00 on Friday; venue open 08:00–22:00' },
+    { criterion: 'Layout', met: true, detail: 'Layout theatre offered' },
+    { criterion: 'Accessibility', met: true, detail: 'None requested' },
+    { criterion: 'Facilities', met: true, detail: 'None requested' },
+    { criterion: 'Availability', met: true, detail: 'Available', conflicts: [] },
+  ];
+  const CHECKED = {
+    startsAt: '2026-06-05T01:00:00+00:00', endsAt: '2026-06-05T09:00:00+00:00',
+    expectedAttendance: 150, layout: 'theatre', accessibility: [], facilities: [],
+  };
+
+  const overriddenRow = {
+    id: 'b1', venue_id: VENUE_ID, event_request_id: EVENT_ID,
+    starts_at: '2026-06-05T01:00:00+00:00', ends_at: '2026-06-05T09:00:00+00:00',
+    status: 'pending', created_at: '2026-05-01T09:00:00+00:00',
+    room_layout_code: 'theatre',
+    suitability_result: { suitable: false, criteria: CRITERIA, checked: CHECKED },
+    suitability_overridden: true,
+    event_requests: { event_name: 'Freshmen Orientation' },
+  };
+  const plainBody = {
+    id: 'b1', venueId: VENUE_ID, eventRequestId: EVENT_ID,
+    startsAt: '2026-06-05T01:00:00+00:00', endsAt: '2026-06-05T09:00:00+00:00',
+    status: 'pending', statusDisplay: getBookingStatusDisplay('pending'),
+    createdAt: '2026-05-01T09:00:00+00:00',
+  };
+
+  it('SCRUM188_AC7_venue_staff_get_the_result_and_the_overridden_criteria', async () => {
+    const stub = queryStub(ok([overriddenRow]));
+    from.mockReturnValueOnce(stub);
+
+    const res = await request(appWith(signedInAs(ROLE.VENUE_STAFF))).get(BOOKINGS);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{
+      ...plainBody,
+      roomLayoutCode: 'theatre',
+      eventName: 'Freshmen Orientation',
+      suitability: { suitable: false, criteria: CRITERIA, checked: CHECKED },
+      suitabilityOverridden: true,
+      overriddenCriteria: ['Capacity'],
+    }]);
+    expect(stub.args('select')[0]).toContain('suitability_result');
+  });
+
+  it('SCRUM188_AC7_an_event_coordinator_gets_todays_shape_and_no_suitability_is_read', async () => {
+    const stub = queryStub(ok([overriddenRow]));
+    from.mockReturnValueOnce(stub);
+
+    const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR))).get(BOOKINGS);
+
+    // The list covers other coordinators' events, so their suitability
+    // records are neither read nor returned -- not merely hidden.
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([plainBody]);
+    expect(stub.args('select')).toEqual([PLAIN_SELECT]);
+  });
+
+  it('SCRUM188_AC7_a_coordinator_cannot_ask_for_the_suitability_shape', async () => {
+    const stub = queryStub(ok([overriddenRow]));
+    from.mockReturnValueOnce(stub);
+
+    const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR)))
+      .get(`${BOOKINGS}?includeSuitability=true`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([plainBody]);
+    expect(stub.args('select')).toEqual([PLAIN_SELECT]);
+  });
+
+  it('SCRUM188_AC7_venue_staff_see_an_older_request_as_suitability_null', async () => {
+    from.mockReturnValueOnce(queryStub(ok([{
+      ...overriddenRow,
+      room_layout_code: null, suitability_result: null, suitability_overridden: false,
+    }])));
+
+    const res = await request(appWith(signedInAs(ROLE.VENUE_STAFF))).get(BOOKINGS);
+
+    expect(res.status).toBe(200);
+    expect(res.body[0]).toMatchObject({
+      roomLayoutCode: null,
+      eventName: 'Freshmen Orientation',
+      suitability: null,
+      suitabilityOverridden: false,
+      overriddenCriteria: [],
+    });
   });
 });
 

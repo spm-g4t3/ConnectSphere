@@ -196,3 +196,24 @@ describe("isStaleWithdrawError (SCRUM-255)", () => {
     },
   );
 });
+// SCRUM-188 review fix F11: a 400 about the requirement codes points at the
+// search form, where they were chosen.
+describe("SCRUM-188 unrecognised requirement codes", () => {
+  it.each(["accessibility", "facilities", "roomLayoutCode", "acknowledgedCriteria"])(
+    "SCRUM188_AC7_a_400_naming_%s_says_the_requirements_were_not_recognised",
+    (field) => {
+      const message = bookingRequestErrorMessage(
+        http(400, { error: "prose", details: [{ field, message: "Unknown code xyz" }] }),
+      );
+      expect(message).toBe(
+        "The selected requirements were not recognised. Adjust the layout, accessibility features or facilities in the search form, then try again.",
+      );
+    },
+  );
+
+  it("SCRUM188_AC7_a_400_about_other_fields_keeps_the_general_message", () => {
+    expect(
+      bookingRequestErrorMessage(http(400, { details: [{ field: "setupNotes", message: "Too long" }] })),
+    ).toBe("Some details were not accepted. Please check the form.");
+  });
+});

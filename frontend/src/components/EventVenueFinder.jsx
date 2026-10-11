@@ -72,8 +72,39 @@
 // disables every button once a request is sent, or once the server answers
 // that the event already has one, so a second cannot be started; a new search
 // closes an open panel but does not undo that.
+//
+// SCRUM-191 (SCRUM-188 AC1/AC2): "Check suitability" on each result, and a
+// "Check another venue" control under the results for any active venue the
+// search did not return, open VenueSuitabilityPanel in place, beside the
+// search form like the request panel. There is no page or route for it: the
+// check is a step in finding a venue for this event, so it lives here.
+//
+//   - Enabled only for the event's assigned coordinator (userId equal to
+//     assignedCoordinatorId), the only caller the server answers. The parent
+//     passes userId only while that holds.
+//   - The requirements checked are a snapshot of the form's layout,
+//     accessibility and facilities taken when the check is pressed, kept with
+//     the open panel. Editing the form afterwards does not change the result
+//     on screen; pressing Check again takes a new snapshot and a fresh panel.
+//   - "Check another venue" loads searchActiveVenues() once, when first
+//     opened, so a coordinator who never opens it costs no call. That search
+//     leaves retired venues out, and any row still marked retired is dropped
+//     here too, so a retired venue is never offered.
+//   - One panel at a time: opening a check closes an open request panel, and
+//     opening a request closes an open check. "Request this venue" from a
+//     check opens BookingRequestPanel with the result as `suitability` and the
+//     same snapshot as `requirements`, so the unsuitable warning shows up front
+//     and the request carries the codes that were checked. A request straight
+//     from a result card, with no check first, carries the form's current
+//     codes, so the server's check on submit still judges them.
+//   - A new search closes either panel, as it always closed the request one.
+//
+// SCRUM-188: `hasLiveRequest` is the parent's word, from the event's Venue
+// suitability section, that the event already has a live request when the
+// view loads. It counts as eventRequested, so the request buttons start
+// disabled with the same hint, rather than only after a refused send.
 
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { VENUE_TIME_ZONE } from "../services/datetimeFormat";
 import { bookingRequestEligibility } from "../services/bookingRequestEligibility";
 import {
@@ -83,13 +114,14 @@ import {
   toSearchCriteria,
   validateEventSearchForm,
 } from "../services/eventVenueSearchForm";
-import { findVenuesForEvent } from "../services/venueService";
+import { findVenuesForEvent, searchActiveVenues } from "../services/venueService";
 import {
   ACCESSIBILITY_FEATURES,
   FACILITIES,
   ROOM_LAYOUTS,
 } from "../services/venueLookups";
 import BookingRequestPanel from "./BookingRequestPanel";
+import VenueSuitabilityPanel from "./VenueSuitabilityPanel";
 
 /** The three code lists on a result, in the order they are shown. */
 const RESULT_CODE_LISTS = [
@@ -113,9 +145,9 @@ function codesText(codes, options) {
 
 /**
  * One matching venue: its name as the heading, the rest as a <dl>, then the
- * SCRUM-254 request button.
+ * SCRUM-191 check and SCRUM-254 request buttons.
  */
-function VenueResult({ venue, headingId, requestDisabled, onRequest }) {
+function VenueResult({ venue, headingId, checkDisabled, onCheck, requestDisabled, onRequest }) {
   const rows = [
     { term: "Location", value: venue.location },
     { term: "Maximum capacity", value: venue.maxCapacity },
@@ -135,7 +167,16 @@ function VenueResult({ venue, headingId, requestDisabled, onRequest }) {
           </div>
         ))}
       </dl>
-      {/* type="button": this sits inside the search form and must not submit it. */}
+      {/* type="button": these sit inside the search form and must not submit it. */}
+      <button
+        type="button"
+        className="event-venue-finder__check"
+        aria-label={`Check suitability: ${venue.name}`}
+        disabled={checkDisabled}
+        onClick={() => onCheck(venue)}
+      >
+        Check suitability
+      </button>
       <button
         type="button"
         className="event-venue-finder__request"
@@ -149,13 +190,109 @@ function VenueResult({ venue, headingId, requestDisabled, onRequest }) {
   );
 }
 
+/**
+ * SCRUM-191 (AC1): check any active venue, not only the ones the search
+ * returned. A disclosure, so the venue list is fetched only once someone
+ * opens it, and only once. It sits outside the search form (see the header).
+ */
+function OtherVenueCheck({ disabled, onCheck }) {
+  const idPrefix = useId();
+  const [open, setOpen] = useState(false);
+  // null until loaded, so "not loaded yet" and "no active venues" differ.
+  const [venues, setVenues] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [selectedId, setSelectedId] = useState("");
+
+  async function load() {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const rows = await searchActiveVenues();
+      // The search already leaves retired venues out; this is belt and braces.
+      setVenues((Array.isArray(rows) ? rows : []).filter((venue) => !venue?.retiredAt));
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next && venues === null && !loading) load();
+  }
+
+  const selected = venues?.find((venue) => venue.id === selectedId) ?? null;
+  const bodyId = `${idPrefix}-body`;
+  const selectId = `${idPrefix}-venue`;
+
+  return (
+    <div className="event-venue-finder__other">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        disabled={disabled}
+        onClick={toggle}
+      >
+        Check another venue
+      </button>
+      {open && (
+        <div id={bodyId} className="event-venue-finder__other-body">
+          {loading && <p className="event-venue-finder__hint">Loading venues...</p>}
+          {loadError && (
+            <>
+              <p className="event-venue-finder__error" role="alert">
+                Could not load the list of venues. Please try again.
+              </p>
+              <button type="button" onClick={load}>
+                Try again
+              </button>
+            </>
+          )}
+          {venues !== null && venues.length === 0 && (
+            <p className="event-venue-finder__hint">There are no active venues to check.</p>
+          )}
+          {venues !== null && venues.length > 0 && (
+            <div className="event-venue-finder__other-row">
+              <label htmlFor={selectId}>Active venue</label>
+              <select
+                id={selectId}
+                value={selectedId}
+                onChange={(e) => setSelectedId(e.target.value)}
+                disabled={disabled}
+              >
+                <option value="">Choose a venue</option>
+                {venues.map((venue) => (
+                  <option key={venue.id} value={venue.id}>
+                    {venue.location ? `${venue.name} (${venue.location})` : venue.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={disabled || !selected}
+                onClick={() => onCheck(selected)}
+              >
+                Check
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The two checkbox groups, in the order they are shown. */
 const CODE_GROUPS = [
   { field: "accessibility", legend: "Accessibility features", options: ACCESSIBILITY_FEATURES },
   { field: "facilities", legend: "Facilities", options: FACILITIES },
 ];
 
-export default function EventVenueFinder({ request, userId, onRequestSubmitted }) {
+export default function EventVenueFinder({ request, userId, hasLiveRequest = false, onRequestSubmitted }) {
   // Lazy: the function runs on the first render only. See the header.
   const [seed] = useState(() => seedFromEvent(request));
   const [values, setValues] = useState(seed);
@@ -169,9 +306,19 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
 
   // SCRUM-254. See the header: the venue whose panel is open, and whether
   // this event now has a live request, so no second one can be started.
+  // `requesting` is { venue, suitability, requirements } for the open request
+  // panel; suitability is set only when it was opened from a check (SCRUM-191).
   const eligibility = bookingRequestEligibility(request, userId);
-  const [requestingVenue, setRequestingVenue] = useState(null);
-  const [eventRequested, setEventRequested] = useState(false);
+  const [requesting, setRequesting] = useState(null);
+  const [requestSent, setRequestSent] = useState(false);
+  const eventRequested = requestSent || Boolean(hasLiveRequest);
+
+  // SCRUM-191. See the header: the venue whose suitability panel is open,
+  // with the requirements snapshot it checks and a per-check key, so pressing
+  // Check again on the same venue runs a fresh check.
+  const canCheck = Boolean(request?.id) && Boolean(userId) && request.assignedCoordinatorId === userId;
+  const [checkingVenue, setCheckingVenue] = useState(null);
+  const checkCount = useRef(0);
 
   const idPrefix = useId();
   const idFor = (field) => `${idPrefix}-${field}`;
@@ -216,7 +363,8 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
     setServerFieldErrors([]);
     setError(null);
     // The results are about to change, so a panel for one of them closes.
-    setRequestingVenue(null);
+    setRequesting(null);
+    setCheckingVenue(null);
     setLoading(true);
     try {
       // SCRUM-491 (AC5): this event's id, so a venue it holds is not hidden
@@ -238,6 +386,32 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
     } finally {
       setLoading(false);
     }
+  }
+
+  /** The form's requirement codes as they stand now, copied (see the header). */
+  function currentRequirements() {
+    return {
+      layout: values.layout,
+      accessibility: [...values.accessibility],
+      facilities: [...values.facilities],
+    };
+  }
+
+  function openCheck(venue) {
+    checkCount.current += 1;
+    setRequesting(null);
+    setCheckingVenue({ venue, requirements: currentRequirements(), key: checkCount.current });
+  }
+
+  function openRequest(venue) {
+    setCheckingVenue(null);
+    setRequesting({ venue, suitability: undefined, requirements: currentRequirements() });
+  }
+
+  function requestFromCheck(venue, result) {
+    const requirements = checkingVenue?.requirements;
+    setCheckingVenue(null);
+    setRequesting({ venue, suitability: result, requirements });
   }
 
   function messagesFor(field) {
@@ -428,8 +602,10 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
                 <VenueResult
                   venue={venue}
                   headingId={`${idPrefix}-venue-${venue.id}`}
+                  checkDisabled={!canCheck}
+                  onCheck={openCheck}
                   requestDisabled={!eligibility.eligible || eventRequested}
-                  onRequest={setRequestingVenue}
+                  onRequest={openRequest}
                 />
               </li>
             ))}
@@ -444,18 +620,36 @@ export default function EventVenueFinder({ request, userId, onRequestSubmitted }
         )}
       </form>
 
-      {/* Beside the search form, not in it: the panel has a <form> of its own. */}
-      {requestingVenue && (
-        <BookingRequestPanel
-          key={requestingVenue.id}
+      {/* Outside the search form: it has controls of its own (see the header). */}
+      <OtherVenueCheck disabled={!canCheck} onCheck={openCheck} />
+
+      {/* Beside the search form, not in it, like the request panel below. */}
+      {checkingVenue && (
+        <VenueSuitabilityPanel
+          key={checkingVenue.key}
           event={request}
-          venue={requestingVenue}
+          venue={checkingVenue.venue}
+          requirements={checkingVenue.requirements}
+          canRequest={eligibility.eligible && !eventRequested}
+          onRequest={requestFromCheck}
+          onClose={() => setCheckingVenue(null)}
+        />
+      )}
+
+      {/* Beside the search form, not in it: the panel has a <form> of its own. */}
+      {requesting && (
+        <BookingRequestPanel
+          key={requesting.venue.id}
+          event={request}
+          venue={requesting.venue}
+          suitability={requesting.suitability}
+          requirements={requesting.requirements}
           onSubmitted={(created) => {
-            setEventRequested(true);
+            setRequestSent(true);
             onRequestSubmitted?.(created);
           }}
-          onEventAlreadyRequested={() => setEventRequested(true)}
-          onClose={() => setRequestingVenue(null)}
+          onEventAlreadyRequested={() => setRequestSent(true)}
+          onClose={() => setRequesting(null)}
         />
       )}
     </>

@@ -634,6 +634,7 @@ button { cursor: pointer; }
    .dashboard--organiser__event-details dl { grid-template-columns: 1fr; gap: 3px; }
    .dashboard--organiser__event-details dd { margin-bottom: 7px; }
    .dashboard--coordinator .coordinator-request-detail .event-venue-finder__result-row { grid-template-columns: 1fr; }
+   .venue-suitability .venue-suitability__criteria li, .venue-suitability__checked-row { grid-template-columns: 1fr; }
    .dashboard--organiser .dashboard--organiser__deadline-row { grid-template-columns: 1fr; }
    .dashboard--organiser__deadline-meta { align-items: flex-start; text-align: left; }
    .my-event-requests { padding: 36px 18px; }
@@ -682,3 +683,62 @@ button { cursor: pointer; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__result dd { font-size: 0.9rem; margin: 0; overflow-wrap: anywhere; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__request { margin-top: 8px; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__browse { font-size: 0.9rem; margin: 12px 0 0; }
+/* SCRUM-191: suitability check, inside the event's "Find a venue". */
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__check { margin: 8px 8px 0 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__other { display: grid; gap: 8px; justify-items: start; margin-top: 12px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__other-body { display: grid; gap: 8px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__other-row { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__other-row label { color: var(--muted); font-size: 0.9rem; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__other-row select { border: 1px solid var(--line); border-radius: 6px; max-width: 100%; min-width: 0; padding: 10px 12px; }
+/* SCRUM-188: read out, not shown (the verdict's venue name). */
+.visually-hidden { border: 0; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; }
+.venue-suitability-panel__note { color: var(--muted); font-size: 0.9em; margin: 0 0 10px; }
+.venue-suitability-panel { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; margin: 18px 0; padding: 14px 16px; }
+.venue-suitability-panel h3 { margin: 0 0 10px; }
+.venue-suitability-panel__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
+.venue-suitability-panel__loading { color: var(--muted); margin: 0; }
+.venue-suitability-panel__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.venue-suitability__verdict { border-radius: 6px; font-weight: 700; margin: 0 0 10px; padding: 8px 12px; }
+.venue-suitability__verdict--met { background: #e8f7f1; color: #17684f; }
+.venue-suitability__verdict--unmet { background: #fff6e5; color: #8a5a00; }
+.venue-suitability__criteria { list-style: none; margin: 0 0 12px; padding: 0; }
+.venue-suitability .venue-suitability__criteria li { border-top: 1px solid var(--line); display: grid; gap: 2px 12px; grid-template-columns: 80px minmax(120px, 160px) minmax(0, 1fr); padding: 6px 0; }
+.venue-suitability__criterion--met strong { color: #17684f; }
+.venue-suitability__criterion--unmet strong { color: #a43c32; }
+.venue-suitability__criterion-detail { overflow-wrap: anywhere; }
+.venue-suitability h4 { font-size: 0.95rem; margin: 0 0 6px; }
+.venue-suitability__checked { display: grid; gap: 4px; margin: 0; }
+.venue-suitability__checked-row { display: grid; gap: 2px 16px; grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); }
+.venue-suitability__checked dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.venue-suitability__checked dd { font-size: 0.9rem; margin: 0; overflow-wrap: anywhere; }
+/* SCRUM-188 AC7. An overridden criterion: amber, the "warning to act on"
+   pair, so it reads differently from a plain unmet one. */
+.venue-suitability__criterion--overridden strong { color: #8a5a00; }
+/* SCRUM-188 AC7. The suitability summary on a Venue Staff booking row. The
+   row keeps the .dashboard li spread for its time, id and status, and wraps
+   so the summary takes a full line beneath them. Not dashboard-scoped beyond
+   that override, so SCRUM-258's review screen gets the same look. */
+.dashboard li.venue-detail__booking--with-suitability { flex-wrap: wrap; }
+.venue-detail__booking-event { flex: 1 1 100%; }
+.booking-suitability { flex: 1 1 100%; min-width: 0; }
+.booking-suitability p { margin: 0 0 6px; }
+.booking-suitability__verdict-value { border-radius: 6px; padding: 0 8px; }
+.booking-suitability__verdict-value--met { background: #e8f7f1; color: #17684f; }
+.booking-suitability__verdict-value--unmet { background: #fff6e5; color: #8a5a00; }
+.booking-suitability .booking-suitability__override { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 6px; color: #8a5a00; font-weight: 700; padding: 6px 10px; }
+.booking-suitability .booking-suitability__none { color: var(--muted); font-style: italic; }
+.booking-suitability__details summary { cursor: pointer; margin-bottom: 8px; }
+/* SCRUM-192: the live recheck of the event's requested venues. */
+.event-venue-suitability { display: grid; gap: 10px; justify-items: start; }
+.event-venue-suitability__list { list-style: none; margin: 0; padding: 0; width: 100%; }
+.event-venue-suitability .event-venue-suitability__item { border-top: 1px solid var(--line); display: block; padding: 10px 0; }
+.event-venue-suitability .event-venue-suitability__item:first-child { border-top: 0; }
+.event-venue-suitability__item h4 { font-size: 1rem; margin: 0 0 6px; }
+.event-venue-suitability__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.9rem; gap: 6px 14px; margin: 0 0 8px; }
+.event-venue-suitability__verdict { border-radius: 6px; font-weight: 700; padding: 0 8px; }
+.event-venue-suitability__verdict--met { background: #e8f7f1; color: #17684f; }
+.event-venue-suitability__verdict--unmet { background: #fff6e5; color: #8a5a00; }
+.event-venue-suitability__alert, .event-venue-suitability__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0 0 8px; padding: 8px 12px; }
+.event-venue-suitability__note { color: var(--muted); font-size: 0.9rem; margin: 0 0 8px; }
+.event-venue-suitability__loading, .event-venue-suitability__empty { color: var(--muted); margin: 0; }
+.event-venue-suitability__details summary { cursor: pointer; margin-bottom: 8px; }
