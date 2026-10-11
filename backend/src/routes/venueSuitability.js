@@ -34,12 +34,37 @@
  * Statuses: 200; 400 a malformed id or code, or an unknown code; 401; 403
  * wrong role, or not the event's assigned coordinator; 404 no such event or
  * venue; 409 with code EVENT_DATES_MISSING or VENUE_RETIRED; 500.
+ *
+ *   GET /bookings
+ *
+ * SCRUM-192 (SCRUM-188 AC6, Week 7): every venue the event has requested or
+ * booked -- pending, approved or flagged for review -- checked again now,
+ * against the event's current period and attendance and the venue's current
+ * details, setup and turnaround included. Computed on each view rather than
+ * stored; venueSuitabilityService.checkEventVenues says why. The same callers
+ * as the one-venue check, for the same reasons: Event Coordinators only, and
+ * among them only the event's assigned one.
+ *
+ * Answers an array, oldest booking first, each with the live verdict
+ * (current), the stored one (atRequest) and newlyUnmet. An event with no live
+ * bookings is 200 with [], not 404. A retired venue is that item's error, not
+ * the response's.
+ *
+ * Statuses: 200; 400 a malformed event id; 401; 403 wrong role, or not the
+ * event's assigned coordinator; 404 no such event; 409 with code
+ * EVENT_DATES_MISSING; 500.
  */
 
 import express from 'express';
 
-import { checkVenueSuitability } from '../services/venueSuitabilityService.js';
-import { validateSuitabilityQuery } from '../validation/venueSuitabilityValidation.js';
+import {
+  checkEventVenues as checkEventVenuesService,
+  checkVenueSuitability,
+} from '../services/venueSuitabilityService.js';
+import {
+  validateEventVenuesQuery,
+  validateSuitabilityQuery,
+} from '../validation/venueSuitabilityValidation.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
@@ -83,6 +108,8 @@ function parseSuitabilityQuery(eventRequestId, query) {
  * @param {Function} [options.requireRole]       a factory, as in the other routers
  * @param {object}   [options.client]            a Supabase client, usually a test double
  * @param {Function} [options.checkSuitability]  the check, for tests
+ * @param {Function} [options.checkEventVenues]  the recheck of the event's
+ *                                               bookings (SCRUM-192), for tests
  * @returns {import('express').Router}
  */
 export function createVenueSuitabilityRouter({
@@ -90,6 +117,7 @@ export function createVenueSuitabilityRouter({
   requireRole = createRequireRole,
   client,
   checkSuitability = checkVenueSuitability,
+  checkEventVenues = checkEventVenuesService,
 } = {}) {
   // mergeParams: this router is mounted under /:id, and that id is the event's.
   const router = express.Router({ mergeParams: true });
@@ -101,6 +129,16 @@ export function createVenueSuitabilityRouter({
     try {
       const input = validateSuitabilityQuery(parseSuitabilityQuery(req.params.id, req.query));
       const result = await checkSuitability({ ...input, userId: req.user.id, client });
+      res.status(200).json(result);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  router.get('/bookings', coordinatorOnly, async (req, res) => {
+    try {
+      const { eventRequestId } = validateEventVenuesQuery({ eventRequestId: req.params.id });
+      const result = await checkEventVenues(eventRequestId, { userId: req.user.id, client });
       res.status(200).json(result);
     } catch (err) {
       handleError(err, res);

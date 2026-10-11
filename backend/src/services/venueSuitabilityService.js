@@ -55,6 +55,11 @@
  *                     accessibility, facilities },
  *        }>
  *
+ * SCRUM-192 adds checkEventVenues(eventRequestId, { userId, client }): the
+ * same check run again, live, for every venue the event has requested or
+ * booked (SCRUM-188 AC6, Week 7). See that function for why it is computed on
+ * view rather than stored.
+ *
  * The answer can go stale the moment it is given. create_booking_request
  * checks the period again under its locks, so a result that was true a moment
  * ago cannot let a conflicting request through.
@@ -71,6 +76,7 @@
 
 import { ConflictError, ForbiddenError } from '../errors.js';
 import { SUITABILITY_CRITERIA, evaluateCriteria, toVenueLocal } from '../domain/venueMatching.js';
+import { BOOKING_STATUS, getBookingStatusDisplay } from '../domain/bookingStatus.js';
 import { getEventRequestForCoordinator } from './eventRequestService.js';
 
 /** The sixth criterion's label, reported after SCRUM-189's five. */
@@ -289,7 +295,17 @@ export async function checkVenueSuitability({
   const db = await resolveClient(client);
 
   const event = await getEventRequestForCoordinator(eventRequestId, { client: db });
+  assertCheckable(event, userId);
 
+  return judgeVenue(event, { venueId, roomLayoutCode, accessibility, facilities }, db);
+}
+
+/**
+ * Steps 2 and 3 of checkVenueSuitability, shared with checkEventVenues: the
+ * caller must be the event's assigned coordinator (when userId is given), and
+ * the event must have both ends of its period, or there is nothing to judge.
+ */
+function assertCheckable(event, userId) {
   if (userId !== undefined && userId !== null && event.assignedCoordinatorId !== userId) {
     throw new ForbiddenError(
       `Only the coordinator assigned to event request ${event.id} can check a venue for it.`,
@@ -302,7 +318,22 @@ export async function checkVenueSuitability({
       { code: 'EVENT_DATES_MISSING' },
     );
   }
+}
 
+/**
+ * Steps 4 to 6 of checkVenueSuitability: judge one venue against an event
+ * already read and already cleared by assertCheckable.
+ *
+ * SCRUM-192: private, so the one-venue check and checkEventVenues share every
+ * rule without the event being read again for each booking. Both entry points
+ * call this and nothing else judges, so there is no second copy to drift.
+ *
+ * @param {object} event  the stored event, in camelCase
+ * @param {{venueId: string, roomLayoutCode?: string|null, accessibility?: string[],
+ *          facilities?: string[]}} requirements
+ * @param {object} db     a resolved Supabase client
+ */
+async function judgeVenue(event, { venueId, roomLayoutCode = null, accessibility, facilities }, db) {
   const layout = roomLayoutCode ?? null;
   const requested = {
     accessibility: asList(accessibility),
@@ -374,4 +405,167 @@ export async function checkVenueSuitability({
       facilities: requested.facilities,
     },
   };
+}
+
+
+/**
+ * The booking statuses that still hold, or may yet hold, a venue for the
+ * event: a request awaiting Venue Staff, an approved booking, and one a venue
+ * change has flagged. Rejected, withdrawn and cancelled ones no longer claim
+ * the venue, so there is nothing to recheck.
+ */
+export const LIVE_BOOKING_STATUSES = Object.freeze([
+  BOOKING_STATUS.PENDING,
+  BOOKING_STATUS.APPROVED,
+  BOOKING_STATUS.FLAGGED_FOR_REVIEW,
+]);
+
+/** What checkEventVenues reads of each booking, with its venue embedded. */
+const EVENT_BOOKING_COLUMNS =
+  'id, venue_id, status, room_layout_code, suitability_result, suitability_overridden, created_at, ' +
+  'venues(name, location)';
+
+/**
+ * PostgREST embeds a many-to-one as an object, but an array if it were ever
+ * read as one-to-many. Read defensively, as bookingRequestService does.
+ */
+function one(embedded) {
+  return Array.isArray(embedded) ? embedded[0] : embedded;
+}
+
+/** The names of the criteria a result did not meet, in the order it gave them. */
+function unmetOf(criteria) {
+  return asList(criteria)
+    .filter((criterion) => criterion && criterion.met === false)
+    .map((criterion) => criterion.criterion);
+}
+
+/**
+ * The verdict stored when the booking was requested, as { suitable, unmet },
+ * or null for a row that stored none (requests before SCRUM-190, or a
+ * malformed value), so the screen can tell "never judged" from "was fine".
+ */
+function atRequestOf(stored) {
+  if (typeof stored !== 'object' || stored === null || !Array.isArray(stored.criteria)) return null;
+  return {
+    suitable: stored.suitable === true,
+    unmet: unmetOf(stored.criteria),
+  };
+}
+
+/**
+ * Recheck every venue the event has requested or booked (SCRUM-188 AC6,
+ * Week 7; SCRUM-192).
+ *
+ * Why this is computed on view and not stored. AC6 asks that a change to the
+ * event's date, time or attendance, or to the venue's details, recheck the
+ * venue and show any failure on the event; Week 7 adds a change to the venue's
+ * setup or turnaround time. Those changes arrive by four unrelated paths: the
+ * draft PATCH, a clarification amendment, process_change_request, and
+ * update_venue. None shares a hook with the others, so a stored recheck would
+ * need a trigger on each and could still miss one. Judging live, whenever the
+ * event is viewed, covers every path at once, and the answer can never be
+ * stale. The stored suitability_result is left alone as the request-time
+ * record, and is reported beside the live answer as atRequest.
+ *
+ * Each booking is judged by judgeVenue -- the same rules as the one-venue
+ * check -- with:
+ *  - the event's current period and expected attendance, so a moved date or
+ *    a changed attendance is what gets judged, whatever the booking was made
+ *    against;
+ *  - the booking's own room layout;
+ *  - the accessibility and facility codes the coordinator chose when
+ *    requesting, read from suitability_result.checked. Rows stored before
+ *    SCRUM-190 have no checked, and fall back to none asked for.
+ * The check already drops the event's own bookings from availability, so a
+ * booking never conflicts with itself.
+ *
+ * newlyUnmet names the criteria unmet now that were met at request time, so
+ * the screen can say what changed rather than repeat what the coordinator
+ * already overrode. With no stored verdict, every unmet criterion is new.
+ *
+ * Errors: the event-wide ones (no such event, not the assigned coordinator,
+ * EVENT_DATES_MISSING) refuse the whole request, as the one-venue check does.
+ * A retired venue (VENUE_RETIRED) belongs to one booking, so that item carries
+ * current: null and the error, and the others still return. Anything else is
+ * rethrown.
+ *
+ * An event with no live bookings is [], not a 404, for the same reason the
+ * venue search answers [].
+ *
+ * @param {string} eventRequestId
+ * @param {object} [options]
+ * @param {string} [options.userId]  the caller, from the JWT
+ * @param {object} [options.client]  a Supabase client
+ * @returns {Promise<Array<{bookingId: string, venueId: string, venueName: string|null,
+ *   venueLocation: string|null, status: string, statusDisplay: object,
+ *   suitabilityOverridden: boolean,
+ *   current: {suitable: boolean, criteria: object[], checked: object}|null,
+ *   atRequest: {suitable: boolean, unmet: string[]}|null,
+ *   newlyUnmet: string[], error: {code: string, message: string}|null}>>}
+ *   oldest booking first
+ * @throws {NotFoundError}   no such event, or a draft
+ * @throws {ForbiddenError}  userId is not the event's assigned coordinator
+ * @throws {ConflictError}   EVENT_DATES_MISSING
+ * @throws {Error}           the bookings or availability read failed
+ */
+export async function checkEventVenues(eventRequestId, { userId, client } = {}) {
+  const db = await resolveClient(client);
+
+  const event = await getEventRequestForCoordinator(eventRequestId, { client: db });
+  assertCheckable(event, userId);
+
+  const { data, error } = await db
+    .from('bookings')
+    .select(EVENT_BOOKING_COLUMNS)
+    .eq('event_request_id', event.id)
+    .in('status', LIVE_BOOKING_STATUSES)
+    .order('created_at');
+  if (error) throw new Error(error.message || "The event's bookings could not be read");
+
+  return Promise.all((data ?? []).map((booking) => recheckBooking(event, booking, db)));
+}
+
+/** One booking of checkEventVenues, rechecked; see there. */
+async function recheckBooking(event, booking, db) {
+  const venue = one(booking.venues) ?? {};
+  const stored = booking.suitability_result ?? null;
+  const atRequest = atRequestOf(stored);
+
+  const item = {
+    bookingId: booking.id,
+    venueId: booking.venue_id,
+    venueName: venue.name ?? null,
+    venueLocation: venue.location ?? null,
+    status: booking.status,
+    statusDisplay: getBookingStatusDisplay(booking.status),
+    suitabilityOverridden: booking.suitability_overridden ?? false,
+    current: null,
+    atRequest,
+    newlyUnmet: [],
+    error: null,
+  };
+
+  try {
+    item.current = await judgeVenue(
+      event,
+      {
+        venueId: booking.venue_id,
+        roomLayoutCode: booking.room_layout_code ?? null,
+        accessibility: stored?.checked?.accessibility ?? [],
+        facilities: stored?.checked?.facilities ?? [],
+      },
+      db,
+    );
+  } catch (err) {
+    if (err instanceof ConflictError && err.code === 'VENUE_RETIRED') {
+      item.error = { code: err.code, message: err.message };
+      return item;
+    }
+    throw err;
+  }
+
+  const unmetAtRequest = new Set(atRequest ? atRequest.unmet : []);
+  item.newlyUnmet = unmetOf(item.current.criteria).filter((name) => !unmetAtRequest.has(name));
+  return item;
 }

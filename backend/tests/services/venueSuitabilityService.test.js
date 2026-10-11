@@ -11,6 +11,8 @@
  *   WK7  availability is judged on the occupied period and says which part is
  *        setup and which turnaround; another event's hold makes the venue
  *        unavailable; the event's own holds and bookings do not count
+ *   AC6  (SCRUM-192) the event's requested and booked venues are rechecked
+ *        against its current period and attendance, and failures named
  *
  * The client is a fake answering by table and function, so nothing here needs
  * credentials. What venue_occupancy_conflicts() returns is proved against a
@@ -27,6 +29,8 @@ vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: {}, supabaseAdm
 
 const {
   checkVenueSuitability,
+  checkEventVenues,
+  LIVE_BOOKING_STATUSES,
   describeAvailability,
   toOccupancyConflict,
   SUITABILITY_CHECK_CRITERIA,
@@ -103,8 +107,20 @@ const KNOWN_CODES = {
 /**
  * A client answering by table (the event, the venue, the code lookups) and by
  * function (the occupancy rows), recording every call.
+ *
+ * SCRUM-192: also the event's bookings (select -> eq -> in -> order), and,
+ * when venuesById is given, a venue per id, so each booking can be judged
+ * against its own venue.
  */
-function fakeClient({ event = eventRow(), venue = venueRow(), occupancy = [], rpcError = null } = {}) {
+function fakeClient({
+  event = eventRow(),
+  venue = venueRow(),
+  occupancy = [],
+  rpcError = null,
+  bookings = [],
+  bookingsError = null,
+  venuesById = null,
+} = {}) {
   const calls = [];
   return {
     calls,
@@ -112,21 +128,37 @@ function fakeClient({ event = eventRow(), venue = venueRow(), occupancy = [], rp
       const call = { table, filters: [] };
       calls.push(call);
       const chain = {
-        select: () => chain,
+        select: (columns) => {
+          call.columns = columns;
+          return chain;
+        },
         eq: (column, value) => {
           call.filters.push([column, value]);
           return chain;
         },
         in: (column, values) => {
           call.filters.push([column, values]);
+          if (table === 'bookings') return chain;
           const known = KNOWN_CODES[table] ?? [];
           return Promise.resolve({
             data: values.filter((code) => known.includes(code)).map((code) => ({ code })),
             error: null,
           });
         },
-        maybeSingle: () =>
-          Promise.resolve({ data: table === 'event_requests' ? event : venue, error: null }),
+        order: (column) => {
+          call.order = column;
+          return Promise.resolve(
+            bookingsError ? { data: null, error: bookingsError } : { data: bookings, error: null },
+          );
+        },
+        maybeSingle: () => {
+          if (table === 'event_requests') return Promise.resolve({ data: event, error: null });
+          if (venuesById) {
+            const id = call.filters.find(([column]) => column === 'id')?.[1];
+            return Promise.resolve({ data: venuesById[id] ?? null, error: null });
+          }
+          return Promise.resolve({ data: venue, error: null });
+        },
       };
       return chain;
     },
@@ -524,5 +556,308 @@ describe('SCRUM188_AC2 checked echoes what was judged', () => {
     const result = await check(fakeClient(), { roomLayoutCode: null, accessibility: undefined });
     expect(result.checked).toMatchObject({ layout: null, accessibility: [], facilities: [] });
     expect(result.criteria[2]).toEqual({ criterion: 'Layout', met: true, detail: 'None requested' });
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-192: checkEventVenues, the recheck of the event's live bookings.
+// ---------------------------------------------------------------------------
+
+const VENUE_B = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const BOOKING_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+/** A stored request-time verdict: every criterion met, except those named. */
+function storedResult({ unmet = [], checked } = {}) {
+  const result = {
+    suitable: unmet.length === 0,
+    criteria: SUITABILITY_CHECK_CRITERIA.map((criterion) => ({
+      criterion,
+      met: !unmet.includes(criterion),
+      detail: 'as stored',
+    })),
+  };
+  if (checked !== undefined) result.checked = checked;
+  return result;
+}
+
+/** A bookings row as checkEventVenues selects it. */
+function eventBookingRow(overrides = {}) {
+  return {
+    id: BOOKING,
+    venue_id: VENUE,
+    status: 'approved',
+    room_layout_code: 'theatre',
+    suitability_result: storedResult({
+      checked: {
+        startsAt: START,
+        endsAt: END,
+        expectedAttendance: 120,
+        layout: 'theatre',
+        accessibility: ['wheelchair_access'],
+        facilities: ['projector'],
+      },
+    }),
+    suitability_overridden: false,
+    created_at: '2026-10-01T00:00:00+00:00',
+    venues: { name: 'Hall A', location: 'Level 1' },
+    ...overrides,
+  };
+}
+
+const recheck = (client, options = {}) => checkEventVenues(EVENT, { userId: COORDINATOR, client, ...options });
+
+
+describe('SCRUM188_AC6 which bookings are rechecked', () => {
+  it('SCRUM192_reads_only_the_events_pending_approved_and_flagged_bookings_oldest_first', async () => {
+    const client = fakeClient();
+    await recheck(client);
+    const read = client.calls.find((c) => c.table === 'bookings');
+    expect(read.filters).toEqual([
+      ['event_request_id', EVENT],
+      ['status', ['pending', 'approved', 'flagged_for_review']],
+    ]);
+    expect(LIVE_BOOKING_STATUSES).toEqual(['pending', 'approved', 'flagged_for_review']);
+    expect(read.order).toBe('created_at');
+    expect(read.columns).toMatch(/suitability_result/);
+    expect(read.columns).toMatch(/venues\(name, location\)/);
+  });
+
+  it('SCRUM192_an_event_with_no_live_bookings_is_an_empty_list_not_an_error', async () => {
+    const client = fakeClient({ bookings: [] });
+    expect(await recheck(client)).toEqual([]);
+    expect(client.calls.some((c) => c.fn)).toBe(false);
+  });
+
+  it('SCRUM192_a_failed_bookings_read_is_an_untyped_error', async () => {
+    const err = await recheck(fakeClient({ bookingsError: { message: 'boom' } })).catch((e) => e);
+    expect(err.constructor).toBe(Error);
+    expect(err.message).toBe('boom');
+  });
+
+  it('SCRUM192_each_item_names_the_booking_its_venue_and_status', async () => {
+    const [item] = await recheck(fakeClient({ bookings: [eventBookingRow({ suitability_overridden: true })] }));
+    expect(item).toMatchObject({
+      bookingId: BOOKING,
+      venueId: VENUE,
+      venueName: 'Hall A',
+      venueLocation: 'Level 1',
+      status: 'approved',
+      statusDisplay: { status: 'approved', label: 'Approved', group: 'APPROVED' },
+      suitabilityOverridden: true,
+      error: null,
+    });
+    expect(item.current.criteria.map((c) => c.criterion)).toEqual([...SUITABILITY_CHECK_CRITERIA]);
+  });
+
+  it('SCRUM192_an_embedded_venue_read_as_an_array_still_names_it', async () => {
+    const [item] = await recheck(
+      fakeClient({ bookings: [eventBookingRow({ venues: [{ name: 'Hall A', location: 'Level 1' }] })] }),
+    );
+    expect(item).toMatchObject({ venueName: 'Hall A', venueLocation: 'Level 1' });
+  });
+});
+
+
+describe('SCRUM188_AC6 each booking is judged by the same check', () => {
+  it('SCRUM192_each_booking_is_rechecked_with_its_own_layout_and_stored_codes', async () => {
+    const bookingA = eventBookingRow();
+    const bookingB = eventBookingRow({
+      id: BOOKING_B,
+      venue_id: VENUE_B,
+      status: 'pending',
+      room_layout_code: 'banquet',
+      suitability_result: storedResult({
+        checked: { layout: 'banquet', accessibility: [], facilities: ['stage'] },
+      }),
+      venues: { name: 'Hall B', location: 'Level 2' },
+    });
+    const client = fakeClient({
+      bookings: [bookingA, bookingB],
+      venuesById: { [VENUE]: venueRow(), [VENUE_B]: venueRow({ id: VENUE_B, name: 'Hall B' }) },
+    });
+    const [a, b] = await recheck(client);
+
+    expect(a.current.checked).toMatchObject({
+      layout: 'theatre',
+      accessibility: ['wheelchair_access'],
+      facilities: ['projector'],
+    });
+    expect(a.current.suitable).toBe(true);
+    expect(b.current.checked).toMatchObject({ layout: 'banquet', accessibility: [], facilities: ['stage'] });
+    expect(b.current.criteria[4]).toEqual({ criterion: 'Facilities', met: false, detail: 'Missing: stage' });
+
+    const rpcVenues = client.calls.filter((c) => c.fn).map((c) => c.args.p_venue_id);
+    expect(rpcVenues.sort()).toEqual([VENUE, VENUE_B].sort());
+  });
+
+  it.each([
+    ['no stored result', { suitability_result: null }],
+    ['a stored result without checked', { suitability_result: storedResult() }],
+  ])('SCRUM192_%s_falls_back_to_no_codes_asked_for', async (_label, overrides) => {
+    const [item] = await recheck(fakeClient({ bookings: [eventBookingRow(overrides)] }));
+    expect(item.current.checked).toMatchObject({ layout: 'theatre', accessibility: [], facilities: [] });
+    expect(item.current.criteria[3]).toEqual({ criterion: 'Accessibility', met: true, detail: 'None requested' });
+  });
+
+  it('SCRUM192_no_layout_on_the_booking_is_none_asked_for', async () => {
+    const [item] = await recheck(fakeClient({ bookings: [eventBookingRow({ room_layout_code: null })] }));
+    expect(item.current.checked.layout).toBeNull();
+    expect(item.current.criteria[2]).toEqual({ criterion: 'Layout', met: true, detail: 'None requested' });
+  });
+
+  it('SCRUM188_AC6_the_events_current_period_and_attendance_are_judged_not_the_bookings', async () => {
+    // Booked for 10:00-12:00 with 120; the event has since moved to Thursday
+    // 20:00-23:00 with 200 attending.
+    const event = eventRow({
+      proposed_start: '2026-11-12T20:00:00+08:00',
+      proposed_end: '2026-11-12T23:00:00+08:00',
+      expected_attendance: 200,
+    });
+    const client = fakeClient({ event, bookings: [eventBookingRow()] });
+    const [item] = await recheck(client);
+
+    expect(item.current.checked).toMatchObject({
+      startsAt: '2026-11-12T20:00:00+08:00',
+      endsAt: '2026-11-12T23:00:00+08:00',
+      expectedAttendance: 200,
+    });
+    expect(item.current.criteria[0]).toEqual({
+      criterion: 'Capacity',
+      met: false,
+      detail: 'Capacity 150 < expected attendance 200',
+    });
+    expect(item.current.criteria[1].met).toBe(false);
+    expect(client.calls.find((c) => c.fn).args).toMatchObject({
+      p_starts_at: '2026-11-12T20:00:00+08:00',
+      p_ends_at: '2026-11-12T23:00:00+08:00',
+    });
+  });
+
+  it('SCRUM188_WK7_a_venues_new_setup_and_turnaround_are_judged_live', async () => {
+    const venue = venueRow({ setup_minutes: 60, turnaround_minutes: 90 });
+    const [item] = await recheck(fakeClient({ venue, bookings: [eventBookingRow()] }));
+    expect(availabilityOf(item.current).detail).toBe(
+      'Free 09:00–13:30 on Wed 11 Nov (incl. 60 min setup, 90 min turnaround)',
+    );
+  });
+
+  it('SCRUM188_WK7_the_booking_never_conflicts_with_itself_but_another_events_does', async () => {
+    const own = bookingRow({ id: BOOKING, event_request_id: EVENT });
+    const occupancy = [own, bookingRow({ id: BOOKING_B })];
+    const [item] = await recheck(fakeClient({ occupancy, bookings: [eventBookingRow()] }));
+    expect(availabilityOf(item.current).met).toBe(false);
+    expect(availabilityOf(item.current).conflicts.map((c) => c.id)).toEqual([BOOKING_B]);
+  });
+
+  it('SCRUM192_the_event_is_read_once_for_every_booking', async () => {
+    const client = fakeClient({
+      bookings: [eventBookingRow(), eventBookingRow({ id: BOOKING_B })],
+    });
+    await recheck(client);
+    expect(client.calls.filter((c) => c.table === 'event_requests')).toHaveLength(1);
+  });
+});
+
+
+describe('SCRUM188_AC6 newlyUnmet and atRequest', () => {
+  it('SCRUM192_a_criterion_met_at_request_and_unmet_now_is_newly_unmet', async () => {
+    const event = eventRow({ expected_attendance: 151 });
+    const [item] = await recheck(fakeClient({ event, bookings: [eventBookingRow()] }));
+    expect(item.atRequest).toEqual({ suitable: true, unmet: [] });
+    expect(item.current.suitable).toBe(false);
+    expect(item.newlyUnmet).toEqual(['Capacity']);
+  });
+
+  it('SCRUM192_a_criterion_already_overridden_at_request_is_not_newly_unmet', async () => {
+    const booking = eventBookingRow({
+      suitability_overridden: true,
+      suitability_result: storedResult({ unmet: ['Capacity'], checked: { accessibility: [], facilities: [] } }),
+    });
+    const event = eventRow({ expected_attendance: 151 });
+    const occupancy = [bookingRow({ id: BOOKING_B })];
+    const [item] = await recheck(fakeClient({ event, occupancy, bookings: [booking] }));
+    expect(item.atRequest).toEqual({ suitable: false, unmet: ['Capacity'] });
+    const unmetNow = item.current.criteria.filter((c) => !c.met).map((c) => c.criterion);
+    expect(unmetNow).toEqual(['Capacity', 'Availability']);
+    expect(item.newlyUnmet).toEqual(['Availability']);
+  });
+
+  it('SCRUM192_a_criterion_unmet_at_request_and_met_now_is_not_reported', async () => {
+    const booking = eventBookingRow({
+      suitability_result: storedResult({ unmet: ['Capacity'], checked: { accessibility: [], facilities: [] } }),
+    });
+    const [item] = await recheck(fakeClient({ bookings: [booking] }));
+    expect(item.atRequest.unmet).toEqual(['Capacity']);
+    expect(item.current.suitable).toBe(true);
+    expect(item.newlyUnmet).toEqual([]);
+  });
+
+  it('SCRUM192_with_no_stored_result_every_unmet_criterion_is_new', async () => {
+    const event = eventRow({ expected_attendance: 151 });
+    const booking = eventBookingRow({ suitability_result: null });
+    const [item] = await recheck(fakeClient({ event, occupancy: [blockRow()], bookings: [booking] }));
+    expect(item.atRequest).toBeNull();
+    expect(item.newlyUnmet).toEqual(['Capacity', 'Availability']);
+  });
+});
+
+
+describe('SCRUM188_AC6 errors', () => {
+  it('SCRUM192_a_retired_venue_is_that_items_error_and_the_others_still_return', async () => {
+    const retired = eventBookingRow({
+      id: BOOKING_B,
+      venue_id: VENUE_B,
+      venues: { name: 'Old Hall', location: null },
+    });
+    const client = fakeClient({
+      bookings: [eventBookingRow(), retired],
+      venuesById: {
+        [VENUE]: venueRow(),
+        [VENUE_B]: venueRow({ id: VENUE_B, retired_at: '2026-09-01T00:00:00+00:00' }),
+      },
+    });
+    const [ok, gone] = await recheck(client);
+    expect(ok.current.suitable).toBe(true);
+    expect(ok.error).toBeNull();
+    expect(gone).toMatchObject({
+      bookingId: BOOKING_B,
+      venueName: 'Old Hall',
+      current: null,
+      newlyUnmet: [],
+      error: { code: 'VENUE_RETIRED', message: `Venue ${VENUE_B} is retired, so it cannot host an event` },
+    });
+    expect(gone.atRequest).toEqual({ suitable: true, unmet: [] });
+  });
+
+  it('SCRUM192_any_other_failure_of_one_booking_fails_the_whole_recheck', async () => {
+    const err = await recheck(
+      fakeClient({ rpcError: { message: 'boom' }, bookings: [eventBookingRow()] }),
+    ).catch((e) => e);
+    expect(err.constructor).toBe(Error);
+    expect(err.message).toBe('boom');
+  });
+
+  it('SCRUM188_AC6_a_coordinator_not_assigned_to_the_event_is_refused_before_bookings_are_read', async () => {
+    const client = fakeClient({ bookings: [eventBookingRow()] });
+    const err = await recheck(client, { userId: SOMEONE_ELSE }).catch((e) => e);
+    expect(err).toBeInstanceOf(ForbiddenError);
+    expect(client.calls.map((c) => c.table ?? c.fn)).toEqual(['event_requests']);
+  });
+
+  it('SCRUM188_AC6_an_event_with_no_dates_is_409_EVENT_DATES_MISSING_for_the_whole_request', async () => {
+    const client = fakeClient({ event: eventRow({ proposed_start: null }), bookings: [eventBookingRow()] });
+    const err = await recheck(client).catch((e) => e);
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.code).toBe('EVENT_DATES_MISSING');
+    expect(client.calls.map((c) => c.table ?? c.fn)).toEqual(['event_requests']);
+  });
+
+  it.each([
+    ['an unknown event', { event: null }],
+    ['a draft', { event: eventRow({ status: 'draft' }) }],
+  ])('SCRUM188_AC6_%s_is_404', async (_label, options) => {
+    const err = await recheck(fakeClient(options)).catch((e) => e);
+    expect(err).toBeInstanceOf(NotFoundError);
   });
 });

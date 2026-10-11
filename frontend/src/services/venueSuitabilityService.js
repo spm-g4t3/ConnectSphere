@@ -50,3 +50,32 @@ export async function checkVenueSuitability(eventRequestId, venueId, requirement
   });
   return response.data;
 }
+
+/**
+ * SCRUM-192 (SCRUM-188 AC6, Week 7). Rechecks every venue this event has
+ * requested or booked (GET /event-requests/:id/venue-suitability/bookings).
+ *
+ * Nothing but the id travels. The server rechecks each live booking against
+ * the event's current period and attendance and the venue's current details,
+ * so a moved date, a changed attendance or an edited venue (setup and
+ * turnaround included) shows here without any stored flag going stale.
+ *
+ * An event with no live booking is a 200 with [], not an error. A retired
+ * venue comes back as an item with `error` (code VENUE_RETIRED) and
+ * current: null, while the event's other bookings still come back.
+ *
+ * Failures: 400 (a malformed id), 401, 403 (not the event's assigned
+ * coordinator), 404, and 409 EVENT_DATES_MISSING for the whole event.
+ * venueSuitabilityErrors.js words them.
+ *
+ * @param {string} eventRequestId
+ * @returns {Promise<Array<{bookingId: string, venueId: string,
+ *   venueName: string, venueLocation: string, status: string,
+ *   statusDisplay: Object, suitabilityOverridden: boolean,
+ *   current: Object|null, atRequest: {suitable: boolean, unmet: string[]}|null,
+ *   newlyUnmet: string[], error?: {code: string, message: string}}>>}
+ */
+export async function getEventVenueSuitability(eventRequestId) {
+  const response = await apiClient.get(`/event-requests/${eventRequestId}/venue-suitability/bookings`);
+  return response.data;
+}

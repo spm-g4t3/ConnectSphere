@@ -32,12 +32,18 @@
 // coordinator now starts the review of a submitted request, then approves,
 // rejects or returns it for amendment; a decided request shows its decision
 // read-only (DecisionOutcome). See the comment above the decision section.
+//
+// SCRUM-192 (SCRUM-188 AC6, Week 7) added "Venue suitability" above "Find a
+// venue": the event's requested and booked venues, rechecked live each time
+// this view opens or the event's period or attendance changes. See the
+// comment above that section.
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import AssignmentHistory from "./AssignmentHistory";
 import EventVenueFinder from "./EventVenueFinder";
+import EventVenueSuitability from "./EventVenueSuitability";
 import DecisionOutcome from "./DecisionOutcome";
 import ReassignEventPanel from "./ReassignEventPanel";
 import ClarificationHistory from "./ClarificationHistory";
@@ -201,6 +207,11 @@ export default function CoordinatorRequestDetail({
   const [reassigning, setReassigning] = useState(false);
   const [handedOverTo, setHandedOverTo] = useState(null);
   const [historyVersion, setHistoryVersion] = useState(0);
+  // SCRUM-192. Bumped when a booking request is sent from "Find a venue", so
+  // "Venue suitability" remounts and shows the new booking. The parent's
+  // refresh alone would not: a booking changes none of the event fields the
+  // section is keyed by, and `current` can be this panel's own copy.
+  const [venueVersion, setVenueVersion] = useState(0);
 
   const assignedCoordinatorId = handedOverTo?.id ?? request.assignedCoordinatorId;
 
@@ -821,14 +832,34 @@ export default function CoordinatorRequestDetail({
           each result's "Request this venue"). userId is passed only while
           this user is the assigned coordinator, so a handover made here
           (handedOverTo) turns the request buttons off even though `current`
-          still names this user. A sent request refreshes the parent's list. */}
+          still names this user. A sent request refreshes the parent's list
+          and the Venue suitability section above. */}
+      {/* SCRUM-192 (SCRUM-188 AC6, Week 7): the event's requested and booked
+          venues, rechecked live against the event as it is now. Keyed like
+          EventVenueFinder, so an approved change request that moves the
+          period or attendance remounts it and the recheck happens as the
+          change lands; venueVersion adds a booking just sent below. Shown
+          only to the assigned coordinator, the one the server answers. */}
+      {isAssignedCoordinator && (
+        <section className="event-venue-suitability-section">
+          <h3>Venue suitability</h3>
+          <EventVenueSuitability
+            key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}|${venueVersion}`}
+            eventRequestId={current.id}
+          />
+        </section>
+      )}
+
       <section>
         <h3>Find a venue</h3>
         <EventVenueFinder
           key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}`}
           request={current}
           userId={isAssignedCoordinator ? user.id : undefined}
-          onRequestSubmitted={() => onChangeRequestProcessed?.()}
+          onRequestSubmitted={() => {
+            setVenueVersion((n) => n + 1);
+            onChangeRequestProcessed?.();
+          }}
         />
         <p className="event-venue-finder__browse">
           <Link to="/venue-search">Browse all venues</Link>

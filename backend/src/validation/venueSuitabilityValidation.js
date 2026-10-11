@@ -101,3 +101,32 @@ export function validateSuitabilityQuery(input) {
 
   return { eventRequestId, venueId, roomLayoutCode, accessibility, facilities };
 }
+
+/**
+ * Validate the event id of a recheck of the event's venues (SCRUM-192).
+ *
+ * GET /api/event-requests/:id/venue-suitability/bookings takes nothing but the
+ * event from the path: the venues, layouts and codes are the bookings' own.
+ * The same id rule as the one-venue check, so a malformed id is a 400 before
+ * any read rather than a 404 from the database.
+ *
+ * @param {object} input
+ * @param {string} input.eventRequestId  the event, from the path
+ * @returns {{eventRequestId: string}}  lower-cased
+ * @throws {ValidationError}
+ */
+export function validateEventVenuesQuery(input) {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new ValidationError('Invalid suitability check -- expected an object');
+  }
+
+  const errors = createErrorCollector();
+  const eventRequestId = checkId(errors, 'eventRequestId', 'event', input.eventRequestId);
+
+  if (errors.hasErrors) {
+    const summary = errors.details.map(({ field, message }) => `${field}: ${message}`).join('; ');
+    throw new ValidationError(`Invalid suitability check -- ${summary}`, errors.details);
+  }
+
+  return { eventRequestId };
+}

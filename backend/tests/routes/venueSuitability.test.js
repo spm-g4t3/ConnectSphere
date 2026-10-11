@@ -7,6 +7,9 @@
  * query string is parsed into what the check takes, the caller is the token's
  * and never the query's, and each failure answers its status.
  *
+ * SCRUM-192 adds GET /bookings, the recheck of the event's requested and
+ * booked venues (SCRUM-188 AC6), named SCRUM188_AC6_<what> / SCRUM192_<what>.
+ *
  * Most tests inject a fake checker, so what is proved is the route alone. The
  * last block runs the real check over a fake client, end to end, so the
  * statuses the service raises are proved to reach the client as documented.
@@ -375,5 +378,231 @@ describe('SCRUM188_AC1 end to end over the real check', () => {
     const res = await realGet({ venueId: VENUE }, { client: fakeClient(options) });
     expect(res.status).toBe(409);
     expect(res.body.code).toBe(code);
+  });
+});
+
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-192: GET /bookings, the recheck of the event's live bookings.
+// ---------------------------------------------------------------------------
+
+describe('SCRUM188_AC6 GET /bookings', () => {
+  const BOOKINGS = `${BASE}/bookings`;
+  const ITEM = {
+    bookingId: '44444444-4444-4444-8444-444444444444',
+    venueId: VENUE,
+    venueName: 'Hall A',
+    venueLocation: 'Level 1',
+    status: 'approved',
+    statusDisplay: { status: 'approved', label: 'Approved', group: 'APPROVED', description: 'x' },
+    suitabilityOverridden: false,
+    current: NOT_SUITABLE,
+    atRequest: { suitable: true, unmet: [] },
+    newlyUnmet: ['Capacity'],
+    error: null,
+  };
+
+  /** An app with the router mounted where app.js mounts it, over an injected recheck. */
+  function bookingsApp({
+    requireAuth = signedInAs(ROLE.EVENT_COORDINATOR),
+    checkEventVenues = vi.fn(async () => [ITEM]),
+    checkSuitability = vi.fn(async () => SUITABLE),
+    client = { marker: 'fake client' },
+  } = {}) {
+    return express()
+      .use(express.json())
+      .use(
+        '/api/event-requests/:id/venue-suitability',
+        createVenueSuitabilityRouter({ requireAuth, client, checkSuitability, checkEventVenues }),
+      );
+  }
+
+  it('SCRUM188_AC6_answers_200_with_the_rechecked_bookings', async () => {
+    const res = await request(bookingsApp()).get(BOOKINGS);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([ITEM]);
+  });
+
+  it('SCRUM192_no_live_bookings_is_200_with_an_empty_list', async () => {
+    const res = await request(bookingsApp({ checkEventVenues: vi.fn(async () => []) })).get(BOOKINGS);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM192_passes_the_event_the_tokens_caller_and_the_client', async () => {
+    const checkEventVenues = vi.fn(async () => []);
+    const checkSuitability = vi.fn(async () => SUITABLE);
+    const client = { marker: 'this one' };
+    await request(bookingsApp({ checkEventVenues, checkSuitability, client }))
+      .get(`/api/event-requests/${EVENT.toUpperCase()}/venue-suitability/bookings`)
+      .query({ userId: SOMEONE_ELSE });
+    expect(checkEventVenues).toHaveBeenCalledWith(EVENT, { userId: COORDINATOR, client });
+    expect(checkSuitability).not.toHaveBeenCalled();
+  });
+
+  it.each(OTHER_ROLES)('SCRUM188_AC6_refuses_%s_with_403_and_runs_no_recheck', async (role) => {
+    const checkEventVenues = vi.fn(async () => []);
+    const res = await request(bookingsApp({ requireAuth: signedInAs(role), checkEventVenues })).get(BOOKINGS);
+    expect(res.status).toBe(403);
+    expect(checkEventVenues).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM188_AC6_signed_out_is_401_and_runs_no_recheck', async () => {
+    const checkEventVenues = vi.fn(async () => []);
+    const res = await request(bookingsApp({ requireAuth: signedOut, checkEventVenues })).get(BOOKINGS);
+    expect(res.status).toBe(401);
+    expect(checkEventVenues).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM192_a_malformed_event_id_is_400_before_any_recheck', async () => {
+    const checkEventVenues = vi.fn(async () => []);
+    const res = await request(bookingsApp({ checkEventVenues })).get(
+      '/api/event-requests/not-an-id/venue-suitability/bookings',
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'eventRequestId', message: 'must be a valid event id' }]);
+    expect(checkEventVenues).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['not the assigned coordinator', new ForbiddenError('Not your event'), 403, { error: 'Not your event' }],
+    ['an unknown event', new NotFoundError('Event request not found'), 404, { error: 'Event request not found' }],
+    ['an event with no dates', new ConflictError('No dates', { code: 'EVENT_DATES_MISSING' }), 409, {
+      code: 'EVENT_DATES_MISSING',
+      conflicts: [],
+    }],
+  ])('SCRUM188_AC6_%s_answers_its_status', async (_label, error, status, body) => {
+    const checkEventVenues = vi.fn(async () => { throw error; });
+    const res = await request(bookingsApp({ checkEventVenues })).get(BOOKINGS);
+    expect(res.status).toBe(status);
+    expect(res.body).toMatchObject(body);
+  });
+
+  it('SCRUM188_AC6_anything_untyped_is_500_without_its_message', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await request(
+      bookingsApp({ checkEventVenues: vi.fn(async () => { throw new Error('driver detail'); }) }),
+    ).get(BOOKINGS);
+    spy.mockRestore();
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+  });
+
+  describe('end to end over the real recheck', () => {
+    const eventRow = (overrides = {}) => ({
+      id: EVENT,
+      organiser_id: '11111111-1111-4111-8111-111111111111',
+      event_name: 'Orientation',
+      proposed_start: '2026-11-11T10:00:00+08:00',
+      proposed_end: '2026-11-11T12:00:00+08:00',
+      expected_attendance: 120,
+      status: 'approved',
+      assigned_coordinator_id: COORDINATOR,
+      ...overrides,
+    });
+    const venueRow = (overrides = {}) => ({
+      id: VENUE,
+      name: 'Hall A',
+      location: 'Level 1',
+      max_capacity: 100,
+      setup_minutes: 30,
+      turnaround_minutes: 45,
+      retired_at: null,
+      venue_room_layouts: [{ room_layout_code: 'theatre' }],
+      venue_accessibility_features: [],
+      venue_facilities: [{ facility_code: 'projector' }],
+      venue_operating_hours: [{ day_of_week: 3, opens_at: '08:00:00', closes_at: '22:00:00' }],
+      ...overrides,
+    });
+    const bookingRow = {
+      id: '44444444-4444-4444-8444-444444444444',
+      venue_id: VENUE,
+      status: 'approved',
+      room_layout_code: 'theatre',
+      suitability_result: {
+        suitable: true,
+        criteria: [{ criterion: 'Capacity', met: true, detail: 'Capacity 100 ≥ expected attendance 90' }],
+        checked: { layout: 'theatre', accessibility: [], facilities: ['projector'] },
+      },
+      suitability_overridden: false,
+      created_at: '2026-10-01T00:00:00+00:00',
+      venues: { name: 'Hall A', location: 'Level 1' },
+    };
+
+    /** Answers the event, the bookings, the venue, the code lookups and the occupancy function. */
+    function fakeClient({ event = eventRow(), venue = venueRow(), bookings = [bookingRow] } = {}) {
+      return {
+        from(table) {
+          const chain = {
+            select: () => chain,
+            eq: () => chain,
+            in: (_column, codes) =>
+              table === 'bookings'
+                ? chain
+                : Promise.resolve({ data: codes.map((code) => ({ code })), error: null }),
+            order: () => Promise.resolve({ data: bookings, error: null }),
+            maybeSingle: () =>
+              Promise.resolve({ data: table === 'event_requests' ? event : venue, error: null }),
+          };
+          return chain;
+        },
+        rpc: () => Promise.resolve({ data: [], error: null }),
+      };
+    }
+
+    const realGet = (client, requireAuth = signedInAs(ROLE.EVENT_COORDINATOR)) =>
+      request(
+        express()
+          .use(express.json())
+          .use(
+            '/api/event-requests/:id/venue-suitability',
+            createVenueSuitabilityRouter({ requireAuth, client }),
+          ),
+      ).get(BOOKINGS);
+
+    it('SCRUM188_AC6_attendance_raised_past_capacity_is_200_with_capacity_newly_unmet', async () => {
+      const res = await realGet(fakeClient());
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0]).toMatchObject({
+        bookingId: bookingRow.id,
+        venueName: 'Hall A',
+        statusDisplay: { label: 'Approved' },
+        atRequest: { suitable: true, unmet: [] },
+        newlyUnmet: ['Capacity'],
+        error: null,
+      });
+      expect(res.body[0].current.suitable).toBe(false);
+      expect(res.body[0].current.checked).toMatchObject({ expectedAttendance: 120, facilities: ['projector'] });
+    });
+
+    it('SCRUM192_a_retired_venue_is_200_with_the_items_error', async () => {
+      const res = await realGet(fakeClient({ venue: venueRow({ retired_at: '2026-09-01T00:00:00+00:00' }) }));
+      expect(res.status).toBe(200);
+      expect(res.body[0]).toMatchObject({ current: null, error: { code: 'VENUE_RETIRED' } });
+    });
+
+    it('SCRUM188_AC6_the_assigned_coordinator_rule_is_403', async () => {
+      const res = await realGet(fakeClient(), signedInAs(ROLE.EVENT_COORDINATOR, SOMEONE_ELSE));
+      expect(res.status).toBe(403);
+    });
+
+    it('SCRUM188_AC6_an_unknown_event_is_404', async () => {
+      const res = await realGet(fakeClient({ event: null }));
+      expect(res.status).toBe(404);
+    });
+
+    it('SCRUM188_AC6_EVENT_DATES_MISSING_is_409', async () => {
+      const res = await realGet(fakeClient({ event: eventRow({ proposed_end: null }) }));
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('EVENT_DATES_MISSING');
+    });
+
+    it('SCRUM192_no_live_bookings_is_200_with_an_empty_list', async () => {
+      const res = await realGet(fakeClient({ bookings: [] }));
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
   });
 });

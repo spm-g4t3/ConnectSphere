@@ -2,11 +2,17 @@
 //
 // SCRUM-191 (SCRUM-188 AC1). The one call the suitability panel makes.
 // apiClient is mocked, so nothing touches the network.
+//
+// SCRUM-192 (SCRUM-188 AC6) adds the live recheck of the event's requested
+// and booked venues.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { apiClient } from "../../src/services/apiClient";
-import { checkVenueSuitability } from "../../src/services/venueSuitabilityService.js";
+import {
+  checkVenueSuitability,
+  getEventVenueSuitability,
+} from "../../src/services/venueSuitabilityService.js";
 
 vi.mock("../../src/services/apiClient", () => ({
   apiClient: { get: vi.fn() },
@@ -62,5 +68,25 @@ describe("SCRUM-191 checkVenueSuitability", () => {
     vi.mocked(apiClient.get).mockRejectedValue(failure);
 
     await expect(checkVenueSuitability("e1", "v1")).rejects.toBe(failure);
+  });
+});
+
+describe("SCRUM-192 getEventVenueSuitability", () => {
+  it("SCRUM188_AC6_gets_the_events_bookings_recheck_route_and_returns_the_body", async () => {
+    const items = [{ bookingId: "b1", current: RESULT, newlyUnmet: [] }];
+    vi.mocked(apiClient.get).mockResolvedValue({ data: items });
+
+    await expect(getEventVenueSuitability("e1")).resolves.toBe(items);
+
+    expect(apiClient.get).toHaveBeenCalledWith("/event-requests/e1/venue-suitability/bookings");
+  });
+
+  it("SCRUM188_AC6_lets_a_failure_through_for_the_caller_to_read", async () => {
+    const failure = Object.assign(new Error("409"), {
+      response: { status: 409, data: { code: "EVENT_DATES_MISSING" } },
+    });
+    vi.mocked(apiClient.get).mockRejectedValue(failure);
+
+    await expect(getEventVenueSuitability("e1")).rejects.toBe(failure);
   });
 });

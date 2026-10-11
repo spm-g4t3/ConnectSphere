@@ -708,3 +708,17 @@ button { cursor: pointer; }
 .venue-suitability__checked-row { display: grid; gap: 2px 16px; grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); }
 .venue-suitability__checked dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
 .venue-suitability__checked dd { font-size: 0.9rem; margin: 0; overflow-wrap: anywhere; }
+/* SCRUM-192: the live recheck of the event's requested venues. */
+.event-venue-suitability { display: grid; gap: 10px; justify-items: start; }
+.event-venue-suitability__list { list-style: none; margin: 0; padding: 0; width: 100%; }
+.event-venue-suitability .event-venue-suitability__item { border-top: 1px solid var(--line); display: block; padding: 10px 0; }
+.event-venue-suitability .event-venue-suitability__item:first-child { border-top: 0; }
+.event-venue-suitability__item h4 { font-size: 1rem; margin: 0 0 6px; }
+.event-venue-suitability__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.9rem; gap: 6px 14px; margin: 0 0 8px; }
+.event-venue-suitability__verdict { border-radius: 6px; font-weight: 700; padding: 0 8px; }
+.event-venue-suitability__verdict--met { background: #e8f7f1; color: #17684f; }
+.event-venue-suitability__verdict--unmet { background: #fff6e5; color: #8a5a00; }
+.event-venue-suitability__alert, .event-venue-suitability__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0 0 8px; padding: 8px 12px; }
+.event-venue-suitability__note { color: var(--muted); font-size: 0.9rem; margin: 0 0 8px; }
+.event-venue-suitability__loading, .event-venue-suitability__empty { color: var(--muted); margin: 0; }
+.event-venue-suitability__details summary { cursor: pointer; margin-bottom: 8px; }
