@@ -1,6 +1,6 @@
 -- ---------------------------------------------------------------------------
 -- 041_lead_assignment.sql
--- SCRUM-515 to SCRUM-517: the Event Coordinator Lead assigns, and reassigns
+-- SCRUM-515 to SCRUM-518: the Event Coordinator Lead assigns, and reassigns
 --
 -- Part of SCRUM-486 "Assign and Reassign Event Coordinators from an Unassigned
 -- Queue - Event Coordinator Lead". This story's one migration, built across
@@ -11,18 +11,19 @@
 --                     reassign_event_request opened to the Lead.
 --   SCRUM-517 (done)  the refusal to review or decide an unassigned request,
 --                     in words that name the Lead.
---   SCRUM-518         the notifications.
+--   SCRUM-518 (done)  the notifications: to every Lead on submission, and to
+--                     the new coordinator and the Organiser on assignment and
+--                     reassignment.
+-- All four are in; the file is complete.
 --
--- DO NOT APPLY THIS to the live database until SCRUM-518 has landed in this
--- file. Without it nobody is told a request is waiting, so a submission would
--- sit in the Lead's queue unseen. The PGlite tests read it from disk, so
--- they run against it whether or not it has been applied.
---
--- Run it once in the Supabase SQL Editor, after 040_venue_holds.sql, and after
--- 039 (the Lead's role, which assign_event_request and reassign_event_request
--- name). Safe to re-run: the constraint is dropped by name and added again,
--- every changed function is `create or replace` with an unchanged signature,
--- and the one new function is `create or replace` too.
+-- Run it once in the Supabase SQL Editor, after 040_venue_holds.sql. It also
+-- needs 039 (the Lead's role, which submit_event_request, assign_event_request
+-- and reassign_event_request name), which comes before 040. 040 must come
+-- first for a second reason: this file restates notifications_type_known, and
+-- 040's is the list it restates (see "The notification types" below). Safe to
+-- re-run: both constraints are dropped by name and added again, every changed
+-- function is `create or replace` with an unchanged signature, and the two
+-- new functions are `create or replace` too.
 --
 -- Why. The customer's Week 7 change 5: "Newly submitted event requests should
 -- no longer be assigned directly to an Event Coordinator. Instead, they first
@@ -55,6 +56,10 @@
 --   AC6   The event's holder, or a Lead, may reassign it.
 --   AC8   Nobody starts the review of, or decides, a submitted request with
 --         no coordinator, and the refusal says it is waiting for the Lead.
+--   AC10  Every Lead is told when a request is submitted; the new coordinator,
+--         and the Organiser with the coordinator's name, are told when it is
+--         assigned or reassigned.
+--   AC11  With no Lead, submission still succeeds and writes no notice.
 --   AC9   Each assignment's history row names who made it: assigned_by is the
 --         Lead, so new rows are told apart from SCRUM-327's automatic ones,
 --         whose null assigned_by still reads "automatically on submission".
@@ -183,6 +188,69 @@
 --     unassigned submitted request (a direct call to the decision route) was
 --     answered by the caller check's misleading 403.
 --
+--   * The notification types (SCRUM-518). A contract: describeNotification()
+--     in frontend/src/services/notificationDisplay.js keys its wording on the
+--     exact type string, one headline per type, and SCRUM-172 will render
+--     these. Three types, each with camelCase payload keys (014's convention,
+--     because the API returns the payload as stored). There is no
+--     event_request_id column on notifications; the event travels in the
+--     payload as eventRequestId, as 026's and 030's clarification notices do.
+--
+--       event_request_awaiting_assignment   to every Lead, on submission
+--         { eventRequestId, eventName, submittedAt }
+--       event_request_assigned              to the new coordinator, on an
+--                                           assignment or a reassignment
+--         { eventRequestId, eventName, assignedById, assignedByName,
+--           previousCoordinatorId, previousCoordinatorName, note }
+--       event_request_coordinator_assigned  to the Organiser, on the same
+--         { eventRequestId, eventName, coordinatorId, coordinatorName,
+--           previousCoordinatorId, previousCoordinatorName }
+--
+--     Split, not shared, for two reasons. The words differ: the coordinator
+--     is told "you have been given this event", the Organiser "your request
+--     now has this coordinator", and one type can carry one headline. And the
+--     payloads differ: the coordinator's carries the handover note, the
+--     Organiser's does not, because the Organiser does not see the note (AC9;
+--     docs/SCRUM-327.md D4), and a payload is what the screen receives. A
+--     reassignment reuses the same two types, not two more: what changes is
+--     who held it before, so previousCoordinatorId and previousCoordinatorName
+--     are null on a first assignment and set on a reassignment, which is all
+--     the screen needs to word it "assigned" or "handed over". The names are
+--     read through profile_display_name(), the one shape this file uses for a
+--     person's name, falling back to the id so a notice never names nobody.
+--
+--   * The Lead notice is an insert from a select of every profile holding
+--     event_coordinator_lead, as 014 notifies every coordinator with an
+--     insert from a select of every profile holding event_coordinator. "The
+--     Lead" means every user with the role (AC10). With no Lead the select is
+--     empty, so the insert writes nothing and fails nothing, which is AC11. A
+--     single-row insert, or a select ... into, would not do that.
+--
+--   * The notices are written inside the three functions, in the transaction
+--     that does the work, as every notice in this schema is (014, 026, 030,
+--     031, 033 to 036, 040); notificationService.js only reads them and marks
+--     them read. So a notice cannot exist for a submission or an assignment
+--     that was refused: every refusal raises before the inserts, and a raise
+--     rolls them back with everything else.
+--
+--   * notifications_type_known is restated from 040, which has seven types,
+--     not from 034, which has six. The constraint is dropped and added whole
+--     each time a type is added, so whichever list is restated is the list in
+--     force. 034's lacks venue_hold_expired, which 040 added. Restated from
+--     034, one of two things happens. If any hold has already expired on the
+--     live database, its notice row fails the re-added constraint and this
+--     file does not apply. If none has, the file applies cleanly, and every
+--     later run of process_venue_hold_expiry (040) fails with 23514 on its
+--     notice insert; because the expiry and the notice are one statement,
+--     venue holds would silently stop expiring, with nothing on any screen to
+--     show it. The test suite pins all seven (SCRUM486_AC10_…_keeps_every_type
+--     _040_allows) and proves the expiry still runs after this file. 040's
+--     other notification objects (the venue_hold_id column,
+--     notifications_hold_expired_needs_hold, and the partial index
+--     notifications_one_per_expired_hold) are left alone: each is written
+--     `type <> 'venue_hold_expired' or ...`, so the new types pass them with
+--     venue_hold_id null.
+--
 --   * Error codes follow 018 and 029: standard SQLSTATEs (22004, P0002, 55000,
 --     42501, 22023, 23514, 40001), which translateError in
 --     eventRequestService.js maps once. 040,
@@ -215,9 +283,19 @@
 --     header describes a rule the application no longer applies; it is
 --     applied and append-only, so this note is the correction.
 --
---   * Add the Lead's queue, refuse the review of an unassigned request, or
---     write any notification. Those are SCRUM-517, 518 and 519; 517 and 518
---     in this file.
+--   * Add the Lead's queue, or any route or screen. Those are SCRUM-519 on.
+--
+--   * Show the Lead their notices. CoordinatorNotifications is mounted only by
+--     the Coordinator's and the Organiser's dashboards, so the Lead's notices
+--     are written but have nowhere to appear until SCRUM-519 gives the Lead's
+--     dashboard a list. Adding one there changes SCRUM-485's test that the
+--     Lead's dashboard calls no service (SCRUM485_AC3_the_%s_dashboard_calls_no
+--     _service), which was right for a placeholder and stops being right then.
+--
+--   * Spare the live check scripts. Once this is applied, any script that
+--     submits through submit_event_request notifies every real Lead in the
+--     shared project, and no script counts notifications, so those rows are
+--     left behind. Recorded here so whoever runs them next knows.
 --
 --   * Change anything about who acts on an event after a reassignment (AC7).
 --     Open clarifications, change requests and flagged bookings reference the
@@ -246,6 +324,49 @@ alter table event_requests
   add constraint event_requests_assigned_when_submitted check (
     status in ('draft', 'submitted', 'cancelled')
     or assigned_coordinator_id is not null
+  );
+
+
+-- ---------------------------------------------------------------------
+-- 1a. A person's name, for a refusal or a notice (SCRUM-516, SCRUM-518)
+-- ---------------------------------------------------------------------
+-- Their full name, or their id when they have none on record, so a message
+-- never names nobody. One definition: AC4's "already assigned to ..." and
+-- AC10's notices read names the same way. stable: it only reads.
+
+create or replace function profile_display_name(p_user_id uuid)
+returns text
+language sql
+stable
+as $$
+  select coalesce(
+    (select nullif(btrim(p.full_name), '') from profiles p where p.id = p_user_id),
+    p_user_id::text
+  );
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 1b. The notification types (SCRUM-518)
+-- ---------------------------------------------------------------------
+-- 040's seven, unchanged and in 040's order, then this story's three. Restated
+-- from 040 and not 034; see the header, which says what happens otherwise.
+
+alter table notifications drop constraint if exists notifications_type_known;
+alter table notifications
+  add constraint notifications_type_known check (
+    type in (
+      'booking_flagged',
+      'booking_request_withdrawn',
+      'clarification_requested',
+      'clarification_replied',
+      'clarification_closed',
+      'booking_flagged_setup_change',
+      'venue_hold_expired',
+      'event_request_awaiting_assignment',
+      'event_request_assigned',
+      'event_request_coordinator_assigned'
+    )
   );
 
 
@@ -315,6 +436,20 @@ begin
     (event_request_id, previous_status, new_status, changed_by, reason)
   values
     (p_event_request_id, 'draft', 'submitted', p_changed_by, null);
+
+  -- AC10: every Lead is told a request is waiting. An insert from a select,
+  -- as 014 tells every coordinator: with no Lead it writes nothing and fails
+  -- nothing (AC11).
+  insert into notifications (recipient_id, type, payload)
+  select p.id,
+         'event_request_awaiting_assignment',
+         jsonb_build_object(
+           'eventRequestId', v_request.id,
+           'eventName',      v_request.event_name,
+           'submittedAt',    v_request.submitted_at
+         )
+    from profiles p
+   where p.role = 'event_coordinator_lead';
 
   return v_request;
 end;
@@ -492,7 +627,6 @@ language plpgsql
 as $$
 declare
   v_request event_requests;
-  v_holder  text;
 begin
   -- Lock first, then read: a second assignment of the same request waits here
   -- for the first to commit, then sees its coordinator (AC4).
@@ -526,17 +660,12 @@ begin
       using errcode = 'insufficient_privilege';
   end if;
 
-  -- AC4: if someone got there first, say who. The name is read from profiles,
-  -- with the id as a fallback for a coordinator with no name on record, so the
-  -- Lead is never told "already assigned" without being told to whom.
+  -- AC4: if someone got there first, say who, through profile_display_name
+  -- (section 1a): the name, or the id for a coordinator with none on record,
+  -- so the Lead is never told "already assigned" without being told to whom.
   if v_request.assigned_coordinator_id is not null then
-    select coalesce(nullif(btrim(p.full_name), ''), p.id::text)
-      into v_holder
-      from profiles p
-     where p.id = v_request.assigned_coordinator_id;
-
     raise exception 'event request % is already assigned to %',
-      p_event_request_id, coalesce(v_holder, v_request.assigned_coordinator_id::text)
+      p_event_request_id, profile_display_name(v_request.assigned_coordinator_id)
       using errcode = 'object_not_in_prerequisite_state';
   end if;
 
@@ -588,6 +717,34 @@ begin
     raise exception 'event request % changed while it was being assigned', p_event_request_id
       using errcode = 'serialization_failure';
   end if;
+
+  -- AC10: the new coordinator, and the Organiser with the coordinator's name.
+  -- After every refusal, so a refused assignment notifies nobody. No previous
+  -- coordinator on a first assignment. The note goes to the coordinator only:
+  -- the Organiser does not see it (AC9).
+  insert into notifications (recipient_id, type, payload)
+  values
+    (p_coordinator_id,
+     'event_request_assigned',
+     jsonb_build_object(
+       'eventRequestId',          v_request.id,
+       'eventName',               v_request.event_name,
+       'assignedById',            p_assigned_by,
+       'assignedByName',          profile_display_name(p_assigned_by),
+       'previousCoordinatorId',   null::uuid,
+       'previousCoordinatorName', null::text,
+       'note',                    nullif(btrim(p_note), '')
+     )),
+    (v_request.organiser_id,
+     'event_request_coordinator_assigned',
+     jsonb_build_object(
+       'eventRequestId',          v_request.id,
+       'eventName',               v_request.event_name,
+       'coordinatorId',           p_coordinator_id,
+       'coordinatorName',         profile_display_name(p_coordinator_id),
+       'previousCoordinatorId',   null::uuid,
+       'previousCoordinatorName', null::text
+     ));
 
   return v_request;
 end;
@@ -721,6 +878,33 @@ begin
   values
     (p_event_request_id, v_outgoing, p_new_coordinator_id,
      p_assigned_by, p_handover_note);
+
+  -- AC10, as for a first assignment, with who held it before (SCRUM-518). The
+  -- same two types; previousCoordinatorId is what makes it a handover. The
+  -- note to the new coordinator only, never the Organiser (AC9).
+  insert into notifications (recipient_id, type, payload)
+  values
+    (p_new_coordinator_id,
+     'event_request_assigned',
+     jsonb_build_object(
+       'eventRequestId',          v_request.id,
+       'eventName',               v_request.event_name,
+       'assignedById',            p_assigned_by,
+       'assignedByName',          profile_display_name(p_assigned_by),
+       'previousCoordinatorId',   v_outgoing,
+       'previousCoordinatorName', profile_display_name(v_outgoing),
+       'note',                    nullif(btrim(p_handover_note), '')
+     )),
+    (v_request.organiser_id,
+     'event_request_coordinator_assigned',
+     jsonb_build_object(
+       'eventRequestId',          v_request.id,
+       'eventName',               v_request.event_name,
+       'coordinatorId',           p_new_coordinator_id,
+       'coordinatorName',         profile_display_name(p_new_coordinator_id),
+       'previousCoordinatorId',   v_outgoing,
+       'previousCoordinatorName', profile_display_name(v_outgoing)
+     ));
 
   return v_request;
 end;

@@ -208,9 +208,31 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     await db.exec(migration('006_event_change_requests.sql'));
     await db.exec(migration('019_change_request_decision_coordinator.sql'));
     await db.exec(migration('039_coordinator_lead_and_safety_officer_roles.sql'));
+    // The notifications table, which 041 restates the types of and its three
+    // functions now write to (SCRUM-518). The real one comes from 014's booking
+    // review migration, which needs bookings and venue blocks this suite does
+    // not build, so it is written here in the shape those functions use:
+    // recipient, type and payload, plus the reference columns other notices
+    // carry. 041 replaces the type check with its own, so the one here only
+    // has to exist. eventClarificationDatabase.test.js does the same.
+    await db.exec(`
+      create table notifications (
+        id uuid primary key default gen_random_uuid(),
+        recipient_id uuid not null references auth.users (id) on delete cascade,
+        type text not null,
+        booking_id uuid,
+        block_id uuid,
+        venue_hold_id uuid,
+        payload jsonb not null default '{}',
+        read_at timestamptz,
+        created_at timestamptz not null default now(),
+        constraint notifications_type_known check (type in ('booking_flagged'))
+      );
+    `);
     // SCRUM-486's migration, last, as production will have it: the relaxed
     // assignment constraint and submission without assignment (SCRUM-515),
-    // and the Lead's assignment and reassignment (SCRUM-516).
+    // the Lead's assignment and reassignment (SCRUM-516), the refusal of an
+    // unassigned review (SCRUM-517), and the notices (SCRUM-518).
     await db.exec(migration('041_lead_assignment.sql'));
   }, 60_000);
 
@@ -233,6 +255,13 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       expect(submitted).toMatchObject({ status: 'submitted', assigned_coordinator_id: null });
       expect(await statusHistory(id)).toHaveLength(1);
       expect(await assignmentHistory(id)).toHaveLength(0);
+      // AC11-01, the notice half (SCRUM-518): with no Lead there is nobody to
+      // tell, and the insert from an empty select writes nothing and fails
+      // nothing.
+      const { rows: notices } = await db.query(
+        "select * from notifications where payload->>'eventRequestId' = $1", [id],
+      );
+      expect(notices).toEqual([]);
     });
 
     describe('once coordinators exist', () => {
@@ -1316,6 +1345,140 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       expect(err.message).toContain('it cannot be decided yet');
       expect(await row(id)).toEqual(before);
       expect(await statusHistory(id)).toHaveLength(0);
+    });
+  });
+
+  describe('SCRUM-486 AC10: the Lead, the coordinator and the organiser are notified', () => {
+    // SCRUM-518. The notices are written inside the three functions, so these
+    // read them back from the table after each call.
+    const noticesFor = async (id) => (await db.query(
+      `select recipient_id, type, payload from notifications
+        where payload->>'eventRequestId' = $1 order by created_at, id`,
+      [id],
+    )).rows;
+
+    it('SCRUM486_AC10_submission_tells_every_lead_a_request_is_waiting', async () => {
+      // AC10-01. Two Leads exist by now, so two notices, one each, of the
+      // Lead's type, naming the event.
+      const id = await request();
+
+      await submit(id);
+
+      const notices = await noticesFor(id);
+      expect(notices.map((n) => n.recipient_id).sort()).toEqual([lead, lead2].sort());
+      for (const notice of notices) {
+        expect(notice.type).toBe('event_request_awaiting_assignment');
+        expect(notice.payload).toMatchObject({ eventRequestId: id, eventName: 'event draft' });
+        expect(notice.payload.submittedAt).toBeTruthy();
+      }
+    });
+
+    it('SCRUM486_AC10_an_assignment_tells_the_coordinator_and_the_organiser_by_name', async () => {
+      // AC10-02. The coordinator's notice carries who assigned it and the
+      // note; the Organiser's carries the coordinator's name and no note
+      // (AC9: the Organiser does not see the note).
+      const id = await unassigned();
+
+      await assign(id, coordinator, lead, 'Yours from today');
+
+      const notices = await noticesFor(id);
+      expect(notices).toHaveLength(2);
+      expect(notices.find((n) => n.recipient_id === coordinator)).toMatchObject({
+        type: 'event_request_assigned',
+        payload: {
+          eventRequestId: id,
+          assignedById: lead,
+          assignedByName: 'Lena Lead',
+          previousCoordinatorId: null,
+          previousCoordinatorName: null,
+          note: 'Yours from today',
+        },
+      });
+      const toOrganiser = notices.find((n) => n.recipient_id === organiser);
+      expect(toOrganiser).toMatchObject({
+        type: 'event_request_coordinator_assigned',
+        payload: {
+          eventRequestId: id,
+          coordinatorId: coordinator,
+          coordinatorName: 'Priya Nair',
+          previousCoordinatorId: null,
+        },
+      });
+      expect(toOrganiser.payload).not.toHaveProperty('note');
+    });
+
+    it('SCRUM486_AC10_a_reassignment_tells_the_new_coordinator_and_the_organiser_who_held_it', async () => {
+      // AC10-03. The same two types; previousCoordinatorId is what makes it a
+      // handover, so the screen can word it so.
+      const id = await request(STATUS.UNDER_REVIEW);
+
+      await reassign(id, otherCoordinator, lead, 'Handing over');
+
+      const notices = await noticesFor(id);
+      expect(notices).toHaveLength(2);
+      expect(notices.find((n) => n.recipient_id === otherCoordinator)).toMatchObject({
+        type: 'event_request_assigned',
+        payload: { previousCoordinatorId: coordinator, previousCoordinatorName: 'Priya Nair', note: 'Handing over' },
+      });
+      const toOrganiser = notices.find((n) => n.recipient_id === organiser);
+      expect(toOrganiser).toMatchObject({
+        type: 'event_request_coordinator_assigned',
+        payload: { coordinatorName: 'Omar Okafor', previousCoordinatorName: 'Priya Nair' },
+      });
+      expect(toOrganiser.payload).not.toHaveProperty('note');
+    });
+
+    it.each([
+      ['already assigned (AC4-02)', (id) => assign(id, coordinator), (id) => assign(id, otherCoordinator, lead2)],
+      ['to a Lead (AC3-02)', async () => {}, (id) => assign(id, lead2)],
+      ['by a coordinator (AC3-03)', async () => {}, (id) => assign(id, coordinator, coordinator)],
+    ])('SCRUM486_AC10_a_refused_assignment_notifies_nobody_when_%s', async (_label, setUp, attempt) => {
+      // AC10-05. Every refusal raises before the inserts, and a raise rolls
+      // them back. Counted after any setup (the first, successful assignment
+      // writes its own two), so the refused call is shown to add none.
+      const id = await unassigned();
+      await setUp(id);
+      const before = await noticesFor(id);
+
+      const err = await refusal(attempt(id));
+
+      expect(err).not.toBeNull();
+      expect(await noticesFor(id)).toEqual(before);
+    });
+
+    it('SCRUM486_AC10_041_keeps_every_type_040_allows_and_adds_three', async () => {
+      // AC10-04, read from the files. notifications_type_known is restated
+      // whole each time; 041 must restate 040's seven, not 034's six. Dropping
+      // venue_hold_expired would stop venue holds expiring (041's header). The
+      // constraint in force is checked too, so the PGlite database agrees.
+      const typesIn = (name) => {
+        const sql = migration(name).replace(/--[^\n]*/g, '');
+        const at = sql.lastIndexOf('add constraint notifications_type_known');
+        const list = sql.slice(at, sql.indexOf(');', at));
+        return [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+      };
+      const from040 = typesIn('040_venue_holds.sql');
+      const in041 = typesIn('041_lead_assignment.sql');
+
+      expect(from040).toEqual([
+        'booking_flagged',
+        'booking_request_withdrawn',
+        'clarification_requested',
+        'clarification_replied',
+        'clarification_closed',
+        'booking_flagged_setup_change',
+        'venue_hold_expired',
+      ]);
+      expect(in041).toEqual([
+        ...from040,
+        'event_request_awaiting_assignment',
+        'event_request_assigned',
+        'event_request_coordinator_assigned',
+      ]);
+      const { rows: [def] } = await db.query(
+        "select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'notifications_type_known'",
+      );
+      for (const type of in041) expect(def.def).toContain(`'${type}'`);
     });
   });
 
