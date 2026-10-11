@@ -19,7 +19,22 @@ const CANCEL_ERROR_MESSAGES = {
   409: "This event has changed and can no longer be cancelled in its current status. Reopen it to see where it stands.",
 };
 
-function cancellationPreviewErrorMessage(error) {
+function cancellationErrorMessage(error) {
+  const status = error.response?.status;
+  if (status === 409) {
+    const serverMessage = error.response?.data?.error;
+    const currentStatus = serverMessage?.match(
+      /has status ([^,]+), which cannot be cancelled/i,
+    )?.[1];
+    if (currentStatus) {
+      return `This event has status "${currentStatus}", which cannot be cancelled. Reopen it to see where it stands.`;
+    }
+  }
+  return CANCEL_ERROR_MESSAGES[status] ||
+    "The event could not be cancelled. No changes have been made; try again.";
+}
+
+function cancellationPreviewErrorMessage(error, eventRequestId) {
   const status = error.response?.status;
   const serverMessage = error.response?.data?.error;
 
@@ -33,7 +48,7 @@ function cancellationPreviewErrorMessage(error) {
     return serverMessage || "This event request or its cancellation preview is not available.";
   }
   if (status >= 500) {
-    return `The server could not load the cancellation preview (${status}). Check the backend error log for details.${serverMessage ? ` Server response: ${serverMessage}` : ""}`;
+    return `The server could not load the cancellation preview (${status}). Try again. If the problem continues, contact your ConnectSphere administrator and provide event request ID: ${eventRequestId}.`;
   }
   if (status) {
     return serverMessage || `The cancellation preview request failed (${status}). Check the reason and try again.`;
@@ -61,6 +76,9 @@ function ImpactSection({ title, impact }) {
               {item.quantity !== undefined ? ` (quantity ${item.quantity})` : ""}
               {item.startsAt && `, ${formatTimestamp(item.startsAt)}`}
               {item.endsAt && `–${formatTimestamp(item.endsAt)}`}
+              {item.expiresAt && `, expires ${formatTimestamp(item.expiresAt)}`}
+              {item.lines?.length > 0 &&
+                ` — ${item.lines.map((line) => `${line.equipmentName || "Equipment"} (quantity ${line.quantity})`).join(", ")}`}
             </li>
           ))}
         </ul>
@@ -75,12 +93,13 @@ function CancellationImpact({ impact }) {
       <h3>What cancellation will affect</h3>
       <ImpactSection title="Venue bookings to cancel" impact={impact.venueBookings} />
       <ImpactSection title="Pending venue booking requests to withdraw" impact={impact.bookingRequests} />
+      <ImpactSection title="Tentative venue holds to release" impact={impact.venueHolds} />
       <ImpactSection title="Equipment requests to cancel" impact={impact.equipmentRequests} />
       <ImpactSection title="Active equipment reservations to release" impact={impact.equipmentReservations} />
       <p>
         This preview includes arrangements currently recorded in ConnectSphere.
-        Registrations, separate tentative holds and on-site assignments are not
-        yet available in this system.
+        Registrations and on-site support assignments are not yet available in
+        this system.
       </p>
     </div>
   );
@@ -143,7 +162,7 @@ export default function EventCancellationPanel({
       setImpact(preview);
     } catch (requestError) {
       setError(
-        `${cancellationPreviewErrorMessage(requestError)} No changes have been made.`,
+        `${cancellationPreviewErrorMessage(requestError, eventRequest.id)} No changes have been made.`,
       );
     } finally {
       setLoadingImpact(false);
@@ -162,10 +181,7 @@ export default function EventCancellationPanel({
       });
       onCancelled?.(updated);
     } catch (requestError) {
-      setError(
-        CANCEL_ERROR_MESSAGES[requestError.response?.status] ||
-          "The event could not be cancelled. No changes have been made; try again.",
-      );
+      setError(cancellationErrorMessage(requestError));
     } finally {
       setCancelling(false);
     }

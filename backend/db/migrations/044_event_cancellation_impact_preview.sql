@@ -100,6 +100,7 @@ begin
         select count(*)::integer
           from equipment_requests r
          where r.event_request_id = p_event_request_id
+           and r.status <> 'cancelled'
       ),
       'details', coalesce((
         select jsonb_agg(
@@ -121,12 +122,14 @@ begin
                 from equipment_lines l
                 join equipment_types t on t.id = l.equipment_type_id
                where l.equipment_request_id = r.id
+                 and l.removed_at is null
             ), '[]'::jsonb)
           )
           order by r.created_at, r.id
         )
           from equipment_requests r
          where r.event_request_id = p_event_request_id
+           and r.status <> 'cancelled'
       ), '[]'::jsonb)
     ),
     'equipmentReservations', jsonb_build_object(

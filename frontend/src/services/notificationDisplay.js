@@ -1,7 +1,7 @@
 // notificationDisplay.js
 //
 // SCRUM-128 (SCRUM-17 AC3). Turns a stored notification into the two lines
-// the Coordinator reads. Kept out of CoordinatorNotifications.jsx so the
+// the recipient reads. Kept out of CoordinatorNotifications.jsx so the
 // wording is testable without rendering, the same split as
 // eventRequestStatusDisplay.js.
 //
@@ -15,6 +15,8 @@
 //     turnaroundMinutes, reason }
 //   venue_hold_expired (040, SCRUM-491): { eventRequestId, eventName,
 //     venueId, venueName, expiresAt }
+//   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
+//     cancelledAt }
 // Every field is read defensively -- a notification outlives the build that
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
@@ -120,6 +122,32 @@ export function describeNotification(notification) {
         `It was for ${formatRange(payload.startsAt, payload.endsAt)}. ` +
         "It no longer needs a decision.",
     };
+  }
+
+  if (notification?.type === "event_cancelled") {
+    const eventName = payload.eventName || "Unnamed event";
+    if (payload.audience === "organiser") {
+      const reason = payload.reason || "No reason recorded.";
+      const cancelledAt = payload.cancelledAt
+        ? ` Cancelled ${formatTimestamp(payload.cancelledAt)}.`
+        : "";
+      return {
+        headline: `${eventName} was cancelled`,
+        detail: `Reason: ${reason}.${cancelledAt}`,
+      };
+    }
+    if (payload.audience === "venue_staff") {
+      return {
+        headline: `Bookings for ${eventName} were released`,
+        detail: "Pending booking requests were withdrawn and confirmed bookings were cancelled.",
+      };
+    }
+    if (payload.audience === "technical_support_staff") {
+      return {
+        headline: `Equipment arrangements for ${eventName} were cancelled`,
+        detail: "The equipment request was cancelled and its active reservations were released.",
+      };
+    }
   }
 
   if (

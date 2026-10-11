@@ -61,6 +61,19 @@ describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
       create role authenticated;
     `);
     for (const name of MIGRATIONS) await db.exec(migration(name));
+    await db.exec('alter table equipment_lines add column removed_at timestamptz');
+    await db.exec(`
+      create type venue_hold_status as enum ('active', 'expired', 'released');
+      create table venue_holds (
+        id uuid primary key default gen_random_uuid(),
+        event_request_id uuid not null references event_requests(id),
+        venue_id uuid not null references venues(id),
+        placed_at timestamptz not null default now(),
+        expires_at timestamptz not null,
+        status venue_hold_status not null default 'active'
+      );
+    `);
+    await db.exec(migration('049_filter_cancelled_equipment_from_cancellation_preview.sql'));
 
     organiser = (await one('insert into auth.users (email) values ($1) returning id', ['organiser@test'])).id;
     eventId = await makeEvent('Preview event');
@@ -159,6 +172,66 @@ describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
       quantity: 2,
       flagged: false,
     });
+  });
+
+  it('excludes cancelled equipment requests from the impact preview', async () => {
+    const cancelledRequestId = (
+      await one(
+        `insert into equipment_requests (event_request_id, status)
+         values ($1, 'cancelled') returning id`,
+        [eventId],
+      )
+    ).id;
+
+    const { preview } = await one(
+      'select event_cancellation_impact_preview($1) as preview',
+      [eventId],
+    );
+
+    expect(preview.equipmentRequests.details).not.toContainEqual(
+      expect.objectContaining({ id: cancelledRequestId }),
+    );
+    expect(preview.equipmentRequests.count).toBe(
+      preview.equipmentRequests.details.length,
+    );
+  });
+
+  it('excludes removed equipment lines from the request details', async () => {
+    const requestId = (
+      await one(
+        `insert into equipment_requests (event_request_id, status)
+         values ($1, 'arranged') returning id`,
+        [eventId],
+      )
+    ).id;
+    const otherEquipmentTypeId = (
+      await one(
+        "insert into equipment_types (name, total_quantity) values ('Microphone', 10) returning id",
+      )
+    ).id;
+    const activeLineId = (
+      await one(
+        `insert into equipment_lines (equipment_request_id, equipment_type_id, quantity)
+         values ($1, $2, 1) returning id`,
+        [requestId, equipmentTypeId],
+      )
+    ).id;
+    const removedLineId = (
+      await one(
+        `insert into equipment_lines (equipment_request_id, equipment_type_id, quantity, removed_at)
+         values ($1, $2, 1, now()) returning id`,
+        [requestId, otherEquipmentTypeId],
+      )
+    ).id;
+
+    const { preview } = await one(
+      'select event_cancellation_impact_preview($1) as preview',
+      [eventId],
+    );
+    const request = preview.equipmentRequests.details.find((item) => item.id === requestId);
+
+    expect(request.lines.map((line) => line.id)).toContain(activeLineId);
+    expect(request.lines.map((line) => line.id)).not.toContain(removedLineId);
   });
 
   it('changes no database rows and rejects a missing event', async () => {

@@ -31,6 +31,8 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
   let organiser;
   let coordinator;
   let otherCoordinator;
+  let venueStaff;
+  let technicalSupport;
   let venueId;
 
   const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
@@ -77,6 +79,17 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
          values ($1, $2, '2026-12-01T09:00:00Z', '2026-12-01T10:00:00Z', $3)
          returning id`,
         [venueId, eventId, status],
+      )
+    ).id;
+  }
+
+  async function makeHold(eventId) {
+    return (
+      await one(
+        `insert into venue_holds (event_request_id, venue_id, placed_by, expires_at)
+         values ($1, $2, $3, now() + interval '1 day')
+         returning id`,
+        [eventId, venueId, coordinator],
       )
     ).id;
   }
@@ -137,16 +150,43 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
     await db.exec(migration('027_booking_request_statuses.sql'));
     await db.exec(migration('022_equipment_schema.sql'));
     await db.exec(migration('042_event_cancellation_fields.sql'));
+    await db.exec('alter table equipment_lines add column removed_at timestamptz');
     await db.exec(migration('043_release_event_arrangements.sql'));
     await db.exec(migration('045_cancel_event_request.sql'));
+    await db.exec(`
+      create type venue_hold_status as enum ('active', 'expired');
+      create table venue_holds (
+        id uuid primary key default gen_random_uuid(),
+        event_request_id uuid not null references event_requests(id),
+        venue_id uuid not null references venues(id),
+        placed_by uuid not null references auth.users(id),
+        placed_at timestamptz not null default now(),
+        expires_at timestamptz not null,
+        status venue_hold_status not null default 'active',
+        expired_at timestamptz
+      );
+    `);
+    await db.exec(migration('047_add_released_venue_hold_status.sql'));
+    await db.exec(migration('048_complete_event_cancellation_existing_arrangements.sql'));
 
     organiser = (await one("insert into auth.users (email) values ('organiser@test') returning id")).id;
     coordinator = (await one("insert into auth.users (email) values ('coordinator@test') returning id")).id;
     otherCoordinator = (await one("insert into auth.users (email) values ('other-coordinator@test') returning id")).id;
+    venueStaff = (await one("insert into auth.users (email) values ('venue-staff@test') returning id")).id;
+    technicalSupport = (await one("insert into auth.users (email) values ('technical-support@test') returning id")).id;
+    await db.query(
+      `insert into profiles (id, role) values
+         ($1, 'event_organiser'),
+         ($2, 'event_coordinator'),
+         ($3, 'event_coordinator'),
+         ($4, 'venue_staff'),
+         ($5, 'technical_support_staff')`,
+      [organiser, coordinator, otherCoordinator, venueStaff, technicalSupport],
+    );
     venueId = (
       await one("insert into venues (name, location, max_capacity) values ('Hall', 'Block A', 100) returning id")
     ).id;
-  });
+  }, 30000);
 
   afterAll(async () => {
     await db?.close();
@@ -155,6 +195,16 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
   it('cancels a newly created event arrangement set and closes open change/clarification requests', async () => {
     const eventId = await makeEvent('pending_clarification');
     const bookingId = await makeBooking(eventId, 'pending');
+    const holdId = await makeHold(eventId);
+    const unrelatedEventId = await makeEvent('approved');
+    const unrelatedHoldId = await makeHold(unrelatedEventId);
+    const equipmentRequestId = (
+      await one(
+        `insert into equipment_requests (event_request_id, status)
+         values ($1, 'pending_review') returning id`,
+        [eventId],
+      )
+    ).id;
     const changeRequestId = await makeChangeRequest(eventId);
     await db.query(
       `insert into event_request_clarification_history
@@ -162,6 +212,15 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
        values ($1, 'question', 'Please clarify the event plan', $2)`,
       [eventId, coordinator],
     );
+
+    const { preview } = await one(
+      'select event_cancellation_impact_preview($1) as preview',
+      [eventId],
+    );
+    expect(preview.venueHolds).toMatchObject({
+      count: 1,
+      details: [expect.objectContaining({ id: holdId, venueName: 'Hall' })],
+    });
 
     await cancel(eventId, coordinator, '  Venue unavailable  ', 'organiser_request');
 
@@ -173,6 +232,38 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
     expect(cancelled.cancelled_at).not.toBeNull();
     expect(cancelled.attendee_message).toBe('This event will not go ahead.');
     expect(await bookingStatus(bookingId)).toBe('withdrawn');
+    expect(await one(
+      'select status::text as status, released_at, released_by from venue_holds where id = $1',
+      [holdId],
+    )).toMatchObject({ status: 'released', released_by: coordinator });
+    expect((await one('select status::text as status from venue_holds where id = $1', [unrelatedHoldId])).status)
+      .toBe('active');
+    expect((await one('select status::text as status from equipment_requests where id = $1', [equipmentRequestId])).status)
+      .toBe('cancelled');
+    const notifications = (await db.query(
+      `select recipient_id, payload
+         from notifications
+        where event_request_id = $1 and type = 'event_cancelled'`,
+      [eventId],
+    )).rows;
+    expect(notifications).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        recipient_id: organiser,
+        payload: expect.objectContaining({
+          audience: 'organiser',
+          eventName: expect.stringContaining('Cancellation test'),
+          reason: 'Venue unavailable',
+        }),
+      }),
+      expect.objectContaining({
+        recipient_id: venueStaff,
+        payload: expect.objectContaining({ audience: 'venue_staff' }),
+      }),
+      expect.objectContaining({
+        recipient_id: technicalSupport,
+        payload: expect.objectContaining({ audience: 'technical_support_staff' }),
+      }),
+    ]));
     const changeRequest = await one(
       'select status::text as status, decision::text as decision, processed_by, processed_at from event_change_requests where id = $1',
       [changeRequestId],

@@ -517,15 +517,15 @@ button { cursor: pointer; }
    the body is allowed to take the width. Unread rows get a teal edge and a
    "New" pill; read rows are muted rather than hidden, so they stay readable
    without competing with what still needs attention. */
-.dashboard--coordinator .coordinator-notifications li { align-items: flex-start; }
-.dashboard--coordinator .coordinator-notifications__body { flex: 1; min-width: 0; }
-.dashboard--coordinator .coordinator-notifications__body p { margin: 0 0 4px; }
-.dashboard--coordinator .coordinator-notifications__headline strong { color: var(--ink); }
-.dashboard--coordinator .coordinator-notifications__detail { overflow-wrap: anywhere; }
-.dashboard--coordinator .coordinator-notifications__time { font-size: 0.8rem; }
-.dashboard--coordinator .coordinator-notifications__item--unread { border-left: 3px solid var(--teal); padding-left: 12px; }
-.dashboard--coordinator .coordinator-notifications__item--read { opacity: 0.7; }
-.dashboard--coordinator .coordinator-notifications__new { background: #e8f7f1; border-radius: 999px; color: #17684f; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-left: 10px; padding: 3px 10px; text-transform: uppercase; }
+.dashboard .coordinator-notifications li { align-items: flex-start; }
+.dashboard .coordinator-notifications__body { flex: 1; min-width: 0; }
+.dashboard .coordinator-notifications__body p { margin: 0 0 4px; }
+.dashboard .coordinator-notifications__headline strong { color: var(--ink); }
+.dashboard .coordinator-notifications__detail { overflow-wrap: anywhere; }
+.dashboard .coordinator-notifications__time { font-size: 0.8rem; }
+.dashboard .coordinator-notifications__item--unread { border-left: 3px solid var(--teal); padding-left: 12px; }
+.dashboard .coordinator-notifications__item--read { opacity: 0.7; }
+.dashboard .coordinator-notifications__new { background: #e8f7f1; border-radius: 999px; color: #17684f; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-left: 10px; padding: 3px 10px; text-transform: uppercase; }
 /* The handoff banner on venue search. Needs a rule of its own because
    .venue-search has no card styling at all -- it is a bare filter bar -- so
    without one the context reads as a stray sentence above the inputs rather
