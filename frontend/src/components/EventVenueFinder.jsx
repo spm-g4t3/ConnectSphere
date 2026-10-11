@@ -398,7 +398,6 @@ export default function EventVenueFinder({ request, userId, hasLiveRequest = fal
   }
 
   function openCheck(venue) {
-    if (!venue) return;
     checkCount.current += 1;
     setRequesting(null);
     setCheckingVenue({ venue, requirements: currentRequirements(), key: checkCount.current });

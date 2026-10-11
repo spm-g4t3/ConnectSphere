@@ -1353,6 +1353,44 @@ describe("SCRUM-191 check a venue's suitability from the event (SCRUM188_AC1/AC2
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["an empty list", []],
+    // A malformed response is treated as no venues rather than crashing.
+    ["a malformed response", null],
+  ])("SCRUM188_AC1_%s_says_there_are_no_active_venues_to_check", async (_label, rows) => {
+    vi.mocked(searchActiveVenues).mockResolvedValue(rows);
+    const { user } = renderFinder(APPROVED, { userId: COORDINATOR });
+
+    await user.click(otherToggle());
+
+    expect(await screen.findByText("There are no active venues to check.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Active venue")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM188_AC1_a_venue_without_a_location_is_listed_by_name_alone", async () => {
+    vi.mocked(searchActiveVenues).mockResolvedValue([{ id: "v4", name: "Rooftop", maxCapacity: 30 }]);
+    const { user } = renderFinder(APPROVED, { userId: COORDINATOR });
+
+    await user.click(otherToggle());
+    const select = await screen.findByLabelText("Active venue");
+
+    const options = within(select).getAllByRole("option").map((o) => o.textContent);
+    expect(options).toEqual(["Choose a venue", "Rooftop"]);
+  });
+
+  it("SCRUM188_AC1_closing_the_other_venue_check_removes_its_panel", async () => {
+    vi.mocked(searchActiveVenues).mockResolvedValue([STUDIO]);
+    const { user } = renderFinder(APPROVED, { userId: COORDINATOR });
+    await user.click(otherToggle());
+    await user.selectOptions(await screen.findByLabelText("Active venue"), "v3");
+    await user.click(screen.getByRole("button", { name: "Check" }));
+    await within(suitabilityPanel("Studio")).findByText("Not suitable");
+
+    await user.click(within(suitabilityPanel("Studio")).getByRole("button", { name: "Close" }));
+
+    expect(suitabilityPanel("Studio")).not.toBeInTheDocument();
+  });
+
   it("SCRUM191_only_one_panel_is_open_at_a_time", async () => {
     const { user } = await searched();
 

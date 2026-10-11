@@ -159,7 +159,6 @@ export default function BookingRequestPanel({
     if (sending.current || submitted) return;
     if (notesTooLong) return;
     if (needsConfirmation && !confirmed) return;
-    if (unavailable) return;
 
     sending.current = true;
     setSubmitting(true);
