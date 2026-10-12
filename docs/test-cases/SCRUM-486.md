@@ -259,7 +259,7 @@ as an insert from a select, so zero Leads writes zero rows and fails nothing
 | AC1-03 | — | `submitEventRequest` | One rpc with the same three arguments as today; returns `assignedCoordinatorId: null`; no `ServiceUnavailableError` path | Proved (svc): `SCRUM330_AC1_submits_through_one_call_that_names_no_coordinator`, `SCRUM330_AC1_returns_the_submitted_request_in_camelCase_with_no_coordinator` (both moved in SCRUM-522), `SCRUM486_AC11_submission_no_longer_reports_a_missing_coordinator_as_a_503` |
 | AC1-04 | ORG's complete draft | `POST /api/event-requests/:id/submit` | 200, `assignedCoordinatorId` null | Proved (route): `SCRUM10_AC5_returns_200_and_the_submitted_request`, re-expected in SCRUM-522 to a null coordinator |
 | AC1-05 | ORG; one UNASSIGNED request | Open their requests list | The row itself says it is waiting for a coordinator to be assigned, without opening anything | Proved (screen): `SCRUM486_AC1_a_submitted_request_with_no_coordinator_says_it_is_waiting_for_the_lead`, `SCRUM486_AC1_the_two_are_visibly_different_on_rows_that_share_a_status` |
-| AC1-06 | ORG; the same request, now HELD BY A | Open their requests list | The row names A instead; no "waiting" line | **Partly unmet.** The "waiting" line goes and the row says a coordinator is assigned (`SCRUM486_AC1_a_submitted_request_with_a_coordinator_says_it_is_waiting_for_review`), but it does not name A: the Organiser's list carries no coordinator name (SCRUM-334 left that as a backend follow-up). SCRUM-523 to report |
+| AC1-06 | ORG; the same request, now HELD BY A | Open their requests list | The row names A instead; no "waiting" line | Proved (svc, screen), after SCRUM-523: `SCRUM486_AC1_each_held_row_carries_its_coordinators_name_from_one_read`, `SCRUM486_AC1_no_coordinator_on_any_row_means_no_second_read` (the Organiser's list reads the names in one profiles read); `SCRUM486_AC1_a_submitted_request_names_the_coordinator_it_was_assigned_to` (the row reads "A has been assigned; your request is waiting for them to start the review", and the waiting-for-the-Lead line is gone) |
 
 ---
 
@@ -542,10 +542,11 @@ deleted to make room.
 | The implementation | The SCRUM-486 subtasks between them |
 
 **Tally:** 71 cases (64 under the criteria, 7 traps), counted from the tables.
-After SCRUM-522: **66 proved**; **5 not**, each marked in its row and listed here
-for SCRUM-523 to report:
+After SCRUM-522: **66 proved**; **5 not**. After SCRUM-523: **67 proved**; **4 not**,
+each marked in its row and listed here. AC1-06 was the fifth: SCRUM-522 found the
+Organiser's row could not name the coordinator, and SCRUM-523 added the name to
+the Organiser's list.
 
-- **AC1-06**, partly unmet: the Organiser's row does not name the coordinator.
 - **AC4-05**, written, not run: the real race is in the live script.
 - **AC5-03**, cannot be written: the safety statuses do not exist yet.
 - **AC8-05**, met differently: one 409 message names both causes.

@@ -158,7 +158,12 @@ describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
 // ---------------------------------------------------------------------------
 describe("SCRUM486_AC1 where a submitted request stands with its coordinator", () => {
   const WAITING_FOR_LEAD = "Waiting for the Event Coordinator Lead to assign a coordinator to your request.";
-  const WAITING_FOR_REVIEW = "A coordinator has been assigned. Your request is waiting for them to start the review.";
+  // The unnamed form, for a row whose coordinator has no name on record (these
+  // fixtures carry no assignedCoordinatorName). Was "A coordinator has been
+  // assigned. Your request is ..." until the line gained the coordinator's
+  // name (AC1-06), when the sentence became "<who> has been assigned; your
+  // request is ...". Right when written: the list carried no name then.
+  const WAITING_FOR_REVIEW = "A coordinator has been assigned; your request is waiting for them to start the review.";
 
   /** The request's own list item, found by its name. */
   const rowOf = async (name) => (await screen.findByText(name)).closest("li");
@@ -177,6 +182,19 @@ describe("SCRUM486_AC1 where a submitted request stands with its coordinator", (
 
     const line = await screen.findByText(WAITING_FOR_REVIEW);
     expect(line.closest("details")).toBeNull();
+    expect(screen.queryByText(WAITING_FOR_LEAD)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC1_a_submitted_request_names_the_coordinator_it_was_assigned_to", async () => {
+    // AC1-06. The name comes with the list (listEventRequestsForOrganiser
+    // reads it in one profiles read), so the row says who without a click.
+    renderList([eventRequest({ assignedCoordinatorId: COORDINATOR, assignedCoordinatorName: "Priya Nair" })]);
+
+    const line = await screen.findByText(
+      "Priya Nair has been assigned; your request is waiting for them to start the review.",
+    );
+    expect(line.closest("details")).toBeNull();
+    expect(screen.queryByText(WAITING_FOR_REVIEW)).not.toBeInTheDocument();
     expect(screen.queryByText(WAITING_FOR_LEAD)).not.toBeInTheDocument();
   });
 

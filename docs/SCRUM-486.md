@@ -50,8 +50,8 @@ on afterwards.
 | Frontend suite (`npm test` in `frontend`) | 2115 passing and 1 todo across 88 files; every coverage gate met; SCRUM-486's four gated files (`UnassignedQueue.jsx`, `AssignCoordinatorPanel.jsx`, `waitingTime.js`, `EventRequestReviewPage.jsx`) at 100% |
 | SCRUM-486's own tests | 201 distinct `SCRUM486_…` titles: 101 backend, 100 frontend (describe titles included; a parametrised test counts once). Older tests this story moved are not counted here; each records in a comment why it was right when written, and the case document's "Existing tests this story must change" says where each of its rows went |
 | PGlite | Three suites build a real Postgres with 041: `eventStatusLifecycleDatabase`, `eventClarificationDatabase`, `venueHoldExpiryAfterLeadAssignmentDatabase`; a fourth, `leadReassignmentWalkthrough`, runs the real router and services over it |
-| Live database | **Not verified by this story.** Whether 041 is applied to the shared project is not recorded in the repository. The three rewritten live scripts have **not been run** (they write to the shared project). Before the examination: apply 041 if it is not, then run `assignment:check`, `request:check`, `routes:check` |
-| Test-case document | 71 cases: **66 proved** by named tests, **5 not** (section 4), each marked in its row |
+| Live database | **Not verified by this story.** 041 is not yet applied to the shared project (as of 12 October). The three rewritten live scripts have **not been run** (they write to the shared project). Before the examination: apply 041 if it is not, then run `assignment:check`, `request:check`, `routes:check` |
+| Test-case document | 71 cases: **67 proved** by named tests, **4 not** (section 4), each marked in its row |
 
 The layers prove different things, and most of this story is in Postgres
 functions. A fake client returns whatever it is given, so only PGlite proves what
@@ -88,6 +88,13 @@ examination, and correct this document rather than defend it if they differ.
 | AC11 | If no Lead exists, submission still succeeds and the request waits in the queue. This replaces the refusal in SCRUM-327 AC5. No notification is written, and nothing fails. | **Done** |
 
 **Tally:** 8 done, 3 partial (AC4, AC5, AC10), 0 deferred.
+
+AC1 counts as done because AC1-06 is met: SCRUM-522 had reported it partly
+unmet, since the Organiser's row could say a coordinator was assigned but not
+who. SCRUM-523 closed it. `listEventRequestsForOrganiser` now reads the
+coordinators' names in one `profiles` read for the whole list, and the row reads
+"<name> has been assigned; your request is waiting for them to start the review"
+(section 2).
 
 A criterion counts as done only where a named test proves it; where the code is
 right but the proof is missing, it is partial.
@@ -141,7 +148,8 @@ Every one of those is undone, and nothing else.
 | Service | AC1-03 | `SCRUM330_AC1_submits_through_one_call_that_names_no_coordinator`, `SCRUM330_AC1_returns_the_submitted_request_in_camelCase_with_no_coordinator`, `SCRUM486_AC11_submission_no_longer_reports_a_missing_coordinator_as_a_503` | One read, one rpc, the same three arguments; `assignedCoordinatorId` comes back as a present `null`; no 503 path |
 | Route | AC1-04 | `SCRUM10_AC5_returns_200_and_the_submitted_request` | 200, the caller from the token as `p_changed_by`, and `assignedCoordinatorId: null` in the body |
 | Screen | AC1-05 | `SCRUM486_AC1_a_submitted_request_with_no_coordinator_says_it_is_waiting_for_the_lead`, `SCRUM486_AC1_the_two_are_visibly_different_on_rows_that_share_a_status` | On the row itself, not behind a click: "Waiting for the Event Coordinator Lead to assign a coordinator to your request." |
-| Screen | AC1-06 | `SCRUM486_AC1_a_submitted_request_with_a_coordinator_says_it_is_waiting_for_review` | Once assigned, the line changes. **It does not name the coordinator** (section 4) |
+| Service | AC1-06 | `SCRUM486_AC1_each_held_row_carries_its_coordinators_name_from_one_read`, `SCRUM486_AC1_no_coordinator_on_any_row_means_no_second_read` | The Organiser's list carries `assignedCoordinatorName`, from one profiles read narrowed to the list's coordinators, skipped when no row has one |
+| Screen | AC1-06 | `SCRUM486_AC1_a_submitted_request_names_the_coordinator_it_was_assigned_to` | Once assigned, the row names who: "Priya Nair has been assigned; your request is waiting for them to start the review." |
 | Screen | TR-03 | `SCRUM486_TR03_a_resubmitted_request_waiting_for_the_lead_reads_not_assigned` | The history beside it says "Not assigned yet", although its newest row names the old coordinator |
 | Live | — | `check-event-request-service.js` step 4; `check-event-request-routes.js`, the queue section; `check-coordinator-assignment.js` section 1 | The same against Supabase. **Written, not run** |
 
@@ -172,9 +180,13 @@ Every one of those is undone, and nothing else.
    to be picked up by a Coordinator", true whether or not anyone is assigned (D8).
 6. **Screen one** (`MyEventRequests.jsx`, `assignmentLine`). For a submitted
    request only, a line under the status: no coordinator, "Waiting for the Event
-   Coordinator Lead to assign a coordinator to your request."; one assigned, "A
-   coordinator has been assigned. Your request is waiting for them to start the
-   review." Derived from `assignedCoordinatorId`, which every read carries.
+   Coordinator Lead to assign a coordinator to your request."; one assigned,
+   "<name> has been assigned; your request is waiting for them to start the
+   review." Derived from `assignedCoordinatorId`, which every read carries, and
+   `assignedCoordinatorName`, which `listEventRequestsForOrganiser` reads in one
+   `profiles` read for the whole list (the two-read pattern of the Lead's queue;
+   skipped when no row has a coordinator). A coordinator with no name on record
+   reads "A coordinator has been assigned; …".
 7. **Screen two** (`AssignmentHistory.jsx`, in the Organiser's "Your coordinator
    and assignment history"). "Current coordinator" comes from the request's own
    `assignedCoordinatorId`, passed in by the parent, not from the newest history
@@ -192,14 +204,15 @@ why in a comment: `SCRUM325_assigns_exactly_one_coordinator_…`,
 **Manual verification:** none recorded. The walkthrough is "as an Organiser,
 submit a complete draft; the row reads 'Waiting for the Event Coordinator Lead…';
 sign in as a Lead; the request is in the Unassigned queue; assign it; the
-Organiser's row now reads 'A coordinator has been assigned…'". Do it once 041 is
+Organiser's row now names the coordinator: '<name> has been assigned…'". Do it once 041 is
 live, before the examination.
 
 **Likely follow-ups.** "Why not just stop setting the coordinator?" (D2). "Why one
 migration, when 016 and 017 were split?" (D1). "Why not change the status label?"
-(D8). "Why did SCRUM-327's tests change if SCRUM-327 was right?" (section 5). "Why
-doesn't the Organiser see who was assigned?" The list carries no name; it is a
-backend change (section 4).
+(D8). "Why did SCRUM-327's tests change if SCRUM-327 was right?" (section 5). "How
+does the row know the coordinator's name?" One `profiles` read for the whole list,
+narrowed to its coordinators: SCRUM-334 left the name behind a click to avoid one
+read per row, and one read per list costs neither.
 
 ---
 
@@ -418,7 +431,6 @@ only true proof, and it has not been run.
 | AC4-05 not run | The true race is written (`check-coordinator-assignment.js` section 2), not run. Until it is, AC4's concurrency half rests on the argument in D13 and on 041's lock | The team, before the examination |
 | AC5-03: Safety review, Safety approved | Not values of `event_request_status` yet. 041 names them in its status list, compared as text, so nothing needs to change when they arrive; until then no test can reassign at them | SCRUM-488 |
 | AC10-06: the new notices are not worded | Each is shown, counted and can be marked read, as "New notification / This notification type cannot be displayed yet". `describeNotification` does not know the three types | SCRUM-172 |
-| AC1-06: the coordinator's name on the Organiser's row | The row says a coordinator is assigned but not who. `GET /event-requests` carries no name; the name is behind "Your coordinator and assignment history" (SCRUM-334 recorded the same) | Follow-up: the name in the Organiser's list |
 | The Lead finds events only by address | No list leads to `/event-requests/:id` (D12) | SCRUM-487 |
 | A reopened draft stays in its old coordinator's "My events" | **Found while writing this review; inferred from the code, not reproduced.** 022 reopens a rejected request to a draft and keeps its coordinator; `listEventRequestsForCoordinator` filters only on the coordinator, with no status filter, so the old coordinator's list shows the Organiser's private draft until it is resubmitted (when 041 clears it). The service's comment claimed this could not happen ("assignment happens at submission"); it now says it can. Opening the draft is refused (404), so the list shows a name and status, not the content. Predates this story (it came with 022) | Follow-up: exclude drafts in that read, or clear the coordinator in 022's reopen |
 | The organiser dashboard has no waiting line | `EventOrganiserDashboard` shows the shared status description in its expanded detail, without D8's line. The brief named only `MyEventRequests` | Follow-up |
@@ -429,9 +441,9 @@ only true proof, and it has not been run.
 
 | Item | Detail |
 |---|---|
-| `pick_event_coordinator` alive but dead | 015's selection rule is still in the database. Nothing calls it since 041: not submission, not the backfills (they ran once), and since SCRUM-522 not the check script either. **041's header says it stays because the check script still calls it; that is no longer true** (section 6). Dropping it needs a migration of its own and buys nothing but tidiness; leaving it means a function implementing SCRUM-327 AC2 and AC3, which are superseded |
+| `pick_event_coordinator` alive but dead | 015's selection rule is still in the database. Nothing calls it since 041: not submission, not the backfills (they ran once), and since SCRUM-522 not the check script either. It is kept deliberately, and 041's header now says why: the customer reversed a decision they had already given, so the rule is what would be needed back if they reverse it again; and dropping it would leave 015's applied header describing a function that does not exist. The cost is a function implementing SCRUM-327 AC2 and AC3, which are superseded |
 | Applied migration headers that argue for automatic assignment | 014, 015, 016, 017, 018, 021 and 022 describe the old model, in places as the reason for their code. They are applied and append-only, so they stay; 041's header records the correction. Listed in section 5 |
-| 041's own header has two stale sentences | It says the check script calls `pick_event_coordinator`, and that "no script counts notifications". SCRUM-522 changed both. If 041 is not yet applied to the shared project, correct those two lines before applying it; if it is, this document is the correction |
+| 041's header, corrected before applying | Two of its "does not do" notes went stale in SCRUM-522: the reason for keeping `pick_event_coordinator` (the check script no longer calls it) and "no script counts notifications". Both were rewritten in SCRUM-523, while 041 was still unapplied; nothing else in the file changed |
 | The backend's worker cap manages contention, it does not remove it | `vitest.config.js` sets `maxWorkers: '50%'` (SCRUM-522): one worker per physical core instead of one per logical one, because the PGlite suites are CPU-bound and two on one core starved the cheap text tests into timeouts. It costs nothing (the run is as long as its slowest file), but every PGlite suite added still raises the load, and the heaviest PGlite test takes about 3.5 s in a full run against a 5 s timeout (1.4 s alone). If that margin closes, the remedy is that suite's own timeout or fewer migrations per suite, not a higher global timeout |
 | Test fakes that apply filters | Two fakes in `leadAssignmentService.test.js` apply `eq`, `in`, `is` and `not` to rows, so the queue reads are proved against data rather than against the query string. They model PostgREST; if the service starts using an operator they do not know, they throw by name rather than answer wrongly, but they are a second implementation of filter semantics to keep honest |
 | A PGlite adapter for supabase-js | `leadReassignmentWalkthrough.test.js` turns `rpc` and `from().select().eq().maybeSingle()` into SQL so the real router runs over a real database. It does exactly what that path needs and throws on anything else |
@@ -522,7 +534,7 @@ reason.
 | `021_event_status_history.sql` | Redefines `submit_event_request` with the pick and the P0001 | **Left**: applied. 041 §2 replaces it |
 | `022_event_status_transitions.sql`:47 | "submit_event_request chooses again on resubmission" | **Left**: applied. 041's header (D2 here) records why 041 clears the column |
 | `014_coordinator_assignment.sql` header | Assignment at submission; the constraint "arrives in 015" | **Left**: applied |
-| `041_lead_assignment.sql` header, two lines | The check script calls `pick_event_coordinator`; no script counts notifications | **Left, pending**: correct before applying if 041 is not yet live (section 4) |
+| `041_lead_assignment.sql` header, two lines | The check script calls `pick_event_coordinator`; no script counts notifications | **Corrected** in SCRUM-523, before 041 is applied: the new reason for keeping the function, and which scripts now count and delete notifications |
 | `eventRequestService.js`, module header | "it also assigns an Event Coordinator" | **Corrected** in SCRUM-520 |
 | `eventRequestService.js`, `submitEventRequest` | The pick and the P0001 | **Corrected** in SCRUM-515 |
 | `eventRequestService.js`, `translateError` | The P0001 → 503 branch | **Corrected** in SCRUM-515: removed, with a comment saying why |
@@ -565,8 +577,7 @@ history (no: every coordinator, and now the Lead).
 
 ## Before the examination
 
-- **Confirm 041 is applied** to the shared project, and if it is not, correct its
-  two stale header lines first (section 4).
+- **Apply 041** to the shared project; its header is current as of SCRUM-523.
 - **Run the three live scripts** (`assignment:check`, `request:check`,
   `routes:check`). Expect one known failure in `routes:check`, the "Submitted"
   label (section 4).

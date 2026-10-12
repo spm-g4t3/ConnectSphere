@@ -31,6 +31,7 @@ import {
   listEventRequestsForReview,
   getEventClarificationHistory,
   listAssignmentHistory,
+  listEventRequestsForOrganiser,
   startEventReview,
   decideEventRequest,
 } from '../../src/services/eventRequestService.js';
@@ -821,5 +822,56 @@ describe('SCRUM-486 AC8: the review of a request waiting for the Lead is refused
     expect(err.status).toBe(409);
     expect(err.message).toBe(message);
     expect(trail(client)).toHaveLength(1);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// AC1-06: the Organiser's list names each request's coordinator
+// ---------------------------------------------------------------------------
+describe("SCRUM-486 AC1: the Organiser's list carries the coordinator's name", () => {
+  it('SCRUM486_AC1_each_held_row_carries_its_coordinators_name_from_one_read', async () => {
+    // AC1-06. The list, then one profiles read narrowed to the coordinators
+    // in it, each once, as listUnassignedEventRequests reads organisers.
+    const client = createFakeClient([
+      ok([
+        unassignedRow({ id: 'a', assigned_coordinator_id: COORDINATOR_A }),
+        unassignedRow({ id: 'b', assigned_coordinator_id: COORDINATOR_A }),
+        unassignedRow({ id: 'c', assigned_coordinator_id: COORDINATOR_B }),
+        unassignedRow({ id: 'waiting' }),
+      ]),
+      ok([profileRow(COORDINATOR_A, 'Priya Nair'), profileRow(COORDINATOR_B, 'Omar Okafor')]),
+    ]);
+
+    const rows = await listEventRequestsForOrganiser(ORGANISER_ID, { client });
+
+    expect(rows.map((row) => [row.id, row.assignedCoordinatorName])).toEqual([
+      ['a', 'Priya Nair'], ['b', 'Priya Nair'], ['c', 'Omar Okafor'], ['waiting', null],
+    ]);
+    const [, names] = client.calls;
+    expect(names.table).toBe('profiles');
+    expect([...names.inFilters[0][1]].sort()).toEqual([COORDINATOR_A, COORDINATOR_B].sort());
+  });
+
+  it('SCRUM486_AC1_no_coordinator_on_any_row_means_no_second_read', async () => {
+    // Drafts, and requests still waiting for the Lead: nobody to name.
+    const client = createFakeClient([ok([unassignedRow(), unassignedRow({ id: 'draft', status: STATUS.DRAFT })])]);
+
+    const rows = await listEventRequestsForOrganiser(ORGANISER_ID, { client });
+
+    expect(trail(client)).toEqual(['event_requests']);
+    expect(rows.every((row) => row.assignedCoordinatorName === null)).toBe(true);
+  });
+
+  it('SCRUM486_AC1_a_coordinator_with_no_name_is_null_not_missing', async () => {
+    const client = createFakeClient([
+      ok([unassignedRow({ assigned_coordinator_id: COORDINATOR_A })]),
+      ok([profileRow(COORDINATOR_A, null)]),
+    ]);
+
+    const [row] = await listEventRequestsForOrganiser(ORGANISER_ID, { client });
+
+    expect(row).toHaveProperty('assignedCoordinatorName', null);
+    expect(row.assignedCoordinatorId).toBe(COORDINATOR_A);
   });
 });

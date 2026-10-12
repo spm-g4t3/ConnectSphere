@@ -109,9 +109,15 @@ function CoordinatorDetails({ eventRequestId, currentCoordinatorId }) {
 function assignmentLine(request) {
   if (request.status !== "submitted") return null;
 
-  return request.assignedCoordinatorId == null
-    ? "Waiting for the Event Coordinator Lead to assign a coordinator to your request."
-    : "A coordinator has been assigned. Your request is waiting for them to start the review.";
+  if (request.assignedCoordinatorId == null) {
+    return "Waiting for the Event Coordinator Lead to assign a coordinator to your request.";
+  }
+
+  // AC1-06: named, from the list's own read (assignedCoordinatorName). A
+  // coordinator with no name on record is still said to be assigned, never
+  // shown as "null".
+  const who = request.assignedCoordinatorName ?? "A coordinator";
+  return `${who} has been assigned; your request is waiting for them to start the review.`;
 }
 
 function ClarificationHistoryDetails({ eventRequestId, isOpen }) {

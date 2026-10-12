@@ -275,13 +275,18 @@
 --
 -- What this migration deliberately does not do:
 --
---   * Drop pick_event_coordinator (015). After this file nothing live calls
---     it: submission was its only caller, and the backfills in 016 and 017 that
---     also called it have run. It stays, unused, because
---     backend/scripts/check-coordinator-assignment.js still calls it (its
---     section 1 tests the selection rule) and dropping it buys nothing. 015's
---     header describes a rule the application no longer applies; it is
---     applied and append-only, so this note is the correction.
+--   * Drop pick_event_coordinator (015). After this file nothing calls it:
+--     submission was its only caller, the backfills in 016 and 017 that also
+--     called it have run, and the check scripts no longer do (SCRUM-522
+--     rewrote check-coordinator-assignment.js around the Lead). It stays,
+--     unused, for two reasons. This story exists because the customer
+--     reversed a decision they had already given: SCRUM-327 built automatic
+--     selection to their brief, and Week 7 took it away. The selection rule is
+--     what would be needed back if they reverse it again, and keeping it costs
+--     nothing while nothing calls it. And dropping it would leave 015's
+--     header, which is applied and append-only, describing a function that no
+--     longer exists. 015's header describes a rule the application no longer
+--     applies; this note is the correction.
 --
 --   * Add the Lead's queue, or any route or screen. Those are SCRUM-519 on.
 --
@@ -294,8 +299,13 @@
 --
 --   * Spare the live check scripts. Once this is applied, any script that
 --     submits through submit_event_request notifies every real Lead in the
---     shared project, and no script counts notifications, so those rows are
---     left behind. Recorded here so whoever runs them next knows.
+--     shared project. The three scripts that submit or assign handle it since
+--     SCRUM-522: check-coordinator-assignment.js and
+--     check-event-request-service.js count notifications before and after,
+--     with every other table they touch, and delete every notice about an
+--     event they created; check-event-request-routes.js deletes them and
+--     checks none is left for its events. A script that submits and does none
+--     of this would leave real Leads' notices behind.
 --
 --   * Change anything about who acts on an event after a reassignment (AC7).
 --     Open clarifications, change requests and flagged bookings reference the

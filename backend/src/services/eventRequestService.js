@@ -1256,7 +1256,24 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
   // An Organiser with no requests is an ordinary state -- a new client who has
   // not raised one yet -- so it is an empty list, not a NotFoundError. The ??
   // guards the shape PostgREST returns for an empty result set.
-  return (data ?? []).map(toEventRequest);
+  const rows = data ?? [];
+
+  // SCRUM-486 AC1-06: each row carries its coordinator's name, so the
+  // Organiser's row can say who has their request. SCRUM-334 left the name
+  // behind a click ("Your coordinator and assignment history") because reading
+  // it per row would be one request per row; this is one read for the whole
+  // list instead, the two-read pattern listUnassignedEventRequests uses:
+  // event_requests and profiles both reference auth.users and not each other,
+  // so PostgREST cannot embed the name. Narrowed to this list's coordinators,
+  // and skipped when no row has one -- a list of drafts, or of requests still
+  // waiting for the Lead, costs no second read.
+  const coordinatorIds = rows.map((row) => row.assigned_coordinator_id).filter((id) => id != null);
+  const nameOf = coordinatorIds.length > 0 ? await readNames(db, coordinatorIds) : () => null;
+
+  return rows.map((row) => ({
+    ...toEventRequest(row),
+    assignedCoordinatorName: nameOf(row.assigned_coordinator_id ?? null),
+  }));
 }
 
 
