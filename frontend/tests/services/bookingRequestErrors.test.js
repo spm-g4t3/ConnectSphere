@@ -33,7 +33,8 @@ describe("bookingRequestErrorMessage", () => {
   // the venue asked for, and the old event-wide wording would wrongly tell the
   // coordinator that no other venue can be requested.
   it.each([
-    ["BOOKING_REQUEST_EXISTS", /pending or approved request for this venue/],
+    // SCRUM-525: names where to withdraw it, the Venue Requests page.
+    ["BOOKING_REQUEST_EXISTS", /pending or approved request for this venue\..*withdraw that request first under Venue Requests\.$/],
     ["BOOKING_FLAGGED_FOR_REVIEW", /booking for this venue is flagged for review/],
   ])("SCRUM525_AC1_%s_is_explained_per_venue", (code, pattern) => {
     const message = bookingRequestErrorMessage(conflict(code, [{ kind: "booking_request", bookingId: "b9" }]));

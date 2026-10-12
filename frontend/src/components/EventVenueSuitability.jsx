@@ -135,7 +135,8 @@ function BookingSuitability({ item }) {
 
       {current && !suitable && newlyUnmet && (
         <p className="event-venue-suitability__alert" role="alert">
-          This venue no longer meets the event&apos;s requirements: {newlyUnmet}
+          {/* SCRUM-525: the request's, since each is judged on its own attendance. */}
+          This venue no longer meets this request&apos;s requirements: {newlyUnmet}
         </p>
       )}
 

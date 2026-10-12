@@ -65,9 +65,18 @@
 --     PostgREST then refuses the call as ambiguous (PGRST203). 040 dropped
 --     venue_occupancy_conflicts' old signature for the same reason.
 --
---   * Steps 6, 7 and 9 change; every other step is 040's word for word,
---     including the lock order (the event `for update`, then the venue `for
---     share`). See the comments on the changed steps below.
+--   * Steps 6 and 9 change, and the attendance guard is new (after the
+--     suitability check, before step 4); step 7 changed only in its
+--     comment. Every other step is 040's word for word, including the lock
+--     order (the event `for update`, then the venue `for share`). See the
+--     comments on the changed steps below.
+--
+-- Deploy order: run 051 and deploy the matching API back to back. The two
+-- halves do not work across versions. After 051, an API from before it
+-- leaves p_expected_attendance out, so the default null reaches the guard
+-- and every request fails with 22023, which the API reports as a 400. An
+-- API from after it, before 051 has run, names a parameter 040's function
+-- does not have, and PostgREST refuses the call with PGRST202.
 --
 -- Before running it in Supabase, two read-only checks:
 --   select event_request_id, venue_id, count(*)

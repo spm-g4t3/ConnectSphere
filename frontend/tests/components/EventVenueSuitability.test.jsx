@@ -132,7 +132,7 @@ describe("SCRUM-192 loading and listing (SCRUM188_AC6)", () => {
     const li = venueItem("Hall A");
     expect(within(li).getAllByText("Not suitable").length).toBeGreaterThan(0);
     expect(within(li).getByRole("alert")).toHaveTextContent(
-      "This venue no longer meets the event's requirements: Capacity, Availability",
+      "This venue no longer meets this request's requirements: Capacity, Availability",
     );
     expect(li.querySelector("details")).toHaveAttribute("open");
     expect(within(li).getByText("Capacity not met")).toBeInTheDocument();
@@ -154,7 +154,7 @@ describe("SCRUM-192 loading and listing (SCRUM188_AC6)", () => {
     expect(within(li).getByText("Requested although it did not meet: Layout")).toBeInTheDocument();
     // Only what newly fails raises the alarm.
     expect(within(li).getByRole("alert")).toHaveTextContent(
-      "This venue no longer meets the event's requirements: Capacity",
+      "This venue no longer meets this request's requirements: Capacity",
     );
     expect(within(li).getByRole("alert")).not.toHaveTextContent("Layout");
   });
@@ -255,7 +255,7 @@ describe("SCRUM-192 failures and rechecking (SCRUM188_AC6)", () => {
     await user.click(screen.getByRole("button", { name: "Recheck" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This venue no longer meets the event's requirements: Availability",
+      "This venue no longer meets this request's requirements: Availability",
     );
     expect(getEventVenueSuitability).toHaveBeenCalledTimes(2);
     expect(getEventVenueSuitability).toHaveBeenLastCalledWith("e1");
@@ -447,7 +447,7 @@ describe("SCRUM-188 Week 7 occupied period in the recheck", () => {
     await screen.findByRole("heading", { name: "Hall A" });
     const li = venueItem("Hall A");
     expect(within(li).getByRole("alert")).toHaveTextContent(
-      "This venue no longer meets the event's requirements: Availability",
+      "This venue no longer meets this request's requirements: Availability",
     );
     expect(li.querySelector("details")).toHaveAttribute("open");
     expect(within(li).getByText(detail)).toBeInTheDocument();

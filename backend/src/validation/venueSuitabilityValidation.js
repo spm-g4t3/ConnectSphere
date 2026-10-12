@@ -25,6 +25,7 @@
  */
 
 import { ValidationError } from '../errors.js';
+import { MAX_ATTENDANCE } from './eventRequestValidation.js';
 import { isPlausibleId } from './eventChangeRequestValidation.js';
 import { LAYOUT_CODE_PATTERN, checkOptionalCodeLists } from './bookingRequestValidation.js';
 
@@ -130,7 +131,8 @@ export function validateSuitabilityQuery(input) {
  * checkAttendance, which refuses "12" because JSON could have sent 12. Here
  * only digits are accepted -- no sign, point, exponent or blank, which Number()
  * would otherwise read as 0 or as a fraction -- and the value must be at least
- * 1 and a safe integer, so it is exactly the number typed. A repeated
+ * 1 and a safe integer, so it is exactly the number typed, and at most
+ * MAX_ATTENDANCE, as the body's is. A repeated
  * ?attendance= arrives as an array and is refused, since a venue is checked
  * for one number. Blank is refused rather than read as absent: the panel only
  * sends the parameter when the coordinator has entered a number.
@@ -145,6 +147,12 @@ function checkAttendanceParam(errors, value) {
   const number = text !== null && /^\d+$/.test(text) ? Number(text) : NaN;
   if (!Number.isSafeInteger(number) || number < 1) {
     errors.add('attendance', 'must be a whole number greater than zero');
+    return undefined;
+  }
+  // The body's cap, for the same reason: a booking made at this number could
+  // not be stored, so it is not judged either.
+  if (number > MAX_ATTENDANCE) {
+    errors.add('attendance', `must be at most ${MAX_ATTENDANCE}`);
     return undefined;
   }
   return number;

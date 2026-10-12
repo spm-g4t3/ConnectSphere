@@ -15,9 +15,11 @@ const CODE_MESSAGES = {
   VENUE_RETIRED: "This venue has been retired and can no longer be requested. Choose another venue.",
   // SCRUM-525 (AC1): one live request per venue per event, not per event, so
   // both refusals are about this venue only and say other venues are still
-  // open.
+  // open. "Venue Requests" is the menu label of the page where a request is
+  // withdrawn (Navigation.jsx, /my-venue-requests), so the coordinator knows
+  // where to go.
   BOOKING_REQUEST_EXISTS:
-    "This event already has a pending or approved request for this venue. You can still request other venues; to ask for this one again, withdraw that request first.",
+    "This event already has a pending or approved request for this venue. You can still request other venues; to ask for this one again, withdraw that request first under Venue Requests.",
   BOOKING_FLAGGED_FOR_REVIEW:
     "This event's booking for this venue is flagged for review. Resolve it before requesting this venue again, or choose another venue.",
   // SCRUM-525 (R4): only when the form sent no attendance and the event has

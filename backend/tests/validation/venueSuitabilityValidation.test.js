@@ -112,4 +112,13 @@ describe('SCRUM525_AC3 validateSuitabilityQuery reads ?attendance=', () => {
     expect(validateSuitabilityQuery({ ...BASE, attendance: '1' }).expectedAttendance).toBe(1);
     expect(validateSuitabilityQuery({ ...BASE, attendance: ' 80 ' }).expectedAttendance).toBe(80);
   });
+
+  it('SCRUM525_AC3_attendance_stops_at_the_postgres_integer_maximum', () => {
+    // The body's cap, read from text: the largest number a booking could
+    // store is judged; one more could never be requested, so it is refused.
+    expect(validateSuitabilityQuery({ ...BASE, attendance: '2147483647' }).expectedAttendance).toBe(2147483647);
+    expect(faultsOf({ ...BASE, attendance: '2147483648' })).toEqual([
+      { field: 'attendance', message: 'must be at most 2147483647' },
+    ]);
+  });
 });

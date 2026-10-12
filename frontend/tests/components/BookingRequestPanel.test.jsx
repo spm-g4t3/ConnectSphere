@@ -250,7 +250,7 @@ describe("a venue that fails the suitability check", () => {
     const { user } = renderPanel({ suitability: UNSUITABLE });
 
     const warning = screen.getByRole("alert");
-    expect(warning).toHaveTextContent("does not meet this event's requirements");
+    expect(warning).toHaveTextContent("does not meet this request's requirements");
     expect(within(warning).getByText("Capacity: Capacity 80 < expected attendance 150")).toBeInTheDocument();
     // Only what was not met.
     expect(within(warning).queryByText(/Facilities/)).not.toBeInTheDocument();
@@ -300,7 +300,7 @@ describe("a venue that fails the suitability check", () => {
     await user.click(submit());
 
     const warning = await screen.findByRole("alert");
-    expect(warning).toHaveTextContent("does not meet this event's requirements");
+    expect(warning).toHaveTextContent("does not meet this request's requirements");
     expect(within(warning).getByText("Capacity: Capacity 80 < expected attendance 150")).toBeInTheDocument();
     // The first send did not claim a confirmation.
     expect(createBookingRequest).toHaveBeenNthCalledWith(1, { eventRequestId: "e1", venueId: "v1", expectedAttendance: 150 });
@@ -736,6 +736,27 @@ describe("SCRUM-191 the coordinator's requirement codes travel with the request"
     });
   });
 
+  // SCRUM-525 (AC2): the layout belongs to the request, so the form shows the
+  // one it will send, and says so when it sends none.
+  it.each([
+    ["a layout", { layout: "theatre" }, "Theatre (from your search)", { roomLayoutCode: "theatre" }],
+    ["no layout", { layout: "" }, "None requested", {}],
+  ])("SCRUM525_AC2_the_request_form_shows_the_layout_it_will_send (%s)", async (_label, requirements, shown, sent) => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel({ requirements });
+
+    const term = screen.getByText("Room layout", { selector: "dt" });
+    expect(term.nextElementSibling.textContent).toBe(shown);
+    await user.click(submit());
+
+    expect(createBookingRequest).toHaveBeenCalledWith({
+      eventRequestId: "e1",
+      venueId: "v1",
+      expectedAttendance: 150,
+      ...sent,
+    });
+  });
+
   it("SCRUM191_codes_and_the_unsuitable_confirmation_go_together", async () => {
     vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
     const { user } = renderPanel({ suitability: UNSUITABLE, requirements: { layout: "theatre" } });
@@ -934,6 +955,7 @@ describe("SCRUM-525 expected attendance for this venue", () => {
     const { user } = renderPanel();
 
     expect(attendanceField()).toHaveValue(150);
+    expect(attendanceField()).toHaveAccessibleDescription(/^Prefilled with the event's expected attendance\./);
     // Leaving the field unchanged is not a new number, so nothing is checked.
     await user.click(attendanceField());
     await user.tab();
@@ -992,12 +1014,45 @@ describe("SCRUM-525 expected attendance for this venue", () => {
     expect(createBookingRequest).toHaveBeenCalledWith({ eventRequestId: "e1", venueId: "v1", expectedAttendance: 1 });
   });
 
+  // The column is a Postgres integer and the server refuses anything above
+  // its maximum, so the form refuses it first, beside the field.
+  it("SCRUM525_AC2_attendance_above_the_database_limit_is_refused", async () => {
+    const { user } = renderPanel();
+
+    await setAttendance(user, "2147483648");
+
+    expect(screen.getByText("Expected attendance must be at most 2,147,483,647.")).toBeInTheDocument();
+    expect(attendanceField()).toHaveAttribute("aria-invalid", "true");
+    expect(submit()).toBeDisabled();
+    fireEvent.submit(attendanceField().closest("form"));
+    expect(checkVenueSuitability).not.toHaveBeenCalled();
+    expect(createBookingRequest).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM525_AC2_attendance_at_the_database_limit_is_accepted", async () => {
+    const max = 2147483647;
+    vi.mocked(checkVenueSuitability).mockResolvedValue({ ...SUITABLE, checked: { expectedAttendance: max } });
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel();
+
+    await setAttendance(user, String(max));
+    expect(attendanceField()).not.toHaveAttribute("aria-invalid");
+    await waitFor(() => expect(submit()).toBeEnabled());
+    await user.click(submit());
+
+    expect(checkVenueSuitability).toHaveBeenCalledWith("e1", "v1", {}, { attendance: max });
+    expect(createBookingRequest).toHaveBeenCalledWith({ eventRequestId: "e1", venueId: "v1", expectedAttendance: max });
+  });
+
   it("SCRUM525_AC2_an_event_without_attendance_starts_blank_and_asks_for_one", async () => {
     vi.mocked(checkVenueSuitability).mockResolvedValue({ ...SUITABLE, checked: { expectedAttendance: 60 } });
     const { user } = renderPanel({ event: { ...EVENT, expectedAttendance: null } });
 
-    // Shown at once: nothing could be sent without a number.
+    // Shown at once: nothing could be sent without a number. The hint does
+    // not claim a prefill there was none of.
     expect(attendanceField()).toHaveValue(null);
+    expect(attendanceField()).toHaveAccessibleDescription(/The event has no expected attendance, so enter one/);
+    expect(attendanceField()).not.toHaveAccessibleDescription(/Prefilled/);
     expect(screen.getByText("Enter the expected attendance for this venue.")).toBeInTheDocument();
     expect(submit()).toBeDisabled();
 
@@ -1057,7 +1112,7 @@ describe("SCRUM-525 editing attendance rechecks the venue", () => {
     criteria: [{ criterion: "Capacity", met: true, detail: `Capacity 100 >= expected attendance ${n}` }],
     checked: { expectedAttendance: n },
   });
-  const warningText = /does not meet this event's requirements/;
+  const warningText = /does not meet this request's requirements/;
 
   async function setAttendance(user, text) {
     await user.clear(attendanceField());
@@ -1149,6 +1204,26 @@ describe("SCRUM-525 editing attendance rechecks the venue", () => {
     expect(checkVenueSuitability).toHaveBeenCalledTimes(1);
   });
 
+  // No blur here: the form is submitted straight from the field (as Enter in
+  // another field or a script would), so only the send path's own check can
+  // stop it. Without that check the request would go out for a number whose
+  // verdict was never shown.
+  it("SCRUM525_AC3_sending_with_an_unchecked_number_checks_it_first (submitted without leaving the field)", async () => {
+    vi.mocked(checkVenueSuitability).mockResolvedValue(suitableFor(80));
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel();
+
+    await user.clear(attendanceField());
+    await user.type(attendanceField(), "80");
+    expect(checkVenueSuitability).not.toHaveBeenCalled();
+    fireEvent.submit(attendanceField().closest("form"));
+
+    expect(createBookingRequest).not.toHaveBeenCalled();
+    expect(checkVenueSuitability).toHaveBeenCalledTimes(1);
+    expect(checkVenueSuitability).toHaveBeenCalledWith("e1", "v1", {}, { attendance: 80 });
+    await waitFor(() => expect(submit()).toBeEnabled());
+  });
+
   it("SCRUM525_AC3_a_failed_recheck_says_so_and_leaves_sending_to_the_server", async () => {
     vi.mocked(checkVenueSuitability).mockRejectedValue(httpError(500));
     vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
@@ -1165,5 +1240,29 @@ describe("SCRUM-525 editing attendance rechecks the venue", () => {
 
     await user.click(submit());
     expect(createBookingRequest).toHaveBeenCalledWith({ eventRequestId: "e1", venueId: "v1", expectedAttendance: 80 });
+  });
+
+  // After a failed check, the server judges the number on send. When it asks
+  // for a confirmation, its list is the verdict, and the failed check's
+  // "checked again when you send" must not stand beside it as if pending.
+  it("SCRUM525_AC3_a_send_after_a_failed_recheck_clears_the_stale_alert", async () => {
+    vi.mocked(checkVenueSuitability).mockRejectedValue(httpError(500));
+    vi.mocked(createBookingRequest).mockRejectedValue(
+      conflict409("SUITABILITY_CONFIRMATION_REQUIRED", [
+        { criterion: "Capacity", met: false, detail: "Capacity 60 < expected attendance 80" },
+      ]),
+    );
+    const { user } = renderPanel();
+
+    await setAttendance(user, "80");
+    expect(await screen.findByText(/It will be checked again when you send the request\./)).toBeInTheDocument();
+
+    await user.click(submit());
+
+    const warning = await screen.findByText(warningText);
+    expect(within(warning.closest("[role=alert]")).getByText("Capacity: Capacity 60 < expected attendance 80")).toBeInTheDocument();
+    expect(screen.queryByText(/It will be checked again when you send the request\./)).not.toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(confirmBox()).not.toBeChecked();
   });
 });

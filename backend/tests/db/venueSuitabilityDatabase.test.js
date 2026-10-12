@@ -13,6 +13,10 @@
  * the hold exclusion argument, the stale booking period, `met` and the detail
  * text are all judged on rows Postgres produced.
  *
+ * SCRUM-525 adds the real createBookingRequest over the same client: its
+ * create_booking_request rpc runs on PGlite too, so a request's own
+ * attendance is judged, stored and rechecked end to end.
+ *
  * Not proved here: the PostgREST select strings, which the service and route
  * tests pin.
  *
@@ -40,6 +44,8 @@ vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: {}, supabaseAdm
 const { checkVenueSuitability, checkEventVenues } = await import(
   '../../src/services/venueSuitabilityService.js'
 );
+const { createBookingRequest } = await import('../../src/services/bookingRequestService.js');
+const { ConflictError } = await import('../../src/errors.js');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
@@ -122,7 +128,9 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
    * A Supabase client whose reads and rpc go to PGlite: the event, the venue
    * with its attributes, the code lookups, the event's bookings with their
    * venue, and venue_occupancy_conflicts() called with the service's named
-   * arguments.
+   * arguments. SCRUM-525: create_booking_request too, with its error passed
+   * back in PostgREST's shape (code, message, hint, details), so the
+   * service's own translation of a refusal is what is tested.
    */
   function pgliteClient() {
     const readVenue = async (id) => {
@@ -183,6 +191,27 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
         return chain;
       },
       async rpc(fn, args) {
+        if (fn === 'create_booking_request') {
+          try {
+            const { result } = await one(
+              `select create_booking_request(
+                 p_event_request_id => $1::uuid, p_venue_id => $2::uuid, p_requested_by => $3::uuid,
+                 p_room_layout_code => $4::text, p_setup_notes => $5::text, p_suitability => $6::jsonb,
+                 p_confirm_unsuitable => $7::boolean, p_expected_attendance => $8::integer) as result`,
+              [
+                args.p_event_request_id, args.p_venue_id, args.p_requested_by, args.p_room_layout_code,
+                args.p_setup_notes, JSON.stringify(args.p_suitability), args.p_confirm_unsuitable,
+                args.p_expected_attendance,
+              ],
+            );
+            return { data: result, error: null };
+          } catch (error) {
+            return {
+              data: null,
+              error: { code: error.code, message: error.message, hint: error.hint, details: error.detail },
+            };
+          }
+        }
         if (fn !== 'venue_occupancy_conflicts') throw new Error(`unexpected rpc ${fn}`);
         try {
           const data = await rows(
@@ -215,13 +244,13 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
     return id;
   }
 
-  async function makeVenue(setup = 30, turnaround = 45) {
+  async function makeVenue(setup = 30, turnaround = 45, capacity = 200) {
     counter += 1;
     const id = (
       await one(
         `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, $2, $3) returning id`,
-        [`Harbour Room ${counter}`, setup, turnaround],
+         values ($1, 'Block A', $4, $2, $3) returning id`,
+        [`Harbour Room ${counter}`, setup, turnaround, capacity],
       )
     ).id;
     await db.query(
@@ -293,6 +322,10 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
     expect(result.outcome).toBe('created');
     return result.booking.id;
   }
+
+  /** SCRUM-525: the real service path, as the form calls it, over the PGlite client. */
+  const requestThroughService = (eventId, venueId, input = {}) =>
+    createBookingRequest({ eventRequestId: eventId, venueId, ...input }, coordinator, { client: pgliteClient() });
 
   const check = (eventId, venueId) =>
     checkVenueSuitability({ eventRequestId: eventId, venueId, userId: coordinator, client: pgliteClient() });
@@ -543,6 +576,69 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
       expect(availability.conflicts.map((c) => c.id)).toEqual([bookingId]);
       expect(ms(availability.conflicts[0].occupiedEndsAt)).toBe(ms(at('13:00')));
       expect(after.newlyUnmet).toEqual(['Availability']);
+    });
+  });
+
+  describe('SCRUM-525: each booking judged on its own attendance', () => {
+    it('SCRUM525_AC3_flow_two_bookings_are_judged_on_their_own_attendance', async () => {
+      // FL-02 (R7, R15). Event E has attendance 150; venues A and B hold 100
+      // each. A is requested for 40 people, B for 200 (the coordinator
+      // confirms B's Capacity shortfall, as the form asks). Both requests go
+      // through the real createBookingRequest and create_booking_request, so
+      // what is stored is what the service judged.
+      const venueA = await makeVenue(30, 45, 100);
+      const venueB = await makeVenue(30, 45, 100);
+      const eventId = await makeEvent(at('14:00'), at('16:00'));
+
+      const bookingA = await requestThroughService(eventId, venueA, { expectedAttendance: 40 });
+      const bookingB = await requestThroughService(eventId, venueB, {
+        expectedAttendance: 200,
+        confirmUnsuitable: true,
+        acknowledgedCriteria: ['Capacity'],
+      });
+      expect(bookingA.expectedAttendance).toBe(40);
+      expect(bookingB.expectedAttendance).toBe(200);
+
+      // The recheck judges each booking on its own number, never the event's
+      // 150 -- which would fail A and hide that B fails on its own 200.
+      const items = await recheck(eventId);
+      const a = items.find((item) => item.venueId === venueA);
+      const b = items.find((item) => item.venueId === venueB);
+      expect(a).toMatchObject({ expectedAttendance: 40, attendanceSource: 'booking', error: null });
+      expect(b).toMatchObject({ expectedAttendance: 200, attendanceSource: 'booking', error: null });
+      expect(a.current.criteria.find((c) => c.criterion === 'Capacity'))
+        .toMatchObject({ met: true, detail: 'Capacity 100 ≥ expected attendance 40' });
+      expect(b.current.criteria.find((c) => c.criterion === 'Capacity'))
+        .toMatchObject({ met: false, detail: 'Capacity 100 < expected attendance 200' });
+    });
+
+    it('SCRUM525_AC1_a_duplicate_at_an_approved_venue_is_refused_as_existing_not_unsuitable', async () => {
+      // B-AC1 ordering (R3). E already holds an approved booking at A, and A
+      // is too small for this request (300 > 200), so Capacity is unmet; the
+      // coordinator confirms that one shortfall, as the form would. The
+      // service judges suitability before create_booking_request, so it is
+      // the own-booking filter in judgeVenue that keeps E's approved booking
+      // out of Availability. Without it Availability is unmet too, is not
+      // among the acknowledged criteria, and the duplicate is misreported as
+      // SUITABILITY_CONFIRMATION_REQUIRED instead of reaching step 6.
+      const venueId = await makeVenue();
+      const eventId = await makeEvent(at('17:00'), at('19:00'));
+      const approvedId = await makeBooking(venueId, eventId, at('17:00'), at('19:00'), 'approved');
+
+      const err = await requestThroughService(eventId, venueId, {
+        expectedAttendance: 300,
+        confirmUnsuitable: true,
+        acknowledgedCriteria: ['Capacity'],
+      }).catch((e) => e);
+
+      expect(err).toBeInstanceOf(ConflictError);
+      expect(err.code).toBe('BOOKING_REQUEST_EXISTS');
+      expect(err.conflicts).toEqual([{ kind: 'booking_request', bookingId: approvedId }]);
+      const { n } = await one(
+        `select count(*)::int as n from bookings where event_request_id = $1`,
+        [eventId],
+      );
+      expect(n).toBe(1);
     });
   });
 });

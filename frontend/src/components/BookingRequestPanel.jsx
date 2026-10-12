@@ -12,7 +12,10 @@
 // the same ones the suitability check was given. They are sent as
 // roomLayoutCode, accessibility and facilities so the server's check on submit
 // judges the coordinator's codes rather than "None requested". A blank layout
-// and empty lists are left out of the body.
+// and empty lists are left out of the body. SCRUM-525 (AC2): the layout is
+// the request's own, so the details list shows the one that will be sent,
+// read-only and marked as coming from the search, or "None requested". It is
+// changed in the search form, the one place the codes are chosen.
 //
 // What the coordinator sees and chooses:
 //   - the event's own details, because they are what the request will carry:
@@ -22,8 +25,9 @@
 //   - SCRUM-525 (AC2): the expected attendance for this venue. It belongs to
 //     the request, not the event, because one event can now use several
 //     venues at once, each for part of its audience. It is prefilled from the
-//     event's expected attendance, stays editable, must be a whole number of
-//     1 or more, and is always sent as expectedAttendance, so the number the
+//     event's expected attendance, stays editable, must be a whole number
+//     from 1 to MAX_ATTENDANCE (the column is a Postgres integer, and the
+//     server refuses anything larger), and is always sent as expectedAttendance, so the number the
 //     server checks and stores is the one on screen. The event's own number
 //     stays in the details list beside it, labelled as the event's;
 //   - optional setup notes, the only free text sent.
@@ -39,7 +43,8 @@
 // sequence number and only the latest one's answer is applied, so a slow
 // answer for an older number can never overwrite a newer one. A failed check
 // says so and leaves the send enabled: the server checks again on submit and
-// is the gate. All of this runs from event handlers, never an effect.
+// is the gate, and once it answers with its own verdict that note is retired
+// so the two never stand side by side. All of this runs from event handlers, never an effect.
 //
 // Suitability (N10) is computed by the server. When the venue fails it, a
 // warning lists the criteria not met and the coordinator must tick an explicit
@@ -97,10 +102,18 @@ import {
   formatOccupiedPeriod,
   requestPaddingNote,
 } from "../services/occupiedPeriodDisplay";
-import { criterionDetailText } from "../services/venueSuitabilityDisplay";
+import { criterionDetailText, labelFor } from "../services/venueSuitabilityDisplay";
+import { ROOM_LAYOUTS } from "../services/venueLookups";
 
 /** Mirrors bookings_setup_notes_length in migration 030. */
 const SETUP_NOTES_MAX_LENGTH = 1000;
+
+/**
+ * SCRUM-525: the largest attendance the server accepts, the Postgres integer
+ * maximum of bookings.expected_attendance. Refused here too, so the
+ * coordinator is told beside the field instead of by a 400 after sending.
+ */
+const MAX_ATTENDANCE = 2147483647;
 
 /** The fields of this form a 400's details[] can be shown beside. */
 const FORM_FIELDS = ["setupNotes", "expectedAttendance"];
@@ -109,13 +122,14 @@ const FORM_FIELDS = ["setupNotes", "expectedAttendance"];
  * SCRUM-525: the attendance text as the number to send, or null when it is
  * not one. The same rule as the server's: digits only (no sign, decimal point
  * or exponent, which a number input would otherwise let through), at least 1,
- * and small enough to be exact.
+ * and at most MAX_ATTENDANCE. A string of digits too long to be exact is far
+ * above that bound, so the bound refuses it too.
  */
 function parseAttendance(text) {
   const trimmed = String(text ?? "").trim();
   if (!/^\d+$/.test(trimmed)) return null;
   const n = Number(trimmed);
-  return n >= 1 && Number.isSafeInteger(n) ? n : null;
+  return n >= 1 && n <= MAX_ATTENDANCE ? n : null;
 }
 
 /** Why the attendance text is not a number to send, or null when it is. */
@@ -125,8 +139,9 @@ function attendanceProblem(text) {
   // A sign is allowed here only so that 0 and -5 are told the real problem.
   if (!/^-?\d+$/.test(trimmed)) return "Expected attendance must be a whole number.";
   if (Number(trimmed) < 1) return "Expected attendance must be at least 1.";
-  // Too many digits to be exact is not a number anyone means.
-  if (parseAttendance(trimmed) === null) return "Expected attendance must be a whole number.";
+  if (Number(trimmed) > MAX_ATTENDANCE) {
+    return `Expected attendance must be at most ${MAX_ATTENDANCE.toLocaleString("en-US")}.`;
+  }
   return null;
 }
 
@@ -134,6 +149,15 @@ function attendanceProblem(text) {
 function attendanceSeed(event) {
   const n = event?.expectedAttendance;
   return Number.isInteger(n) ? String(n) : "";
+}
+
+/**
+ * SCRUM-525 (AC2): the layout this request will send, as its label. Marked as
+ * the search's, because that is where it was chosen and where it is changed.
+ */
+function layoutText(requirements) {
+  const layout = requirements?.layout;
+  return layout ? `${labelFor(layout, ROOM_LAYOUTS)} (from your search)` : "None requested";
 }
 
 function orNotSpecified(value) {
@@ -306,6 +330,13 @@ export default function BookingRequestPanel({
     } catch (err) {
       if (isSuitabilityConfirmationRequired(err)) {
         // Warn, and wait for the coordinator to tick the box and send again.
+        // The server has now judged the number sent, so a failed check's
+        // "checked again when you send" is spent: retire it, and the server's
+        // list is the verdict on screen. Only here, because only this answer
+        // carries a verdict; after any other refusal the failed check's note
+        // still holds, and going back to 'idle' would bring back the caller's
+        // verdict for a number that is no longer in the field.
+        setRecheck({ status: "idle", result: null, error: null });
         setServerCriteria(unmetCriteria(err));
         setConfirmed(false);
       } else {
@@ -332,6 +363,9 @@ export default function BookingRequestPanel({
         {/* SCRUM-525: the event's number, beside the per-venue field below. */}
         <dt>Event&apos;s expected attendance</dt>
         <dd>{event.expectedAttendance ?? "Not specified"}</dd>
+        {/* SCRUM-525 (AC2): the request's own layout, which it will send. */}
+        <dt>Room layout</dt>
+        <dd>{layoutText(requirements)}</dd>
         <dt>Venue requirements</dt>
         <dd>{orNotSpecified(event.venueRequirements)}</dd>
         <dt>Accessibility requirements</dt>
@@ -385,7 +419,10 @@ export default function BookingRequestPanel({
             />
           </label>
           <p className="booking-request__hint" id={attendanceHintId}>
-            Prefilled with the event&apos;s expected attendance. Changing it checks this venue again.
+            {/* Prefilled only when the event has a number to prefill. */}
+            {attendanceSeed(event) === ""
+              ? "The event has no expected attendance, so enter one for this venue. Entering it checks this venue for that number."
+              : "Prefilled with the event's expected attendance. Changing it checks this venue again."}
           </p>
           {attendanceMessages.length > 0 && (
             <ul className="booking-request__field-error" id={attendanceErrorId}>
@@ -431,7 +468,8 @@ export default function BookingRequestPanel({
 
           {needsConfirmation && (
             <div className="booking-request__warning" role="alert">
-              <h4>This venue does not meet this event&apos;s requirements</h4>
+              {/* SCRUM-525: the request's, since Capacity is judged on its own number. */}
+              <h4>This venue does not meet this request&apos;s requirements</h4>
               {unmet.length > 0 && (
                 <ul>
                   {unmet.map((criterion, i) => (

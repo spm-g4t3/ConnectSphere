@@ -47,6 +47,8 @@ import {
   getCoordinatorChangeRequests,
   getEventCancellationImpact,
   getEventClarificationHistory,
+  listCoordinators,
+  reassignEventRequest,
   requestEventClarification,
   startEventReview,
 } from "../../src/services/eventRequestService";
@@ -908,8 +910,17 @@ describe("SCRUM-188 a live request known on load", () => {
   });
 
   // SCRUM-525 (R13): the request a refusal collided with is shown, so the
-  // section reloads to list it.
+  // section reloads to list it, and Hall A's hint then names its status from
+  // the server, which the refusal alone does not carry.
   it("SCRUM525_AC1_an_already_requested_refusal_reloads_venue_suitability", async () => {
+    const COLLIDED_ITEM = {
+      ...APPROVED_ITEM,
+      bookingId: "b7",
+      venueId: "v1",
+      venueName: "Hall A",
+      venueLocation: "Level 2",
+    };
+    vi.mocked(getEventVenueSuitability).mockResolvedValueOnce([]).mockResolvedValueOnce([COLLIDED_ITEM]);
     vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
     vi.mocked(createBookingRequest).mockRejectedValue(
       Object.assign(httpError(409), {
@@ -928,6 +939,37 @@ describe("SCRUM-188 a live request known on load", () => {
     await user.click(within(panel).getByRole("button", { name: "Request this venue" }));
 
     await waitFor(() => expect(getEventVenueSuitability).toHaveBeenCalledTimes(2));
+    const suitabilitySection = screen.getByRole("heading", { name: "Venue suitability" }).closest("section");
+    expect(await within(suitabilitySection).findByRole("heading", { name: "Hall A" })).toBeInTheDocument();
     expect(requestButton("Hall A")).toBeDisabled();
+    await waitFor(() => expect(requestButton("Hall A")).toHaveAccessibleDescription(/\(Approved\)/));
+  });
+
+  // SCRUM-525 (R13): the lock hint points at Venue suitability, which only
+  // the assigned coordinator sees. After a handover made in this view the
+  // section is gone, so no hint may send the coordinator looking for it; the
+  // buttons stay off for eligibility's reason, shown once above the results.
+  it("SCRUM525_AC1_after_a_handover_no_hint_points_at_the_hidden_venue_suitability", async () => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([LIVE_ITEM]);
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL, ROOM_B]);
+    vi.mocked(listCoordinators).mockResolvedValue([{ id: OTHER, fullName: "Olga Other" }]);
+    vi.mocked(reassignEventRequest).mockResolvedValue({ id: REQUEST_ID, assignedCoordinatorId: OTHER });
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest({ ...PERIOD, status: "approved" }));
+    await screen.findByRole("heading", { name: "Room B" });
+
+    await user.click(screen.getByRole("button", { name: "Hand over to another coordinator" }));
+    await user.selectOptions(await screen.findByLabelText("Hand over to"), OTHER);
+    await user.click(screen.getByRole("button", { name: "Confirm handover" }));
+    await screen.findByText(/Handed over to Olga Other/);
+    expect(screen.queryByRole("heading", { name: "Venue suitability" })).not.toBeInTheDocument();
+
+    await searchInFinder(user);
+    expect(requestButton("Room B")).toBeDisabled();
+    expect(requestButton("Room B")).not.toHaveAccessibleDescription(/Venue suitability/);
+    expect(within(finderSection()).queryByText(/See it under Venue suitability/)).not.toBeInTheDocument();
+    expect(
+      within(finderSection()).getByText("Only the coordinator assigned to this event can request a venue for it."),
+    ).toBeInTheDocument();
   });
 });

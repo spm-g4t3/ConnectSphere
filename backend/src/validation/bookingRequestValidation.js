@@ -28,7 +28,9 @@
  * checkAttendance): a whole number above zero, with no coercion, so "12" is
  * refused rather than guessed at. Absent means "the event's", and the service
  * fills that in; it is not capped at the event's number, because nothing in
- * the requirements caps it. The database refuses below 1 again (051).
+ * the requirements caps it. The only ceiling is MAX_ATTENDANCE, Postgres's
+ * integer maximum, above which it could not be stored. The database refuses
+ * below 1 again (051).
  */
 
 import { ValidationError } from '../errors.js';

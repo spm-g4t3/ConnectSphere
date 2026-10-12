@@ -467,8 +467,8 @@ async function judgeVenue(
   },
   db,
 ) {
-  // Strictly null or undefined: 0 is a number, judged and not met, never
-  // treated as missing.
+  // Strictly null or undefined: 0 is a number, judged like any other (every
+  // capacity holds it, so Capacity is met), never treated as missing.
   if (expectedAttendance === null || expectedAttendance === undefined) {
     throw new ConflictError(
       'There is no expected attendance for this venue or its event, so its Capacity cannot be judged',

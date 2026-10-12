@@ -917,7 +917,13 @@ export default function CoordinatorRequestDetail({
           key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}`}
           request={current}
           userId={isAssignedCoordinator && current.status !== "cancelled" ? user.id : undefined}
-          liveRequests={liveVenueRequests.eventId === current.id ? liveVenueRequests.venues : undefined}
+          // Only while the Venue suitability section is shown: the lock hint
+          // says "See it under Venue suitability above", and after a handover
+          // made here that section is gone while this state remains. The
+          // buttons stay off anyway, for eligibility's reason, shown once.
+          liveRequests={
+            isAssignedCoordinator && liveVenueRequests.eventId === current.id ? liveVenueRequests.venues : undefined
+          }
           onRequestSubmitted={() => {
             setVenueVersion((n) => n + 1);
             onChangeRequestProcessed?.();

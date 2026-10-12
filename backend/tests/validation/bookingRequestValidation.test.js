@@ -203,6 +203,22 @@ describe('SCRUM525_AC2 validateCreateBookingRequest reads expectedAttendance', (
     expect(validateCreateBookingRequest({ ...BASE, expectedAttendance: null }).expectedAttendance).toBeNull();
     expect(validateCreateBookingRequest({ ...BASE, expectedAttendance: 1 }).expectedAttendance).toBe(1);
   });
+
+  it('SCRUM525_AC2_expected_attendance_stops_at_the_postgres_integer_maximum', () => {
+    // bookings.expected_attendance is an integer column (051). The largest
+    // value it holds is kept; one more is refused on the field, so it is a
+    // 400 naming expectedAttendance, not a failed cast inside the database.
+    expect(validateCreateBookingRequest({ ...BASE, expectedAttendance: 2147483647 }).expectedAttendance)
+      .toBe(2147483647);
+    let err = null;
+    try {
+      validateCreateBookingRequest({ ...BASE, expectedAttendance: 2147483648 });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'expectedAttendance', message: 'must be at most 2147483647' }]);
+  });
 });
 
 

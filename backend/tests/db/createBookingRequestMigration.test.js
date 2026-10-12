@@ -349,7 +349,8 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
     });
   });
 
-  describe('one live request per event', () => {
+  // This file's migrations stop at 030; 051's per-venue rule is pinned in multiVenueBookingRequestDatabase.test.js.
+  describe('030 only (historical): one live request per event, superseded by 051\'s one per venue (SCRUM-525)', () => {
     it('SCRUM252_refuses_a_second_request_for_the_same_event_and_names_the_first', async () => {
       const eventId = await makeEvent();
       const first = await request(eventId, await makeVenue());

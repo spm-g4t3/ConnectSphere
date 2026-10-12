@@ -443,16 +443,31 @@ describe('SCRUM-525: several venue requests per event (051)', () => {
       const [venueA, venueB] = [await makeVenue(), await makeVenue()];
       const eventId = await makeEvent();
 
+      // The database's own clock around each request, so each created_at is
+      // pinned to the call that wrote it: a time copied from the other
+      // booking, from the event, or from a fixed default would fall outside
+      // its window.
+      const dbNow = async () => (await one('select now() as t')).t.getTime();
+
+      const beforeA = await dbNow();
       const atA = await request(eventId, venueA, 150, { by: coordinator });
+      const afterA = await dbNow();
       await db.query('update event_requests set assigned_coordinator_id = $2 where id = $1', [eventId, otherCoordinator]);
+      const beforeB = await dbNow();
       const atB = await request(eventId, venueB, 150, { by: otherCoordinator });
+      const afterB = await dbNow();
 
       const rowA = await bookingRow(atA.booking.id);
       const rowB = await bookingRow(atB.booking.id);
       expect(rowA.requested_by).toBe(coordinator);
       expect(rowB.requested_by).toBe(otherCoordinator);
-      expect(rowA.created_at).toBeInstanceOf(Date);
-      expect(rowB.created_at).toBeInstanceOf(Date);
+      const createdA = rowA.created_at.getTime();
+      const createdB = rowB.created_at.getTime();
+      expect(createdA).toBeGreaterThanOrEqual(beforeA);
+      expect(createdA).toBeLessThanOrEqual(afterA);
+      expect(createdB).toBeGreaterThanOrEqual(beforeB);
+      expect(createdB).toBeLessThanOrEqual(afterB);
+      expect(createdB).toBeGreaterThanOrEqual(createdA);
     });
   });
 

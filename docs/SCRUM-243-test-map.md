@@ -19,7 +19,7 @@ Key to the layers:
   `components/MyBookingRequests`, `auth/myVenueRequestsRoute`,
   `services/bookingRequest*`.
 - **Live** `scripts/check-booking-requests.js` (`npm run booking-requests:check`):
-  the real database, real concurrent calls. Run by hand; needs migrations 027-031.
+  the real database, real concurrent calls. Run by hand; needs migrations 027-031 and, since SCRUM-525, 051.
 
 | # | Criterion | DB | Route / service | UI | Live |
 |---|---|---|---|---|---|
@@ -27,7 +27,7 @@ Key to the layers:
 | 2 | Uses the event's period and requirements, chosen venue, optional notes, N10 result | period and requirements copied from the event, kept after the event is edited, attribution, notes cap, layout FK | body cannot set status, period, requester or suitability; validation (400s) | panel shows event and venue, sends only choices | status and period on the real column |
 | 3 | Refused for a retired venue or an overlap; conflict shown | retired; blocks and approved bookings at both edges, one second inside, containing, contained; other venue; removed block; non-approved bookings | 409 `VENUE_RETIRED`, `BOOKING_PERIOD_CONFLICT` with the list | conflict list in the panel | request vs block race |
 | 4 | Failed suitability warns and needs confirmation | gate after conflicts; recorded as overridden; missing result refused | `SUITABILITY_CONFIRMATION_REQUIRED` then confirmed; fails closed with 503; bad checker result 500 | warning, checkbox required, up front and after the server asks | n/a (N10 not built) |
-| 5 | One Pending or Approved request per event; flagged counts (N24) | pending, approved, flagged named; a real SCRUM-17 override flags then blocks a request; cancelled flag frees it; rejected, withdrawn, cancelled do not count; per event | 409 `BOOKING_REQUEST_EXISTS`, `BOOKING_FLAGGED_FOR_REVIEW` with the booking id | buttons disabled after success or those answers | one winner across 3 venues and at one venue |
+| 5 | One Pending or Approved request per event; flagged counts (N24). Superseded by SCRUM-525 (migration 051): one live request per event per venue, a flagged booking blocking only its own venue | pending, approved, flagged named; a real SCRUM-17 override flags then blocks a request; cancelled flag frees it; rejected, withdrawn, cancelled do not count; per event (030; per venue since 051, `tests/db/multiVenueBookingRequestDatabase.test.js`) | 409 `BOOKING_REQUEST_EXISTS`, `BOOKING_FLAGGED_FOR_REVIEW` with the booking id | buttons disabled after success or those answers | since 051: all created across 3 venues, one winner at one venue, and two at one venue plus one at another leaving one per venue |
 | 6 | New request is Pending, in Venue Staff's list, Venue Staff notified | status written by the function; pending is what the list reads | response is pending | "Pending" shown | |
 | 7 | Coordinator can withdraw a Pending request; Venue Staff notified | pending to withdrawn, only status changes; notifications to every Venue Staff only; refused or failed withdrawal leaves nothing; failed notification rolls it back; non-pending refused; repeat refused | 200, 400, 401, 403, 404, 409 `BOOKING_NOT_PENDING`; repeat is 409 | confirm, one at a time, list refreshed, error refresh | two withdrawals; withdrawal vs status change; withdrawal vs handover |
 | 8 | `bookings.status` default is pending | 028 default, existing rows kept, explicit statuses kept | | | insert with no status |

@@ -175,6 +175,15 @@ function checkText(errors, field, value, required) {
 }
 
 /**
+ * The largest expected attendance that can be stored: Postgres's integer
+ * maximum, the type of both event_requests.expected_attendance and
+ * bookings.expected_attendance (051). No requirement caps attendance, but a
+ * larger number cannot be stored at all, so it is refused here, on the field,
+ * rather than left to fail the cast inside the database.
+ */
+export const MAX_ATTENDANCE = 2147483647;
+
+/**
  * AC1 of the venue story put the same rule on capacity: a positive whole number.
  *
  * Strict about type on purpose. '40' is refused rather than coerced, so the
@@ -194,6 +203,11 @@ export function checkAttendance(errors, value) {
     // One message for both faults: half a person and minus five people are the
     // same mistake to whoever is filling in the form.
     errors.add('expectedAttendance', 'must be a whole number greater than zero');
+    return null;
+  }
+
+  if (value > MAX_ATTENDANCE) {
+    errors.add('expectedAttendance', `must be at most ${MAX_ATTENDANCE}`);
     return null;
   }
 

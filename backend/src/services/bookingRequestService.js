@@ -5,8 +5,9 @@
  *
  * A coordinator requests a venue for an approved or confirmed event. The
  * request is a bookings row in the 'pending' status, written by
- * create_booking_request in 030_create_booking_request.sql rather than by a
- * direct insert, for the reason 012 gives for block creation: the checks have
+ * create_booking_request in 051_multi_venue_booking_requests.sql (first
+ * written by 030) rather than by a direct insert, for the reason 012 gives
+ * for block creation: the checks have
  * to hold until the insert commits, and supabase-js gives each call its own
  * transaction. The function locks the event row and then the venue row ("for
  * share", the protocol SCRUM-17's migrations 013 to 015 set out for the booking
@@ -69,9 +70,9 @@ const VALIDATION_CODES = new Set([
   '23514', // check constraint: setup notes too long
   '22023', // invalid_parameter_value: no suitability result, or an expected attendance below 1 (051)
   // numeric_value_out_of_range: an expectedAttendance above Postgres's integer
-  // maximum. checkAttendance caps nothing (no requirement does), so such a
-  // number passes validation and only the cast to integer can refuse it; it is
-  // still the caller's input that was wrong, so a 400, not a 500.
+  // maximum. checkAttendance refuses one (MAX_ATTENDANCE), so this is a
+  // backstop for a caller that skips validation; it is still the caller's
+  // input that was wrong, so a 400, not a 500.
   '22003',
   '23502', // not null
   '22P02', // invalid text representation
