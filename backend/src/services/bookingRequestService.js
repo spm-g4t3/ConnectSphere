@@ -407,6 +407,8 @@ export async function createBookingRequest(
     p_setup_notes: request.setupNotes,
     p_suitability: suitability,
     p_confirm_unsuitable: confirmUnsuitable,
+    // SCRUM-525: the event's attendance until ST3 lets the request carry its own.
+    p_expected_attendance: event.expectedAttendance,
   });
 
   if (error) throw translateError(error);

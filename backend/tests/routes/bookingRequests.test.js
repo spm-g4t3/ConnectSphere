@@ -253,6 +253,7 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
       p_setup_notes: 'Extra tables',
       p_suitability: SUITABLE,
       p_confirm_unsuitable: false,
+      p_expected_attendance: 150,
     });
     expect(checkSuitability).toHaveBeenCalledWith({
       eventRequestId: EVENT_ID,
@@ -282,6 +283,7 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
     expect(Object.keys(args).sort()).toEqual([
       'p_confirm_unsuitable',
       'p_event_request_id',
+      'p_expected_attendance',
       'p_requested_by',
       'p_room_layout_code',
       'p_setup_notes',

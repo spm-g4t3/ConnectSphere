@@ -44,7 +44,7 @@ const { checkVenueSuitability, checkEventVenues } = await import(
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
 
-/** venueHoldsDatabase.test.js's list: through 036, then 040. */
+/** venueHoldsDatabase.test.js's list: through 036, then 040 and 051. */
 const MIGRATIONS = [
   '001_event_requests.sql',
   '005_event_request_details.sql',
@@ -75,6 +75,7 @@ const MIGRATIONS = [
   '035_setup_change_recheck_refine.sql',
   '036_venue_safety_facts.sql',
   '040_venue_holds.sql',
+  '051_multi_venue_booking_requests.sql',
 ];
 
 /** What 014 reads from SCRUM-19's migration, which is not on this branch. */
@@ -286,8 +287,8 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
   /** E's own request through the real create_booking_request, as the app makes it. */
   async function requestVenue(eventId, venueId) {
     const { result } = await one(
-      'select create_booking_request($1, $2, $3, null, null, $4::jsonb, false) as result',
-      [eventId, venueId, coordinator, JSON.stringify(STORED_SUITABLE)],
+      'select create_booking_request($1, $2, $3, null, null, $4::jsonb, false, $5) as result',
+      [eventId, venueId, coordinator, JSON.stringify(STORED_SUITABLE), 150],
     );
     expect(result.outcome).toBe('created');
     return result.booking.id;
