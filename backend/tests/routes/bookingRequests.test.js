@@ -89,6 +89,9 @@ function bookingRow(overrides = {}) {
     status: 'pending',
     requested_by: COORDINATOR_ID,
     room_layout_code: 'theatre',
+    // SCRUM-525 (051): the attendance stored with the request; 150 is the
+    // event's, which a body without one defaults to.
+    expected_attendance: 150,
     venue_requirements: 'Tiered seating',
     accessibility_requirements: 'Step-free entrance',
     setup_notes: 'Extra tables',
@@ -227,6 +230,7 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
       startsAt: START,
       endsAt: END,
       roomLayoutCode: 'theatre',
+      expectedAttendance: 150,
       venueRequirements: 'Tiered seating',
       accessibilityRequirements: 'Step-free entrance',
       setupNotes: 'Extra tables',
@@ -261,6 +265,7 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
       roomLayoutCode: 'theatre',
       accessibility: [],
       facilities: [],
+      expectedAttendance: 150,
       userId: COORDINATOR_ID,
       client,
     });
@@ -507,13 +512,18 @@ describe('SCRUM-252: a retired venue and an unavailable period are refused with 
 });
 
 
-describe('SCRUM-252: one live request per event', () => {
+describe('SCRUM-252/SCRUM-525: one live request per event per venue', () => {
   it.each([
     ['a pending or approved request', 'BOOKING_REQUEST_EXISTS'],
     ['a booking flagged for review', 'BOOKING_FLAGGED_FOR_REVIEW'],
   ])('SCRUM252_refuses_an_event_with_%s_and_names_it', async (_label, hint) => {
     const res = await post(
-      clientFor(dbFailure('PT409', 'the event already has one', { hint, details: OTHER_BOOKING_ID })),
+      clientFor(
+        dbFailure('PT409', 'the event already has a live request for this venue', {
+          hint,
+          details: OTHER_BOOKING_ID,
+        }),
+      ),
     );
 
     expect(res.status).toBe(409);

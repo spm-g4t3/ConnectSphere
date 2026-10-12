@@ -160,7 +160,10 @@ describe('SCRUM188_AC2 the query string becomes the check', () => {
     });
   });
 
-  it('SCRUM188_AC2_the_period_attendance_and_caller_cannot_be_chosen_in_the_query', async () => {
+  it('SCRUM188_AC2_the_period_caller_and_an_expectedAttendance_key_are_never_read_from_the_query', async () => {
+    // SCRUM-525: attendance can now be chosen, but only as ?attendance=; the
+    // body's name is not read here, and with no ?attendance= no key is added,
+    // so the check falls back to the event's number.
     const checkSuitability = vi.fn(async () => SUITABLE);
     await get(
       {
@@ -212,6 +215,32 @@ describe('SCRUM188_AC1 bad input is 400 before any check', () => {
     const res = await request(appWith()).get(`${BASE}?venueId=${VENUE}&layout=theatre&layout=banquet`);
     expect(res.status).toBe(400);
     expect(res.body.details).toEqual([{ field: 'layout', message: 'must be a single layout code' }]);
+  });
+});
+
+
+describe('SCRUM525_AC3 ?attendance= is the number the venue is checked for', () => {
+  it('SCRUM525_AC3_the_attendance_query_reaches_the_check', async () => {
+    // B-AC3-04: the text becomes the number the check judges; with no
+    // parameter there is none, so the check takes the event's.
+    const checkSuitability = vi.fn(async () => SUITABLE);
+    await get({ venueId: VENUE, attendance: '80' }, { checkSuitability });
+    expect(checkSuitability.mock.calls[0][0].expectedAttendance).toBe(80);
+
+    await get({ venueId: VENUE }, { checkSuitability });
+    expect(checkSuitability.mock.calls[1][0].expectedAttendance).toBeUndefined();
+  });
+
+  it.each(['0', '-5', '1.5', 'abc', ''])('SCRUM525_AC3_attendance_%s_is_400_and_runs_no_check', async (attendance) => {
+    // B-AC3-05: anything but a whole number above zero is the caller's fault,
+    // reported on the field, and never reaches the judge.
+    const checkSuitability = vi.fn(async () => SUITABLE);
+    const res = await get({ venueId: VENUE, attendance }, { checkSuitability });
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([
+      { field: 'attendance', message: 'must be a whole number greater than zero' },
+    ]);
+    expect(checkSuitability).not.toHaveBeenCalled();
   });
 });
 
@@ -475,10 +504,6 @@ describe('SCRUM188_AC6 GET /bookings', () => {
       code: 'EVENT_DATES_MISSING',
       conflicts: [],
     }],
-    ['an event with no attendance', new ConflictError('No attendance', { code: 'EVENT_ATTENDANCE_MISSING' }), 409, {
-      code: 'EVENT_ATTENDANCE_MISSING',
-      conflicts: [],
-    }],
   ])('SCRUM188_AC6_%s_answers_its_status', async (_label, error, status, body) => {
     const checkEventVenues = vi.fn(async () => { throw error; });
     const res = await request(bookingsApp({ checkEventVenues })).get(BOOKINGS);
@@ -616,10 +641,24 @@ describe('SCRUM188_AC6 GET /bookings', () => {
     });
 
     // SCRUM-193/194 regressions, through the real router.
-    it('SCRUM188_AC3_EVENT_ATTENDANCE_MISSING_is_409_for_the_whole_recheck', async () => {
-      const res = await realGet(fakeClient({ event: eventRow({ expected_attendance: null }) }));
-      expect(res.status).toBe(409);
-      expect(res.body.code).toBe('EVENT_ATTENDANCE_MISSING');
+    it('SCRUM525_AC3_no_attendance_anywhere_is_200_with_that_items_EVENT_ATTENDANCE_MISSING', async () => {
+      // R12: was a 409 for the whole recheck (SCRUM-193/194 B1). Attendance is
+      // per booking now, so an event and a booking with none is that item's
+      // problem, and the list -- which may hold bookings with their own
+      // numbers -- still answers 200.
+      const res = await realGet(
+        fakeClient({
+          event: eventRow({ expected_attendance: null }),
+          bookings: [{ ...bookingRow, expected_attendance: null }],
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(res.body[0]).toMatchObject({
+        current: null,
+        expectedAttendance: null,
+        attendanceSource: null,
+        error: { code: 'EVENT_ATTENDANCE_MISSING' },
+      });
     });
 
     it('SCRUM188_AC6_a_stored_code_no_longer_known_is_200_with_STORED_REQUIREMENTS_INVALID', async () => {

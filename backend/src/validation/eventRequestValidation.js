@@ -112,6 +112,12 @@ const UPDATE_MANDATORY = [];
  * someone else's story for no behavioural gain. Extracting a shared
  * src/validation/validationHelpers.js is the right end state and is a refactor
  * candidate once both branches are merged -- not before.
+ *
+ * SCRUM-525 is the one exception, and it goes the other way: checkAttendance
+ * below is exported, not copied. A booking request's own attendance is the
+ * same quantity as the event's -- it is compared with the same capacity -- so
+ * the two must refuse exactly the same values, and a second copy of the rule
+ * could drift. This module owns it, so nothing in it changes.
  */
 function createErrorCollector() {
   const details = [];
@@ -174,8 +180,11 @@ function checkText(errors, field, value, required) {
  * Strict about type on purpose. '40' is refused rather than coerced, so the
  * fault surfaces here instead of inside Venue Suitability Checking, where
  * attendance is compared with a venue's capacity.
+ *
+ * SCRUM-525: exported for bookingRequestValidation.js, so a booking request's
+ * expectedAttendance is held to this rule and reported on the same field.
  */
-function checkAttendance(errors, value) {
+export function checkAttendance(errors, value) {
   if (typeof value !== 'number' || Number.isNaN(value)) {
     errors.add('expectedAttendance', 'must be a number');
     return null;

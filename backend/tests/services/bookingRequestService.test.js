@@ -37,6 +37,9 @@ const eventRow = () => ({
   assigned_coordinator_id: USER,
   proposed_start: '2026-12-01T09:00:00+00:00',
   proposed_end: '2026-12-01T17:00:00+00:00',
+  // SCRUM-525: an attendance to default to, as every requestable event has
+  // in practice; the cases without one set it to null explicitly.
+  expected_attendance: 150,
 });
 
 /** A client that answers the event read, then the rpc, in that order. */
@@ -191,6 +194,7 @@ describe('toBookingRequest', () => {
       startsAt: 'a',
       endsAt: 'b',
       roomLayoutCode: null,
+      expectedAttendance: null,
       venueRequirements: null,
       accessibilityRequirements: null,
       setupNotes: null,
@@ -363,6 +367,7 @@ describe('SCRUM188 the booking request carries the requirement codes to the chec
       roomLayoutCode: 'theatre',
       accessibility: ['wheelchair_access'],
       facilities: ['projector'],
+      expectedAttendance: 150,
       userId: USER,
       client,
     });
@@ -417,5 +422,148 @@ describe('SCRUM188 the booking request carries the requirement codes to the chec
     }).catch((e) => e);
     expect(err).toBe(refusal);
     expect(client.calls.filter((c) => c.fn)).toHaveLength(0);
+  });
+});
+
+describe('SCRUM525_AC2 each request carries its own expected attendance', () => {
+  /**
+   * A client that answers the event read, then answers the rpc as 051 does:
+   * the created booking holds the p_expected_attendance it was sent. So a
+   * response's expectedAttendance can only be right if the service sent the
+   * right number and mapped the row back, not because a fixture said so.
+   */
+  function storingClient(event) {
+    const calls = [];
+    return {
+      calls,
+      from(table) {
+        calls.push({ table });
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          maybeSingle: () => Promise.resolve({ data: event, error: null }),
+        };
+        return chain;
+      },
+      rpc(fn, args) {
+        calls.push({ fn, args });
+        const booking = {
+          id: BOOKING,
+          event_request_id: args.p_event_request_id,
+          venue_id: args.p_venue_id,
+          status: 'pending',
+          expected_attendance: args.p_expected_attendance,
+        };
+        return Promise.resolve({ data: { outcome: 'created', booking }, error: null });
+      },
+    };
+  }
+
+  const rpcArgs = (client) => client.calls.find((c) => c.fn === 'create_booking_request').args;
+
+  it('SCRUM525_AC2_without_attendance_the_events_reaches_the_check_and_the_rpc', async () => {
+    // B-AC2-05 (R4): absent, the default is the event's 150, and it is the one
+    // number both judged and stored.
+    const checkSuitability = checker();
+    const client = storingClient(eventRow());
+
+    const booking = await createBookingRequest({ eventRequestId: EVENT, venueId: VENUE }, USER, {
+      client,
+      checkSuitability,
+    });
+
+    expect(checkSuitability.mock.calls[0][0].expectedAttendance).toBe(150);
+    expect(rpcArgs(client).p_expected_attendance).toBe(150);
+    expect(booking.expectedAttendance).toBe(150);
+  });
+
+  it('SCRUM525_AC2_a_given_attendance_is_the_one_checked_and_stored', async () => {
+    // B-AC2-06 (R4): 40 for this venue against an event of 150. If the check
+    // saw one number and the rpc another, the stored verdict would be about a
+    // different crowd from the one Venue Staff are asked to host.
+    const checkSuitability = checker();
+    const client = storingClient(eventRow());
+
+    const booking = await createBookingRequest(
+      { eventRequestId: EVENT, venueId: VENUE, expectedAttendance: 40 },
+      USER,
+      { client, checkSuitability },
+    );
+
+    expect(checkSuitability.mock.calls[0][0].expectedAttendance).toBe(40);
+    expect(rpcArgs(client).p_expected_attendance).toBe(40);
+    expect(booking.expectedAttendance).toBe(40);
+  });
+
+  it('SCRUM525_AC2_no_attendance_anywhere_is_409_and_nothing_is_written', async () => {
+    // B-AC2-07 (R12): neither the request nor the event gives a number, so
+    // there is nothing to judge Capacity on or to store. Refused after the
+    // event read and before the check: only event_requests was read.
+    const checkSuitability = checker();
+    const client = storingClient({ ...eventRow(), expected_attendance: null });
+
+    const err = await createBookingRequest({ eventRequestId: EVENT, venueId: VENUE }, USER, {
+      client,
+      checkSuitability,
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.code).toBe('EVENT_ATTENDANCE_MISSING');
+    expect(checkSuitability).not.toHaveBeenCalled();
+    expect(client.calls).toEqual([{ table: 'event_requests' }]);
+  });
+
+  it('SCRUM525_AC2_an_event_without_attendance_can_still_be_requested_with_one', async () => {
+    // B-AC2-07's pair (R12): the refusal is for no number anywhere, not for
+    // an event without one. Given 40, the request goes through on 40.
+    const checkSuitability = checker();
+    const client = storingClient({ ...eventRow(), expected_attendance: null });
+
+    const booking = await createBookingRequest(
+      { eventRequestId: EVENT, venueId: VENUE, expectedAttendance: 40 },
+      USER,
+      { client, checkSuitability },
+    );
+
+    expect(checkSuitability.mock.calls[0][0].expectedAttendance).toBe(40);
+    expect(rpcArgs(client).p_expected_attendance).toBe(40);
+    expect(booking.status).toBe('pending');
+  });
+
+  it('SCRUM525_AC2_a_stranger_is_refused_before_the_attendance_is_considered', async () => {
+    // The order the brief fixes: the coordinator check comes first, so an
+    // event with no attendance answers a stranger 403, not a 409 that would
+    // tell them something about the event.
+    const client = storingClient({
+      ...eventRow(),
+      assigned_coordinator_id: '99999999-9999-4999-8999-999999999999',
+      expected_attendance: null,
+    });
+
+    const err = await createBookingRequest({ eventRequestId: EVENT, venueId: VENUE }, USER, {
+      client,
+      checkSuitability: checker(),
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ForbiddenError);
+  });
+
+  it('SCRUM525_AC2_an_attendance_beyond_the_integer_range_is_a_400', async () => {
+    // checkAttendance caps nothing, so 3000000000 passes validation and only
+    // the cast to Postgres integer refuses it (22003). That is still the
+    // caller's input, so a 400 and not a 500.
+    const client = clientAnswering(
+      { data: eventRow(), error: null },
+      failure('22003', 'value "3000000000" is out of range for type integer'),
+    );
+
+    const err = await createBookingRequest(
+      { eventRequestId: EVENT, venueId: VENUE, expectedAttendance: 3000000000 },
+      USER,
+      { client, checkSuitability: checker() },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.status).toBe(400);
   });
 });

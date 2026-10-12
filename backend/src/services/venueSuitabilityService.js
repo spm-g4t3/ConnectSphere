@@ -36,18 +36,24 @@
  *  - A venue block is never padded (SCRUM-484 AC6); it is described by its
  *    own period.
  *
- * Computed from stored data. The event's period and expected attendance are
- * read from the stored event, and the venue's attributes, hours and minutes
- * from the stored venue. The only things the coordinator supplies are the
- * requirement codes -- layout, accessibility and facilities -- because the
- * event records its requirements as free text and there is nothing stored to
- * judge against. Those codes are echoed in the result's `checked`, so Venue
- * Staff reading the stored result see exactly what was assessed.
+ * Computed from stored data. The event's period is read from the stored
+ * event, and the venue's attributes, hours and minutes from the stored venue.
+ * The coordinator supplies the requirement codes -- layout, accessibility and
+ * facilities -- because the event records its requirements as free text and
+ * there is nothing stored to judge against.
+ *
+ * SCRUM-525: the coordinator may also supply the expected attendance, since
+ * one event can now use several venues and each takes its own share. When
+ * given it is the number Capacity is judged on; otherwise it is the event's.
+ * The period is never the caller's: every booking of an event uses the
+ * event's. All of these are echoed in the result's `checked`, so Venue Staff
+ * reading the stored result see exactly what was assessed.
  *
  * The contract the booking request service relies on:
  *
  *   checkVenueSuitability({ eventRequestId, venueId, roomLayoutCode,
- *                           accessibility, facilities, userId, client })
+ *                           accessibility, facilities, expectedAttendance,
+ *                           userId, client })
  *     -> Promise<{
  *          suitable: boolean,   // true only if every criterion is met
  *          criteria: Array<{ criterion, met, detail, conflicts? }>,
@@ -326,9 +332,10 @@ function asList(value) {
  *  2. When userId is given, the caller must be the event's assigned
  *     coordinator. The endpoint always gives it; so does the booking request.
  *  3. The event must have both ends of its period (EVENT_DATES_MISSING, the
- *     code create_booking_request uses), or there is nothing to judge, and an
- *     expected attendance (EVENT_ATTENDANCE_MISSING, SCRUM-193/194 B1), or
- *     Capacity would be judged against nothing and could read as met.
+ *     code create_booking_request uses), or there is nothing to judge. There
+ *     must also be an expected attendance -- the caller's, else the event's
+ *     -- or Capacity would be judged against nothing (EVENT_ATTENDANCE_MISSING,
+ *     SCRUM-193/194 B1; judgeVenue enforces it).
  *  4. The requirement codes must exist (400, assertKnownCodes), so a typo
  *     reads as the request's fault rather than as the venue "missing" it.
  *  5. The venue, with its attributes: unknown is a NotFoundError, and a
@@ -336,9 +343,10 @@ function asList(value) {
  *  6. The five attribute criteria (evaluateCriteria), then Availability
  *     (venue_occupancy_conflicts()).
  *
- * Capacity is judged against the event's expected attendance, because a
- * booking has no attendance of its own yet (the SCRUM-188 roadmap's Week 7
- * note).
+ * Capacity is judged against the expected attendance given for this venue,
+ * or the event's when none is given (SCRUM-525, completing the SCRUM-188
+ * roadmap's Week 7 note: each booking has an attendance of its own). The
+ * number judged is echoed as checked.expectedAttendance.
  *
  * A venue that is not suitable is an answer, not an error: suitable false,
  * with the criteria saying why.
@@ -349,6 +357,9 @@ function asList(value) {
  * @param {string|null} [input.roomLayoutCode]  null or absent: no layout asked for
  * @param {string[]} [input.accessibility]      absent: none asked for
  * @param {string[]} [input.facilities]         absent: none asked for
+ * @param {number} [input.expectedAttendance]   SCRUM-525: the attendance for
+ *                                              this venue; absent or null: the
+ *                                              event's
  * @param {string} [input.userId]               the caller, from the JWT
  * @param {object} [input.client]               a Supabase client
  * @returns {Promise<{suitable: boolean, criteria: object[], checked: object}>}
@@ -365,6 +376,7 @@ export async function checkVenueSuitability({
   roomLayoutCode = null,
   accessibility,
   facilities,
+  expectedAttendance,
   userId,
   client,
 } = {}) {
@@ -373,19 +385,28 @@ export async function checkVenueSuitability({
   const event = await getEventRequestForCoordinator(eventRequestId, { client: db });
   assertCheckable(event, userId);
 
-  return judgeVenue(event, { venueId, roomLayoutCode, accessibility, facilities }, db);
+  return judgeVenue(
+    event,
+    {
+      venueId,
+      roomLayoutCode,
+      accessibility,
+      facilities,
+      expectedAttendance: expectedAttendance ?? event.expectedAttendance ?? null,
+    },
+    db,
+  );
 }
 
 /**
  * Steps 2 and 3 of checkVenueSuitability, shared with checkEventVenues: the
  * caller must be the event's assigned coordinator (when userId is given), and
- * the event must have both ends of its period and an expected attendance, or
- * there is nothing to judge.
+ * the event must have both ends of its period, or there is nothing to judge.
  *
- * SCRUM-193/194 (B1, AC3): without an attendance, meetsCapacity compares the
- * capacity with null, which JavaScript reads as 0, so every venue "met"
- * Capacity -- a pass the search (which requires an attendance) would never
- * give. Refused like a missing date instead.
+ * SCRUM-525: the attendance is no longer checked here. It belongs to each
+ * venue now (a booking's own, else the event's), so an event with none can
+ * still be judged for a venue that has one; judgeVenue checks the number it is
+ * actually given.
  */
 function assertCheckable(event, userId) {
   if (userId !== undefined && userId !== null && event.assignedCoordinatorId !== userId) {
@@ -398,13 +419,6 @@ function assertCheckable(event, userId) {
     throw new ConflictError(
       'This event has no start or end yet, so no venue can be checked against it',
       { code: 'EVENT_DATES_MISSING' },
-    );
-  }
-
-  if (event.expectedAttendance === null || event.expectedAttendance === undefined) {
-    throw new ConflictError(
-      'This event has no expected attendance yet, so no venue can be checked against it',
-      { code: 'EVENT_ATTENDANCE_MISSING' },
     );
   }
 }
@@ -422,17 +436,46 @@ function assertCheckable(event, userId) {
  * booking does not cover the event as it now stands, so Availability is not
  * met whatever the occupancy says, and its detail says so.
  *
+ * SCRUM-525: expectedAttendance is the number Capacity is judged on, already
+ * resolved by the caller -- the request's or booking's own, else the event's.
+ *
+ * SCRUM-193/194 (B1, AC3), moved here from assertCheckable by SCRUM-525:
+ * without an attendance, meetsCapacity compares the capacity with null, which
+ * JavaScript reads as 0, so every venue "met" Capacity -- a pass the search
+ * (which requires an attendance) would never give. Refused like a missing date
+ * instead. Checked here because this is where the number is used, so neither
+ * entry point can reach Capacity without one; and first, so nothing is read
+ * for a venue that cannot be judged.
+ *
  * @param {object} event  the stored event, in camelCase
  * @param {{venueId: string, roomLayoutCode?: string|null, accessibility?: string[],
- *          facilities?: string[], bookingPeriod?: {startsAt: string, endsAt: string}|null}}
+ *          facilities?: string[], expectedAttendance?: number|null,
+ *          bookingPeriod?: {startsAt: string, endsAt: string}|null}}
  *        requirements
  * @param {object} db     a resolved Supabase client
+ * @throws {ConflictError} EVENT_ATTENDANCE_MISSING, or VENUE_RETIRED
  */
 async function judgeVenue(
   event,
-  { venueId, roomLayoutCode = null, accessibility, facilities, bookingPeriod = null },
+  {
+    venueId,
+    roomLayoutCode = null,
+    accessibility,
+    facilities,
+    expectedAttendance = null,
+    bookingPeriod = null,
+  },
   db,
 ) {
+  // Strictly null or undefined: 0 is a number, judged and not met, never
+  // treated as missing.
+  if (expectedAttendance === null || expectedAttendance === undefined) {
+    throw new ConflictError(
+      'There is no expected attendance for this venue or its event, so its Capacity cannot be judged',
+      { code: 'EVENT_ATTENDANCE_MISSING' },
+    );
+  }
+
   const layout = roomLayoutCode ?? null;
   const requested = {
     accessibility: asList(accessibility),
@@ -462,7 +505,7 @@ async function judgeVenue(
   const attributeCriteria = evaluateCriteria(venue, {
     startsAt: event.proposedStart,
     endsAt: event.proposedEnd,
-    expectedAttendance: event.expectedAttendance,
+    expectedAttendance,
     layout: layout ?? undefined,
     accessibility: requested.accessibility,
     facilities: requested.facilities,
@@ -498,7 +541,7 @@ async function judgeVenue(
     checked: {
       startsAt: event.proposedStart,
       endsAt: event.proposedEnd,
-      expectedAttendance: event.expectedAttendance,
+      expectedAttendance,
       layout,
       accessibility: requested.accessibility,
       facilities: requested.facilities,
@@ -521,8 +564,8 @@ export const LIVE_BOOKING_STATUSES = Object.freeze([
 
 /** What checkEventVenues reads of each booking, with its venue embedded. */
 const EVENT_BOOKING_COLUMNS =
-  'id, venue_id, status, starts_at, ends_at, room_layout_code, suitability_result, ' +
-  'suitability_overridden, created_at, venues(name, location)';
+  'id, venue_id, status, starts_at, ends_at, room_layout_code, expected_attendance, ' +
+  'suitability_result, suitability_overridden, created_at, venues(name, location)';
 
 /**
  * PostgREST embeds a many-to-one as an object, but an array if it were ever
@@ -569,9 +612,13 @@ function atRequestOf(stored) {
  *
  * Each booking is judged by judgeVenue -- the same rules as the one-venue
  * check -- with:
- *  - the event's current period and expected attendance, so a moved date or
- *    a changed attendance is what gets judged, whatever the booking was made
- *    against;
+ *  - the event's current period, so a moved date is what gets judged,
+ *    whatever the booking was made against;
+ *  - the booking's own expected attendance (SCRUM-525, 051), or the event's
+ *    current one when the booking has none (a row older than 051 on an event
+ *    that had no attendance then). A booking's own number wins (R15), so a
+ *    change to the event's attendance re-judges only bookings without one;
+ *    changing a booking's number is SCRUM-395's;
  *  - the booking's own room layout;
  *  - the accessibility and facility codes the coordinator chose when
  *    requesting, read from suitability_result.checked. Rows stored before
@@ -590,12 +637,19 @@ function atRequestOf(stored) {
  * has. Such a booking is reported with Availability not met (see judgeVenue)
  * and so counts in newlyUnmet; the stored booking is not changed here.
  *
+ * Each item also carries, at the top level, the booking's roomLayoutCode, the
+ * expectedAttendance applied (its own, else the event's, else null) and
+ * attendanceSource ('booking', 'event' or null), so the screen can list them
+ * (AC5) and mark a fallback as the event's (R14) even when the recheck failed.
+ *
  * Errors: the event-wide ones (no such event, not the assigned coordinator,
- * EVENT_DATES_MISSING, EVENT_ATTENDANCE_MISSING) and a failed bookings read
- * refuse the whole request, as the one-venue check does. Anything that goes
- * wrong for one booking belongs to that booking (SCRUM-193/194, B3/B7): its
- * item carries current: null, newlyUnmet [] and an error, and the others
- * still return --
+ * EVENT_DATES_MISSING) and a failed bookings read refuse the whole request,
+ * as the one-venue check does. Anything that goes wrong for one booking
+ * belongs to that booking (SCRUM-193/194, B3/B7): its item carries current:
+ * null, newlyUnmet [] and an error, and the others still return --
+ *   EVENT_ATTENDANCE_MISSING     SCRUM-525 (R12): neither the booking nor the
+ *                                event has an attendance; another booking with
+ *                                its own number is still judged
  *   VENUE_RETIRED                the venue was retired
  *   STORED_REQUIREMENTS_INVALID  the stored accessibility or facility codes
  *                                are not a list of codes, or a code is no
@@ -614,6 +668,8 @@ function atRequestOf(stored) {
  * @returns {Promise<Array<{bookingId: string, venueId: string, venueName: string|null,
  *   venueLocation: string|null, status: string, statusDisplay: object,
  *   bookingStartsAt: string|null, bookingEndsAt: string|null,
+ *   roomLayoutCode: string|null, expectedAttendance: number|null,
+ *   attendanceSource: 'booking'|'event'|null,
  *   suitabilityOverridden: boolean,
  *   current: {suitable: boolean, criteria: object[], checked: object}|null,
  *   atRequest: {suitable: boolean, unmet: string[]}|null,
@@ -621,7 +677,7 @@ function atRequestOf(stored) {
  *   oldest booking first
  * @throws {NotFoundError}   no such event, or a draft
  * @throws {ForbiddenError}  userId is not the event's assigned coordinator
- * @throws {ConflictError}   EVENT_DATES_MISSING or EVENT_ATTENDANCE_MISSING
+ * @throws {ConflictError}   EVENT_DATES_MISSING
  * @throws {Error}           the bookings read failed
  */
 export async function checkEventVenues(eventRequestId, { userId, client } = {}) {
@@ -680,7 +736,12 @@ function storedCodes(stored) {
 
 /** One booking's failure as its item's error; see checkEventVenues. */
 function toItemError(err, booking) {
-  if (err instanceof ConflictError && err.code === 'VENUE_RETIRED') {
+  // SCRUM-525: a booking with no attendance anywhere is that booking's
+  // problem now, not the event's (R12), so it is named as such.
+  if (
+    err instanceof ConflictError &&
+    (err.code === 'VENUE_RETIRED' || err.code === 'EVENT_ATTENDANCE_MISSING')
+  ) {
     return { code: err.code, message: err.message };
   }
   // A ValidationError here can only come from assertKnownCodes: the stored
@@ -720,7 +781,13 @@ async function recheckBooking(event, booking, db) {
   const atRequest = atRequestOf(stored);
   const bookingStartsAt = booking.starts_at ?? null;
   const bookingEndsAt = booking.ends_at ?? null;
+  // SCRUM-525 (R15): the booking's own number wins; the event's is only the
+  // fallback for a booking that has none.
+  const ownAttendance = booking.expected_attendance ?? null;
+  const expectedAttendance = ownAttendance ?? event.expectedAttendance ?? null;
 
+  // Everything the list shows that does not need the recheck is set here,
+  // before the try, so an item whose recheck fails still shows it (AC5).
   const item = {
     bookingId: booking.id,
     venueId: booking.venue_id,
@@ -730,6 +797,10 @@ async function recheckBooking(event, booking, db) {
     statusDisplay: getBookingStatusDisplay(booking.status),
     bookingStartsAt,
     bookingEndsAt,
+    roomLayoutCode: booking.room_layout_code ?? null,
+    expectedAttendance,
+    attendanceSource:
+      ownAttendance !== null ? 'booking' : expectedAttendance !== null ? 'event' : null,
     suitabilityOverridden: booking.suitability_overridden ?? false,
     current: null,
     atRequest,
@@ -746,6 +817,7 @@ async function recheckBooking(event, booking, db) {
         roomLayoutCode: booking.room_layout_code ?? null,
         accessibility,
         facilities,
+        expectedAttendance,
         // Compared only when both ends were read.
         bookingPeriod:
           bookingStartsAt && bookingEndsAt

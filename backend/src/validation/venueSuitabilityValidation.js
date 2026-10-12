@@ -6,9 +6,13 @@
  * GET /api/event-requests/:id/venue-suitability takes the event from the path
  * and, from the query string, the venue and the requirement codes the
  * coordinator picked: a layout, and accessibility and facility code lists.
- * Nothing else is read. The event's period and expected attendance are the
- * stored ones, never the caller's, so a query naming startsAt or
- * expectedAttendance is not an error; those keys are simply never looked at.
+ *
+ * SCRUM-525 adds attendance: the number of people this venue would be for,
+ * so the panel can check the figure the coordinator is about to request
+ * rather than the event's. Absent, the service uses the event's. Nothing else
+ * is read. The event's period is always the stored one, never the caller's,
+ * so a query naming startsAt (or expectedAttendance, the body's name) is not
+ * an error; those keys are simply never looked at.
  *
  * The same rules as a booking request, on purpose: a check the panel runs
  * (SCRUM-191) and the check the booking request repeats on submit must accept
@@ -60,9 +64,13 @@ function checkId(errors, field, label, value) {
  * @param {string} [input.layout]        one room layout code
  * @param {string[]} [input.accessibility] accessibility feature codes
  * @param {string[]} [input.facilities]  facility codes
+ * @param {string} [input.attendance]    SCRUM-525: the attendance for this
+ *                                       venue, as the query string's text
  * @returns {{eventRequestId: string, venueId: string, roomLayoutCode: string|null,
- *            accessibility: string[], facilities: string[]}}  ids lower-cased;
- *            a blank layout is null and a missing list is []
+ *            accessibility: string[], facilities: string[],
+ *            expectedAttendance?: number}}  ids lower-cased; a blank layout is
+ *            null and a missing list is []; expectedAttendance only when
+ *            attendance was sent
  * @throws {ValidationError} listing every problem found
  */
 export function validateSuitabilityQuery(input) {
@@ -94,12 +102,52 @@ export function validateSuitabilityQuery(input) {
 
   const { accessibility, facilities } = checkOptionalCodeLists(errors, input);
 
+  const expectedAttendance = checkAttendanceParam(errors, input.attendance);
+
   if (errors.hasErrors) {
     const summary = errors.details.map(({ field, message }) => `${field}: ${message}`).join('; ');
     throw new ValidationError(`Invalid suitability check -- ${summary}`, errors.details);
   }
 
-  return { eventRequestId, venueId, roomLayoutCode, accessibility, facilities };
+  return {
+    eventRequestId,
+    venueId,
+    roomLayoutCode,
+    accessibility,
+    facilities,
+    // Absent stays absent, not null: the service then falls back to the
+    // event's number, and the key list the checker receives is unchanged for
+    // every caller that does not send one.
+    ...(expectedAttendance !== undefined && { expectedAttendance }),
+  };
+}
+
+/**
+ * SCRUM-525: ?attendance=, the same rule as a booking request's
+ * expectedAttendance (a whole number above zero), read from text.
+ *
+ * A query string carries only text, so this cannot be the body's
+ * checkAttendance, which refuses "12" because JSON could have sent 12. Here
+ * only digits are accepted -- no sign, point, exponent or blank, which Number()
+ * would otherwise read as 0 or as a fraction -- and the value must be at least
+ * 1 and a safe integer, so it is exactly the number typed. A repeated
+ * ?attendance= arrives as an array and is refused, since a venue is checked
+ * for one number. Blank is refused rather than read as absent: the panel only
+ * sends the parameter when the coordinator has entered a number.
+ *
+ * @param {{add: Function}} errors  a collector
+ * @param {*} value
+ * @returns {number|undefined}  undefined when absent or invalid
+ */
+function checkAttendanceParam(errors, value) {
+  if (value === undefined) return undefined;
+  const text = typeof value === 'string' ? value.trim() : null;
+  const number = text !== null && /^\d+$/.test(text) ? Number(text) : NaN;
+  if (!Number.isSafeInteger(number) || number < 1) {
+    errors.add('attendance', 'must be a whole number greater than zero');
+    return undefined;
+  }
+  return number;
 }
 
 /**

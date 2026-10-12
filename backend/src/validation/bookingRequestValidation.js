@@ -21,11 +21,20 @@
  * suitability check judges them and stores them in its result. Whether each
  * code exists is checked by the suitability service (assertKnownCodes), for
  * the reason venueValidation.js gives for the search.
+ *
+ * SCRUM-525 adds an optional expectedAttendance: how many people this venue
+ * is for, since one event may now use several venues and each takes its own
+ * share. It is the event's attendance rule exactly (eventRequestValidation's
+ * checkAttendance): a whole number above zero, with no coercion, so "12" is
+ * refused rather than guessed at. Absent means "the event's", and the service
+ * fills that in; it is not capped at the event's number, because nothing in
+ * the requirements caps it. The database refuses below 1 again (051).
  */
 
 import { ValidationError } from '../errors.js';
 import { isPlausibleId } from './eventChangeRequestValidation.js';
 import { checkCodeArray } from './venueValidation.js';
+import { checkAttendance } from './eventRequestValidation.js';
 import { SUITABILITY_CHECK_CRITERIA } from '../domain/venueMatching.js';
 
 /** Mirrors bookings_setup_notes_length in 030. */
@@ -181,11 +190,15 @@ export function validateBookingRequestId(id) {
  *                                        coordinator accepts the venue does not
  *                                        meet, by label; see
  *                                        checkAcknowledgedCriteria
+ * @param {number} [input.expectedAttendance] SCRUM-525: the attendance for this
+ *                                        venue, a whole number above zero;
+ *                                        absent or null means the event's
  * @returns {{eventRequestId: string, venueId: string, roomLayoutCode: string|null,
  *            setupNotes: string|null, confirmUnsuitable: boolean,
  *            accessibility: string[], facilities: string[],
- *            acknowledgedCriteria: string[]}}  the code lists trimmed, and []
- *            when none were sent
+ *            acknowledgedCriteria: string[], expectedAttendance: number|null}}
+ *            the code lists trimmed, and [] when none were sent;
+ *            expectedAttendance null when none was sent
  * @throws {ValidationError} listing every problem found, not just the first
  */
 export function validateCreateBookingRequest(input) {
@@ -224,6 +237,13 @@ export function validateCreateBookingRequest(input) {
 
   const acknowledgedCriteria = checkAcknowledgedCriteria(errors, input.acknowledgedCriteria);
 
+  // SCRUM-525: null, not a number, when absent, so the service can tell "the
+  // event's" from a value and fill in the default itself.
+  const expectedAttendance =
+    input.expectedAttendance === undefined || input.expectedAttendance === null
+      ? null
+      : checkAttendance(errors, input.expectedAttendance);
+
   if (errors.hasErrors) {
     const summary = errors.details.map(({ field, message }) => `${field}: ${message}`).join('; ');
     throw new ValidationError(`Invalid booking request -- ${summary}`, errors.details);
@@ -238,5 +258,6 @@ export function validateCreateBookingRequest(input) {
     accessibility,
     facilities,
     acknowledgedCriteria,
+    expectedAttendance,
   };
 }

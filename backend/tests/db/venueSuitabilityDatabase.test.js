@@ -164,7 +164,7 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
           order: async () => ({
             data: await rows(
               `select b.id, b.venue_id, b.status, b.starts_at, b.ends_at, b.room_layout_code,
-                      b.suitability_result, b.suitability_overridden, b.created_at,
+                      b.expected_attendance, b.suitability_result, b.suitability_overridden, b.created_at,
                       json_build_object('name', v.name, 'location', v.location) as venues
                  from bookings b join venues v on v.id = b.venue_id
                 where b.event_request_id = $1 and b.status::text = any($2::text[])
