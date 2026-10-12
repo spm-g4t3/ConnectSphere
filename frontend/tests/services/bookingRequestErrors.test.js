@@ -7,8 +7,8 @@ import { describe, it, expect } from "vitest";
 import {
   bookingRequestErrorMessage,
   fieldErrorsFrom,
-  isEventAlreadyRequested,
   isSuitabilityConfirmationRequired,
+  isVenueAlreadyRequested,
   periodConflicts,
   unmetCriteria,
   isStaleWithdrawError,
@@ -23,12 +23,30 @@ describe("bookingRequestErrorMessage", () => {
     ["EVENT_NOT_BOOKABLE", /approved or confirmed/],
     ["EVENT_DATES_MISSING", /no proposed start and end/],
     ["VENUE_RETIRED", /retired/],
-    ["BOOKING_REQUEST_EXISTS", /pending or approved venue request/],
-    ["BOOKING_FLAGGED_FOR_REVIEW", /flagged for review/],
     ["BOOKING_PERIOD_CONFLICT", /not available for the whole of the event/],
     ["BOOKING_CHANGED", /changed while you were working/],
   ])("SCRUM254_explains_the_409_%s", (code, pattern) => {
     expect(bookingRequestErrorMessage(conflict(code))).toMatch(pattern);
+  });
+
+  // SCRUM-525 (AC1): one live request per venue, so both refusals are about
+  // the venue asked for, and the old event-wide wording would wrongly tell the
+  // coordinator that no other venue can be requested.
+  it.each([
+    ["BOOKING_REQUEST_EXISTS", /pending or approved request for this venue/],
+    ["BOOKING_FLAGGED_FOR_REVIEW", /booking for this venue is flagged for review/],
+  ])("SCRUM525_AC1_%s_is_explained_per_venue", (code, pattern) => {
+    const message = bookingRequestErrorMessage(conflict(code, [{ kind: "booking_request", bookingId: "b9" }]));
+    expect(message).toMatch(pattern);
+    expect(message).toMatch(/this venue/);
+    expect(message).not.toMatch(/only one is allowed/);
+  });
+
+  // SCRUM-525 (R4): no attendance in the body and none on the event.
+  it("SCRUM525_AC2_explains_EVENT_ATTENDANCE_MISSING", () => {
+    expect(bookingRequestErrorMessage(conflict("EVENT_ATTENDANCE_MISSING"))).toBe(
+      "This event has no expected attendance saved, so enter one for this venue before requesting it.",
+    );
   });
 
   it.each([
@@ -117,15 +135,16 @@ describe("periodConflicts", () => {
   });
 });
 
-describe("isEventAlreadyRequested", () => {
+// SCRUM-525 renamed isEventAlreadyRequested: the codes now name a venue.
+describe("isVenueAlreadyRequested", () => {
   it.each(["BOOKING_REQUEST_EXISTS", "BOOKING_FLAGGED_FOR_REVIEW"])("SCRUM254_is_true_for_%s", (code) => {
-    expect(isEventAlreadyRequested(conflict(code))).toBe(true);
+    expect(isVenueAlreadyRequested(conflict(code))).toBe(true);
   });
 
   it.each([conflict("VENUE_RETIRED"), http(403, { code: "BOOKING_REQUEST_EXISTS" }), undefined])(
     "SCRUM254_is_false_for_%s",
     (err) => {
-      expect(isEventAlreadyRequested(err)).toBe(false);
+      expect(isVenueAlreadyRequested(err)).toBe(false);
     },
   );
 });
@@ -210,6 +229,18 @@ describe("SCRUM-188 unrecognised requirement codes", () => {
       );
     },
   );
+
+  // SCRUM-525 (AC2): the attendance is typed on the request form, so a
+  // refused number must not send the coordinator to the search form.
+  it("SCRUM525_AC2_a_400_naming_expectedAttendance_points_at_the_attendance_not_the_search_form", () => {
+    const message = bookingRequestErrorMessage(
+      http(400, { error: "prose", details: [{ field: "expectedAttendance", message: "must be at least 1" }] }),
+    );
+    expect(message).toBe(
+      "The expected attendance for this venue was not accepted. Enter a whole number of 1 or more.",
+    );
+    expect(message).not.toMatch(/search form/);
+  });
 
   it("SCRUM188_AC7_a_400_about_other_fields_keeps_the_general_message", () => {
     expect(

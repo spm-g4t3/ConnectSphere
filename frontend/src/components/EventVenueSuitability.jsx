@@ -37,8 +37,17 @@
 //   - An item the server could not recheck says why in fixed copy, keyed by
 //     its code (STORED_REQUIREMENTS_INVALID, RECHECK_FAILED); never its prose.
 //   - onLoaded(items) tells the parent what came back, so the event's
-//     "Find a venue" knows on load that a request is already live and does
-//     not offer a second one (every item here is a live booking).
+//     "Find a venue" knows on load which venues already have a live request,
+//     with each one's status, and does not offer those venues again (every
+//     item here is a live booking, an errored one included). SCRUM-525: other
+//     venues stay requestable; the lock is per venue.
+//
+// SCRUM-525 (AC5, R14): each booking also shows its own attendance and
+// layout, outside the recheck result, so an item whose recheck failed still
+// shows them. The attendance is the number the server applied; when the
+// booking has none of its own and the event's was used, it says "(event's)",
+// so a fallback is never read as the number requested, and with neither it
+// says "Not recorded".
 //   - A failed call uses recheckErrorMessage: a 400 here is not about the
 //     coordinator's requirement codes, since none are sent.
 
@@ -46,6 +55,8 @@ import { useEffect, useRef, useState } from "react";
 import { getEventVenueSuitability } from "../services/venueSuitabilityService";
 import { recheckErrorMessage } from "../services/venueSuitabilityErrors";
 import VenueSuitabilityResult from "./VenueSuitabilityResult";
+import { labelFor } from "../services/venueSuitabilityDisplay";
+import { ROOM_LAYOUTS } from "../services/venueLookups";
 
 const RETIRED_MESSAGE = "It can no longer host this event, so request another venue.";
 const ITEM_ERROR_MESSAGE = "This venue could not be rechecked. Press Recheck to try again.";
@@ -53,7 +64,22 @@ const ITEM_ERROR_MESSAGES = {
   STORED_REQUIREMENTS_INVALID:
     "The requirements saved with this request can no longer be read, so it could not be rechecked.",
   RECHECK_FAILED: "This venue could not be rechecked right now. Try Recheck.",
+  // SCRUM-525 (R12): only this booking is affected, so only it says so.
+  EVENT_ATTENDANCE_MISSING:
+    "Neither this request nor the event has an expected attendance, so its capacity could not be checked.",
 };
+
+/** SCRUM-525 (R14): the attendance applied, marked when it is the event's. */
+function attendanceText(item) {
+  const n = item?.expectedAttendance;
+  if (!Number.isInteger(n)) return "Not recorded";
+  return item?.attendanceSource === "event" ? `${n} (event's)` : String(n);
+}
+
+/** SCRUM-525 (AC5): the booking's layout as its label, or that none was asked for. */
+function layoutText(code) {
+  return code ? labelFor(code, ROOM_LAYOUTS) : "None requested";
+}
 
 /** Fixed copy for an item's error, by its code (never the server's message). */
 function itemErrorMessage(error) {
@@ -84,6 +110,8 @@ function BookingSuitability({ item }) {
       <p className="event-venue-suitability__meta">
         {item?.venueLocation && <span>{item.venueLocation}</span>}
         {statusLabel && <span>Booking: {statusLabel}</span>}
+        <span>{`Attendance: ${attendanceText(item)}`}</span>
+        <span>{`Layout: ${layoutText(item?.roomLayoutCode)}`}</span>
         {verdict && (
           <span
             className={`event-venue-suitability__verdict event-venue-suitability__verdict--${suitable ? "met" : "unmet"}`}

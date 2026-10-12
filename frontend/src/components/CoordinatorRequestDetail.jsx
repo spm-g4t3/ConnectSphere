@@ -172,6 +172,20 @@ function startDateHasPassed(value) {
   return Number.isNaN(time) || time <= Date.now();
 }
 
+/**
+ * SCRUM-525 (AC1, R13): Venue suitability's items as the venues Find a venue
+ * must not offer again, each with the status label its hint names. An item
+ * whose recheck failed still counts: it is a live booking all the same, and
+ * the server would refuse a second request for its venue.
+ */
+function liveRequestsFrom(items) {
+  const venues = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    if (item?.venueId) venues.set(item.venueId, item.statusDisplay?.label ?? item.status ?? null);
+  }
+  return venues;
+}
+
 export default function CoordinatorRequestDetail({
   request,
   onReviewDecisionProcessed,
@@ -222,11 +236,12 @@ export default function CoordinatorRequestDetail({
   // refresh alone would not: a booking changes none of the event fields the
   // section is keyed by, and `current` can be this panel's own copy.
   const [venueVersion, setVenueVersion] = useState(0);
-  // SCRUM-188: whether the Venue suitability section found a live request
-  // for this event when it loaded, so Find a venue starts with its request
-  // buttons off instead of offering one the server would refuse.
+  // SCRUM-188, per venue since SCRUM-525: the venues the Venue suitability
+  // section found a live request for when it loaded, with each one's status,
+  // so Find a venue starts with those venues' request buttons off instead of
+  // offering one the server would refuse. Every other venue stays on.
   // Kept with the event it was loaded for, so another event never inherits it.
-  const [liveVenueRequest, setLiveVenueRequest] = useState({ eventId: null, live: false });
+  const [liveVenueRequests, setLiveVenueRequests] = useState({ eventId: null, venues: new Map() });
 
   const assignedCoordinatorId = handedOverTo?.id ?? request.assignedCoordinatorId;
 
@@ -882,15 +897,16 @@ export default function CoordinatorRequestDetail({
           period or attendance remounts it and the recheck happens as the
           change lands; venueVersion adds a booking just sent below. Shown
           only to the assigned coordinator, the one the server answers.
-          SCRUM-188: what it loads tells Find a venue whether a request is
-          already live (onLoaded -> hasLiveRequest). */}
+          SCRUM-188: what it loads tells Find a venue which venues already
+          have a live request (onLoaded -> liveRequests; per venue since
+          SCRUM-525). */}
       {isAssignedCoordinator && (
         <section className="event-venue-suitability-section">
           <h3>Venue suitability</h3>
           <EventVenueSuitability
             key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}|${venueVersion}`}
             eventRequestId={current.id}
-            onLoaded={(items) => setLiveVenueRequest({ eventId: current.id, live: items.length > 0 })}
+            onLoaded={(items) => setLiveVenueRequests({ eventId: current.id, venues: liveRequestsFrom(items) })}
           />
         </section>
       )}
@@ -901,11 +917,14 @@ export default function CoordinatorRequestDetail({
           key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}`}
           request={current}
           userId={isAssignedCoordinator && current.status !== "cancelled" ? user.id : undefined}
-          hasLiveRequest={liveVenueRequest.eventId === current.id && liveVenueRequest.live}
+          liveRequests={liveVenueRequests.eventId === current.id ? liveVenueRequests.venues : undefined}
           onRequestSubmitted={() => {
             setVenueVersion((n) => n + 1);
             onChangeRequestProcessed?.();
           }}
+          // SCRUM-525 (R13): a venue refused as already requested reloads
+          // Venue suitability, so the request it collided with is listed.
+          onVenueAlreadyRequested={() => setVenueVersion((n) => n + 1)}
         />
         <p className="event-venue-finder__browse">
           <Link to="/venue-search">Browse all venues</Link>
