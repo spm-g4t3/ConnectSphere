@@ -43,3 +43,111 @@
 .equipment-review .equipment-review__error { color: #a12a2a; font-weight: 600; }
 .equipment-review .equipment-review__form input[type="number"] { border: 1px solid var(--line, #c3d3cf); border-radius: 6px; font: inherit; padding: 6px 8px; }
 .equipment-review .equipment-review__form textarea { border: 1px solid var(--line, #c3d3cf); border-radius: 6px; font: inherit; padding: 6px 8px; }
+
+/* Redesign: clearer structure. One card per line, one thing to do next, and flagged
+   reservations get their own panel with the choices written out. Every state is
+   written as well as coloured. Selectors start from .equipment-review so they outrank
+   the app's `.dashboard li`, `.dashboard p` and `.dashboard section` rules. */
+.equipment-review .er-event-head { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; justify-content: space-between; }
+.equipment-review .er-event-head h2 { font-size: 1.4rem; margin: 0; }
+.equipment-review .er-facts { display: grid; gap: 10px 28px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin: 14px 0 6px; }
+.equipment-review .er-facts dt, .equipment-review .er-label, .equipment-review .er-compare dt { color: #5a6c70; display: block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.equipment-review .er-facts dd, .equipment-review .er-compare dd { margin: 2px 0 0; }
+
+.equipment-review .er-steps { counter-reset: none; display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 18px 0 0; padding: 0; }
+.equipment-review .er-step { align-items: center; background: #eef3f1; border-radius: 999px; color: #5a6c70; display: inline-flex; font-size: 0.88rem; gap: 8px; padding: 6px 14px 6px 8px; }
+.equipment-review .er-step__num { align-items: center; background: #cfdad6; border-radius: 50%; color: #2d3f43; display: inline-flex; font-size: 0.78rem; font-weight: 700; height: 22px; justify-content: center; width: 22px; }
+.equipment-review .er-step--current { background: #0b6b63; color: #fff; font-weight: 700; }
+.equipment-review .er-step--current .er-step__num { background: #fff; color: #0b6b63; }
+.equipment-review .er-step--done { background: #eef7f1; color: #2e7d4f; }
+.equipment-review .er-step--done .er-step__num { background: #2e7d4f; color: #fff; }
+
+.equipment-review .er-next { border-left: 8px solid #0b6b63; border-radius: 10px; padding: 16px 20px; }
+.equipment-review .er-next h2 { font-size: 1.15rem; margin: 0 0 4px; }
+.equipment-review .er-next p { color: #26383c; margin: 4px 0; }
+.equipment-review .er-next .er-next__who { color: #5a6c70; font-size: 0.88rem; }
+.equipment-review .er-next--action { background: #e8f3f1; border-left-color: #0b6b63; }
+.equipment-review .er-next--warn { background: #fff3e6; border-left-color: #ea7a1a; }
+.equipment-review .er-next--ok { background: #eef7f1; border-left-color: #2e7d4f; }
+.equipment-review .er-next--muted { background: #eef2f1; border-left-color: #8a9a9e; }
+
+.equipment-review .equipment-review__line { background: #fff; border: 1px solid #d3dedb; border-radius: 12px; margin: 14px 0; padding: 18px 20px; }
+.equipment-review .equipment-review__line-head strong { font-size: 1.1rem; }
+.equipment-review .er-counts { display: flex; flex-wrap: wrap; font-weight: 600; gap: 4px 20px; margin-top: 6px; }
+.equipment-review .er-progress { background: #e3ebe8; border-radius: 999px; height: 8px; margin: 8px 0 4px; overflow: hidden; }
+.equipment-review .er-progress span { background: #2e7d4f; display: block; height: 100%; }
+.equipment-review .er-pill { border-radius: 999px; font-size: 0.75rem; font-weight: 700; padding: 3px 10px; }
+.equipment-review .er-pill--ok { background: #eef7f1; color: #2e7d4f; }
+.equipment-review .er-pill--todo { background: #fff3e6; color: #8a4a00; }
+.equipment-review .equipment-review__notes .er-label { margin-bottom: 2px; }
+.equipment-review .equipment-review__availability .er-label { margin-bottom: 2px; }
+.equipment-review .equipment-review__availability summary { cursor: pointer; font-weight: 600; margin-top: 6px; }
+.equipment-review .equipment-review__availability ul { margin: 6px 0 0 18px; padding: 0; }
+.equipment-review .equipment-review__availability li { display: list-item; list-style: disc; }
+
+.equipment-review .equipment-review__reservations h3 { font-size: 0.82rem; letter-spacing: 0.06em; margin: 16px 0 4px; text-transform: uppercase; color: #5a6c70; }
+.equipment-review .equipment-review__reservation { background: #f6faf8; border: 1px solid #d9e4e0; border-left: 4px solid #2e7d4f; border-radius: 8px; display: grid; gap: 10px; margin: 8px 0; padding: 12px 14px; }
+.equipment-review .er-res__main { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.equipment-review .er-res__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.equipment-review .equipment-review__reservation--flagged { background: #fff8ef; border-color: #f0c79a; border-left-color: #ea7a1a; }
+.equipment-review .er-conflict { display: grid; gap: 10px; }
+.equipment-review .er-conflict h4 { color: #8a4a00; font-size: 1rem; margin: 0; }
+.equipment-review .er-conflict p { margin: 0; }
+.equipment-review .er-compare { display: grid; gap: 8px 24px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin: 0; }
+.equipment-review .er-compare > div { background: #fff; border: 1px solid #f0d9bd; border-radius: 8px; padding: 8px 12px; }
+.equipment-review .er-choices { display: grid; gap: 10px; list-style: none; margin: 4px 0 0; padding: 0; }
+.equipment-review .er-choices li { align-items: center; display: grid; gap: 6px 14px; grid-template-columns: minmax(150px, 190px) 1fr; }
+.equipment-review .er-choices li span { color: #3d5256; font-size: 0.9rem; }
+@media (max-width: 640px) { .equipment-review .er-choices li { grid-template-columns: 1fr; } }
+
+.equipment-review .er-line-actions { border-top: 1px dashed #d3dedb; margin-top: 14px; padding-top: 12px; }
+.equipment-review .equipment-review__form { background: #f6faf8; border: 1px solid #d3dedb; border-radius: 10px; margin-top: 12px; max-width: 560px; padding: 14px 16px; }
+.equipment-review .equipment-review__form h4 { font-size: 1rem; margin: 0; }
+
+.equipment-review button.er-btn { border-radius: 8px; font: inherit; font-size: 0.92rem; font-weight: 600; padding: 9px 16px; }
+.equipment-review button.er-btn--primary { background: #0b6b63; border: 1px solid #0b6b63; color: #fff; }
+.equipment-review button.er-btn--secondary { background: #fff; border: 1px solid #0b6b63; color: #0b6b63; }
+.equipment-review button.er-btn--danger { background: #fff; border: 1px solid #b3261e; color: #b3261e; }
+.equipment-review button.er-btn--link { background: none; border: 0; color: #0b6b63; padding: 4px 0; text-decoration: underline; }
+.equipment-review button.er-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.equipment-review .equipment-review__complete { background: #fff; border: 1px solid #d3dedb; border-radius: 12px; padding: 18px 20px; }
+.equipment-review .er-checklist { display: grid; gap: 6px; list-style: none; margin: 8px 0 14px; padding: 0; }
+.equipment-review .er-check { align-items: baseline; display: flex; gap: 10px; justify-content: flex-start; }
+.equipment-review .er-check > span { font-weight: 700; }
+.equipment-review .er-check--ok > span { color: #2e7d4f; }
+.equipment-review .er-check--todo > span { color: #ea7a1a; }
+.equipment-review .equipment-review__notice { background: #eef7f1; border-radius: 8px; color: #1f5a37; padding: 10px 14px; }
+.equipment-review p.equipment-review__error { background: #fdecea; border-radius: 8px; padding: 10px 14px; }
+
+/* Tabs: lines that need the reviewer are kept apart from lines that are dealt with. */
+.equipment-review .er-tabs { border-bottom: 2px solid #e3ebe8; display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.equipment-review button.er-tab { align-items: center; background: #f3f7f6; border: 1px solid #d3dedb; border-bottom: 0; border-radius: 10px 10px 0 0; color: #34484d; display: inline-flex; font: inherit; font-weight: 600; gap: 8px; margin-bottom: -2px; padding: 9px 16px; }
+.equipment-review button.er-tab .er-tab__count { background: #cfdad6; border-radius: 999px; font-size: 0.78rem; min-width: 22px; padding: 1px 8px; text-align: center; }
+.equipment-review button.er-tab--attention .er-tab__count { background: #fde3c4; color: #8a4a00; }
+.equipment-review button.er-tab--done .er-tab__count { background: #d4edda; color: #1f5a37; }
+.equipment-review button.er-tab--active { background: #fff; border-bottom: 2px solid #fff; color: #0b6b63; }
+.equipment-review button.er-tab--attention.er-tab--active { border-top: 4px solid #ea7a1a; }
+.equipment-review button.er-tab--done.er-tab--active { border-top: 4px solid #2e7d4f; }
+.equipment-review button.er-tab--all.er-tab--active { border-top: 4px solid #0b6b63; }
+.equipment-review .er-empty { background: #f6faf8; border: 1px dashed #b9cbc6; border-radius: 10px; margin: 14px 0; padding: 18px; }
+
+/* A line's colour says where it stands: orange needs units, red-orange is flagged, green is done, grey-red was not provided. */
+.equipment-review .er-line--short { border-left: 8px solid #ea7a1a; }
+.equipment-review .er-line--flagged { border-left: 8px solid #d9480f; background: #fffaf5; }
+.equipment-review .er-line--ok { border-left: 8px solid #2e7d4f; }
+.equipment-review .er-line--cannot { border-left: 8px solid #b3261e; }
+.equipment-review .er-counts span { background: #eef3f8; border-radius: 6px; color: #23415f; padding: 2px 10px; }
+.equipment-review .er-counts span + span { background: #e6f3ea; color: #1f5a37; }
+.equipment-review .er-line--short .er-counts span + span, .equipment-review .er-line--flagged .er-counts span + span { background: #fff0dc; color: #8a4a00; }
+.equipment-review .er-line--cannot .er-counts span + span { background: #fdecea; color: #a12a2a; }
+
+/* App.css fills every `.dashboard button:hover` teal, which hid the label on tabs and outlined
+   buttons. Each kind gets its own hover and focus state. */
+.equipment-review button.er-tab:hover:not(:disabled) { background: #e3eeeb; color: #0b6b63; }
+.equipment-review button.er-tab--active:hover:not(:disabled) { background: #fff; color: #0b6b63; }
+.equipment-review button.er-btn--primary:hover:not(:disabled) { background: #095a54; border-color: #095a54; color: #fff; }
+.equipment-review button.er-btn--secondary:hover:not(:disabled) { background: #e8f3f1; color: #0b6b63; }
+.equipment-review button.er-btn--danger:hover:not(:disabled) { background: #fdecea; color: #b3261e; }
+.equipment-review button.er-btn--link:hover:not(:disabled) { background: none; color: #095a54; }
+.equipment-review button.er-tab:focus-visible, .equipment-review button.er-btn:focus-visible { outline: 3px solid rgba(8, 127, 123, 0.4); outline-offset: 2px; }

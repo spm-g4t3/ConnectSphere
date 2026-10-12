@@ -124,8 +124,8 @@ describe("EquipmentReview: what is shown", () => {
   it("SCRUM290_shows_event_venue_coordinator_and_status", async () => {
     await open(state());
     expect(getEquipmentReview).toHaveBeenCalledWith(EVENT_ID);
-    expect(screen.getByText("Venue: Hall A")).toBeInTheDocument();
-    expect(screen.getByText("Coordinator: Rae Tan")).toBeInTheDocument();
+    expect(screen.getByText("Hall A")).toBeInTheDocument();
+    expect(screen.getByText("Rae Tan")).toBeInTheDocument();
     expect(screen.getByText("Pending review")).toBeInTheDocument();
   });
 
@@ -138,6 +138,7 @@ describe("EquipmentReview: what is shown", () => {
 
   it("SCRUM290_shows_each_line_with_requested_reserved_and_availability", async () => {
     await open(state({ lines: [line(), line({ id: MIC, name: "Microphone", quantity: 1, reserved: 1, shortBy: 0, availability: availability("Fully available", 1, 5) })] }));
+    await userEvent.click(screen.getByRole("tab", { name: /^All/ }));
     expect(screen.getByText("Requested: 3")).toBeInTheDocument();
     expect(screen.getByText("Reserved: 1 of 3")).toBeInTheDocument();
     expect(screen.getByText("Partially available")).toBeInTheDocument();
@@ -150,7 +151,7 @@ describe("EquipmentReview: what is shown", () => {
     const a = availability("Partially available", 3, 2);
     a.reservations = [{ id: "x", eventName: "Gala", quantity: 8, startAt: "2026-11-01T09:00:00Z", endAt: "2026-11-01T13:00:00Z", flagged: true }];
     await open(state({ lines: [line({ availability: a })] }));
-    expect(screen.getByText("Overlapping reservations (1)")).toBeInTheDocument();
+    expect(screen.getByText("Other events using this equipment (1)")).toBeInTheDocument();
     expect(screen.getByText(/Gala: 8/)).toHaveTextContent("(flagged for review)");
   });
 

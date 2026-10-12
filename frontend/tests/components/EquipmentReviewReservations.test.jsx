@@ -137,7 +137,7 @@ describe("what is shown", () => {
   it("SCRUM300_AC2_lists_each_reservation_with_its_quantity_and_period", async () => {
     await open(state());
     expect(screen.getByRole("heading", { name: "Reservations (1)" })).toBeInTheDocument();
-    expect(screen.getByText(/2 reserved,/)).toBeInTheDocument();
+    expect(screen.getByText("2 reserved")).toBeInTheDocument();
   });
 
   it("SCRUM300_AC7_a_flagged_reservation_says_flagged_and_why", async () => {
@@ -189,7 +189,7 @@ describe("what is shown", () => {
 describe("AC1: only the current reviewer is offered the actions", () => {
   it("SCRUM300_AC1_someone_who_is_not_the_reviewer_sees_reservations_but_no_buttons", async () => {
     await open(state({ reviewerId: OTHER, lines: [flaggedLine()] }));
-    expect(screen.getByText(/2 reserved,/)).toBeInTheDocument();
+    expect(screen.getByText("2 reserved")).toBeInTheDocument();
     for (const name of [/^Reserve /, /^Move/, /^Keep/, /^Reduce/, /^Release/]) {
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     }
@@ -206,7 +206,7 @@ describe("AC1: only the current reviewer is offered the actions", () => {
     await open(state());
     expect(screen.queryByRole("button", { name: /^Move/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Keep/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Release the Projector reservation" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Release all: Projector" })).toBeInTheDocument();
   });
 
   it("SCRUM300_AC4_reduce_is_not_offered_on_a_reservation_of_one", async () => {
@@ -297,7 +297,7 @@ describe("AC2: reserving", () => {
 
   it("SCRUM300_opening_the_mark_note_form_closes_an_open_reservation_form", async () => {
     await open(state());
-    await click("Reduce the Projector reservation");
+    await click("Reduce quantity: Projector");
     expect(screen.getByLabelText(/New quantity/)).toBeInTheDocument();
     await click("Mark as cannot be provided: Projector");
     expect(screen.queryByLabelText(/New quantity/)).not.toBeInTheDocument();
@@ -308,7 +308,7 @@ describe("AC2: reserving", () => {
   it("SCRUM300_opening_a_reservation_form_closes_an_open_mark_note_form", async () => {
     await open(state());
     await click("Mark as cannot be provided: Projector");
-    await click("Release the Projector reservation");
+    await click("Release all: Projector");
     expect(screen.queryByLabelText(/Why can Projector not be provided/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Why is it being released?")).toBeInTheDocument();
   });
@@ -357,7 +357,7 @@ describe("the reserve form hint", () => {
 describe("a refusal message does not outlive the typing that fixes it", () => {
   it("SCRUM300_the_reduce_reason_error_clears_when_the_reviewer_types", async () => {
     await open(state());
-    await click("Reduce the Projector reservation");
+    await click("Reduce quantity: Projector");
     await userEvent.click(screen.getByRole("button", { name: "Reduce" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Add a reason.");
     await userEvent.type(screen.getByLabelText("Why is it being reduced?"), "a");
@@ -380,7 +380,7 @@ describe("AC4: reducing and releasing", () => {
   it("SCRUM300_AC4_reduce_sends_the_new_quantity_and_the_reason", async () => {
     reduceEquipmentReservation.mockResolvedValue(state({ lines: [line({ reservations: [reservation({ quantity: 1 })] })] }));
     await open(state());
-    await click("Reduce the Projector reservation");
+    await click("Reduce quantity: Projector");
     expect(screen.getByLabelText(/New quantity \(currently 2\)/)).toHaveValue(1);
     await userEvent.type(screen.getByLabelText("Why is it being reduced?"), "Only one needed");
     await userEvent.click(screen.getByRole("button", { name: "Reduce" }));
@@ -391,7 +391,7 @@ describe("AC4: reducing and releasing", () => {
 
   it("SCRUM300_AC4_reduce_without_a_reason_is_refused_before_any_call", async () => {
     await open(state());
-    await click("Reduce the Projector reservation");
+    await click("Reduce quantity: Projector");
     await userEvent.click(screen.getByRole("button", { name: "Reduce" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Add a reason.");
     expect(reduceEquipmentReservation).not.toHaveBeenCalled();
@@ -399,7 +399,7 @@ describe("AC4: reducing and releasing", () => {
 
   it("SCRUM300_AC4_a_whitespace_only_reason_counts_as_none", async () => {
     await open(state());
-    await click("Reduce the Projector reservation");
+    await click("Reduce quantity: Projector");
     await userEvent.type(screen.getByLabelText("Why is it being reduced?"), "   ");
     await userEvent.click(screen.getByRole("button", { name: "Reduce" }));
     expect(reduceEquipmentReservation).not.toHaveBeenCalled();
@@ -407,7 +407,7 @@ describe("AC4: reducing and releasing", () => {
 
   it("SCRUM300_AC4_reducing_to_the_same_or_a_larger_number_is_refused_before_any_call", async () => {
     await open(state());
-    await click("Reduce the Projector reservation");
+    await click("Reduce quantity: Projector");
     const input = screen.getByLabelText(/New quantity/);
     await userEvent.clear(input);
     await userEvent.type(input, "2");
@@ -420,7 +420,7 @@ describe("AC4: reducing and releasing", () => {
   it("SCRUM300_AC4_release_sends_the_reason", async () => {
     releaseEquipmentReservation.mockResolvedValue(state({ lines: [line({ reservations: [] })] }));
     await open(state());
-    await click("Release the Projector reservation");
+    await click("Release all: Projector");
     await userEvent.type(screen.getByLabelText("Why is it being released?"), "Wrong item");
     await userEvent.click(screen.getByRole("button", { name: "Release" }));
 
@@ -431,7 +431,7 @@ describe("AC4: reducing and releasing", () => {
 
   it("SCRUM300_AC4_release_without_a_reason_is_refused_before_any_call", async () => {
     await open(state());
-    await click("Release the Projector reservation");
+    await click("Release all: Projector");
     await userEvent.click(screen.getByRole("button", { name: "Release" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Add a reason.");
     expect(releaseEquipmentReservation).not.toHaveBeenCalled();
@@ -440,7 +440,7 @@ describe("AC4: reducing and releasing", () => {
   it("SCRUM300_AC4_a_server_refusal_keeps_the_form_open_and_keeps_the_typed_reason", async () => {
     releaseEquipmentReservation.mockRejectedValue(fail(400, { error: "x", details: [{ field: "reason", message: "is required: say why" }] }));
     await open(state());
-    await click("Release the Projector reservation");
+    await click("Release all: Projector");
     await userEvent.type(screen.getByLabelText("Why is it being released?"), "Wrong item");
     await userEvent.click(screen.getByRole("button", { name: "Release" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Reason: is required: say why");
@@ -449,7 +449,7 @@ describe("AC4: reducing and releasing", () => {
 
   it("SCRUM300_AC4_only_one_editor_is_open_at_a_time", async () => {
     await open(state({ lines: [line({ reservations: [reservation(), reservation({ id: RES_B, quantity: 2 })] })] }));
-    const [first, second] = screen.getAllByRole("button", { name: "Release the Projector reservation" });
+    const [first, second] = screen.getAllByRole("button", { name: "Release all: Projector" });
     await userEvent.click(first);
     expect(screen.getAllByLabelText("Why is it being released?")).toHaveLength(1);
     await userEvent.click(second);
@@ -458,7 +458,7 @@ describe("AC4: reducing and releasing", () => {
 
   it("SCRUM300_AC4_cancel_closes_a_reduce_form_without_a_call", async () => {
     await open(state());
-    await click("Reduce the Projector reservation");
+    await click("Reduce quantity: Projector");
     await click("Cancel");
     expect(screen.queryByLabelText(/New quantity/)).not.toBeInTheDocument();
     expect(reduceEquipmentReservation).not.toHaveBeenCalled();
@@ -469,7 +469,7 @@ describe("AC7: resolving a flagged reservation", () => {
   it("SCRUM300_AC7_move_calls_the_service_and_replaces_the_state", async () => {
     moveEquipmentReservation.mockResolvedValue(state({ lines: [line()] }));
     await open(state({ lines: [flaggedLine()] }));
-    await click("Move the Projector reservation");
+    await click("Move to new time: Projector");
 
     expect(moveEquipmentReservation).toHaveBeenCalledWith(EVENT_ID, RES_A);
     expect(await screen.findByRole("status")).toHaveTextContent(/Moved the Projector reservation/);
@@ -480,7 +480,7 @@ describe("AC7: resolving a flagged reservation", () => {
   it("SCRUM300_AC7_keep_calls_the_service_and_replaces_the_state", async () => {
     keepEquipmentReservation.mockResolvedValue(state({ lines: [line()] }));
     await open(state({ lines: [flaggedLine()] }));
-    await click("Keep the Projector reservation");
+    await click("Keep old time: Projector");
 
     expect(keepEquipmentReservation).toHaveBeenCalledWith(EVENT_ID, RES_A);
     expect(await screen.findByRole("status")).toHaveTextContent(/Kept the Projector reservation/);
@@ -492,7 +492,7 @@ describe("AC7: resolving a flagged reservation", () => {
       fail(400, { error: "x", details: [{ field: "quantity", message: "Only 0 available for the event's current period, so 2 cannot be moved there" }] }),
     );
     await open(state({ lines: [flaggedLine()] }));
-    await click("Move the Projector reservation");
+    await click("Move to new time: Projector");
     expect(await screen.findByRole("alert")).toHaveTextContent(/Only 0 available/);
     expect(screen.getByText("Flagged")).toBeInTheDocument();
   });
@@ -502,7 +502,7 @@ describe("AC7: resolving a flagged reservation", () => {
       fail(409, { error: "This reservation cannot be kept. Its period no longer matches the event. Move it, reduce it or release it." }),
     );
     await open(state({ lines: [flaggedLine()] }));
-    await click("Keep the Projector reservation");
+    await click("Keep old time: Projector");
     expect(await screen.findByRole("alert")).toHaveTextContent(/period no longer matches/);
     expect(getEquipmentReview).toHaveBeenCalledTimes(2);
   });
@@ -511,9 +511,9 @@ describe("AC7: resolving a flagged reservation", () => {
     let finish;
     moveEquipmentReservation.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     await open(state({ lines: [flaggedLine()] }));
-    await click("Move the Projector reservation");
-    expect(screen.getByRole("button", { name: "Keep the Projector reservation" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Release the Projector reservation" })).toBeDisabled();
+    await click("Move to new time: Projector");
+    expect(screen.getByRole("button", { name: "Keep old time: Projector" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Release all: Projector" })).toBeDisabled();
     finish(state({ lines: [line()] }));
     expect(await screen.findByText(/Moved the Projector reservation/)).toBeInTheDocument();
   });
@@ -528,10 +528,152 @@ describe("AC7: resolving a flagged reservation", () => {
         ],
       }),
     );
-    await click("Move the Projector reservation");
+    await click("Move to new time: Projector");
     expect(moveEquipmentReservation).toHaveBeenCalledWith(EVENT_ID, RES_A);
     expect(await screen.findByText(/1 reservation is flagged/)).toBeInTheDocument();
     expect(screen.getByText(/Moved the Projector reservation/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Move the Microphone reservation" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move to new time: Microphone" })).toBeInTheDocument();
+  });
+});
+
+describe("guidance: what to do next", () => {
+  const next = () => screen.getByRole("region", { name: "Next step" });
+  const shortLine = (overrides = {}) => line({ reservations: [], ...overrides });
+
+  it("SCRUM300_UX_a_pending_request_says_to_start_and_offers_the_button_there", async () => {
+    await open(state({ status: "pending_review", lines: [shortLine()] }));
+    expect(next()).toHaveTextContent("Start the review");
+    expect(next()).toContainElement(screen.getByRole("button", { name: "Start review" }));
+  });
+
+  it("SCRUM300_UX_the_reviewer_with_short_lines_is_told_to_reserve_or_mark_them", async () => {
+    await open(state({ lines: [shortLine()] }));
+    expect(next()).toHaveTextContent("Reserve the rest of the equipment");
+    expect(next()).toHaveTextContent("1 of 1 line still needs equipment");
+  });
+
+  it("SCRUM300_UX_a_flagged_reservation_comes_first_and_says_where_to_look", async () => {
+    await open(state({ lines: [flaggedLine()] }));
+    expect(next()).toHaveTextContent("Decide on 1 flagged reservation");
+    expect(next()).toHaveTextContent("orange box");
+  });
+
+  it("SCRUM300_UX_a_fully_reserved_request_says_it_is_ready_to_complete", async () => {
+    await open(state({ lines: [line({ reservations: [reservation({ quantity: 5 })] })] }));
+    expect(next()).toHaveTextContent("Ready to complete");
+  });
+
+  it("SCRUM300_UX_someone_else_s_review_names_the_reviewer_and_offers_take_over_in_the_panel", async () => {
+    await open(state({ reviewerId: OTHER }));
+    expect(next()).toHaveTextContent("Sam Lee is reviewing this");
+    expect(next()).toContainElement(screen.getByRole("button", { name: "Take over review" }));
+  });
+
+  it("SCRUM300_UX_the_progress_steps_mark_the_current_one", async () => {
+    await open(state({ lines: [shortLine()] }));
+    const current = screen.getByRole("list", { name: "Review progress" }).querySelector("[aria-current='step']");
+    expect(current).toHaveTextContent("Reserve the equipment");
+  });
+});
+
+describe("guidance: a flagged reservation", () => {
+  it("SCRUM300_UX_shows_what_it_was_reserved_for_and_what_the_event_is_now", async () => {
+    await open(state({ lines: [flaggedLine()] }));
+    expect(screen.getByText("Needs your decision")).toBeInTheDocument();
+    expect(screen.getByText("Reserved for")).toBeInTheDocument();
+    expect(screen.getByText("The event is now")).toBeInTheDocument();
+  });
+
+  it("SCRUM300_UX_each_choice_says_in_words_what_it_does", async () => {
+    await open(state({ lines: [flaggedLine()] }));
+    expect(screen.getByText(/Reserve the same units for the event's new date and time/)).toBeInTheDocument();
+    expect(screen.getByText(/Leave the reservation as it is and clear the flag/)).toBeInTheDocument();
+    expect(screen.getByText(/Give all 2 back so other events can use them/)).toBeInTheDocument();
+  });
+
+  it("SCRUM300_UX_someone_who_is_not_the_reviewer_sees_the_conflict_but_no_choices", async () => {
+    await open(state({ reviewerId: OTHER, lines: [flaggedLine()] }));
+    expect(screen.getByText("Needs your decision")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Move to new time: Projector" })).not.toBeInTheDocument();
+  });
+});
+
+describe("guidance: finishing", () => {
+  it("SCRUM300_UX_the_checklist_shows_which_lines_still_need_something", async () => {
+    await open(
+      state({
+        lines: [
+          line({ reservations: [reservation({ quantity: 5 })] }),
+          line({ id: MIC, name: "Microphone", reservations: [] }),
+        ],
+      }),
+    );
+    expect(screen.getByText(/Projector: 5 of 5 reserved/)).toBeInTheDocument();
+    expect(screen.getByText(/Microphone: 0 of 5 reserved \(reserve more or mark it cannot be provided\)/)).toBeInTheDocument();
+  });
+});
+
+describe("tabs: lines that need attention are kept apart from lines that are done", () => {
+  const done = () => line({ id: MIC, name: "Microphone", reservations: [reservation({ id: RES_B, quantity: 5 })] });
+  const short = () => line({ reservations: [] });
+  const tab = (name) => screen.getByRole("tab", { name });
+
+  it("SCRUM300_UX_opens_on_needs_attention_and_hides_finished_lines", async () => {
+    await open(state({ lines: [short(), done()] }));
+    expect(tab(/^Needs attention/)).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Projector")).toBeInTheDocument();
+    expect(screen.queryByText("Microphone")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM300_UX_each_tab_shows_how_many_lines_it_holds", async () => {
+    await open(state({ lines: [short(), done()] }));
+    expect(tab(/^Needs attention/)).toHaveTextContent("1");
+    expect(tab(/^Done/)).toHaveTextContent("1");
+    expect(tab(/^All/)).toHaveTextContent("2");
+  });
+
+  it("SCRUM300_UX_the_done_tab_shows_only_finished_lines", async () => {
+    await open(state({ lines: [short(), done()] }));
+    await userEvent.click(tab(/^Done/));
+    expect(screen.getByText("Microphone")).toBeInTheDocument();
+    expect(screen.queryByText("Projector")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM300_UX_a_flagged_line_counts_as_needing_attention_even_when_fully_reserved", async () => {
+    await open(state({ lines: [flaggedLine(), done()] }));
+    expect(tab(/^Needs attention/)).toHaveTextContent("1");
+    expect(screen.getByText("Needs your decision")).toBeInTheDocument();
+  });
+
+  it("SCRUM300_UX_a_line_marked_cannot_be_provided_counts_as_done", async () => {
+    await open(state({ lines: [line({ reservations: [], outcome: "cannot_be_provided", outcomeNote: "No stock" })] }));
+    expect(tab(/^Done/)).toHaveTextContent("1");
+    expect(tab(/^Done/)).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("SCRUM300_UX_with_nothing_left_to_do_it_opens_on_done_and_says_so", async () => {
+    await open(state({ lines: [done()] }));
+    expect(tab(/^Done/)).toHaveAttribute("aria-selected", "true");
+    await userEvent.click(tab(/^Needs attention/));
+    expect(screen.getByText(/Nothing needs attention/)).toBeInTheDocument();
+  });
+
+  it("SCRUM300_UX_a_line_moves_to_done_after_it_is_fully_reserved", async () => {
+    await open(state({ lines: [short()] }));
+    reserveEquipment.mockResolvedValue(state({ lines: [line({ reservations: [reservation({ quantity: 5 })] })] }));
+    await click("Reserve Projector");
+    await userEvent.clear(screen.getByLabelText(/How many Projector to reserve/));
+    await userEvent.type(screen.getByLabelText(/How many Projector to reserve/), "5");
+    await userEvent.click(screen.getByRole("button", { name: "Reserve" }));
+    expect(await screen.findByText("Reserved 5 of Projector.")).toBeInTheDocument();
+    expect(tab(/^Done/)).toHaveTextContent("1");
+    expect(tab(/^Done/)).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("SCRUM300_UX_the_all_tab_shows_every_line", async () => {
+    await open(state({ lines: [short(), done()] }));
+    await userEvent.click(tab(/^All/));
+    expect(screen.getByText("Projector")).toBeInTheDocument();
+    expect(screen.getByText("Microphone")).toBeInTheDocument();
   });
 });
