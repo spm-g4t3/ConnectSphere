@@ -24,6 +24,12 @@ const PANEL = { lines: 100, branches: 97.56, functions: 100, statements: 97.81 }
 // dispatch clicks to disabled buttons. The ref is cheap defence behind them.
 const MY_BOOKING_REQUESTS = { lines: 100, branches: 98.07, functions: 100, statements: 98.24 }
 
+// SCRUM-525's one exception, measured the same way: if (checking) return in
+// BookingRequestPanel.jsx's handleSubmit is unreachable, because the send
+// button is disabled while a recheck runs and Enter in the attendance field
+// only starts the check. The guard is cheap defence behind the button.
+const BOOKING_REQUEST_PANEL = { lines: 100, branches: 99.4, functions: 100, statements: 99.3 }
+
 const SCRUM17_FILES = [
   'src/components/VenueBlocksPanel.jsx',
   'src/components/VenueBlockForm.jsx',
@@ -128,7 +134,11 @@ export default defineConfig({
         ...SCRUM141_FILES.map((file) => [file, FULL]),
         ...SCRUM254_FILES.map((file) => [
           file,
-          file === 'src/components/MyBookingRequests.jsx' ? MY_BOOKING_REQUESTS : FULL,
+          file === 'src/components/MyBookingRequests.jsx'
+            ? MY_BOOKING_REQUESTS
+            : file === 'src/components/BookingRequestPanel.jsx'
+              ? BOOKING_REQUEST_PANEL
+              : FULL,
         ]),
         ...SCRUM485_FILES.map((file) => [file, FULL]),
         ...SCRUM491_FILES.map((file) => [file, FULL]),

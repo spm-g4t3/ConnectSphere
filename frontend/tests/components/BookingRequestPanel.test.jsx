@@ -1184,6 +1184,29 @@ describe("SCRUM-525 editing attendance rechecks the venue", () => {
     expect(submit()).toBeEnabled();
   });
 
+  it("SCRUM525_AC3_an_older_check_failing_late_does_not_replace_the_newer_verdict", async () => {
+    const for80 = deferred();
+    const for120 = deferred();
+    vi.mocked(checkVenueSuitability).mockImplementation((_e, _v, _req, opts) =>
+      opts.attendance === 80 ? for80.promise : for120.promise,
+    );
+    const { user } = renderPanel();
+
+    await setAttendance(user, "80");
+    await setAttendance(user, "120");
+
+    // 120's verdict (unsuitable, so it is visible) lands first, then 80's stale failure.
+    for120.resolve({ ...CAPACITY_UNMET, checked: { expectedAttendance: 120 } });
+    expect(await screen.findByText(warningText)).toBeInTheDocument();
+    await act(async () => {
+      for80.reject(httpError(500));
+      await for80.promise.catch(() => {});
+    });
+
+    expect(screen.getByText(warningText)).toBeInTheDocument();
+    expect(screen.queryByText(/It will be checked again when you send the request\./)).not.toBeInTheDocument();
+  });
+
   it("SCRUM525_AC3_sending_with_an_unchecked_number_checks_it_first", async () => {
     vi.mocked(checkVenueSuitability).mockResolvedValue(suitableFor(80));
     vi.mocked(createBookingRequest).mockResolvedValue(PENDING);

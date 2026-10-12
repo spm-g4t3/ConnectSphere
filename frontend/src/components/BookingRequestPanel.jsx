@@ -126,7 +126,7 @@ const FORM_FIELDS = ["setupNotes", "expectedAttendance"];
  * above that bound, so the bound refuses it too.
  */
 function parseAttendance(text) {
-  const trimmed = String(text ?? "").trim();
+  const trimmed = text.trim();
   if (!/^\d+$/.test(trimmed)) return null;
   const n = Number(trimmed);
   return n >= 1 && n <= MAX_ATTENDANCE ? n : null;
@@ -134,7 +134,7 @@ function parseAttendance(text) {
 
 /** Why the attendance text is not a number to send, or null when it is. */
 function attendanceProblem(text) {
-  const trimmed = String(text ?? "").trim();
+  const trimmed = text.trim();
   if (trimmed === "") return "Enter the expected attendance for this venue.";
   // A sign is allowed here only so that 0 and -5 are told the real problem.
   if (!/^-?\d+$/.test(trimmed)) return "Expected attendance must be a whole number.";
