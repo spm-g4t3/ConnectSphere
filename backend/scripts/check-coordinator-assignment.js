@@ -804,20 +804,11 @@ async function main() {
   // shared database until they were removed by hand. The two refusals above
   // stay: requestEventClarification throws them before it writes anything.
   //
-  // The positive path is in PGlite instead, in parts; no test has a
-  // coordinator the Lead handed the event to call request_event_clarification
-  // and succeed:
-  //  - the holder asks and it is recorded: eventClarificationDatabase.test.js,
-  //    "records a future-dated question, text reply, repeat question and
-  //    closure transactionally";
-  //  - 030 checks the caller against the event's assigned_coordinator_id when
-  //    it runs, and reassignment changes that column, so the new holder is the
-  //    one who may act: SCRUM486_AC7_an_open_clarification_follows_the_event_to_its_new_coordinator
-  //    (AC7-04: the previous holder asks, the new one closes) and
-  //    SCRUM486_AC7_the_new_coordinator_reviews_and_decides_and_the_previous_one_cannot
-  //    (AC7-01: the new holder moves it to pending_clarification, through
-  //    022's change_event_request_status rather than the clarification
-  //    function).
+  // The positive path is proved in PGlite instead, by
+  // SCRUM486_AC7_the_coordinator_the_lead_hands_it_to_asks_for_clarification_and_the_previous_one_cannot,
+  // and closing a clarification after a handover by
+  // SCRUM486_AC7_an_open_clarification_follows_the_event_to_its_new_coordinator
+  // (AC7-04), both in eventClarificationDatabase.test.js.
 
   const readCancelled = await getEventRequestForCoordinator(cancelled);
   check(

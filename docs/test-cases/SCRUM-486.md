@@ -300,7 +300,7 @@ as an insert from a select, so zero Leads writes zero rows and fails nothing
 | AC4-02 | UNASSIGNED, then assigned to A | LEAD assigns it to B (the second of two) | Refused, with a message naming A as the coordinator already assigned; nothing written | Proved (pglite): `SCRUM486_AC4_refuses_a_second_assignment_and_names_who_got_there_first` |
 | AC4-03 | The function refuses as in AC4-02 | The service | A 409 carrying the function's message, so the name reaches the screen | Proved (svc, route): `SCRUM486_AC4_a_lost_race_is_a_409_that_names_who_holds_it`, `SCRUM486_AC4_a_lost_race_arrives_as_a_409_with_the_holder_as_data` |
 | AC4-04 | LEAD; the assignment comes back 409 | — | The screen says who was assigned, and the request leaves the queue on refresh | Proved (screen): `SCRUM486_AC4_a_lost_race_names_who_was_assigned_and_offers_only_the_way_back`, `SCRUM486_AC4_after_a_lost_race_the_request_leaves_the_queue_on_the_way_back` |
-| AC4-05 | Two connections, the same UNASSIGNED request | Both assign at once | Exactly one succeeds; the other is refused as in AC4-02 | **Written, not run.** PGlite proves two calls issued together end with one winner and a named refusal (`SCRUM486_AC4_of_two_leads_assigning_at_once_exactly_one_wins_and_the_other_is_told_who`), not the row lock under true overlap (one connection). The real race is `check-coordinator-assignment.js` section 2, five rounds of two Leads; it runs against the live database and has not been run |
+| AC4-05 | Two connections, the same UNASSIGNED request | Both assign at once | Exactly one succeeds; the other is refused as in AC4-02 | Proved (live): `check-coordinator-assignment.js` section 2, five rounds of two Leads assigning at once on separate connections, run against the shared Supabase project twice on 12 October (the first run after 052, and the run at `d298ffc`). Every round of both runs ended with one winner, the other refused with a message naming the winner, and one history row. **This is the live script, run by hand, not CI**: no test suite runs it. PGlite proves two calls issued together end the same way (`SCRUM486_AC4_of_two_leads_assigning_at_once_exactly_one_wins_and_the_other_is_told_who`), but on one connection, so not the row lock under true overlap |
 
 AC4-02 is the proof that the second assignment is refused: PGlite runs one query at
 a time, so it shows the refusal of an assignment that arrives after another, which
@@ -338,7 +338,7 @@ provokes two at once, and needs two real connections.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC7-01 | Reassigned from A to B by LEAD | B starts the review, asks for clarification, decides | Each allowed | Proved (pglite, route): `SCRUM486_AC7_the_new_coordinator_reviews_and_decides_and_the_previous_one_cannot`, `SCRUM486_AC7_after_a_lead_hands_a_to_b_a_is_refused_and_b_reviews_and_decides` |
+| AC7-01 | Reassigned from A to B by LEAD | B starts the review, asks for clarification, decides | Each allowed | Proved (pglite, route): review and decide by `SCRUM486_AC7_the_new_coordinator_reviews_and_decides_and_the_previous_one_cannot`, `SCRUM486_AC7_after_a_lead_hands_a_to_b_a_is_refused_and_b_reviews_and_decides`; asks for clarification by `SCRUM486_AC7_the_coordinator_the_lead_hands_it_to_asks_for_clarification_and_the_previous_one_cannot` (pglite, through `request_event_clarification`). **Corrected after SCRUM-523:** this row named only the first two for all three actions, but neither has B ask through the clarification function (the first moves the status with 022's `change_event_request_status`; the second has no clarification step), and the live script's clarification step was removed (030's history cannot be deleted) |
 | AC7-02 | The same | A tries each of those | Refused 42501 / 403 | Proved (pglite, route): the same two |
 | AC7-03 | The same | A reads the event | Allowed (any coordinator reads any event, SCRUM-332) | Proved (route, on a real database): `SCRUM486_AC7_after_a_lead_hands_a_to_b_a_is_refused_and_b_reviews_and_decides` |
 | AC7-04 | A clarification request open when LEAD reassigned A → B | B closes it; A tries to | B allowed; A refused | Proved (pglite): `SCRUM486_AC7_an_open_clarification_follows_the_event_to_its_new_coordinator` |
@@ -545,12 +545,13 @@ deleted to make room.
 | The implementation | The SCRUM-486 subtasks between them |
 
 **Tally:** 71 cases (64 under the criteria, 7 traps), counted from the tables.
-After SCRUM-522: **66 proved**; **5 not**. After SCRUM-523: **67 proved**; **4 not**,
-each marked in its row and listed here. AC1-06 was the fifth: SCRUM-522 found the
-Organiser's row could not name the coordinator, and SCRUM-523 added the name to
-the Organiser's list.
+After SCRUM-522: **66 proved**; **5 not**. After SCRUM-523: **67 proved**; **4 not**.
+After the live runs of 12 October: **68 proved**; **3 not**, each marked in its row
+and listed here. AC1-06 was the fifth: SCRUM-522 found the Organiser's row could
+not name the coordinator, and SCRUM-523 added the name to the Organiser's list.
+AC4-05 was the fourth: the real race, in the live script, had not been run; it
+has now, twice (proved live, not in CI).
 
-- **AC4-05**, written, not run: the real race is in the live script.
 - **AC5-03**, cannot be written: the safety statuses do not exist yet.
 - **AC8-05**, met differently: one 409 message names both causes.
 - **AC10-06**, unmet: the new notices are not yet worded (SCRUM-172).

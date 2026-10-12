@@ -342,4 +342,47 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
       ["closure", otherCoordinator],
     ]);
   });
+
+  it("SCRUM486_AC7_the_coordinator_the_lead_hands_it_to_asks_for_clarification_and_the_previous_one_cannot", async () => {
+    // AC7-01's "asks for clarification". Until SCRUM-486 removed it,
+    // check-coordinator-assignment.js was the only place a coordinator the
+    // Lead handed the event to asked; it could not stay there (030's history
+    // cannot be deleted, so the live run could not clean up). Nothing in 052
+    // does this: request_event_clarification passes the caller to 022's
+    // change_event_request_status as the expected coordinator, which compares
+    // it with assigned_coordinator_id when it runs, and reassignment changes
+    // that column.
+    //
+    // The refusal is 40001, not 42501: 022's "no longer assigned to this
+    // coordinator" (serialization_failure), as in the wrong-actor test above.
+    // The 403 the screen shows is the service's own check, made before the
+    // call. It comes first, while the event is still under review, so a 55000
+    // status refusal cannot pass for it.
+    const id = await event();
+    await db.query("select * from reassign_event_request($1, $2, $3, null)", [id, otherCoordinator, lead]);
+    // The handover's own notices (052, AC10), so what follows is measured from here.
+    const handoverNotices = await notifications(id);
+
+    const previous = await refused(db.query(
+      "select * from request_event_clarification($1, $2, $2, 'Please confirm the attendee count.', null)",
+      [id, coordinator],
+    ));
+    expect(previous?.code).toBe("40001");
+    expect((await one("select status from event_requests where id = $1", [id])).status).toBe("under_review");
+    expect(await history(id)).toHaveLength(0);
+    expect(await notifications(id)).toEqual(handoverNotices);
+
+    const asked = await one(
+      "select * from request_event_clarification($1, $2, $2, 'Please confirm the attendee count.', null)",
+      [id, otherCoordinator],
+    );
+    expect(asked.status).toBe("pending_clarification");
+    expect((await history(id)).map((entry) => [entry.entry_type, entry.created_by])).toEqual([
+      ["question", otherCoordinator],
+    ]);
+    expect(await notifications(id)).toEqual([
+      ...handoverNotices,
+      { recipient_id: organiser, type: "clarification_requested" },
+    ]);
+  });
 });
