@@ -28,3 +28,18 @@
 .equipment-review__form label { display: grid; gap: 4px; }
 .equipment-review__form textarea { min-height: 72px; resize: vertical; }
 .equipment-review__confirm p { margin: 6px 0; }
+
+/* SCRUM-300: reservations on a line. A flagged one is marked in words as well as colour. */
+.equipment-review__reservations ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.equipment-review__reservations h3 { font-size: 0.95rem; margin: 10px 0 4px; }
+.equipment-review .equipment-review__reservation { border-left: 4px solid #d9e4e0; display: grid; gap: 4px; margin: 6px 0; padding: 6px 12px; }
+.equipment-review .equipment-review__reservation--flagged { background: #fff3e6; border-left-color: #ea7a1a; }
+.equipment-review__flag { color: #8a4a00; }
+.equipment-review .equipment-review__flag-banner { background: #fff3e6; border-left: 6px solid #ea7a1a; border-radius: 8px; margin: 8px 0; padding: 10px 14px; }
+.equipment-review__form input[type="number"] { max-width: 120px; }
+
+/* Found in manual testing: `.dashboard p { color: var(--muted) }` (App.css) outranks
+   `.equipment-review__error`, so every error on this screen rendered grey. */
+.equipment-review .equipment-review__error { color: #a12a2a; font-weight: 600; }
+.equipment-review .equipment-review__form input[type="number"] { border: 1px solid var(--line, #c3d3cf); border-radius: 6px; font: inherit; padding: 6px 8px; }
+.equipment-review .equipment-review__form textarea { border: 1px solid var(--line, #c3d3cf); border-radius: 6px; font: inherit; padding: 6px 8px; }

@@ -27,7 +27,12 @@ vi.mock("../../src/services/equipmentReviewService", () => ({
   clearEquipmentLineOutcome: vi.fn(),
   completeEquipmentReview: vi.fn(),
   getEquipmentReview: vi.fn(),
+  keepEquipmentReservation: vi.fn(),
   markEquipmentLineUnavailable: vi.fn(),
+  moveEquipmentReservation: vi.fn(),
+  reduceEquipmentReservation: vi.fn(),
+  releaseEquipmentReservation: vi.fn(),
+  reserveEquipment: vi.fn(),
   startEquipmentReview: vi.fn(),
   takeOverEquipmentReview: vi.fn(),
 }));
@@ -230,13 +235,13 @@ describe("EquipmentReview: marking lines", () => {
   it("SCRUM290_pending_review_offers_no_line_actions", async () => {
     await open(state());
     expect(screen.queryByRole("button", { name: /Cannot be provided/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reserve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Reserve/ })).not.toBeInTheDocument();
   });
 
-  it("SCRUM290_reviewer_sees_a_disabled_reserve_and_a_mark_button_on_short_lines_only", async () => {
+  it("SCRUM290_reviewer_sees_a_reserve_and_a_mark_button_on_short_lines_only", async () => {
     await open(underReview({ lines: [line(), line({ id: MIC, name: "Microphone", quantity: 1, reserved: 1, shortBy: 0 })] }));
-    expect(screen.getAllByRole("button", { name: "Reserve" })).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Reserve" })).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: /^Reserve/ })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Reserve Projector" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Mark as cannot be provided: Projector" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Microphone/ })).not.toBeInTheDocument();
   });
