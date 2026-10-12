@@ -677,9 +677,11 @@ export async function updateEventRequest(id, changes, organiserId, { client } = 
  * pair, so they cannot drift unnoticed. The function also checks the thing
  * only it can check reliably, that the status is still what the caller saw.
  *
- * Submitting is not done through this function. It also assigns a coordinator
- * and sets submitted_at, so it has its own, submitEventRequest, and a request
- * cannot reach submitted any other way. Asking for it here is refused.
+ * Submitting is not done through this function. It also sets submitted_at,
+ * clears the coordinator and the reviewer, and notifies every Lead (041; until
+ * SCRUM-486 it chose a coordinator instead), so it has its own,
+ * submitEventRequest, and a request cannot reach submitted any other way.
+ * Asking for it here is refused.
  *
  * This takes no view on who may make the change. Whoever calls it has already
  * proved that, as every function in this module does.
@@ -1604,10 +1606,14 @@ export async function listEventRequestsForReview({ client } = {}) {
  * its Organiser asks why, or the completed one when a report is due. Leave
  * the terminal statuses out here and there is no way to find them at all,
  * because the coordinator read needs an id. The frontend can collapse the
- * groups that are finished. Drafts stay out without a filter: a draft never
- * has an assigned coordinator, because assignment happens at submission
- * (016), so assigned_coordinator_id = caller already excludes every one. That
- * keeps the privacy boundary COORDINATOR_QUEUE_STATUSES keeps for the queue.
+ * groups that are finished. There is no draft filter, and this used to say
+ * none was needed because "a draft never has an assigned coordinator, since
+ * assignment happens at submission (016)". That stopped being true twice:
+ * SCRUM-318's 022 reopens a rejected request to a draft and leaves its
+ * coordinator on it, and since SCRUM-486 (041) assignment does not happen at
+ * submission at all. So a reopened draft is listed here for the coordinator
+ * who held it, until it is submitted again and 041 clears the column. That is
+ * a known gap, recorded in docs/SCRUM-486.md section 4, not a decision.
  *
  * Why this list shows the organiser's name, when listEventRequestsForReview
  * calls leaving it out "the privacy floor of the shared queue": that floor is
@@ -2017,8 +2023,10 @@ const HISTORY_COLUMNS = 'id, previous_coordinator_id, new_coordinator_id, assign
  *
  * SCRUM-334, for SCRUM-327 AC9 (every handover records who made it, and the
  * note) and AC10 (the Organiser's screen shows the history). Reads
- * event_request_assignment_history (014), which 016 writes on submission and
- * 018 on every handover.
+ * event_request_assignment_history (014). 016 wrote a row on submission until
+ * SCRUM-486; since 041 the first row is the Lead's assignment
+ * (assign_event_request), and every handover writes one (018, widened by 041).
+ * The old rows stay, with assigned_by null, and still read as automatic.
  *
  * Its own read, behind its own routes, not folded into the event reads. Folded
  * in, it would put a growing array inside every event read, /mine and /queue

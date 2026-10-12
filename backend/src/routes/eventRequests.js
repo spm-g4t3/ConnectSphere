@@ -256,8 +256,10 @@ export function createEventRequestRouter({
    * SCRUM-333 (SCRUM-327 AC11): "My events", every event assigned to the
    * signed-in coordinator, soonest first, each with its organiser's name.
    *
-   * Beside GET /queue, not replacing it. The queue is the only view of work
-   * nobody holds yet; this is the work the caller does hold. Which one the
+   * Beside GET /queue, not replacing it. The queue is every coordinator's view
+   * of work awaiting a decision, whoever holds it; this is the work the caller
+   * does hold. (Until SCRUM-486 the queue was described as work nobody holds
+   * yet; that work is now the Lead's, at GET /unassigned.) Which one the
    * dashboard opens on is the frontend's choice.
    *
    * DECLARATION ORDER IS LOAD-BEARING, exactly as for /queue above. '/mine' is

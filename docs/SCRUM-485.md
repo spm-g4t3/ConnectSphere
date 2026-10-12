@@ -87,7 +87,7 @@ rather than assert the link.
 | AC1 | `ROLE.EVENT_COORDINATOR_LEAD`, `ROLE.SAFETY_OFFICER` and their labels in `userRole.js`; the h1 of each dashboard | `SCRUM485_AC1_the_two_roles_are_spelled_as_the_enum_spells_them`, `SCRUM485_AC1_the_labels_are_the_exact_names_in_the_plural` (`userRole.test.js`); `SCRUM485_AC3_an_event_coordinator_lead_gets_the_lead_dashboard`, `SCRUM485_AC3_a_safety_officer_gets_the_safety_officer_dashboard` (`Dashboard.test.jsx`). The backlog review, AC1-05, is not done |
 | AC2 | `profiles.id` is the primary key, with one `role` column (007); login and `requireAuth` each read one value | `SCRUM485_AC2_a_second_role_for_the_same_account_is_refused` (PGlite, 23505); `SCRUM485_AC3_a_%s_logs_in_and_gets_that_exact_role_back` (`auth.test.js`); `SCRUM485_AC5_admits_%s_and_puts_the_exact_role_on_the_request` (`requireAuth.test.js`) |
 | AC3 | `POST /api/auth/login` returns `profiles.role` unchanged; `LoginForm` navigates to `/dashboard`; `DASHBOARD_BY_ROLE` has `EVENT_COORDINATOR_LEAD` and `SAFETY_OFFICER` | Section 2 |
-| AC4 | `NAV_LINKS_BY_ROLE` has one entry for each new role, Dashboard | `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link`, `SCRUM485_AC4_a_safety_officer_has_exactly_the_dashboard_link`, `SCRUM485_AC4_%s_sees_no_link_from_any_other_role`, `SCRUM485_AC4_a_lead_sees_none_of_the_coordinators_links` (`Navigation.test.jsx`) |
+| AC4 | `NAV_LINKS_BY_ROLE` has one entry for each new role, Dashboard (since SCRUM-486, SCRUM-519, the Lead also has Unassigned Queue) | `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_and_unassigned_queue_links` (was `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link`, renamed by SCRUM-519 when the link was added), `SCRUM485_AC4_a_safety_officer_has_exactly_the_dashboard_link`, `SCRUM485_AC4_%s_sees_no_link_from_any_other_role`, `SCRUM485_AC4_a_lead_sees_none_of_the_coordinators_links` (`Navigation.test.jsx`) |
 | AC5 | 039; `requireAuth` (no role list); `createRequireRole` (`allowed.includes`) | Section 2 |
 | AC6 | 039 appends and removes nothing; no existing entry in `ROLE`, `DASHBOARD_BY_ROLE` or `NAV_LINKS_BY_ROLE` changed | `SCRUM485_AC6_the_enum_holds_the_five_then_the_two_in_that_order`, `SCRUM485_AC6_the_five_existing_roles_and_their_labels_are_unchanged` (`userRole.test.js`); `SCRUM485_AC6_%s_still_gets_the_%s`, `SCRUM485_AC6_an_attendee_gets_the_attendee_dashboard_scrum485_left_it_as_scrum453_built_it` (`Dashboard.test.jsx`); `SCRUM485_AC6_%s_keeps_exactly_its_links`, `SCRUM485_AC6_an_attendee_keeps_the_links_scrum453_gave_it` (`Navigation.test.jsx`). The two Attendee cases pin what SCRUM-453 built, since 11 October; before then they pinned that the Attendee had no dashboard and no links; every existing test still passing; the live profile counts before and after (AC6-07) |
 | AC7 | No code: an auth user and a `profiles` row per role, made in Supabase | AC7-01 (live check), AC7-03 and AC7-04 (walkthroughs, 10 October); AC7-02 by `SCRUM485_AC5_a_profile_can_hold_%s` and `SCRUM485_AC5_a_misspelt_role_is_refused_by_the_enum` (PGlite) |
@@ -329,7 +329,7 @@ still renders, is clickable, and lands on the catch-all redirect back to
 None is better. SCRUM-486 and 487 (the Lead) and SCRUM-490 (the Safety Officer)
 add each link with its route, and the exact-count tests
 (`SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link`, `SCRUM485_AC4_a_safety_officer_has_exactly_the_dashboard_link`) make them update the expectation
-when they do.
+when they do. They did: SCRUM-519 added the Lead's Unassigned Queue link with its route, and the Lead's case is now `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_and_unassigned_queue_links`.
 
 The cross-role test reads every other role's links by **rendering** that role's
 nav, not from `NAV_LINKS_BY_ROLE`: the map is not exported, because an object
@@ -437,7 +437,9 @@ Stated plainly, because it will be asked.
 Carried from the test-case document, with the first promoted because it is the
 next story's first problem.
 
-1. **The Lead's unassigned queue can never hold anything.** Since SCRUM-330 every
+1. **Answered by SCRUM-486 (12 October 2026):** migration 041 relaxed the constraint
+   and took the pick out of submission, in one file, as this question asked
+   (`docs/SCRUM-486.md`, D1). As written at the time: **The Lead's unassigned queue can never hold anything.** Since SCRUM-330 every
    request is assigned a coordinator at submission (`submit_event_request`, 016),
    and a submission with no coordinator available is refused and stays a draft.
    So no request is ever submitted and unassigned. And the database forbids it:
@@ -452,7 +454,9 @@ next story's first problem.
    it starts.**
 2. **Should the Organiser's own routes be role-gated?** AC5-13, `/events` and the
    placeholder pages (section 4). Gating changes what existing roles can do.
-3. **Can the Lead also be assigned events?** Still open. The Week 7 brief says the
+3. **Answered by SCRUM-486 (12 October 2026): no.** The team decided on 11 October
+   that the Lead supervises and is not assigned events (`docs/SCRUM-486.md`, D5). As
+   written at the time: **Can the Lead also be assigned events?** Still open. The Week 7 brief says the
    Lead views "all coordinator assignments and active events under their
    supervision", which reads as supervision rather than a caseload, but that is an
    inference. It decides whether 015 may ever pick a Lead, and whether a Lead

@@ -311,7 +311,9 @@ export async function listCoordinators() {
  * Two things a caller must understand before rendering one:
  *
  *  - automatic: true means the system assigned the event when it was
- *    submitted. There is no person behind it, so assignedById and
+ *    submitted, which only happened before SCRUM-486; every row written since
+ *    names the Lead or the coordinator who made it. There is no person behind
+ *    an automatic row, so assignedById and
  *    assignedByName are null by design, not because data is missing. Render
  *    it as "Assigned automatically", not as a handover by nobody. Test
  *    automatic rather than assignedByName, because a name is also null for a

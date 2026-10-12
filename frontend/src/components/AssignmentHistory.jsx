@@ -110,7 +110,8 @@ function HistoryEntry({ entry, currentUserId }) {
     );
 
   // automatic: true means the system assigned the event when it was
-  // submitted. There is no person behind it, so assignedByName is null by
+  // submitted, which only rows from before SCRUM-486 can say; since then the
+  // Lead assigns, and the row names them. There is no person behind it, so assignedByName is null by
   // design, not missing. It is tested here rather than assignedByName, because
   // a name is also null for a person who has none on record, and the two must
   // not read the same.
