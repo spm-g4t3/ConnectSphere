@@ -22,7 +22,7 @@ const ASSIGNMENT = [
 ];
 // SCRUM-19's decision columns, applied for real (025) rather than the
 // stand-in this suite used to add by hand, which created only
-// reviewing_coordinator_id. SCRUM-486's reassignment (041, from 018) reads
+// reviewing_coordinator_id. SCRUM-486's reassignment (052, from 018) reads
 // `decision` to decide whether the reviewer follows a handover, so the stand-in
 // no longer described the table. Before 014, whose prerequisite guard needs
 // reviewing_coordinator_id, as in eventStatusLifecycleDatabase.test.js.
@@ -114,10 +114,10 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     await db.exec(migration("026_clarification_amendment_fields.sql"));
     // SCRUM-486's migration, last: it redefines close_event_clarification with
     // a null-caller guard (SCRUM-515), so the version tested here is the one
-    // production will have. 039 first, for the Lead's role, which 041's
+    // production will have. 039 first, for the Lead's role, which 052's
     // reassignment names (SCRUM-516).
     await db.exec(migration("039_coordinator_lead_and_safety_officer_roles.sql"));
-    await db.exec(migration("041_lead_assignment.sql"));
+    await db.exec(migration("052_lead_assignment.sql"));
 
     organiser = (await one("insert into auth.users(email) values ('organiser@example.test') returning id")).id;
     coordinator = (await one("insert into auth.users(email) values ('coordinator@example.test') returning id")).id;
@@ -294,11 +294,11 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
   });
 
   it("SCRUM486_TR05_closing_refuses_a_null_caller_before_the_status_check", async () => {
-    // TR-05. Since 041 a submitted request may have no coordinator. 030's
+    // TR-05. Since 052 a submitted request may have no coordinator. 030's
     // check, `assigned_coordinator_id is distinct from p_coordinator_id`, finds
-    // a null caller and a null coordinator not distinct, so before 041 a null
+    // a null caller and a null coordinator not distinct, so before 052 a null
     // caller got past it here and was refused only by the status check that
-    // follows (55000). 041 refuses the null caller first, as 018 and 029 do.
+    // follows (55000). 052 refuses the null caller first, as 018 and 029 do.
     // A request at pending_clarification cannot have no coordinator even
     // now, so a submitted one is what reaches the hole.
     const id = (await one(
@@ -319,7 +319,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     // AC7-04. The clarification belongs to the event, and
     // close_event_clarification checks the event's holder when it runs, so
     // after the Lead moves the event the new coordinator closes it and the
-    // previous one cannot. Nothing in 041 does this; it is proved, not built.
+    // previous one cannot. Nothing in 052 does this; it is proved, not built.
     const id = await event();
     await db.query(
       "select * from request_event_clarification($1, $2, $2, 'Please confirm the attendee count.', null)",

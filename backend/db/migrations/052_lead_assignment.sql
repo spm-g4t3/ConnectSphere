@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- 041_lead_assignment.sql
+-- 052_lead_assignment.sql
 -- SCRUM-515 to SCRUM-518: the Event Coordinator Lead assigns, and reassigns
 --
 -- Part of SCRUM-486 "Assign and Reassign Event Coordinators from an Unassigned
@@ -16,14 +16,39 @@
 --                     reassignment.
 -- All four are in; the file is complete.
 --
--- Run it once in the Supabase SQL Editor, after 040_venue_holds.sql. It also
--- needs 039 (the Lead's role, which submit_event_request, assign_event_request
--- and reassign_event_request name), which comes before 040. 040 must come
--- first for a second reason: this file restates notifications_type_known, and
--- 040's is the list it restates (see "The notification types" below). Safe to
--- re-run: both constraints are dropped by name and added again, every changed
--- function is `create or replace` with an unchanged signature, and the two
--- new functions are `create or replace` too.
+-- Numbered 052, not 041 as it was written. It was 041 until the merge of dev
+-- on 12 October brought in SCRUM-370's migrations 042 to 049, and the commit
+-- messages of SCRUM-515 to SCRUM-523 still call it 041.
+--
+-- Run it once in the Supabase SQL Editor, after 049 -- in particular after
+-- 048_complete_event_cancellation_existing_arrangements.sql. It also needs 039
+-- (the Lead's role, which submit_event_request, assign_event_request and
+-- reassign_event_request name). Safe to re-run: both constraints are dropped
+-- by name and added again, the column is added only if missing, every changed
+-- function is `create or replace` with an unchanged signature, and the two new
+-- functions are `create or replace` too.
+--
+-- Why the number moved. A migration's number is its apply order on a fresh
+-- build. This file and 048 both restate notifications_type_known as a whole
+-- list, so whichever runs second decides which types exist. At 041, a rebuild
+-- would run this file and then 048, and 048's list does not have this story's
+-- three types: every submission would then fail, because submit_event_request
+-- writes the Lead's notice inside the same transaction. On the live database,
+-- where 048 had already run, 041 would have worked. A database broken only on
+-- a fresh build, and fine on everyone's own, is the worst shape this bug can
+-- take: nobody sees it until a new environment is built. At 052, after 048,
+-- both orders agree. 046 is free but unusable, as is any number below 049,
+-- for the same reason.
+--
+-- The lesson, stated because the whole story leans on the technique it limits.
+-- This file was written against 040 as the latest source of that constraint.
+-- The live database was already ahead of the repository: SCRUM-370 had applied
+-- 048, with event_cancelled, from its own branch. No migration-text test could
+-- see that, because each story's PGlite suites apply only that story's own
+-- migrations. A PGlite suite proves what a set of files does together; it says
+-- nothing about files it was never given, or about the order a live database
+-- actually received them in. Two stories that each restate one shared
+-- constraint can each pass every test and still break each other.
 --
 -- Why. The customer's Week 7 change 5: "Newly submitted event requests should
 -- no longer be assigned directly to an Event Coordinator. Instead, they first
@@ -192,9 +217,16 @@
 --     in frontend/src/services/notificationDisplay.js keys its wording on the
 --     exact type string, one headline per type, and SCRUM-172 will render
 --     these. Three types, each with camelCase payload keys (014's convention,
---     because the API returns the payload as stored). There is no
---     event_request_id column on notifications; the event travels in the
---     payload as eventRequestId, as 026's and 030's clarification notices do.
+--     because the API returns the payload as stored). The event travels in the
+--     payload as eventRequestId, as 026's and 030's clarification notices do,
+--     and since 048 also in notifications.event_request_id, the column 048
+--     added for event_cancelled. Both, on purpose: the column makes these
+--     notices queryable by event and consistent with cancellation's, and the
+--     payload key keeps the contract SCRUM-172 is building against. (Until the
+--     merge of dev this said there was no such column; there was not, in the
+--     repository.) 048 constrains the column only for its own type
+--     (notifications_event_cancelled_needs_event, and a unique index partial
+--     on type = 'event_cancelled'), so these three may set it freely.
 --
 --       event_request_awaiting_assignment   to every Lead, on submission
 --         { eventRequestId, eventName, submittedAt }
@@ -233,18 +265,25 @@
 --     that was refused: every refusal raises before the inserts, and a raise
 --     rolls them back with everything else.
 --
---   * notifications_type_known is restated from 040, which has seven types,
---     not from 034, which has six. The constraint is dropped and added whole
---     each time a type is added, so whichever list is restated is the list in
---     force. 034's lacks venue_hold_expired, which 040 added. Restated from
---     034, one of two things happens. If any hold has already expired on the
---     live database, its notice row fails the re-added constraint and this
+--   * notifications_type_known is restated from 048, which has eight types:
+--     040's seven and SCRUM-370's event_cancelled. Not from 040, as this file
+--     first did (see "Why the number moved" above), and not from 034, which
+--     has six. The constraint is dropped and added whole each time a type is
+--     added, so whichever list is restated is the list in force. Leaving out
+--     event_cancelled would break cancellation the same way leaving out
+--     venue_hold_expired breaks hold expiry: cancel_event_request (048) writes
+--     its notice in the same transaction as the cancellation. The venue-hold
+--     case, which the tests demonstrate: 034's list lacks venue_hold_expired,
+--     which 040 added. Restated from 034, one of two things happens. If any
+--     hold has already expired on the live database, its notice row fails the
+--     re-added constraint and this
 --     file does not apply. If none has, the file applies cleanly, and every
 --     later run of process_venue_hold_expiry (040) fails with 23514 on its
 --     notice insert; because the expiry and the notice are one statement,
 --     venue holds would silently stop expiring, with nothing on any screen to
---     show it. The test suite pins all seven (SCRUM486_AC10_…_keeps_every_type
---     _040_allows) and proves the expiry still runs after this file. 040's
+--     show it. The test suite pins all eight (SCRUM486_AC10_052_keeps_every
+--     _type_048_allows_and_adds_three) and proves the expiry still runs after
+--     this file. 040's
 --     other notification objects (the venue_hold_id column,
 --     notifications_hold_expired_needs_hold, and the partial index
 --     notifications_one_per_expired_hold) are left alone: each is written
@@ -275,13 +314,18 @@
 --
 -- What this migration deliberately does not do:
 --
---   * Drop pick_event_coordinator (015). After this file nothing live calls
---     it: submission was its only caller, and the backfills in 016 and 017 that
---     also called it have run. It stays, unused, because
---     backend/scripts/check-coordinator-assignment.js still calls it (its
---     section 1 tests the selection rule) and dropping it buys nothing. 015's
---     header describes a rule the application no longer applies; it is
---     applied and append-only, so this note is the correction.
+--   * Drop pick_event_coordinator (015). After this file nothing calls it:
+--     submission was its only caller, the backfills in 016 and 017 that also
+--     called it have run, and the check scripts no longer do (SCRUM-522
+--     rewrote check-coordinator-assignment.js around the Lead). It stays,
+--     unused, for two reasons. This story exists because the customer
+--     reversed a decision they had already given: SCRUM-327 built automatic
+--     selection to their brief, and Week 7 took it away. The selection rule is
+--     what would be needed back if they reverse it again, and keeping it costs
+--     nothing while nothing calls it. And dropping it would leave 015's
+--     header, which is applied and append-only, describing a function that no
+--     longer exists. 015's header describes a rule the application no longer
+--     applies; this note is the correction.
 --
 --   * Add the Lead's queue, or any route or screen. Those are SCRUM-519 on.
 --
@@ -294,8 +338,13 @@
 --
 --   * Spare the live check scripts. Once this is applied, any script that
 --     submits through submit_event_request notifies every real Lead in the
---     shared project, and no script counts notifications, so those rows are
---     left behind. Recorded here so whoever runs them next knows.
+--     shared project. The three scripts that submit or assign handle it since
+--     SCRUM-522: check-coordinator-assignment.js and
+--     check-event-request-service.js count notifications before and after,
+--     with every other table they touch, and delete every notice about an
+--     event they created; check-event-request-routes.js deletes them and
+--     checks none is left for its events. A script that submits and does none
+--     of this would leave real Leads' notices behind.
 --
 --   * Change anything about who acts on an event after a reassignment (AC7).
 --     Open clarifications, change requests and flagged bookings reference the
@@ -349,8 +398,16 @@ $$;
 -- ---------------------------------------------------------------------
 -- 1b. The notification types (SCRUM-518)
 -- ---------------------------------------------------------------------
--- 040's seven, unchanged and in 040's order, then this story's three. Restated
--- from 040 and not 034; see the header, which says what happens otherwise.
+-- The event's own column, as 048 adds it, word for word. A no-op wherever 048
+-- has run (the live database, and any build in number order); stated here so
+-- this file's inserts do not depend on 048 for a column they write, and so the
+-- PGlite suites, which apply this file without SCRUM-370's migrations, have it.
+alter table notifications
+  add column if not exists event_request_id uuid references event_requests (id) on delete cascade;
+
+-- 048's eight, unchanged and in 048's order (040's seven, then event_cancelled),
+-- then this story's three. Restated from 048 and not 040 or 034; see the
+-- header, which says what happens otherwise.
 
 alter table notifications drop constraint if exists notifications_type_known;
 alter table notifications
@@ -363,6 +420,7 @@ alter table notifications
       'clarification_closed',
       'booking_flagged_setup_change',
       'venue_hold_expired',
+      'event_cancelled',
       'event_request_awaiting_assignment',
       'event_request_assigned',
       'event_request_coordinator_assigned'
@@ -440,9 +498,10 @@ begin
   -- AC10: every Lead is told a request is waiting. An insert from a select,
   -- as 014 tells every coordinator: with no Lead it writes nothing and fails
   -- nothing (AC11).
-  insert into notifications (recipient_id, type, payload)
+  insert into notifications (recipient_id, type, event_request_id, payload)
   select p.id,
          'event_request_awaiting_assignment',
+         v_request.id,
          jsonb_build_object(
            'eventRequestId', v_request.id,
            'eventName',      v_request.event_name,
@@ -722,10 +781,11 @@ begin
   -- After every refusal, so a refused assignment notifies nobody. No previous
   -- coordinator on a first assignment. The note goes to the coordinator only:
   -- the Organiser does not see it (AC9).
-  insert into notifications (recipient_id, type, payload)
+  insert into notifications (recipient_id, type, event_request_id, payload)
   values
     (p_coordinator_id,
      'event_request_assigned',
+     v_request.id,
      jsonb_build_object(
        'eventRequestId',          v_request.id,
        'eventName',               v_request.event_name,
@@ -737,6 +797,7 @@ begin
      )),
     (v_request.organiser_id,
      'event_request_coordinator_assigned',
+     v_request.id,
      jsonb_build_object(
        'eventRequestId',          v_request.id,
        'eventName',               v_request.event_name,
@@ -882,10 +943,11 @@ begin
   -- AC10, as for a first assignment, with who held it before (SCRUM-518). The
   -- same two types; previousCoordinatorId is what makes it a handover. The
   -- note to the new coordinator only, never the Organiser (AC9).
-  insert into notifications (recipient_id, type, payload)
+  insert into notifications (recipient_id, type, event_request_id, payload)
   values
     (p_new_coordinator_id,
      'event_request_assigned',
+     v_request.id,
      jsonb_build_object(
        'eventRequestId',          v_request.id,
        'eventName',               v_request.event_name,
@@ -897,6 +959,7 @@ begin
      )),
     (v_request.organiser_id,
      'event_request_coordinator_assigned',
+     v_request.id,
      jsonb_build_object(
        'eventRequestId',          v_request.id,
        'eventName',               v_request.event_name,
@@ -1048,7 +1111,7 @@ begin
   end if;
 
   -- SCRUM-486 AC8, the same check as start_event_review's and for the same
-  -- reason. A request cannot be under review without a coordinator (041's
+  -- reason. A request cannot be under review without a coordinator (052's
   -- constraint still requires one past submitted), but this function checks
   -- the caller before the status, so a decision attempted on an unassigned
   -- submitted request would otherwise be answered by the caller check, as 42501

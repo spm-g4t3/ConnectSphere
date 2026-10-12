@@ -7,11 +7,11 @@
  * coordinator automatically. Rewritten for SCRUM-486 (SCRUM-522), because the
  * customer changed that requirement on 11 October: a submitted request now
  * goes to the Event Coordinator Lead, who assigns it to a coordinator by hand.
- * Migration 041 made the change. What the script used to prove, and what it
+ * Migration 052 made the change. What the script used to prove, and what it
  * proves now:
  *
  *   1. Was: the selection rule (015) -- fewest active events, then longest
- *      without an assignment. 041 leaves pick_event_coordinator in the
+ *      without an assignment. 052 leaves pick_event_coordinator in the
  *      database, but nothing calls it any more, so testing it would prove a
  *      rule the system no longer uses. Now: submission assigns nobody. The
  *      request is submitted with no coordinator and no assignment-history row,
@@ -19,14 +19,14 @@
  *      not in the coordinators' shared queue.
  *   2. Was: assign on submission (016) -- one coordinator, one history row,
  *      assigned_by null for "the system". Now: the Lead assigns
- *      (assign_event_request, 041) -- one coordinator, one history row whose
+ *      (assign_event_request, 052) -- one coordinator, one history row whose
  *      assigned_by is the Lead, the coordinator and the Organiser told; every
  *      refusal by its code, a second assignment told who won, and the request
  *      out of the Lead's queue and into the shared one. And the real AC4 race:
  *      two Leads assigning at once, on separate connections, which no test
  *      suite here can do.
  *   3. Was: 017's constraint refused a submitted event with no coordinator.
- *      Now: 041's relaxed constraint allows exactly that and still refuses any
+ *      Now: 052's relaxed constraint allows exactly that and still refuses any
  *      later status without one.
  *   4. Reassignment: a holder's handover, unchanged, and beside it the Lead's
  *      (AC6): a Lead who does not hold the event moves it, the history names
@@ -43,7 +43,7 @@
  *
  * HAZARDS, each handled below rather than hoped away:
  *
- *  - Every real Lead is notified of this script's submissions (041 tells every
+ *  - Every real Lead is notified of this script's submissions (052 tells every
  *    Lead a request is waiting). Those rows are real Leads' notifications in a
  *    shared project, so cleanup deletes every notification about an event this
  *    run created, and notifications are counted before and after like every
@@ -53,7 +53,7 @@
  *    deleted (every coordinator column is ON DELETE RESTRICT). cleanup() looks
  *    for such events and, if one is still submitted, returns it to the Lead's
  *    queue (no coordinator, the history rows naming test users removed). That
- *    is the state it was in before the Lead chose; 041's constraint allows it
+ *    is the state it was in before the Lead chose; 052's constraint allows it
  *    only at submitted. Anything further along is reported as a cleanup
  *    failure naming the event, for a Lead to hand over by hand. Before
  *    SCRUM-486 this re-homed the event with pick_event_coordinator; there is no
@@ -283,7 +283,7 @@ async function findForeignEvents() {
 
 /**
  * Put a real request back in the Lead's queue, as it was before a Lead chose
- * a test coordinator for it. Only at submitted: 041's constraint allows no
+ * a test coordinator for it. Only at submitted: 052's constraint allows no
  * coordinator there and nowhere later, and later would mean work had begun
  * under a test account that is about to vanish, which needs a person.
  */
@@ -440,7 +440,7 @@ async function main() {
   await createUser('V', 'venue_staff');
 
   // -- 1. Submission assigns nobody (SCRUM-486 AC1, AC2, AC10) ----------------
-  section('1. submission assigns nobody; the request waits for the Lead (041)');
+  section('1. submission assigns nobody; the request waits for the Lead (052)');
 
   const s1 = await submitDraft('s1');
   check('the request is submitted', s1.status === 'submitted', s1.status);
@@ -470,7 +470,7 @@ async function main() {
   );
 
   // -- 2. The Lead assigns (SCRUM-486 AC3, AC4, AC9, AC10) --------------------
-  section('2. the Lead assigns (assign_event_request, 041)');
+  section('2. the Lead assigns (assign_event_request, 052)');
 
   // Each refusal first, while the request is still unassigned.
   checkRefusal(
@@ -540,7 +540,7 @@ async function main() {
   // through its own HTTP request and so its own Postgres connection, which is
   // the one thing the PGlite suite cannot do (it has one connection; see
   // SCRUM486_AC4_of_two_leads_assigning_at_once_... for what it does prove).
-  // What decides here is 041's row lock: the second transaction waits on
+  // What decides here is 052's row lock: the second transaction waits on
   // `for update` until the first commits, then reads the coordinator the
   // first wrote and refuses. Several rounds, because whether the two actually
   // overlap on a given round depends on timing; every round must still end
@@ -584,12 +584,12 @@ async function main() {
     if (cancelError) throw new Error(`could not cancel race event ${round}: ${cancelError.message}`);
   }
 
-  // -- 3. The constraint, relaxed (041) ---------------------------------------
-  section('3. no coordinator is allowed at submitted, and only there (041)');
+  // -- 3. The constraint, relaxed (052) ---------------------------------------
+  section('3. no coordinator is allowed at submitted, and only there (052)');
 
   // Straight at the table, bypassing every function, which is the only way to
   // prove the constraint rather than the code in front of it. 017 refused the
-  // first of these; 041 allows it, because the request now waits for the Lead.
+  // first of these; 052 allows it, because the request now waits for the Lead.
   const { data: waitingRow, error: waitingError } = await supabase
     .from('event_requests')
     .insert({ organiser_id: users.organiser, event_name: `${NAME}_waiting`, status: 'submitted' })
@@ -620,7 +620,7 @@ async function main() {
   );
 
   // -- 4. Reassignment (SCRUM-327 AC6, and SCRUM-486 AC5, AC6) ----------------
-  section('4. reassignment by the holder, and by the Lead (041)');
+  section('4. reassignment by the holder, and by the Lead (052)');
 
   // The holder's handover, as SCRUM-327 has it. Before it, s1 is given a
   // reviewer, as if A had started the review; no decision has been made, so
@@ -680,7 +680,7 @@ async function main() {
     409,
   );
 
-  // A null caller, straight at the function, on an event nobody holds. 041
+  // A null caller, straight at the function, on an event nobody holds. 052
   // keeps 018's explicit null check ahead of everything, so the code says the
   // caller was refused (42501), not the missing coordinator (55000).
   const unheld = await insertEvent('cancelled_unheld', { status: 'cancelled', coordinator: null });

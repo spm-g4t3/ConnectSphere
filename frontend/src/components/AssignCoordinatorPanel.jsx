@@ -22,7 +22,7 @@
 // hidden behind a click. A list of radios shows every name and count at once.
 //
 // This screen decides nothing about who may assign. The server's
-// assign_event_request (041) checks the caller is a Lead, the request is still
+// assign_event_request (052) checks the caller is a Lead, the request is still
 // unassigned, and the person chosen is an Event Coordinator, under a lock.
 
 import { useEffect, useState } from "react";

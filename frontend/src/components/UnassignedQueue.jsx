@@ -4,7 +4,7 @@
 // assigned yet, oldest submission first, for the Event Coordinator Lead to
 // assign; and the assignment panel each row opens into (AC3).
 //
-// Since migration 041 submission no longer picks a coordinator, so this list
+// Since migration 052 submission no longer picks a coordinator, so this list
 // is the only place a new request is waiting. Each row says what the Lead
 // needs to choose who should take it: the event, its organiser, when it runs,
 // how many are expected, and how long it has waited.

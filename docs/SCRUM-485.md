@@ -437,7 +437,7 @@ Stated plainly, because it will be asked.
 Carried from the test-case document, with the first promoted because it is the
 next story's first problem.
 
-1. **Answered by SCRUM-486 (12 October 2026):** migration 041 relaxed the constraint
+1. **Answered by SCRUM-486 (12 October 2026):** migration 052 relaxed the constraint
    and took the pick out of submission, in one file, as this question asked
    (`docs/SCRUM-486.md`, D1). As written at the time: **The Lead's unassigned queue can never hold anything.** Since SCRUM-330 every
    request is assigned a coordinator at submission (`submit_event_request`, 016),

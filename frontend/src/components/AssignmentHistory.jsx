@@ -23,7 +23,7 @@
 // the parent passes it (both parents do), named from the history. Before
 // SCRUM-486 it was the newest entry's new coordinator, which was always the
 // same person: every submission assigned someone and every change wrote a
-// row. 041 broke that equivalence. A rejected request reopened to a draft and
+// row. 052 broke that equivalence. A rejected request reopened to a draft and
 // submitted again (TR-02) goes back to the Lead's queue with no coordinator,
 // but its history still ends with the coordinator who held it before; read
 // from the newest row, the screen would name them as current while the

@@ -9,11 +9,11 @@
 //
 // This screen decides nothing about who may hand over. The parent shows the
 // button only to the assigned coordinator or an Event Coordinator Lead, as a
-// convenience; the server's reassign_event_request (041) is the gate, and
+// convenience; the server's reassign_event_request (052) is the gate, and
 // checks it again under a lock. So every refusal the server can give is
 // handled below, including the ones the parent's check should make rare.
 //
-// SCRUM-486 (SCRUM-521): two callers. Since 041 the Lead may hand over any
+// SCRUM-486 (SCRUM-521): two callers. Since 052 the Lead may hand over any
 // event, not only the holder. Three things follow, each marked below: which
 // list of coordinators is read, who is left out of it, and wording that was
 // written for a caller who held the event.
@@ -28,7 +28,7 @@ import {
 } from "../services/eventRequestService";
 
 // 403 reworded in SCRUM-521. It said "Only Event Coordinators can hand an
-// event over", which has been false since 041 let the Lead hand over too.
+// event over", which has been false since 052 let the Lead hand over too.
 const LOAD_ERROR_MESSAGES = {
   401: "Your session has expired. Please sign in again.",
   403: "Only Event Coordinators and the Event Coordinator Lead can hand an event over.",
@@ -61,7 +61,7 @@ const LOAD_ERROR_MESSAGES = {
 //
 // 403, since SCRUM-486 (SCRUM-519). It used to say "This event is no longer
 // assigned to you", which was the only way a coordinator could be refused
-// when only the holder could hand over. 041 lets the Event Coordinator Lead
+// when only the holder could hand over. 052 lets the Event Coordinator Lead
 // hand over any event too, so a 403 now means the caller is neither the
 // holder nor a Lead, and "assigned to you" would be wrong said to a Lead.
 // The message says who may hand an event over, which is true for any caller.

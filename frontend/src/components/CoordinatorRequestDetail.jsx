@@ -121,7 +121,7 @@ function seedableCapacity(value) {
 // messages are written by the database and name ids.
 // SCRUM-486 (SCRUM-517): 409 now has two causes. The request has moved on and
 // is no longer waiting to be reviewed, or it has no coordinator and is waiting
-// for the Event Coordinator Lead to assign it (migration 041 refuses that with
+// for the Event Coordinator Lead to assign it (migration 052 refuses that with
 // 55000, a 409, rather than 029's 403, which told the coordinator it was
 // someone else's when it was nobody's). One message names both: they share a
 // remedy, and telling them apart would mean reading the server's message text,
@@ -246,15 +246,15 @@ export default function CoordinatorRequestDetail({
   // holds is stale, ReassignEventPanel turns the 403 into a message.
   const isAssignedCoordinator = Boolean(user?.id) && assignedCoordinatorId === user.id;
   // SCRUM-486 (SCRUM-521), AC6: the Event Coordinator Lead may hand over any
-  // event, as 041's reassign_event_request allows, so the button shows for
+  // event, as 052's reassign_event_request allows, so the button shows for
   // the holder or a Lead. Only while someone holds it: a request with no
-  // coordinator is assigned from the Lead's queue, not handed over (041
+  // coordinator is assigned from the Lead's queue, not handed over (052
   // refuses that, AC5-05). The Lead is never isAssignedCoordinator (only
   // event_coordinator can be assigned), so every other action on this screen
   // stays the holder's.
   //
   // SCRUM-370: and never on a cancelled event, which nobody can hand over
-  // (041's status list leaves cancelled out). Both conditions kept from the
+  // (052's status list leaves cancelled out). Both conditions kept from the
   // merge of dev, neither dropped.
   const isLead = normaliseRole(user?.role) === "EVENT_COORDINATOR_LEAD";
   const canReassign = assignedCoordinatorId != null
@@ -809,12 +809,12 @@ export default function CoordinatorRequestDetail({
               </button>
             </div>
           ) : current.assignedCoordinatorId == null ? (
-            // SCRUM-486 AC8-04 (SCRUM-519). Since 041 a submitted request can
+            // SCRUM-486 AC8-04 (SCRUM-519). Since 052 a submitted request can
             // have no coordinator: it is in the Lead's unassigned queue. Every
             // coordinator can still open it (SCRUM-332), and "waiting for the
             // assigned coordinator" would name someone who does not exist.
             // isAssignedCoordinator is false for everyone here, so nobody is
-            // offered Start review, which 041 would refuse anyway.
+            // offered Start review, which 052 would refuse anyway.
             <p>Waiting for the Event Coordinator Lead to assign this request to a coordinator.</p>
           ) : (
             <p>Waiting for the assigned coordinator to start the review.</p>

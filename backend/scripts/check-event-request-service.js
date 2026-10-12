@@ -23,7 +23,7 @@
  *
  * SCRUM-486 (SCRUM-522). The customer changed what submission does on
  * 11 October: it no longer assigns a coordinator; the request waits for the
- * Event Coordinator Lead, and every Lead is told (migration 041). Step 4 used
+ * Event Coordinator Lead, and every Lead is told (migration 052). Step 4 used
  * to check that a coordinator was chosen and one assignment-history row
  * written by "the system", and was right until then. It now checks that none
  * was, that no row was written, and that every Lead was notified. Those
@@ -132,7 +132,7 @@ async function countRows(table) {
   return count ?? 0;
 }
 
-/** The tables this script writes to. Notifications since SCRUM-486 (041). */
+/** The tables this script writes to. Notifications since SCRUM-486 (052). */
 async function countAll() {
   return {
     requests: await countRows('event_requests'),
@@ -305,7 +305,7 @@ async function main() {
   );
   check('the status history row has a timestamp', Boolean(statusAfterSubmit[0]?.created_at));
 
-  // SCRUM-486 (041). Until 11 October the one production path chose a
+  // SCRUM-486 (052). Until 11 October the one production path chose a
   // coordinator and recorded it, and these checks said so: "a coordinator is
   // assigned", and one history row "assigned by the system". The customer moved
   // that choice to the Event Coordinator Lead. So submission now assigns

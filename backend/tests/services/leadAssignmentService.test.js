@@ -5,7 +5,7 @@
  *   listUnassignedEventRequests  AC2-01, AC2-02  the queue
  *   listCoordinatorWorkload      AC3-06          the picker's list
  *   assignEventRequest           AC3-04, AC4-03  the assignment, and a lost race
- *   requestEventClarification    AC8             the wrong-reason fault 041 left
+ *   requestEventClarification    AC8             the wrong-reason fault 052 left
  *   listEventRequestsForReview   AC2-06          the shared queue leaves the unassigned out (SCRUM-520)
  *   getEventClarificationHistory AC6             the Lead reads it, so the event screen loads (SCRUM-521)
  *
@@ -382,7 +382,7 @@ describe('SCRUM-486 AC3, AC4: the Lead assigns a request', () => {
     ['blank', '   '],
     ['not a string', 42],
   ])('SCRUM486_AC3_a_note_that_is_%s_is_sent_as_null', async (_label, note) => {
-    // The note is optional (AC3). 041 also stores nullif(btrim(note), ''),
+    // The note is optional (AC3). 052 also stores nullif(btrim(note), ''),
     // so this is belt to its braces; sending null says "no note" plainly.
     const client = createFakeClient([ok(unassignedRow({ assigned_coordinator_id: COORDINATOR_A }))]);
 
@@ -409,7 +409,7 @@ describe('SCRUM-486 AC3, AC4: the Lead assigns a request', () => {
   });
 
   it('SCRUM486_AC4_a_lost_race_is_a_409_that_names_who_holds_it', async () => {
-    // AC4-03. 041 refuses with "event request <id> is already assigned to
+    // AC4-03. 052 refuses with "event request <id> is already assigned to
     // <name>". The service reads who holds it now and returns them as data,
     // so the screen can say "already assigned to Priya Nair" (AC4-04)
     // without parsing server text. The message carries the name and not the
@@ -601,7 +601,7 @@ describe('SCRUM-486 AC8: an unassigned request is waiting for the Lead, not some
     requestEventClarification(REQUEST_ID, 'Please confirm the audience.', caller, { client: createFakeClient([ok(row)]) });
 
   it('SCRUM486_AC8_asking_for_clarification_on_an_unassigned_request_names_the_lead', async () => {
-    // The fault 041 fixed in start_event_review, here in the service. Before
+    // The fault 052 fixed in start_event_review, here in the service. Before
     // SCRUM-519 the caller check came first and answered 403 "Only the
     // coordinator assigned to event request ... can request clarification on
     // it" about a request that has no coordinator, telling A it is someone
@@ -794,13 +794,13 @@ describe('SCRUM-486 AC7: a booking flagged before the Lead moved its event is th
 
 
 // ---------------------------------------------------------------------------
-// SCRUM-522: AC8-03, 041's "waiting for the Lead" refusal reaches the caller
+// SCRUM-522: AC8-03, 052's "waiting for the Lead" refusal reaches the caller
 // ---------------------------------------------------------------------------
 describe('SCRUM-486 AC8: the review of a request waiting for the Lead is refused in its own words', () => {
-  // 041 refuses start_event_review and decide_event_request on a submitted
+  // 052 refuses start_event_review and decide_event_request on a submitted
   // request with no coordinator, with 55000 and a message naming the Lead,
   // before the caller check. The service must pass that message through as a
-  // 409, not dress it as "not yours" (403). The texts are 041's exactly.
+  // 409, not dress it as "not yours" (403). The texts are 052's exactly.
   it.each([
     [
       'starting the review',

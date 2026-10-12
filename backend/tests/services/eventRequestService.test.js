@@ -632,7 +632,7 @@ describe('AC4: an incomplete or missing request is not submitted', () => {
 //
 // SCRUM-486 (SCRUM-522). Everything above about choosing a coordinator was
 // SCRUM-327's requirement, and right until the customer changed it on
-// 11 October: 041's submit_event_request chooses nobody, writes no assignment
+// 11 October: 052's submit_event_request chooses nobody, writes no assignment
 // row, and leaves the request for the Event Coordinator Lead. The service call
 // itself did not change -- one read, one rpc, the same three arguments -- so
 // the tests below keep their assertions about it; what moved is the row the
@@ -641,7 +641,7 @@ describe('AC4: an incomplete or missing request is not submitted', () => {
 /**
  * The row submit_event_request returns: submitted and timed, with no
  * coordinator. Until SCRUM-486 it was "submitted, timed and assigned", with
- * assigned_coordinator_id set, because 016 assigned one. 041 does not.
+ * assigned_coordinator_id set, because 016 assigned one. 052 does not.
  */
 function submittedRow() {
   return storedRow({
@@ -685,7 +685,7 @@ describe('SCRUM-327 AC1, as amended by SCRUM-486: submission is one call, and as
     // Was SCRUM330_AC1_assigns_a_coordinator_on_submission. Its assertions
     // all still hold and are unchanged; its name and the reason it gave --
     // "the service does not choose one, the function does (015)" -- became
-    // false when 041 stopped the function choosing. The reason it still holds
+    // false when 052 stopped the function choosing. The reason it still holds
     // now: nobody is chosen at submission; the Lead chooses later
     // (assign_event_request). SCRUM-486 AC1-03.
     //
@@ -715,7 +715,7 @@ describe('SCRUM-327 AC1, as amended by SCRUM-486: submission is one call, and as
   it('SCRUM330_AC1_returns_the_submitted_request_in_camelCase_with_no_coordinator', async () => {
     // Was SCRUM330_AC1_returns_the_assigned_coordinator_in_camelCase, with a
     // fixture whose coordinator it expected back. Right when written: 016
-    // returned every submitted row with one. Since 041 the row comes back with
+    // returned every submitted row with one. Since 052 the row comes back with
     // none (SCRUM-486 AC1-03), so the fixture says so and the expectation is
     // null -- the key present, not missing, which is what lets the Organiser's
     // screen say "waiting for the Lead" (SCRUM-520) rather than nothing.
@@ -837,7 +837,7 @@ describe("SCRUM-330: the function's refusals become typed errors", () => {
     // AC11-03. Was SCRUM330_AC5_refuses_when_no_coordinator_is_available,
     // which pinned SCRUM-327 AC5: P0001 from pick_event_coordinator finding
     // nobody became a ServiceUnavailableError, a 503 with the AC's message.
-    // Right then. Since 041 submission chooses no coordinator, so it cannot
+    // Right then. Since 052 submission chooses no coordinator, so it cannot
     // raise that, and translateError has no P0001 branch. A P0001 arriving here
     // now would be unexpected, and is reported as the untyped server fault it
     // is, not as "try again later".
@@ -1066,10 +1066,10 @@ describe("SCRUM-331: the function's refusals become typed errors", () => {
       //
       // Was SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over, with
       // 018's message. Right when written: only the holder could hand over.
-      // Since 041 (SCRUM-486 AC6) the Lead may too, so "only the assigned
+      // Since 052 (SCRUM-486 AC6) the Lead may too, so "only the assigned
       // coordinator" is no longer the rule, and the message the function
       // raises names both. Renamed to the refusal that is still true, with
-      // 041's text; what is asserted (a 42501 becomes a 403 with the message
+      // 052's text; what is asserted (a 42501 becomes a 403 with the message
       // passed through untouched) is unchanged.
       name: 'SCRUM331_AC6_a_caller_who_neither_holds_the_event_nor_leads_is_refused',
       code: '42501',
@@ -2049,7 +2049,7 @@ function createQueueFakeClient(results = []) {
 
 
 /**
- * A row the review queue can return. SCRUM-486 (SCRUM-520): since 041 the
+ * A row the review queue can return. SCRUM-486 (SCRUM-520): since 052 the
  * queue reads only requests someone holds, so every row it returns has a
  * coordinator. The SCRUM-45 fixtures below used storedRow, which has none:
  * right when written, because the coordinator was not part of what the queue
@@ -2063,7 +2063,7 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
     // Was SCRUM45_AC1_filters_on_the_three_review_statuses_and_nothing_else.
     // Right when written: from SCRUM-330 until SCRUM-486 every submitted
     // request was given a coordinator in the same transaction, so a status
-    // filter alone already meant "held by someone". Migration 041 removed
+    // filter alone already meant "held by someone". Migration 052 removed
     // that: a submitted request now waits with no coordinator until the Lead
     // assigns one, and it is the Lead's alone (AC2-06). So the read gained one
     // filter, and "nothing else" is no longer true. Renamed for that; the

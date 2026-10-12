@@ -65,7 +65,7 @@ describe("SCRUM486 /unassigned-queue", () => {
     "SCRUM486_AC2_sends_%s_to_unauthorized_and_never_mounts_the_queue",
     (role) => {
       // A coordinator too: the queue is the Lead's worklist, and only a Lead
-      // can assign (041).
+      // can assign (052).
       renderAppAt("/unassigned-queue", role);
 
       expect(screen.queryByTestId("unassigned-queue-stub")).not.toBeInTheDocument();

@@ -151,7 +151,7 @@ async function cleanup() {
   // nobody was thinking about.
   //
   // Assignment history came with SCRUM-330, when submit_event_request wrote a
-  // row for draftEventId's submission. Since SCRUM-486 (041) submission
+  // row for draftEventId's submission. Since SCRUM-486 (052) submission
   // assigns nobody and writes no row, so there is normally nothing here; the
   // delete stays because the table's event_request_id is ON DELETE RESTRICT
   // (014), and one stray row would keep the event and its users behind.
@@ -739,7 +739,7 @@ async function main() {
   // Until SCRUM-486 the right person was every Coordinator, through GET /queue,
   // because submission assigned one; these checks said "joins the queue" and
   // were right. On 11 October the customer moved that first choice to the
-  // Event Coordinator Lead: 041 submits with no coordinator, and since
+  // Event Coordinator Lead: 052 submits with no coordinator, and since
   // SCRUM-520 the coordinators' queue lists only requests someone holds. So
   // the request is NOT in GET /queue, and IS in the Lead's GET /unassigned,
   // still carrying the status the submit gave it. The reported bug -- an
@@ -788,7 +788,7 @@ async function main() {
     (await asCoordinator('/unassigned')).status === 403,
   );
 
-  // And the Lead is told. 041 notifies every Lead, so the test Lead's notice
+  // And the Lead is told. 052 notifies every Lead, so the test Lead's notice
   // is the one this run can name.
   const { data: leadNotices } = await supabaseAdmin
     .from('notifications')

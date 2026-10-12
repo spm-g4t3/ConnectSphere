@@ -1182,10 +1182,10 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
       ok(submittableRow()),
       // submitEventRequest's own read.
       ok(submittableRow()),
-      // submit_event_request (041): the row as the function leaves it --
+      // submit_event_request (052): the row as the function leaves it --
       // submitted and timed, with no coordinator. Until SCRUM-486 this was
       // "and assigned a coordinator (SCRUM-330)", and the fixture carried one,
-      // because 016 assigned it. 041 leaves that to the Lead.
+      // because 016 assigned it. 052 leaves that to the Lead.
       ok(submittableRow({
         status: STATUS.SUBMITTED,
         submitted_at: '2026-01-15T09:00:00+00:00',
@@ -1779,7 +1779,7 @@ const signedInWithRole = (role, id = COORDINATOR_ID) => (req, _res, next) => {
  *
  * SCRUM-486 (SCRUM-520): each row now has a coordinator. These rows had none,
  * which was right when written, because the queue did not select on the
- * coordinator. Since 041 it reads only requests someone holds (AC2-06), so a
+ * coordinator. Since 052 it reads only requests someone holds (AC2-06), so a
  * row without one is a response the route can no longer receive, and a test
  * passing on it would pass on data production cannot produce.
  */
@@ -2154,9 +2154,9 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
     //
     // Was SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over, with
     // 018's message. Right when written: the holder was the only one who
-    // could. Since 041 a Lead may too (SCRUM-486 AC6; the Lead's case is in
+    // could. Since 052 a Lead may too (SCRUM-486 AC6; the Lead's case is in
     // leadAssignmentRoutes.test.js), so the name now says the case it proves,
-    // a coordinator who is not the holder, and the message is 041's.
+    // a coordinator who is not the holder, and the message is 052's.
     const message = `only the coordinator assigned to event request ${REQUEST_ID}, or the Event Coordinator Lead, can hand it over`;
     const client = createWritableFakeClient([dbFailure('42501', message)]);
 

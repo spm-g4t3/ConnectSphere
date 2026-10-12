@@ -135,7 +135,7 @@ describe('SCRUM-486 AC2, AC3: the Lead\'s routes are the Lead\'s alone', () => {
 
   it.each(CASES)('SCRUM486_AC2_%s_refuses_%s_with_403_and_queries_nothing', async (_route, _label, role, call) => {
     // AC2-05, AC3-05. A coordinator too: the queue is the Lead's worklist,
-    // and only a Lead can assign (041). Nothing is queued, so a query that
+    // and only a Lead can assign (052). Nothing is queued, so a query that
     // slipped past the gate would fail loudly rather than pass by accident.
     const client = createFakeClient([]);
 
@@ -227,7 +227,7 @@ describe('SCRUM-486 AC3, AC4: POST /:id/assign', () => {
   it('SCRUM486_AC3_a_lead_assigns_and_is_recorded_from_the_token_not_the_body', async () => {
     // AC3-05. The body names someone else as the one assigning; it is
     // ignored. Without this a Lead's assignment could be made to look like
-    // another person's, and 041's Lead check would test the wrong person.
+    // another person's, and 052's Lead check would test the wrong person.
     const client = createFakeClient([ok(row({ assigned_coordinator_id: COORDINATOR_A }))]);
 
     const res = await assign(client, { coordinatorId: COORDINATOR_A, note: 'Over to you', assignedBy: COORDINATOR_B });
@@ -299,7 +299,7 @@ describe('SCRUM-486 AC6: POST /:id/reassign admits the Lead as well as a coordin
 
   it('SCRUM486_AC6_a_lead_reaches_the_handover_function', async () => {
     // AC6-04. Before SCRUM-519 this route was coordinatorOnly, so a Lead was
-    // refused here with "restricted to Event Coordinators" and 041's widened
+    // refused here with "restricted to Event Coordinators" and 052's widened
     // reassign_event_request was unreachable from the browser. The Lead is
     // the one handing over, from the token.
     const client = createFakeClient([handedOver()]);
@@ -387,7 +387,7 @@ describe('SCRUM-486 AC6: the event screen\'s reads admit the Lead, so the hand-o
   });
 
   it('SCRUM486_AC6_the_lead_reads_the_history_with_its_notes', async () => {
-    // The Lead writes handover notes (041 records theirs), so reads them; the
+    // The Lead writes handover notes (052 records theirs), so reads them; the
     // Organiser's route still never carries them.
     const [, path, results] = READS[1];
     const client = createFakeClient(results());

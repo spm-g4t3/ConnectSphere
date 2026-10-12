@@ -416,7 +416,7 @@ describe("SCRUM19_AC1 starting the review", () => {
   });
 
   it("SCRUM486_AC8_a_409_on_start_review_says_it_may_be_waiting_for_the_lead", async () => {
-    // AC8-05. Since migration 041, starting the review of a request with no
+    // AC8-05. Since migration 052, starting the review of a request with no
     // coordinator is refused with 409 (55000), not 403. The 409 entry names
     // both of its causes, the Lead's assignment among them; the screen does
     // not read the server's message to choose between them.
@@ -452,10 +452,10 @@ describe("SCRUM19_AC1 a coordinator who is not assigned sees no actions", () => 
     ["the coordinator who used to hold it", ASSIGNED],
     ["any other coordinator", OTHER],
   ])("SCRUM486_AC8_an_unassigned_request_opened_by_%s_says_it_is_waiting_for_the_lead", async (_label, viewer) => {
-    // AC8-04. Since 041 a submitted request can have no coordinator; any
+    // AC8-04. Since 052 a submitted request can have no coordinator; any
     // coordinator can still open it by id (SCRUM-332). "Waiting for the
     // assigned coordinator" would name nobody, so it says who it is waiting
-    // for, and nobody is offered Start review, which 041 would refuse.
+    // for, and nobody is offered Start review, which 052 would refuse.
     renderAs(viewer, eventRequest({ assignedCoordinatorId: null }));
 
     expect(
@@ -844,7 +844,7 @@ describe("SCRUM486_AC6 the hand-over action on the event screen", () => {
   it("SCRUM486_AC6_not_even_a_lead_sees_it_on_a_cancelled_event", async () => {
     // The merge of dev (SCRUM-370) put "not cancelled" into the same gate as
     // SCRUM-521's "the holder or a Lead": a cancelled event cannot be handed
-    // over (041's status list leaves it out), whoever is looking.
+    // over (052's status list leaves it out), whoever is looking.
     renderAsRole(LEAD, "event_coordinator_lead", eventRequest({ status: "cancelled" }));
 
     await screen.findByText("IS212 Industry Night");
@@ -852,7 +852,7 @@ describe("SCRUM486_AC6 the hand-over action on the event screen", () => {
   });
 
   it("SCRUM486_AC6_not_even_a_lead_sees_it_on_a_request_nobody_holds", async () => {
-    // Assigned from the Lead's queue, not handed over (041 refuses, AC5-05).
+    // Assigned from the Lead's queue, not handed over (052 refuses, AC5-05).
     renderAsRole(LEAD, "event_coordinator_lead", eventRequest({ assignedCoordinatorId: null }));
 
     await screen.findByText("IS212 Industry Night");

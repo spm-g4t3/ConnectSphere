@@ -1,13 +1,13 @@
 // EventCoordinatorLeadDashboard.test.jsx
 //
 // SCRUM-486 (SCRUM-519): what the Lead's dashboard holds now that the queue
-// is built, and the notices 041 sends the Lead.
+// is built, and the notices 052 sends the Lead.
 //
 // Dashboard.test.jsx pins which dashboard each role gets. This file pins what
 // is on the Lead's: the live queue, the overview placeholder SCRUM-487 will
 // replace, and the notifications card.
 //
-// The notices. 041 writes three new types (AC10): event_request_awaiting_
+// The notices. 052 writes three new types (AC10): event_request_awaiting_
 // assignment to every Lead, event_request_assigned to the coordinator,
 // event_request_coordinator_assigned to the Organiser. This build's
 // describeNotification knows none of them; SCRUM-172 words them. Until then
@@ -38,7 +38,7 @@ vi.mock("../../src/services/notificationService", () => ({
 const LEAD = { id: "77777777-7777-4777-8777-777777777777", email: "lead@example.com", role: "event_coordinator_lead" };
 const REQUEST_ID = "22222222-2222-4222-8222-222222222222";
 
-/** One notice of each type 041 adds, as GET /notifications returns them. */
+/** One notice of each type 052 adds, as GET /notifications returns them. */
 const NEW_TYPES = [
   {
     id: "n1",

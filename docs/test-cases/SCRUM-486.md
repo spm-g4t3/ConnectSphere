@@ -2,9 +2,9 @@
 
 **Story:** Assign and Reassign Event Coordinators from an Unassigned Queue — Event Coordinator Lead
 **Subtask:** SCRUM-514 (this document)
-**Schema:** `041_lead_assignment.sql` (SCRUM-515 to SCRUM-518). 040 is `040_venue_holds.sql`
+**Schema:** `052_lead_assignment.sql` (SCRUM-515 to SCRUM-518). 040 is `040_venue_holds.sql`
 **Written:** 11 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; SCRUM-522 fills in the test names.
-**Corrected:** 11 October 2026, after the audit of SCRUM-491 (venue holds, migration 040): which suites need 041, 040's notification types and their failure mode, and the error codes 041 uses.
+**Corrected:** 11 October 2026, after the audit of SCRUM-491 (venue holds, migration 040): which suites need 052, 040's notification types and their failure mode, and the error codes 052 uses.
 **Marked:** 12 October 2026, SCRUM-522: every case's **Implemented by** names the tests that prove it, or says why none does yet. The cases themselves are unchanged.
 
 This document is the written layer between SCRUM-486's acceptance criteria and the
@@ -38,8 +38,8 @@ story lives in Postgres functions:
 
 | Short | File | Proves |
 |---|---|---|
-| pglite | a PGlite suite applying the real migrations, 041 included (`backend/tests/db/`, beside `eventStatusLifecycleDatabase.test.js`) | What the database accepts and what the functions write. The only place that proves the constraint and the functions, rather than what a fake client was told |
-| mig | a migration-text test for 041 | What 041 contains |
+| pglite | a PGlite suite applying the real migrations, 052 included (`backend/tests/db/`, beside `eventStatusLifecycleDatabase.test.js`) | What the database accepts and what the functions write. The only place that proves the constraint and the functions, rather than what a fake client was told |
+| mig | a migration-text test for 052 | What 052 contains |
 | svc | `backend/tests/services/eventRequestService.test.js` (fake client) | The service calls the right function with the right arguments, and maps each SQLSTATE to the right error |
 | route | `backend/tests/routes/eventRequests.test.js` (fake client) | Gates, status codes, the caller from the token |
 | screen | the component tests in `frontend/tests/components/` | What each person sees |
@@ -215,13 +215,13 @@ status covers both "waiting for the Lead to assign" and "assigned, waiting to be
 reviewed". So the organiser's waiting line is derived from the request having no
 `assignedCoordinatorId`, and the status display is left to describe the status.
 
-**041 raises 018's and 029's codes, not 040's.** Two conventions now exist in the
+**052 raises 018's and 029's codes, not 040's.** Two conventions now exist in the
 schema. 018 and 029 raise standard SQLSTATEs (55000 for a state that does not
 allow the action, 42501 for the wrong caller, 22023 for a bad value, 40001 for a
 lost race) and leave the HTTP status to `translateError` in
 `eventRequestService.js`, which maps each code once. 040, the venue holds, raises
 `errcode = 'PT409'` with a hint (`EVENT_NOT_APPROVED`), a PostgREST code that sets
-the HTTP status itself. 041's functions follow 018 and 029, because they sit
+the HTTP status itself. 052's functions follow 018 and 029, because they sit
 beside them: `assign_event_request` is the first-assignment twin of
 `reassign_event_request` (018), and the not-yet-assigned refusal is added to
 `start_event_review` (029). A reader comparing the assign and reassign functions
@@ -315,7 +315,7 @@ provokes two at once, and needs two real connections.
 |---|---|---|---|---|
 | AC5-01 | HELD BY A, at each of `submitted`, `under_review`, `pending_clarification`, `approved`, `confirmed` | Reassign to B | Allowed: B holds it; one history row | Proved (pglite): `SCRUM486_AC5_a_lead_reassigns_a_request_that_is_%s` |
 | AC5-02 | HELD BY A, at each of `rejected`, `completed`, `cancelled` | Reassign to B | Refused 55000 naming the status; nothing written | Proved (pglite): `SCRUM486_AC5_refuses_to_reassign_a_request_that_is_%s_and_writes_nothing` |
-| AC5-03 | — | Reassign at `safety_review` or `safety_approved` | **Cannot be written as specified**: neither status exists (see *What cannot be tested*) | **Cannot be written yet** (see *What cannot be tested*). `SCRUM486_AC5_the_status_list_names_the_safety_statuses_before_they_exist` pins that 041 names them; the behaviour waits for the statuses |
+| AC5-03 | — | Reassign at `safety_review` or `safety_approved` | **Cannot be written as specified**: neither status exists (see *What cannot be tested*) | **Cannot be written yet** (see *What cannot be tested*). `SCRUM486_AC5_the_status_list_names_the_safety_statuses_before_they_exist` pins that 052 names them; the behaviour waits for the statuses |
 | AC5-04 | — | Reassign with no note, or a blank one | Allowed; the note stored as null | Proved (pglite, svc): `SCRUM486_AC5_a_handover_with_no_note_stores_null`, `SCRUM331_AC9_sends_an_omitted_or_blank_note_as_null` |
 | AC5-05 | UNASSIGNED | Reassign it | Refused, with a message saying it has no coordinator yet and must be assigned, not a 40001 "changed hands" | Proved (pglite): `SCRUM486_AC5_an_unassigned_request_is_assigned_not_reassigned` |
 
@@ -379,21 +379,24 @@ provokes two at once, and needs two real connections.
 | AC10-01 | LEAD and LEAD2 exist | Submit a request | One notice to each Lead, of a new type, with `eventRequestId` and the event name in the payload | Proved (pglite): `SCRUM486_AC10_submission_tells_every_lead_a_request_is_waiting` |
 | AC10-02 | UNASSIGNED | LEAD assigns it to A | One notice to A, and one to ORG naming A | Proved (pglite): `SCRUM486_AC10_an_assignment_tells_the_coordinator_and_the_organiser_by_name` |
 | AC10-03 | HELD BY A | LEAD (or A) reassigns to B | One notice to B, and one to ORG naming B | Proved (pglite): `SCRUM486_AC10_a_reassignment_tells_the_new_coordinator_and_the_organiser_who_held_it` |
-| AC10-04 | — | Read 041's `notifications_type_known` | All seven of 040's types, `booking_flagged`, `booking_request_withdrawn`, `clarification_requested`, `clarification_replied`, `clarification_closed`, `booking_flagged_setup_change`, `venue_hold_expired`, plus the new ones. Not 034's six, which lack `venue_hold_expired` | Proved (mig, pglite): `SCRUM486_AC10_041_keeps_every_type_040_allows_and_adds_three` |
+| AC10-04 | — | Read 052's `notifications_type_known` | All seven of 040's types, `booking_flagged`, `booking_request_withdrawn`, `clarification_requested`, `clarification_replied`, `clarification_closed`, `booking_flagged_setup_change`, `venue_hold_expired`, plus the new ones. Not 034's six, which lack `venue_hold_expired`. **Since the merge of dev (12 October): 048's eight, which add `event_cancelled`, plus the three; the file moved from 041 to 052 to apply after 048** | Proved (mig, pglite): `SCRUM486_AC10_052_keeps_every_type_048_allows_and_adds_three` |
 | AC10-05 | An assignment refused (AC4-02, AC3-02) | — | No notice written | Proved (pglite): `SCRUM486_AC10_a_refused_assignment_notifies_nobody_when_%s` |
 | AC10-06 | A notice of each new type | Each recipient opens their notifications | Shown in words, not as a raw type | **Unmet.** Each new type is shown, counted and markable, but as "New notification / This notification type cannot be displayed yet" (`SCRUM486_AC10_each_new_type_is_shown_as_a_notification_that_cannot_be_displayed_yet`), not in words. The wording is SCRUM-172's. SCRUM-523 to report |
-| AC10-07 | 041 applied after 040; an active hold whose expiry has passed | `process_venue_hold_expiry` | The hold is marked expired and its `venue_hold_expired` notice written, as before 041 | Proved (pglite): `SCRUM486_AC10_a_lapsed_hold_still_expires_and_is_notified_after_041` |
+| AC10-07 | 052 applied after 040; an active hold whose expiry has passed | `process_venue_hold_expiry` | The hold is marked expired and its `venue_hold_expired` notice written, as before 052 | Proved (pglite): `SCRUM486_AC10_a_lapsed_hold_still_expires_and_is_notified_after_052` |
 
 **Why AC10-04 and AC10-07 matter beyond this story.** `notifications_type_known`
-is restated whole every time a type is added: 041 drops it and adds it again with
-the new types beside the old. The last restatement is 040's, with seven types.
-An earlier list, 034's, has six and lacks `venue_hold_expired`. If 041 restated
+is restated whole every time a type is added: 052 drops it and adds it again with
+the new types beside the old. When this was written the last restatement was
+040's, with seven types; since the merge of dev it is 048's, with eight (040's
+seven and `event_cancelled`), and this story's migration moved from 041 to 052 to
+come after it (`docs/SCRUM-486.md`, D7).
+An earlier list, 034's, has six and lacks `venue_hold_expired`. If 052 restated
 that one, one of two things would follow. If any hold has already expired on the
-live database, its notice row would fail the new constraint, so 041 would not
-apply at all. If none has, 041 would apply cleanly and every later run of
+live database, its notice row would fail the new constraint, so 052 would not
+apply at all. If none has, 052 would apply cleanly and every later run of
 `process_venue_hold_expiry` would fail with 23514 on its notice insert, and
 because the expiry and the notice are one statement, **venue holds would silently
-stop expiring**. AC10-04 catches the list; AC10-07 catches the effect. 041 leaves
+stop expiring**. AC10-04 catches the list; AC10-07 catches the effect. 052 leaves
 040's other notification objects (`notifications_hold_expired_needs_hold` and the
 partial index `notifications_one_per_expired_hold`) as they are; both are
 written `type <> 'venue_hold_expired' or …`, so the new types pass them
@@ -426,29 +429,29 @@ Where a criterion owns a trap, the case is above and named here; the rest are
 | `start_event_review` must name the Lead, not say "not assigned to you" | AC8-01, AC8-02 |
 | The two null-caller holes must close (037 equipment lines, 030 close clarification) | TR-04, TR-05 |
 | Submission must succeed with no Lead, writing no notice | AC11-01 |
-| The suites that build or read the database must know about 041 | TR-06, TR-07 |
+| The suites that build or read the database must know about 052 | TR-06, TR-07 |
 | Of two simultaneous assignments, one succeeds and the other names the winner | AC4-02, AC4-05 |
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| TR-01 | 041 applied | Write a request at `submitted` with no coordinator; then at `under_review`, `pending_clarification`, `approved`, `confirmed` with none | `submitted` accepted; every other status refused 23514 naming the relaxed constraint. `draft` and `cancelled` still accepted with none | Proved (pglite): `SCRUM486_TR01_accepts_a_submitted_request_with_no_coordinator`, `SCRUM486_TR01_still_refuses_a_request_that_is_%s_with_no_coordinator`, `SCRUM486_TR01_still_accepts_a_request_that_is_%s_with_no_coordinator` |
+| TR-01 | 052 applied | Write a request at `submitted` with no coordinator; then at `under_review`, `pending_clarification`, `approved`, `confirmed` with none | `submitted` accepted; every other status refused 23514 naming the relaxed constraint. `draft` and `cancelled` still accepted with none | Proved (pglite): `SCRUM486_TR01_accepts_a_submitted_request_with_no_coordinator`, `SCRUM486_TR01_still_refuses_a_request_that_is_%s_with_no_coordinator`, `SCRUM486_TR01_still_accepts_a_request_that_is_%s_with_no_coordinator` |
 | TR-02 | HELD BY A, rejected, reopened to draft by 022 (which leaves A and the reviewer on it) | Submit again | `assigned_coordinator_id` null and `reviewing_coordinator_id` null; the request is in the queue, not back with A | Proved (pglite): `SCRUM486_TR02_a_resubmitted_request_reaches_the_queue_with_no_coordinator_and_no_reviewer` |
 | TR-03 | TR-02's request | Open its assignment history | "Current coordinator" reads not assigned, although the newest history row names A. Today `AssignmentHistory` takes the current coordinator from the newest row, which after TR-02 would be wrong | Proved (screen), with the fix made in SCRUM-522: `SCRUM486_TR03_a_resubmitted_request_waiting_for_the_lead_reads_not_assigned`. `AssignmentHistory` now takes the current coordinator from the request |
 | TR-04 | UNASSIGNED | Migration 037's equipment-lines function with a null caller | Refused 42501. Today `v_assigned is distinct from p_coordinator_id` lets null meet null through; safe only while 017 guaranteed a coordinator | Proved (pglite): `SCRUM486_TR04_refuses_a_null_caller_on_a_request_with_no_coordinator` and its two companions |
 | TR-05 | UNASSIGNED at `pending_clarification` is impossible, so: a request whose coordinator is null, by a direct write | Migration 030's close-clarification function with a null caller | Refused 42501 before the status check. The same `is distinct from` hole as TR-04 | Proved (pglite): `SCRUM486_TR05_closing_refuses_a_null_caller_before_the_status_check` |
-| TR-06 | — | The two suites that apply migrations to a real PGlite database and include 016, 017 or 021: `eventStatusLifecycleDatabase.test.js`, `eventClarificationDatabase.test.js` | Each also applies 041, after 040, so its database is the one production will have | Proved (pglite), by setup: both suites apply 041 last, so every case in them runs on it |
-| TR-07 | — | The two text tests that read every migration: `draftToSubmittedSinglePath.test.js`, `eventStatusHistoryMigration.test.js` | Their expectations change to include 041 (see *Existing tests this story must change*). `venueSetupTimeMigration.test.js` needs nothing: its mention of 021 is in a fixed list of 018 to 022 about the venue functions, not the status history | Proved (mig): both text tests' expectations include 041 (SCRUM-515) |
+| TR-06 | — | The two suites that apply migrations to a real PGlite database and include 016, 017 or 021: `eventStatusLifecycleDatabase.test.js`, `eventClarificationDatabase.test.js` | Each also applies 052, after 040, so its database is the one production will have | Proved (pglite), by setup: both suites apply 052 last, so every case in them runs on it |
+| TR-07 | — | The two text tests that read every migration: `draftToSubmittedSinglePath.test.js`, `eventStatusHistoryMigration.test.js` | Their expectations change to include 052 (see *Existing tests this story must change*). `venueSetupTimeMigration.test.js` needs nothing: its mention of 021 is in a fixed list of 018 to 022 about the venue functions, not the status history | Proved (mig): both text tests' expectations include 052 (SCRUM-515) |
 
 **Two kinds of suite, and why a text test can break without being wrong.** A PGlite
-suite applies the migrations to a real database, so it needs 041 in its list to
+suite applies the migrations to a real database, so it needs 052 in its list to
 test the database production will have; leave it out and it goes on passing
 against the old behaviour, which is the dangerous case. A text test reads the
 migration files and pins a fact about them, such as "only 016 and 021 set
 `status = 'submitted'`". Both of these scan every migration with `readdirSync`,
-so they pick 041 up on their own, and the moment 041 adds a third definition of
+so they pick 052 up on their own, and the moment 052 adds a third definition of
 `submit_event_request` the fact they pin stops being true. That failure is the
 test working: it was written to notice exactly a new writer of the status, and the
-fix is to add 041 to its expectation, with the reason, not to loosen it.
+fix is to add 052 to its expectation, with the reason, not to loosen it.
 
 ---
 
@@ -465,15 +468,15 @@ deleted to make room.
 | `SCRUM330_AC1_returns_the_assigned_coordinator_in_camelCase` | svc | The mapping still holds; the fixture and name assume a coordinator on every submitted row. **Done in SCRUM-522:** now `SCRUM330_AC1_returns_the_submitted_request_in_camelCase_with_no_coordinator` |
 | `SCRUM330_AC1_never_assigns_a_coordinator_to_an_incomplete_draft` | svc | Still true, trivially; renamed to what it proves, that an incomplete draft is not submitted. **Done in SCRUM-522:** now `SCRUM330_AC1_never_submits_an_incomplete_draft` |
 | The other `SCRUM330_AC1_*` (submits only through the function, leaves the draft check to the function, translates a vanished request, reports a non-draft as a conflict, treats a missing time as a server fault) | svc | Unchanged: none asserts anything about the coordinator |
-| `SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over` | svc, route | Still true for another coordinator, but no longer the whole rule: a Lead may too (AC6). Renamed and extended by AC6-02 and AC6-04. **Done in SCRUM-521:** now `SCRUM331_AC6_a_caller_who_neither_holds_the_event_nor_leads_is_refused` (svc) and `SCRUM331_AC6_a_coordinator_who_does_not_hold_the_event_cannot_hand_it_over` (route), with 041's message |
+| `SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over` | svc, route | Still true for another coordinator, but no longer the whole rule: a Lead may too (AC6). Renamed and extended by AC6-02 and AC6-04. **Done in SCRUM-521:** now `SCRUM331_AC6_a_caller_who_neither_holds_the_event_nor_leads_is_refused` (svc) and `SCRUM331_AC6_a_coordinator_who_does_not_hold_the_event_cannot_hand_it_over` (route), with 052's message |
 | `SCRUM334_AC9_lists_every_event_coordinator`, `SCRUM334_AC9_returns_each_coordinator_as_an_id_and_a_name` | svc | AC3 adds each coordinator's active-event count to the list. **Did not change:** SCRUM-519 gave the Lead a read of its own (`listCoordinatorWorkload`, `GET /coordinator-workload`) rather than widening this one, so both tests still pin SCRUM-334's list as it was (open question 1 below, answered) |
 | `SCRUM325_refuses_the_submission_when_no_coordinator_exists_and_leaves_the_draft_alone` | pglite | Pins P0001 with no coordinator. Reverses: AC11-02. **Done in SCRUM-515:** now `SCRUM486_AC11_submits_when_no_event_coordinator_and_no_lead_exists` |
 | `SCRUM325_assigns_exactly_one_coordinator_and_records_one_row_in_each_history` | pglite | Reverses: AC1-01 (no coordinator, no assignment row). **Done in SCRUM-515:** now `SCRUM486_AC1_submits_with_no_coordinator_even_when_coordinators_exist` |
 | `SCRUM325_refuses_a_second_submission_and_adds_no_assignment_and_no_history` | pglite | The 55000 holds; its assertion that the coordinator and the one assignment row are kept assumes the first submission assigned |
 | `SCRUM325_gives_no_other_way_to_submit_without_a_coordinator` | pglite | Pins the constraint TR-01 relaxes. Reverses |
 | `SCRUM318_lets_the_reopened_draft_be_submitted_again_through_the_one_submission_path` | pglite | Asserts the resubmitted request is given a coordinator again. Reverses: TR-02 |
-| `sets status = 'submitted' only in the two definitions of submit_event_request`; `chooses the coordinator once, with the one selection rule`; `sets status, submitted_at and the coordinator in one statement`; `writes the assignment history once, after the update, in the same function`; `stops before writing when no coordinator is available`; `is backed by the constraint that refuses a submitted request with no coordinator` | `backend/tests/db/draftToSubmittedSinglePath.test.js` | They read 016's and 021's text and pin assignment on submission. 041 adds a third definition, without a selection, and relaxes the constraint |
-| `has no other writer in any migration` | `backend/tests/db/eventStatusHistoryMigration.test.js` | Lists the files whose functions write the status history (`021_event_status_history.sql: 2`, `022_event_status_transitions.sql: 1`, `029_event_request_decisions_functions.sql: 2`). 041 redefines `submit_event_request` and `start_event_review`, both of which write a history row, so 041 joins the list with its count. Right when written: it pinned every writer there was |
+| `sets status = 'submitted' only in the two definitions of submit_event_request`; `chooses the coordinator once, with the one selection rule`; `sets status, submitted_at and the coordinator in one statement`; `writes the assignment history once, after the update, in the same function`; `stops before writing when no coordinator is available`; `is backed by the constraint that refuses a submitted request with no coordinator` | `backend/tests/db/draftToSubmittedSinglePath.test.js` | They read 016's and 021's text and pin assignment on submission. 052 adds a third definition, without a selection, and relaxes the constraint |
+| `has no other writer in any migration` | `backend/tests/db/eventStatusHistoryMigration.test.js` | Lists the files whose functions write the status history (`021_event_status_history.sql: 2`, `022_event_status_transitions.sql: 1`, `029_event_request_decisions_functions.sql: 2`). 052 redefines `submit_event_request` and `start_event_review`, both of which write a history row, so 052 joins the list with its count. Right when written: it pinned every writer there was |
 | `SCRUM485_AC5_%s_refuses_%s_with_403_and_queries_nothing` (its `GET /coordinators` rows) | route | Asserts a Lead is refused the coordinator list. If the picker reads that route, this row changes (open question 1) |
 | `SCRUM485_AC3_an_event_coordinator_lead_gets_the_lead_dashboard`, `SCRUM485_AC3_the_%s_dashboard_calls_no_service`, `SCRUM485_AC3_the_%s_dashboard_has_no_link_to_a_page_that_does_not_exist` | `frontend/tests/components/Dashboard.test.jsx` | They pin the Lead's dashboard as a placeholder that fetches nothing. The queue makes it real (AC2-07), for the Lead only; the Safety Officer's cases stand |
 | `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link` | `frontend/tests/components/Navigation.test.jsx` | Pins one link. Changes if the queue gets a route and a link of its own; SCRUM-485's design said the count case would force exactly this update. **Done in SCRUM-519:** now `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_and_unassigned_queue_links` |

@@ -203,17 +203,17 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     await db.exec(migration('029_event_request_decisions_functions.sql'));
     // Change requests (006, and 019's coordinator check), so SCRUM-486's AC7
     // can show a pending change request following the event to its new
-    // coordinator. 039, the Lead's role, which 041's assign and reassign
+    // coordinator. 039, the Lead's role, which 052's assign and reassign
     // functions name.
     await db.exec(migration('006_event_change_requests.sql'));
     await db.exec(migration('019_change_request_decision_coordinator.sql'));
     await db.exec(migration('039_coordinator_lead_and_safety_officer_roles.sql'));
-    // The notifications table, which 041 restates the types of and its three
+    // The notifications table, which 052 restates the types of and its three
     // functions now write to (SCRUM-518). The real one comes from 014's booking
     // review migration, which needs bookings and venue blocks this suite does
     // not build, so it is written here in the shape those functions use:
     // recipient, type and payload, plus the reference columns other notices
-    // carry. 041 replaces the type check with its own, so the one here only
+    // carry. 052 replaces the type check with its own, so the one here only
     // has to exist. eventClarificationDatabase.test.js does the same.
     await db.exec(`
       create table notifications (
@@ -233,7 +233,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     // assignment constraint and submission without assignment (SCRUM-515),
     // the Lead's assignment and reassignment (SCRUM-516), the refusal of an
     // unassigned review (SCRUM-517), and the notices (SCRUM-518).
-    await db.exec(migration('041_lead_assignment.sql'));
+    await db.exec(migration('052_lead_assignment.sql'));
   }, 60_000);
 
   afterAll(async () => {
@@ -368,7 +368,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       it('SCRUM325_gives_no_other_way_to_submit_without_a_coordinator', async () => {
         // Until SCRUM-486 this also asserted that a direct update to submitted
         // with no coordinator was refused by 017's constraint. That was right
-        // then. 041 relaxes the constraint to allow exactly that row, so the
+        // then. 052 relaxes the constraint to allow exactly that row, so the
         // database no longer refuses it (SCRUM486_TR01_… below pins the new
         // rule); the single path is now held by the status function's refusal
         // here and by the application, which draftToSubmittedSinglePath.test.js
@@ -780,20 +780,20 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
   });
 
   // -------------------------------------------------------------------------
-  // SCRUM-486 (SCRUM-515): migration 041, the relaxed constraint and the guards
+  // SCRUM-486 (SCRUM-515): migration 052, the relaxed constraint and the guards
   // -------------------------------------------------------------------------
   // docs/test-cases/SCRUM-486.md, TR-01, TR-02, TR-04 and AC1-02. Real
   // Postgres, because each is about what the database accepts or what a
   // function does with a null, which a fake client cannot show.
 
-  describe('SCRUM-486: 041 relaxes the assignment constraint for submitted only', () => {
+  describe('SCRUM-486: 052 relaxes the assignment constraint for submitted only', () => {
     // Each row is written straight to the table, bypassing every function, so
     // only the constraint can refuse it. `extra` overrides the fixture's
     // coordinator with null.
     const noCoordinator = { assigned_coordinator_id: null };
 
     it('SCRUM486_TR01_accepts_a_submitted_request_with_no_coordinator', async () => {
-      // TR-01, the half 041 adds: a submitted request may wait for the Lead.
+      // TR-01, the half 052 adds: a submitted request may wait for the Lead.
       const id = await request(STATUS.SUBMITTED, noCoordinator);
 
       expect((await row(id)).assigned_coordinator_id).toBeNull();
@@ -807,7 +807,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       STATUS.COMPLETED,
       STATUS.REJECTED,
     ])('SCRUM486_TR01_still_refuses_a_request_that_is_%s_with_no_coordinator', async (status) => {
-      // TR-01, the half 041 keeps: past submitted, only the assigned
+      // TR-01, the half 052 keeps: past submitted, only the assigned
       // coordinator can have moved the request, so it must have one.
       const err = await refusal(request(status, noCoordinator));
 
@@ -833,7 +833,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       // coordinator and the reviewer on the draft, as the first two
       // expectations show. If submission merely stopped choosing a
       // coordinator, it would leave them there and the request would go
-      // straight back to its old coordinator, past the Lead. 041 sets both to
+      // straight back to its old coordinator, past the Lead. 052 sets both to
       // null.
       const id = await request(STATUS.REJECTED);
       await change(id, STATUS.REJECTED, STATUS.DRAFT, organiser);
@@ -854,7 +854,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
 
   describe('SCRUM-486: submission no longer chooses a coordinator', () => {
     it('SCRUM486_AC1_the_submission_function_in_force_does_not_call_pick_event_coordinator', async () => {
-      // AC1-02, read from the function Postgres actually holds after 041, not
+      // AC1-02, read from the function Postgres actually holds after 052, not
       // from the file: one definition in force, and no selection in it.
       const { rows } = await db.query(
         "select prosrc from pg_proc where proname = 'submit_event_request'",
@@ -871,7 +871,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     // caller before it reads any equipment table, so it can be called here.
 
     it('SCRUM486_TR04_refuses_a_null_caller_on_a_request_with_no_coordinator', async () => {
-      // The hole 041 closes: before it, null is not distinct from null, so a
+      // The hole 052 closes: before it, null is not distinct from null, so a
       // null caller on a request with no coordinator passed this check.
       const id = await request(STATUS.SUBMITTED, { assigned_coordinator_id: null });
 
@@ -1238,7 +1238,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
   });
 
   describe('SCRUM-486 AC7: after a reassignment the new coordinator acts, the previous one does not', () => {
-    // No code in 041 does this. Every function that acts on an event checks
+    // No code in 052 does this. Every function that acts on an event checks
     // its assigned_coordinator_id when it runs, so moving the event moves the
     // right to act. These tests prove it rather than build anything.
 
@@ -1319,9 +1319,9 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
   });
 
   describe('SCRUM-486 AC8: nobody reviews or decides a request waiting for the Lead', () => {
-    // SCRUM-517. Before 041 these were refused by 029's caller check, with
+    // SCRUM-517. Before 052 these were refused by 029's caller check, with
     // 42501 "only the coordinator assigned ...", which was never wrong while
-    // every submitted request had a coordinator. 041 refuses them first, with
+    // every submitted request had a coordinator. 052 refuses them first, with
     // 55000 and a message naming the Lead.
     const WAITING = 'waiting for the Event Coordinator Lead to assign it a coordinator';
     const startReview = (id, by) => db.query('select * from start_event_review($1, $2)', [id, by]);
@@ -1456,6 +1456,30 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       expect(toOrganiser.payload).not.toHaveProperty('note');
     });
 
+    it('SCRUM486_AC10_every_notice_names_its_event_in_the_column_and_the_payload', async () => {
+      // Since the merge of dev: 048 added notifications.event_request_id for
+      // event_cancelled, and 052 fills it on all three of this story's types,
+      // keeping eventRequestId in the payload for SCRUM-172's contract. Each
+      // of the three writers: submission, a first assignment, a handover.
+      const id = await request();
+      await submit(id);
+      await assign(id, coordinator, lead);
+      await reassign(id, otherCoordinator, lead);
+
+      const { rows } = await db.query(
+        `select type, event_request_id, payload->>'eventRequestId' as in_payload
+           from notifications where payload->>'eventRequestId' = $1`,
+        [id],
+      );
+      expect(new Set(rows.map((n) => n.type))).toEqual(new Set([
+        'event_request_awaiting_assignment', 'event_request_assigned', 'event_request_coordinator_assigned',
+      ]));
+      for (const notice of rows) {
+        expect(notice.event_request_id).toBe(id);
+        expect(notice.in_payload).toBe(id);
+      }
+    });
+
     it('SCRUM486_AC10_a_reassignment_tells_the_new_coordinator_and_the_organiser_who_held_it', async () => {
       // AC10-03. The same two types; previousCoordinatorId is what makes it a
       // handover, so the screen can word it so.
@@ -1495,11 +1519,23 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       expect(await noticesFor(id)).toEqual(before);
     });
 
-    it('SCRUM486_AC10_041_keeps_every_type_040_allows_and_adds_three', async () => {
+    it('SCRUM486_AC10_052_keeps_every_type_048_allows_and_adds_three', async () => {
       // AC10-04, read from the files. notifications_type_known is restated
-      // whole each time; 041 must restate 040's seven, not 034's six. Dropping
-      // venue_hold_expired would stop venue holds expiring (041's header). The
-      // constraint in force is checked too, so the PGlite database agrees.
+      // whole each time, so 052 must restate the latest list before it, which
+      // is 048's eight: 040's seven and SCRUM-370's event_cancelled. Leaving
+      // venue_hold_expired out would stop venue holds expiring; leaving
+      // event_cancelled out would stop cancellation (052's header).
+      //
+      // Was SCRUM486_AC10_041_keeps_every_type_040_allows_and_adds_three, and
+      // read 040. Right when written: 040 was the latest list in this
+      // repository. The merge of dev brought 048, which restates it with
+      // event_cancelled, and the file moved from 041 to 052 to apply after it.
+      // 040's seven are still checked, as the first part of 048's list.
+      //
+      // The constraint in force is checked too, so the PGlite database agrees.
+      // That database does not apply 048 (this suite builds SCRUM-486's
+      // migrations, not SCRUM-370's), which is exactly why the list is read
+      // from 048's text: no PGlite suite applies both stories' files.
       const typesIn = (name) => {
         const sql = migration(name).replace(/--[^\n]*/g, '');
         const at = sql.lastIndexOf('add constraint notifications_type_known');
@@ -1507,7 +1543,8 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
         return [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
       };
       const from040 = typesIn('040_venue_holds.sql');
-      const in041 = typesIn('041_lead_assignment.sql');
+      const from048 = typesIn('048_complete_event_cancellation_existing_arrangements.sql');
+      const in052 = typesIn('052_lead_assignment.sql');
 
       expect(from040).toEqual([
         'booking_flagged',
@@ -1518,8 +1555,9 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
         'booking_flagged_setup_change',
         'venue_hold_expired',
       ]);
-      expect(in041).toEqual([
-        ...from040,
+      expect(from048).toEqual([...from040, 'event_cancelled']);
+      expect(in052).toEqual([
+        ...from048,
         'event_request_awaiting_assignment',
         'event_request_assigned',
         'event_request_coordinator_assigned',
@@ -1527,7 +1565,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       const { rows: [def] } = await db.query(
         "select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'notifications_type_known'",
       );
-      for (const type of in041) expect(def.def).toContain(`'${type}'`);
+      for (const type of in052) expect(def.def).toContain(`'${type}'`);
     });
   });
 

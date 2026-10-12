@@ -101,7 +101,7 @@ describe("SCRUM486_AC9 who made each assignment, old rows and new", () => {
 describe("SCRUM486_TR03 the current coordinator comes from the request, not the newest row", () => {
   it("SCRUM486_TR03_a_resubmitted_request_waiting_for_the_lead_reads_not_assigned", async () => {
     // TR-02's request: Priya held it, it was rejected, reopened and submitted
-    // again, and 041 left it with no coordinator. Its history still ends with
+    // again, and 052 left it with no coordinator. Its history still ends with
     // Priya. Taken from the newest row, the screen would say she holds it.
     renderHistory([automatic], { currentCoordinatorId: null });
 

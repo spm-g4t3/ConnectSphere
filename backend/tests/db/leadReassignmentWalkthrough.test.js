@@ -3,12 +3,12 @@
  * coordinator A's event to coordinator B, then A is refused and B acts.
  *
  * Why this test, when eventStatusLifecycleDatabase.test.js already proves
- * AC7 against 041's functions (SCRUM486_AC7_the_new_coordinator_reviews_and_
+ * AC7 against 052's functions (SCRUM486_AC7_the_new_coordinator_reviews_and_
  * decides_and_the_previous_one_cannot). That test calls the SQL functions
  * directly. SCRUM-331 proved handovers over HTTP, but only the holder's own,
  * with a fake client that answers whatever it is told. Neither exercises the
  * path a Lead actually takes: the widened route gates (coordinatorOrLead on
- * POST /:id/reassign and GET /:id/review), the services, and 041's functions,
+ * POST /:id/reassign and GET /:id/review), the services, and 052's functions,
  * together. Here the real router runs over a real database, so every refusal
  * below comes from where it would in production, not from a queued answer.
  *
@@ -119,7 +119,7 @@ describe('SCRUM-486 AC6, AC7: a Lead hands A\'s event to B, over HTTP, on a real
       create table auth.users (id uuid primary key default gen_random_uuid(), email text);
     `);
     for (const name of MIGRATIONS) await db.exec(migration(name));
-    // The notifications table 041 writes to, in the shape
+    // The notifications table 052 writes to, in the shape
     // eventStatusLifecycleDatabase.test.js builds it, for the same reason.
     await db.exec(`
       create table notifications (
@@ -141,7 +141,7 @@ describe('SCRUM-486 AC6, AC7: a Lead hands A\'s event to B, over HTTP, on a real
     // (eventClarificationDatabase.test.js builds them); the column alone is
     // what this path needs, so it is added as 030 declares it.
     await db.exec('alter table event_requests add column clarification_reply_by_date date');
-    await db.exec(migration('041_lead_assignment.sql'));
+    await db.exec(migration('052_lead_assignment.sql'));
     // SCRUM-370's cancellation columns. Since the merge of dev the services'
     // COLUMNS reads them (cancellation_reason, cancellation_initiator,
     // cancelled_by, cancelled_at), so every read on this path needs them.

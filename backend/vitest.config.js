@@ -51,6 +51,19 @@ export default defineConfig({
     // (Vitest 5 has no poolOptions.threads.maxThreads; maxWorkers is the
     // top-level setting for every pool.)
     maxWorkers: '50%',
+    // SCRUM-486 (after the merge of dev, 12 October): the hook timeout, for the
+    // same contention. The cap above manages it; it cannot remove it, and there
+    // are now 25 PGlite suites, up from 20. A PGlite suite builds its database
+    // in beforeAll, which takes a few seconds alone and several times that
+    // when the machine is busy. Under Vitest's 10-second default, three of
+    // SCRUM-370's new suites failed in full runs with "Hook timed out" and
+    // passed alone in 6 seconds: a starved hook read as a broken migration.
+    // 60 seconds is what SCRUM-486's own suites already pass per hook. Global,
+    // not per suite, so the next PGlite suite anyone adds is covered without
+    // having to know this. A hook that genuinely hangs still fails, a minute
+    // later. The tests themselves keep the 5-second default: they are cheap
+    // once the database exists, and a slow test is still worth hearing about.
+    hookTimeout: 60_000,
     // Point supertest's requests at the loopback of the family its server is
     // bound to ('[::1]' for the default dual-stack listener), not always
     // 127.0.0.1. Without this, parallel workers occasionally reach each

@@ -9,7 +9,7 @@
  * partly-written record to protect against. Submission is the exception.
  * SCRUM-330 made it assign an Event Coordinator and record that in a second
  * table, and supabase-js has no transactions, so it calls submit_event_request
- * (migration 016) through rpc. Since SCRUM-486 (041) submission assigns
+ * (migration 016) through rpc. Since SCRUM-486 (052) submission assigns
  * nobody -- the Event Coordinator Lead does, through assignEventRequest -- but
  * it still writes the status, its history row and the Lead's notices in one
  * transaction, so it stays an rpc. The reasoning is at submitEventRequest. Since SCRUM-321 every other status change goes through
@@ -213,7 +213,7 @@ function translateError(error) {
     return new ConflictError(`That record already exists: ${detail}`);
   }
 
-  // The next is raised by submit_event_request (016, then 021 and 041), with
+  // The next is raised by submit_event_request (016, then 021 and 052), with
   // its own SQLSTATE so it is told apart by code rather than by matching
   // message text.
   //
@@ -232,7 +232,7 @@ function translateError(error) {
     return new ConflictError(detail);
   }
 
-  // No P0001 branch, since SCRUM-486 (migration 041). P0001 was submission's
+  // No P0001 branch, since SCRUM-486 (migration 052). P0001 was submission's
   // "No coordinator is available" (SCRUM-327 AC5), a 503. Submission no
   // longer looks for a coordinator, so it can no longer raise it, and nothing
   // else this module calls raises P0001: 006's process_change_request does,
@@ -465,7 +465,7 @@ export async function getEventRequestById(id, { client } = {}) {
  *
  * SCRUM-10 created this. SCRUM-330 (SCRUM-327 AC1 and AC5) moved the write
  * into the Postgres function submit_event_request, called through rpc.
- * SCRUM-486 (migration 041) took the assignment back out of that function: the
+ * SCRUM-486 (migration 052) took the assignment back out of that function: the
  * customer's Week 7 change 5 sends a new request to the Event Coordinator
  * Lead's unassigned queue instead. In one transaction the function now locks
  * the row, checks it is still a draft, writes status and submitted_at, sets
@@ -683,7 +683,7 @@ export async function updateEventRequest(id, changes, organiserId, { client } = 
  * only it can check reliably, that the status is still what the caller saw.
  *
  * Submitting is not done through this function. It also sets submitted_at,
- * clears the coordinator and the reviewer, and notifies every Lead (041; until
+ * clears the coordinator and the reviewer, and notifies every Lead (052; until
  * SCRUM-486 it chose a coordinator instead), so it has its own,
  * submitEventRequest, and a request cannot reach submitted any other way.
  * Asking for it here is refused.
@@ -841,11 +841,11 @@ export async function requestEventClarification(
   const current = await getEventRequestForCoordinator(id, { client: db });
 
   // SCRUM-486 (SCRUM-519): a submitted request nobody has been assigned is
-  // waiting for the Event Coordinator Lead. Checked before the caller, as 041
+  // waiting for the Event Coordinator Lead. Checked before the caller, as 052
   // checks it before the caller in start_event_review: there is no coordinator,
   // so there is no "yours" to be wrong about. Without this the caller check
   // below would answer "Only the coordinator assigned ..." about a request that
-  // is nobody's. A 409, as 041's 55000 is: not in a state that allows this.
+  // is nobody's. A 409, as 052's 55000 is: not in a state that allows this.
   if (current.status === STATUS.SUBMITTED && current.assignedCoordinatorId == null) {
     throw new ConflictError(
       'This request is waiting for the Event Coordinator Lead to assign it a coordinator, '
@@ -1580,11 +1580,11 @@ export async function getEventClarificationHistory(id, userId, role, { client } 
  * that, and its docstring carries the argument -- including that excluding
  * `draft` is the access control for a queue every Coordinator can see.
  *
- * SCRUM-486 (SCRUM-520), AC2-06: only requests someone holds. Since 041 a
+ * SCRUM-486 (SCRUM-520), AC2-06: only requests someone holds. Since 052 a
  * submitted request has no coordinator until the Event Coordinator Lead
  * assigns one, and until then it is the Lead's alone: it is listed in the
  * Lead's unassigned queue (listUnassignedEventRequests), and every coordinator
- * action on it is refused (041's start_event_review and decide_event_request,
+ * action on it is refused (052's start_event_review and decide_event_request,
  * and requestEventClarification here). Listed in this queue it would be a row
  * every coordinator can open and do nothing with. So the read also requires
  * assigned_coordinator_id is not null, and every status it listed before is
@@ -1677,7 +1677,7 @@ export async function listEventRequestsForReview({ client } = {}) {
  * first. It sits beside the shared queue: the queue is every coordinator's
  * view of work awaiting a decision, whoever holds it, and this is the view of
  * work one person does hold. (Before SCRUM-486 the queue was described as work
- * nobody holds yet; since 041 that work is the Lead's unassigned queue, and
+ * nobody holds yet; since 052 that work is the Lead's unassigned queue, and
  * this queue lists only requests someone holds.)
  *
  * No status filter. The queue leaves decided statuses out because it is a
@@ -1691,9 +1691,9 @@ export async function listEventRequestsForReview({ client } = {}) {
  * none was needed because "a draft never has an assigned coordinator, since
  * assignment happens at submission (016)". That stopped being true twice:
  * SCRUM-318's 022 reopens a rejected request to a draft and leaves its
- * coordinator on it, and since SCRUM-486 (041) assignment does not happen at
+ * coordinator on it, and since SCRUM-486 (052) assignment does not happen at
  * submission at all. So a reopened draft is listed here for the coordinator
- * who held it, until it is submitted again and 041 clears the column. That is
+ * who held it, until it is submitted again and 052 clears the column. That is
  * a known gap, recorded in docs/SCRUM-486.md section 4, not a decision.
  *
  * Why this list shows the organiser's name, when listEventRequestsForReview
@@ -2012,13 +2012,13 @@ export async function listCoordinatorWorkload({ client } = {}) {
  * The Lead assigns an unassigned submitted request to one Event Coordinator
  * (SCRUM-486 AC3, AC4).
  *
- * SCRUM-519. The write is assign_event_request (041), through rpc: it locks
+ * SCRUM-519. The write is assign_event_request (052), through rpc: it locks
  * the row, refuses anyone but a Lead, refuses a request that already has a
  * coordinator or is not submitted, refuses an assignee who is not an Event
  * Coordinator, then writes the coordinator, its history row and the two
  * notices in one transaction. A blank note becomes null.
  *
- * AC4 asks for a lost race to be shown who was assigned. 041 says so in its
+ * AC4 asks for a lost race to be shown who was assigned. 052 says so in its
  * message, but that message also names the event's id, and the screens never
  * show raw server text. So on a 409 this reads who holds the request now and
  * returns them as data: a ConflictError with code ALREADY_ASSIGNED and the
@@ -2105,8 +2105,8 @@ const HISTORY_COLUMNS = 'id, previous_coordinator_id, new_coordinator_id, assign
  * SCRUM-334, for SCRUM-327 AC9 (every handover records who made it, and the
  * note) and AC10 (the Organiser's screen shows the history). Reads
  * event_request_assignment_history (014). 016 wrote a row on submission until
- * SCRUM-486; since 041 the first row is the Lead's assignment
- * (assign_event_request), and every handover writes one (018, widened by 041).
+ * SCRUM-486; since 052 the first row is the Lead's assignment
+ * (assign_event_request), and every handover writes one (018, widened by 052).
  * The old rows stay, with assigned_by null, and still read as automatic.
  *
  * Its own read, behind its own routes, not folded into the event reads. Folded

@@ -41,7 +41,7 @@ export default function EventCoordinatorDashboard({ user }) {
 
           Why the shared queue stays (SCRUM-486, SCRUM-520). This used to rest
           on "since SCRUM-330 every event is assigned the moment it is
-          submitted", which 041 made false: a submitted request now waits with
+          submitted", which 052 made false: a submitted request now waits with
           no coordinator until the Event Coordinator Lead assigns one, and
           those requests are the Lead's alone, in the Lead's unassigned queue,
           so this queue leaves them out. The queue stays because the customer

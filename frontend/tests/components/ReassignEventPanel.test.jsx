@@ -1,7 +1,7 @@
 // ReassignEventPanel.test.jsx
 //
 // SCRUM-486: the handover panel for its two callers, the coordinator who
-// holds the event and, since 041, the Event Coordinator Lead.
+// holds the event and, since 052, the Event Coordinator Lead.
 //
 // SCRUM-519 pinned the 403 message. SCRUM-521 adds who is left out of the
 // list (the holder, not the caller), which list a Lead reads, and every
@@ -89,7 +89,7 @@ describe("SCRUM486_AC6 who the picker offers", () => {
 
   it("SCRUM486_AC6_for_a_lead_the_holder_is_left_out_not_the_caller", async () => {
     // The bug: the old filter left out the caller, which for a Lead removed
-    // nobody, and offered the holder, a choice 041 refuses with 23514.
+    // nobody, and offered the holder, a choice 052 refuses with 23514.
     renderAs(LEAD, "event_coordinator_lead");
 
     const names = await optionNames();
@@ -193,7 +193,7 @@ describe("SCRUM486_AC6 every message on the path, true for either caller", () =>
     [500, "The list of coordinators could not be loaded. Please try again."],
   ])("SCRUM486_AC6_loading_the_list_for_a_lead_fails_with_%s", async (status, message) => {
     // The 403 said "Only Event Coordinators can hand an event over" until
-    // SCRUM-521, false since 041 let the Lead.
+    // SCRUM-521, false since 052 let the Lead.
     vi.mocked(listCoordinatorWorkload).mockRejectedValue(httpError(status));
     renderAs(LEAD, "event_coordinator_lead");
 

@@ -81,7 +81,7 @@ function CoordinatorDetails({ eventRequestId, currentCoordinatorId }) {
  * SCRUM-486 (SCRUM-520), AC1-05: where a submitted request stands with its
  * coordinator, said on the row, or null when there is nothing to add.
  *
- * Since migration 041 "submitted" covers two situations an Organiser needs to
+ * Since migration 052 "submitted" covers two situations an Organiser needs to
  * tell apart: nobody has been assigned yet (the Event Coordinator Lead will
  * choose someone), or a coordinator has been and has not started the review.
  * Before SCRUM-486 they were one situation, because a coordinator was assigned
@@ -97,12 +97,12 @@ function CoordinatorDetails({ eventRequestId, currentCoordinatorId }) {
  * CoordinatorRequestDetail). Making it depend on the assignment
  * would mean every one of those passing the coordinator in, including
  * GET /:id/status, which reads only the status, or two responses describing
- * the same request differently. And the assignment is not a status: 041
+ * the same request differently. And the assignment is not a status: 052
  * deliberately added none. The shared description, "waiting to be picked up
  * by a Coordinator", is still true in both situations; this line says which.
  *
  * Only for "submitted". Under review, pending clarification, approved and
- * confirmed always have a coordinator (041's relaxed constraint still requires
+ * confirmed always have a coordinator (052's relaxed constraint still requires
  * one), and the status itself says what is happening; a draft or a cancelled
  * request is waiting for nobody.
  */
@@ -347,7 +347,7 @@ export default function MyEventRequests() {
               </details>
 
               {/* Not on a draft: a draft has never had a coordinator, so it has
-                  no history to show. (Since 041 a submitted request may not
+                  no history to show. (Since 052 a submitted request may not
                   have one yet either; its history then says so, and the line
                   above has already told the Organiser why.) */}
               {req.status !== "draft" && (

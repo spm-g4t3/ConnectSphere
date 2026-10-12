@@ -14,9 +14,9 @@
 //     as data.
 //   * The Lead's notifications (CoordinatorNotifications, the Coordinator's
 //     card, reused as it is). Submission now tells every Lead a request is
-//     waiting (041, event_request_awaiting_assignment), and without this card
+//     waiting (052, event_request_awaiting_assignment), and without this card
 //     those notices would be written and never seen. This build does not yet
-//     describe 041's three new types; describeNotification shows each as "New
+//     describe 052's three new types; describeNotification shows each as "New
 //     notification / This notification type cannot be displayed yet", so they
 //     are counted and can be marked read, until SCRUM-172 words them.
 //
