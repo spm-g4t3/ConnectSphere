@@ -38,9 +38,14 @@ import {
 } from '../errors.js';
 import {
   checkOutcomeNote,
+  checkReserveInput,
+  checkReduceInput,
+  checkReleaseInput,
+  checkResolveInput,
   throwIfInvalid,
   validateEventRequestId,
   validateEquipmentLineId,
+  validateReservationId,
 } from '../validation/equipmentReviewValidation.js';
 import { equipmentRequestStatusLabel } from '../domain/equipmentRequestStatus.js';
 import { toAvailabilityResult } from './equipmentAvailabilityService.js';
@@ -83,6 +88,16 @@ function missingNoteDetails(message) {
   return names.map((name) => ({ field: 'lines', message: `${name} needs a note` }));
 }
 
+/** Which input a 22023 message from the database is about. */
+function detailsFor(detail) {
+  if (/note/i.test(detail)) return [{ field: 'note', message: detail }];
+  if (/reason/i.test(detail)) return [{ field: 'reason', message: detail }];
+  if (/quantity|available|reserved|needs|reduce/i.test(detail)) {
+    return [{ field: 'quantity', message: detail }];
+  }
+  return [];
+}
+
 /**
  * Turn a raw Postgres error into a typed one. The messages from 038 are written
  * to be read by Technical Support Staff, so they pass through unchanged.
@@ -103,7 +118,7 @@ function translateError(error) {
     if (detail.startsWith(MISSING_NOTES_PREFIX)) {
       return new ValidationError(detail, missingNoteDetails(detail));
     }
-    return new ValidationError(detail, /note/i.test(detail) ? [{ field: 'note', message: detail }] : []);
+    return new ValidationError(detail, detailsFor(detail));
   }
 
   // A check constraint backing the functions up. The message is the driver's, so
@@ -118,6 +133,19 @@ function translateError(error) {
 }
 
 
+/** One live reservation, in camelCase. */
+function toReservation(row) {
+  return {
+    id: row.id,
+    quantity: row.quantity,
+    startAt: row.start_at,
+    endAt: row.end_at,
+    flagged: row.flagged === true,
+    flagReason: row.flag_reason ?? null,
+    flaggedAt: row.flagged_at ?? null,
+  };
+}
+
 /** One line for the review screen, in camelCase. Built as a literal. */
 function toReviewLine(row) {
   return {
@@ -129,6 +157,9 @@ function toReviewLine(row) {
     typeRetired: row.type_retired === true,
     reserved: row.reserved ?? 0,
     shortBy: Math.max(0, row.quantity - (row.reserved ?? 0)),
+    // Live reservations only (054). A line read from before 054 has none.
+    reservations: (row.reservations ?? []).map(toReservation),
+    flaggedCount: (row.reservations ?? []).filter((r) => r.flagged === true).length,
     outcome: row.outcome ?? null,
     outcomeNote: row.outcome_note ?? null,
     outcomeBy: row.outcome_by ?? null,
@@ -368,6 +399,147 @@ export async function completeEquipmentReview(eventRequestId, userId, { client }
   return callReviewFunction(
     'complete_equipment_review',
     { p_event_request_id: eventRequestId, p_user_id: userId },
+    client,
+  );
+}
+
+
+/**
+ * Reserve units for a line (SCRUM-300 AC2). The quantity is the only thing read
+ * from the body. Only the current reviewer, while the event is in a status that
+ * allows it (AC1).
+ *
+ * @throws {ValidationError} a bad quantity, more than the line needs, or more
+ *                           than is available (the message says how many are)
+ * @throws {ForbiddenError}  the caller is not the current reviewer
+ * @throws {ConflictError}   the request is not Under review, the event's status
+ *                           does not allow it, or the type is retired
+ */
+export async function reserveEquipment(eventRequestId, lineId, input, userId, { client } = {}) {
+  validateEventRequestId(eventRequestId);
+  validateEquipmentLineId(lineId);
+  requireUser(userId);
+
+  const { value, details } = checkReserveInput(input);
+  throwIfInvalid(details);
+
+  return callReviewFunction(
+    'reserve_equipment',
+    {
+      p_event_request_id: eventRequestId,
+      p_user_id: userId,
+      p_line_id: lineId,
+      p_quantity: value.quantity,
+    },
+    client,
+  );
+}
+
+/** Reduce a reservation to a smaller quantity, with a reason (AC4, AC7). */
+export async function reduceEquipmentReservation(
+  eventRequestId,
+  reservationId,
+  input,
+  userId,
+  { client } = {},
+) {
+  validateEventRequestId(eventRequestId);
+  validateReservationId(reservationId);
+  requireUser(userId);
+
+  const { value, details } = checkReduceInput(input);
+  throwIfInvalid(details);
+
+  return callReviewFunction(
+    'reduce_equipment_reservation',
+    {
+      p_event_request_id: eventRequestId,
+      p_user_id: userId,
+      p_reservation_id: reservationId,
+      p_quantity: value.quantity,
+      p_reason: value.reason,
+    },
+    client,
+  );
+}
+
+/** Release a reservation, with a reason (AC4, AC7). It is kept in the history. */
+export async function releaseEquipmentReservation(
+  eventRequestId,
+  reservationId,
+  input,
+  userId,
+  { client } = {},
+) {
+  validateEventRequestId(eventRequestId);
+  validateReservationId(reservationId);
+  requireUser(userId);
+
+  const { value, details } = checkReleaseInput(input);
+  throwIfInvalid(details);
+
+  return callReviewFunction(
+    'release_equipment_reservation',
+    {
+      p_event_request_id: eventRequestId,
+      p_user_id: userId,
+      p_reservation_id: reservationId,
+      p_reason: value.reason,
+    },
+    client,
+  );
+}
+
+/** Move a flagged reservation to the event's current period (AC7). */
+export async function moveEquipmentReservation(
+  eventRequestId,
+  reservationId,
+  input,
+  userId,
+  { client } = {},
+) {
+  validateEventRequestId(eventRequestId);
+  validateReservationId(reservationId);
+  requireUser(userId);
+
+  const { value, details } = checkResolveInput(input);
+  throwIfInvalid(details);
+
+  return callReviewFunction(
+    'move_equipment_reservation',
+    {
+      p_event_request_id: eventRequestId,
+      p_user_id: userId,
+      p_reservation_id: reservationId,
+      p_reason: value.reason,
+    },
+    client,
+  );
+}
+
+/** Keep a flagged reservation as it is, when it still fits (AC7). */
+export async function keepEquipmentReservation(
+  eventRequestId,
+  reservationId,
+  input,
+  userId,
+  { client } = {},
+) {
+  validateEventRequestId(eventRequestId);
+  validateReservationId(reservationId);
+  requireUser(userId);
+
+  const { value, details } = checkResolveInput(input);
+  throwIfInvalid(details);
+
+  return callReviewFunction(
+    'keep_equipment_reservation',
+    {
+      p_event_request_id: eventRequestId,
+      p_user_id: userId,
+      p_reservation_id: reservationId,
+      p_reason: value.reason,
+    },
     client,
   );
 }
