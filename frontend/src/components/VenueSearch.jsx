@@ -51,11 +51,12 @@
 // carries the event's id and details), and never on a retired row. Both are
 // router state, so a reload drops the buttons along with the banner; the search
 // itself is untouched. A click opens BookingRequestPanel for that row, the same
-// flow the suitability panel (SCRUM-191) mounts. The buttons are disabled, with
-// the reason shown once, when the signed-in coordinator cannot request for this
-// event, and once a request has been sent or the server says the event already
-// has one. userId is a prop for the reason role is: useAuth throws without an
-// AuthProvider, and this page's tests render without one.
+// flow the suitability panel (SCRUM-191) mounts; that panel lives in
+// EventVenueFinder, inside the event view, not on this page. The buttons are
+// disabled, with the reason shown once, when the signed-in coordinator cannot
+// request for this event, and once a request has been sent or the server says
+// the event already has one. userId is a prop for the reason role is: useAuth
+// throws without an AuthProvider, and this page's tests render without one.
 
 import { useState, useCallback, useEffect, useId, useRef } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";

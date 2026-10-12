@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getOpenTickets, getEquipmentRequests } from "../services/supportService";
+import CoordinatorNotifications from "./CoordinatorNotifications";
 
 export default function TechnicalSupportDashboard({ user }) {
   const [tickets, setTickets] = useState([]);
@@ -41,6 +42,8 @@ export default function TechnicalSupportDashboard({ user }) {
           {equipmentRequests.length === 0 && <p>No pending equipment requests.</p>}
         </ul>
       </section>
+
+      <CoordinatorNotifications />
     </div>
   );
 }

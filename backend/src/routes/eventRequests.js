@@ -93,6 +93,8 @@ import {
   assignEventRequest,
   startEventReview,
   decideEventRequest,
+  getEventCancellationImpact,
+  cancelEventRequest,
 } from '../services/eventRequestService.js';
 import {
   createChangeRequestFromClient,
@@ -116,6 +118,7 @@ import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 // Credential-free too: http/handleError.js imports only errors.js.
 import { createErrorHandler } from '../http/handleError.js';
+import { ForbiddenError } from '../errors.js';
 
 
 /** Map an error to a response; see src/http/handleError.js (SCRUM-127). */
@@ -567,6 +570,19 @@ export function createEventRequestRouter({
     }
   });
 
+  router.get('/:id/cancellation-impact', coordinatorOnly, async (req, res) => {
+    try {
+      const event = await getEventRequestForCoordinator(req.params.id, { client });
+      if (event.assignedCoordinatorId !== req.user.id) {
+        throw new ForbiddenError('Only the coordinator assigned to this event can preview its cancellation.');
+      }
+      const impact = await getEventCancellationImpact(req.params.id, { client });
+      res.status(200).json(impact);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
   /**
    * SCRUM-334 (SCRUM-327 AC9, AC10): an event's assignment history, in two
    * routes. This one is the Organiser's; GET /:id/assignments/review below is
@@ -902,6 +918,24 @@ export function createEventRequestRouter({
       const updated = await decideEventRequest(
         req.params.id,
         { decision: req.body?.decision, decisionNote: req.body?.decisionNote },
+        req.user.id,
+        { client },
+      );
+      res.status(200).json(withStatusDisplay(updated));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  router.post('/:id/cancel', coordinatorOnly, async (req, res) => {
+    try {
+      const updated = await cancelEventRequest(
+        req.params.id,
+        {
+          reason: req.body?.reason,
+          initiator: req.body?.initiator,
+          attendeeMessage: req.body?.attendeeMessage,
+        },
         req.user.id,
         { client },
       );

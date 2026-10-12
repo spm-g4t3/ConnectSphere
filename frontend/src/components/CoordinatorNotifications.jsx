@@ -1,9 +1,8 @@
 // CoordinatorNotifications.jsx
 //
-// SCRUM-128 (SCRUM-17 AC3): "... each affected booking is flagged for review
-// and its Event Coordinator is notified." This is where the Coordinator sees
-// that notification. It replaces the "Pending venue bookings" stub on
-// EventCoordinatorDashboard, which never had an endpoint behind it.
+// The signed-in user's inbox. SCRUM-128 first used it for Coordinator
+// notifications; it is shared by the organiser, venue and technical-support
+// dashboards for the notification types addressed to those roles.
 //
 // Read and unread are listed together, newest first, with the unread count
 // in the heading. Hiding read ones would make "what did that message say?"

@@ -41,7 +41,7 @@ const FROZEN_NOW = new Date('2026-09-28T06:30:00.000Z');
 const FIRST_READ = '2026-09-27T01:00:00+00:00';
 
 // SCRUM-491 added venue_hold_id, the hold a 'venue_hold_expired' notice is about.
-const COLUMNS = 'id, recipient_id, type, booking_id, block_id, venue_hold_id, payload, read_at, created_at';
+const COLUMNS = 'id, recipient_id, type, booking_id, block_id, venue_hold_id, event_request_id, payload, read_at, created_at';
 
 const PAYLOAD = {
   venueName: 'Seminar Room 2-1',
@@ -70,6 +70,7 @@ function notificationRow(overrides = {}) {
     booking_id: BOOKING_ID,
     block_id: BLOCK_ID,
     venue_hold_id: null,
+    event_request_id: null,
     payload: PAYLOAD,
     read_at: null,
     created_at: '2026-09-26T03:00:00+00:00',
@@ -83,6 +84,7 @@ const CAMEL_NOTIFICATION = {
   bookingId: BOOKING_ID,
   blockId: BLOCK_ID,
   venueHoldId: null,
+  eventRequestId: null,
   payload: PAYLOAD,
   readAt: null,
   createdAt: '2026-09-26T03:00:00+00:00',
@@ -142,7 +144,7 @@ describe('toNotification', () => {
     const mapped = toNotification(notificationRow());
     expect(mapped).toEqual(CAMEL_NOTIFICATION);
     expect(Object.keys(mapped).sort()).toEqual(
-      ['blockId', 'bookingId', 'createdAt', 'id', 'payload', 'readAt', 'type', 'venueHoldId'],
+      ['blockId', 'bookingId', 'createdAt', 'eventRequestId', 'id', 'payload', 'readAt', 'type', 'venueHoldId'],
     );
   });
 

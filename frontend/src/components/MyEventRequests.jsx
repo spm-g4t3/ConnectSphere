@@ -21,7 +21,7 @@ import ChangeRequestForm from "./ChangeRequestForm";
 import ChangeRequestStatusList from "./ChangeRequestStatusList";
 import AssignmentHistory from "./AssignmentHistory";
 import DecisionOutcome from "./DecisionOutcome";
-import ClarificationHistory from "./ClarificationHistory";
+import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import ClarificationReplyForm from "./ClarificationReplyForm";
 
 function formatEventDate(value) {
@@ -118,22 +118,6 @@ function assignmentLine(request) {
   // shown as "null".
   const who = request.assignedCoordinatorName ?? "A coordinator";
   return `${who} has been assigned; your request is waiting for them to start the review.`;
-}
-
-function ClarificationHistoryDetails({ eventRequestId, isOpen }) {
-  const [opened, setOpened] = useState(false);
-
-  return (
-    <details
-      className="my-event-requests__details"
-      onToggle={(event) => {
-        if (event.currentTarget.open) setOpened(true);
-      }}
-    >
-      <summary>Clarification history</summary>
-      {opened && <ClarificationHistory eventRequestId={eventRequestId} isOpen={isOpen} />}
-    </details>
-  );
 }
 
 export default function MyEventRequests() {
@@ -293,13 +277,14 @@ export default function MyEventRequests() {
               )}
 
               {req.status === "pending_clarification" && req.clarificationNote && (
-                <p className="my-event-requests__clarification" role="alert">
-                  <strong>Coordinator clarification:</strong> {req.clarificationNote}
-                </p>
+                <div className="my-event-requests__clarification" role="status">
+                  <strong>Coordinator question</strong>
+                  <p>{req.clarificationNote}</p>
+                </div>
               )}
               {req.status === "pending_clarification" && req.clarificationReplyByDate && (
                 <p className="my-event-requests__clarification">
-                  Please respond by {req.clarificationReplyByDate}.
+                  Please respond by {formatEventDate(req.clarificationReplyByDate)}.
                   {req.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
                     <strong className="clarification-overdue"> Overdue</strong>
                   )}
@@ -324,6 +309,18 @@ export default function MyEventRequests() {
                 <div className="my-event-requests__decision">
                   <strong>Decision</strong>
                   <DecisionOutcome request={req} view="organiser" />
+                </div>
+              )}
+
+              {req.status === "cancelled" && (
+                <div className="my-event-requests__cancellation">
+                  <strong>Event cancelled</strong>
+                  <dl>
+                    <dt>Reason</dt>
+                    <dd>{req.cancellationReason || "No reason recorded."}</dd>
+                    <dt>Cancelled on</dt>
+                    <dd>{formatEventDate(req.cancelledAt)}</dd>
+                  </dl>
                 </div>
               )}
 
@@ -357,9 +354,11 @@ export default function MyEventRequests() {
                 <CoordinatorDetails eventRequestId={req.id} currentCoordinatorId={req.assignedCoordinatorId ?? null} />
               )}
               {req.status !== "draft" && (
-                <ClarificationHistoryDetails
+                <ClarificationHistoryDialog
                   eventRequestId={req.id}
-                  isOpen={req.status === "pending_clarification"}
+                  eventName={req.eventName}
+                  isOpenQuestion={req.status === "pending_clarification"}
+                  latestQuestion={req.clarificationNote}
                 />
               )}
 
@@ -380,7 +379,9 @@ export default function MyEventRequests() {
                   </button>
                 )}
 
-                {req.status !== "draft" && req.status !== "pending_clarification" && (
+                {req.status !== "draft" &&
+                  req.status !== "pending_clarification" &&
+                  req.status !== "cancelled" && (
                   <button
                     onClick={() => setActivePanel({ mode: "change-request", request: req })}
                   >

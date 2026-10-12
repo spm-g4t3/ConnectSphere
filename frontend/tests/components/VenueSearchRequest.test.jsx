@@ -269,6 +269,7 @@ describe("the request flow from a result", () => {
       eventRequestId: "e1",
       venueId: "v2",
       confirmUnsuitable: true,
+      acknowledgedCriteria: ["Capacity"],
     });
     expect(await within(panel()).findByText(/Request sent/)).toBeInTheDocument();
   });

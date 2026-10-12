@@ -200,6 +200,25 @@ export async function getEventRequestQueue() {
   return response.data;
 }
 
+export async function getEventCancellationImpact(id) {
+  const response = await apiClient.get(
+    `/event-requests/${id}/cancellation-impact`,
+  );
+  return response.data;
+}
+
+export async function cancelEventRequest(
+  id,
+  { reason, initiator, attendeeMessage },
+) {
+  const response = await apiClient.post(`/event-requests/${id}/cancel`, {
+    reason,
+    initiator,
+    attendeeMessage,
+  });
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // SCRUM-327: coordinator assignment
 // ---------------------------------------------------------------------------
