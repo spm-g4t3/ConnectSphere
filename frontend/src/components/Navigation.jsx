@@ -57,9 +57,7 @@ const NAV_LINKS_BY_ROLE = {
   ],
   ATTENDEE: [
     { to: "/dashboard", label: "Dashboard" },
-    // "Browse Open Events" (SCRUM-495) is not linked yet: that story has no
-    // route, page or branch, and /events is the Organiser's page. Add it here
-    // with the path SCRUM-495 registers.
+    // Open events are browsed and registered from the attendee dashboard.
   ],
   // SCRUM-485 (SCRUM-510). One link each, deliberately: Dashboard, where
   // SCRUM-509 put each role's own screen. The pages that dashboard describes,

@@ -105,6 +105,8 @@ button { cursor: pointer; }
 .my-event-requests__item-description { line-height: 1.5; margin: 10px 0; }
 .my-event-requests__item-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .my-event-requests__item-actions button { font-size: 0.88rem; }
+.my-event-requests__registration-link { align-items: center; background: #eef6f3; border: 1px solid #b9d8d0; border-radius: 6px; color: var(--teal-dark); display: inline-flex; font-size: 0.88rem; font-weight: 700; padding: 9px 13px; text-decoration: none; }
+.my-event-requests__registration-link:hover { background: #dff0ea; }
 .my-event-requests__error { background: #fff0ee; border-radius: 6px; color: #a43c32; padding: 10px 12px; }
 .event-request-form, .change-request-form { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 18px; margin: 0 0 24px; padding: 24px; }
 .event-request-form h1, .change-request-form h2 { color: var(--ink); margin: 0; }
@@ -574,6 +576,37 @@ button { cursor: pointer; }
 .my-event-requests__details dl { display: grid; gap: 8px 16px; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 14px 0 4px; }
 .my-event-requests__details dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
 .my-event-requests__details dd { color: var(--ink); font-size: 0.9rem; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.event-registration-page { margin: 0 auto; max-width: 960px; padding: 38px 24px 72px; }
+.event-registration-page__back { color: var(--teal-dark); display: inline-block; font-weight: 700; margin-bottom: 24px; text-decoration: none; }
+.event-registration-page__back:hover { text-decoration: underline; }
+.event-registration-page__header { margin-bottom: 24px; }
+.event-registration-page__header .eyebrow { margin: 0 0 8px; }
+.event-registration-page__header h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.5rem); letter-spacing: -0.04em; margin: 0 0 12px; overflow-wrap: anywhere; }
+.event-registration-page__header p:not(.eyebrow) { color: var(--muted); margin: 6px 0; }
+.event-registration-page__summary, .event-registration-page__form { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(24, 61, 58, 0.06); margin-top: 20px; padding: clamp(20px, 4vw, 30px); }
+.event-registration-page__summary h2, .event-registration-page__form h2 { color: var(--ink); font-size: 1.2rem; margin: 0 0 8px; }
+.event-registration-page__summary dl { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin: 20px 0 0; }
+.event-registration-page__summary dl > div { background: #f5f9f7; border: 1px solid #e5eeea; border-radius: 7px; min-width: 0; padding: 13px 15px; }
+.event-registration-page__summary dt { color: var(--muted); font-size: 0.8rem; font-weight: 700; margin-bottom: 5px; }
+.event-registration-page__summary dd { color: var(--ink); font-size: 0.95rem; font-weight: 600; line-height: 1.45; margin: 0; overflow-wrap: anywhere; }
+.event-registration-page__form > p { color: var(--muted); line-height: 1.5; margin: 0; }
+.event-registration-page__toggle { align-items: center; background: #f5f9f7; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); display: flex; gap: 12px; margin: 22px 0; padding: 15px 16px; }
+.event-registration-page__toggle input { accent-color: var(--teal); height: 19px; margin: 0; width: 19px; }
+.event-registration-page__toggle span { font-weight: 700; }
+.event-registration-page__fields { display: grid; gap: 18px 20px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.event-registration-page__fields label { color: var(--ink); display: grid; font-size: 0.92rem; font-weight: 700; gap: 8px; min-width: 0; }
+.event-registration-page__optional, .event-registration-page__hint { color: var(--muted); font-size: 0.8rem; font-weight: 400; }
+.event-registration-page__fields input { background: white; border: 1px solid #aebfba; border-radius: 6px; color: var(--ink); font: inherit; min-height: 44px; min-width: 0; padding: 9px 11px; width: 100%; }
+.event-registration-page__fields input:focus { border-color: var(--teal); outline: 3px solid rgba(8, 127, 123, 0.15); }
+.event-registration-page__hint { line-height: 1.4; }
+.event-registration-page__actions { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; margin-top: 24px; }
+.event-registration-page__actions button, .event-registration-page__error button { background: var(--teal); border: 0; border-radius: 6px; color: white; font-weight: 700; min-height: 44px; padding: 10px 16px; }
+.event-registration-page__actions button:hover, .event-registration-page__error button:hover { background: var(--teal-dark); }
+.event-registration-page__actions button:disabled, .event-registration-page__error button:disabled { cursor: wait; opacity: 0.65; }
+.event-registration-page__actions [role="status"] { color: #17684f; font-weight: 700; margin: 0; }
+.event-registration-page__notice { background: #fff6e5; border-left: 4px solid #bb7a12; border-radius: 5px; color: #61440d; line-height: 1.5; margin-top: 20px; padding: 13px 16px; }
+.event-registration-page__error { background: #fff0ee; border-left: 4px solid #a43c32; border-radius: 6px; color: #772820; margin: 20px 0; padding: 14px 16px; }
+.event-registration-page__error p { line-height: 1.5; margin: 0 0 12px; overflow-wrap: anywhere; }
 .my-event-requests__clarification { background: #fff6e5; border-left: 3px solid #bb7a12; color: #61440d; margin: 14px 0; padding: 10px 12px; white-space: pre-wrap; }
 .coordinator-clarification { display: grid; gap: 12px; }
 .coordinator-clarification label { color: var(--muted); display: grid; gap: 7px; }
@@ -682,6 +715,10 @@ button { cursor: pointer; }
    .my-event-requests { padding: 36px 18px; }
    .my-event-requests__header { align-items: flex-start; flex-direction: column; }
    .my-event-requests__item { padding: 16px; }
+   .event-registration-page { padding: 28px 18px 48px; }
+   .event-registration-page__fields { grid-template-columns: 1fr; }
+   .event-registration-page__summary dl { grid-template-columns: 1fr; }
+   .event-registration-page__actions { align-items: flex-start; flex-direction: column; }
    .event-request-form, .change-request-form { padding: 18px; }
    .event-request-form__row, .venue-search__filters, .venue-search__window { grid-template-columns: 1fr; }
    .my-event-requests__details dl { grid-template-columns: 1fr; gap: 3px; }

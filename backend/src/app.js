@@ -12,6 +12,7 @@ import cors from 'cors';
 
 import authRoutes from './routes/auth.js';
 import eventRequestRoutes from './routes/eventRequests.js';
+import eventRegistrationRoutes from './routes/eventRegistration.js';
 import venueRoutes from './routes/venues.js';
 import notificationRoutes from './routes/notifications.js';
 import bookingRequestRoutes from './routes/bookingRequests.js';
@@ -37,6 +38,7 @@ app.use('/api/event-requests/:id/equipment-review', equipmentReviewRoutes);
 app.use('/api/event-requests/:id/venue-suitability', venueSuitabilityRoutes);
 
 app.use('/api/event-requests', eventRequestRoutes);
+app.use('/api/registration', eventRegistrationRoutes);
 
 // Mounted by SCRUM-15. It was withheld until it stopped taking the acting user
 // from req.body.userId -- a client asserting its own identity against a table

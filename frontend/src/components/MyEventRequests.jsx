@@ -10,7 +10,7 @@
 // should never be trusted to enforce that boundary itself.
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getMyEventRequests } from "../services/eventRequestService";
 import {
   readStatusDisplay,
@@ -307,6 +307,12 @@ export default function MyEventRequests() {
               )}
 
               <div className="my-event-requests__item-actions">
+                <Link
+                  className="my-event-requests__registration-link"
+                  to={`/events/${req.id}/registration`}
+                >
+                  Registration settings
+                </Link>
                 {req.status === "draft" && (
                   <button onClick={() => setActivePanel({ mode: "edit", request: req })}>
                     Continue editing

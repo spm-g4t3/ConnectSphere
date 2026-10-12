@@ -246,12 +246,16 @@ describe("Dashboard role map", () => {
     expect(screen.getByRole("heading", { name: "Welcome, user@example.com" })).toBeInTheDocument();
   });
 
-  it("shows the Browse Open Events entry, with no invented event data", () => {
+  it("shows only events returned by the registration service", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
     renderAs("attendee");
 
     expect(screen.getByRole("heading", { name: "Browse Open Events" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("not available yet");
-    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent("no events open for registration");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Confirmed, registration is on, the opening time has passed",
+    );
+    expect(apiClient.get).toHaveBeenCalledWith("/registration/open");
   });
 
   it("falls back for an unrecognised role", () => {

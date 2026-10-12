@@ -179,6 +179,15 @@ They are different facts and the code never uses one for the other.
 - `planning` is no longer a status in the code, but it is still a value of the database enum, which Postgres cannot shrink. Migration `020` moves any such row to Approved and a constraint refuses the value.
 - No endpoint deletes a draft yet.
 - Moving a request to Approved, Rejected or Confirmed needs the decision columns from SCRUM-19. `change_event_request_status` does not write them, so those transitions will need that story to extend it.
+
+## Event registration
+
+Event Organisers configure registration for their own Approved or Confirmed events from **My Events**. Registration is off by default; settings include the opening and closing times, an optional positive capacity, and an optional withdrawal deadline. The attendee dashboard lists only Confirmed events whose registration is enabled, in-window and not full. The registration endpoint rechecks those conditions and inserts a registration under an event-row lock, so concurrent attendees cannot claim the final place together.
+
+Migration `backend/db/migrations/050_event_registration.sql` adds the settings, attendee registrations, settings audit history and the transactional functions. Settings changes are limited to the event's Organiser; the assigned Coordinator cannot change them. Each changed settings snapshot records the acting user and timestamp. Returning a Confirmed event to Approved preserves both settings and registrations, while its status prevents new registrations.
+
+The current event-status enum has `approved` and `confirmed`, but no Safety review or Safety approved values. The registration setup recognizes `safety_review` and `safety_approved` as configurable states for when the lifecycle adds them; events cannot enter those states yet. Run `npm --prefix backend test -- tests/db/eventRegistrationDatabase.test.js` to exercise the migration and registration functions against PGlite.
+
 ## Development workflow
 
 ### Branches

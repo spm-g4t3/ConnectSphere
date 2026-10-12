@@ -16,6 +16,7 @@ import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
 import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck";
 import EquipmentReview from "./components/EquipmentReview";
+import EventRegistrationSettings from "./components/EventRegistrationSettings";
 import "./App.css";
 
 function LoadingScreen() {
@@ -56,6 +57,11 @@ function VenueCalendarRoute() {
   );
 }
 
+function EventRegistrationSettingsRoute() {
+  const { eventId } = useParams();
+  return <EventRegistrationSettings key={eventId} eventId={eventId} />;
+}
+
 function AppRoutes() {
   const { user, loading, logoutMessage, clearLogoutMessage } = useAuth();
 
@@ -76,6 +82,14 @@ function AppRoutes() {
         <Route path="/login" element={<LoginForm />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
         <Route path="/events" element={<ProtectedRoute><MyEventRequests /></ProtectedRoute>} />
+        <Route
+          path="/events/:eventId/registration"
+          element={
+            <ProtectedRoute allowedRoles={["event_organiser"]}>
+              <EventRegistrationSettingsRoute />
+            </ProtectedRoute>
+          }
+        />
         {/* VenueSearch was written, correct, and imported by nothing — the route
             rendered a placeholder over a working component. Swapped for the real one. */}
         {/* Internal roles only. Venue search is the Coordinator's planning tool
