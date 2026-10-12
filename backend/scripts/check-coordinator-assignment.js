@@ -66,6 +66,20 @@
  *    version before SCRUM-522 did not delete status history, so once 021 was
  *    live its event delete would have been refused (inferred from 021's
  *    foreign key; not observed, since this script has not been run since).
+ *  - Clarification history cannot be deleted. 030's trigger
+ *    (event_clarification_history_immutable, SCRUM-162) refuses every update
+ *    or delete on event_request_clarification_history, including the cascade
+ *    when an event is deleted. One successful clarification request makes its
+ *    event, its organiser and its coordinator permanent in the shared
+ *    database. Observed on 12 October: the first run after 052 asked for
+ *    clarification on s1, and cleanup could not remove it. So this script
+ *    never asks for clarification successfully; refusals are fine, since they
+ *    write nothing. Do not add one back, and do not switch the trigger off
+ *    from here (the service-role client cannot ALTER TABLE, and an audit guard
+ *    is not this script's to lower).
+ *  - Events are deleted one at a time, so an event that cannot be removed is
+ *    named and the rest still go. The first run deleted them in one statement,
+ *    and s1 kept all eleven.
  *
  * Exits non-zero on any failure.
  */
@@ -323,26 +337,39 @@ async function returnToQueue(event) {
 async function cleanup() {
   const foreign = await findForeignEvents();
 
-  // The order is the third hazard in the header.
+  // One event at a time, children first (the delete-order hazard), so a row
+  // that cannot go is named and keeps only its own event, not every event
+  // this run made (the last hazard in the header).
+  const names = new Map();
   if (createdEventIds.length > 0) {
-    // Every notification about this run's events, including real Leads'.
+    const { data, error } = await supabase
+      .from('event_requests')
+      .select('id, event_name')
+      .in('id', createdEventIds);
+    if (error) cleanupErrors.push(`read event names: ${error.message}`);
+    for (const row of data ?? []) names.set(row.id, row.event_name);
+  }
+
+  for (const id of createdEventIds) {
+    const event = names.get(id) ?? id;
+    // Every notification about this event, including real Leads'.
     await remove(
-      'notifications about this run\'s events',
-      supabase.from('notifications').delete().in('payload->>eventRequestId', createdEventIds),
+      `notifications about ${event}`,
+      supabase.from('notifications').delete().eq('payload->>eventRequestId', id),
     );
     await remove(
-      'change requests',
-      supabase.from('event_change_requests').delete().in('event_request_id', createdEventIds),
+      `change requests of ${event}`,
+      supabase.from('event_change_requests').delete().eq('event_request_id', id),
     );
     await remove(
-      'status history',
-      supabase.from('event_request_status_history').delete().in('event_request_id', createdEventIds),
+      `status history of ${event}`,
+      supabase.from('event_request_status_history').delete().eq('event_request_id', id),
     );
     await remove(
-      'assignment history',
-      supabase.from('event_request_assignment_history').delete().in('event_request_id', createdEventIds),
+      `assignment history of ${event}`,
+      supabase.from('event_request_assignment_history').delete().eq('event_request_id', id),
     );
-    await remove('event requests', supabase.from('event_requests').delete().in('id', createdEventIds));
+    await remove(`event ${event}`, supabase.from('event_requests').delete().eq('id', id));
   }
 
   for (const event of foreign) await returnToQueue(event);
@@ -766,14 +793,31 @@ async function main() {
     `${decided.status}, by ${labelOf(decided.processedBy)}`,
   );
 
-  // Clarification is asked only under review. Before SCRUM-19 removed the
-  // auto-start, asking on a submitted request started the review as a side
-  // effect, and the version of this script before SCRUM-522 relied on that;
-  // now the holder starts the review first, as on the screen.
   const started = await startEventReview(s1.id, users.B);
   check('the holder the Lead chose can start the review', started.status === 'under_review' && started.reviewingCoordinatorId === users.B, started.status);
-  const clarified = await requestEventClarification(s1.id, 'Please confirm numbers.', users.B);
-  check('and can request clarification', clarified.status === 'pending_clarification', clarified.status);
+
+  // No successful clarification here (removed in SCRUM-486, after the first
+  // live run on 12 October). Clarification history is immutable by design
+  // (030, SCRUM-162): its trigger refuses every delete, the cascade from
+  // deleting the event included, so a live script cannot clean up after
+  // asking for clarification. That run left s1, its organiser and B in the
+  // shared database until they were removed by hand. The two refusals above
+  // stay: requestEventClarification throws them before it writes anything.
+  //
+  // The positive path is in PGlite instead, in parts; no test has a
+  // coordinator the Lead handed the event to call request_event_clarification
+  // and succeed:
+  //  - the holder asks and it is recorded: eventClarificationDatabase.test.js,
+  //    "records a future-dated question, text reply, repeat question and
+  //    closure transactionally";
+  //  - 030 checks the caller against the event's assigned_coordinator_id when
+  //    it runs, and reassignment changes that column, so the new holder is the
+  //    one who may act: SCRUM486_AC7_an_open_clarification_follows_the_event_to_its_new_coordinator
+  //    (AC7-04: the previous holder asks, the new one closes) and
+  //    SCRUM486_AC7_the_new_coordinator_reviews_and_decides_and_the_previous_one_cannot
+  //    (AC7-01: the new holder moves it to pending_clarification, through
+  //    022's change_event_request_status rather than the clarification
+  //    function).
 
   const readCancelled = await getEventRequestForCoordinator(cancelled);
   check(

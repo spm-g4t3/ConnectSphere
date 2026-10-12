@@ -376,7 +376,11 @@ async function main() {
   const oneBody = await one.json();
   check(
     'a single request carries its status display',
-    oneBody.statusDisplay?.label === 'Submitted'
+    // "Requested", not "Submitted": SCRUM-318 AC7 gave 'submitted' the
+    // Organiser-facing label "Requested". This check expected the old label
+    // and would fail for that alone (fixed in SCRUM-486, before the first live
+    // run after 052).
+    oneBody.statusDisplay?.label === 'Requested'
       && oneBody.statusDisplay?.group === 'AWAITING_REVIEW',
     JSON.stringify(oneBody.statusDisplay),
   );
@@ -396,7 +400,11 @@ async function main() {
 
   const after = await (await authed(`/${eventId}/status`)).json();
   check('a refetch reflects the new status', after.status === 'under_review', after.label);
-  check('the organiser-facing label changed with it', after.label === 'Under Review', after.label);
+  // "Under review", not "Under Review": SCRUM-318 AC7 gave 'under_review' the
+  // Organiser-facing label "Under review". This check expected the old label
+  // and would fail for that alone (fixed in SCRUM-486, after the first live
+  // run after 052 failed on it).
+  check('the organiser-facing label changed with it', after.label === 'Under review', after.label);
   check(
     'updated_at advanced, so a change is detectable',
     new Date(after.updatedAt).getTime() > new Date(before.updatedAt).getTime(),
