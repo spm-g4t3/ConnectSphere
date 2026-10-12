@@ -4,6 +4,7 @@
  *
  *   GET  /api/event-requests/unassigned            AC2-04, AC2-05  leadOnly
  *   GET  /api/event-requests/coordinator-workload  AC3-06          leadOnly
+ *   GET  /api/event-requests/assigned              AC6             leadOnly
  *   POST /api/event-requests/:id/assign            AC3-05, AC4     leadOnly
  *   POST /api/event-requests/:id/reassign          AC6-04          coordinatorOrLead
  *
@@ -40,7 +41,7 @@ function createFakeClient(results = []) {
   }
 
   function record(fields) {
-    const call = { table: null, fn: null, args: null, filters: [], inFilters: [], isFilters: [], order: [], ...fields };
+    const call = { table: null, fn: null, args: null, filters: [], inFilters: [], isFilters: [], notFilters: [], order: [], ...fields };
     calls.push(call);
     return call;
   }
@@ -54,6 +55,7 @@ function createFakeClient(results = []) {
         eq(column, value) { call.filters.push([column, value]); return chain; },
         in(column, values) { call.inFilters.push([column, [...values]]); return chain; },
         is(column, value) { call.isFilters.push([column, value]); return chain; },
+        not(column, operator, value) { call.notFilters.push([column, operator, value]); return chain; },
         order(column, options) { call.order.push([column, options]); return chain; },
         single: () => settle(call),
         maybeSingle: () => settle(call),
@@ -216,6 +218,77 @@ describe('SCRUM-486 AC3: GET /coordinator-workload', () => {
     // Not read as an id: the first read is of profiles by role.
     expect(client.calls[0].table).toBe('profiles');
     expect(client.calls[0].filters).toEqual([['role', 'event_coordinator']]);
+  });
+});
+
+
+describe('SCRUM-486 AC6: GET /assigned, the Lead\'s way to an assigned event', () => {
+  const assigned = (client, requireAuth) =>
+    request(appWith({ client, requireAuth })).get('/api/event-requests/assigned');
+
+  it('SCRUM486_AC6_a_lead_reads_every_held_event_with_both_names_and_its_status_display', async () => {
+    const client = createFakeClient([
+      ok([{
+        id: REQUEST_ID, event_name: 'IS212 Industry Night', status: STATUS.APPROVED,
+        proposed_start: '2026-11-01T09:00:00+00:00', organiser_id: ORGANISER_ID, assigned_coordinator_id: COORDINATOR_A,
+      }]),
+      ok([{ id: ORGANISER_ID, full_name: 'Aisha Rahman' }, { id: COORDINATOR_A, full_name: 'Priya Nair' }]),
+    ]);
+
+    const res = await assigned(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{
+      id: REQUEST_ID,
+      eventName: 'IS212 Industry Night',
+      status: STATUS.APPROVED,
+      proposedStart: '2026-11-01T09:00:00+00:00',
+      organiserName: 'Aisha Rahman',
+      assignedCoordinatorId: COORDINATOR_A,
+      assignedCoordinatorName: 'Priya Nair',
+      statusDisplay: expect.objectContaining({ group: 'APPROVED' }),
+    }]);
+  });
+
+  it('SCRUM486_AC6_does_not_read_the_assigned_path_as_a_request_id', async () => {
+    // '/assigned' is one segment, so declared after GET /:id Express would
+    // match it with id === 'assigned' and answer from the Organiser's read: an
+    // eq on id, and a 404 for a list that exists. Asserted from the outside:
+    // the one read is the list's (no eq at all, the held filter), and the
+    // answer is the list's empty array.
+    const client = createFakeClient([ok([])]);
+
+    const res = await assigned(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].filters).toEqual([]);
+    expect(client.calls[0].notFilters).toEqual([['assigned_coordinator_id', 'is', null]]);
+  });
+
+  it.each([
+    ['an Event Coordinator', ROLE.EVENT_COORDINATOR],
+    ['an Event Organiser', ROLE.EVENT_ORGANISER],
+  ])('SCRUM486_AC6_%s_is_refused_the_assigned_list_with_403_and_queries_nothing', async (_label, role) => {
+    // leadOnly, not coordinatorOrLead: a coordinator has the shared queue and
+    // "My events", and this list would show them everyone's caseload.
+    const client = createFakeClient([]);
+
+    const res = await assigned(client, signedInWithRole(role, COORDINATOR_A));
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'This action is restricted to Event Coordinator Leads' });
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM486_AC6_the_assigned_list_answers_401_without_a_token', async () => {
+    const client = createFakeClient([]);
+
+    const res = await assigned(client, signedOut);
+
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
   });
 });
 

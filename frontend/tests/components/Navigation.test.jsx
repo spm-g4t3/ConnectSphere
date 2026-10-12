@@ -137,21 +137,40 @@ function linksOf(role) {
 
 const DASHBOARD_ONLY = [["Dashboard", "/dashboard"]];
 
-/** The Lead's links since SCRUM-486 (SCRUM-519) gave the unassigned queue a route. */
-const LEAD_LINKS = [["Dashboard", "/dashboard"], ["Unassigned Queue", "/unassigned-queue"]];
+/**
+ * The Lead's links: the unassigned queue since SCRUM-486 (SCRUM-519) gave it a
+ * route, and the assigned events since SCRUM-486 AC6 gave the Lead a way to an
+ * event to hand over.
+ */
+const LEAD_LINKS = [
+  ["Dashboard", "/dashboard"],
+  ["Unassigned Queue", "/unassigned-queue"],
+  ["Assigned Events", "/assigned-events"],
+];
 
 describe("SCRUM485_AC4 each new role sees only its own links", () => {
-  it("SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_and_unassigned_queue_links", () => {
-    // AC4-01. By count: a link leaking into this block fails here.
+  it("SCRUM486_AC6_an_event_coordinator_lead_has_exactly_the_dashboard_unassigned_queue_and_assigned_events_links", () => {
+    // AC4-01 of SCRUM-485. By count: a link leaking into this block fails here.
     //
     // Was SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link,
     // expecting DASHBOARD_ONLY. Right when written: SCRUM-485 gave the Lead
     // no page but the dashboard, and a link to a route that did not exist
     // would have landed on the catch-all redirect. SCRUM-486 (SCRUM-519)
-    // added the /unassigned-queue route and its link, so the expectation
-    // moved because a link was added, which is what this count case exists
-    // to force (docs/SCRUM-485.md). Renamed so the name says what it pins.
+    // added the /unassigned-queue route and its link, and the test became
+    // SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_and_unassigned_queue_links,
+    // with two links. That was right too, until SCRUM-486 AC6 added
+    // /assigned-events, so the Lead could reach an assigned event by clicking.
+    // Each time the expectation moved because a link was added, which is what
+    // this count case exists to force (docs/SCRUM-485.md); the count is still
+    // exact, now three. Renamed so the name says what it pins.
     expect(linksOf("event_coordinator_lead")).toEqual(LEAD_LINKS);
+  });
+
+  it("SCRUM486_AC6_the_lead_sees_the_assigned_events_link", () => {
+    // The Lead's way to an event to hand over, by clicking (AC6).
+    renderAs("event_coordinator_lead");
+
+    expect(screen.getByRole("link", { name: "Assigned Events" })).toHaveAttribute("href", "/assigned-events");
   });
 
   it("SCRUM485_AC4_a_safety_officer_has_exactly_the_dashboard_link", () => {

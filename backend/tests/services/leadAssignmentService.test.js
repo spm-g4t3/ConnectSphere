@@ -8,6 +8,7 @@
  *   requestEventClarification    AC8             the wrong-reason fault 052 left
  *   listEventRequestsForReview   AC2-06          the shared queue leaves the unassigned out (SCRUM-520)
  *   getEventClarificationHistory AC6             the Lead reads it, so the event screen loads (SCRUM-521)
+ *   listAssignedEventsForLead    AC6             the Lead's list of held events, the way to the event page
  *
  * A file of its own rather than more blocks in eventRequestService.test.js,
  * because neither fake there can answer these reads: createFakeClient has no
@@ -26,6 +27,7 @@ import { describe, it, expect } from 'vitest';
 import {
   listUnassignedEventRequests,
   listCoordinatorWorkload,
+  listAssignedEventsForLead,
   assignEventRequest,
   requestEventClarification,
   listEventRequestsForReview,
@@ -66,7 +68,7 @@ function createFakeClient(results = []) {
   }
 
   function record(fields) {
-    const call = { table: null, fn: null, args: null, select: null, filters: [], inFilters: [], isFilters: [], order: [], ...fields };
+    const call = { table: null, fn: null, args: null, select: null, filters: [], inFilters: [], isFilters: [], notFilters: [], order: [], ...fields };
     calls.push(call);
     return call;
   }
@@ -80,6 +82,7 @@ function createFakeClient(results = []) {
         eq(column, value) { call.filters.push([column, value]); return chain; },
         in(column, values) { call.inFilters.push([column, [...values]]); return chain; },
         is(column, value) { call.isFilters.push([column, value]); return chain; },
+        not(column, operator, value) { call.notFilters.push([column, operator, value]); return chain; },
         order(column, options) { call.order.push([column, options]); return chain; },
         single: () => settle(call),
         maybeSingle: () => settle(call),
@@ -873,5 +876,133 @@ describe("SCRUM-486 AC1: the Organiser's list carries the coordinator's name", (
 
     expect(row).toHaveProperty('assignedCoordinatorName', null);
     expect(row.assignedCoordinatorId).toBe(COORDINATOR_A);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// AC6: the Lead's list of held events, the way to the event page
+// ---------------------------------------------------------------------------
+describe('SCRUM-486 AC6: the Lead lists every held event in an active status', () => {
+  const held = (id, status, coordinator = COORDINATOR_A) =>
+    unassignedRow({ id, status, assigned_coordinator_id: coordinator });
+
+  // One held event in each active status, and everything the list must leave
+  // out: a submitted request nobody holds (it is in the unassigned queue), a
+  // draft that kept a coordinator (022's reopen), and the three finished
+  // statuses.
+  const TABLE = [
+    held('held-submitted', STATUS.SUBMITTED),
+    held('held-under-review', STATUS.UNDER_REVIEW),
+    held('held-pending-clarification', STATUS.PENDING_CLARIFICATION),
+    held('held-approved', STATUS.APPROVED),
+    held('held-confirmed', STATUS.CONFIRMED),
+    unassignedRow({ id: 'unassigned-submitted' }),
+    held('draft-stale-coordinator', STATUS.DRAFT),
+    held('held-completed', STATUS.COMPLETED),
+    held('held-rejected', STATUS.REJECTED),
+    held('held-cancelled', STATUS.CANCELLED),
+  ];
+
+  // The table fake answers every from() from TABLE, so the name read is
+  // answered separately, as the AC2 tests above do.
+  const overTable = () => {
+    const table = createTableFakeClient(TABLE);
+    return {
+      from: (name) => (name === 'profiles'
+        ? { select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }
+        : table.from(name)),
+    };
+  };
+
+  it('SCRUM486_AC6_the_assigned_list_holds_a_held_event_in_each_active_status', async () => {
+    // Approved and confirmed included: the coordinators' queue stops at
+    // pending clarification, and these are the events where an absent
+    // coordinator matters most. The same statuses the picker counts (AC3).
+    const events = await listAssignedEventsForLead({ client: overTable() });
+
+    expect(events.map((event) => event.id).sort()).toEqual([
+      'held-approved', 'held-confirmed', 'held-pending-clarification', 'held-submitted', 'held-under-review',
+    ]);
+  });
+
+  it('SCRUM486_AC6_the_assigned_list_leaves_out_the_unassigned_drafts_and_finished_events', async () => {
+    const ids = (await listAssignedEventsForLead({ client: overTable() })).map((event) => event.id);
+
+    for (const id of ['unassigned-submitted', 'draft-stale-coordinator', 'held-completed', 'held-rejected', 'held-cancelled']) {
+      expect(ids).not.toContain(id);
+    }
+  });
+
+  it('SCRUM486_AC6_the_assigned_list_asks_for_the_earliest_event_first_and_no_start_last', async () => {
+    // SCRUM-487 AC3: earliest event first. nullsFirst: false, because Postgres
+    // sorts nulls first on ascending and an undated event would lead the list.
+    const client = createFakeClient([ok([])]);
+
+    await listAssignedEventsForLead({ client });
+
+    const [read] = client.calls;
+    expect(read.table).toBe('event_requests');
+    expect(read.order).toEqual([
+      ['proposed_start', { ascending: true, nullsFirst: false }],
+      ['id', { ascending: true }],
+    ]);
+    expect(read.notFilters).toEqual([['assigned_coordinator_id', 'is', null]]);
+    expect(read.inFilters).toEqual([['status', [
+      STATUS.SUBMITTED, STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION, STATUS.APPROVED, STATUS.CONFIRMED,
+    ]]]);
+  });
+
+  it('SCRUM486_AC6_the_assigned_list_names_the_coordinator_and_the_organiser_from_one_profiles_read', async () => {
+    // One read of profiles for everyone on the page, each asked for once.
+    const client = createFakeClient([
+      ok([
+        held('a', STATUS.APPROVED, COORDINATOR_A),
+        held('b', STATUS.UNDER_REVIEW, COORDINATOR_B),
+        unassignedRow({
+          id: 'c', status: STATUS.CONFIRMED, assigned_coordinator_id: COORDINATOR_A,
+          organiser_id: OTHER_ORGANISER_ID, proposed_start: null,
+        }),
+      ]),
+      ok([
+        profileRow(COORDINATOR_A, 'Priya Nair'),
+        profileRow(COORDINATOR_B, 'Omar Okafor'),
+        profileRow(ORGANISER_ID, 'Aisha Rahman'),
+      ]),
+    ]);
+
+    const events = await listAssignedEventsForLead({ client });
+
+    expect(trail(client)).toEqual(['event_requests', 'profiles']);
+    expect([...client.calls[1].inFilters[0][1]].sort())
+      .toEqual([COORDINATOR_A, COORDINATOR_B, ORGANISER_ID, OTHER_ORGANISER_ID].sort());
+    expect(events).toEqual([
+      {
+        id: 'a', eventName: 'IS212 Industry Night', status: STATUS.APPROVED, proposedStart: '2026-11-01T09:00:00+00:00',
+        organiserName: 'Aisha Rahman', assignedCoordinatorId: COORDINATOR_A, assignedCoordinatorName: 'Priya Nair',
+      },
+      {
+        id: 'b', eventName: 'IS212 Industry Night', status: STATUS.UNDER_REVIEW, proposedStart: '2026-11-01T09:00:00+00:00',
+        organiserName: 'Aisha Rahman', assignedCoordinatorId: COORDINATOR_B, assignedCoordinatorName: 'Omar Okafor',
+      },
+      {
+        // An organiser with no profiles row is named null, not left out.
+        id: 'c', eventName: 'IS212 Industry Night', status: STATUS.CONFIRMED, proposedStart: null,
+        organiserName: null, assignedCoordinatorId: COORDINATOR_A, assignedCoordinatorName: 'Priya Nair',
+      },
+    ]);
+  });
+
+  it('SCRUM486_AC6_an_empty_assigned_list_is_an_empty_array_and_no_profiles_read', async () => {
+    const client = createFakeClient([ok([])]);
+
+    expect(await listAssignedEventsForLead({ client })).toEqual([]);
+    expect(trail(client)).toEqual(['event_requests']);
+  });
+
+  it('SCRUM486_AC6_a_failed_read_of_the_assigned_list_is_an_error_not_an_empty_list', async () => {
+    const client = createFakeClient([dbError('XX000', 'boom')]);
+
+    expect(await errorFrom(listAssignedEventsForLead({ client }))).toBeInstanceOf(Error);
   });
 });

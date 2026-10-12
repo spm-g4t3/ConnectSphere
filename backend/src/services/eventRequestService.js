@@ -2009,6 +2009,72 @@ export async function listCoordinatorWorkload({ client } = {}) {
 
 
 /**
+ * Every event someone holds in an active status, for the Lead (SCRUM-486 AC6).
+ *
+ * The Lead may hand any held event to another coordinator (AC6), from the
+ * event's own page. Until this read, nothing linked a Lead to that page: an
+ * assigned request leaves the unassigned queue, and the coordinators' queue
+ * and "My events" are coordinatorOnly. This is the list that leads there, and
+ * the first slice of SCRUM-487 AC3's list, which will extend it (filters,
+ * per-coordinator counts, finished events, the unassigned count) rather than
+ * replace it.
+ *
+ * ACTIVE_EVENT_STATUSES, not a list of its own, so the events here are exactly
+ * the ones the picker counts as "N active events" beside each name, and when
+ * SCRUM-488 adds the safety statuses to that constant, both pick them up. Not
+ * the coordinators' queue statuses: those stop at pending clarification, and
+ * approved and confirmed events, where an absent coordinator matters most, are
+ * the ones a Lead most needs to reach.
+ *
+ * Earliest event first (SCRUM-487 AC3), by proposed_start, nulls last for the
+ * reason listEventRequestsForCoordinator gives, then id so two refetches never
+ * reshuffle.
+ *
+ * Only the columns a row shows, not COLUMNS: the row opens the event page,
+ * which reads the full event itself. The organiser's and the coordinator's
+ * names come from one profiles read narrowed to the people on this list
+ * (readNames), skipped when the list is empty, as AC1-06 reads coordinators
+ * for the Organiser's list. Who may call it is decided at the route: leadOnly.
+ *
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<Array<{ id: string, eventName: string, status: string,
+ *   proposedStart: string|null, organiserName: string|null,
+ *   assignedCoordinatorId: string, assignedCoordinatorName: string|null }>>}
+ */
+export async function listAssignedEventsForLead({ client } = {}) {
+  const db = await resolveClient(client);
+
+  const { data, error } = await db
+    .from('event_requests')
+    .select('id, event_name, status, proposed_start, organiser_id, assigned_coordinator_id')
+    .in('status', ACTIVE_EVENT_STATUSES)
+    .not('assigned_coordinator_id', 'is', null)
+    .order('proposed_start', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true });
+
+  if (error) throw translateError(error);
+
+  const rows = data ?? [];
+
+  // Nothing held is not a missing resource: 200 [].
+  if (rows.length === 0) return [];
+
+  const nameOf = await readNames(db, rows.flatMap((row) => [row.organiser_id, row.assigned_coordinator_id]));
+
+  return rows.map((row) => ({
+    id: row.id,
+    eventName: row.event_name,
+    status: row.status,
+    proposedStart: row.proposed_start ?? null,
+    organiserName: nameOf(row.organiser_id),
+    assignedCoordinatorId: row.assigned_coordinator_id,
+    assignedCoordinatorName: nameOf(row.assigned_coordinator_id),
+  }));
+}
+
+
+/**
  * The Lead assigns an unassigned submitted request to one Event Coordinator
  * (SCRUM-486 AC3, AC4).
  *

@@ -71,7 +71,9 @@ const NAV_LINKS_BY_ROLE = {
   // their link here when they add the route.
   //
   // SCRUM-486 (SCRUM-519) added the Lead's unassigned queue, with its route
-  // /unassigned-queue. The coordinator overview is still SCRUM-487's.
+  // /unassigned-queue, and SCRUM-486 AC6 the list of assigned events at
+  // /assigned-events, the Lead's way to an event to hand over. SCRUM-487's
+  // coordinator overview extends that list rather than adding another.
   //
   // The keys are the whole normalised role, as TECHNICAL_SUPPORT_STAFF above
   // learned the hard way. EVENT_COORDINATOR would be the Coordinator's block,
@@ -81,6 +83,7 @@ const NAV_LINKS_BY_ROLE = {
   EVENT_COORDINATOR_LEAD: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/unassigned-queue", label: "Unassigned Queue" },
+    { to: "/assigned-events", label: "Assigned Events" },
   ],
   SAFETY_OFFICER: [
     { to: "/dashboard", label: "Dashboard" },

@@ -55,10 +55,10 @@
  *    past draft through GET /:id/review. Moving requests through later
  *    planning statuses remains a separate workflow.
  *  - The Event Coordinator Lead's routes (SCRUM-486) are gated per route too,
- *    by leadOnly: the unassigned queue, the picker's coordinator workload and
- *    the first assignment. POST /:id/reassign admits a Lead as well as a
- *    coordinator; which of them may hand over this event is the database's
- *    question, as before.
+ *    by leadOnly: the unassigned queue, the picker's coordinator workload, the
+ *    list of assigned events (AC6) and the first assignment. POST
+ *    /:id/reassign admits a Lead as well as a coordinator; which of them may
+ *    hand over this event is the database's question, as before.
  *
  * Ownership is proved by this router, not assumed from the service. Three of
  * the routes below open with an explicit getEventRequestForOrganiser call and
@@ -83,6 +83,7 @@ import {
   listCoordinators,
   listUnassignedEventRequests,
   listCoordinatorWorkload,
+  listAssignedEventsForLead,
   listAssignmentHistory,
   createEventRequest,
   updateEventRequest,
@@ -382,6 +383,32 @@ export function createEventRequestRouter({
   router.get('/coordinator-workload', leadOnly, async (req, res) => {
     try {
       res.status(200).json(await listCoordinatorWorkload({ client }));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-486 AC6: every event someone holds in an active status, earliest
+   * first, each with its organiser's and coordinator's names and statusDisplay.
+   * The Lead's way to the event page they hand an event over from.
+   *
+   * leadOnly, not coordinatorOrLead. Coordinators already have the shared
+   * queue and "My events"; this list is the Lead's supervision ("view all
+   * coordinator assignments"), and widening it would show every coordinator
+   * everyone's caseload, the reason /coordinator-workload is the Lead's alone.
+   *
+   * DECLARATION ORDER IS LOAD-BEARING, as above: '/assigned' is one segment,
+   * so declared after GET /:id it would be read as id === 'assigned' and the
+   * Lead would get the Organiser's 404 instead of the list. Do not move it
+   * below /:id.
+   *
+   * A bare array; none is 200 []. Statuses: 200, 401, 403 unless a Lead, 500.
+   */
+  router.get('/assigned', leadOnly, async (req, res) => {
+    try {
+      const events = await listAssignedEventsForLead({ client });
+      res.status(200).json(events.map(withStatusDisplay));
     } catch (err) {
       handleError(err, res);
     }

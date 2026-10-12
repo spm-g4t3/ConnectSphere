@@ -12,10 +12,12 @@
 // way: it loads the event by id through GET /:id/review, which since SCRUM-521
 // admits the Lead, and renders the same screen.
 //
-// Deliberately not a list. The list a Lead would choose an event from is the
-// coordinator overview, which is SCRUM-487's; building one here would be built
-// twice and thrown away once. Until then the Lead reaches an event by its
-// address, and SCRUM-487's overview will link here.
+// Deliberately not a list. The Lead chooses an event from AssignedEvents
+// (/assigned-events, SCRUM-486 AC6), whose rows link here. This page said
+// until then that the Lead reached an event only by its address; the AC1
+// walkthrough on 12 October showed that was not "reassign events where
+// necessary", so the list was built as the first slice of SCRUM-487's
+// coordinator overview, which extends it and keeps linking here.
 //
 // Open to coordinators too: it is the same read they already have, and gives
 // an event a link of its own. The server decides what either may do on it.

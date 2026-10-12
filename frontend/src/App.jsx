@@ -11,6 +11,7 @@ import VenueCatalogue from "./components/VenueCatalogue";
 import ReviewQueue from "./components/ReviewQueue";
 import MyAssignedEvents from "./components/MyAssignedEvents";
 import UnassignedQueue from "./components/UnassignedQueue";
+import AssignedEvents from "./components/AssignedEvents";
 import EventRequestReviewPage from "./components/EventRequestReviewPage";
 import MyBookingRequests from "./components/MyBookingRequests";
 import EquipmentCatalogue from "./components/EquipmentCatalogue";
@@ -169,12 +170,30 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
+        {/* SCRUM-486 AC6: every event someone holds in an active status, for
+            the Event Coordinator Lead, each row opening the event's page below.
+            Gated as /unassigned-queue is, for the same reason: GET
+            /event-requests/assigned answers 403 to anyone else regardless.
+            Wrapped in the coordinator class, not the Lead's, as the event page
+            below is: App.css colours the status badge under
+            .dashboard--coordinator only, and this list shows one per row. */}
+        <Route
+          path="/assigned-events"
+          element={
+            <ProtectedRoute allowedRoles={["event_coordinator_lead"]}>
+              <div className="dashboard dashboard--coordinator">
+                <AssignedEvents />
+              </div>
+            </ProtectedRoute>
+          }
+        />
         {/* SCRUM-486 (SCRUM-521): one event's coordinator screen by its address,
             so the Event Coordinator Lead can open an event they do not hold and
             hand it over (AC6). Coordinators may open it too. allowedRoles
             mirrors GET /event-requests/:id/review's gate; the API answers 403
-            to anyone else regardless. No list leads here yet: the Lead's
-            coordinator overview is SCRUM-487's (see the page's header).
+            to anyone else regardless. The Lead reaches it from
+            /assigned-events above; SCRUM-487's coordinator overview will
+            extend that list (see the page's header).
 
             The coordinator wrapper for both roles, because App.css colours the
             status badge under .dashboard--coordinator only. */}

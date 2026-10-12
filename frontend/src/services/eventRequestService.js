@@ -463,6 +463,20 @@ export async function listCoordinatorWorkload() {
 }
 
 /**
+ * Every event someone holds in an active status, earliest event first, for
+ * the Lead (SCRUM-486 AC6): the way to an assigned event's page, where the
+ * Lead hands it over. Each row is { id, eventName, status, statusDisplay,
+ * proposedStart, organiserName, assignedCoordinatorId,
+ * assignedCoordinatorName }. Possibly empty.
+ *
+ * @returns {Promise<Object[]>}
+ */
+export async function listAssignedEventsForLead() {
+  const response = await apiClient.get("/event-requests/assigned");
+  return response.data;
+}
+
+/**
  * The Lead assigns an unassigned request to one Event Coordinator (SCRUM-486
  * AC3). The note is optional and becomes the assignment history's handover
  * note; the Organiser never sees it.

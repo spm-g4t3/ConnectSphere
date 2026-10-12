@@ -331,6 +331,26 @@ provokes two at once, and needs two real connections.
 | AC6-04 | — | `POST /:id/reassign` | Admits `event_coordinator` and `event_coordinator_lead`; every other role 403 with nothing queried | Proved (route): `SCRUM486_AC6_a_lead_reaches_the_handover_function`, `SCRUM486_AC6_%s_is_refused_the_handover_with_403_and_queries_nothing` |
 | AC6-05 | HELD BY A, open on the event screen | As A, as LEAD, as B | The hand-over action for A and for LEAD; none for B | Proved (screen): `SCRUM486_AC6_a_lead_sees_the_hand_over_action_on_an_event_they_do_not_hold`, `SCRUM486_AC6_the_holder_still_sees_it`, `SCRUM486_AC6_a_coordinator_who_holds_nothing_does_not` |
 | AC6-06 | HELD BY A, `under_review`, A the reviewer, no decision | LEAD reassigns to B | The reviewer follows to B, as 018 does for a holder's handover. A decided event keeps its reviewer | Proved (pglite): `SCRUM486_AC6_the_reviewer_follows_an_undecided_event_the_lead_moves`, `SCRUM486_AC6_a_decided_event_keeps_its_reviewer_when_the_lead_moves_it` |
+| AC6-07 | A held event in each active status | `listAssignedEventsForLead` | Submitted, under review, pending clarification, approved and confirmed, each listed: the picker's `ACTIVE_EVENT_STATUSES` | Proved (svc): `SCRUM486_AC6_the_assigned_list_holds_a_held_event_in_each_active_status` |
+| AC6-08 | An UNASSIGNED submitted request, a draft with a stale coordinator, held completed, rejected and cancelled events | `listAssignedEventsForLead` | None of them listed | Proved (svc): `SCRUM486_AC6_the_assigned_list_leaves_out_the_unassigned_drafts_and_finished_events` |
+| AC6-09 | — | `listAssignedEventsForLead`'s read | Ordered by `proposed_start` ascending with nulls last, then `id`; held only (`assigned_coordinator_id` not null) | Proved (svc): `SCRUM486_AC6_the_assigned_list_asks_for_the_earliest_event_first_and_no_start_last` |
+| AC6-10 | Events held by A and B, two organisers, one with no profile | `listAssignedEventsForLead` | One `profiles` read for everyone on the page; each row names its organiser and coordinator, null where there is no name | Proved (svc): `SCRUM486_AC6_the_assigned_list_names_the_coordinator_and_the_organiser_from_one_profiles_read` |
+| AC6-11 | Nothing held | `listAssignedEventsForLead` | `[]`, and no `profiles` read | Proved (svc): `SCRUM486_AC6_an_empty_assigned_list_is_an_empty_array_and_no_profiles_read` |
+| AC6-12 | The read fails | `listAssignedEventsForLead` | An error, not an empty list | Proved (svc): `SCRUM486_AC6_a_failed_read_of_the_assigned_list_is_an_error_not_an_empty_list` |
+| AC6-13 | LEAD | `GET /assigned` | 200, each row with both names and its `statusDisplay` | Proved (route): `SCRUM486_AC6_a_lead_reads_every_held_event_with_both_names_and_its_status_display` |
+| AC6-14 | LEAD | `GET /assigned` | The list's read, not `GET /:id`'s with `id === 'assigned'`: the route is declared before `/:id`. Moved below it, this test fails with a 404 | Proved (route): `SCRUM486_AC6_does_not_read_the_assigned_path_as_a_request_id` |
+| AC6-15 | COORD, ORG | `GET /assigned` | 403, nothing queried: `leadOnly`, not `coordinatorOrLead` | Proved (route): `SCRUM486_AC6_%s_is_refused_the_assigned_list_with_403_and_queries_nothing` |
+| AC6-16 | No token | `GET /assigned` | 401, nothing queried | Proved (route): `SCRUM486_AC6_the_assigned_list_answers_401_without_a_token` |
+| AC6-17 | Two held events | Render `AssignedEvents` | Each row: event name, organiser, coordinator, status badge, start; in the server's order | Proved (screen): `SCRUM486_AC6_each_row_names_the_event_organiser_coordinator_status_and_start` |
+| AC6-18 | A row with no names and no start | Render | "No name on record" and "Date not set", never a blank | Proved (screen): `SCRUM486_AC6_a_missing_name_or_date_is_said_never_left_blank` |
+| AC6-19 | A held event | Click "Open" | A router link to `/event-requests/<id>`, followed to that route | Proved (screen): `SCRUM486_AC6_open_links_to_the_events_page_and_goes_there` |
+| AC6-20 | The read is in flight | Render | "Loading..." until it arrives | Proved (screen): `SCRUM486_AC6_says_loading_until_the_list_arrives` |
+| AC6-21 | Nothing held | Render | Says nothing is held; no rows | Proved (screen): `SCRUM486_AC6_an_empty_list_says_nothing_is_held_and_invents_no_rows` |
+| AC6-22 | The read answers 403, 401 or 502 | Render | The status's own message as an alert; no empty state | Proved (screen): `SCRUM486_AC6_a_%s_is_said_and_shows_no_empty_state` |
+| AC6-23 | The read fails with no response | Render | The generic message as an alert | Proved (screen): `SCRUM486_AC6_a_failure_with_no_response_is_still_said` |
+| AC6-24 | LEAD | Render `Navigation` | Exactly three links: Dashboard, Unassigned Queue, Assigned Events | Proved (nav): `SCRUM486_AC6_an_event_coordinator_lead_has_exactly_the_dashboard_unassigned_queue_and_assigned_events_links` (renamed from SCRUM-485's count case; its comment says why) |
+| AC6-25 | LEAD | Render `Navigation` | "Assigned Events" → `/assigned-events` | Proved (nav): `SCRUM486_AC6_the_lead_sees_the_assigned_events_link` |
+| AC6-26 | HELD BY A | LEAD opens Assigned Events, opens A's event, hands it to B; the list then shows B | Every step by clicking | **Not proved by a test.** The pieces are (AC6-13, AC6-19, AC6-05, AC6-02); end to end over PGlite would need `leadReassignmentWalkthrough.test.js`'s adapter to answer a list read, which it does not, and it was not extended. Pending Calven's check by hand |
 
 ---
 
@@ -479,7 +499,7 @@ deleted to make room.
 | `has no other writer in any migration` | `backend/tests/db/eventStatusHistoryMigration.test.js` | Lists the files whose functions write the status history (`021_event_status_history.sql: 2`, `022_event_status_transitions.sql: 1`, `029_event_request_decisions_functions.sql: 2`). 052 redefines `submit_event_request` and `start_event_review`, both of which write a history row, so 052 joins the list with its count. Right when written: it pinned every writer there was |
 | `SCRUM485_AC5_%s_refuses_%s_with_403_and_queries_nothing` (its `GET /coordinators` rows) | route | Asserts a Lead is refused the coordinator list. If the picker reads that route, this row changes (open question 1) |
 | `SCRUM485_AC3_an_event_coordinator_lead_gets_the_lead_dashboard`, `SCRUM485_AC3_the_%s_dashboard_calls_no_service`, `SCRUM485_AC3_the_%s_dashboard_has_no_link_to_a_page_that_does_not_exist` | `frontend/tests/components/Dashboard.test.jsx` | They pin the Lead's dashboard as a placeholder that fetches nothing. The queue makes it real (AC2-07), for the Lead only; the Safety Officer's cases stand |
-| `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link` | `frontend/tests/components/Navigation.test.jsx` | Pins one link. Changes if the queue gets a route and a link of its own; SCRUM-485's design said the count case would force exactly this update. **Done in SCRUM-519:** now `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_and_unassigned_queue_links` |
+| `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link` | `frontend/tests/components/Navigation.test.jsx` | Pins one link. Changes if the queue gets a route and a link of its own; SCRUM-485's design said the count case would force exactly this update. **Done in SCRUM-519:** then `SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_and_unassigned_queue_links`; since AC6's assigned events (12 October), `SCRUM486_AC6_an_event_coordinator_lead_has_exactly_the_dashboard_unassigned_queue_and_assigned_events_links`, three links |
 | Sections 1 and 2 of `check-coordinator-assignment.js` (the selection rule; assignment on submission), and section 4's "previous coordinator can no longer hand it over" | live | Sections 1 and 2 test what this story removes. Section 4's refusal of the outgoing coordinator still holds, but needs a Lead case beside it |
 
 ---
@@ -544,15 +564,18 @@ deleted to make room.
 | Every test named here | SCRUM-522 |
 | The implementation | The SCRUM-486 subtasks between them |
 
-**Tally:** 71 cases (64 under the criteria, 7 traps), counted from the tables.
-After SCRUM-522: **66 proved**; **5 not**. After SCRUM-523: **67 proved**; **4 not**.
-After the live runs of 12 October: **68 proved**; **3 not**, each marked in its row
-and listed here. AC1-06 was the fifth: SCRUM-522 found the Organiser's row could
+**Tally:** 91 cases (84 under the criteria, 7 traps), counted from the tables.
+After SCRUM-522: **66 proved**; **5 not** (of 71). After SCRUM-523: **67 proved**;
+**4 not**. After the live runs of 12 October: **68 proved**; **3 not**. After AC6's
+list of assigned events (12 October, AC6-07 to AC6-26, twenty cases): **87
+proved**; **4 not**, each marked in its row and listed here. AC1-06 was the fifth: SCRUM-522 found the Organiser's row could
 not name the coordinator, and SCRUM-523 added the name to the Organiser's list.
 AC4-05 was the fourth: the real race, in the live script, had not been run; it
 has now, twice (proved live, not in CI).
 
 - **AC5-03**, cannot be written: the safety statuses do not exist yet.
+- **AC6-26**, not proved by a test: the Lead's click-through end to end. Each step
+  is proved on its own; pending Calven's check by hand.
 - **AC8-05**, met differently: one 409 message names both causes.
 - **AC10-06**, unmet: the new notices are not yet worded (SCRUM-172).
 
@@ -567,7 +590,7 @@ and AC3-06's pglite half (in the live script).
 | AC3 | 7 |
 | AC4 | 5 |
 | AC5 | 5 |
-| AC6 | 6 |
+| AC6 | 26 |
 | AC7 | 6 |
 | AC8 | 5 |
 | AC9 | 6 |
