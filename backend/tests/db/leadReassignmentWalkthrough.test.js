@@ -142,6 +142,11 @@ describe('SCRUM-486 AC6, AC7: a Lead hands A\'s event to B, over HTTP, on a real
     // what this path needs, so it is added as 030 declares it.
     await db.exec('alter table event_requests add column clarification_reply_by_date date');
     await db.exec(migration('041_lead_assignment.sql'));
+    // SCRUM-370's cancellation columns. Since the merge of dev the services'
+    // COLUMNS reads them (cancellation_reason, cancellation_initiator,
+    // cancelled_by, cancelled_at), so every read on this path needs them.
+    // 042 only adds a type and columns; nothing on this path uses them.
+    await db.exec(migration('042_event_cancellation_fields.sql'));
 
     const user = async (email, role, name) => {
       const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
