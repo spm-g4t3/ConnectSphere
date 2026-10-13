@@ -11,7 +11,7 @@
 // seam, and check the page without one never claims to have registered anyone.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
@@ -21,9 +21,6 @@ import { getOpenEvent } from "../../src/services/openEventService";
 vi.mock("../../src/services/openEventService", () => ({
   getOpenEvent: vi.fn(),
 }));
-
-const TIME = { hour: "2-digit", minute: "2-digit" };
-const DATE = { weekday: "short", year: "numeric", month: "short", day: "numeric" };
 
 function event(overrides = {}) {
   return {
@@ -90,9 +87,9 @@ describe("SCRUM495_AC5 what the details show", () => {
 
     expect(await screen.findByRole("heading", { name: "Open Day", level: 1 })).toBeInTheDocument();
     const facts = screen.getByText("Date").closest("dl");
-    expect(facts).toHaveTextContent(new Date(e.startsAt).toLocaleDateString(undefined, DATE));
-    expect(facts).toHaveTextContent(new Date(e.startsAt).toLocaleTimeString(undefined, TIME));
-    expect(facts).toHaveTextContent(new Date(e.endsAt).toLocaleTimeString(undefined, TIME));
+    expect(facts).toHaveTextContent(/Oct 25, 2026|25 Oct 2026/);
+    expect(facts).toHaveTextContent("09:00");
+    expect(facts).toHaveTextContent("11:30");
     expect(facts).toHaveTextContent("12 places left");
     expect(screen.getByText(/Come along\./)).toHaveTextContent("Come along. Bring a friend.");
   });
@@ -557,9 +554,65 @@ describe("SCRUM495_AC2_AC3 registering, then the page the server describes", () 
     attempt.resolve();
     await screen.findByText("You are registered for Open Day.");
   });
+
+  it("ignores a second click that arrives before the page has re-rendered", async () => {
+    const attempt = pending();
+    const onRegister = vi.fn().mockReturnValue(attempt.promise);
+    vi.mocked(getOpenEvent).mockResolvedValue(event());
+
+    renderDetails({ onRegister });
+    const button = await screen.findByRole("button", { name: "Register" });
+    act(() => {
+      button.click();
+      button.click();
+    });
+
+    expect(onRegister).toHaveBeenCalledTimes(1);
+    attempt.resolve();
+    await screen.findByText("You are registered for Open Day.");
+  });
+
+  it("names a nameless event plainly, on the heading and in the confirmation", async () => {
+    vi.mocked(getOpenEvent).mockResolvedValue(event({ eventName: "" }));
+
+    renderDetails({ onRegister: vi.fn().mockResolvedValue() });
+    expect(await screen.findByRole("heading", { name: "Unnamed event", level: 1 })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    expect(await screen.findByText("You are registered for this event.")).toBeInTheDocument();
+  });
 });
 
 describe("SCRUM495 loading and error behaviour during a refresh", () => {
+  it("gives a general message when the first read gets no response at all", async () => {
+    vi.mocked(getOpenEvent).mockRejectedValue(new Error("Network Error"));
+
+    renderDetails();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This event could not be loaded. Please try again.");
+  });
+
+  it("keeps the newest answer when an older read fails after it", async () => {
+    const slow = pending();
+    const fast = pending();
+    vi.mocked(getOpenEvent)
+      .mockResolvedValueOnce(event())
+      .mockReturnValueOnce(slow.promise)
+      .mockReturnValueOnce(fast.promise);
+
+    renderDetails({ onRegister: vi.fn() });
+    await screen.findByText("12 places left");
+    returnToTab();
+    returnToTab();
+    fast.resolve(event({ placesLeft: 3 }));
+    await screen.findByText("3 places left");
+    slow.reject({ response: { status: 500 } });
+
+    await waitFor(() => expect(getOpenEvent).toHaveBeenCalledTimes(3));
+    expect(screen.getByText("3 places left")).toBeInTheDocument();
+    expect(screen.queryByText(/Could not refresh this event/)).not.toBeInTheDocument();
+  });
+
   it("keeps the last details with a notice, and pauses Register, when a refresh cannot reach the server", async () => {
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event())

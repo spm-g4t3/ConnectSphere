@@ -1,18 +1,8 @@
 /**
- * Open events route.
- *
- * SCRUM-495: GET / lists the events an Attendee can register for, and GET /:id
- * opens one of them.
- *
- * Attendee only (SCRUM-453 AC3, SCRUM-495 AC1): requireAuth establishes who is
- * calling from the token and the role comes from profiles, never from the
- * request, then requireRole refuses every other role with 403. A caller with no
- * token gets 401 before anything is read.
- *
- * A factory over an injected client, verifier and clock, like the other
- * routers, so the tests drive real Express routing without credentials.
+ * GET / lists the events an Attendee can register for; GET /:id opens one.
+ * Attendee only: the role comes from profiles via requireAuth, never the request.
+ * A factory over an injected client and clock so tests need no credentials.
  */
-
 import express from 'express';
 
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';

@@ -1,9 +1,7 @@
 /* global process -- the time zone tests set TZ for the Node process the tests run in */
 // openEventDisplay.test.js
 //
-// SCRUM-495 (AC3). How availability reads on the browse list. Date and time
-// formatting is covered through the page's own tests, which read the same
-// locale calls.
+// SCRUM-495 (AC3). How availability, dates and times read on the browse list.
 
 import { describe, it, expect, afterEach } from "vitest";
 
@@ -31,12 +29,8 @@ describe("availabilityLabel", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Time zones: the API sends instants with an offset, and the device decides how
-// they read. The same instant must read as the local date and time in each zone.
-// ---------------------------------------------------------------------------
-
-
+// The API sends instants with an offset; the page shows them in Singapore time
+// whatever the device's own zone is.
 const ORIGINAL_TZ = process.env.TZ;
 
 afterEach(() => {
@@ -44,42 +38,42 @@ afterEach(() => {
   else process.env.TZ = ORIGINAL_TZ;
 });
 
-describe("SCRUM495_AC4 date and times follow the device's time zone", () => {
-  // 2026-10-25T01:00Z is 09:00 on the 25th in Singapore and 21:00 on the 24th in New York.
-  const startsAt = "2026-10-25T01:00:00.000Z";
-  const endsAt = "2026-10-25T03:30:00.000Z";
+describe.each(["Asia/Singapore", "America/New_York", "Pacific/Kiritimati"])(
+  "SCRUM495_AC3 date and times read in Singapore time on a device set to %s",
+  (deviceZone) => {
+    // 01:00Z is 09:00 on the 25th in Singapore, 21:00 on the 24th in New York.
+    const startsAt = "2026-10-25T01:00:00.000Z";
+    const endsAt = "2026-10-25T03:30:00.000Z";
 
-  it("reads 09:00 on the 25th in Singapore", () => {
-    process.env.TZ = "Asia/Singapore";
+    it("reads 09:00 to 11:30 on the 25th", () => {
+      process.env.TZ = deviceZone;
 
-    expect(formatEventDate(startsAt)).toContain("25");
-    expect(formatEventStartTime(startsAt)).toContain("09:00");
-    expect(formatEventEndTime(startsAt, endsAt)).toContain("11:30");
-  });
+      expect(formatEventDate(startsAt)).toContain("25 Oct 2026");
+      expect(formatEventStartTime(startsAt)).toContain("09:00");
+      expect(formatEventEndTime(startsAt, endsAt)).toContain("11:30");
+    });
 
-  it("reads 21:00 on the 24th in New York, an earlier calendar day than Singapore", () => {
-    process.env.TZ = "America/New_York";
+    it("shows the end date only where the event crosses midnight in Singapore", () => {
+      // 15:00Z to 17:00Z is 23:00 to 01:00 the next day in Singapore, the same afternoon in New York.
+      process.env.TZ = deviceZone;
 
-    expect(formatEventDate(startsAt)).toContain("24");
-    expect(formatEventStartTime(startsAt)).toMatch(/21:00|09:00/);
-    expect(formatEventEndTime(startsAt, endsAt)).toMatch(/23:30|11:30/);
-  });
+      expect(formatEventEndTime("2026-10-25T15:00:00.000Z", "2026-10-25T17:00:00.000Z")).toContain("26 Oct 2026");
+      expect(formatEventEndTime("2026-10-25T01:00:00.000Z", "2026-10-25T03:00:00.000Z")).not.toMatch(/Oct/);
+    });
 
-  it("accepts the same instant written with an offset", () => {
-    process.env.TZ = "Asia/Singapore";
+    it("accepts the same instant written with an offset", () => {
+      process.env.TZ = deviceZone;
 
-    expect(formatEventStartTime("2026-10-25T09:00:00+08:00")).toBe(formatEventStartTime(startsAt));
-    expect(formatEventDate("2026-10-25T09:00:00+08:00")).toBe(formatEventDate(startsAt));
-  });
+      expect(formatEventStartTime("2026-10-25T09:00:00+08:00")).toBe(formatEventStartTime(startsAt));
+      expect(formatEventDate("2026-10-25T09:00:00+08:00")).toBe(formatEventDate(startsAt));
+    });
+  },
+);
 
-  it("shows the end date only where the event crosses midnight in the reader's zone", () => {
-    // 15:00Z to 17:00Z: 23:00 to 01:00 the next day in Singapore, the same afternoon in New York.
-    const late = { startsAt: "2026-10-25T15:00:00.000Z", endsAt: "2026-10-25T17:00:00.000Z" };
-
-    process.env.TZ = "Asia/Singapore";
-    expect(formatEventEndTime(late.startsAt, late.endsAt)).toContain("26");
-
-    process.env.TZ = "America/New_York";
-    expect(formatEventEndTime(late.startsAt, late.endsAt)).not.toMatch(/Oct|,/);
+describe("SCRUM495_AC3 unreadable times", () => {
+  it("falls back to plain text", () => {
+    expect(formatEventDate(null)).toBe("Date to be confirmed");
+    expect(formatEventStartTime("not a date")).toBe("Not set");
+    expect(formatEventEndTime("2026-10-25T01:00:00.000Z", undefined)).toBe("Not set");
   });
 });

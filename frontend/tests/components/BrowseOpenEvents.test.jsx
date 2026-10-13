@@ -4,8 +4,7 @@
 // own module, so what is under test is what the page does with each answer:
 // the order it was given, the date, times and availability it shows, the
 // Full and Registered marks, and the loading, error and empty states. Dates
-// and times are expected through the same locale calls the page uses, so the
-// test does not depend on the machine's time zone.
+// and times are Singapore time (09:00 for 01:00Z), whatever the machine's zone.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -18,9 +17,6 @@ import { getOpenEvents } from "../../src/services/openEventService";
 vi.mock("../../src/services/openEventService", () => ({
   getOpenEvents: vi.fn(),
 }));
-
-const TIME = { hour: "2-digit", minute: "2-digit" };
-const DATE = { weekday: "short", year: "numeric", month: "short", day: "numeric" };
 
 function event(overrides = {}) {
   return {
@@ -89,9 +85,9 @@ describe("SCRUM495_AC3 what each row shows", () => {
 
     const row = within(await screen.findByRole("list")).getByRole("listitem");
     expect(within(row).getByRole("link", { name: "Open Day" })).toBeInTheDocument();
-    expect(row).toHaveTextContent(new Date(e.startsAt).toLocaleDateString(undefined, DATE));
-    expect(row).toHaveTextContent(`Starts ${new Date(e.startsAt).toLocaleTimeString(undefined, TIME)}`);
-    expect(row).toHaveTextContent(`Ends ${new Date(e.endsAt).toLocaleTimeString(undefined, TIME)}`);
+    expect(row).toHaveTextContent(/Oct 25, 2026|25 Oct 2026/);
+    expect(row).toHaveTextContent("Starts 09:00");
+    expect(row).toHaveTextContent("Ends 11:30");
     expect(row).toHaveTextContent("12 places left");
   });
 
@@ -159,7 +155,15 @@ describe("SCRUM495_AC3 what each row shows", () => {
     renderPage();
 
     const row = within(await screen.findByRole("list")).getByRole("listitem");
-    expect(row).toHaveTextContent(new Date(e.endsAt).toLocaleDateString(undefined, DATE));
+    expect(row).toHaveTextContent(/Oct 27, 2026|27 Oct 2026/);
+  });
+
+  it("shows a nameless event as an unnamed event", async () => {
+    vi.mocked(getOpenEvents).mockResolvedValue([event({ eventName: "" })]);
+
+    renderPage();
+
+    expect(await screen.findByRole("link", { name: "Unnamed event" })).toBeInTheDocument();
   });
 
   it("falls back to plain words for a missing or unreadable date or time", async () => {
@@ -273,10 +277,12 @@ const returnToTab = () => fireEvent(window, new Event("focus"));
 
 function pending() {
   let resolve;
-  const promise = new Promise((res) => {
+  let reject;
+  const promise = new Promise((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 describe("SCRUM495_AC6_AC7_AC8 the list is refreshed from the server", () => {
@@ -411,6 +417,27 @@ describe("SCRUM495_AC6_AC7_AC8 the list is refreshed from the server", () => {
     await Promise.resolve();
     expect(screen.getByRole("link", { name: "Newest" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Stale" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the newest answer when an older read fails after it", async () => {
+    const slow = pending();
+    const fast = pending();
+    vi.mocked(getOpenEvents)
+      .mockResolvedValueOnce([event({ eventName: "First read" })])
+      .mockReturnValueOnce(slow.promise)
+      .mockReturnValueOnce(fast.promise);
+
+    renderPage();
+    await screen.findByRole("link", { name: "First read" });
+    returnToTab();
+    returnToTab();
+    fast.resolve([event({ eventName: "Newest" })]);
+    await screen.findByRole("link", { name: "Newest" });
+    slow.reject({ response: { status: 500 } });
+
+    await waitFor(() => expect(getOpenEvents).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole("link", { name: "Newest" })).toBeInTheDocument();
+    expect(screen.queryByText(/Could not refresh the list/)).not.toBeInTheDocument();
   });
 
   it("opening the page again reads the server again, so a registration made on the details page shows", async () => {

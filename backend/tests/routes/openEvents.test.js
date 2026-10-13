@@ -196,6 +196,26 @@ describe('SCRUM495_AC1 only Attendees can open the list', () => {
 });
 
 describe('SCRUM495_AC2 only open Confirmed events are listed', () => {
+  it('judges by the real clock when none is injected', async () => {
+    const days = (n) => new Date(Date.now() + n * 24 * 60 * 60 * 1000).toISOString();
+    const row = eventRow({
+      proposed_start: days(10),
+      proposed_end: days(11),
+      registration_opens_at: days(-1),
+      registration_closes_at: days(5),
+    });
+    const client = createFakeClient([row]);
+    const app = express().use(
+      '/api/open-events',
+      createOpenEventRouter({ client, requireAuth: signedInWithRole(ROLE.ATTENDEE) }),
+    );
+
+    const res = await request(app).get('/api/open-events');
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((event) => event.id)).toEqual([row.id]);
+  });
+
   it('lists an eligible event with its attendee-facing fields', async () => {
     const row = eventRow({ id: 'a1111111-1111-4111-8111-111111111111' });
 

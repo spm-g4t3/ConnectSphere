@@ -1,57 +1,19 @@
 /**
- * Open events service.
+ * The events an Attendee can register for now, with places left and the
+ * caller's own registration. Read-only; full events stay listed, marked.
  *
- * SCRUM-495: the events an Attendee can currently register for, with how many
- * places each has left and whether this Attendee is already registered.
+ * Eligibility is domain/registrationWindow.js, applied as query filters and
+ * again over the rows, so a row the query should not return never leaves here.
+ * Nothing is cached. Only counts and the caller's own state leave; other
+ * attendees' ids are used to count and dropped. toOpenEvent is an allowlist, so
+ * a new column can never reach the response.
  *
- * Read-only. It never writes a registration. Full events stay in the list;
- * they are marked, not removed.
- *
- * An event is listed when its status is Confirmed, registration is on, the
- * registration window is open now and the event has not started. The rule
- * itself is domain/registrationWindow.js. It is applied twice on purpose: as
- * filters in the query, so the database does the work, and again over what
- * came back, so a row the query should not have returned (a changed filter, a
- * misbehaving client) still never reaches a caller.
- *
- * Nothing is cached. `now` is read on every call and the settings, status and
- * registrations are read from the tables each time, so an event whose
- * registration was switched off, closed, or sent back to Approved (SCRUM-395)
- * drops out of the next response, and a place freed by a withdrawal shows up.
- *
- * Availability is advisory. SCRUM-22 stays the authority on capacity and
- * duplicates, under a lock, at the moment of registering.
- *
- * Registrations are read in ONE query for every listed event, not one per
- * event. That query returns each active registration's event and attendee so
- * this module can count them and spot the caller's own; the attendee ids are
- * used for that and then dropped. Only counts and the caller's own state leave
- * here, never another attendee's identity or record. The caller is the
- * attendeeId passed in, which the route takes from the verified token. A
- * database aggregate would move the counting off this process, but needs a
- * migration, which belongs to SCRUM-22.
- *
- * Assumptions, none of which exists in the schema yet:
- *  - SCRUM-494 stores its settings on event_requests as registration_enabled,
- *    registration_opens_at, registration_closes_at and registration_capacity
- *    (null capacity means no limit).
- *  - SCRUM-22 stores registrations in a `registrations` table with
- *    event_request_id, attendee_id and status; domain/registrationAvailability.js
- *    says which statuses hold a place.
- * This fails against a real database until those exist. If they are named
- * differently, change SETTINGS_COLUMNS, REGISTRATION_COLUMNS and the filters
- * below.
- *
- * What leaves this module is decided by toOpenEvent, an explicit allowlist.
- * The query also selects only the columns it needs, and never the venue,
- * requirement, coordinator, clarification or decision columns. Selecting a
- * column and mapping it are separate steps so that adding a column to the
- * table can never add it to the response.
- *
- * No authorisation here, as in eventRequestService: the route proves the
- * caller is an Attendee.
- */
-import { STATUS } from '../domain/eventRequestStatus.js';
+ * Assumes SCRUM-494's settings on event_requests (registration_enabled,
+ * registration_opens_at, registration_closes_at, registration_capacity; null
+ * capacity is no limit) and SCRUM-22's `registrations` table. Neither is on dev
+ * yet, so this fails against a real database until they are. No authorisation
+ * here: the route proves the caller is an Attendee.
+ */import { STATUS } from '../domain/eventRequestStatus.js';
 import { isOpenForRegistration } from '../domain/registrationWindow.js';
 import { availability, holdsAPlace, ACTIVE_REGISTRATION_STATUS } from '../domain/registrationAvailability.js';
 import { ValidationError, NotFoundError } from '../errors.js';

@@ -3,12 +3,19 @@
 // SCRUM-495. How an open event's date, times and availability read on the
 // browse list. Pure, so the component interprets nothing itself.
 //
-// Dates and times use the reader's own locale and zone, as displayFormat.js
-// does for every other screen: the API sends instants with an offset, and the
-// device decides how they read.
+// Dates and times are Singapore time on every device, because the venue's
+// hours are kept in it (datetimeFormat.js).
 
-const DATE_FORMAT = { weekday: "short", year: "numeric", month: "short", day: "numeric" };
-const TIME_FORMAT = { hour: "2-digit", minute: "2-digit" };
+import { VENUE_TIME_ZONE, toVenueWallClock } from "./datetimeFormat";
+
+const DATE_FORMAT = {
+  weekday: "short",
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  timeZone: VENUE_TIME_ZONE,
+};
+const TIME_FORMAT = { hour: "2-digit", minute: "2-digit", timeZone: VENUE_TIME_ZONE };
 
 function toDate(value) {
   if (!value) return null;
@@ -16,12 +23,8 @@ function toDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function sameLocalDay(a, b) {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
+function sameVenueDay(a, b) {
+  return toVenueWallClock(a.toISOString()).slice(0, 10) === toVenueWallClock(b.toISOString()).slice(0, 10);
 }
 
 /** The event's date, e.g. "Sun, 25 Oct 2026", or a plain fallback. */
@@ -46,7 +49,7 @@ export function formatEventEndTime(startsAt, endsAt) {
 
   const start = toDate(startsAt);
   const time = end.toLocaleTimeString(undefined, TIME_FORMAT);
-  return start && !sameLocalDay(start, end)
+  return start && !sameVenueDay(start, end)
     ? `${end.toLocaleDateString(undefined, DATE_FORMAT)}, ${time}`
     : time;
 }

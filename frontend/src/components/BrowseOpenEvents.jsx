@@ -1,33 +1,11 @@
 // BrowseOpenEvents.jsx
 //
-// SCRUM-495: the Attendee's list of events open for registration, earliest
-// start first, each with its date, start and end times, and availability.
+// The Attendee's list of open events. The backend decides what is listed, the
+// order and the availability; nothing here filters, sorts or counts.
 //
-// Built the way MyBookingRequests is: a useCallback fetch, a status-keyed error
-// table, a "Loading..." line, an empty-state sentence, and <section> as a
-// direct child of the .dashboard wrapper App.jsx's route supplies, so it picks
-// up the `.dashboard > section` card styling.
-//
-// What is listed, in what order, and what is said about places and the
-// caller's own registration are all decided by the backend (GET /open-events).
-// Nothing here filters, re-sorts or counts. The list carries no venue or
-// internal planning information, because the API sends none.
-//
-// Full events stay in the list, marked "Full". An event the caller already
-// holds a place on is marked "Registered". Selecting an event goes to its
-// details page (BrowseEventDetails.jsx).
-//
-// REFRESH. The list is read when the page opens and again whenever the reader
-// returns to the tab, so an event that has since filled, closed, started or
-// gone back to Approved drops out (or shows Full), and a registration made
-// elsewhere shows as Registered. Opening the page again, for instance after
-// registering on the details page, is also a fresh read. A refresh does not
-// blank the list: only the first read shows "Loading...". If a refresh fails
-// for a transient reason the last list stays up with a notice, because
-// removing it would be no more true than keeping it; a lost session or a
-// refused role replaces it with the error, as on first load. Overlapping reads
-// are settled by recency, so a slow old answer never overwrites a newer one.
-
+// It is read on open and when the reader returns to the tab, without blanking
+// the list. A failed refresh keeps the last list with a notice, a lost session
+// or refused role replaces it, and the newest read wins.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getOpenEvents } from "../services/openEventService";

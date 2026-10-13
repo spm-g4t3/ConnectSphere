@@ -1,46 +1,14 @@
 // BrowseEventDetails.jsx
 //
-// SCRUM-495: one open event, opened from the browse list: its name, date, start
-// and end times, the organiser's description, its availability, and a Register
-// action when registering is possible.
+// One open event, from the browse list: the browse preview, with no venue or
+// internal planning information (SCRUM-24's registered view is separate).
 //
-// This is the browse preview. It shows what the API sends for an open event
-// and nothing else: no venue and no internal planning information. The
-// registered-attendee view, which includes the venue, is SCRUM-24's and is a
-// separate page and endpoint.
-//
-// Eligibility is the server's. The event is read afresh every time the page
-// opens (GET /open-events/:id applies the list's rules at that moment), and an
-// event that is not open, for any reason, is one 404 and one message here.
-// Direct URLs get no more than the list would show.
-//
-// The description is the organiser's own text, rendered as a React text node,
-// so it is escaped like every other free-text field in the app, with
-// white-space: pre-wrap to keep its line breaks. It is never parsed as HTML.
-//
-// REGISTER. The action is offered only for an event with a place free that the
-// caller is not already registered for (canRegister from the API). Registering
-// itself is SCRUM-22's, and that flow does not exist yet, so this page takes
-// it as an `onRegister(eventId)` prop rather than carrying a registration path
-// of its own. With no handler the button stays disabled and says so: it never
-// pretends to have registered anyone. SCRUM-22 supplies the handler, and the
-// page then reads the event again, because availability may have changed.
-//
-// REFRESH AND STALE STATE. Nothing is cached. The event is read when the page
-// opens, after every registration attempt, and whenever the reader returns to
-// the tab, and the server's answer replaces what is shown. So an event that
-// has since filled shows Full, one that has gone back to Approved (or closed,
-// or started) turns into the not-open message with no Register action, and a
-// registration made elsewhere shows as Registered. The displayed capacity is
-// never treated as authority: Register only asks SCRUM-22's flow, which checks
-// capacity and duplicates itself, and what happened is then taken from the
-// refreshed event rather than guessed from the failure. A refresh does not
-// blank the page; only the first read shows "Loading...". If a refresh cannot
-// reach the server the last details stay up with a notice and Register is
-// disabled, because they can no longer be confirmed; a lost session or a
-// refused role replaces them with the error. Overlapping reads are settled by
-// recency, so a slow old answer never overwrites a newer one.
-
+// Eligibility is the server's: the event is read afresh on open, after every
+// registration attempt and on return to the tab, and a 404 is one not-open
+// message. Register takes an onRegister(eventId) prop because SCRUM-22's flow
+// does not exist yet; without it the button stays disabled. A failed refresh
+// keeps the details with a notice and pauses Register. The description is
+// rendered as text, never HTML.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getOpenEvent } from "../services/openEventService";
