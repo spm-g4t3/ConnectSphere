@@ -36,6 +36,7 @@ The traps the brief named are cases under the criterion they belong to, marked
 | svc | `backend/tests/services/` (fake client) | Which rows the service asks for, with which filters, what it refuses before asking, and the shape it returns |
 | route | `backend/tests/routes/` (fake client) | Gates, status codes, query parameters reaching the service, declaration order |
 | pglite | a PGlite suite with the real migrations (`backend/tests/db/`) | What the database itself does: who may reassign, and that nothing else moves |
+| mig | a migration-text test (`backend/tests/db/scrum487StatusClassification.test.js`) | What every migration says about `event_request_status`, read as text, against the status lists the code uses |
 | screen | `frontend/tests/components/` | What the Lead sees and can click |
 | nav | `frontend/tests/components/Navigation.test.jsx` | Who is offered the link |
 
@@ -224,8 +225,9 @@ built, its own cases say what the Lead may cancel there.
 | AC2-09 **(trap)** | — | `listCoordinatorWorkload` after the shared helper | Exactly `{ id, fullName, activeEvents }`, selecting only `assigned_coordinator_id`: SCRUM-486's AC3 tests pass unchanged | Proved (svc): SCRUM-486's `SCRUM486_AC3_lists_every_event_coordinator_with_their_active_count`, `SCRUM486_AC3_counts_only_the_active_statuses_of_the_coordinators_listed` and the rest of its AC3 block, unedited, passing after the shared helper |
 | AC2-10 **(trap)** | LEAD | `GET /coordinator-overview` | Not read as an id: declared above `GET /:id` | Proved (route): `SCRUM487_AC2_does_not_read_the_coordinator_overview_path_as_a_request_id`. Moved below `/:id`, it and the gate tests fail |
 | AC2-11 | A Lead exists | `listCoordinatorOverview` | No Lead listed: role `event_coordinator` only (a Lead cannot be assigned events) | Proved (svc): `SCRUM487_AC2_reads_coordinators_by_name_and_only_their_active_events_with_status` |
-| AC2-12 | A holds a Safety review event | `listCoordinatorOverview` | Counted under `safety_review` | **Cannot be written yet** (D4): the status does not exist until SCRUM-488 |
+| AC2-12 | A holds a Safety review event | `listCoordinatorOverview` | Counted under `safety_review` | **Cannot be written yet** (D4): the status does not exist until SCRUM-488. SCRUM-488's migration turns scrum487StatusClassification.test.js red until the status is classified. |
 | AC2-13 | LEAD; two coordinators | Open the overview | Each coordinator's name, total and per-status counts | Proved (screen): `SCRUM487_AC2_one_row_per_coordinator_with_active_events_and_a_column_per_status`, `SCRUM487_AC2_rows_and_columns_keep_the_servers_order`, `SCRUM487_AC2_a_coordinator_with_no_name_or_a_missing_count_is_said_not_left_blank`, `SCRUM487_AC2_no_coordinators_is_said`, `SCRUM487_AC2_the_table_says_it_is_loading`, `SCRUM487_AC2_a_failed_overview_is_said_and_the_events_still_load`, `SCRUM487_AC2_the_overview_is_read_once_for_the_table_and_the_filter`; the call, `SCRUM487_AC2_the_counts_are_a_get_of_/event-requests/coordinator-overview`. Also seen by hand (13 October, check C). |
+| AC2-14 **(trap)** | Every value of `event_request_status`, read from every migration's text | The status lists (`ACTIVE_EVENT_STATUSES`, `FINISHED_EVENT_STATUSES`, draft, retired `planning`) | Each value is draft, active, finished or retired, in exactly one; every live one has a display label; the retired one is refused by 020's lifecycle constraint. A new enum value in no list fails, naming the value and the list to add it to | Proved (mig): `SCRUM487_AC2_every_event_status_in_the_database_is_draft_active_finished_or_retired`, `SCRUM487_AC2_no_status_is_in_two_buckets`, `SCRUM487_AC2_every_live_status_has_a_display_label`, `SCRUM487_AC2_the_retired_status_is_refused_by_the_lifecycle_constraint` |
 
 ### AC3 — every active event, earliest first, filtered by coordinator and status
 
@@ -248,7 +250,8 @@ built, its own cases say what the Lead may cancel there.
 | AC3-15 | — | Any filter | The order is unchanged: `proposed_start` ascending, nulls last, then id | Proved (svc): `SCRUM487_AC3_coordinator_and_status_filters_combine`, `SCRUM487_AC3_include_finished_adds_exactly_the_three_finished_statuses` |
 | AC3-16 **(trap)** | LEAD | `GET /assigned?…` | Not read as an id, with a query string too | Proved (route): `SCRUM487_AC3_the_query_string_reaches_the_read`. Unfiltered: SCRUM-486's `SCRUM486_AC6_does_not_read_the_assigned_path_as_a_request_id` |
 | AC3-17 | LEAD | Choose a coordinator, a status, "include finished" on screen | The list is re-read with those parameters and shows only those rows | Proved (screen): `SCRUM487_AC3_the_first_read_sends_no_filters`, `SCRUM487_AC3_choosing_a_coordinator_reads_their_events`, `SCRUM487_AC3_choosing_a_status_reads_that_status`, `SCRUM487_AC3_the_status_filter_offers_the_active_statuses_and_the_finished_ones_only_when_included`, `SCRUM487_AC3_unticking_include_finished_resets_a_finished_status`, `SCRUM487_AC3_unticking_include_finished_keeps_an_active_status`, `SCRUM487_AC3_a_stale_answer_never_overwrites_a_newer_one`, `SCRUM487_AC3_a_stale_failure_never_overwrites_a_newer_answer`, `SCRUM487_AC3_with_filters_set_an_empty_list_says_the_filters_found_nothing`, `SCRUM487_AC3_without_filters_an_empty_list_still_says_nobody_holds_one`, `SCRUM487_AC3_a_refused_filter_is_said_in_the_pages_words`; the calls, `SCRUM487_AC3_with_%s_the_list_call_is_scrum486s_with_no_params`, `SCRUM487_AC3_%s_sends_exactly_those_params`. Also seen by hand (13 October, checks E and F). |
-| AC3-18 | A Safety approved event | Filter by `safety_approved` | Listed | **Cannot be written yet** (D4) |
+| AC3-18 | A Safety approved event | Filter by `safety_approved` | Listed | **Cannot be written yet** (D4). SCRUM-488's migration turns scrum487StatusClassification.test.js red until the status is classified. |
+| AC3-19 **(trap)** | — | Every status the list filters on | Exists in the `event_request_status` enum, read from the migrations: a typo, or a status listed before its migration, fails | Proved (mig): `SCRUM487_AC3_every_listed_status_exists_in_the_database` |
 
 ### AC4 — unassigned requests counted at the top, with a link to the queue
 
@@ -339,7 +342,7 @@ built, its own cases say what the Lead may cancel there.
 
 ## Tally
 
-56 cases, counted from the tables: 0 proved; 53 not yet implemented; 3 that cannot
+58 cases, counted from the tables (56 until the guard test). At first: 0 proved; 53 not yet implemented; 3 that cannot
 be written as specified (AC2-12, AC3-18, AC5-11). After SCRUM-541: **14 proved**
 (AC1-01 to AC1-03, AC2-01 to AC2-11); 39 not yet implemented; the same 3. After
 SCRUM-542: **31 proved** (adding AC1-04 and AC3-01 to AC3-16); 22 not yet implemented;
@@ -350,13 +353,16 @@ SCRUM-546: **53 proved** (adding AC1-05, AC1-06, AC6-03 and AC6-04); **0 not yet
 implemented**; the same 3, which cannot be written as specified: AC2-12 and
 AC3-18 until SCRUM-488 adds the safety statuses (D4), and AC5-11, since no
 confirm path exists (D7). Every test named in this document was checked, by
-SCRUM-546, to exist under that name.
+SCRUM-546, to exist under that name. After the guard test (SCRUM-546, follow-up):
+**58 cases**, **55 proved** (adding AC2-14 and AC3-19,
+`scrum487StatusClassification.test.js`); 0 not yet implemented; the same 3 that
+cannot be written as specified.
 
 | Section | Cases |
 |---|---|
 | AC1 | 6 |
-| AC2 | 13 |
-| AC3 | 18 |
+| AC2 | 14 |
+| AC3 | 19 |
 | AC4 | 4 |
 | AC5 | 11 |
 | AC6 | 4 |

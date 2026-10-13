@@ -9,7 +9,7 @@ criterion is proved, why the design looks the way it does, and what is still
 missing. The examination chain is **user story → acceptance criterion → test case
 → test class → code**; section 2 walks it end to end for AC3.
 
-The case-by-case mapping is `docs/test-cases/SCRUM-487.md`: 56 cases, each naming
+The case-by-case mapping is `docs/test-cases/SCRUM-487.md`: 58 cases, each naming
 the tests that prove it or saying in bold why none can yet. This document cites it
 rather than repeating it.
 
@@ -41,12 +41,13 @@ the assignment, from the event's own page, as SCRUM-486 built it.
 
 | Evidence | Result |
 |---|---|
-| Backend suite (`npm test` in `backend`) | 5310 passing across 109 files |
+| Backend suite (`npm test` in `backend`) | 5315 passing across 110 files (5310 across 109 before the guard test) |
 | Frontend suite (`npm run test:coverage` in `frontend`) | 2338 passing and 1 todo across 104 files; every coverage gate met. SCRUM-487's gated files (`UnassignedCount.jsx`, `CoordinatorWorkloadTable.jsx`, `AssignedEventsFilters.jsx`) and `AssignedEvents.jsx`, which it extended and which stays in `SCRUM486_FILES`, at 100% |
 | SCRUM-487's own tests | 62 distinct `SCRUM487_…` titles (a parametrised test counts once), in files of their own (`scrum487…`), beside SCRUM-486's files, which this story left unedited bar the two dashboard sentences in section 4 |
 | PGlite | `scrum487OverviewDatabase.test.js` runs the real overview and list reads over Postgres, before and after 052's `reassign_event_request` |
+| Status guard | `scrum487StatusClassification.test.js` reads `event_request_status` from every migration's text and fails if any value is in no status list, in two, or has no label (D13): 5 tests |
 | Live database | No live script covers this story's reads, and none was run (they write to the shared project; the reads here write nothing to check) |
-| Test-case document | 56 cases: **53 proved**, **0 not yet implemented**, **3 that cannot be written as specified** (section 4) |
+| Test-case document | 58 cases: **55 proved**, **0 not yet implemented**, **3 that cannot be written as specified** (section 4) |
 | Manual walkthrough | Passed, checks A to I, by Calven on 13 October 2026 on `afa8c82`, against the shared Supabase project (section 2) |
 
 ---
@@ -66,7 +67,7 @@ the assignment, from the event's own page, as SCRUM-486 built it.
 SCRUM-488 adds `safety_review` and `safety_approved` to `ACTIVE_EVENT_STATUSES`,
 with no change here (D4).
 
-**Test cases:** 56; 53 proved; 3 cannot be written as specified: AC2-12 and AC3-18
+**Test cases:** 58; 55 proved; 3 cannot be written as specified: AC2-12 and AC3-18
 (the safety statuses, D4) and AC5-11 (confirm, D7).
 
 ### Evidence for each criterion
@@ -165,7 +166,9 @@ unknown enum value in a PostgREST filter fails the whole read (22P02, which
 `translateError` leaves untranslated: a 500 for a filter the server built, not a
 400 for the caller). Every count, list, filter and column here is built from
 `ACTIVE_EVENT_STATUSES`, so adding the two statuses there, which SCRUM-488 owns,
-is all it takes. This story did not edit that constant.
+is all it takes. This story did not edit that constant. Forgetting to is caught:
+SCRUM-488's migration turns `scrum487StatusClassification.test.js` red until the
+two statuses are classified (D13).
 
 *Rejected: naming them now.* It would break every read that uses the constant.
 
@@ -275,6 +278,43 @@ and the documents that name them, on a branch whose base PR (#52) was still in
 review when this was decided. #52 was merged into dev on 13 October, so a rename
 can now follow as a change of its own.
 
+### D13. A guard test makes SCRUM-488's step impossible to miss
+
+**The risk is a silent omission.** `ACTIVE_EVENT_STATUSES` and
+`FINISHED_EVENT_STATUSES` are written by hand (D4). When SCRUM-488 adds
+`safety_review` and `safety_approved` to the `event_request_status` enum, events
+in those statuses are left out of every count, list and filter on the overview
+unless someone also adds them to `ACTIVE_EVENT_STATUSES`. Nothing errors: the
+reads just return fewer rows, and the overview looks right.
+
+**What guards it.** `scrum487StatusClassification.test.js` reads the enum from
+every numbered migration's text, in filename order: the one `create type ... as
+enum (...)`, then each `alter type ... add value '...'`, comments stripped first
+(001's own comment shows the syntax with a value `'x'`). Every value must be in
+exactly one of four buckets: draft (never on the overview), active, finished, or
+retired (`planning`, still in the enum because Postgres cannot drop a value, and
+refused for any row by 020's lifecycle constraint, which the test also reads).
+Every live value must have a display label, and every listed status must exist
+in the enum. An `alter type` the test cannot read, a rename for instance, fails
+with a message saying the test must be taught it, rather than being skipped. The
+lists are imported, not parsed from the source, so the test checks what the
+reads use. A new value in no bucket fails with a message naming it and saying
+which list to add it to. SCRUM-488's author has a Jira subtask pointing at the
+test.
+
+*Rejected: a PGlite test.* PGlite applies a list of migrations kept by hand
+(`scrum487OverviewDatabase.test.js` has one); SCRUM-488's migration would be
+checked only if its author remembered to add it to that list, the same kind of
+hand-kept list the guard exists for. Reading every file's text picks it up
+automatically, as `eventStatusLifecycleMigration.test.js` (SCRUM-320) reads 020.
+
+*Rejected: deriving `ACTIVE_EVENT_STATUSES` from the enum at run time.* "Active"
+would then mean "whatever is in the enum", and draft and planning would have to
+be excluded by hand anyway: the hand-kept list moves, it does not go away, and a
+new finished status would be counted as active without anyone deciding it.
+
+*Rejected: a note in the PR alone.* People forget; a red test does not.
+
 ---
 
 ## 4. Known gaps, and technical debt
@@ -283,20 +323,22 @@ can now follow as a change of its own.
 
 | Gap | Detail | Owner |
 |---|---|---|
-| AC2 and AC3 partial | Safety review and Safety approved are not in the enum (AC2-12, AC3-18, D4) | SCRUM-488 |
+| AC2 and AC3 partial | Safety review and Safety approved are not in the enum (AC2-12, AC3-18, D4). The hand-kept status lists are now guarded: SCRUM-488's migration turns `scrum487StatusClassification.test.js` red until they are classified (D13) | SCRUM-488 |
 | D6 awaiting confirmation | The Lead reads handover notes; built since SCRUM-521, not yet confirmed by the team | Calven, with the team |
 | Labels are the Organiser's words | "Awaiting your response" heads a column a Lead reads (D9) | A change to the status display, if wanted |
 | No live check of the overview | No `backend/scripts` live script calls `GET /coordinator-overview` or the filtered `GET /assigned`. The reads write nothing, so a live run would prove only the deployed schema; PGlite proves the SQL against the real migrations (`scrum487OverviewDatabase.test.js`) | Optional |
 | The filtered list over PGlite uses its own adapter | The adapter in `scrum487OverviewDatabase.test.js` turns `eq`, `in`, `not is null` and `order` into SQL. It is not PostgREST: it proves the filters' meaning, not PostgREST's spelling of them | — |
 | The count reads whole rows | `UnassignedCount` reads the queue to count it (D5). Short by nature; a `head` count would need a second definition | — |
-| No refetch on focus | The overview reads on mount and on each filter change, not when the tab regains focus, as `AssignedEvents` did in SCRUM-486. A Lead coming back from the event page remounts it | — |
+| No refetch on focus | The overview reads on mount and on each filter change, not when the tab regains focus (nor did `AssignedEvents` in SCRUM-486, by its own header's choice), unlike `UnassignedQueue`. A Lead coming back from the event page remounts it | — |
 
 ### Technical debt, left
 
 - **`FINISHED_EVENT_STATUSES` lives in the service**, beside `ACTIVE_EVENT_STATUSES`,
   not in `domain/eventRequestStatus.js`, which owns the status vocabulary. Both
   sets belong there; moving them is a change to a file SCRUM-488 and SCRUM-489 are
-  editing, so it was not made here.
+  editing, so it was not made here. Both are hand-kept lists, now guarded:
+  `scrum487StatusClassification.test.js` fails if an enum value is in neither (D13).
+  They are exported for that test.
 - **The polite-status choice is tied to SCRUM-486's test selectors** (D10). It is
   also the right semantics, but if those tests change, the reason recorded here
   should be checked rather than assumed.

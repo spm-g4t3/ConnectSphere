@@ -1938,7 +1938,8 @@ export async function listUnassignedEventRequests({ client } = {}) {
  * which 020 removed. SCRUM-488's safety_review and safety_approved belong here
  * once the enum has them; named now, the read would fail on an unknown value.
  */
-const ACTIVE_EVENT_STATUSES = Object.freeze([
+// Exported for scrum487StatusClassification.test.js, which fails if an enum value is in neither list, so SCRUM-488's new statuses cannot be left out of the overview unnoticed.
+export const ACTIVE_EVENT_STATUSES = Object.freeze([
   STATUS.SUBMITTED,
   STATUS.UNDER_REVIEW,
   STATUS.PENDING_CLARIFICATION,
@@ -1959,7 +1960,7 @@ const ACTIVE_EVENT_STATUSES = Object.freeze([
  * admit draft, and would silently admit any status added later; a new
  * finished status is a decision to make here.
  */
-const FINISHED_EVENT_STATUSES = Object.freeze([
+export const FINISHED_EVENT_STATUSES = Object.freeze([
   STATUS.COMPLETED,
   STATUS.REJECTED,
   STATUS.CANCELLED,
