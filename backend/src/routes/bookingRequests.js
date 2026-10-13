@@ -80,8 +80,10 @@ export function createBookingRequestRouter({
    * Request a venue. 201 and the new request, which is always pending.
    *
    * Body: { eventRequestId, venueId, roomLayoutCode?, setupNotes?,
-   * confirmUnsuitable?, accessibility?, facilities?, acknowledgedCriteria? }
-   * -- the two code lists are SCRUM-190's, judged by the suitability check and
+   * confirmUnsuitable?, accessibility?, facilities?, acknowledgedCriteria?,
+   * expectedAttendance? } -- expectedAttendance (SCRUM-525) is this venue's
+   * own attendance, a whole number from 1, defaulting to the event's; the two
+   * code lists are SCRUM-190's, judged by the suitability check and
    * stored in its result. acknowledgedCriteria (SCRUM-193/194) names, by
    * label, the criteria the coordinator accepts the venue does not meet; an
    * unsuitable venue is requested only when confirmUnsuitable is true and it
@@ -89,7 +91,9 @@ export function createBookingRequestRouter({
    *
    * Statuses: 400 bad input, or an unknown requirement code; 401; 403 wrong
    * role, or not this event's coordinator; 404 no such event or venue; 409
-   * with `code` and `conflicts` (see createBookingRequest).
+   * with `code` and `conflicts` (see createBookingRequest), including
+   * EVENT_ATTENDANCE_MISSING when neither the body nor the event gives an
+   * expected attendance.
    */
   router.post('/', coordinatorOnly, async (req, res) => {
     try {

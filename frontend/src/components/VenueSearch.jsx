@@ -54,9 +54,17 @@
 // flow the suitability panel (SCRUM-191) mounts; that panel lives in
 // EventVenueFinder, inside the event view, not on this page. The buttons are
 // disabled, with the reason shown once, when the signed-in coordinator cannot
-// request for this event, and once a request has been sent or the server says
-// the event already has one. userId is a prop for the reason role is: useAuth
+// request for this event. userId is a prop for the reason role is: useAuth
 // throws without an AuthProvider, and this page's tests render without one.
+//
+// SCRUM-525 (AC1, R11): an event may hold several venues, one live request
+// per venue, so only the venue a request was sent for from this page, or the
+// venue the server refused as already requested, is locked; every other
+// venue stays requestable. This page does not read the event's existing
+// requests on load (that list lives in the event view), so the server's
+// refusal stays the gate for those. A locked row says why, linked to its
+// button with aria-describedby; it does not point at Venue suitability,
+// which is not on this page.
 
 import { useState, useCallback, useEffect, useId, useRef } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -96,10 +104,15 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
   // request button is offered.
   const requestEvent = context?.id ? context : null;
   const eligibility = bookingRequestEligibility(requestEvent, userId);
-  // The venue whose panel is open, and whether this event now has a live
-  // request (just sent, or reported by the server) so no second can be started.
+  // The venue whose panel is open, and (SCRUM-525) the venues this event now
+  // has a live request for, as far as this page knows: sent from here, or
+  // refused by the server as already requested. See the header.
   const [requestingVenue, setRequestingVenue] = useState(null);
-  const [eventRequested, setEventRequested] = useState(false);
+  const [requestedVenueIds, setRequestedVenueIds] = useState(() => new Set());
+
+  function lockVenue(venueId) {
+    setRequestedVenueIds((prev) => new Set(prev).add(venueId));
+  }
 
   // A lazy initialiser, not a plain object. useState's argument is evaluated
   // on every render even though only the first result is kept, so building
@@ -389,22 +402,18 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
           {eligibility.reason}
         </p>
       )}
-      {requestEvent && eligibility.eligible && eventRequested && (
-        <p className="venue-search__hint" role="status">
-          This event already has a venue request, so another cannot be started.
-        </p>
-      )}
 
       {requestEvent && requestingVenue && (
         <BookingRequestPanel
           key={requestingVenue.id}
           event={requestEvent}
           venue={requestingVenue}
+          // The venue the panel was opened for: a refusal names no venue.
           onSubmitted={(request) => {
-            setEventRequested(true);
+            lockVenue(requestingVenue.id);
             onRequestSubmitted?.(request);
           }}
-          onEventAlreadyRequested={() => setEventRequested(true)}
+          onVenueAlreadyRequested={() => lockVenue(requestingVenue.id)}
           onClose={() => setRequestingVenue(null)}
         />
       )}
@@ -429,11 +438,17 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
                 type="button"
                 className="venue-search__request"
                 aria-label={`Request this venue: ${venue.name}`}
-                disabled={!eligibility.eligible || eventRequested}
+                disabled={!eligibility.eligible || requestedVenueIds.has(venue.id)}
+                aria-describedby={requestedVenueIds.has(venue.id) ? `${idPrefix}-requested-${venue.id}` : undefined}
                 onClick={() => setRequestingVenue(venue)}
               >
                 Request this venue
               </button>
+            )}
+            {requestEvent && !venue.retiredAt && requestedVenueIds.has(venue.id) && (
+              <p className="venue-search__hint" id={`${idPrefix}-requested-${venue.id}`}>
+                This event already has a request for this venue.
+              </p>
             )}
           </li>
         ))}

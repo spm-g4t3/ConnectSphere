@@ -1182,12 +1182,14 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
       ok(submittableRow()),
       // submitEventRequest's own read.
       ok(submittableRow()),
-      // submit_event_request (016): the row as the function leaves it --
-      // submitted, timed, and assigned a coordinator (SCRUM-330).
+      // submit_event_request (052): the row as the function leaves it --
+      // submitted and timed, with no coordinator. Until SCRUM-486 this was
+      // "and assigned a coordinator (SCRUM-330)", and the fixture carried one,
+      // because 016 assigned it. 052 leaves that to the Lead.
       ok(submittableRow({
         status: STATUS.SUBMITTED,
         submitted_at: '2026-01-15T09:00:00+00:00',
-        assigned_coordinator_id: COORDINATOR_ID,
+        assigned_coordinator_id: null,
       })),
     ]);
 
@@ -1222,10 +1224,12 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
     expect(typeof client.calls[2].args.p_submitted_at).toBe('string');
     expect(Number.isNaN(new Date(client.calls[2].args.p_submitted_at).getTime())).toBe(false);
 
-    // SCRUM-327: the Organiser sees their coordinator. The id survives the
-    // service mapping and the route's withStatusDisplay projection, so it
-    // reaches the response. Turning it into a name is a later subtask.
-    expect(res.body.assignedCoordinatorId).toBe(COORDINATOR_ID);
+    // SCRUM-486 AC1-04: the response says nobody is assigned yet -- the key
+    // present and null, which is what the Organiser's screen reads to say the
+    // request is waiting for the Lead. Until SCRUM-486 this asserted the
+    // coordinator 016 had assigned ("the Organiser sees their coordinator",
+    // SCRUM-327), and was right then.
+    expect(res.body).toHaveProperty('assignedCoordinatorId', null);
   });
 
   it('SCRUM10_AC5_returns_404_for_another_organisers_draft', async () => {
@@ -1728,6 +1732,13 @@ function createQueueFakeClient(results = []) {
         call.inFilters.push([column, values]);
         return chain;
       },
+      // SCRUM-486 (SCRUM-520): the review queue now also reads
+      // .not('assigned_coordinator_id', 'is', null). Recorded on its own, as
+      // in the service tests' fake.
+      not(column, operator, value) {
+        call.notFilters.push([column, operator, value]);
+        return chain;
+      },
       order(column, options) {
         call.order.push([column, options]);
         return chain;
@@ -1748,6 +1759,7 @@ function createQueueFakeClient(results = []) {
         select: null,
         filters: [],
         inFilters: [],
+        notFilters: [],
         order: [],
       };
       calls.push(call);
@@ -1762,25 +1774,36 @@ const signedInWithRole = (role, id = COORDINATOR_ID) => (req, _res, next) => {
   next();
 };
 
-/** A queue as PostgREST would hand it back: two Organisers, three statuses. */
+/**
+ * A queue as PostgREST would hand it back: two Organisers, three statuses.
+ *
+ * SCRUM-486 (SCRUM-520): each row now has a coordinator. These rows had none,
+ * which was right when written, because the queue did not select on the
+ * coordinator. Since 052 it reads only requests someone holds (AC2-06), so a
+ * row without one is a response the route can no longer receive, and a test
+ * passing on it would pass on data production cannot produce.
+ */
 const queueRows = () => [
   storedRow({
     id: 'queue-1',
     organiser_id: ORGANISER_ID,
     status: STATUS.SUBMITTED,
     submitted_at: '2026-01-11T03:00:00+00:00',
+    assigned_coordinator_id: COORDINATOR_ID,
   }),
   storedRow({
     id: 'queue-2',
     organiser_id: OTHER_ORGANISER_ID,
     status: STATUS.UNDER_REVIEW,
     submitted_at: '2026-01-12T03:00:00+00:00',
+    assigned_coordinator_id: COORDINATOR_ID,
   }),
   storedRow({
     id: 'queue-3',
     organiser_id: OTHER_ORGANISER_ID,
     status: STATUS.PENDING_CLARIFICATION,
     submitted_at: null,
+    assigned_coordinator_id: COORDINATOR_ID,
   }),
 ];
 
@@ -2121,14 +2144,20 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
     expect(client.calls).toHaveLength(0);
   });
 
-  it('SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over', async () => {
-    // A coordinator, so past coordinatorOnly, but not this event's coordinator.
+  it('SCRUM331_AC6_a_coordinator_who_does_not_hold_the_event_cannot_hand_it_over', async () => {
+    // A coordinator, so past the route's gate, but not this event's coordinator.
     // Only the function can tell, because only it reads the row under lock,
     // and it answers 42501. The route turns that into a 403, not a 404: the
     // caller can see this event in the shared queue already, so "not found"
     // would be false and would hide nothing (errors.test.js gives the full
     // argument).
-    const message = `only the coordinator assigned to event request ${REQUEST_ID} can hand it over`;
+    //
+    // Was SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over, with
+    // 018's message. Right when written: the holder was the only one who
+    // could. Since 052 a Lead may too (SCRUM-486 AC6; the Lead's case is in
+    // leadAssignmentRoutes.test.js), so the name now says the case it proves,
+    // a coordinator who is not the holder, and the message is 052's.
+    const message = `only the coordinator assigned to event request ${REQUEST_ID}, or the Event Coordinator Lead, can hand it over`;
     const client = createWritableFakeClient([dbFailure('42501', message)]);
 
     const res = await handOver(client, { newCoordinatorId: NEW_COORDINATOR_ID });

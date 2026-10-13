@@ -12,14 +12,39 @@
 // the same ones the suitability check was given. They are sent as
 // roomLayoutCode, accessibility and facilities so the server's check on submit
 // judges the coordinator's codes rather than "None requested". A blank layout
-// and empty lists are left out of the body.
+// and empty lists are left out of the body. SCRUM-525 (AC2): the layout is
+// the request's own, so the details list shows the one that will be sent,
+// read-only and marked as coming from the search, or "None requested". It is
+// changed in the search form, the one place the codes are chosen.
 //
 // What the coordinator sees and chooses:
 //   - the event's own details, because they are what the request will carry:
-//     the period, expected attendance and free-text requirements come from
-//     the stored event on the server, never from this form;
+//     the period and free-text requirements come from the stored event on the
+//     server, never from this form;
 //   - the venue;
+//   - SCRUM-525 (AC2): the expected attendance for this venue. It belongs to
+//     the request, not the event, because one event can now use several
+//     venues at once, each for part of its audience. It is prefilled from the
+//     event's expected attendance, stays editable, must be a whole number
+//     from 1 to MAX_ATTENDANCE (the column is a Postgres integer, and the
+//     server refuses anything larger), and is always sent as expectedAttendance, so the number the
+//     server checks and stores is the one on screen. The event's own number
+//     stays in the details list beside it, labelled as the event's;
 //   - optional setup notes, the only free text sent.
+//
+// SCRUM-525 (AC3): the suitability verdict must be for the number that will
+// be sent, or the coordinator would confirm one Capacity verdict and the
+// server would judge another. So committing a new attendance (blur or Enter
+// in the field, or a send while the field holds an unchecked number) checks
+// this venue again with { attendance } and the answer replaces the verdict on
+// screen. Committing resets the confirmation, because a tick given for the
+// old number does not cover the new one, and while the check runs the warning
+// and the box are hidden and the send is disabled. Each check takes a
+// sequence number and only the latest one's answer is applied, so a slow
+// answer for an older number can never overwrite a newer one. A failed check
+// says so and leaves the send enabled: the server checks again on submit and
+// is the gate, and once it answers with its own verdict that note is retired
+// so the two never stand side by side. All of this runs from event handlers, never an effect.
 //
 // Suitability (N10) is computed by the server. When the venue fails it, a
 // warning lists the criteria not met and the coordinator must tick an explicit
@@ -48,19 +73,24 @@
 // click that lands before the next render.
 //
 // Presentational about the outcome: it calls onSubmitted(request) and
-// onEventAlreadyRequested() and leaves refreshing whatever they show to the
-// parent. data.error is never shown; see bookingRequestErrors.js.
+// onVenueAlreadyRequested(code) and leaves refreshing whatever they show to
+// the parent. SCRUM-525: the code is BOOKING_REQUEST_EXISTS or
+// BOOKING_FLAGGED_FOR_REVIEW, and either means this venue (not the event)
+// already has a live request; the parent knows which venue it opened this
+// panel for. data.error is never shown; see bookingRequestErrors.js.
 
 import { useId, useRef, useState } from "react";
 import { createBookingRequest } from "../services/bookingRequestService";
 import {
   bookingRequestErrorMessage,
   fieldErrorsFrom,
-  isEventAlreadyRequested,
   isSuitabilityConfirmationRequired,
+  isVenueAlreadyRequested,
   periodConflicts,
   unmetCriteria,
 } from "../services/bookingRequestErrors";
+import { checkVenueSuitability } from "../services/venueSuitabilityService";
+import { suitabilityErrorMessage } from "../services/venueSuitabilityErrors";
 import { shortId } from "../services/displayFormat";
 import {
   formatVenuePeriod,
@@ -72,12 +102,63 @@ import {
   formatOccupiedPeriod,
   requestPaddingNote,
 } from "../services/occupiedPeriodDisplay";
-import { criterionDetailText } from "../services/venueSuitabilityDisplay";
+import { criterionDetailText, labelFor } from "../services/venueSuitabilityDisplay";
+import { ROOM_LAYOUTS } from "../services/venueLookups";
 
 /** Mirrors bookings_setup_notes_length in migration 030. */
 const SETUP_NOTES_MAX_LENGTH = 1000;
 
-const NOTES_FIELDS = ["setupNotes"];
+/**
+ * SCRUM-525: the largest attendance the server accepts, the Postgres integer
+ * maximum of bookings.expected_attendance. Refused here too, so the
+ * coordinator is told beside the field instead of by a 400 after sending.
+ */
+const MAX_ATTENDANCE = 2147483647;
+
+/** The fields of this form a 400's details[] can be shown beside. */
+const FORM_FIELDS = ["setupNotes", "expectedAttendance"];
+
+/**
+ * SCRUM-525: the attendance text as the number to send, or null when it is
+ * not one. The same rule as the server's: digits only (no sign, decimal point
+ * or exponent, which a number input would otherwise let through), at least 1,
+ * and at most MAX_ATTENDANCE. A string of digits too long to be exact is far
+ * above that bound, so the bound refuses it too.
+ */
+function parseAttendance(text) {
+  const trimmed = text.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  return n >= 1 && n <= MAX_ATTENDANCE ? n : null;
+}
+
+/** Why the attendance text is not a number to send, or null when it is. */
+function attendanceProblem(text) {
+  const trimmed = text.trim();
+  if (trimmed === "") return "Enter the expected attendance for this venue.";
+  // A sign is allowed here only so that 0 and -5 are told the real problem.
+  if (!/^-?\d+$/.test(trimmed)) return "Expected attendance must be a whole number.";
+  if (Number(trimmed) < 1) return "Expected attendance must be at least 1.";
+  if (Number(trimmed) > MAX_ATTENDANCE) {
+    return `Expected attendance must be at most ${MAX_ATTENDANCE.toLocaleString("en-US")}.`;
+  }
+  return null;
+}
+
+/** The event's attendance as the field's first text: blank when it has none. */
+function attendanceSeed(event) {
+  const n = event?.expectedAttendance;
+  return Number.isInteger(n) ? String(n) : "";
+}
+
+/**
+ * SCRUM-525 (AC2): the layout this request will send, as its label. Marked as
+ * the search's, because that is where it was chosen and where it is changed.
+ */
+function layoutText(requirements) {
+  const layout = requirements?.layout;
+  return layout ? `${labelFor(layout, ROOM_LAYOUTS)} (from your search)` : "None requested";
+}
 
 function orNotSpecified(value) {
   const text = typeof value === "string" ? value.trim() : value;
@@ -128,11 +209,22 @@ export default function BookingRequestPanel({
   suitability,
   requirements,
   onSubmitted,
-  onEventAlreadyRequested,
+  onVenueAlreadyRequested,
   onClose,
 }) {
   const idPrefix = useId();
   const [setupNotes, setSetupNotes] = useState("");
+  // SCRUM-525. The attendance as typed, seeded once from the event.
+  const [attendanceText, setAttendanceText] = useState(() => attendanceSeed(event));
+  // The number the verdict on screen was judged for: what the caller's check
+  // echoed, else the event's (the number a check without one judges).
+  const [judgedAttendance, setJudgedAttendance] = useState(
+    () => suitability?.checked?.expectedAttendance ?? parseAttendance(attendanceSeed(event)),
+  );
+  // This panel's own check, once the attendance has been changed (see the
+  // header). 'idle' means the caller's `suitability` still stands.
+  const [recheck, setRecheck] = useState({ status: "idle", result: null, error: null });
+  const recheckSeq = useRef(0);
   const [confirmed, setConfirmed] = useState(false);
   // The criteria the server said were not met, once it has said so.
   const [serverCriteria, setServerCriteria] = useState(null);
@@ -143,20 +235,73 @@ export default function BookingRequestPanel({
   const [submitted, setSubmitted] = useState(null);
   const sending = useRef(false);
 
-  const suitabilityFailed = suitability?.suitable === false;
-  const needsConfirmation = suitabilityFailed || serverCriteria !== null;
-  const unmet = serverCriteria ?? failedCriteria(suitability);
+  const attendance = parseAttendance(attendanceText);
+  const checking = recheck.status === "checking";
+  // The verdict on screen: this panel's own check once it has answered, the
+  // caller's until the attendance changes, and none while checking or after
+  // a failed check, so a verdict for another number is never shown.
+  let active = null;
+  if (recheck.status === "done") active = recheck.result;
+  else if (recheck.status === "idle") active = suitability;
+  const needsConfirmation = active?.suitable === false || serverCriteria !== null;
+  const unmet = serverCriteria ?? failedCriteria(active);
   const unavailable = needsConfirmation && includesAvailability(unmet);
   const notesTooLong = Array.from(setupNotes.trim()).length > SETUP_NOTES_MAX_LENGTH;
   const notesErrorId = `${idPrefix}-notes-error`;
   const notesMessages = [
     ...(notesTooLong ? [`Setup notes must be ${SETUP_NOTES_MAX_LENGTH} characters or fewer.`] : []),
-    ...fieldErrors.map((d) => d.message),
+    ...fieldErrors.filter((d) => d.field === "setupNotes").map((d) => d.message),
   ];
+  const attendanceProblemText = attendanceProblem(attendanceText);
+  const attendanceErrorId = `${idPrefix}-attendance-error`;
+  const attendanceHintId = `${idPrefix}-attendance-hint`;
+  const attendanceMessages = [
+    ...(attendanceProblemText ? [attendanceProblemText] : []),
+    ...fieldErrors.filter((d) => d.field === "expectedAttendance").map((d) => d.message),
+  ];
+
+  /** Editing a field retires the server's messages for that field only. */
+  function clearFieldErrors(field) {
+    setFieldErrors((prev) => prev.filter((d) => d.field !== field));
+  }
+
+  /**
+   * SCRUM-525 (AC3): checks this venue again for the attendance in the field,
+   * when it is a valid number other than the one already judged. Returns
+   * whether a check started, so a send can stop and let the coordinator see
+   * the new verdict first. See the header for why it resets the confirmation
+   * and keeps only the latest answer.
+   */
+  function commitAttendance() {
+    const n = parseAttendance(attendanceText);
+    if (n === null || n === judgedAttendance) return false;
+
+    recheckSeq.current += 1;
+    const seq = recheckSeq.current;
+    setJudgedAttendance(n);
+    setServerCriteria(null);
+    setConfirmed(false);
+    setRecheck({ status: "checking", result: null, error: null });
+    checkVenueSuitability(event.id, venue.id, requirements ?? {}, { attendance: n })
+      .then((result) => {
+        if (seq === recheckSeq.current) setRecheck({ status: "done", result, error: null });
+      })
+      .catch((err) => {
+        if (seq === recheckSeq.current) {
+          setRecheck({ status: "error", result: null, error: suitabilityErrorMessage(err) });
+        }
+      });
+    return true;
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (sending.current || submitted) return;
+    if (attendance === null) return;
+    if (checking) return;
+    // An attendance typed but not yet checked is checked first; the
+    // coordinator sends once the verdict for it is on screen.
+    if (commitAttendance()) return;
     if (notesTooLong) return;
     if (needsConfirmation && !confirmed) return;
 
@@ -170,7 +315,12 @@ export default function BookingRequestPanel({
         eventRequestId: event.id,
         venueId: venue.id,
         ...requirementsBody(requirements),
+        // Always sent, so the server never falls back to the event's number
+        // when the coordinator kept it (SCRUM-525, AC2).
+        expectedAttendance: attendance,
         ...(setupNotes.trim() ? { setupNotes: setupNotes.trim() } : {}),
+        // The names come from the verdict on screen, which is the one for
+        // the attendance being sent.
         ...(needsConfirmation && confirmed
           ? { confirmUnsuitable: true, acknowledgedCriteria: criterionNames(unmet) }
           : {}),
@@ -180,13 +330,20 @@ export default function BookingRequestPanel({
     } catch (err) {
       if (isSuitabilityConfirmationRequired(err)) {
         // Warn, and wait for the coordinator to tick the box and send again.
+        // The server has now judged the number sent, so a failed check's
+        // "checked again when you send" is spent: retire it, and the server's
+        // list is the verdict on screen. Only here, because only this answer
+        // carries a verdict; after any other refusal the failed check's note
+        // still holds, and going back to 'idle' would bring back the caller's
+        // verdict for a number that is no longer in the field.
+        setRecheck({ status: "idle", result: null, error: null });
         setServerCriteria(unmetCriteria(err));
         setConfirmed(false);
       } else {
         setError(bookingRequestErrorMessage(err));
         setConflicts(periodConflicts(err));
-        setFieldErrors(fieldErrorsFrom(err, NOTES_FIELDS));
-        if (isEventAlreadyRequested(err)) onEventAlreadyRequested?.();
+        setFieldErrors(fieldErrorsFrom(err, FORM_FIELDS));
+        if (isVenueAlreadyRequested(err)) onVenueAlreadyRequested?.(err.response.data.code);
       }
     } finally {
       sending.current = false;
@@ -203,8 +360,12 @@ export default function BookingRequestPanel({
         <dd>{event.eventName || "Unnamed event"}</dd>
         <dt>When</dt>
         <dd>{formatVenuePeriod(event.proposedStart, event.proposedEnd)}</dd>
-        <dt>Expected attendance</dt>
+        {/* SCRUM-525: the event's number, beside the per-venue field below. */}
+        <dt>Event&apos;s expected attendance</dt>
         <dd>{event.expectedAttendance ?? "Not specified"}</dd>
+        {/* SCRUM-525 (AC2): the request's own layout, which it will send. */}
+        <dt>Room layout</dt>
+        <dd>{layoutText(requirements)}</dd>
         <dt>Venue requirements</dt>
         <dd>{orNotSpecified(event.venueRequirements)}</dd>
         <dt>Accessibility requirements</dt>
@@ -230,13 +391,54 @@ export default function BookingRequestPanel({
         </div>
       ) : (
         <form onSubmit={handleSubmit} noValidate>
+          <label className="booking-request__attendance">
+            Expected attendance for this venue
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={attendanceText}
+              onChange={(e) => {
+                setAttendanceText(e.target.value);
+                clearFieldErrors("expectedAttendance");
+              }}
+              onBlur={commitAttendance}
+              onKeyDown={(e) => {
+                // Enter means "use this number": it checks it, and never
+                // sends a request for a number whose verdict is not shown.
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitAttendance();
+                }
+              }}
+              disabled={submitting}
+              aria-invalid={attendanceMessages.length > 0 ? "true" : undefined}
+              aria-describedby={
+                attendanceMessages.length > 0 ? `${attendanceErrorId} ${attendanceHintId}` : attendanceHintId
+              }
+            />
+          </label>
+          <p className="booking-request__hint" id={attendanceHintId}>
+            {/* Prefilled only when the event has a number to prefill. */}
+            {attendanceSeed(event) === ""
+              ? "The event has no expected attendance, so enter one for this venue. Entering it checks this venue for that number."
+              : "Prefilled with the event's expected attendance. Changing it checks this venue again."}
+          </p>
+          {attendanceMessages.length > 0 && (
+            <ul className="booking-request__field-error" id={attendanceErrorId}>
+              {attendanceMessages.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </ul>
+          )}
+
           <label className="booking-request__notes">
             Setup notes (optional)
             <textarea
               value={setupNotes}
               onChange={(e) => {
                 setSetupNotes(e.target.value);
-                setFieldErrors([]);
+                clearFieldErrors("setupNotes");
               }}
               rows={3}
               disabled={submitting}
@@ -252,9 +454,22 @@ export default function BookingRequestPanel({
             </ul>
           )}
 
+          {checking && (
+            <p className="booking-request__checking" role="status">
+              Checking {venue.name} for {judgedAttendance} people…
+            </p>
+          )}
+
+          {recheck.status === "error" && (
+            <p className="booking-request__error" role="alert">
+              {`${recheck.error} It will be checked again when you send the request.`}
+            </p>
+          )}
+
           {needsConfirmation && (
             <div className="booking-request__warning" role="alert">
-              <h4>This venue does not meet this event&apos;s requirements</h4>
+              {/* SCRUM-525: the request's, since Capacity is judged on its own number. */}
+              <h4>This venue does not meet this request&apos;s requirements</h4>
               {unmet.length > 0 && (
                 <ul>
                   {unmet.map((criterion, i) => (
@@ -329,7 +544,14 @@ export default function BookingRequestPanel({
           <div className="booking-request__actions">
             <button
               type="submit"
-              disabled={submitting || notesTooLong || unavailable || (needsConfirmation && !confirmed)}
+              disabled={
+                submitting ||
+                checking ||
+                attendance === null ||
+                notesTooLong ||
+                unavailable ||
+                (needsConfirmation && !confirmed)
+              }
             >
               {submitting ? "Requesting..." : "Request this venue"}
             </button>

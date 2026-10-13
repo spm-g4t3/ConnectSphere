@@ -19,11 +19,19 @@
 // fails towards showing less, never towards showing the note to an
 // Organiser, which is the same default the backend's includeNotes has.
 //
-// The current coordinator is the newest entry's new coordinator. The history
-// is read fresh when this mounts, so it is at least as current as the event
-// row the parent is holding, and it is the one source that already carries a
-// name and works for both audiences. listCoordinators would also give a name,
-// but it is coordinator-only and an Organiser would get a 403.
+// The current coordinator is the request's own assignedCoordinatorId, when
+// the parent passes it (both parents do), named from the history. Before
+// SCRUM-486 it was the newest entry's new coordinator, which was always the
+// same person: every submission assigned someone and every change wrote a
+// row. 052 broke that equivalence. A rejected request reopened to a draft and
+// submitted again (TR-02) goes back to the Lead's queue with no coordinator,
+// but its history still ends with the coordinator who held it before; read
+// from the newest row, the screen would name them as current while the
+// Organiser's row above says it is waiting for the Lead (SCRUM-486 TR-03).
+// The newest row is used only when no id is passed. The name still comes
+// from the history, the one source that carries one for both audiences;
+// listCoordinators would too, but it is coordinator-only and an Organiser
+// would get a 403.
 //
 // The root is a <div>, so each parent decides what wraps it: a <section> in
 // the coordinator's event panel, a <details> on the Organiser's list.
@@ -102,7 +110,8 @@ function HistoryEntry({ entry, currentUserId }) {
     );
 
   // automatic: true means the system assigned the event when it was
-  // submitted. There is no person behind it, so assignedByName is null by
+  // submitted, which only rows from before SCRUM-486 can say; since then the
+  // Lead assigns, and the row names them. There is no person behind it, so assignedByName is null by
   // design, not missing. It is tested here rather than assignedByName, because
   // a name is also null for a person who has none on record, and the two must
   // not read the same.
@@ -141,8 +150,11 @@ function HistoryEntry({ entry, currentUserId }) {
  * @param {string} props.eventRequestId
  * @param {"coordinator"|"organiser"} props.view  which audience; anything else
  *                                                 gets the Organiser's view
+ * @param {string|null} [props.currentCoordinatorId]  who holds the request now,
+ *        from the request itself; null means nobody (waiting for the Lead).
+ *        Left out, the newest history entry is taken as current.
  */
-export default function AssignmentHistory({ eventRequestId, view }) {
+export default function AssignmentHistory({ eventRequestId, view, currentCoordinatorId }) {
   const { user } = useAuth();
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -188,15 +200,21 @@ export default function AssignmentHistory({ eventRequestId, view }) {
   }
 
   // Oldest first is the server's order and is not re-sorted, so the newest
-  // entry, and with it the current coordinator, is the last.
+  // entry is the last.
   const newest = entries[entries.length - 1];
+
+  // Who holds it now (see the header): the request's own coordinator when the
+  // parent passed it, named from the latest entry that gave it to them.
+  const knowsCurrent = currentCoordinatorId !== undefined;
+  const currentId = knowsCurrent ? currentCoordinatorId : newest?.newCoordinatorId ?? null;
+  const currentName = [...entries].reverse().find((entry) => entry.newCoordinatorId === currentId)?.newCoordinatorName ?? null;
 
   return (
     <div className="assignment-history">
       <p className="assignment-history__current">
         <span className="assignment-history__label">Current coordinator</span>{" "}
-        {newest
-          ? <PersonName id={newest.newCoordinatorId} name={newest.newCoordinatorName} currentUserId={user?.id} />
+        {currentId
+          ? <PersonName id={currentId} name={currentName} currentUserId={user?.id} />
           : "Not assigned yet"}
       </p>
 

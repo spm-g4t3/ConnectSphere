@@ -89,3 +89,36 @@ describe('SCRUM188_AC1 validateSuitabilityQuery', () => {
     ]);
   });
 });
+
+describe('SCRUM525_AC3 validateSuitabilityQuery reads ?attendance=', () => {
+  // The route test (B-AC3-05) covers 0, -5, 1.5, abc and blank end to end.
+  // These are the text shapes only the validator can tell apart: ones
+  // Number() would happily read as a whole number, so a looser rule (a
+  // Number() and isInteger check) would let them through.
+  it.each([
+    ['an exponent', '1e2'],
+    ['a sign', '+5'],
+    ['a repeated key', ['80', '90']],
+    ['more than a safe integer', '9007199254740993'],
+  ])('SCRUM525_AC3_attendance_as_%s_is_refused', (_label, attendance) => {
+    expect(faultsOf({ ...BASE, attendance })).toEqual([
+      { field: 'attendance', message: 'must be a whole number greater than zero' },
+    ]);
+  });
+
+  it('SCRUM525_AC3_attendance_1_and_a_padded_80_are_read_as_numbers', () => {
+    // 1 is the boundary beside the refused 0; the padding is trimmed, as the
+    // layout's is, and the text becomes a number the capacity can be compared with.
+    expect(validateSuitabilityQuery({ ...BASE, attendance: '1' }).expectedAttendance).toBe(1);
+    expect(validateSuitabilityQuery({ ...BASE, attendance: ' 80 ' }).expectedAttendance).toBe(80);
+  });
+
+  it('SCRUM525_AC3_attendance_stops_at_the_postgres_integer_maximum', () => {
+    // The body's cap, read from text: the largest number a booking could
+    // store is judged; one more could never be requested, so it is refused.
+    expect(validateSuitabilityQuery({ ...BASE, attendance: '2147483647' }).expectedAttendance).toBe(2147483647);
+    expect(faultsOf({ ...BASE, attendance: '2147483648' })).toEqual([
+      { field: 'attendance', message: 'must be at most 2147483647' },
+    ]);
+  });
+});

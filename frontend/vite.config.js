@@ -24,6 +24,12 @@ const PANEL = { lines: 100, branches: 97.56, functions: 100, statements: 97.81 }
 // dispatch clicks to disabled buttons. The ref is cheap defence behind them.
 const MY_BOOKING_REQUESTS = { lines: 100, branches: 98.07, functions: 100, statements: 98.24 }
 
+// SCRUM-525's one exception, measured the same way: if (checking) return in
+// BookingRequestPanel.jsx's handleSubmit is unreachable, because the send
+// button is disabled while a recheck runs and Enter in the attendance field
+// only starts the check. The guard is cheap defence behind the button.
+const BOOKING_REQUEST_PANEL = { lines: 100, branches: 99.4, functions: 100, statements: 99.3 }
+
 const SCRUM17_FILES = [
   'src/components/VenueBlocksPanel.jsx',
   'src/components/VenueBlockForm.jsx',
@@ -98,6 +104,22 @@ const SCRUM491_FILES = [
   'src/services/venueHoldValidation.js',
 ]
 
+// SCRUM-486 (SCRUM-519) owns the Lead's unassigned queue, the assignment
+// picker and the waiting-time helper outright. EventCoordinatorLeadDashboard.jsx,
+// which now mounts the queue, is already gated above under SCRUM-485. The
+// edits it makes to shared files (eventRequestService.js, ReassignEventPanel.jsx,
+// CoordinatorRequestDetail.jsx, Navigation.jsx, App.jsx) stay ungated, as
+// those files always have been.
+const SCRUM486_FILES = [
+  'src/components/UnassignedQueue.jsx',
+  'src/components/AssignCoordinatorPanel.jsx',
+  'src/services/waitingTime.js',
+  // SCRUM-521: an event's coordinator screen by its address.
+  'src/components/EventRequestReviewPage.jsx',
+  // AC6: the Lead's list of assigned events, the way to that screen.
+  'src/components/AssignedEvents.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -128,10 +150,15 @@ export default defineConfig({
         ...SCRUM141_FILES.map((file) => [file, FULL]),
         ...SCRUM254_FILES.map((file) => [
           file,
-          file === 'src/components/MyBookingRequests.jsx' ? MY_BOOKING_REQUESTS : FULL,
+          file === 'src/components/MyBookingRequests.jsx'
+            ? MY_BOOKING_REQUESTS
+            : file === 'src/components/BookingRequestPanel.jsx'
+              ? BOOKING_REQUEST_PANEL
+              : FULL,
         ]),
         ...SCRUM485_FILES.map((file) => [file, FULL]),
         ...SCRUM491_FILES.map((file) => [file, FULL]),
+        ...SCRUM486_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

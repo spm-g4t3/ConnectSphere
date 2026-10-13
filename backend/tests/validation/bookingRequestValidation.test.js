@@ -30,6 +30,7 @@ describe('validateCreateBookingRequest', () => {
       accessibility: [],
       facilities: [],
       acknowledgedCriteria: [],
+      expectedAttendance: null,
     });
   });
 
@@ -50,6 +51,7 @@ describe('validateCreateBookingRequest', () => {
       accessibility: [],
       facilities: [],
       acknowledgedCriteria: [],
+      expectedAttendance: null,
     });
   });
 
@@ -173,6 +175,49 @@ describe('SCRUM188_AC7 validateCreateBookingRequest reads acknowledgedCriteria (
       { field: 'acknowledgedCriteria', message: 'entry 0 must be a non-empty criterion name' },
       { field: 'acknowledgedCriteria', message: 'entry 1 must be a non-empty criterion name' },
     ]);
+  });
+});
+
+
+describe('SCRUM525_AC2 validateCreateBookingRequest reads expectedAttendance', () => {
+  // B-AC2-04 (R4): optional, a whole number above zero, never coerced. Each
+  // value is one way the rule could be loosened: no bound (0, -1), a fraction
+  // let through (1.5), a numeric string or a boolean coerced ("12", true).
+  it.each([0, -1, 1.5, '12', true])('SCRUM525_AC2_expected_attendance_%j_is_refused', (value) => {
+    const err = (() => {
+      try {
+        validateCreateBookingRequest({ ...BASE, expectedAttendance: value });
+      } catch (e) {
+        return e;
+      }
+      return null;
+    })();
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toEqual(['expectedAttendance']);
+  });
+
+  it('SCRUM525_AC2_expected_attendance_is_optional_and_1_is_accepted', () => {
+    // Absent or null is "the event's", left as null for the service to fill;
+    // 1, the boundary beside the refused 0, is kept as given.
+    expect(validateCreateBookingRequest(BASE).expectedAttendance).toBeNull();
+    expect(validateCreateBookingRequest({ ...BASE, expectedAttendance: null }).expectedAttendance).toBeNull();
+    expect(validateCreateBookingRequest({ ...BASE, expectedAttendance: 1 }).expectedAttendance).toBe(1);
+  });
+
+  it('SCRUM525_AC2_expected_attendance_stops_at_the_postgres_integer_maximum', () => {
+    // bookings.expected_attendance is an integer column (051). The largest
+    // value it holds is kept; one more is refused on the field, so it is a
+    // 400 naming expectedAttendance, not a failed cast inside the database.
+    expect(validateCreateBookingRequest({ ...BASE, expectedAttendance: 2147483647 }).expectedAttendance)
+      .toBe(2147483647);
+    let err = null;
+    try {
+      validateCreateBookingRequest({ ...BASE, expectedAttendance: 2147483648 });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'expectedAttendance', message: 'must be at most 2147483647' }]);
   });
 });
 

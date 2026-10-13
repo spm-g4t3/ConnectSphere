@@ -182,23 +182,9 @@ describe("the request flow from a result", () => {
     expect(createBookingRequest).toHaveBeenCalledWith({
       eventRequestId: "e1",
       venueId: "v1",
+      expectedAttendance: 150,
       setupNotes: "Extra tables",
     });
-  });
-
-  it("SCRUM254_after_success_tells_the_parent_and_stops_a_second_request_for_the_event", async () => {
-    const created = { id: "b1", status: "pending" };
-    vi.mocked(createBookingRequest).mockResolvedValue(created);
-    const onRequestSubmitted = vi.fn();
-    const { user } = await arrive({ eventContext: EVENT, onRequestSubmitted });
-
-    await user.click(requestButton("Hall A"));
-    await user.click(within(panel()).getByRole("button", { name: "Request this venue" }));
-
-    expect(await within(panel()).findByText(/Request sent to Venue Staff for Hall A/)).toBeInTheDocument();
-    expect(onRequestSubmitted).toHaveBeenCalledWith(created);
-    expect(requestButtons().every((b) => b.disabled)).toBe(true);
-    expect(screen.getAllByRole("status").some((s) => /already has a venue request/.test(s.textContent))).toBe(true);
   });
 
   it("SCRUM254_works_without_an_onRequestSubmitted_handler", async () => {
@@ -209,28 +195,45 @@ describe("the request flow from a result", () => {
     expect(await within(panel()).findByText(/Request sent/)).toBeInTheDocument();
   });
 
-  it("SCRUM254_closing_after_success_keeps_the_other_buttons_disabled", async () => {
-    vi.mocked(createBookingRequest).mockResolvedValue({ id: "b1", status: "pending" });
-    const { user } = await arrive({ eventContext: EVENT });
+  // SCRUM-525 (AC1, R11): one live request per venue, so only the venue
+  // requested from this page, or refused by the server, is locked, and its
+  // row says why. This page has no Venue suitability list to point at.
+  const LOCKED_HINT = "This event already has a request for this venue.";
+
+  it("SCRUM525_AC1_venue_search_locks_only_the_requested_venue (after success and Close)", async () => {
+    const created = { id: "b1", status: "pending" };
+    vi.mocked(createBookingRequest).mockResolvedValue(created);
+    const onRequestSubmitted = vi.fn();
+    const { user } = await arrive({ eventContext: EVENT, onRequestSubmitted });
+
     await user.click(requestButton("Hall A"));
     await user.click(within(panel()).getByRole("button", { name: "Request this venue" }));
-    await user.click(await screen.findByRole("button", { name: "Close" }));
+    expect(await within(panel()).findByText(/Request sent to Venue Staff for Hall A/)).toBeInTheDocument();
+    expect(onRequestSubmitted).toHaveBeenCalledWith(created);
+    await user.click(screen.getByRole("button", { name: "Close" }));
 
     expect(panel()).not.toBeInTheDocument();
-    expect(requestButtons().every((b) => b.disabled)).toBe(true);
+    expect(requestButton("Hall A")).toBeDisabled();
+    expect(requestButton("Hall A")).toHaveAccessibleDescription(LOCKED_HINT);
+    expect(requestButton("Annex")).toBeEnabled();
+    expect(requestButton("Annex")).toHaveAccessibleDescription("");
   });
 
   it.each(["BOOKING_REQUEST_EXISTS", "BOOKING_FLAGGED_FOR_REVIEW"])(
-    "SCRUM254_%s_from_the_server_disables_the_other_buttons",
+    "SCRUM525_AC1_venue_search_locks_only_the_requested_venue (%s)",
     async (code) => {
-      vi.mocked(createBookingRequest).mockRejectedValue(httpError(409, { code, conflicts: [] }));
+      vi.mocked(createBookingRequest).mockRejectedValue(
+        httpError(409, { code, conflicts: [{ kind: "booking_request", bookingId: "b9" }] }),
+      );
       const { user } = await arrive({ eventContext: EVENT });
 
       await user.click(requestButton("Hall A"));
       await user.click(within(panel()).getByRole("button", { name: "Request this venue" }));
 
-      expect(await within(panel()).findByRole("alert")).toBeInTheDocument();
-      expect(requestButtons().every((b) => b.disabled)).toBe(true);
+      expect(await within(panel()).findByRole("alert")).toHaveTextContent(/this venue/);
+      expect(requestButton("Hall A")).toBeDisabled();
+      expect(requestButton("Hall A")).toHaveAccessibleDescription(LOCKED_HINT);
+      expect(requestButton("Annex")).toBeEnabled();
     },
   );
 
@@ -268,6 +271,7 @@ describe("the request flow from a result", () => {
     expect(createBookingRequest).toHaveBeenLastCalledWith({
       eventRequestId: "e1",
       venueId: "v2",
+      expectedAttendance: 150,
       confirmUnsuitable: true,
       acknowledgedCriteria: ["Capacity"],
     });

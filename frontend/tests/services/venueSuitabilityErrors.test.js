@@ -16,7 +16,12 @@ describe("SCRUM-191 suitabilityErrorMessage", () => {
     ["EVENT_DATES_MISSING", /no proposed start and end/],
     ["VENUE_RETIRED", /retired/],
     // SCRUM-188 review fix F11.
-    ["EVENT_ATTENDANCE_MISSING", /^This event has no expected attendance, so no venue can be checked against it yet\.$/],
+    // SCRUM-525: the venue can still be requested with its own attendance,
+    // so the message must not say no venue can be checked or requested.
+    [
+      "EVENT_ATTENDANCE_MISSING",
+      /^This event has no expected attendance yet, so capacity can't be checked here\. You can still request the venue and enter an attendance for it\.$/,
+    ],
   ])("SCRUM188_AC1_explains_the_409_%s", (code, pattern) => {
     expect(suitabilityErrorMessage(conflict(code))).toMatch(pattern);
   });
