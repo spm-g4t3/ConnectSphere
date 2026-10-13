@@ -36,6 +36,8 @@ const CANCELLABLE = [
   STATUS.UNDER_REVIEW,
   STATUS.PENDING_CLARIFICATION,
   STATUS.APPROVED,
+  STATUS.SAFETY_REVIEW,
+  STATUS.SAFETY_APPROVED,
   STATUS.CONFIRMED,
 ];
 
@@ -50,18 +52,18 @@ describe('STATUS mirrors the database enum', () => {
   /** Pull the enum values straight out of the migration, comments stripped. */
   function statusesDeclaredInSql() {
     const here = dirname(fileURLToPath(import.meta.url));
-    const sql = readFileSync(
-      resolve(here, '../../db/migrations/001_event_requests.sql'),
-      'utf8',
-    );
+      const baseSql = readFileSync(resolve(here, '../../db/migrations/001_event_requests.sql'), 'utf8');
+      const safetySql = readFileSync(resolve(here, '../../db/migrations/057_event_safety_statuses.sql'), 'utf8');
 
-    const block = sql.match(
-      /create type event_request_status as enum \(([\s\S]*?)\);/i,
-    );
-    if (!block) throw new Error('could not find the enum in the migration');
+      const block = baseSql.match(
+        /create type event_request_status as enum \(([\s\S]*?)\);/i,
+      );
+      if (!block) throw new Error('could not find the enum in the migration');
 
-    return [...block[1].replace(/--[^\n]*/g, '').matchAll(/'([a-z_]+)'/g)]
-      .map((m) => m[1]);
+      return [
+        ...[...block[1].replace(/--[^\n]*/g, '').matchAll(/'([a-z_]+)'/g)].map((m) => m[1]),
+        ...[...safetySql.matchAll(/add value if not exists '([a-z_]+)'/gi)].map((m) => m[1]),
+      ];
   }
 
   it('only uses values the SQL migration declares', () => {
@@ -79,8 +81,8 @@ describe('STATUS mirrors the database enum', () => {
     expect(missing.sort()).toEqual([...OBSOLETE_STATUSES].sort());
   });
 
-  it('has nine statuses', () => {
-    expect(ALL_STATUSES).toHaveLength(9);
+  it('has eleven statuses', () => {
+    expect(ALL_STATUSES).toHaveLength(11);
   });
 
   it('has no duplicate values', () => {
@@ -184,7 +186,11 @@ describe('only legal status transitions are permitted', () => {
     [STATUS.PENDING_CLARIFICATION, STATUS.UNDER_REVIEW],
     [STATUS.CONFIRMED, STATUS.COMPLETED],
     // SCRUM-318 additions
-    [STATUS.APPROVED, STATUS.CONFIRMED],
+    [STATUS.APPROVED, STATUS.SAFETY_REVIEW],
+    [STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_REVIEW, STATUS.APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.CONFIRMED],
+    [STATUS.SAFETY_APPROVED, STATUS.APPROVED],
     [STATUS.CONFIRMED, STATUS.APPROVED],
     [STATUS.APPROVED, STATUS.REJECTED],
     [STATUS.REJECTED, STATUS.DRAFT],
@@ -221,7 +227,7 @@ describe('only legal status transitions are permitted', () => {
     expect(canTransition(from, to)).toBe(false);
   });
 
-  it('refuses every transition outside the SCRUM-318 table', () => {
+  it('refuses every transition outside the current lifecycle table', () => {
     // The whole table, so a transition added by accident fails here even when
     // nobody thought to write a case for it.
     const permitted = new Set([
@@ -233,7 +239,15 @@ describe('only legal status transitions are permitted', () => {
       'under_review>rejected',
       'approved>rejected',
       'rejected>draft',
-      'approved>confirmed',
+      'approved>safety_review',
+      'safety_review>safety_approved',
+      'safety_review>approved',
+      'safety_review>cancelled',
+      'safety_approved>confirmed',
+      'safety_approved>approved',
+      'safety_approved>cancelled',
+      'safety_review>cancelled',
+      'safety_approved>cancelled',
       'confirmed>approved',
       'confirmed>completed',
       ...CANCELLABLE.map((s) => `${s}>cancelled`),
@@ -644,7 +658,8 @@ describe('SCRUM-323 AC7: every status has its Organiser label', () => {
   it('SCRUM323_AC7_leaves_the_internal_statuses_unchanged', () => {
     expect(Object.values(STATUS).sort()).toEqual([
       'approved', 'cancelled', 'completed', 'confirmed', 'draft',
-      'pending_clarification', 'rejected', 'submitted', 'under_review',
+      'pending_clarification', 'rejected', 'safety_approved', 'safety_review',
+      'submitted', 'under_review',
     ]);
   });
 

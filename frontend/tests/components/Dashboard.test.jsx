@@ -103,8 +103,7 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     renderDashboardAs("safety_officer");
 
     expect(screen.getByRole("heading", { level: 1, name: "Safety Officer" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Safety review list" })).toBeInTheDocument();
-    expect(screen.getByText(/built by SCRUM-490/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Safety review" })).toBeInTheDocument();
   });
 
   it.each(["event_coordinator_lead", "safety_officer"])(

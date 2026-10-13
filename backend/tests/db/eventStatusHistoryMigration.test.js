@@ -190,6 +190,9 @@ describe('SCRUM-321: only the lifecycle and decision functions write the status 
       // columns. The same argument 021 makes for submit_event_request. One
       // row per function, so two.
       '029_event_request_decisions_functions.sql: 2',
+      // SCRUM-490 records each immutable Safety Officer response in the same
+      // transaction as the status transition it causes.
+      '058_safety_review.sql: 2',
     ]);
   });
 });

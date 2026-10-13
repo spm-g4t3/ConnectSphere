@@ -82,7 +82,7 @@ Each package can still be driven on its own from inside its own directory; the r
 
 ## Event status lifecycle
 
-An event request is always in exactly one of nine statuses, and moves between them only along the transitions below. The statuses and transitions are defined once, in `backend/src/domain/eventRequestStatus.js` (`STATUS`, `ALLOWED_TRANSITIONS`, `canTransition`). Every story uses these names.
+An event request is always in exactly one lifecycle status, and moves between them only along the transitions below. The statuses and transitions are defined in `backend/src/domain/eventRequestStatus.js` (`STATUS`, `ALLOWED_TRANSITIONS`, `canTransition`); append-only migrations add statuses to PostgreSQL. Every story uses these names.
 
 ### Statuses and what the Organiser sees
 
@@ -95,6 +95,8 @@ The stored value is internal. The Event Organiser never sees it: they see the la
 | Under review | `under_review` | Under review |
 | Pending clarification | `pending_clarification` | Awaiting your response |
 | Approved | `approved` | Planning |
+| Safety review | `safety_review` | Safety review |
+| Safety approved | `safety_approved` | Safety approved |
 | Confirmed | `confirmed` | Confirmed |
 | Completed | `completed` | Completed |
 | Rejected | `rejected` | Rejected |
@@ -113,19 +115,23 @@ Only these transitions are allowed. This story defines which moves are valid; wh
 | Under review | Approved or Rejected | The assigned coordinator decides (SCRUM-19) |
 | Approved | Rejected | The assigned coordinator rejects an event whose essential arrangements can't be met (SCRUM-19) |
 | Rejected | Draft | The organiser reopens a rejected request to revise and resubmit it (SCRUM-19) |
-| Approved | Confirmed | The assigned coordinator confirms (N07) |
+| Approved | Safety review | The event enters the operational safety check (SCRUM-490) |
+| Safety review | Safety approved or Approved | The Safety Officer approves, requests changes or rejects the safety arrangement (SCRUM-490) |
+| Safety approved | Confirmed or Approved | The assigned coordinator confirms, or a significant change requires replanning |
 | Confirmed | Approved | A significant change is accepted, so the event needs re-planning (N05, N06) |
 | Confirmed | Completed | The assigned coordinator marks the event completed after it ends (N23) |
-| Submitted, Under review, Pending clarification, Approved, Confirmed | Cancelled | The assigned coordinator cancels, including when the organiser asks to withdraw (N08) |
+| Submitted, Under review, Pending clarification, Approved, Safety review, Safety approved, Confirmed | Cancelled | The assigned coordinator cancels, including when the organiser asks to withdraw (N08) |
 
 ```
 Draft -> Submitted -> Under review <-> Pending clarification
                           |
-                          +-> Approved <-> Confirmed -> Completed
+                          +-> Approved -> Safety review -> Safety approved -> Confirmed -> Completed
+                          |      ^              |                |
+                          |      +--------------+----------------+
                           |      |
                           +------+-> Rejected -> Draft (reopened)
 
-Cancelled: from Submitted, Under review, Pending clarification, Approved or Confirmed.
+Cancelled: from Submitted, Under review, Pending clarification, Approved, Safety review, Safety approved or Confirmed.
 ```
 
 - **Final statuses.** Completed and Cancelled are final: nothing leads out of them. A cancelled event cannot be reinstated; the organiser submits a new request instead. Rejected is not final, because a rejected request can be reopened as a draft.

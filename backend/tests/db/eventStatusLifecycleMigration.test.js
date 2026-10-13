@@ -16,6 +16,10 @@ import { dirname, resolve } from 'node:path';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const LIFECYCLE_STATUSES_BEFORE_SAFETY = [
+  'draft', 'submitted', 'under_review', 'pending_clarification', 'approved',
+  'confirmed', 'completed', 'rejected', 'cancelled',
+];
 
 const sql = readFileSync(
   resolve(here, '../../db/migrations/020_event_status_lifecycle.sql'),
@@ -37,7 +41,7 @@ function listAfter(marker) {
 describe('SCRUM-320: the lifecycle constraint', () => {
   it('lists exactly the statuses the domain module defines', () => {
     expect(listAfter('add constraint event_requests_status_in_lifecycle').sort())
-      .toEqual(Object.values(STATUS).sort());
+      .toEqual(LIFECYCLE_STATUSES_BEFORE_SAFETY.sort());
   });
 
   it("does not admit 'planning'", () => {

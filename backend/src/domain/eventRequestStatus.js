@@ -14,8 +14,8 @@
 
 
 /**
- * The nine statuses of the lifecycle (SCRUM-318), spelled as in the Postgres
- * enum `event_request_status`.
+ * The lifecycle statuses, including additions after the original enum
+ * migration. PostgreSQL enum values are added by append-only migrations.
  *
  * There is no PLANNING status. The customer treats planning as approval, so
  * that stage is APPROVED. The enum still carries 'planning', because Postgres
@@ -30,6 +30,8 @@ export const STATUS = Object.freeze({
   UNDER_REVIEW: 'under_review',
   PENDING_CLARIFICATION: 'pending_clarification',
   APPROVED: 'approved',
+  SAFETY_REVIEW: 'safety_review',
+  SAFETY_APPROVED: 'safety_approved',
   CONFIRMED: 'confirmed',
   COMPLETED: 'completed',
   REJECTED: 'rejected',
@@ -89,6 +91,8 @@ export const ORGANISER_STATUS_LABEL = Object.freeze({
   [STATUS.UNDER_REVIEW]: 'Under review',
   [STATUS.PENDING_CLARIFICATION]: 'Awaiting your response',
   [STATUS.APPROVED]: 'Planning',
+  [STATUS.SAFETY_REVIEW]: 'Safety review',
+  [STATUS.SAFETY_APPROVED]: 'Safety approved',
   [STATUS.CONFIRMED]: 'Confirmed',
   [STATUS.COMPLETED]: 'Completed',
   [STATUS.REJECTED]: 'Rejected',
@@ -131,6 +135,16 @@ export const STATUS_DISPLAY = Object.freeze({
     label: ORGANISER_STATUS_LABEL[STATUS.APPROVED],
     group: STATUS_GROUP.APPROVED,
     description: 'Your request has been accepted. Arrangements will now begin.',
+  }),
+  [STATUS.SAFETY_REVIEW]: Object.freeze({
+    label: ORGANISER_STATUS_LABEL[STATUS.SAFETY_REVIEW],
+    group: STATUS_GROUP.AWAITING_REVIEW,
+    description: 'A Safety Officer is reviewing the event arrangements.',
+  }),
+  [STATUS.SAFETY_APPROVED]: Object.freeze({
+    label: ORGANISER_STATUS_LABEL[STATUS.SAFETY_APPROVED],
+    group: STATUS_GROUP.APPROVED,
+    description: 'The event arrangements have passed the safety review.',
   }),
   [STATUS.CONFIRMED]: Object.freeze({
     label: ORGANISER_STATUS_LABEL[STATUS.CONFIRMED],
@@ -205,7 +219,17 @@ export const ALLOWED_TRANSITIONS = Object.freeze({
   ]),
   [STATUS.APPROVED]: Object.freeze([
     STATUS.REJECTED,
+    STATUS.SAFETY_REVIEW,
+    STATUS.CANCELLED,
+  ]),
+  [STATUS.SAFETY_REVIEW]: Object.freeze([
+    STATUS.SAFETY_APPROVED,
+    STATUS.APPROVED,
+    STATUS.CANCELLED,
+  ]),
+  [STATUS.SAFETY_APPROVED]: Object.freeze([
     STATUS.CONFIRMED,
+    STATUS.APPROVED,
     STATUS.CANCELLED,
   ]),
   [STATUS.CONFIRMED]: Object.freeze([

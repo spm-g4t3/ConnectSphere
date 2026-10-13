@@ -16,6 +16,8 @@ import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
 import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck";
 import EquipmentReview from "./components/EquipmentReview";
+import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
+import SafetyReviewHistory from "./components/SafetyReviewHistory";
 import "./App.css";
 
 function LoadingScreen() {
@@ -75,6 +77,22 @@ function AppRoutes() {
       <Routes>
         <Route path="/login" element={<LoginForm />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route
+          path="/safety-review"
+          element={
+            <ProtectedRoute allowedRoles={["safety_officer"]}>
+              <SafetyOfficerDashboard user={user} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/safety-review/history"
+          element={
+            <ProtectedRoute allowedRoles={["safety_officer"]}>
+              <SafetyReviewHistory />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/events" element={<ProtectedRoute><MyEventRequests /></ProtectedRoute>} />
         {/* VenueSearch was written, correct, and imported by nothing — the route
             rendered a placeholder over a working component. Swapped for the real one. */}

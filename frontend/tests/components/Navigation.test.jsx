@@ -143,9 +143,12 @@ describe("SCRUM485_AC4 each new role sees only its own links", () => {
     expect(linksOf("event_coordinator_lead")).toEqual(DASHBOARD_ONLY);
   });
 
-  it("SCRUM485_AC4_a_safety_officer_has_exactly_the_dashboard_link", () => {
-    // AC4-02.
-    expect(linksOf("safety_officer")).toEqual(DASHBOARD_ONLY);
+  it("SCRUM490_a_safety_officer_has_the_safety_review_link", () => {
+    expect(linksOf("safety_officer")).toEqual([
+      ...DASHBOARD_ONLY,
+      ["Safety review", "/safety-review"],
+      ["Review history", "/safety-review/history"],
+    ]);
   });
 
   it("SCRUM485_AC4_a_lead_sees_none_of_the_coordinators_links", () => {
@@ -182,12 +185,19 @@ describe("SCRUM485_AC4 each new role sees only its own links", () => {
     },
   );
 
-  it.each(["Safety Officer", "event-coordinator-lead", "EVENT_COORDINATOR_LEAD", "safety officer"])(
+  it.each(["event-coordinator-lead", "EVENT_COORDINATOR_LEAD"])(
     "SCRUM485_AC4_the_role_spelt_%j_reaches_the_same_single_link",
     (spelling) => {
       // AC4-05. normaliseRole absorbs case, spaces and hyphens, as the
       // American-spelling test above shows for the Organiser.
       expect(linksOf(spelling)).toEqual(DASHBOARD_ONLY);
+    },
+  );
+
+  it.each(["Safety Officer", "safety officer"])(
+    "SCRUM490_the_role_spelt_%j_reaches_the_safety_officer_links",
+    (spelling) => {
+      expect(linksOf(spelling)).toEqual(linksOf("safety_officer"));
     },
   );
 
