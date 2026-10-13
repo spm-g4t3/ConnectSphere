@@ -856,3 +856,17 @@ button { cursor: pointer; }
 .event-venue-suitability__note { color: var(--muted); font-size: 0.9rem; margin: 0 0 8px; }
 .event-venue-suitability__loading, .event-venue-suitability__empty { color: var(--muted); margin: 0; }
 .event-venue-suitability__details summary { cursor: pointer; margin-bottom: 8px; }
+
+/* SCRUM-487: coordinator overview */
+/* /assigned-events: the unassigned count, the coordinators' table and the
+   events list's filters. One block at the end, as App.css is shared by every
+   story. The table's cells take the venue calendar's values; the table scrolls
+   inside itself on a narrow screen rather than widening the page. */
+.assigned-events__unassigned { align-items: baseline; display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 12px 0 8px; }
+.assigned-events__unassigned p { margin: 0; }
+.coordinator-workload { border-collapse: collapse; display: block; overflow-x: auto; width: 100%; }
+.coordinator-workload th, .coordinator-workload td { border-bottom: 1px solid var(--line); padding: 10px 8px; text-align: left; }
+.coordinator-workload thead th { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
+.coordinator-workload td { font-variant-numeric: tabular-nums; }
+.assigned-events__filters { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
+.assigned-events__filters select { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }

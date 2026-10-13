@@ -67,8 +67,9 @@ vi.mock("../../src/components/TechnicalSupportDashboard", () => ({
 }));
 
 const NO_DASHBOARD = "No dashboard available for your role. Please contact support.";
+// SCRUM-487 (SCRUM-544): the overview is built; the placeholder sentence is replaced.
 const NEW_OVERVIEW_TEXT =
-  "Every event a coordinator holds is listed now in Assigned Events. The full overview, with filters and each coordinator's counts, is built by SCRUM-487.";
+  "See every coordinator's events and workload, and filter them, in Assigned Events.";
 
 // In a MemoryRouter since SCRUM-486 AC6: the Lead's overview card holds a
 // router Link to /assigned-events, which cannot render outside a router (the

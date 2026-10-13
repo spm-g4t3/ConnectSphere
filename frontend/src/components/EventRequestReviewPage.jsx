@@ -17,7 +17,8 @@
 // until then that the Lead reached an event only by its address; the AC1
 // walkthrough on 12 October showed that was not "reassign events where
 // necessary", so the list was built as the first slice of SCRUM-487's
-// coordinator overview, which extends it and keeps linking here.
+// coordinator overview. SCRUM-487 extended it (the counts, the filters,
+// finished events), and its rows still link here.
 //
 // Open to coordinators too: it is the same read they already have, and gives
 // an event a link of its own. The server decides what either may do on it.

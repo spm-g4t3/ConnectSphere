@@ -56,7 +56,8 @@
  *    planning statuses remains a separate workflow.
  *  - The Event Coordinator Lead's routes (SCRUM-486) are gated per route too,
  *    by leadOnly: the unassigned queue, the picker's coordinator workload, the
- *    list of assigned events (AC6) and the first assignment. POST
+ *    list of assigned events (AC6) and the first assignment; since SCRUM-487,
+ *    the coordinator overview's counts too. POST
  *    /:id/reassign admits a Lead as well as a coordinator; which of them may
  *    hand over this event is the database's question, as before.
  *
@@ -83,6 +84,7 @@ import {
   listCoordinators,
   listUnassignedEventRequests,
   listCoordinatorWorkload,
+  listCoordinatorOverview,
   listAssignedEventsForLead,
   listAssignmentHistory,
   createEventRequest,
@@ -119,7 +121,7 @@ import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 // Credential-free too: http/handleError.js imports only errors.js.
 import { createErrorHandler } from '../http/handleError.js';
-import { ForbiddenError } from '../errors.js';
+import { ForbiddenError, ValidationError } from '../errors.js';
 
 
 /** Map an error to a response; see src/http/handleError.js (SCRUM-127). */
@@ -389,6 +391,40 @@ export function createEventRequestRouter({
   });
 
   /**
+   * SCRUM-487 AC2 (SCRUM-541): every Event Coordinator, as
+   * { id, fullName, activeEvents, byStatus }, for the Lead's coordinator
+   * overview: how many active events each holds, and how many in each status.
+   * Since SCRUM-546 the response is { statuses, coordinators }: statuses is
+   * each active, then finished, status with its label, so the screen names
+   * every column and filter option without collecting words from the event
+   * rows it happens to have loaded (SCRUM-487 D9).
+   *
+   * A route of its own rather than byStatus added to /coordinator-workload
+   * (SCRUM-487 D3): that response is the assignment picker's, and SCRUM-486
+   * pins it to a name and a count. Both are counted by one shared read in the
+   * service, so the totals agree.
+   *
+   * leadOnly, for the reason /coordinator-workload is: it shows every
+   * coordinator's caseload, which is the Lead's supervision and no
+   * coordinator's business.
+   *
+   * DECLARATION ORDER IS LOAD-BEARING, as above: '/coordinator-overview' is
+   * one segment, so declared after GET /:id it would be read as an id and the
+   * Lead would get the Organiser's 404. Do not move it below /:id.
+   *
+   * An object, { statuses, coordinators }; coordinators by name, and no
+   * coordinators is 200 with coordinators []. Statuses: 200, 401, 403 unless a
+   * Lead, 500.
+   */
+  router.get('/coordinator-overview', leadOnly, async (req, res) => {
+    try {
+      res.status(200).json(await listCoordinatorOverview({ client }));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
    * SCRUM-486 AC6: every event someone holds in an active status, earliest
    * first, each with its organiser's and coordinator's names and statusDisplay.
    * The Lead's way to the event page they hand an event over from.
@@ -403,11 +439,33 @@ export function createEventRequestRouter({
    * Lead would get the Organiser's 404 instead of the list. Do not move it
    * below /:id.
    *
-   * A bare array; none is 200 []. Statuses: 200, 401, 403 unless a Lead, 500.
+   * SCRUM-487 AC3 (SCRUM-542): three optional query parameters, filtered in
+   * the query (SCRUM-487 D2). ?coordinatorId= and ?status= go to the service
+   * as they arrive, and it refuses a malformed one with 400 before reading.
+   * ?includeFinished= is a string on the wire, so it is mapped here: 'true'
+   * is true, 'false' or absent is false, and anything else is 400. A stray
+   * ?includeFinished=yes must not quietly mean false: the Lead would be shown
+   * a list without finished events while believing they had asked for them.
+   * With no parameters this is exactly SCRUM-486 AC6's list.
+   *
+   * A bare array; none is 200 []. Statuses: 200, 400 for a refused filter, 401,
+   * 403 unless a Lead, 500.
    */
   router.get('/assigned', leadOnly, async (req, res) => {
     try {
-      const events = await listAssignedEventsForLead({ client });
+      const { coordinatorId, status, includeFinished: rawIncludeFinished } = req.query;
+      if (rawIncludeFinished !== undefined && rawIncludeFinished !== 'true' && rawIncludeFinished !== 'false') {
+        throw new ValidationError(
+          'Invalid filter -- includeFinished: must be true or false',
+          [{ field: 'includeFinished', message: 'must be true or false' }],
+        );
+      }
+      const events = await listAssignedEventsForLead({
+        client,
+        coordinatorId,
+        status,
+        includeFinished: rawIncludeFinished === 'true',
+      });
       res.status(200).json(events.map(withStatusDisplay));
     } catch (err) {
       handleError(err, res);

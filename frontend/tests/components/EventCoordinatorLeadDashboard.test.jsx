@@ -86,10 +86,11 @@ describe("SCRUM486_AC2 the Lead's dashboard", () => {
     // The queue, read for real, here empty, and said so.
     expect(await screen.findByText("No event requests are waiting for a coordinator.")).toBeInTheDocument();
     expect(listUnassignedEventRequests).toHaveBeenCalledTimes(1);
-    // The overview card: what is listed now, and where; the rest is SCRUM-487's.
+    // The overview card: where the overview is.
+    // SCRUM-487 (SCRUM-544): the overview is built; the placeholder sentence is replaced.
     const overview = screen.getByRole("heading", { level: 2, name: "Coordinator overview" }).closest("section");
     expect(overview.querySelector("p")).toHaveTextContent(
-      "Every event a coordinator holds is listed now in Assigned Events. The full overview, with filters and each coordinator's counts, is built by SCRUM-487.",
+      "See every coordinator's events and workload, and filter them, in Assigned Events.",
     );
     expect(within(overview).getByRole("link", { name: "Assigned Events" })).toHaveAttribute("href", "/assigned-events");
     // The notifications card.

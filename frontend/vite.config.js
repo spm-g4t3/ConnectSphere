@@ -120,6 +120,17 @@ const SCRUM486_FILES = [
   'src/components/AssignedEvents.jsx',
 ]
 
+// SCRUM-487: the Lead's coordinator overview. New files only this story owns,
+// gated outright. AssignedEvents.jsx, which it extends, stays in
+// SCRUM486_FILES, so its 100% gate holds over both stories' code.
+const SCRUM487_FILES = [
+  // SCRUM-543 (AC4): the unassigned count at the top.
+  'src/components/UnassignedCount.jsx',
+  // SCRUM-544 (AC2, AC3): the coordinators' table and the list's filters.
+  'src/components/CoordinatorWorkloadTable.jsx',
+  'src/components/AssignedEventsFilters.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -159,6 +170,7 @@ export default defineConfig({
         ...SCRUM485_FILES.map((file) => [file, FULL]),
         ...SCRUM491_FILES.map((file) => [file, FULL]),
         ...SCRUM486_FILES.map((file) => [file, FULL]),
+        ...SCRUM487_FILES.map((file) => [file, FULL]),
       ]),
     },
   },
