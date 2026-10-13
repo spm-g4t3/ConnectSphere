@@ -1946,6 +1946,25 @@ const ACTIVE_EVENT_STATUSES = Object.freeze([
 ]);
 
 /**
+ * The statuses in which an event is finished, for the Lead's list when they
+ * ask to include finished events (SCRUM-487 AC3: "Completed, Rejected and
+ * Cancelled events are hidden unless the Lead asks to include them").
+ *
+ * SCRUM-542. Named beside ACTIVE_EVENT_STATUSES, and between them the two are
+ * every status an event someone holds can have, except draft: a draft is the
+ * Organiser's working copy, nobody's event to supervise, so it is in neither
+ * and the list never shows one (a reopened draft can keep a stale
+ * coordinator, 022). Not derived as "every STATUS not active", which would
+ * admit draft, and would silently admit any status added later; a new
+ * finished status is a decision to make here.
+ */
+const FINISHED_EVENT_STATUSES = Object.freeze([
+  STATUS.COMPLETED,
+  STATUS.REJECTED,
+  STATUS.CANCELLED,
+]);
+
+/**
  * Every Event Coordinator, with their count of active events, for the Lead's
  * assignment picker (SCRUM-486 AC3).
  *
@@ -2125,6 +2144,27 @@ export async function listCoordinatorOverview({ client } = {}) {
  * reason listEventRequestsForCoordinator gives, then id so two refetches never
  * reshuffle.
  *
+ * SCRUM-487 AC3 (SCRUM-542) adds three options, each applied in the query,
+ * not left to the browser (SCRUM-487 D2: finished events only grow, so
+ * filtering on the screen would mean fetching every one of them to hide
+ * most). Called with none, the read is exactly SCRUM-486 AC6's, and SCRUM-486's
+ * tests of it pass unchanged.
+ *
+ *  - coordinatorId: only that coordinator's events. Checked with isPlausibleId
+ *    first, so a malformed id is a 400 rather than Postgres's 22P02. An id
+ *    that names no coordinator is an empty list, not a 404: the route would
+ *    otherwise tell anyone who calls it which ids are coordinators.
+ *  - status: one status. It must be active or finished; draft is a known
+ *    status but never in this list, so it is refused like an unknown one.
+ *    isKnownStatus would admit draft, so the two arrays decide.
+ *  - includeFinished: a boolean, false by default. Adds exactly
+ *    FINISHED_EVENT_STATUSES to the statuses read.
+ *
+ * Every option is checked before any query, so a refused filter costs no
+ * round trip. A finished status asked for while finished events are hidden is
+ * an empty list without a query: nothing in the list could match, and it is
+ * a coherent question with an empty answer, not a malformed one.
+ *
  * Only the columns a row shows, not COLUMNS: the row opens the event page,
  * which reads the full event itself. The organiser's and the coordinator's
  * names come from one profiles read narrowed to the people on this list
@@ -2133,18 +2173,54 @@ export async function listCoordinatorOverview({ client } = {}) {
  *
  * @param {object} [options]
  * @param {object} [options.client]
+ * @param {string} [options.coordinatorId]     only this coordinator's events (SCRUM-487 AC3)
+ * @param {string} [options.status]            only this status, active or finished (SCRUM-487 AC3)
+ * @param {boolean} [options.includeFinished]  also completed, rejected and cancelled (SCRUM-487 AC3)
  * @returns {Promise<Array<{ id: string, eventName: string, status: string,
  *   proposedStart: string|null, organiserName: string|null,
  *   assignedCoordinatorId: string, assignedCoordinatorName: string|null }>>}
+ * @throws {ValidationError} a malformed coordinatorId, a status that is not
+ *   active or finished, or an includeFinished that is not a boolean, before any query
  */
-export async function listAssignedEventsForLead({ client } = {}) {
+export async function listAssignedEventsForLead({ client, coordinatorId, status, includeFinished = false } = {}) {
+  if (coordinatorId !== undefined && !isPlausibleId(coordinatorId)) {
+    throw new ValidationError(
+      'Invalid filter -- coordinatorId: must be a valid id',
+      [{ field: 'coordinatorId', message: 'must be a valid id' }],
+    );
+  }
+  if (status !== undefined && !ACTIVE_EVENT_STATUSES.includes(status) && !FINISHED_EVENT_STATUSES.includes(status)) {
+    throw new ValidationError(
+      'Invalid filter -- status: must be an active or finished status',
+      [{ field: 'status', message: 'must be an active or finished status' }],
+    );
+  }
+  if (typeof includeFinished !== 'boolean') {
+    throw new ValidationError(
+      'Invalid filter -- includeFinished: must be true or false',
+      [{ field: 'includeFinished', message: 'must be true or false' }],
+    );
+  }
+
+  const statuses = includeFinished ? [...ACTIVE_EVENT_STATUSES, ...FINISHED_EVENT_STATUSES] : ACTIVE_EVENT_STATUSES;
+
+  if (status !== undefined) {
+    // A finished status while finished events are hidden: nothing can match,
+    // so the answer is the empty list, and no query is made to learn it.
+    if (!statuses.includes(status)) return [];
+  }
+
   const db = await resolveClient(client);
 
-  const { data, error } = await db
+  let query = db
     .from('event_requests')
-    .select('id, event_name, status, proposed_start, organiser_id, assigned_coordinator_id')
-    .in('status', ACTIVE_EVENT_STATUSES)
-    .not('assigned_coordinator_id', 'is', null)
+    .select('id, event_name, status, proposed_start, organiser_id, assigned_coordinator_id');
+  // One status narrows the set to itself; it is already known to be in it.
+  query = status === undefined ? query.in('status', statuses) : query.eq('status', status);
+  query = query.not('assigned_coordinator_id', 'is', null);
+  if (coordinatorId !== undefined) query = query.eq('assigned_coordinator_id', coordinatorId.trim());
+
+  const { data, error } = await query
     .order('proposed_start', { ascending: true, nullsFirst: false })
     .order('id', { ascending: true });
 

@@ -155,3 +155,76 @@ describe('SCRUM-487 AC1, AC2: GET /coordinator-overview is the Lead\'s', () => {
     expect(client.calls).toHaveLength(0);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// AC1, AC3: GET /assigned with the filters
+// ---------------------------------------------------------------------------
+describe('SCRUM-487 AC1, AC3: GET /assigned takes the Lead\'s filters', () => {
+  const FINISHED = [STATUS.COMPLETED, STATUS.REJECTED, STATUS.CANCELLED];
+  const ACTIVE = [STATUS.SUBMITTED, STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION, STATUS.APPROVED, STATUS.CONFIRMED];
+  const assigned = (client, query, requireAuth) =>
+    request(appWith({ client, requireAuth })).get(`/api/event-requests/assigned${query}`);
+
+  it('SCRUM487_AC3_the_query_string_reaches_the_read', async () => {
+    // AC3-14, AC3-16: every parameter arrives, and a path with a query string
+    // is still the list's read, not GET /:id's (no eq on id).
+    const client = createFakeClient([ok([])]);
+
+    const res = await assigned(client, `?coordinatorId=${COORDINATOR_A}&status=completed&includeFinished=true`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].filters).toEqual([['status', STATUS.COMPLETED], ['assigned_coordinator_id', COORDINATOR_A]]);
+    expect(client.calls[0].notFilters).toEqual([['assigned_coordinator_id', 'is', null]]);
+  });
+
+  it.each([
+    ['?includeFinished=true', [...ACTIVE, ...FINISHED]],
+    ['?includeFinished=false', ACTIVE],
+    ['', ACTIVE],
+  ])('SCRUM487_AC3_include_finished_%j_reads_its_statuses', async (query, statuses) => {
+    // AC3-13. 'true' is true; 'false' and absent are false.
+    const client = createFakeClient([ok([])]);
+
+    const res = await assigned(client, query);
+
+    expect(res.status).toBe(200);
+    expect(client.calls[0].inFilters).toEqual([['status', statuses]]);
+  });
+
+  it.each([
+    ['?includeFinished=yes', 'includeFinished'],
+    ['?includeFinished=TRUE', 'includeFinished'],
+    ['?includeFinished=', 'includeFinished'],
+    ['?status=draft', 'status'],
+    ['?status=nonsense', 'status'],
+    ['?coordinatorId=not-a-uuid', 'coordinatorId'],
+    ['?status=approved&status=confirmed', 'status'],
+  ])('SCRUM487_AC3_%s_is_400_and_queries_nothing', async (query, field) => {
+    // AC3-09 to AC3-12 over HTTP. A stray value is refused, never read as
+    // false or as no filter; a repeated parameter arrives as an array and is
+    // refused too.
+    const client = createFakeClient([]);
+
+    const res = await assigned(client, query);
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((detail) => detail.field)).toEqual([field]);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ['event_coordinator', ROLE.EVENT_COORDINATOR],
+    ['event_organiser', ROLE.EVENT_ORGANISER],
+  ])('SCRUM487_AC1_%s_is_refused_the_filtered_list_with_403_and_queries_nothing', async (_label, role) => {
+    // AC1-04. The filters do not widen the gate; refused before validation.
+    const client = createFakeClient([]);
+
+    const res = await assigned(client, `?coordinatorId=${COORDINATOR_A}&status=approved&includeFinished=true`, signedInWithRole(role, COORDINATOR_A));
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+});

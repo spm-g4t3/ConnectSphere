@@ -121,7 +121,7 @@ import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 // Credential-free too: http/handleError.js imports only errors.js.
 import { createErrorHandler } from '../http/handleError.js';
-import { ForbiddenError } from '../errors.js';
+import { ForbiddenError, ValidationError } from '../errors.js';
 
 
 /** Map an error to a response; see src/http/handleError.js (SCRUM-127). */
@@ -434,11 +434,33 @@ export function createEventRequestRouter({
    * Lead would get the Organiser's 404 instead of the list. Do not move it
    * below /:id.
    *
-   * A bare array; none is 200 []. Statuses: 200, 401, 403 unless a Lead, 500.
+   * SCRUM-487 AC3 (SCRUM-542): three optional query parameters, filtered in
+   * the query (SCRUM-487 D2). ?coordinatorId= and ?status= go to the service
+   * as they arrive, and it refuses a malformed one with 400 before reading.
+   * ?includeFinished= is a string on the wire, so it is mapped here: 'true'
+   * is true, 'false' or absent is false, and anything else is 400. A stray
+   * ?includeFinished=yes must not quietly mean false: the Lead would be shown
+   * a list without finished events while believing they had asked for them.
+   * With no parameters this is exactly SCRUM-486 AC6's list.
+   *
+   * A bare array; none is 200 []. Statuses: 200, 400 for a refused filter, 401,
+   * 403 unless a Lead, 500.
    */
   router.get('/assigned', leadOnly, async (req, res) => {
     try {
-      const events = await listAssignedEventsForLead({ client });
+      const { coordinatorId, status, includeFinished: rawIncludeFinished } = req.query;
+      if (rawIncludeFinished !== undefined && rawIncludeFinished !== 'true' && rawIncludeFinished !== 'false') {
+        throw new ValidationError(
+          'Invalid filter -- includeFinished: must be true or false',
+          [{ field: 'includeFinished', message: 'must be true or false' }],
+        );
+      }
+      const events = await listAssignedEventsForLead({
+        client,
+        coordinatorId,
+        status,
+        includeFinished: rawIncludeFinished === 'true',
+      });
       res.status(200).json(events.map(withStatusDisplay));
     } catch (err) {
       handleError(err, res);

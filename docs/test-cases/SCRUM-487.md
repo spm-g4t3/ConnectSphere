@@ -4,7 +4,7 @@
 **Subtask:** SCRUM-540 (this document)
 **Schema:** no migration. Everything here reads tables and functions that exist after `052_lead_assignment.sql` (SCRUM-486).
 **Written:** 13 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; each **Implemented by** says so, and the subtask that writes its tests fills it in.
-**Marked:** 13 October 2026, SCRUM-541: AC1-01 to AC1-03 and AC2-01 to AC2-11 name their tests. The cases themselves are unchanged.
+**Marked:** 13 October 2026, SCRUM-541: AC1-01 to AC1-03 and AC2-01 to AC2-11 name their tests; SCRUM-542: AC1-04 and AC3-01 to AC3-16. The cases themselves are unchanged.
 
 This document is the written layer between SCRUM-487's acceptance criteria and the
 Vitest files that will implement them. Deliverable #3 requires test cases
@@ -198,7 +198,7 @@ built, its own cases say what the Lead may cancel there.
 | AC1-01 | LEAD | `GET /coordinator-overview` | 200, a bare array | Proved (route): `SCRUM487_AC2_a_lead_reads_every_coordinator_with_counts_per_status` |
 | AC1-02 | COORD, ORG, venue staff, technical support, attendee, SAFETY, an account with no profile (role null) | `GET /coordinator-overview` | 403 from `leadOnly`, nothing queried | Proved (route): `SCRUM487_AC1_%s_is_refused_the_coordinator_overview_with_403_and_queries_nothing` |
 | AC1-03 | No token | `GET /coordinator-overview` | 401, nothing queried | Proved (route): `SCRUM487_AC1_the_coordinator_overview_answers_401_without_a_token` |
-| AC1-04 | COORD, ORG | `GET /assigned?coordinatorId=…&status=…&includeFinished=true` | 403, nothing queried: the filters do not widen the gate | **not yet implemented** (SCRUM-542). The unfiltered gate is SCRUM-486's `SCRUM486_AC6_%s_is_refused_the_assigned_list_with_403_and_queries_nothing` |
+| AC1-04 | COORD, ORG | `GET /assigned?coordinatorId=…&status=…&includeFinished=true` | 403, nothing queried: the filters do not widen the gate | Proved (route): `SCRUM487_AC1_%s_is_refused_the_filtered_list_with_403_and_queries_nothing`. Unfiltered: SCRUM-486's `SCRUM486_AC6_%s_is_refused_the_assigned_list_with_403_and_queries_nothing` |
 | AC1-05 | COORD, ORG | Open the overview's address | Turned away by `ProtectedRoute` (`event_coordinator_lead` only) | **not yet implemented** (SCRUM-544) |
 | AC1-06 | Every role | Render `Navigation` | Only the Lead is offered the overview | **not yet implemented** (SCRUM-544) |
 
@@ -224,22 +224,22 @@ built, its own cases say what the Lead may cancel there.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC3-01 **(trap)** | — | `listAssignedEventsForLead()` with no options | The same query and rows as SCRUM-486 AC6: `in` status `ACTIVE_EVENT_STATUSES`, held only, by `proposed_start` (nulls last) then id. SCRUM-486's AC6 tests pass unchanged | **not yet implemented** (SCRUM-542). The guard is SCRUM-486's `SCRUM486_AC6_…` tests, unedited |
-| AC3-02 | — | `coordinatorId` A | Adds `eq assigned_coordinator_id A`; still held only | **not yet implemented** (SCRUM-542) |
-| AC3-03 | — | `status` `approved` | Adds `eq status approved` | **not yet implemented** (SCRUM-542) |
-| AC3-04 | — | `coordinatorId` A and `status` `approved` | Both, together | **not yet implemented** (SCRUM-542) |
-| AC3-05 | — | `includeFinished` true | The status set is `ACTIVE_EVENT_STATUSES` plus exactly completed, rejected and cancelled; never draft | **not yet implemented** (SCRUM-542) |
-| AC3-06 **(trap)** | Held events in every status, draft included | `includeFinished` false, then true | Off: completed, rejected and cancelled hidden. On: shown. Draft: never | **not yet implemented** (SCRUM-542) |
-| AC3-07 **(trap)** | — | `status` `completed`, `includeFinished` false | `[]`, and no query: a finished status asked for while finished events are hidden is an empty answer, not an error | **not yet implemented** (SCRUM-542) |
-| AC3-08 | — | `status` `completed`, `includeFinished` true | `eq status completed` | **not yet implemented** (SCRUM-542) |
-| AC3-09 **(trap)** | — | `coordinatorId` not a uuid | 400 (`ValidationError`), no query | **not yet implemented** (SCRUM-542) |
-| AC3-10 **(trap)** | — | `status` `draft` | 400, no query: draft is a known status but never in this list | **not yet implemented** (SCRUM-542) |
-| AC3-11 **(trap)** | — | `status` `nonsense` | 400, no query | **not yet implemented** (SCRUM-542) |
-| AC3-12 **(trap)** | — | `includeFinished` not a boolean (service); `?includeFinished=yes` (route) | 400, no query: a stray value never silently means false | **not yet implemented** (SCRUM-542) |
-| AC3-13 | LEAD | `?includeFinished=true`, `=false`, absent | true, false, false | **not yet implemented** (SCRUM-542) |
-| AC3-14 | LEAD | `GET /assigned?coordinatorId=A&status=approved` | The filters reach the query (the recorded `eq`s) | **not yet implemented** (SCRUM-542) |
-| AC3-15 | — | Any filter | The order is unchanged: `proposed_start` ascending, nulls last, then id | **not yet implemented** (SCRUM-542) |
-| AC3-16 **(trap)** | LEAD | `GET /assigned?…` | Not read as an id, with a query string too | **not yet implemented** (SCRUM-542). Unfiltered: SCRUM-486's `SCRUM486_AC6_does_not_read_the_assigned_path_as_a_request_id` |
+| AC3-01 **(trap)** | — | `listAssignedEventsForLead()` with no options | The same query and rows as SCRUM-486 AC6: `in` status `ACTIVE_EVENT_STATUSES`, held only, by `proposed_start` (nulls last) then id. SCRUM-486's AC6 tests pass unchanged | Proved (svc): `SCRUM487_AC3_with_no_options_the_read_is_scrum486s`; and SCRUM-486's `SCRUM486_AC6_…` service and route tests, unedited, passing |
+| AC3-02 | — | `coordinatorId` A | Adds `eq assigned_coordinator_id A`; still held only | Proved (svc): `SCRUM487_AC3_a_coordinator_filter_adds_one_eq_on_the_coordinator` |
+| AC3-03 | — | `status` `approved` | Adds `eq status approved` | Proved (svc): `SCRUM487_AC3_a_status_filter_narrows_the_read_to_that_status` |
+| AC3-04 | — | `coordinatorId` A and `status` `approved` | Both, together | Proved (svc): `SCRUM487_AC3_coordinator_and_status_filters_combine` |
+| AC3-05 | — | `includeFinished` true | The status set is `ACTIVE_EVENT_STATUSES` plus exactly completed, rejected and cancelled; never draft | Proved (svc): `SCRUM487_AC3_include_finished_adds_exactly_the_three_finished_statuses` |
+| AC3-06 **(trap)** | Held events in every status, draft included | `includeFinished` false, then true | Off: completed, rejected and cancelled hidden. On: shown. Draft: never | Proved (svc): `SCRUM487_AC3_finished_events_are_hidden_unless_asked_for_and_a_draft_never_shows` |
+| AC3-07 **(trap)** | — | `status` `completed`, `includeFinished` false | `[]`, and no query: a finished status asked for while finished events are hidden is an empty answer, not an error | Proved (svc): `SCRUM487_AC3_asking_for_%s_while_finished_events_are_hidden_is_empty_and_makes_no_query` |
+| AC3-08 | — | `status` `completed`, `includeFinished` true | `eq status completed` | Proved (svc): `SCRUM487_AC3_a_finished_status_with_include_finished_is_read` |
+| AC3-09 **(trap)** | — | `coordinatorId` not a uuid | 400 (`ValidationError`), no query | Proved (svc, route): `SCRUM487_AC3_%s_is_refused_with_400_before_any_query`, `SCRUM487_AC3_%s_is_400_and_queries_nothing` |
+| AC3-10 **(trap)** | — | `status` `draft` | 400, no query: draft is a known status but never in this list | Proved (svc, route): `SCRUM487_AC3_%s_is_refused_with_400_before_any_query`, `SCRUM487_AC3_%s_is_400_and_queries_nothing` |
+| AC3-11 **(trap)** | — | `status` `nonsense` | 400, no query | Proved (svc, route): `SCRUM487_AC3_%s_is_refused_with_400_before_any_query`, `SCRUM487_AC3_%s_is_400_and_queries_nothing` |
+| AC3-12 **(trap)** | — | `includeFinished` not a boolean (service); `?includeFinished=yes` (route) | 400, no query: a stray value never silently means false | Proved (svc, route): `SCRUM487_AC3_%s_is_refused_with_400_before_any_query`, `SCRUM487_AC3_%s_is_400_and_queries_nothing` |
+| AC3-13 | LEAD | `?includeFinished=true`, `=false`, absent | true, false, false | Proved (route): `SCRUM487_AC3_include_finished_%j_reads_its_statuses` |
+| AC3-14 | LEAD | `GET /assigned?coordinatorId=A&status=approved` | The filters reach the query (the recorded `eq`s) | Proved (route): `SCRUM487_AC3_the_query_string_reaches_the_read` |
+| AC3-15 | — | Any filter | The order is unchanged: `proposed_start` ascending, nulls last, then id | Proved (svc): `SCRUM487_AC3_coordinator_and_status_filters_combine`, `SCRUM487_AC3_include_finished_adds_exactly_the_three_finished_statuses` |
+| AC3-16 **(trap)** | LEAD | `GET /assigned?…` | Not read as an id, with a query string too | Proved (route): `SCRUM487_AC3_the_query_string_reaches_the_read`. Unfiltered: SCRUM-486's `SCRUM486_AC6_does_not_read_the_assigned_path_as_a_request_id` |
 | AC3-17 | LEAD | Choose a coordinator, a status, "include finished" on screen | The list is re-read with those parameters and shows only those rows | **not yet implemented** (SCRUM-544) |
 | AC3-18 | A Safety approved event | Filter by `safety_approved` | Listed | **Cannot be written yet** (D4) |
 
@@ -315,7 +315,9 @@ built, its own cases say what the Lead may cancel there.
 
 56 cases, counted from the tables: 0 proved; 53 not yet implemented; 3 that cannot
 be written as specified (AC2-12, AC3-18, AC5-11). After SCRUM-541: **14 proved**
-(AC1-01 to AC1-03, AC2-01 to AC2-11); 39 not yet implemented; the same 3.
+(AC1-01 to AC1-03, AC2-01 to AC2-11); 39 not yet implemented; the same 3. After
+SCRUM-542: **31 proved** (adding AC1-04 and AC3-01 to AC3-16); 22 not yet implemented;
+the same 3.
 
 | Section | Cases |
 |---|---|
