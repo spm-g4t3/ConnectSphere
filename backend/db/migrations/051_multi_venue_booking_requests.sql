@@ -26,8 +26,11 @@
 --        refused, naming the live request in DETAIL. A booking flagged for
 --        review blocks only its own venue: the event can still request
 --        another one.
---   AC2  Each request stores its own expected attendance, at least 1, in
---        bookings.expected_attendance. The API always sends one.
+--   AC2  Each request stores its own expected attendance, at least 1 and at
+--        most the event's (when it has one), in bookings.expected_attendance.
+--        The API always sends one. The cap is checked when a request is made,
+--        not as a constraint on bookings, so a change request that later
+--        lowers the event's attendance never invalidates existing bookings.
 --   AC4  An event's bookings at different venues never conflict with each
 --        other. Every other conflict rule -- blocks, other events' occupying
 --        bookings, other events' active holds, the padded period -- is
@@ -97,6 +100,7 @@
 --          booking of this event at this venue; its id in DETAIL)        409
 --   22023  no suitability result with a boolean "suitable"               400
 --   22023  a missing expected attendance, or one below 1 (SCRUM-525)     400
+--   22023  an expected attendance above the event's (SCRUM-525)          400
 -- ---------------------------------------------------------------------------
 
 
@@ -210,6 +214,15 @@ begin
   if p_expected_attendance is null or p_expected_attendance < 1 then
     raise exception 'an expected attendance of at least 1 is required, got %',
       coalesce(p_expected_attendance::text, 'none')
+      using errcode = 'invalid_parameter_value';
+  end if;
+
+  -- A venue cannot be for more people than the event expects; equal is fine.
+  -- Checked here, at request time only (see the header).
+  if v_event.expected_attendance is not null
+     and p_expected_attendance > v_event.expected_attendance then
+    raise exception 'an expected attendance of at most the event''s (%) is required, got %',
+      v_event.expected_attendance, p_expected_attendance
       using errcode = 'invalid_parameter_value';
   end if;
 

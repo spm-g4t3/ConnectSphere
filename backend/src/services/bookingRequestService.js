@@ -68,7 +68,9 @@ const UUID_PATTERN =
 /** Postgres codes that mean "the input was wrong", whoever caught it. */
 const VALIDATION_CODES = new Set([
   '23514', // check constraint: setup notes too long
-  '22023', // invalid_parameter_value: no suitability result, or an expected attendance below 1 (051)
+  // invalid_parameter_value: no suitability result, or an expected attendance
+  // below 1 or above the event's (051)
+  '22023',
   // numeric_value_out_of_range: an expectedAttendance above Postgres's integer
   // maximum. checkAttendance refuses one (MAX_ATTENDANCE), so this is a
   // backstop for a caller that skips validation; it is still the caller's
@@ -313,7 +315,8 @@ function checkedSuitability(result) {
  * @param {Function} [options.checkSuitability]  the N10 check; see
  *                              venueSuitabilityService.js for its contract
  * @returns {Promise<object>} the new pending request, shaped by toBookingRequest
- * @throws {ValidationError} bad input, before any network call
+ * @throws {ValidationError} bad input, before any network call; or an
+ *                           expectedAttendance above the event's, once read
  * @throws {NotFoundError}   no such event, or no such venue
  * @throws {ForbiddenError}  the caller is not the event's assigned coordinator
  * @throws {ConflictError}   by code: EVENT_NOT_BOOKABLE, EVENT_DATES_MISSING,
@@ -336,7 +339,9 @@ function checkedSuitability(result) {
  * SCRUM-525: input may also carry expectedAttendance, the number of people
  * this venue is for; absent, it is the event's. That one number is both the
  * one Capacity is judged on and the one stored on the booking, so the verdict
- * the coordinator saw is about what Venue Staff will read. With neither, this
+ * the coordinator saw is about what Venue Staff will read. A number above the
+ * event's (when it has one) is a ValidationError on expectedAttendance, before
+ * the check or the function runs. With neither number, this
  * throws EVENT_ATTENDANCE_MISSING after the coordinator and status checks (a
  * stranger learns nothing about the event) and before the check or the
  * function runs, so nothing is judged against no number and nothing written.
@@ -400,6 +405,19 @@ export async function createBookingRequest(
       'This event has no expected attendance; give one for this venue to request it',
       { code: 'EVENT_ATTENDANCE_MISSING' },
     );
+  }
+  // AC2: a venue is never for more people than the event. Checked only here,
+  // at request time, so lowering the event's attendance later leaves
+  // existing bookings valid. 051 repeats it under the event lock.
+  if (
+    request.expectedAttendance !== null &&
+    event.expectedAttendance != null &&
+    request.expectedAttendance > event.expectedAttendance
+  ) {
+    const message = `must be at most the event's expected attendance (${event.expectedAttendance})`;
+    throw new ValidationError(`Invalid booking request -- expectedAttendance: ${message}`, [
+      { field: 'expectedAttendance', message },
+    ]);
   }
 
   const suitability = checkedSuitability(

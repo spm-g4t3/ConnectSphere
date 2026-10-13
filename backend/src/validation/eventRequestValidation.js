@@ -175,11 +175,11 @@ function checkText(errors, field, value, required) {
 }
 
 /**
- * The largest expected attendance that can be stored: Postgres's integer
- * maximum, the type of both event_requests.expected_attendance and
- * bookings.expected_attendance (051). No requirement caps attendance, but a
- * larger number cannot be stored at all, so it is refused here, on the field,
- * rather than left to fail the cast inside the database.
+ * A storage limit, not a business rule: Postgres's integer maximum, the type of
+ * event_requests.expected_attendance and bookings.expected_attendance (051).
+ * Refused here, on the field, rather than failing the cast in the database.
+ * A booking's attendance is separately capped by its event's
+ * (bookingRequestService.js, 051).
  */
 export const MAX_ATTENDANCE = 2147483647;
 

@@ -582,7 +582,7 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
   describe('SCRUM-525: each booking judged on its own attendance', () => {
     it('SCRUM525_AC3_flow_two_bookings_are_judged_on_their_own_attendance', async () => {
       // FL-02 (R7, R15). Event E has attendance 150; venues A and B hold 100
-      // each. A is requested for 40 people, B for 200 (the coordinator
+      // each. A is requested for 40 people, B for 120 (the coordinator
       // confirms B's Capacity shortfall, as the form asks). Both requests go
       // through the real createBookingRequest and create_booking_request, so
       // what is stored is what the service judged.
@@ -592,41 +592,41 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
 
       const bookingA = await requestThroughService(eventId, venueA, { expectedAttendance: 40 });
       const bookingB = await requestThroughService(eventId, venueB, {
-        expectedAttendance: 200,
+        expectedAttendance: 120,
         confirmUnsuitable: true,
         acknowledgedCriteria: ['Capacity'],
       });
       expect(bookingA.expectedAttendance).toBe(40);
-      expect(bookingB.expectedAttendance).toBe(200);
+      expect(bookingB.expectedAttendance).toBe(120);
 
       // The recheck judges each booking on its own number, never the event's
-      // 150 -- which would fail A and hide that B fails on its own 200.
+      // 150 -- which would fail A and judge B on a number nobody asked for.
       const items = await recheck(eventId);
       const a = items.find((item) => item.venueId === venueA);
       const b = items.find((item) => item.venueId === venueB);
       expect(a).toMatchObject({ expectedAttendance: 40, attendanceSource: 'booking', error: null });
-      expect(b).toMatchObject({ expectedAttendance: 200, attendanceSource: 'booking', error: null });
+      expect(b).toMatchObject({ expectedAttendance: 120, attendanceSource: 'booking', error: null });
       expect(a.current.criteria.find((c) => c.criterion === 'Capacity'))
         .toMatchObject({ met: true, detail: 'Capacity 100 ≥ expected attendance 40' });
       expect(b.current.criteria.find((c) => c.criterion === 'Capacity'))
-        .toMatchObject({ met: false, detail: 'Capacity 100 < expected attendance 200' });
+        .toMatchObject({ met: false, detail: 'Capacity 100 < expected attendance 120' });
     });
 
     it('SCRUM525_AC1_a_duplicate_at_an_approved_venue_is_refused_as_existing_not_unsuitable', async () => {
       // B-AC1 ordering (R3). E already holds an approved booking at A, and A
-      // is too small for this request (300 > 200), so Capacity is unmet; the
+      // is too small for this request (120 > 100), so Capacity is unmet; the
       // coordinator confirms that one shortfall, as the form would. The
       // service judges suitability before create_booking_request, so it is
       // the own-booking filter in judgeVenue that keeps E's approved booking
       // out of Availability. Without it Availability is unmet too, is not
       // among the acknowledged criteria, and the duplicate is misreported as
       // SUITABILITY_CONFIRMATION_REQUIRED instead of reaching step 6.
-      const venueId = await makeVenue();
+      const venueId = await makeVenue(30, 45, 100);
       const eventId = await makeEvent(at('17:00'), at('19:00'));
       const approvedId = await makeBooking(venueId, eventId, at('17:00'), at('19:00'), 'approved');
 
       const err = await requestThroughService(eventId, venueId, {
-        expectedAttendance: 300,
+        expectedAttendance: 120,
         confirmUnsuitable: true,
         acknowledgedCriteria: ['Capacity'],
       }).catch((e) => e);

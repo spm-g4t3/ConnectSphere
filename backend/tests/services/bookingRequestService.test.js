@@ -530,6 +530,40 @@ describe('SCRUM525_AC2 each request carries its own expected attendance', () => 
     expect(booking.status).toBe('pending');
   });
 
+  it('SCRUM525_AC2_attendance_above_the_events_is_a_field_error_and_nothing_runs', async () => {
+    // 151 for one venue of an event expecting 150: refused on the field,
+    // before the check or the rpc, so nothing is judged or written.
+    const checkSuitability = checker();
+    const client = storingClient(eventRow());
+
+    const err = await createBookingRequest(
+      { eventRequestId: EVENT, venueId: VENUE, expectedAttendance: 151 },
+      USER,
+      { client, checkSuitability },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([
+      { field: 'expectedAttendance', message: expect.stringContaining('(150)') },
+    ]);
+    expect(checkSuitability).not.toHaveBeenCalled();
+    expect(client.calls).toEqual([{ table: 'event_requests' }]);
+  });
+
+  it('SCRUM525_AC2_attendance_equal_to_the_events_is_accepted', async () => {
+    // The boundary: the whole event at one venue is allowed.
+    const client = storingClient(eventRow());
+
+    const booking = await createBookingRequest(
+      { eventRequestId: EVENT, venueId: VENUE, expectedAttendance: 150 },
+      USER,
+      { client, checkSuitability: checker() },
+    );
+
+    expect(rpcArgs(client).p_expected_attendance).toBe(150);
+    expect(booking.expectedAttendance).toBe(150);
+  });
+
   it('SCRUM525_AC2_a_stranger_is_refused_before_the_attendance_is_considered', async () => {
     // The order the brief fixes: the coordinator check comes first, so an
     // event with no attendance answers a stranger 403, not a 409 that would
@@ -549,9 +583,9 @@ describe('SCRUM525_AC2 each request carries its own expected attendance', () => 
   });
 
   it('SCRUM525_AC2_an_attendance_beyond_the_integer_range_is_a_400', async () => {
-    // checkAttendance caps nothing, so 3000000000 passes validation and only
-    // the cast to Postgres integer refuses it (22003). That is still the
-    // caller's input, so a 400 and not a 500.
+    // 3000000000 cannot be stored as a Postgres integer. checkAttendance
+    // refuses it (MAX_ATTENDANCE) before any call; should that ever be
+    // skipped, the 22003 from the cast still maps to a 400, not a 500.
     const client = clientAnswering(
       { data: eventRow(), error: null },
       failure('22003', 'value "3000000000" is out of range for type integer'),

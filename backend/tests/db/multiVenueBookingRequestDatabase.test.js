@@ -300,6 +300,29 @@ describe('SCRUM-525: several venue requests per event (051)', () => {
       expect([rowB.expected_attendance, rowB.room_layout_code]).toEqual([40, 'u_shape']);
     });
 
+    it('SCRUM525_AC2_attendance_above_the_events_is_refused_and_equal_is_stored', async () => {
+      // The event expects 150, so 151 at one venue is 22023 and nothing
+      // is written; 150 is the boundary and goes through.
+      const venueA = await makeVenue();
+      const eventId = await makeEvent({ attendance: 150 });
+
+      const error = await refusal(request(eventId, venueA, 151));
+      expect(error).toEqual({ code: '22023', hint: null, detail: null });
+      expect(await countFor(eventId)).toBe(0);
+
+      const result = await request(eventId, venueA, 150);
+      expect(result.outcome).toBe('created');
+      expect((await bookingRow(result.booking.id)).expected_attendance).toBe(150);
+    });
+
+    it('SCRUM525_AC2_an_event_without_attendance_caps_nothing', async () => {
+      const venueA = await makeVenue();
+      const eventId = await makeEvent({ attendance: null });
+
+      const result = await request(eventId, venueA, 500);
+      expect(result.outcome).toBe('created');
+    });
+
     it('SCRUM525_AC2_the_column_refuses_0_and_keeps_null_for_old_rows', async () => {
       const venueA = await makeVenue();
       const eventId = await makeEvent();
