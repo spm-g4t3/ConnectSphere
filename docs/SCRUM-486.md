@@ -52,7 +52,7 @@ on afterwards.
 | PGlite | Three suites build a real Postgres with 052: `eventStatusLifecycleDatabase`, `eventClarificationDatabase`, `venueHoldExpiryAfterLeadAssignmentDatabase`; a fourth, `leadReassignmentWalkthrough`, runs the real router and services over it |
 | Live database | **052 applied to the shared project, and all three live scripts run on 12 October.** First run: every behaviour check passed in all three, including `assignment:check`'s five rounds of the real AC4 race, but `assignment:check`'s cleanup failed and `routes:check` failed one stale label check (section 4, "Live scripts"). After the fixes: `assignment:check` passed every check but the table-count one, which failed only because another user created three events in the shared project during the run; its by-id check found nothing of the run left, and every other table returned to its starting count. `routes:check` passed 69 of 69 and left nothing. `request:check` passed clean on the first run, notifications back to their starting count, and was not rerun |
 | `assignment:check`'s table counts | On `d298ffc`'s run its whole-table count check failed: event_requests 16 → 19, because another writer added three events mid-run ("[TEST] Hack Night", "[TEST] Competing Event", "[TEST] Mic Check", 12:32 UTC). Its by-id check showed nothing of the run was left. The count check is left as it is: on a shared database it can only warn, and the by-id check is the real proof |
-| Test-case document | 91 cases: **87 proved**, **4 not** (section 4), each marked in its row. 86 are proved by named tests in CI; AC4-05 is proved live, by the live script run by hand. The 20 added on 12 October are AC6's list of assigned events (D12, revised); AC6-26, the Lead's click-through end to end, waits on Calven's check |
+| Test-case document | 91 cases: **88 proved**, **3 not** (section 4), each marked in its row. 86 are proved by named tests in CI; AC4-05 is proved live, by the live script run by hand; AC6-26, the Lead's click-through end to end, is proved by hand (13 October, section 2). The 20 added on 12 October are AC6's list of assigned events (D12, revised) |
 
 The layers prove different things, and most of this story is in Postgres
 functions. A fake client returns whatever it is given, so only PGlite proves what
@@ -202,13 +202,38 @@ why in a comment: `SCRUM325_assigns_exactly_one_coordinator_…`,
 `SCRUM330_AC1_…` service tests and `SCRUM10_AC5_returns_200_and_the_submitted_request`
 (SCRUM-522). Section 5 lists them with what each now proves.
 
-**Manual verification:** walked through by Calven on 12 October, with 052 live,
-and passed. The walkthrough is "as an Organiser, submit a complete draft; the row
-reads 'Waiting for the Event Coordinator Lead…'; sign in as a Lead; the request is
-in the Unassigned queue; assign it; the Organiser's row now names the coordinator:
-'<name> has been assigned…'". It showed the gap D12 (revised) closes.
+**Manual verification.** Two runs by hand, both by Calven, both against the
+shared Supabase project with 052 applied, both passed.
 
-Lead reassignment through the UI: pending Calven's check.
+*AC1 walkthrough, 12 October, on the branch at `6035664`.*
+
+| Check | Seen | Case |
+|---|---|---|
+| 1 | A submitted request's row says "Waiting for the Event Coordinator Lead to assign a coordinator to your request." | AC1-05 |
+| 2 | The Lead got a notification, shown as "cannot be displayed yet" (the wording is SCRUM-172's) | AC10-01; AC10-06 stays unmet |
+| 3 | The request is in the Unassigned Queue with organiser, dates, attendance and waiting time | AC2-07 |
+| 4 | Nothing pre-selected in the picker; coordinators only | AC3-07, AC3-06 |
+| 5 | After "Confirm assignment" it left the queue | AC3-01, AC2-01 |
+| 6 | The Organiser's row then named the coordinator ("<name> has been assigned; your request is waiting for them to start the review.") | AC1-06 |
+
+It also showed a gap: the Lead could reassign only an event whose address they
+typed. D12 (revised) closes it.
+
+*Lead click-through, 13 October, on `5260207`.*
+
+| Check | Seen | Case |
+|---|---|---|
+| A | The Lead's nav shows Dashboard, Unassigned Queue, Assigned Events | AC6-24, AC6-25 |
+| B | The held request is listed with coordinator, organiser, badge and start date; no unassigned or cancelled rows | AC6-17, AC6-08 |
+| C | Open shows the event page with "Hand over to another coordinator" and no review or decide actions | AC6-19, AC6-05 |
+| D | After "Confirm handover" the page shows the new coordinator, and the newest history row names the Lead with the note | AC6-02, AC9-02 |
+| E | Assigned Events shows the new coordinator | AC6-26 |
+| F | The Organiser's My Events row names the new coordinator | AC1-06 |
+
+A to F together are AC6-26, the click-through end to end, which no test covers
+(the PGlite walkthrough's adapter cannot run a list read); it is proved by this
+run. Every other case above was already proved by a test, and its row now says
+it was also seen by hand.
 
 **Likely follow-ups.** "Why not just stop setting the coordinator?" (D2). "Why one
 migration, when 016 and 017 were split?" (D1). "Why not change the status label?"
@@ -493,7 +518,7 @@ live script, run by hand; CI still cannot run it.
 | AC4-05 proved live, not in CI | The true race (`check-coordinator-assignment.js` section 2) ran twice on 12 October, five rounds each, one winner and a named refusal every round (D13). No suite can run it, so a change to 052's lock is caught only by running the script again | Run it again after any change to `assign_event_request` |
 | AC5-03: Safety review, Safety approved | Not values of `event_request_status` yet. 052 names them in its status list, compared as text, so nothing needs to change when they arrive; until then no test can reassign at them | SCRUM-488 |
 | AC10-06: the new notices are not worded | Each is shown, counted and can be marked read, as "New notification / This notification type cannot be displayed yet". `describeNotification` does not know the three types | SCRUM-172 |
-| The Lead finds events only by address | **Closed (12 October).** `/assigned-events` lists every held active event, each linking to `/event-requests/:id` (D12, revised). SCRUM-487 extends that list. Not end-to-end over PGlite: `leadReassignmentWalkthrough.test.js`'s adapter answers only `rpc` and single-row reads, and was not extended; the click-through is pending Calven's check | Done |
+| The Lead finds events only by address | **Closed (12 October).** `/assigned-events` lists every held active event, each linking to `/event-requests/:id` (D12, revised). SCRUM-487 extends that list. Not end-to-end over PGlite: `leadReassignmentWalkthrough.test.js`'s adapter answers only `rpc` and single-row reads, and was not extended; the click-through was checked by hand on 13 October and passed (section 2) | Done |
 | A reopened draft stays in its old coordinator's "My events" | **Found while writing this review; inferred from the code, not reproduced.** 022 reopens a rejected request to a draft and keeps its coordinator; `listEventRequestsForCoordinator` filters only on the coordinator, with no status filter, so the old coordinator's list shows the Organiser's private draft until it is resubmitted (when 052 clears it). The service's comment claimed this could not happen ("assignment happens at submission"); it now says it can. Opening the draft is refused (404), so the list shows a name and status, not the content. Predates this story (it came with 022) | Follow-up: exclude drafts in that read, or clear the coordinator in 022's reopen |
 | The organiser dashboard has no waiting line | `EventOrganiserDashboard` shows the shared status description in its expanded detail, without D8's line. The brief named only `MyEventRequests` | Follow-up |
 | A request waiting for the Lead can be cancelled by nobody | **Found after the merge of dev; a dead end this story created in SCRUM-370's flow.** `cancel_event_request` (045) admits only the event's assigned coordinator, and `POST /:id/cancel` is `coordinatorOnly`; the Organiser has no cancellation or withdrawal route of their own (no route calls `changeEventRequestStatus`, and no change-request field names a status), and a change request asking for it could not be decided either, since 019 lets only the holder decide one. Before this story every submitted request had a holder, so someone could always cancel it. 045 also refuses with "Only the coordinator assigned … can cancel it", the wrong-reason message SCRUM-517 fixed for review. Not changed here: 045 is SCRUM-370's | A ticket, with SCRUM-370's owner: who cancels a request nobody holds (the Lead, the Organiser, or both) |
@@ -644,7 +669,8 @@ history (no: every coordinator, and now the Lead).
 - **052 is applied and the three live scripts have run** (12 October; section 4,
   "Live scripts"). Run one again only to show it: each makes and removes real
   rows in the shared project.
-- **Walk AC1 once by hand**, as in section 2.
+- **AC1 and the Lead's click-through have been walked by hand** (12 and 13
+  October; section 2). Walk them again only to show them.
 - **Check the eleven criteria against Jira**, AC6's amendment in particular.
 - **Be ready for "if SCRUM-327 was done, why did its tests change?"** Section 5, in
   two sentences: the customer changed the requirement, which is a new story, not a

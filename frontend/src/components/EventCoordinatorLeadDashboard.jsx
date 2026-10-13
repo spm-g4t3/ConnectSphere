@@ -9,9 +9,12 @@
 //
 //   * The unassigned queue (UnassignedQueue), live: every submitted request
 //     waiting for a coordinator, each with an Assign action.
-//   * The coordinator overview, still a placeholder saying SCRUM-487 builds
-//     it. No invented rows: a placeholder that looked like data would be read
-//     as data.
+//   * The coordinator overview, still SCRUM-487's to build (filters,
+//     per-coordinator counts). Since SCRUM-486 AC6 its card links to Assigned
+//     Events (/assigned-events), which already lists every event a
+//     coordinator holds; until then it said "there is nothing to show", which
+//     that list made false. No invented rows: a placeholder that looked like
+//     data would be read as data.
 //   * The Lead's notifications (CoordinatorNotifications, the Coordinator's
 //     card, reused as it is). Submission now tells every Lead a request is
 //     waiting (052, event_request_awaiting_assignment), and without this card
@@ -28,6 +31,7 @@
 // each section a direct child so it picks up the `.dashboard > section` card
 // styling. The h1 names the role exactly, as AC1 asks.
 
+import { Link } from "react-router-dom";
 import UnassignedQueue from "./UnassignedQueue";
 import CoordinatorNotifications from "./CoordinatorNotifications";
 
@@ -44,8 +48,9 @@ export default function EventCoordinatorLeadDashboard({ user }) {
       <section>
         <h2>Coordinator overview</h2>
         <p>
-          Every coordinator&apos;s assigned and active events will be shown here.
-          This is built by SCRUM-487; until then there is nothing to show.
+          Every event a coordinator holds is listed now in{" "}
+          <Link to="/assigned-events">Assigned Events</Link>. The full overview,
+          with filters and each coordinator&apos;s counts, is built by SCRUM-487.
         </p>
       </section>
 

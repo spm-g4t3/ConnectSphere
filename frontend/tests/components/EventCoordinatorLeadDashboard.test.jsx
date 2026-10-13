@@ -4,8 +4,9 @@
 // is built, and the notices 052 sends the Lead.
 //
 // Dashboard.test.jsx pins which dashboard each role gets. This file pins what
-// is on the Lead's: the live queue, the overview placeholder SCRUM-487 will
-// replace, and the notifications card.
+// is on the Lead's: the live queue, the overview card (which since SCRUM-486
+// AC6 links to Assigned Events, and leaves the full overview to SCRUM-487),
+// and the notifications card. Rendered in a MemoryRouter for that link.
 //
 // The notices. 052 writes three new types (AC10): event_request_awaiting_
 // assignment to every Lead, event_request_assigned to the coordinator,
@@ -18,6 +19,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 
 import EventCoordinatorLeadDashboard from "../../src/components/EventCoordinatorLeadDashboard.jsx";
@@ -57,7 +59,8 @@ const NEW_TYPES = [
   },
 ].map((notice) => ({ ...notice, readAt: null, createdAt: "2026-10-10T03:00:00+00:00" }));
 
-const renderDashboard = () => render(<EventCoordinatorLeadDashboard user={LEAD} />);
+const inRouter = (ui) => render(<MemoryRouter>{ui}</MemoryRouter>);
+const renderDashboard = () => inRouter(<EventCoordinatorLeadDashboard user={LEAD} />);
 
 beforeEach(() => {
   vi.mocked(listUnassignedEventRequests).mockReset();
@@ -69,7 +72,13 @@ beforeEach(() => {
 
 
 describe("SCRUM486_AC2 the Lead's dashboard", () => {
-  it("SCRUM486_AC2_holds_the_live_queue_the_overview_placeholder_and_the_notifications", async () => {
+  it("SCRUM486_AC6_holds_the_live_queue_the_overview_link_to_assigned_events_and_the_notifications", async () => {
+    // Was SCRUM486_AC2_holds_the_live_queue_the_overview_placeholder_and_the_notifications,
+    // which asserted /built by SCRUM-487/ on a card whose sentence ended
+    // "until then there is nothing to show". Right when written (SCRUM-519):
+    // no screen listed any coordinator's events. SCRUM-486 AC6 built Assigned
+    // Events, so the card now points there and keeps SCRUM-487 for the full
+    // overview. Renamed so the name says what it pins.
     renderDashboard();
 
     expect(screen.getByRole("heading", { level: 1, name: "Event Coordinator Lead" })).toBeInTheDocument();
@@ -77,16 +86,19 @@ describe("SCRUM486_AC2 the Lead's dashboard", () => {
     // The queue, read for real, here empty, and said so.
     expect(await screen.findByText("No event requests are waiting for a coordinator.")).toBeInTheDocument();
     expect(listUnassignedEventRequests).toHaveBeenCalledTimes(1);
-    // SCRUM-487's section is still a placeholder.
-    expect(screen.getByRole("heading", { level: 2, name: "Coordinator overview" })).toBeInTheDocument();
-    expect(screen.getByText(/built by SCRUM-487/)).toBeInTheDocument();
+    // The overview card: what is listed now, and where; the rest is SCRUM-487's.
+    const overview = screen.getByRole("heading", { level: 2, name: "Coordinator overview" }).closest("section");
+    expect(overview.querySelector("p")).toHaveTextContent(
+      "Every event a coordinator holds is listed now in Assigned Events. The full overview, with filters and each coordinator's counts, is built by SCRUM-487.",
+    );
+    expect(within(overview).getByRole("link", { name: "Assigned Events" })).toHaveAttribute("href", "/assigned-events");
     // The notifications card.
     expect(await screen.findByText("You have no notifications.")).toBeInTheDocument();
     expect(listNotifications).toHaveBeenCalledTimes(1);
   });
 
   it("SCRUM486_AC2_uses_a_name_when_one_is_sent", async () => {
-    render(<EventCoordinatorLeadDashboard user={{ ...LEAD, name: "Lena Lead" }} />);
+    inRouter(<EventCoordinatorLeadDashboard user={{ ...LEAD, name: "Lena Lead" }} />);
 
     expect(screen.getByText("Signed in as Lena Lead.")).toBeInTheDocument();
     await screen.findByText("You have no notifications.");

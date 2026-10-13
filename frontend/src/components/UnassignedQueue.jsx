@@ -15,8 +15,10 @@
 // its card styling comes from the parent.
 //
 // No router hooks. ReviewQueue reads location.state to reopen a panel after a
-// navigation; nothing navigates here, and leaving the router out lets the
-// Lead's dashboard render where Dashboard.jsx's tests render it, without one.
+// navigation; nothing navigates here, so the queue renders without a router.
+// (This used to add that it let the Lead's dashboard render without one too.
+// Since SCRUM-486 AC6 the dashboard's overview card holds a router Link to
+// Assigned Events, so the dashboard needs a router of its own regardless.)
 
 import { useCallback, useEffect, useState } from "react";
 import { listUnassignedEventRequests } from "../services/eventRequestService";

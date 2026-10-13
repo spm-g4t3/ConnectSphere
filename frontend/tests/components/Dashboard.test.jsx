@@ -27,6 +27,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 import Dashboard from "../../src/components/Dashboard.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
@@ -66,10 +67,18 @@ vi.mock("../../src/components/TechnicalSupportDashboard", () => ({
 }));
 
 const NO_DASHBOARD = "No dashboard available for your role. Please contact support.";
+const NEW_OVERVIEW_TEXT =
+  "Every event a coordinator holds is listed now in Assigned Events. The full overview, with filters and each coordinator's counts, is built by SCRUM-487.";
+
+// In a MemoryRouter since SCRUM-486 AC6: the Lead's overview card holds a
+// router Link to /assigned-events, which cannot render outside a router (the
+// app always has one). No other dashboard reads the router, so for them it
+// changes nothing.
+const inRouter = (ui) => render(<MemoryRouter>{ui}</MemoryRouter>);
 
 function renderDashboardAs(role) {
   vi.mocked(useAuth).mockReturnValue({ user: { id: "u1", email: "someone@example.com", role } });
-  return render(<Dashboard />);
+  return inRouter(<Dashboard />);
 }
 
 function anyServiceCalled() {
@@ -86,19 +95,27 @@ beforeEach(() => {
 
 
 describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
-  it("SCRUM485_AC3_an_event_coordinator_lead_gets_the_lead_dashboard", () => {
-    // AC3-04, and AC1-04: the heading names the role exactly.
+  it("SCRUM486_AC6_an_event_coordinator_lead_gets_the_lead_dashboard_whose_overview_links_to_assigned_events", () => {
+    // SCRUM-485 AC3-04, and AC1-04: the heading names the role exactly.
+    //
+    // Was SCRUM485_AC3_an_event_coordinator_lead_gets_the_lead_dashboard,
+    // which asserted /built by SCRUM-487/ on the overview card, whose sentence
+    // ended "until then there is nothing to show". Right when written: no
+    // screen listed any coordinator's events. SCRUM-486 AC6 built Assigned
+    // Events, which lists every event a coordinator holds, so that sentence
+    // became false; the card now points there and keeps SCRUM-487 for the
+    // full overview. Renamed so the name says what it pins.
     renderDashboardAs("event_coordinator_lead");
 
     expect(screen.getByRole("heading", { level: 1, name: "Event Coordinator Lead" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Unassigned queue" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Coordinator overview" })).toBeInTheDocument();
-    // What the role will do there, and which story builds it. The overview
-    // is still a placeholder; the queue is not. This used to assert "built by
-    // SCRUM-486" too, right while the queue was a placeholder; SCRUM-519
-    // built it, so the placeholder line is gone and its absence is pinned.
+    const overview = screen.getByRole("heading", { level: 2, name: "Coordinator overview" }).closest("section");
+    // This used to assert "built by SCRUM-486" too, right while the queue was
+    // a placeholder; SCRUM-519 built it, so its absence is pinned.
     expect(screen.queryByText(/built by SCRUM-486/)).not.toBeInTheDocument();
-    expect(screen.getByText(/built by SCRUM-487/)).toBeInTheDocument();
+    expect(overview.querySelector("p")).toHaveTextContent(NEW_OVERVIEW_TEXT);
+    expect(screen.queryByText(/nothing to show/)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Assigned Events" })).toHaveAttribute("href", "/assigned-events");
   });
 
   it("SCRUM485_AC3_a_safety_officer_gets_the_safety_officer_dashboard", () => {
@@ -163,19 +180,29 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     expect(getEquipmentRequests).not.toHaveBeenCalled();
   });
 
-  it.each(["event_coordinator_lead", "safety_officer"])(
+  it.each(["safety_officer"])(
     "SCRUM485_AC3_the_%s_dashboard_has_no_link_to_a_page_that_does_not_exist",
     (role) => {
-      // No link on either dashboard. For the Safety Officer, App.jsx has no
-      // route for the section yet. For the Lead, since SCRUM-519 the queue
-      // has one (/unassigned-queue), but it is mounted on the dashboard
-      // itself and its Assign actions are buttons, so it needs no link here;
-      // the nav carries it.
+      // No link: App.jsx has no route for the Safety Officer's section yet.
+      //
+      // The event_coordinator_lead row moved to the case below. It was right
+      // when written: the Lead's dashboard had no link, since the queue is
+      // mounted on it and its Assign actions are buttons. SCRUM-486 AC6 gave
+      // the overview card a link to Assigned Events, a page that exists.
       renderDashboardAs(role);
 
       expect(screen.queryAllByRole("link")).toHaveLength(0);
     },
   );
+
+  it("SCRUM486_AC6_the_lead_dashboards_one_link_is_to_assigned_events", () => {
+    // The Lead's row of the case above, carried on: still no link to a page
+    // that does not exist. Exactly one link, to /assigned-events, which
+    // App.jsx routes (SCRUM-486 AC6).
+    renderDashboardAs("event_coordinator_lead");
+
+    expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(["/assigned-events"]);
+  });
 
   it.each([
     ["Safety Officer", "Safety Officer"],
@@ -196,7 +223,7 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     // Login returns no name, so the email stands in. A name, if one is ever
     // sent, is used instead.
     vi.mocked(useAuth).mockReturnValue({ user: { email: "lead@example.com", role: "event_coordinator_lead" } });
-    const { unmount } = render(<Dashboard />);
+    const { unmount } = inRouter(<Dashboard />);
     expect(screen.getByText("Signed in as lead@example.com.")).toBeInTheDocument();
     unmount();
 
