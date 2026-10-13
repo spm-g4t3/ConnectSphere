@@ -13,6 +13,7 @@
     "db:check": "node scripts/check-db.js",
     "venue:check": "node scripts/check-venue-service.js",
     "request:check": "node scripts/check-event-request-service.js",
+    "assignment:check": "node scripts/check-coordinator-assignment.js",
     "change-request:check": "node scripts/check-event-change-request-service.js",
     "routes:check": "node scripts/check-event-request-routes.js",
     "venue-routes:check": "node scripts/check-venue-routes.js",

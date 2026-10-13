@@ -74,11 +74,16 @@ export function createEventEquipmentRouter({
   // mergeParams: this router is mounted under /:id, and that id is the event's.
   const router = express.Router({ mergeParams: true });
   const coordinatorOnly = requireRole(ROLE.EVENT_COORDINATOR);
+  // SCRUM-486 (SCRUM-521): the read only. The Event Coordinator Lead opens the
+  // event screen to hand an event over, and that screen reads this list on
+  // mount. The three writes below stay coordinatorOnly, and 037 still allows
+  // only the event's assigned coordinator to change its equipment.
+  const coordinatorOrLead = requireRole(ROLE.EVENT_COORDINATOR, ROLE.EVENT_COORDINATOR_LEAD);
 
   router.use(requireAuth);
 
   /** AC11: the event's equipment. 404 for an event that does not exist. */
-  router.get('/', coordinatorOnly, async (req, res) => {
+  router.get('/', coordinatorOrLead, async (req, res) => {
     try {
       res.status(200).json(await listEventEquipment(req.params.id, { client }));
     } catch (err) {

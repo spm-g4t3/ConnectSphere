@@ -41,6 +41,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { normaliseRole } from "../auth/normaliseRole";
 import AssignmentHistory from "./AssignmentHistory";
 import EventVenueFinder from "./EventVenueFinder";
 import EventVenueSuitability from "./EventVenueSuitability";
@@ -118,10 +119,18 @@ function seedableCapacity(value) {
 
 // SCRUM-19. Keyed by status, as ReviewQueue's table is, because the server's
 // messages are written by the database and name ids.
+// SCRUM-486 (SCRUM-517): 409 now has two causes. The request has moved on and
+// is no longer waiting to be reviewed, or it has no coordinator and is waiting
+// for the Event Coordinator Lead to assign it (migration 052 refuses that with
+// 55000, a 409, rather than 029's 403, which told the coordinator it was
+// someone else's when it was nobody's). One message names both: they share a
+// remedy, and telling them apart would mean reading the server's message text,
+// which this screen never does. The return-for-amendment table below does the
+// same with its 409.
 const START_REVIEW_ERROR_MESSAGES = {
   403: "This request is no longer assigned to you, so you cannot start its review. Go back and reopen it to see who holds it now.",
   404: "This request no longer exists.",
-  409: "This request is no longer waiting to be reviewed. Go back and reopen it to see where it stands.",
+  409: "This request cannot be reviewed yet: it may be waiting for the Event Coordinator Lead to assign it a coordinator, or it may no longer be waiting to be reviewed. Go back and reopen it to see where it stands.",
 };
 
 const DECISION_ERROR_MESSAGES = {
@@ -251,7 +260,21 @@ export default function CoordinatorRequestDetail({
   // refused. The server checks again, under a lock, and if the row this panel
   // holds is stale, ReassignEventPanel turns the 403 into a message.
   const isAssignedCoordinator = Boolean(user?.id) && assignedCoordinatorId === user.id;
-  const canReassign = isAssignedCoordinator && current.status !== "cancelled";
+  // SCRUM-486 (SCRUM-521), AC6: the Event Coordinator Lead may hand over any
+  // event, as 052's reassign_event_request allows, so the button shows for
+  // the holder or a Lead. Only while someone holds it: a request with no
+  // coordinator is assigned from the Lead's queue, not handed over (052
+  // refuses that, AC5-05). The Lead is never isAssignedCoordinator (only
+  // event_coordinator can be assigned), so every other action on this screen
+  // stays the holder's.
+  //
+  // SCRUM-370: and never on a cancelled event, which nobody can hand over
+  // (052's status list leaves cancelled out). Both conditions kept from the
+  // merge of dev, neither dropped.
+  const isLead = normaliseRole(user?.role) === "EVENT_COORDINATOR_LEAD";
+  const canReassign = assignedCoordinatorId != null
+    && current.status !== "cancelled"
+    && (isAssignedCoordinator || isLead);
 
   // SCRUM-19. isAssignedCoordinator also decides who sees the review and
   // decision actions, and for the same reason: a convenience, not the gate.
@@ -466,6 +489,7 @@ export default function CoordinatorRequestDetail({
     return (
       <ReassignEventPanel
         request={request}
+        outgoingCoordinatorId={assignedCoordinatorId}
         onCancel={() => setReassigning(false)}
         onReassigned={handleReassigned}
       />
@@ -695,12 +719,19 @@ export default function CoordinatorRequestDetail({
           panel was opened from is a little out of date. */}
       <section>
         <h3>Coordinator</h3>
-        <AssignmentHistory key={historyVersion} eventRequestId={request.id} view="coordinator" />
+        <AssignmentHistory
+          key={historyVersion}
+          eventRequestId={request.id}
+          view="coordinator"
+          currentCoordinatorId={assignedCoordinatorId}
+        />
 
         {handedOverTo && (
           <p className="coordinator-reassign__notice" role="status">
-            Handed over to {handedOverTo.fullName ?? "the coordinator you chose"}. You can still
-            view this event, but not change it.
+            Handed over to {handedOverTo.fullName ?? "the coordinator you chose"}.
+            {/* Said to the coordinator who handed it over. A Lead never could
+                change it, and can hand it over again (SCRUM-521). */}
+            {isLead ? "" : " You can still view this event, but not change it."}
           </p>
         )}
 
@@ -792,6 +823,14 @@ export default function CoordinatorRequestDetail({
                 {startingReview ? "Starting..." : "Start review"}
               </button>
             </div>
+          ) : current.assignedCoordinatorId == null ? (
+            // SCRUM-486 AC8-04 (SCRUM-519). Since 052 a submitted request can
+            // have no coordinator: it is in the Lead's unassigned queue. Every
+            // coordinator can still open it (SCRUM-332), and "waiting for the
+            // assigned coordinator" would name someone who does not exist.
+            // isAssignedCoordinator is false for everyone here, so nobody is
+            // offered Start review, which 052 would refuse anyway.
+            <p>Waiting for the Event Coordinator Lead to assign this request to a coordinator.</p>
           ) : (
             <p>Waiting for the assigned coordinator to start the review.</p>
           )}
