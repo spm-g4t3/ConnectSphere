@@ -1965,7 +1965,9 @@ const ACTIVE_EVENT_STATUSES = Object.freeze([
  * top in all but name.
  *
  * Two reads: the coordinators, then their active events, counted here. A
- * coordinator with none is listed with 0, not left out.
+ * coordinator with none is listed with 0, not left out. Both reads are
+ * readCoordinatorsAndActiveEvents, shared with the Lead's overview (SCRUM-487
+ * AC2), so the picker's count and the overview's total are one count.
  *
  * @param {object} [options]
  * @param {object} [options.client]
@@ -1974,6 +1976,46 @@ const ACTIVE_EVENT_STATUSES = Object.freeze([
 export async function listCoordinatorWorkload({ client } = {}) {
   const db = await resolveClient(client);
 
+  // Only the column the count needs: the picker shows a name and a number.
+  const { coordinators, events } = await readCoordinatorsAndActiveEvents(db, 'assigned_coordinator_id');
+
+  const countOf = new Map();
+  for (const event of events) {
+    countOf.set(event.assigned_coordinator_id, (countOf.get(event.assigned_coordinator_id) ?? 0) + 1);
+  }
+
+  return coordinators.map((profile) => ({
+    id: profile.id,
+    fullName: profile.full_name ?? null,
+    activeEvents: countOf.get(profile.id) ?? 0,
+  }));
+}
+
+
+/**
+ * The two reads the picker's workload and the Lead's overview share: every
+ * Event Coordinator, by name then id, and their events in an active status.
+ *
+ * SCRUM-487 (SCRUM-541), extracted from listCoordinatorWorkload as it was, so
+ * that "N active events" in SCRUM-486's picker and a coordinator's total in
+ * SCRUM-487's overview are the same coordinators counted over the same events
+ * (SCRUM-487 D3). Two copies of these reads would agree only until someone
+ * changed one of them.
+ *
+ * `columns` is the caller's: the picker selects only assigned_coordinator_id,
+ * and SCRUM-486 pins exactly that select, while the overview also needs status
+ * to count each one. Everything else, the role, the order, the narrowing to
+ * the coordinators just read and the status set, is fixed here.
+ *
+ * No coordinators means no second read: there is nobody to count for. A
+ * failed read throws through translateError; a zero-filled list would look
+ * like coordinators with nothing to do.
+ *
+ * @param {object} db       a resolved client
+ * @param {string} columns  the event columns the caller counts by
+ * @returns {Promise<{ coordinators: Array<{ id: string, full_name: string|null }>, events: object[] }>}
+ */
+async function readCoordinatorsAndActiveEvents(db, columns) {
   const { data: profiles, error: profilesError } = await db
     .from('profiles')
     .select('id, full_name')
@@ -1985,26 +2027,79 @@ export async function listCoordinatorWorkload({ client } = {}) {
 
   const coordinators = profiles ?? [];
 
-  if (coordinators.length === 0) return [];
+  if (coordinators.length === 0) return { coordinators, events: [] };
 
   const { data: events, error: eventsError } = await db
     .from('event_requests')
-    .select('assigned_coordinator_id')
+    .select(columns)
     .in('assigned_coordinator_id', coordinators.map((profile) => profile.id))
     .in('status', ACTIVE_EVENT_STATUSES);
 
   if (eventsError) throw translateError(eventsError);
 
-  const countOf = new Map();
-  for (const event of events ?? []) {
-    countOf.set(event.assigned_coordinator_id, (countOf.get(event.assigned_coordinator_id) ?? 0) + 1);
+  return { coordinators, events: events ?? [] };
+}
+
+
+/**
+ * Every Event Coordinator, with their active events counted in total and per
+ * status, for the Lead's coordinator overview (SCRUM-487 AC2).
+ *
+ * SCRUM-541. AC2: "every Event Coordinator with their number of active events
+ * and the count in each status". Returned as { id, fullName, activeEvents,
+ * byStatus } per coordinator.
+ *
+ * A read of its own rather than byStatus added to listCoordinatorWorkload
+ * (SCRUM-487 D3). The picker's response is pinned exactly by SCRUM-486 ("an
+ * extra key fails: no role, no recommended"): beside a choice, it shows a name
+ * and a number and nothing that reads as advice. The per-status breakdown is
+ * the supervision view's. Both count through readCoordinatorsAndActiveEvents,
+ * so activeEvents here equals the picker's count for the same coordinator.
+ *
+ * byStatus has one key for every status in ACTIVE_EVENT_STATUSES, each 0 when
+ * the coordinator holds none: a missing key would make the screen guess
+ * whether it means none or unknown. The keys come from the constant, not a
+ * list written here, so when SCRUM-488 adds safety_review and safety_approved
+ * to it, they appear here with no change. Until then AC2 is partial: those two
+ * are not values of event_request_status yet, and naming one in the status
+ * filter would fail the whole read (SCRUM-487 D4). activeEvents is the sum of
+ * byStatus, so the two can never disagree on one row.
+ *
+ * Ordered by name, then id, like the picker, never by workload: the overview
+ * shows who has what, and does not rank anyone. A coordinator with nothing is
+ * listed with zeros, not left out; they are the one most able to take more.
+ * Who may call it is decided at the route: leadOnly.
+ *
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<Array<{ id: string, fullName: string|null, activeEvents: number,
+ *   byStatus: Object<string, number> }>>}
+ */
+export async function listCoordinatorOverview({ client } = {}) {
+  const db = await resolveClient(client);
+
+  const { coordinators, events } = await readCoordinatorsAndActiveEvents(db, 'assigned_coordinator_id, status');
+
+  const byStatusOf = new Map(
+    coordinators.map((profile) => [profile.id, Object.fromEntries(ACTIVE_EVENT_STATUSES.map((status) => [status, 0]))]),
+  );
+  for (const event of events) {
+    const counts = byStatusOf.get(event.assigned_coordinator_id);
+    // The read is narrowed to these coordinators and these statuses, so both
+    // always match; the guard keeps activeEvents the sum of byStatus even if
+    // a row ever arrived that did not.
+    if (counts && Object.hasOwn(counts, event.status)) counts[event.status] += 1;
   }
 
-  return coordinators.map((profile) => ({
-    id: profile.id,
-    fullName: profile.full_name ?? null,
-    activeEvents: countOf.get(profile.id) ?? 0,
-  }));
+  return coordinators.map((profile) => {
+    const byStatus = byStatusOf.get(profile.id);
+    return {
+      id: profile.id,
+      fullName: profile.full_name ?? null,
+      activeEvents: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
+      byStatus,
+    };
+  });
 }
 
 

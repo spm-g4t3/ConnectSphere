@@ -1,0 +1,214 @@
+/**
+ * SCRUM-487: the service half of the Event Coordinator Lead's coordinator
+ * overview.
+ *
+ *   listCoordinatorOverview    AC2  every coordinator, counted in total and per status (SCRUM-541)
+ *   listAssignedEventsForLead  AC3  the events list, filtered (SCRUM-542)
+ *
+ * A file of its own rather than more blocks in leadAssignmentService.test.js,
+ * which is SCRUM-486's and under review in its PR: a change here cannot then
+ * collide with a change there. The fake client is that file's, copied rather
+ * than imported, for the reason that file gives for not sharing helpers.
+ *
+ * SCRUM-486's own tests of listCoordinatorWorkload and listAssignedEventsForLead
+ * stay where they are, unedited. They are the proof that this story's changes
+ * left the picker and the unfiltered list exactly as they were (cases AC2-09
+ * and AC3-01 of docs/test-cases/SCRUM-487.md).
+ */
+
+import { describe, it, expect } from 'vitest';
+
+import {
+  listCoordinatorOverview,
+  listCoordinatorWorkload,
+} from '../../src/services/eventRequestService.js';
+import { STATUS } from '../../src/domain/eventRequestStatus.js';
+
+
+// ---------------------------------------------------------------------------
+// The fake client
+// ---------------------------------------------------------------------------
+/**
+ * Records one entry per .from(), each filter kind in its own list, and hands
+ * back queued { data, error } pairs in call order. Running out throws, so an
+ * unexpected extra round trip fails by name; an empty queue proves "no query".
+ */
+function createFakeClient(results = []) {
+  const queue = [...results];
+  const calls = [];
+
+  function settle(call) {
+    if (queue.length === 0) {
+      throw new Error(`fake client: no result queued for ${call.operation} on ${call.table}`);
+    }
+    return Promise.resolve(queue.shift());
+  }
+
+  return {
+    calls,
+    from(table) {
+      const call = { table, operation: 'select', select: null, filters: [], inFilters: [], notFilters: [], order: [] };
+      calls.push(call);
+      const chain = {
+        select(columns = '*') { call.select = columns; return chain; },
+        eq(column, value) { call.filters.push([column, value]); return chain; },
+        in(column, values) { call.inFilters.push([column, [...values]]); return chain; },
+        not(column, operator, value) { call.notFilters.push([column, operator, value]); return chain; },
+        order(column, options) { call.order.push([column, options]); return chain; },
+        then: (resolve, reject) => settle(call).then(resolve, reject),
+      };
+      return chain;
+    },
+  };
+}
+
+const ok = (data) => ({ data, error: null });
+const dbError = (code, message) => ({ data: null, error: { code, message } });
+
+async function errorFrom(promise) {
+  try {
+    await promise;
+    return null;
+  } catch (err) {
+    return err;
+  }
+}
+
+const trail = (client) => client.calls.map((call) => call.table);
+
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+const COORDINATOR_A = '44444444-4444-4444-8444-444444444444';
+const COORDINATOR_B = '66666666-6666-4666-8666-666666666666';
+
+/** The active statuses, written out: the test states what the code must count. */
+const ACTIVE = [STATUS.SUBMITTED, STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION, STATUS.APPROVED, STATUS.CONFIRMED];
+
+const profileRow = (id, fullName) => ({ id, full_name: fullName });
+const held = (coordinator, status) => ({ assigned_coordinator_id: coordinator, status });
+const zeros = () => Object.fromEntries(ACTIVE.map((status) => [status, 0]));
+
+/** Omar (A) holds one event in each active status and a second approved one; Priya (B) holds nothing. */
+const COORDINATORS = [profileRow(COORDINATOR_A, 'Omar Okafor'), profileRow(COORDINATOR_B, 'Priya Nair')];
+const EVENTS = [...ACTIVE.map((status) => held(COORDINATOR_A, status)), held(COORDINATOR_A, STATUS.APPROVED)];
+
+
+// ---------------------------------------------------------------------------
+// AC2: every coordinator, with active events and the count in each status
+// ---------------------------------------------------------------------------
+describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per status', () => {
+  it('SCRUM487_AC2_lists_every_coordinator_with_a_count_for_every_active_status', async () => {
+    // AC2-01, AC2-02, AC2-03. Every key of ACTIVE_EVENT_STATUSES on every row;
+    // a coordinator with nothing is listed with zeros, not left out.
+    const client = createFakeClient([ok(COORDINATORS), ok(EVENTS)]);
+
+    const overview = await listCoordinatorOverview({ client });
+
+    expect(overview).toEqual([
+      {
+        id: COORDINATOR_A,
+        fullName: 'Omar Okafor',
+        activeEvents: 6,
+        byStatus: {
+          [STATUS.SUBMITTED]: 1,
+          [STATUS.UNDER_REVIEW]: 1,
+          [STATUS.PENDING_CLARIFICATION]: 1,
+          [STATUS.APPROVED]: 2,
+          [STATUS.CONFIRMED]: 1,
+        },
+      },
+      { id: COORDINATOR_B, fullName: 'Priya Nair', activeEvents: 0, byStatus: zeros() },
+    ]);
+  });
+
+  it('SCRUM487_AC2_active_events_is_the_sum_of_by_status_and_the_pickers_count', async () => {
+    // AC2-04, AC2-05 (SCRUM-487 D3). The same coordinators and events through
+    // both reads: one count, so the picker and the overview cannot disagree.
+    const overview = await listCoordinatorOverview({ client: createFakeClient([ok(COORDINATORS), ok(EVENTS)]) });
+    const picker = await listCoordinatorWorkload({ client: createFakeClient([ok(COORDINATORS), ok(EVENTS)]) });
+
+    for (const row of overview) {
+      expect(row.activeEvents).toBe(Object.values(row.byStatus).reduce((sum, n) => sum + n, 0));
+    }
+    expect(overview.map(({ id, activeEvents }) => ({ id, activeEvents })))
+      .toEqual(picker.map(({ id, activeEvents }) => ({ id, activeEvents })));
+  });
+
+  it('SCRUM487_AC2_reads_coordinators_by_name_and_only_their_active_events_with_status', async () => {
+    // AC2-01, AC2-06, AC2-11. The same two reads as the picker's: role
+    // event_coordinator only (no Lead), by name then id, never by workload;
+    // then their events in the active statuses, now with status to count by.
+    const client = createFakeClient([ok(COORDINATORS), ok([])]);
+
+    await listCoordinatorOverview({ client });
+
+    const [people, events] = client.calls;
+    expect(people.table).toBe('profiles');
+    expect(people.filters).toEqual([['role', 'event_coordinator']]);
+    expect(people.order).toEqual([
+      ['full_name', { ascending: true, nullsFirst: false }],
+      ['id', { ascending: true }],
+    ]);
+    expect(events.table).toBe('event_requests');
+    expect(events.select.split(',').map((c) => c.trim()).sort()).toEqual(['assigned_coordinator_id', 'status']);
+    expect(events.inFilters).toEqual([
+      ['assigned_coordinator_id', [COORDINATOR_A, COORDINATOR_B]],
+      ['status', ACTIVE],
+    ]);
+    for (const notActive of [STATUS.DRAFT, STATUS.COMPLETED, STATUS.REJECTED, STATUS.CANCELLED]) {
+      expect(events.inFilters[1][1]).not.toContain(notActive);
+    }
+  });
+
+  it('SCRUM487_AC2_the_order_is_the_reads_never_the_workload', async () => {
+    // Omar holds six and Priya none; a list sorted by workload would move
+    // Priya. The service keeps the read's order.
+    const client = createFakeClient([ok(COORDINATORS), ok(EVENTS)]);
+
+    const overview = await listCoordinatorOverview({ client });
+
+    expect(overview.map((row) => row.fullName)).toEqual(['Omar Okafor', 'Priya Nair']);
+  });
+
+  it('SCRUM487_AC2_no_coordinators_is_an_empty_array_and_no_event_read', async () => {
+    // AC2-07.
+    for (const data of [[], null]) {
+      const client = createFakeClient([ok(data)]);
+      await expect(listCoordinatorOverview({ client })).resolves.toEqual([]);
+      expect(trail(client)).toEqual(['profiles']);
+    }
+  });
+
+  it('SCRUM487_AC2_a_coordinator_with_no_name_keeps_their_counts', async () => {
+    const client = createFakeClient([ok([profileRow(COORDINATOR_A, null)]), ok([held(COORDINATOR_A, STATUS.CONFIRMED)])]);
+
+    const [row] = await listCoordinatorOverview({ client });
+
+    expect(row).toEqual({ id: COORDINATOR_A, fullName: null, activeEvents: 1, byStatus: { ...zeros(), [STATUS.CONFIRMED]: 1 } });
+  });
+
+  it.each([
+    ['the coordinators read', [dbError('42P01', 'relation "profiles" does not exist')]],
+    ['the events read', [ok(COORDINATORS), dbError('42P01', 'relation "event_requests" does not exist')]],
+  ])('SCRUM487_AC2_a_failure_in_%s_is_an_error_not_a_zero_filled_list', async (_label, results) => {
+    // AC2-08. Through translateError: 42P01 is no known SQLSTATE, so it stays
+    // untyped and handleError answers 500. Never a list of zeros, which would
+    // look like coordinators with nothing to do.
+    const err = await errorFrom(listCoordinatorOverview({ client: createFakeClient(results) }));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.status).toBeUndefined();
+  });
+
+  it('SCRUM487_AC2_a_known_sqlstate_from_the_events_read_is_translated', async () => {
+    // By SQLSTATE, never by message: 42501 is translateError's ForbiddenError,
+    // so the events read's error goes through it rather than being rethrown.
+    const err = await errorFrom(listCoordinatorOverview({
+      client: createFakeClient([ok(COORDINATORS), dbError('42501', 'permission denied for table event_requests')]),
+    }));
+
+    expect(err.status).toBe(403);
+  });
+});
