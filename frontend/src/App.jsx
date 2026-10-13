@@ -192,8 +192,8 @@ function AppRoutes() {
             hand it over (AC6). Coordinators may open it too. allowedRoles
             mirrors GET /event-requests/:id/review's gate; the API answers 403
             to anyone else regardless. The Lead reaches it from
-            /assigned-events above; SCRUM-487's coordinator overview will
-            extend that list (see the page's header).
+            /assigned-events above, the list SCRUM-486 built and SCRUM-487
+            extended into the coordinator overview (see the page's header).
 
             The coordinator wrapper for both roles, because App.css colours the
             status badge under .dashboard--coordinator only. */}
