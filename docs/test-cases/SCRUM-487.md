@@ -4,7 +4,7 @@
 **Subtask:** SCRUM-540 (this document)
 **Schema:** no migration. Everything here reads tables and functions that exist after `052_lead_assignment.sql` (SCRUM-486).
 **Written:** 13 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; each **Implemented by** says so, and the subtask that writes its tests fills it in.
-**Marked:** 13 October 2026, SCRUM-541: AC1-01 to AC1-03 and AC2-01 to AC2-11 name their tests; SCRUM-542: AC1-04 and AC3-01 to AC3-16. The cases themselves are unchanged.
+**Marked:** 13 October 2026, SCRUM-541: AC1-01 to AC1-03 and AC2-01 to AC2-11 name their tests; SCRUM-542: AC1-04 and AC3-01 to AC3-16; SCRUM-543 to SCRUM-545: AC2-13, AC3-17, AC4, AC5-01 to AC5-10, AC6-01 and AC6-02. The cases themselves are unchanged.
 
 This document is the written layer between SCRUM-487's acceptance criteria and the
 Vitest files that will implement them. Deliverable #3 requires test cases
@@ -159,14 +159,20 @@ links to are the same read.
 first mixes two kinds of row with different actions; the second is a second
 definition of "unassigned" beside the queue's.
 
-### D6. The Lead reads handover notes, confirmed
+### D6. The Lead reads handover notes: built, awaiting the team's confirmation
 
-The ticket asks the team to confirm it. It is built: SCRUM-521 put `GET
-/:id/assignments/review` behind `coordinatorOrLead`, reading the history with
-`includeNotes: true`, so the Lead's event page shows the notes. This story records
-the decision as confirmed (Calven's brief, 13 October). The Organiser's history
-route still never carries a note (SCRUM-486 AC9). Jira's "to confirm" should be
-updated to match.
+The ticket's design decision says "Team decision, to confirm", and as of 13
+October 2026 the team has not confirmed it. It is built and working: SCRUM-521
+put `GET /:id/assignments/review` behind `coordinatorOrLead`, reading the history
+with `includeNotes: true`, so the Lead's event page shows the notes
+(`SCRUM486_AC6_the_lead_reads_the_history_with_its_notes`; on screen,
+`SCRUM487_AC5_a_lead_sees_%s_read_only_with_only_the_hand_over_action`). The
+Organiser's history route still never carries a note (SCRUM-486 AC9). Calven is
+raising it with the team. If they decide against it, the change is that one
+route's gate back to `coordinatorOnly`, and AC5-03 changes with it.
+
+*Corrected 13 October (SCRUM-545):* the first version of this document recorded
+the decision as confirmed. Nobody had confirmed it.
 
 ### D7. "Cannot confirm" holds because no confirm path exists
 
@@ -256,24 +262,24 @@ built, its own cases say what the Lead may cancel there.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC5-01 | HELD BY A | LEAD, `GET /:id/review` | 200, the full event. Already SCRUM-486's `SCRUM486_AC6_a_lead_who_holds_nothing_reads_%s` | **not yet implemented** (SCRUM-545) |
-| AC5-02 | HELD BY A, with clarification history | LEAD reads the clarification history | Allowed (SCRUM-521's service check) | **not yet implemented** (SCRUM-545) |
-| AC5-03 | HELD BY A, a handover with a note | LEAD, `GET /:id/assignments/review` | The history, with the note (D6). Already SCRUM-486's `SCRUM486_AC6_the_lead_reads_the_history_with_its_notes` | **not yet implemented** (SCRUM-545) |
-| AC5-04 **(trap)** | HELD BY A | LEAD, `POST /:id/start-review` | 403, nothing queried | **not yet implemented** (SCRUM-545) |
-| AC5-05 **(trap)** | HELD BY A, under review | LEAD, `POST /:id/decision` | 403, nothing queried | **not yet implemented** (SCRUM-545) |
-| AC5-06 **(trap)** | HELD BY A | LEAD, `POST /:id/cancel` | 403, nothing queried | **not yet implemented** (SCRUM-545) |
-| AC5-07 **(trap)** | HELD BY A, under review | LEAD, `POST /:id/clarification` | 403, nothing queried | **not yet implemented** (SCRUM-545) |
-| AC5-08 **(trap)** | HELD BY A, pending clarification | LEAD, `POST /:id/clarification/close` | 403, nothing queried | **not yet implemented** (SCRUM-545) |
-| AC5-09 **(trap)** | A pending change request on an event HELD BY A | LEAD, `POST /change-requests/:id/decision` | 403, nothing queried | **not yet implemented** (SCRUM-545) |
-| AC5-10 | HELD BY A, open on the event page | As LEAD | No start-review, decide, cancel, clarification or change-request action; the hand-over action only | **not yet implemented** (SCRUM-545) |
+| AC5-01 | HELD BY A | LEAD, `GET /:id/review` | 200, the full event. Already SCRUM-486's `SCRUM486_AC6_a_lead_who_holds_nothing_reads_%s` | Proved (route, screen): SCRUM-486's `SCRUM486_AC6_a_lead_who_holds_nothing_reads_%s` and `SCRUM486_AC6_the_lead_opens_the_event_as_a_coordinator_does` (route); the details on screen in `SCRUM487_AC5_a_lead_sees_%s_read_only_with_only_the_hand_over_action` |
+| AC5-02 | HELD BY A, with clarification history | LEAD reads the clarification history | Allowed (SCRUM-521's service check) | Proved (svc, screen): SCRUM-486's `SCRUM486_AC6_a_lead_who_did_not_write_it_reads_it` (the clarification history's service check, SCRUM-521); its control on screen in `SCRUM487_AC5_a_lead_sees_%s_read_only_with_only_the_hand_over_action` |
+| AC5-03 | HELD BY A, a handover with a note | LEAD, `GET /:id/assignments/review` | The history, with the note (D6). Already SCRUM-486's `SCRUM486_AC6_the_lead_reads_the_history_with_its_notes` | Proved (route, screen): SCRUM-486's `SCRUM486_AC6_the_lead_reads_the_history_with_its_notes` (route); the note on screen in `SCRUM487_AC5_a_lead_sees_%s_read_only_with_only_the_hand_over_action` |
+| AC5-04 **(trap)** | HELD BY A | LEAD, `POST /:id/start-review` | 403, nothing queried | Proved (route): `SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` (POST /:id/start-review) |
+| AC5-05 **(trap)** | HELD BY A, under review | LEAD, `POST /:id/decision` | 403, nothing queried | Proved (route): `SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` (POST /:id/decision) |
+| AC5-06 **(trap)** | HELD BY A | LEAD, `POST /:id/cancel` | 403, nothing queried | Proved (route): `SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` (POST /:id/cancel) |
+| AC5-07 **(trap)** | HELD BY A, under review | LEAD, `POST /:id/clarification` | 403, nothing queried | Proved (route): `SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` (POST /:id/clarification) |
+| AC5-08 **(trap)** | HELD BY A, pending clarification | LEAD, `POST /:id/clarification/close` | 403, nothing queried | Proved (route): `SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` (POST /:id/clarification/close) |
+| AC5-09 **(trap)** | A pending change request on an event HELD BY A | LEAD, `POST /change-requests/:id/decision` | 403, nothing queried | Proved (route): `SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` (POST /change-requests/:changeRequestId/decision) |
+| AC5-10 | HELD BY A, open on the event page | As LEAD | No start-review, decide, cancel, clarification or change-request action; the hand-over action only | Proved (screen): `SCRUM487_AC5_a_lead_sees_%s_read_only_with_only_the_hand_over_action`, in submitted, under review, pending clarification, approved, confirmed, and approved with an open change request; and SCRUM-486's `SCRUM486_AC6_a_lead_sees_the_hand_over_action_on_an_event_they_do_not_hold` |
 | AC5-11 | — | LEAD confirms an event | **Cannot be tested as written** (D7): no confirm path exists | — |
 
 ### AC6 — the Lead reassigns from this view, without the holder
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC6-01 | HELD BY A, in the overview | LEAD clicks the row's Open, then hands it to B | Reaches the event page by a router link; the hand-over is the SCRUM-486 one | **not yet implemented** (SCRUM-544, SCRUM-545) |
-| AC6-02 **(trap)** | HELD BY A; A does nothing | LEAD reassigns to B | Allowed; history previous A, new B, `assigned_by` LEAD. No call by A at any point. Already SCRUM-486's `SCRUM486_AC6_a_lead_who_does_not_hold_the_event_reassigns_it` (pglite) | **not yet implemented** (SCRUM-545) |
+| AC6-01 | HELD BY A, in the overview | LEAD clicks the row's Open, then hands it to B | Reaches the event page by a router link; the hand-over is the SCRUM-486 one | Proved (screen): `SCRUM487_AC6_a_filtered_row_opens_the_events_page`; on the event page, SCRUM-486's `SCRUM486_AC6_a_lead_sees_the_hand_over_action_on_an_event_they_do_not_hold` and `SCRUM486_AC6_a_lead_hands_it_over_from_the_screen_without_being_told_they_can_no_longer_change_it`; unfiltered, `SCRUM486_AC6_open_links_to_the_events_page_and_goes_there` |
+| AC6-02 **(trap)** | HELD BY A; A does nothing | LEAD reassigns to B | Allowed; history previous A, new B, `assigned_by` LEAD. No call by A at any point. Already SCRUM-486's `SCRUM486_AC6_a_lead_who_does_not_hold_the_event_reassigns_it` (pglite) | Proved (pglite): SCRUM-486's `SCRUM486_AC6_a_lead_who_does_not_hold_the_event_reassigns_it`: the holder makes no call; and by hand on 13 October (SCRUM-486 AC6-26, checks C and D) |
 | AC6-03 | After AC6-02 | Re-read the overview | A's counts down by one, B's up by one, in the event's status | **not yet implemented** (SCRUM-545) |
 | AC6-04 | After AC6-02 | Re-read the list filtered by B | The event is listed under B, not under A | **not yet implemented** (SCRUM-545) |
 
@@ -291,8 +297,9 @@ built, its own cases say what the Lead may cancel there.
    only. Proposed: no; the finished option is the list's (AC3).
 3. **One status at a time, or several?** AC3 says "by status". Proposed: one, as a
    single `status` parameter; several can be added without breaking it.
-4. **D6's confirmation.** The ticket says "to confirm". This document records it as
-   confirmed from Calven's brief; the Jira design decision should say so too.
+4. **D6's confirmation.** The ticket says "to confirm", and the team has not yet
+   (13 October). The behaviour is built and proved (AC5-03); Calven is raising the
+   decision with the team.
 5. **Safety statuses** (D4). AC2 and AC3 stay partial until SCRUM-488 adds them to
    `ACTIVE_EVENT_STATUSES`. Should `FINISHED_EVENT_STATUSES` be checked then too?
    Proposed: no change; safety statuses are active.
@@ -332,7 +339,9 @@ built, its own cases say what the Lead may cancel there.
 be written as specified (AC2-12, AC3-18, AC5-11). After SCRUM-541: **14 proved**
 (AC1-01 to AC1-03, AC2-01 to AC2-11); 39 not yet implemented; the same 3. After
 SCRUM-542: **31 proved** (adding AC1-04 and AC3-01 to AC3-16); 22 not yet implemented;
-the same 3.
+the same 3. After SCRUM-543 to SCRUM-545: **49 proved** (adding AC2-13, AC3-17,
+AC4-01 to AC4-04, AC5-01 to AC5-10, AC6-01 and AC6-02); 4 not yet implemented
+(AC1-05, AC1-06, AC6-03 and AC6-04, left for SCRUM-546); the same 3.
 
 | Section | Cases |
 |---|---|

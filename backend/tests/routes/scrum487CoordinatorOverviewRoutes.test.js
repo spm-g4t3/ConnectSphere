@@ -228,3 +228,43 @@ describe('SCRUM-487 AC1, AC3: GET /assigned takes the Lead\'s filters', () => {
     expect(client.calls).toHaveLength(0);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// AC5: the Lead's view is read-only; every write on the event page refuses them
+// ---------------------------------------------------------------------------
+describe('SCRUM-487 AC5: a Lead is refused every write the event page offers a coordinator', () => {
+  // SCRUM-487 (SCRUM-545). SCRUM-485 sampled coordinatorOnly with a Lead on
+  // GET /queue, GET /coordinators and POST /:id/start-review
+  // (SCRUM485_AC5_%s_refuses_%s_with_403_and_queries_nothing); requireRole's
+  // own test proves the gate. This covers every write the event screen can
+  // make, each one by name: a route moved to coordinatorOrLead by mistake,
+  // as POST /:id/reassign was on purpose (SCRUM-486 AC6), fails here by name.
+  // POST /:id/reassign is the one write a Lead is allowed, and is SCRUM-486's
+  // to prove (SCRUM486_AC6_a_lead_reaches_the_handover_function).
+  const EVENT_ID = '22222222-2222-4222-8222-222222222222';
+  const CHANGE_REQUEST_ID = '33333333-3333-4333-8333-333333333333';
+  const WRITES = [
+    ['POST /:id/start-review', (app) => request(app).post(`/api/event-requests/${EVENT_ID}/start-review`).send({})],
+    ['POST /:id/decision', (app) => request(app).post(`/api/event-requests/${EVENT_ID}/decision`).send({ decision: 'approved', decisionNote: 'Fine.' })],
+    ['POST /:id/cancel', (app) => request(app).post(`/api/event-requests/${EVENT_ID}/cancel`).send({ reason: 'Venue closed.' })],
+    ['POST /:id/clarification', (app) => request(app).post(`/api/event-requests/${EVENT_ID}/clarification`).send({ note: 'Numbers?' })],
+    ['POST /:id/clarification/close', (app) => request(app).post(`/api/event-requests/${EVENT_ID}/clarification/close`).send({ note: 'Closing.' })],
+    [
+      'POST /change-requests/:changeRequestId/decision',
+      (app) => request(app).post(`/api/event-requests/change-requests/${CHANGE_REQUEST_ID}/decision`).send({ decision: 'approved' }),
+    ],
+  ];
+
+  it.each(WRITES)('SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing', async (_route, call) => {
+    // AC5-04 to AC5-09. Nothing queued: a query that slipped past the gate
+    // would fail with "no result queued" instead of passing by accident.
+    const client = createFakeClient([]);
+
+    const res = await call(appWith({ client }));
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'This action is restricted to Event Coordinators' });
+    expect(client.calls).toHaveLength(0);
+  });
+});
