@@ -20,7 +20,6 @@ import equipmentRoutes from './routes/equipment.js';
 import eventEquipmentRoutes from './routes/eventEquipment.js';
 import venueSuitabilityRoutes from './routes/venueSuitability.js';
 import equipmentReviewRoutes from './routes/equipmentReview.js';
-import openEventRoutes from './routes/openEvents.js';
 import { startVenueHoldExpiryScheduler } from './jobs/venueHoldExpiryScheduler.js';
 
 const app = express();
@@ -60,9 +59,6 @@ app.use('/api/equipment/availability', equipmentAvailabilityRoutes);
 
 // SCRUM-252: an Event Coordinator requests a venue for an approved event.
 app.use('/api/booking-requests', bookingRequestRoutes);
-
-// SCRUM-495: the events an Attendee can register for. Attendee only.
-app.use('/api/open-events', openEventRoutes);
 
 // SCRUM-491 (AC7, AC8): mark lapsed venue holds expired and notify their
 // coordinators, once a minute. A lapsed hold already occupies nothing without
