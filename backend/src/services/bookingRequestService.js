@@ -5,13 +5,15 @@
  *
  * A coordinator requests a venue for an approved or confirmed event. The
  * request is a bookings row in the 'pending' status, written by
- * create_booking_request in 030_create_booking_request.sql rather than by a
- * direct insert, for the reason 012 gives for block creation: the checks have
+ * create_booking_request in 051_multi_venue_booking_requests.sql (first
+ * written by 030) rather than by a direct insert, for the reason 012 gives
+ * for block creation: the checks have
  * to hold until the insert commits, and supabase-js gives each call its own
  * transaction. The function locks the event row and then the venue row ("for
  * share", the protocol SCRUM-17's migrations 013 to 015 set out for the booking
  * writer), and only then checks the event, the venue, the period and the
- * event's existing requests.
+ * event's live request at this venue (SCRUM-525: one per venue, not one per
+ * event, since 051).
  *
  * What this module adds around that function:
  *
@@ -66,7 +68,14 @@ const UUID_PATTERN =
 /** Postgres codes that mean "the input was wrong", whoever caught it. */
 const VALIDATION_CODES = new Set([
   '23514', // check constraint: setup notes too long
-  '22023', // invalid_parameter_value: no suitability result from the caller
+  // invalid_parameter_value: no suitability result, or an expected attendance
+  // below 1 or above the event's (051)
+  '22023',
+  // numeric_value_out_of_range: an expectedAttendance above Postgres's integer
+  // maximum. checkAttendance refuses one (MAX_ATTENDANCE), so this is a
+  // backstop for a caller that skips validation; it is still the caller's
+  // input that was wrong, so a 400, not a 500.
+  '22003',
   '23502', // not null
   '22P02', // invalid text representation
 ]);
@@ -257,6 +266,8 @@ export function toBookingRequest(row) {
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     roomLayoutCode: row.room_layout_code ?? null,
+    // SCRUM-525: the attendance this venue was requested for (051).
+    expectedAttendance: row.expected_attendance ?? null,
     venueRequirements: row.venue_requirements ?? null,
     accessibilityRequirements: row.accessibility_requirements ?? null,
     setupNotes: row.setup_notes ?? null,
@@ -304,13 +315,17 @@ function checkedSuitability(result) {
  * @param {Function} [options.checkSuitability]  the N10 check; see
  *                              venueSuitabilityService.js for its contract
  * @returns {Promise<object>} the new pending request, shaped by toBookingRequest
- * @throws {ValidationError} bad input, before any network call
+ * @throws {ValidationError} bad input, before any network call; or an
+ *                           expectedAttendance above the event's, once read
  * @throws {NotFoundError}   no such event, or no such venue
  * @throws {ForbiddenError}  the caller is not the event's assigned coordinator
  * @throws {ConflictError}   by code: EVENT_NOT_BOOKABLE, EVENT_DATES_MISSING,
+ *                           EVENT_ATTENDANCE_MISSING (SCRUM-525: neither the
+ *                           request nor the event gives an attendance),
  *                           VENUE_RETIRED, BOOKING_REQUEST_EXISTS and
- *                           BOOKING_FLAGGED_FOR_REVIEW (conflicts name the
- *                           existing booking), BOOKING_PERIOD_CONFLICT
+ *                           BOOKING_FLAGGED_FOR_REVIEW at this venue
+ *                           (conflicts name the existing booking),
+ *                           BOOKING_PERIOD_CONFLICT
  *                           (conflicts are blocks, occupying bookings and
  *                           other events' active holds (SCRUM-491),
  *                           each with its occupied period, shaped by
@@ -320,6 +335,16 @@ function checkedSuitability(result) {
  * SCRUM-190: input may also carry accessibility and facilities, code lists
  * passed to the checker with the caller. An unknown code is a ValidationError
  * from the check, before anything is written.
+ *
+ * SCRUM-525: input may also carry expectedAttendance, the number of people
+ * this venue is for; absent, it is the event's. That one number is both the
+ * one Capacity is judged on and the one stored on the booking, so the verdict
+ * the coordinator saw is about what Venue Staff will read. A number above the
+ * event's (when it has one) is a ValidationError on expectedAttendance, before
+ * the check or the function runs. With neither number, this
+ * throws EVENT_ATTENDANCE_MISSING after the coordinator and status checks (a
+ * stranger learns nothing about the event) and before the check or the
+ * function runs, so nothing is judged against no number and nothing written.
  *
  * SCRUM-193/194 (F2, SCRUM-188 AC7, "any criterion the coordinator chose to
  * override"): input may carry acknowledgedCriteria, the criterion labels the
@@ -338,7 +363,8 @@ function checkedSuitability(result) {
  *
  * The race that remains is small: between this check and the moment
  * create_booking_request takes its locks, the venue's attributes (an
- * update_venue) or the event's attendance could change. The function
+ * update_venue) or, when the request takes the event's attendance, that
+ * attendance could change. The function
  * re-checks the period under its locks, so a new booking, block or hold is
  * still refused as BOOKING_PERIOD_CONFLICT; an attribute change in that
  * window is not re-judged, and the stored result is the one computed here.
@@ -371,6 +397,29 @@ export async function createBookingRequest(
     );
   }
 
+  // SCRUM-525 (R4, R12): the request's own number, else the event's. Refused
+  // here, not left to the check or to 051's guard, so neither runs without one.
+  const expectedAttendance = request.expectedAttendance ?? event.expectedAttendance ?? null;
+  if (expectedAttendance === null) {
+    throw new ConflictError(
+      'This event has no expected attendance; give one for this venue to request it',
+      { code: 'EVENT_ATTENDANCE_MISSING' },
+    );
+  }
+  // AC2: a venue is never for more people than the event. Checked only here,
+  // at request time, so lowering the event's attendance later leaves
+  // existing bookings valid. 051 repeats it under the event lock.
+  if (
+    request.expectedAttendance !== null &&
+    event.expectedAttendance != null &&
+    request.expectedAttendance > event.expectedAttendance
+  ) {
+    const message = `must be at most the event's expected attendance (${event.expectedAttendance})`;
+    throw new ValidationError(`Invalid booking request -- expectedAttendance: ${message}`, [
+      { field: 'expectedAttendance', message },
+    ]);
+  }
+
   const suitability = checkedSuitability(
     await checkSuitability({
       eventRequestId: request.eventRequestId,
@@ -378,6 +427,7 @@ export async function createBookingRequest(
       roomLayoutCode: request.roomLayoutCode,
       accessibility: request.accessibility,
       facilities: request.facilities,
+      expectedAttendance,
       userId,
       client: db,
     }),
@@ -407,6 +457,8 @@ export async function createBookingRequest(
     p_setup_notes: request.setupNotes,
     p_suitability: suitability,
     p_confirm_unsuitable: confirmUnsuitable,
+    // SCRUM-525: the number just judged, so what is stored is what was checked.
+    p_expected_attendance: expectedAttendance,
   });
 
   if (error) throw translateError(error);

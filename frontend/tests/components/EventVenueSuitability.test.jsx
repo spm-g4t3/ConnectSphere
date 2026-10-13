@@ -51,6 +51,10 @@ function item(overrides = {}) {
     venueLocation: "Level 2",
     status: "pending",
     statusDisplay: { status: "pending", label: "Pending", group: "OPEN", description: "" },
+    // SCRUM-525 (AC5): top-level, so they survive a failed recheck.
+    roomLayoutCode: "theatre",
+    expectedAttendance: 150,
+    attendanceSource: "booking",
     suitabilityOverridden: false,
     current: { suitable: true, criteria: ALL_MET, checked: CHECKED },
     atRequest: { suitable: true, unmet: [] },
@@ -128,7 +132,7 @@ describe("SCRUM-192 loading and listing (SCRUM188_AC6)", () => {
     const li = venueItem("Hall A");
     expect(within(li).getAllByText("Not suitable").length).toBeGreaterThan(0);
     expect(within(li).getByRole("alert")).toHaveTextContent(
-      "This venue no longer meets the event's requirements: Capacity, Availability",
+      "This venue no longer meets this request's requirements: Capacity, Availability",
     );
     expect(li.querySelector("details")).toHaveAttribute("open");
     expect(within(li).getByText("Capacity not met")).toBeInTheDocument();
@@ -150,7 +154,7 @@ describe("SCRUM-192 loading and listing (SCRUM188_AC6)", () => {
     expect(within(li).getByText("Requested although it did not meet: Layout")).toBeInTheDocument();
     // Only what newly fails raises the alarm.
     expect(within(li).getByRole("alert")).toHaveTextContent(
-      "This venue no longer meets the event's requirements: Capacity",
+      "This venue no longer meets this request's requirements: Capacity",
     );
     expect(within(li).getByRole("alert")).not.toHaveTextContent("Layout");
   });
@@ -251,7 +255,7 @@ describe("SCRUM-192 failures and rechecking (SCRUM188_AC6)", () => {
     await user.click(screen.getByRole("button", { name: "Recheck" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This venue no longer meets the event's requirements: Availability",
+      "This venue no longer meets this request's requirements: Availability",
     );
     expect(getEventVenueSuitability).toHaveBeenCalledTimes(2);
     expect(getEventVenueSuitability).toHaveBeenLastCalledWith("e1");
@@ -347,6 +351,82 @@ describe("SCRUM-188 items that could not be rechecked", () => {
   });
 });
 
+// SCRUM-525 (AC5, R14): each booking shows its own attendance and layout,
+// outside the recheck result, and says when the number is the event's.
+describe("SCRUM-525 each booking's attendance and layout", () => {
+  it("SCRUM525_AC5_each_booking_shows_its_attendance_and_layout", async () => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([
+      item({ expectedAttendance: 120, roomLayoutCode: "theatre" }),
+      // Errored: no `current`, yet its own values still show.
+      item({
+        bookingId: "b2",
+        venueId: "v2",
+        venueName: "Room B",
+        expectedAttendance: 40,
+        roomLayoutCode: "u_shape",
+        current: null,
+        newlyUnmet: [],
+        error: { code: "RECHECK_FAILED", message: "prose" },
+      }),
+    ]);
+    renderSection();
+
+    await screen.findByRole("heading", { name: "Hall A" });
+    const hall = venueItem("Hall A");
+    expect(within(hall).getByText("Attendance: 120")).toBeInTheDocument();
+    expect(within(hall).getByText("Layout: Theatre")).toBeInTheDocument();
+
+    const room = venueItem("Room B");
+    expect(within(room).getByText("Attendance: 40")).toBeInTheDocument();
+    expect(within(room).getByText("Layout: U-Shape")).toBeInTheDocument();
+    expect(within(room).getByRole("alert")).toHaveTextContent("could not be rechecked");
+  });
+
+  it("SCRUM525_AC5_a_booking_with_no_layout_says_none_was_requested", async () => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([item({ roomLayoutCode: null })]);
+    renderSection();
+
+    await screen.findByRole("heading", { name: "Hall A" });
+    expect(within(venueItem("Hall A")).getByText("Layout: None requested")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["event", 150, "Attendance: 150 (event's)"],
+    ["booking", 40, "Attendance: 40"],
+    [null, null, "Attendance: Not recorded"],
+  ])("SCRUM525_AC5_a_fallback_attendance_is_marked_as_the_events (source %s)", async (source, n, text) => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([
+      item({ attendanceSource: source, expectedAttendance: n }),
+    ]);
+    renderSection();
+
+    await screen.findByRole("heading", { name: "Hall A" });
+    // Exact text: "Attendance: 40" must not carry the event's mark.
+    expect(within(venueItem("Hall A")).getByText(text)).toBeInTheDocument();
+  });
+
+  it("SCRUM525_AC3_a_booking_with_no_attendance_anywhere_errors_alone", async () => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([
+      item({
+        expectedAttendance: null,
+        attendanceSource: null,
+        current: null,
+        newlyUnmet: [],
+        error: { code: "EVENT_ATTENDANCE_MISSING", message: "raw prose" },
+      }),
+      item({ bookingId: "b2", venueId: "v2", venueName: "Room B", expectedAttendance: 40 }),
+    ]);
+    renderSection();
+
+    await screen.findByRole("heading", { name: "Hall A" });
+    expect(within(venueItem("Hall A")).getByRole("alert")).toHaveTextContent(
+      "Neither this request nor the event has an expected attendance, so its capacity could not be checked.",
+    );
+    expect(screen.queryByText(/raw prose/)).not.toBeInTheDocument();
+    expect(within(venueItem("Room B")).queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
 // F-WK7-1-01: the recheck shows the occupied period and its parts as sent.
 describe("SCRUM-188 Week 7 occupied period in the recheck", () => {
   it("SCRUM188_WK7_1_a_recheck_shows_the_occupied_period_and_its_parts", async () => {
@@ -367,7 +447,7 @@ describe("SCRUM-188 Week 7 occupied period in the recheck", () => {
     await screen.findByRole("heading", { name: "Hall A" });
     const li = venueItem("Hall A");
     expect(within(li).getByRole("alert")).toHaveTextContent(
-      "This venue no longer meets the event's requirements: Availability",
+      "This venue no longer meets this request's requirements: Availability",
     );
     expect(li.querySelector("details")).toHaveAttribute("open");
     expect(within(li).getByText(detail)).toBeInTheDocument();

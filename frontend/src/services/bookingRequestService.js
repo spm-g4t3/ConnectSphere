@@ -9,9 +9,11 @@ import { apiClient } from "./apiClient";
 /**
  * Requests a venue for an event (POST /booking-requests).
  *
- * Only the coordinator's choices go in the body: the venue, setup notes, and
+ * Only the coordinator's choices go in the body: the venue, setup notes,
  * (SCRUM-191) the room layout and accessibility and facility codes the
- * suitability check judges, each left out when blank or empty. The period and
+ * suitability check judges, each left out when blank or empty, and
+ * (SCRUM-525, AC2) the expected attendance for this venue, which the server
+ * checks Capacity on and stores with the booking. The period and
  * the event's free-text requirements come from the stored event, the
  * requester from the token, the suitability result from the server, and the
  * status is always pending, so none of them is sent.
@@ -20,10 +22,15 @@ import { apiClient } from "./apiClient";
  * event's assigned coordinator), 404 (no such event or venue), 503 (suitability
  * checking unavailable) and 409 with a `code` and `conflicts`:
  * EVENT_NOT_BOOKABLE, EVENT_DATES_MISSING, VENUE_RETIRED,
- * BOOKING_REQUEST_EXISTS and BOOKING_FLAGGED_FOR_REVIEW (conflicts name the
- * existing booking), BOOKING_PERIOD_CONFLICT (conflicts are blocks and approved
- * bookings), and SUITABILITY_CONFIRMATION_REQUIRED (conflicts are the criteria
- * not met; resend with confirmUnsuitable: true).
+ * EVENT_ATTENDANCE_MISSING (SCRUM-525: no attendance in the body and none on
+ * the event), BOOKING_REQUEST_EXISTS and BOOKING_FLAGGED_FOR_REVIEW
+ * (SCRUM-525: per venue, so they mean this event already has a live request
+ * for this venue; conflicts are [{ kind: 'booking_request', bookingId }], with
+ * no venue id, so the caller knows the venue from what it sent),
+ * BOOKING_PERIOD_CONFLICT (conflicts are blocks and approved bookings), and
+ * SUITABILITY_CONFIRMATION_REQUIRED (conflicts are the criteria not met;
+ * resend with confirmUnsuitable: true). A 400's details[] may name
+ * expectedAttendance.
  *
  * @param {Object} input
  * @param {string} input.eventRequestId
@@ -32,12 +39,15 @@ import { apiClient } from "./apiClient";
  * @param {string[]} [input.accessibility]  SCRUM-191, accessibility feature codes
  * @param {string[]} [input.facilities]     SCRUM-191, facility codes
  * @param {string} [input.setupNotes]
+ * @param {number} [input.expectedAttendance]  SCRUM-525, a whole number of 1
+ *   or more; the event's when left out
  * @param {boolean} [input.confirmUnsuitable]
  * @param {string[]} [input.acknowledgedCriteria]  SCRUM-188 (AC7), the names of
  *   the unmet criteria the coordinator confirmed; sent with confirmUnsuitable.
  *   The server accepts the override only when they cover every criterion it
  *   finds unmet, otherwise it answers SUITABILITY_CONFIRMATION_REQUIRED again.
- * @returns {Promise<Object>} the new request, always status "pending"
+ * @returns {Promise<Object>} the new request, always status "pending", with
+ *   the expectedAttendance it was stored with
  */
 export async function createBookingRequest(input) {
   const response = await apiClient.post("/booking-requests", input);

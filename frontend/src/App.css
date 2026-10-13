@@ -113,14 +113,19 @@ button { cursor: pointer; }
 .my-event-requests { margin: 0 auto; max-width: 1080px; padding: 54px 24px; }
 .my-event-requests__header { align-items: center; display: flex; gap: 20px; justify-content: space-between; margin-bottom: 24px; }
 .my-event-requests__header h1 { color: var(--ink); font-size: 1.8rem; margin: 0; }
-.my-event-requests__header > button, .my-event-requests__item-actions button, .my-event-requests__back, .review-queue__back, .venue-search__back { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 14px; }
+.my-event-requests__header > button, .my-event-requests__item-actions button, .my-event-requests__back, .review-queue__back, .unassigned-queue__back, .venue-search__back { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 14px; }
 .my-event-requests__header > button:hover, .my-event-requests__item-actions button:hover { background: var(--teal-dark); }
-.my-event-requests__back, .review-queue__back, .venue-search__back { background: transparent; border: 1px solid var(--line); color: var(--teal-dark); margin-bottom: 18px; }
-.my-event-requests__back:hover, .review-queue__back:hover, .venue-search__back:hover { background: #eef6f3; }
+.my-event-requests__back, .review-queue__back, .unassigned-queue__back, .venue-search__back { background: transparent; border: 1px solid var(--line); color: var(--teal-dark); margin-bottom: 18px; }
+.my-event-requests__back:hover, .review-queue__back:hover, .unassigned-queue__back:hover, .venue-search__back:hover { background: #eef6f3; }
 .my-event-requests__list { display: grid; gap: 14px; list-style: none; margin: 0; padding: 0; }
 .my-event-requests__item { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(24, 61, 58, 0.05); display: block; padding: 20px; }
 .my-event-requests__item-main { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; }
 .my-event-requests__item-description { line-height: 1.5; margin: 10px 0; }
+/* SCRUM-486 (SCRUM-520). Where a submitted request stands with its
+   coordinator, directly under the status description it qualifies: the
+   summary teal of the page's other secondary lines, pulled up under the
+   description as the reassign hint is under its field. */
+.my-event-requests__assignment { color: var(--teal-dark); font-size: 0.9rem; margin: -6px 0 10px; }
 .my-event-requests__item-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .my-event-requests__item-actions button { font-size: 0.88rem; }
 .my-event-requests__error { background: #fff0ee; border-radius: 6px; color: #a43c32; padding: 10px 12px; }
@@ -163,7 +168,7 @@ button { cursor: pointer; }
 /* The rule above makes every .dashboard p muted grey, which would render a
    failed retire in exactly the same voice as the empty-state text. Same
    colour pair as .app-nav__error. */
-.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .venue-block-form__error, .dashboard .coordinator-notifications__error, .dashboard .coordinator-notifications__row-error, .dashboard .venue-blocks__error, .dashboard .venue-hold-form__error, .dashboard .venue-holds__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .unassigned-queue__error, .dashboard .venue-block-form__error, .dashboard .coordinator-notifications__error, .dashboard .coordinator-notifications__row-error, .dashboard .venue-blocks__error, .dashboard .venue-hold-form__error, .dashboard .venue-holds__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 /* NECESSARY, not cosmetic. .dashboard li above forces flex with
    justify-content: space-between, which on a checkbox row throws the box to
    one edge of the card and its label to the other with the whole width
@@ -494,6 +499,43 @@ button { cursor: pointer; }
 .dashboard--coordinator .reassign-event__form select:focus, .dashboard--coordinator .reassign-event__form textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .dashboard--coordinator .reassign-event__hint { font-size: 0.84rem; margin: -6px 0 0; }
 .dashboard--coordinator .reassign-event__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* SCRUM-486 (SCRUM-519). The Lead's unassigned queue. It renders in two
+   places, the Lead's dashboard and /unassigned-queue, and in both it is a
+   <section> directly inside .dashboard, so the card, the h2, the row layout
+   (`.dashboard li`, details left and the Assign button right) and the teal
+   buttons come from the dashboard rules, as they do for the review queue.
+   Scoped to the component's own class, not to .dashboard--coordinator-lead,
+   so nothing here depends on which of the two pages it is on. These only lay
+   out the left side of a row, with My events' values: the event name, then
+   the organiser, period, attendance and waiting time as smaller muted lines
+   under it -- secondary to the name, not headings of their own. */
+.unassigned-queue__item > div { display: grid; gap: 4px; min-width: 0; }
+.unassigned-queue__item p { font-size: 0.85rem; margin: 0; overflow-wrap: anywhere; }
+.unassigned-queue__waiting { color: var(--muted); }
+/* The confirmation after an assignment, the same green notice the handover
+   confirmation uses. The <p role="status"> has no class of its own. */
+.unassigned-queue > p[role="status"] { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 0 0 14px; padding: 8px 12px; }
+/* SCRUM-486 (SCRUM-519). The Lead's picker: the handover panel's layout and
+   values (.reassign-event__*, above), which are scoped to the coordinator's
+   dashboard and so do not reach the Lead's. Scoped to its own class instead,
+   for the reason the queue's rules give. The radio list is a fieldset, framed
+   as the clarification form's field list is. */
+.assign-coordinator h2 { margin-bottom: 8px; }
+.assign-coordinator__form { display: grid; gap: 14px; margin-top: 16px; max-width: 560px; }
+.assign-coordinator__form > label { color: var(--muted); display: grid; gap: 7px; }
+.assign-coordinator__form textarea { background: white; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 96px; padding: 10px 12px; resize: vertical; }
+.assign-coordinator__form textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
+.assign-coordinator__form fieldset { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 8px; margin: 0; padding: 14px; }
+.assign-coordinator__form legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
+/* Each choice a row, so the whole row is the target and the counts line up.
+   The chosen row takes the nav's active treatment (teal-dark text on the
+   hover tint, a teal edge), so the one choice the Lead has made reads at a
+   glance rather than only by the radio's dot. */
+.assign-coordinator__choice { align-items: center; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); cursor: pointer; display: flex; gap: 8px; padding: 10px 12px; }
+.assign-coordinator__choice:hover { background: #eef6f3; }
+.assign-coordinator__choice:has(input:checked) { background: #eef6f3; border-color: var(--teal); color: var(--teal-dark); font-weight: 700; }
+.assign-coordinator__hint { font-size: 0.84rem; margin: -6px 0 0; }
+.assign-coordinator__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 /* SCRUM-19. DecisionOutcome renders on the coordinator's event panel
    (.dashboard--coordinator) and on the Organiser's list (.my-event-requests),
    so, like .assignment-history above, it is scoped to its own class rather

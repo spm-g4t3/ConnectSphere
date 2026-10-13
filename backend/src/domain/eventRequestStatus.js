@@ -262,9 +262,11 @@ export const ALLOWED_TRANSITIONS = Object.freeze({
  *    a request you yourself paused is to remember its id.
  *
  *  - draft is OUT, and that exclusion is not an oversight -- it is the privacy
- *    boundary of the whole shared-queue design. There is no coordinator_id on
- *    event_requests and no assignment model, so every Coordinator sees every
- *    row this list admits. A draft is an Organiser's private working copy that
+ *    boundary of the whole shared-queue design. Every Coordinator sees every
+ *    row this list admits, whoever holds it. (This used to say there was no
+ *    coordinator column and no assignment model, which was true when SCRUM-45
+ *    wrote it; 014 added assigned_coordinator_id, and since SCRUM-486 the
+ *    queue also leaves out a request nobody holds, in the service.) A draft is an Organiser's private working copy that
  *    they have not chosen to show anyone, so the status filter IS the access
  *    control, and widening this array is what would breach it.
  *

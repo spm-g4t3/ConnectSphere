@@ -174,3 +174,99 @@ describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
     expect(within(record).queryByText(COORDINATOR)).not.toBeInTheDocument();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-486 (SCRUM-520), AC1-05: the Organiser can tell "waiting to be
+// assigned" from "assigned, waiting for review", on the row itself.
+// ---------------------------------------------------------------------------
+describe("SCRUM486_AC1 where a submitted request stands with its coordinator", () => {
+  const WAITING_FOR_LEAD = "Waiting for the Event Coordinator Lead to assign a coordinator to your request.";
+  // The unnamed form, for a row whose coordinator has no name on record (these
+  // fixtures carry no assignedCoordinatorName). Was "A coordinator has been
+  // assigned. Your request is ..." until the line gained the coordinator's
+  // name (AC1-06), when the sentence became "<who> has been assigned; your
+  // request is ...". Right when written: the list carried no name then.
+  const WAITING_FOR_REVIEW = "A coordinator has been assigned; your request is waiting for them to start the review.";
+
+  /** The request's own list item, found by its name. */
+  const rowOf = async (name) => (await screen.findByText(name)).closest("li");
+
+  it("SCRUM486_AC1_a_submitted_request_with_no_coordinator_says_it_is_waiting_for_the_lead", async () => {
+    // AC1-05. On the row, not inside a collapsed section: nothing is opened.
+    renderList([eventRequest({ assignedCoordinatorId: null })]);
+
+    const line = await screen.findByText(WAITING_FOR_LEAD);
+    expect(line.closest("details")).toBeNull();
+    expect(screen.queryByText(WAITING_FOR_REVIEW)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC1_a_submitted_request_with_a_coordinator_says_it_is_waiting_for_review", async () => {
+    renderList([eventRequest({ assignedCoordinatorId: COORDINATOR })]);
+
+    const line = await screen.findByText(WAITING_FOR_REVIEW);
+    expect(line.closest("details")).toBeNull();
+    expect(screen.queryByText(WAITING_FOR_LEAD)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC1_a_submitted_request_names_the_coordinator_it_was_assigned_to", async () => {
+    // AC1-06. The name comes with the list (listEventRequestsForOrganiser
+    // reads it in one profiles read), so the row says who without a click.
+    renderList([eventRequest({ assignedCoordinatorId: COORDINATOR, assignedCoordinatorName: "Priya Nair" })]);
+
+    const line = await screen.findByText(
+      "Priya Nair has been assigned; your request is waiting for them to start the review.",
+    );
+    expect(line.closest("details")).toBeNull();
+    expect(screen.queryByText(WAITING_FOR_REVIEW)).not.toBeInTheDocument();
+    expect(screen.queryByText(WAITING_FOR_LEAD)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC1_the_two_are_visibly_different_on_rows_that_share_a_status", async () => {
+    // Same status, same badge, same shared description from the API: the
+    // line is the only difference, and it is there on both rows.
+    renderList([
+      eventRequest({ id: "a", eventName: "Unassigned Night", assignedCoordinatorId: null }),
+      eventRequest({ id: "b", eventName: "Assigned Night", assignedCoordinatorId: COORDINATOR }),
+    ]);
+
+    const unassigned = await rowOf("Unassigned Night");
+    const assigned = await rowOf("Assigned Night");
+    expect(within(unassigned).getByText("Submitted")).toBeInTheDocument();
+    expect(within(assigned).getByText("Submitted")).toBeInTheDocument();
+    expect(within(unassigned).getByText(WAITING_FOR_LEAD)).toBeInTheDocument();
+    expect(within(assigned).getByText(WAITING_FOR_REVIEW)).toBeInTheDocument();
+    expect(within(unassigned).queryByText(WAITING_FOR_REVIEW)).not.toBeInTheDocument();
+    expect(within(assigned).queryByText(WAITING_FOR_LEAD)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC1_a_draft_is_unchanged", async () => {
+    // No line, and the status description from the API as it was.
+    renderList([
+      eventRequest({
+        status: "draft",
+        assignedCoordinatorId: null,
+        statusDisplay: { status: "draft", label: "Draft", group: "DRAFT", description: "Not yet submitted to ConnectSphere. You can keep editing it." },
+      }),
+    ]);
+
+    const row = await rowOf("IS212 Industry Night");
+    expect(within(row).getByText("Not yet submitted to ConnectSphere. You can keep editing it.")).toBeInTheDocument();
+    expect(within(row).queryByText(WAITING_FOR_LEAD)).not.toBeInTheDocument();
+    expect(within(row).queryByText(WAITING_FOR_REVIEW)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC1_past_submission_the_status_speaks_for_itself", async () => {
+    renderList([
+      eventRequest({
+        status: "under_review",
+        statusDisplay: { status: "under_review", label: "Under review", group: "UNDER_REVIEW", description: "A Coordinator is assessing your request." },
+      }),
+    ]);
+
+    const row = await rowOf("IS212 Industry Night");
+    expect(within(row).getByText("A Coordinator is assessing your request.")).toBeInTheDocument();
+    expect(within(row).queryByText(WAITING_FOR_LEAD)).not.toBeInTheDocument();
+    expect(within(row).queryByText(WAITING_FOR_REVIEW)).not.toBeInTheDocument();
+  });
+});

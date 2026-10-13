@@ -21,8 +21,11 @@
  *
  * Migrations: the same list as venueBlockOccupancyDatabase.test.js, through
  * 033, then 040 (SCRUM-491), whose create_booking_request is 033's with step
- * 7 also counting other events' active holds. Every case above the hold one
- * holds no venue, so each still tests 033's rule unchanged.
+ * 7 also counting other events' active holds, then 051 (SCRUM-525), the
+ * latest definition, which keeps 040's step 7 and adds the request's own
+ * expected attendance as an 8th argument (150 here, the event's). Every case
+ * above the hold one holds no venue, so each still tests 033's rule
+ * unchanged.
  *
  * Dates: D is the Singapore date 10 days from when the test runs, never
  * hard-coded. Instants are compared with getTime().
@@ -62,6 +65,7 @@ const MIGRATIONS = [
   '032_venue_occupancy.sql',
   '033_venue_occupancy_callers.sql',
   '040_venue_holds.sql',
+  '051_multi_venue_booking_requests.sql',
 ];
 
 /** What 014 reads from SCRUM-19's migration, which is not on this branch. */
@@ -153,8 +157,8 @@ describe('SCRUM-484: create_booking_request uses the occupied period (033)', () 
   async function requestFor(venueId, startsAt, endsAt) {
     const eventId = await makeEvent(startsAt, endsAt);
     const row = await one(
-      'select create_booking_request($1, $2, $3, null, null, $4::jsonb, false) as result',
-      [eventId, venueId, coordinator, JSON.stringify(SUITABLE)],
+      'select create_booking_request($1, $2, $3, null, null, $4::jsonb, false, $5) as result',
+      [eventId, venueId, coordinator, JSON.stringify(SUITABLE), 150],
     );
     return { eventId, result: row.result };
   }
@@ -368,11 +372,11 @@ describe('SCRUM-484: create_booking_request uses the occupied period (033)', () 
     });
   });
 
-  // SCRUM-188 AC7 (SCRUM-193/194): the request-time result at 040's
-  // definition of create_booking_request, which createBookingRequestMigration
-  // (stopping at 030) does not reach, with a full result as the service builds
-  // it -- six criteria and `checked`.
-  describe('SCRUM-188 AC7: the suitability result is stored with the request (040)', () => {
+  // SCRUM-188 AC7 (SCRUM-193/194): the request-time result at the latest
+  // definition of create_booking_request (051, which keeps 040's storing of
+  // it), which createBookingRequestMigration (stopping at 030) does not reach,
+  // with a full result as the service builds it -- six criteria and `checked`.
+  describe('SCRUM-188 AC7: the suitability result is stored with the request (051)', () => {
     const CHECKED = {
       startsAt: at('10:00'),
       endsAt: at('12:00'),
@@ -397,8 +401,8 @@ describe('SCRUM-484: create_booking_request uses the occupied period (033)', () 
     const request = async (eventId, venueId, confirm) =>
       (
         await one(
-          'select create_booking_request($1, $2, $3, null, null, $4::jsonb, $5) as result',
-          [eventId, venueId, coordinator, JSON.stringify(UNSUITABLE_FULL), confirm],
+          'select create_booking_request($1, $2, $3, null, null, $4::jsonb, $5, $6) as result',
+          [eventId, venueId, coordinator, JSON.stringify(UNSUITABLE_FULL), confirm, 150],
         )
       ).result;
 
