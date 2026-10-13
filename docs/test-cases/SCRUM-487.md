@@ -4,7 +4,7 @@
 **Subtask:** SCRUM-540 (this document)
 **Schema:** no migration. Everything here reads tables and functions that exist after `052_lead_assignment.sql` (SCRUM-486).
 **Written:** 13 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; each **Implemented by** says so, and the subtask that writes its tests fills it in.
-**Marked:** 13 October 2026, SCRUM-541: AC1-01 to AC1-03 and AC2-01 to AC2-11 name their tests; SCRUM-542: AC1-04 and AC3-01 to AC3-16; SCRUM-543 to SCRUM-545: AC2-13, AC3-17, AC4, AC5-01 to AC5-10, AC6-01 and AC6-02. The cases themselves are unchanged.
+**Marked:** 13 October 2026. SCRUM-546: AC1-05, AC1-06, AC6-03, AC6-04, and AC2-07's renamed test; every name checked. SCRUM-541: AC1-01 to AC1-03 and AC2-01 to AC2-11 name their tests; SCRUM-542: AC1-04 and AC3-01 to AC3-16; SCRUM-543 to SCRUM-545: AC2-13, AC3-17, AC4, AC5-01 to AC5-10, AC6-01 and AC6-02. The cases themselves are unchanged.
 
 This document is the written layer between SCRUM-487's acceptance criteria and the
 Vitest files that will implement them. Deliverable #3 requires test cases
@@ -205,20 +205,20 @@ built, its own cases say what the Lead may cancel there.
 | AC1-02 | COORD, ORG, venue staff, technical support, attendee, SAFETY, an account with no profile (role null) | `GET /coordinator-overview` | 403 from `leadOnly`, nothing queried | Proved (route): `SCRUM487_AC1_%s_is_refused_the_coordinator_overview_with_403_and_queries_nothing` |
 | AC1-03 | No token | `GET /coordinator-overview` | 401, nothing queried | Proved (route): `SCRUM487_AC1_the_coordinator_overview_answers_401_without_a_token` |
 | AC1-04 | COORD, ORG | `GET /assigned?coordinatorId=…&status=…&includeFinished=true` | 403, nothing queried: the filters do not widen the gate | Proved (route): `SCRUM487_AC1_%s_is_refused_the_filtered_list_with_403_and_queries_nothing`. Unfiltered: SCRUM-486's `SCRUM486_AC6_%s_is_refused_the_assigned_list_with_403_and_queries_nothing` |
-| AC1-05 | COORD, ORG | Open the overview's address | Turned away by `ProtectedRoute` (`event_coordinator_lead` only) | **not yet implemented** (SCRUM-544) |
-| AC1-06 | Every role | Render `Navigation` | Only the Lead is offered the overview | **not yet implemented** (SCRUM-544) |
+| AC1-05 | COORD, ORG | Open the overview's address | Turned away by `ProtectedRoute` (`event_coordinator_lead` only) | Proved (route table, real `App`): `SCRUM487_AC1_the_lead_opens_the_overview_and_is_offered_its_link`, `SCRUM487_AC1_sends_%s_to_unauthorized_and_never_mounts_the_overview`, `SCRUM487_AC1_sends_a_signed_out_visitor_to_login` |
+| AC1-06 | Every role | Render `Navigation` | Only the Lead is offered the overview | Proved (nav, real `App`): `SCRUM487_AC1_%s_is_not_offered_the_overview_in_the_nav`, `SCRUM487_AC1_the_lead_opens_the_overview_and_is_offered_its_link`; the Lead's exact links, SCRUM-486's `SCRUM486_AC6_an_event_coordinator_lead_has_exactly_the_dashboard_unassigned_queue_and_assigned_events_links` |
 
 ### AC2 — every coordinator, with active events and the count in each status
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
 | AC2-01 | Coordinators A (Omar) and B (Priya); Omar holds more | `listCoordinatorOverview` | Every `event_coordinator`, by name then id, never by workload | Proved (svc): `SCRUM487_AC2_lists_every_coordinator_with_a_count_for_every_active_status`, `SCRUM487_AC2_reads_coordinators_by_name_and_only_their_active_events_with_status`, `SCRUM487_AC2_the_order_is_the_reads_never_the_workload` |
-| AC2-02 | A holds one event in each active status | `listCoordinatorOverview` | `byStatus` has one key for every status in `ACTIVE_EVENT_STATUSES`, each counted | Proved (svc): `SCRUM487_AC2_lists_every_coordinator_with_a_count_for_every_active_status` |
+| AC2-02 | A holds one event in each active status | `listCoordinatorOverview` | `byStatus` has one key for every status in `ACTIVE_EVENT_STATUSES`, each counted | Proved (svc): `SCRUM487_AC2_lists_every_coordinator_with_a_count_for_every_active_status`; the statuses' words, `SCRUM487_AC2_the_response_names_every_active_then_finished_status_with_its_badge_label` |
 | AC2-03 **(trap)** | B holds nothing | `listCoordinatorOverview` | B is listed, `activeEvents` 0 and 0 in every status; not left out | Proved (svc): `SCRUM487_AC2_lists_every_coordinator_with_a_count_for_every_active_status` |
 | AC2-04 **(trap)** | Any | `listCoordinatorOverview` | Each coordinator's `activeEvents` equals the sum of their `byStatus` | Proved (svc): `SCRUM487_AC2_active_events_is_the_sum_of_by_status_and_the_pickers_count` |
 | AC2-05 **(trap)** | The same coordinators and events | `listCoordinatorOverview` and `listCoordinatorWorkload` | Each coordinator's `activeEvents` is the same in both (D3) | Proved (svc): `SCRUM487_AC2_active_events_is_the_sum_of_by_status_and_the_pickers_count` |
 | AC2-06 | — | The overview's event read | Narrowed to the coordinators read and to `ACTIVE_EVENT_STATUSES`: no draft or finished event is counted | Proved (svc): `SCRUM487_AC2_reads_coordinators_by_name_and_only_their_active_events_with_status` |
-| AC2-07 | No coordinators | `listCoordinatorOverview` | `[]`, and the event read is skipped | Proved (svc): `SCRUM487_AC2_no_coordinators_is_an_empty_array_and_no_event_read` |
+| AC2-07 | No coordinators | `listCoordinatorOverview` | `[]`, and the event read is skipped | Proved (svc): `SCRUM487_AC2_no_coordinators_is_an_empty_list_with_its_statuses_and_no_event_read` |
 | AC2-08 | Either read fails | `listCoordinatorOverview` | The error through `translateError`, never an empty or zero-filled list | Proved (svc): `SCRUM487_AC2_a_failure_in_%s_is_an_error_not_a_zero_filled_list`, `SCRUM487_AC2_a_known_sqlstate_from_the_events_read_is_translated` |
 | AC2-09 **(trap)** | — | `listCoordinatorWorkload` after the shared helper | Exactly `{ id, fullName, activeEvents }`, selecting only `assigned_coordinator_id`: SCRUM-486's AC3 tests pass unchanged | Proved (svc): SCRUM-486's `SCRUM486_AC3_lists_every_event_coordinator_with_their_active_count`, `SCRUM486_AC3_counts_only_the_active_statuses_of_the_coordinators_listed` and the rest of its AC3 block, unedited, passing after the shared helper |
 | AC2-10 **(trap)** | LEAD | `GET /coordinator-overview` | Not read as an id: declared above `GET /:id` | Proved (route): `SCRUM487_AC2_does_not_read_the_coordinator_overview_path_as_a_request_id`. Moved below `/:id`, it and the gate tests fail |
@@ -230,7 +230,7 @@ built, its own cases say what the Lead may cancel there.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC3-01 **(trap)** | — | `listAssignedEventsForLead()` with no options | The same query and rows as SCRUM-486 AC6: `in` status `ACTIVE_EVENT_STATUSES`, held only, by `proposed_start` (nulls last) then id. SCRUM-486's AC6 tests pass unchanged | Proved (svc): `SCRUM487_AC3_with_no_options_the_read_is_scrum486s`; and SCRUM-486's `SCRUM486_AC6_…` service and route tests, unedited, passing |
+| AC3-01 **(trap)** | — | `listAssignedEventsForLead()` with no options | The same query and rows as SCRUM-486 AC6: `in` status `ACTIVE_EVENT_STATUSES`, held only, by `proposed_start` (nulls last) then id. SCRUM-486's AC6 tests pass unchanged | Proved (svc): `SCRUM487_AC3_with_no_options_the_read_is_scrum486s`; and SCRUM-486's service and route tests of the unfiltered list, unedited and passing: `SCRUM486_AC6_the_assigned_list_holds_a_held_event_in_each_active_status`, `SCRUM486_AC6_the_assigned_list_leaves_out_the_unassigned_drafts_and_finished_events`, `SCRUM486_AC6_the_assigned_list_asks_for_the_earliest_event_first_and_no_start_last`, `SCRUM486_AC6_the_assigned_list_names_the_coordinator_and_the_organiser_from_one_profiles_read`, `SCRUM486_AC6_a_lead_reads_every_held_event_with_both_names_and_its_status_display`, `SCRUM486_AC6_does_not_read_the_assigned_path_as_a_request_id` |
 | AC3-02 | — | `coordinatorId` A | Adds `eq assigned_coordinator_id A`; still held only | Proved (svc): `SCRUM487_AC3_a_coordinator_filter_adds_one_eq_on_the_coordinator` |
 | AC3-03 | — | `status` `approved` | Adds `eq status approved` | Proved (svc): `SCRUM487_AC3_a_status_filter_narrows_the_read_to_that_status` |
 | AC3-04 | — | `coordinatorId` A and `status` `approved` | Both, together | Proved (svc): `SCRUM487_AC3_coordinator_and_status_filters_combine` |
@@ -280,8 +280,8 @@ built, its own cases say what the Lead may cancel there.
 |---|---|---|---|---|
 | AC6-01 | HELD BY A, in the overview | LEAD clicks the row's Open, then hands it to B | Reaches the event page by a router link; the hand-over is the SCRUM-486 one | Proved (screen): `SCRUM487_AC6_a_filtered_row_opens_the_events_page`; on the event page, SCRUM-486's `SCRUM486_AC6_a_lead_sees_the_hand_over_action_on_an_event_they_do_not_hold` and `SCRUM486_AC6_a_lead_hands_it_over_from_the_screen_without_being_told_they_can_no_longer_change_it`; unfiltered, `SCRUM486_AC6_open_links_to_the_events_page_and_goes_there` |
 | AC6-02 **(trap)** | HELD BY A; A does nothing | LEAD reassigns to B | Allowed; history previous A, new B, `assigned_by` LEAD. No call by A at any point. Already SCRUM-486's `SCRUM486_AC6_a_lead_who_does_not_hold_the_event_reassigns_it` (pglite) | Proved (pglite): SCRUM-486's `SCRUM486_AC6_a_lead_who_does_not_hold_the_event_reassigns_it`: the holder makes no call; and by hand on 13 October (SCRUM-486 AC6-26, checks C and D) |
-| AC6-03 | After AC6-02 | Re-read the overview | A's counts down by one, B's up by one, in the event's status | **not yet implemented** (SCRUM-545) |
-| AC6-04 | After AC6-02 | Re-read the list filtered by B | The event is listed under B, not under A | **not yet implemented** (SCRUM-545) |
+| AC6-03 | After AC6-02 | Re-read the overview | A's counts down by one, B's up by one, in the event's status | Proved (pglite): `SCRUM487_AC6_after_a_lead_hands_a_to_b_the_counts_and_the_filtered_list_move_with_the_event`, the real `listCoordinatorOverview` over Postgres before and after 052's `reassign_event_request` |
+| AC6-04 | After AC6-02 | Re-read the list filtered by B | The event is listed under B, not under A | Proved (pglite): `SCRUM487_AC6_after_a_lead_hands_a_to_b_the_counts_and_the_filtered_list_move_with_the_event`, the real `listAssignedEventsForLead` filtered by A and by B, before and after |
 
 ---
 
@@ -310,14 +310,16 @@ built, its own cases say what the Lead may cancel there.
    SCRUM-485's and SCRUM-486's pinned nav tests and the documents that name them,
    on a branch whose base PR (#52) is still in review. A rename can follow once
    #52 is merged, as a change of its own.
-7. **Status words in the coordinators' table.** No helper, in the frontend or the
-   API, labels a bare status key; labels arrive only on each event row's
-   `statusDisplay`, and those are the Organiser's words ("Requested", "Awaiting
-   your response", "Planning"). The table and the status filter use the label of
-   an event row seen with that status, and the raw key otherwise (SCRUM-544).
-   Proposed: the overview's response carries a coordinator-facing label per
-   `byStatus` key, in a later change, so every heading is a word and the same
-   word whatever the list shows.
+7. **Status words in the coordinators' table. Decided (SCRUM-546, 13 October).**
+   The overview's response now carries them: `statuses`, `{ status, label,
+   finished }` for every active then every finished status, each label
+   `getStatusDisplay`'s, the same words as every status badge (D9 of
+   `docs/SCRUM-487.md`). Until SCRUM-546 the screen collected each word from an
+   event row it had loaded, and showed the raw key for a status no row had
+   shown. The words stay the Organiser's ("Requested", "Awaiting your response",
+   "Planning"), because they are the words already on every badge the Lead sees,
+   here and on the event page; coordinator-facing words would be a change to the
+   whole status display, not this story. Closed.
 
 ---
 
@@ -341,7 +343,12 @@ be written as specified (AC2-12, AC3-18, AC5-11). After SCRUM-541: **14 proved**
 SCRUM-542: **31 proved** (adding AC1-04 and AC3-01 to AC3-16); 22 not yet implemented;
 the same 3. After SCRUM-543 to SCRUM-545: **49 proved** (adding AC2-13, AC3-17,
 AC4-01 to AC4-04, AC5-01 to AC5-10, AC6-01 and AC6-02); 4 not yet implemented
-(AC1-05, AC1-06, AC6-03 and AC6-04, left for SCRUM-546); the same 3.
+(AC1-05, AC1-06, AC6-03 and AC6-04, left for SCRUM-546); the same 3. After
+SCRUM-546: **53 proved** (adding AC1-05, AC1-06, AC6-03 and AC6-04); **0 not yet
+implemented**; the same 3, which cannot be written as specified: AC2-12 and
+AC3-18 until SCRUM-488 adds the safety statuses (D4), and AC5-11, since no
+confirm path exists (D7). Every test named in this document was checked, by
+SCRUM-546, to exist under that name.
 
 | Section | Cases |
 |---|---|

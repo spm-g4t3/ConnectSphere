@@ -50,7 +50,7 @@ beforeEach(() => {
   vi.mocked(listAssignedEventsForLead).mockReset();
   vi.mocked(listAssignedEventsForLead).mockResolvedValue([HELD]);
   vi.mocked(listCoordinatorOverview).mockReset();
-  vi.mocked(listCoordinatorOverview).mockResolvedValue([]);
+  vi.mocked(listCoordinatorOverview).mockResolvedValue({ statuses: [], coordinators: [] });
   vi.mocked(listUnassignedEventRequests).mockReset();
 });
 

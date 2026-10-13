@@ -11,37 +11,35 @@
 // The coordinators are the overview's rows, the same read as the table above,
 // so the filter offers exactly the coordinators the table shows.
 //
-// The statuses offered:
-//  - the active ones, in the server's order: the byStatus keys of the
-//    overview, built from ACTIVE_EVENT_STATUSES, so SCRUM-488's safety
-//    statuses arrive here too;
-//  - the finished ones, only while "Include completed, rejected and
-//    cancelled" is ticked. With it off, the server hides finished events, so a
-//    finished status could only ever answer "nothing". FINISHED_STATUSES is
-//    the server's FINISHED_EVENT_STATUSES (SCRUM-542) and what the checkbox's
-//    own label names; the server refuses any other value with a 400, so a
-//    drift between the two would be seen, not silent.
-//  - never draft, which is nobody's event to supervise.
+// The statuses offered are the overview response's, each with its label
+// (SCRUM-546, SCRUM-487 D9), in the server's order:
+//  - the active ones, always: built from ACTIVE_EVENT_STATUSES, so SCRUM-488's
+//    safety statuses arrive here too;
+//  - the finished ones (finished: true), only while "Include completed,
+//    rejected and cancelled" is ticked. With it off, the server hides
+//    finished events, so a finished status could only ever answer "nothing".
+//    Which statuses are finished is the server's word too (its
+//    FINISHED_EVENT_STATUSES, SCRUM-542); until SCRUM-546 this file kept its
+//    own copy of the list;
+//  - never draft, which the response does not name.
 //
 // Unticking the box while a finished status is chosen resets the status to
 // "All statuses": the option the Lead chose would no longer be on offer, and
 // a select showing a value it does not list would mislead.
 
-const FINISHED_STATUSES = ["completed", "rejected", "cancelled"];
-
 /**
  * @param {object} props
  * @param {Array<{id: string, fullName: string|null}>} props.coordinators
- * @param {string[]} props.activeStatuses                 in the server's order
- * @param {(status: string) => string} props.labelOf
+ * @param {Array<{status: string, label: string, finished: boolean}>} props.statuses  in the server's order
  * @param {{coordinatorId: string, status: string, includeFinished: boolean}} props.filters
  * @param {(filters: {coordinatorId: string, status: string, includeFinished: boolean}) => void} props.onChange
  */
-export default function AssignedEventsFilters({ coordinators, activeStatuses, labelOf, filters, onChange }) {
-  const statuses = filters.includeFinished ? [...activeStatuses, ...FINISHED_STATUSES] : activeStatuses;
+export default function AssignedEventsFilters({ coordinators, statuses, filters, onChange }) {
+  const offered = statuses.filter((entry) => filters.includeFinished || !entry.finished);
+  const finished = new Set(statuses.filter((entry) => entry.finished).map((entry) => entry.status));
 
   function setIncludeFinished(includeFinished) {
-    const keepsStatus = includeFinished || !FINISHED_STATUSES.includes(filters.status);
+    const keepsStatus = includeFinished || !finished.has(filters.status);
     onChange({ ...filters, includeFinished, status: keepsStatus ? filters.status : "" });
   }
 
@@ -68,8 +66,8 @@ export default function AssignedEventsFilters({ coordinators, activeStatuses, la
         onChange={(event) => onChange({ ...filters, status: event.target.value })}
       >
         <option value="">All statuses</option>
-        {statuses.map((status) => (
-          <option key={status} value={status}>{labelOf(status)}</option>
+        {offered.map(({ status, label }) => (
+          <option key={status} value={status}>{label}</option>
         ))}
       </select>
 

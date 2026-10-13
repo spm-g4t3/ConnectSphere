@@ -394,6 +394,10 @@ export function createEventRequestRouter({
    * SCRUM-487 AC2 (SCRUM-541): every Event Coordinator, as
    * { id, fullName, activeEvents, byStatus }, for the Lead's coordinator
    * overview: how many active events each holds, and how many in each status.
+   * Since SCRUM-546 the response is { statuses, coordinators }: statuses is
+   * each active, then finished, status with its label, so the screen names
+   * every column and filter option without collecting words from the event
+   * rows it happens to have loaded (SCRUM-487 D9).
    *
    * A route of its own rather than byStatus added to /coordinator-workload
    * (SCRUM-487 D3): that response is the assignment picker's, and SCRUM-486
@@ -408,7 +412,8 @@ export function createEventRequestRouter({
    * one segment, so declared after GET /:id it would be read as an id and the
    * Lead would get the Organiser's 404. Do not move it below /:id.
    *
-   * A bare array, by name; none is 200 []. Statuses: 200, 401, 403 unless a
+   * An object, { statuses, coordinators }; coordinators by name, and no
+   * coordinators is 200 with coordinators []. Statuses: 200, 401, 403 unless a
    * Lead, 500.
    */
   router.get('/coordinator-overview', leadOnly, async (req, res) => {

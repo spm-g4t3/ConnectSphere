@@ -33,12 +33,27 @@ const counts = (overrides = {}) => ({
   submitted: 0, under_review: 0, pending_clarification: 0, approved: 0, confirmed: 0, ...overrides,
 });
 
+/** The response's statuses, as the server sends them (SCRUM-546, D9). */
+const STATUSES = [
+  { status: "submitted", label: "Requested", finished: false },
+  { status: "under_review", label: "Under review", finished: false },
+  { status: "pending_clarification", label: "Awaiting your response", finished: false },
+  { status: "approved", label: "Planning", finished: false },
+  { status: "confirmed", label: "Confirmed", finished: false },
+  { status: "completed", label: "Completed", finished: true },
+  { status: "rejected", label: "Rejected", finished: true },
+  { status: "cancelled", label: "Cancelled", finished: true },
+];
+
 // Omar holds nothing and Priya five, in name order: a table sorted by
 // workload would put Priya first.
-const OVERVIEW = [
-  { id: OMAR, fullName: "Omar Okafor", activeEvents: 0, byStatus: counts() },
-  { id: PRIYA, fullName: "Priya Nair", activeEvents: 5, byStatus: counts({ under_review: 2, approved: 3 }) },
-];
+const OVERVIEW = {
+  statuses: STATUSES,
+  coordinators: [
+    { id: OMAR, fullName: "Omar Okafor", activeEvents: 0, byStatus: counts() },
+    { id: PRIYA, fullName: "Priya Nair", activeEvents: 5, byStatus: counts({ under_review: 2, approved: 3 }) },
+  ],
+};
 
 const row = (overrides) => ({
   id: "e1",
@@ -106,14 +121,16 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 describe("SCRUM487_AC2 the coordinators table", () => {
   it("SCRUM487_AC2_one_row_per_coordinator_with_active_events_and_a_column_per_status", async () => {
-    // AC2-13. A zero is 0, never blank. Each status column is named by the
-    // label of an event row seen with it; one no row has is named by its key.
+    // AC2-13. A zero is 0, never blank. One column per active status, headed
+    // with the response's label. Until SCRUM-546 this test pinned the old
+    // fallback: words collected from event rows, raw keys (submitted,
+    // pending_clarification, confirmed) where no row had shown the status.
     renderOverview();
     await screen.findByText("IS212 Industry Night");
     const t = await table();
 
     expect(headings(t)).toEqual([
-      "Coordinator", "Active events", "submitted", "Under review", "pending_clarification", "Planning", "confirmed",
+      "Coordinator", "Active events", "Requested", "Under review", "Awaiting your response", "Planning", "Confirmed",
     ]);
     expect(bodyRows(t)).toEqual([
       ["Omar Okafor", "0", "0", "0", "0", "0", "0"],
@@ -125,24 +142,35 @@ describe("SCRUM487_AC2 the coordinators table", () => {
   it("SCRUM487_AC2_rows_and_columns_keep_the_servers_order", async () => {
     // Rows by name, never by workload (SCRUM-486 AC3: the system suggests
     // nobody): Priya holds more and stays second. Columns in the order the
-    // server sends byStatus, here not the usual one.
-    vi.mocked(listCoordinatorOverview).mockResolvedValue([
-      { id: OMAR, fullName: "Omar Okafor", activeEvents: 0, byStatus: { confirmed: 0, submitted: 0 } },
-      { id: PRIYA, fullName: "Priya Nair", activeEvents: 9, byStatus: { confirmed: 9, submitted: 0 } },
-    ]);
+    // server sends its statuses, here not the usual one; finished statuses are
+    // never columns, as the table counts active events.
+    vi.mocked(listCoordinatorOverview).mockResolvedValue({
+      statuses: [
+        { status: "confirmed", label: "Confirmed", finished: false },
+        { status: "completed", label: "Completed", finished: true },
+        { status: "submitted", label: "Requested", finished: false },
+      ],
+      coordinators: [
+        { id: OMAR, fullName: "Omar Okafor", activeEvents: 0, byStatus: { confirmed: 0, submitted: 0 } },
+        { id: PRIYA, fullName: "Priya Nair", activeEvents: 9, byStatus: { confirmed: 9, submitted: 0 } },
+      ],
+    });
 
     renderOverview();
     const t = await table();
 
-    expect(headings(t)).toEqual(["Coordinator", "Active events", "confirmed", "submitted"]);
+    expect(headings(t)).toEqual(["Coordinator", "Active events", "Confirmed", "Requested"]);
     expect(bodyRows(t).map(([name]) => name)).toEqual(["Omar Okafor", "Priya Nair"]);
   });
 
   it("SCRUM487_AC2_a_coordinator_with_no_name_or_a_missing_count_is_said_not_left_blank", async () => {
-    vi.mocked(listCoordinatorOverview).mockResolvedValue([
-      { id: OMAR, fullName: null, activeEvents: 0, byStatus: { submitted: 0 } },
-      { id: PRIYA, fullName: "Priya Nair", activeEvents: 0, byStatus: {} },
-    ]);
+    vi.mocked(listCoordinatorOverview).mockResolvedValue({
+      statuses: [{ status: "submitted", label: "Requested", finished: false }],
+      coordinators: [
+        { id: OMAR, fullName: null, activeEvents: 0, byStatus: { submitted: 0 } },
+        { id: PRIYA, fullName: "Priya Nair", activeEvents: 0, byStatus: {} },
+      ],
+    });
 
     renderOverview();
     const t = await table();
@@ -150,8 +178,22 @@ describe("SCRUM487_AC2 the coordinators table", () => {
     expect(bodyRows(t)).toEqual([["No name on record", "0", "0"], ["Priya Nair", "0", "0"]]);
   });
 
+  it("SCRUM487_AC2_every_column_is_headed_by_the_responses_label_with_no_event_loaded", async () => {
+    // Replaces the raw-key fallback (SCRUM-546, D9). With no event rows at
+    // all, nothing to collect a word from, every heading is still a word,
+    // and the same word the status badges use.
+    vi.mocked(listAssignedEventsForLead).mockResolvedValue([]);
+
+    renderOverview();
+    await screen.findByText("No coordinator is holding an active event.");
+    const t = await table();
+
+    expect(headings(t).slice(2)).toEqual(["Requested", "Under review", "Awaiting your response", "Planning", "Confirmed"]);
+    expect(headings(t).join(" ")).not.toMatch(/_/);
+  });
+
   it("SCRUM487_AC2_no_coordinators_is_said", async () => {
-    vi.mocked(listCoordinatorOverview).mockResolvedValue([]);
+    vi.mocked(listCoordinatorOverview).mockResolvedValue({ statuses: STATUSES, coordinators: [] });
 
     renderOverview();
 
@@ -237,6 +279,7 @@ describe("SCRUM487_AC3 the events list's filters", () => {
 
     expect(optionsOf(statusFilter())).toEqual(["", "submitted", "under_review", "pending_clarification", "approved", "confirmed"]);
     expect(within(statusFilter()).getByRole("option", { name: "Planning" })).toHaveValue("approved");
+    expect(within(statusFilter()).queryByRole("option", { name: "Completed" })).not.toBeInTheDocument();
 
     await user.click(includeFinished());
 
@@ -245,6 +288,21 @@ describe("SCRUM487_AC3 the events list's filters", () => {
       "", "submitted", "under_review", "pending_clarification", "approved", "confirmed", "completed", "rejected", "cancelled",
     ]);
     expect(optionsOf(statusFilter())).not.toContain("draft");
+    expect(within(statusFilter()).getByRole("option", { name: "Completed" })).toHaveValue("completed");
+  });
+
+  it("SCRUM487_AC3_every_status_option_is_named_by_the_responses_label_with_no_event_loaded", async () => {
+    // Replaces the raw-key fallback for the filter too (SCRUM-546, D9).
+    vi.mocked(listAssignedEventsForLead).mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderOverview();
+    await table();
+    await user.click(includeFinished());
+
+    expect(within(statusFilter()).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "All statuses", "Requested", "Under review", "Awaiting your response", "Planning", "Confirmed",
+      "Completed", "Rejected", "Cancelled",
+    ]);
   });
 
   it("SCRUM487_AC3_unticking_include_finished_resets_a_finished_status", async () => {

@@ -2,7 +2,8 @@
  * SCRUM-487: the service half of the Event Coordinator Lead's coordinator
  * overview.
  *
- *   listCoordinatorOverview    AC2  every coordinator, counted in total and per status (SCRUM-541)
+ *   listCoordinatorOverview    AC2  every coordinator, counted in total and per status (SCRUM-541),
+ *                                   and each status's label (SCRUM-546, D9)
  *   listAssignedEventsForLead  AC3  the events list, filtered (SCRUM-542)
  *
  * A file of its own rather than more blocks in leadAssignmentService.test.js,
@@ -92,6 +93,21 @@ const profileRow = (id, fullName) => ({ id, full_name: fullName });
 const held = (coordinator, status) => ({ assigned_coordinator_id: coordinator, status });
 const zeros = () => Object.fromEntries(ACTIVE.map((status) => [status, 0]));
 
+/**
+ * The overview's statuses, written out: every active status, then every
+ * finished one, each with the label every status badge uses (SCRUM-487 D9).
+ */
+const STATUSES = [
+  { status: STATUS.SUBMITTED, label: 'Requested', finished: false },
+  { status: STATUS.UNDER_REVIEW, label: 'Under review', finished: false },
+  { status: STATUS.PENDING_CLARIFICATION, label: 'Awaiting your response', finished: false },
+  { status: STATUS.APPROVED, label: 'Planning', finished: false },
+  { status: STATUS.CONFIRMED, label: 'Confirmed', finished: false },
+  { status: STATUS.COMPLETED, label: 'Completed', finished: true },
+  { status: STATUS.REJECTED, label: 'Rejected', finished: true },
+  { status: STATUS.CANCELLED, label: 'Cancelled', finished: true },
+];
+
 /** Omar (A) holds one event in each active status and a second approved one; Priya (B) holds nothing. */
 const COORDINATORS = [profileRow(COORDINATOR_A, 'Omar Okafor'), profileRow(COORDINATOR_B, 'Priya Nair')];
 const EVENTS = [...ACTIVE.map((status) => held(COORDINATOR_A, status)), held(COORDINATOR_A, STATUS.APPROVED)];
@@ -106,7 +122,7 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
     // a coordinator with nothing is listed with zeros, not left out.
     const client = createFakeClient([ok(COORDINATORS), ok(EVENTS)]);
 
-    const overview = await listCoordinatorOverview({ client });
+    const { coordinators: overview } = await listCoordinatorOverview({ client });
 
     expect(overview).toEqual([
       {
@@ -128,7 +144,7 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
   it('SCRUM487_AC2_active_events_is_the_sum_of_by_status_and_the_pickers_count', async () => {
     // AC2-04, AC2-05 (SCRUM-487 D3). The same coordinators and events through
     // both reads: one count, so the picker and the overview cannot disagree.
-    const overview = await listCoordinatorOverview({ client: createFakeClient([ok(COORDINATORS), ok(EVENTS)]) });
+    const { coordinators: overview } = await listCoordinatorOverview({ client: createFakeClient([ok(COORDINATORS), ok(EVENTS)]) });
     const picker = await listCoordinatorWorkload({ client: createFakeClient([ok(COORDINATORS), ok(EVENTS)]) });
 
     for (const row of overview) {
@@ -169,16 +185,19 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
     // Priya. The service keeps the read's order.
     const client = createFakeClient([ok(COORDINATORS), ok(EVENTS)]);
 
-    const overview = await listCoordinatorOverview({ client });
+    const { coordinators: overview } = await listCoordinatorOverview({ client });
 
     expect(overview.map((row) => row.fullName)).toEqual(['Omar Okafor', 'Priya Nair']);
   });
 
-  it('SCRUM487_AC2_no_coordinators_is_an_empty_array_and_no_event_read', async () => {
-    // AC2-07.
+  it('SCRUM487_AC2_no_coordinators_is_an_empty_list_with_its_statuses_and_no_event_read', async () => {
+    // AC2-07. Was SCRUM487_AC2_no_coordinators_is_an_empty_array_and_no_event_read,
+    // right while the response was a bare array; since SCRUM-546 it is
+    // { statuses, coordinators }, and the statuses are there with nobody to
+    // count (the filter still needs them).
     for (const data of [[], null]) {
       const client = createFakeClient([ok(data)]);
-      await expect(listCoordinatorOverview({ client })).resolves.toEqual([]);
+      await expect(listCoordinatorOverview({ client })).resolves.toEqual({ statuses: STATUSES, coordinators: [] });
       expect(trail(client)).toEqual(['profiles']);
     }
   });
@@ -186,9 +205,19 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
   it('SCRUM487_AC2_a_coordinator_with_no_name_keeps_their_counts', async () => {
     const client = createFakeClient([ok([profileRow(COORDINATOR_A, null)]), ok([held(COORDINATOR_A, STATUS.CONFIRMED)])]);
 
-    const [row] = await listCoordinatorOverview({ client });
+    const { coordinators: [row] } = await listCoordinatorOverview({ client });
 
     expect(row).toEqual({ id: COORDINATOR_A, fullName: null, activeEvents: 1, byStatus: { ...zeros(), [STATUS.CONFIRMED]: 1 } });
+  });
+
+  it('SCRUM487_AC2_the_response_names_every_active_then_finished_status_with_its_badge_label', async () => {
+    // AC2-02, AC3-05 (SCRUM-487 D9). Every status the overview shows, in
+    // order, active then finished, each in the words its status badge uses.
+    // Never draft. From the response, not collected from event rows.
+    const { statuses } = await listCoordinatorOverview({ client: createFakeClient([ok(COORDINATORS), ok(EVENTS)]) });
+
+    expect(statuses).toEqual(STATUSES);
+    expect(statuses.map((entry) => entry.status)).not.toContain(STATUS.DRAFT);
   });
 
   it.each([

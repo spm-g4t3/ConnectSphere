@@ -495,12 +495,15 @@ export async function listAssignedEventsForLead(filters = {}) {
 
 /**
  * Every Event Coordinator with their active events counted in total and per
- * status, for the Lead's overview (SCRUM-487 AC2). Each row is { id, fullName,
- * activeEvents, byStatus }, byStatus keyed by every active status in the
- * server's order, 0 where there are none. In name order, never workload order.
- * Gated on event_coordinator_lead server-side.
+ * status, for the Lead's overview (SCRUM-487 AC2), and the words for each
+ * status. Returns { statuses, coordinators }: statuses is { status, label,
+ * finished } for every active status then every finished one (SCRUM-546,
+ * D9); each coordinator is { id, fullName, activeEvents, byStatus }, byStatus
+ * keyed by every active status, 0 where there are none. Coordinators in name
+ * order, never workload order. Gated on event_coordinator_lead server-side.
  *
- * @returns {Promise<Array<{id: string, fullName: string|null, activeEvents: number, byStatus: Object<string, number>}>>}
+ * @returns {Promise<{statuses: Array<{status: string, label: string, finished: boolean}>,
+ *   coordinators: Array<{id: string, fullName: string|null, activeEvents: number, byStatus: Object<string, number>}>}>}
  */
 export async function listCoordinatorOverview() {
   const response = await apiClient.get("/event-requests/coordinator-overview");

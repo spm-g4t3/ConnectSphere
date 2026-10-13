@@ -9,8 +9,9 @@
 // queue, and the coordinators' queue and My events are theirs. The Lead could
 // reach an event only by typing its address, which is not "reassign events
 // where necessary" (change 5). This is the smallest list that closes that: no
-// filters, no counts, no actions of its own. It is the first slice of
-// SCRUM-487 AC3's list, which will extend it rather than replace it.
+// filters, no counts, no actions of its own. It was the first slice of
+// SCRUM-487 AC3's list, and SCRUM-487 extended it rather than replacing it
+// (below).
 //
 // Built the way UnassignedQueue is: a <section> that takes its card styling
 // and badge colours from the wrapper App.jsx mounts it in, a status-keyed
@@ -28,7 +29,7 @@
 //
 //  1. the unassigned count (AC4, UnassignedCount);
 //  2. every coordinator with their counts (AC2, CoordinatorWorkloadTable),
-//     from GET /coordinator-overview;
+//     from GET /coordinator-overview, which also names each status;
 //  3. the events, filtered on the server (AC3, AssignedEventsFilters, then
 //     the list SCRUM-486 built), with the coordinator filter filled from the
 //     same overview read.
@@ -38,13 +39,15 @@
 // alert: the list is what the page is for, and SCRUM-486's tests find its
 // failure as the page's one alert.
 //
-// The words for each status, in the table's headings and the status filter.
-// Neither the API nor the frontend has a label for a bare status key: labels
-// arrive only as each event row's statusDisplay. So a status is named by the
-// label of an event row seen with it, kept across reloads so a heading does
-// not change as the filters change, and otherwise by the raw key. Rejected:
-// a label table written here, a second copy of the status vocabulary
-// eventRequestStatus.js owns, which is what statusDisplay exists to avoid.
+// The words for each status, in the table's headings and the status filter,
+// come from the overview response's statuses: { status, label, finished },
+// each label getStatusDisplay's, the same words as every status badge
+// (SCRUM-546, SCRUM-487 D9). Until SCRUM-546 this page collected each word
+// from an event row it had loaded with that status, and showed the raw key
+// (pending_clarification) for a status no row had shown, so a heading
+// depended on what the filters had fetched. Rejected then and now: a label
+// table written here, a second copy of the vocabulary eventRequestStatus.js
+// owns.
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -77,9 +80,10 @@ export default function AssignedEvents() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filters, setFilters] = useState(NO_FILTERS);
-  // status -> label, from every event row seen so far (see the header).
-  const [labels, setLabels] = useState({});
 
+  // The overview: { statuses, coordinators }, read once for the table and
+  // the filters.
+  const [statuses, setStatuses] = useState([]);
   const [coordinators, setCoordinators] = useState([]);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [overviewFailed, setOverviewFailed] = useState(false);
@@ -87,7 +91,9 @@ export default function AssignedEvents() {
   useEffect(() => {
     async function load() {
       try {
-        setCoordinators(await listCoordinatorOverview());
+        const overview = await listCoordinatorOverview();
+        setStatuses(overview.statuses);
+        setCoordinators(overview.coordinators);
       } catch {
         setOverviewFailed(true);
       } finally {
@@ -114,13 +120,6 @@ export default function AssignedEvents() {
         const rows = await listAssignedEventsForLead(filters);
         if (ignore) return;
         setEvents(rows);
-        setLabels((known) => {
-          const next = { ...known };
-          for (const row of rows) {
-            if (row.statusDisplay?.label && !next[row.status]) next[row.status] = row.statusDisplay.label;
-          }
-          return next;
-        });
       } catch (err) {
         if (ignore) return;
         setEvents([]);
@@ -139,9 +138,8 @@ export default function AssignedEvents() {
     };
   }, [filters]);
 
-  const labelOf = (status) => labels[status] ?? status;
-  // The byStatus keys, in the server's order: every coordinator has all of them.
-  const activeStatuses = coordinators.length > 0 ? Object.keys(coordinators[0].byStatus) : [];
+  // The table counts active events only, so its columns are the active statuses.
+  const activeStatuses = statuses.filter((entry) => !entry.finished);
   const filtered = filters.coordinatorId !== "" || filters.status !== "" || filters.includeFinished;
 
   return (
@@ -159,7 +157,6 @@ export default function AssignedEvents() {
       <CoordinatorWorkloadTable
         coordinators={coordinators}
         statuses={activeStatuses}
-        labelOf={labelOf}
         loading={overviewLoading}
         failed={overviewFailed}
       />
@@ -168,8 +165,7 @@ export default function AssignedEvents() {
       <h3>Events</h3>
       <AssignedEventsFilters
         coordinators={coordinators}
-        activeStatuses={activeStatuses}
-        labelOf={labelOf}
+        statuses={statuses}
         filters={filters}
         onChange={setFilters}
       />

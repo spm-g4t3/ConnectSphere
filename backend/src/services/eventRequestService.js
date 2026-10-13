@@ -75,6 +75,7 @@ import {
   canTransition,
   COORDINATOR_QUEUE_STATUSES,
   getOrganiserStatusLabel,
+  getStatusDisplay,
 } from '../domain/eventRequestStatus.js';
 // Imports nothing itself, so this service stays loadable without credentials.
 import { ROLE } from '../domain/userRole.js';
@@ -2062,11 +2063,27 @@ async function readCoordinatorsAndActiveEvents(db, columns) {
 
 /**
  * Every Event Coordinator, with their active events counted in total and per
- * status, for the Lead's coordinator overview (SCRUM-487 AC2).
+ * status, for the Lead's coordinator overview (SCRUM-487 AC2), and the words
+ * for each status the overview shows.
  *
  * SCRUM-541. AC2: "every Event Coordinator with their number of active events
- * and the count in each status". Returned as { id, fullName, activeEvents,
- * byStatus } per coordinator.
+ * and the count in each status". Returned as { statuses, coordinators }:
+ * coordinators is { id, fullName, activeEvents, byStatus } per coordinator.
+ *
+ * SCRUM-546 (SCRUM-487 D9): statuses is { status, label, finished } for every
+ * status in ACTIVE_EVENT_STATUSES, then every one in FINISHED_EVENT_STATUSES,
+ * in that order. The screen heads the table's columns and fills the status
+ * filter from it. Before, the screen took each status's words from an event
+ * row it had happened to load with that status, and fell back to the raw key
+ * (pending_clarification) for a status no row had shown: a heading that
+ * depended on what the filters had fetched. The label is getStatusDisplay's,
+ * the same source as every row's statusDisplay, so a column heading and a
+ * status badge never give one status two names. They are the Organiser's
+ * words ("Requested", "Planning"), the ones on every badge the Lead already
+ * sees; coordinator-facing words would be a change to the whole status
+ * display, not this read. finished tells the screen which statuses to offer
+ * only when the Lead includes finished events (AC3). Changing this response
+ * cost nothing: it is new in SCRUM-487 and nothing else reads it.
  *
  * A read of its own rather than byStatus added to listCoordinatorWorkload
  * (SCRUM-487 D3). The picker's response is pinned exactly by SCRUM-486 ("an
@@ -2091,8 +2108,9 @@ async function readCoordinatorsAndActiveEvents(db, columns) {
  *
  * @param {object} [options]
  * @param {object} [options.client]
- * @returns {Promise<Array<{ id: string, fullName: string|null, activeEvents: number,
- *   byStatus: Object<string, number> }>>}
+ * @returns {Promise<{ statuses: Array<{ status: string, label: string, finished: boolean }>,
+ *   coordinators: Array<{ id: string, fullName: string|null, activeEvents: number,
+ *   byStatus: Object<string, number> }> }>}
  */
 export async function listCoordinatorOverview({ client } = {}) {
   const db = await resolveClient(client);
@@ -2110,15 +2128,23 @@ export async function listCoordinatorOverview({ client } = {}) {
     if (counts && Object.hasOwn(counts, event.status)) counts[event.status] += 1;
   }
 
-  return coordinators.map((profile) => {
-    const byStatus = byStatusOf.get(profile.id);
-    return {
-      id: profile.id,
-      fullName: profile.full_name ?? null,
-      activeEvents: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
-      byStatus,
-    };
-  });
+  const statuses = [
+    ...ACTIVE_EVENT_STATUSES.map((status) => ({ status, label: getStatusDisplay(status).label, finished: false })),
+    ...FINISHED_EVENT_STATUSES.map((status) => ({ status, label: getStatusDisplay(status).label, finished: true })),
+  ];
+
+  return {
+    statuses,
+    coordinators: coordinators.map((profile) => {
+      const byStatus = byStatusOf.get(profile.id);
+      return {
+        id: profile.id,
+        fullName: profile.full_name ?? null,
+        activeEvents: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
+        byStatus,
+      };
+    }),
+  };
 }
 
 
@@ -2128,10 +2154,11 @@ export async function listCoordinatorOverview({ client } = {}) {
  * The Lead may hand any held event to another coordinator (AC6), from the
  * event's own page. Until this read, nothing linked a Lead to that page: an
  * assigned request leaves the unassigned queue, and the coordinators' queue
- * and "My events" are coordinatorOnly. This is the list that leads there, and
- * the first slice of SCRUM-487 AC3's list, which will extend it (filters,
- * per-coordinator counts, finished events, the unassigned count) rather than
- * replace it.
+ * and "My events" are coordinatorOnly. This is the list that leads there. It
+ * was the first slice of SCRUM-487 AC3's list, and SCRUM-487 extended it
+ * (SCRUM-542: the filters and finished events, below) rather than replacing
+ * it; the per-coordinator counts are listCoordinatorOverview, and the
+ * unassigned count is the queue's own read on the screen.
  *
  * ACTIVE_EVENT_STATUSES, not a list of its own, so the events here are exactly
  * the ones the picker counts as "N active events" beside each name, and when

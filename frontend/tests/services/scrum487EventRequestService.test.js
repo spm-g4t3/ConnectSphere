@@ -25,10 +25,14 @@ beforeEach(() => {
 
 describe("SCRUM487 the overview's calls", () => {
   it("SCRUM487_AC2_the_counts_are_a_get_of_/event-requests/coordinator-overview", async () => {
-    const rows = [{ id: COORDINATOR_ID, fullName: "Priya Nair", activeEvents: 1, byStatus: { approved: 1 } }];
-    vi.mocked(apiClient.get).mockResolvedValue({ data: rows });
+    // { statuses, coordinators } since SCRUM-546 (D9), passed through as sent.
+    const overview = {
+      statuses: [{ status: "approved", label: "Planning", finished: false }],
+      coordinators: [{ id: COORDINATOR_ID, fullName: "Priya Nair", activeEvents: 1, byStatus: { approved: 1 } }],
+    };
+    vi.mocked(apiClient.get).mockResolvedValue({ data: overview });
 
-    await expect(listCoordinatorOverview()).resolves.toEqual(rows);
+    await expect(listCoordinatorOverview()).resolves.toEqual(overview);
 
     expect(apiClient.get).toHaveBeenCalledTimes(1);
     expect(apiClient.get).toHaveBeenCalledWith("/event-requests/coordinator-overview");

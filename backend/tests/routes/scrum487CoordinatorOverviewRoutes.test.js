@@ -90,7 +90,8 @@ describe('SCRUM-487 AC1, AC2: GET /coordinator-overview is the Lead\'s', () => {
     request(appWith({ client, requireAuth })).get('/api/event-requests/coordinator-overview');
 
   it('SCRUM487_AC2_a_lead_reads_every_coordinator_with_counts_per_status', async () => {
-    // AC1-01. 200 and a bare array, each row with its byStatus.
+    // AC1-01. 200 and { statuses, coordinators }: each coordinator with its
+    // byStatus, and each status with its label (SCRUM-546, D9).
     const client = createFakeClient([
       ok([{ id: COORDINATOR_A, full_name: 'Omar Okafor' }]),
       ok([{ assigned_coordinator_id: COORDINATOR_A, status: STATUS.APPROVED }]),
@@ -99,18 +100,30 @@ describe('SCRUM-487 AC1, AC2: GET /coordinator-overview is the Lead\'s', () => {
     const res = await overview(client);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([{
-      id: COORDINATOR_A,
-      fullName: 'Omar Okafor',
-      activeEvents: 1,
-      byStatus: {
-        [STATUS.SUBMITTED]: 0,
-        [STATUS.UNDER_REVIEW]: 0,
-        [STATUS.PENDING_CLARIFICATION]: 0,
-        [STATUS.APPROVED]: 1,
-        [STATUS.CONFIRMED]: 0,
-      },
-    }]);
+    expect(res.body).toEqual({
+      statuses: [
+        { status: STATUS.SUBMITTED, label: 'Requested', finished: false },
+        { status: STATUS.UNDER_REVIEW, label: 'Under review', finished: false },
+        { status: STATUS.PENDING_CLARIFICATION, label: 'Awaiting your response', finished: false },
+        { status: STATUS.APPROVED, label: 'Planning', finished: false },
+        { status: STATUS.CONFIRMED, label: 'Confirmed', finished: false },
+        { status: STATUS.COMPLETED, label: 'Completed', finished: true },
+        { status: STATUS.REJECTED, label: 'Rejected', finished: true },
+        { status: STATUS.CANCELLED, label: 'Cancelled', finished: true },
+      ],
+      coordinators: [{
+        id: COORDINATOR_A,
+        fullName: 'Omar Okafor',
+        activeEvents: 1,
+        byStatus: {
+          [STATUS.SUBMITTED]: 0,
+          [STATUS.UNDER_REVIEW]: 0,
+          [STATUS.PENDING_CLARIFICATION]: 0,
+          [STATUS.APPROVED]: 1,
+          [STATUS.CONFIRMED]: 0,
+        },
+      }],
+    });
   });
 
   it('SCRUM487_AC2_does_not_read_the_coordinator_overview_path_as_a_request_id', async () => {
@@ -118,13 +131,13 @@ describe('SCRUM-487 AC1, AC2: GET /coordinator-overview is the Lead\'s', () => {
     // /:id Express would match it with id === 'coordinator-overview' and answer
     // from the Organiser's read (an eq on id, then a 404). Asserted from the
     // outside: the first read is of profiles by role, and the answer is the
-    // overview's empty array.
+    // overview's, with no coordinators.
     const client = createFakeClient([ok([])]);
 
     const res = await overview(client);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([]);
+    expect(res.body.coordinators).toEqual([]);
     expect(client.calls).toHaveLength(1);
     expect(client.calls[0].table).toBe('profiles');
     expect(client.calls[0].filters).toEqual([['role', 'event_coordinator']]);
