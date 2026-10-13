@@ -2,7 +2,7 @@
 
 **Story:** View Every Coordinator's Events — Event Coordinator Lead
 **Closing subtask:** SCRUM-547 (this document)
-**Status as of 13 October 2026:** built and tested; four criteria done and two partial until SCRUM-488 (section 1). The manual walkthrough (section 2) has not been run yet.
+**Status as of 13 October 2026:** built and tested; four criteria done and two partial until SCRUM-488 (section 1). The manual walkthrough (section 2) was run by Calven on 13 October and every check passed.
 
 This document is the record of what SCRUM-487 delivered, how each acceptance
 criterion is proved, why the design looks the way it does, and what is still
@@ -34,8 +34,8 @@ the assignment, from the event's own page, as SCRUM-486 built it.
 | SCRUM-543 | AC4: the unassigned count at the top of the overview, with its link to the queue | `163d226` |
 | SCRUM-544 | The overview screen: the coordinators' table, the filters, the stale-response guard, the dashboard card | `475e9e6` |
 | SCRUM-545 | AC5 and AC6 proved: every write on the event page refuses a Lead; the Lead's event page is read-only but for the hand-over | `4ab7b0d` |
-| SCRUM-546 | The overview response carries its status labels (D9); the four open cases proved; every cited test name checked | uncommitted |
-| SCRUM-547 | This document | uncommitted |
+| SCRUM-546 | The overview response carries its status labels (D9); the four open cases proved; every cited test name checked | `afa8c82` |
+| SCRUM-547 | This document | `afa8c82` |
 
 ### Verification as of 13 October 2026
 
@@ -47,7 +47,7 @@ the assignment, from the event's own page, as SCRUM-486 built it.
 | PGlite | `scrum487OverviewDatabase.test.js` runs the real overview and list reads over Postgres, before and after 052's `reassign_event_request` |
 | Live database | No live script covers this story's reads, and none was run (they write to the shared project; the reads here write nothing to check) |
 | Test-case document | 56 cases: **53 proved**, **0 not yet implemented**, **3 that cannot be written as specified** (section 4) |
-| Manual walkthrough | **Not yet run** (section 2) |
+| Manual walkthrough | Passed, checks A to I, by Calven on 13 October 2026 on `afa8c82`, against the shared Supabase project (section 2) |
 
 ---
 
@@ -98,20 +98,25 @@ the Lead asking for one coordinator's events with finished ones included.
 | The response | `GET /assigned` | A bare array, each row with both names and its `statusDisplay` | SCRUM-486's `SCRUM486_AC6_a_lead_reads_every_held_event_with_both_names_and_its_status_display` |
 | The list | `AssignedEvents.jsx` | Rows in the server's order; "No events match these filters." when filtered and empty; a 400 said as "Those filters could not be applied." | SCRUM-486's `SCRUM486_AC6_each_row_names_the_event_organiser_coordinator_status_and_start`; `SCRUM487_AC3_with_filters_set_an_empty_list_says_the_filters_found_nothing`, `SCRUM487_AC3_a_refused_filter_is_said_in_the_pages_words` |
 
-**Manual walkthrough.** Calven, in the browser, against the shared Supabase
-project. The results are filled in after the click-through.
+**Manual walkthrough.** Run by Calven in the browser on 13 October 2026, on the
+SCRUM-487 branch at `afa8c82`, against the shared Supabase project.
 
 | Check | What to see | Result |
 |---|---|---|
-| A | The Lead dashboard's "Coordinator overview" card says "See every coordinator's events and workload, and filter them, in Assigned Events." and links there | **not yet run** |
-| B | At the top of Assigned Events, the number of requests waiting, in words, and "Open the Unassigned Queue" leading to the queue | **not yet run** |
-| C | The Coordinators table: every coordinator, in name order; each status column headed with a word, not a key; each row's status columns add up to its Active events; zeros shown as 0 | **not yet run** |
-| D | The events list, earliest event first | **not yet run** |
-| E | The coordinator filter shows only that coordinator's events | **not yet run** |
-| F | The status filter and "Include completed, rejected and cancelled": finished statuses offered only while ticked; unticking with a finished status chosen resets it to "All statuses" | **not yet run** |
-| G | Open on a row: the event page has no Start review, decision, cancel, clarification or change-request action; the clarification and assignment histories are shown, the handover note with them; "Hand over to another coordinator" is shown | **not yet run** |
-| H | Hand the event to another coordinator; back on Assigned Events, the row names the new coordinator and the two coordinators' counts have moved by one | **not yet run** |
-| I | Signed in as an Event Coordinator, `/assigned-events` is refused | **not yet run** |
+| A | The Lead dashboard's "Coordinator overview" card says "See every coordinator's events and workload, and filter them, in Assigned Events." and links there | Passed (13 October) |
+| B | At the top of Assigned Events, the number of requests waiting, in words, and "Open the Unassigned Queue" leading to the queue | Passed (13 October) |
+| C | The Coordinators table: every coordinator, in name order; each status column headed with a word, not a key; each row's status columns add up to its Active events; zeros shown as 0 | Passed (13 October) |
+| D | The events list, earliest event first | Passed (13 October) |
+| E | The coordinator filter shows only that coordinator's events | Passed (13 October) |
+| F | The status filter and "Include completed, rejected and cancelled": finished statuses offered only while ticked; unticking with a finished status chosen resets it to "All statuses" | Passed (13 October) |
+| G | Open on a row: the event page has no Start review, decision, cancel, clarification or change-request action; the clarification and assignment histories are shown, the handover note with them; "Hand over to another coordinator" is shown | Passed (13 October) |
+| H | Hand the event to another coordinator; back on Assigned Events, the row names the new coordinator and the two coordinators' counts have moved by one | Passed (13 October) |
+| I | Signed in as an Event Coordinator, `/assigned-events` is refused | Passed (13 October) |
+
+Check H reassigned a real test event in the shared project, through 052's
+`reassign_event_request`, so its new coordinator and its organiser were notified
+there (SCRUM-486 AC10), and the event's assignment history now records the Lead's
+handover.
 
 ---
 
@@ -266,8 +271,9 @@ feel stuck and still leaves a refetch racing a navigation.
 The overview extends SCRUM-486's page (D1), and its heading says what it shows
 ("Every coordinator's events and workload."). Renaming the nav link to
 "Coordinator overview" would rename SCRUM-485's and SCRUM-486's pinned nav tests
-and the documents that name them, on a branch whose base PR (#52) is still in
-review. A rename can follow #52 as a change of its own.
+and the documents that name them, on a branch whose base PR (#52) was still in
+review when this was decided. #52 was merged into dev on 13 October, so a rename
+can now follow as a change of its own.
 
 ---
 
@@ -284,7 +290,6 @@ review. A rename can follow #52 as a change of its own.
 | The filtered list over PGlite uses its own adapter | The adapter in `scrum487OverviewDatabase.test.js` turns `eq`, `in`, `not is null` and `order` into SQL. It is not PostgREST: it proves the filters' meaning, not PostgREST's spelling of them | — |
 | The count reads whole rows | `UnassignedCount` reads the queue to count it (D5). Short by nature; a `head` count would need a second definition | — |
 | No refetch on focus | The overview reads on mount and on each filter change, not when the tab regains focus, as `AssignedEvents` did in SCRUM-486. A Lead coming back from the event page remounts it | — |
-| Manual walkthrough | Section 2's checks A to I, not yet run | Calven |
 
 ### Technical debt, left
 
@@ -336,7 +341,7 @@ review. A rename can follow #52 as a change of its own.
 5. **Safety statuses (D4).** Nothing to change in `FINISHED_EVENT_STATUSES` when
    SCRUM-488 adds them; they are active. **Decided.**
 6. **The overview's name and address (D12).** "Assigned Events" at
-   `/assigned-events`, kept. **Decided**; a rename can follow PR #52.
+   `/assigned-events`, kept. **Decided**; now that PR #52 is merged (13 October), a rename can follow as a change of its own.
 7. **Status words in the table (D9).** The response carries them, in the
    Organiser's words. **Decided and closed** (SCRUM-546).
 
@@ -344,7 +349,6 @@ review. A rename can follow #52 as a change of its own.
 
 ## Before the examination
 
-- **Run section 2's walkthrough** (A to I) and record the results there.
 - **Be ready for "why is AC2 partial?"** D4 in two sentences: the safety statuses
   do not exist in the database yet, and naming them would break the read; adding
   them to one constant, in SCRUM-488, finishes AC2 and AC3 with no change here.
