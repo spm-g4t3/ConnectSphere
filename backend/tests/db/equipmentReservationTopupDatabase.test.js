@@ -154,11 +154,11 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
   const allRows = (event) =>
     rows('select id from equipment_reservations where event_request_id = $1', [event]);
 
-  it('N30_runs_a_second_time_without_error', async () => {
+  it('SCRUM300_AC2_runs_a_second_time_without_error', async () => {
     await expect(db.exec(migration('060_equipment_reservation_topup.sql'))).resolves.not.toThrow();
   });
 
-  it('N30_reserving_2_and_then_2_more_leaves_one_reservation_of_4', async () => {
+  it('SCRUM300_AC2_reserving_2_and_then_2_more_leaves_one_reservation_of_4', async () => {
     const { event, line } = await reviewed('Projector', 10, 4);
     await reserve(event, reviewerA, line, 2);
     await reserve(event, reviewerA, line, 2);
@@ -169,7 +169,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect(await allRows(event)).toHaveLength(1);
   });
 
-  it('N30_the_returned_review_shows_one_reservation_for_the_item', async () => {
+  it('SCRUM300_AC2_the_returned_review_shows_one_reservation_for_the_item', async () => {
     const { event, line } = await reviewed('Projector', 10, 4);
     await reserve(event, reviewerA, line, 1);
     const state = await reserve(event, reviewerA, line, 2);
@@ -179,7 +179,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect(item.reservations[0].quantity).toBe(3);
   });
 
-  it('N30_the_first_reservation_is_recorded_as_reserved_and_the_top_up_as_increased', async () => {
+  it('SCRUM300_AC2_the_first_reservation_is_recorded_as_reserved_and_the_top_up_as_increased', async () => {
     const { event, line } = await reviewed('Projector', 10, 4);
     await reserve(event, reviewerA, line, 2);
     await reserve(event, reviewerA, line, 2);
@@ -198,7 +198,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect(new Date(history[1].end_after).toISOString()).toBe(new Date(END).toISOString());
   });
 
-  it('N30_both_calls_are_recorded_against_the_same_reservation', async () => {
+  it('SCRUM300_AC2_both_calls_are_recorded_against_the_same_reservation', async () => {
     const { event, line } = await reviewed('Projector', 10, 4);
     await reserve(event, reviewerA, line, 2);
     await reserve(event, reviewerA, line, 2);
@@ -209,7 +209,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect(ids).toHaveLength(1);
   });
 
-  it('N30_topping_up_to_the_full_quantity_arranges_the_request', async () => {
+  it('SCRUM300_AC2_topping_up_to_the_full_quantity_arranges_the_request', async () => {
     const { event, line } = await reviewed('Projector', 10, 4);
     await reserve(event, reviewerA, line, 2);
     expect(await requestStatus(event)).not.toBe('arranged');
@@ -217,7 +217,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect(await requestStatus(event)).toBe('arranged');
   });
 
-  it('N30_a_top_up_above_what_the_item_still_needs_is_refused_and_changes_nothing', async () => {
+  it('SCRUM300_AC2_a_top_up_above_what_the_item_still_needs_is_refused_and_changes_nothing', async () => {
     const { event, line } = await reviewed('Projector', 10, 4);
     await reserve(event, reviewerA, line, 3);
 
@@ -229,7 +229,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect(await events(event)).toHaveLength(1);
   });
 
-  it('N30_a_top_up_still_needs_the_units_to_be_available', async () => {
+  it('SCRUM300_AC2_a_top_up_still_needs_the_units_to_be_available', async () => {
     const type = await newType('Mic', 3);
     const first = await newEvent();
     const second = await newEvent();
@@ -247,7 +247,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect((await liveRows(first))[0].quantity).toBe(2);
   });
 
-  it('N30_another_event_reserving_the_same_type_gets_its_own_reservation', async () => {
+  it('SCRUM300_AC2_another_event_reserving_the_same_type_gets_its_own_reservation', async () => {
     const type = await newType('Cable', 10);
     const first = await newEvent();
     const second = await newEvent();
@@ -264,7 +264,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect((await liveRows(second))[0].quantity).toBe(2);
   });
 
-  it('N30_two_different_items_each_keep_their_own_reservation', async () => {
+  it('SCRUM300_AC2_two_different_items_each_keep_their_own_reservation', async () => {
     const typeA = await newType(`Projector ${Math.random()}`, 10);
     const typeB = await newType(`Cable ${Math.random()}`, 10);
     const event = await newEvent();
@@ -281,7 +281,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect(live.map((r) => r.quantity).sort()).toEqual([1, 2]);
   });
 
-  it('N30_a_released_reservation_is_not_topped_up', async () => {
+  it('SCRUM300_AC2_a_released_reservation_is_not_topped_up', async () => {
     const { event, line } = await reviewed('Projector', 10, 4);
     const state = await reserve(event, reviewerA, line, 2);
     await release(event, reviewerA, state.request.lines[0].reservations[0].id);
@@ -294,7 +294,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect((await events(event)).map((e) => e.action)).toEqual(['reserved', 'released', 'reserved']);
   });
 
-  it('N30_a_flagged_reservation_is_not_topped_up', async () => {
+  it('SCRUM300_AC2_a_flagged_reservation_is_not_topped_up', async () => {
     const { event, line } = await reviewed('Projector', 10, 4);
     await reserve(event, reviewerA, line, 2);
     // Raising the line's quantity flags the reservation until the reviewer decides.
@@ -311,7 +311,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect((await events(event)).map((e) => e.action)).toEqual(['reserved', 'flagged', 'reserved']);
   });
 
-  it('N30_a_live_reservation_on_a_different_period_is_not_topped_up', async () => {
+  it('SCRUM300_AC2_a_live_reservation_on_a_different_period_is_not_topped_up', async () => {
     const { event, line } = await reviewed('Projector', 10, 4);
     await reserve(event, reviewerA, line, 2);
     // Defensive: no flow leaves an unflagged reservation on another period, but if one
@@ -327,7 +327,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect(live.map((r) => r.quantity)).toEqual([2, 2]);
   });
 
-  it('N30_a_moved_reservation_is_topped_up_on_the_new_period', async () => {
+  it('SCRUM300_AC2_a_moved_reservation_is_topped_up_on_the_new_period', async () => {
     const { event, line } = await reviewed('Projector', 10, 4);
     const state = await reserve(event, reviewerA, line, 2);
     await changePeriod(event);
@@ -342,7 +342,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     expect(new Date(live[0].start_at).toISOString()).toBe(new Date(NEW_START).toISOString());
   });
 
-  it('N30_the_history_accepts_the_increased_action_and_still_refuses_unknown_ones', async () => {
+  it('SCRUM300_AC2_the_history_accepts_the_increased_action_and_still_refuses_unknown_ones', async () => {
     const { event, line } = await reviewed('Projector', 10, 4);
     const state = await reserve(event, reviewerA, line, 1);
     const id = state.request.lines[0].reservations[0].id;
