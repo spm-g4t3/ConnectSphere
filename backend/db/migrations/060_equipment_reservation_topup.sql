@@ -1,4 +1,4 @@
--- 057_equipment_reservation_topup.sql
+-- 060_equipment_reservation_topup.sql
 -- SCRUM-300 "Reserve Equipment for an Event - Technical Support Staff"
 --
 -- Run after 056. Safe to run twice.

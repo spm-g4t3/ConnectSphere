@@ -23,7 +23,7 @@ const MIGRATIONS = [
   '053_equipment_reservations.sql',
   '054_equipment_reservation_actions.sql',
   '055_equipment_reservation_guards.sql',
-  '057_equipment_reservation_topup.sql',
+  '060_equipment_reservation_topup.sql',
 ];
 
 const START = '2026-12-01T10:00:00Z';
@@ -155,7 +155,7 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     rows('select id from equipment_reservations where event_request_id = $1', [event]);
 
   it('N30_runs_a_second_time_without_error', async () => {
-    await expect(db.exec(migration('057_equipment_reservation_topup.sql'))).resolves.not.toThrow();
+    await expect(db.exec(migration('060_equipment_reservation_topup.sql'))).resolves.not.toThrow();
   });
 
   it('N30_reserving_2_and_then_2_more_leaves_one_reservation_of_4', async () => {
