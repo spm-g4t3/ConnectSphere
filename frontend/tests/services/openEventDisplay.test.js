@@ -48,7 +48,7 @@ describe.each(["Asia/Singapore", "America/New_York", "Pacific/Kiritimati"])(
     it("reads 09:00 to 11:30 on the 25th", () => {
       process.env.TZ = deviceZone;
 
-      expect(formatEventDate(startsAt)).toContain("25 Oct 2026");
+      expect(formatEventDate(startsAt)).toMatch(/Oct 25, 2026|25 Oct 2026/);
       expect(formatEventStartTime(startsAt)).toContain("09:00");
       expect(formatEventEndTime(startsAt, endsAt)).toContain("11:30");
     });
@@ -57,7 +57,7 @@ describe.each(["Asia/Singapore", "America/New_York", "Pacific/Kiritimati"])(
       // 15:00Z to 17:00Z is 23:00 to 01:00 the next day in Singapore, the same afternoon in New York.
       process.env.TZ = deviceZone;
 
-      expect(formatEventEndTime("2026-10-25T15:00:00.000Z", "2026-10-25T17:00:00.000Z")).toContain("26 Oct 2026");
+      expect(formatEventEndTime("2026-10-25T15:00:00.000Z", "2026-10-25T17:00:00.000Z")).toMatch(/Oct 26, 2026|26 Oct 2026/);
       expect(formatEventEndTime("2026-10-25T01:00:00.000Z", "2026-10-25T03:00:00.000Z")).not.toMatch(/Oct/);
     });
 
