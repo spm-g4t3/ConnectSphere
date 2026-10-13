@@ -122,6 +122,11 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
   let organiser;
   let coordinator;
   let otherCoordinator;
+  // SCRUM-486. Their profiles are added with the coordinators' ("once
+  // coordinators exist"), so SCRUM486_AC11_… still runs with no Lead.
+  let lead;
+  let lead2;
+  let safety;
 
   const one = async (sql, params) => (await db.query(sql, params)).rows[0];
 
@@ -186,6 +191,9 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
     coordinator = (await one("insert into auth.users (email) values ('c1@x') returning id")).id;
     otherCoordinator = (await one("insert into auth.users (email) values ('c2@x') returning id")).id;
+    lead = (await one("insert into auth.users (email) values ('lead@x') returning id")).id;
+    lead2 = (await one("insert into auth.users (email) values ('lead2@x') returning id")).id;
+    safety = (await one("insert into auth.users (email) values ('safety@x') returning id")).id;
     await db.query("insert into profiles (id, role) values ($1, 'event_organiser')", [organiser]);
     await db.exec(migration('020_event_status_lifecycle.sql'));
     await db.exec(migration('021_event_status_history.sql'));
@@ -193,22 +201,67 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     // SCRUM-19's two functions, after 022: start_event_review calls 022's
     // event_request_status_allows.
     await db.exec(migration('029_event_request_decisions_functions.sql'));
+    // Change requests (006, and 019's coordinator check), so SCRUM-486's AC7
+    // can show a pending change request following the event to its new
+    // coordinator. 039, the Lead's role, which 052's assign and reassign
+    // functions name.
+    await db.exec(migration('006_event_change_requests.sql'));
+    await db.exec(migration('019_change_request_decision_coordinator.sql'));
+    await db.exec(migration('039_coordinator_lead_and_safety_officer_roles.sql'));
+    // The notifications table, which 052 restates the types of and its three
+    // functions now write to (SCRUM-518). The real one comes from 014's booking
+    // review migration, which needs bookings and venue blocks this suite does
+    // not build, so it is written here in the shape those functions use:
+    // recipient, type and payload, plus the reference columns other notices
+    // carry. 052 replaces the type check with its own, so the one here only
+    // has to exist. eventClarificationDatabase.test.js does the same.
+    await db.exec(`
+      create table notifications (
+        id uuid primary key default gen_random_uuid(),
+        recipient_id uuid not null references auth.users (id) on delete cascade,
+        type text not null,
+        booking_id uuid,
+        block_id uuid,
+        venue_hold_id uuid,
+        payload jsonb not null default '{}',
+        read_at timestamptz,
+        created_at timestamptz not null default now(),
+        constraint notifications_type_known check (type in ('booking_flagged'))
+      );
+    `);
+    // SCRUM-486's migration, last, as production will have it: the relaxed
+    // assignment constraint and submission without assignment (SCRUM-515),
+    // the Lead's assignment and reassignment (SCRUM-516), the refusal of an
+    // unassigned review (SCRUM-517), and the notices (SCRUM-518).
+    await db.exec(migration('052_lead_assignment.sql'));
   }, 60_000);
 
   afterAll(async () => {
     await db?.close();
   });
 
-  describe('Draft -> Submitted keeps its SCRUM-327 behaviour and gains a history row', () => {
-    it('SCRUM325_refuses_the_submission_when_no_coordinator_exists_and_leaves_the_draft_alone', async () => {
+  describe('Draft -> Submitted: no coordinator since SCRUM-486, and one history row', () => {
+    it('SCRUM486_AC11_submits_when_no_event_coordinator_and_no_lead_exists', async () => {
+      // AC11-01 and AC11-02. Was SCRUM325_refuses_the_submission_when_no_
+      // coordinator_exists_and_leaves_the_draft_alone, which pinned SCRUM-327
+      // AC5's refusal (P0001) and was right then. Submission no longer looks
+      // for a coordinator, so with nobody holding either role it succeeds,
+      // and the request waits for a Lead. This runs before any coordinator or
+      // Lead profile exists in this database.
       const id = await request();
 
-      const err = await refusal(submit(id));
+      const { rows: [submitted] } = await submit(id);
 
-      expect(err.code).toBe('P0001');
-      expect(await row(id)).toMatchObject({ status: 'draft', submitted_at: null, assigned_coordinator_id: null });
-      expect(await statusHistory(id)).toHaveLength(0);
+      expect(submitted).toMatchObject({ status: 'submitted', assigned_coordinator_id: null });
+      expect(await statusHistory(id)).toHaveLength(1);
       expect(await assignmentHistory(id)).toHaveLength(0);
+      // AC11-01, the notice half (SCRUM-518): with no Lead there is nobody to
+      // tell, and the insert from an empty select writes nothing and fails
+      // nothing.
+      const { rows: notices } = await db.query(
+        "select * from notifications where payload->>'eventRequestId' = $1", [id],
+      );
+      expect(notices).toEqual([]);
     });
 
     describe('once coordinators exist', () => {
@@ -217,24 +270,35 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
           "insert into profiles (id, role) values ($1, 'event_coordinator'), ($2, 'event_coordinator')",
           [coordinator, otherCoordinator],
         );
+        // SCRUM-486: two Leads and a Safety Officer, and names on the
+        // coordinators so AC4's refusal can be seen to name one.
+        await db.query(
+          `insert into profiles (id, role, full_name) values
+             ($1, 'event_coordinator_lead', 'Lena Lead'),
+             ($2, 'event_coordinator_lead', 'Lars Lead'),
+             ($3, 'safety_officer', 'Sam Safety')`,
+          [lead, lead2, safety],
+        );
+        await db.query("update profiles set full_name = 'Priya Nair' where id = $1", [coordinator]);
+        await db.query("update profiles set full_name = 'Omar Okafor' where id = $1", [otherCoordinator]);
       });
 
-      it('SCRUM325_assigns_exactly_one_coordinator_and_records_one_row_in_each_history', async () => {
+      it('SCRUM486_AC1_submits_with_no_coordinator_even_when_coordinators_exist', async () => {
+        // AC1-01. Was SCRUM325_assigns_exactly_one_coordinator_and_records_one_
+        // row_in_each_history, which pinned SCRUM-327 AC1 (a coordinator chosen
+        // on submission, and its assignment row) and was right then. Two
+        // coordinators exist here, so a coordinator could have been chosen;
+        // none is. No assignment row, because nothing was assigned. The
+        // status-history row is unchanged.
         const id = await request();
 
         const { rows: [submitted] } = await submit(id);
 
         expect(submitted.status).toBe('submitted');
-        expect([coordinator, otherCoordinator]).toContain(submitted.assigned_coordinator_id);
+        expect(submitted.assigned_coordinator_id).toBeNull();
+        expect(submitted.reviewing_coordinator_id).toBeNull();
         expect(submitted.submitted_at).not.toBeNull();
-
-        const assignments = await assignmentHistory(id);
-        expect(assignments).toHaveLength(1);
-        expect(assignments[0]).toMatchObject({
-          previous_coordinator_id: null,
-          new_coordinator_id: submitted.assigned_coordinator_id,
-          assigned_by: null,
-        });
+        expect(await assignmentHistory(id)).toHaveLength(0);
 
         const statuses = await statusHistory(id);
         expect(statuses).toHaveLength(1);
@@ -256,7 +320,9 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
         expect(err.code).toBe('55000');
         expect(err.message).toContain('submitted');
         expect((await row(id)).assigned_coordinator_id).toBe(first.assigned_coordinator_id);
-        expect(await assignmentHistory(id)).toHaveLength(1);
+        // None since SCRUM-486: the first submission assigns nobody, so there
+        // is no assignment row for the second to add to. It used to be one.
+        expect(await assignmentHistory(id)).toHaveLength(0);
         expect(await statusHistory(id)).toHaveLength(1);
       });
 
@@ -277,8 +343,9 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
 
       it('SCRUM325_is_atomic_when_the_last_write_fails', async () => {
         // The status history insert is the function's last write, after the
-        // status, the coordinator and the assignment row. An unknown user fails
-        // it with a foreign key violation, and everything before it must roll back.
+        // status update (and, before SCRUM-486, the coordinator and the
+        // assignment row). An unknown user fails it with a foreign key
+        // violation, and everything before it must roll back.
         const id = await request();
 
         const err = await refusal(submit(id, '99999999-9999-4999-8999-999999999999'));
@@ -299,17 +366,20 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       });
 
       it('SCRUM325_gives_no_other_way_to_submit_without_a_coordinator', async () => {
+        // Until SCRUM-486 this also asserted that a direct update to submitted
+        // with no coordinator was refused by 017's constraint. That was right
+        // then. 052 relaxes the constraint to allow exactly that row, so the
+        // database no longer refuses it (SCRUM486_TR01_… below pins the new
+        // rule); the single path is now held by the status function's refusal
+        // here and by the application, which draftToSubmittedSinglePath.test.js
+        // checks. The name is kept: the application still has no other way.
         const id = await request();
 
-        const direct = await refusal(
-          db.query("update event_requests set status = 'submitted', submitted_at = now() where id = $1", [id]),
-        );
         const viaStatusFunction = await refusal(change(id, STATUS.DRAFT, STATUS.SUBMITTED, organiser));
         const oldSignature = await one(
           "select count(*)::int as n from pg_proc where proname = 'submit_event_request' and pronargs = 2",
         );
 
-        expect(direct.message).toContain('event_requests_assigned_when_submitted');
         expect(viaStatusFunction.code).toBe('22023');
         expect(oldSignature.n).toBe(0);
         expect((await row(id)).status).toBe('draft');
@@ -355,6 +425,13 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       it('SCRUM325_records_each_step_of_a_journey_once_and_in_order', async () => {
         const id = await request();
         await submit(id);
+        // Since SCRUM-486 submission assigns nobody, so the Lead assigns the
+        // request here, through assign_event_request (SCRUM-516). Under
+        // SCRUM-515 a direct update stood in for it, because the function did
+        // not exist yet. An assignment writes no status history, so the
+        // journey below is unchanged. Before SCRUM-486 the holder came from
+        // submission itself.
+        await db.query('select * from assign_event_request($1, $2, $3, null)', [id, coordinator, lead]);
         const holder = (await row(id)).assigned_coordinator_id;
 
         // A pause between steps, because the history is read back by time and
@@ -455,13 +532,17 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
 
         expect(again.status).toBe(STATUS.SUBMITTED);
         expect(again.submitted_at).not.toBeNull();
-        expect([coordinator, otherCoordinator]).toContain(again.assigned_coordinator_id);
+        // Until SCRUM-486 the resubmission was given a coordinator again, and
+        // this asserted it (SCRUM-327 AC3), rightly then. Now it goes to the
+        // Lead's queue with none, and no assignment row. SCRUM486_TR02_… below
+        // is the trap this guards against, with the stale coordinator shown.
+        expect(again.assigned_coordinator_id).toBeNull();
         const history = await statusHistory(id);
         expect(history.map((h) => [h.previous_status, h.new_status])).toEqual([
           [STATUS.REJECTED, STATUS.DRAFT],
           [STATUS.DRAFT, STATUS.SUBMITTED],
         ]);
-        expect(await assignmentHistory(id)).toHaveLength(1);
+        expect(await assignmentHistory(id)).toHaveLength(0);
       });
     });
 
@@ -695,6 +776,796 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
 
       expect(err.code).toBe('23001');
       expect(await statusHistory(id)).toHaveLength(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // SCRUM-486 (SCRUM-515): migration 052, the relaxed constraint and the guards
+  // -------------------------------------------------------------------------
+  // docs/test-cases/SCRUM-486.md, TR-01, TR-02, TR-04 and AC1-02. Real
+  // Postgres, because each is about what the database accepts or what a
+  // function does with a null, which a fake client cannot show.
+
+  describe('SCRUM-486: 052 relaxes the assignment constraint for submitted only', () => {
+    // Each row is written straight to the table, bypassing every function, so
+    // only the constraint can refuse it. `extra` overrides the fixture's
+    // coordinator with null.
+    const noCoordinator = { assigned_coordinator_id: null };
+
+    it('SCRUM486_TR01_accepts_a_submitted_request_with_no_coordinator', async () => {
+      // TR-01, the half 052 adds: a submitted request may wait for the Lead.
+      const id = await request(STATUS.SUBMITTED, noCoordinator);
+
+      expect((await row(id)).assigned_coordinator_id).toBeNull();
+    });
+
+    it.each([
+      STATUS.UNDER_REVIEW,
+      STATUS.PENDING_CLARIFICATION,
+      STATUS.APPROVED,
+      STATUS.CONFIRMED,
+      STATUS.COMPLETED,
+      STATUS.REJECTED,
+    ])('SCRUM486_TR01_still_refuses_a_request_that_is_%s_with_no_coordinator', async (status) => {
+      // TR-01, the half 052 keeps: past submitted, only the assigned
+      // coordinator can have moved the request, so it must have one.
+      const err = await refusal(request(status, noCoordinator));
+
+      expect(err.code).toBe('23514');
+      expect(err.message).toContain('event_requests_assigned_when_submitted');
+    });
+
+    it.each([STATUS.DRAFT, STATUS.CANCELLED])(
+      'SCRUM486_TR01_still_accepts_a_request_that_is_%s_with_no_coordinator',
+      async (status) => {
+        // As 017 already allowed: a draft has not reached anyone, and a draft
+        // may be cancelled before it ever does.
+        const id = await request(status, noCoordinator);
+
+        expect((await row(id)).assigned_coordinator_id).toBeNull();
+      },
+    );
+  });
+
+  describe('SCRUM-486: a reopened request goes back to the queue', () => {
+    it('SCRUM486_TR02_a_resubmitted_request_reaches_the_queue_with_no_coordinator_and_no_reviewer', async () => {
+      // TR-02. 022's rejected -> draft clears the decision but keeps the
+      // coordinator and the reviewer on the draft, as the first two
+      // expectations show. If submission merely stopped choosing a
+      // coordinator, it would leave them there and the request would go
+      // straight back to its old coordinator, past the Lead. 052 sets both to
+      // null.
+      const id = await request(STATUS.REJECTED);
+      await change(id, STATUS.REJECTED, STATUS.DRAFT, organiser);
+      const reopened = await row(id);
+      expect(reopened.assigned_coordinator_id).toBe(coordinator);
+      expect(reopened.reviewing_coordinator_id).toBe(coordinator);
+
+      const { rows: [again] } = await submit(id);
+
+      expect(again).toMatchObject({
+        status: STATUS.SUBMITTED,
+        assigned_coordinator_id: null,
+        reviewing_coordinator_id: null,
+      });
+      expect(await assignmentHistory(id)).toHaveLength(0);
+    });
+  });
+
+  describe('SCRUM-486: submission no longer chooses a coordinator', () => {
+    it('SCRUM486_AC1_the_submission_function_in_force_does_not_call_pick_event_coordinator', async () => {
+      // AC1-02, read from the function Postgres actually holds after 052, not
+      // from the file: one definition in force, and no selection in it.
+      const { rows } = await db.query(
+        "select prosrc from pg_proc where proname = 'submit_event_request'",
+      );
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].prosrc).not.toMatch(/pick_event_coordinator/);
+      expect(rows[0].prosrc).not.toMatch(/No coordinator is available/);
+    });
+  });
+
+  describe('SCRUM-486: the equipment guard refuses a null caller (TR-04)', () => {
+    // assert_equipment_editable reads only event_requests, and refuses the
+    // caller before it reads any equipment table, so it can be called here.
+
+    it('SCRUM486_TR04_refuses_a_null_caller_on_a_request_with_no_coordinator', async () => {
+      // The hole 052 closes: before it, null is not distinct from null, so a
+      // null caller on a request with no coordinator passed this check.
+      const id = await request(STATUS.SUBMITTED, { assigned_coordinator_id: null });
+
+      const err = await refusal(db.query('select assert_equipment_editable($1, null)', [id]));
+
+      expect(err.code).toBe('42501');
+    });
+
+    it('SCRUM486_TR04_still_refuses_a_real_caller_who_is_not_the_coordinator', async () => {
+      const id = await request(STATUS.APPROVED);
+
+      const err = await refusal(db.query('select assert_equipment_editable($1, $2)', [id, otherCoordinator]));
+
+      expect(err.code).toBe('42501');
+    });
+
+    it('SCRUM486_TR04_still_lets_the_assigned_coordinator_through_on_an_approved_event', async () => {
+      // So the guard did not close the door on the person it is for.
+      const id = await request(STATUS.APPROVED);
+
+      await db.query('select assert_equipment_editable($1, $2)', [id, coordinator]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // SCRUM-486 (SCRUM-516): the Lead assigns, and reassignment is opened to the Lead
+  // -------------------------------------------------------------------------
+  // docs/test-cases/SCRUM-486.md, the PGlite cases of AC3 to AC7 and AC9.
+  // Real Postgres, because each is about who a function lets through, what it
+  // writes, and what it writes nothing of when it refuses.
+
+  const assign = (id, to, by = lead, note = null) =>
+    db.query('select * from assign_event_request($1, $2, $3, $4)', [id, to, by, note]);
+  const reassign = (id, to, by, note = null) =>
+    db.query('select * from reassign_event_request($1, $2, $3, $4)', [id, to, by, note]);
+  /** A submitted request with no coordinator: the Lead's to assign. */
+  const unassigned = () => request(STATUS.SUBMITTED, { assigned_coordinator_id: null });
+
+  describe('SCRUM-486 AC3: the Lead assigns a submitted request to one Event Coordinator', () => {
+    it('SCRUM486_AC3_a_lead_assigns_an_unassigned_submitted_request', async () => {
+      // AC3-01, and AC9-01: the coordinator, and a history row naming the Lead.
+      const id = await unassigned();
+
+      const { rows: [assigned] } = await assign(id, coordinator, lead, 'Over to you');
+
+      expect(assigned.assigned_coordinator_id).toBe(coordinator);
+      expect(await assignmentHistory(id)).toEqual([
+        expect.objectContaining({
+          previous_coordinator_id: null,
+          new_coordinator_id: coordinator,
+          assigned_by: lead,
+          handover_note: 'Over to you',
+        }),
+      ]);
+    });
+
+    it('SCRUM486_AC3_a_blank_note_is_stored_as_null', async () => {
+      const id = await unassigned();
+
+      await assign(id, coordinator, lead, '   ');
+
+      expect((await assignmentHistory(id))[0].handover_note).toBeNull();
+    });
+
+    it.each([
+      ['a Lead', () => lead2],
+      ['a Safety Officer', () => safety],
+      ['the Organiser', () => organiser],
+    ])('SCRUM486_AC3_refuses_%s_as_the_assignee_and_writes_nothing', async (_who, assignee) => {
+      // AC3-02. Only event_coordinator may be chosen; one role per account
+      // means that alone excludes every Lead (the team's 11 October decision).
+      const id = await unassigned();
+      const before = await row(id);
+
+      const err = await refusal(assign(id, assignee()));
+
+      expect(err.code).toBe('22023');
+      expect(await row(id)).toEqual(before);
+      expect(await assignmentHistory(id)).toHaveLength(0);
+    });
+
+    it.each([
+      ['an Event Coordinator', () => coordinator],
+      ['the Organiser', () => organiser],
+      ['a Safety Officer', () => safety],
+      ['nobody (a null caller)', () => null],
+    ])('SCRUM486_AC3_refuses_%s_as_the_caller_and_writes_nothing', async (_who, caller) => {
+      // AC3-03. Only a Lead assigns.
+      const id = await unassigned();
+      const before = await row(id);
+
+      const err = await refusal(assign(id, coordinator, caller()));
+
+      expect(err.code).toBe('42501');
+      expect(await row(id)).toEqual(before);
+      expect(await assignmentHistory(id)).toHaveLength(0);
+    });
+
+    it.each([STATUS.DRAFT, STATUS.CANCELLED])(
+      'SCRUM486_AC3_refuses_to_assign_a_request_that_is_%s',
+      async (status) => {
+        // Only a submitted request is waiting for the Lead.
+        const id = await request(status, { assigned_coordinator_id: null });
+
+        const err = await refusal(assign(id, coordinator));
+
+        expect(err.code).toBe('55000');
+        expect(err.message).toContain(`status ${status}`);
+        expect(await assignmentHistory(id)).toHaveLength(0);
+      },
+    );
+
+    it('SCRUM486_AC3_reports_a_missing_request_as_not_found', async () => {
+      const err = await refusal(assign('00000000-0000-0000-0000-000000000000', coordinator));
+
+      expect(err.code).toBe('P0002');
+    });
+  });
+
+  describe('SCRUM-486 AC4: one step, and a second assignment is refused by name', () => {
+    it('SCRUM486_AC4_refuses_a_second_assignment_and_names_who_got_there_first', async () => {
+      // AC4-02. The first assignment commits; the second, from another Lead,
+      // finds the request taken. PGlite runs one query at a time, so this is
+      // the second of two arriving in turn, which is what the row lock makes
+      // of two arriving at once. The refusal says who, by name.
+      const id = await unassigned();
+      await assign(id, coordinator, lead);
+
+      const err = await refusal(assign(id, otherCoordinator, lead2));
+
+      expect(err.code).toBe('55000');
+      expect(err.message).toContain('already assigned to Priya Nair');
+      expect((await row(id)).assigned_coordinator_id).toBe(coordinator);
+      expect(await assignmentHistory(id)).toHaveLength(1);
+    });
+
+    it('SCRUM486_AC4_of_two_leads_assigning_at_once_exactly_one_wins_and_the_other_is_told_who', async () => {
+      // AC4-05, as far as PGlite can take it, by the technique
+      // SCRUM325_lets_exactly_one_of_two_simultaneous_transitions_from_the_
+      // same_status_succeed uses: both calls are issued together and neither
+      // is awaited before the other starts.
+      //
+      // What this proves, and what it cannot. PGlite is one connection and
+      // runs one statement at a time, so the two calls queue and run back to
+      // back; they never interleave. So this proves that each call's check and
+      // write are one unit -- the second, issued before the first finished,
+      // still sees the first's coordinator and is refused, writing nothing --
+      // and that exactly one of two concurrent attempts wins. It cannot prove
+      // the row lock (`for update`) holding the second transaction while the
+      // first commits, because nothing here can make them overlap; PGlite
+      // cannot open a second connection to the same database. That half is
+      // proved against real Postgres, where each call is its own connection,
+      // by section 2 of scripts/check-coordinator-assignment.js (several
+      // rounds of two Leads assigning at once).
+      const id = await unassigned();
+
+      const outcomes = await Promise.allSettled([
+        assign(id, coordinator, lead),
+        assign(id, otherCoordinator, lead2),
+      ]);
+
+      const won = outcomes.filter((o) => o.status === 'fulfilled');
+      const lost = outcomes.filter((o) => o.status === 'rejected');
+      expect(won).toHaveLength(1);
+      expect(lost).toHaveLength(1);
+
+      const winner = won[0].value.rows[0].assigned_coordinator_id;
+      const winnerName = winner === coordinator ? 'Priya Nair' : 'Omar Okafor';
+      expect(lost[0].reason.code).toBe('55000');
+      expect(lost[0].reason.message).toContain(`already assigned to ${winnerName}`);
+
+      // One coordinator, one history row naming them, and only the winner's
+      // two notices: the loser wrote nothing.
+      expect((await row(id)).assigned_coordinator_id).toBe(winner);
+      const history = await assignmentHistory(id);
+      expect(history).toHaveLength(1);
+      expect(history[0].new_coordinator_id).toBe(winner);
+      const { rows: notices } = await db.query(
+        `select type from notifications
+          where payload->>'eventRequestId' = $1 and type <> 'event_request_awaiting_assignment'`,
+        [id],
+      );
+      expect(notices.map((n) => n.type).sort()).toEqual(['event_request_assigned', 'event_request_coordinator_assigned']);
+    });
+
+    it('SCRUM486_AC4_the_coordinator_and_its_history_row_stand_or_fall_together', async () => {
+      // AC4-01. A constraint added for this test refuses one history row, so
+      // the insert fails after the update has run. The update must not stand.
+      await db.exec(`
+        alter table event_request_assignment_history
+          add constraint scrum486_test_refuse_one_note check (handover_note is distinct from 'refuse me')
+      `);
+      try {
+        const id = await unassigned();
+
+        const err = await refusal(assign(id, coordinator, lead, 'refuse me'));
+
+        expect(err.code).toBe('23514');
+        expect((await row(id)).assigned_coordinator_id).toBeNull();
+        expect(await assignmentHistory(id)).toHaveLength(0);
+      } finally {
+        await db.exec('alter table event_request_assignment_history drop constraint scrum486_test_refuse_one_note');
+      }
+    });
+  });
+
+  describe('SCRUM-486 AC5: reassignment in the listed statuses only', () => {
+    it.each([
+      STATUS.SUBMITTED,
+      STATUS.UNDER_REVIEW,
+      STATUS.PENDING_CLARIFICATION,
+      STATUS.APPROVED,
+      STATUS.CONFIRMED,
+    ])('SCRUM486_AC5_a_lead_reassigns_a_request_that_is_%s', async (status) => {
+      // AC5-01, the five that exist. safety_review and safety_approved are on
+      // the function's list (as text) but cannot be written until SCRUM-488
+      // adds them to the enum (AC5-03).
+      const id = await request(status);
+
+      const { rows: [moved] } = await reassign(id, otherCoordinator, lead);
+
+      expect(moved.assigned_coordinator_id).toBe(otherCoordinator);
+      expect(await assignmentHistory(id)).toHaveLength(1);
+    });
+
+    it.each([STATUS.REJECTED, STATUS.COMPLETED, STATUS.CANCELLED])(
+      'SCRUM486_AC5_refuses_to_reassign_a_request_that_is_%s_and_writes_nothing',
+      async (status) => {
+        // AC5-02.
+        const id = await request(status);
+        const before = await row(id);
+
+        const err = await refusal(reassign(id, otherCoordinator, lead));
+
+        expect(err.code).toBe('55000');
+        expect(err.message).toContain(`status ${status}`);
+        expect(await row(id)).toEqual(before);
+        expect(await assignmentHistory(id)).toHaveLength(0);
+      },
+    );
+
+    it('SCRUM486_AC5_the_status_list_names_the_safety_statuses_before_they_exist', async () => {
+      // AC5-03 as far as it can go before SCRUM-488: the function in force
+      // names both, and every reassignment above runs, so naming them as text
+      // does not stop it running while the enum lacks them.
+      const { rows: [fn] } = await db.query(
+        "select prosrc from pg_proc where proname = 'reassign_event_request'",
+      );
+
+      expect(fn.prosrc).toContain("'safety_review'");
+      expect(fn.prosrc).toContain("'safety_approved'");
+      expect(fn.prosrc).toContain('status::text');
+    });
+
+    it('SCRUM486_AC5_a_handover_with_no_note_stores_null', async () => {
+      // AC5-04.
+      const id = await request(STATUS.SUBMITTED);
+
+      await reassign(id, otherCoordinator, coordinator);
+
+      expect((await assignmentHistory(id))[0].handover_note).toBeNull();
+    });
+
+    it('SCRUM486_AC5_an_unassigned_request_is_assigned_not_reassigned', async () => {
+      // AC5-05. Not 018's 40001 "changed hands", which its guarded update
+      // would have raised against a null coordinator.
+      const id = await unassigned();
+
+      const err = await refusal(reassign(id, coordinator, lead));
+
+      expect(err.code).toBe('55000');
+      expect(err.message).toContain('must be assigned, not reassigned');
+      expect(await assignmentHistory(id)).toHaveLength(0);
+    });
+
+    it('SCRUM486_AC5_a_coordinator_is_refused_reassigning_an_unassigned_request_as_the_caller', async () => {
+      // The caller is checked first, so only someone entitled to reassign
+      // learns that the request has no coordinator.
+      const id = await unassigned();
+
+      const err = await refusal(reassign(id, otherCoordinator, coordinator));
+
+      expect(err.code).toBe('42501');
+    });
+  });
+
+  describe('SCRUM-486 AC6: the holder and the Lead both reassign', () => {
+    it('SCRUM486_AC6_the_holder_reassigns_as_scrum327_allowed', async () => {
+      // AC6-01. SCRUM-327 AC6 stands: unchanged by the widening.
+      const id = await request(STATUS.UNDER_REVIEW);
+
+      await reassign(id, otherCoordinator, coordinator, 'On leave from Monday');
+
+      expect((await row(id)).assigned_coordinator_id).toBe(otherCoordinator);
+      expect((await assignmentHistory(id))[0]).toMatchObject({
+        previous_coordinator_id: coordinator,
+        new_coordinator_id: otherCoordinator,
+        assigned_by: coordinator,
+        handover_note: 'On leave from Monday',
+      });
+    });
+
+    it('SCRUM486_AC6_a_lead_who_does_not_hold_the_event_reassigns_it', async () => {
+      // AC6-02. The Lead is not the holder, and the guarded update no longer
+      // compares with the caller, so this is not a 40001.
+      const id = await request(STATUS.UNDER_REVIEW);
+
+      await reassign(id, otherCoordinator, lead);
+
+      expect((await assignmentHistory(id))[0]).toMatchObject({
+        previous_coordinator_id: coordinator,
+        new_coordinator_id: otherCoordinator,
+        assigned_by: lead,
+      });
+    });
+
+    it.each([
+      ['another Event Coordinator', () => otherCoordinator],
+      ['a Safety Officer', () => safety],
+      ['the Organiser', () => organiser],
+      ['nobody (a null caller)', () => null],
+    ])('SCRUM486_AC6_refuses_%s_as_the_caller_and_writes_nothing', async (_who, caller) => {
+      // AC6-03.
+      const id = await request(STATUS.UNDER_REVIEW);
+      const before = await row(id);
+
+      const err = await refusal(reassign(id, otherCoordinator, caller()));
+
+      expect(err.code).toBe('42501');
+      expect(await row(id)).toEqual(before);
+      expect(await assignmentHistory(id)).toHaveLength(0);
+    });
+
+    it('SCRUM486_AC6_still_refuses_a_handover_to_the_current_holder', async () => {
+      // 018's rule, kept, for a Lead as for the holder.
+      const id = await request(STATUS.UNDER_REVIEW);
+
+      const err = await refusal(reassign(id, coordinator, lead));
+
+      expect(err.code).toBe('23514');
+    });
+
+    it('SCRUM486_AC6_the_reviewer_follows_an_undecided_event_the_lead_moves', async () => {
+      // AC6-06, 018's rule with a Lead as the caller.
+      const id = await request(STATUS.UNDER_REVIEW, { reviewing_coordinator_id: coordinator });
+
+      await reassign(id, otherCoordinator, lead);
+
+      expect((await row(id)).reviewing_coordinator_id).toBe(otherCoordinator);
+    });
+
+    it('SCRUM486_AC6_a_decided_event_keeps_its_reviewer_when_the_lead_moves_it', async () => {
+      // The other half: the reviewer of a decided event records who decided.
+      const id = await request(STATUS.APPROVED);
+
+      await reassign(id, otherCoordinator, lead);
+
+      expect(await row(id)).toMatchObject({
+        assigned_coordinator_id: otherCoordinator,
+        reviewing_coordinator_id: coordinator,
+        decided_by: coordinator,
+      });
+    });
+  });
+
+  describe('SCRUM-486 AC7: after a reassignment the new coordinator acts, the previous one does not', () => {
+    // No code in 052 does this. Every function that acts on an event checks
+    // its assigned_coordinator_id when it runs, so moving the event moves the
+    // right to act. These tests prove it rather than build anything.
+
+    it('SCRUM486_AC7_the_new_coordinator_reviews_and_decides_and_the_previous_one_cannot', async () => {
+      // AC7-01 and AC7-02.
+      const id = await unassigned();
+      await assign(id, coordinator, lead);
+      await reassign(id, otherCoordinator, lead);
+
+      expect((await refusal(db.query('select * from start_event_review($1, $2)', [id, coordinator]))).code)
+        .toBe('42501');
+
+      await db.query('select * from start_event_review($1, $2)', [id, otherCoordinator]);
+      await change(id, STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION, otherCoordinator, 'Numbers?', otherCoordinator);
+      await change(id, STATUS.PENDING_CLARIFICATION, STATUS.UNDER_REVIEW, organiser);
+
+      expect((await refusal(db.query(
+        "select * from decide_event_request($1, 'rejected', 'No.', $2, now())", [id, coordinator],
+      ))).code).toBe('42501');
+
+      const { rows: [decided] } = await db.query(
+        "select * from decide_event_request($1, 'rejected', 'Not this term.', $2, now())", [id, otherCoordinator],
+      );
+      expect(decided).toMatchObject({ status: STATUS.REJECTED, decided_by: otherCoordinator });
+    });
+
+    it('SCRUM486_AC7_a_pending_change_request_follows_the_event_to_its_new_coordinator', async () => {
+      // AC7-05. The change request names the event, not a coordinator, and
+      // process_change_request (019) checks the event's holder when it runs.
+      const id = await request(STATUS.APPROVED);
+      const { id: changeRequest } = await one(
+        `insert into event_change_requests (event_request_id, requested_by, change_field, requested_change)
+         values ($1, $2, 'description', 'A longer description.') returning id`,
+        [id, organiser],
+      );
+      await reassign(id, otherCoordinator, lead);
+
+      const previous = await refusal(db.query(
+        "select * from process_change_request($1, 'approved', null, $2)", [changeRequest, coordinator],
+      ));
+      const { rows: [processed] } = await db.query(
+        "select * from process_change_request($1, 'approved', null, $2)", [changeRequest, otherCoordinator],
+      );
+
+      expect(previous.code).toBe('42501');
+      expect(processed).toMatchObject({ status: 'processed', processed_by: otherCoordinator });
+    });
+  });
+
+  describe('SCRUM-486 AC9: the history names who made each assignment', () => {
+    it('SCRUM486_AC9_reads_correctly_across_a_submission_an_assignment_and_two_reassignments', async () => {
+      // AC9-01 and AC9-02. Submission writes no row; the Lead's first
+      // assignment names the Lead; the holder's handover names the holder; the
+      // Lead's names the Lead. No row has a null assigned_by, so none would
+      // read "automatically on submission", which listAssignmentHistory derives
+      // from a null (SCRUM-327's rows keep theirs).
+      const id = await request();
+      await submit(id);
+      expect(await assignmentHistory(id)).toHaveLength(0);
+
+      await assign(id, coordinator, lead, 'Yours');
+      await pause();
+      await reassign(id, otherCoordinator, coordinator, 'Handing over');
+      await pause();
+      await reassign(id, coordinator, lead);
+
+      const history = (await db.query(
+        `select previous_coordinator_id, new_coordinator_id, assigned_by, handover_note
+           from event_request_assignment_history where event_request_id = $1 order by created_at, id`,
+        [id],
+      )).rows;
+      expect(history).toEqual([
+        { previous_coordinator_id: null, new_coordinator_id: coordinator, assigned_by: lead, handover_note: 'Yours' },
+        { previous_coordinator_id: coordinator, new_coordinator_id: otherCoordinator, assigned_by: coordinator, handover_note: 'Handing over' },
+        { previous_coordinator_id: otherCoordinator, new_coordinator_id: coordinator, assigned_by: lead, handover_note: null },
+      ]);
+    });
+  });
+
+  describe('SCRUM-486 AC8: nobody reviews or decides a request waiting for the Lead', () => {
+    // SCRUM-517. Before 052 these were refused by 029's caller check, with
+    // 42501 "only the coordinator assigned ...", which was never wrong while
+    // every submitted request had a coordinator. 052 refuses them first, with
+    // 55000 and a message naming the Lead.
+    const WAITING = 'waiting for the Event Coordinator Lead to assign it a coordinator';
+    const startReview = (id, by) => db.query('select * from start_event_review($1, $2)', [id, by]);
+
+    it.each([
+      ['an Event Coordinator', () => coordinator],
+      ['the Lead', () => lead],
+      ['nobody (a null caller)', () => null],
+    ])('SCRUM486_AC8_starting_the_review_of_an_unassigned_request_is_refused_naming_the_lead_for_%s', async (_who, caller) => {
+      // AC8-01 and AC8-02: the same answer for every caller, because there is
+      // no coordinator for any of them to be wrong about.
+      const id = await unassigned();
+      const before = await row(id);
+
+      const err = await refusal(startReview(id, caller()));
+
+      expect(err.code).toBe('55000');
+      expect(err.message).toContain(WAITING);
+      expect(err.message).toContain('its review cannot start yet');
+      expect(await row(id)).toEqual(before);
+      expect(await statusHistory(id)).toHaveLength(0);
+    });
+
+    it('SCRUM486_AC8_a_request_held_by_someone_else_is_still_refused_as_not_yours', async () => {
+      // The other refusal, unchanged and told apart from the new one: by its
+      // code (42501, not 55000) and by its words.
+      const id = await request(STATUS.SUBMITTED);
+
+      const err = await refusal(startReview(id, otherCoordinator));
+
+      expect(err.code).toBe('42501');
+      expect(err.message).toContain('only the coordinator assigned');
+      expect(err.message).not.toContain('Lead');
+    });
+
+    it('SCRUM486_AC8_once_assigned_the_coordinator_starts_the_review', async () => {
+      // The refusal lasts only until the Lead assigns the request.
+      const id = await unassigned();
+      await assign(id, coordinator);
+
+      const { rows: [started] } = await startReview(id, coordinator);
+
+      expect(started).toMatchObject({ status: STATUS.UNDER_REVIEW, reviewing_coordinator_id: coordinator });
+    });
+
+    it('SCRUM486_AC8_a_draft_is_still_answered_as_not_yours', async () => {
+      // Draft is left out of the new check on purpose: it has no coordinator
+      // either, but it is not waiting for the Lead. SCRUM-19 answers it with
+      // the caller check's 403 (AC1-03), and still does.
+      const id = await request(STATUS.DRAFT);
+
+      const err = await refusal(startReview(id, coordinator));
+
+      expect(err.code).toBe('42501');
+    });
+
+    it('SCRUM486_AC8_deciding_an_unassigned_request_is_refused_naming_the_lead', async () => {
+      // decide_event_request had the same fault: it checks the caller before
+      // the status, so a decision on an unassigned submitted request was the
+      // caller check's 42501. Reachable by a direct call, so guarded.
+      const id = await unassigned();
+      const before = await row(id);
+
+      const err = await refusal(db.query(
+        "select * from decide_event_request($1, 'rejected', 'Not viable.', $2, now())", [id, coordinator],
+      ));
+
+      expect(err.code).toBe('55000');
+      expect(err.message).toContain(WAITING);
+      expect(err.message).toContain('it cannot be decided yet');
+      expect(await row(id)).toEqual(before);
+      expect(await statusHistory(id)).toHaveLength(0);
+    });
+  });
+
+  describe('SCRUM-486 AC10: the Lead, the coordinator and the organiser are notified', () => {
+    // SCRUM-518. The notices are written inside the three functions, so these
+    // read them back from the table after each call.
+    const noticesFor = async (id) => (await db.query(
+      `select recipient_id, type, payload from notifications
+        where payload->>'eventRequestId' = $1 order by created_at, id`,
+      [id],
+    )).rows;
+
+    it('SCRUM486_AC10_submission_tells_every_lead_a_request_is_waiting', async () => {
+      // AC10-01. Two Leads exist by now, so two notices, one each, of the
+      // Lead's type, naming the event.
+      const id = await request();
+
+      await submit(id);
+
+      const notices = await noticesFor(id);
+      expect(notices.map((n) => n.recipient_id).sort()).toEqual([lead, lead2].sort());
+      for (const notice of notices) {
+        expect(notice.type).toBe('event_request_awaiting_assignment');
+        expect(notice.payload).toMatchObject({ eventRequestId: id, eventName: 'event draft' });
+        expect(notice.payload.submittedAt).toBeTruthy();
+      }
+    });
+
+    it('SCRUM486_AC10_an_assignment_tells_the_coordinator_and_the_organiser_by_name', async () => {
+      // AC10-02. The coordinator's notice carries who assigned it and the
+      // note; the Organiser's carries the coordinator's name and no note
+      // (AC9: the Organiser does not see the note).
+      const id = await unassigned();
+
+      await assign(id, coordinator, lead, 'Yours from today');
+
+      const notices = await noticesFor(id);
+      expect(notices).toHaveLength(2);
+      expect(notices.find((n) => n.recipient_id === coordinator)).toMatchObject({
+        type: 'event_request_assigned',
+        payload: {
+          eventRequestId: id,
+          assignedById: lead,
+          assignedByName: 'Lena Lead',
+          previousCoordinatorId: null,
+          previousCoordinatorName: null,
+          note: 'Yours from today',
+        },
+      });
+      const toOrganiser = notices.find((n) => n.recipient_id === organiser);
+      expect(toOrganiser).toMatchObject({
+        type: 'event_request_coordinator_assigned',
+        payload: {
+          eventRequestId: id,
+          coordinatorId: coordinator,
+          coordinatorName: 'Priya Nair',
+          previousCoordinatorId: null,
+        },
+      });
+      expect(toOrganiser.payload).not.toHaveProperty('note');
+    });
+
+    it('SCRUM486_AC10_every_notice_names_its_event_in_the_column_and_the_payload', async () => {
+      // Since the merge of dev: 048 added notifications.event_request_id for
+      // event_cancelled, and 052 fills it on all three of this story's types,
+      // keeping eventRequestId in the payload for SCRUM-172's contract. Each
+      // of the three writers: submission, a first assignment, a handover.
+      const id = await request();
+      await submit(id);
+      await assign(id, coordinator, lead);
+      await reassign(id, otherCoordinator, lead);
+
+      const { rows } = await db.query(
+        `select type, event_request_id, payload->>'eventRequestId' as in_payload
+           from notifications where payload->>'eventRequestId' = $1`,
+        [id],
+      );
+      expect(new Set(rows.map((n) => n.type))).toEqual(new Set([
+        'event_request_awaiting_assignment', 'event_request_assigned', 'event_request_coordinator_assigned',
+      ]));
+      for (const notice of rows) {
+        expect(notice.event_request_id).toBe(id);
+        expect(notice.in_payload).toBe(id);
+      }
+    });
+
+    it('SCRUM486_AC10_a_reassignment_tells_the_new_coordinator_and_the_organiser_who_held_it', async () => {
+      // AC10-03. The same two types; previousCoordinatorId is what makes it a
+      // handover, so the screen can word it so.
+      const id = await request(STATUS.UNDER_REVIEW);
+
+      await reassign(id, otherCoordinator, lead, 'Handing over');
+
+      const notices = await noticesFor(id);
+      expect(notices).toHaveLength(2);
+      expect(notices.find((n) => n.recipient_id === otherCoordinator)).toMatchObject({
+        type: 'event_request_assigned',
+        payload: { previousCoordinatorId: coordinator, previousCoordinatorName: 'Priya Nair', note: 'Handing over' },
+      });
+      const toOrganiser = notices.find((n) => n.recipient_id === organiser);
+      expect(toOrganiser).toMatchObject({
+        type: 'event_request_coordinator_assigned',
+        payload: { coordinatorName: 'Omar Okafor', previousCoordinatorName: 'Priya Nair' },
+      });
+      expect(toOrganiser.payload).not.toHaveProperty('note');
+    });
+
+    it.each([
+      ['already assigned (AC4-02)', (id) => assign(id, coordinator), (id) => assign(id, otherCoordinator, lead2)],
+      ['to a Lead (AC3-02)', async () => {}, (id) => assign(id, lead2)],
+      ['by a coordinator (AC3-03)', async () => {}, (id) => assign(id, coordinator, coordinator)],
+    ])('SCRUM486_AC10_a_refused_assignment_notifies_nobody_when_%s', async (_label, setUp, attempt) => {
+      // AC10-05. Every refusal raises before the inserts, and a raise rolls
+      // them back. Counted after any setup (the first, successful assignment
+      // writes its own two), so the refused call is shown to add none.
+      const id = await unassigned();
+      await setUp(id);
+      const before = await noticesFor(id);
+
+      const err = await refusal(attempt(id));
+
+      expect(err).not.toBeNull();
+      expect(await noticesFor(id)).toEqual(before);
+    });
+
+    it('SCRUM486_AC10_052_keeps_every_type_048_allows_and_adds_three', async () => {
+      // AC10-04, read from the files. notifications_type_known is restated
+      // whole each time, so 052 must restate the latest list before it, which
+      // is 048's eight: 040's seven and SCRUM-370's event_cancelled. Leaving
+      // venue_hold_expired out would stop venue holds expiring; leaving
+      // event_cancelled out would stop cancellation (052's header).
+      //
+      // Was SCRUM486_AC10_041_keeps_every_type_040_allows_and_adds_three, and
+      // read 040. Right when written: 040 was the latest list in this
+      // repository. The merge of dev brought 048, which restates it with
+      // event_cancelled, and the file moved from 041 to 052 to apply after it.
+      // 040's seven are still checked, as the first part of 048's list.
+      //
+      // The constraint in force is checked too, so the PGlite database agrees.
+      // That database does not apply 048 (this suite builds SCRUM-486's
+      // migrations, not SCRUM-370's), which is exactly why the list is read
+      // from 048's text: no PGlite suite applies both stories' files.
+      const typesIn = (name) => {
+        const sql = migration(name).replace(/--[^\n]*/g, '');
+        const at = sql.lastIndexOf('add constraint notifications_type_known');
+        const list = sql.slice(at, sql.indexOf(');', at));
+        return [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+      };
+      const from040 = typesIn('040_venue_holds.sql');
+      const from048 = typesIn('048_complete_event_cancellation_existing_arrangements.sql');
+      const in052 = typesIn('052_lead_assignment.sql');
+
+      expect(from040).toEqual([
+        'booking_flagged',
+        'booking_request_withdrawn',
+        'clarification_requested',
+        'clarification_replied',
+        'clarification_closed',
+        'booking_flagged_setup_change',
+        'venue_hold_expired',
+      ]);
+      expect(from048).toEqual([...from040, 'event_cancelled']);
+      expect(in052).toEqual([
+        ...from048,
+        'event_request_awaiting_assignment',
+        'event_request_assigned',
+        'event_request_coordinator_assigned',
+      ]);
+      const { rows: [def] } = await db.query(
+        "select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'notifications_type_known'",
+      );
+      for (const type of in052) expect(def.def).toContain(`'${type}'`);
     });
   });
 

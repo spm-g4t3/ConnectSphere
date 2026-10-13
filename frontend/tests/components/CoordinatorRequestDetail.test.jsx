@@ -47,6 +47,9 @@ import {
   getCoordinatorChangeRequests,
   getEventCancellationImpact,
   getEventClarificationHistory,
+  listCoordinatorWorkload,
+  listCoordinators,
+  reassignEventRequest,
   requestEventClarification,
   startEventReview,
 } from "../../src/services/eventRequestService";
@@ -68,6 +71,8 @@ vi.mock("../../src/services/eventRequestService", () => ({
   getEventCancellationImpact: vi.fn(),
   getEventClarificationHistory: vi.fn(),
   listCoordinators: vi.fn(),
+  // SCRUM-521: the handover panel reads this one when the caller is a Lead.
+  listCoordinatorWorkload: vi.fn(),
   processCoordinatorChangeRequest: vi.fn(),
   reassignEventRequest: vi.fn(),
   requestEventClarification: vi.fn(),
@@ -409,6 +414,23 @@ describe("SCRUM19_AC1 starting the review", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/no longer assigned to you/i);
   });
+
+  it("SCRUM486_AC8_a_409_on_start_review_says_it_may_be_waiting_for_the_lead", async () => {
+    // AC8-05. Since migration 052, starting the review of a request with no
+    // coordinator is refused with 409 (55000), not 403. The 409 entry names
+    // both of its causes, the Lead's assignment among them; the screen does
+    // not read the server's message to choose between them.
+    vi.mocked(startEventReview).mockRejectedValue(httpError(409));
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest());
+
+    await user.click(await screen.findByRole("button", { name: "Start review" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/waiting for the Event Coordinator Lead to assign it a coordinator/);
+    expect(alert).toHaveTextContent(/no longer be waiting to be reviewed/);
+    expect(alert).not.toHaveTextContent(/no longer assigned to you/);
+  });
 });
 
 
@@ -424,6 +446,24 @@ describe("SCRUM19_AC1 a coordinator who is not assigned sees no actions", () => 
 
     expect(await screen.findByText(text)).toBeInTheDocument();
     expect(actionButtonsShown()).toEqual([]);
+  });
+
+  it.each([
+    ["the coordinator who used to hold it", ASSIGNED],
+    ["any other coordinator", OTHER],
+  ])("SCRUM486_AC8_an_unassigned_request_opened_by_%s_says_it_is_waiting_for_the_lead", async (_label, viewer) => {
+    // AC8-04. Since 052 a submitted request can have no coordinator; any
+    // coordinator can still open it by id (SCRUM-332). "Waiting for the
+    // assigned coordinator" would name nobody, so it says who it is waiting
+    // for, and nobody is offered Start review, which 052 would refuse.
+    renderAs(viewer, eventRequest({ assignedCoordinatorId: null }));
+
+    expect(
+      await screen.findByText("Waiting for the Event Coordinator Lead to assign this request to a coordinator."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Waiting for the assigned coordinator to start the review.")).not.toBeInTheDocument();
+    expect(actionButtonsShown()).toEqual([]);
+    expect(screen.queryByRole("button", { name: /hand over|reassign/i })).not.toBeInTheDocument();
   });
 });
 
@@ -754,6 +794,135 @@ describe("SCRUM254 requesting a venue from the event view", () => {
 
     await waitFor(() => expect(onChangeRequestProcessed).toHaveBeenCalledTimes(1));
     expect(createBookingRequest).toHaveBeenCalledWith({ eventRequestId: REQUEST_ID, venueId: "v1" });
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-486 (SCRUM-521), AC6-05: who sees the hand-over action
+// ---------------------------------------------------------------------------
+describe("SCRUM486_AC6 the hand-over action on the event screen", () => {
+  const LEAD = "77777777-7777-4777-8777-777777777777";
+  const HAND_OVER = "Hand over to another coordinator";
+
+  function renderAsRole(userId, role, request) {
+    vi.mocked(useAuth).mockReturnValue({ user: { id: userId, role } });
+    return render(
+      <MemoryRouter>
+        <CoordinatorRequestDetail request={request} onChangeRequestProcessed={vi.fn()} onReviewDecisionProcessed={vi.fn()} />
+      </MemoryRouter>,
+    );
+  }
+
+  beforeEach(() => {
+    vi.mocked(listCoordinators).mockReset();
+    vi.mocked(listCoordinatorWorkload).mockReset();
+    vi.mocked(reassignEventRequest).mockReset();
+  });
+
+  it("SCRUM486_AC6_a_lead_sees_the_hand_over_action_on_an_event_they_do_not_hold", async () => {
+    renderAsRole(LEAD, "event_coordinator_lead", eventRequest({ status: "under_review", reviewingCoordinatorId: ASSIGNED }));
+
+    expect(await screen.findByRole("button", { name: HAND_OVER })).toBeInTheDocument();
+    // And nothing else: reviewing and deciding stay the holder's.
+    expect(actionButtonsShown()).toEqual([]);
+  });
+
+  it("SCRUM486_AC6_the_holder_still_sees_it", async () => {
+    renderAsRole(ASSIGNED, "event_coordinator", eventRequest());
+
+    expect(await screen.findByRole("button", { name: HAND_OVER })).toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC6_a_coordinator_who_holds_nothing_does_not", async () => {
+    renderAsRole(OTHER, "event_coordinator", eventRequest());
+
+    await screen.findByText("IS212 Industry Night");
+    expect(screen.queryByRole("button", { name: HAND_OVER })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC6_not_even_a_lead_sees_it_on_a_cancelled_event", async () => {
+    // The merge of dev (SCRUM-370) put "not cancelled" into the same gate as
+    // SCRUM-521's "the holder or a Lead": a cancelled event cannot be handed
+    // over (052's status list leaves it out), whoever is looking.
+    renderAsRole(LEAD, "event_coordinator_lead", eventRequest({ status: "cancelled" }));
+
+    await screen.findByText("IS212 Industry Night");
+    expect(screen.queryByRole("button", { name: HAND_OVER })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC6_not_even_a_lead_sees_it_on_a_request_nobody_holds", async () => {
+    // Assigned from the Lead's queue, not handed over (052 refuses, AC5-05).
+    renderAsRole(LEAD, "event_coordinator_lead", eventRequest({ assignedCoordinatorId: null }));
+
+    await screen.findByText("IS212 Industry Night");
+    expect(screen.queryByRole("button", { name: HAND_OVER })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC6_a_lead_hands_it_over_from_the_screen_without_being_told_they_can_no_longer_change_it", async () => {
+    // The Lead's panel reads the Lead's list, leaves out the holder, and after
+    // the handover the notice does not say "you can no longer change it",
+    // which was never true of the Lead. The Lead can hand it over again.
+    vi.mocked(listCoordinatorWorkload).mockResolvedValue([
+      { id: ASSIGNED, fullName: "Priya Nair", activeEvents: 2 },
+      { id: OTHER, fullName: "Omar Okafor", activeEvents: 0 },
+    ]);
+    vi.mocked(reassignEventRequest).mockResolvedValue(eventRequest({ assignedCoordinatorId: OTHER }));
+    const user = userEvent.setup();
+    renderAsRole(LEAD, "event_coordinator_lead", eventRequest());
+
+    await user.click(await screen.findByRole("button", { name: HAND_OVER }));
+    const select = await screen.findByLabelText("Hand over to");
+    expect(within(select).queryByRole("option", { name: /Priya Nair/ })).not.toBeInTheDocument();
+    await user.selectOptions(select, OTHER);
+    await user.click(screen.getByRole("button", { name: "Confirm handover" }));
+
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("Handed over to Omar Okafor.");
+    expect(notice).not.toHaveTextContent(/not change it/);
+    expect(listCoordinators).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: HAND_OVER })).toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC6_a_second_handover_from_the_same_screen_leaves_out_the_new_holder", async () => {
+    // The panel is told who holds the event now, not who held it when the
+    // screen was loaded: after A -> B, the next list leaves out B, offers A.
+    vi.mocked(listCoordinatorWorkload).mockResolvedValue([
+      { id: ASSIGNED, fullName: "Priya Nair", activeEvents: 2 },
+      { id: OTHER, fullName: "Omar Okafor", activeEvents: 0 },
+    ]);
+    vi.mocked(reassignEventRequest).mockResolvedValue(eventRequest({ assignedCoordinatorId: OTHER }));
+    const user = userEvent.setup();
+    renderAsRole(LEAD, "event_coordinator_lead", eventRequest());
+
+    await user.click(await screen.findByRole("button", { name: HAND_OVER }));
+    await user.selectOptions(await screen.findByLabelText("Hand over to"), OTHER);
+    await user.click(screen.getByRole("button", { name: "Confirm handover" }));
+    await screen.findByRole("status");
+    await user.click(screen.getByRole("button", { name: HAND_OVER }));
+
+    const select = await screen.findByLabelText("Hand over to");
+    expect(within(select).queryByRole("option", { name: /Omar Okafor/ })).not.toBeInTheDocument();
+    expect(within(select).getByRole("option", { name: /Priya Nair/ })).toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC6_the_holder_is_still_told_they_can_view_but_not_change_it", async () => {
+    vi.mocked(listCoordinators).mockResolvedValue([
+      { id: ASSIGNED, fullName: "Priya Nair" },
+      { id: OTHER, fullName: "Omar Okafor" },
+    ]);
+    vi.mocked(reassignEventRequest).mockResolvedValue(eventRequest({ assignedCoordinatorId: OTHER }));
+    const user = userEvent.setup();
+    renderAsRole(ASSIGNED, "event_coordinator", eventRequest());
+
+    await user.click(await screen.findByRole("button", { name: HAND_OVER }));
+    await user.selectOptions(await screen.findByLabelText("Hand over to"), OTHER);
+    await user.click(screen.getByRole("button", { name: "Confirm handover" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Handed over to Omar Okafor. You can still view this event, but not change it.",
+    );
+    expect(screen.queryByRole("button", { name: HAND_OVER })).not.toBeInTheDocument();
   });
 });
 

@@ -109,8 +109,21 @@ const ROUTES = [
 ];
 
 
+/**
+ * SCRUM-486 (SCRUM-521): the Lead may read an event's equipment, and only
+ * read it. The event screen the Lead hands an event over from reads this list
+ * on mount. The table below refused the Lead every route, reads included, and
+ * that was right when written (SCRUM-485 granted the Lead nothing). The read
+ * row for the Lead is taken out of the refusal table and pinned as allowed in
+ * the case after it; the Lead's three write rows stay refused.
+ */
+const isLeadRead = (role, what) => role === ROLE.EVENT_COORDINATOR_LEAD && what === 'reads';
+
 describe('AC1: only Event Coordinators reach any route', () => {
-  it.each(OTHER_ROLES.flatMap((role) => ROUTES.map(([what, call]) => [role, what, call])))(
+  it.each(
+    OTHER_ROLES.flatMap((role) => ROUTES.map(([what, call]) => [role, what, call]))
+      .filter(([role, what]) => !isLeadRead(role, what)),
+  )(
     'SCRUM21_AC1_refuses_%s_who_%s_with_403_and_reaches_nothing',
     async (role, _what, call) => {
       const client = fakeClient();
@@ -122,6 +135,18 @@ describe('AC1: only Event Coordinators reach any route', () => {
       expect(client.from).not.toHaveBeenCalled();
     },
   );
+
+  it('SCRUM486_AC6_the_lead_reads_an_events_equipment_and_nothing_else', async () => {
+    // The read reaches the read function and only that; the writes above
+    // still refuse the Lead before the client is touched.
+    const client = fakeClient({ rpc: { equipment_for_event: ok(stateRow({ status: 'arranged' })) } });
+
+    const res = await request(appWith(client, signedInAs(ROLE.EVENT_COORDINATOR_LEAD))).get(BASE);
+
+    expect(res.status).toBe(200);
+    expect(res.body.request.statusLabel).toBe('Arranged');
+    expect(client.rpcCalls.map(({ name }) => name)).toEqual(['equipment_for_event']);
+  });
 
   it.each(ROUTES)('SCRUM21_AC1_refuses_a_signed_out_caller_who_%s_with_401', async (_what, call) => {
     const client = fakeClient();

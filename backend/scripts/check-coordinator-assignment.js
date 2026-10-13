@@ -1,58 +1,85 @@
 /**
- * End-to-end proof for coordinator assignment (SCRUM-327, checked by SCRUM-335).
+ * End-to-end proof for coordinator assignment, against the live database.
  *
  * Run with: npm run assignment:check
  *
- * The unit suite has over a thousand tests, every one against a fake client.
- * They prove the services call the right Postgres function with the right
- * arguments and turn each SQLSTATE into the right error. They cannot prove
- * what the functions themselves do, because a fake returns whatever it was
- * given. This script is the other half: it runs the real functions from 015,
- * 016, 017, 018 and 019 against the real database, through the real services.
+ * First written for SCRUM-327 (checked by SCRUM-335), when submission chose a
+ * coordinator automatically. Rewritten for SCRUM-486 (SCRUM-522), because the
+ * customer changed that requirement on 11 October: a submitted request now
+ * goes to the Event Coordinator Lead, who assigns it to a coordinator by hand.
+ * Migration 052 made the change. What the script used to prove, and what it
+ * proves now:
  *
- *   1. The selection rule (015): fewest active events, then longest without a
- *      new assignment, then never assigned first, coordinators only.
- *   2. Assign on submission (016): one coordinator, one history row.
- *   3. The constraint (017): nothing past draft without a coordinator.
- *   4. Reassignment (018): a handover, the reviewer following it, and each
- *      refusal by its SQLSTATE.
- *   5. Permissions (SCRUM-332, 019): only the assigned coordinator changes an
- *      event; any coordinator reads it.
- *   6. The reads (SCRUM-333, SCRUM-334): "My events" and the history.
+ *   1. Was: the selection rule (015) -- fewest active events, then longest
+ *      without an assignment. 052 leaves pick_event_coordinator in the
+ *      database, but nothing calls it any more, so testing it would prove a
+ *      rule the system no longer uses. Now: submission assigns nobody. The
+ *      request is submitted with no coordinator and no assignment-history row,
+ *      every Lead is told it is waiting, it is in the Lead's queue, and it is
+ *      not in the coordinators' shared queue.
+ *   2. Was: assign on submission (016) -- one coordinator, one history row,
+ *      assigned_by null for "the system". Now: the Lead assigns
+ *      (assign_event_request, 052) -- one coordinator, one history row whose
+ *      assigned_by is the Lead, the coordinator and the Organiser told; every
+ *      refusal by its code, a second assignment told who won, and the request
+ *      out of the Lead's queue and into the shared one. And the real AC4 race:
+ *      two Leads assigning at once, on separate connections, which no test
+ *      suite here can do.
+ *   3. Was: 017's constraint refused a submitted event with no coordinator.
+ *      Now: 052's relaxed constraint allows exactly that and still refuses any
+ *      later status without one.
+ *   4. Reassignment: a holder's handover, unchanged, and beside it the Lead's
+ *      (AC6): a Lead who does not hold the event moves it, the history names
+ *      the Lead, and the coordinator it was taken from is refused after. An
+ *      unassigned request is refused as "assign, not reassign".
+ *   5. Permissions: only the holder acts; any coordinator reads. Unchanged.
+ *   6. The reads: "My events", the history (old automatic rows and new Lead
+ *      rows side by side, AC9-03), and both coordinator lists.
  *
- * It creates its own users: four coordinators, one Organiser, and one Venue
- * Staff member who is the perfect candidate in every way except their role.
- * It removes them, and everything they touched, at the end. Cleanup is checked
- * like any other step: every delete's error is kept, and the last checks count
- * what is left.
+ * It creates its own users: an Organiser, an Event Coordinator Lead, three
+ * coordinators, and a Venue Staff member used as someone who may not be
+ * assigned. It removes them and everything they touched, and checks that it
+ * did: every delete's error is kept, and the last checks count what is left.
  *
- * TWO HAZARDS, both handled below rather than hoped away:
+ * HAZARDS, each handled below rather than hoped away:
  *
- *  - The coordinators created here are real candidates for a real submission.
- *    pick_event_coordinator ranks every profile with the role, and to test the
- *    rule these coordinators are deliberately made the best candidates in turn.
- *    If an Organiser submits a genuine request while this runs, it may be
- *    assigned to one of them. cleanup() looks for any event it did not create
- *    that names one of its users, and re-homes it: it removes the history row
- *    naming the test coordinator, asks pick_event_coordinator again once the
- *    test profiles are gone, and records the assignment the event should have
- *    had. It says so loudly. Without this the test user could not be deleted,
- *    because every coordinator column is ON DELETE RESTRICT, and the real event
- *    would be left held by an account that is about to vanish.
- *
- *  - Every event submitted here gets a history row, and history's
- *    event_request_id is ON DELETE RESTRICT (014), as are new_coordinator_id
- *    and assigned_by. So the delete order is fixed: change requests, then
- *    history, then events, then users. In the other order the first delete is
- *    refused and everything after it is left behind.
- *
- * And one precondition. The rule compares these coordinators with the real
- * ones. A real coordinator with no active events and no assignment history
- * would tie with or beat the test's intended winner, and then the checks
- * would be measuring the live data, not the rule. preconditionHolds() checks
- * for one first and, if it finds one, skips the selection checks with a
- * failure that says why, rather than reporting a result it cannot stand
- * behind.
+ *  - Every real Lead is notified of this script's submissions (052 tells every
+ *    Lead a request is waiting). Those rows are real Leads' notifications in a
+ *    shared project, so cleanup deletes every notification about an event this
+ *    run created, and notifications are counted before and after like every
+ *    other table. Until cleanup runs, a real Lead who looks will see them.
+ *  - The test coordinators are real choices in a real Lead's picker while this
+ *    runs. If a Lead assigns a real request to one, the test user cannot be
+ *    deleted (every coordinator column is ON DELETE RESTRICT). cleanup() looks
+ *    for such events and, if one is still submitted, returns it to the Lead's
+ *    queue (no coordinator, the history rows naming test users removed). That
+ *    is the state it was in before the Lead chose; 052's constraint allows it
+ *    only at submitted. Anything further along is reported as a cleanup
+ *    failure naming the event, for a Lead to hand over by hand. Before
+ *    SCRUM-486 this re-homed the event with pick_event_coordinator; there is no
+ *    automatic choice to fall back on now, and inventing one would undo the
+ *    change the customer asked for.
+ *  - Delete order. event_request_assignment_history and (since SCRUM-321)
+ *    event_request_status_history both reference event_requests ON DELETE
+ *    RESTRICT, and name users the same way. So: notifications, change
+ *    requests, status history, assignment history, events, then users. The
+ *    version before SCRUM-522 did not delete status history, so once 021 was
+ *    live its event delete would have been refused (inferred from 021's
+ *    foreign key; not observed, since this script has not been run since).
+ *  - Clarification history cannot be deleted. 030's trigger
+ *    (event_clarification_history_immutable, SCRUM-162) refuses every update
+ *    or delete on event_request_clarification_history, including the cascade
+ *    when an event is deleted. One successful clarification request makes its
+ *    event, its organiser and its coordinator permanent in the shared
+ *    database. Observed on 12 October: the first run after 052 asked for
+ *    clarification on s1, and cleanup could not remove it. So this script
+ *    never asks for clarification successfully; refusals are fine, since they
+ *    write nothing. Do not add one back, and do not switch the trigger off
+ *    from here (the service-role client cannot ALTER TABLE, and an audit guard
+ *    is not this script's to lower).
+ *  - Events are deleted one at a time, so an event that cannot be removed is
+ *    named and the rest still go. The first run deleted them in one statement,
+ *    and s1 kept all eleven.
  *
  * Exits non-zero on any failure.
  */
@@ -61,12 +88,17 @@ import { supabase } from '../src/config/supabaseClient.js';
 import {
   createEventRequest,
   submitEventRequest,
+  assignEventRequest,
   reassignEventRequest,
+  startEventReview,
   requestEventClarification,
   getEventRequestForCoordinator,
   listEventRequestsForCoordinator,
+  listEventRequestsForReview,
+  listUnassignedEventRequests,
   listAssignmentHistory,
   listCoordinators,
+  listCoordinatorWorkload,
 } from '../src/services/eventRequestService.js';
 import {
   createChangeRequest,
@@ -84,25 +116,12 @@ const NAME = `__check_assign_${STAMP}`;
 
 const DAY = 24 * 60 * 60 * 1000;
 
-// The statuses 015 counts as active. Repeated here only to set up and describe
-// fixtures, never to decide anything the function decides.
-const ACTIVE = ['submitted', 'under_review', 'pending_clarification', 'approved', 'planning', 'confirmed'];
-
-// Fixed instants for the history rows that set up the tie-break. Far in the
-// past on purpose: older than any real assignment, so a real coordinator's
-// history can never be older than the one the test intends to win.
-const LONG_AGO = {
-  first: '2000-01-01T00:00:00Z',
-  second: '2000-01-02T00:00:00Z',
-  third: '2000-01-03T00:00:00Z',
-};
-
 // Everything created, tracked the moment it exists, so cleanup can find it
 // whatever fails afterwards.
 const users = {};            // label -> id
 const createdEventIds = [];
 let countsBefore = null;
-let rehomed = [];
+let returnedToQueue = [];
 let failures = 0;
 
 // supabase-js returns a refused delete as { error } rather than throwing, so a
@@ -151,8 +170,8 @@ function userIds() {
  *
  * No password: nothing here signs in. Every action goes through the services,
  * which take the acting user as an argument, exactly as the routes pass
- * req.user.id. The full_name is what organiserName and the history's names
- * are checked against.
+ * req.user.id. The full_name is what the names in lists and refusals are
+ * checked against.
  */
 async function createUser(label, role) {
   const { data, error } = await supabase.auth.admin.createUser({
@@ -170,13 +189,8 @@ async function createUser(label, role) {
   return data.user.id;
 }
 
-/**
- * An event inserted directly, already assigned, to give a coordinator a known
- * workload. These are fixtures for the rule, not tests of submission, so they
- * skip submit_event_request on purpose: the rule must be measured against
- * workloads the script chose, not ones the rule itself produced.
- */
-async function insertEvent(label, { status, coordinator, proposedStart = null }) {
+/** An event inserted directly, for fixtures no function should make. */
+async function insertEvent(label, { status, coordinator }) {
   const { data, error } = await supabase
     .from('event_requests')
     .insert({
@@ -184,32 +198,13 @@ async function insertEvent(label, { status, coordinator, proposedStart = null })
       event_name: `${NAME}_${label}`,
       status,
       assigned_coordinator_id: coordinator,
-      proposed_start: proposedStart,
+      submitted_at: status === 'draft' ? null : new Date().toISOString(),
     })
     .select('id')
     .single();
   if (error) throw new Error(`could not insert event ${label}: ${error.message}`);
   createdEventIds.push(data.id);
   return data.id;
-}
-
-/**
- * A history row with a chosen created_at, which is the only way to set up a
- * tie-break deterministically: 015's step 3 reads max(created_at) per
- * coordinator, and real assignments made a moment apart are too close to
- * reason about.
- */
-async function insertHistory(eventId, coordinator, createdAt) {
-  const { error } = await supabase
-    .from('event_request_assignment_history')
-    .insert({
-      event_request_id: eventId,
-      previous_coordinator_id: null,
-      new_coordinator_id: coordinator,
-      assigned_by: null,
-      created_at: createdAt,
-    });
-  if (error) throw new Error(`could not insert history: ${error.message}`);
 }
 
 /** A complete draft, made and submitted through the real services. */
@@ -223,7 +218,7 @@ async function submitDraft(label) {
     expectedAttendance: 40,
   }, users.organiser);
   createdEventIds.push(draft.id);
-  return submitEventRequest(draft.id);
+  return submitEventRequest(draft.id, { changedBy: users.organiser });
 }
 
 /** The history rows for one event, oldest first, straight from the table. */
@@ -238,51 +233,14 @@ async function historyOf(eventId) {
   return data;
 }
 
-async function setStatus(eventId, status) {
-  const { error } = await supabase.from('event_requests').update({ status }).eq('id', eventId);
-  if (error) throw new Error(`could not set status: ${error.message}`);
-}
-
-/**
- * Is there a real coordinator who would beat the test's intended winners?
- *
- * The intended winners always have no active events, and either no history or
- * history from 2000-01-01 to 2000-01-03. A real coordinator with no active
- * events and no history, or history at least that old, would tie with or beat
- * them, and the result would depend on the live data and on uuid order. Any
- * real coordinator with at least one active event, or with an assignment since
- * 2000-01-03, cannot.
- */
-async function preconditionHolds() {
-  const { data: real, error } = await supabase
-    .from('profiles')
-    .select('id, full_name')
-    .eq('role', 'event_coordinator')
-    .not('id', 'in', `(${userIds().join(',')})`);
-  if (error) throw new Error(`could not read coordinators: ${error.message}`);
-
-  const blockers = [];
-  for (const coordinator of real ?? []) {
-    const { count: active } = await supabase
-      .from('event_requests')
-      .select('id', { count: 'exact', head: true })
-      .eq('assigned_coordinator_id', coordinator.id)
-      .in('status', ACTIVE);
-
-    const { data: latest } = await supabase
-      .from('event_request_assignment_history')
-      .select('created_at')
-      .eq('new_coordinator_id', coordinator.id)
-      .order('created_at', { ascending: false })
-      .limit(1);
-
-    const lastAssigned = latest?.[0]?.created_at ?? null;
-    const tooOld = lastAssigned === null || new Date(lastAssigned) <= new Date(LONG_AGO.third);
-    if ((active ?? 0) === 0 && tooOld) blockers.push(coordinator.full_name ?? coordinator.id);
-  }
-
-  console.log(`  real coordinators: ${(real ?? []).length}, none idle and never assigned: ${blockers.length === 0}`);
-  return blockers;
+/** The notifications about one event, straight from the table. */
+async function noticesAbout(eventId) {
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('recipient_id, type, payload')
+    .eq('payload->>eventRequestId', eventId);
+  if (error) throw new Error(`could not read notifications: ${error.message}`);
+  return data ?? [];
 }
 
 // ---------------------------------------------------------------------------
@@ -298,9 +256,16 @@ async function countAll() {
   return {
     events: await countRows('event_requests'),
     history: await countRows('event_request_assignment_history'),
+    statusHistory: await countRows('event_request_status_history'),
     changeRequests: await countRows('event_change_requests'),
+    notifications: await countRows('notifications'),
     profiles: await countRows('profiles'),
   };
+}
+
+function describeCounts(c) {
+  return `event_requests ${c.events}, history ${c.history}, status history ${c.statusHistory}, `
+    + `change requests ${c.changeRequests}, notifications ${c.notifications}, profiles ${c.profiles}`;
 }
 
 /** Run one cleanup step, keeping its error rather than dropping it. */
@@ -310,13 +275,9 @@ async function remove(label, query) {
 }
 
 /**
- * Events this script did not create that name one of its users.
- *
- * The first hazard in the header. Only possible if a real Organiser submitted
- * while this ran and the rule chose a test coordinator, or a real coordinator
- * handed something to one. Looked for on every coordinator column, and on
- * organiser_id too, though nothing outside this script uses the test
- * Organiser.
+ * Events this script did not create that name one of its users: a real Lead
+ * assigned or handed a real request to a test coordinator while this ran (the
+ * second hazard in the header).
  */
 async function findForeignEvents() {
   const ids = userIds().join(',');
@@ -324,7 +285,7 @@ async function findForeignEvents() {
 
   const { data, error } = await supabase
     .from('event_requests')
-    .select('id, event_name, assigned_coordinator_id, reviewing_coordinator_id')
+    .select('id, event_name, status, assigned_coordinator_id, reviewing_coordinator_id')
     .or(`assigned_coordinator_id.in.(${ids}),reviewing_coordinator_id.in.(${ids}),organiser_id.in.(${ids})`);
   if (error) {
     cleanupErrors.push(`find foreign events: ${error.message}`);
@@ -335,18 +296,21 @@ async function findForeignEvents() {
 }
 
 /**
- * Give a real event back to a real coordinator.
- *
- * Runs after the test profiles are deleted, so pick_event_coordinator can only
- * choose among real coordinators. The history row naming the test coordinator
- * is removed and replaced with the automatic assignment the event should have
- * had, so its history still starts with exactly one system row. The update and
- * the insert are two requests, not one transaction; this is a recovery path
- * for a rare collision, and it reports every step it could not complete.
+ * Put a real request back in the Lead's queue, as it was before a Lead chose
+ * a test coordinator for it. Only at submitted: 052's constraint allows no
+ * coordinator there and nowhere later, and later would mean work had begun
+ * under a test account that is about to vanish, which needs a person.
  */
-async function rehome(event) {
-  const ids = userIds().join(',');
+async function returnToQueue(event) {
+  if (event.status !== 'submitted') {
+    cleanupErrors.push(
+      `real event ${event.id} (${event.event_name}) is ${event.status} and held by a test coordinator; `
+        + 'a Lead must hand it to a real coordinator before the test user can be removed',
+    );
+    return;
+  }
 
+  const ids = userIds().join(',');
   await remove(
     `history naming test users on real event ${event.id}`,
     supabase
@@ -355,70 +319,64 @@ async function rehome(event) {
       .eq('event_request_id', event.id)
       .or(`new_coordinator_id.in.(${ids}),previous_coordinator_id.in.(${ids}),assigned_by.in.(${ids})`),
   );
-
-  const { data: chosen, error: pickError } = await supabase
-    .rpc('pick_event_coordinator', { p_event_request_id: event.id });
-  if (pickError || !chosen) {
-    cleanupErrors.push(
-      `real event ${event.id} (${event.event_name}) is held by a test coordinator and no real `
-        + `coordinator could be chosen for it${pickError ? `: ${pickError.message}` : ''}`,
-    );
-    return;
-  }
-
-  const reviewerWasTest = userIds().includes(event.reviewing_coordinator_id);
   await remove(
-    `re-assign real event ${event.id}`,
+    `return real event ${event.id} to the Lead's queue`,
     supabase
       .from('event_requests')
-      .update({
-        assigned_coordinator_id: chosen,
-        ...(reviewerWasTest ? { reviewing_coordinator_id: null } : {}),
-      })
+      .update({ assigned_coordinator_id: null, reviewing_coordinator_id: null })
       .eq('id', event.id),
-  );
-  await remove(
-    `history for re-assigned real event ${event.id}`,
-    supabase.from('event_request_assignment_history').insert({
-      event_request_id: event.id,
-      previous_coordinator_id: null,
-      new_coordinator_id: chosen,
-      assigned_by: null,
-    }),
   );
 
   console.log(
     `\n  NOTE: real event "${event.event_name}" (${event.id}) was assigned to a test coordinator `
-      + `while this ran. It has been re-assigned to ${chosen} and its history row replaced.`,
+      + 'while this ran. It is back in the Event Coordinator Lead\'s queue, unassigned.',
   );
-  rehomed.push(event.id);
+  returnedToQueue.push(event.id);
 }
 
 async function cleanup() {
   const foreign = await findForeignEvents();
 
-  // The order is the second hazard in the header: change requests, history and
-  // events before users, because each references the next.
+  // One event at a time, children first (the delete-order hazard), so a row
+  // that cannot go is named and keeps only its own event, not every event
+  // this run made (the last hazard in the header).
+  const names = new Map();
   if (createdEventIds.length > 0) {
-    await remove(
-      'change requests',
-      supabase.from('event_change_requests').delete().in('event_request_id', createdEventIds),
-    );
-    await remove(
-      'assignment history',
-      supabase.from('event_request_assignment_history').delete().in('event_request_id', createdEventIds),
-    );
-    await remove('event requests', supabase.from('event_requests').delete().in('id', createdEventIds));
+    const { data, error } = await supabase
+      .from('event_requests')
+      .select('id, event_name')
+      .in('id', createdEventIds);
+    if (error) cleanupErrors.push(`read event names: ${error.message}`);
+    for (const row of data ?? []) names.set(row.id, row.event_name);
   }
 
-  // Profiles before the re-home, so the rule cannot choose a test coordinator
-  // again, and before the auth users, so a failure shows as its own error.
+  for (const id of createdEventIds) {
+    const event = names.get(id) ?? id;
+    // Every notification about this event, including real Leads'.
+    await remove(
+      `notifications about ${event}`,
+      supabase.from('notifications').delete().eq('payload->>eventRequestId', id),
+    );
+    await remove(
+      `change requests of ${event}`,
+      supabase.from('event_change_requests').delete().eq('event_request_id', id),
+    );
+    await remove(
+      `status history of ${event}`,
+      supabase.from('event_request_status_history').delete().eq('event_request_id', id),
+    );
+    await remove(
+      `assignment history of ${event}`,
+      supabase.from('event_request_assignment_history').delete().eq('event_request_id', id),
+    );
+    await remove(`event ${event}`, supabase.from('event_requests').delete().eq('id', id));
+  }
+
+  for (const event of foreign) await returnToQueue(event);
+
   for (const [label, id] of Object.entries(users)) {
     await remove(`profile ${label}`, supabase.from('profiles').delete().eq('id', id));
   }
-
-  for (const event of foreign) await rehome(event);
-
   for (const [label, id] of Object.entries(users)) {
     await remove(`auth user ${label}`, supabase.auth.admin.deleteUser(id));
   }
@@ -427,12 +385,6 @@ async function cleanup() {
 /**
  * Prove the cleanup, after it has run: this run's rows by id, and every table
  * by count.
- *
- * The by-id check is the strict one: none of this run's events, history,
- * change requests, profiles or users remain. The counts are the wider net, in
- * case something was created that was never tracked. They allow for real
- * events re-homed above, each of which is a real event and a real history row
- * that rightly stay.
  */
 async function verifyCleanup() {
   check('cleanup ran without errors', cleanupErrors.length === 0, cleanupErrors.join('; '));
@@ -443,12 +395,13 @@ async function verifyCleanup() {
     .select('id', { count: 'exact', head: true })
     .like('event_name', `${NAME}%`);
 
-  const { count: historyLeft } = createdEventIds.length === 0
-    ? { count: 0 }
-    : await supabase
-      .from('event_request_assignment_history')
-      .select('id', { count: 'exact', head: true })
-      .in('event_request_id', createdEventIds);
+  const byEvent = async (table, column = 'event_request_id') => (createdEventIds.length === 0
+    ? 0
+    : (await supabase.from(table).select('id', { count: 'exact', head: true }).in(column, createdEventIds)).count);
+
+  const historyLeft = await byEvent('event_request_assignment_history');
+  const statusLeft = await byEvent('event_request_status_history');
+  const noticesLeft = await byEvent('notifications', 'payload->>eventRequestId');
 
   const { count: profilesLeft } = ids.length === 0
     ? { count: 0 }
@@ -462,31 +415,32 @@ async function verifyCleanup() {
 
   check(
     'nothing of this run is left behind',
-    eventsLeft === 0 && historyLeft === 0 && profilesLeft === 0 && usersLeft === 0,
-    `${eventsLeft} event(s), ${historyLeft} history row(s), ${profilesLeft} profile(s), ${usersLeft} user(s)`,
+    eventsLeft === 0 && historyLeft === 0 && statusLeft === 0 && noticesLeft === 0
+      && profilesLeft === 0 && usersLeft === 0,
+    `${eventsLeft} event(s), ${historyLeft} history row(s), ${statusLeft} status row(s), `
+      + `${noticesLeft} notification(s), ${profilesLeft} profile(s), ${usersLeft} user(s)`,
   );
 
   if (countsBefore) {
     const after = await countAll();
-    const extra = rehomed.length;
-    console.log(
-      `\n  counts before -> after:  event_requests ${countsBefore.events} -> ${after.events}, `
-        + `history ${countsBefore.history} -> ${after.history}, `
-        + `change requests ${countsBefore.changeRequests} -> ${after.changeRequests}, `
-        + `profiles ${countsBefore.profiles} -> ${after.profiles}`,
-    );
-    // If this fails while the by-id check above passes, this run left nothing of
-    // its own: someone else wrote to the shared database while it ran. The
-    // detail says so, so the failure is not read as a leak.
-    const balanced = after.events === countsBefore.events + extra
-      && after.history === countsBefore.history + extra
+    console.log(`\n  counts before: ${describeCounts(countsBefore)}`);
+    console.log(`  counts after:  ${describeCounts(after)}`);
+    // A real event returned to the queue loses its history row(s) naming a
+    // test coordinator, so history may end lower than it started; that is
+    // reported, not hidden.
+    const balanced = after.events === countsBefore.events
+      && after.statusHistory === countsBefore.statusHistory
       && after.changeRequests === countsBefore.changeRequests
-      && after.profiles === countsBefore.profiles;
+      && after.notifications === countsBefore.notifications
+      && after.profiles === countsBefore.profiles
+      && (returnedToQueue.length > 0 || after.history === countsBefore.history);
+    // If this fails while the by-id check above passes, this run left nothing
+    // of its own: someone else wrote to the shared database while it ran.
     check(
       'every table is back to its starting count',
       balanced,
       balanced
-        ? (extra ? `allowing for ${extra} real event(s) re-homed` : 'no real events touched')
+        ? (returnedToQueue.length ? `allowing for ${returnedToQueue.length} real event(s) returned to the queue` : 'no real events touched')
         : 'counts moved: if nothing of this run is left (above), another user wrote during the run',
     );
   }
@@ -497,197 +451,219 @@ async function verifyCleanup() {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  console.log('\nCoordinator assignment check\n');
+  console.log('\nCoordinator assignment check (the Lead assigns, SCRUM-486)\n');
 
   countsBefore = await countAll();
-  console.log(
-    `  counts before: event_requests ${countsBefore.events}, history ${countsBefore.history}, `
-      + `change requests ${countsBefore.changeRequests}, profiles ${countsBefore.profiles}`,
-  );
+  console.log(`  counts before: ${describeCounts(countsBefore)}`);
 
   await createUser('organiser', 'event_organiser');
+  await createUser('L', 'event_coordinator_lead');
+  // A second Lead, for the race in section 2 (AC4-05).
+  await createUser('L2', 'event_coordinator_lead');
   await createUser('A', 'event_coordinator');
   await createUser('B', 'event_coordinator');
   await createUser('C', 'event_coordinator');
-
-  // Not a coordinator, and otherwise the ideal candidate: no events and no
-  // history, so on every key the rule ranks by, V would come first. If the role
-  // filter were missing, V would win the very first submission.
+  // Not a coordinator: may not be assigned or handed anything.
   await createUser('V', 'venue_staff');
 
-  // -- 1. The selection rule (SCRUM-329, AC2-4) ------------------------------
-  section('1. the selection rule (015)');
+  // -- 1. Submission assigns nobody (SCRUM-486 AC1, AC2, AC10) ----------------
+  section('1. submission assigns nobody; the request waits for the Lead (052)');
 
-  const blockers = await preconditionHolds();
-  let s1 = null;
-  let s2 = null;
-  let s3 = null;
+  const s1 = await submitDraft('s1');
+  check('the request is submitted', s1.status === 'submitted', s1.status);
+  check(
+    'with no coordinator and no reviewer',
+    s1.assignedCoordinatorId === null && s1.reviewingCoordinatorId === null,
+    `${labelOf(s1.assignedCoordinatorId)} / ${labelOf(s1.reviewingCoordinatorId)}`,
+  );
+  check('and no assignment-history row, because nothing was assigned', (await historyOf(s1.id)).length === 0);
 
-  if (blockers.length > 0) {
+  const { count: leads } = await supabase
+    .from('profiles')
+    .select('id', { count: 'exact', head: true })
+    .eq('role', 'event_coordinator_lead');
+  const waiting = (await noticesAbout(s1.id)).filter((n) => n.type === 'event_request_awaiting_assignment');
+  check(
+    'every Lead is told it is waiting, the test Lead among them',
+    waiting.length === leads && waiting.some((n) => n.recipient_id === users.L),
+    `${waiting.length} notice(s) for ${leads} Lead(s)`,
+  );
+
+  const queue = await listUnassignedEventRequests();
+  check('it is in the Lead\'s queue', queue.some((event) => event.id === s1.id));
+  check(
+    'and not in the coordinators\' shared queue (AC2-06)',
+    !(await listEventRequestsForReview()).some((event) => event.id === s1.id),
+  );
+
+  // -- 2. The Lead assigns (SCRUM-486 AC3, AC4, AC9, AC10) --------------------
+  section('2. the Lead assigns (assign_event_request, 052)');
+
+  // Each refusal first, while the request is still unassigned.
+  checkRefusal(
+    'a coordinator cannot make the first assignment (42501)',
+    await failureFrom(assignEventRequest(s1.id, { coordinatorId: users.B }, users.A)),
+    ForbiddenError,
+    403,
+  );
+  checkRefusal(
+    'someone who is not an Event Coordinator cannot be assigned (22023)',
+    await failureFrom(assignEventRequest(s1.id, { coordinatorId: users.V }, users.L)),
+    ValidationError,
+    400,
+  );
+  checkRefusal(
+    'nor can a Lead (22023)',
+    await failureFrom(assignEventRequest(s1.id, { coordinatorId: users.L }, users.L)),
+    ValidationError,
+    400,
+  );
+  check('none of those wrote anything', (await historyOf(s1.id)).length === 0);
+
+  const ASSIGN_NOTE = 'Yours from today.';
+  const assigned = await assignEventRequest(s1.id, { coordinatorId: users.A, note: ASSIGN_NOTE }, users.L);
+  check('the Lead\'s assignment gives it a coordinator', assigned.assignedCoordinatorId === users.A, labelOf(assigned.assignedCoordinatorId));
+
+  const assignedHistory = await historyOf(s1.id);
+  check('one history row', assignedHistory.length === 1, `${assignedHistory.length} row(s)`);
+  check(
+    'a first assignment, made by the Lead, with the note',
+    assignedHistory[0]?.previous_coordinator_id === null
+      && assignedHistory[0]?.new_coordinator_id === users.A
+      && assignedHistory[0]?.assigned_by === users.L
+      && assignedHistory[0]?.handover_note === ASSIGN_NOTE,
+    `previous ${labelOf(assignedHistory[0]?.previous_coordinator_id)}, new ${labelOf(assignedHistory[0]?.new_coordinator_id)}, `
+      + `by ${labelOf(assignedHistory[0]?.assigned_by)}`,
+  );
+
+  const afterAssign = await noticesAbout(s1.id);
+  const toCoordinator = afterAssign.find((n) => n.type === 'event_request_assigned');
+  const toOrganiser = afterAssign.find((n) => n.type === 'event_request_coordinator_assigned');
+  check(
+    'the coordinator is told, with the note',
+    toCoordinator?.recipient_id === users.A && toCoordinator?.payload?.note === ASSIGN_NOTE,
+    toCoordinator ? labelOf(toCoordinator.recipient_id) : 'no notice',
+  );
+  check(
+    'the Organiser is told who, and not the note',
+    toOrganiser?.recipient_id === users.organiser
+      && toOrganiser?.payload?.coordinatorName === 'Check Assign A'
+      && !('note' in (toOrganiser?.payload ?? {})),
+    toOrganiser ? JSON.stringify(toOrganiser.payload) : 'no notice',
+  );
+
+  const second = await failureFrom(assignEventRequest(s1.id, { coordinatorId: users.B }, users.L));
+  checkRefusal('a second assignment is refused (AC4)', second, ConflictError, 409);
+  check(
+    'and is told who was assigned, as data the screen can show',
+    second?.code === 'ALREADY_ASSIGNED' && second?.conflicts?.[0]?.assignedCoordinatorName === 'Check Assign A',
+    second ? `${second.code} ${JSON.stringify(second.conflicts)}` : '(no error)',
+  );
+
+  check('it has left the Lead\'s queue', !(await listUnassignedEventRequests()).some((event) => event.id === s1.id));
+  check('and is in the shared queue now that someone holds it', (await listEventRequestsForReview()).some((event) => event.id === s1.id));
+
+  // AC4-05, the real race. Two Leads assign the same request at once, each
+  // through its own HTTP request and so its own Postgres connection, which is
+  // the one thing the PGlite suite cannot do (it has one connection; see
+  // SCRUM486_AC4_of_two_leads_assigning_at_once_... for what it does prove).
+  // What decides here is 052's row lock: the second transaction waits on
+  // `for update` until the first commits, then reads the coordinator the
+  // first wrote and refuses. Several rounds, because whether the two actually
+  // overlap on a given round depends on timing; every round must still end
+  // with exactly one winner, one history row, and a loser told who won.
+  const ROUNDS = 5;
+  for (let round = 1; round <= ROUNDS; round += 1) {
+    const raced = await submitDraft(`race_${round}`);
+    const outcomes = await Promise.allSettled([
+      assignEventRequest(raced.id, { coordinatorId: users.A }, users.L),
+      assignEventRequest(raced.id, { coordinatorId: users.B }, users.L2),
+    ]);
+    const won = outcomes.filter((o) => o.status === 'fulfilled');
+    const lost = outcomes.filter((o) => o.status === 'rejected');
+    const winner = won[0]?.value?.assignedCoordinatorId;
+    const raceHistory = await historyOf(raced.id);
+
     check(
-      'precondition: no real coordinator is idle and never assigned',
-      false,
-      `${blockers.join(', ')} would compete with the test coordinators, so the rule cannot be `
-        + 'isolated from the live data. Selection checks skipped.',
-    );
-  } else {
-    // Workloads, chosen so each step can only pass for the right reason:
-    //   A: no active events, last assigned 2000-01-03 (most recent of the three)
-    //   B: one active event,  last assigned 2000-01-01 (the oldest)
-    //   C: two active events, last assigned 2000-01-02
-    // A wins only if active count comes before the time since last assignment.
-    // Ranked by time alone, B would win.
-    const aCancelled = await insertEvent('a_cancelled', { status: 'cancelled', coordinator: users.A });
-    await insertHistory(aCancelled, users.A, LONG_AGO.third);
-
-    const bActive = await insertEvent('b_active', { status: 'submitted', coordinator: users.B });
-    await insertHistory(bActive, users.B, LONG_AGO.first);
-
-    // C's two keep a proposed start, one dated and one not, for the ordering
-    // check on "My events" in section 6.
-    const cFirst = await insertEvent('c_dated', {
-      status: 'submitted',
-      coordinator: users.C,
-      proposedStart: new Date(Date.now() + 10 * DAY).toISOString(),
-    });
-    const cSecond = await insertEvent('c_undated', { status: 'under_review', coordinator: users.C });
-    await insertHistory(cFirst, users.C, LONG_AGO.second);
-
-    s1 = await submitDraft('s1');
-    check(
-      'fewest active events wins, ahead of who waited longest',
-      s1.assignedCoordinatorId === users.A,
-      `went to ${labelOf(s1.assignedCoordinatorId)}; expected A (0 active), not B (oldest)`,
+      `race ${round}: exactly one of two Leads assigning at once wins`,
+      won.length === 1 && lost.length === 1,
+      `${won.length} won, ${lost.length} lost`,
     );
     check(
-      'a non-coordinator is never chosen, though best on every other key',
-      s1.assignedCoordinatorId !== users.V,
-      `went to ${labelOf(s1.assignedCoordinatorId)}`,
+      `race ${round}: the other is told who won (ALREADY_ASSIGNED)`,
+      lost[0]?.reason instanceof ConflictError
+        && lost[0].reason.code === 'ALREADY_ASSIGNED'
+        && lost[0].reason.conflicts?.[0]?.assignedCoordinatorId === winner,
+      lost[0]?.reason ? `${lost[0].reason.code}: ${lost[0].reason.message}` : 'nothing was refused',
     );
-
-    // Now a tie on active events. B and C drop to none; A has one (s1).
-    //   B: last assigned 2000-01-01, C: last assigned 2000-01-02
-    // The one waiting longest since their last new assignment wins: B.
-    await setStatus(bActive, 'cancelled');
-    await setStatus(cFirst, 'cancelled');
-    await setStatus(cSecond, 'cancelled');
-
-    s2 = await submitDraft('s2');
     check(
-      'on a tie, the coordinator longest without a new assignment wins',
-      s2.assignedCoordinatorId === users.B,
-      `went to ${labelOf(s2.assignedCoordinatorId)}; expected B (2000-01-01), not C (2000-01-02)`,
+      `race ${round}: one history row, naming the winner`,
+      raceHistory.length === 1 && raceHistory[0].new_coordinator_id === winner,
+      `${raceHistory.length} row(s), winner ${labelOf(winner)}`,
     );
 
-    // A coordinator who has never been assigned anything, against C, who has
-    // no active events and was last assigned in 2000. Never beats any date:
-    // 015 sorts that null first. With nulls last, C would win.
-    //
-    // Created only now, because from the moment it exists it is the best
-    // candidate there is, for this script's submissions and anyone else's.
-    await createUser('D', 'event_coordinator');
-    s3 = await submitDraft('s3');
-    check(
-      'a coordinator never assigned anything sorts first',
-      s3.assignedCoordinatorId === users.D,
-      `went to ${labelOf(s3.assignedCoordinatorId)}; expected D (no history), not C (2000-01-02)`,
-    );
-
-    const { count: vEvents } = await supabase
+    // Out of the active count, so section 6's workload figures are about the
+    // events set up for them. A cancelled request may keep its coordinator.
+    const { error: cancelError } = await supabase
       .from('event_requests')
-      .select('id', { count: 'exact', head: true })
-      .eq('assigned_coordinator_id', users.V);
-    const { count: vHistory } = await supabase
-      .from('event_request_assignment_history')
-      .select('id', { count: 'exact', head: true })
-      .eq('new_coordinator_id', users.V);
-    check(
-      'across all three submissions, the Venue Staff member received nothing',
-      vEvents === 0 && vHistory === 0,
-      `${vEvents} event(s), ${vHistory} history row(s)`,
-    );
+      .update({ status: 'cancelled' })
+      .eq('id', raced.id);
+    if (cancelError) throw new Error(`could not cancel race event ${round}: ${cancelError.message}`);
   }
 
-  // Sections 2 to 6 need s1. If the selection checks were skipped, submit one
-  // anyway: whoever the rule picks, the remaining checks use that coordinator.
-  if (!s1) s1 = await submitDraft('s1');
-  const holder = s1.assignedCoordinatorId;
-
-  // -- 2. Assign on submission (SCRUM-330, AC1) ------------------------------
-  section('2. assign on submission (016)');
-
-  const s1History = await historyOf(s1.id);
-  check('the submission wrote exactly one history row', s1History.length === 1, `${s1History.length} row(s)`);
-  check(
-    'the event and its history name the same coordinator',
-    s1History[0]?.new_coordinator_id === holder,
-    `${labelOf(s1History[0]?.new_coordinator_id)} / ${labelOf(holder)}`,
-  );
-  check(
-    'it is a first assignment: no previous coordinator',
-    s1History[0]?.previous_coordinator_id === null,
-    String(s1History[0]?.previous_coordinator_id),
-  );
-  check(
-    'made by the system: assigned_by is null',
-    s1History[0]?.assigned_by === null,
-    String(s1History[0]?.assigned_by),
-  );
-  check(
-    'submitted_at and the history row created_at both exist',
-    Boolean(s1.submittedAt) && Boolean(s1History[0]?.created_at),
-    `${s1.submittedAt} / ${s1History[0]?.created_at}`,
-  );
-
-  // -- 3. The constraint (017) -----------------------------------------------
-  section('3. no event past draft without a coordinator (017)');
+  // -- 3. The constraint, relaxed (052) ---------------------------------------
+  section('3. no coordinator is allowed at submitted, and only there (052)');
 
   // Straight at the table, bypassing every function, which is the only way to
-  // prove the constraint rather than the code in front of it.
+  // prove the constraint rather than the code in front of it. 017 refused the
+  // first of these; 052 allows it, because the request now waits for the Lead.
+  const { data: waitingRow, error: waitingError } = await supabase
+    .from('event_requests')
+    .insert({ organiser_id: users.organiser, event_name: `${NAME}_waiting`, status: 'submitted' })
+    .select('id')
+    .single();
+  if (waitingRow?.id) createdEventIds.push(waitingRow.id);
+  check(
+    'a submitted event with no coordinator is accepted',
+    !waitingError && Boolean(waitingRow?.id),
+    waitingError ? `${waitingError.code}: ${waitingError.message}` : 'accepted',
+  );
+
   const { data: orphan, error: orphanError } = await supabase
     .from('event_requests')
-    .insert({ organiser_id: users.organiser, event_name: `${NAME}_orphan`, status: 'submitted' })
+    .insert({ organiser_id: users.organiser, event_name: `${NAME}_orphan`, status: 'under_review' })
     .select('id')
     .single();
   if (orphan?.id) createdEventIds.push(orphan.id);
   check(
-    'a submitted event with no coordinator is refused with 23514',
+    'an event under review with no coordinator is refused with 23514',
     orphanError?.code === '23514',
     orphanError ? `${orphanError.code}: ${orphanError.message}` : 'the insert was ACCEPTED',
   );
   check(
-    'the refusal names 017\'s constraint',
+    'the refusal names the constraint',
     /event_requests_assigned_when_submitted/.test(orphanError?.message ?? ''),
     orphanError?.message ?? '(no error)',
   );
 
-  // -- 4. Reassignment (SCRUM-331, AC6, AC7, AC9) ----------------------------
-  section('4. reassignment (018)');
+  // -- 4. Reassignment (SCRUM-327 AC6, and SCRUM-486 AC5, AC6) ----------------
+  section('4. reassignment by the holder, and by the Lead (052)');
 
-  // The handover goes to C, who holds nothing active. Before it, s1 is given a
-  // reviewer: the outgoing coordinator, as if they had started the review.
-  // No decision has been made, so 018 must move the reviewer with the event.
-  const receiver = holder === users.C ? users.B : users.C;
+  // The holder's handover, as SCRUM-327 has it. Before it, s1 is given a
+  // reviewer, as if A had started the review; no decision has been made, so
+  // the reviewer moves with the event.
   const { error: reviewerError } = await supabase
     .from('event_requests')
-    .update({ reviewing_coordinator_id: holder })
+    .update({ reviewing_coordinator_id: users.A })
     .eq('id', s1.id);
   if (reviewerError) throw new Error(`could not set the reviewer: ${reviewerError.message}`);
 
   const NOTE = 'On leave from Monday. The venue shortlist is in my notes.';
-  const handedOver = await reassignEventRequest(
-    s1.id,
-    { newCoordinatorId: receiver, handoverNote: NOTE },
-    holder,
-  );
-  check(
-    'a valid handover moves the event',
-    handedOver.assignedCoordinatorId === receiver,
-    labelOf(handedOver.assignedCoordinatorId),
-  );
+  const handedOver = await reassignEventRequest(s1.id, { newCoordinatorId: users.C, handoverNote: NOTE }, users.A);
+  check('the holder hands it over', handedOver.assignedCoordinatorId === users.C, labelOf(handedOver.assignedCoordinatorId));
   check(
     'and the reviewer moves with it, because no decision has been made',
-    handedOver.reviewingCoordinatorId === receiver,
+    handedOver.reviewingCoordinatorId === users.C,
     labelOf(handedOver.reviewingCoordinatorId),
   );
 
@@ -695,70 +671,49 @@ async function main() {
   const handoverRow = afterHandover[afterHandover.length - 1];
   check('the handover added one history row', afterHandover.length === 2, `${afterHandover.length} row(s)`);
   check(
-    'naming the outgoing coordinator as previous',
-    handoverRow?.previous_coordinator_id === holder,
-    labelOf(handoverRow?.previous_coordinator_id),
-  );
-  check(
-    'and a real person as assigned_by, not the system',
-    handoverRow?.assigned_by === holder,
-    labelOf(handoverRow?.assigned_by),
+    'naming A as previous and A as the one who made it',
+    handoverRow?.previous_coordinator_id === users.A && handoverRow?.assigned_by === users.A,
+    `${labelOf(handoverRow?.previous_coordinator_id)}, by ${labelOf(handoverRow?.assigned_by)}`,
   );
   check('with the note', handoverRow?.handover_note === NOTE, handoverRow?.handover_note);
 
-  // Each refusal, against the event as the handover left it.
   checkRefusal(
     'the previous coordinator can no longer hand it over (42501)',
-    await failureFrom(reassignEventRequest(s1.id, { newCoordinatorId: users.A === holder ? users.B : users.A }, holder)),
+    await failureFrom(reassignEventRequest(s1.id, { newCoordinatorId: users.B }, users.A)),
     ForbiddenError,
     403,
   );
   checkRefusal(
     'a new coordinator without the role is refused (22023)',
-    await failureFrom(reassignEventRequest(s1.id, { newCoordinatorId: users.V }, receiver)),
+    await failureFrom(reassignEventRequest(s1.id, { newCoordinatorId: users.V }, users.C)),
     ValidationError,
     400,
   );
-  const toSelf = await failureFrom(reassignEventRequest(s1.id, { newCoordinatorId: receiver }, receiver));
+  const toSelf = await failureFrom(reassignEventRequest(s1.id, { newCoordinatorId: users.C }, users.C));
   checkRefusal('handing it to the current holder is refused (23514)', toSelf, ValidationError, 400);
   check(
-    'and the message is 018\'s own, not the history constraint\'s',
+    'and the message is the function\'s own, not the history constraint\'s',
     /already assigned to that coordinator/.test(toSelf?.message ?? ''),
     toSelf?.message,
   );
 
-  // A cancelled event cannot be handed over. Inserted here, held by the
-  // receiver, so the caller check passes and only the status is in question.
-  const cancelled = await insertEvent('cancelled_held', { status: 'cancelled', coordinator: receiver });
+  // A cancelled event cannot be handed over. Held by B, so B's caller check
+  // passes and only the status is in question.
+  const cancelled = await insertEvent('cancelled_held', { status: 'cancelled', coordinator: users.B });
   checkRefusal(
-    'a status outside the five AC6 allows is refused (55000)',
-    await failureFrom(reassignEventRequest(cancelled, { newCoordinatorId: holder }, receiver)),
+    'a status outside the ones AC5 allows is refused (55000)',
+    await failureFrom(reassignEventRequest(cancelled, { newCoordinatorId: users.A }, users.B)),
     ConflictError,
     409,
   );
 
-  // A null caller, straight at the function. reassignEventRequest always passes
-  // the caller it is given, and the route always gives it req.user.id from the
-  // token, so this path is only reachable by a direct call: anything holding
-  // the secret key, a future service, or a hand-run script.
-  //
-  // 018 refuses `p_assigned_by is null` explicitly, before comparing it with
-  // the event's coordinator, and that check was added during review. Without
-  // it, `is distinct from` would compare a null caller with a null coordinator,
-  // find them not distinct, and let the caller through.
-  //
-  // So the event matters. Against s1, which has a coordinator, `null is
-  // distinct from C` is true and the call is refused whether or not the
-  // explicit check exists, so a 42501 there proves nothing about it. The only
-  // events with no coordinator are drafts and cancelled ones (017 allows both).
-  // This is a cancelled one with none. With the explicit check it is refused as
-  // the caller (42501). Without it, the caller check would pass and the status
-  // check would refuse it instead (55000), so the code alone says which guard
-  // caught it.
+  // A null caller, straight at the function, on an event nobody holds. 052
+  // keeps 018's explicit null check ahead of everything, so the code says the
+  // caller was refused (42501), not the missing coordinator (55000).
   const unheld = await insertEvent('cancelled_unheld', { status: 'cancelled', coordinator: null });
   const { error: nullCallerError } = await supabase.rpc('reassign_event_request', {
     p_event_request_id: unheld,
-    p_new_coordinator_id: receiver,
+    p_new_coordinator_id: users.C,
     p_assigned_by: null,
     p_handover_note: null,
   });
@@ -766,6 +721,31 @@ async function main() {
     'a null caller is refused as the caller (42501), even on an event nobody holds',
     nullCallerError?.code === '42501',
     nullCallerError ? `${nullCallerError.code}: ${nullCallerError.message}` : 'the call was ACCEPTED',
+  );
+
+  // SCRUM-486 AC6: the Lead, who does not hold it, hands it from C to B.
+  const LEAD_NOTE = 'C is moving to the Open Day team.';
+  const leadMoved = await reassignEventRequest(s1.id, { newCoordinatorId: users.B, handoverNote: LEAD_NOTE }, users.L);
+  check('the Lead, who does not hold it, hands it over', leadMoved.assignedCoordinatorId === users.B, labelOf(leadMoved.assignedCoordinatorId));
+  const leadRow = (await historyOf(s1.id)).at(-1);
+  check(
+    'the history names C as previous and the Lead as the one who made it',
+    leadRow?.previous_coordinator_id === users.C && leadRow?.new_coordinator_id === users.B && leadRow?.assigned_by === users.L,
+    `${labelOf(leadRow?.previous_coordinator_id)} -> ${labelOf(leadRow?.new_coordinator_id)}, by ${labelOf(leadRow?.assigned_by)}`,
+  );
+  checkRefusal(
+    'and C, whose event the Lead moved, can no longer hand it over (42501)',
+    await failureFrom(reassignEventRequest(s1.id, { newCoordinatorId: users.A }, users.C)),
+    ForbiddenError,
+    403,
+  );
+
+  // AC5-05: a request nobody holds is assigned, not reassigned, even by a Lead.
+  checkRefusal(
+    'an unassigned request cannot be reassigned, even by the Lead (55000)',
+    await failureFrom(reassignEventRequest(waitingRow.id, { newCoordinatorId: users.A }, users.L)),
+    ConflictError,
+    409,
   );
 
   const afterRefusals = await historyOf(s1.id);
@@ -776,18 +756,24 @@ async function main() {
     .single();
   check(
     'none of the refusals wrote anything',
-    afterRefusals.length === 2 && s1Row?.assigned_coordinator_id === receiver,
+    afterRefusals.length === 3 && s1Row?.assigned_coordinator_id === users.B,
     `${afterRefusals.length} history row(s), held by ${labelOf(s1Row?.assigned_coordinator_id)}`,
   );
 
-  // -- 5. Permissions (SCRUM-332, AC7) ---------------------------------------
-  section('5. only the assigned coordinator changes an event (SCRUM-332, 019)');
+  // -- 5. Permissions (SCRUM-332, SCRUM-486 AC7) ------------------------------
+  section('5. only the holder changes an event; any coordinator reads it');
 
   checkRefusal(
-    'clarification by a coordinator who does not hold the event is refused',
-    await failureFrom(requestEventClarification(s1.id, 'Please confirm numbers.', holder)),
+    'clarification by a coordinator who no longer holds it is refused',
+    await failureFrom(requestEventClarification(s1.id, 'Please confirm numbers.', users.C)),
     ForbiddenError,
     403,
+  );
+  checkRefusal(
+    'clarification on a request nobody holds is refused as waiting for the Lead, not as someone else\'s (409)',
+    await failureFrom(requestEventClarification(waitingRow.id, 'Please confirm numbers.', users.A)),
+    ConflictError,
+    409,
   );
 
   const change = await createChangeRequest(
@@ -796,39 +782,34 @@ async function main() {
   );
   checkRefusal(
     'a change request decision by a coordinator who does not hold the event is refused (019, 42501)',
-    await failureFrom(processChangeRequest(change.id, { decision: 'approved' }, holder)),
+    await failureFrom(processChangeRequest(change.id, { decision: 'approved' }, users.C)),
     ForbiddenError,
     403,
   );
-
-  const { data: stillOpen } = await supabase
-    .from('event_change_requests')
-    .select('status')
-    .eq('id', change.id)
-    .single();
-  check('and the change request is still open', stillOpen?.status === 'outstanding', stillOpen?.status);
-
-  const decided = await processChangeRequest(change.id, { decision: 'approved' }, receiver);
+  const decided = await processChangeRequest(change.id, { decision: 'approved' }, users.B);
   check(
-    'the assigned coordinator can decide it',
-    decided.status === 'processed' && decided.processedBy === receiver,
+    'the holder the Lead chose can decide it',
+    decided.status === 'processed' && decided.processedBy === users.B,
     `${decided.status}, by ${labelOf(decided.processedBy)}`,
   );
 
-  // The positive path of the clarification guard: the update now filters on
-  // assigned_coordinator_id, and this proves PostgREST accepts that filter and
-  // the row matches it.
-  const clarified = await requestEventClarification(s1.id, 'Please confirm numbers.', receiver);
-  check(
-    'the assigned coordinator can request clarification',
-    clarified.status === 'pending_clarification',
-    clarified.status,
-  );
+  const started = await startEventReview(s1.id, users.B);
+  check('the holder the Lead chose can start the review', started.status === 'under_review' && started.reviewingCoordinatorId === users.B, started.status);
 
-  // getEventRequestForCoordinator takes no caller at all: any coordinator may
-  // read any event past draft, and the route's role gate is the only proof
-  // needed. So "a coordinator who does not hold it can read it" is proved by
-  // the read succeeding with no caller, for an event the queue does not carry.
+  // No successful clarification here (removed in SCRUM-486, after the first
+  // live run on 12 October). Clarification history is immutable by design
+  // (030, SCRUM-162): its trigger refuses every delete, the cascade from
+  // deleting the event included, so a live script cannot clean up after
+  // asking for clarification. That run left s1, its organiser and B in the
+  // shared database until they were removed by hand. The two refusals above
+  // stay: requestEventClarification throws them before it writes anything.
+  //
+  // The positive path is proved in PGlite instead, by
+  // SCRUM486_AC7_the_coordinator_the_lead_hands_it_to_asks_for_clarification_and_the_previous_one_cannot,
+  // and closing a clarification after a handover by
+  // SCRUM486_AC7_an_open_clarification_follows_the_event_to_its_new_coordinator
+  // (AC7-04), both in eventClarificationDatabase.test.js.
+
   const readCancelled = await getEventRequestForCoordinator(cancelled);
   check(
     'any coordinator can read an event the queue does not carry (cancelled)',
@@ -848,69 +829,81 @@ async function main() {
     `${draftRead?.name}: ${draftRead?.message}`,
   );
 
-  // -- 6. The reads (SCRUM-333, SCRUM-334) -----------------------------------
-  section('6. "My events" and the history (SCRUM-333, SCRUM-334)');
+  // -- 6. The reads (SCRUM-333, SCRUM-334, SCRUM-486 AC3, AC9) -----------------
+  section('6. "My events", the history, and both coordinator lists');
 
-  const mine = await listEventRequestsForCoordinator(receiver);
+  const mine = await listEventRequestsForCoordinator(users.B);
   check(
     'My events holds only events assigned to that coordinator',
-    mine.length > 0 && mine.every((event) => event.assignedCoordinatorId === receiver),
+    mine.length > 0 && mine.every((event) => event.assignedCoordinatorId === users.B),
     `${mine.length} event(s)`,
   );
   check(
-    'including the one just handed to them, and a cancelled one',
+    'including the one the Lead handed them, and a cancelled one',
     mine.some((event) => event.id === s1.id) && mine.some((event) => event.id === cancelled),
   );
-
-  // Ordered by proposed_start, soonest first, undated last. Asserted as a
-  // monotonic sequence over the whole list, with null as +Infinity, so a real
-  // event on this coordinator could not make it fail for the wrong reason.
-  const when = (event) => (event.proposedStart ? new Date(event.proposedStart).getTime() : Number.POSITIVE_INFINITY);
-  check(
-    'ordered by event date, soonest first, undated last',
-    mine.every((event, i) => i === 0 || when(mine[i - 1]) <= when(event)),
-    mine.map((event) => event.proposedStart ?? 'null').join(' <= '),
-  );
   const ownRow = mine.find((event) => event.id === s1.id);
-  check(
-    'each row carries the organiser\'s name',
-    ownRow?.organiserName === 'Check Assign organiser',
-    ownRow?.organiserName,
-  );
+  check('each row carries the organiser\'s name', ownRow?.organiserName === 'Check Assign organiser', ownRow?.organiserName);
 
   const forCoordinators = await listAssignmentHistory(s1.id, { includeNotes: true });
   check(
-    'the history is oldest first',
-    forCoordinators.length === 2 && forCoordinators[0].automatic && !forCoordinators[1].automatic
-      && new Date(forCoordinators[0].createdAt) <= new Date(forCoordinators[1].createdAt),
-    forCoordinators.map((entry) => (entry.automatic ? 'automatic' : 'handover')).join(' -> '),
+    'the history is oldest first: the Lead\'s assignment, A\'s handover, the Lead\'s handover',
+    forCoordinators.map((entry) => entry.assignedByName).join(' | ')
+      === 'Check Assign L | Check Assign A | Check Assign L',
+    forCoordinators.map((entry) => entry.assignedByName).join(' | '),
   );
   check(
-    'with names, read from profiles',
-    forCoordinators[1]?.previousCoordinatorName === `Check Assign ${labelOf(holder)}`
-      && forCoordinators[1]?.newCoordinatorName === `Check Assign ${labelOf(receiver)}`,
-    `${forCoordinators[1]?.previousCoordinatorName} -> ${forCoordinators[1]?.newCoordinatorName}`,
+    'no row of the new model reads as automatic',
+    forCoordinators.every((entry) => entry.automatic === false),
   );
   check(
-    'the coordinators\' view carries the note',
-    forCoordinators[1]?.handoverNote === NOTE && 'handoverNote' in forCoordinators[0],
-    forCoordinators[1]?.handoverNote,
+    'the coordinators\' view carries the notes',
+    forCoordinators.map((entry) => entry.handoverNote).join(' | ') === `${ASSIGN_NOTE} | ${NOTE} | ${LEAD_NOTE}`,
   );
-
   const forOrganiser = await listAssignmentHistory(s1.id, { includeNotes: false });
   check(
     'the Organiser\'s view has no handoverNote key at all',
-    forOrganiser.length === 2 && forOrganiser.every((entry) => !('handoverNote' in entry)),
+    forOrganiser.length === 3 && forOrganiser.every((entry) => !('handoverNote' in entry)),
     `${forOrganiser.length} entr(ies)`,
   );
 
-  const pickerList = await listCoordinators();
-  const pickerIds = pickerList.map((coordinator) => coordinator.id);
+  // AC9-03. Events assigned before SCRUM-486 have a history row with
+  // assigned_by null, written by 016 on submission. Those rows are in the live
+  // data beside the Lead's, so the label must still read them as automatic.
+  // One such row is made here, in 016's exact shape.
+  const legacy = await insertEvent('legacy_automatic', { status: 'submitted', coordinator: users.A });
+  const { error: legacyError } = await supabase.from('event_request_assignment_history').insert({
+    event_request_id: legacy,
+    previous_coordinator_id: null,
+    new_coordinator_id: users.A,
+    assigned_by: null,
+  });
+  if (legacyError) throw new Error(`could not insert the legacy history row: ${legacyError.message}`);
+  const legacyHistory = await listAssignmentHistory(legacy, { includeNotes: true });
   check(
-    'the coordinator list holds the coordinators and nobody else',
+    'a pre-SCRUM-486 row still reads as automatic, with no one named (AC9-03)',
+    legacyHistory.length === 1 && legacyHistory[0].automatic === true && legacyHistory[0].assignedByName === null,
+    JSON.stringify(legacyHistory[0]),
+  );
+
+  const pickerIds = (await listCoordinators()).map((coordinator) => coordinator.id);
+  check(
+    'the coordinators\' handover list holds coordinators and nobody else',
     [users.A, users.B, users.C].every((id) => pickerIds.includes(id))
-      && !pickerIds.includes(users.V) && !pickerIds.includes(users.organiser),
-    `${pickerList.length} coordinator(s)`,
+      && ![users.V, users.organiser, users.L].some((id) => pickerIds.includes(id)),
+  );
+
+  const workload = await listCoordinatorWorkload();
+  const workloadOf = (id) => workload.find((coordinator) => coordinator.id === id)?.activeEvents;
+  check(
+    'the Lead\'s picker lists coordinators only, never a Lead (AC3)',
+    [users.A, users.B, users.C].every((id) => workload.some((c) => c.id === id))
+      && ![users.V, users.organiser, users.L].some((id) => workload.some((c) => c.id === id)),
+  );
+  check(
+    'with each one\'s active events: A the legacy request, B the handed-over one, C none',
+    workloadOf(users.A) === 1 && workloadOf(users.B) === 1 && workloadOf(users.C) === 0,
+    `A ${workloadOf(users.A)}, B ${workloadOf(users.B)}, C ${workloadOf(users.C)}`,
   );
 }
 
@@ -933,5 +926,5 @@ main()
       console.error(`\n${failures} check(s) failed.\n`);
       process.exit(1);
     }
-    console.log('\nAll checks passed. Chose, assigned, refused, handed over, read, cleaned up.\n');
+    console.log('\nAll checks passed. Submitted, assigned by the Lead, refused, handed over, read, cleaned up.\n');
   });

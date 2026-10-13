@@ -98,6 +98,22 @@ const SCRUM491_FILES = [
   'src/services/venueHoldValidation.js',
 ]
 
+// SCRUM-486 (SCRUM-519) owns the Lead's unassigned queue, the assignment
+// picker and the waiting-time helper outright. EventCoordinatorLeadDashboard.jsx,
+// which now mounts the queue, is already gated above under SCRUM-485. The
+// edits it makes to shared files (eventRequestService.js, ReassignEventPanel.jsx,
+// CoordinatorRequestDetail.jsx, Navigation.jsx, App.jsx) stay ungated, as
+// those files always have been.
+const SCRUM486_FILES = [
+  'src/components/UnassignedQueue.jsx',
+  'src/components/AssignCoordinatorPanel.jsx',
+  'src/services/waitingTime.js',
+  // SCRUM-521: an event's coordinator screen by its address.
+  'src/components/EventRequestReviewPage.jsx',
+  // AC6: the Lead's list of assigned events, the way to that screen.
+  'src/components/AssignedEvents.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -132,6 +148,7 @@ export default defineConfig({
         ]),
         ...SCRUM485_FILES.map((file) => [file, FULL]),
         ...SCRUM491_FILES.map((file) => [file, FULL]),
+        ...SCRUM486_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

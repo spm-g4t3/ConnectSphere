@@ -41,6 +41,9 @@ let otherOrganiserId = null;
 // SCRUM-45. The throwaway Event Coordinator. Tracked exactly like the two
 // Organisers so cleanup() removes it even when a check above throws.
 let coordinatorId = null;
+// SCRUM-486 (SCRUM-522). The throwaway Event Coordinator Lead, whose queue a
+// submitted request now joins instead of the coordinators'. Tracked the same.
+let leadId = null;
 let eventId = null;
 let otherEventId = null;
 
@@ -147,15 +150,20 @@ async function cleanup() {
   // behind, and the failure surfaces as a confusing FK refusal on a delete
   // nobody was thinking about.
   //
-  // Assignment history is new with SCRUM-330. draftEventId is submitted over
-  // HTTP, so submit_event_request writes a history row for it, and that
-  // table's event_request_id is ON DELETE RESTRICT (014) on purpose. Its
-  // new_coordinator_id is restricted too, which is a second reason it has to
-  // go before the coordinator's user below.
+  // Assignment history came with SCRUM-330, when submit_event_request wrote a
+  // row for draftEventId's submission. Since SCRUM-486 (052) submission
+  // assigns nobody and writes no row, so there is normally nothing here; the
+  // delete stays because the table's event_request_id is ON DELETE RESTRICT
+  // (014), and one stray row would keep the event and its users behind.
+  //
+  // SCRUM-486: the submission notifies every Event Coordinator Lead, real ones
+  // included, in a shared project. Notifications reference users, not events,
+  // so nothing else removes them; they go first.
   //
   // requested_by and processed_by on change requests reference auth.users, so
   // these also have to run before the user deletes.
   for (const id of eventIds) {
+    await remove('notifications', supabase.from('notifications').delete().eq('payload->>eventRequestId', id));
     await remove('change requests', supabase.from('event_change_requests').delete().eq('event_request_id', id));
     await remove('assignment history', supabase.from('event_request_assignment_history').delete().eq('event_request_id', id));
     // SCRUM-321: the submission also wrote a status history row. changed_by
@@ -173,7 +181,7 @@ async function cleanup() {
   // profiles cascades from auth.users, so deleting the user is enough -- but it
   // is deleted explicitly here so a failure shows up as its own error rather
   // than as a confusing FK refusal on the user delete.
-  for (const id of [organiserId, otherOrganiserId, coordinatorId]) {
+  for (const id of [organiserId, otherOrganiserId, coordinatorId, leadId]) {
     if (!id) continue;
     await remove('profile', supabase.from('profiles').delete().eq('id', id));
     await remove('auth user', supabase.auth.admin.deleteUser(id));
@@ -208,7 +216,15 @@ async function verifyCleanup() {
       .select('id', { count: 'exact', head: true })
       .in('event_request_id', eventIds);
 
-  const userIds = [organiserId, otherOrganiserId, coordinatorId].filter(Boolean);
+  const userIds = [organiserId, otherOrganiserId, coordinatorId, leadId].filter(Boolean);
+
+  // SCRUM-486: the Leads' notices about this run's submission.
+  const { count: noticesLeft } = eventIds.length === 0
+    ? { count: 0 }
+    : await supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .in('payload->>eventRequestId', eventIds);
   const { count: profilesLeft } = userIds.length === 0
     ? { count: 0 }
     : await supabase
@@ -224,8 +240,8 @@ async function verifyCleanup() {
 
   check(
     'nothing left behind after cleanup',
-    eventsLeft === 0 && historyLeft === 0 && profilesLeft === 0 && usersLeft === 0,
-    `${eventsLeft} request(s), ${historyLeft} history row(s), `
+    eventsLeft === 0 && historyLeft === 0 && noticesLeft === 0 && profilesLeft === 0 && usersLeft === 0,
+    `${eventsLeft} request(s), ${historyLeft} history row(s), ${noticesLeft} notification(s), `
       + `${profilesLeft} profile(s), ${usersLeft} user(s)`,
   );
 }
@@ -244,6 +260,9 @@ async function main() {
   // from a real profiles row, read by the real middleware out of a real JWT.
   const coordinator = await createTestUser('coordinator', 'event_coordinator');
   coordinatorId = coordinator.id;
+  // SCRUM-486: a submitted request now waits in the Lead's queue.
+  const lead = await createTestUser('lead', 'event_coordinator_lead');
+  leadId = lead.id;
 
   eventId = await createEventRequest(organiserId, `__check_routes_mine_${STAMP}`, 'submitted', coordinatorId);
   otherEventId = await createEventRequest(otherOrganiserId, `__check_routes_theirs_${STAMP}`, 'submitted', coordinatorId);
@@ -357,7 +376,11 @@ async function main() {
   const oneBody = await one.json();
   check(
     'a single request carries its status display',
-    oneBody.statusDisplay?.label === 'Submitted'
+    // "Requested", not "Submitted": SCRUM-318 AC7 gave 'submitted' the
+    // Organiser-facing label "Requested". This check expected the old label
+    // and would fail for that alone (fixed in SCRUM-486, before the first live
+    // run after 052).
+    oneBody.statusDisplay?.label === 'Requested'
       && oneBody.statusDisplay?.group === 'AWAITING_REVIEW',
     JSON.stringify(oneBody.statusDisplay),
   );
@@ -377,7 +400,11 @@ async function main() {
 
   const after = await (await authed(`/${eventId}/status`)).json();
   check('a refetch reflects the new status', after.status === 'under_review', after.label);
-  check('the organiser-facing label changed with it', after.label === 'Under Review', after.label);
+  // "Under review", not "Under Review": SCRUM-318 AC7 gave 'under_review' the
+  // Organiser-facing label "Under review". This check expected the old label
+  // and would fail for that alone (fixed in SCRUM-486, after the first live
+  // run after 052 failed on it).
+  check('the organiser-facing label changed with it', after.label === 'Under review', after.label);
   check(
     'updated_at advanced, so a change is detectable',
     new Date(after.updatedAt).getTime() > new Date(before.updatedAt).getTime(),
@@ -708,26 +735,78 @@ async function main() {
     JSON.stringify(statusRows),
   );
 
-  // -- SCRUM-45: a request submitted over HTTP joins the queue ---------------
+  // -- SCRUM-45, amended by SCRUM-486: where a submitted request goes --------
   //
   // The half of the queue proof that closes the loop on the reported bug.
   // draftEventId was created, edited and submitted entirely over HTTP by an
   // Organiser, and a moment ago the queue correctly refused to show it while
   // it was a draft. Nothing has happened to it since but the status change,
-  // so this is the reported journey end to end: an Organiser submits, and a
-  // Coordinator sees it.
+  // so this is the reported journey end to end: an Organiser submits, and the
+  // right person sees it.
+  //
+  // Until SCRUM-486 the right person was every Coordinator, through GET /queue,
+  // because submission assigned one; these checks said "joins the queue" and
+  // were right. On 11 October the customer moved that first choice to the
+  // Event Coordinator Lead: 052 submits with no coordinator, and since
+  // SCRUM-520 the coordinators' queue lists only requests someone holds. So
+  // the request is NOT in GET /queue, and IS in the Lead's GET /unassigned,
+  // still carrying the status the submit gave it. The reported bug -- an
+  // Organiser submits and nobody on the staff side sees it -- stays fixed;
+  // it is the Lead who sees it now.
   const queueTwo = await asCoordinator('/queue');
   const queueTwoBody = await queueTwo.json();
   const requeued = Array.isArray(queueTwoBody) ? queueTwoBody : [];
   check(
-    'a request submitted over HTTP joins the queue',
-    queueTwo.status === 200 && requeued.some((r) => r.id === draftEventId),
+    'a request submitted over HTTP does not join the coordinators\' queue: nobody holds it yet',
+    queueTwo.status === 200 && !requeued.some((r) => r.id === draftEventId),
     `status ${queueTwo.status}, ${requeued.length} row(s)`,
   );
+
+  // A third sign-in, for the Lead. The Organiser's and the Coordinator's
+  // tokens are already issued strings, so this does not disturb them (proved
+  // for the second sign-in above).
+  const { data: leadSession, error: leadSignInError } =
+    await supabaseAuth.auth.signInWithPassword({ email: lead.email, password: PASSWORD });
+  if (leadSignInError) {
+    throw new Error(`could not sign in as the test Lead: ${leadSignInError.message}`);
+  }
+  const unassigned = await fetch(`${base}/unassigned`, {
+    headers: { Authorization: `Bearer ${leadSession.session.access_token}` },
+  });
+  const unassignedBody = await unassigned.json();
+  const waiting = Array.isArray(unassignedBody) ? unassignedBody : [];
   check(
-    'and it arrives carrying the status the submit gave it',
-    requeued.find((r) => r.id === draftEventId)?.statusDisplay?.label === 'Submitted',
-    requeued.find((r) => r.id === draftEventId)?.statusDisplay?.label,
+    'it joins the Event Coordinator Lead\'s queue instead',
+    unassigned.status === 200 && waiting.some((r) => r.id === draftEventId),
+    `status ${unassigned.status}, ${waiting.length} row(s)`,
+  );
+  check(
+    'and it arrives carrying the status the submit gave it, and its organiser\'s name',
+    // The status code, not the label: the label is presentation, and SCRUM-318
+    // AC7 already renamed it ("Requested").
+    waiting.find((r) => r.id === draftEventId)?.statusDisplay?.status === 'submitted'
+      && waiting.find((r) => r.id === draftEventId)?.organiserName === 'Check organiser',
+    JSON.stringify({
+      status: waiting.find((r) => r.id === draftEventId)?.statusDisplay?.status,
+      organiser: waiting.find((r) => r.id === draftEventId)?.organiserName,
+    }),
+  );
+  check(
+    'the coordinator is refused the Lead\'s queue',
+    (await asCoordinator('/unassigned')).status === 403,
+  );
+
+  // And the Lead is told. 052 notifies every Lead, so the test Lead's notice
+  // is the one this run can name.
+  const { data: leadNotices } = await supabaseAdmin
+    .from('notifications')
+    .select('type')
+    .eq('recipient_id', leadId)
+    .eq('payload->>eventRequestId', draftEventId);
+  check(
+    'and the Lead is notified that it is waiting',
+    leadNotices?.length === 1 && leadNotices[0].type === 'event_request_awaiting_assignment',
+    JSON.stringify(leadNotices),
   );
 
   // The ownership hole, proved live. otherEventId is made a complete draft
