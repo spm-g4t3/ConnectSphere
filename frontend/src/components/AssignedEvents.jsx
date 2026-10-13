@@ -21,6 +21,7 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import UnassignedCount from "./UnassignedCount";
 import { listAssignedEventsForLead } from "../services/eventRequestService";
 import { formatTimestamp } from "../services/displayFormat";
 import {
@@ -61,6 +62,11 @@ export default function AssignedEvents() {
   return (
     <section className="assigned-events">
       <h2>Assigned events</h2>
+
+      {/* SCRUM-487 AC4 (SCRUM-543): the requests nobody holds yet, counted,
+          with the way to the queue. Counted, not listed (SCRUM-487 D5): this
+          list is of held events, and the queue is where the rest are acted on. */}
+      <UnassignedCount />
 
       {loading && <p>Loading...</p>}
       {error && <p role="alert">{error}</p>}

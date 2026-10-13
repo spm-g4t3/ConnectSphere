@@ -247,10 +247,10 @@ built, its own cases say what the Lead may cancel there.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC4-01 | Three UNASSIGNED requests | Open the overview | "3" at the top, from `GET /unassigned`'s length (D5) | **not yet implemented** (SCRUM-543) |
-| AC4-02 | The same | Click the count's link | A router link to `/unassigned-queue` | **not yet implemented** (SCRUM-543) |
-| AC4-03 | No UNASSIGNED request | Open the overview | Says none are waiting; the count is shown as 0, not hidden | **not yet implemented** (SCRUM-543) |
-| AC4-04 | An UNASSIGNED request | Read the events list | Not in it: held events only. Already proved for the unfiltered list by SCRUM-486's `SCRUM486_AC6_the_assigned_list_leaves_out_the_unassigned_drafts_and_finished_events`; for the filtered list by AC3-02 to AC3-08 keeping the held filter | **not yet implemented** (SCRUM-542, SCRUM-543) |
+| AC4-01 | Three UNASSIGNED requests | Open the overview | "3" at the top, from `GET /unassigned`'s length (D5) | Proved (screen): `SCRUM487_AC4_%s_waiting_reads_%j` (1 and 3), counted from `listUnassignedEventRequests` |
+| AC4-02 | The same | Click the count's link | A router link to `/unassigned-queue` | Proved (screen): `SCRUM487_AC4_the_count_links_to_the_unassigned_queue` |
+| AC4-03 | No UNASSIGNED request | Open the overview | Says none are waiting; the count is shown as 0, not hidden | Proved (screen): `SCRUM487_AC4_%s_waiting_reads_%j` (0); and `SCRUM487_AC4_a_failed_count_is_said_and_the_events_list_still_loads`, `SCRUM487_AC4_the_count_says_so_while_it_loads` |
+| AC4-04 | An UNASSIGNED request | Read the events list | Not in it: held events only. Already proved for the unfiltered list by SCRUM-486's `SCRUM486_AC6_the_assigned_list_leaves_out_the_unassigned_drafts_and_finished_events`; for the filtered list by AC3-02 to AC3-08 keeping the held filter | Proved (svc): SCRUM-486's `SCRUM486_AC6_the_assigned_list_leaves_out_the_unassigned_drafts_and_finished_events`; filtered, `SCRUM487_AC3_a_coordinator_filter_adds_one_eq_on_the_coordinator`, `SCRUM487_AC3_a_status_filter_narrows_the_read_to_that_status` and `SCRUM487_AC3_coordinator_and_status_filters_combine`, each asserting the held filter stays |
 
 ### AC5 — the Lead opens any event read-only
 
