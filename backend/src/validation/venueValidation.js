@@ -172,8 +172,15 @@ function checkCapacity(errors, field, value) {
   return value;
 }
 
-/** Attribute sets are arrays of lookup codes; existence is the FK's job. */
-function checkCodeArray(errors, field, value) {
+/**
+ * Attribute sets are arrays of lookup codes; existence is the FK's job.
+ *
+ * Exported for SCRUM-190: a booking request (bookingRequestValidation.js) and
+ * the suitability check's query (venueSuitabilityValidation.js) carry the
+ * same accessibility and facility code lists as an event search, and read
+ * them by this one rule. errors is any collector with add(field, message).
+ */
+export function checkCodeArray(errors, field, value) {
   if (!Array.isArray(value)) {
     errors.add(field, 'must be an array of codes');
     return null;

@@ -38,6 +38,15 @@
  *    expectedAttendance, and optionally layout, accessibility, facilities and
  *    location.
  *    An optional criterion that is absent is not filtered on.
+ *
+ * SCRUM-189, a subtask of SCRUM-188 (Check Venue Suitability for an Event),
+ * adds evaluateCriteria: the same rules, one verdict per criterion, each with
+ * the values compared (SCRUM-188 AC2). It is built from the predicates above
+ * -- meetsCapacity, hoursVerdict, supportsLayout, providesAll -- so the
+ * suitability check and the search can never disagree about a venue. It is
+ * for the suitability check only: search keeps matchesAllCriteria's bare
+ * yes/no, because SCRUM-145 forbids search from saying why a venue was left
+ * out.
  */
 
 /**
@@ -140,20 +149,76 @@ export function meetsCapacity(venue, attendance) {
 }
 
 /**
+ * AC3: whether the venue's operating hours cover the whole requested period,
+ * and why -- the one home of the hours rule, read by coversPeriod (search) and
+ * evaluateCriteria (SCRUM-188 AC2 suitability).
+ *
+ * Three conditions, each a reason a venue cannot host the event, checked in
+ * this order so the reason given is the first one that applies:
+ *
+ *  1. Start and end on the same Singapore date ('spans_midnight'). Hours
+ *     cannot run past midnight (closes_at > opens_at, 002/017), so no venue
+ *     can be open across one and an overnight event can never fit. This is a
+ *     verdict rather than a throw; whether validation should refuse such a
+ *     request outright is SCRUM-20 open point 7, still undecided.
+ *  2. A row for that weekday ('closed_that_day'). A weekday with no row is
+ *     closed (017's known limit), not open all day.
+ *  3. opens_at <= start and closes_at >= end ('outside_hours', else
+ *     'within_hours'). Both edges inclusive: an event 09:00-18:00 fits hours
+ *     09:00-18:00 exactly (B-AC3-04), while 08:59 or 18:01 does not
+ *     (B-AC3-05/06).
+ *
+ * start and end are toVenueLocal's readings, returned so a caller describing
+ * the verdict shows the same Singapore wall clock the rule judged, rather than
+ * converting the instants a second time.
+ *
+ * @param {Array<{day_of_week: number, opens_at: string, closes_at: string}>} hours
+ * @param {string|Date} startsAt
+ * @param {string|Date} endsAt
+ * @returns {{
+ *   met: boolean,
+ *   reason: 'spans_midnight'|'closed_that_day'|'outside_hours'|'within_hours',
+ *   dayOfWeek: number,
+ *   opensAt?: string,
+ *   closesAt?: string,
+ *   start: {date: string, dayOfWeek: number, minutes: number},
+ *   end: {date: string, dayOfWeek: number, minutes: number},
+ * }}  dayOfWeek is the start's; opensAt/closesAt only when a row was found
+ */
+export function hoursVerdict(hours, startsAt, endsAt) {
+  const start = toVenueLocal(startsAt);
+  const end = toVenueLocal(endsAt);
+  const dayOfWeek = start.dayOfWeek;
+
+  if (start.date !== end.date) {
+    return { met: false, reason: 'spans_midnight', dayOfWeek, start, end };
+  }
+
+  const row = hours.find((entry) => entry.day_of_week === dayOfWeek);
+  if (row === undefined) {
+    return { met: false, reason: 'closed_that_day', dayOfWeek, start, end };
+  }
+
+  const met =
+    timeToMinutes(row.opens_at) <= start.minutes &&
+    timeToMinutes(row.closes_at) >= end.minutes;
+
+  return {
+    met,
+    reason: met ? 'within_hours' : 'outside_hours',
+    dayOfWeek,
+    opensAt: row.opens_at,
+    closesAt: row.closes_at,
+    start,
+    end,
+  };
+}
+
+/**
  * AC3: the venue's operating hours cover the whole requested period.
  *
- * Three conditions, each a reason a venue cannot host the event:
- *
- *  1. Start and end on the same Singapore date. Hours cannot run past midnight
- *     (closes_at > opens_at, 002/017), so no venue can be open across one and
- *     an overnight event can never fit. This returns false rather than
- *     throwing; whether validation should refuse such a request outright is
- *     SCRUM-20 open point 7, still undecided.
- *  2. A row for that weekday. A weekday with no row is closed (017's known
- *     limit), not open all day.
- *  3. opens_at <= start and closes_at >= end. Both edges inclusive: an event
- *     09:00-18:00 fits hours 09:00-18:00 exactly (B-AC3-04), while 08:59 or
- *     18:01 does not (B-AC3-05/06).
+ * Just hoursVerdict's yes/no, so search and suitability share one hours rule;
+ * the conditions are documented there.
  *
  * @param {Array<{day_of_week: number, opens_at: string, closes_at: string}>} hours
  * @param {string|Date} startsAt
@@ -161,18 +226,7 @@ export function meetsCapacity(venue, attendance) {
  * @returns {boolean}
  */
 export function coversPeriod(hours, startsAt, endsAt) {
-  const start = toVenueLocal(startsAt);
-  const end = toVenueLocal(endsAt);
-
-  if (start.date !== end.date) return false;
-
-  const row = hours.find((entry) => entry.day_of_week === start.dayOfWeek);
-  if (row === undefined) return false;
-
-  return (
-    timeToMinutes(row.opens_at) <= start.minutes &&
-    timeToMinutes(row.closes_at) >= end.minutes
-  );
+  return hoursVerdict(hours, startsAt, endsAt).met;
 }
 
 /**
@@ -241,6 +295,10 @@ export function matchesLocation(venue, location) {
  * out. Keeping the reason out of this function makes that true by
  * construction rather than by every caller remembering not to.
  *
+ * The per-criterion "why" lives in evaluateCriteria, built from the same
+ * predicates and used by the suitability check only (SCRUM-188), never by
+ * search (SCRUM-145).
+ *
  * @param {object} venue     as described in the header
  * @param {object} criteria  as described in the header
  * @returns {boolean}
@@ -254,4 +312,182 @@ export function matchesAllCriteria(venue, criteria) {
     providesAll(venue.facilities, criteria.facilities) &&
     matchesLocation(venue, criteria.location)
   );
+}
+
+
+/**
+ * SCRUM-188 AC2: the criteria a suitability check reports, in the order it
+ * reports them.
+ *
+ * Display labels, not codes: the frontend's BookingRequestPanel renders each
+ * entry as "<criterion>: <detail>", so the label is what the Venue Staff
+ * member reads. Frozen so no caller can reorder or rename them in place.
+ *
+ * Location is deliberately absent -- it is a search filter (SCRUM-141), not a
+ * SCRUM-188 criterion. SCRUM-190 adds 'Availability' alongside these, since
+ * whether a venue is free is SQL (venue_occupancy_conflicts()), not a pure
+ * rule this module can judge.
+ */
+export const SUITABILITY_CRITERIA = Object.freeze([
+  'Capacity',
+  'Operating hours',
+  'Layout',
+  'Accessibility',
+  'Facilities',
+]);
+
+/** The sixth criterion's label, judged by SQL and reported after the five. */
+export const AVAILABILITY_CRITERION = 'Availability';
+
+/**
+ * SCRUM-188 AC2: every criterion the suitability check reports, in order --
+ * the five above, then Availability. Defined here (and re-exported by
+ * venueSuitabilityService.js) so a pure module -- the booking request's
+ * validation of acknowledgedCriteria (SCRUM-193/194, F2) -- can name the
+ * criteria without importing a service.
+ */
+export const SUITABILITY_CHECK_CRITERIA = Object.freeze([
+  ...SUITABILITY_CRITERIA,
+  AVAILABILITY_CRITERION,
+]);
+
+/** day_of_week 0-6, 0 = Sunday, the convention toVenueLocal returns (002). */
+const DAY_NAMES = Object.freeze([
+  'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+]);
+
+/** What an optional criterion that was not asked for reads as. */
+const NONE_REQUESTED = 'None requested';
+
+/**
+ * Minutes since midnight as 'HH:MM' on the venue's clock.
+ *
+ * Seconds are dropped, not rounded: a reading of 08:59:59 shows as 08:59, so
+ * the displayed start never looks later than the one the rule judged.
+ */
+function minutesToClock(minutes) {
+  const whole = Math.floor(minutes);
+  const hh = String(Math.floor(whole / 60)).padStart(2, '0');
+  const mm = String(whole % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+/** 'HH:MM:SS' or 'HH:MM' from venue_operating_hours as 'HH:MM'. */
+function timeToClock(time) {
+  return time.slice(0, 5);
+}
+
+/**
+ * The words for an hours verdict.
+ *
+ * A midnight span names both days, short ('Fri 22:00 – Sat 01:00'), because
+ * the two times alone would read as an event running backwards; the other
+ * cases name one day in full, since the whole event falls on it.
+ */
+function describeHours(verdict) {
+  const { start, end } = verdict;
+
+  if (verdict.reason === 'spans_midnight') {
+    const day = (local) => DAY_NAMES[local.dayOfWeek].slice(0, 3);
+    return (
+      `Event spans midnight (${day(start)} ${minutesToClock(start.minutes)} – ` +
+      `${day(end)} ${minutesToClock(end.minutes)})`
+    );
+  }
+
+  const dayName = DAY_NAMES[verdict.dayOfWeek];
+  if (verdict.reason === 'closed_that_day') return `Venue closed on ${dayName}`;
+
+  return (
+    `Event runs ${minutesToClock(start.minutes)}–${minutesToClock(end.minutes)} ` +
+    `on ${dayName}; venue open ${timeToClock(verdict.opensAt)}–${timeToClock(verdict.closesAt)}`
+  );
+}
+
+/**
+ * The verdict for an accessibility or facilities request.
+ *
+ * Missing items are listed in the order they were requested, so the detail
+ * reads back the event's own list rather than the venue's.
+ */
+function itemsVerdict(criterion, venueCodes, requested) {
+  const met = providesAll(venueCodes, requested);
+  const asked = requested ?? [];
+  const missing = asked.filter((code) => !venueCodes.includes(code));
+  let detail = NONE_REQUESTED;
+  if (asked.length > 0) {
+    detail = met ? `All ${asked.length} requested provided` : `Missing: ${missing.join(', ')}`;
+  }
+  // SCRUM-193/194 (F4): the codes as well as the words, so a screen can show
+  // its own labels for them; detail stays as the fallback.
+  return { criterion, met, detail, missing, requested: [...asked] };
+}
+
+/**
+ * SCRUM-188 AC2: each criterion as met or not met, with the values compared.
+ *
+ * SCRUM-189: one entry per SUITABILITY_CRITERIA label, in that order. Every
+ * `met` comes from the predicate search uses -- meetsCapacity, hoursVerdict,
+ * supportsLayout, providesAll -- and never from a second copy of the rule, so
+ * a venue the suitability check calls suitable is one the search would return
+ * for the same request, and the other way round. The detail only describes a
+ * verdict; it never decides one.
+ *
+ * Unlike matchesAllCriteria this says why, which is why search must not call
+ * it (SCRUM-145). Location is not evaluated: it is not a SCRUM-188 criterion.
+ *
+ * criteria has the search's shape, so SCRUM-190 can pass a booking's own
+ * layout and attendance without changes here. An optional criterion that is
+ * absent, or an empty list, is met and reads "None requested".
+ *
+ * @param {object} venue  as described in the header
+ * @param {{startsAt: string|Date, endsAt: string|Date, expectedAttendance: number,
+ *   layout?: string, accessibility?: string[], facilities?: string[]}} criteria
+ * SCRUM-193/194 (F4): besides the words, the Layout entry carries `layout`
+ * (the code asked for, or null) and `offers` (the venue's layout codes), and
+ * the Accessibility and Facilities entries carry `requested` (the codes asked
+ * for) and `missing` (those the venue lacks, [] when met), so the screen can
+ * show its own labels for the codes. They describe the verdict; `met` is
+ * decided exactly as before.
+ *
+ * @returns {Array<{criterion: string, met: boolean, detail: string}>}
+ */
+export function evaluateCriteria(venue, criteria) {
+  const [capacityLabel, hoursLabel, layoutLabel, accessibilityLabel, facilitiesLabel] =
+    SUITABILITY_CRITERIA;
+
+  const attendance = criteria.expectedAttendance;
+  const capacityMet = meetsCapacity(venue, attendance);
+
+  const hours = hoursVerdict(venue.hours, criteria.startsAt, criteria.endsAt);
+
+  const { layout } = criteria;
+  const layoutMet = supportsLayout(venue, layout);
+  let layoutDetail = NONE_REQUESTED;
+  if (layout !== undefined) {
+    const offers = venue.layouts.length > 0 ? venue.layouts.join(', ') : 'none';
+    layoutDetail = layoutMet
+      ? `Layout ${layout} offered`
+      : `Layout ${layout} not offered (offers: ${offers})`;
+  }
+
+  return [
+    {
+      criterion: capacityLabel,
+      met: capacityMet,
+      detail: `Capacity ${venue.maxCapacity} ${capacityMet ? '≥' : '<'} expected attendance ${attendance}`,
+    },
+    { criterion: hoursLabel, met: hours.met, detail: describeHours(hours) },
+    {
+      criterion: layoutLabel,
+      met: layoutMet,
+      detail: layoutDetail,
+      // SCRUM-193/194 (F4): the code asked for (null: none) and the venue's
+      // layouts, for the screen's labels.
+      layout: layout ?? null,
+      offers: [...venue.layouts],
+    },
+    itemsVerdict(accessibilityLabel, venue.accessibility, criteria.accessibility),
+    itemsVerdict(facilitiesLabel, venue.facilities, criteria.facilities),
+  ];
 }

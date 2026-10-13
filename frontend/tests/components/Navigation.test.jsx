@@ -138,10 +138,40 @@ function linksOf(role) {
 
 const DASHBOARD_ONLY = [["Dashboard", "/dashboard"]];
 
+/**
+ * The Lead's links: the unassigned queue since SCRUM-486 (SCRUM-519) gave it a
+ * route, and the assigned events since SCRUM-486 AC6 gave the Lead a way to an
+ * event to hand over.
+ */
+const LEAD_LINKS = [
+  ["Dashboard", "/dashboard"],
+  ["Unassigned Queue", "/unassigned-queue"],
+  ["Assigned Events", "/assigned-events"],
+];
+
 describe("SCRUM485_AC4 each new role sees only its own links", () => {
-  it("SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link", () => {
-    // AC4-01. By count: a link leaking into this block fails here.
-    expect(linksOf("event_coordinator_lead")).toEqual(DASHBOARD_ONLY);
+  it("SCRUM486_AC6_an_event_coordinator_lead_has_exactly_the_dashboard_unassigned_queue_and_assigned_events_links", () => {
+    // AC4-01 of SCRUM-485. By count: a link leaking into this block fails here.
+    //
+    // Was SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_link,
+    // expecting DASHBOARD_ONLY. Right when written: SCRUM-485 gave the Lead
+    // no page but the dashboard, and a link to a route that did not exist
+    // would have landed on the catch-all redirect. SCRUM-486 (SCRUM-519)
+    // added the /unassigned-queue route and its link, and the test became
+    // SCRUM485_AC4_an_event_coordinator_lead_has_exactly_the_dashboard_and_unassigned_queue_links,
+    // with two links. That was right too, until SCRUM-486 AC6 added
+    // /assigned-events, so the Lead could reach an assigned event by clicking.
+    // Each time the expectation moved because a link was added, which is what
+    // this count case exists to force (docs/SCRUM-485.md); the count is still
+    // exact, now three. Renamed so the name says what it pins.
+    expect(linksOf("event_coordinator_lead")).toEqual(LEAD_LINKS);
+  });
+
+  it("SCRUM486_AC6_the_lead_sees_the_assigned_events_link", () => {
+    // The Lead's way to an event to hand over, by clicking (AC6).
+    renderAs("event_coordinator_lead");
+
+    expect(screen.getByRole("link", { name: "Assigned Events" })).toHaveAttribute("href", "/assigned-events");
   });
 
   it("SCRUM485_AC4_a_safety_officer_has_exactly_the_dashboard_link", () => {
@@ -183,12 +213,25 @@ describe("SCRUM485_AC4 each new role sees only its own links", () => {
     },
   );
 
-  it.each(["Safety Officer", "event-coordinator-lead", "EVENT_COORDINATOR_LEAD", "safety officer"])(
+  it.each(["Safety Officer", "safety officer"])(
     "SCRUM485_AC4_the_role_spelt_%j_reaches_the_same_single_link",
     (spelling) => {
       // AC4-05. normaliseRole absorbs case, spaces and hyphens, as the
       // American-spelling test above shows for the Organiser.
+      //
+      // The two Lead spellings that were rows here moved to the case below
+      // when the Lead gained a second link (SCRUM-519). They were right when
+      // written: the Lead had the same single link as the Safety Officer.
       expect(linksOf(spelling)).toEqual(DASHBOARD_ONLY);
+    },
+  );
+
+  it.each(["event-coordinator-lead", "EVENT_COORDINATOR_LEAD"])(
+    "SCRUM486_AC2_the_role_spelt_%j_reaches_the_leads_links",
+    (spelling) => {
+      // AC4-05's Lead rows, carried over unchanged in what they prove: any
+      // spelling normaliseRole accepts reaches the Lead's whole set.
+      expect(linksOf(spelling)).toEqual(LEAD_LINKS);
     },
   );
 

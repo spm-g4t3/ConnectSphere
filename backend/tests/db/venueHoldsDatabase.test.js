@@ -26,7 +26,9 @@
  * days from now; instants are compared with getTime(), never as strings.
  *
  * Migrations: setupChangeRecheckDatabase.test.js's list, plus 036 (the
- * latest update_venue, which must still ignore holds) and 040.
+ * latest update_venue, which must still ignore holds), 040, and 051
+ * (SCRUM-525), which redefines create_booking_request with 040's step 7 and
+ * an 8th argument, the request's expected attendance.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -69,6 +71,7 @@ const MIGRATIONS = [
   '035_setup_change_recheck_refine.sql',
   '036_venue_safety_facts.sql',
   '040_venue_holds.sql',
+  '051_multi_venue_booking_requests.sql',
 ];
 
 /** What 014 reads from SCRUM-19's migration, which is not on this branch. */
@@ -175,8 +178,8 @@ describe('SCRUM-491: tentative venue holds (040)', () => {
   async function requestBooking(eventId, venueId) {
     return (
       await one(
-        'select create_booking_request($1, $2, $3, null, null, $4::jsonb, false) as result',
-        [eventId, venueId, coordinator, JSON.stringify(SUITABLE)],
+        'select create_booking_request($1, $2, $3, null, null, $4::jsonb, false, $5) as result',
+        [eventId, venueId, coordinator, JSON.stringify(SUITABLE), 150],
       )
     ).result;
   }

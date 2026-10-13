@@ -200,6 +200,25 @@ export async function getEventRequestQueue() {
   return response.data;
 }
 
+export async function getEventCancellationImpact(id) {
+  const response = await apiClient.get(
+    `/event-requests/${id}/cancellation-impact`,
+  );
+  return response.data;
+}
+
+export async function cancelEventRequest(
+  id,
+  { reason, initiator, attendeeMessage },
+) {
+  const response = await apiClient.post(`/event-requests/${id}/cancel`, {
+    reason,
+    initiator,
+    attendeeMessage,
+  });
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // SCRUM-327: coordinator assignment
 // ---------------------------------------------------------------------------
@@ -311,7 +330,9 @@ export async function listCoordinators() {
  * Two things a caller must understand before rendering one:
  *
  *  - automatic: true means the system assigned the event when it was
- *    submitted. There is no person behind it, so assignedById and
+ *    submitted, which only happened before SCRUM-486; every row written since
+ *    names the Lead or the coordinator who made it. There is no person behind
+ *    an automatic row, so assignedById and
  *    assignedByName are null by design, not because data is missing. Render
  *    it as "Assigned automatically", not as a handover by nobody. Test
  *    automatic rather than assignedByName, because a name is also null for a
@@ -408,6 +429,72 @@ export async function reassignEventRequest(id, { newCoordinatorId, handoverNote 
   const response = await apiClient.post(`/event-requests/${id}/reassign`, {
     newCoordinatorId,
     handoverNote,
+  });
+  return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// SCRUM-486 (SCRUM-519): the Event Coordinator Lead's queue and assignment
+// ---------------------------------------------------------------------------
+// All three are gated on event_coordinator_lead server-side.
+
+/**
+ * Every submitted request nobody has been assigned yet, oldest submission
+ * first (SCRUM-486 AC2). Each carries organiserName and submittedAt, from
+ * which the screen says how long it has waited. Possibly empty.
+ *
+ * @returns {Promise<Object[]>}
+ */
+export async function listUnassignedEventRequests() {
+  const response = await apiClient.get("/event-requests/unassigned");
+  return response.data;
+}
+
+/**
+ * Every Event Coordinator, with their count of active events, for the Lead's
+ * picker (SCRUM-486 AC3). In name order, never workload order: the system
+ * suggests nobody. Leads are never in it; they cannot be assigned events.
+ *
+ * @returns {Promise<Array<{id: string, fullName: string|null, activeEvents: number}>>}
+ */
+export async function listCoordinatorWorkload() {
+  const response = await apiClient.get("/event-requests/coordinator-workload");
+  return response.data;
+}
+
+/**
+ * Every event someone holds in an active status, earliest event first, for
+ * the Lead (SCRUM-486 AC6): the way to an assigned event's page, where the
+ * Lead hands it over. Each row is { id, eventName, status, statusDisplay,
+ * proposedStart, organiserName, assignedCoordinatorId,
+ * assignedCoordinatorName }. Possibly empty.
+ *
+ * @returns {Promise<Object[]>}
+ */
+export async function listAssignedEventsForLead() {
+  const response = await apiClient.get("/event-requests/assigned");
+  return response.data;
+}
+
+/**
+ * The Lead assigns an unassigned request to one Event Coordinator (SCRUM-486
+ * AC3). The note is optional and becomes the assignment history's handover
+ * note; the Organiser never sees it.
+ *
+ * A 409 whose err.response.data.code is "ALREADY_ASSIGNED" means another
+ * Lead got there first; err.response.data.conflicts[0].assignedCoordinatorName
+ * says who (AC4). Any other 409 means the request is no longer submitted.
+ * 400 is no coordinator chosen, or someone who is not an Event Coordinator;
+ * 403 is not a Lead; 404 is no such request.
+ *
+ * @param {string} id
+ * @param {{coordinatorId: string, note?: string}} assignment
+ * @returns {Promise<Object>} the request, now assigned
+ */
+export async function assignEventRequest(id, { coordinatorId, note }) {
+  const response = await apiClient.post(`/event-requests/${id}/assign`, {
+    coordinatorId,
+    note,
   });
   return response.data;
 }

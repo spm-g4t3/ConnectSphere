@@ -13,10 +13,19 @@ const CODE_MESSAGES = {
   EVENT_DATES_MISSING:
     "This event has no proposed start and end, so a venue cannot be requested yet.",
   VENUE_RETIRED: "This venue has been retired and can no longer be requested. Choose another venue.",
+  // SCRUM-525 (AC1): one live request per venue per event, not per event, so
+  // both refusals are about this venue only and say other venues are still
+  // open. "Venue Requests" is the menu label of the page where a request is
+  // withdrawn (Navigation.jsx, /my-venue-requests), so the coordinator knows
+  // where to go.
   BOOKING_REQUEST_EXISTS:
-    "This event already has a pending or approved venue request, and only one is allowed at a time. Withdraw the pending request first if you want a different venue.",
+    "This event already has a pending or approved request for this venue. You can still request other venues; to ask for this one again, withdraw that request first under Venue Requests.",
   BOOKING_FLAGGED_FOR_REVIEW:
-    "A booking for this event is flagged for review. Resolve it before requesting another venue.",
+    "This event's booking for this venue is flagged for review. Resolve it before requesting this venue again, or choose another venue.",
+  // SCRUM-525 (R4): only when the form sent no attendance and the event has
+  // none either. The form always sends one, so this is a stale or odd client.
+  EVENT_ATTENDANCE_MISSING:
+    "This event has no expected attendance saved, so enter one for this venue before requesting it.",
   BOOKING_PERIOD_CONFLICT:
     "This venue is not available for the whole of the event. See what is in the way below, or choose another venue.",
   BOOKING_CHANGED: "This request changed while you were working on it. Please try again.",
@@ -32,8 +41,35 @@ const STATUS_MESSAGES = {
 
 const DEFAULT_MESSAGE = "Could not submit the request. Please try again.";
 
-/** The 409 codes meaning the event already has a live request or booking. */
-const EVENT_ALREADY_REQUESTED_CODES = new Set([
+// SCRUM-188: a 400 naming the requirement codes means the server did not
+// recognise one of the layout, accessibility or facility codes the request
+// carried (or the criteria it acknowledged). They come from the search form,
+// so that is where to fix them.
+const REQUIREMENT_FIELDS = new Set(["accessibility", "facilities", "roomLayoutCode", "acknowledgedCriteria"]);
+const REQUIREMENTS_MESSAGE =
+  "The selected requirements were not recognised. Adjust the layout, accessibility features or facilities in the search form, then try again.";
+
+// SCRUM-525 (AC2): the attendance is typed on the request form itself, not in
+// the search form, so a 400 naming it gets its own message pointing there. It
+// is checked first, and kept out of REQUIREMENT_FIELDS, so a refused number is
+// never blamed on the search form.
+const ATTENDANCE_FIELDS = new Set(["expectedAttendance"]);
+const ATTENDANCE_MESSAGE =
+  "The expected attendance for this venue was not accepted. Enter a whole number of 1 or more.";
+
+/** Does a 400's details[] name any of these fields? */
+function namesField(err, fields) {
+  if (err?.response?.status !== 400) return false;
+  const details = err.response.data?.details;
+  return Array.isArray(details) && details.some((d) => fields.has(d?.field));
+}
+
+/**
+ * The 409 codes meaning this event already has a live request or booking for
+ * the venue just asked for. SCRUM-525: per venue, so they lock that venue
+ * only, never the event.
+ */
+const VENUE_ALREADY_REQUESTED_CODES = new Set([
   "BOOKING_REQUEST_EXISTS",
   "BOOKING_FLAGGED_FOR_REVIEW",
 ]);
@@ -58,6 +94,8 @@ function conflictsOf(err) {
 export function bookingRequestErrorMessage(err) {
   const code = codeOf(err);
   if (code && Object.hasOwn(CODE_MESSAGES, code)) return CODE_MESSAGES[code];
+  if (namesField(err, ATTENDANCE_FIELDS)) return ATTENDANCE_MESSAGE;
+  if (namesField(err, REQUIREMENT_FIELDS)) return REQUIREMENTS_MESSAGE;
 
   const status = err?.response?.status;
   if (Object.hasOwn(STATUS_MESSAGES, status)) return STATUS_MESSAGES[status];
@@ -93,9 +131,12 @@ export function periodConflicts(err) {
   return conflictsOf(err).filter((c) => PERIOD_CONFLICT_KINDS.has(c?.kind));
 }
 
-/** Does the answer mean this event already has a pending, approved or flagged booking? */
-export function isEventAlreadyRequested(err) {
-  return err?.response?.status === 409 && EVENT_ALREADY_REQUESTED_CODES.has(codeOf(err));
+/**
+ * Does the answer mean this event already has a pending, approved or flagged
+ * booking for the venue just asked for (SCRUM-525: that venue, not the event)?
+ */
+export function isVenueAlreadyRequested(err) {
+  return err?.response?.status === 409 && VENUE_ALREADY_REQUESTED_CODES.has(codeOf(err));
 }
 
 /** A 400's details[], for the fields this form has. */

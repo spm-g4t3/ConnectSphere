@@ -265,6 +265,62 @@ describe("describeNotification: booking_request_withdrawn", () => {
   });
 });
 
+describe("describeNotification: event_cancelled (SCRUM-374)", () => {
+  it("shows the reason and cancellation date to the Organiser", () => {
+    const result = describeNotification({
+      type: "event_cancelled",
+      payload: {
+        audience: "organiser",
+        eventName: "Tech Talk",
+        reason: "Venue unavailable",
+        cancelledAt: "2026-10-01T10:00:00+08:00",
+      },
+    });
+
+    expect(result.headline).toBe("Tech Talk was cancelled");
+    expect(result.detail).toBe(
+      `Reason: Venue unavailable. Cancelled ${formatTimestamp("2026-10-01T10:00:00+08:00")}.`,
+    );
+  });
+
+  it("uses safe defaults when the Organiser cancellation details are missing", () => {
+    expect(describeNotification({
+      type: "event_cancelled",
+      payload: { audience: "organiser", reason: "", cancelledAt: null },
+    })).toEqual({
+      headline: "Unnamed event was cancelled",
+      detail: "Reason: No reason recorded.",
+    });
+  });
+
+  it("uses the generic notification for an unknown cancellation audience", () => {
+    expect(describeNotification({
+      type: "event_cancelled",
+      payload: { audience: "unknown" },
+    })).toEqual({
+      headline: "New notification",
+      detail: "This notification type cannot be displayed yet.",
+    });
+  });
+
+  it("uses audience-specific details for venue and technical support staff", () => {
+    expect(describeNotification({
+      type: "event_cancelled",
+      payload: { audience: "venue_staff", eventName: "Tech Talk" },
+    })).toEqual({
+      headline: "Bookings for Tech Talk were released",
+      detail: "Pending booking requests were withdrawn and confirmed bookings were cancelled.",
+    });
+    expect(describeNotification({
+      type: "event_cancelled",
+      payload: { audience: "technical_support_staff", eventName: "Tech Talk" },
+    })).toEqual({
+      headline: "Equipment arrangements for Tech Talk were cancelled",
+      detail: "The equipment request was cancelled and its active reservations were released.",
+    });
+  });
+});
+
 describe("describeNotification: other types", () => {
   it.each([
     ["clarification_requested", "A Coordinator has a question about Tech Talk"],
@@ -357,4 +413,3 @@ describe("describeNotification: venue_hold_expired (SCRUM-491 AC8)", () => {
     expect(`${headline} ${detail}`).not.toMatch(/undefined|null/);
   });
 });
-

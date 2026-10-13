@@ -6,7 +6,7 @@
 //
 // venueService is mocked, so nothing touches the network. SCRUM-142's venue
 // details and SCRUM-143's no-match message and retry (AC8) are asserted at
-// the end.
+// the end, then SCRUM-254's request button and SCRUM-191's suitability check.
 //
 // Timezone-proof: the finder shows Singapore (venue) time on every device, so
 // expected input values are Singapore literals and payloads are compared with
@@ -18,8 +18,9 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 
 import EventVenueFinder from "../../src/components/EventVenueFinder.jsx";
-import { findVenuesForEvent } from "../../src/services/venueService";
+import { findVenuesForEvent, searchActiveVenues } from "../../src/services/venueService";
 import { createBookingRequest } from "../../src/services/bookingRequestService";
+import { checkVenueSuitability } from "../../src/services/venueSuitabilityService";
 import {
   ACCESSIBILITY_FEATURES,
   FACILITIES,
@@ -28,6 +29,11 @@ import {
 
 vi.mock("../../src/services/venueService", () => ({
   findVenuesForEvent: vi.fn(),
+  searchActiveVenues: vi.fn(),
+}));
+
+vi.mock("../../src/services/venueSuitabilityService", () => ({
+  checkVenueSuitability: vi.fn(),
 }));
 
 vi.mock("../../src/services/bookingRequestService", () => ({
@@ -143,6 +149,8 @@ beforeEach(() => {
   vi.mocked(findVenuesForEvent).mockReset();
   vi.mocked(findVenuesForEvent).mockResolvedValue([]);
   vi.mocked(createBookingRequest).mockReset();
+  vi.mocked(searchActiveVenues).mockReset();
+  vi.mocked(checkVenueSuitability).mockReset();
 });
 
 describe("SCRUM20_AC2 pre-filled from the event", () => {
@@ -987,7 +995,6 @@ describe("SCRUM254 request this venue from the event's search", () => {
   const PENDING_BOOKING = { id: "b1", status: "pending" };
   const NOT_APPROVED =
     /A venue can only be requested for an approved or confirmed event\. This event is/;
-  const ALREADY = "This event already has a venue request, so another cannot be started.";
 
   const requestButton = (name) =>
     screen.getByRole("button", { name: `Request this venue: ${name}` });
@@ -1064,45 +1071,50 @@ describe("SCRUM254 request this venue from the event's search", () => {
     expect(searchForm.contains(panel("Annex"))).toBe(false);
   });
 
-  it("SCRUM254_a_sent_request_reaches_the_parent_and_disables_every_button", async () => {
+  // SCRUM-525 (AC1, R11): one live request per venue, so a send locks only
+  // the venue it was for, whether or not the parent listens.
+  it.each([
+    ["with", true],
+    ["without", false],
+  ])("SCRUM525_AC1_a_sent_request_disables_only_that_venue (%s onRequestSubmitted)", async (_label, withCallback) => {
     vi.mocked(createBookingRequest).mockResolvedValue(PENDING_BOOKING);
-    const onRequestSubmitted = vi.fn();
+    const onRequestSubmitted = withCallback ? vi.fn() : undefined;
     const { user } = await searched(APPROVED, { userId: COORDINATOR, onRequestSubmitted });
 
     await user.click(requestButton("Hall A"));
     await user.click(within(panel("Hall A")).getByRole("button", { name: "Request this venue" }));
 
-    await waitFor(() => expect(onRequestSubmitted).toHaveBeenCalledWith(PENDING_BOOKING));
-    expect(createBookingRequest).toHaveBeenCalledWith({ eventRequestId: "e1", venueId: "v1" });
-    for (const button of allRequestButtons()) expect(button).toBeDisabled();
-    expect(screen.getByText(ALREADY)).toBeInTheDocument();
+    await waitFor(() => expect(requestButton("Hall A")).toBeDisabled());
+    expect(createBookingRequest).toHaveBeenCalledWith({ eventRequestId: "e1", venueId: "v1", expectedAttendance: 80 });
+    if (withCallback) expect(onRequestSubmitted).toHaveBeenCalledWith(PENDING_BOOKING);
+    expect(requestButton("Annex")).toBeEnabled();
+    expect(requestButton("Hall A")).toHaveAccessibleDescription(/\(Pending\)/);
   });
 
-  it("SCRUM254_a_sent_request_without_a_parent_callback_still_disables_the_buttons", async () => {
-    vi.mocked(createBookingRequest).mockResolvedValue(PENDING_BOOKING);
-    const { user } = await searched();
-
-    await user.click(requestButton("Hall A"));
-    await user.click(within(panel("Hall A")).getByRole("button", { name: "Request this venue" }));
-
-    await waitFor(() => {
-      for (const button of allRequestButtons()) expect(button).toBeDisabled();
-    });
-  });
-
-  it("SCRUM254_an_already_requested_answer_disables_every_button", async () => {
+  // SCRUM-525 (AC1, R3): a refusal names no venue, so the lock comes from the
+  // panel that sent it, and only that venue is locked.
+  it.each([
+    ["BOOKING_REQUEST_EXISTS", null],
+    ["BOOKING_FLAGGED_FOR_REVIEW", "Flagged for review"],
+  ])("SCRUM525_AC1_%s_disables_only_the_venue_it_names", async (code, status) => {
     vi.mocked(createBookingRequest).mockRejectedValue(
-      httpError(409, { error: "prose", code: "BOOKING_REQUEST_EXISTS" }),
+      httpError(409, { error: "prose", code, conflicts: [{ kind: "booking_request", bookingId: "b9" }] }),
     );
     const onRequestSubmitted = vi.fn();
-    const { user } = await searched(APPROVED, { userId: COORDINATOR, onRequestSubmitted });
+    const onVenueAlreadyRequested = vi.fn();
+    const { user } = await searched(APPROVED, { userId: COORDINATOR, onRequestSubmitted, onVenueAlreadyRequested });
 
     await user.click(requestButton("Annex"));
     await user.click(within(panel("Annex")).getByRole("button", { name: "Request this venue" }));
 
-    await waitFor(() => {
-      for (const button of allRequestButtons()) expect(button).toBeDisabled();
-    });
+    await waitFor(() => expect(requestButton("Annex")).toBeDisabled());
+    expect(requestButton("Hall A")).toBeEnabled();
+    expect(requestButton("Annex")).toHaveAccessibleDescription(
+      status
+        ? `This event already has a request for this venue (${status}). See it under Venue suitability above.`
+        : "This event already has a request for this venue. See it under Venue suitability above.",
+    );
+    expect(onVenueAlreadyRequested).toHaveBeenCalledWith(code);
     expect(onRequestSubmitted).not.toHaveBeenCalled();
   });
 
@@ -1116,8 +1128,7 @@ describe("SCRUM254 request this venue from the event's search", () => {
     expect(requestButton("Hall A")).toBeEnabled();
   });
 
-  it("SCRUM254_a_new_search_closes_an_open_panel_but_keeps_the_sent_state", async () => {
-    vi.mocked(createBookingRequest).mockResolvedValue(PENDING_BOOKING);
+  it("SCRUM254_a_new_search_closes_an_open_panel", async () => {
     const { user } = await searched();
 
     await user.click(requestButton("Hall A"));
@@ -1127,15 +1138,44 @@ describe("SCRUM254 request this venue from the event's search", () => {
     await waitFor(() => expect(findVenuesForEvent).toHaveBeenCalledTimes(2));
     await screen.findByRole("heading", { name: "Hall A" });
     expect(panel("Hall A")).not.toBeInTheDocument();
+  });
 
-    // Send, then search again: the buttons stay off.
+  // SCRUM-525 (AC1): the lock describes the event, not the results, so it
+  // survives a new search, and stays on the one venue.
+  it("SCRUM525_AC1_a_new_search_keeps_the_sent_venue_disabled", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING_BOOKING);
+    const { user } = await searched();
+
     await user.click(requestButton("Annex"));
     await user.click(within(panel("Annex")).getByRole("button", { name: "Request this venue" }));
-    await screen.findByText(ALREADY);
+    await waitFor(() => expect(requestButton("Annex")).toBeDisabled());
     await user.click(searchButton());
-    await waitFor(() => expect(findVenuesForEvent).toHaveBeenCalledTimes(3));
+
+    await waitFor(() => expect(findVenuesForEvent).toHaveBeenCalledTimes(2));
     await screen.findByRole("heading", { name: "Annex" });
-    for (const button of allRequestButtons()) expect(button).toBeDisabled();
+    expect(requestButton("Annex")).toBeDisabled();
+    expect(requestButton("Hall A")).toBeEnabled();
+  });
+
+  // SCRUM-525 (AC1 "the existing one shown", R13): a venue the parent says
+  // is already requested names the request's status and where it is listed.
+  it("SCRUM525_AC1_a_requested_venue_points_to_its_existing_request", async () => {
+    vi.mocked(checkVenueSuitability).mockResolvedValue({ suitable: true, criteria: [], checked: {} });
+    const sentence = "This event already has a request for this venue (Pending). See it under Venue suitability above.";
+    const { user } = await searched(APPROVED, { userId: COORDINATOR, liveRequests: new Map([["v2", "Pending"]]) });
+
+    expect(requestButton("Annex")).toBeDisabled();
+    expect(requestButton("Annex")).toHaveAccessibleDescription(sentence);
+    expect(requestButton("Hall A")).toBeEnabled();
+    expect(requestButton("Hall A")).toHaveAccessibleDescription("");
+    // A hint, not an announcement.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    // Checked from its card, the venue is not offered in the panel either.
+    await user.click(screen.getByRole("button", { name: "Check suitability: Annex" }));
+    const check = screen.getByRole("region", { name: "Suitability of Annex" });
+    await within(check).findByText(sentence);
+    expect(within(check).queryByRole("button", { name: "Request this venue" })).not.toBeInTheDocument();
   });
 });
 
@@ -1154,5 +1194,305 @@ describe("SCRUM491_AC5 the event's own hold does not hide a venue from its searc
 
     const criteria = await sentCriteria();
     expect(criteria).not.toHaveProperty("eventRequestId");
+  });
+});
+
+describe("SCRUM-191 check a venue's suitability from the event (SCRUM188_AC1/AC2)", () => {
+  const COORDINATOR = "u-coord";
+  const APPROVED = Object.freeze({
+    ...EVENT,
+    status: "approved",
+    assignedCoordinatorId: COORDINATOR,
+  });
+  const STUDIO = { id: "v3", name: "Studio", location: "Block D", maxCapacity: 40 };
+
+  const UNSUITABLE = {
+    suitable: false,
+    criteria: [
+      { criterion: "Capacity", met: false, detail: "Capacity 40 < expected attendance 80" },
+      { criterion: "Operating hours", met: true, detail: "Open" },
+      { criterion: "Layout", met: true, detail: "Offered" },
+      { criterion: "Accessibility", met: true, detail: "Provided" },
+      { criterion: "Facilities", met: true, detail: "Provided" },
+      { criterion: "Availability", met: true, detail: "Free" },
+    ],
+    checked: {
+      startsAt: START_ISO,
+      endsAt: END_ISO,
+      expectedAttendance: 80,
+      layout: "theatre",
+      accessibility: ["hearing_loop"],
+      facilities: ["projector"],
+    },
+  };
+
+  const checkButton = (name) => screen.getByRole("button", { name: `Check suitability: ${name}` });
+  const suitabilityPanel = (name) => screen.queryByRole("region", { name: `Suitability of ${name}` });
+  const requestPanel = (name) => screen.queryByRole("region", { name: `Request ${name}` });
+  const requestButton = (name) => screen.getByRole("button", { name: `Request this venue: ${name}` });
+  const otherToggle = () => screen.getByRole("button", { name: "Check another venue" });
+
+  /** Renders the finder, searches, and waits for HALL and ANNEX. */
+  async function searched(request = APPROVED, props = { userId: COORDINATOR }) {
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL, ANNEX]);
+    const utils = renderFinder(request, props);
+    await utils.user.click(searchButton());
+    await screen.findByRole("heading", { name: "Hall A" });
+    return utils;
+  }
+
+  /** Ticks theatre, Hearing loop and Projector in the form. */
+  async function pickCodes(user) {
+    await user.selectOptions(field.layout(), "theatre");
+    await user.click(within(group("Accessibility features")).getByLabelText("Hearing loop"));
+    await user.click(within(group("Facilities")).getByLabelText("Projector"));
+  }
+
+  beforeEach(() => {
+    vi.mocked(checkVenueSuitability).mockResolvedValue(UNSUITABLE);
+  });
+
+  it("SCRUM188_AC1_each_result_offers_check_suitability_as_a_non_submitting_button", async () => {
+    await searched();
+    expect(checkButton("Hall A")).toHaveAttribute("type", "button");
+    expect(checkButton("Annex")).toBeEnabled();
+  });
+
+  it("SCRUM188_AC1_check_suitability_opens_the_panel_with_the_forms_codes", async () => {
+    const { user } = await searched();
+    await pickCodes(user);
+
+    await user.click(checkButton("Hall A"));
+
+    expect(suitabilityPanel("Hall A")).toBeInTheDocument();
+    expect(await within(suitabilityPanel("Hall A")).findByText("Not suitable")).toBeInTheDocument();
+    expect(checkVenueSuitability).toHaveBeenCalledWith("e1", "v1", {
+      layout: "theatre",
+      accessibility: ["hearing_loop"],
+      facilities: ["projector"],
+    });
+    // No search is run, and the panel is not nested in the search form.
+    expect(findVenuesForEvent).toHaveBeenCalledTimes(1);
+    expect(searchButton().closest("form").contains(suitabilityPanel("Hall A"))).toBe(false);
+  });
+
+  it("SCRUM188_AC1_later_form_edits_do_not_change_the_checked_snapshot", async () => {
+    const { user } = await searched();
+    await pickCodes(user);
+    await user.click(checkButton("Hall A"));
+    await within(suitabilityPanel("Hall A")).findByText("Not suitable");
+
+    // Edit the form after the check.
+    await user.selectOptions(field.layout(), "banquet");
+    await user.click(within(group("Facilities")).getByLabelText("Wi-Fi"));
+
+    expect(checkVenueSuitability).toHaveBeenCalledTimes(1);
+    expect(suitabilityPanel("Hall A")).toBeInTheDocument();
+
+    // Requesting from the panel carries the codes that were checked.
+    vi.mocked(createBookingRequest).mockResolvedValue({ id: "b1", status: "pending" });
+    await user.click(within(suitabilityPanel("Hall A")).getByRole("button", { name: "Request this venue" }));
+    await user.click(within(requestPanel("Hall A")).getByRole("checkbox"));
+    await user.click(within(requestPanel("Hall A")).getByRole("button", { name: "Request this venue" }));
+
+    await waitFor(() => expect(createBookingRequest).toHaveBeenCalledTimes(1));
+    expect(createBookingRequest).toHaveBeenCalledWith({
+      eventRequestId: "e1",
+      venueId: "v1",
+      roomLayoutCode: "theatre",
+      accessibility: ["hearing_loop"],
+      facilities: ["projector"],
+      expectedAttendance: 80,
+      confirmUnsuitable: true,
+      acknowledgedCriteria: ["Capacity"],
+    });
+  });
+
+  it("SCRUM188_AC1_checking_the_same_venue_again_takes_a_new_snapshot", async () => {
+    const { user } = await searched();
+    await user.click(checkButton("Hall A"));
+    await within(suitabilityPanel("Hall A")).findByText("Not suitable");
+
+    await user.selectOptions(field.layout(), "banquet");
+    await user.click(checkButton("Hall A"));
+
+    await waitFor(() => expect(checkVenueSuitability).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(checkVenueSuitability).mock.calls[1][2]).toMatchObject({ layout: "banquet" });
+  });
+
+  it.each([
+    ["a different coordinator", "someone-else"],
+    ["no signed-in user", undefined],
+  ])("SCRUM188_AC1_check_buttons_are_disabled_for_%s", async (_label, userId) => {
+    await searched(APPROVED, { userId });
+    expect(checkButton("Hall A")).toBeDisabled();
+    expect(checkButton("Annex")).toBeDisabled();
+    expect(otherToggle()).toBeDisabled();
+  });
+
+  it("SCRUM188_AC1_check_another_venue_lists_only_active_venues_and_checks_the_chosen_one", async () => {
+    vi.mocked(searchActiveVenues).mockResolvedValue([
+      HALL,
+      STUDIO,
+      { id: "v9", name: "Old Wing", location: "Block Z", retiredAt: "2026-01-01T00:00:00Z" },
+    ]);
+    const { user } = renderFinder(APPROVED, { userId: COORDINATOR });
+    expect(searchActiveVenues).not.toHaveBeenCalled();
+
+    await user.click(otherToggle());
+    const select = await screen.findByLabelText("Active venue");
+    // Retired venues are never offered; the default search excludes them.
+    expect(searchActiveVenues).toHaveBeenCalledWith();
+    const options = within(select).getAllByRole("option").map((o) => o.textContent);
+    expect(options).toEqual(["Choose a venue", "Hall A (Level 2)", "Studio (Block D)"]);
+
+    const check = screen.getByRole("button", { name: "Check" });
+    expect(check).toBeDisabled();
+    await user.selectOptions(select, "v3");
+    await user.click(check);
+
+    expect(await within(suitabilityPanel("Studio")).findByText("Not suitable")).toBeInTheDocument();
+    expect(checkVenueSuitability).toHaveBeenCalledWith("e1", "v3", {
+      layout: "",
+      accessibility: [],
+      facilities: [],
+    });
+  });
+
+  it("SCRUM188_AC1_the_active_venue_list_is_loaded_once", async () => {
+    vi.mocked(searchActiveVenues).mockResolvedValue([STUDIO]);
+    const { user } = renderFinder(APPROVED, { userId: COORDINATOR });
+
+    await user.click(otherToggle());
+    await screen.findByLabelText("Active venue");
+    await user.click(otherToggle());
+    await user.click(otherToggle());
+    await screen.findByLabelText("Active venue");
+
+    expect(searchActiveVenues).toHaveBeenCalledTimes(1);
+  });
+
+  it("SCRUM188_AC1_a_failed_venue_list_says_so_and_can_be_retried", async () => {
+    vi.mocked(searchActiveVenues)
+      .mockRejectedValueOnce(httpError(500, { error: "prose" }))
+      .mockResolvedValueOnce([STUDIO]);
+    const { user } = renderFinder(APPROVED, { userId: COORDINATOR });
+
+    await user.click(otherToggle());
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the list of venues.");
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByLabelText("Active venue")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["an empty list", []],
+    // A malformed response is treated as no venues rather than crashing.
+    ["a malformed response", null],
+  ])("SCRUM188_AC1_%s_says_there_are_no_active_venues_to_check", async (_label, rows) => {
+    vi.mocked(searchActiveVenues).mockResolvedValue(rows);
+    const { user } = renderFinder(APPROVED, { userId: COORDINATOR });
+
+    await user.click(otherToggle());
+
+    expect(await screen.findByText("There are no active venues to check.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Active venue")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM188_AC1_a_venue_without_a_location_is_listed_by_name_alone", async () => {
+    vi.mocked(searchActiveVenues).mockResolvedValue([{ id: "v4", name: "Rooftop", maxCapacity: 30 }]);
+    const { user } = renderFinder(APPROVED, { userId: COORDINATOR });
+
+    await user.click(otherToggle());
+    const select = await screen.findByLabelText("Active venue");
+
+    const options = within(select).getAllByRole("option").map((o) => o.textContent);
+    expect(options).toEqual(["Choose a venue", "Rooftop"]);
+  });
+
+  it("SCRUM188_AC1_closing_the_other_venue_check_removes_its_panel", async () => {
+    vi.mocked(searchActiveVenues).mockResolvedValue([STUDIO]);
+    const { user } = renderFinder(APPROVED, { userId: COORDINATOR });
+    await user.click(otherToggle());
+    await user.selectOptions(await screen.findByLabelText("Active venue"), "v3");
+    await user.click(screen.getByRole("button", { name: "Check" }));
+    await within(suitabilityPanel("Studio")).findByText("Not suitable");
+
+    await user.click(within(suitabilityPanel("Studio")).getByRole("button", { name: "Close" }));
+
+    expect(suitabilityPanel("Studio")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM191_only_one_panel_is_open_at_a_time", async () => {
+    const { user } = await searched();
+
+    await user.click(checkButton("Hall A"));
+    expect(suitabilityPanel("Hall A")).toBeInTheDocument();
+
+    await user.click(requestButton("Annex"));
+    expect(requestPanel("Annex")).toBeInTheDocument();
+    expect(suitabilityPanel("Hall A")).not.toBeInTheDocument();
+
+    await user.click(checkButton("Annex"));
+    expect(suitabilityPanel("Annex")).toBeInTheDocument();
+    expect(requestPanel("Annex")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM191_requesting_from_the_panel_opens_the_request_with_the_suitability_and_codes", async () => {
+    const { user } = await searched();
+    await pickCodes(user);
+    await user.click(checkButton("Hall A"));
+    await within(suitabilityPanel("Hall A")).findByText("Not suitable");
+
+    await user.click(within(suitabilityPanel("Hall A")).getByRole("button", { name: "Request this venue" }));
+
+    const panel = requestPanel("Hall A");
+    expect(panel).toBeInTheDocument();
+    expect(suitabilityPanel("Hall A")).not.toBeInTheDocument();
+    // The unsuitable result is there up front, before any send.
+    expect(within(panel).getByRole("alert")).toHaveTextContent("Capacity: Capacity 40 < expected attendance 80");
+    expect(within(panel).getByRole("button", { name: "Request this venue" })).toBeDisabled();
+  });
+
+  it("SCRUM191_request_this_venue_is_hidden_in_the_panel_when_the_event_cannot_be_requested", async () => {
+    const { user } = await searched({ ...APPROVED, status: "submitted" });
+    await user.click(checkButton("Hall A"));
+    await within(suitabilityPanel("Hall A")).findByText("Not suitable");
+
+    expect(
+      within(suitabilityPanel("Hall A")).queryByRole("button", { name: "Request this venue" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("SCRUM191_a_request_straight_from_a_result_carries_the_forms_current_codes", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue({ id: "b1", status: "pending" });
+    const { user } = await searched();
+    await pickCodes(user);
+
+    await user.click(requestButton("Annex"));
+    await user.click(within(requestPanel("Annex")).getByRole("button", { name: "Request this venue" }));
+
+    await waitFor(() =>
+      expect(createBookingRequest).toHaveBeenCalledWith({
+        eventRequestId: "e1",
+        venueId: "v2",
+        roomLayoutCode: "theatre",
+        accessibility: ["hearing_loop"],
+        facilities: ["projector"],
+        expectedAttendance: 80,
+      }),
+    );
+    expect(checkVenueSuitability).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM191_a_new_search_closes_an_open_check", async () => {
+    const { user } = await searched();
+    await user.click(checkButton("Hall A"));
+    expect(suitabilityPanel("Hall A")).toBeInTheDocument();
+
+    await user.click(searchButton());
+    await waitFor(() => expect(findVenuesForEvent).toHaveBeenCalledTimes(2));
+    expect(suitabilityPanel("Hall A")).not.toBeInTheDocument();
   });
 });

@@ -22,6 +22,12 @@
 // The facts themselves render through VenueSafetyFacts, the same component the
 // Safety Officer's review will use; the loading, error and retry states stay
 // here.
+//
+// SCRUM-188 AC7: Venue Staff's booking rows also carry the event's name and
+// the suitability result the coordinator sent with the request, overrides
+// included. A row with a `suitability` key -- null or not -- is one of those
+// and gets BookingSuitabilitySummary; a coordinator's row has no such key and
+// renders exactly as before.
 
 import { useCallback, useEffect, useId, useState } from "react";
 import {
@@ -33,6 +39,7 @@ import { formatTimestamp, shortId } from "../services/displayFormat";
 import { formatTurnaround } from "../services/turnaroundOptions";
 import { safetyFactText } from "../services/venueSafetyFacts";
 import VenueSafetyFacts from "./VenueSafetyFacts";
+import BookingSuitabilitySummary from "./BookingSuitabilitySummary";
 
 const BOOKINGS_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
@@ -298,32 +305,50 @@ export default function VenueDetail({ venue }) {
 
         {bookings.length > 0 && (
           <>
-            {/* 009_bookings.sql joins nothing and the service selects six
-                columns, none of them a name, so there is no event title to
-                show. The id is rendered as an identifier rather than dressed
-                up as a label it is not. */}
-            <p className="venue-detail__help">
-              Event names are not shown &mdash; the API records the event request's
-              id only.
-            </p>
+            {/* A coordinator's rows carry no event name, so there is no event
+                title to show and the id is rendered as an identifier rather
+                than dressed up as a label it is not. SCRUM-188 AC7 sends Venue
+                Staff the name; the note stays until every row has one. */}
+            {!bookings.every((booking) => booking.eventName) && (
+              <p className="venue-detail__help">
+                Event names are not shown &mdash; the API records the event request's
+                id only.
+              </p>
+            )}
             <ul>
-              {bookings.map((booking) => (
-                <li key={booking.id}>
-                  <span>
-                    {formatTimestamp(booking.startsAt)} &ndash;{" "}
-                    {formatTimestamp(booking.endsAt)}
-                  </span>
-                  <code title={booking.eventRequestId ?? undefined}>
-                    {booking.eventRequestId ? shortId(booking.eventRequestId) : "no event"}
-                  </code>
-                  {/* SCRUM-243: a booking request that is not (or no longer) a
-                      hold -- pending, rejected, withdrawn -- must not read as
-                      one. Absent from older responses, so shown only when sent. */}
-                  {booking.statusDisplay?.label && (
-                    <span className="venue-detail__booking-status">{booking.statusDisplay.label}</span>
-                  )}
-                </li>
-              ))}
+              {bookings.map((booking) => {
+                const hasSuitability = Object.prototype.hasOwnProperty.call(booking, "suitability");
+                return (
+                  <li
+                    key={booking.id}
+                    className={hasSuitability ? "venue-detail__booking--with-suitability" : undefined}
+                  >
+                    {hasSuitability && booking.eventName && (
+                      <strong className="venue-detail__booking-event">{booking.eventName}</strong>
+                    )}
+                    <span>
+                      {formatTimestamp(booking.startsAt)} &ndash;{" "}
+                      {formatTimestamp(booking.endsAt)}
+                    </span>
+                    <code title={booking.eventRequestId ?? undefined}>
+                      {booking.eventRequestId ? shortId(booking.eventRequestId) : "no event"}
+                    </code>
+                    {/* SCRUM-243: a booking request that is not (or no longer) a
+                        hold -- pending, rejected, withdrawn -- must not read as
+                        one. Absent from older responses, so shown only when sent. */}
+                    {booking.statusDisplay?.label && (
+                      <span className="venue-detail__booking-status">{booking.statusDisplay.label}</span>
+                    )}
+                    {hasSuitability && (
+                      <BookingSuitabilitySummary
+                        suitability={booking.suitability}
+                        suitabilityOverridden={booking.suitabilityOverridden}
+                        overriddenCriteria={booking.overriddenCriteria}
+                      />
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </>
         )}

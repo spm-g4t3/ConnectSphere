@@ -48,6 +48,9 @@
  *           them, which made the calendar's 403 a formality: an Organiser
  *           could fetch the bookings half of it here. A retired venue's
  *           bookings stay readable (SCRUM-15 AC3).
+ *           Only Venue Staff get each booking's suitability record
+ *           (SCRUM-188 AC7); Coordinators get the plain rows, since the list
+ *           covers other coordinators' events.
  *   event-search  Event Coordinators only (SCRUM-140, for SCRUM-20). The
  *           story is written from the Event Coordinator's seat, and its
  *           results reveal when venues are busy: a venue left out is one
@@ -90,6 +93,7 @@ import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js'
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorHandler } from '../http/handleError.js';
+import { parseCodeList } from '../http/parseCodeList.js';
 
 
 /** Map an error to a response; see src/http/handleError.js (SCRUM-127). */
@@ -143,43 +147,6 @@ function parseSearchFilters(query) {
 
 
 /**
- * Split comma-separated codes into one list, for accessibility and facilities.
- *
- * Why commas: axios's default serialisation of an array param is `key[]=a&
- * key[]=b`, and Express 5's default query parser ('simple', which is Node's
- * querystring.parse -- express/lib/application.js sets it, utils.js
- * compileQueryParser maps it) keeps that as a key literally named 'key[]', so
- * req.query.key would be undefined and the criterion silently lost. A single
- * `key=a,b` survives any client and any parser, and codes never contain
- * commas. A repeated `key=a&key=b`, which querystring.parse does turn into an
- * array, is accepted too and split the same way.
- *
- * Blank pieces are dropped (`a,,b`, a trailing comma, an untouched field), and
- * if nothing is left the result is undefined so the caller leaves the key out
- * -- the validator treats a missing list as "not filtered on".
- *
- * Only strings are split. Anything else -- a non-string array entry, or an
- * object a different query parser might build -- is passed through as it
- * came, so validateEventSearchCriteria reports it ("must be an array of
- * codes", "entry N must be a non-empty code") rather than this quietly
- * dropping it. The simple parser only produces strings, so in production that
- * is a guard, not a path.
- */
-function parseCodeList(value) {
-  if (typeof value !== 'string' && !Array.isArray(value)) return value;
-
-  const pieces = typeof value === 'string' ? [value] : value;
-  const codes = pieces.flatMap((piece) =>
-    typeof piece === 'string'
-      ? piece.split(',').map((code) => code.trim()).filter((code) => code !== '')
-      : [piece],
-  );
-
-  return codes.length > 0 ? codes : undefined;
-}
-
-
-/**
  * Turn an event search's query string into what validateEventSearchCriteria
  * expects (SCRUM-140, for SCRUM-20 AC1).
  *
@@ -194,7 +161,8 @@ function parseCodeList(value) {
  * than becoming 0 or NaN. Number('abc') is NaN and Number('12.5') 12.5, so
  * both still get the message they deserve.
  *
- * accessibility and facilities are comma-separated lists; see parseCodeList.
+ * accessibility and facilities are comma-separated lists; see parseCodeList
+ * (src/http/parseCodeList.js, shared with the suitability check since SCRUM-190).
  * Each key is set only when something is left to filter by.
  */
 function parseEventSearch(query) {
@@ -473,12 +441,23 @@ export function createVenueRouter({
    * it; left open, this route would be a side door to what the calendar's
    * 403 refuses.
    *
+   * SCRUM-188 AC7: Venue Staff get each booking with its suitability record
+   * -- the stored result, whether the coordinator overrode it and which
+   * criteria, the layout requested and the event's name -- because they are
+   * who decide the request and AC7 says the result is attached for them.
+   * Event Coordinators get the shape they had before: this list holds every
+   * event's bookings on the venue, and a coordinator has no business reading
+   * the suitability record of an event that is not theirs. They see their
+   * own through the event screen (SCRUM-191, SCRUM-192). The role decides
+   * the shape, not a query parameter, so a coordinator cannot ask for it.
+   *
    * Statuses: 200; 400 for a malformed id (the service validates it); 401;
    * 403 unless Venue Staff or an Event Coordinator; 500.
    */
   router.get('/:id/bookings', internalReaders, async (req, res) => {
     try {
-      res.status(200).json(await getBookingsForVenue(req.params.id));
+      const includeSuitability = req.user.role === ROLE.VENUE_STAFF;
+      res.status(200).json(await getBookingsForVenue(req.params.id, { includeSuitability }));
     } catch (err) {
       handleError(err, res);
     }

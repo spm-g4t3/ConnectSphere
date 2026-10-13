@@ -17,6 +17,11 @@
  * Timezone independence: every instant carries an explicit offset and every
  * expectation is a Singapore wall-clock value, so these pass whatever TZ the
  * process runs under (checked under UTC, Asia/Singapore and America/New_York).
+ *
+ * SCRUM-189, a subtask of SCRUM-188 (Check Venue Suitability for an Event):
+ * the SCRUM188_AC2 blocks prove evaluateCriteria gives one verdict per
+ * criterion, with the values compared, and never disagrees with
+ * matchesAllCriteria on the fixtures above.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -30,6 +35,9 @@ import {
   providesAll,
   matchesLocation,
   matchesAllCriteria,
+  hoursVerdict,
+  SUITABILITY_CRITERIA,
+  evaluateCriteria,
 } from '../../src/domain/venueMatching.js';
 
 /** Wednesday (day 3) hours 09:00-18:00, as PostgREST returns `time` columns. */
@@ -424,5 +432,369 @@ describe('SCRUM20_AC4 meeting only some criteria is not enough', () => {
     ['SCRUM20_AC4_venue_failing_only_location_is_excluded', { location: 'Level 2' }],
   ])('%s', (_name, change) => {
     expect(matchesAllCriteria(harbourRoom(change), AC4_REQUEST())).toBe(false);
+  });
+});
+
+
+// SCRUM-189: the per-criterion verdicts the SCRUM-188 suitability check shows.
+describe('SCRUM188_AC2 hoursVerdict', () => {
+  it('SCRUM188_AC2_within_hours_carries_the_row_and_the_local_readings', () => {
+    expect(hoursVerdict(WEDNESDAY_9_TO_6, sgt('10:00'), sgt('12:00'))).toEqual({
+      met: true,
+      reason: 'within_hours',
+      dayOfWeek: 3,
+      opensAt: '09:00:00',
+      closesAt: '18:00:00',
+      start: { date: '2026-11-11', dayOfWeek: 3, minutes: 600 },
+      end: { date: '2026-11-11', dayOfWeek: 3, minutes: 720 },
+    });
+  });
+
+  it('SCRUM188_AC2_each_reason_is_named', () => {
+    expect(hoursVerdict(WEDNESDAY_9_TO_6, sgt('08:00'), sgt('12:00')).reason).toBe('outside_hours');
+    expect(hoursVerdict(WEDNESDAY_9_TO_6, sgt('10:00', '2026-11-15'), sgt('12:00', '2026-11-15')))
+      .toMatchObject({ met: false, reason: 'closed_that_day', dayOfWeek: 0 });
+    expect(hoursVerdict(WEDNESDAY_9_TO_6, sgt('23:00'), sgt('01:00', '2026-11-12')))
+      .toMatchObject({ met: false, reason: 'spans_midnight' });
+  });
+
+  it('SCRUM188_AC2_no_row_means_no_opening_times_are_reported', () => {
+    const verdict = hoursVerdict([], sgt('10:00'), sgt('12:00'));
+    expect(verdict).not.toHaveProperty('opensAt');
+    expect(verdict).not.toHaveProperty('closesAt');
+  });
+});
+
+
+describe('SCRUM188_AC2 evaluateCriteria shape', () => {
+  it('SCRUM188_AC2_labels_are_the_five_display_labels_in_order', () => {
+    expect(SUITABILITY_CRITERIA).toEqual([
+      'Capacity',
+      'Operating hours',
+      'Layout',
+      'Accessibility',
+      'Facilities',
+    ]);
+    expect(Object.isFrozen(SUITABILITY_CRITERIA)).toBe(true);
+  });
+
+  it('SCRUM188_AC2_one_entry_per_criterion_in_suitability_order', () => {
+    const verdicts = evaluateCriteria(harbourRoom(), baseRequest());
+    expect(verdicts.map((v) => v.criterion)).toEqual([...SUITABILITY_CRITERIA]);
+    verdicts.forEach((v) => {
+      expect(Object.keys(v).slice(0, 3)).toEqual(['criterion', 'met', 'detail']);
+      expect(typeof v.met).toBe('boolean');
+      expect(typeof v.detail).toBe('string');
+    });
+    // SCRUM-193/194 (F4): the structured codes beside the words.
+    expect(verdicts.map((v) => Object.keys(v).sort())).toEqual([
+      ['criterion', 'detail', 'met'],
+      ['criterion', 'detail', 'met'],
+      ['criterion', 'detail', 'layout', 'met', 'offers'],
+      ['criterion', 'detail', 'met', 'missing', 'requested'],
+      ['criterion', 'detail', 'met', 'missing', 'requested'],
+    ]);
+  });
+
+  it('SCRUM188_AC2_location_is_not_a_suitability_criterion', () => {
+    const verdicts = evaluateCriteria(harbourRoom(), baseRequest({ location: 'Level 2' }));
+    expect(verdicts).toHaveLength(5);
+    expect(verdicts.every((v) => v.met)).toBe(true);
+  });
+
+  it('SCRUM188_AC2_base_request_reads_all_met', () => {
+    expect(evaluateCriteria(harbourRoom(), baseRequest())).toEqual([
+      { criterion: 'Capacity', met: true, detail: 'Capacity 100 ≥ expected attendance 80' },
+      {
+        criterion: 'Operating hours',
+        met: true,
+        detail: 'Event runs 10:00–12:00 on Wednesday; venue open 09:00–18:00',
+      },
+      {
+        criterion: 'Layout',
+        met: true,
+        detail: 'Layout theatre offered',
+        layout: 'theatre',
+        offers: ['classroom', 'theatre'],
+      },
+      {
+        criterion: 'Accessibility',
+        met: true,
+        detail: 'All 1 requested provided',
+        missing: [],
+        requested: ['step_free_entrance'],
+      },
+      {
+        criterion: 'Facilities',
+        met: true,
+        detail: 'All 2 requested provided',
+        missing: [],
+        requested: ['projector', 'wifi'],
+      },
+    ]);
+  });
+});
+
+
+/** The one verdict for a label, from a full evaluateCriteria run. */
+const verdictFor = (label, venue, criteria) =>
+  evaluateCriteria(venue, criteria).find((v) => v.criterion === label);
+
+
+describe('SCRUM188_AC2 capacity verdict', () => {
+  it('SCRUM188_AC2_capacity_below_attendance_is_not_met', () => {
+    expect(
+      verdictFor('Capacity', harbourRoom({ maxCapacity: 80 }), baseRequest({ expectedAttendance: 150 })),
+    ).toEqual({ criterion: 'Capacity', met: false, detail: 'Capacity 80 < expected attendance 150' });
+  });
+
+  it('SCRUM188_AC2_capacity_equal_to_attendance_is_met', () => {
+    expect(
+      verdictFor('Capacity', harbourRoom({ maxCapacity: 150 }), baseRequest({ expectedAttendance: 150 })),
+    ).toEqual({ criterion: 'Capacity', met: true, detail: 'Capacity 150 ≥ expected attendance 150' });
+  });
+});
+
+
+describe('SCRUM188_AC2 operating hours verdict', () => {
+  const hoursOf = (venue, criteria) => verdictFor('Operating hours', venue, criteria);
+
+  it('SCRUM188_AC2_start_before_opening_is_not_met', () => {
+    expect(hoursOf(harbourRoom(), baseRequest({ startsAt: sgt('08:00') }))).toEqual({
+      criterion: 'Operating hours',
+      met: false,
+      detail: 'Event runs 08:00–12:00 on Wednesday; venue open 09:00–18:00',
+    });
+  });
+
+  it('SCRUM188_AC2_ending_exactly_at_closing_is_met', () => {
+    expect(hoursOf(harbourRoom(), baseRequest({ endsAt: sgt('18:00') }))).toEqual({
+      criterion: 'Operating hours',
+      met: true,
+      detail: 'Event runs 10:00–18:00 on Wednesday; venue open 09:00–18:00',
+    });
+  });
+
+  it('SCRUM188_AC2_one_minute_past_closing_is_not_met', () => {
+    expect(hoursOf(harbourRoom(), baseRequest({ endsAt: sgt('18:01') }))).toEqual({
+      criterion: 'Operating hours',
+      met: false,
+      detail: 'Event runs 10:00–18:01 on Wednesday; venue open 09:00–18:00',
+    });
+  });
+
+  it('SCRUM188_AC2_weekday_with_no_hours_row_reads_closed', () => {
+    const sunday = baseRequest({ startsAt: sgt('10:00', '2026-11-15'), endsAt: sgt('12:00', '2026-11-15') });
+    expect(hoursOf(harbourRoom(), sunday)).toEqual({
+      criterion: 'Operating hours',
+      met: false,
+      detail: 'Venue closed on Sunday',
+    });
+  });
+
+  it('SCRUM188_AC2_midnight_span_names_both_days', () => {
+    // Friday 2026-11-13 22:00 to Saturday 01:00, Singapore.
+    const overnight = baseRequest({
+      startsAt: sgt('22:00', '2026-11-13'),
+      endsAt: sgt('01:00', '2026-11-14'),
+    });
+    expect(hoursOf(harbourRoom(), overnight)).toEqual({
+      criterion: 'Operating hours',
+      met: false,
+      detail: 'Event spans midnight (Fri 22:00 – Sat 01:00)',
+    });
+  });
+
+  it('SCRUM188_AC2_utc_and_offset_forms_of_one_period_read_the_same', () => {
+    const offset = evaluateCriteria(harbourRoom(), baseRequest());
+    const utc = evaluateCriteria(
+      harbourRoom(),
+      baseRequest({ startsAt: '2026-11-11T02:00:00Z', endsAt: '2026-11-11T04:00:00Z' }),
+    );
+    expect(utc).toEqual(offset);
+  });
+
+  it('SCRUM188_AC2_utc_instant_is_described_on_the_singapore_clock', () => {
+    // B-AC3-09: 00:30Z is 08:30 Wednesday in Singapore.
+    expect(
+      hoursOf(harbourRoom(), baseRequest({ startsAt: '2026-11-11T00:30:00Z', endsAt: '2026-11-11T02:00:00Z' })),
+    ).toEqual({
+      criterion: 'Operating hours',
+      met: false,
+      detail: 'Event runs 08:30–10:00 on Wednesday; venue open 09:00–18:00',
+    });
+  });
+});
+
+
+describe('SCRUM188_AC2 layout verdict', () => {
+  it('SCRUM188_AC2_offered_layout_is_met', () => {
+    expect(verdictFor('Layout', harbourRoom(), baseRequest())).toEqual({
+      criterion: 'Layout',
+      met: true,
+      detail: 'Layout theatre offered',
+      layout: 'theatre',
+      offers: ['classroom', 'theatre'],
+    });
+  });
+
+  it('SCRUM188_AC2_layout_not_offered_lists_what_is', () => {
+    expect(
+      verdictFor('Layout', harbourRoom({ layouts: ['banquet', 'classroom'] }), baseRequest()),
+    ).toEqual({
+      criterion: 'Layout',
+      met: false,
+      detail: 'Layout theatre not offered (offers: banquet, classroom)',
+      layout: 'theatre',
+      offers: ['banquet', 'classroom'],
+    });
+  });
+
+  it('SCRUM188_AC2_venue_with_no_layouts_says_none', () => {
+    expect(verdictFor('Layout', harbourRoom({ layouts: [] }), baseRequest()).detail)
+      .toBe('Layout theatre not offered (offers: none)');
+  });
+});
+
+
+describe('SCRUM188_AC2 accessibility and facilities verdicts', () => {
+  it('SCRUM188_AC2_missing_accessibility_is_listed_in_requested_order', () => {
+    const criteria = baseRequest({
+      accessibility: ['wheelchair_ramp', 'step_free_entrance', 'hearing_loop'],
+    });
+    expect(verdictFor('Accessibility', harbourRoom(), criteria)).toEqual({
+      criterion: 'Accessibility',
+      met: false,
+      detail: 'Missing: wheelchair_ramp, hearing_loop',
+      missing: ['wheelchair_ramp', 'hearing_loop'],
+      requested: ['wheelchair_ramp', 'step_free_entrance', 'hearing_loop'],
+    });
+  });
+
+  it('SCRUM188_AC2_all_accessibility_provided_is_met', () => {
+    const criteria = baseRequest({ accessibility: ['lift_access', 'step_free_entrance'] });
+    expect(verdictFor('Accessibility', harbourRoom(), criteria)).toEqual({
+      criterion: 'Accessibility',
+      met: true,
+      detail: 'All 2 requested provided',
+      missing: [],
+      requested: ['lift_access', 'step_free_entrance'],
+    });
+  });
+
+  it('SCRUM188_AC2_missing_facility_is_not_met', () => {
+    const criteria = baseRequest({ facilities: ['projector', 'catering'] });
+    expect(verdictFor('Facilities', harbourRoom(), criteria)).toEqual({
+      criterion: 'Facilities',
+      met: false,
+      detail: 'Missing: catering',
+      missing: ['catering'],
+      requested: ['projector', 'catering'],
+    });
+  });
+
+  it('SCRUM188_AC2_all_facilities_provided_is_met', () => {
+    expect(verdictFor('Facilities', harbourRoom(), baseRequest())).toEqual({
+      criterion: 'Facilities',
+      met: true,
+      detail: 'All 2 requested provided',
+      missing: [],
+      requested: ['projector', 'wifi'],
+    });
+  });
+});
+
+
+describe('SCRUM188_AC2 optional criteria not requested', () => {
+  const required = { startsAt: sgt('10:00'), endsAt: sgt('12:00'), expectedAttendance: 80 };
+  const bare = harbourRoom({ layouts: [], accessibility: [], facilities: [] });
+
+  it('SCRUM188_AC2_absent_optionals_read_none_requested', () => {
+    const verdicts = evaluateCriteria(bare, required);
+    expect(verdicts.slice(2)).toEqual([
+      { criterion: 'Layout', met: true, detail: 'None requested', layout: null, offers: [] },
+      { criterion: 'Accessibility', met: true, detail: 'None requested', missing: [], requested: [] },
+      { criterion: 'Facilities', met: true, detail: 'None requested', missing: [], requested: [] },
+    ]);
+  });
+
+  it('SCRUM188_AC2_empty_lists_read_none_requested', () => {
+    const verdicts = evaluateCriteria(bare, { ...required, accessibility: [], facilities: [] });
+    expect(verdicts.slice(3)).toEqual([
+      { criterion: 'Accessibility', met: true, detail: 'None requested', missing: [], requested: [] },
+      { criterion: 'Facilities', met: true, detail: 'None requested', missing: [], requested: [] },
+    ]);
+  });
+});
+
+
+// SCRUM-193/194 (F4): structured codes beside the words, so the frontend can
+// show its own labels. They never change `met`.
+describe('SCRUM188_AC2 structured codes on the criterion entries', () => {
+  it('SCRUM188_AC2_layout_entry_carries_the_code_asked_for_and_what_the_venue_offers', () => {
+    const verdict = verdictFor('Layout', harbourRoom({ layouts: ['banquet'] }), baseRequest({ layout: 'u_shape' }));
+    expect(verdict).toMatchObject({ met: false, layout: 'u_shape', offers: ['banquet'] });
+  });
+
+  it('SCRUM188_AC2_missing_and_requested_name_the_codes_for_accessibility_and_facilities', () => {
+    const verdicts = evaluateCriteria(
+      harbourRoom(),
+      baseRequest({ accessibility: ['hearing_loop', 'lift_access'], facilities: ['stage'] }),
+    );
+    expect(verdicts[3]).toMatchObject({ missing: ['hearing_loop'], requested: ['hearing_loop', 'lift_access'] });
+    expect(verdicts[4]).toMatchObject({ missing: ['stage'], requested: ['stage'] });
+  });
+});
+
+
+// SCRUM-189: evaluateCriteria and matchesAllCriteria share one set of
+// predicates, so over every fixture above they must agree (location aside,
+// since only search filters on it).
+describe('SCRUM188_AC2 parity with the SCRUM-20 search rule', () => {
+  const required = { startsAt: sgt('10:00'), endsAt: sgt('12:00'), expectedAttendance: 80 };
+  const bare = harbourRoom({ layouts: [], accessibility: [], facilities: [] });
+
+  it.each([
+    ['control', harbourRoom(), baseRequest()],
+    ['capacity equal', harbourRoom(), baseRequest({ expectedAttendance: 100 })],
+    ['capacity short', harbourRoom({ maxCapacity: 79 }), baseRequest()],
+    ['capacity 1', harbourRoom({ maxCapacity: 1 }), baseRequest()],
+    ['hours late open', harbourRoom({ hours: [{ day_of_week: 3, opens_at: '11:00:00', closes_at: '18:00:00' }] }), baseRequest()],
+    ['start before opening', harbourRoom(), baseRequest({ startsAt: sgt('08:59') })],
+    ['end after closing', harbourRoom(), baseRequest({ endsAt: sgt('18:01') })],
+    ['exact hours', harbourRoom(), baseRequest({ startsAt: sgt('09:00'), endsAt: sgt('18:00') })],
+    ['sunday', harbourRoom(), baseRequest({ startsAt: sgt('10:00', '2026-11-15'), endsAt: sgt('12:00', '2026-11-15') })],
+    ['no hours', harbourRoom({ hours: [] }), baseRequest()],
+    ['midnight span', harbourRoom(), baseRequest({ startsAt: sgt('23:00'), endsAt: sgt('01:00', '2026-11-12') })],
+    ['utc request', harbourRoom(), baseRequest({ startsAt: '2026-11-11T02:00:00Z', endsAt: '2026-11-11T04:00:00Z' })],
+    ['utc before opening', harbourRoom(), baseRequest({ startsAt: '2026-11-11T00:30:00Z', endsAt: '2026-11-11T02:00:00Z' })],
+    ['layout missing', harbourRoom({ layouts: ['classroom'] }), baseRequest()],
+    ['layout banquet', harbourRoom(), baseRequest({ layout: 'banquet' })],
+    ['accessibility missing', harbourRoom({ accessibility: ['lift_access'] }), baseRequest()],
+    ['facilities missing', harbourRoom({ facilities: ['pa_system', 'projector'] }), baseRequest()],
+    ['bare required only', bare, required],
+    ['bare too many', bare, { ...required, expectedAttendance: 101 }],
+    ['bare too early', bare, { ...required, startsAt: sgt('08:00') }],
+  ])('SCRUM188_AC2_parity_%s', (_label, venue, criteria) => {
+    expect(criteria).not.toHaveProperty('location');
+    expect(evaluateCriteria(venue, criteria).every((v) => v.met)).toBe(
+      matchesAllCriteria(venue, criteria),
+    );
+  });
+
+  // SCRUM-193/194, B-AC3-03: the rows above mostly test failures; these pin
+  // parity when what was asked for is provided.
+  it.each([
+    ['layout requested and offered', harbourRoom(), baseRequest({ layout: 'classroom' })],
+    [
+      'accessibility and facilities all provided',
+      harbourRoom(),
+      baseRequest({ accessibility: ['lift_access', 'step_free_entrance'], facilities: ['pa_system', 'projector', 'wifi'] }),
+    ],
+    ['capacity 0 attendance 0', harbourRoom({ maxCapacity: 0 }), baseRequest({ expectedAttendance: 0 })],
+  ])('SCRUM188_AC3_parity_also_holds_when_requested_items_are_provided (%s)', (_label, venue, criteria) => {
+    const verdicts = evaluateCriteria(venue, criteria);
+    expect(verdicts.every((v) => v.met)).toBe(true);
+    expect(matchesAllCriteria(venue, criteria)).toBe(true);
   });
 });

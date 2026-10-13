@@ -32,16 +32,24 @@
 // coordinator now starts the review of a submitted request, then approves,
 // rejects or returns it for amendment; a decided request shows its decision
 // read-only (DecisionOutcome). See the comment above the decision section.
+//
+// SCRUM-192 (SCRUM-188 AC6, Week 7) added "Venue suitability" above "Find a
+// venue": the event's requested and booked venues, rechecked live each time
+// this view opens or the event's period or attendance changes. See the
+// comment above that section.
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { normaliseRole } from "../auth/normaliseRole";
 import AssignmentHistory from "./AssignmentHistory";
 import EventVenueFinder from "./EventVenueFinder";
+import EventVenueSuitability from "./EventVenueSuitability";
 import DecisionOutcome from "./DecisionOutcome";
 import ReassignEventPanel from "./ReassignEventPanel";
-import ClarificationHistory from "./ClarificationHistory";
+import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import EventEquipmentSection from "./EventEquipmentSection";
+import EventCancellationPanel from "./EventCancellationPanel";
 import {
   decideEventRequest,
   getCoordinatorChangeRequests,
@@ -111,10 +119,18 @@ function seedableCapacity(value) {
 
 // SCRUM-19. Keyed by status, as ReviewQueue's table is, because the server's
 // messages are written by the database and name ids.
+// SCRUM-486 (SCRUM-517): 409 now has two causes. The request has moved on and
+// is no longer waiting to be reviewed, or it has no coordinator and is waiting
+// for the Event Coordinator Lead to assign it (migration 052 refuses that with
+// 55000, a 409, rather than 029's 403, which told the coordinator it was
+// someone else's when it was nobody's). One message names both: they share a
+// remedy, and telling them apart would mean reading the server's message text,
+// which this screen never does. The return-for-amendment table below does the
+// same with its 409.
 const START_REVIEW_ERROR_MESSAGES = {
   403: "This request is no longer assigned to you, so you cannot start its review. Go back and reopen it to see who holds it now.",
   404: "This request no longer exists.",
-  409: "This request is no longer waiting to be reviewed. Go back and reopen it to see where it stands.",
+  409: "This request cannot be reviewed yet: it may be waiting for the Event Coordinator Lead to assign it a coordinator, or it may no longer be waiting to be reviewed. Go back and reopen it to see where it stands.",
 };
 
 const DECISION_ERROR_MESSAGES = {
@@ -143,6 +159,14 @@ const RETURN_FOR_AMENDMENT_ERROR_MESSAGES = {
 const START_DATE_PASSED_MESSAGE =
   "This request cannot be approved because its proposed start date has passed or is missing. Agree a new date with the organiser, or reject the request.";
 
+const CANCELLABLE_STATUSES = new Set([
+  "submitted",
+  "under_review",
+  "pending_clarification",
+  "approved",
+  "confirmed",
+]);
+
 /**
  * Has this event's proposed start passed, by this browser's clock?
  *
@@ -155,6 +179,20 @@ function startDateHasPassed(value) {
   if (!value) return true;
   const time = new Date(value).getTime();
   return Number.isNaN(time) || time <= Date.now();
+}
+
+/**
+ * SCRUM-525 (AC1, R13): Venue suitability's items as the venues Find a venue
+ * must not offer again, each with the status label its hint names. An item
+ * whose recheck failed still counts: it is a live booking all the same, and
+ * the server would refuse a second request for its venue.
+ */
+function liveRequestsFrom(items) {
+  const venues = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    if (item?.venueId) venues.set(item.venueId, item.statusDisplay?.label ?? item.status ?? null);
+  }
+  return venues;
 }
 
 export default function CoordinatorRequestDetail({
@@ -199,8 +237,20 @@ export default function CoordinatorRequestDetail({
   // AssignmentHistory key, bumped to make it read the history again.
   const { user } = useAuth();
   const [reassigning, setReassigning] = useState(false);
+  const [cancellationPage, setCancellationPage] = useState(false);
   const [handedOverTo, setHandedOverTo] = useState(null);
   const [historyVersion, setHistoryVersion] = useState(0);
+  // SCRUM-192. Bumped when a booking request is sent from "Find a venue", so
+  // "Venue suitability" remounts and shows the new booking. The parent's
+  // refresh alone would not: a booking changes none of the event fields the
+  // section is keyed by, and `current` can be this panel's own copy.
+  const [venueVersion, setVenueVersion] = useState(0);
+  // SCRUM-188, per venue since SCRUM-525: the venues the Venue suitability
+  // section found a live request for when it loaded, with each one's status,
+  // so Find a venue starts with those venues' request buttons off instead of
+  // offering one the server would refuse. Every other venue stays on.
+  // Kept with the event it was loaded for, so another event never inherits it.
+  const [liveVenueRequests, setLiveVenueRequests] = useState({ eventId: null, venues: new Map() });
 
   const assignedCoordinatorId = handedOverTo?.id ?? request.assignedCoordinatorId;
 
@@ -210,7 +260,21 @@ export default function CoordinatorRequestDetail({
   // refused. The server checks again, under a lock, and if the row this panel
   // holds is stale, ReassignEventPanel turns the 403 into a message.
   const isAssignedCoordinator = Boolean(user?.id) && assignedCoordinatorId === user.id;
-  const canReassign = isAssignedCoordinator;
+  // SCRUM-486 (SCRUM-521), AC6: the Event Coordinator Lead may hand over any
+  // event, as 052's reassign_event_request allows, so the button shows for
+  // the holder or a Lead. Only while someone holds it: a request with no
+  // coordinator is assigned from the Lead's queue, not handed over (052
+  // refuses that, AC5-05). The Lead is never isAssignedCoordinator (only
+  // event_coordinator can be assigned), so every other action on this screen
+  // stays the holder's.
+  //
+  // SCRUM-370: and never on a cancelled event, which nobody can hand over
+  // (052's status list leaves cancelled out). Both conditions kept from the
+  // merge of dev, neither dropped.
+  const isLead = normaliseRole(user?.role) === "EVENT_COORDINATOR_LEAD";
+  const canReassign = assignedCoordinatorId != null
+    && current.status !== "cancelled"
+    && (isAssignedCoordinator || isLead);
 
   // SCRUM-19. isAssignedCoordinator also decides who sees the review and
   // decision actions, and for the same reason: a convenience, not the gate.
@@ -425,8 +489,22 @@ export default function CoordinatorRequestDetail({
     return (
       <ReassignEventPanel
         request={request}
+        outgoingCoordinatorId={assignedCoordinatorId}
         onCancel={() => setReassigning(false)}
         onReassigned={handleReassigned}
+      />
+    );
+  }
+
+  if (cancellationPage) {
+    return (
+      <EventCancellationPanel
+        eventRequest={current}
+        onBack={() => setCancellationPage(false)}
+        onCancelled={(updated) => {
+          setUpdatedRequest(updated);
+          onChangeRequestProcessed?.();
+        }}
       />
     );
   }
@@ -440,6 +518,15 @@ export default function CoordinatorRequestDetail({
         </span>
       </h2>
       <p>{display.description}</p>
+      {isAssignedCoordinator && CANCELLABLE_STATUSES.has(current.status) && (
+        <button
+          className="coordinator-request-detail__cancel"
+          type="button"
+          onClick={() => setCancellationPage(true)}
+        >
+          Cancel event
+        </button>
+      )}
 
       <section>
         <h3>The request</h3>
@@ -491,7 +578,7 @@ export default function CoordinatorRequestDetail({
       <EventEquipmentSection
         requestId={request.id}
         status={current.status}
-        canEdit={isAssignedCoordinator}
+        canEdit={isAssignedCoordinator && current.status !== "cancelled"}
       />
 
       <section>
@@ -527,7 +614,7 @@ export default function CoordinatorRequestDetail({
                       )}
                     </p>
                   )}
-                  {isOpen && (
+                  {isOpen && current.status !== "cancelled" && isAssignedCoordinator && (
                     <div className="coordinator-change-requests__actions">
                       <button
                         type="button"
@@ -632,12 +719,19 @@ export default function CoordinatorRequestDetail({
           panel was opened from is a little out of date. */}
       <section>
         <h3>Coordinator</h3>
-        <AssignmentHistory key={historyVersion} eventRequestId={request.id} view="coordinator" />
+        <AssignmentHistory
+          key={historyVersion}
+          eventRequestId={request.id}
+          view="coordinator"
+          currentCoordinatorId={assignedCoordinatorId}
+        />
 
         {handedOverTo && (
           <p className="coordinator-reassign__notice" role="status">
-            Handed over to {handedOverTo.fullName ?? "the coordinator you chose"}. You can still
-            view this event, but not change it.
+            Handed over to {handedOverTo.fullName ?? "the coordinator you chose"}.
+            {/* Said to the coordinator who handed it over. A Lead never could
+                change it, and can hand it over again (SCRUM-521). */}
+            {isLead ? "" : " You can still view this event, but not change it."}
           </p>
         )}
 
@@ -674,18 +768,23 @@ export default function CoordinatorRequestDetail({
       ) : current.status === "pending_clarification" ? (
         <section>
           <h3>Waiting for organiser reply</h3>
-          <p>{current.clarificationNote || "No clarification note was recorded."}</p>
-          {current.clarificationReplyByDate && (
-            <p>
-              Reply by: {current.clarificationReplyByDate}
-              {current.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
-                <strong className="clarification-overdue"> Overdue</strong>
-              )}
-            </p>
-          )}
-          <ClarificationHistory
+          <div className="clarification-current">
+            <strong>Current question</strong>
+            <p>{current.clarificationNote || "No clarification question was recorded."}</p>
+            {current.clarificationReplyByDate && (
+              <span>
+                Reply by {formatTimestamp(current.clarificationReplyByDate)}
+                {current.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
+                  <strong className="clarification-overdue"> · Overdue</strong>
+                )}
+              </span>
+            )}
+          </div>
+          <ClarificationHistoryDialog
             eventRequestId={request.id}
-            isOpen
+            eventName={request.eventName}
+            isOpenQuestion
+            latestQuestion={current.clarificationNote}
           />
           {isAssignedCoordinator && (
             <form className="coordinator-clarification" onSubmit={handleCloseClarification}>
@@ -724,6 +823,14 @@ export default function CoordinatorRequestDetail({
                 {startingReview ? "Starting..." : "Start review"}
               </button>
             </div>
+          ) : current.assignedCoordinatorId == null ? (
+            // SCRUM-486 AC8-04 (SCRUM-519). Since 052 a submitted request can
+            // have no coordinator: it is in the Lead's unassigned queue. Every
+            // coordinator can still open it (SCRUM-332), and "waiting for the
+            // assigned coordinator" would name someone who does not exist.
+            // isAssignedCoordinator is false for everyone here, so nobody is
+            // offered Start review, which 052 would refuse anyway.
+            <p>Waiting for the Event Coordinator Lead to assign this request to a coordinator.</p>
           ) : (
             <p>Waiting for the assigned coordinator to start the review.</p>
           )}
@@ -803,10 +910,10 @@ export default function CoordinatorRequestDetail({
       {request.status !== "pending_clarification" && (
         <section className="coordinator-clarification-history">
           <h3>Clarification history</h3>
-          <details>
-            <summary>View questions, replies and closures</summary>
-            <ClarificationHistory eventRequestId={request.id} />
-          </details>
+          <ClarificationHistoryDialog
+            eventRequestId={request.id}
+            eventName={request.eventName}
+          />
         </section>
       )}
 
@@ -821,14 +928,48 @@ export default function CoordinatorRequestDetail({
           each result's "Request this venue"). userId is passed only while
           this user is the assigned coordinator, so a handover made here
           (handedOverTo) turns the request buttons off even though `current`
-          still names this user. A sent request refreshes the parent's list. */}
+          still names this user. A sent request refreshes the parent's list
+          and the Venue suitability section above. */}
+      {/* SCRUM-192 (SCRUM-188 AC6, Week 7): the event's requested and booked
+          venues, rechecked live against the event as it is now. Keyed like
+          EventVenueFinder, so an approved change request that moves the
+          period or attendance remounts it and the recheck happens as the
+          change lands; venueVersion adds a booking just sent below. Shown
+          only to the assigned coordinator, the one the server answers.
+          SCRUM-188: what it loads tells Find a venue which venues already
+          have a live request (onLoaded -> liveRequests; per venue since
+          SCRUM-525). */}
+      {isAssignedCoordinator && (
+        <section className="event-venue-suitability-section">
+          <h3>Venue suitability</h3>
+          <EventVenueSuitability
+            key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}|${venueVersion}`}
+            eventRequestId={current.id}
+            onLoaded={(items) => setLiveVenueRequests({ eventId: current.id, venues: liveRequestsFrom(items) })}
+          />
+        </section>
+      )}
+
       <section>
         <h3>Find a venue</h3>
         <EventVenueFinder
           key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}`}
           request={current}
-          userId={isAssignedCoordinator ? user.id : undefined}
-          onRequestSubmitted={() => onChangeRequestProcessed?.()}
+          userId={isAssignedCoordinator && current.status !== "cancelled" ? user.id : undefined}
+          // Only while the Venue suitability section is shown: the lock hint
+          // says "See it under Venue suitability above", and after a handover
+          // made here that section is gone while this state remains. The
+          // buttons stay off anyway, for eligibility's reason, shown once.
+          liveRequests={
+            isAssignedCoordinator && liveVenueRequests.eventId === current.id ? liveVenueRequests.venues : undefined
+          }
+          onRequestSubmitted={() => {
+            setVenueVersion((n) => n + 1);
+            onChangeRequestProcessed?.();
+          }}
+          // SCRUM-525 (R13): a venue refused as already requested reloads
+          // Venue suitability, so the request it collided with is listed.
+          onVenueAlreadyRequested={() => setVenueVersion((n) => n + 1)}
         />
         <p className="event-venue-finder__browse">
           <Link to="/venue-search">Browse all venues</Link>

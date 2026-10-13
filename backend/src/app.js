@@ -18,6 +18,7 @@ import bookingRequestRoutes from './routes/bookingRequests.js';
 import equipmentAvailabilityRoutes from './routes/equipmentAvailability.js';
 import equipmentRoutes from './routes/equipment.js';
 import eventEquipmentRoutes from './routes/eventEquipment.js';
+import venueSuitabilityRoutes from './routes/venueSuitability.js';
 import equipmentReviewRoutes from './routes/equipmentReview.js';
 import openEventRoutes from './routes/openEvents.js';
 import { startVenueHoldExpiryScheduler } from './jobs/venueHoldExpiryScheduler.js';
@@ -31,6 +32,10 @@ app.use('/api/auth', authRoutes);
 
 app.use('/api/event-requests/:id/equipment', eventEquipmentRoutes)
 app.use('/api/event-requests/:id/equipment-review', equipmentReviewRoutes);
+
+// SCRUM-190 (SCRUM-188): one venue judged against one event, criterion by
+// criterion. Before the /api/event-requests router, like the equipment routes.
+app.use('/api/event-requests/:id/venue-suitability', venueSuitabilityRoutes);
 
 app.use('/api/event-requests', eventRequestRoutes);
 

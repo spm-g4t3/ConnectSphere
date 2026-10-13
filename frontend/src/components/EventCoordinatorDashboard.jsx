@@ -36,12 +36,22 @@ export default function EventCoordinatorDashboard({ user }) {
       {/* SCRUM-333. Both lists, mine first. They answer different questions:
           My events is the work this coordinator holds, every status, soonest
           first; the review queue is every event awaiting a decision across the
-          whole team, whoever holds it. Since SCRUM-330 every event is assigned
-          the moment it is submitted, so the queue is no longer "work nobody
-          holds". It stays because it is the only view of what colleagues have
-          waiting, which is what a coordinator covering for someone, or
-          picking who to hand an event to, needs to see. Mine comes first
-          because it is the work this person is accountable for.
+          whole team, held by any coordinator. Mine comes first because it is
+          the work this person is accountable for.
+
+          Why the shared queue stays (SCRUM-486, SCRUM-520). This used to rest
+          on "since SCRUM-330 every event is assigned the moment it is
+          submitted", which 052 made false: a submitted request now waits with
+          no coordinator until the Event Coordinator Lead assigns one, and
+          those requests are the Lead's alone, in the Lead's unassigned queue,
+          so this queue leaves them out. The queue stays because the customer
+          restricts what a coordinator may manage, not what they may see:
+          only the assigned coordinator acts on an event (SCRUM-327 AC6, AC7),
+          but any coordinator may view any event (SCRUM-444 AC1). This queue
+          is that view, of what colleagues have waiting, which is what a
+          coordinator covering for someone, or choosing who to hand an event
+          to, needs. listEventRequestsForReview's docstring has the argument
+          in full.
 
           Both are direct children of .dashboard so each <section> root picks
           up the `.dashboard > section` card styling, exactly as VenueCatalogue

@@ -22,6 +22,12 @@ import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
+// SCRUM-190: the default checker loads venueService.js lazily, and that module
+// imports the Supabase client statically, which throws without a .env. Every
+// query in these tests goes to the injected fake, so the real client is never
+// wanted; this only lets the module load.
+vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: {}, supabaseAdmin: {}, default: {} }));
+
 import { createBookingRequestRouter } from '../../src/routes/bookingRequests.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
 import { ROLE } from '../../src/domain/userRole.js';
@@ -39,11 +45,13 @@ const START = '2026-12-01T09:00:00+00:00';
 const END = '2026-12-01T17:00:00+00:00';
 
 const SUITABLE = { suitable: true, criteria: [{ criterion: 'capacity', met: true }] };
+// Criterion labels as the real check reports them, since SCRUM-193/194's
+// acknowledgedCriteria names the unmet ones by label.
 const UNSUITABLE = {
   suitable: false,
   criteria: [
-    { criterion: 'capacity', met: false, detail: 'Capacity 80 < expected attendance 150' },
-    { criterion: 'facilities', met: true },
+    { criterion: 'Capacity', met: false, detail: 'Capacity 80 < expected attendance 150' },
+    { criterion: 'Facilities', met: true },
   ],
 };
 
@@ -81,12 +89,45 @@ function bookingRow(overrides = {}) {
     status: 'pending',
     requested_by: COORDINATOR_ID,
     room_layout_code: 'theatre',
+    // SCRUM-525 (051): the attendance stored with the request; 150 is the
+    // event's, which a body without one defaults to.
+    expected_attendance: 150,
     venue_requirements: 'Tiered seating',
     accessibility_requirements: 'Step-free entrance',
     setup_notes: 'Extra tables',
     suitability_result: SUITABLE,
     suitability_overridden: false,
     created_at: '2026-10-06T10:00:00+00:00',
+    ...overrides,
+  };
+}
+
+/**
+ * SCRUM-190: the venue as getVenueById selects it, open 08:00-22:00 every day
+ * (Singapore), large enough for the event and with nothing set up around it.
+ */
+function venueRow(overrides = {}) {
+  return {
+    id: VENUE_ID,
+    name: 'Hall A',
+    location: 'Level 1',
+    max_capacity: 200,
+    turnaround_minutes: 0,
+    setup_minutes: 0,
+    emergency_access: null,
+    known_restrictions: null,
+    retired_at: null,
+    created_at: '2026-01-01T00:00:00+00:00',
+    updated_at: '2026-01-01T00:00:00+00:00',
+    last_modified_by: null,
+    venue_room_layouts: [{ room_layout_code: 'theatre' }],
+    venue_accessibility_features: [],
+    venue_facilities: [],
+    venue_operating_hours: [0, 1, 2, 3, 4, 5, 6].map((day) => ({
+      day_of_week: day,
+      opens_at: '08:00:00',
+      closes_at: '22:00:00',
+    })),
     ...overrides,
   };
 }
@@ -120,6 +161,10 @@ function createFakeClient(results = []) {
         },
         order: (column, options) => {
           (call.order ??= []).push([column, options]);
+          return chain;
+        },
+        in: (column, values) => {
+          call.filters.push([column, values]);
           return chain;
         },
         maybeSingle: () => settle(call),
@@ -185,6 +230,7 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
       startsAt: START,
       endsAt: END,
       roomLayoutCode: 'theatre',
+      expectedAttendance: 150,
       venueRequirements: 'Tiered seating',
       accessibilityRequirements: 'Step-free entrance',
       setupNotes: 'Extra tables',
@@ -211,11 +257,16 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
       p_setup_notes: 'Extra tables',
       p_suitability: SUITABLE,
       p_confirm_unsuitable: false,
+      p_expected_attendance: 150,
     });
     expect(checkSuitability).toHaveBeenCalledWith({
       eventRequestId: EVENT_ID,
       venueId: VENUE_ID,
       roomLayoutCode: 'theatre',
+      accessibility: [],
+      facilities: [],
+      expectedAttendance: 150,
+      userId: COORDINATOR_ID,
       client,
     });
   });
@@ -237,6 +288,7 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
     expect(Object.keys(args).sort()).toEqual([
       'p_confirm_unsuitable',
       'p_event_request_id',
+      'p_expected_attendance',
       'p_requested_by',
       'p_room_layout_code',
       'p_setup_notes',
@@ -460,13 +512,18 @@ describe('SCRUM-252: a retired venue and an unavailable period are refused with 
 });
 
 
-describe('SCRUM-252: one live request per event', () => {
+describe('SCRUM-252/SCRUM-525: one live request per event per venue', () => {
   it.each([
     ['a pending or approved request', 'BOOKING_REQUEST_EXISTS'],
     ['a booking flagged for review', 'BOOKING_FLAGGED_FOR_REVIEW'],
   ])('SCRUM252_refuses_an_event_with_%s_and_names_it', async (_label, hint) => {
     const res = await post(
-      clientFor(dbFailure('PT409', 'the event already has one', { hint, details: OTHER_BOOKING_ID })),
+      clientFor(
+        dbFailure('PT409', 'the event already has a live request for this venue', {
+          hint,
+          details: OTHER_BOOKING_ID,
+        }),
+      ),
     );
 
     expect(res.status).toBe(409);
@@ -493,13 +550,14 @@ describe('SCRUM-252: the suitability check (N10)', () => {
     expect(res.body.code).toBe('SUITABILITY_CONFIRMATION_REQUIRED');
     // Only the criteria that were not met.
     expect(res.body.conflicts).toEqual([UNSUITABLE.criteria[0]]);
-    expect(rpcCall(client).args).toMatchObject({ p_suitability: UNSUITABLE, p_confirm_unsuitable: false });
+    // SCRUM-193/194: refused by the service before the function is called.
+    expect(rpcCall(client)).toBeUndefined();
   });
 
   it('SCRUM252_submits_once_the_coordinator_confirms', async () => {
     const client = clientFor(created({ suitability_result: UNSUITABLE, suitability_overridden: true }));
 
-    const res = await post(client, { ...BODY, confirmUnsuitable: true }, {
+    const res = await post(client, { ...BODY, confirmUnsuitable: true, acknowledgedCriteria: ['Capacity'] }, {
       checkSuitability: vi.fn(async () => UNSUITABLE),
     });
 
@@ -516,17 +574,110 @@ describe('SCRUM-252: the suitability check (N10)', () => {
 
   it('SCRUM252_the_result_is_computed_by_the_server_whatever_the_body_says', async () => {
     const checkSuitability = vi.fn(async () => UNSUITABLE);
-    const client = clientFor(ok({ outcome: 'suitability_confirmation_required', suitability: UNSUITABLE }));
+    const client = clientFor(created({ suitability_result: UNSUITABLE, suitability_overridden: true }));
 
-    await post(client, { ...BODY, suitable: true, suitability: SUITABLE }, { checkSuitability });
+    await post(
+      client,
+      { ...BODY, suitable: true, suitability: SUITABLE, confirmUnsuitable: true, acknowledgedCriteria: ['Capacity'] },
+      { checkSuitability },
+    );
 
     expect(rpcCall(client).args.p_suitability).toEqual(UNSUITABLE);
   });
 
-  it('SCRUM252_fails_closed_with_503_until_N10_exists', async () => {
-    const client = createFakeClient([ok(eventRow())]);
+  // SCRUM-193/194 (F2, SCRUM-188 AC7): an unsuitable venue is confirmed only
+  // for the criteria the coordinator names.
+  const TWO_UNMET = {
+    suitable: false,
+    criteria: [
+      { criterion: 'Capacity', met: false, detail: 'Capacity 80 < expected attendance 150' },
+      { criterion: 'Facilities', met: true, detail: 'None requested' },
+      { criterion: 'Availability', met: false, detail: 'Needs … Blocked …' },
+    ],
+  };
 
-    // No checkSuitability supplied: the router falls back to the real default.
+  it.each([
+    ['confirmUnsuitable alone', { confirmUnsuitable: true }],
+    ['only some of the unmet criteria', { confirmUnsuitable: true, acknowledgedCriteria: ['Capacity'] }],
+    ['the criteria without confirmUnsuitable', { acknowledgedCriteria: ['Capacity', 'Availability'] }],
+    ['other criteria than the unmet ones', { confirmUnsuitable: true, acknowledgedCriteria: ['Layout', 'Capacity'] }],
+  ])('SCRUM188_AC7_%s_is_asked_again_and_nothing_is_written', async (_label, extra) => {
+    const client = clientFor();
+
+    const res = await post(client, { ...BODY, ...extra }, { checkSuitability: vi.fn(async () => TWO_UNMET) });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('SUITABILITY_CONFIRMATION_REQUIRED');
+    expect(res.body.conflicts).toEqual([TWO_UNMET.criteria[0], TWO_UNMET.criteria[2]]);
+    expect(rpcCall(client)).toBeUndefined();
+  });
+
+  it('SCRUM188_AC7_every_unmet_criterion_named_is_requested_as_overridden', async () => {
+    const client = clientFor(created({ suitability_result: TWO_UNMET, suitability_overridden: true }));
+
+    const res = await post(
+      client,
+      { ...BODY, confirmUnsuitable: true, acknowledgedCriteria: ['Availability', 'Capacity'] },
+      { checkSuitability: vi.fn(async () => TWO_UNMET) },
+    );
+
+    expect(res.status).toBe(201);
+    expect(rpcCall(client).args).toMatchObject({ p_suitability: TWO_UNMET, p_confirm_unsuitable: true });
+  });
+
+  it('SCRUM188_AC7_naming_more_than_the_unmet_criteria_is_still_confirmed', async () => {
+    const client = clientFor(created({ suitability_result: UNSUITABLE, suitability_overridden: true }));
+
+    const res = await post(
+      client,
+      { ...BODY, confirmUnsuitable: true, acknowledgedCriteria: ['Capacity', 'Availability'] },
+      { checkSuitability: vi.fn(async () => UNSUITABLE) },
+    );
+
+    expect(res.status).toBe(201);
+    expect(rpcCall(client).args.p_confirm_unsuitable).toBe(true);
+  });
+
+  it('SCRUM188_AC7_an_unknown_acknowledged_criterion_is_400_before_any_read', async () => {
+    const client = clientFor();
+    const checkSuitability = vi.fn(async () => UNSUITABLE);
+
+    const res = await post(
+      client,
+      { ...BODY, confirmUnsuitable: true, acknowledgedCriteria: ['capacity'] },
+      { checkSuitability },
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.details[0].field).toBe('acknowledgedCriteria');
+    expect(client.calls).toEqual([]);
+    expect(checkSuitability).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM188_AC7_acknowledging_criteria_for_a_suitable_venue_changes_nothing', async () => {
+    const client = clientFor();
+
+    const res = await post(client, { ...BODY, acknowledgedCriteria: ['Capacity'] });
+
+    expect(res.status).toBe(201);
+    expect(rpcCall(client).args.p_confirm_unsuitable).toBe(false);
+  });
+
+  it('SCRUM190_the_default_checker_judges_the_stored_event_and_venue_and_its_result_is_stored', async () => {
+    // No checkSuitability supplied: the router falls back to the real check.
+    // Reads: the event (booking service), the event again (the check), the
+    // venue, then the occupancy function, then create_booking_request.
+    // 09:00-17:00 in Singapore, inside the venue's hours. START and END are
+    // 17:00-01:00 there, which would fail operating hours for crossing midnight.
+    const daytime = { proposed_start: '2026-12-01T01:00:00+00:00', proposed_end: '2026-12-01T09:00:00+00:00' };
+    const client = createFakeClient([
+      ok(eventRow(daytime)),
+      ok(eventRow(daytime)),
+      ok(venueRow()),
+      ok([]),
+      created(),
+    ]);
+
     const res = await request(
       express()
         .use(express.json())
@@ -538,8 +689,46 @@ describe('SCRUM-252: the suitability check (N10)', () => {
       .post('/api/booking-requests')
       .send(BODY);
 
-    expect(res.status).toBe(503);
-    expect(client.calls.map((c) => c.operation)).toEqual(['select']);
+    expect(res.status).toBe(201);
+    expect(client.calls.map((c) => c.fn ?? c.table)).toEqual([
+      'event_requests',
+      'event_requests',
+      'venues',
+      'venue_occupancy_conflicts',
+      'create_booking_request',
+    ]);
+    const stored = client.calls.at(-1).args.p_suitability;
+    expect(stored.suitable).toBe(true);
+    expect(stored.criteria.map((c) => c.criterion)).toEqual([
+      'Capacity', 'Operating hours', 'Layout', 'Accessibility', 'Facilities', 'Availability',
+    ]);
+    expect(stored.checked).toEqual({
+      startsAt: daytime.proposed_start,
+      endsAt: daytime.proposed_end,
+      expectedAttendance: 150,
+      layout: null,
+      accessibility: [],
+      facilities: [],
+    });
+  });
+
+  it('SCRUM190_an_unknown_requirement_code_is_400_and_nothing_is_written', async () => {
+    const client = createFakeClient([ok(eventRow()), ok(eventRow()), ok([])]);
+
+    const res = await request(
+      express()
+        .use(express.json())
+        .use(
+          '/api/booking-requests',
+          createBookingRequestRouter({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }),
+        ),
+    )
+      .post('/api/booking-requests')
+      .send({ ...BODY, facilities: ['teleporter'] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'facilities', message: 'unknown code "teleporter"' }]);
+    expect(client.calls.some((c) => c.operation === 'rpc')).toBe(false);
   });
 
   it.each([
