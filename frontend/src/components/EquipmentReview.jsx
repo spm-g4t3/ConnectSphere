@@ -177,7 +177,7 @@ function lineState(line) {
 const NEEDS_ATTENTION = new Set(["flagged", "short"]);
 
 /** The one thing to do next, in a sentence. Tone only picks the colour. */
-function nextStep({ status, isReviewer, reviewerName, flaggedTotal, shortCount }) {
+function nextStep({ status, isReviewer, reviewerName, flaggedTotal, unmarkedCount }) {
   if (status === "pending_review") {
     return {
       tone: "action",
@@ -212,11 +212,11 @@ function nextStep({ status, isReviewer, reviewerName, flaggedTotal, shortCount }
       text: `Something changed after ${flaggedTotal === 1 ? "this reservation was" : "these reservations were"} made. Open the item marked "Needs decision" and choose one option.`,
     };
   }
-  if (shortCount > 0) {
+  if (unmarkedCount > 0) {
     return {
       tone: "action",
       title: "Reserve the rest of the equipment",
-      text: `${shortCount} ${shortCount === 1 ? "item still needs" : "items still need"} equipment. Reserve what is available, or mark it as not provided.`,
+      text: `${unmarkedCount} ${unmarkedCount === 1 ? "item still needs" : "items still need"} equipment. Reserve what is available, or mark it as not provided.`,
     };
   }
   return {
@@ -492,7 +492,7 @@ export default function EquipmentReview() {
     isReviewer,
     reviewerName: request.reviewerName,
     flaggedTotal,
-    shortCount: shortLines.length,
+    unmarkedCount: shortLines.filter((line) => line.outcome !== "cannot_be_provided").length,
   });
 
   return (
@@ -703,18 +703,20 @@ export default function EquipmentReview() {
                                       </button>
                                       <span>Reserve the same units for the event's new date and time. Only works if enough are free then.</span>
                                     </li>
-                                    <li>
-                                      <button
-                                        type="button"
-                                        className="er-btn er-btn--secondary"
-                                        aria-label={`Keep old time: ${line.name}`}
-                                        disabled={busy}
-                                        onClick={() => handleResolve("keep", line, reservation)}
-                                      >
-                                        Keep old time
-                                      </button>
-                                      <span>Leave the reservation as it is and clear the flag. Choose this if the old time still works.</span>
-                                    </li>
+                                    {reservation.canKeep && (
+                                      <li>
+                                        <button
+                                          type="button"
+                                          className="er-btn er-btn--secondary"
+                                          aria-label={`Keep old time: ${line.name}`}
+                                          disabled={busy}
+                                          onClick={() => handleResolve("keep", line, reservation)}
+                                        >
+                                          Keep old time
+                                        </button>
+                                        <span>Leave the reservation as it is and clear the flag. Choose this if the old time still works.</span>
+                                      </li>
+                                    )}
                                     {reservation.quantity > 1 && (
                                       <li>
                                         <button
@@ -999,7 +1001,7 @@ export default function EquipmentReview() {
             <button
               type="button"
               className="er-btn er-btn--primary"
-              disabled={busy}
+              disabled={busy || flaggedTotal > 0}
               onClick={() => {
                 setNotice(null);
                 setError(null);
@@ -1012,9 +1014,7 @@ export default function EquipmentReview() {
           ) : (
             <div className="equipment-review__confirm">
               <p>
-                {shortLines.length === 0
-                  ? "Every item is fully reserved, so this request will be marked Arranged."
-                  : `${shortLines.length} item${shortLines.length === 1 ? " is" : "s are"} not fully reserved. Each needs a "Cannot be provided" note, and the request will be marked Cannot be fully arranged. Reservations already made are kept.`}
+                {`${shortLines.length} item${shortLines.length === 1 ? " is" : "s are"} not fully reserved. Each needs a "Cannot be provided" note, and the request will be marked Cannot be fully arranged. Reservations already made are kept.`}
               </p>
               <div className="equipment-review__actions">
                 <button type="button" className="er-btn er-btn--primary" disabled={busy} onClick={handleComplete}>

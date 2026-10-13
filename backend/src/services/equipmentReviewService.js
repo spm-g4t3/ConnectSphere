@@ -25,6 +25,7 @@
  *   42501  not the current reviewer, or no caller             ForbiddenError   403
  *   55000  the request is not in a status that allows this    ConflictError    409
  *   40001  the request changed during the call (a backstop)   ConflictError    409
+ *   40P01  two changes met in the database; one was undone    ConflictError    409
  *   22023  a missing note, or short lines without one         ValidationError  400
  *   P0002  no such event, request or line                     NotFoundError    404
  * Anything else is left untyped, so it reaches the API as a 500.
@@ -114,6 +115,15 @@ function translateError(error) {
     return new ConflictError(detail, { code: REVIEW_NOT_ALLOWED });
   }
 
+  // An inventory change and a reservation can lock the same rows in opposite
+  // orders, and Postgres then undoes one of them. Nothing was saved, so the
+  // screen says to try again.
+  if (code === '40P01') {
+    return new ConflictError('Someone changed this equipment at the same moment. Please try again.', {
+      code: REVIEW_NOT_ALLOWED,
+    });
+  }
+
   if (code === '22023') {
     if (detail.startsWith(MISSING_NOTES_PREFIX)) {
       return new ValidationError(detail, missingNoteDetails(detail));
@@ -143,6 +153,7 @@ function toReservation(row) {
     flagged: row.flagged === true,
     flagReason: row.flag_reason ?? null,
     flaggedAt: row.flagged_at ?? null,
+    canKeep: row.can_keep === true,
   };
 }
 

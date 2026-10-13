@@ -339,6 +339,19 @@ describe('AC2 and AC3: starting and taking over', () => {
     expect(err.code).toBe(REVIEW_NOT_ALLOWED);
   });
 
+  it('SCRUM300_AC3_a_deadlock_between_two_changes_is_a_409_that_says_to_try_again', async () => {
+    const client = fakeClient({
+      start_equipment_review: dbError('40P01', 'deadlock detected'),
+    });
+
+    const err = await failure(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.status).toBe(409);
+    expect(err.code).toBe(REVIEW_NOT_ALLOWED);
+    expect(err.message).toBe('Someone changed this equipment at the same moment. Please try again.');
+  });
+
   it('N14_AC2_an_event_with_no_equipment_request_is_a_404', async () => {
     const client = fakeClient({
       start_equipment_review: dbError('P0002', 'This event has no equipment request to review'),

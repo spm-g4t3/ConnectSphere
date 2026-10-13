@@ -54,6 +54,7 @@ const reservation = (overrides = {}) => ({
   flagged: false,
   flagReason: null,
   flaggedAt: null,
+  canKeep: false,
   ...overrides,
 });
 
@@ -108,7 +109,7 @@ function state({ status = "under_review", reviewerId = ME, lines = [line()] } = 
 const flaggedLine = () =>
   line({
     reservations: [
-      reservation({ flagged: true, flagReason: "The event date or time changed" }),
+      reservation({ flagged: true, flagReason: "The event date or time changed", canKeep: true }),
     ],
   });
 
@@ -579,6 +580,30 @@ describe("AC7: resolving a flagged reservation", () => {
     expect(getEquipmentReview).toHaveBeenCalledTimes(2);
   });
 
+  it("SCRUM300_AC7_keep_is_not_offered_when_the_server_says_it_cannot_work", async () => {
+    await open(
+      state({
+        lines: [
+          line({ reservations: [reservation({ flagged: true, flagReason: "The event date or time changed", canKeep: false })] }),
+        ],
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Move to new time: Projector" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Release all: Projector" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Keep old time: Projector" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM300_AC7_complete_review_is_disabled_while_a_reservation_is_flagged", async () => {
+    await open(state({ lines: [flaggedLine()] }));
+    expect(screen.getByRole("button", { name: "Complete review" })).toBeDisabled();
+    expect(screen.getByText(/has a flagged reservation to decide/)).toBeInTheDocument();
+  });
+
+  it("SCRUM300_AC7_complete_review_is_available_once_nothing_is_flagged", async () => {
+    await open(state({ lines: [line({ reservations: [reservation({ quantity: 2 })], outcome: "cannot_be_provided", outcomeNote: "None left" })] }));
+    expect(screen.getByRole("button", { name: "Complete review" })).toBeEnabled();
+  });
+
   it("SCRUM300_AC7_buttons_are_disabled_while_an_action_is_running", async () => {
     let finish;
     moveEquipmentReservation.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
@@ -632,9 +657,22 @@ describe("guidance: what to do next", () => {
     expect(next()).toHaveTextContent("Needs decision");
   });
 
-  it("SCRUM300_UX_a_fully_reserved_request_says_it_is_ready_to_complete", async () => {
-    await open(state({ lines: [line({ reservations: [reservation({ quantity: 5 })] })] }));
+  it("SCRUM300_UX_a_short_line_marked_cannot_be_provided_says_it_is_ready_to_complete", async () => {
+    await open(state({ lines: [line({ outcome: "cannot_be_provided", outcomeNote: "None left" })] }));
     expect(next()).toHaveTextContent("Ready to complete");
+  });
+
+  it("SCRUM300_UX_a_marked_line_and_an_unmarked_one_still_asks_for_the_unmarked_one", async () => {
+    await open(
+      state({
+        lines: [
+          line({ outcome: "cannot_be_provided", outcomeNote: "None left" }),
+          line({ id: MIC, name: "Microphone", reservations: [] }),
+        ],
+      }),
+    );
+    expect(next()).toHaveTextContent("Reserve the rest of the equipment");
+    expect(next()).toHaveTextContent("1 item still needs equipment");
   });
 
   it("SCRUM300_UX_someone_else_s_review_names_the_reviewer_and_offers_take_over_in_the_panel", async () => {

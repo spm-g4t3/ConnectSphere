@@ -39,6 +39,7 @@ const reservationRow = (overrides = {}) => ({
   flagged: false,
   flag_reason: null,
   flagged_at: null,
+  can_keep: false,
   ...overrides,
 });
 
@@ -272,7 +273,7 @@ describe('the review state carries the reservations', () => {
     const state = toReviewState(
       reviewRow([
         reservationRow(),
-        reservationRow({ id: '99999999-9999-4999-8999-999999999999', quantity: 1, flagged: true, flag_reason: 'The event date or time changed', flagged_at: '2026-10-12T09:00:00+00:00' }),
+        reservationRow({ id: '99999999-9999-4999-8999-999999999999', quantity: 1, flagged: true, flag_reason: 'The event date or time changed', flagged_at: '2026-10-12T09:00:00+00:00', can_keep: true }),
       ]),
     );
     const line = state.request.lines[0];
@@ -285,8 +286,16 @@ describe('the review state carries the reservations', () => {
       flagged: true,
       flagReason: 'The event date or time changed',
       flaggedAt: '2026-10-12T09:00:00+00:00',
+      canKeep: true,
     });
+    expect(line.reservations[0].canKeep).toBe(false);
     expect(line.flaggedCount).toBe(1);
+  });
+
+  it('SCRUM300_AC7_a_reservation_with_no_can_keep_in_the_read_is_not_keepable', () => {
+    const row = reviewRow();
+    delete row.request.lines[0].reservations[0].can_keep;
+    expect(toReviewState(row).request.lines[0].reservations[0].canKeep).toBe(false);
   });
 
   it('N19_a_line_with_no_reservations_has_an_empty_list_and_no_flags', () => {

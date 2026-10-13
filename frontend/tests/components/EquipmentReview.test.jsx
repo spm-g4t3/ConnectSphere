@@ -307,10 +307,10 @@ describe("EquipmentReview: completing", () => {
     expect(completeEquipmentReview).not.toHaveBeenCalled();
   });
 
-  it("SCRUM290_complete_says_arranged_when_nothing_is_short", async () => {
-    await open(underReview({ lines: [line({ reserved: 3, shortBy: 0 })] }));
+  it("SCRUM290_complete_counts_the_short_lines_in_words", async () => {
+    await open(underReview({ lines: [line(), line({ id: "line-2", name: "Microphone" })] }));
     await userEvent.click(screen.getByRole("button", { name: "Complete review" }));
-    expect(screen.getByText(/will be marked Arranged/)).toBeInTheDocument();
+    expect(screen.getByText(/2 items are not fully reserved/)).toBeInTheDocument();
   });
 
   it("SCRUM290_confirming_completes_and_shows_the_new_status", async () => {
