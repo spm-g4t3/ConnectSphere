@@ -120,6 +120,9 @@ const SCRUM486_FILES = [
 const SCRUM487_FILES = [
   // SCRUM-543 (AC4): the unassigned count at the top.
   'src/components/UnassignedCount.jsx',
+  // SCRUM-544 (AC2, AC3): the coordinators' table and the list's filters.
+  'src/components/CoordinatorWorkloadTable.jsx',
+  'src/components/AssignedEventsFilters.jsx',
 ]
 
 // https://vite.dev/config/

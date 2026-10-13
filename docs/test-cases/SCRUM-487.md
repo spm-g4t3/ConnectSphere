@@ -218,7 +218,7 @@ built, its own cases say what the Lead may cancel there.
 | AC2-10 **(trap)** | LEAD | `GET /coordinator-overview` | Not read as an id: declared above `GET /:id` | Proved (route): `SCRUM487_AC2_does_not_read_the_coordinator_overview_path_as_a_request_id`. Moved below `/:id`, it and the gate tests fail |
 | AC2-11 | A Lead exists | `listCoordinatorOverview` | No Lead listed: role `event_coordinator` only (a Lead cannot be assigned events) | Proved (svc): `SCRUM487_AC2_reads_coordinators_by_name_and_only_their_active_events_with_status` |
 | AC2-12 | A holds a Safety review event | `listCoordinatorOverview` | Counted under `safety_review` | **Cannot be written yet** (D4): the status does not exist until SCRUM-488 |
-| AC2-13 | LEAD; two coordinators | Open the overview | Each coordinator's name, total and per-status counts | **not yet implemented** (SCRUM-544) |
+| AC2-13 | LEAD; two coordinators | Open the overview | Each coordinator's name, total and per-status counts | Proved (screen): `SCRUM487_AC2_one_row_per_coordinator_with_active_events_and_a_column_per_status`, `SCRUM487_AC2_rows_and_columns_keep_the_servers_order`, `SCRUM487_AC2_a_coordinator_with_no_name_or_a_missing_count_is_said_not_left_blank`, `SCRUM487_AC2_no_coordinators_is_said`, `SCRUM487_AC2_the_table_says_it_is_loading`, `SCRUM487_AC2_a_failed_overview_is_said_and_the_events_still_load`, `SCRUM487_AC2_the_overview_is_read_once_for_the_table_and_the_filter`; the call, `SCRUM487_AC2_the_counts_are_a_get_of_/event-requests/coordinator-overview` |
 
 ### AC3 — every active event, earliest first, filtered by coordinator and status
 
@@ -240,7 +240,7 @@ built, its own cases say what the Lead may cancel there.
 | AC3-14 | LEAD | `GET /assigned?coordinatorId=A&status=approved` | The filters reach the query (the recorded `eq`s) | Proved (route): `SCRUM487_AC3_the_query_string_reaches_the_read` |
 | AC3-15 | — | Any filter | The order is unchanged: `proposed_start` ascending, nulls last, then id | Proved (svc): `SCRUM487_AC3_coordinator_and_status_filters_combine`, `SCRUM487_AC3_include_finished_adds_exactly_the_three_finished_statuses` |
 | AC3-16 **(trap)** | LEAD | `GET /assigned?…` | Not read as an id, with a query string too | Proved (route): `SCRUM487_AC3_the_query_string_reaches_the_read`. Unfiltered: SCRUM-486's `SCRUM486_AC6_does_not_read_the_assigned_path_as_a_request_id` |
-| AC3-17 | LEAD | Choose a coordinator, a status, "include finished" on screen | The list is re-read with those parameters and shows only those rows | **not yet implemented** (SCRUM-544) |
+| AC3-17 | LEAD | Choose a coordinator, a status, "include finished" on screen | The list is re-read with those parameters and shows only those rows | Proved (screen): `SCRUM487_AC3_the_first_read_sends_no_filters`, `SCRUM487_AC3_choosing_a_coordinator_reads_their_events`, `SCRUM487_AC3_choosing_a_status_reads_that_status`, `SCRUM487_AC3_the_status_filter_offers_the_active_statuses_and_the_finished_ones_only_when_included`, `SCRUM487_AC3_unticking_include_finished_resets_a_finished_status`, `SCRUM487_AC3_unticking_include_finished_keeps_an_active_status`, `SCRUM487_AC3_a_stale_answer_never_overwrites_a_newer_one`, `SCRUM487_AC3_a_stale_failure_never_overwrites_a_newer_answer`, `SCRUM487_AC3_with_filters_set_an_empty_list_says_the_filters_found_nothing`, `SCRUM487_AC3_without_filters_an_empty_list_still_says_nobody_holds_one`, `SCRUM487_AC3_a_refused_filter_is_said_in_the_pages_words`; the calls, `SCRUM487_AC3_with_%s_the_list_call_is_scrum486s_with_no_params`, `SCRUM487_AC3_%s_sends_exactly_those_params` |
 | AC3-18 | A Safety approved event | Filter by `safety_approved` | Listed | **Cannot be written yet** (D4) |
 
 ### AC4 — unassigned requests counted at the top, with a link to the queue
@@ -296,6 +296,21 @@ built, its own cases say what the Lead may cancel there.
 5. **Safety statuses** (D4). AC2 and AC3 stay partial until SCRUM-488 adds them to
    `ACTIVE_EVENT_STATUSES`. Should `FINISHED_EVENT_STATUSES` be checked then too?
    Proposed: no change; safety statuses are active.
+6. **The overview's name and address. Decided (SCRUM-544, 13 October): they stay
+   "Assigned Events" at `/assigned-events`.** The overview extends SCRUM-486's
+   page (D1), and its heading says what it shows ("Every coordinator's events and
+   workload."). Renaming the nav link to "Coordinator overview" would rename
+   SCRUM-485's and SCRUM-486's pinned nav tests and the documents that name them,
+   on a branch whose base PR (#52) is still in review. A rename can follow once
+   #52 is merged, as a change of its own.
+7. **Status words in the coordinators' table.** No helper, in the frontend or the
+   API, labels a bare status key; labels arrive only on each event row's
+   `statusDisplay`, and those are the Organiser's words ("Requested", "Awaiting
+   your response", "Planning"). The table and the status filter use the label of
+   an event row seen with that status, and the raw key otherwise (SCRUM-544).
+   Proposed: the overview's response carries a coordinator-facing label per
+   `byStatus` key, in a later change, so every heading is a word and the same
+   word whatever the list shows.
 
 ---
 

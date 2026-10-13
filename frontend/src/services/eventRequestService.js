@@ -469,10 +469,41 @@ export async function listCoordinatorWorkload() {
  * proposedStart, organiserName, assignedCoordinatorId,
  * assignedCoordinatorName }. Possibly empty.
  *
+ * SCRUM-487 AC3 (SCRUM-544): the Lead's filters, sent as query parameters
+ * and applied by the server (SCRUM-487 D2). Only the filters that are set are
+ * sent, and includeFinished only as "true": the server reads "true", "false"
+ * or absent and refuses anything else, so "off" is simply not sending it.
+ * Called with nothing, the request is exactly SCRUM-486's: no params at all.
+ *
+ * @param {object} [filters]
+ * @param {string} [filters.coordinatorId]     only this coordinator's events
+ * @param {string} [filters.status]            only this status
+ * @param {boolean} [filters.includeFinished]  also completed, rejected and cancelled
  * @returns {Promise<Object[]>}
  */
-export async function listAssignedEventsForLead() {
-  const response = await apiClient.get("/event-requests/assigned");
+export async function listAssignedEventsForLead(filters = {}) {
+  const params = {};
+  if (filters.coordinatorId) params.coordinatorId = filters.coordinatorId;
+  if (filters.status) params.status = filters.status;
+  if (filters.includeFinished) params.includeFinished = "true";
+
+  const response = Object.keys(params).length > 0
+    ? await apiClient.get("/event-requests/assigned", { params })
+    : await apiClient.get("/event-requests/assigned");
+  return response.data;
+}
+
+/**
+ * Every Event Coordinator with their active events counted in total and per
+ * status, for the Lead's overview (SCRUM-487 AC2). Each row is { id, fullName,
+ * activeEvents, byStatus }, byStatus keyed by every active status in the
+ * server's order, 0 where there are none. In name order, never workload order.
+ * Gated on event_coordinator_lead server-side.
+ *
+ * @returns {Promise<Array<{id: string, fullName: string|null, activeEvents: number, byStatus: Object<string, number>}>>}
+ */
+export async function listCoordinatorOverview() {
+  const response = await apiClient.get("/event-requests/coordinator-overview");
   return response.data;
 }
 

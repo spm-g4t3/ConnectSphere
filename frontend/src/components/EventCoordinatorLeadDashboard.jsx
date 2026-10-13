@@ -9,12 +9,15 @@
 //
 //   * The unassigned queue (UnassignedQueue), live: every submitted request
 //     waiting for a coordinator, each with an Assign action.
-//   * The coordinator overview, still SCRUM-487's to build (filters,
-//     per-coordinator counts). Since SCRUM-486 AC6 its card links to Assigned
-//     Events (/assigned-events), which already lists every event a
-//     coordinator holds; until then it said "there is nothing to show", which
-//     that list made false. No invented rows: a placeholder that looked like
-//     data would be read as data.
+//   * The coordinator overview's card. SCRUM-487 (SCRUM-544) built the
+//     overview at /assigned-events: every coordinator's counts, every held
+//     event, the filters. The card points there and shows none of it itself,
+//     so the dashboard reads nothing more (SCRUM486_AC2_the_lead_dashboard_
+//     reads_only_the_unassigned_queue_and_its_notifications pins what it
+//     reads). Before SCRUM-486 AC6 the card said "there is nothing to show";
+//     from then until SCRUM-487 it pointed to the unfiltered list and named
+//     SCRUM-487 as still to build. Rejected: the counts on the dashboard too,
+//     a second copy of the overview and a third read on every login.
 //   * The Lead's notifications (CoordinatorNotifications, the Coordinator's
 //     card, reused as it is). Submission now tells every Lead a request is
 //     waiting (052, event_request_awaiting_assignment), and without this card
@@ -48,9 +51,8 @@ export default function EventCoordinatorLeadDashboard({ user }) {
       <section>
         <h2>Coordinator overview</h2>
         <p>
-          Every event a coordinator holds is listed now in{" "}
-          <Link to="/assigned-events">Assigned Events</Link>. The full overview,
-          with filters and each coordinator&apos;s counts, is built by SCRUM-487.
+          See every coordinator&apos;s events and workload, and filter them, in{" "}
+          <Link to="/assigned-events">Assigned Events</Link>.
         </p>
       </section>
 
