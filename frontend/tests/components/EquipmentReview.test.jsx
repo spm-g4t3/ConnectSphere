@@ -139,12 +139,13 @@ describe("EquipmentReview: what is shown", () => {
   it("SCRUM290_shows_each_line_with_requested_reserved_and_availability", async () => {
     await open(state({ lines: [line(), line({ id: MIC, name: "Microphone", quantity: 1, reserved: 1, shortBy: 0, availability: availability("Fully available", 1, 5) })] }));
     await userEvent.click(screen.getByRole("tab", { name: /^All/ }));
-    expect(screen.getByText("Requested: 3")).toBeInTheDocument();
-    expect(screen.getByText("Reserved: 1 of 3")).toBeInTheDocument();
-    expect(screen.getByText("Partially available")).toBeInTheDocument();
-    expect(screen.getByText("Only 2 of 3 requested are available.")).toBeInTheDocument();
-    expect(screen.getByText("Fully available")).toBeInTheDocument();
-    expect(screen.getAllByText("HDMI please")).toHaveLength(2);
+    expect(screen.getByText("1 of 3 reserved")).toBeInTheDocument();
+    expect(screen.getByText("1 of 1 reserved")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Projector/ }));
+    expect(screen.getByText("Only 2 of 3 available.")).toBeInTheDocument();
+    expect(screen.getByText("Note: HDMI please")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Microphone/ }));
+    expect(screen.getByText("Enough in stock: 5 available.")).toBeInTheDocument();
   });
 
   it("SCRUM290_lists_overlapping_reservations", async () => {
@@ -189,7 +190,7 @@ describe("EquipmentReview: starting and taking over", () => {
     startEquipmentReview.mockResolvedValue(underReview());
     await userEvent.click(screen.getByRole("button", { name: "Start review" }));
     expect(startEquipmentReview).toHaveBeenCalledWith(EVENT_ID);
-    expect(await screen.findByText(/You are reviewing this request/)).toBeInTheDocument();
+    expect(await screen.findByText("Reserve the rest of the equipment")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start review" })).not.toBeInTheDocument();
   });
 
@@ -242,7 +243,7 @@ describe("EquipmentReview: marking lines", () => {
   it("SCRUM290_reviewer_sees_a_reserve_and_a_mark_button_on_short_lines_only", async () => {
     await open(underReview({ lines: [line(), line({ id: MIC, name: "Microphone", quantity: 1, reserved: 1, shortBy: 0 })] }));
     expect(screen.getAllByRole("button", { name: /^Reserve/ })).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Reserve Projector" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^Reserve( \d+)?( more)?: Projector$/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Mark as cannot be provided: Projector" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Microphone/ })).not.toBeInTheDocument();
   });
@@ -302,7 +303,7 @@ describe("EquipmentReview: completing", () => {
   it("SCRUM290_complete_asks_first_and_says_what_will_happen_when_lines_are_short", async () => {
     await open(underReview());
     await userEvent.click(screen.getByRole("button", { name: "Complete review" }));
-    expect(screen.getByText(/1 line is not fully reserved/)).toBeInTheDocument();
+    expect(screen.getByText(/1 item is not fully reserved/)).toBeInTheDocument();
     expect(completeEquipmentReview).not.toHaveBeenCalled();
   });
 

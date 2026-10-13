@@ -62,17 +62,6 @@ const STATUS_CLASS = {
   cancelled: "cancelled",
 };
 
-function availabilitySummary(result) {
-  if (result.message) return result.message;
-  if (result.result === "Fully available") {
-    return `${result.quantityRequested} requested, ${result.quantityAvailable} available.`;
-  }
-  if (result.result === "Partially available") {
-    return `Only ${result.quantityAvailable} of ${result.quantityRequested} requested are available.`;
-  }
-  return `None of the ${result.quantityRequested} requested are available.`;
-}
-
 /**
  * How many more can be reserved for a line right now, or null when the line has
  * no availability to go on. SCRUM-23's figure leaves the event's own reservations
@@ -85,9 +74,55 @@ function reservableNow(line) {
   return Math.max(0, Math.min(line.shortBy, available - line.reserved));
 }
 
+/** A number box with a minus and a plus either side. The server still decides what is allowed. */
+function QuantityStepper({ id, name, value, max, disabled, onChange }) {
+  const n = Math.floor(Number(value) || 0);
+  return (
+    <div className="er-stepper">
+      <button
+        type="button"
+        className="er-stepper__btn"
+        aria-label={`One fewer ${name}`}
+        disabled={disabled || n <= 1}
+        onClick={() => onChange(String(Math.max(1, n - 1)))}
+      >
+        {"\u2212"}
+      </button>
+      <input
+        id={id}
+        type="number"
+        min="1"
+        step="1"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <button
+        type="button"
+        className="er-stepper__btn"
+        aria-label={`One more ${name}`}
+        disabled={disabled || (max !== null && n >= max)}
+        onClick={() => onChange(String(n + 1))}
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+function stockSentence(availability, requested) {
+  if (availability.message) return availability.message;
+  if (availability.result === "Fully available") return `Enough in stock: ${availability.quantityAvailable} available.`;
+  if (availability.result === "Partially available") {
+    return `Only ${availability.quantityAvailable} of ${requested} available.`;
+  }
+  return "None available.";
+}
+
 function Availability({ availability }) {
-  if (!availability) return <p className="equipment-review__muted">Availability is not shown for this line.</p>;
+  if (!availability) return <p className="equipment-review__muted">Availability is not shown for this item.</p>;
   const { breakdown, reservations } = availability;
+  const requested = availability.quantityRequested;
 
   return (
     <div
@@ -95,27 +130,33 @@ function Availability({ availability }) {
         RESULT_CLASS[availability.result] ?? "unavailable"
       }`}
     >
-      <span className="er-label">Stock check</span>
-      <strong>{availability.result}</strong>
-      <span>{availabilitySummary(availability)}</span>
-      {breakdown && (
-        <p className="equipment-review__muted">
-          {`${breakdown.total} in stock, ${breakdown.damagedOrUnderMaintenance} damaged or under maintenance, ${breakdown.reserved} reserved for this period.`}
-        </p>
-      )}
-      {reservations.length > 0 && (
-        <details>
-          <summary>{`Other events using this equipment (${reservations.length})`}</summary>
-          <ul>
-            {reservations.map((reservation) => (
-              <li key={reservation.id}>
-                {`${reservation.eventName ?? "Another event"}: ${reservation.quantity} ${
-                  reservation.quantity === 1 ? "unit" : "units"
-                }, ${formatEventPeriod(reservation.startAt, reservation.endAt)}`}
-                {reservation.flagged ? " (flagged for review)" : ""}
-              </li>
-            ))}
-          </ul>
+      <p className="er-stock">
+        <span className="er-stock__dot" aria-hidden="true" />
+        {stockSentence(availability, requested)}
+      </p>
+      {(breakdown || reservations.length > 0) && (
+        <details className="er-stock__details">
+          <summary>Stock details</summary>
+          {breakdown && (
+            <p className="er-stock__breakdown">
+              {`${breakdown.total} in stock, ${breakdown.damagedOrUnderMaintenance} damaged or under maintenance, ${breakdown.reserved} reserved for this period.`}
+            </p>
+          )}
+          {reservations.length > 0 && (
+            <>
+              <p className="er-stock__others">{`Other events using this equipment (${reservations.length})`}</p>
+              <ul>
+                {reservations.map((reservation) => (
+                  <li key={reservation.id}>
+                    {`${reservation.eventName ?? "Another event"}: ${reservation.quantity} ${
+                      reservation.quantity === 1 ? "unit" : "units"
+                    }, ${formatEventPeriod(reservation.startAt, reservation.endAt)}`}
+                    {reservation.flagged ? " (flagged for review)" : ""}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </details>
       )}
     </div>
@@ -135,29 +176,20 @@ function lineState(line) {
 
 const NEEDS_ATTENTION = new Set(["flagged", "short"]);
 
-const STEP_LABELS = ["Start the review", "Reserve the equipment", "Complete the review"];
-
-/** Which of the three steps the reviewer is on. A finished request counts as past step 3. */
-function currentStep({ status, reviewing, flaggedTotal, shortCount }) {
-  if (status === "arranged" || status === "cannot_be_fully_arranged" || status === "cancelled") return 4;
-  if (!reviewing) return 1;
-  return flaggedTotal === 0 && shortCount === 0 ? 3 : 2;
-}
-
 /** The one thing to do next, in a sentence. Tone only picks the colour. */
-function nextStep({ status, isReviewer, reviewerName, flaggedTotal, shortCount, lineCount }) {
+function nextStep({ status, isReviewer, reviewerName, flaggedTotal, shortCount }) {
   if (status === "pending_review") {
     return {
       tone: "action",
       title: "Start the review",
-      text: "Start the review to reserve equipment or mark lines.",
+      text: "Start the review to reserve equipment or mark items.",
     };
   }
   if (status === "cannot_be_fully_arranged") {
     return {
       tone: "warn",
       title: "Some equipment could not be provided",
-      text: "Review again if stock has changed and you want to try the missing lines once more.",
+      text: "Review again if stock has changed and you want to try the missing items once more.",
     };
   }
   if (status === "arranged") {
@@ -177,20 +209,20 @@ function nextStep({ status, isReviewer, reviewerName, flaggedTotal, shortCount, 
     return {
       tone: "warn",
       title: `Decide on ${flaggedTotal} flagged reservation${flaggedTotal === 1 ? "" : "s"}`,
-      text: `${flaggedTotal} reservation${flaggedTotal === 1 ? " is" : "s are"} flagged because something changed after it was made. Find the orange box below and choose one option. The request cannot be Arranged while any is flagged.`,
+      text: `Something changed after ${flaggedTotal === 1 ? "this reservation was" : "these reservations were"} made. Open the item marked "Needs decision" and choose one option.`,
     };
   }
   if (shortCount > 0) {
     return {
       tone: "action",
       title: "Reserve the rest of the equipment",
-      text: `${shortCount} of ${lineCount} line${lineCount === 1 ? "" : "s"} ${shortCount === 1 ? "still needs" : "still need"} equipment. For each one, reserve what is available, or say it cannot be provided and why.`,
+      text: `${shortCount} ${shortCount === 1 ? "item still needs" : "items still need"} equipment. Reserve what is available, or mark it as not provided.`,
     };
   }
   return {
     tone: "ok",
     title: "Ready to complete",
-    text: "Every line is dealt with. Press Complete review at the bottom of the page.",
+    text: "Every item is dealt with. Press Complete review at the bottom.",
   };
 }
 
@@ -211,7 +243,11 @@ export default function EquipmentReview() {
   const [markError, setMarkError] = useState(null);
   const [confirmingComplete, setConfirmingComplete] = useState(false);
 
-  // The one open reservation editor: { kind: "reserve" | "reduce" | "release", lineId, reservationId? }.
+  // How many of each short line to reserve, by line id. A line with no entry reserves as many as it can.
+  const [reserveQty, setReserveQty] = useState({});
+  const [reserveError, setReserveError] = useState(null);
+
+  // The one open reservation editor: { kind: "change" | "reduce" | "release", lineId, reservationId }.
   const [editor, setEditor] = useState(null);
   const [quantityInput, setQuantityInput] = useState("");
   const [reasonInput, setReasonInput] = useState("");
@@ -219,6 +255,8 @@ export default function EquipmentReview() {
 
   // null until the reviewer picks a tab: then the screen shows what needs attention, or what is done.
   const [pickedTab, setPickedTab] = useState(null);
+  // The one line that is open. undefined: not chosen yet (a lone line opens itself); null: all closed.
+  const [openLineId, setOpenLineId] = useState(undefined);
 
   const load = useCallback(async () => {
     try {
@@ -273,6 +311,7 @@ export default function EquipmentReview() {
     setQuantityInput("");
     setReasonInput("");
     setEditorError(null);
+    setReserveError(null);
   }
 
   async function handleStart() {
@@ -340,19 +379,33 @@ export default function EquipmentReview() {
         setEditorError(`Enter a number below ${reservation.quantity}. To give all of it back, release it.`);
         return;
       }
+      if (editor.kind === "change" && quantity === reservation.quantity) {
+        setEditorError("That is the current quantity. Enter a different number.");
+        return;
+      }
     }
-    if (editor.kind !== "reserve" && reason === "") {
+    // Giving units back needs a reason. Reserving more does not.
+    const reducing = editor.kind === "reduce" || (editor.kind === "change" && quantity < reservation.quantity);
+    if ((editor.kind === "release" || reducing) && reason === "") {
       setEditorError("Add a reason.");
       return;
     }
 
     setEditorError(null);
     const actions = {
-      reserve: [() => reserveEquipment(eventId, line.id, quantity), `Reserved ${quantity} of ${line.name}.`],
       reduce: [
         () => reduceEquipmentReservation(eventId, reservation?.id, quantity, reason),
         `Reduced the ${line.name} reservation to ${quantity}.`,
       ],
+      change: reducing
+        ? [
+            () => reduceEquipmentReservation(eventId, reservation?.id, quantity, reason),
+            `Reduced the ${line.name} reservation to ${quantity}.`,
+          ]
+        : [
+            () => reserveEquipment(eventId, line.id, quantity - (reservation?.quantity ?? 0)),
+            `Reserved ${quantity - (reservation?.quantity ?? 0)} more ${line.name}.`,
+          ],
       release: [
         () => releaseEquipmentReservation(eventId, reservation?.id, reason),
         `Released the ${line.name} reservation.`,
@@ -361,6 +414,22 @@ export default function EquipmentReview() {
     const [action, success] = actions[editor.kind];
     const ok = await run(action, { onError: setEditorError, success });
     if (ok) resetEditors();
+  }
+
+  /** One click: reserve the number shown beside the button. */
+  async function handleReserve(line, quantity) {
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      setReserveError({ lineId: line.id, message: "Enter a whole number of 1 or more." });
+      return;
+    }
+    setMarkingId(null);
+    setEditor(null);
+    setReserveError(null);
+    const ok = await run(() => reserveEquipment(eventId, line.id, quantity), {
+      onError: (message) => setReserveError({ lineId: line.id, message }),
+      success: `Reserved ${quantity} of ${line.name}.`,
+    });
+    if (ok) setReserveQty((all) => ({ ...all, [line.id]: undefined }));
   }
 
   async function handleResolve(kind, line, reservation) {
@@ -412,6 +481,11 @@ export default function EquipmentReview() {
   const doneLines = lines.filter((line) => !NEEDS_ATTENTION.has(lineState(line)));
   const tab = pickedTab ?? (attentionLines.length > 0 ? "attention" : "done");
   const visibleLines = tab === "attention" ? attentionLines : tab === "done" ? doneLines : lines;
+  const openId = openLineId !== undefined ? openLineId : visibleLines.length === 1 ? visibleLines[0].id : null;
+  function toggleLine(id) {
+    resetEditors();
+    setOpenLineId(openId === id ? null : id);
+  }
   const eventPeriod = formatEventPeriod(event?.proposedStart, event?.proposedEnd);
   const next = nextStep({
     status,
@@ -419,9 +493,7 @@ export default function EquipmentReview() {
     reviewerName: request.reviewerName,
     flaggedTotal,
     shortCount: shortLines.length,
-    lineCount: lines.length,
   });
-  const stepNumber = currentStep({ status, reviewing, flaggedTotal, shortCount: shortLines.length });
 
   return (
     <div className="dashboard dashboard--tech-support equipment-review">
@@ -453,25 +525,10 @@ export default function EquipmentReview() {
         </button>
       </section>
 
-      <ol className="er-steps" aria-label="Review progress">
-        {STEP_LABELS.map((label, index) => (
-          <li
-            key={label}
-            className={`er-step${index + 1 < stepNumber ? " er-step--done" : ""}${index + 1 === stepNumber ? " er-step--current" : ""}`}
-            aria-current={index + 1 === stepNumber ? "step" : undefined}
-          >
-            <span className="er-step__num" aria-hidden="true">
-              {index + 1 < stepNumber ? "✓" : index + 1}
-            </span>
-            {label}
-          </li>
-        ))}
-      </ol>
-
       <section className={`er-next er-next--${next.tone}`} aria-label="Next step">
         <h2>{next.title}</h2>
         <p>{next.text}</p>
-        {status === "under_review" && (
+        {status === "under_review" && !isReviewer && (
           <p className="er-next__who">
             {isReviewer
               ? `You are reviewing this request (since ${formatTimestamp(request.reviewStartedAt)}).`
@@ -508,8 +565,8 @@ export default function EquipmentReview() {
       )}
 
       <section className="equipment-review__lines">
-        <h2>{`Lines (${lines.length})`}</h2>
-        <div className="er-tabs" role="tablist" aria-label="Show lines">
+        <h2>Equipment requested</h2>
+        <div className="er-tabs" role="tablist" aria-label="Show equipment items">
           {[
             ["attention", "Needs attention", attentionLines.length, "attention"],
             ["done", "Done", doneLines.length, "done"],
@@ -523,7 +580,10 @@ export default function EquipmentReview() {
               aria-selected={tab === id}
               aria-controls="er-tabpanel"
               className={`er-tab er-tab--${tone}${tab === id ? " er-tab--active" : ""}`}
-              onClick={() => setPickedTab(id)}
+              onClick={() => {
+                setPickedTab(id);
+                setOpenLineId(undefined);
+              }}
             >
               {label}
               <span className="er-tab__count">{count}</span>
@@ -534,10 +594,10 @@ export default function EquipmentReview() {
         {visibleLines.length === 0 && (
           <p className="er-empty">
             {tab === "attention"
-              ? "Nothing needs attention. Every line is reserved or marked as not provided. Check the Done tab, then complete the review."
+              ? "Nothing needs attention. Every item is reserved or marked as not provided. Check the Done tab, then complete the review."
               : tab === "done"
-                ? "Nothing is finished yet. Reserve equipment on the Needs attention tab and lines will move here."
-                : "This request has no lines."}
+                ? "Nothing is finished yet. Reserve equipment on the Needs attention tab and items will move here."
+                : "This request has no equipment items."}
           </p>
         )}
         <ul>
@@ -546,32 +606,45 @@ export default function EquipmentReview() {
             const reservations = line.reservations ?? [];
             const editingThisLine = editor?.lineId === line.id;
             const percent = line.quantity > 0 ? Math.min(100, Math.round((line.reserved / line.quantity) * 100)) : 0;
-            const lineDone = line.shortBy <= 0;
+            const isOpen = openId === line.id;
             const canReserveNow = reservableNow(line);
+            const reserveMax = canReserveNow ?? line.shortBy;
+            const reserveValue = reserveQty[line.id] ?? String(reserveMax);
+            const reserveText = reserveValue === "" ? "Reserve" : `Reserve ${reserveValue}${line.reserved > 0 ? " more" : ""}`;
             return (
               <li key={line.id} className={`equipment-review__line er-line--${lineState(line)}`}>
-                <div className="equipment-review__line-head">
-                  <strong>{line.name}</strong>
-                  {!marked && (
-                    <span className={`er-pill ${lineDone ? "er-pill--ok" : "er-pill--todo"}`}>
-                      {lineDone ? "Fully reserved" : `${line.shortBy} more needed`}
+                <h3 className="er-line__heading">
+                  <button
+                    type="button"
+                    className="er-line__toggle"
+                    aria-expanded={isOpen}
+                    aria-controls={`er-line-${line.id}`}
+                    onClick={() => toggleLine(line.id)}
+                  >
+                    <span className="er-line__top">
+                      <strong>{line.name}</strong>
+                      {(lineState(line) === "flagged" || lineState(line) === "cannot") && (
+                        <span className={`er-pill er-pill--${lineState(line)}`}>
+                          {lineState(line) === "flagged" ? "Needs decision" : "Not provided"}
+                        </span>
+                      )}
+                      {line.typeRetired && <small>This equipment type has been retired.</small>}
+                      <span className="er-line__chevron" aria-hidden="true">
+                        {isOpen ? "Hide \u25B4" : "Open \u25BE"}
+                      </span>
                     </span>
-                  )}
-                  {line.typeRetired && <small>This equipment type has been retired.</small>}
-                </div>
-                <div className="er-counts">
-                  <span>{`Requested: ${line.quantity}`}</span>
-                  <span>{`Reserved: ${line.reserved} of ${line.quantity}`}</span>
-                </div>
-                <div className="er-progress" aria-hidden="true">
-                  <span style={{ width: `${percent}%` }} />
-                </div>
-                <p className="equipment-review__notes">
-                  <span className="er-label">Technical notes</span>
-                  {line.technicalNotes ?? "No technical notes."}
-                </p>
-
+                    <span className="er-counts">{`${line.reserved} of ${line.quantity} reserved`}</span>
+                    <span className="er-progress" aria-hidden="true">
+                      <span style={{ width: `${percent}%` }} />
+                    </span>
+                  </button>
+                </h3>
+                {isOpen && (
+                <div id={`er-line-${line.id}`} className="er-line__body">
                 <Availability availability={line.availability} />
+                {line.technicalNotes && (
+                  <p className="equipment-review__notes er-notes">{`Note: ${line.technicalNotes}`}</p>
+                )}
 
                 {marked && (
                   <div className="equipment-review__outcome">
@@ -682,20 +755,20 @@ export default function EquipmentReview() {
 
                             {reviewing && !reservation.flagged && !editingThis && (
                               <div className="er-res__actions">
-                                {reservation.quantity > 1 && (
+                                {(reservation.quantity > 1 || (line.shortBy > 0 && canReserveNow !== 0)) && (
                                   <button
                                     type="button"
                                     className="er-btn er-btn--secondary"
-                                    aria-label={`Reduce quantity: ${line.name}`}
+                                    aria-label={`Change quantity: ${line.name}`}
                                     disabled={busy}
                                     onClick={() =>
                                       openEditor(
-                                        { kind: "reduce", lineId: line.id, reservationId: reservation.id },
-                                        reservation.quantity - 1,
+                                        { kind: "change", lineId: line.id, reservationId: reservation.id },
+                                        reservation.quantity,
                                       )
                                     }
                                   >
-                                    Reduce quantity
+                                    Change quantity
                                   </button>
                                 )}
                                 <button
@@ -719,38 +792,46 @@ export default function EquipmentReview() {
                                 onSubmit={(e) => handleEditorSubmit(e, line, reservation)}
                               >
                                 <h4>
-                                  {editor.kind === "reduce"
-                                    ? `Reduce the ${line.name} reservation`
-                                    : `Release the ${line.name} reservation`}
+                                  {editor.kind === "release"
+                                    ? `Release the ${line.name} reservation`
+                                    : editor.kind === "change"
+                                      ? `Change the ${line.name} reservation`
+                                      : `Reduce the ${line.name} reservation`}
                                 </h4>
-                                {editor.kind === "reduce" && (
-                                  <label>
-                                    {`New quantity (currently ${reservation.quantity})`}
-                                    <input
-                                      type="number"
-                                      min="1"
-                                      step="1"
+                                {editor.kind !== "release" && (
+                                  <>
+                                    <label htmlFor={`er-qty-${reservation.id}`}>
+                                      {`New quantity (currently ${reservation.quantity})`}
+                                    </label>
+                                    <QuantityStepper
+                                      id={`er-qty-${reservation.id}`}
+                                      name={line.name}
                                       value={quantityInput}
+                                      max={editor.kind === "change" ? reservation.quantity + (canReserveNow ?? line.shortBy) : reservation.quantity - 1}
+                                      disabled={busy}
+                                      onChange={(value) => {
+                                        setQuantityInput(value);
+                                        setEditorError(null);
+                                      }}
+                                    />
+                                  </>
+                                )}
+                                {(editor.kind === "release" ||
+                                  editor.kind === "reduce" ||
+                                  (editor.kind === "change" && Number(quantityInput) < reservation.quantity)) && (
+                                  <label>
+                                    {editor.kind === "release" ? "Why is it being released?" : "Why is it being reduced?"}
+                                    <textarea
+                                      value={reasonInput}
+                                      maxLength={MAX_NOTE_LENGTH}
                                       disabled={busy}
                                       onChange={(e) => {
-                                        setQuantityInput(e.target.value);
+                                        setReasonInput(e.target.value);
                                         setEditorError(null);
                                       }}
                                     />
                                   </label>
                                 )}
-                                <label>
-                                  {editor.kind === "reduce" ? "Why is it being reduced?" : "Why is it being released?"}
-                                  <textarea
-                                    value={reasonInput}
-                                    maxLength={MAX_NOTE_LENGTH}
-                                    disabled={busy}
-                                    onChange={(e) => {
-                                      setReasonInput(e.target.value);
-                                      setEditorError(null);
-                                    }}
-                                  />
-                                </label>
                                 {editorError && (
                                   <p className="equipment-review__error" role="alert">
                                     {editorError}
@@ -762,7 +843,13 @@ export default function EquipmentReview() {
                                     className={`er-btn ${editor.kind === "release" ? "er-btn--danger" : "er-btn--primary"}`}
                                     disabled={busy}
                                   >
-                                    {busy ? "Saving..." : editor.kind === "reduce" ? "Reduce" : "Release"}
+                                    {busy
+                                      ? "Saving..."
+                                      : editor.kind === "release"
+                                        ? "Release"
+                                        : editor.kind === "change" && Number(quantityInput) > reservation.quantity
+                                          ? `Reserve ${Number(quantityInput) - reservation.quantity} more`
+                                          : "Reduce"}
                                   </button>
                                   <button type="button" className="er-btn er-btn--secondary" disabled={busy} onClick={resetEditors}>
                                     Cancel
@@ -777,91 +864,77 @@ export default function EquipmentReview() {
                   </div>
                 )}
 
-                {reviewing && line.shortBy > 0 && markingId !== line.id && !(editingThisLine && editor.kind === "reserve") && (
+                {reviewing && line.shortBy > 0 && markingId !== line.id && (
                   <div className="er-line-actions">
-                    <div className="equipment-review__actions">
-                      <button
-                        type="button"
-                        className="er-btn er-btn--primary"
-                        aria-label={`Reserve ${line.name}`}
-                        disabled={busy}
-                        onClick={() => {
-                          openEditor({ kind: "reserve", lineId: line.id }, canReserveNow === null ? line.shortBy : canReserveNow || "");
-                        }}
-                      >
-                        Reserve
-                      </button>
-                      <button
-                        type="button"
-                        className="er-btn er-btn--secondary"
-                        aria-label={`${marked ? "Edit note for" : "Mark as cannot be provided:"} ${line.name}`}
-                        disabled={busy}
-                        onClick={() => openMark(line)}
-                      >
-                        {marked ? "Edit note" : "Cannot be provided"}
-                      </button>
-                      {marked && (
+                    <form
+                      className="er-quick"
+                      noValidate
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleReserve(line, Number(reserveValue));
+                      }}
+                    >
+                      {canReserveNow !== 0 && !editingThisLine && (
+                        <div className="er-quick__reserve">
+                          <label htmlFor={`er-qty-${line.id}`} className="er-quick__label">
+                            {`How many ${line.name} to reserve?`}
+                          </label>
+                          <QuantityStepper
+                            id={`er-qty-${line.id}`}
+                            name={line.name}
+                            value={reserveValue}
+                            max={reserveMax}
+                            disabled={busy}
+                            onChange={(value) => {
+                              setReserveQty((all) => ({ ...all, [line.id]: value }));
+                              setReserveError(null);
+                            }}
+                          />
+                          <button
+                            type="submit"
+                            className="er-btn er-btn--primary"
+                            aria-label={`${reserveText}: ${line.name}`}
+                            disabled={busy}
+                          >
+                            {busy ? "Saving..." : reserveText}
+                          </button>
+                        </div>
+                      )}
+                      {canReserveNow === 0 && (
+                        <p className="equipment-review__muted">None can be reserved right now.</p>
+                      )}
+                      {canReserveNow !== null && canReserveNow > 0 && canReserveNow < line.shortBy && (
+                        <p className="equipment-review__muted">{`Only ${canReserveNow} can be reserved right now.`}</p>
+                      )}
+                      {reserveError?.lineId === line.id && (
+                        <p className="equipment-review__error" role="alert">
+                          {reserveError.message}
+                        </p>
+                      )}
+                      <div className="equipment-review__actions">
                         <button
                           type="button"
                           className="er-btn er-btn--secondary"
-                          aria-label={`Remove mark on ${line.name}`}
+                          aria-label={`${marked ? "Edit note for" : "Mark as cannot be provided:"} ${line.name}`}
                           disabled={busy}
-                          onClick={() => handleClear(line)}
+                          onClick={() => openMark(line)}
                         >
-                          Remove mark
+                          {marked ? "Edit note" : "Cannot be provided"}
                         </button>
-                      )}
-                    </div>
-                    <p className="equipment-review__muted">
-                      {marked
-                        ? "Marked as not provided. You can still reserve what is available."
-                        : canReserveNow === 0
-                          ? "Nothing can be reserved right now. If it cannot be supplied, say so."
-                          : canReserveNow === null
-                            ? "Reserve units for this event, or say this line cannot be provided."
-                            : `${canReserveNow} can be reserved right now. If the rest cannot be supplied, say so.`}
-                    </p>
+                        {marked && (
+                          <button
+                            type="button"
+                            className="er-btn er-btn--secondary"
+                            aria-label={`Remove mark on ${line.name}`}
+                            disabled={busy}
+                            onClick={() => handleClear(line)}
+                          >
+                            Remove mark
+                          </button>
+                        )}
+                      </div>
+                    </form>
                   </div>
-                )}
-
-                {reviewing && editingThisLine && editor.kind === "reserve" && (
-                  <form className="equipment-review__form" noValidate onSubmit={(e) => handleEditorSubmit(e, line)}>
-                    <h4>{`Reserve ${line.name}`}</h4>
-                    <label>
-                      {`How many ${line.name} to reserve? (${line.shortBy} still needed)`}
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={quantityInput}
-                        disabled={busy}
-                        onChange={(e) => {
-                          setQuantityInput(e.target.value);
-                          setEditorError(null);
-                        }}
-                      />
-                    </label>
-                    {canReserveNow !== null && (
-                      <p className="equipment-review__muted">
-                        {canReserveNow === 0
-                          ? "None can be reserved right now."
-                          : `Up to ${canReserveNow} can be reserved right now.`}
-                      </p>
-                    )}
-                    {editorError && (
-                      <p className="equipment-review__error" role="alert">
-                        {editorError}
-                      </p>
-                    )}
-                    <div className="equipment-review__actions">
-                      <button type="submit" className="er-btn er-btn--primary" disabled={busy}>
-                        {busy ? "Saving..." : "Reserve"}
-                      </button>
-                      <button type="button" className="er-btn er-btn--secondary" disabled={busy} onClick={resetEditors}>
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
                 )}
 
                 {reviewing && markingId === line.id && (
@@ -891,6 +964,8 @@ export default function EquipmentReview() {
                     </div>
                   </form>
                 )}
+                </div>
+                )}
               </li>
             );
           })}
@@ -907,7 +982,7 @@ export default function EquipmentReview() {
               const done = !flagged && (line.shortBy <= 0 || line.outcome === "cannot_be_provided");
               return (
                 <li key={line.id} className={done ? "er-check er-check--ok" : "er-check er-check--todo"}>
-                  <span aria-hidden="true">{done ? "✓" : "!"}</span>
+                  <span aria-hidden="true">{done ? "\u2713" : "!"}</span>
                   {`${line.name}: ${line.reserved} of ${line.quantity} reserved`}
                   {flagged
                     ? " (has a flagged reservation to decide)"
@@ -938,8 +1013,8 @@ export default function EquipmentReview() {
             <div className="equipment-review__confirm">
               <p>
                 {shortLines.length === 0
-                  ? "Every line is fully reserved, so this request will be marked Arranged."
-                  : `${shortLines.length} line${shortLines.length === 1 ? " is" : "s are"} not fully reserved. Each needs a "Cannot be provided" note, and the request will be marked Cannot be fully arranged. Reservations already made are kept.`}
+                  ? "Every item is fully reserved, so this request will be marked Arranged."
+                  : `${shortLines.length} item${shortLines.length === 1 ? " is" : "s are"} not fully reserved. Each needs a "Cannot be provided" note, and the request will be marked Cannot be fully arranged. Reservations already made are kept.`}
               </p>
               <div className="equipment-review__actions">
                 <button type="button" className="er-btn er-btn--primary" disabled={busy} onClick={handleComplete}>
