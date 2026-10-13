@@ -793,7 +793,12 @@ describe("SCRUM254 requesting a venue from the event view", () => {
     await user.click(within(panel).getByRole("button", { name: "Request this venue" }));
 
     await waitFor(() => expect(onChangeRequestProcessed).toHaveBeenCalledTimes(1));
-    expect(createBookingRequest).toHaveBeenCalledWith({ eventRequestId: REQUEST_ID, venueId: "v1" });
+    expect(createBookingRequest).toHaveBeenCalledWith({
+      eventRequestId: REQUEST_ID,
+      venueId: "v1",
+      // eventRequest()'s attendance, the panel's seed.
+      expectedAttendance: 120,
+    });
   });
 });
 
@@ -1011,12 +1016,15 @@ describe("SCRUM192 venue suitability on the event view", () => {
   });
 });
 
-// SCRUM-188 review fix F9: an event that already has a live request does not
-// offer another one on reload; the Venue suitability section tells Find a
-// venue what it loaded.
+// SCRUM-188 review fix F9, per venue since SCRUM-525 (AC1, R13): the Venue
+// suitability section tells Find a venue which venues already have a live
+// request, and only those are not offered again.
 describe("SCRUM-188 a live request known on load", () => {
   const PERIOD = { proposedStart: START_ISO, proposedEnd: END_ISO };
   const HALL = { id: "v1", name: "Hall A", location: "Level 2", maxCapacity: 200 };
+  const ROOM_B = { id: "v9", name: "Room B", location: "Level 1", maxCapacity: 60 };
+  const ROOM_C = { id: "v8", name: "Room C", location: "Level 3", maxCapacity: 60 };
+  // Errored on purpose: a booking whose recheck failed is still live.
   const LIVE_ITEM = {
     bookingId: "b1",
     venueId: "v9",
@@ -1024,30 +1032,111 @@ describe("SCRUM-188 a live request known on load", () => {
     venueLocation: "Level 1",
     status: "pending",
     statusDisplay: { status: "pending", label: "Pending" },
+    roomLayoutCode: null,
+    expectedAttendance: 40,
+    attendanceSource: "booking",
     suitabilityOverridden: false,
     current: null,
     atRequest: null,
     newlyUnmet: [],
     error: { code: "RECHECK_FAILED", message: "prose" },
   };
+  const APPROVED_ITEM = {
+    ...LIVE_ITEM,
+    bookingId: "b2",
+    venueId: "v8",
+    venueName: "Room C",
+    status: "approved",
+    statusDisplay: { status: "approved", label: "Approved" },
+    current: { suitable: true, criteria: [], checked: {} },
+    error: null,
+  };
   const finderSection = () => screen.getByRole("heading", { name: "Find a venue" }).closest("section");
+  const requestButton = (name) =>
+    within(finderSection()).getByRole("button", { name: `Request this venue: ${name}` });
   async function searchInFinder(user) {
     await user.click(within(finderSection()).getByRole("button", { name: "Search venues" }));
     return within(finderSection()).findByRole("button", { name: "Request this venue: Hall A" });
   }
 
-  it("SCRUM188_AC7_request_buttons_start_disabled_when_the_event_already_has_a_live_request", async () => {
-    vi.mocked(getEventVenueSuitability).mockResolvedValue([LIVE_ITEM]);
-    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+  it("SCRUM525_AC1_a_live_request_on_load_disables_only_its_venue", async () => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([LIVE_ITEM, APPROVED_ITEM]);
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL, ROOM_B, ROOM_C]);
     const user = userEvent.setup();
     renderAs(ASSIGNED, eventRequest({ ...PERIOD, status: "approved" }));
 
     await screen.findByRole("heading", { name: "Room B" });
-    const request = await searchInFinder(user);
-    expect(request).toBeDisabled();
-    expect(within(finderSection()).getByRole("status")).toHaveTextContent(
-      "This event already has a venue request, so another cannot be started.",
-    );
+    expect(await searchInFinder(user)).toBeEnabled();
+    expect(requestButton("Room B")).toBeDisabled();
+    expect(requestButton("Room B")).toHaveAccessibleDescription(/Pending/);
+    expect(requestButton("Room B")).toHaveAccessibleDescription(/Venue suitability/);
+    // Each venue names its own request's status, from the server's label.
+    expect(requestButton("Room C")).toBeDisabled();
+    expect(requestButton("Room C")).toHaveAccessibleDescription(/\(Approved\)/);
     expect(createBookingRequest).not.toHaveBeenCalled();
+  });
+
+  // SCRUM-525 (R13): the request a refusal collided with is shown, so the
+  // section reloads to list it, and Hall A's hint then names its status from
+  // the server, which the refusal alone does not carry.
+  it("SCRUM525_AC1_an_already_requested_refusal_reloads_venue_suitability", async () => {
+    const COLLIDED_ITEM = {
+      ...APPROVED_ITEM,
+      bookingId: "b7",
+      venueId: "v1",
+      venueName: "Hall A",
+      venueLocation: "Level 2",
+    };
+    vi.mocked(getEventVenueSuitability).mockResolvedValueOnce([]).mockResolvedValueOnce([COLLIDED_ITEM]);
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    vi.mocked(createBookingRequest).mockRejectedValue(
+      Object.assign(httpError(409), {
+        response: {
+          status: 409,
+          data: { code: "BOOKING_REQUEST_EXISTS", conflicts: [{ kind: "booking_request", bookingId: "b7" }] },
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest({ ...PERIOD, status: "approved" }));
+    await waitFor(() => expect(getEventVenueSuitability).toHaveBeenCalledTimes(1));
+
+    await user.click(await searchInFinder(user));
+    const panel = screen.getByRole("region", { name: "Request Hall A" });
+    await user.click(within(panel).getByRole("button", { name: "Request this venue" }));
+
+    await waitFor(() => expect(getEventVenueSuitability).toHaveBeenCalledTimes(2));
+    const suitabilitySection = screen.getByRole("heading", { name: "Venue suitability" }).closest("section");
+    expect(await within(suitabilitySection).findByRole("heading", { name: "Hall A" })).toBeInTheDocument();
+    expect(requestButton("Hall A")).toBeDisabled();
+    await waitFor(() => expect(requestButton("Hall A")).toHaveAccessibleDescription(/\(Approved\)/));
+  });
+
+  // SCRUM-525 (R13): the lock hint points at Venue suitability, which only
+  // the assigned coordinator sees. After a handover made in this view the
+  // section is gone, so no hint may send the coordinator looking for it; the
+  // buttons stay off for eligibility's reason, shown once above the results.
+  it("SCRUM525_AC1_after_a_handover_no_hint_points_at_the_hidden_venue_suitability", async () => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([LIVE_ITEM]);
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL, ROOM_B]);
+    vi.mocked(listCoordinators).mockResolvedValue([{ id: OTHER, fullName: "Olga Other" }]);
+    vi.mocked(reassignEventRequest).mockResolvedValue({ id: REQUEST_ID, assignedCoordinatorId: OTHER });
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest({ ...PERIOD, status: "approved" }));
+    await screen.findByRole("heading", { name: "Room B" });
+
+    await user.click(screen.getByRole("button", { name: "Hand over to another coordinator" }));
+    await user.selectOptions(await screen.findByLabelText("Hand over to"), OTHER);
+    await user.click(screen.getByRole("button", { name: "Confirm handover" }));
+    await screen.findByText(/Handed over to Olga Other/);
+    expect(screen.queryByRole("heading", { name: "Venue suitability" })).not.toBeInTheDocument();
+
+    await searchInFinder(user);
+    expect(requestButton("Room B")).toBeDisabled();
+    expect(requestButton("Room B")).not.toHaveAccessibleDescription(/Venue suitability/);
+    expect(within(finderSection()).queryByText(/See it under Venue suitability/)).not.toBeInTheDocument();
+    expect(
+      within(finderSection()).getByText("Only the coordinator assigned to this event can request a venue for it."),
+    ).toBeInTheDocument();
   });
 });

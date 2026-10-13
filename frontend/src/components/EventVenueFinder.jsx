@@ -68,10 +68,27 @@
 // bookingRequestEligibility is a convenience, not the gate: it saves a
 // coordinator a button that can only be refused, and when it says no, its
 // reason shows once above the results. The server checks everything again
-// under a lock (create_booking_request, migration 030). eventRequested
-// disables every button once a request is sent, or once the server answers
-// that the event already has one, so a second cannot be started; a new search
-// closes an open panel but does not undo that.
+// under a lock (create_booking_request, migration 030).
+//
+// SCRUM-525 (AC1, R11, R13): an event may hold several venues, but only one
+// live request (pending, approved or flagged for review) per venue. So the
+// lock is per venue, never event-wide: a venue's Request button is disabled
+// when the parent says the event already has a live request for it
+// (`liveRequests`), or when this finder sent one for it, or when the server
+// refused one for it as already requested (`sentVenues`). Every other venue
+// stays requestable. A locked card says why, under the card, linked to its
+// button with aria-describedby: the event already has a request for this
+// venue, its status when known, and that it is listed under Venue suitability
+// above, which is where the existing request is shown (R13). It is a plain
+// hint, not a status: nothing changed at that moment that needs announcing.
+// The status shown is the parent's when it has one, since that is the
+// server's current word; this finder's own guess ("Pending" for a request it
+// just sent, "Flagged for review" for that refusal, none for a request that
+// already existed) only fills the gap. A new search closes an open panel but
+// keeps the locks: they describe the event, not the results.
+// A refusal carries the existing booking's id but no venue id, so the venue
+// is the one the refused panel was opened for, captured when that panel's
+// callbacks were made, not read from state when the answer lands.
 //
 // SCRUM-191 (SCRUM-188 AC1/AC2): "Check suitability" on each result, and a
 // "Check another venue" control under the results for any active venue the
@@ -99,10 +116,18 @@
 //     codes, so the server's check on submit still judges them.
 //   - A new search closes either panel, as it always closed the request one.
 //
-// SCRUM-188: `hasLiveRequest` is the parent's word, from the event's Venue
-// suitability section, that the event already has a live request when the
-// view loads. It counts as eventRequested, so the request buttons start
-// disabled with the same hint, rather than only after a refused send.
+// SCRUM-188, reworked by SCRUM-525: `liveRequests` is the parent's word, from
+// the event's Venue suitability section, on which venues already have a live
+// request when the view loads, as a Map of venue id to status label. Those
+// venues start locked, rather than only after a refused send.
+// onVenueAlreadyRequested(code) tells the parent the server refused a venue
+// as already requested, so it can reload that section and show the request
+// the coordinator collided with.
+//
+// A venue locked this way and opened through "Check suitability" or "Check
+// another venue" shows the same sentence in the suitability panel in place of
+// its Request button (requestBlockedReason), so it is never offered there
+// either.
 
 import { useId, useRef, useState } from "react";
 import { VENUE_TIME_ZONE } from "../services/datetimeFormat";
@@ -122,6 +147,19 @@ import {
 } from "../services/venueLookups";
 import BookingRequestPanel from "./BookingRequestPanel";
 import VenueSuitabilityPanel from "./VenueSuitabilityPanel";
+
+/** The default for `liveRequests`: one shared empty Map, so it is stable. */
+const NO_LIVE_REQUESTS = new Map();
+
+/**
+ * SCRUM-525 (R13): why a venue cannot be requested again, naming its live
+ * request's status when known and where that request is listed.
+ */
+function alreadyRequestedText(status) {
+  return status
+    ? `This event already has a request for this venue (${status}). See it under Venue suitability above.`
+    : "This event already has a request for this venue. See it under Venue suitability above.";
+}
 
 /** The three code lists on a result, in the order they are shown. */
 const RESULT_CODE_LISTS = [
@@ -147,7 +185,9 @@ function codesText(codes, options) {
  * One matching venue: its name as the heading, the rest as a <dl>, then the
  * SCRUM-191 check and SCRUM-254 request buttons.
  */
-function VenueResult({ venue, headingId, checkDisabled, onCheck, requestDisabled, onRequest }) {
+function VenueResult({ venue, headingId, checkDisabled, onCheck, requestDisabled, lockedReason, onRequest }) {
+  // SCRUM-525: the hint that explains a locked Request button, by id.
+  const lockedHintId = `${headingId}-locked`;
   const rows = [
     { term: "Location", value: venue.location },
     { term: "Maximum capacity", value: venue.maxCapacity },
@@ -182,10 +222,16 @@ function VenueResult({ venue, headingId, checkDisabled, onCheck, requestDisabled
         className="event-venue-finder__request"
         aria-label={`Request this venue: ${venue.name}`}
         disabled={requestDisabled}
+        aria-describedby={lockedReason ? lockedHintId : undefined}
         onClick={() => onRequest(venue)}
       >
         Request this venue
       </button>
+      {lockedReason && (
+        <p className="event-venue-finder__hint" id={lockedHintId}>
+          {lockedReason}
+        </p>
+      )}
     </article>
   );
 }
@@ -292,7 +338,13 @@ const CODE_GROUPS = [
   { field: "facilities", legend: "Facilities", options: FACILITIES },
 ];
 
-export default function EventVenueFinder({ request, userId, hasLiveRequest = false, onRequestSubmitted }) {
+export default function EventVenueFinder({
+  request,
+  userId,
+  liveRequests = NO_LIVE_REQUESTS,
+  onRequestSubmitted,
+  onVenueAlreadyRequested,
+}) {
   // Lazy: the function runs on the first render only. See the header.
   const [seed] = useState(() => seedFromEvent(request));
   const [values, setValues] = useState(seed);
@@ -304,14 +356,23 @@ export default function EventVenueFinder({ request, userId, hasLiveRequest = fal
   // "searched, nothing matched" (the no-match message) stay distinguishable.
   const [results, setResults] = useState(null);
 
-  // SCRUM-254. See the header: the venue whose panel is open, and whether
-  // this event now has a live request, so no second one can be started.
+  // SCRUM-254. See the header: the venue whose panel is open.
   // `requesting` is { venue, suitability, requirements } for the open request
   // panel; suitability is set only when it was opened from a check (SCRUM-191).
   const eligibility = bookingRequestEligibility(request, userId);
   const [requesting, setRequesting] = useState(null);
-  const [requestSent, setRequestSent] = useState(false);
-  const eventRequested = requestSent || Boolean(hasLiveRequest);
+  // SCRUM-525. The venues this finder has locked itself (see the header):
+  // venue id -> the status it knows of, or null when it knows none.
+  const [sentVenues, setSentVenues] = useState(() => new Map());
+
+  const isLocked = (venueId) => liveRequests.has(venueId) || sentVenues.has(venueId);
+  // The parent's status first: it is the server's (see the header).
+  const lockedStatus = (venueId) => liveRequests.get(venueId) ?? sentVenues.get(venueId) ?? null;
+  const lockedReason = (venueId) => (isLocked(venueId) ? alreadyRequestedText(lockedStatus(venueId)) : null);
+
+  function lockVenue(venueId, status) {
+    setSentVenues((prev) => new Map(prev).set(venueId, status));
+  }
 
   // SCRUM-191. See the header: the venue whose suitability panel is open,
   // with the requirements snapshot it checks and a per-check key, so pressing
@@ -589,11 +650,6 @@ export default function EventVenueFinder({ request, userId, hasLiveRequest = fal
             {eligibility.reason}
           </p>
         )}
-        {hasResults && eligibility.eligible && eventRequested && (
-          <p className="event-venue-finder__hint" role="status">
-            This event already has a venue request, so another cannot be started.
-          </p>
-        )}
 
         {hasResults && (
           <ul className="event-venue-finder__results" aria-label="Matching venues">
@@ -604,7 +660,8 @@ export default function EventVenueFinder({ request, userId, hasLiveRequest = fal
                   headingId={`${idPrefix}-venue-${venue.id}`}
                   checkDisabled={!canCheck}
                   onCheck={openCheck}
-                  requestDisabled={!eligibility.eligible || eventRequested}
+                  requestDisabled={!eligibility.eligible || isLocked(venue.id)}
+                  lockedReason={lockedReason(venue.id)}
                   onRequest={openRequest}
                 />
               </li>
@@ -630,7 +687,8 @@ export default function EventVenueFinder({ request, userId, hasLiveRequest = fal
           event={request}
           venue={checkingVenue.venue}
           requirements={checkingVenue.requirements}
-          canRequest={eligibility.eligible && !eventRequested}
+          canRequest={eligibility.eligible && !isLocked(checkingVenue.venue.id)}
+          requestBlockedReason={lockedReason(checkingVenue.venue.id) ?? undefined}
           onRequest={requestFromCheck}
           onClose={() => setCheckingVenue(null)}
         />
@@ -644,11 +702,15 @@ export default function EventVenueFinder({ request, userId, hasLiveRequest = fal
           venue={requesting.venue}
           suitability={requesting.suitability}
           requirements={requesting.requirements}
+          // The venue is captured here, with the panel (see the header).
           onSubmitted={(created) => {
-            setRequestSent(true);
+            lockVenue(requesting.venue.id, "Pending");
             onRequestSubmitted?.(created);
           }}
-          onEventAlreadyRequested={() => setRequestSent(true)}
+          onVenueAlreadyRequested={(code) => {
+            lockVenue(requesting.venue.id, code === "BOOKING_FLAGGED_FOR_REVIEW" ? "Flagged for review" : null);
+            onVenueAlreadyRequested?.(code);
+          }}
           onClose={() => setRequesting(null)}
         />
       )}

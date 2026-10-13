@@ -6,7 +6,7 @@
  *
  * Drives the real services -- bookingRequestService, venueBlockService,
  * venueService and eventRequestService -- against the live database, through
- * create_booking_request (030) and withdraw_booking_request (031), then removes
+ * create_booking_request (051) and withdraw_booking_request (031), then removes
  * everything it created.
  *
  * The unit, route and PGlite suites prove the rules. PGlite is one connection,
@@ -16,8 +16,9 @@
  *  - that the PostgREST embed filter the coordinator's list relies on really
  *    scopes to the assigned coordinator, and follows a handover;
  *  - that the default for an omitted status is pending on the real column (028);
- *  - that simultaneous requests for one event leave at most one active request,
- *    at different venues and at the same venue (the event row lock, 030);
+ *  - that simultaneous requests for one event leave at most one active request
+ *    per venue: at different venues all are created, at the same venue only
+ *    one is (051's per-venue rule, under 030's event row lock);
  *  - that a request racing a venue block ends in a state some serial order
  *    explains, with no deadlock or stray error (the venue "for share" /
  *    "for no key update" protocol of 012 to 015);
@@ -43,7 +44,7 @@
  * UPDATE as a stand-in, because Venue Staff approval and rejection (SCRUM-258)
  * do not exist yet; replace it with the real transition when they do.
  *
- * Requires migrations 027 to 031. The preflight says what is missing, and
+ * Requires migrations 027 to 031, and 051. The preflight says what is missing, and
  * nothing is written until it passes. Exits non-zero on any failure.
  *
  * It creates throwaway auth users: two Venue Staff, two Event Coordinators and
@@ -121,7 +122,7 @@ const rejected = (results) => results.filter((r) => r.status === 'rejected');
 // Preflight
 // ---------------------------------------------------------------------------
 
-/** Confirms 027-031 are applied before anything is written. */
+/** Confirms 027-031 and 051 are applied before anything is written. */
 async function preflight() {
   const missing = [];
 
@@ -133,6 +134,9 @@ async function preflight() {
 
   // Neither function can find an event or booking that does not exist, and both
   // must say so with no_data_found. PGRST202 means the function is missing.
+  // p_expected_attendance is passed so a database still on 040's 7-argument
+  // create_booking_request answers PGRST202 here, not P0002: without it the
+  // preflight would pass on 040 and every request below would fail.
   const { error: createError } = await supabase.rpc('create_booking_request', {
     p_event_request_id: randomUUID(),
     p_venue_id: randomUUID(),
@@ -141,9 +145,10 @@ async function preflight() {
     p_setup_notes: null,
     p_suitability: { suitable: true, criteria: [] },
     p_confirm_unsuitable: false,
+    p_expected_attendance: 1,
   });
   if (createError?.code !== 'P0002') {
-    missing.push(`create_booking_request (030): expected P0002, got ${createError?.code ?? 'no error'} ${createError?.message ?? ''}`.trim());
+    missing.push(`create_booking_request (051): expected P0002, got ${createError?.code ?? 'no error'} ${createError?.message ?? ''}`.trim());
   }
 
   const { error: withdrawError } = await supabase.rpc('withdraw_booking_request', {
@@ -346,11 +351,11 @@ async function main() {
   const missing = await preflight();
   if (missing.length > 0) {
     for (const line of missing) console.error(`  missing: ${line}`);
-    console.error('\nApply migrations 027-031 in the Supabase SQL Editor, then run this again.');
+    console.error('\nApply migrations 027-031 and 051 in the Supabase SQL Editor, then run this again.');
     failures += 1;
     return;
   }
-  check('migrations 027-031 are applied', true);
+  check('migrations 027-031 and 051 are applied', true);
 
   // --- setup ---------------------------------------------------------------
   await createTestUser('staff1', 'venue_staff');
@@ -402,6 +407,10 @@ async function main() {
   check('every row A is shown is on an event assigned to A', everyScoped);
 
   // --- 3. race: one event, different venues --------------------------------
+  // SCRUM-525 (051): one live request per (event, venue), so requests for one
+  // event at three different venues are all created, however they interleave
+  // on the event row lock. Before 051 exactly one won; this now catches that
+  // rule creeping back as much as a lost or doubled row.
   console.log('\n  race: simultaneous requests for one event at different venues');
 
   for (let round = 1; round <= ROUNDS; round += 1) {
@@ -412,15 +421,14 @@ async function main() {
     const results = await startTogether(racers.map((venueId) => () => request(eventId, venueId, coordA)));
     await trackBookingsOf(eventId);
 
-    const wins = fulfilled(results);
     const losses = rejected(results);
     const active = await activeBookingsOf(eventId);
-    check(`round ${round}: exactly one of three succeeds`, wins.length === 1, `${wins.length} succeeded`);
-    check(`round ${round}: the others are refused as BOOKING_REQUEST_EXISTS`,
-      losses.length === 2 && losses.every((r) => r.reason instanceof ConflictError && r.reason.code === 'BOOKING_REQUEST_EXISTS'),
+    check(`round ${round}: all three are created`, fulfilled(results).length === 3, `${fulfilled(results).length} succeeded`);
+    check(`round ${round}: nothing is refused`, losses.length === 0,
       losses.map((r) => r.reason?.code ?? r.reason?.message).join(','));
-    check(`round ${round}: exactly one active request is stored`, active.length === 1, `${active.length} active`);
-    check(`round ${round}: the stored one is the one that succeeded`, active[0]?.id === wins[0]?.value?.id);
+    check(`round ${round}: each venue holds exactly one active request`,
+      active.length === 3 && racers.every((venueId) => active.filter((b) => b.venue_id === venueId).length === 1),
+      `${active.length} active`);
   }
 
   console.log('\n  race: simultaneous requests for one event at the SAME venue');
@@ -438,6 +446,41 @@ async function main() {
     const active = await activeBookingsOf(eventId);
     check(`round ${round}: exactly one succeeds`, fulfilled(results).length === 1, `${fulfilled(results).length} succeeded`);
     check(`round ${round}: exactly one active request is stored`, active.length === 1, `${active.length} active`);
+  }
+
+  // The two rules at once: two requests for venue 1 and one for venue 2, all
+  // for one event. The venue 2 request must never be refused because of the
+  // venue 1 pair, and the venue 1 pair must still leave only one.
+  console.log('\n  race: simultaneous requests for one event, two at one venue and one at another');
+
+  for (let round = 1; round <= ROUNDS; round += 1) {
+    const eventId = await makeEvent(`race1m_${round}`, coordA, at(1400 + round * 24), at(1408 + round * 24));
+    const venue1 = await makeVenue(`race1m_${round}_1`);
+    const venue2 = await makeVenue(`race1m_${round}_2`);
+
+    const results = await startTogether([
+      () => request(eventId, venue1, coordA),
+      () => request(eventId, venue1, coordA),
+      () => request(eventId, venue2, coordA),
+    ]);
+    await trackBookingsOf(eventId);
+
+    const wins = fulfilled(results);
+    const losses = rejected(results);
+    const active = await activeBookingsOf(eventId);
+    const activeAt = (venueId) => active.filter((b) => b.venue_id === venueId).length;
+    check(`round ${round}: exactly two succeed, one at each venue`,
+      wins.length === 2 &&
+        wins.filter((r) => r.value.venueId === venue1).length === 1 &&
+        wins.filter((r) => r.value.venueId === venue2).length === 1,
+      wins.map((r) => r.value.venueId === venue1 ? 'V1' : r.value.venueId === venue2 ? 'V2' : '?').join(','));
+    check(`round ${round}: the other venue 1 request is refused as BOOKING_REQUEST_EXISTS`,
+      losses.length === 1 && results[2].status === 'fulfilled' &&
+        losses[0].reason instanceof ConflictError && losses[0].reason.code === 'BOOKING_REQUEST_EXISTS',
+      losses.map((r) => r.reason?.code ?? r.reason?.message).join(','));
+    check(`round ${round}: each venue holds exactly one active request`,
+      active.length === 2 && activeAt(venue1) === 1 && activeAt(venue2) === 1,
+      `${activeAt(venue1)} at V1, ${activeAt(venue2)} at V2`);
   }
 
   // --- 4. race: a request against a venue block ---------------------------

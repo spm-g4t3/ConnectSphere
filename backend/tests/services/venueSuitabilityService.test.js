@@ -574,16 +574,16 @@ describe('SCRUM188_AC2 checked echoes what was judged', () => {
     });
   });
 
-  it('SCRUM188_AC2_a_period_or_attendance_sent_by_the_caller_is_never_used', async () => {
+  // SCRUM-525: was ..._a_period_or_attendance_sent_by_the_caller_is_never_used.
+  // The attendance may now be the caller's (B-AC3-01); the period never is (R9).
+  it('SCRUM188_AC2_a_period_sent_by_the_caller_is_never_used', async () => {
     const client = fakeClient();
     const result = await check(client, {
       startsAt: '2030-01-01T00:00:00Z',
       endsAt: '2030-01-02T00:00:00Z',
       proposedStart: '2030-01-01T00:00:00Z',
-      expectedAttendance: 5,
     });
-    expect(result.checked).toMatchObject({ startsAt: START, endsAt: END, expectedAttendance: 120 });
-    expect(result.criteria[0].detail).toBe('Capacity 150 ≥ expected attendance 120');
+    expect(result.checked).toMatchObject({ startsAt: START, endsAt: END });
     const rpc = client.calls.find((c) => c.fn);
     expect(rpc.args).toMatchObject({ p_starts_at: START, p_ends_at: END });
   });
@@ -633,6 +633,10 @@ function eventBookingRow(overrides = {}) {
     starts_at: START,
     ends_at: END,
     room_layout_code: 'theatre',
+    // A row from before 051 on an event that had no attendance then: none of
+    // its own, so the recheck falls back to the event's (SCRUM-525, R7). The
+    // cases about a booking's own number set it explicitly.
+    expected_attendance: null,
     suitability_result: storedResult({
       checked: {
         startsAt: START,
@@ -769,15 +773,16 @@ describe('SCRUM188_AC6 each booking is judged by the same check', () => {
     });
   });
 
-  it('SCRUM188_AC6_the_events_current_period_and_attendance_are_judged_not_the_bookings', async () => {
-    // Booked for 10:00-12:00 with 120; the event has since moved to Thursday
-    // 20:00-23:00 with 200 attending.
+  it('SCRUM188_AC6_the_events_current_period_and_a_booking_without_its_own_attendance_follows_the_events', async () => {
+    // Booked for 10:00-12:00 with no attendance of its own; the event has
+    // since moved to Thursday 20:00-23:00 with 200 attending. SCRUM-525 (R15):
+    // only a booking without its own number follows the event's.
     const event = eventRow({
       proposed_start: '2026-11-12T20:00:00+08:00',
       proposed_end: '2026-11-12T23:00:00+08:00',
       expected_attendance: 200,
     });
-    const client = fakeClient({ event, bookings: [eventBookingRow()] });
+    const client = fakeClient({ event, bookings: [eventBookingRow({ expected_attendance: null })] });
     const [item] = await recheck(client);
 
     expect(item.current.checked).toMatchObject({
@@ -958,12 +963,32 @@ describe('SCRUM188_AC3 an event needs an expected attendance (B1)', () => {
     expect(result.criteria[0]).toMatchObject({ met: true, detail: 'Capacity 150 ≥ expected attendance 0' });
   });
 
-  it('SCRUM188_AC6_no_attendance_refuses_the_whole_recheck_before_bookings_are_read', async () => {
-    const client = fakeClient({ event: eventRow({ expected_attendance: null }), bookings: [eventBookingRow()] });
-    const err = await recheck(client).catch((e) => e);
-    expect(err).toBeInstanceOf(ConflictError);
-    expect(err.code).toBe('EVENT_ATTENDANCE_MISSING');
-    expect(client.calls.map((c) => c.table ?? c.fn)).toEqual(['event_requests']);
+  // SCRUM-525 replaced SCRUM188_AC6_no_attendance_refuses_the_whole_recheck_
+  // before_bookings_are_read: attendance is per booking now (R12).
+  it('SCRUM525_AC3_a_booking_with_no_attendance_anywhere_errors_alone', async () => {
+    // B-AC3-06. The event has no number; booking A has its own 40, booking B
+    // none. A is judged on 40; B has nothing to judge Capacity on, so B alone
+    // carries the error and the recheck still resolves.
+    const client = fakeClient({
+      event: eventRow({ expected_attendance: null }),
+      bookings: [
+        eventBookingRow({ expected_attendance: 40 }),
+        eventBookingRow({ id: BOOKING_B, expected_attendance: null }),
+      ],
+    });
+
+    const [a, b] = await recheck(client);
+
+    expect(a.error).toBeNull();
+    expect(a.current.criteria[0]).toMatchObject({ met: true, detail: 'Capacity 150 ≥ expected attendance 40' });
+    expect(b).toMatchObject({
+      bookingId: BOOKING_B,
+      current: null,
+      newlyUnmet: [],
+      expectedAttendance: null,
+      attendanceSource: null,
+      error: { code: 'EVENT_ATTENDANCE_MISSING' },
+    });
   });
 });
 
@@ -1223,17 +1248,107 @@ describe('SCRUM188_WK7_3 checked per booking (B-WK7-3-01/02)', () => {
     });
   });
 
-  it('SCRUM188_WK7_3_capacity_uses_the_events_attendance_until_bookings_have_their_own', async () => {
-    // Accepted as partial (open point 1): bookings have no attendance column.
+  // SCRUM-525 replaced SCRUM188_WK7_3_capacity_uses_the_events_attendance_
+  // until_bookings_have_their_own, which accepted WK7-3 as partial: bookings
+  // now have their own attendance (051).
+  it('SCRUM525_AC3_each_booking_is_rechecked_on_its_own_attendance', async () => {
+    // B-AC3-02 (R7, R15). Both venues hold 100 and the event is 150, so only
+    // reading each booking's own number can give one met and one not.
+    const [rowOne, rowTwo] = twoVenueBookings();
     const client = fakeClient({
       event: eventRow({ expected_attendance: 150 }),
-      bookings: twoVenueBookings(),
-      venuesById: { [V1]: venueRow({ max_capacity: 200 }), [V2]: venueRow({ id: V2, max_capacity: 100 }) },
+      bookings: [{ ...rowOne, expected_attendance: 40 }, { ...rowTwo, expected_attendance: 200 }],
+      venuesById: { [V1]: venueRow({ max_capacity: 100 }), [V2]: venueRow({ id: V2, max_capacity: 100 }) },
     });
+
     const [one, two] = await recheck(client);
-    expect(one.current.criteria[0]).toMatchObject({ met: true, detail: 'Capacity 200 ≥ expected attendance 150' });
-    expect(two.current.criteria[0]).toMatchObject({ met: false, detail: 'Capacity 100 < expected attendance 150' });
-    expect(one.current.checked.expectedAttendance).toBe(150);
-    expect(two.current.checked.expectedAttendance).toBe(150);
+
+    expect(one.current.criteria[0]).toMatchObject({ met: true, detail: 'Capacity 100 ≥ expected attendance 40' });
+    expect(two.current.criteria[0]).toMatchObject({ met: false, detail: 'Capacity 100 < expected attendance 200' });
+    expect(one).toMatchObject({ expectedAttendance: 40, attendanceSource: 'booking' });
+    expect(two).toMatchObject({ expectedAttendance: 200, attendanceSource: 'booking' });
+    // The column is asked for, so the real read has a number to give.
+    expect(client.calls.find((c) => c.table === 'bookings').columns).toMatch(/\bexpected_attendance\b/);
+  });
+
+  it('SCRUM525_AC3_a_booking_without_attendance_falls_back_to_the_events', async () => {
+    // B-AC3-03 (R7). Null must fall back to the event's 150, not be read as
+    // 0 -- which would pass Capacity at any size -- and the item says the
+    // number was the event's (R14).
+    const client = fakeClient({
+      event: eventRow({ expected_attendance: 150 }),
+      venue: venueRow({ max_capacity: 100 }),
+      bookings: [eventBookingRow({ expected_attendance: null })],
+    });
+
+    const [item] = await recheck(client);
+
+    expect(item.current.criteria[0]).toMatchObject({ met: false, detail: 'Capacity 100 < expected attendance 150' });
+    expect(item).toMatchObject({ expectedAttendance: 150, attendanceSource: 'event' });
+  });
+});
+
+
+describe('SCRUM525_AC3 the one-venue check takes the attendance given', () => {
+  it('SCRUM525_AC3_capacity_is_judged_on_the_requests_attendance', async () => {
+    // B-AC3-01 (R4, R7). A hall of 100 against an event of 150: given 80 for
+    // this venue it is met, and checked echoes 80 so the stored result says
+    // what was judged; given nothing, the event's 150 is judged.
+    const client = () => fakeClient({
+      event: eventRow({ expected_attendance: 150 }),
+      venue: venueRow({ max_capacity: 100 }),
+    });
+
+    const given = await check(client(), { expectedAttendance: 80 });
+    expect(given.criteria[0]).toMatchObject({ met: true, detail: 'Capacity 100 ≥ expected attendance 80' });
+    expect(given.checked.expectedAttendance).toBe(80);
+
+    const omitted = await check(client());
+    expect(omitted.criteria[0]).toMatchObject({ met: false, detail: 'Capacity 100 < expected attendance 150' });
+    expect(omitted.checked.expectedAttendance).toBe(150);
+  });
+
+  it('SCRUM525_AC3_an_event_without_attendance_is_judged_on_the_one_given', async () => {
+    // R12: the 409 is for no number anywhere, not for an event without one.
+    const result = await check(
+      fakeClient({ event: eventRow({ expected_attendance: null }), venue: venueRow({ max_capacity: 100 }) }),
+      { expectedAttendance: 80 },
+    );
+    expect(result.criteria[0]).toMatchObject({ met: true, detail: 'Capacity 100 ≥ expected attendance 80' });
+  });
+});
+
+
+describe('SCRUM525_AC5 each listed booking carries its attendance and layout', () => {
+  it('SCRUM525_AC5_each_listed_booking_carries_its_attendance_and_layout', async () => {
+    // B-AC5-01 (R14, R15). Top level, not only inside current, so the screen
+    // still has them when the recheck fails: booking B's venue is retired.
+    const client = fakeClient({
+      event: eventRow({ expected_attendance: 150 }),
+      bookings: [
+        eventBookingRow({ expected_attendance: 120, room_layout_code: 'theatre' }),
+        eventBookingRow({
+          id: BOOKING_B,
+          venue_id: VENUE_B,
+          expected_attendance: null,
+          room_layout_code: 'u_shape',
+        }),
+      ],
+      venuesById: {
+        [VENUE]: venueRow(),
+        [VENUE_B]: venueRow({ id: VENUE_B, retired_at: '2026-09-01T00:00:00+00:00' }),
+      },
+    });
+
+    const [a, b] = await recheck(client);
+
+    expect(a).toMatchObject({ roomLayoutCode: 'theatre', expectedAttendance: 120, attendanceSource: 'booking' });
+    expect(b).toMatchObject({
+      current: null,
+      error: { code: 'VENUE_RETIRED' },
+      roomLayoutCode: 'u_shape',
+      expectedAttendance: 150,
+      attendanceSource: 'event',
+    });
   });
 });

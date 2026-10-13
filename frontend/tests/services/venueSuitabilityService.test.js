@@ -63,6 +63,28 @@ describe("SCRUM-191 checkVenueSuitability", () => {
     expect(config.params).toEqual({ venueId: "v1" });
   });
 
+  // SCRUM-525 (AC3): the request form's attendance reaches the check, and an
+  // absent or null one leaves the key out so the server judges the event's
+  // (an "attendance=null" query would be a 400).
+  it("SCRUM525_AC3_attendance_is_sent_as_a_query_param", async () => {
+    await checkVenueSuitability("e1", "v1", { layout: "theatre" }, { attendance: 80 });
+
+    expect(apiClient.get).toHaveBeenCalledWith("/event-requests/e1/venue-suitability", {
+      params: { venueId: "v1", layout: "theatre", attendance: 80 },
+    });
+  });
+
+  it.each([
+    ["no options", undefined],
+    ["no attendance", {}],
+    ["a null attendance", { attendance: null }],
+  ])("SCRUM525_AC3_%s_sends_no_attendance_param", async (_label, options) => {
+    await checkVenueSuitability("e1", "v1", {}, options);
+
+    const [, config] = vi.mocked(apiClient.get).mock.calls[0];
+    expect(config.params).toEqual({ venueId: "v1" });
+  });
+
   it("SCRUM188_AC1_lets_a_failure_through_for_the_caller_to_read", async () => {
     const failure = Object.assign(new Error("409"), { response: { status: 409 } });
     vi.mocked(apiClient.get).mockRejectedValue(failure);

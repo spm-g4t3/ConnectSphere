@@ -17,7 +17,11 @@
 //   - the recheck reads the stored booking and recomputes it, raising only
 //     criteria that were not overridden (AC6);
 //   - Venue Staff's bookings list carries the stored result; a coordinator's
-//     does not (AC7).
+//     does not (AC7);
+//   - SCRUM-525: one live request per venue per event (a second request for
+//     the same venue is 409 BOOKING_REQUEST_EXISTS, another venue is fine),
+//     and Capacity is judged on the request's own attendance, falling back to
+//     the event's, which each booking stores and the recheck reads back.
 // Every other export the tree imports rejects with "unexpected call".
 //
 // Timezone-safe: the expected "When" text is built from the fixture instants
@@ -112,6 +116,20 @@ const SEMINAR = Object.freeze({
   retiredAt: null,
 });
 
+// SCRUM-525: a second venue, big enough for the whole event.
+const HALL_A = Object.freeze({
+  id: "3f2504e0-4f89-41d3-9a0c-0305e82c3302",
+  name: "Hall A",
+  location: "Level 1",
+  maxCapacity: 200,
+  layouts: ["theatre", "u_shape"],
+  accessibility: [],
+  facilities: ["projector"],
+  retiredAt: null,
+});
+
+const VENUES = Object.freeze({ [SEMINAR.id]: SEMINAR, [HALL_A.id]: HALL_A });
+
 const CRITERIA_ORDER = ["Capacity", "Operating hours", "Layout", "Accessibility", "Facilities", "Availability"];
 
 function httpError(status, data) {
@@ -135,14 +153,17 @@ function singaporeWhen(startsAt, endsAt) {
 function createFakeSuitabilityBackend() {
   const bookings = [];
   let viewer = "coordinator";
+  let nextId = 1;
+  const LIVE = new Set(["pending", "approved", "flagged_for_review"]);
+  const LABELS = { pending: "Pending", approved: "Approved", flagged_for_review: "Flagged for review" };
 
-  function judge(venue, { layout = null, accessibility = [], facilities = [] } = {}) {
-    const capacityMet = venue.maxCapacity >= EVENT.expectedAttendance;
+  function judge(venue, { layout = null, accessibility = [], facilities = [] } = {}, attendance = EVENT.expectedAttendance) {
+    const capacityMet = venue.maxCapacity >= attendance;
     const criteria = [
       {
         criterion: "Capacity",
         met: capacityMet,
-        detail: `Capacity ${venue.maxCapacity} ${capacityMet ? "≥" : "<"} expected attendance ${EVENT.expectedAttendance}`,
+        detail: `Capacity ${venue.maxCapacity} ${capacityMet ? "≥" : "<"} expected attendance ${attendance}`,
       },
       { criterion: "Operating hours", met: true, detail: "Open 08:00–22:00 on Wednesday" },
       {
@@ -162,7 +183,7 @@ function createFakeSuitabilityBackend() {
       checked: {
         startsAt: EVENT.proposedStart,
         endsAt: EVENT.proposedEnd,
-        expectedAttendance: EVENT.expectedAttendance,
+        expectedAttendance: attendance,
         layout,
         accessibility,
         facilities,
@@ -179,22 +200,38 @@ function createFakeSuitabilityBackend() {
     },
 
     async findVenuesForEvent(criteria) {
-      return [SEMINAR].filter((v) => v.maxCapacity >= criteria.expectedAttendance).map((v) => structuredClone(v));
+      return Object.values(VENUES)
+        .filter((v) => v.maxCapacity >= criteria.expectedAttendance)
+        .map((v) => structuredClone(v));
     },
 
-    async checkVenueSuitability(eventRequestId, venueId, requirements) {
+    async checkVenueSuitability(eventRequestId, venueId, requirements, options) {
       expect(eventRequestId).toBe(EVENT.id);
-      expect(venueId).toBe(SEMINAR.id);
-      return judge(SEMINAR, requirements);
+      expect(VENUES[venueId]).toBeDefined();
+      return judge(VENUES[venueId], requirements, options?.attendance ?? EVENT.expectedAttendance);
     },
 
     async createBookingRequest(input) {
+      const venue = VENUES[input.venueId];
+      const attendance = input.expectedAttendance ?? EVENT.expectedAttendance ?? null;
+      if (attendance === null) throw httpError(409, { code: "EVENT_ATTENDANCE_MISSING" });
+      // One live request per venue per event (SCRUM-525), checked before
+      // suitability, as the server does.
+      const live = bookings.find(
+        (b) => b.eventRequestId === input.eventRequestId && b.venueId === input.venueId && LIVE.has(b.status),
+      );
+      if (live) {
+        throw httpError(409, {
+          code: "BOOKING_REQUEST_EXISTS",
+          conflicts: [{ kind: "booking_request", bookingId: live.id }],
+        });
+      }
       const requirements = {
         layout: input.roomLayoutCode ?? null,
         accessibility: input.accessibility ?? [],
         facilities: input.facilities ?? [],
       };
-      const result = judge(SEMINAR, requirements);
+      const result = judge(venue, requirements, attendance);
       const unmet = unmetNames(result);
       const acknowledged = Array.isArray(input.acknowledgedCriteria) ? input.acknowledgedCriteria : [];
       const confirmed = input.confirmUnsuitable === true && unmet.every((name) => acknowledged.includes(name));
@@ -205,36 +242,42 @@ function createFakeSuitabilityBackend() {
         });
       }
       const booking = {
-        id: "b0000000-0000-4000-8000-000000000001",
+        id: `b0000000-0000-4000-8000-${String(nextId++).padStart(12, "0")}`,
         eventRequestId: input.eventRequestId,
         venueId: input.venueId,
         status: "pending",
+        expectedAttendance: attendance,
         requirements,
         suitability: result,
         suitabilityOverridden: !result.suitable,
         createdAt: "2026-10-11T09:00:00+08:00",
       };
       bookings.push(booking);
-      return { id: booking.id, status: "pending" };
+      return { id: booking.id, status: "pending", expectedAttendance: attendance };
     },
 
     async getEventVenueSuitability(eventRequestId) {
       return bookings
         .filter((b) => b.eventRequestId === eventRequestId)
         .map((b) => {
-          const current = judge(SEMINAR, b.requirements);
+          const venue = VENUES[b.venueId];
+          // The booking's own attendance, which every booking here has.
+          const current = judge(venue, b.requirements, b.expectedAttendance);
           const atRequestUnmet = unmetNames(b.suitability);
           const accepted = b.suitabilityOverridden ? atRequestUnmet : [];
           return {
             bookingId: b.id,
-            venueId: SEMINAR.id,
-            venueName: SEMINAR.name,
-            venueLocation: SEMINAR.location,
+            venueId: venue.id,
+            venueName: venue.name,
+            venueLocation: venue.location,
             status: b.status,
-            statusDisplay: { status: "pending", label: "Pending", group: "PENDING", description: "" },
+            statusDisplay: { status: b.status, label: LABELS[b.status], group: "PENDING", description: "" },
             suitabilityOverridden: b.suitabilityOverridden,
             bookingStartsAt: EVENT.proposedStart,
             bookingEndsAt: EVENT.proposedEnd,
+            roomLayoutCode: b.requirements.layout,
+            expectedAttendance: b.expectedAttendance,
+            attendanceSource: "booking",
             current,
             atRequest: { suitable: b.suitability.suitable, unmet: atRequestUnmet },
             newlyUnmet: unmetNames(current).filter((name) => !accepted.includes(name)),
@@ -389,6 +432,7 @@ describe("SCRUM188 venue suitability flow", () => {
       eventRequestId: EVENT.id,
       venueId: SEMINAR.id,
       roomLayoutCode: "theatre",
+      expectedAttendance: 150,
       confirmUnsuitable: true,
       acknowledgedCriteria: ["Capacity"],
     });
@@ -412,7 +456,10 @@ describe("SCRUM188 venue suitability flow", () => {
     expect(within(item).getByText("Not met — overridden by coordinator")).toBeInTheDocument();
   });
 
-  it("SCRUM188_AC7_flow_a_reloaded_event_does_not_offer_a_second_request", async () => {
+  // SCRUM-525 (AC1, AC2, AC5): after a reload the event's live request
+  // locks its own venue only; another venue is requested at its own
+  // attendance, and the section lists it with that attendance and layout.
+  it("SCRUM525_AC1_flow_a_reloaded_event_offers_another_venue_but_not_the_same_one", async () => {
     const { user } = await checkSeminarRoom();
     await requestDespiteCapacity(user);
     cleanup();
@@ -421,10 +468,45 @@ describe("SCRUM188 venue suitability flow", () => {
     await within(suitabilitySection()).findByRole("heading", { name: "Seminar Room" });
     const finder = finderSection();
     fireEvent.change(within(finder).getByLabelText("Expected attendance"), { target: { value: "80" } });
+    await again.selectOptions(within(finder).getByLabelText("Layout"), "theatre");
     await again.click(within(finder).getByRole("button", { name: "Search venues" }));
 
-    expect(await within(finder).findByRole("button", { name: "Request this venue: Seminar Room" })).toBeDisabled();
-    expect(within(finder).getByText("This event already has a venue request, so another cannot be started.")).toBeInTheDocument();
+    const seminar = await within(finder).findByRole("button", { name: "Request this venue: Seminar Room" });
+    expect(seminar).toBeDisabled();
+    expect(seminar).toHaveAccessibleDescription(/\(Pending\)/);
+    expect(seminar).toHaveAccessibleDescription(/Venue suitability/);
+    const hall = within(finder).getByRole("button", { name: "Request this venue: Hall A" });
+    expect(hall).toBeEnabled();
+
+    await again.click(hall);
+    const panel = screen.getByRole("region", { name: "Request Hall A" });
+    const attendance = within(panel).getByLabelText("Expected attendance for this venue");
+    await again.clear(attendance);
+    await again.type(attendance, "120");
+    await again.tab();
+    const send = within(panel).getByRole("button", { name: "Request this venue" });
+    await waitFor(() => expect(send).toBeEnabled());
+    await again.click(send);
+    await within(panel).findByText(/Request sent to Venue Staff for Hall A/);
+
+    expect(venueSuitabilityService.checkVenueSuitability).toHaveBeenLastCalledWith(
+      EVENT.id,
+      HALL_A.id,
+      { layout: "theatre", accessibility: [], facilities: [] },
+      { attendance: 120 },
+    );
+    expect(bookingRequestService.createBookingRequest).toHaveBeenLastCalledWith({
+      eventRequestId: EVENT.id,
+      venueId: HALL_A.id,
+      roomLayoutCode: "theatre",
+      expectedAttendance: 120,
+    });
+    const item = (await within(suitabilitySection()).findByRole("heading", { name: "Hall A" })).closest("li");
+    expect(within(item).getByText("Attendance: 120")).toBeInTheDocument();
+    expect(within(item).getByText("Layout: Theatre")).toBeInTheDocument();
+    // The first booking keeps its own number.
+    const first = within(suitabilitySection()).getByRole("heading", { name: "Seminar Room" }).closest("li");
+    expect(within(first).getByText("Attendance: 150")).toBeInTheDocument();
   });
 
   it("SCRUM188_AC7_flow_venue_staff_see_requested_despite_not_meeting_capacity", async () => {

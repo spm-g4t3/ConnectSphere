@@ -19,6 +19,7 @@
     "venue-routes:check": "node scripts/check-venue-routes.js",
     "equipment:check": "node scripts/check-equipment-service.js",
     "equipment:seed": "node db/seeds/equipment.js",
+    "venues:seed": "node db/seeds/venues.js",
     "venue-holds:seed": "node db/seeds/venueHolds.js",
     "booking-suitability:seed": "node db/seeds/bookingSuitability.js",
     "booking-suitability:unseed": "node db/seeds/bookingSuitabilityCleanup.js",
