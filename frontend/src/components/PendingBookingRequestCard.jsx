@@ -10,6 +10,7 @@
 
 import { useState } from "react";
 import BookingSuitabilitySummary from "./BookingSuitabilitySummary";
+import { BOOKABLE_EVENT_STATUSES, statusLabel } from "../services/bookingRequestEligibility";
 import {
   bookingStatusClassName,
   readBookingStatusDisplay,
@@ -45,7 +46,9 @@ function plural(count, one, many) {
   return count === 1 ? one : many;
 }
 
-const STILL_OPEN = "This request is still open and can be approved or rejected.";
+function capitalise(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 /**
  * Why a conflicting request is flagged. conflictingWith lists the bookings in
@@ -61,10 +64,16 @@ function conflictingNote(conflictingWith) {
     period: formatVenuePeriod(other.startsAt, other.endsAt),
   }));
   if (named.length === 1) {
-    return `${named[0].name} was approved at this venue for ${named[0].period}. ${STILL_OPEN}`;
+    return (
+      `${named[0].name} was approved at this venue for ${named[0].period}. ` +
+      "This request can't be approved while that booking stands; it can be rejected, or left for the coordinator to withdraw."
+    );
   }
   const list = named.map(({ name, period }) => `${name}, ${period}`).join("; ");
-  return `These events were approved at this venue for overlapping times: ${list}. ${STILL_OPEN}`;
+  return (
+    `These events were approved at this venue for overlapping times: ${list}. ` +
+    "This request can't be approved while those bookings stand; it can be rejected, or left for the coordinator to withdraw."
+  );
 }
 
 export default function PendingBookingRequestCard({
@@ -88,6 +97,18 @@ export default function PendingBookingRequestCard({
   const eventName = item.eventName || "Unnamed event";
   const venueName = item.venueName || "Unknown venue";
   const regionId = `pending-booking-${item.id}`;
+  const conflictingNoteId = `${regionId}-conflicting`;
+  const eventNoteId = `${regionId}-event-status`;
+
+  // Hints only, so Venue Staff are not offered a refusal the server is certain
+  // to give (EVENT_NOT_BOOKABLE, BOOKING_PERIOD_CONFLICT); it re-checks both
+  // under lock. A missing eventStatus does not block: the server still guards.
+  const eventNotBookable =
+    typeof item.eventStatus === "string" &&
+    item.eventStatus !== "" &&
+    !BOOKABLE_EVENT_STATUSES.includes(item.eventStatus);
+  const blockedByBooking = item.status === CONFLICTING && conflictingWith.length > 0;
+  const approveBlockedBy = eventNotBookable ? eventNoteId : blockedByBooking ? conflictingNoteId : undefined;
   const reasonId = `${regionId}-reason`;
   const reasonErrorId = `${regionId}-reason-error`;
 
@@ -125,11 +146,21 @@ export default function PendingBookingRequestCard({
 
       {expanded && (
         <div id={regionId} role="region" aria-label={`${eventName} at ${venueName}`} className="pending-bookings__detail">
+          {eventNotBookable && (
+            <p id={eventNoteId} className="pending-bookings__event-status">
+              This request can't be approved because the event is {statusLabel(item.eventStatus)}. It can
+              be rejected.
+            </p>
+          )}
           {item.status === CONFLICTING && (
-            <p className="pending-bookings__conflicting">{conflictingNote(conflictingWith)}</p>
+            <p id={conflictingNoteId} className="pending-bookings__conflicting">
+              {conflictingNote(conflictingWith)}
+            </p>
           )}
 
           <dl>
+            <dt>Event status</dt>
+            <dd>{capitalise(statusLabel(item.eventStatus))}</dd>
             <dt>Venue</dt>
             <dd>
               {venueName}
@@ -188,14 +219,19 @@ export default function PendingBookingRequestCard({
           )}
 
           <div className="pending-bookings__approve">
-            {marksOnApproval > 0 && (
+            {marksOnApproval > 0 && !approveBlockedBy && (
               <p>
                 Approving marks {marksOnApproval}{" "}
                 {plural(marksOnApproval, "overlapping request", "overlapping requests")} as
                 Conflicting.
               </p>
             )}
-            <button type="button" onClick={() => onApprove(item)} disabled={busy}>
+            <button
+              type="button"
+              onClick={() => onApprove(item)}
+              disabled={busy || Boolean(approveBlockedBy)}
+              aria-describedby={approveBlockedBy}
+            >
               {deciding === "approve" ? "Approving..." : "Approve"}
             </button>
           </div>

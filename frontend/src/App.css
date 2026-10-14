@@ -864,7 +864,7 @@ button { cursor: pointer; }
 .dashboard .pending-bookings__overlapping { list-style: decimal inside; }
 .dashboard .pending-bookings__overlapping li { display: list-item; padding: 6px 0; }
 .pending-bookings__overlapping li > * { margin-right: 12px; }
-.dashboard .pending-bookings__conflicting { background: #fff0ee; border-left: 3px solid #a43c32; border-radius: 6px; color: #a43c32; padding: 8px 12px; }
+.dashboard .pending-bookings__conflicting, .dashboard .pending-bookings__event-status { background: #fff0ee; border-left: 3px solid #a43c32; border-radius: 6px; color: #a43c32; padding: 8px 12px; }
 .pending-bookings__approve { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; }
 .pending-bookings__reject { display: grid; gap: 6px; max-width: 640px; }
 .pending-bookings__reject label { color: var(--muted); font-size: 0.9rem; margin-top: 6px; }

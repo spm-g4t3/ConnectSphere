@@ -17,7 +17,8 @@
 /** The event statuses a venue can be requested for (SCRUM-243 AC1), the safety check included (066). */
 export const BOOKABLE_EVENT_STATUSES = Object.freeze(["approved", "safety_review", "safety_approved", "confirmed"]);
 
-function statusLabel(status) {
+/** An event status in plain words ("safety review"), or "unknown" when none arrived. */
+export function statusLabel(status) {
   return typeof status === "string" && status ? status.replaceAll("_", " ") : "unknown";
 }
 

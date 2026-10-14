@@ -18,6 +18,7 @@ import {
   rejectBookingRequest,
 } from "../../src/services/bookingRequestService";
 import { formatVenuePeriod, formatVenueRange } from "../../src/services/datetimeFormat.js";
+import { BOOKABLE_EVENT_STATUSES } from "../../src/services/bookingRequestEligibility.js";
 
 vi.mock("../../src/services/bookingRequestService", () => ({
   getPendingBookingRequests: vi.fn(),
@@ -228,7 +229,7 @@ describe("the queue (AC1)", () => {
 
     expect(region.querySelector(".pending-bookings__conflicting").textContent).toBe(
       `Tech Talk was approved at this venue for ${formatVenuePeriod(CLASH_STARTS, CLASH_ENDS)}. ` +
-        "This request is still open and can be approved or rejected.",
+        "This request can't be approved while that booking stands; it can be rejected, or left for the coordinator to withdraw.",
     );
   });
 
@@ -246,7 +247,8 @@ describe("the queue (AC1)", () => {
     const period = formatVenuePeriod(CLASH_STARTS, CLASH_ENDS);
     expect(region.querySelector(".pending-bookings__conflicting").textContent).toBe(
       `These events were approved at this venue for overlapping times: Tech Talk, ${period}; ` +
-        `Gala Dinner, ${period}. This request is still open and can be approved or rejected.`,
+        `Gala Dinner, ${period}. This request can't be approved while those bookings stand; it can be rejected, ` +
+        "or left for the coordinator to withdraw.",
     );
   });
 
@@ -261,6 +263,38 @@ describe("the queue (AC1)", () => {
     expect(region.querySelector(".pending-bookings__conflicting").textContent).toBe(
       "The booking this request clashed with is no longer in the way, so it can now be approved.",
     );
+    const approve = within(region).getByRole("button", { name: "Approve" });
+    expect(approve).toBeEnabled();
+    expect(approve).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("SCRUM258_AC2_approve_is_disabled_while_an_approved_booking_is_in_the_way_and_reject_still_works", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValueOnce([
+      item("1", {
+        status: "conflicting",
+        conflictingWith: [clash("b1", "Tech Talk")],
+        overlapping: [overlap("o1", "Alpha")],
+      }),
+      item("o1"),
+    ]).mockResolvedValueOnce([]);
+    vi.mocked(rejectBookingRequest).mockResolvedValue({ id: "1", status: "rejected" });
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    // Approving is certain to be refused (BOOKING_PERIOD_CONFLICT), so it is not offered.
+    const approve = within(region).getByRole("button", { name: "Approve" });
+    expect(approve).toBeDisabled();
+    expect(approve).toHaveAccessibleDescription(/can't be approved while that booking stands/);
+    // An approval that cannot happen marks nothing, so no warning that it would.
+    expect(within(region).queryByText(/Approving marks/)).not.toBeInTheDocument();
+
+    await user.type(within(region).getByLabelText("Reason for rejecting (required)"), "Clashes with Tech Talk");
+    await user.click(within(region).getByRole("button", { name: "Reject" }));
+    expect(rejectBookingRequest).toHaveBeenCalledWith("1", {
+      reason: "Clashes with Tech Talk",
+      suggestedAlternative: "",
+    });
   });
 
   it("SCRUM258_AC3_the_approve_warning_counts_only_overlaps_still_pending", async () => {
@@ -501,6 +535,78 @@ describe("approving (AC2, AC3, AC5)", () => {
     expect(screen.queryByText("Event 1")).not.toBeInTheDocument();
     expect(screen.getByText("Event 2")).toBeInTheDocument();
   });
+});
+
+describe("the event's own status (AC5)", () => {
+  const fieldIn = (region, label) => within(region).getByText(label, { selector: "dt" }).nextElementSibling;
+
+  it("SCRUM258_AC5_a_cancelled_event_is_shown_approve_is_disabled_and_reject_still_works", async () => {
+    vi.mocked(getPendingBookingRequests)
+      .mockResolvedValueOnce([
+        item("1", { eventStatus: "cancelled", overlapping: [overlap("o1", "Alpha")] }),
+        item("o1"),
+      ])
+      .mockResolvedValueOnce([]);
+    vi.mocked(rejectBookingRequest).mockResolvedValue({ id: "1", status: "rejected" });
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(fieldIn(region, "Event status")).toHaveTextContent(/^Cancelled$/);
+    const note = "This request can't be approved because the event is cancelled. It can be rejected.";
+    expect(region.querySelector(".pending-bookings__event-status").textContent).toBe(note);
+    const approve = within(region).getByRole("button", { name: "Approve" });
+    expect(approve).toBeDisabled();
+    expect(approve).toHaveAccessibleDescription(note);
+    expect(within(region).queryByText(/Approving marks/)).not.toBeInTheDocument();
+
+    await user.type(within(region).getByLabelText("Reason for rejecting (required)"), "Event cancelled");
+    await user.click(within(region).getByRole("button", { name: "Reject" }));
+    expect(rejectBookingRequest).toHaveBeenCalledWith("1", { reason: "Event cancelled", suggestedAlternative: "" });
+  });
+
+  it("SCRUM258_AC5_an_unbookable_event_takes_precedence_over_a_conflicting_note_for_the_approve_explanation", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", { eventStatus: "under_review", status: "conflicting", conflictingWith: [] }),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    // The clash has gone, but the event itself still cannot take a booking.
+    expect(fieldIn(region, "Event status")).toHaveTextContent(/^Under review$/);
+    const approve = within(region).getByRole("button", { name: "Approve" });
+    expect(approve).toBeDisabled();
+    expect(approve).toHaveAccessibleDescription(/because the event is under review/);
+  });
+
+  it.each(BOOKABLE_EVENT_STATUSES)("SCRUM258_AC5_an_event_that_is_%s_can_be_approved", async (eventStatus) => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", { eventStatus, overlapping: [overlap("o1", "Alpha")] }),
+      item("o1"),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).getByRole("button", { name: "Approve" })).toBeEnabled();
+    expect(region.querySelector(".pending-bookings__event-status")).toBeNull();
+    expect(within(region).getByText(/Approving marks 1 overlapping request/)).toBeInTheDocument();
+  });
+
+  it.each([[null], [undefined], [""]])(
+    "SCRUM258_AC5_a_missing_event_status_%j_does_not_block_approval",
+    async (eventStatus) => {
+      vi.mocked(getPendingBookingRequests).mockResolvedValue([item("1", { eventStatus })]);
+      const { user } = renderQueue();
+      await screen.findByText("Event 1");
+      const region = await openCard(user, "1");
+
+      expect(fieldIn(region, "Event status")).toHaveTextContent(/^Unknown$/);
+      expect(within(region).getByRole("button", { name: "Approve" })).toBeEnabled();
+      expect(region.querySelector(".pending-bookings__event-status")).toBeNull();
+    },
+  );
 });
 
 describe("rejecting (AC4)", () => {
