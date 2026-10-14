@@ -42,7 +42,7 @@ const refusal = async (promise) => {
   }
 };
 
-/** The JS vocabulary as 027 leaves the enum: 067 appends conflicting later. */
+/** The JS vocabulary as 027 leaves the enum: 065 appends conflicting later. */
 const STATUSES_THROUGH_027 = Object.values(BOOKING_STATUS).filter(
   (status) => status !== BOOKING_STATUS.CONFLICTING,
 );

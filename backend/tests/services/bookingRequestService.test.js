@@ -617,7 +617,7 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
     ],
   };
 
-  /** One element of list_pending_booking_requests (065), as jsonb returns it. */
+  /** One element of list_pending_booking_requests (066), as jsonb returns it. */
   const pendingRow = (overrides = {}) => ({
     id: BOOKING,
     event_request_id: EVENT,

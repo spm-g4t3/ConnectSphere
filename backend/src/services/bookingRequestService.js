@@ -5,7 +5,7 @@
  *
  * A coordinator requests a venue for an approved, safety-checked or confirmed
  * event. The request is a bookings row in the 'pending' status, written by
- * create_booking_request in 066_decide_booking_request.sql (first written by
+ * create_booking_request in 066_venue_staff_booking_decisions.sql (first written by
  * 030) rather than by a direct insert, for the reason 012 gives
  * for block creation: the checks have
  * to hold until the insert commits, and supabase-js gives each call its own
@@ -66,7 +66,7 @@ import { toSuitabilityRecord } from '../domain/suitabilityRecord.js';
 /**
  * The event statuses a venue can be requested for (SCRUM-243 AC1), and since
  * SCRUM-260 approved for: past approval and still live, through the safety
- * check. create_booking_request (068) and decide_booking_request (071) hold the same list.
+ * check. create_booking_request and decide_booking_request (066) hold the same list.
  */
 const BOOKABLE_EVENT_STATUSES = Object.freeze([
   STATUS.APPROVED,
@@ -592,10 +592,10 @@ function toOverlappingRequest(entry) {
  * shaped by toSuitabilityRecord, as on the venue's bookings list, so both
  * screens show the same verdict and overridden criteria.
  *
- * @param {object} row  one element of list_pending_booking_requests (065)
+ * @param {object} row  one element of list_pending_booking_requests (066)
  */
 function toPendingBookingRequest(row) {
-  // Pending or conflicting (068); a row without one is from 065, all pending.
+  // Pending or conflicting (066); a row without a status is read as pending.
   const status = row.status ?? BOOKING_STATUS.PENDING;
   return {
     id: row.id,
@@ -626,10 +626,10 @@ function toPendingBookingRequest(row) {
 /**
  * The pending booking requests Venue Staff decide on (SCRUM-259, SCRUM-258 AC1).
  *
- * Pending and conflicting requests (068), each with its status. Oldest first,
+ * Pending and conflicting requests (066), each with its status. Oldest first,
  * every venue, each with the other events' open requests at
  * its venue whose occupied periods overlap, in submission order. Read through
- * list_pending_booking_requests (065), which refuses anyone but Venue Staff
+ * list_pending_booking_requests (066), which refuses anyone but Venue Staff
  * (42501, a ForbiddenError) and pads periods with venue_occupied_period(), so
  * the formula is not repeated here.
  *
@@ -662,7 +662,7 @@ export async function listPendingBookingRequests(callerId, { client } = {}) {
  * pre-check here: the question that matters is answered under the lock, where
  * it cannot change before the write.
  *
- * A conflicting request can be withdrawn as a pending one can (068). Any other
+ * A conflicting request can be withdrawn as a pending one can (066). Any other
  * -- including one already withdrawn -- is a ConflictError and nothing is
  * changed. Withdrawing twice is not a success the
  * second time.
@@ -723,7 +723,7 @@ function toDecidedBookingRequest(row) {
 }
 
 /**
- * One call to decide_booking_request (071) and its answer, shared by approve
+ * One call to decide_booking_request (066) and its answer, shared by approve
  * and reject. The function checks the caller is Venue Staff, locks the event,
  * the venue (approval only) and the booking, refuses a request that is not
  * pending, and writes the decision and the coordinator's notice together.
@@ -765,8 +765,8 @@ async function decideBookingRequest(
   }
   if (decision !== 'approve') return booking;
 
-  // The other events' requests this approval marked conflicting (068), and
-  // this event's hold on the venue it converted, if any (071).
+  // The other events' requests this approval marked conflicting, and this
+  // event's hold on the venue it converted, if any (both 066).
   return {
     ...booking,
     markedConflicting: Array.isArray(data.marked_conflicting) ? data.marked_conflicting : [],
@@ -795,12 +795,12 @@ function checkCaller(callerId) {
  * Only this request changes; the event's other bookings are untouched.
  *
  * Other events' pending requests whose occupied periods overlap this one are
- * marked conflicting and their coordinators notified (068); their ids come
+ * marked conflicting and their coordinators notified (066); their ids come
  * back as `markedConflicting`. A conflicting request can itself be approved
  * once nothing occupies its period.
  *
  * Holds are not released: this event's own active, unexpired hold on the venue
- * becomes converted (071), and its id comes back as `convertedHoldId`, or null
+ * becomes converted (066), and its id comes back as `convertedHoldId`, or null
  * when there was none.
  *
  * @param {string} bookingId  the request's id

@@ -7,7 +7,7 @@
  * the venue converts it (SCRUM-262). Expired, released and converted holds
  * occupy nothing; a converted hold's booking does instead.
  *
- * Mirrors the Postgres enum `venue_hold_status` in 040 and its 047 and 070
+ * Mirrors the Postgres enum `venue_hold_status` in 040 and its 047 and 065
  * extensions, in the same order. These lists must stay identical -- a test asserts match.
  *
  * Deliberately free of imports, database calls and framework code -- pure data

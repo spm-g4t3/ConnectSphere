@@ -87,7 +87,7 @@ const LATEST = latestFunctions();
 const OVERLAP = /&&|\b(?:\w+\.)?(?:starts_at|ends_at|proposed_start|proposed_end)\s*(?:<(?!=)|>(?!=))/g;
 
 /**
- * The functions that ARE the rule. pending_request_overlaps (065) is the one
+ * The functions that ARE the rule. pending_request_overlaps (066) is the one
  * home of pending-vs-period overlap, which venue_occupancy_conflicts
  * deliberately never answers: a pending request occupies nothing.
  */
@@ -152,10 +152,9 @@ describe('SCRUM484_AC4 no copy of the overlap rule in SQL', () => {
     // one function that decides what occupies a venue now lives in 040.
     expect(LATEST.get('venue_occupied_period')?.file).toBe('032_venue_occupancy.sql');
     expect(LATEST.get('venue_occupancy_conflicts')?.file).toBe('040_venue_holds.sql');
-    // SCRUM-259: pending requests overlapping a period, for Venue Staff's queue
-    // and approval. Changed for SCRUM-261: 068 restates it with conflicting
-    // requests counted as open too, the comparison unchanged.
-    expect(LATEST.get('pending_request_overlaps')?.file).toBe('068_mark_conflicting_booking_requests.sql');
+    // SCRUM-258: open (pending or conflicting) requests overlapping a period,
+    // for Venue Staff's queue and approval.
+    expect(LATEST.get('pending_request_overlaps')?.file).toBe('066_venue_staff_booking_decisions.sql');
     // And the raw helper is not.
     expect(LATEST.has('venue_block_booking_conflicts')).toBe(false);
     // The scan replays every migration in the folder, so the latest

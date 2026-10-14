@@ -1,38 +1,143 @@
--- 068_mark_conflicting_booking_requests.sql
--- SCRUM-261 (SCRUM-258 AC3): approving a request marks the other events' open
--- requests whose occupied periods overlap it 'conflicting' (067), and tells
--- their coordinators.
+-- 066_venue_staff_booking_decisions.sql
+-- SCRUM-258: Venue Staff see the open booking requests and approve or reject
+-- each one; the decision is recorded on the booking and the coordinator told.
+--
+-- An approval re-checks the request's occupied period under lock, marks the
+-- other events' open requests that overlap it 'conflicting' and tells their
+-- coordinators, and converts the event's own hold on that venue. Each request
+-- is decided on its own; the event's other bookings are not touched.
 --
 -- Conflicting is a flag, not an end state: changes flag and notify, and the
--- Coordinator decides. So a conflicting request stays open and is handled as a
--- pending one wherever a pending one has special handling: the Venue Staff
--- queue, deciding, withdrawing and the one-live-request rule here, and
--- cancellation and its preview in 069. It never occupies a venue
--- (venue_occupancy_conflicts, 040, is not touched) and never reverts to
--- pending by itself.
+-- Coordinator decides. A conflicting request stays open and is handled as a
+-- pending one wherever a pending one has special handling: the queue, deciding,
+-- withdrawing, the one-live-request rule, and cancellation (067). It never
+-- occupies a venue (venue_occupancy_conflicts, 040, is unchanged) and never
+-- reverts to pending by itself.
 --
--- Every function below is its latest definition restated, changed only where
--- it compares a booking status with 'pending', except that
--- decide_booking_request also does the marking (section 4):
---   pending_request_overlaps, list_pending_booking_requests   065
---   decide_booking_request, create_booking_request            066
---   withdraw_booking_request                                  031
+-- A converted hold no longer occupies the venue; the approved booking does.
+-- Nothing else that reads or writes venue_holds changes, because each acts on
+-- status 'active' only: venue_occupancy_conflicts and process_venue_hold_expiry
+-- (040) skip it, and cancellation (067) cancels the booking it became.
 --
--- Run after 067, in its own transaction (see 067).
+-- Adds: decision columns on bookings; converted columns on venue_holds; the
+-- decision notification types; pending_request_overlaps,
+-- list_pending_booking_requests and decide_booking_request; and restates
+-- withdraw_booking_request (031) and create_booking_request (051) to treat
+-- conflicting as open and, for create, to accept the safety statuses.
+-- Statuses are compared as text where 062's or 065's values appear, as 062
+-- explains.
+--
+-- Run order: 065, then 066, then 067, each as a separate execution (065's enum
+-- values must commit first).
+--
+-- SQLSTATEs, mapped by translateError:
+--   list_pending_booking_requests
+--     42501  the caller is null, or does not hold venue_staff              403
+--   decide_booking_request
+--     42501  the caller is null, or does not hold venue_staff              403
+--     22023  an unknown decision, a rejection without a reason, or a
+--            reason or alternative given with an approval                  400
+--     23514  a reason or alternative over 1000 characters                  400
+--     P0002  no such booking                                               404
+--     PT409  BOOKING_NOT_PENDING, EVENT_NOT_BOOKABLE, BOOKING_PERIOD_STALE,
+--            VENUE_RETIRED                                                 409
+--     40001  the guarded update matched no row (see 031)                   409
+--   withdraw_booking_request and create_booking_request keep 031's and 051's.
 
 
 -- ---------------------------------------------------------------------
--- 1. Constraints (extend 066)
+-- 1. The decision on the booking
 -- ---------------------------------------------------------------------
--- A decided request is no longer open, so it is never conflicting either.
+-- Nullable and without defaults, for 025's reasons: an undecided request has
+-- no decision, and older approved bookings were never decided by anyone. The
+-- status carries what was decided: a rejection stays rejected, and an approval
+-- may later be flagged or cancelled while keeping who approved it and when.
+--
+-- No trigger keeps these columns from being edited. As 025 says, a CHECK
+-- cannot tell a first write from an overwrite; the guarantee is that
+-- decide_booking_request writes them only on a row still open under its
+-- lock, and nothing else writes them.
 
+alter table bookings
+  add column if not exists decided_by            uuid references auth.users (id),
+  add column if not exists decided_at            timestamptz,
+  add column if not exists decision_reason       text,
+  add column if not exists suggested_alternative text;
+
+-- Who and when are recorded together.
+alter table bookings drop constraint if exists bookings_decided_paired;
+alter table bookings
+  add constraint bookings_decided_paired check (
+    (decided_by is null) = (decided_at is null)
+  );
+
+-- A decided request is no longer open (pending or conflicting), and was
+-- never withdrawn.
 alter table bookings drop constraint if exists bookings_decided_not_pending;
 alter table bookings
   add constraint bookings_decided_not_pending check (
     decided_at is null or status::text not in ('pending', 'conflicting', 'withdrawn')
   );
 
--- 066's thirteen, unchanged and in 066's order, then this file's one.
+-- A reason belongs to a decided rejection, and says something.
+alter table bookings drop constraint if exists bookings_decision_reason_on_rejection;
+alter table bookings
+  add constraint bookings_decision_reason_on_rejection check (
+    decision_reason is null
+    or (status::text = 'rejected'
+        and decided_at is not null
+        and length(btrim(decision_reason)) > 0
+        and length(decision_reason) <= 1000)
+  );
+
+-- Every rejection decided here has its reason. Tied to decided_at rather than
+-- the status alone, so a rejected row written before this file still passes.
+alter table bookings drop constraint if exists bookings_rejection_has_reason;
+alter table bookings
+  add constraint bookings_rejection_has_reason check (
+    decided_at is null or status::text <> 'rejected' or decision_reason is not null
+  );
+
+-- The suggested alternative is optional, and only ever part of a rejection.
+alter table bookings drop constraint if exists bookings_suggested_alternative_on_rejection;
+alter table bookings
+  add constraint bookings_suggested_alternative_on_rejection check (
+    suggested_alternative is null
+    or (decision_reason is not null
+        and length(btrim(suggested_alternative)) > 0
+        and length(suggested_alternative) <= 1000)
+  );
+
+
+-- ---------------------------------------------------------------------
+-- 2. Converted holds (as 048 records released ones)
+-- ---------------------------------------------------------------------
+-- converted_at and converted_booking_id are set exactly when the status is
+-- 'converted'. Compared as text, as 048 does, so the check needs no enum
+-- literal from 065.
+
+alter table venue_holds
+  add column if not exists converted_at timestamptz,
+  add column if not exists converted_booking_id uuid references bookings (id);
+
+alter table venue_holds
+  drop constraint if exists venue_holds_converted_at_matches_status;
+alter table venue_holds
+  add constraint venue_holds_converted_at_matches_status
+  check ((status::text = 'converted') = (converted_at is not null));
+
+alter table venue_holds
+  drop constraint if exists venue_holds_converted_booking_matches_status;
+alter table venue_holds
+  add constraint venue_holds_converted_booking_matches_status
+  check ((status::text = 'converted') = (converted_booking_id is not null));
+
+
+-- ---------------------------------------------------------------------
+-- 3. Notifications accept the three decision types (extends 052)
+-- ---------------------------------------------------------------------
+-- 052's eleven, unchanged and in 052's order, then this file's three.
+
 alter table notifications drop constraint if exists notifications_type_known;
 alter table notifications
   add constraint notifications_type_known check (
@@ -54,7 +159,7 @@ alter table notifications
     )
   );
 
--- As 066 does for a decision: the notice names the booking it is about.
+-- As 031 does for a withdrawal: the notice names the booking it is about.
 alter table notifications drop constraint if exists notifications_booking_decision_needs_booking;
 alter table notifications
   add constraint notifications_booking_decision_needs_booking
@@ -62,13 +167,18 @@ alter table notifications
                       'booking_request_conflicting')
          or booking_id is not null);
 
+
 -- ---------------------------------------------------------------------
--- 2. pending_request_overlaps (065, open requests)
+-- 4. pending_request_overlaps
 -- ---------------------------------------------------------------------
--- Still the one home of "which open requests overlap this period": the queue
--- and approval both ask it. Open is pending or conflicting, since a
--- conflicting request can still be approved once its clash is gone.
--- venue_occupancy_conflicts (040) still never counts either as an occupant.
+-- The one home of "which open requests overlap this period": the queue
+-- (section 5) and approval (section 6) both ask it. Open is pending or
+-- conflicting, since a conflicting request can still be approved once its
+-- clash is gone. venue_occupancy_conflicts (040) deliberately never counts
+-- either as an occupant.
+--
+-- Read-only. Pending requests never block each other (first come, first
+-- served), so the overlaps are shown for the decision, not enforced here.
 --
 -- Both periods are padded by venue_occupied_period() (032) with the venue's
 -- minutes and compared with &&: half-open, so touching is no clash. Requests
@@ -136,12 +246,15 @@ $$;
 revoke execute on function pending_request_overlaps(uuid, timestamptz, timestamptz, uuid)
   from public, anon, authenticated;
 
+
 -- ---------------------------------------------------------------------
--- 3. list_pending_booking_requests (065, conflicting ones too)
+-- 5. list_pending_booking_requests
 -- ---------------------------------------------------------------------
--- A conflicting request still waits for Venue Staff, so it stays in the queue,
--- oldest first as before; each element now carries its `status` so the screen
--- can tell the two apart.
+-- The Venue Staff queue: every open request, oldest first, each with the
+-- other events' open requests that clash with it (section 4). A conflicting
+-- request still waits for Venue Staff, so it is listed; each element carries
+-- its `status` so the screen can tell the two apart. A jsonb array, '[]' when
+-- nothing is open, as the other jsonb readers answer.
 
 create or replace function list_pending_booking_requests(p_caller uuid)
 returns jsonb
@@ -232,27 +345,53 @@ $$;
 revoke execute on function list_pending_booking_requests(uuid)
   from public, anon, authenticated;
 
+
 -- ---------------------------------------------------------------------
--- 4. decide_booking_request (066, marks the clashing requests)
+-- 6. decide_booking_request
 -- ---------------------------------------------------------------------
--- 066's function with two changes. A conflicting request can be decided as a
+-- One function for both decisions: they share the role check, the locks, the
+-- open check, the guarded update and the notice; approval adds the event and
+-- period checks between them. A conflicting request can be decided as a
 -- pending one can; the re-check still refuses an approval while the clash
--- stands. And an approval then marks the other events' pending requests whose
--- occupied periods overlap it conflicting, as pending_request_overlaps
--- (section 2) answers, and notifies each one's coordinator (step 12). Requests
--- already conflicting stay so and are not notified again. This event's other
--- requests are never touched.
+-- stands.
 --
--- An approval returns {outcome: 'approved', booking, marked_conflicting: [id]},
--- the ids in id order; a rejection and a conflict return what 066 returned.
+-- Returns, for a rejection, {outcome: 'rejected', booking}; for an approval
+-- something now occupies, {outcome: 'conflict', conflicts} built as
+-- create_booking_request builds them, with nothing written; and for an
+-- approval, {outcome: 'approved', booking, marked_conflicting: [id],
+-- converted_hold_id}.
 --
--- Locks are 066's, then the requests being marked, in id order. Only an
--- approval takes them, and only under its venue lock, so two approvals never
--- wait on each other's rows. A withdrawal, rejection or cancellation of one of
--- them locks that request's own event and then the request, never this event,
--- venue or booking, so it can make this wait (or wait for it) but not both.
--- Their events are not locked: an event after a booking is the reverse of
--- 031's order and would deadlock with an approval of theirs at this venue.
+-- An approval then marks the other events' pending requests whose occupied
+-- periods overlap it conflicting, as pending_request_overlaps answers, and
+-- notifies each one's coordinator (step 12). Requests already conflicting stay
+-- so and are not notified again. This event's other requests are never
+-- touched. Last (step 13) it converts this event's active, unexpired hold at
+-- the booked venue; converted_hold_id is that hold's id, or null.
+--
+-- Locks: the event `for update`, then (approval only) the venue `for no key
+-- update`, then the booking `for update` -- event before venue as 030 and 040
+-- take them, and booking last as 031 does. The venue lock is place_venue_hold's
+-- (040), not the `for share` 030 foresaw: `for share` would let two approvals
+-- at one venue run side by side, each seeing the other still pending, and both
+-- pass the re-check. `for no key update` makes them, and any hold or block
+-- being placed there, take turns; a create_booking_request's `for share` waits
+-- too. A rejection frees nothing, so it takes no venue lock (031's reasoning).
+--
+-- Then the requests being marked, in id order. Only an approval takes them,
+-- and only under its venue lock, so two approvals never wait on each other's
+-- rows. A withdrawal, rejection or cancellation of one of them locks that
+-- request's own event and then the request, never this event, venue or
+-- booking, so it can make this wait (or wait for it) but not both. Their
+-- events are not locked: an event after a booking is the reverse of 031's
+-- order and would deadlock with an approval of theirs at this venue.
+--
+-- Then the hold row. It is this event's own row, taken with the event already
+-- locked for update, as every writer of an event's holds locks the event
+-- first: place_venue_hold (040, for share) and release_event_arrangements
+-- (067, for update) wait on the event lock. The expiry job (also run inside
+-- place_venue_hold, after its venue lock) waits on nothing this function holds
+-- but hold rows, so the two can only take turns on one hold; each guards on
+-- 'active' and skips it if the other won.
 
 create or replace function decide_booking_request(
   p_booking_id            uuid,
@@ -275,6 +414,7 @@ declare
   v_new_status  text;
   v_venue_name  text;
   v_marked_ids  uuid[] := '{}';
+  v_converted_hold_id uuid;
 begin
   -- 1. Only Venue Staff, as place_venue_hold (040) checks it. A null caller is
   --    refused too.
@@ -360,7 +500,7 @@ begin
 
   if p_decision = 'approve' then
     -- 7. An event past approval and still live: the statuses a venue can be
-    --    requested for (create_booking_request, section 6).
+    --    requested for (create_booking_request, step 3).
     if v_event.status::text not in ('approved', 'safety_review', 'safety_approved', 'confirmed') then
       raise exception 'event request % has status %, and a venue can only be booked for an approved, safety-checked or confirmed event',
         v_event_id, v_event.status
@@ -498,18 +638,35 @@ begin
      and er.assigned_coordinator_id is not null
    order by b.id;
 
+  -- 13. Approval only: this event's own hold at this venue becomes converted,
+  --     if it is still active and unexpired. A hold past its expiry is not a
+  --     booking and never was one here; the expiry job records it as expired.
+  --     Holds at the event's other venues and other events' holds are not
+  --     touched. No hold, nothing to convert. The update takes the row lock.
+  update venue_holds
+     set status               = 'converted',
+         converted_at         = now(),
+         converted_booking_id = v_booking.id
+   where event_request_id = v_event_id
+     and venue_id = v_booking.venue_id
+     and status = 'active'
+     and expires_at > now()
+  returning id into v_converted_hold_id;
+
   return jsonb_build_object('outcome', v_new_status, 'booking', to_jsonb(v_booking),
-                            'marked_conflicting', to_jsonb(v_marked_ids));
+                            'marked_conflicting', to_jsonb(v_marked_ids),
+                            'converted_hold_id', v_converted_hold_id);
 end;
 $$;
 
--- As in 031 and 065: it trusts p_caller to be who the API authenticated, so
--- only the API should reach this. Nothing is granted.
+-- As in 031: it trusts p_caller to be who the API authenticated, so only the
+-- API should reach this. Nothing is granted.
 revoke execute on function decide_booking_request(uuid, uuid, text, text, text)
   from public, anon, authenticated;
 
+
 -- ---------------------------------------------------------------------
--- 5. withdraw_booking_request (031, conflicting ones too)
+-- 7. withdraw_booking_request (031, conflicting ones too)
 -- ---------------------------------------------------------------------
 -- A conflicting request is the coordinator's to withdraw, as a pending one
 -- is. 031's function otherwise word for word; the refusal keeps its hint.
@@ -616,16 +773,19 @@ begin
 end;
 $$;
 
--- See the header: only the API should reach this.
+-- As in 031: only the API should reach this. Nothing is granted.
 revoke execute on function withdraw_booking_request(uuid, uuid)
   from public, anon, authenticated;
 
+
 -- ---------------------------------------------------------------------
--- 6. create_booking_request (066, step 6)
+-- 8. create_booking_request (051, steps 3 and 6)
 -- ---------------------------------------------------------------------
--- 066's function word for word except step 6: a conflicting request is still
--- the event's live request at that venue, so the coordinator withdraws it
--- before requesting the venue again.
+-- 051's function word for word except two steps. Step 3: the safety statuses
+-- join approved and confirmed, the same statuses approval accepts. Step 6: a
+-- conflicting request is still the event's live request at that venue, so the
+-- coordinator withdraws it before requesting the venue again. Same signature,
+-- so `create or replace` replaces it.
 
 create or replace function create_booking_request(
   p_event_request_id   uuid,
@@ -673,7 +833,7 @@ begin
   end if;
 
   -- 3. Only an event past approval and still live: approved, in or through
-  --    the safety check, or confirmed. Compared as text (see the header).
+  --    the safety check, or confirmed. Compared as text, as 062 explains.
   if v_event.status::text not in ('approved', 'safety_review', 'safety_approved', 'confirmed') then
     raise exception 'event request % has status %, and a venue can only be requested for an approved, safety-checked or confirmed event',
       p_event_request_id, v_event.status
@@ -705,7 +865,7 @@ begin
   end if;
 
   -- A venue cannot be for more people than the event expects; equal is fine.
-  -- Checked here, at request time only (see the header).
+  -- Checked here, at request time only (see 051's header).
   if v_event.expected_attendance is not null
      and p_expected_attendance > v_event.expected_attendance then
     raise exception 'an expected attendance of at most the event''s (%) is required, got %',
@@ -713,7 +873,7 @@ begin
       using errcode = 'invalid_parameter_value';
   end if;
 
-  -- 4. Lock the venue, "for share" (see the header). A block being created
+  -- 4. Lock the venue, "for share" (see 051's header). A block being created
   --    over it, or the venue being retired, makes this wait; the reads below
   --    then see whatever that transaction committed.
   select retired_at

@@ -1,17 +1,22 @@
--- 069_withdraw_conflicting_on_cancellation.sql
--- SCRUM-261: cancelling an event treats its conflicting booking requests (067,
--- 068) as it treats its pending ones -- they are withdrawn, listed in the
--- preview, and Venue Staff are told.
+-- 067_withdraw_conflicting_on_cancellation.sql
+-- SCRUM-258: cancelling an event treats its conflicting booking requests (065)
+-- as it treats its pending ones -- they are withdrawn, listed in the preview,
+-- and Venue Staff are told.
 --
--- Its own file, apart from 068, because these functions belong to the
--- cancellation stack (042-049, 054) and 068's do not. Each is its latest
+-- Its own file, apart from 066, because these functions belong to the
+-- cancellation stack (042-049, 054) and 066's do not. Each is its latest
 -- definition restated, changed only where it compares a booking status with
 -- 'pending':
 --   release_event_arrangements                                054
 --   event_cancellation_impact_preview                         049
 --   cancel_event_request                                      048
 --
--- Run after 068.
+-- A converted hold (065, 066) is left alone: these act on active holds only,
+-- and cancelling cancels the booking the hold became. Nothing here needs 066's
+-- objects; only 065's 'conflicting' value, so it may run without 066.
+--
+-- Run order: 065, then 066, then 067, each as a separate execution.
+-- SQLSTATEs are unchanged from 048, 049 and 054.
 
 
 -- ---------------------------------------------------------------------

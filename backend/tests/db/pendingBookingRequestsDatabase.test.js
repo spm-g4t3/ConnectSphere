@@ -1,5 +1,5 @@
 /**
- * The Venue Staff queue of pending booking requests (065), against a real
+ * The Venue Staff queue of pending booking requests (066), against a real
  * Postgres.
  *
  * SCRUM-258 AC1: only Venue Staff see it; pending requests, oldest first, each
@@ -8,7 +8,8 @@
  * Week 7: occupied = start - setup -> end + turnaround, half-open.
  *
  * Migrations: multiVenueBookingRequestDatabase.test.js's list through 051,
- * then 065. Nothing in 052-063 touches bookings, venues or
+ * then 065 and 066, each in its own exec (065's enum values must commit
+ * first). Nothing in 052-063 touches bookings, venues or
  * venue_occupied_period, so none is needed.
  *
  * Each test makes its own venues and events and reads only its own rows from
@@ -51,7 +52,8 @@ const MIGRATIONS = [
   '033_venue_occupancy_callers.sql',
   '040_venue_holds.sql',
   '051_multi_venue_booking_requests.sql',
-  '065_pending_booking_requests.sql',
+  '065_booking_decision_statuses.sql',
+  '066_venue_staff_booking_decisions.sql',
 ];
 
 /** What 014 reads from SCRUM-19's migration, which is not on this branch. */
@@ -78,7 +80,7 @@ const refusalCode = async (promise) => {
   }
 };
 
-describe('SCRUM-258 AC1: the pending booking requests Venue Staff decide on (065)', () => {
+describe('SCRUM-258 AC1: the pending booking requests Venue Staff decide on (066)', () => {
   let db;
   let organiser;
   let coordinator;

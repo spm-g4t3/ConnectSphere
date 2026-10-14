@@ -5,7 +5,7 @@
  * is active until its expiry passes, then expired (AC7).
  *
  * Mirrors venueBlockReason.test.js: the JS list and the database enum in
- * 040_venue_holds.sql and its extensions (047, 070) must not drift apart.
+ * 040_venue_holds.sql and its extensions (047, 065) must not drift apart.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -19,7 +19,7 @@ import { VENUE_HOLD_STATUS, isVenueHoldStatus } from '../../src/domain/venueHold
 /** The hold migrations with every `--` comment stripped. */
 function migrationSql() {
   const here = dirname(fileURLToPath(import.meta.url));
-  return ['040_venue_holds.sql', '047_add_released_venue_hold_status.sql', '070_converted_venue_hold_status.sql']
+  return ['040_venue_holds.sql', '047_add_released_venue_hold_status.sql', '065_booking_decision_statuses.sql']
     .map((name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8'))
     .join('\n')
     .replace(/--[^\n]*/g, '');

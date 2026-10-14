@@ -1,6 +1,6 @@
 /**
  * Approving a request marks the other events' overlapping pending requests
- * conflicting and tells their coordinators (067, 068), against a real Postgres.
+ * conflicting and tells their coordinators (065, 066), against a real Postgres.
  *
  * SCRUM-258 AC3 at the SQL level, with the Week 7 rules: overlap is of the
  * padded occupied periods, each request is decided on its own, and a change
@@ -9,10 +9,10 @@
  * rejected, withdrawn, or approved once its clash is gone, still counts as the
  * event's live request at that venue, and never occupies the venue.
  *
- * Migrations: decideBookingRequestDatabase.test.js's stack, then 067 and 068,
- * each in its own exec (067's enum value must commit before 068 uses it).
+ * Migrations: decideBookingRequestDatabase.test.js's stack (065's enum value
+ * must commit before 066 uses it, so each is its own exec).
  *
- * PGlite is one connection, so the lock order 068 takes is not raced here.
+ * PGlite is one connection, so the lock order 066 takes is not raced here.
  *
  * Dates: D is the Singapore date 10 days from now, never hard-coded.
  */
@@ -20,13 +20,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const MIGRATION_068 = '068_mark_conflicting_booking_requests.sql';
+const MIGRATIONS_DIR = resolve(here, '../../db/migrations');
+const migration = (name) => readFileSync(resolve(MIGRATIONS_DIR, name), 'utf8');
+const MIGRATION_066 = '066_venue_staff_booking_decisions.sql';
 
 const MIGRATIONS = [
   '001_event_requests.sql',
@@ -52,11 +53,9 @@ const MIGRATIONS = [
   '033_venue_occupancy_callers.sql',
   '040_venue_holds.sql',
   '051_multi_venue_booking_requests.sql',
-  '065_pending_booking_requests.sql',
+  '065_booking_decision_statuses.sql',
   'SAFETY_ENUM',
-  '066_decide_booking_request.sql',
-  '067_conflicting_booking_status.sql',
-  MIGRATION_068,
+  MIGRATION_066,
 ];
 
 /** What 014 reads from SCRUM-19's migration, which is not on this branch. */
@@ -102,7 +101,7 @@ const functionBody = (file, name) => {
   return sql.slice(start, sql.indexOf('$$;', start));
 };
 
-describe('SCRUM-258 AC3: overlapping requests become conflicting (067, 068)', () => {
+describe('SCRUM-258 AC3: overlapping requests become conflicting (065, 066)', () => {
   let db;
   let organiser;
   let coordinator;
@@ -408,13 +407,20 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting (067, 068)', ()
     });
   });
 
-  describe('the shared surfaces 068 restates', () => {
-    // A restatement from an older list would drop 066's decision types.
-    it('SCRUM258_AC3_the_notification_list_keeps_every_066_type_and_adds_conflicting', () => {
-      const from066 = notificationTypes(migration('066_decide_booking_request.sql'));
+  describe('the shared surfaces 066 sets', () => {
+    // A later story restating the list from an older migration would drop the
+    // decision types; the list that wins is the highest-numbered one.
+    it('SCRUM258_AC3_the_latest_notification_list_keeps_the_decision_types', () => {
+      const setters = readdirSync(MIGRATIONS_DIR)
+        .filter((name) => name.endsWith('.sql'))
+        .sort()
+        .filter((name) => migration(name).includes('add constraint notifications_type_known'));
+      const latest = notificationTypes(migration(setters.at(-1)));
 
-      expect(from066.length).toBeGreaterThan(0);
-      expect(notificationTypes(migration(MIGRATION_068))).toEqual([...from066, 'booking_request_conflicting']);
+      expect(setters).toContain(MIGRATION_066);
+      expect(latest).toEqual(
+        expect.arrayContaining(['booking_request_approved', 'booking_request_rejected', 'booking_request_conflicting']),
+      );
     });
 
     it('SCRUM258_AC3_a_conflicting_notice_must_name_its_booking', async () => {
@@ -427,7 +433,7 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting (067, 068)', ()
 
     // The queue and the marking must agree on what overlaps, so both ask one function.
     it('SCRUM258_Week7_approval_marks_through_pending_request_overlaps', () => {
-      const body = functionBody(MIGRATION_068, 'decide_booking_request');
+      const body = functionBody(MIGRATION_066, 'decide_booking_request');
       const marking = body.slice(body.indexOf("set status = 'conflicting'") - 600);
 
       expect(marking).toMatch(/pending_request_overlaps\s*\(/);

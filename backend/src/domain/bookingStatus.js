@@ -11,7 +11,7 @@
  *
  * Mirrors the Postgres enum `booking_status` exactly, in the same order: 011
  * creates it, 027_booking_request_statuses.sql appends the request statuses
- * and 067_conflicting_booking_status.sql appends conflicting. These two lists
+ * and 065_booking_decision_statuses.sql appends conflicting. These two lists
  * must stay identical -- a test asserts the match.
  *
  * Deliberately free of imports, database calls and framework code -- pure data

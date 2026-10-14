@@ -1,13 +1,13 @@
 /**
  * Approving a booking request converts the approving event's own hold at that
- * venue instead of releasing it (070, 071), against a real Postgres.
+ * venue instead of releasing it (065, 066), against a real Postgres.
  *
  * SCRUM-258 Week 7: holds are not released on approval; the event's own hold
  * for the same venue becomes converted (SCRUM-491). An expired hold never
  * counts as a booking, and each request is decided on its own.
  *
- * Migrations: conflictingBookingRequestDatabase.test.js's stack, then 070 and
- * 071, each in its own exec (070's enum value must commit before 071 uses it).
+ * Migrations: conflictingBookingRequestDatabase.test.js's stack (065's enum
+ * values must commit before 066 uses them, so each is its own exec).
  *
  * Dates: D is the Singapore date 10 days from now, never hard-coded.
  */
@@ -46,13 +46,9 @@ const MIGRATIONS = [
   '033_venue_occupancy_callers.sql',
   '040_venue_holds.sql',
   '051_multi_venue_booking_requests.sql',
-  '065_pending_booking_requests.sql',
+  '065_booking_decision_statuses.sql',
   'SAFETY_ENUM',
-  '066_decide_booking_request.sql',
-  '067_conflicting_booking_status.sql',
-  '068_mark_conflicting_booking_requests.sql',
-  '070_converted_venue_hold_status.sql',
-  '071_convert_event_hold_on_approval.sql',
+  '066_venue_staff_booking_decisions.sql',
 ];
 
 /** What 014 reads from SCRUM-19's migration, which is not on this branch. */
@@ -82,7 +78,7 @@ const refusal = async (promise) => {
   }
 };
 
-describe('SCRUM-258 Week 7: approval converts the event\'s own hold (070, 071)', () => {
+describe('SCRUM-258 Week 7: approval converts the event\'s own hold (065, 066)', () => {
   let db;
   let organiser;
   let coordinator;

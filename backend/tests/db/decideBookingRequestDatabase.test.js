@@ -8,11 +8,12 @@
  * its check constraints, and the coordinator's notice. Week 7: each request is
  * decided on its own, and the event's own hold never blocks its approval.
  *
- * Migrations: pendingBookingRequestsDatabase.test.js's list through 065, then
- * 062's two enum values (the rest of 062 rewrites constraints from 020-025,
- * which this stack does not build, and 066 compares statuses as text), then
- * 066. 052 is not applied: it needs the assignment stack; its notification
- * list is compared with 066's as text instead.
+ * Migrations: pendingBookingRequestsDatabase.test.js's list through 051, then
+ * 065, then 062's two enum values (the rest of 062 rewrites constraints from
+ * 020-025, which this stack does not build, and 066 compares statuses as
+ * text), then 066, each in its own exec. 052 is not applied: it needs the
+ * assignment stack; its notification list is compared with 066's as text
+ * instead.
  *
  * PGlite is one connection, so two approvals can never meet on a lock here.
  * The race is covered by a sequential test plus a check of the lock 066 takes;
@@ -31,7 +32,7 @@ import { dirname, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const MIGRATION_066 = '066_decide_booking_request.sql';
+const MIGRATION_066 = '066_venue_staff_booking_decisions.sql';
 
 const MIGRATIONS = [
   '001_event_requests.sql',
@@ -57,7 +58,7 @@ const MIGRATIONS = [
   '033_venue_occupancy_callers.sql',
   '040_venue_holds.sql',
   '051_multi_venue_booking_requests.sql',
-  '065_pending_booking_requests.sql',
+  '065_booking_decision_statuses.sql',
   'SAFETY_ENUM',
   MIGRATION_066,
 ];
@@ -312,7 +313,8 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request (066)', () => {
 
       expect(result.outcome).toBe('conflict');
       expect(result.conflicts.map((c) => [c.kind, c.booking_id])).toEqual([['booking', first.id]]);
-      expect((await bookingRow(second.id)).status).toBe('pending');
+      // Refused, not decided: still open, as the first approval marked it.
+      expect(await bookingRow(second.id)).toMatchObject({ status: 'conflicting', decided_at: null });
     });
 
     // PGlite cannot run two transactions at once, so the race is pinned by the
@@ -536,12 +538,17 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request (066)', () => {
     });
 
     // Shared surface: a restatement from an older list would drop 052's types.
-    it('SCRUM258_AC6_the_notification_list_keeps_every_052_type_and_adds_the_two_decisions', () => {
+    it('SCRUM258_AC6_the_notification_list_keeps_every_052_type_and_adds_the_decision_types', () => {
       const from052 = notificationTypes(migration('052_lead_assignment.sql'));
       const from066 = notificationTypes(migration(MIGRATION_066));
 
       expect(from052.length).toBeGreaterThan(0);
-      expect(from066).toEqual([...from052, 'booking_request_approved', 'booking_request_rejected']);
+      expect(from066).toEqual([
+        ...from052,
+        'booking_request_approved',
+        'booking_request_rejected',
+        'booking_request_conflicting',
+      ]);
     });
   });
 

@@ -83,12 +83,12 @@ export function createBookingRequestRouter({
   });
 
   /**
-   * SCRUM-259: every pending or conflicting booking request (068), oldest
+   * SCRUM-259: every pending or conflicting booking request (066), oldest
    * first, for Venue Staff to decide on, each with its status and the other
    * events' open requests whose occupied periods overlap it, in submission
    * order.
    *
-   * Behind venueStaffOnly, and list_pending_booking_requests (065) checks the
+   * Behind venueStaffOnly, and list_pending_booking_requests (066) checks the
    * caller's role again. A bare array; none pending is 200 [], never 404.
    * Declared before any /:id route, so "pending" is never read as an id.
    *
@@ -160,10 +160,10 @@ export function createBookingRequestRouter({
   /**
    * SCRUM-260: approve a pending or conflicting request. 200 and the request,
    * now approved, with who decided and when, `markedConflicting`: the ids of
-   * other events' requests it made conflicting (068), and `convertedHoldId`:
-   * the event's hold on the venue it converted, or null (071).
+   * other events' requests it made conflicting, and `convertedHoldId`: the
+   * event's hold on the venue it converted, or null (both 066).
    *
-   * Behind venueStaffOnly, and decide_booking_request (071) checks the role
+   * Behind venueStaffOnly, and decide_booking_request (066) checks the role
    * again. No pre-check: whether the request is still pending, the event still
    * live and on the same dates, and the venue still free for the padded period
    * are answered under its locks. There is no body; the caller is always
@@ -189,7 +189,7 @@ export function createBookingRequestRouter({
    *
    * Body: { reason, suggestedAlternative? } -- reason is required and not
    * blank; both are at most 1000 characters. Behind venueStaffOnly, and
-   * decide_booking_request (071) checks the role again. The caller is always
+   * decide_booking_request (066) checks the role again. The caller is always
    * req.user.id.
    *
    * Statuses: 400 malformed id, a missing or blank reason, or a text too long;

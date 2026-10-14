@@ -1,11 +1,13 @@
 /**
  * Cancelling an event treats its conflicting booking requests as its pending
- * ones (069): the preview lists them, cancelling withdraws them, and Venue
+ * ones (067): the preview lists them, cancelling withdraws them, and Venue
  * Staff are told.
  *
  * SCRUM-258 AC3 with the Week 7 rule that conflicting is a flag on an open
  * request, not an end state. Uses cancelEventReleasesReservationsDatabase's
- * stack (through 054), then 049 (the preview 069 restates), 067, 069, 070 and 071.
+ * stack (through 054), then 049 (the preview 067 restates), 065, 066 (for the
+ * converted-hold columns) and 067. 017, 023 and 032 are added because 066's
+ * pending_request_overlaps is language sql, so its body is checked on creation.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
@@ -42,7 +44,7 @@ const EQUIPMENT = [
   '054_equipment_reservation_actions.sql',
 ];
 
-describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests (069)', () => {
+describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests (067)', () => {
   let db;
   let organiser;
   let coordinator;
@@ -119,7 +121,10 @@ describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests 
     await db.exec(migration('002_venues.sql'));
     await db.exec(migration('009_bookings.sql'));
     await db.exec(migration('011_venue_blocks.sql'));
+    await db.exec(migration('017_venue_turnaround.sql'));
+    await db.exec(migration('023_venue_setup_time.sql'));
     await db.exec(migration('027_booking_request_statuses.sql'));
+    await db.exec(migration('032_venue_occupancy.sql'));
     await db.exec(migration('022_equipment_schema.sql'));
     await db.exec(migration('042_event_cancellation_fields.sql'));
     await db.exec('alter table equipment_lines add column removed_at timestamptz');
@@ -142,12 +147,10 @@ describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests 
     await db.exec(migration('048_complete_event_cancellation_existing_arrangements.sql'));
     for (const name of EQUIPMENT) await db.exec(migration(name));
     await db.exec(migration('049_filter_cancelled_equipment_from_cancellation_preview.sql'));
-    // 067's enum value must commit before 069 uses it, so each is its own exec.
-    await db.exec(migration('067_conflicting_booking_status.sql'));
-    await db.exec(migration('069_withdraw_conflicting_on_cancellation.sql'));
-    // 070's enum value must commit before 071's converted-hold columns use it.
-    await db.exec(migration('070_converted_venue_hold_status.sql'));
-    await db.exec(migration('071_convert_event_hold_on_approval.sql'));
+    // 065's enum values must commit before 066 and 067 use them, so each is its own exec.
+    await db.exec(migration('065_booking_decision_statuses.sql'));
+    await db.exec(migration('066_venue_staff_booking_decisions.sql'));
+    await db.exec(migration('067_withdraw_conflicting_on_cancellation.sql'));
 
     organiser = (await one("insert into auth.users (email) values ('organiser@test') returning id")).id;
     coordinator = (await one("insert into auth.users (email) values ('coordinator@test') returning id")).id;
@@ -204,7 +207,8 @@ describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests 
   it('SCRUM258_Week7_cancelling_cancels_the_approved_booking_and_leaves_its_converted_hold_converted', async () => {
     const eventId = await makeApprovedEvent();
     const approved = await makeBooking(eventId, venueId, 'approved');
-    // The hold 071 converts on approval, written directly: decide is not in this stack.
+    // The hold 066 converts on approval, written directly: decide's re-check needs
+    // occupancy functions this stack does not build.
     const holdId = (
       await one(
         `insert into venue_holds

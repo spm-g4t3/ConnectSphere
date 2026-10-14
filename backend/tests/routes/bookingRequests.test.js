@@ -1124,7 +1124,7 @@ describe('SCRUM-258 AC1: Venue Staff see the pending requests', () => {
   const STAFF_ID = '99999999-9999-4999-8999-999999999999';
   const asStaff = signedInWithRole(ROLE.VENUE_STAFF, STAFF_ID);
 
-  /** One element of list_pending_booking_requests (065). */
+  /** One element of list_pending_booking_requests (066). */
   const pendingRow = (overrides = {}) => ({
     ...bookingRow(),
     event_name: 'IS212 Industry Night',
