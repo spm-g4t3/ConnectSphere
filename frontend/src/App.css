@@ -345,6 +345,7 @@ button { cursor: pointer; }
 .my-booking-requests__notice { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 6px 0 0; padding: 8px 12px; }
 .dashboard--coordinator .my-booking-requests button:disabled { cursor: not-allowed; opacity: 0.55; }
 .dashboard--coordinator .status--booking-pending { background: #fff6e5; color: #8a5a00; }
+.dashboard--coordinator .status--booking-conflicting { background: #fff0ee; color: #a43c32; }
 .dashboard--coordinator .status--booking-approved { background: #e8f7f1; color: #17684f; }
 .dashboard--coordinator .status--booking-flagged { background: #fff0ee; color: #a43c32; }
 .dashboard--coordinator .status--booking-rejected { background: #fff0ee; color: #a43c32; }

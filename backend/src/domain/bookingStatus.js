@@ -5,11 +5,14 @@
  * booking needs a status to say whether it is one.
  *
  * SCRUM-250: a venue booking request is a booking in the pending, rejected or
- * withdrawn state, so those three are part of the same vocabulary.
+ * withdrawn state, so those three are part of the same vocabulary. SCRUM-261
+ * adds conflicting: still open, but another event's overlapping request was
+ * approved.
  *
  * Mirrors the Postgres enum `booking_status` exactly, in the same order: 011
- * creates it and 027_booking_request_statuses.sql appends the request
- * statuses. These two lists must stay identical -- a test asserts the match.
+ * creates it, 027_booking_request_statuses.sql appends the request statuses
+ * and 067_conflicting_booking_status.sql appends conflicting. These two lists
+ * must stay identical -- a test asserts the match.
  *
  * Deliberately free of imports, database calls and framework code -- pure data
  * and pure functions, the same shape as domain/userRole.js.
@@ -22,6 +25,7 @@ export const BOOKING_STATUS = Object.freeze({
   PENDING: 'pending',
   REJECTED: 'rejected',
   WITHDRAWN: 'withdrawn',
+  CONFLICTING: 'conflicting',
 });
 
 // Keyed by value, so the membership check below is a single own-property test.
@@ -61,6 +65,14 @@ export const BOOKING_STATUS_DISPLAY = Object.freeze({
     label: 'Pending',
     group: 'PENDING',
     description: 'Waiting for Venue Staff to decide. It can still be withdrawn.',
+  }),
+  // A flag on an open request, not an outcome: it still waits for Venue Staff,
+  // and the coordinator decides whether to withdraw it.
+  [BOOKING_STATUS.CONFLICTING]: Object.freeze({
+    label: 'Conflicting',
+    group: 'CONFLICTING',
+    description:
+      'Still waiting for Venue Staff, but another event has been approved for an overlapping time. It can still be withdrawn.',
   }),
   [BOOKING_STATUS.APPROVED]: Object.freeze({
     label: 'Approved',

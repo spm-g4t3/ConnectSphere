@@ -27,6 +27,7 @@ const END = "2026-12-01T17:00:00Z";
 
 const DISPLAY = {
   pending: { status: "pending", label: "Pending", group: "PENDING", description: "x" },
+  conflicting: { status: "conflicting", label: "Conflicting", group: "CONFLICTING", description: "x" },
   approved: { status: "approved", label: "Approved", group: "APPROVED", description: "x" },
   rejected: { status: "rejected", label: "Rejected", group: "REJECTED", description: "x" },
   withdrawn: { status: "withdrawn", label: "Withdrawn", group: "WITHDRAWN", description: "x" },
@@ -318,6 +319,16 @@ describe("statuses and details", () => {
     expect(badge).toHaveClass("status--booking-unknown");
   });
 
+  it("SCRUM258_AC3_a_conflicting_request_shows_the_conflicting_badge_in_its_own_style", async () => {
+    vi.mocked(getMyBookingRequests).mockResolvedValue([item("1", "conflicting"), item("2", "pending")]);
+    renderList();
+    await screen.findByText("Event 1");
+
+    const badge = within(rowFor("Event 1")).getByText("Conflicting", { selector: ".status-badge" });
+    expect(badge).toHaveClass("status--booking-conflicting");
+    expect(badge).not.toHaveClass("status--booking-pending");
+  });
+
   it("SCRUM255_has_no_staff_approve_or_reject_controls", async () => {
     vi.mocked(getMyBookingRequests).mockResolvedValue(ALL);
     renderList();
@@ -345,6 +356,24 @@ describe("withdrawing", () => {
     for (const name of ["Event 2", "Event 3", "Event 4", "Event 5", "Event 6"]) {
       expect(withdrawButton(name)).not.toBeInTheDocument();
     }
+  });
+
+  it("SCRUM258_AC3_a_conflicting_request_is_still_open_so_it_offers_withdraw", async () => {
+    vi.mocked(getMyBookingRequests).mockResolvedValue([
+      item("1", "conflicting"),
+      item("2", "approved"),
+      item("3", "rejected"),
+    ]);
+    vi.mocked(withdrawBookingRequest).mockResolvedValue({ id: "1", status: "withdrawn" });
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+
+    expect(withdrawButton("Event 2")).not.toBeInTheDocument();
+    expect(withdrawButton("Event 3")).not.toBeInTheDocument();
+    await user.click(withdrawButton("Event 1"));
+    await user.click(screen.getByRole("button", { name: "Yes, withdraw" }));
+
+    expect(withdrawBookingRequest).toHaveBeenCalledWith("1");
   });
 
   it("SCRUM255_asks_before_withdrawing_and_keep_it_backs_out", async () => {

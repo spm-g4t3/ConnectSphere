@@ -66,7 +66,7 @@ import { toSuitabilityRecord } from '../domain/suitabilityRecord.js';
 /**
  * The event statuses a venue can be requested for (SCRUM-243 AC1), and since
  * SCRUM-260 approved for: past approval and still live, through the safety
- * check. create_booking_request and decide_booking_request (066) hold the same list.
+ * check. create_booking_request and decide_booking_request (068) hold the same list.
  */
 const BOOKABLE_EVENT_STATUSES = Object.freeze([
   STATUS.APPROVED,
@@ -569,7 +569,8 @@ export async function listBookingRequestsForCoordinator(coordinatorId, { client 
 }
 
 /**
- * One pending request clashing with another, in camelCase (SCRUM-259).
+ * One open (pending or conflicting) request clashing with another, in
+ * camelCase (SCRUM-259).
  *
  * @param {object} entry  from list_pending_booking_requests' `overlapping`
  */
@@ -594,6 +595,8 @@ function toOverlappingRequest(entry) {
  * @param {object} row  one element of list_pending_booking_requests (065)
  */
 function toPendingBookingRequest(row) {
+  // Pending or conflicting (068); a row without one is from 065, all pending.
+  const status = row.status ?? BOOKING_STATUS.PENDING;
   return {
     id: row.id,
     eventRequestId: row.event_request_id,
@@ -602,8 +605,8 @@ function toPendingBookingRequest(row) {
     venueId: row.venue_id,
     venueName: row.venue_name ?? null,
     venueLocation: row.venue_location ?? null,
-    status: BOOKING_STATUS.PENDING,
-    statusDisplay: getBookingStatusDisplay(BOOKING_STATUS.PENDING),
+    status,
+    statusDisplay: getBookingStatusDisplay(status),
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     occupiedStartsAt: row.occupied_starts_at ?? null,
@@ -623,7 +626,8 @@ function toPendingBookingRequest(row) {
 /**
  * The pending booking requests Venue Staff decide on (SCRUM-259, SCRUM-258 AC1).
  *
- * Oldest first, every venue, each with the other events' pending requests at
+ * Pending and conflicting requests (068), each with its status. Oldest first,
+ * every venue, each with the other events' open requests at
  * its venue whose occupied periods overlap, in submission order. Read through
  * list_pending_booking_requests (065), which refuses anyone but Venue Staff
  * (42501, a ForbiddenError) and pads periods with venue_occupied_period(), so
@@ -658,8 +662,9 @@ export async function listPendingBookingRequests(callerId, { client } = {}) {
  * pre-check here: the question that matters is answered under the lock, where
  * it cannot change before the write.
  *
- * A request that is not pending -- including one already withdrawn -- is a
- * ConflictError and nothing is changed. Withdrawing twice is not a success the
+ * A conflicting request can be withdrawn as a pending one can (068). Any other
+ * -- including one already withdrawn -- is a ConflictError and nothing is
+ * changed. Withdrawing twice is not a success the
  * second time.
  *
  * @param {string} bookingId  the request's id
@@ -718,7 +723,7 @@ function toDecidedBookingRequest(row) {
 }
 
 /**
- * One call to decide_booking_request (066) and its answer, shared by approve
+ * One call to decide_booking_request (068) and its answer, shared by approve
  * and reject. The function checks the caller is Venue Staff, locks the event,
  * the venue (approval only) and the booking, refuses a request that is not
  * pending, and writes the decision and the coordinator's notice together.
@@ -758,7 +763,13 @@ async function decideBookingRequest(
   if (booking.status !== expected) {
     throw new Error(`decide_booking_request returned a ${booking.status} booking, not ${expected}`);
   }
-  return booking;
+  if (decision !== 'approve') return booking;
+
+  // The other events' requests this approval marked conflicting (068).
+  return {
+    ...booking,
+    markedConflicting: Array.isArray(data.marked_conflicting) ? data.marked_conflicting : [],
+  };
 }
 
 /** The Venue Staff caller, from the JWT; refused before any round trip. */
@@ -781,12 +792,18 @@ function checkCaller(callerId) {
  * turns on the venue lock, so only one of two overlapping requests can pass.
  * Only this request changes; the event's other bookings are untouched.
  *
+ * Other events' pending requests whose occupied periods overlap this one are
+ * marked conflicting and their coordinators notified (068); their ids come
+ * back as `markedConflicting`. A conflicting request can itself be approved
+ * once nothing occupies its period.
+ *
  * @param {string} bookingId  the request's id
  * @param {string} callerId   from the JWT -- never the body
  * @param {object} [options]
  * @param {object} [options.client]
  * @returns {Promise<object>} the request, now approved, shaped by
- *                            toDecidedBookingRequest
+ *                            toDecidedBookingRequest, plus markedConflicting
+ *                            (ids, possibly empty)
  * @throws {ValidationError} no caller, or a malformed id, before any round trip
  * @throws {NotFoundError}   no such booking request
  * @throws {ForbiddenError}  the caller is not Venue Staff

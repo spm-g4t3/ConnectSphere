@@ -32,19 +32,21 @@ function migrationSql() {
   return sql.replace(/--[^\n]*/g, '');
 }
 
-/** The 027 migration (SCRUM-250) with every `--` comment stripped. */
+/**
+ * The migrations that append to the enum, 027 (SCRUM-250) then 067
+ * (SCRUM-261), with every `--` comment stripped.
+ */
 function requestStatusMigrationSql() {
   const here = dirname(fileURLToPath(import.meta.url));
-  const sql = readFileSync(
-    resolve(here, '../../db/migrations/027_booking_request_statuses.sql'),
-    'utf8',
-  );
-  return sql.replace(/--[^\n]*/g, '');
+  return ['027_booking_request_statuses.sql', '067_conflicting_booking_status.sql']
+    .map((name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8'))
+    .join('\n')
+    .replace(/--[^\n]*/g, '');
 }
 
 /**
  * The enum values as the migrations leave them, in declared order: the ones
- * 011 creates, then the ones 027 appends.
+ * 011 creates, then the ones 027 and 067 append.
  */
 function statusesDeclaredInSql() {
   const block = migrationSql().match(
@@ -85,6 +87,7 @@ describe('BOOKING_STATUS mirrors the database enum', () => {
       'pending',
       'rejected',
       'withdrawn',
+      'conflicting',
     ]);
   });
 

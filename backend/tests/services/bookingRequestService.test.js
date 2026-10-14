@@ -693,6 +693,15 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
     ]);
   });
 
+  it('SCRUM258_AC3_a_conflicting_request_in_the_queue_keeps_its_status_and_display', async () => {
+    const [request] = await listPendingBookingRequests(USER, {
+      client: clientAnswering({ data: [pendingRow({ status: 'conflicting' })], error: null }),
+    });
+
+    expect(request.status).toBe('conflicting');
+    expect(request.statusDisplay).toMatchObject({ label: 'Conflicting', group: 'CONFLICTING' });
+  });
+
   it.each([null, undefined])('SCRUM258_AC1_a_%s_result_or_overlap_list_is_empty_not_an_error', async (value) => {
     expect(await listPendingBookingRequests(USER, { client: clientAnswering({ data: value, error: null }) })).toEqual([]);
     const [request] = await listPendingBookingRequests(USER, {
@@ -847,6 +856,16 @@ describe('SCRUM258 approving and rejecting a booking request (066)', () => {
   it('SCRUM258_AC6_a_caller_who_is_not_venue_staff_is_forbidden', async () => {
     const err = await rejectBookingRequest(BOOKING, USER, { reason: 'No' }, { client: clientAnswering(failure('42501')) }).catch((e) => e);
     expect(err).toBeInstanceOf(ForbiddenError);
+  });
+
+  it('SCRUM258_AC3_approval_returns_the_ids_of_the_requests_it_marked_conflicting', async () => {
+    const marked = [OTHER_EVENT, HOLD];
+    const client = clientAnswering({
+      data: { outcome: 'approved', booking: decidedRow(), marked_conflicting: marked },
+      error: null,
+    });
+
+    expect((await approveBookingRequest(BOOKING, STAFF, { client })).markedConflicting).toEqual(marked);
   });
 
   it('SCRUM258_AC3_an_approval_reported_with_a_booking_still_pending_is_an_error_not_a_success', async () => {

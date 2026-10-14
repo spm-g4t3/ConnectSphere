@@ -45,12 +45,13 @@ const LIST_ERROR_MESSAGES = {
   500: "Your venue requests could not be loaded. Please try again.",
 };
 
-const PENDING = "pending";
+// A conflicting request is still open, so its coordinator can withdraw it too.
+const WITHDRAWABLE = new Set(["pending", "conflicting"]);
 const FLAGGED_FOR_REVIEW = "flagged_for_review";
 
 function RequestRow({ item, confirming, withdrawing, busy, onAsk, onCancel, onConfirm }) {
   const display = readBookingStatusDisplay(item);
-  const isPending = item.status === PENDING;
+  const canWithdraw = WITHDRAWABLE.has(item.status);
   // Only a setup or turnaround change stores a reason code (SCRUM-484); a
   // booking flagged by a venue block has none, and reads as before.
   const reason = reviewReasonLabel(item.reviewReason);
@@ -88,7 +89,7 @@ function RequestRow({ item, confirming, withdrawing, busy, onAsk, onCancel, onCo
         )}
       </div>
 
-      {isPending && !confirming && (
+      {canWithdraw && !confirming && (
         <button
           type="button"
           className="my-booking-requests__withdraw"
@@ -100,7 +101,7 @@ function RequestRow({ item, confirming, withdrawing, busy, onAsk, onCancel, onCo
         </button>
       )}
 
-      {isPending && confirming && (
+      {canWithdraw && confirming && (
         <div className="my-booking-requests__confirm">
           <span>Withdraw this request? Venue Staff will be told.</span>
           <button type="button" onClick={() => onConfirm(item)} disabled={busy}>

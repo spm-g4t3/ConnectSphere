@@ -153,8 +153,9 @@ describe('SCRUM484_AC4 no copy of the overlap rule in SQL', () => {
     expect(LATEST.get('venue_occupied_period')?.file).toBe('032_venue_occupancy.sql');
     expect(LATEST.get('venue_occupancy_conflicts')?.file).toBe('040_venue_holds.sql');
     // SCRUM-259: pending requests overlapping a period, for Venue Staff's queue
-    // and, later, approval (SCRUM-261).
-    expect(LATEST.get('pending_request_overlaps')?.file).toBe('065_pending_booking_requests.sql');
+    // and approval. Changed for SCRUM-261: 068 restates it with conflicting
+    // requests counted as open too, the comparison unchanged.
+    expect(LATEST.get('pending_request_overlaps')?.file).toBe('068_mark_conflicting_booking_requests.sql');
     // And the raw helper is not.
     expect(LATEST.has('venue_block_booking_conflicts')).toBe(false);
     // The scan replays every migration in the folder, so the latest
