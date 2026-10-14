@@ -132,6 +132,8 @@ describe('SCRUM-487 AC2, AC3, AC6: the overview over a real database, before and
     await db.exec('alter table event_requests add column clarification_reply_by_date date');
     await db.exec(migration('052_lead_assignment.sql'));
     await db.exec(migration('042_event_cancellation_fields.sql'));
+    // SCRUM-488: the safety statuses, which the overview now lists.
+    await db.exec(migration('053_safety_statuses.sql'));
 
     const user = async (email, role, name) => {
       const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
@@ -211,5 +213,43 @@ describe('SCRUM-487 AC2, AC3, AC6: the overview over a real database, before and
     // Earliest first: the cancelled event starts sooner.
     expect(await ids({ includeFinished: true })).toEqual([finishedId, eventId]);
     expect(await ids({ includeFinished: true, coordinatorId: coordinatorA })).toEqual([finishedId]);
+  });
+
+  it('SCRUM487_AC2_AC3_on_a_real_database_events_in_the_safety_statuses_are_counted_listed_and_filtered', async () => {
+    // AC2-12 and AC3-18, which waited for SCRUM-488's enum values. A's two
+    // events, one in each safety status, each carrying the approval a decided
+    // status requires.
+    const safetyEvent = async (name, status, startDays) => (await one(
+      `insert into event_requests
+         (organiser_id, event_name, status, submitted_at, assigned_coordinator_id, reviewing_coordinator_id,
+          decision, decided_by, decided_at, proposed_start, proposed_end)
+       values ($1, $2, $3::event_request_status, now(), $4, $4, 'approved', $4, now(), $5, $6) returning id`,
+      [organiser, name, status, coordinatorA, future(startDays), future(startDays + 0.25)],
+    )).id;
+    const inReview = await safetyEvent('Safety Walkthrough', 'safety_review', 20);
+    const approved = await safetyEvent('Safety Gala', 'safety_approved', 21);
+
+    const overview = await listCoordinatorOverview({ client });
+    const row = countsOf(overview, coordinatorA);
+
+    expect(overview.statuses.map(({ status, label, finished }) => [status, label, finished])).toEqual([
+      ['submitted', 'Requested', false],
+      ['under_review', 'Under review', false],
+      ['pending_clarification', 'Awaiting your response', false],
+      ['approved', 'Planning', false],
+      ['safety_review', 'Safety check', false],
+      ['safety_approved', 'Safety approved', false],
+      ['confirmed', 'Confirmed', false],
+      ['completed', 'Completed', true],
+      ['rejected', 'Rejected', true],
+      ['cancelled', 'Cancelled', true],
+    ]);
+    expect(row.byStatus).toMatchObject({ safety_review: 1, safety_approved: 1 });
+    expect(row.activeEvents).toBe(2);
+
+    const ids = async (options) => (await listAssignedEventsForLead({ client, ...options })).map((event) => event.id);
+    expect(await ids({ coordinatorId: coordinatorA })).toEqual([inReview, approved]);
+    expect(await ids({ status: 'safety_review' })).toEqual([inReview]);
+    expect(await ids({ status: 'safety_approved' })).toEqual([approved]);
   });
 });

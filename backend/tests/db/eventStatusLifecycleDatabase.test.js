@@ -135,12 +135,15 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
    *
    * A row at a decided status carries the decision a real one would have, made
    * by its coordinator as reviewer, because 025 refuses such a row without one.
-   * approved, confirmed and completed were approved; rejected was rejected,
+   * approved, the two safety statuses, confirmed and completed were approved;
+   * rejected was rejected,
    * with the reason 025 requires. cancelled carries none: it is reachable both
    * with and without a decision. `extra` overrides any of it.
    */
   const DECISION_FOR = {
     [STATUS.APPROVED]: 'approved',
+    [STATUS.SAFETY_REVIEW]: 'approved',
+    [STATUS.SAFETY_APPROVED]: 'approved',
     [STATUS.CONFIRMED]: 'approved',
     [STATUS.COMPLETED]: 'approved',
     [STATUS.REJECTED]: 'rejected',
@@ -234,6 +237,8 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     // the Lead's assignment and reassignment (SCRUM-516), the refusal of an
     // unassigned review (SCRUM-517), and the notices (SCRUM-518).
     await db.exec(migration('052_lead_assignment.sql'));
+    // SCRUM-488: the safety statuses and the constraints that admit them.
+    await db.exec(migration('053_safety_statuses.sql'));
   }, 60_000);
 
   afterAll(async () => {
@@ -1084,11 +1089,12 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       STATUS.UNDER_REVIEW,
       STATUS.PENDING_CLARIFICATION,
       STATUS.APPROVED,
+      STATUS.SAFETY_REVIEW,
+      STATUS.SAFETY_APPROVED,
       STATUS.CONFIRMED,
     ])('SCRUM486_AC5_a_lead_reassigns_a_request_that_is_%s', async (status) => {
-      // AC5-01, the five that exist. safety_review and safety_approved are on
-      // the function's list (as text) but cannot be written until SCRUM-488
-      // adds them to the enum (AC5-03).
+      // AC5-01 and AC5-03: the seven. 052 compares the status as text, so it
+      // ran for the safety statuses once 053 added them to the enum.
       const id = await request(status);
 
       const { rows: [moved] } = await reassign(id, otherCoordinator, lead);
@@ -1114,9 +1120,10 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     );
 
     it('SCRUM486_AC5_the_status_list_names_the_safety_statuses_before_they_exist', async () => {
-      // AC5-03 as far as it can go before SCRUM-488: the function in force
-      // names both, and every reassignment above runs, so naming them as text
-      // does not stop it running while the enum lacks them.
+      // AC5-03: the function in force names both, and compares as text. The
+      // name is from when the enum lacked them, and is kept because
+      // docs/SCRUM-486.md cites it; the reassignments above now run against
+      // the real values (053).
       const { rows: [fn] } = await db.query(
         "select prosrc from pg_proc where proname = 'reassign_event_request'",
       );

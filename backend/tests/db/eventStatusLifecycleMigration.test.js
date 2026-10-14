@@ -13,9 +13,16 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-import { STATUS } from '../../src/domain/eventRequestStatus.js';
-
 const here = dirname(fileURLToPath(import.meta.url));
+
+// Migration 020 is history: it admitted the nine statuses of SCRUM-318 and is
+// never rewritten. The safety statuses are admitted by 053, which has its own
+// test (scrum488SafetyStatusesDatabase.test.js), so this list is written out
+// and no longer follows the domain module.
+const NINE_STATUSES_OF_020 = [
+  'draft', 'submitted', 'under_review', 'pending_clarification',
+  'approved', 'confirmed', 'completed', 'rejected', 'cancelled',
+];
 
 const sql = readFileSync(
   resolve(here, '../../db/migrations/020_event_status_lifecycle.sql'),
@@ -35,9 +42,9 @@ function listAfter(marker) {
 }
 
 describe('SCRUM-320: the lifecycle constraint', () => {
-  it('lists exactly the statuses the domain module defines', () => {
+  it('lists exactly the nine statuses of SCRUM-318', () => {
     expect(listAfter('add constraint event_requests_status_in_lifecycle').sort())
-      .toEqual(Object.values(STATUS).sort());
+      .toEqual([...NINE_STATUSES_OF_020].sort());
   });
 
   it("does not admit 'planning'", () => {

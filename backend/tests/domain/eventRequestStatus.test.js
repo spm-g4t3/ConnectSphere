@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -47,21 +47,33 @@ const OBSOLETE_STATUSES = ['planning'];
 // The JS list and the database enum must not drift apart
 // ---------------------------------------------------------------------------
 describe('STATUS mirrors the database enum', () => {
-  /** Pull the enum values straight out of the migration, comments stripped. */
+  /**
+   * The enum's values: 001's create type, comments stripped, then every
+   * `alter type event_request_status add value` in the later migrations.
+   */
   function statusesDeclaredInSql() {
     const here = dirname(fileURLToPath(import.meta.url));
-    const sql = readFileSync(
-      resolve(here, '../../db/migrations/001_event_requests.sql'),
-      'utf8',
-    );
+    const migrations = resolve(here, '../../db/migrations');
+    const sql = readFileSync(resolve(migrations, '001_event_requests.sql'), 'utf8');
 
     const block = sql.match(
       /create type event_request_status as enum \(([\s\S]*?)\);/i,
     );
     if (!block) throw new Error('could not find the enum in the migration');
 
-    return [...block[1].replace(/--[^\n]*/g, '').matchAll(/'([a-z_]+)'/g)]
+    const values = [...block[1].replace(/--[^\n]*/g, '').matchAll(/'([a-z_]+)'/g)]
       .map((m) => m[1]);
+
+    for (const file of readdirSync(migrations).filter((name) => /^\d{3}_.*\.sql$/.test(name)).sort()) {
+      const text = readFileSync(resolve(migrations, file), 'utf8').replace(/--[^\n]*/g, '');
+      for (const [, value] of text.matchAll(
+        /alter type (?:public\.)?event_request_status\s+add value (?:if not exists )?'([a-z_]+)'/gi,
+      )) {
+        if (!values.includes(value)) values.push(value);
+      }
+    }
+
+    return values;
   }
 
   it('only uses values the SQL migration declares', () => {
