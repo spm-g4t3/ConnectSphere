@@ -14,8 +14,9 @@
 
 
 /**
- * The nine statuses of the lifecycle (SCRUM-318), spelled as in the Postgres
- * enum `event_request_status`.
+ * The statuses of the lifecycle: the nine of SCRUM-318, and the two safety
+ * statuses SCRUM-488 puts between APPROVED and CONFIRMED. Spelled as in the
+ * Postgres enum `event_request_status`.
  *
  * There is no PLANNING status. The customer treats planning as approval, so
  * that stage is APPROVED. The enum still carries 'planning', because Postgres
@@ -30,6 +31,8 @@ export const STATUS = Object.freeze({
   UNDER_REVIEW: 'under_review',
   PENDING_CLARIFICATION: 'pending_clarification',
   APPROVED: 'approved',
+  SAFETY_REVIEW: 'safety_review',
+  SAFETY_APPROVED: 'safety_approved',
   CONFIRMED: 'confirmed',
   COMPLETED: 'completed',
   REJECTED: 'rejected',
@@ -89,6 +92,9 @@ export const ORGANISER_STATUS_LABEL = Object.freeze({
   [STATUS.UNDER_REVIEW]: 'Under review',
   [STATUS.PENDING_CLARIFICATION]: 'Awaiting your response',
   [STATUS.APPROVED]: 'Planning',
+  // SCRUM-488 AC5, labels still to be confirmed by the team (docs/SCRUM-488-decisions.md, D3).
+  [STATUS.SAFETY_REVIEW]: 'Safety check',
+  [STATUS.SAFETY_APPROVED]: 'Safety approved',
   [STATUS.CONFIRMED]: 'Confirmed',
   [STATUS.COMPLETED]: 'Completed',
   [STATUS.REJECTED]: 'Rejected',
@@ -131,6 +137,17 @@ export const STATUS_DISPLAY = Object.freeze({
     label: ORGANISER_STATUS_LABEL[STATUS.APPROVED],
     group: STATUS_GROUP.APPROVED,
     description: 'Your request has been accepted. Arrangements will now begin.',
+  }),
+  // The safety statuses reuse existing groups, so the UI needs no new style.
+  [STATUS.SAFETY_REVIEW]: Object.freeze({
+    label: ORGANISER_STATUS_LABEL[STATUS.SAFETY_REVIEW],
+    group: STATUS_GROUP.UNDER_REVIEW,
+    description: 'A Safety Officer is checking the arrangements for your event before it can be confirmed.',
+  }),
+  [STATUS.SAFETY_APPROVED]: Object.freeze({
+    label: ORGANISER_STATUS_LABEL[STATUS.SAFETY_APPROVED],
+    group: STATUS_GROUP.APPROVED,
+    description: 'The safety check is complete. Your Coordinator can now confirm your event.',
   }),
   [STATUS.CONFIRMED]: Object.freeze({
     label: ORGANISER_STATUS_LABEL[STATUS.CONFIRMED],

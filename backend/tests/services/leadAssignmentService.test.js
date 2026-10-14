@@ -247,7 +247,10 @@ describe('SCRUM-486 AC2: the Lead\'s unassigned queue', () => {
 // AC3: the picker's coordinators and their workload
 // ---------------------------------------------------------------------------
 describe('SCRUM-486 AC3: every Event Coordinator, with their active events', () => {
-  const ACTIVE = [STATUS.SUBMITTED, STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION, STATUS.APPROVED, STATUS.CONFIRMED];
+  const ACTIVE = [
+    STATUS.SUBMITTED, STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION, STATUS.APPROVED,
+    STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED, STATUS.CONFIRMED,
+  ];
 
   it('SCRUM486_AC3_lists_every_event_coordinator_with_their_active_count', async () => {
     // AC3-06: A holds two active events, B none. B is listed with 0, not left
@@ -301,7 +304,8 @@ describe('SCRUM-486 AC3: every Event Coordinator, with their active events', () 
 
   it('SCRUM486_AC3_counts_only_the_active_statuses_of_the_coordinators_listed', async () => {
     // Open question 3, answered once in the service: submitted (assigned, not
-    // yet reviewed) through confirmed. Not draft, completed, rejected or
+    // yet reviewed) through confirmed, the two safety statuses included
+    // (SCRUM-488). Not draft, completed, rejected or
     // cancelled. The count is narrowed to the coordinators just read.
     const client = createFakeClient([
       ok([profileRow(COORDINATOR_A, 'Omar Okafor'), profileRow(COORDINATOR_B, 'Priya Nair')]),
@@ -949,7 +953,8 @@ describe('SCRUM-486 AC6: the Lead lists every held event in an active status', (
     ]);
     expect(read.notFilters).toEqual([['assigned_coordinator_id', 'is', null]]);
     expect(read.inFilters).toEqual([['status', [
-      STATUS.SUBMITTED, STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION, STATUS.APPROVED, STATUS.CONFIRMED,
+      STATUS.SUBMITTED, STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION, STATUS.APPROVED,
+      STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED, STATUS.CONFIRMED,
     ]]]);
   });
 
