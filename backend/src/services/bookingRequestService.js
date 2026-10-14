@@ -57,6 +57,7 @@ import { getEventRequestForCoordinator } from './eventRequestService.js';
 import { checkVenueSuitability } from './venueSuitabilityService.js';
 import { STATUS } from '../domain/eventRequestStatus.js';
 import { BOOKING_STATUS, getBookingStatusDisplay } from '../domain/bookingStatus.js';
+import { toSuitabilityRecord } from '../domain/suitabilityRecord.js';
 
 /** The event statuses a venue can be requested for (SCRUM-243 AC1). */
 const BOOKABLE_EVENT_STATUSES = Object.freeze([STATUS.APPROVED, STATUS.CONFIRMED]);
@@ -551,6 +552,91 @@ export async function listBookingRequestsForCoordinator(coordinatorId, { client 
   return (data ?? [])
     .filter((row) => one(row.event_requests)?.assigned_coordinator_id === coordinatorId)
     .map(toBookingRequestListItem);
+}
+
+/**
+ * One pending request clashing with another, in camelCase (SCRUM-259).
+ *
+ * @param {object} entry  from list_pending_booking_requests' `overlapping`
+ */
+function toOverlappingRequest(entry) {
+  return {
+    id: entry.id,
+    eventRequestId: entry.event_request_id,
+    eventName: entry.event_name ?? null,
+    startsAt: entry.starts_at,
+    endsAt: entry.ends_at,
+    occupiedStartsAt: entry.occupied_starts_at,
+    occupiedEndsAt: entry.occupied_ends_at,
+    createdAt: entry.created_at,
+  };
+}
+
+/**
+ * One row of the Venue Staff queue, in camelCase. The suitability record is
+ * shaped by toSuitabilityRecord, as on the venue's bookings list, so both
+ * screens show the same verdict and overridden criteria.
+ *
+ * @param {object} row  one element of list_pending_booking_requests (065)
+ */
+function toPendingBookingRequest(row) {
+  return {
+    id: row.id,
+    eventRequestId: row.event_request_id,
+    eventName: row.event_name ?? null,
+    eventStatus: row.event_status ?? null,
+    venueId: row.venue_id,
+    venueName: row.venue_name ?? null,
+    venueLocation: row.venue_location ?? null,
+    status: BOOKING_STATUS.PENDING,
+    statusDisplay: getBookingStatusDisplay(BOOKING_STATUS.PENDING),
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    occupiedStartsAt: row.occupied_starts_at ?? null,
+    occupiedEndsAt: row.occupied_ends_at ?? null,
+    expectedAttendance: row.expected_attendance ?? null,
+    roomLayoutCode: row.room_layout_code ?? null,
+    venueRequirements: row.venue_requirements ?? null,
+    accessibilityRequirements: row.accessibility_requirements ?? null,
+    setupNotes: row.setup_notes ?? null,
+    ...toSuitabilityRecord(row),
+    requestedBy: row.requested_by ?? null,
+    createdAt: row.created_at,
+    overlapping: (row.overlapping ?? []).map(toOverlappingRequest),
+  };
+}
+
+/**
+ * The pending booking requests Venue Staff decide on (SCRUM-259, SCRUM-258 AC1).
+ *
+ * Oldest first, every venue, each with the other events' pending requests at
+ * its venue whose occupied periods overlap, in submission order. Read through
+ * list_pending_booking_requests (065), which refuses anyone but Venue Staff
+ * (42501, a ForbiddenError) and pads periods with venue_occupied_period(), so
+ * the formula is not repeated here.
+ *
+ * @param {string} callerId  from the JWT -- never the client
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object[]>} possibly empty, in camelCase
+ * @throws {ValidationError} when no caller was supplied, before any round trip
+ * @throws {ForbiddenError}  the caller is not Venue Staff
+ */
+export async function listPendingBookingRequests(callerId, { client } = {}) {
+  if (typeof callerId !== 'string' || callerId.trim() === '') {
+    throw new ValidationError(
+      'Invalid caller -- callerId: is required',
+      [{ field: 'callerId', message: 'is required' }],
+    );
+  }
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('list_pending_booking_requests', { p_caller: callerId });
+
+  if (error) throw translateError(error);
+
+  return (Array.isArray(data) ? data : []).map(toPendingBookingRequest);
 }
 
 /**

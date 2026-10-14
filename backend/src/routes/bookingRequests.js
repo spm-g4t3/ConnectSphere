@@ -6,7 +6,8 @@
  *
  * GET /mine lists the signed-in coordinator's requests, POST / creates a request
  * for a venue against an approved or confirmed event, and POST /:id/withdraw
- * withdraws a pending one, all behind coordinatorOnly.
+ * withdraws a pending one, all behind coordinatorOnly. GET /pending (SCRUM-259)
+ * lists every pending request for Venue Staff, behind venueStaffOnly.
  * Whether the caller is that event's assigned coordinator is checked in the
  * service and again, under lock, in create_booking_request (030), or only
  * under lock in withdraw_booking_request (031); the route only passes on what
@@ -29,6 +30,7 @@ import { createErrorHandler } from '../http/handleError.js';
 import {
   createBookingRequest,
   listBookingRequestsForCoordinator,
+  listPendingBookingRequests,
   withdrawBookingRequest,
 } from '../services/bookingRequestService.js';
 
@@ -51,6 +53,7 @@ export function createBookingRequestRouter({
   const router = express.Router();
 
   const coordinatorOnly = requireRole(ROLE.EVENT_COORDINATOR);
+  const venueStaffOnly = requireRole(ROLE.VENUE_STAFF);
 
   router.use(requireAuth);
 
@@ -70,6 +73,27 @@ export function createBookingRequestRouter({
   router.get('/mine', coordinatorOnly, async (req, res) => {
     try {
       const requests = await listBookingRequestsForCoordinator(req.user.id, { client });
+      res.status(200).json(requests);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-259: every pending booking request, oldest first, for Venue Staff to
+   * decide on, each with the other events' pending requests whose occupied
+   * periods overlap it, in submission order.
+   *
+   * Behind venueStaffOnly, and list_pending_booking_requests (065) checks the
+   * caller's role again. A bare array; none pending is 200 [], never 404.
+   * Declared before any /:id route, so "pending" is never read as an id.
+   *
+   * Statuses: 200, 401, 403 for the wrong role or no role, 500 for anything
+   * untyped.
+   */
+  router.get('/pending', venueStaffOnly, async (req, res) => {
+    try {
+      const requests = await listPendingBookingRequests(req.user.id, { client });
       res.status(200).json(requests);
     } catch (err) {
       handleError(err, res);

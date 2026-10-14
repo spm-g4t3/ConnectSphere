@@ -1120,3 +1120,71 @@ describe('SCRUM-255: a coordinator sees only requests on their own events', () =
     expect(res.status).toBe(200);
   });
 });
+describe('SCRUM-258 AC1: Venue Staff see the pending requests', () => {
+  const STAFF_ID = '99999999-9999-4999-8999-999999999999';
+  const asStaff = signedInWithRole(ROLE.VENUE_STAFF, STAFF_ID);
+
+  /** One element of list_pending_booking_requests (065). */
+  const pendingRow = (overrides = {}) => ({
+    ...bookingRow(),
+    event_name: 'IS212 Industry Night',
+    event_status: STATUS.APPROVED,
+    venue_name: 'Hall A',
+    venue_location: 'Level 1',
+    occupied_starts_at: START,
+    occupied_ends_at: END,
+    overlapping: [],
+    ...overrides,
+  });
+
+  const listPending = (client, { requireAuth = asStaff, query = '' } = {}) =>
+    request(appWith({ client, requireAuth })).get(`/api/booking-requests/pending${query}`);
+
+  it('SCRUM258_AC1_venue_staff_get_200_and_the_queue_in_the_functions_order', async () => {
+    const client = createFakeClient([ok([pendingRow(), pendingRow({ id: OTHER_BOOKING_ID })])]);
+
+    const res = await listPending(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((r) => r.id)).toEqual([BOOKING_ID, OTHER_BOOKING_ID]);
+    expect(res.body[0]).toMatchObject({ eventName: 'IS212 Industry Night', venueName: 'Hall A', status: 'pending', overlapping: [] });
+  });
+
+  it('SCRUM258_AC1_an_empty_queue_is_200_not_404', async () => {
+    const res = await listPending(createFakeClient([ok([])]));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM258_AC1_the_caller_is_the_token_user_never_the_query', async () => {
+    const client = createFakeClient([ok([])]);
+
+    await listPending(client, { query: `?p_caller=${COORDINATOR_ID}&callerId=${COORDINATOR_ID}` });
+
+    expect(client.calls).toEqual([
+      expect.objectContaining({ operation: 'rpc', fn: 'list_pending_booking_requests', args: { p_caller: STAFF_ID } }),
+    ]);
+  });
+
+  it('SCRUM258_AC1_returns_401_without_a_token_and_never_queries', async () => {
+    const client = createFakeClient([ok([])]);
+    const res = await listPending(client, { requireAuth: signedOut });
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([ROLE.EVENT_COORDINATOR, ROLE.EVENT_ORGANISER, ROLE.EVENT_COORDINATOR_LEAD, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.SAFETY_OFFICER, ROLE.ATTENDEE, null])(
+    'SCRUM258_AC1_refuses_%s_with_403_and_never_queries',
+    async (role) => {
+      const client = createFakeClient([ok([])]);
+      const res = await listPending(client, { requireAuth: signedInWithRole(role) });
+      expect(res.status).toBe(403);
+      expect(client.calls).toHaveLength(0);
+    },
+  );
+
+  it('SCRUM258_AC1_a_refusal_from_the_function_is_403', async () => {
+    const res = await listPending(createFakeClient([dbFailure('42501', 'only Venue Staff can view pending booking requests')]));
+    expect(res.status).toBe(403);
+  });
+});

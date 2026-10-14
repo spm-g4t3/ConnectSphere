@@ -14,6 +14,7 @@ import {
   createBookingRequest,
   withdrawBookingRequest,
   listBookingRequestsForCoordinator,
+  listPendingBookingRequests,
   toBookingRequest,
 } from '../../src/services/bookingRequestService.js';
 import {
@@ -599,5 +600,102 @@ describe('SCRUM525_AC2 each request carries its own expected attendance', () => 
 
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.status).toBe(400);
+  });
+});
+
+describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
+  const OTHER_EVENT = '66666666-6666-4666-8666-666666666666';
+  const OTHER_BOOKING = '77777777-7777-4777-8777-777777777777';
+  const OVERRIDDEN = {
+    suitable: false,
+    criteria: [
+      { criterion: 'Capacity', met: false },
+      { criterion: 'Facilities', met: true },
+      { criterion: 'Accessibility', met: false },
+    ],
+  };
+
+  /** One element of list_pending_booking_requests (065), as jsonb returns it. */
+  const pendingRow = (overrides = {}) => ({
+    id: BOOKING,
+    event_request_id: EVENT,
+    event_name: 'Gala',
+    event_status: 'approved',
+    venue_id: VENUE,
+    venue_name: 'Hall A',
+    venue_location: 'Level 1',
+    starts_at: '2026-12-01T10:00:00+00:00',
+    ends_at: '2026-12-01T12:00:00+00:00',
+    occupied_starts_at: '2026-12-01T09:30:00+00:00',
+    occupied_ends_at: '2026-12-01T12:45:00+00:00',
+    expected_attendance: 120,
+    room_layout_code: 'theatre',
+    venue_requirements: 'Tiered seating',
+    accessibility_requirements: null,
+    setup_notes: null,
+    suitability_result: OVERRIDDEN,
+    suitability_overridden: true,
+    requested_by: USER,
+    created_at: '2026-10-01T00:00:00+00:00',
+    overlapping: [
+      {
+        id: OTHER_BOOKING,
+        event_request_id: OTHER_EVENT,
+        event_name: 'Fair',
+        starts_at: '2026-12-01T12:30:00+00:00',
+        ends_at: '2026-12-01T14:00:00+00:00',
+        occupied_starts_at: '2026-12-01T12:00:00+00:00',
+        occupied_ends_at: '2026-12-01T14:45:00+00:00',
+        created_at: '2026-10-02T00:00:00+00:00',
+      },
+    ],
+    ...overrides,
+  });
+
+  it.each([undefined, null, '', '   ', 42])('SCRUM258_AC1_listing_for_the_caller_%j_is_refused_before_any_call', async (caller) => {
+    const client = clientAnswering();
+    const err = await listPendingBookingRequests(caller, { client }).catch((e) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM258_AC1_a_caller_who_is_not_venue_staff_is_forbidden', async () => {
+    const err = await listPendingBookingRequests(USER, { client: clientAnswering(failure('42501')) }).catch((e) => e);
+    expect(err).toBeInstanceOf(ForbiddenError);
+  });
+
+  it('SCRUM258_AC1_shows_the_suitability_with_overrides_and_the_overlaps_in_camelCase', async () => {
+    const [request] = await listPendingBookingRequests(USER, { client: clientAnswering({ data: [pendingRow()], error: null }) });
+
+    expect(request).toMatchObject({
+      id: BOOKING,
+      status: 'pending',
+      expectedAttendance: 120,
+      occupiedStartsAt: '2026-12-01T09:30:00+00:00',
+      occupiedEndsAt: '2026-12-01T12:45:00+00:00',
+      suitability: { suitable: false, criteria: OVERRIDDEN.criteria },
+      suitabilityOverridden: true,
+      overriddenCriteria: ['Capacity', 'Accessibility'],
+    });
+    expect(request.overlapping).toEqual([
+      {
+        id: OTHER_BOOKING,
+        eventRequestId: OTHER_EVENT,
+        eventName: 'Fair',
+        startsAt: '2026-12-01T12:30:00+00:00',
+        endsAt: '2026-12-01T14:00:00+00:00',
+        occupiedStartsAt: '2026-12-01T12:00:00+00:00',
+        occupiedEndsAt: '2026-12-01T14:45:00+00:00',
+        createdAt: '2026-10-02T00:00:00+00:00',
+      },
+    ]);
+  });
+
+  it.each([null, undefined])('SCRUM258_AC1_a_%s_result_or_overlap_list_is_empty_not_an_error', async (value) => {
+    expect(await listPendingBookingRequests(USER, { client: clientAnswering({ data: value, error: null }) })).toEqual([]);
+    const [request] = await listPendingBookingRequests(USER, {
+      client: clientAnswering({ data: [pendingRow({ overlapping: value })], error: null }),
+    });
+    expect(request.overlapping).toEqual([]);
   });
 });
