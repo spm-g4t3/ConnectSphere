@@ -106,6 +106,8 @@ describe('SCRUM-487 AC1, AC2: GET /coordinator-overview is the Lead\'s', () => {
         { status: STATUS.UNDER_REVIEW, label: 'Under review', finished: false },
         { status: STATUS.PENDING_CLARIFICATION, label: 'Awaiting your response', finished: false },
         { status: STATUS.APPROVED, label: 'Planning', finished: false },
+        { status: STATUS.SAFETY_REVIEW, label: 'Safety check', finished: false },
+        { status: STATUS.SAFETY_APPROVED, label: 'Safety approved', finished: false },
         { status: STATUS.CONFIRMED, label: 'Confirmed', finished: false },
         { status: STATUS.COMPLETED, label: 'Completed', finished: true },
         { status: STATUS.REJECTED, label: 'Rejected', finished: true },
@@ -120,6 +122,8 @@ describe('SCRUM-487 AC1, AC2: GET /coordinator-overview is the Lead\'s', () => {
           [STATUS.UNDER_REVIEW]: 0,
           [STATUS.PENDING_CLARIFICATION]: 0,
           [STATUS.APPROVED]: 1,
+          [STATUS.SAFETY_REVIEW]: 0,
+          [STATUS.SAFETY_APPROVED]: 0,
           [STATUS.CONFIRMED]: 0,
         },
       }],
@@ -175,7 +179,10 @@ describe('SCRUM-487 AC1, AC2: GET /coordinator-overview is the Lead\'s', () => {
 // ---------------------------------------------------------------------------
 describe('SCRUM-487 AC1, AC3: GET /assigned takes the Lead\'s filters', () => {
   const FINISHED = [STATUS.COMPLETED, STATUS.REJECTED, STATUS.CANCELLED];
-  const ACTIVE = [STATUS.SUBMITTED, STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION, STATUS.APPROVED, STATUS.CONFIRMED];
+  const ACTIVE = [
+    STATUS.SUBMITTED, STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION, STATUS.APPROVED,
+    STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED, STATUS.CONFIRMED,
+  ];
   const assigned = (client, query, requireAuth) =>
     request(appWith({ client, requireAuth })).get(`/api/event-requests/assigned${query}`);
 

@@ -3496,3 +3496,124 @@ describe('SCRUM-491: GET /hold-candidates, the hold form event picker', () => {
     },
   );
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-488 AC5 and AC6 -- the safety statuses reach every consumer as labels
+// ---------------------------------------------------------------------------
+// Each route below already sends the shared statusDisplay, so these tests pin
+// the words themselves, written out, over the routes that feed SCRUM-14's
+// Organiser views, a coordinator's My events and the status history. The labels
+// are provisional until SCRUM-549's decision is confirmed.
+describe('SCRUM-488 AC5, AC6: the safety statuses over HTTP', () => {
+  const SAFETY = [
+    [STATUS.SAFETY_REVIEW, 'Safety check', 'UNDER_REVIEW'],
+    [STATUS.SAFETY_APPROVED, 'Safety approved', 'APPROVED'],
+  ];
+  const SAFETY_OFFICER_ID = '77777777-7777-4777-8777-777777777777';
+  const heldIn = (status, overrides = {}) => storedRow({
+    status,
+    submitted_at: '2026-01-15T09:00:00+00:00',
+    assigned_coordinator_id: COORDINATOR_ID,
+    ...overrides,
+  });
+
+  it.each(SAFETY)('SCRUM488_AC5_the_organiser_reads_an_event_in_%s_as_%s', async (status, label, group) => {
+    const client = createFakeClient([ok(heldIn(status))]);
+
+    const res = await request(appWith({ client })).get(`/api/event-requests/${REQUEST_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe(status);
+    expect(res.body.statusDisplay).toMatchObject({ status, label, group });
+    expect(res.body.statusDisplay.description).not.toMatch(/_|safety_/);
+  });
+
+  it.each(SAFETY)('SCRUM488_AC5_the_status_endpoint_answers_%s_as_%s', async (status, label, group) => {
+    const client = createFakeClient([ok(heldIn(status))]);
+
+    const res = await request(appWith({ client })).get(`/api/event-requests/${REQUEST_ID}/status`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status, label, group });
+    expect(res.body.description).not.toMatch(/_/);
+  });
+
+  it('SCRUM488_AC5_the_organisers_list_labels_events_in_both_safety_statuses_beside_the_others', async () => {
+    const client = createQueueFakeClient([ok([
+      heldIn(STATUS.SAFETY_REVIEW, { id: 'e-1' }),
+      heldIn(STATUS.SAFETY_APPROVED, { id: 'e-2' }),
+      heldIn(STATUS.APPROVED, { id: 'e-3' }),
+      heldIn(STATUS.CONFIRMED, { id: 'e-4' }),
+    ]), ok([{ id: COORDINATOR_ID, full_name: 'Carlos Coordinator' }])]);
+
+    const res = await request(appWith({ client })).get('/api/event-requests');
+
+    expect(res.body.map((row) => [row.id, row.statusDisplay.label])).toEqual([
+      ['e-1', 'Safety check'],
+      ['e-2', 'Safety approved'],
+      ['e-3', 'Planning'],
+      ['e-4', 'Confirmed'],
+    ]);
+  });
+
+  it('SCRUM488_AC6_my_events_keeps_events_in_both_safety_statuses_and_labels_them', async () => {
+    // No status filter: the read is narrowed to the coordinator and nothing else.
+    const rows = [
+      heldIn(STATUS.SAFETY_REVIEW, { id: 'mine-1', organiser_id: ORGANISER_ID }),
+      heldIn(STATUS.SAFETY_APPROVED, { id: 'mine-2', organiser_id: ORGANISER_ID }),
+      heldIn(STATUS.SUBMITTED, { id: 'mine-3', organiser_id: ORGANISER_ID }),
+    ];
+    const client = createQueueFakeClient([ok(rows), ok([{ id: ORGANISER_ID, full_name: 'Aisha Rahman' }])]);
+
+    const res = await request(appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }))
+      .get('/api/event-requests/mine');
+
+    expect(client.calls[0].filters).toEqual([['assigned_coordinator_id', COORDINATOR_ID]]);
+    expect(client.calls[0].inFilters).toEqual([]);
+    expect(res.body.map((row) => [row.id, row.status, row.statusDisplay.label, row.statusDisplay.group])).toEqual([
+      ['mine-1', 'safety_review', 'Safety check', 'UNDER_REVIEW'],
+      ['mine-2', 'safety_approved', 'Safety approved', 'APPROVED'],
+      ['mine-3', 'submitted', 'Requested', 'AWAITING_REVIEW'],
+    ]);
+  });
+
+  it('SCRUM488_AC6_the_status_history_labels_both_safety_statuses_with_reasons_oldest_first', async () => {
+    const rows = [
+      { previous_status: STATUS.APPROVED, new_status: STATUS.SAFETY_REVIEW, changed_by: COORDINATOR_ID, reason: 'Venue and equipment are arranged.', created_at: '2026-02-01T09:00:00+00:00' },
+      { previous_status: STATUS.SAFETY_REVIEW, new_status: STATUS.SAFETY_APPROVED, changed_by: SAFETY_OFFICER_ID, reason: null, created_at: '2026-02-02T09:00:00+00:00' },
+      { previous_status: STATUS.SAFETY_APPROVED, new_status: STATUS.APPROVED, changed_by: COORDINATOR_ID, reason: 'Attendance doubled.', created_at: '2026-02-03T09:00:00+00:00' },
+    ];
+    const client = createQueueFakeClient([
+      ok(heldIn(STATUS.APPROVED)),
+      ok(rows),
+      ok([{ id: COORDINATOR_ID, full_name: 'Carlos Coordinator' }, { id: SAFETY_OFFICER_ID, full_name: 'Sam Safety' }]),
+    ]);
+
+    const res = await request(appWith({ client, requireAuth: signedInAs(ORGANISER_ID) }))
+      .get(`/api/event-requests/${REQUEST_ID}/status-history`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      {
+        previousStatus: 'approved', previousStatusLabel: 'Planning',
+        newStatus: 'safety_review', newStatusLabel: 'Safety check',
+        changedByName: 'Carlos Coordinator', changedAt: '2026-02-01T09:00:00+00:00',
+        reason: 'Venue and equipment are arranged.',
+      },
+      {
+        previousStatus: 'safety_review', previousStatusLabel: 'Safety check',
+        newStatus: 'safety_approved', newStatusLabel: 'Safety approved',
+        changedByName: 'Sam Safety', changedAt: '2026-02-02T09:00:00+00:00',
+        reason: null,
+      },
+      {
+        previousStatus: 'safety_approved', previousStatusLabel: 'Safety approved',
+        newStatus: 'approved', newStatusLabel: 'Planning',
+        changedByName: 'Carlos Coordinator', changedAt: '2026-02-03T09:00:00+00:00',
+        reason: 'Attendance doubled.',
+      },
+    ]);
+    expect(client.calls[1].order).toEqual([['created_at', { ascending: true }]]);
+  });
+});

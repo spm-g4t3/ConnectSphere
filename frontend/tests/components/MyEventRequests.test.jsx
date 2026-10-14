@@ -270,3 +270,70 @@ describe("SCRUM486_AC1 where a submitted request stands with its coordinator", (
     expect(within(row).queryByText(WAITING_FOR_REVIEW)).not.toBeInTheDocument();
   });
 });
+
+
+describe("SCRUM488_AC5 the Organiser's list shows the safety statuses", () => {
+  // The words come from the server's statusDisplay (SCRUM-42). These are what
+  // it sends for each status, written out; the labels are provisional until
+  // SCRUM-549's decision is confirmed.
+  const SAFETY = [
+    ["safety_review", "Safety check", "UNDER_REVIEW", "status--under-review", "A Safety Officer is checking the arrangements for your event before it can be confirmed."],
+    ["safety_approved", "Safety approved", "APPROVED", "status--approved", "The safety check is complete. Your Coordinator can now confirm your event."],
+  ];
+
+  const safetyEvent = (status, label, group, description, overrides = {}) =>
+    eventRequest({
+      status,
+      eventName: `Event in ${status}`,
+      decision: "approved",
+      decisionNote: null,
+      decidedBy: COORDINATOR,
+      decidedAt: "2026-01-15T09:00:00+08:00",
+      statusDisplay: { status, label, group, description },
+      ...overrides,
+    });
+
+  it.each(SAFETY)("SCRUM488_AC5_shows_%s_as_%s_with_its_badge_and_description", async (status, label, group, cssClass, description) => {
+    renderList([safetyEvent(status, label, group, description)]);
+
+    const item = (await screen.findByText(`Event in ${status}`)).closest("li");
+    expect(within(item).getByText(label)).toHaveClass("status-badge", cssClass);
+    expect(within(item).getByText(description)).toBeInTheDocument();
+  });
+
+  it.each(SAFETY)("SCRUM488_AC5_never_shows_the_internal_name_or_an_unknown_status_for_%s", async (status, label, group, _cssClass, description) => {
+    const { container } = renderList([safetyEvent(status, label, group, description)]);
+
+    await screen.findByText(`Event in ${status}`);
+    const shown = container.textContent.replace(`Event in ${status}`, "");
+    expect(shown).not.toContain(status);
+    expect(shown).not.toMatch(/Unknown Status|Status Unavailable/);
+  });
+
+  it.each(SAFETY)("SCRUM488_AC5_keeps_the_approval_and_the_request_a_change_action_for_%s", async (status, label, group, _cssClass, description) => {
+    renderList([safetyEvent(status, label, group, description)]);
+
+    const item = (await screen.findByText(`Event in ${status}`)).closest("li");
+    expect(within(item).getByText("Decision")).toBeInTheDocument();
+    expect(await within(item).findByText("Approved")).toBeInTheDocument();
+    expect(within(item).getByRole("button", { name: "Request a change" })).toBeInTheDocument();
+    expect(within(item).queryByRole("button", { name: "Respond to clarification" })).not.toBeInTheDocument();
+    expect(within(item).queryByRole("button", { name: "Continue editing" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM488_AC5_labels_each_status_in_a_mixed_list_by_its_own_words", async () => {
+    renderList([
+      eventRequest({ id: "a", eventName: "A", statusDisplay: { status: "submitted", label: "Requested", group: "AWAITING_REVIEW", description: "Waiting." } }),
+      safetyEvent("safety_review", "Safety check", "UNDER_REVIEW", "Checking.", { id: "b", eventName: "B" }),
+      safetyEvent("safety_approved", "Safety approved", "APPROVED", "Done.", { id: "c", eventName: "C" }),
+      eventRequest({ id: "d", eventName: "D", status: "confirmed", statusDisplay: { status: "confirmed", label: "Confirmed", group: "CONFIRMED", description: "Going ahead." } }),
+    ]);
+
+    await screen.findByText("A");
+    const badge = (name) => within(screen.getByText(name).closest("li")).getByText(/^(Requested|Safety check|Safety approved|Confirmed)$/);
+    expect(["A", "B", "C", "D"].map((name) => badge(name).textContent))
+      .toEqual(["Requested", "Safety check", "Safety approved", "Confirmed"]);
+    expect(badge("A")).toHaveClass("status--awaiting-review");
+    expect(badge("D")).toHaveClass("status--confirmed");
+  });
+});

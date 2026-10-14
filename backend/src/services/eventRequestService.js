@@ -677,7 +677,7 @@ export async function updateEventRequest(id, changes, organiserId, { client } = 
  *
  * The rule is asked in two places on purpose. canTransition here refuses an
  * illegal move before any round trip, with the status named. The function
- * (migration 022) holds the same table in SQL and refuses it again under the
+ * (migration 022, restated by 063) holds the same table in SQL and refuses it again under the
  * row lock, because the function is callable by anything that reaches the
  * database, not only this service. A test compares the two tables pair by
  * pair, so they cannot drift unnoticed. The function also checks the thing
@@ -1935,15 +1935,19 @@ export async function listUnassignedEventRequests({ client } = {}) {
  * (assigned, not yet reviewed) through confirmed: everything that still needs
  * the coordinator. Not draft, which nobody holds; not completed, rejected or
  * cancelled, which are finished. 015's selection rule also counted planning,
- * which 020 removed. SCRUM-488's safety_review and safety_approved belong here
- * once the enum has them; named now, the read would fail on an unknown value.
+ * which 020 removed. SCRUM-488's safety_review and safety_approved are in the
+ * list, between approved and confirmed, so a coordinator holding an event in
+ * the safety check still counts it. The order is the lifecycle's and is the
+ * order of the overview's columns and of the filter's options.
  */
-// Exported for scrum487StatusClassification.test.js, which fails if an enum value is in neither list, so SCRUM-488's new statuses cannot be left out of the overview unnoticed.
+// Exported for scrum487StatusClassification.test.js, which fails if an enum value is in neither list, so a status added later cannot be left out of the overview unnoticed.
 export const ACTIVE_EVENT_STATUSES = Object.freeze([
   STATUS.SUBMITTED,
   STATUS.UNDER_REVIEW,
   STATUS.PENDING_CLARIFICATION,
   STATUS.APPROVED,
+  STATUS.SAFETY_REVIEW,
+  STATUS.SAFETY_APPROVED,
   STATUS.CONFIRMED,
 ]);
 
@@ -2096,10 +2100,10 @@ async function readCoordinatorsAndActiveEvents(db, columns) {
  * byStatus has one key for every status in ACTIVE_EVENT_STATUSES, each 0 when
  * the coordinator holds none: a missing key would make the screen guess
  * whether it means none or unknown. The keys come from the constant, not a
- * list written here, so when SCRUM-488 adds safety_review and safety_approved
- * to it, they appear here with no change. Until then AC2 is partial: those two
- * are not values of event_request_status yet, and naming one in the status
- * filter would fail the whole read (SCRUM-487 D4). activeEvents is the sum of
+ * list written here, so the safety statuses SCRUM-488 added to it appear here
+ * with no other change. Naming a status the database enum lacks in the filter
+ * would fail the whole read (SCRUM-487 D4), so the enum migration (SCRUM-550)
+ * has to reach a database before this list does. activeEvents is the sum of
  * byStatus, so the two can never disagree on one row.
  *
  * Ordered by name, then id, like the picker, never by workload: the overview
@@ -2162,8 +2166,8 @@ export async function listCoordinatorOverview({ client } = {}) {
  * unassigned count is the queue's own read on the screen.
  *
  * ACTIVE_EVENT_STATUSES, not a list of its own, so the events here are exactly
- * the ones the picker counts as "N active events" beside each name, and when
- * SCRUM-488 adds the safety statuses to that constant, both pick them up. Not
+ * the ones the picker counts as "N active events" beside each name, and the
+ * safety statuses SCRUM-488 added to that constant are in both. Not
  * the coordinators' queue statuses: those stop at pending clarification, and
  * approved and confirmed events, where an absent coordinator matters most, are
  * the ones a Lead most needs to reach.

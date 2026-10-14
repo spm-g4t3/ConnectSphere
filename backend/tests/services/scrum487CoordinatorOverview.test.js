@@ -86,8 +86,11 @@ const trail = (client) => client.calls.map((call) => call.table);
 const COORDINATOR_A = '44444444-4444-4444-8444-444444444444';
 const COORDINATOR_B = '66666666-6666-4666-8666-666666666666';
 
-/** The active statuses, written out: the test states what the code must count. */
-const ACTIVE = [STATUS.SUBMITTED, STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION, STATUS.APPROVED, STATUS.CONFIRMED];
+/** The active statuses, written out: the test states what the code must count. SCRUM-488 adds the two safety statuses, in lifecycle order. */
+const ACTIVE = [
+  STATUS.SUBMITTED, STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION, STATUS.APPROVED,
+  STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED, STATUS.CONFIRMED,
+];
 
 const profileRow = (id, fullName) => ({ id, full_name: fullName });
 const held = (coordinator, status) => ({ assigned_coordinator_id: coordinator, status });
@@ -102,6 +105,8 @@ const STATUSES = [
   { status: STATUS.UNDER_REVIEW, label: 'Under review', finished: false },
   { status: STATUS.PENDING_CLARIFICATION, label: 'Awaiting your response', finished: false },
   { status: STATUS.APPROVED, label: 'Planning', finished: false },
+  { status: STATUS.SAFETY_REVIEW, label: 'Safety check', finished: false },
+  { status: STATUS.SAFETY_APPROVED, label: 'Safety approved', finished: false },
   { status: STATUS.CONFIRMED, label: 'Confirmed', finished: false },
   { status: STATUS.COMPLETED, label: 'Completed', finished: true },
   { status: STATUS.REJECTED, label: 'Rejected', finished: true },
@@ -128,12 +133,14 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
       {
         id: COORDINATOR_A,
         fullName: 'Omar Okafor',
-        activeEvents: 6,
+        activeEvents: 8,
         byStatus: {
           [STATUS.SUBMITTED]: 1,
           [STATUS.UNDER_REVIEW]: 1,
           [STATUS.PENDING_CLARIFICATION]: 1,
           [STATUS.APPROVED]: 2,
+          [STATUS.SAFETY_REVIEW]: 1,
+          [STATUS.SAFETY_APPROVED]: 1,
           [STATUS.CONFIRMED]: 1,
         },
       },
@@ -181,7 +188,7 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
   });
 
   it('SCRUM487_AC2_the_order_is_the_reads_never_the_workload', async () => {
-    // Omar holds six and Priya none; a list sorted by workload would move
+    // Omar holds eight and Priya none; a list sorted by workload would move
     // Priya. The service keeps the read's order.
     const client = createFakeClient([ok(COORDINATORS), ok(EVENTS)]);
 
@@ -208,6 +215,22 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
     const { coordinators: [row] } = await listCoordinatorOverview({ client });
 
     expect(row).toEqual({ id: COORDINATOR_A, fullName: null, activeEvents: 1, byStatus: { ...zeros(), [STATUS.CONFIRMED]: 1 } });
+  });
+
+  it('SCRUM487_AC2_a_safety_event_is_counted_under_its_own_status_and_in_the_pickers_count', async () => {
+    // AC2-12, open until SCRUM-488 added the statuses. One event in Safety
+    // review is one under safety_review, in the total, and in the picker.
+    const events = [held(COORDINATOR_A, STATUS.SAFETY_REVIEW)];
+    const { coordinators: [row] } = await listCoordinatorOverview({ client: createFakeClient([ok(COORDINATORS), ok(events)]) });
+    const [picked] = await listCoordinatorWorkload({ client: createFakeClient([ok(COORDINATORS), ok(events)]) });
+
+    expect(row).toEqual({
+      id: COORDINATOR_A,
+      fullName: 'Omar Okafor',
+      activeEvents: 1,
+      byStatus: { ...zeros(), [STATUS.SAFETY_REVIEW]: 1 },
+    });
+    expect(picked.activeEvents).toBe(1);
   });
 
   it('SCRUM487_AC2_the_response_names_every_active_then_finished_status_with_its_badge_label', async () => {
@@ -294,6 +317,18 @@ describe('SCRUM-487 AC3: the Lead filters the list and can include finished even
     expect(read.inFilters).toEqual([]);
     expect(read.notFilters).toEqual([['assigned_coordinator_id', 'is', null]]);
   });
+
+  it.each([STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED])(
+    'SCRUM487_AC3_a_status_filter_accepts_the_safety_status_%s',
+    async (status) => {
+      // AC3-18, open until SCRUM-488 added the statuses. Both are active, so
+      // the filter is not refused and the read is narrowed to the one status.
+      const [read] = (await readWith({ status })).calls;
+
+      expect(read.filters).toEqual([['status', status]]);
+      expect(read.inFilters).toEqual([]);
+    },
+  );
 
   it('SCRUM487_AC3_coordinator_and_status_filters_combine', async () => {
     // AC3-04, AC3-15: both filters, and the order is untouched by either.
