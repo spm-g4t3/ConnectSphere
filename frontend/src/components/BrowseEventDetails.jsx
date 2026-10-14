@@ -15,6 +15,7 @@ import { getOpenEvent } from "../services/openEventService";
 import useRefreshOnReturn from "./useRefreshOnReturn";
 import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import {
+  EVENT_TIME_NOTE,
   availabilityLabel,
   formatEventDate,
   formatEventEndTime,
@@ -91,7 +92,7 @@ export default function BrowseEventDetails({ onRegister }) {
   const latest = useRef(0);
   const loaded = useRef(false);
   const sending = useRef(false);
-
+  const currentEventId = useRef(eventId);
   // Reads the event and shows the answer. Resolves to what was found, so a
   // caller that needs the fresh state (a failed registration) can act on it:
   // { kind: "open", event }, { kind: "not-open" } or { kind: "error" }, or
@@ -148,9 +149,13 @@ export default function BrowseEventDetails({ onRegister }) {
   }, [eventId]);
 
   useEffect(() => {
+    currentEventId.current = eventId;
     loaded.current = false;
+    // Banners belong to the event they were raised on.
+    setNotice(null);
+    setRegisterError(null);
     load();
-  }, [load]);
+  }, [eventId, load]);
 
   // Not while a registration is in flight: that attempt refreshes when it ends.
   const refreshOnReturn = useCallback(() => {
@@ -166,12 +171,21 @@ export default function BrowseEventDetails({ onRegister }) {
     setNotice(null);
 
     const name = event.eventName || "this event";
+    const startedOn = eventId;
     let registered;
     try {
       await onRegister(event.id);
       registered = true;
     } catch {
       registered = false;
+    }
+
+    // The reader moved to another event meanwhile: nothing about this attempt
+    // belongs on that page, and re-reading would overwrite it.
+    if (currentEventId.current !== startedOn) {
+      sending.current = false;
+      setRegistering(false);
+      return;
     }
 
     // Success or not, what is on offer may have changed, and the server's
@@ -233,11 +247,15 @@ export default function BrowseEventDetails({ onRegister }) {
               </div>
               <div>
                 <dt>Starts</dt>
-                <dd>{formatEventStartTime(event.startsAt)}</dd>
+                <dd>
+                  {formatEventStartTime(event.startsAt)} {EVENT_TIME_NOTE}
+                </dd>
               </div>
               <div>
                 <dt>Ends</dt>
-                <dd>{formatEventEndTime(event.startsAt, event.endsAt)}</dd>
+                <dd>
+                  {formatEventEndTime(event.startsAt, event.endsAt)} {EVENT_TIME_NOTE}
+                </dd>
               </div>
               <div>
                 <dt>Availability</dt>

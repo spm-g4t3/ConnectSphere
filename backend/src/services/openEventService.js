@@ -4,18 +4,21 @@
  *
  * Eligibility is domain/registrationWindow.js, applied as query filters and
  * again over the rows, so a row the query should not return never leaves here.
- * Nothing is cached. Only counts and the caller's own state leave; other
- * attendees' ids are used to count and dropped. toOpenEvent is an allowlist, so
+ * Nothing is cached. Only counts and the caller's own state leave; the database
+ * counts, so other attendees' ids never reach this service. toOpenEvent is an allowlist, so
  * a new column can never reach the response.
  *
  * Assumes SCRUM-494's settings on event_requests (registration_enabled,
  * registration_opens_at, registration_closes_at, registration_capacity; null
- * capacity is no limit) and SCRUM-22's `registrations` table. Neither is on dev
- * yet, so this fails against a real database until they are. No authorisation
- * here: the route proves the caller is an Attendee.
- */import { STATUS } from '../domain/eventRequestStatus.js';
+ * capacity is no limit; null close time is open until closed by hand) and
+ * SCRUM-22's `registrations` table, counted by migration 068. None of these is
+ * on dev yet, so the route is mounted only when OPEN_EVENTS_ENABLED=true
+ * (config/featureFlags.js). No authorisation here: the route proves the caller
+ * is an Attendee.
+ */
+import { STATUS } from '../domain/eventRequestStatus.js';
 import { isOpenForRegistration } from '../domain/registrationWindow.js';
-import { availability, holdsAPlace, ACTIVE_REGISTRATION_STATUS } from '../domain/registrationAvailability.js';
+import { availability } from '../domain/registrationAvailability.js';
 import { ValidationError, NotFoundError } from '../errors.js';
 // The repository's one uuid check, a pure module, so this service stays loadable
 // without credentials.
@@ -28,9 +31,6 @@ const SETTINGS_COLUMNS = `
 
 // status is read only to re-check it; it is not part of the response.
 const COLUMNS = `id, event_name, description, proposed_start, proposed_end, status, ${SETTINGS_COLUMNS}`;
-
-// attendee_id is read only to count and to recognise the caller; it is never returned.
-const REGISTRATION_COLUMNS = 'event_request_id, attendee_id, status';
 
 async function resolveClient(client) {
   if (client) return client;
@@ -46,6 +46,9 @@ async function resolveClient(client) {
  * placesLeft is null for no limit and never negative. isFull and isRegistered
  * are what the page labels "Full" and "Registered"; canRegister is whether the
  * Register action should be offered (advisory, see the file header).
+ * canJoinWaitlist and waitlistCount are placeholders so SCRUM-22 can add the
+ * waiting list without changing this shape: there is none yet, so never
+ * joinable and no count.
  */
 function toOpenEvent(row, activeCount, isRegistered) {
   const { placesLeft, isFull } = availability(row.registration_capacity, activeCount);
@@ -61,6 +64,8 @@ function toOpenEvent(row, activeCount, isRegistered) {
     isFull,
     isRegistered,
     canRegister: !isFull && !isRegistered,
+    canJoinWaitlist: false,
+    waitlistCount: null,
   };
 }
 
@@ -72,26 +77,6 @@ function toSettings(row) {
     registrationClosesAt: row.registration_closes_at,
     startsAt: row.proposed_start,
   };
-}
-
-/**
- * One pass over the registrations of the listed events: how many hold a place
- * per event, and which of them are the caller's. Other attendees' ids are
- * compared and discarded.
- */
-function tally(registrations, attendeeId) {
-  const counts = new Map();
-  const mine = new Set();
-
-  for (const registration of registrations) {
-    if (!holdsAPlace(registration)) continue;
-
-    const eventId = registration.event_request_id;
-    counts.set(eventId, (counts.get(eventId) ?? 0) + 1);
-    if (registration.attendee_id === attendeeId) mine.add(eventId);
-  }
-
-  return { counts, mine };
 }
 
 function assertAttendee(attendeeId) {
@@ -111,28 +96,32 @@ function openEventsQuery(db, instant) {
     .eq('status', STATUS.CONFIRMED)
     .eq('registration_enabled', true)
     .lte('registration_opens_at', instant)
-    .gt('registration_closes_at', instant)
-    .gt('proposed_start', instant);
+    .gt('proposed_start', instant)
+    // A null close time stays open until the Organiser closes registration by hand.
+    .or(`registration_closes_at.is.null,registration_closes_at.gt.${instant}`);
 }
 
 /**
- * Add availability and the caller's own state to eligible rows, reading every
- * event's registrations in one query.
+ * Add availability and the caller's own state to eligible rows. The database
+ * counts, so no row limit can cut a count short, and the ids travel in the
+ * request body, not the URL.
  */
 async function withRegistrationState(db, rows, attendeeId) {
   if (rows.length === 0) return [];
 
-  const { data: registrations, error } = await db
-    .from('registrations')
-    .select(REGISTRATION_COLUMNS)
-    .in('event_request_id', rows.map((row) => row.id))
-    .eq('status', ACTIVE_REGISTRATION_STATUS);
+  const { data, error } = await db.rpc('open_event_registration_state', {
+    p_event_ids: rows.map((row) => row.id),
+    p_attendee_id: attendeeId,
+  });
 
   if (error) throw error;
 
-  const { counts, mine } = tally(registrations ?? [], attendeeId);
+  const states = new Map((data ?? []).map((state) => [state.event_request_id, state]));
 
-  return rows.map((row) => toOpenEvent(row, counts.get(row.id) ?? 0, mine.has(row.id)));
+  return rows.map((row) => {
+    const state = states.get(row.id);
+    return toOpenEvent(row, Number(state?.active_count ?? 0), state?.is_registered === true);
+  });
 }
 
 /**
@@ -143,8 +132,8 @@ async function withRegistrationState(db, rows, attendeeId) {
  * @param {object} [options.client]
  * @param {Date} [options.now]  the instant to judge by; tests pass one
  * @returns {Promise<object[]>} possibly empty, each with only id, eventName,
- *   description, startsAt, endsAt, capacity, placesLeft, isFull, isRegistered
- *   and canRegister
+ *   description, startsAt, endsAt, capacity, placesLeft, isFull, isRegistered,
+ *   canRegister, canJoinWaitlist and waitlistCount
  * @throws {ValidationError} when no attendee was supplied, before any read
  */
 export async function listOpenEvents({ attendeeId, client, now = new Date() } = {}) {

@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 
 import BrowseEventDetails from "../../src/components/BrowseEventDetails.jsx";
 import { getOpenEvent } from "../../src/services/openEventService";
@@ -87,7 +87,7 @@ describe("SCRUM495_AC5 what the details show", () => {
 
     expect(await screen.findByRole("heading", { name: "Open Day", level: 1 })).toBeInTheDocument();
     const facts = screen.getByText("Date").closest("dl");
-    expect(facts).toHaveTextContent(/Oct 25, 2026|25 Oct 2026/);
+    expect(facts).toHaveTextContent("2026-10-25");
     expect(facts).toHaveTextContent("09:00");
     expect(facts).toHaveTextContent("11:30");
     expect(facts).toHaveTextContent("12 places left");
@@ -675,5 +675,79 @@ describe("SCRUM495 loading and error behaviour during a refresh", () => {
     expect(await screen.findByText("Registration could not be completed. Please try again.")).toBeInTheDocument();
     expect(screen.getByText(/Could not refresh this event/)).toBeInTheDocument();
     expect(screen.getByText("12 places left")).toBeInTheDocument();
+  });
+});
+
+describe("SCRUM495 moving to another event", () => {
+  function renderWithSwitch(onRegister) {
+    return render(
+      <MemoryRouter initialEntries={["/open-events/e1"]}>
+        <Link to="/open-events/e2">Go to B</Link>
+        <Routes>
+          <Route path="/open-events/:eventId" element={<BrowseEventDetails onRegister={onRegister} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("SCRUM495_clears_the_registered_notice_when_another_event_is_opened", async () => {
+    vi.mocked(getOpenEvent).mockImplementation(async (id) =>
+      id === "e1" ? event() : event({ id: "e2", eventName: "Workshop" }),
+    );
+    renderWithSwitch(vi.fn().mockResolvedValue({}));
+    await screen.findByRole("heading", { name: "Open Day", level: 1 });
+
+    await userEvent.click(registerButton());
+    expect(await screen.findByText("You are registered for Open Day.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("link", { name: "Go to B" }));
+
+    await screen.findByRole("heading", { name: "Workshop", level: 1 });
+    expect(screen.queryByText(/You are registered for/)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM495_clears_the_registration_error_when_another_event_is_opened", async () => {
+    vi.mocked(getOpenEvent).mockImplementation(async (id) =>
+      id === "e1" ? event() : event({ id: "e2", eventName: "Workshop" }),
+    );
+    renderWithSwitch(vi.fn().mockRejectedValue(new Error("no")));
+    await screen.findByRole("heading", { name: "Open Day", level: 1 });
+
+    await userEvent.click(registerButton());
+    expect(await screen.findByText(/Registration could not be completed/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("link", { name: "Go to B" }));
+
+    await screen.findByRole("heading", { name: "Workshop", level: 1 });
+    expect(screen.queryByText(/Registration could not be completed/)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM495_a_registration_that_finishes_after_the_move_leaves_the_new_event_alone", async () => {
+    let finish;
+    vi.mocked(getOpenEvent).mockImplementation(async (id) =>
+      id === "e1" ? event() : event({ id: "e2", eventName: "Workshop" }),
+    );
+    renderWithSwitch(() => new Promise((resolve) => { finish = resolve; }));
+    await screen.findByRole("heading", { name: "Open Day", level: 1 });
+
+    await userEvent.click(registerButton());
+    await userEvent.click(screen.getByRole("link", { name: "Go to B" }));
+    await screen.findByRole("heading", { name: "Workshop", level: 1 });
+    await act(async () => finish({}));
+
+    expect(screen.getByRole("heading", { name: "Workshop", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText(/You are registered for/)).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM495 time zone note", () => {
+  it("SCRUM495_names_Singapore_time_beside_the_start_and_end", async () => {
+    vi.mocked(getOpenEvent).mockResolvedValue(event());
+
+    renderDetails();
+
+    const facts = (await screen.findByText("Starts", { selector: "dt" })).closest("dl");
+    expect(facts).toHaveTextContent("09:00 (Singapore time)");
+    expect(facts).toHaveTextContent("11:30 (Singapore time)");
   });
 });

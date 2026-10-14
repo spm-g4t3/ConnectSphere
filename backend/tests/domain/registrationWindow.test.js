@@ -57,11 +57,20 @@ describe('SCRUM495_AC2 isOpenForRegistration', () => {
 
   it.each([
     ['no opening time', { registrationOpensAt: null }],
-    ['no closing time', { registrationClosesAt: null }],
     ['no start', { startsAt: null }],
     ['an unreadable opening time', { registrationOpensAt: 'soon' }],
+    ['an unreadable closing time', { registrationClosesAt: 'soon' }],
   ])('is not open with %s', (_label, overrides) => {
     expect(isOpenForRegistration(open(overrides), NOW)).toBe(false);
+  });
+
+  it.each([null, undefined])('is open with no closing time (%s): open until the Organiser closes it by hand', (closes) => {
+    expect(isOpenForRegistration(open({ registrationClosesAt: closes }), NOW)).toBe(true);
+  });
+
+  it('is not open with no closing time once the event has started, or while registration is off', () => {
+    expect(isOpenForRegistration(open({ registrationClosesAt: null, startsAt: NOW.toISOString() }), NOW)).toBe(false);
+    expect(isOpenForRegistration(open({ registrationClosesAt: null, registrationEnabled: false }), NOW)).toBe(false);
   });
 
   it('compares instants, so the same moment written with another offset is the same answer', () => {

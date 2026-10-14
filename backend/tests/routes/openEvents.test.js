@@ -60,7 +60,20 @@ function eventRow(overrides = {}) {
 
 const at = (value) => new Date(value).getTime();
 
-/** In-memory event_requests that applies what the service asks of it. */
+/** One `.or()` condition: `column.is.null` or `column.gt.value`, joined by commas. */
+function matchesOr(row, expression) {
+  return expression.split(',').some((condition) => {
+    const [column, op, value] = condition.split('.');
+    if (op === 'is') return row[column] === null || row[column] === undefined;
+    const cell = row[column];
+    return cell !== null && cell !== undefined && at(cell) > at(condition.slice(column.length + op.length + 2));
+  });
+}
+
+/**
+ * In-memory event_requests that applies what the service asks of it, and the
+ * open_event_registration_state function as the database computes it.
+ */
 function createFakeClient(
   rows,
   { error = null, ignoreFilters = false, registrations = [], registrationError = null } = {},
@@ -69,13 +82,31 @@ function createFakeClient(
 
   return {
     calls,
+    rpc(name, args) {
+      calls.push({ table: `rpc:${name}`, args });
+      if (registrationError) return Promise.resolve({ data: null, error: registrationError });
+
+      const byEvent = new Map();
+      for (const r of registrations) {
+        if (!args.p_event_ids.includes(r.event_request_id) || r.status !== 'registered') continue;
+        const state = byEvent.get(r.event_request_id) ?? { event_request_id: r.event_request_id, active_count: 0, is_registered: false };
+        state.active_count += 1;
+        state.is_registered ||= r.attendee_id === args.p_attendee_id;
+        byEvent.set(r.event_request_id, state);
+      }
+      return Promise.resolve({ data: [...byEvent.values()], error: null });
+    },
     from(table) {
       const call = { table, selected: null, filters: [], orders: [] };
       calls.push(call);
-      const source = table === 'registrations' ? registrations : rows;
-      const failure = table === 'registrations' ? registrationError : error;
+      const source = rows;
+      const failure = error;
 
       const chain = {
+        or: (expression) => {
+          call.filters.push(['or', expression]);
+          return chain;
+        },
         select: (columns) => {
           call.selected = columns;
           return chain;
@@ -107,6 +138,7 @@ function createFakeClient(
             ? [...source]
             : source.filter((row) =>
                 call.filters.every(([op, column, value]) => {
+                  if (op === 'or') return matchesOr(row, column);
                   const cell = row[column];
                   if (op === 'eq') return cell === value;
                   if (op === 'in') return value.includes(cell);
@@ -142,9 +174,20 @@ function get(client, { requireAuth = signedInWithRole(ROLE.ATTENDEE), now = () =
 }
 
 const ALLOWED_KEYS = [
-  'canRegister', 'capacity', 'description', 'endsAt', 'eventName', 'id',
-  'isFull', 'isRegistered', 'placesLeft', 'startsAt',
+  'canJoinWaitlist', 'canRegister', 'capacity', 'description', 'endsAt', 'eventName', 'id',
+  'isFull', 'isRegistered', 'placesLeft', 'startsAt', 'waitlistCount',
 ];
+
+describe('SCRUM495 waiting-list placeholders', () => {
+  it('offers no waiting list yet, even on a full event, so SCRUM-22 adds one without reshaping the response', async () => {
+    const row = eventRow({ registration_capacity: 1 });
+    const client = createFakeClient([row], { registrations: [registration(row.id, OTHER_ATTENDEE_ID)] });
+
+    const res = await get(client);
+
+    expect(res.body[0]).toMatchObject({ isFull: true, canRegister: false, canJoinWaitlist: false, waitlistCount: null });
+  });
+});
 
 describe('SCRUM495_AC1 only Attendees can open the list', () => {
   it('lets an Attendee in', async () => {
@@ -233,6 +276,8 @@ describe('SCRUM495_AC2 only open Confirmed events are listed', () => {
         isFull: false,
         isRegistered: false,
         canRegister: true,
+        canJoinWaitlist: false,
+        waitlistCount: null,
       },
     ]);
   });
@@ -286,6 +331,29 @@ describe('SCRUM495_AC2 only open Confirmed events are listed', () => {
     expect(res.body).toEqual([]);
   });
 
+  it('lists an event with no closing time, open until the Organiser closes it by hand', async () => {
+    const res = await get(createFakeClient([eventRow({ registration_closes_at: null })]));
+
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].eventName).toBe('Open Day');
+  });
+
+  it('opens an event with no closing time by direct URL too', async () => {
+    const row = eventRow({ registration_closes_at: null });
+
+    const res = await getOne(createFakeClient([row]), row.id);
+
+    expect(res.status).toBe(200);
+  });
+
+  it('still leaves out an event with no closing time once it has started', async () => {
+    const row = eventRow({ registration_closes_at: null, proposed_start: '2026-10-12T09:00:00+00:00', proposed_end: '2026-10-12T17:00:00+00:00' });
+
+    const res = await get(createFakeClient([row]));
+
+    expect(res.body).toEqual([]);
+  });
+
   it('applies the half-open window: open at the opening instant, closed at the closing instant', async () => {
     const opensNow = eventRow({ event_name: 'Opens now', registration_opens_at: NOW.toISOString() });
     const closesNow = eventRow({ event_name: 'Closes now', registration_closes_at: NOW.toISOString() });
@@ -334,8 +402,8 @@ describe('SCRUM495_AC2 only open Confirmed events are listed', () => {
       ['eq', 'status', 'confirmed'],
       ['eq', 'registration_enabled', true],
       ['lte', 'registration_opens_at', '2026-10-12T10:00:00.000Z'],
-      ['gt', 'registration_closes_at', '2026-10-12T10:00:00.000Z'],
       ['gt', 'proposed_start', '2026-10-12T10:00:00.000Z'],
+      ['or', 'registration_closes_at.is.null,registration_closes_at.gt.2026-10-12T10:00:00.000Z'],
     ]);
   });
 });
@@ -445,18 +513,36 @@ describe('SCRUM495_AC3 places left', () => {
     expect(res.body[0].placesLeft).toBe(3);
   });
 
-  it('reads all registrations in one query for the listed events, not one per event', async () => {
+  it('counts in the database, in one call for the listed events, not one per event', async () => {
     const rows = [eventRow(), eventRow(), eventRow()];
     const client = createFakeClient(rows);
 
     await get(client);
 
-    const reads = client.calls.filter((call) => call.table === 'registrations');
+    const reads = client.calls.filter((call) => call.table === 'rpc:open_event_registration_state');
     expect(reads).toHaveLength(1);
-    expect(reads[0].filters).toEqual([
-      ['in', 'event_request_id', rows.map((r) => r.id)],
-      ['eq', 'status', 'registered'],
-    ]);
+    expect(reads[0].args).toEqual({ p_event_ids: rows.map((r) => r.id), p_attendee_id: ATTENDEE_ID });
+    expect(client.calls.some((call) => call.table === 'registrations')).toBe(false);
+  });
+
+  it('counts past 1,000 registrations, because the database returns one row per event', async () => {
+    const row = eventRow({ registration_capacity: 1200 });
+    const registrations = Array.from({ length: 1100 }, (_, n) => registration(row.id, `attendee-${n}`));
+    registrations.push(registration(row.id, ATTENDEE_ID));
+
+    const res = await get(createFakeClient([row], { registrations }));
+
+    expect(res.body[0]).toMatchObject({ placesLeft: 99, isFull: false, isRegistered: true });
+  });
+
+  it('keeps the event ids out of the URL, so hundreds of open events still list', async () => {
+    const rows = Array.from({ length: 400 }, () => eventRow());
+    const client = createFakeClient(rows);
+
+    const res = await get(client);
+
+    expect(res.body).toHaveLength(400);
+    expect(client.calls.filter((call) => call.table === 'event_requests').every((call) => !call.filters.some(([op]) => op === 'in'))).toBe(true);
   });
 
   it('does not read registrations at all when no event is listed', async () => {
@@ -467,13 +553,12 @@ describe('SCRUM495_AC3 places left', () => {
     expect(client.calls.map((call) => call.table)).toEqual(['event_requests']);
   });
 
-  it('still ignores a withdrawn registration if the query returned it', async () => {
-    const row = eventRow({ registration_capacity: 1 });
-    const registrations = [registration(row.id, ATTENDEE_ID, 'withdrawn')];
+  it('treats an event the database returns no row for as empty and not registered', async () => {
+    const row = eventRow({ registration_capacity: 2 });
 
-    const res = await get(createFakeClient([row], { registrations, ignoreFilters: true }));
+    const res = await get(createFakeClient([row]));
 
-    expect(res.body[0]).toMatchObject({ placesLeft: 1, isRegistered: false, canRegister: true });
+    expect(res.body[0]).toMatchObject({ placesLeft: 2, isRegistered: false });
   });
 });
 
@@ -555,18 +640,18 @@ describe('SCRUM495_AC6 the signed-in attendee\'s own registration', () => {
     expect(Object.keys(res.body[0]).sort()).toEqual(ALLOWED_KEYS);
   });
 
-  it('selects only the event, attendee and status columns of a registration', async () => {
+  it('never reads a registration row: the database returns counts and the caller\'s own flag only', async () => {
     const client = createFakeClient([eventRow()]);
 
     await get(client);
 
-    const read = client.calls.find((call) => call.table === 'registrations');
-    expect(read.selected).toBe('event_request_id, attendee_id, status');
+    expect(client.calls.some((call) => call.table === 'registrations')).toBe(false);
+    expect(client.calls.some((call) => call.table === 'rpc:open_event_registration_state')).toBe(true);
   });
 
   it('never writes: the stand-in client has no write methods, and a clean run proves none was called', async () => {
     const client = createFakeClient([eventRow()]);
-    const chainMethods = Object.keys(client.from('registrations'));
+    const chainMethods = Object.keys(client.from('event_requests'));
 
     expect(chainMethods).not.toEqual(expect.arrayContaining(['insert', 'update', 'delete', 'upsert']));
     expect((await get(client)).status).toBe(200);
@@ -845,8 +930,8 @@ describe('SCRUM495_AC2 one event follows the same eligibility as the list', () =
       ['eq', 'status', 'confirmed'],
       ['eq', 'registration_enabled', true],
       ['lte', 'registration_opens_at', '2026-10-12T10:00:00.000Z'],
-      ['gt', 'registration_closes_at', '2026-10-12T10:00:00.000Z'],
       ['gt', 'proposed_start', '2026-10-12T10:00:00.000Z'],
+      ['or', 'registration_closes_at.is.null,registration_closes_at.gt.2026-10-12T10:00:00.000Z'],
       ['eq', 'id', row.id],
     ]);
   });
@@ -909,14 +994,15 @@ describe('SCRUM495_AC3_AC6 availability and registration state on one event', ()
     expect(res.body).toMatchObject({ placesLeft: 1, isFull: false, isRegistered: false, canRegister: true });
   });
 
-  it('reads the registrations of this one event, in one query', async () => {
+  it('reads the registration state of this one event, in one call', async () => {
     const row = eventRow();
     const client = createFakeClient([row]);
 
     await getOne(client, row.id);
 
-    expect(client.calls.filter((call) => call.table === 'registrations')).toHaveLength(1);
-    expect(client.calls[1].filters).toEqual([['in', 'event_request_id', [row.id]], ['eq', 'status', 'registered']]);
+    const reads = client.calls.filter((call) => call.table === 'rpc:open_event_registration_state');
+    expect(reads).toHaveLength(1);
+    expect(reads[0].args).toEqual({ p_event_ids: [row.id], p_attendee_id: ATTENDEE_ID });
   });
 });
 

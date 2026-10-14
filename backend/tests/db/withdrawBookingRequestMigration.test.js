@@ -416,7 +416,25 @@ describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
     });
 
     it('SCRUM253_can_be_applied_again_without_error', async () => {
+      const types = [
+        'clarification_requested',
+        'event_cancelled',
+        'event_request_assigned',
+        'safety_review_response',
+      ];
+      const existing = [];
+      for (const type of types) {
+        existing.push(await one(
+          'insert into notifications (recipient_id, type) values ($1, $2) returning *',
+          [staffA, type],
+        ));
+      }
+
       await db.exec(migration('031_withdraw_booking_request.sql'));
+
+      for (const notification of existing) {
+        expect(await one('select * from notifications where id = $1', [notification.id])).toEqual(notification);
+      }
       const { id } = await makeBooking('pending');
       expect((await withdraw(id)).booking.status).toBe('withdrawn');
     });

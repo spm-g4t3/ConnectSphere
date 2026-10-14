@@ -3,7 +3,9 @@
  * and SCRUM-22's check share one answer.
  *
  * Half-open, like venue occupancy: the window is [opens, closes), and an event
- * starting exactly now is no longer listed. Instants are compared, never
+ * starting exactly now is no longer listed. A close time that was never set
+ * means open until the Organiser closes registration by hand; one that is set
+ * but unreadable never counts as open. Instants are compared, never
  * calendar dates, so no time zone is involved. The tickets give no boundary
  * for "has not passed"; if the team reads it as closes >= now, change this and
  * the filters in openEventService.js.
@@ -20,16 +22,19 @@ function toMillis(value) {
  * @param {string} event.status
  * @param {boolean} event.registrationEnabled
  * @param {string|Date|null} event.registrationOpensAt
- * @param {string|Date|null} event.registrationClosesAt
+ * @param {string|Date|null} event.registrationClosesAt  null: no close time
  * @param {string|Date|null} event.startsAt
  * @param {Date} now
- * @returns {boolean} true only when every condition holds; a missing or
- *   unreadable time never counts as open
+ * @returns {boolean} true only when every condition holds; a missing opening
+ *   or start time, or an unreadable time, never counts as open
  */
 export function isOpenForRegistration(event, now) {
   const at = now.getTime();
   const opens = toMillis(event.registrationOpensAt);
-  const closes = toMillis(event.registrationClosesAt);
+  const closes =
+    event.registrationClosesAt === null || event.registrationClosesAt === undefined
+      ? Number.POSITIVE_INFINITY
+      : toMillis(event.registrationClosesAt);
   const starts = toMillis(event.startsAt);
 
   return (

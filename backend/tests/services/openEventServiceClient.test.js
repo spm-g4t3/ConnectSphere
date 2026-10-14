@@ -22,7 +22,7 @@ vi.mock('../../src/config/supabaseClient.js', () => {
     );
     return chain;
   };
-  return { supabase: { from }, supabaseAdmin: {}, default: {} };
+  return { supabase: { from, rpc: () => Promise.resolve(answers.rpc) }, supabaseAdmin: {}, default: {} };
 });
 
 import { listOpenEvents, getOpenEvent } from '../../src/services/openEventService.js';
@@ -52,7 +52,7 @@ beforeEach(() => {
 describe('SCRUM495 the shared client and empty answers', () => {
   it('reads through the shared Supabase client when none is passed', async () => {
     answers.event_requests = { data: [openRow], error: null };
-    answers.registrations = { data: [], error: null };
+    answers.rpc = { data: [], error: null };
 
     const events = await listOpenEvents({ attendeeId: ATTENDEE_ID, now: NOW });
 
@@ -73,9 +73,9 @@ describe('SCRUM495 the shared client and empty answers', () => {
     );
   });
 
-  it('counts no registrations when that read returns no rows and no error', async () => {
+  it('counts no registrations when the database returns no rows and no error', async () => {
     answers.event_requests = { data: [openRow], error: null };
-    answers.registrations = { data: null, error: null };
+    answers.rpc = { data: null, error: null };
 
     const [event] = await listOpenEvents({ attendeeId: ATTENDEE_ID, now: NOW });
 

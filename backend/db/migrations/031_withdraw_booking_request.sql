@@ -87,15 +87,31 @@
 
 
 -- ---------------------------------------------------------------------
--- 1. Notifications accept the new type (extends 014)
+-- 1. Notifications accept the withdrawal type
 -- ---------------------------------------------------------------------
--- Replaced rather than altered, as 014 said a check can be: drop and add in
--- one transaction. The new rule names its reference, as booking_flagged does.
+-- Preserve 052's notification vocabulary and the live safety types so applying
+-- this missing migration also succeeds on a database with newer notifications.
 
 alter table notifications drop constraint if exists notifications_type_known;
 alter table notifications
   add constraint notifications_type_known
-  check (type in ('booking_flagged', 'booking_request_withdrawn'));
+  check (type in (
+    'booking_flagged',
+    'booking_request_withdrawn',
+    'clarification_requested',
+    'clarification_replied',
+    'clarification_closed',
+    'booking_flagged_setup_change',
+    'venue_hold_expired',
+    'event_cancelled',
+    'event_request_awaiting_assignment',
+    'event_request_assigned',
+    'event_request_coordinator_assigned',
+    'safety_review_response',
+    'safety_booking_flagged',
+    'safety_equipment_review',
+    'event_submitted_for_safety_review'
+  ));
 
 alter table notifications drop constraint if exists notifications_request_withdrawn_needs_booking;
 alter table notifications

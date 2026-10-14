@@ -12,6 +12,7 @@ import { getOpenEvents } from "../services/openEventService";
 import useRefreshOnReturn from "./useRefreshOnReturn";
 import { openEventDetailsPath } from "../services/openEventRoutes";
 import {
+  EVENT_TIME_NOTE,
   availabilityLabel,
   formatEventDate,
   formatEventEndTime,
@@ -42,6 +43,7 @@ function EventRow({ event }) {
           <span>{formatEventDate(event.startsAt)}</span>
           <span>Starts {formatEventStartTime(event.startsAt)}</span>
           <span>Ends {formatEventEndTime(event.startsAt, event.endsAt)}</span>
+          <span>{EVENT_TIME_NOTE}</span>
         </span>
       </div>
       <span

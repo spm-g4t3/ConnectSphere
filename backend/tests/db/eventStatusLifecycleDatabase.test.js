@@ -1519,23 +1519,10 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       expect(await noticesFor(id)).toEqual(before);
     });
 
-    it('SCRUM486_AC10_052_keeps_every_type_048_allows_and_adds_three', async () => {
-      // AC10-04, read from the files. notifications_type_known is restated
-      // whole each time, so 052 must restate the latest list before it, which
-      // is 048's eight: 040's seven and SCRUM-370's event_cancelled. Leaving
-      // venue_hold_expired out would stop venue holds expiring; leaving
-      // event_cancelled out would stop cancellation (052's header).
-      //
-      // Was SCRUM486_AC10_041_keeps_every_type_040_allows_and_adds_three, and
-      // read 040. Right when written: 040 was the latest list in this
-      // repository. The merge of dev brought 048, which restates it with
-      // event_cancelled, and the file moved from 041 to 052 to apply after it.
-      // 040's seven are still checked, as the first part of 048's list.
-      //
-      // The constraint in force is checked too, so the PGlite database agrees.
-      // That database does not apply 048 (this suite builds SCRUM-486's
-      // migrations, not SCRUM-370's), which is exactly why the list is read
-      // from 048's text: no PGlite suite applies both stories' files.
+    it('SCRUM486_AC10_052_preserves_existing_notification_types_when_reapplied', async () => {
+      // Restating a narrower list fails when newer notifications already exist.
+      // Read the baseline from 048 because this suite does not apply it, then
+      // reapply 052 with existing safety notices to reproduce the live failure.
       const typesIn = (name) => {
         const sql = migration(name).replace(/--[^\n]*/g, '');
         const at = sql.lastIndexOf('add constraint notifications_type_known');
@@ -1545,6 +1532,12 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       const from040 = typesIn('040_venue_holds.sql');
       const from048 = typesIn('048_complete_event_cancellation_existing_arrangements.sql');
       const in052 = typesIn('052_lead_assignment.sql');
+      const safetyTypes = [
+        'safety_review_response',
+        'safety_booking_flagged',
+        'safety_equipment_review',
+        'event_submitted_for_safety_review',
+      ];
 
       expect(from040).toEqual([
         'booking_flagged',
@@ -1561,7 +1554,21 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
         'event_request_awaiting_assignment',
         'event_request_assigned',
         'event_request_coordinator_assigned',
+        ...safetyTypes,
       ]);
+      const existing = [];
+      for (const type of safetyTypes) {
+        existing.push(await one(
+          'insert into notifications (recipient_id, type) values ($1, $2) returning *',
+          [organiser, type],
+        ));
+      }
+
+      await db.exec(migration('052_lead_assignment.sql'));
+
+      for (const notification of existing) {
+        expect(await one('select * from notifications where id = $1', [notification.id])).toEqual(notification);
+      }
       const { rows: [def] } = await db.query(
         "select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'notifications_type_known'",
       );

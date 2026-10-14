@@ -3,9 +3,10 @@
 //
 // SCRUM-495 (AC3). How availability, dates and times read on the browse list.
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 
 import {
+  EVENT_TIME_NOTE,
   availabilityLabel,
   formatEventDate,
   formatEventEndTime,
@@ -48,17 +49,17 @@ describe.each(["Asia/Singapore", "America/New_York", "Pacific/Kiritimati"])(
     it("reads 09:00 to 11:30 on the 25th", () => {
       process.env.TZ = deviceZone;
 
-      expect(formatEventDate(startsAt)).toMatch(/Oct 25, 2026|25 Oct 2026/);
-      expect(formatEventStartTime(startsAt)).toContain("09:00");
-      expect(formatEventEndTime(startsAt, endsAt)).toContain("11:30");
+      expect(formatEventDate(startsAt)).toBe("2026-10-25");
+      expect(formatEventStartTime(startsAt)).toBe("09:00");
+      expect(formatEventEndTime(startsAt, endsAt)).toBe("11:30");
     });
 
     it("shows the end date only where the event crosses midnight in Singapore", () => {
       // 15:00Z to 17:00Z is 23:00 to 01:00 the next day in Singapore, the same afternoon in New York.
       process.env.TZ = deviceZone;
 
-      expect(formatEventEndTime("2026-10-25T15:00:00.000Z", "2026-10-25T17:00:00.000Z")).toMatch(/Oct 26, 2026|26 Oct 2026/);
-      expect(formatEventEndTime("2026-10-25T01:00:00.000Z", "2026-10-25T03:00:00.000Z")).not.toMatch(/Oct/);
+      expect(formatEventEndTime("2026-10-25T15:00:00.000Z", "2026-10-25T17:00:00.000Z")).toBe("2026-10-26 01:00");
+      expect(formatEventEndTime("2026-10-25T01:00:00.000Z", "2026-10-25T03:00:00.000Z")).toBe("11:00");
     });
 
     it("accepts the same instant written with an offset", () => {
@@ -75,5 +76,24 @@ describe("SCRUM495_AC3 unreadable times", () => {
     expect(formatEventDate(null)).toBe("Date to be confirmed");
     expect(formatEventStartTime("not a date")).toBe("Not set");
     expect(formatEventEndTime("2026-10-25T01:00:00.000Z", undefined)).toBe("Not set");
+  });
+});
+
+describe("SCRUM495_AC3 the same text whatever the browser's locale", () => {
+  it("does not call the locale-dependent formatters", () => {
+    const date = vi.spyOn(Date.prototype, "toLocaleDateString");
+    const time = vi.spyOn(Date.prototype, "toLocaleTimeString");
+
+    formatEventDate("2026-10-25T01:00:00.000Z");
+    formatEventStartTime("2026-10-25T01:00:00.000Z");
+    formatEventEndTime("2026-10-25T01:00:00.000Z", "2026-10-26T01:00:00.000Z");
+
+    expect(date).not.toHaveBeenCalled();
+    expect(time).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("carries one zone note, shared with the venue pages", () => {
+    expect(EVENT_TIME_NOTE).toBe("(Singapore time)");
   });
 });

@@ -85,7 +85,7 @@ describe("SCRUM495_AC3 what each row shows", () => {
 
     const row = within(await screen.findByRole("list")).getByRole("listitem");
     expect(within(row).getByRole("link", { name: "Open Day" })).toBeInTheDocument();
-    expect(row).toHaveTextContent(/Oct 25, 2026|25 Oct 2026/);
+    expect(row).toHaveTextContent("2026-10-25");
     expect(row).toHaveTextContent("Starts 09:00");
     expect(row).toHaveTextContent("Ends 11:30");
     expect(row).toHaveTextContent("12 places left");
@@ -155,7 +155,7 @@ describe("SCRUM495_AC3 what each row shows", () => {
     renderPage();
 
     const row = within(await screen.findByRole("list")).getByRole("listitem");
-    expect(row).toHaveTextContent(/Oct 27, 2026|27 Oct 2026/);
+    expect(row).toHaveTextContent("2026-10-27");
   });
 
   it("shows a nameless event as an unnamed event", async () => {
