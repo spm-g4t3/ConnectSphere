@@ -43,6 +43,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 import { STATUS, canTransition } from '../../src/domain/eventRequestStatus.js';
+import { ELEVEN_STATUSES, EVERY_PAIR } from '../fixtures/expectedTransitionMatrix.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
@@ -766,34 +767,11 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
   });
 
   describe('the database holds the same transition table as the domain', () => {
-    // Hand-written from SCRUM-318 as changed by SCRUM-488 AC2, not read from
-    // either module, so neither copy can drift without this test saying so.
-    const LEGAL = [
-      ['draft', 'submitted'],
-      ['submitted', 'under_review'],
-      ['under_review', 'pending_clarification'],
-      ['pending_clarification', 'under_review'],
-      ['under_review', 'approved'],
-      ['under_review', 'rejected'],
-      ['approved', 'rejected'],
-      ['rejected', 'draft'],
-      ['approved', 'safety_review'],
-      ['safety_review', 'safety_approved'],
-      ['safety_review', 'approved'],
-      ['safety_approved', 'approved'],
-      ['safety_approved', 'confirmed'],
-      ['confirmed', 'approved'],
-      ['confirmed', 'completed'],
-      ['submitted', 'cancelled'],
-      ['under_review', 'cancelled'],
-      ['pending_clarification', 'cancelled'],
-      ['approved', 'cancelled'],
-      ['safety_review', 'cancelled'],
-      ['safety_approved', 'cancelled'],
-      ['confirmed', 'cancelled'],
-    ];
-    const ELEVEN = Object.values(STATUS);
-    const WITH_PLANNING = [...ELEVEN, 'planning'];
+    // From tests/fixtures/expectedTransitionMatrix.js: written out from
+    // SCRUM-318 as changed by SCRUM-488 AC2, read by neither implementation,
+    // so neither copy can drift without this test saying so.
+    const LEGAL = EVERY_PAIR.filter(([, , allowed]) => allowed).map(([from, to]) => [from, to]);
+    const ELEVEN = ELEVEN_STATUSES;    const WITH_PLANNING = [...ELEVEN, 'planning'];
     const isLegal = (from, to) => LEGAL.some(([f, t]) => f === from && t === to);
 
     it('SCRUM488_AC2_allows_exactly_the_twenty_two_listed_transitions_and_nothing_else', async () => {
@@ -809,6 +787,31 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       expect(allowed.map((pair) => pair.join('>')).sort()).toEqual(LEGAL.map((pair) => pair.join('>')).sort());
     });
 
+    it('SCRUM553_AC2_every_pair_of_the_eleven_statuses_matches_the_expected_matrix_in_SQL_and_in_JavaScript', async () => {
+      expect([...Object.values(STATUS)].sort()).toEqual([...ELEVEN].sort());
+      for (const [from, to, allowed] of EVERY_PAIR) {
+        const { rows: [r] } = await db.query('select event_request_status_allows($1, $2) as allowed', [from, to]);
+        expect(r.allowed, `SQL ${from} -> ${to}`).toBe(allowed);
+        expect(canTransition(from, to), `JS ${from} -> ${to}`).toBe(allowed);
+      }
+    });
+
+    it('SCRUM553_AC2_the_retired_planning_status_is_allowed_to_and_from_nothing', async () => {
+      for (const other of ELEVEN) {
+        for (const [from, to] of [['planning', other], [other, 'planning']]) {
+          const { rows: [r] } = await db.query('select event_request_status_allows($1, $2) as allowed', [from, to]);
+          expect(r.allowed, `SQL ${from} -> ${to}`).toBe(false);
+          expect(canTransition(from, to), `JS ${from} -> ${to}`).toBe(false);
+        }
+      }
+    });
+
+    it('SCRUM553_AC2_approved_to_confirmed_is_refused_by_both_guards', async () => {
+      const { rows: [r] } = await db.query("select event_request_status_allows('approved', 'confirmed') as allowed");
+
+      expect(r.allowed).toBe(false);
+      expect(canTransition('approved', 'confirmed')).toBe(false);
+    });
     it('SCRUM318_agrees_with_canTransition_for_every_pair_of_statuses', async () => {
       for (const from of WITH_PLANNING) {
         for (const to of WITH_PLANNING) {

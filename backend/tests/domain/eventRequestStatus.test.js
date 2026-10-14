@@ -13,6 +13,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
+import { ELEVEN_STATUSES, EXPECTED_TRANSITIONS, EVERY_PAIR } from '../fixtures/expectedTransitionMatrix.js';
+
 import {
   STATUS,
   STATUS_GROUP,
@@ -259,38 +261,33 @@ describe('only legal status transitions are permitted', () => {
     expect(canTransition(from, to)).toBe(false);
   });
 
-  it('refuses every transition outside the SCRUM-318 table as SCRUM-488 changed it', () => {
-    // The whole table, so a transition added by accident fails here even when
-    // nobody thought to write a case for it. All eleven statuses, 121 pairs.
-    const permitted = new Set([
-      'draft>submitted',
-      'submitted>under_review',
-      'under_review>pending_clarification',
-      'pending_clarification>under_review',
-      'under_review>approved',
-      'under_review>rejected',
-      'approved>rejected',
-      'rejected>draft',
-      'approved>safety_review',
-      'safety_review>safety_approved',
-      'safety_review>approved',
-      'safety_approved>approved',
-      'safety_approved>confirmed',
-      'confirmed>approved',
-      'confirmed>completed',
-      ...CANCELLABLE.map((s) => `${s}>cancelled`),
-    ]);
-
-    expect(permitted.size).toBe(22);
-    expect(ALL_STATUSES).toHaveLength(11);
-    for (const from of ALL_STATUSES) {
-      for (const to of ALL_STATUSES) {
-        expect(canTransition(from, to), `${from} -> ${to}`)
-          .toBe(permitted.has(`${from}>${to}`));
-      }
+  it('SCRUM553_AC2_agrees_with_the_expected_matrix_for_every_pair_of_the_eleven_statuses', () => {
+    // 121 pairs against tests/fixtures/expectedTransitionMatrix.js, which is
+    // written out and read by no implementation.
+    expect([...ALL_STATUSES].sort()).toEqual([...ELEVEN_STATUSES].sort());
+    expect(EVERY_PAIR).toHaveLength(121);
+    expect(EVERY_PAIR.filter(([, , allowed]) => allowed)).toHaveLength(22);
+    for (const [from, to, allowed] of EVERY_PAIR) {
+      expect(canTransition(from, to), `${from} -> ${to}`).toBe(allowed);
     }
   });
 
+  it('SCRUM553_AC2_ALLOWED_TRANSITIONS_lists_exactly_the_expected_targets_for_every_status', () => {
+    for (const status of ELEVEN_STATUSES) {
+      expect([...ALLOWED_TRANSITIONS[status]].sort(), status).toEqual([...EXPECTED_TRANSITIONS[status]].sort());
+    }
+  });
+
+  it('SCRUM553_AC2_approved_to_confirmed_is_refused', () => {
+    expect(canTransition('approved', 'confirmed')).toBe(false);
+    expect(ALLOWED_TRANSITIONS[STATUS.APPROVED]).not.toContain(STATUS.CONFIRMED);
+  });
+
+  it('SCRUM553_AC2_completed_and_cancelled_lead_nowhere_among_the_eleven', () => {
+    for (const from of ['completed', 'cancelled']) {
+      expect(ELEVEN_STATUSES.filter((to) => canTransition(from, to)), from).toEqual([]);
+    }
+  });
   it('SCRUM488_AC2_confirmed_is_reached_only_from_safety_approved', () => {
     const into = ALL_STATUSES.filter((from) => canTransition(from, STATUS.CONFIRMED));
 
