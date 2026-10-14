@@ -226,6 +226,7 @@ function one(embedded) {
 const LIST_COLUMNS = `
   id, event_request_id, venue_id, starts_at, ends_at, status,
   room_layout_code, setup_notes, suitability_overridden, created_at, flagged_at, review_reason,
+  decided_at, decision_reason, suggested_alternative,
   venues(name, location),
   event_requests!inner(event_name, status, assigned_coordinator_id)
 `;
@@ -240,6 +241,10 @@ const LIST_COLUMNS = `
  * reviewReason is the code a setup or turnaround change stored when it
  * flagged the booking (034, 'setup_or_turnaround_changed'); null for a block
  * flag or an unflagged booking.
+ * decidedAt, decisionReason and suggestedAlternative are Venue Staff's
+ * decision (066), named as toDecidedBookingRequest names them; null until
+ * decided, and both texts are null on an approval. decided_by is not read:
+ * a Venue Staff user id tells the coordinator nothing.
  *
  * @param {object} row  from LIST_COLUMNS
  */
@@ -263,6 +268,9 @@ function toBookingRequestListItem(row) {
     suitabilityOverridden: row.suitability_overridden ?? false,
     flaggedAt: row.flagged_at ?? null,
     reviewReason: row.review_reason ?? null,
+    decidedAt: row.decided_at ?? null,
+    decisionReason: row.decision_reason ?? null,
+    suggestedAlternative: row.suggested_alternative ?? null,
     createdAt: row.created_at,
   };
 }

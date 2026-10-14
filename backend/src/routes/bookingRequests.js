@@ -62,7 +62,8 @@ export function createBookingRequestRouter({
 
   /**
    * SCRUM-255: the signed-in coordinator's booking requests, newest first,
-   * every status, each with its event, venue and period.
+   * every status, each with its event, venue and period, and Venue Staff's
+   * decision once made (SCRUM-258 AC6).
    *
    * Narrowed to the events assigned to req.user.id, never to anything in the
    * query string or body, so one coordinator cannot read another's. Behind

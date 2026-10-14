@@ -928,9 +928,35 @@ describe('SCRUM-255: the coordinator lists their booking requests', () => {
         suitabilityOverridden: false,
         flaggedAt: null,
         reviewReason: null,
+        decidedAt: null,
+        decisionReason: null,
+        suggestedAlternative: null,
         createdAt: '2026-10-06T10:00:00+00:00',
       },
     ]);
+  });
+
+  it('SCRUM258_AC6_a_rejected_request_returns_the_reason_and_suggested_alternative', async () => {
+    const res = await list(
+      createFakeClient([
+        ok([
+          listRow({
+            status: 'rejected',
+            decided_at: '2026-10-08T10:00:00+00:00',
+            decision_reason: 'Hall closed for repairs',
+            suggested_alternative: 'Annex, same time',
+          }),
+        ]),
+      ]),
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body[0]).toMatchObject({
+      status: 'rejected',
+      decidedAt: '2026-10-08T10:00:00+00:00',
+      decisionReason: 'Hall closed for repairs',
+      suggestedAlternative: 'Annex, same time',
+    });
   });
 
   it.each([
