@@ -8,9 +8,8 @@
  *   3. Keep was offered, and always refused, for a reservation flagged by a
  *      date change. The review read now says per reservation whether it can work.
  *
- * The lock-order deadlock between an inventory change and a reservation needs
- * two connections, and PGlite has one, so it is covered by the service tests
- * that map 40P01 to a 409.
+ * The lock order between an inventory change and a reservation is part of 061, and is
+ * pinned in equipmentReviewFollowupsDatabase.test.js.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

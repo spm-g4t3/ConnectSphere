@@ -199,6 +199,12 @@ describe("EquipmentReview: starting and taking over", () => {
     expect(screen.getByRole("button", { name: "Review again" })).toBeInTheDocument();
   });
 
+  it("SCRUM290_the_reviewer_is_told_they_own_the_review_and_since_when", async () => {
+    await open(underReview());
+    expect(screen.getByText(/You are reviewing this request \(since /)).toBeInTheDocument();
+    expect(screen.queryByText(/Being reviewed by/)).not.toBeInTheDocument();
+  });
+
   it("SCRUM290_someone_elses_review_shows_their_name_and_take_over_only", async () => {
     await open(state({ status: "under_review", statusLabel: "Under review", reviewerId: OTHER }));
     expect(screen.getByText(/Being reviewed by Sam Lee/)).toBeInTheDocument();
@@ -311,6 +317,12 @@ describe("EquipmentReview: completing", () => {
     await open(underReview({ lines: [line(), line({ id: "line-2", name: "Microphone" })] }));
     await userEvent.click(screen.getByRole("button", { name: "Complete review" }));
     expect(screen.getByText(/2 items are not fully reserved/)).toBeInTheDocument();
+  });
+
+  it("SCRUM290_complete_says_arranged_when_nothing_is_short", async () => {
+    await open(underReview({ lines: [line({ reserved: 3, shortBy: 0 })] }));
+    await userEvent.click(screen.getByRole("button", { name: "Complete review" }));
+    expect(screen.getByText(/Every item is fully reserved, so this request will be marked Arranged/)).toBeInTheDocument();
   });
 
   it("SCRUM290_confirming_completes_and_shows_the_new_status", async () => {

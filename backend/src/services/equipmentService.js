@@ -80,8 +80,8 @@ function translateError(error) {
     });
   }
 
-  // A change here can flag reservations (054) while a reviewer reserves the same
-  // equipment; Postgres undoes one of the two. Nothing was saved, so try again.
+  // 061 makes these lock in one order, so this should not happen. If Postgres
+  // still undoes one of two changes, nothing was saved: try again.
   if (code === '40P01') {
     return new ConflictError('Someone changed this equipment at the same moment. Please try again.', {
       code: 'EQUIPMENT_CHANGED_AT_THE_SAME_TIME',

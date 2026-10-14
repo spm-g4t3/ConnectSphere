@@ -115,9 +115,8 @@ function translateError(error) {
     return new ConflictError(detail, { code: REVIEW_NOT_ALLOWED });
   }
 
-  // An inventory change and a reservation can lock the same rows in opposite
-  // orders, and Postgres then undoes one of them. Nothing was saved, so the
-  // screen says to try again.
+  // 061 makes these lock in one order, so this should not happen. If Postgres
+  // still undoes one of two changes, nothing was saved: try again.
   if (code === '40P01') {
     return new ConflictError('Someone changed this equipment at the same moment. Please try again.', {
       code: REVIEW_NOT_ALLOWED,

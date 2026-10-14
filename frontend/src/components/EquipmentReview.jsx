@@ -528,7 +528,7 @@ export default function EquipmentReview() {
       <section className={`er-next er-next--${next.tone}`} aria-label="Next step">
         <h2>{next.title}</h2>
         <p>{next.text}</p>
-        {status === "under_review" && !isReviewer && (
+        {status === "under_review" && (
           <p className="er-next__who">
             {isReviewer
               ? `You are reviewing this request (since ${formatTimestamp(request.reviewStartedAt)}).`
@@ -1014,7 +1014,9 @@ export default function EquipmentReview() {
           ) : (
             <div className="equipment-review__confirm">
               <p>
-                {`${shortLines.length} item${shortLines.length === 1 ? " is" : "s are"} not fully reserved. Each needs a "Cannot be provided" note, and the request will be marked Cannot be fully arranged. Reservations already made are kept.`}
+                {shortLines.length === 0
+                  ? "Every item is fully reserved, so this request will be marked Arranged."
+                  : `${shortLines.length} item${shortLines.length === 1 ? " is" : "s are"} not fully reserved. Each needs a "Cannot be provided" note, and the request will be marked Cannot be fully arranged. Reservations already made are kept.`}
               </p>
               <div className="equipment-review__actions">
                 <button type="button" className="er-btn er-btn--primary" disabled={busy} onClick={handleComplete}>
