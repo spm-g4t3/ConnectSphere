@@ -5,6 +5,7 @@
 **Schema:** `064_safety_review_submission.sql` (SCRUM-555, SCRUM-556), after SCRUM-488's 062 and 063.
 **Written:** 14 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; each **Implemented by** says so, and the subtask that writes its tests fills it in.
 **Marked:** 14 October 2026, SCRUM-555 and SCRUM-556: every case their tests prove names them. The cases themselves are unchanged.
+**Marked:** 14 October 2026, SCRUM-557 and SCRUM-558: the screen's cases and AC7-01, AC8-04 marked; AC1-10, AC6-06, AC8-06 and AC8-07 added for the screen and the notice's wording.
 
 This document is the written layer between SCRUM-489's acceptance criteria and the
 Vitest files that implement them. The chain is **user story → acceptance criteria
@@ -27,7 +28,9 @@ are marked **(trap)**.
 | pglite | `backend/tests/db/scrum489SafetyReviewSubmissionDatabase.test.js` | What the database does: the readiness lines, the refusals and their SQLSTATEs, what is written and what is not |
 | svc | `backend/tests/services/scrum489…` (fake client) | What the service refuses before the database, and how each SQLSTATE becomes an error |
 | route | `backend/tests/routes/scrum489…` (fake client) | Gates, status codes, the caller from the token, query and body parameters |
-| screen | `frontend/tests/components/` | What the coordinator sees (SCRUM-557) |
+| pglite-558 | `backend/tests/db/scrum489EquipmentLockDatabase.test.js` | AC7's lock and AC8's label, from a real submission (SCRUM-558) |
+| screen | `frontend/tests/components/scrum489…` | What the coordinator sees (SCRUM-557) |
+| display | `frontend/tests/services/scrum489…` | The panel's two calls, and the notice's wording |
 
 Which subtask writes each: SCRUM-555 (AC2, AC3's read, AC4's line), SCRUM-556 (AC1,
 AC3's refusal, AC4, AC5, AC6, AC8's notice), SCRUM-557 (every screen case),
@@ -207,7 +210,8 @@ SCRUM-490 AC3 says the note is where they are described. Open question 2.
 `CoordinatorRequestDetail.jsx` and `EventCancellationPanel.jsx` leave out both
 safety statuses, though SCRUM-488 made the moves legal. Once this story can put an
 event in Safety review, its coordinator loses Cancel there. Cancellation is
-SCRUM-370's; nothing is changed here. Open question 3.
+SCRUM-370's; the gap is SCRUM-561 ("Cancel an Event in a Safety Status - Event
+Coordinator"). Nothing is changed here. Open question 3.
 
 ### D15. Built on SCRUM-488's working assumptions
 
@@ -233,6 +237,7 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
 | AC1-07 | No token | `POST /:id/safety-review` | 401, nothing queried | Proved (route): `SCRUM489_AC1_the_submission_answers_401_without_a_token` |
 | AC1-08 **(trap)** | A coordinator | `POST /:id/safety-review` with `coordinatorId` in the body | The caller is the token's user; the body's id is ignored | Proved (route): `SCRUM489_AC1_the_caller_is_the_tokens_user_not_the_bodys` |
 | AC1-09 | A coordinator | `POST /:id/safety-review` with an id that is not a uuid | 400, no rpc | Proved (route): `SCRUM489_AC1_an_id_that_is_not_a_uuid_is_400_and_queries_nothing`; (svc) `SCRUM489_AC5_%s_is_refused_with_400_before_any_rpc` |
+| AC1-10 | The coordinator's event page | Open it as A while Approved; as a Lead; as B; as A in every other status; then a refusal | The submission panel only for A while Approved; each refusal worded by status and code, never the server's text (a convenience: AC1-02 to AC1-04 are the gate) | Proved (screen): `SCRUM489_AC1_the_assigned_coordinator_of_an_approved_event_is_offered_it`, `SCRUM489_AC1_%s_is_not_offered_it`, `SCRUM489_AC1_an_event_that_is_%s_offers_no_submission`, `SCRUM489_AC1_a_%s%s_shows_its_own_message`, `SCRUM489_AC1_a_request_that_never_reached_the_server_shows_the_generic_message` |
 
 ### AC2 — the readiness conditions
 
@@ -264,7 +269,7 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
 | AC3-06 | — | `?noEquipmentConfirmed=true`, `=false`, absent; anything else | Sent as true, false, false; anything else 400, no rpc | Proved (route): `SCRUM489_AC3_%j_reads_with_no_equipment_confirmed_%s`, `SCRUM489_AC3_%s_is_400_and_queries_nothing` |
 | AC3-07 | An Organiser, a Safety Officer; no token; a non-uuid id | `GET /:id/readiness` | 403; 401; 400, no rpc | Proved (route): `SCRUM489_AC3_%s_is_refused_the_checklist_with_403_and_queries_nothing`, `SCRUM489_AC3_the_checklist_answers_401_without_a_token`, `SCRUM489_AC3_an_id_that_is_not_a_uuid_is_400_and_queries_nothing`; (svc) `SCRUM489_AC3_%s_is_refused_with_400_before_any_rpc` |
 | AC3-08 **(trap)** | — | `GET /:id/readiness` | Not read as an id, and declared with the other `/:id/…` reads | Proved (route): `SCRUM489_AC3_%s_reads_the_checklist`, `SCRUM489_AC3_a_draft_is_answered_as_not_found` |
-| AC3-09 | An event with met and outstanding lines | Open the submission panel | Each line shown as met or outstanding, with its detail | **not yet implemented** (SCRUM-557) |
+| AC3-09 | An event with met and outstanding lines | Open the submission panel | Each line shown as met or outstanding, with its detail | Proved (screen): `SCRUM489_AC3_each_item_shows_met_or_outstanding_in_words_with_its_detail`, `SCRUM489_AC3_submit_is_disabled_while_anything_is_outstanding`, `SCRUM489_AC3_a_409_event_not_ready_shows_every_returned_line_and_reads_the_checklist_again` |
 
 ### AC4 — the no-equipment acknowledgement
 
@@ -276,7 +281,7 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
 | AC4-04 | Requirements not empty, an active equipment request | `event_readiness` | No acknowledgement line; the request's own line decides | Proved (pglite): `SCRUM489_AC4_whitespace_requirements_or_an_active_request_need_no_confirmation` |
 | AC4-05 | No acknowledgement line | A submits with `noEquipmentConfirmed` true | Allowed; `no_equipment_confirmed` stored false (nothing was acknowledged) | Proved (pglite): `SCRUM489_AC4_a_confirmation_with_nothing_to_confirm_is_stored_false` |
 | AC4-06 | — | The service with a non-boolean `noEquipmentConfirmed` | 400, no rpc | Proved (svc): `SCRUM489_AC3_%s_is_refused_with_400_before_any_rpc`, `SCRUM489_AC5_%s_is_refused_with_400_before_any_rpc`; (route) `SCRUM489_AC5_%s_is_400_and_queries_nothing` |
-| AC4-07 | The acknowledgement line present | Open the panel | A confirmation the coordinator must tick | **not yet implemented** (SCRUM-557) |
+| AC4-07 | The acknowledgement line present | Open the panel | A confirmation the coordinator must tick | Proved (screen): `SCRUM489_AC4_with_%s_the_checkbox_is_%s`, `SCRUM489_AC4_ticking_reads_again_with_no_equipment_confirmed_and_shows_the_servers_answer`, `SCRUM489_AC4_the_confirmation_is_sent_on_submit` |
 
 ### AC5 — the note for the Safety Officer
 
@@ -287,7 +292,7 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
 | AC5-03 **(trap)** | Ready | An empty or whitespace-only note; no note | Stored as no note (null), in the submission and the history | Proved (pglite): `SCRUM489_AC5_a_note_that_is_%s_is_stored_as_it_should_be`; (svc) `SCRUM489_AC5_a_note_that_is_%s_is_sent_as_null` |
 | AC5-04 | Ready | A note with surrounding spaces | Stored trimmed | Proved (pglite): `SCRUM489_AC6_the_status_history_submission_and_notices_are_written_once`; (svc) `SCRUM489_AC6_a_submission_is_one_rpc_with_the_caller_the_trimmed_note_and_the_confirmation` |
 | AC5-05 | — | The service with a note that is not a string | 400, no rpc | Proved (svc): `SCRUM489_AC5_%s_is_refused_with_400_before_any_rpc` |
-| AC5-06 | — | Type in the panel | A note box, optional, with a 2,000-character limit | **not yet implemented** (SCRUM-557) |
+| AC5-06 | — | Type in the panel | A note box, optional, with a 2,000-character limit | Proved (screen): `SCRUM489_AC5_the_counter_counts_the_trimmed_note`, `SCRUM489_AC5_a_note_of_2000_characters_is_accepted_and_sent`, `SCRUM489_AC5_a_note_of_2001_characters_blocks_submit_with_a_message`, `SCRUM489_AC5_a_whitespace_only_note_sends_no_note` |
 
 ### AC6 — what a submission records
 
@@ -298,12 +303,13 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
 | AC6-03 **(trap)** | A submission row | Update it; delete it | Both refused; the row unchanged | Proved (pglite): `SCRUM489_AC6_a_submission_row_cannot_be_changed_or_deleted` |
 | AC6-04 | Ready | `POST /:id/safety-review` | 200 with the updated event, shaped as the other action routes return it (`statusDisplay` included) | Proved (route): `SCRUM489_AC6_the_holder_submits_and_gets_the_event_in_safety_review`; (svc) `SCRUM489_AC6_a_submission_is_one_rpc_with_the_caller_the_trimmed_note_and_the_confirmation` |
 | AC6-05 **(trap)** | 064 applied | Apply it again | No error; one constraint, one trigger, one function of each signature | Proved (pglite): `SCRUM489_AC6_064_is_safe_to_run_twice` |
+| AC6-06 | The panel open, ready | A submits | The page shows the returned event at once ("Safety check", no panel) and the parent refreshes; a status that moved meanwhile refreshes it too | Proved (screen): `SCRUM489_AC6_success_hands_the_returned_event_to_the_page`, `SCRUM489_AC6_the_page_shows_safety_check_at_once_with_no_submission_panel`, `SCRUM489_AC6_a_status_that_moved_under_the_coordinator_refreshes_the_page`; (display) `SCRUM489_AC6_submitting_posts_the_note_and_the_confirmation_and_returns_the_event` |
 
 ### AC7 — equipment locked during Safety review; a significant change returns to Approved
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC7-01 | In Safety review | A adds, amends or removes an equipment line | 55000 "… only be changed as a significant change" (052's guard, D12) | **not yet implemented** (SCRUM-558) |
+| AC7-01 | In Safety review | A adds, amends or removes an equipment line | 55000 "… only be changed as a significant change" (052's guard, D12) | Proved (pglite-558): `SCRUM489_AC7_%s_in_safety_review_is_refused_as_a_significant_change_and_nothing_changes`. No earlier test named safety_review: SCRUM-21's `SCRUM21_AC10_…` cover confirmed only. Over HTTP the route cannot tell the statuses apart, so `SCRUM21_AC10_a_confirmed_event_gets_409_with_the_significant_change_message` (eventEquipment.test.js) already proves the 409 |
 | AC7-02 | In Safety review | An approved change request moves the date, time or attendance | The event returns to Approved | **Cannot be tested as written** (D10): `process_change_request` keeps the status today; SCRUM-395 builds this |
 
 ### AC8 — the Safety Officers are told; the organiser sees "Safety check"
@@ -313,8 +319,10 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
 | AC8-01 **(trap)** | Two Safety Officers, a Lead, another coordinator | A submits | One `event_submitted_for_safety_review` notice to each Safety Officer, none to anyone else; the payload of D11, without the note | Proved (pglite): `SCRUM489_AC6_the_status_history_submission_and_notices_are_written_once` |
 | AC8-02 | No Safety Officer | A submits | Allowed; no notice | Proved (pglite): `SCRUM489_AC8_with_no_safety_officer_it_still_submits_and_notifies_nobody` |
 | AC8-03 | 064 applied | Read `notifications_type_known` | Fifteen types: 052's eleven, SCRUM-490's three, and this story's one | Proved (pglite): `SCRUM489_AC8_the_type_list_keeps_every_earlier_type_and_adds_this_storys` |
-| AC8-04 | In Safety review | The organiser's list | "Safety check" (SCRUM-488's label) | **not yet implemented** (SCRUM-558) |
+| AC8-04 | In Safety review | The organiser's list | "Safety check" (SCRUM-488's label) | Proved (pglite-558): `SCRUM489_AC8_a_submitted_event_reads_to_its_organiser_as_safety_check`. The words over HTTP and on screen, for a seeded row, are SCRUM-488's: `SCRUM488_AC5_the_organiser_reads_an_event_in_%s_as_%s`, `SCRUM488_AC5_the_organisers_list_labels_events_in_both_safety_statuses_beside_the_others` (eventRequests.test.js), `SCRUM488_AC5_shows_%s_as_%s_with_its_badge_and_description` (MyEventRequests.test.jsx) |
 | AC8-05 | A notice of this type | A Safety Officer opens their notifications | Shown, in words | **Cannot be tested as written**: see below |
+| AC8-06 | A notice of this type, with or without each payload field | `describeNotification` | "Event submitted for safety check"; the detail names the event, the coordinator and the start, each falling back in words | Proved (display): `SCRUM489_AC8_names_the_event_the_coordinator_and_the_start`, `SCRUM489_AC8_with_%s_it_falls_back_in_words`, `SCRUM489_AC8_a_start_that_is_%s_is_left_out`, `SCRUM489_AC8_with_no_payload_it_still_reads_as_a_submission` |
+| AC8-07 | A Safety Officer signs in | The dashboard | The notifications card is shown | **not yet implemented**: mounting it fails SCRUM-485's `SCRUM485_AC3_the_%s_dashboard_calls_no_service` (AC3-08); held for Calven's decision |
 
 ---
 
@@ -326,7 +334,7 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
    AC3 suggest the Safety Officer needs it. Team decision.
 3. **Cancelling an event in Safety review (D14).** `cancel_event_request` and the
    two `CANCELLABLE_STATUSES` lists leave out both safety statuses. A fix for
-   SCRUM-370's owner; its ticket key is to be given by Calven.
+   SCRUM-561 ("Cancel an Event in a Safety Status - Event Coordinator").
 4. **AC7's second half (D10).** Partial until SCRUM-395.
 5. **The gate's position (D15).** SCRUM-488's working assumption, awaiting the
    team.
@@ -344,8 +352,8 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
   Officer has nowhere to see one. Where a card exists, SCRUM-172's
   `describeNotification` shows a type it does not know as "New notification / This
   notification type cannot be displayed yet.", counted and markable, not hidden.
-  Wording this type, and a card for the Safety Officer, are SCRUM-172's and
-  SCRUM-490's.
+  SCRUM-557 has since worded this type (AC8-06); the card is AC8-07, held
+  because mounting it breaks SCRUM-485's no-service test of that dashboard.
 
 ---
 
@@ -355,15 +363,17 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
 AC3-09, AC4-07, AC5-06, AC7-01 and AC8-04, marked for SCRUM-557 or SCRUM-558); 2
 that cannot be written as specified (AC7-02, AC8-05). Twenty-four are traps. After SCRUM-555 and
 SCRUM-556: **49 proved**; 5 not yet implemented (AC3-09, AC4-07, AC5-06, AC7-01,
-AC8-04: the screen and SCRUM-558's proofs); the same 2.
+AC8-04: the screen and SCRUM-558's proofs); the same 2. After SCRUM-557 and
+SCRUM-558: 60 cases (AC1-10, AC6-06, AC8-06 and AC8-07 added); **57 proved**; 1
+not yet implemented (AC8-07, the Safety Officer's card); the same 2.
 
 | Section | Cases |
 |---|---|
-| AC1 | 9 |
+| AC1 | 10 |
 | AC2 | 13 |
 | AC3 | 9 |
 | AC4 | 7 |
 | AC5 | 6 |
-| AC6 | 5 |
+| AC6 | 6 |
 | AC7 | 2 |
-| AC8 | 5 |
+| AC8 | 7 |
