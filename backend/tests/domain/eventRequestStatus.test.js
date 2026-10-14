@@ -663,6 +663,8 @@ const AC7_LABELS = [
   [STATUS.UNDER_REVIEW, 'Under review'],
   [STATUS.PENDING_CLARIFICATION, 'Awaiting your response'],
   [STATUS.APPROVED, 'Planning'],
+  [STATUS.SAFETY_REVIEW, 'Safety check'],
+  [STATUS.SAFETY_APPROVED, 'Safety approved'],
   [STATUS.CONFIRMED, 'Confirmed'],
   [STATUS.COMPLETED, 'Completed'],
   [STATUS.REJECTED, 'Rejected'],
@@ -707,7 +709,8 @@ describe('SCRUM-323 AC7: every status has its Organiser label', () => {
   it('SCRUM323_AC7_leaves_the_internal_statuses_unchanged', () => {
     expect(Object.values(STATUS).sort()).toEqual([
       'approved', 'cancelled', 'completed', 'confirmed', 'draft',
-      'pending_clarification', 'rejected', 'submitted', 'under_review',
+      'pending_clarification', 'rejected', 'safety_approved', 'safety_review',
+      'submitted', 'under_review',
     ]);
   });
 
@@ -736,4 +739,44 @@ describe('SCRUM-323: a status that is not one of the nine', () => {
       expect(getOrganiserStatusLabel(value)).toBe(STATUS_FALLBACK.UNAVAILABLE.label);
     },
   );
+});
+
+
+describe('SCRUM-488 AC5: the safety statuses as the Organiser sees them', () => {
+  // Written out, not read from the table, so a changed word fails here by name.
+  // The labels are provisional until SCRUM-549's decision is confirmed.
+  it.each([
+    [STATUS.SAFETY_REVIEW, 'Safety check', STATUS_GROUP.UNDER_REVIEW],
+    [STATUS.SAFETY_APPROVED, 'Safety approved', STATUS_GROUP.APPROVED],
+  ])('SCRUM488_AC5_shows_%s_as_%s_in_an_existing_group', (status, label, group) => {
+    const display = getStatusDisplay(status);
+
+    expect(display).toMatchObject({ status, label, group });
+    expect(getOrganiserStatusLabel(status)).toBe(label);
+    expect(isKnownStatus(status)).toBe(true);
+  });
+
+  it.each([STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED])(
+    'SCRUM488_AC5_never_shows_the_internal_name_or_an_unknown_fallback_for_%s',
+    (status) => {
+      const { label, description } = getStatusDisplay(status);
+
+      for (const text of [label, description]) {
+        expect(text).not.toMatch(/_/);
+        expect(text).not.toContain(status);
+      }
+      expect(label).not.toBe(STATUS_FALLBACK.UNKNOWN.label);
+      expect(label).not.toBe(STATUS_FALLBACK.UNAVAILABLE.label);
+      expect(description.trim()).not.toBe('');
+    },
+  );
+
+  it('SCRUM488_AC5_reuses_groups_the_frontend_already_styles_so_no_group_is_added', () => {
+    // frontend/src/services/eventRequestStatusDisplay.js styles on the group.
+    // A new group would need a CSS class there; reusing one needs none.
+    expect(Object.values(STATUS_GROUP).sort()).toEqual([
+      'ACTION_REQUIRED', 'APPROVED', 'AWAITING_REVIEW', 'CANCELLED', 'COMPLETED',
+      'CONFIRMED', 'DRAFT', 'REJECTED', 'UNAVAILABLE', 'UNDER_REVIEW', 'UNKNOWN',
+    ]);
+  });
 });

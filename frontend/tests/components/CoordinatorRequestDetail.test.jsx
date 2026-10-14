@@ -699,6 +699,31 @@ describe("SCRUM19 statuses with nothing to decide", () => {
     expect(actionButtonsShown()).toEqual([]);
   });
 
+  it.each([
+    ["safety_review", "Safety check", "UNDER_REVIEW", "A Safety Officer is checking the arrangements for your event before it can be confirmed."],
+    ["safety_approved", "Safety approved", "APPROVED", "The safety check is complete. Your Coordinator can now confirm your event."],
+  ])("SCRUM488_AC6_an_event_in_%s_opens_with_its_label_and_its_approval_and_no_decision_actions", async (status, label, group, description) => {
+    // A seeded event: the safety actions belong to SCRUM-489 and SCRUM-490, so
+    // this screen offers nothing to decide, as for every status past approval.
+    renderAs(ASSIGNED, eventRequest({
+      status,
+      statusDisplay: { status, label, group, description },
+      decision: "approved",
+      decisionNote: null,
+      decidedBy: ASSIGNED,
+      decidedAt: "2026-01-15T09:00:00+08:00",
+    }));
+
+    const heading = screen.getByRole("heading", { name: new RegExp(`IS212 Industry Night\\s*${label}`) });
+    expect(within(heading).getByText(label)).toHaveClass("status-badge");
+    expect(screen.getByText(description)).toBeInTheDocument();
+    expect(screen.queryByText(status)).not.toBeInTheDocument();
+    expect(screen.queryByText("Waiting for organiser reply")).not.toBeInTheDocument();
+    expect(actionButtonsShown()).toEqual([]);
+    const record = (await screen.findByText("Outcome")).closest("dl");
+    expect(within(record).getByText("Approved")).toBeInTheDocument();
+  });
+
   it("SCRUM19_AC9_a_decision_stays_on_show_after_the_status_moves_on", async () => {
     // Confirmed after approval: the status has moved, the decision has not.
     renderAs(ASSIGNED, eventRequest({
