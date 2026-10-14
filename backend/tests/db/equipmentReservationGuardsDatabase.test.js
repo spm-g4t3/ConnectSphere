@@ -145,12 +145,12 @@ describe('SCRUM-300: AC5 and AC8 guards in Postgres', () => {
   });
 
 
-  it('N20_runs_a_second_time_without_error', async () => {
+  it('SCRUM300_runs_a_second_time_without_error', async () => {
     await expect(db.exec(migration('055_equipment_reservation_guards.sql'))).resolves.not.toThrow();
   });
 
   describe('AC5: a cancelled request releases its reservations', () => {
-    it('N20_AC5_cancelling_the_request_releases_its_reservations_as_the_system', async () => {
+    it('SCRUM300_AC5_cancelling_the_request_releases_its_reservations_as_the_system', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       await db.query("update equipment_requests set status = 'cancelled' where event_request_id = $1", [event]);
@@ -161,7 +161,7 @@ describe('SCRUM-300: AC5 and AC8 guards in Postgres', () => {
       expect((await events(event)).at(-1)).toMatchObject({ action: 'released', user_id: null, reason: 'request cancelled' });
     });
 
-    it('N20_AC5_the_units_are_available_to_another_event_afterwards', async () => {
+    it('SCRUM300_AC5_the_units_are_available_to_another_event_afterwards', async () => {
       const type = await newType('Laser', 1);
       const first = await newEvent();
       const second = await newEvent();
@@ -177,7 +177,7 @@ describe('SCRUM-300: AC5 and AC8 guards in Postgres', () => {
       expect(await live(second)).toHaveLength(1);
     });
 
-    it('N20_AC5_cancelling_twice_records_one_release', async () => {
+    it('SCRUM300_AC5_cancelling_twice_records_one_release', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       await db.query("update equipment_requests set status = 'cancelled' where event_request_id = $1", [event]);
@@ -185,7 +185,7 @@ describe('SCRUM-300: AC5 and AC8 guards in Postgres', () => {
       expect((await events(event)).filter((e) => e.action === 'released')).toHaveLength(1);
     });
 
-    it('N20_AC5_a_reservation_released_by_hand_first_is_not_released_again', async () => {
+    it('SCRUM300_AC5_a_reservation_released_by_hand_first_is_not_released_again', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       const { id } = await reservation(event);
@@ -196,13 +196,13 @@ describe('SCRUM-300: AC5 and AC8 guards in Postgres', () => {
       expect(releases[0].user_id).toBe(reviewerA);
     });
 
-    it('N20_AC5_cancelling_a_request_with_no_reservations_is_harmless', async () => {
+    it('SCRUM300_AC5_cancelling_a_request_with_no_reservations_is_harmless', async () => {
       const { event } = await reviewed('Projector', 10, 4);
       await db.query("update equipment_requests set status = 'cancelled' where event_request_id = $1", [event]);
       expect(await events(event)).toHaveLength(0);
     });
 
-    it('N20_AC5_another_events_reservations_are_left_alone', async () => {
+    it('SCRUM300_AC5_another_events_reservations_are_left_alone', async () => {
       const a = await reviewed('Projector', 10, 4);
       const b = await reviewed('Mic', 10, 4);
       await reserve(a.event, reviewerA, a.line, 1);
@@ -211,7 +211,7 @@ describe('SCRUM-300: AC5 and AC8 guards in Postgres', () => {
       expect((await reservation(b.event)).released_at).toBeNull();
     });
 
-    it('N20_AC5_cancelling_one_request_does_not_release_the_units_of_another_request_on_the_same_event', async () => {
+    it('SCRUM300_AC5_cancelling_one_request_does_not_release_the_units_of_another_request_on_the_same_event', async () => {
       const typeA = await newType('Camera', 5);
       const typeB = await newType('Tripod', 5);
       const event = await newEvent();
@@ -246,7 +246,7 @@ describe('SCRUM-300: AC5 and AC8 guards in Postgres', () => {
   });
 
   describe('AC8: never deleted, always with a reason', () => {
-    it('N20_AC8_a_reservation_cannot_be_deleted', async () => {
+    it('SCRUM300_AC8_a_reservation_cannot_be_deleted', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       const err = await refusal(db.query('delete from equipment_reservations where event_request_id = $1', [event]));
@@ -255,7 +255,7 @@ describe('SCRUM-300: AC5 and AC8 guards in Postgres', () => {
       expect(await live(event)).toHaveLength(1);
     });
 
-    it('N20_AC8_a_released_reservation_cannot_be_deleted_either', async () => {
+    it('SCRUM300_AC8_a_released_reservation_cannot_be_deleted_either', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       const { id } = await reservation(event);
@@ -264,17 +264,17 @@ describe('SCRUM-300: AC5 and AC8 guards in Postgres', () => {
       expect(err?.code).toBe('55000');
     });
 
-    it('N20_AC8_deleting_nothing_is_not_an_error', async () => {
+    it('SCRUM300_AC8_deleting_nothing_is_not_an_error', async () => {
       await expect(db.query("delete from equipment_reservations where id = '00000000-0000-0000-0000-000000000000'")).resolves.not.toThrow();
     });
 
-    it('N20_AC8_a_new_reservation_records_a_reason', async () => {
+    it('SCRUM300_AC8_a_new_reservation_records_a_reason', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       expect((await events(event))[0]).toMatchObject({ action: 'reserved', user_id: reviewerA, reason: 'Reserved for the event' });
     });
 
-    it('N20_AC8_every_kind_of_history_row_has_a_user_or_system_a_time_and_a_reason', async () => {
+    it('SCRUM300_AC8_every_kind_of_history_row_has_a_user_or_system_a_time_and_a_reason', async () => {
       const { event, line } = await reviewed('Projector', 10, 5);
       await reserve(event, reviewerA, line, 3);
       const { id } = await reservation(event);

@@ -229,7 +229,7 @@ describe('SCRUM-300 with SCRUM-370: cancelling an event releases its reserved eq
       [eventId],
     )).rows;
 
-  it('N18_AC5_cancelling_releases_live_reservations_and_records_a_system_release', async () => {
+  it('SCRUM300_AC5_cancelling_releases_live_reservations_and_records_a_system_release', async () => {
     const eventId = await approvedEventWithReservation(2);
     await cancel(eventId, coordinator, 'Venue unavailable');
 
@@ -250,13 +250,13 @@ describe('SCRUM-300 with SCRUM-370: cancelling an event releases its reserved eq
       .toBe('cancelled');
   });
 
-  it('N18_AC5_the_reservation_row_is_kept_not_deleted', async () => {
+  it('SCRUM300_AC5_the_reservation_row_is_kept_not_deleted', async () => {
     const eventId = await approvedEventWithReservation(1);
     await cancel(eventId);
     expect(await reservationsOf(eventId)).toHaveLength(1);
   });
 
-  it('N18_AC5_another_events_reservation_is_left_alone', async () => {
+  it('SCRUM300_AC5_another_events_reservation_is_left_alone', async () => {
     const cancelled = await approvedEventWithReservation(1);
     const other = await approvedEventWithReservation(1);
     await cancel(cancelled);
@@ -265,7 +265,7 @@ describe('SCRUM-300 with SCRUM-370: cancelling an event releases its reserved eq
     expect((await historyOf(other)).map((row) => row.action)).toEqual(['reserved']);
   });
 
-  it('N18_AC5_the_released_units_are_available_again', async () => {
+  it('SCRUM300_AC5_the_released_units_are_available_again', async () => {
     const eventId = await approvedEventWithReservation(3);
     const typeId = (await one('select equipment_type_id as id from equipment_reservations where event_request_id = $1', [eventId])).id;
     const before = await one(
@@ -280,7 +280,7 @@ describe('SCRUM-300 with SCRUM-370: cancelling an event releases its reserved eq
     expect(after.available).toBe(before.available + 3);
   });
 
-  it('N18_AC5_an_already_released_reservation_is_not_released_twice', async () => {
+  it('SCRUM300_AC5_an_already_released_reservation_is_not_released_twice', async () => {
     const eventId = await approvedEventWithReservation(1);
     const [reservation] = await reservationsOf(eventId);
     await db.query('select release_equipment_reservation($1, $2, $3, $4)', [eventId, technicalSupport, reservation.id, 'Not needed']);
@@ -290,7 +290,7 @@ describe('SCRUM-300 with SCRUM-370: cancelling an event releases its reserved eq
     expect(released[0].user_id).toBe(technicalSupport);
   });
 
-  it('N18_AC5_a_cancel_that_is_refused_releases_nothing', async () => {
+  it('SCRUM300_AC5_a_cancel_that_is_refused_releases_nothing', async () => {
     const eventId = await approvedEventWithReservation(1);
     await expect(cancel(eventId, coordinator, '   ')).rejects.toThrow();
     const [reservation] = await reservationsOf(eventId);

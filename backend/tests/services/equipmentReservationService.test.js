@@ -1,7 +1,7 @@
 /**
  * Service tests for the reservation actions.
  *
- * SCRUM-300. Named N19_ACn_<what_it_checks>. The client is a test double, so
+ * SCRUM-300. Named SCRUM300_ACn_<what_it_checks>. The client is a test double, so
  * these are about what the service sends, what it refuses before the database
  * is called, and how each database refusal becomes a typed error. What the
  * database does is tested against Postgres in
@@ -118,7 +118,7 @@ const ACTIONS = [
 ];
 
 describe('what is sent to the database', () => {
-  it('N19_AC2_reserve_sends_the_line_the_quantity_and_the_signed_in_user', async () => {
+  it('SCRUM300_AC2_reserve_sends_the_line_the_quantity_and_the_signed_in_user', async () => {
     const client = fakeClient();
     await reserveEquipment(EVENT_ID, LINE_ID, { quantity: 3, userId: 'forged' }, REVIEWER_ID, { client });
     expect(client.rpcCalls[0]).toEqual({
@@ -127,7 +127,7 @@ describe('what is sent to the database', () => {
     });
   });
 
-  it('N19_AC4_reduce_sends_the_quantity_and_the_trimmed_reason', async () => {
+  it('SCRUM300_AC4_reduce_sends_the_quantity_and_the_trimmed_reason', async () => {
     const client = fakeClient();
     await reduceEquipmentReservation(EVENT_ID, RESERVATION_ID, { quantity: 1, reason: ' Less needed ' }, REVIEWER_ID, { client });
     expect(client.rpcCalls[0].args).toEqual({
@@ -139,7 +139,7 @@ describe('what is sent to the database', () => {
     });
   });
 
-  it('N19_AC4_release_sends_the_reason', async () => {
+  it('SCRUM300_AC4_release_sends_the_reason', async () => {
     const client = fakeClient();
     await releaseEquipmentReservation(EVENT_ID, RESERVATION_ID, { reason: 'Wrong item' }, REVIEWER_ID, { client });
     expect(client.rpcCalls[0]).toMatchObject({
@@ -149,7 +149,7 @@ describe('what is sent to the database', () => {
   });
 
   it.each([['move', moveEquipmentReservation, 'move_equipment_reservation'], ['keep', keepEquipmentReservation, 'keep_equipment_reservation']])(
-    'N19_AC7_%s_sends_a_null_reason_when_none_is_given',
+    'SCRUM300_AC7_%s_sends_a_null_reason_when_none_is_given',
     async (_what, fn, rpcName) => {
       const client = fakeClient();
       await fn(EVENT_ID, RESERVATION_ID, undefined, REVIEWER_ID, { client });
@@ -157,7 +157,7 @@ describe('what is sent to the database', () => {
     },
   );
 
-  it.each(ACTIONS)('N19_AC1_%s_never_takes_the_caller_from_the_input', async (_what, _rpc, call) => {
+  it.each(ACTIONS)('SCRUM300_AC1_%s_never_takes_the_caller_from_the_input', async (_what, _rpc, call) => {
     const client = fakeClient();
     await call(client, REVIEWER_ID);
     expect(client.rpcCalls[0].args.p_user_id).toBe(REVIEWER_ID);
@@ -165,14 +165,14 @@ describe('what is sent to the database', () => {
 });
 
 describe('refused before the database is called', () => {
-  it.each([0, -2, 1.5, '3', null, undefined])('N19_AC2_reserve_refuses_quantity_%j_with_400', async (quantity) => {
+  it.each([0, -2, 1.5, '3', null, undefined])('SCRUM300_AC2_reserve_refuses_quantity_%j_with_400', async (quantity) => {
     const client = fakeClient();
     const err = await failure(reserveEquipment(EVENT_ID, LINE_ID, { quantity }, REVIEWER_ID, { client }));
     expect(err).toBeInstanceOf(ValidationError);
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  it('N19_AC4_reduce_without_a_reason_is_refused', async () => {
+  it('SCRUM300_AC4_reduce_without_a_reason_is_refused', async () => {
     const client = fakeClient();
     const err = await failure(reduceEquipmentReservation(EVENT_ID, RESERVATION_ID, { quantity: 1 }, REVIEWER_ID, { client }));
     expect(err).toBeInstanceOf(ValidationError);
@@ -180,7 +180,7 @@ describe('refused before the database is called', () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  it('N19_AC4_release_without_a_reason_is_refused', async () => {
+  it('SCRUM300_AC4_release_without_a_reason_is_refused', async () => {
     const client = fakeClient();
     const err = await failure(releaseEquipmentReservation(EVENT_ID, RESERVATION_ID, {}, REVIEWER_ID, { client }));
     expect(err).toBeInstanceOf(ValidationError);
@@ -194,11 +194,11 @@ describe('refused before the database is called', () => {
     ['reservation id (release)', () => releaseEquipmentReservation(EVENT_ID, 'nope', { reason: 'x' }, REVIEWER_ID, { client: fakeClient() })],
     ['reservation id (move)', () => moveEquipmentReservation(EVENT_ID, 'nope', {}, REVIEWER_ID, { client: fakeClient() })],
     ['reservation id (keep)', () => keepEquipmentReservation(EVENT_ID, 'nope', {}, REVIEWER_ID, { client: fakeClient() })],
-  ])('N19_a_bad_%s_is_a_400', async (_what, call) => {
+  ])('SCRUM300_a_bad_%s_is_a_400', async (_what, call) => {
     expect(await failure(call())).toBeInstanceOf(ValidationError);
   });
 
-  it.each(ACTIONS)('N19_AC1_%s_without_a_signed_in_user_is_refused', async (_what, _rpc, call) => {
+  it.each(ACTIONS)('SCRUM300_AC1_%s_without_a_signed_in_user_is_refused', async (_what, _rpc, call) => {
     const client = fakeClient();
     expect(await failure(call(client, ''))).toBeInstanceOf(ValidationError);
     expect(client.rpc).not.toHaveBeenCalled();
@@ -206,29 +206,29 @@ describe('refused before the database is called', () => {
 });
 
 describe('database refusals become typed errors', () => {
-  it.each(ACTIONS)('N19_AC1_%s_not_the_reviewer_is_403', async (_what, rpcName, call) => {
+  it.each(ACTIONS)('SCRUM300_AC1_%s_not_the_reviewer_is_403', async (_what, rpcName, call) => {
     const client = fakeClient({ [rpcName]: dbError('42501', 'Only the current reviewer can do this') });
     expect(await failure(call(client))).toBeInstanceOf(ForbiddenError);
   });
 
-  it.each(ACTIONS)('N19_AC1_%s_wrong_status_is_409', async (_what, rpcName, call) => {
+  it.each(ACTIONS)('SCRUM300_AC1_%s_wrong_status_is_409', async (_what, rpcName, call) => {
     const client = fakeClient({ [rpcName]: dbError('55000', 'This can only be done while the request is Under review.') });
     const err = await failure(call(client));
     expect(err).toBeInstanceOf(ConflictError);
     expect(err.message).toMatch(/Under review/);
   });
 
-  it.each(ACTIONS)('N19_%s_a_lost_race_40001_is_409', async (_what, rpcName, call) => {
+  it.each(ACTIONS)('SCRUM300_%s_a_lost_race_40001_is_409', async (_what, rpcName, call) => {
     const client = fakeClient({ [rpcName]: dbError('40001', 'changed') });
     expect(await failure(call(client))).toBeInstanceOf(ConflictError);
   });
 
-  it.each(ACTIONS)('N19_%s_not_found_is_404', async (_what, rpcName, call) => {
+  it.each(ACTIONS)('SCRUM300_%s_not_found_is_404', async (_what, rpcName, call) => {
     const client = fakeClient({ [rpcName]: dbError('P0002', 'Reservation not found') });
     expect(await failure(call(client))).toBeInstanceOf(NotFoundError);
   });
 
-  it('N19_AC2_more_than_available_is_a_400_on_quantity_and_keeps_the_figure', async () => {
+  it('SCRUM300_AC2_more_than_available_is_a_400_on_quantity_and_keeps_the_figure', async () => {
     const client = fakeClient({ reserve_equipment: dbError('22023', 'Only 1 available for this period, so 2 cannot be reserved') });
     const err = await failure(reserveEquipment(EVENT_ID, LINE_ID, { quantity: 2 }, REVIEWER_ID, { client }));
     expect(err).toBeInstanceOf(ValidationError);
@@ -236,31 +236,31 @@ describe('database refusals become typed errors', () => {
     expect(err.details).toEqual([expect.objectContaining({ field: 'quantity' })]);
   });
 
-  it('N19_AC2_more_than_the_line_needs_is_a_400_on_quantity', async () => {
+  it('SCRUM300_AC2_more_than_the_line_needs_is_a_400_on_quantity', async () => {
     const client = fakeClient({ reserve_equipment: dbError('22023', 'Only 1 more can be reserved on this line (it needs 3 and 2 is already reserved)') });
     const err = await failure(reserveEquipment(EVENT_ID, LINE_ID, { quantity: 2 }, REVIEWER_ID, { client }));
     expect(err.details).toEqual([expect.objectContaining({ field: 'quantity' })]);
   });
 
-  it('N19_AC4_a_reason_the_database_refuses_is_a_400_on_reason', async () => {
+  it('SCRUM300_AC4_a_reason_the_database_refuses_is_a_400_on_reason', async () => {
     const client = fakeClient({ release_equipment_reservation: dbError('22023', 'A reason is required') });
     const err = await failure(releaseEquipmentReservation(EVENT_ID, RESERVATION_ID, { reason: 'x' }, REVIEWER_ID, { client }));
     expect(err.details).toEqual([expect.objectContaining({ field: 'reason' })]);
   });
 
-  it('N19_AC7_a_move_the_database_refuses_for_availability_is_a_400', async () => {
+  it('SCRUM300_AC7_a_move_the_database_refuses_for_availability_is_a_400', async () => {
     const client = fakeClient({ move_equipment_reservation: dbError('22023', 'Only 0 available for the event\'s current period, so 2 cannot be moved there') });
     expect(await failure(moveEquipmentReservation(EVENT_ID, RESERVATION_ID, {}, REVIEWER_ID, { client }))).toBeInstanceOf(ValidationError);
   });
 
-  it('N19_AC7_a_keep_the_database_refuses_is_a_409_with_the_reason_in_words', async () => {
+  it('SCRUM300_AC7_a_keep_the_database_refuses_is_a_409_with_the_reason_in_words', async () => {
     const client = fakeClient({ keep_equipment_reservation: dbError('55000', 'This reservation cannot be kept. Its period no longer matches the event.') });
     const err = await failure(keepEquipmentReservation(EVENT_ID, RESERVATION_ID, {}, REVIEWER_ID, { client }));
     expect(err).toBeInstanceOf(ConflictError);
     expect(err.message).toMatch(/period no longer matches/);
   });
 
-  it('N19_an_unexpected_database_error_is_left_untyped_so_it_becomes_a_500', async () => {
+  it('SCRUM300_an_unexpected_database_error_is_left_untyped_so_it_becomes_a_500', async () => {
     const client = fakeClient({ reserve_equipment: dbError('XX000', 'boom') });
     const err = await failure(reserveEquipment(EVENT_ID, LINE_ID, { quantity: 1 }, REVIEWER_ID, { client }));
     expect(err).not.toBeInstanceOf(ValidationError);
@@ -269,7 +269,7 @@ describe('database refusals become typed errors', () => {
 });
 
 describe('the review state carries the reservations', () => {
-  it('N19_AC7_each_line_lists_its_reservations_in_camelCase_with_the_flag', () => {
+  it('SCRUM300_AC7_each_line_lists_its_reservations_in_camelCase_with_the_flag', () => {
     const state = toReviewState(
       reviewRow([
         reservationRow(),
@@ -298,12 +298,12 @@ describe('the review state carries the reservations', () => {
     expect(toReviewState(row).request.lines[0].reservations[0].canKeep).toBe(false);
   });
 
-  it('N19_a_line_with_no_reservations_has_an_empty_list_and_no_flags', () => {
+  it('SCRUM300_a_line_with_no_reservations_has_an_empty_list_and_no_flags', () => {
     const state = toReviewState(reviewRow([]));
     expect(state.request.lines[0]).toMatchObject({ reservations: [], flaggedCount: 0 });
   });
 
-  it('N19_a_read_from_before_054_with_no_reservations_key_still_works', () => {
+  it('SCRUM300_a_read_from_before_054_with_no_reservations_key_still_works', () => {
     const row = reviewRow();
     delete row.request.lines[0].reservations;
     expect(toReviewState(row).request.lines[0]).toMatchObject({ reservations: [], flaggedCount: 0 });

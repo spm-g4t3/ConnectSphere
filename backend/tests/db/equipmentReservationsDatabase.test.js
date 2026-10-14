@@ -145,12 +145,12 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
   });
 
 
-  it('N17_runs_a_second_time_without_error', async () => {
+  it('SCRUM300_runs_a_second_time_without_error', async () => {
     await expect(db.exec(migration('054_equipment_reservation_actions.sql'))).resolves.not.toThrow();
   });
 
   describe('AC4: reduce and release', () => {
-    it('N17_AC4_reduce_lowers_the_quantity_and_records_who_and_why', async () => {
+    it('SCRUM300_AC4_reduce_lowers_the_quantity_and_records_who_and_why', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 3);
       const { id } = await reservation(event);
@@ -160,7 +160,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect(last).toMatchObject({ action: 'reduced', user_id: reviewerA, reason: 'Only one needed', quantity_before: 3, quantity_after: 1 });
     });
 
-    it.each([3, 4, 0, null])('N17_AC4_reduce_to_%s_is_refused', async (quantity) => {
+    it.each([3, 4, 0, null])('SCRUM300_AC4_reduce_to_%s_is_refused', async (quantity) => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 3);
       const { id } = await reservation(event);
@@ -168,7 +168,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect(err?.code).toBe('22023');
     });
 
-    it('N17_AC4_a_reason_is_required_to_reduce_and_to_release', async () => {
+    it('SCRUM300_AC4_a_reason_is_required_to_reduce_and_to_release', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 3);
       const { id } = await reservation(event);
@@ -177,7 +177,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await reservation(event)).released_at).toBeNull();
     });
 
-    it('N17_AC4_release_keeps_the_row_and_records_the_release', async () => {
+    it('SCRUM300_AC4_release_keeps_the_row_and_records_the_release', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 3);
       const { id } = await reservation(event);
@@ -188,7 +188,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await events(event)).at(-1)).toMatchObject({ action: 'released', user_id: reviewerA });
     });
 
-    it('N17_AC4_only_the_current_reviewer_can_reduce_or_release', async () => {
+    it('SCRUM300_AC4_only_the_current_reviewer_can_reduce_or_release', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 3);
       const { id } = await reservation(event);
@@ -196,7 +196,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await refusal(release(event, reviewerB, id)))?.code).toBe('42501');
     });
 
-    it('N17_AC4_a_released_reservation_cannot_be_released_again', async () => {
+    it('SCRUM300_AC4_a_released_reservation_cannot_be_released_again', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 3);
       const { id } = await reservation(event);
@@ -204,7 +204,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await refusal(release(event, reviewerA, id)))?.code).toBe('55000');
     });
 
-    it('N17_AC4_another_events_reservation_is_not_found', async () => {
+    it('SCRUM300_AC4_another_events_reservation_is_not_found', async () => {
       const a = await reviewed('Projector', 10, 4);
       const b = await reviewed('Mic', 10, 4);
       await reserve(b.event, reviewerA, b.line, 1);
@@ -214,7 +214,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
   });
 
   describe('AC5: automatic release', () => {
-    it('N17_AC5_removing_a_line_releases_its_reservations_as_the_system', async () => {
+    it('SCRUM300_AC5_removing_a_line_releases_its_reservations_as_the_system', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       await db.query('select remove_equipment_line($1, $2, $3)', [event, coordinator, line]);
@@ -223,7 +223,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await events(event)).at(-1)).toMatchObject({ action: 'released', user_id: null, reason: 'request cancelled' });
     });
 
-    it('N17_AC5_an_event_that_is_completed_releases_everything_with_a_reason', async () => {
+    it('SCRUM300_AC5_an_event_that_is_completed_releases_everything_with_a_reason', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       await db.query("update event_requests set status = 'completed' where id = $1", [event]);
@@ -234,7 +234,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
   });
 
   describe('AC6: flagging', () => {
-    it('N17_AC6_a_date_change_flags_keeps_the_hold_and_sends_the_request_back', async () => {
+    it('SCRUM300_AC6_a_date_change_flags_keeps_the_hold_and_sends_the_request_back', async () => {
       const { event, line } = await reviewed('Projector', 10, 2);
       await reserve(event, reviewerA, line, 2);
       expect(await requestStatus(event)).toBe('arranged');
@@ -248,7 +248,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await events(event)).at(-1)).toMatchObject({ action: 'flagged', user_id: null });
     });
 
-    it('N17_AC6_amending_a_line_flags_its_reservations_with_a_reason', async () => {
+    it('SCRUM300_AC6_amending_a_line_flags_its_reservations_with_a_reason', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       await db.query('select amend_equipment_line($1, $2, $3, 3)', [event, coordinator, line]);
@@ -258,7 +258,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect(await requestStatus(event)).toBe('pending_review');
     });
 
-    it('N17_AC6_a_type_losing_usable_units_flags_only_over_committed_reservations', async () => {
+    it('SCRUM300_AC6_a_type_losing_usable_units_flags_only_over_committed_reservations', async () => {
       const a = await reviewed('Lamp', 4, 2);
       await reserve(a.event, reviewerA, a.line, 2);
       await db.query('update equipment_types set damaged_quantity = 3 where id = $1', [a.type]);
@@ -270,21 +270,21 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await reservation(b.event)).flagged).toBe(false);
     });
 
-    it('N17_AC6_retiring_a_type_flags_its_reservations', async () => {
+    it('SCRUM300_AC6_retiring_a_type_flags_its_reservations', async () => {
       const { event, line, type } = await reviewed('Lamp', 4, 2);
       await reserve(event, reviewerA, line, 2);
       await db.query('update equipment_types set retired_at = now() where id = $1', [type]);
       expect((await reservation(event)).flagged).toBe(true);
     });
 
-    it('N17_AC6_a_change_that_does_not_move_the_period_flags_nothing', async () => {
+    it('SCRUM300_AC6_a_change_that_does_not_move_the_period_flags_nothing', async () => {
       const { event, line } = await reviewed('Projector', 10, 2);
       await reserve(event, reviewerA, line, 2);
       await db.query("update event_requests set event_name = 'Renamed' where id = $1", [event]);
       expect((await reservation(event)).flagged).toBe(false);
     });
 
-    it('N17_AC6_the_review_read_lists_each_reservation_with_its_flag', async () => {
+    it('SCRUM300_AC6_the_review_read_lists_each_reservation_with_its_flag', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       await changePeriod(event);
@@ -305,7 +305,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       return ctx;
     };
 
-    it('N17_AC7_move_takes_the_current_period_clears_the_flag_and_arranges', async () => {
+    it('SCRUM300_AC7_move_takes_the_current_period_clears_the_flag_and_arranges', async () => {
       const { event, id } = await flaggedOne();
       await move(event, reviewerA, id);
       const row = await reservation(event);
@@ -315,7 +315,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await events(event)).at(-1)).toMatchObject({ action: 'moved', user_id: reviewerA });
     });
 
-    it('N17_AC7_move_is_refused_when_the_new_period_lacks_units_and_stays_flagged', async () => {
+    it('SCRUM300_AC7_move_is_refused_when_the_new_period_lacks_units_and_stays_flagged', async () => {
       const { event, id, type } = await flaggedOne(2, 2);
       const other = await newEvent({ start: NEW_START, end: NEW_END });
       const otherLine = (await add(other, type, 2)).request.lines[0].id;
@@ -327,14 +327,14 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await reservation(event)).flagged).toBe(true);
     });
 
-    it('N17_AC7_move_does_not_count_the_reservation_against_itself', async () => {
+    it('SCRUM300_AC7_move_does_not_count_the_reservation_against_itself', async () => {
       const { event, id } = await flaggedOne(2, 2);
       await db.query("update event_requests set proposed_start = '2026-12-01T11:00:00Z', proposed_end = '2026-12-01T13:00:00Z' where id = $1", [event]);
       await move(event, reviewerA, id);
       expect((await reservation(event)).flagged).toBe(false);
     });
 
-    it('N17_AC7_only_a_flagged_reservation_can_be_moved_or_kept', async () => {
+    it('SCRUM300_AC7_only_a_flagged_reservation_can_be_moved_or_kept', async () => {
       const { event, line } = await reviewed('Projector', 10, 3);
       await reserve(event, reviewerA, line, 1);
       const { id } = await reservation(event);
@@ -342,14 +342,14 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await refusal(keep(event, reviewerA, id)))?.code).toBe('55000');
     });
 
-    it('N17_AC7_keep_is_refused_while_the_period_does_not_match', async () => {
+    it('SCRUM300_AC7_keep_is_refused_while_the_period_does_not_match', async () => {
       const { event, id } = await flaggedOne();
       const err = await refusal(keep(event, reviewerA, id));
       expect(err?.code).toBe('55000');
       expect(err?.message).toMatch(/period no longer matches/);
     });
 
-    it('N17_AC7_keep_works_when_the_event_goes_back_to_the_original_period', async () => {
+    it('SCRUM300_AC7_keep_works_when_the_event_goes_back_to_the_original_period', async () => {
       const { event, id } = await flaggedOne();
       await changePeriod(event, START, END);
       await keep(event, reviewerA, id, 'Date reverted');
@@ -358,7 +358,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect(await requestStatus(event)).toBe('arranged');
     });
 
-    it('N17_AC7_keep_is_refused_when_the_line_now_needs_less', async () => {
+    it('SCRUM300_AC7_keep_is_refused_when_the_line_now_needs_less', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 4);
       await db.query('select amend_equipment_line($1, $2, $3, 2)', [event, coordinator, line]);
@@ -368,7 +368,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect(err?.message).toMatch(/more than the line now needs/);
     });
 
-    it('N17_AC7_keep_is_refused_when_the_type_is_over_committed', async () => {
+    it('SCRUM300_AC7_keep_is_refused_when_the_type_is_over_committed', async () => {
       const { event, line, type } = await reviewed('Projector', 4, 2);
       await reserve(event, reviewerA, line, 2);
       await db.query('select amend_equipment_line($1, $2, $3, 2)', [event, coordinator, line]);
@@ -379,7 +379,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect(err?.message).toMatch(/over-committed/);
     });
 
-    it('N17_AC7_reducing_a_flagged_reservation_that_now_fits_clears_the_flag', async () => {
+    it('SCRUM300_AC7_reducing_a_flagged_reservation_that_now_fits_clears_the_flag', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 4);
       await db.query('select amend_equipment_line($1, $2, $3, 2)', [event, coordinator, line]);
@@ -390,13 +390,13 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect(await requestStatus(event)).toBe('arranged');
     });
 
-    it('N17_AC7_reducing_a_reservation_whose_period_is_wrong_leaves_it_flagged', async () => {
+    it('SCRUM300_AC7_reducing_a_reservation_whose_period_is_wrong_leaves_it_flagged', async () => {
       const { event, id } = await flaggedOne(10, 3);
       await reduce(event, reviewerA, id, 1, 'Smaller');
       expect((await reservation(event)).flagged).toBe(true);
     });
 
-    it('N17_AC7_releasing_a_flagged_reservation_takes_it_off_the_flagged_list', async () => {
+    it('SCRUM300_AC7_releasing_a_flagged_reservation_takes_it_off_the_flagged_list', async () => {
       const { event, id } = await flaggedOne();
       await release(event, reviewerA, id, 'Not needed any more');
       const state = asJson(await one('select equipment_review_for_event($1)::text as answer', [event]));
@@ -414,14 +414,14 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       return ctx;
     };
 
-    it('N17_move_and_keep_refuse_anyone_but_the_current_reviewer', async () => {
+    it('SCRUM300_move_and_keep_refuse_anyone_but_the_current_reviewer', async () => {
       const { event, id } = await flagged();
       expect((await refusal(move(event, reviewerB, id)))?.code).toBe('42501');
       expect((await refusal(keep(event, reviewerB, id)))?.code).toBe('42501');
       expect((await reservation(event)).flagged).toBe(true);
     });
 
-    it('N17_move_keep_reduce_and_release_refuse_when_the_request_is_not_under_review', async () => {
+    it('SCRUM300_move_keep_reduce_and_release_refuse_when_the_request_is_not_under_review', async () => {
       const { event, id } = await flagged();
       await db.query("update equipment_requests set status = 'pending_review' where event_request_id = $1 and status <> 'cancelled'", [event]);
       for (const call of [
@@ -434,7 +434,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       }
     });
 
-    it('N17_reduce_release_move_and_keep_refuse_when_the_event_status_does_not_allow_it', async () => {
+    it('SCRUM300_reduce_release_move_and_keep_refuse_when_the_event_status_does_not_allow_it', async () => {
       const { event, id } = await flagged();
       await db.query("update event_requests set status = 'rejected' where id = $1", [event]);
       for (const call of [
@@ -449,7 +449,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       }
     });
 
-    it('N17_a_refused_action_writes_no_history', async () => {
+    it('SCRUM300_a_refused_action_writes_no_history', async () => {
       const { event, id } = await flagged();
       const before = (await events(event)).length;
       await refusal(reduce(event, reviewerB, id, 1));
@@ -458,7 +458,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await events(event)).length).toBe(before);
     });
 
-    it('N17_a_released_reservation_cannot_be_moved_kept_or_reduced', async () => {
+    it('SCRUM300_a_released_reservation_cannot_be_moved_kept_or_reduced', async () => {
       const { event, id } = await flagged();
       await release(event, reviewerA, id);
       for (const call of [
@@ -470,27 +470,27 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       }
     });
 
-    it('N17_a_made_up_reservation_id_is_not_found', async () => {
+    it('SCRUM300_a_made_up_reservation_id_is_not_found', async () => {
       const { event } = await flagged();
       const none = '00000000-0000-0000-0000-000000000000';
       expect((await refusal(release(event, reviewerA, none)))?.code).toBe('P0002');
       expect((await refusal(move(event, reviewerA, none)))?.code).toBe('P0002');
     });
 
-    it('N17_move_to_a_type_that_has_since_been_retired_is_refused', async () => {
+    it('SCRUM300_move_to_a_type_that_has_since_been_retired_is_refused', async () => {
       const { event, id, type } = await flagged();
       await db.query('update equipment_types set retired_at = now() where id = $1', [type]);
       const err = await refusal(move(event, reviewerA, id));
       expect(err?.code).toBe('55000');
     });
 
-    it('N17_move_is_refused_when_the_event_has_lost_its_period', async () => {
+    it('SCRUM300_move_is_refused_when_the_event_has_lost_its_period', async () => {
       const { event, id } = await flagged();
       await db.query('update event_requests set proposed_start = null where id = $1', [event]);
       expect((await refusal(move(event, reviewerA, id)))?.code).toBe('55000');
     });
 
-    it('N17_move_is_refused_when_the_reservation_holds_more_than_the_line_needs', async () => {
+    it('SCRUM300_move_is_refused_when_the_reservation_holds_more_than_the_line_needs', async () => {
       const { event, line, id } = await flagged();
       await db.query('select amend_equipment_line($1, $2, $3, 1)', [event, coordinator, line]);
       await start(event, reviewerA);
@@ -501,7 +501,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
   });
 
   describe('flag side effects', () => {
-    it('N17_AC6_flagging_clears_the_reviewer_and_the_request_goes_back_to_pending_review', async () => {
+    it('SCRUM300_AC6_flagging_clears_the_reviewer_and_the_request_goes_back_to_pending_review', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       expect(await requestStatus(event)).toBe('under_review');
@@ -514,7 +514,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect(request.reviewer_id).toBeNull();
     });
 
-    it('N17_AC6_the_old_reviewer_can_no_longer_act_after_a_flag', async () => {
+    it('SCRUM300_AC6_the_old_reviewer_can_no_longer_act_after_a_flag', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       await changePeriod(event);
@@ -522,7 +522,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await refusal(release(event, reviewerA, id)))?.code).toBe('55000');
     });
 
-    it('N17_AC6_flagging_twice_records_one_flag', async () => {
+    it('SCRUM300_AC6_flagging_twice_records_one_flag', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       await changePeriod(event);
@@ -531,7 +531,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect(flags).toHaveLength(1);
     });
 
-    it('N17_AC6_a_released_reservation_is_not_flagged_by_a_date_change', async () => {
+    it('SCRUM300_AC6_a_released_reservation_is_not_flagged_by_a_date_change', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       const { id } = await reservation(event);
@@ -541,7 +541,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect((await events(event)).filter((e) => e.action === 'flagged')).toHaveLength(0);
     });
 
-    it('N17_AC6_a_cancelled_request_is_left_cancelled_by_a_flag', async () => {
+    it('SCRUM300_AC6_a_cancelled_request_is_left_cancelled_by_a_flag', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
       await db.query("update equipment_requests set status = 'cancelled' where event_request_id = $1", [event]);
@@ -550,7 +550,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       expect(row.s).toBe('cancelled');
     });
 
-    it('N17_AC7_more_can_still_be_reserved_on_a_line_that_has_a_flagged_reservation_but_it_cannot_arrange', async () => {
+    it('SCRUM300_AC7_more_can_still_be_reserved_on_a_line_that_has_a_flagged_reservation_but_it_cannot_arrange', async () => {
       const { event, line } = await reviewed('Projector', 10, 3);
       await reserve(event, reviewerA, line, 1);
       await db.query('update equipment_reservations set flagged = true where equipment_line_id = $1', [line]);

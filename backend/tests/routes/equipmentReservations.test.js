@@ -1,7 +1,7 @@
 /**
  * Route tests for the reservation actions.
  *
- * SCRUM-300. Named N19_ACn_<what_it_checks>. About transport and authorisation:
+ * SCRUM-300. Named SCRUM300_ACn_<what_it_checks>. About transport and authorisation:
  * only Technical Support Staff reach any route, a refused attempt reaches no
  * database function, the caller is the signed-in user and never the body, and
  * each refusal has the right status. The client is injected, so the real
@@ -127,7 +127,7 @@ const ROUTES = [
 
 describe('AC1: only Technical Support Staff reach any reservation route', () => {
   it.each(OTHER_ROLES.flatMap((role) => ROUTES.map(([what, call]) => [role, what, call])))(
-    'N19_AC1_refuses_%s_who_%s_with_403_and_reaches_nothing',
+    'SCRUM300_AC1_refuses_%s_who_%s_with_403_and_reaches_nothing',
     async (role, _what, call) => {
       const client = fakeClient();
       const res = await call(appWith(client, signedInAs(role)));
@@ -137,7 +137,7 @@ describe('AC1: only Technical Support Staff reach any reservation route', () => 
     },
   );
 
-  it.each(ROUTES)('N19_AC1_refuses_a_signed_out_caller_who_%s_with_401', async (_what, call) => {
+  it.each(ROUTES)('SCRUM300_AC1_refuses_a_signed_out_caller_who_%s_with_401', async (_what, call) => {
     const client = fakeClient();
     const res = await call(appWith(client, signedOut));
     expect(res.status).toBe(401);
@@ -146,7 +146,7 @@ describe('AC1: only Technical Support Staff reach any reservation route', () => 
 });
 
 describe('the routes for Technical Support Staff', () => {
-  it.each(ROUTES)('N19_%s_answers_200_with_the_review_state_and_calls_the_right_function', async (_what, call, rpcName) => {
+  it.each(ROUTES)('SCRUM300_%s_answers_200_with_the_review_state_and_calls_the_right_function', async (_what, call, rpcName) => {
     const client = fakeClient();
     const res = await call(appWith(client));
     expect(res.status).toBe(200);
@@ -154,14 +154,14 @@ describe('the routes for Technical Support Staff', () => {
     expect(client.rpcCalls[0].name).toBe(rpcName);
   });
 
-  it.each(ROUTES)('N19_AC1_%s_uses_the_signed_in_user_not_one_in_the_body', async (_what, call, _rpc) => {
+  it.each(ROUTES)('SCRUM300_AC1_%s_uses_the_signed_in_user_not_one_in_the_body', async (_what, call, _rpc) => {
     const client = fakeClient();
     const app = appWith(client, signedInAs(ROLE.TECHNICAL_SUPPORT_STAFF, SOMEONE_ELSE));
     await call(app);
     expect(client.rpcCalls[0].args.p_user_id).toBe(SOMEONE_ELSE);
   });
 
-  it('N19_AC1_a_user_id_in_the_body_is_ignored', async () => {
+  it('SCRUM300_AC1_a_user_id_in_the_body_is_ignored', async () => {
     const client = fakeClient();
     await request(appWith(client))
       .post(`${BASE}/lines/${LINE_ID}/reservations`)
@@ -169,7 +169,7 @@ describe('the routes for Technical Support Staff', () => {
     expect(client.rpcCalls[0].args.p_user_id).toBe(REVIEWER_ID);
   });
 
-  it('N19_AC2_reserve_with_a_bad_quantity_is_400_and_reaches_no_function', async () => {
+  it('SCRUM300_AC2_reserve_with_a_bad_quantity_is_400_and_reaches_no_function', async () => {
     const client = fakeClient();
     const res = await request(appWith(client)).post(`${BASE}/lines/${LINE_ID}/reservations`).send({ quantity: 0 });
     expect(res.status).toBe(400);
@@ -177,14 +177,14 @@ describe('the routes for Technical Support Staff', () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  it('N19_AC2_reserve_with_no_body_is_400', async () => {
+  it('SCRUM300_AC2_reserve_with_no_body_is_400', async () => {
     const client = fakeClient();
     const res = await request(appWith(client)).post(`${BASE}/lines/${LINE_ID}/reservations`);
     expect(res.status).toBe(400);
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  it('N19_AC4_release_without_a_reason_is_400', async () => {
+  it('SCRUM300_AC4_release_without_a_reason_is_400', async () => {
     const client = fakeClient();
     const res = await request(appWith(client)).post(`${BASE}/reservations/${RESERVATION_ID}/release`).send({});
     expect(res.status).toBe(400);
@@ -192,40 +192,40 @@ describe('the routes for Technical Support Staff', () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  it('N19_AC4_reduce_lists_both_faults_at_once', async () => {
+  it('SCRUM300_AC4_reduce_lists_both_faults_at_once', async () => {
     const client = fakeClient();
     const res = await request(appWith(client)).patch(`${BASE}/reservations/${RESERVATION_ID}`).send({ quantity: 'x' });
     expect(res.status).toBe(400);
     expect(res.body.details.map((d) => d.field).sort()).toEqual(['quantity', 'reason']);
   });
 
-  it('N19_a_malformed_id_in_the_url_is_400_and_reaches_no_function', async () => {
+  it('SCRUM300_a_malformed_id_in_the_url_is_400_and_reaches_no_function', async () => {
     const client = fakeClient();
     const res = await request(appWith(client)).post(`${BASE}/reservations/not-a-uuid/release`).send({ reason: 'x' });
     expect(res.status).toBe(400);
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  it('N19_AC2_more_than_available_is_400_and_the_message_shows_how_many_are', async () => {
+  it('SCRUM300_AC2_more_than_available_is_400_and_the_message_shows_how_many_are', async () => {
     const client = fakeClient({ reserve_equipment: dbError('22023', 'Only 1 available for this period, so 2 cannot be reserved') });
     const res = await request(appWith(client)).post(`${BASE}/lines/${LINE_ID}/reservations`).send({ quantity: 2 });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/Only 1 available/);
   });
 
-  it('N19_AC3_the_second_reviewer_for_the_last_unit_gets_the_updated_figure', async () => {
+  it('SCRUM300_AC3_the_second_reviewer_for_the_last_unit_gets_the_updated_figure', async () => {
     const client = fakeClient({ reserve_equipment: dbError('22023', 'Only 0 available for this period, so 1 cannot be reserved') });
     const res = await request(appWith(client)).post(`${BASE}/lines/${LINE_ID}/reservations`).send({ quantity: 1 });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/Only 0 available/);
   });
 
-  it.each(ROUTES)('N19_AC1_%s_not_the_current_reviewer_is_403', async (_what, call, rpcName) => {
+  it.each(ROUTES)('SCRUM300_AC1_%s_not_the_current_reviewer_is_403', async (_what, call, rpcName) => {
     const client = fakeClient({ [rpcName]: dbError('42501', 'Only the current reviewer can do this') });
     expect((await call(appWith(client))).status).toBe(403);
   });
 
-  it.each(ROUTES)('N19_AC1_%s_when_the_request_is_not_under_review_is_409_with_the_code', async (_what, call, rpcName) => {
+  it.each(ROUTES)('SCRUM300_AC1_%s_when_the_request_is_not_under_review_is_409_with_the_code', async (_what, call, rpcName) => {
     const client = fakeClient({ [rpcName]: dbError('55000', 'This can only be done while the request is Under review. This request is Arranged.') });
     const res = await call(appWith(client));
     expect(res.status).toBe(409);
@@ -233,12 +233,12 @@ describe('the routes for Technical Support Staff', () => {
     expect(res.body.error).toMatch(/Arranged/);
   });
 
-  it.each(ROUTES)('N19_%s_an_unknown_event_line_or_reservation_is_404', async (_what, call, rpcName) => {
+  it.each(ROUTES)('SCRUM300_%s_an_unknown_event_line_or_reservation_is_404', async (_what, call, rpcName) => {
     const client = fakeClient({ [rpcName]: dbError('P0002', 'Not found') });
     expect((await call(appWith(client))).status).toBe(404);
   });
 
-  it.each(ROUTES)('N19_%s_an_unexpected_failure_is_500_without_leaking_the_driver_message', async (_what, call, rpcName) => {
+  it.each(ROUTES)('SCRUM300_%s_an_unexpected_failure_is_500_without_leaking_the_driver_message', async (_what, call, rpcName) => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const client = fakeClient({ [rpcName]: dbError('XX000', 'secret internal detail') });
     const res = await call(appWith(client));
@@ -247,13 +247,13 @@ describe('the routes for Technical Support Staff', () => {
     spy.mockRestore();
   });
 
-  it('N19_the_old_review_routes_still_exist', async () => {
+  it('SCRUM300_the_old_review_routes_still_exist', async () => {
     const client = fakeClient({ equipment_review_for_event: ok(reviewRow()) });
     const res = await request(appWith(client)).get(BASE);
     expect(res.status).toBe(200);
   });
 
-  it('N19_an_unsupported_method_on_a_reservation_is_404', async () => {
+  it('SCRUM300_an_unsupported_method_on_a_reservation_is_404', async () => {
     const client = fakeClient();
     const res = await request(appWith(client)).delete(`${BASE}/reservations/${RESERVATION_ID}`);
     expect(res.status).toBe(404);
