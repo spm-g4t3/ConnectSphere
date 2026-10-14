@@ -6,6 +6,7 @@
 **Written:** 14 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; each **Implemented by** says so, and the subtask that writes its tests fills it in.
 **Marked:** 14 October 2026, SCRUM-555 and SCRUM-556: every case their tests prove names them. The cases themselves are unchanged.
 **Marked:** 14 October 2026, SCRUM-557 and SCRUM-558: the screen's cases and AC7-01, AC8-04 marked; AC1-10, AC6-06, AC8-06 and AC8-07 added for the screen and the notice's wording.
+**Marked:** 14 October 2026, the AC8-07 fix-up: the Safety Officer's card mounted; AC8-05 and AC8-07 proved.
 
 This document is the written layer between SCRUM-489's acceptance criteria and the
 Vitest files that implement them. The chain is **user story → acceptance criteria
@@ -320,9 +321,14 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
 | AC8-02 | No Safety Officer | A submits | Allowed; no notice | Proved (pglite): `SCRUM489_AC8_with_no_safety_officer_it_still_submits_and_notifies_nobody` |
 | AC8-03 | 064 applied | Read `notifications_type_known` | Fifteen types: 052's eleven, SCRUM-490's three, and this story's one | Proved (pglite): `SCRUM489_AC8_the_type_list_keeps_every_earlier_type_and_adds_this_storys` |
 | AC8-04 | In Safety review | The organiser's list | "Safety check" (SCRUM-488's label) | Proved (pglite-558): `SCRUM489_AC8_a_submitted_event_reads_to_its_organiser_as_safety_check`. The words over HTTP and on screen, for a seeded row, are SCRUM-488's: `SCRUM488_AC5_the_organiser_reads_an_event_in_%s_as_%s`, `SCRUM488_AC5_the_organisers_list_labels_events_in_both_safety_statuses_beside_the_others` (eventRequests.test.js), `SCRUM488_AC5_shows_%s_as_%s_with_its_badge_and_description` (MyEventRequests.test.jsx) |
-| AC8-05 | A notice of this type | A Safety Officer opens their notifications | Shown, in words | **Cannot be tested as written**: see below |
+| AC8-05 | A notice of this type | A Safety Officer opens their notifications | Shown, in words | Proved (screen): `SCRUM489_AC8_a_safety_officer_reads_a_submission_notice_on_the_dashboard_in_words` (Dashboard.test.jsx), the real card and `describeNotification`. Was cannot-be-tested while the dashboard had no card (see below) |
 | AC8-06 | A notice of this type, with or without each payload field | `describeNotification` | "Event submitted for safety check"; the detail names the event, the coordinator and the start, each falling back in words | Proved (display): `SCRUM489_AC8_names_the_event_the_coordinator_and_the_start`, `SCRUM489_AC8_with_%s_it_falls_back_in_words`, `SCRUM489_AC8_a_start_that_is_%s_is_left_out`, `SCRUM489_AC8_with_no_payload_it_still_reads_as_a_submission` |
-| AC8-07 | A Safety Officer signs in | The dashboard | The notifications card is shown | **not yet implemented**: mounting it fails SCRUM-485's `SCRUM485_AC3_the_%s_dashboard_calls_no_service` (AC3-08); held for Calven's decision |
+| AC8-07 | A Safety Officer signs in | The dashboard | The notifications card is shown; it is the dashboard's only read | Proved (screen): `SCRUM489_AC8_the_safety_officer_dashboard_reads_only_its_notifications`, `SCRUM489_AC8_a_safety_officer_reads_a_submission_notice_on_the_dashboard_in_words` (Dashboard.test.jsx) |
+
+SCRUM-485's `SCRUM485_AC3_the_%s_dashboard_calls_no_service` (AC3-08) lost its `safety_officer` row, its
+last, and is gone. The row was right when written; mounting the card makes the dashboard read
+`/notifications`. Calven's decision, as SCRUM-486 did for the Lead: the read is pinned exactly by
+AC8-07's first test, so nothing the dashboard calls goes unchecked.
 
 ---
 
@@ -347,13 +353,14 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
   runs should wait on the submission's `for share` lock and be seen by the next
   readiness check. PGlite is one connection, so two transactions never overlap.
 - **AC7-02** (D10): SCRUM-395's.
-- **AC8-05, the Safety Officer reading the notice.** On `dev` the Safety Officer's
+- **AC8-05, the Safety Officer reading the notice** (no longer: proved since the
+  AC8-07 fix-up mounted the card; kept for the record). On `dev` the Safety Officer's
   dashboard (`SafetyOfficerDashboard.jsx`) has no notifications card, so a Safety
   Officer has nowhere to see one. Where a card exists, SCRUM-172's
   `describeNotification` shows a type it does not know as "New notification / This
   notification type cannot be displayed yet.", counted and markable, not hidden.
-  SCRUM-557 has since worded this type (AC8-06); the card is AC8-07, held
-  because mounting it breaks SCRUM-485's no-service test of that dashboard.
+  SCRUM-557 has since worded this type (AC8-06), and the AC8-07 fix-up mounted
+  the card.
 
 ---
 
@@ -365,7 +372,9 @@ that cannot be written as specified (AC7-02, AC8-05). Twenty-four are traps. Aft
 SCRUM-556: **49 proved**; 5 not yet implemented (AC3-09, AC4-07, AC5-06, AC7-01,
 AC8-04: the screen and SCRUM-558's proofs); the same 2. After SCRUM-557 and
 SCRUM-558: 60 cases (AC1-10, AC6-06, AC8-06 and AC8-07 added); **57 proved**; 1
-not yet implemented (AC8-07, the Safety Officer's card); the same 2.
+not yet implemented (AC8-07, the Safety Officer's card); the same 2. After the
+AC8-07 fix-up: **59 proved**; 0 not yet implemented; 1 that cannot be written
+(AC7-02, SCRUM-395's).
 
 | Section | Cases |
 |---|---|
