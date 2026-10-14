@@ -283,6 +283,12 @@ function translateError(error) {
     return new NotFoundError(detail || 'Event request not found');
   }
 
+  // SCRUM-489: submit_event_for_safety_review (064) refuses an event that is not
+  // ready with every outstanding checklist line as JSON in DETAIL.
+  if (code === 'PT409' && error.hint === 'EVENT_NOT_READY') {
+    return new ConflictError(detail, { code: 'EVENT_NOT_READY', conflicts: parseOutstanding(error.details) });
+  }
+
   // Left untyped on purpose. An unrecognised code is not the caller's fault and
   // there is nothing for them to correct, so it must not reach the API dressed
   // as a 400 telling an Organiser to fix their form.
@@ -2491,4 +2497,98 @@ export async function listAssignmentHistory(id, { includeNotes = false } = {}, {
 
     return entry;
   });
+}
+
+
+/** DETAIL's outstanding lines, or none: a malformed DETAIL must not become a 500. */
+function parseOutstanding(details) {
+  try {
+    const items = JSON.parse(details);
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return [];
+  }
+}
+
+const SAFETY_NOTE_MAX = 2000;
+
+/**
+ * The readiness checklist of SCRUM-489 AC2 and AC3, from event_readiness (064),
+ * the same function the submission and SCRUM-363's confirm run.
+ *
+ * @param {object} options
+ * @param {string} options.eventRequestId
+ * @param {boolean} [options.noEquipmentConfirmed]
+ * @param {object} [options.client]
+ * @returns {Promise<{ eventRequestId: string, ready: boolean, items: object[] }>}
+ */
+export async function getEventReadiness({ client, eventRequestId, noEquipmentConfirmed = false } = {}) {
+  if (!isPlausibleId(eventRequestId)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+  if (typeof noEquipmentConfirmed !== 'boolean') {
+    throw new ValidationError(
+      'Invalid noEquipmentConfirmed -- must be true or false',
+      [{ field: 'noEquipmentConfirmed', message: 'must be true or false' }],
+    );
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('event_readiness', {
+    p_event_request_id: eventRequestId,
+    p_no_equipment_confirmed: noEquipmentConfirmed,
+  });
+  if (error) throw translateError(error);
+  return data;
+}
+
+/**
+ * The assigned coordinator sends an Approved, ready event to the Safety
+ * Officers (SCRUM-489 AC1 to AC6, AC8), through submit_event_for_safety_review
+ * (064). The inputs are refused here first, by the database's own rules, so a
+ * bad one costs no round trip.
+ *
+ * @param {object} options
+ * @param {string} options.eventRequestId
+ * @param {string} options.coordinatorId     the caller, from the token
+ * @param {string} [options.note]            for the Safety Officer, up to 2,000 characters
+ * @param {boolean} [options.noEquipmentConfirmed]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the event, now in Safety review, in camelCase
+ */
+export async function submitForSafetyReview({
+  client, eventRequestId, coordinatorId, note, noEquipmentConfirmed = false,
+} = {}) {
+  if (!isPlausibleId(eventRequestId)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
+    throw new ValidationError('coordinatorId is required');
+  }
+  if (note !== undefined && note !== null && typeof note !== 'string') {
+    throw new ValidationError('Invalid note -- must be text', [{ field: 'note', message: 'must be text' }]);
+  }
+  const trimmed = typeof note === 'string' ? note.trim() : '';
+  if (trimmed.length > SAFETY_NOTE_MAX) {
+    throw new ValidationError(
+      'The note for the Safety Officer must be 2,000 characters or fewer',
+      [{ field: 'note', message: 'must be 2,000 characters or fewer' }],
+    );
+  }
+  if (typeof noEquipmentConfirmed !== 'boolean') {
+    throw new ValidationError(
+      'Invalid noEquipmentConfirmed -- must be true or false',
+      [{ field: 'noEquipmentConfirmed', message: 'must be true or false' }],
+    );
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('submit_event_for_safety_review', {
+    p_event_request_id: eventRequestId,
+    p_coordinator_id: coordinatorId,
+    p_note: trimmed === '' ? null : trimmed,
+    p_no_equipment_confirmed: noEquipmentConfirmed,
+  });
+  if (error) throw translateError(error);
+  return toEventRequest(data);
 }
