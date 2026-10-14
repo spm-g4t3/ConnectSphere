@@ -8,7 +8,7 @@
 // and tells Venue Staff what happened, including every refusal.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within, act } from "@testing-library/react";
+import { render, screen, within, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import PendingBookingRequests from "../../src/components/PendingBookingRequests.jsx";
@@ -550,5 +550,121 @@ describe("rejecting (AC4)", () => {
     await user.click(within(region).getByRole("button", { name: "Reject" }));
 
     expect(rejectBookingRequest).toHaveBeenCalledWith("1", { reason: "Too small", suggestedAlternative: "Hall B" });
+  });
+});
+
+
+describe("after a decision, and incomplete data", () => {
+  // The value shown beside a <dt> label in an open card.
+  const fieldIn = (region, label) => within(region).getByText(label, { selector: "dt" }).nextElementSibling;
+
+  it("SCRUM258_AC3_a_refetch_that_fails_after_a_decision_keeps_the_notice_and_says_the_queue_could_not_load", async () => {
+    vi.mocked(getPendingBookingRequests)
+      .mockResolvedValueOnce([item("1")])
+      .mockRejectedValueOnce(httpError(500));
+    vi.mocked(approveBookingRequest).mockResolvedValue({ id: "1", markedConflicting: [] });
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    await user.click(within(region).getByRole("button", { name: "Approve" }));
+
+    // The approval happened; only the reload failed, so both are said.
+    expect(await screen.findByRole("status")).toHaveTextContent("Approved Hall 1 for Event 1.");
+    expect(screen.getByRole("alert")).toHaveTextContent(/could not be loaded/);
+    expect(getPendingBookingRequests).toHaveBeenCalledTimes(2);
+  });
+
+  it("SCRUM258_AC3_one_marked_request_is_reported_in_the_singular", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([item("1", { overlapping: [overlap("o1", "Alpha")] })]);
+    vi.mocked(approveBookingRequest).mockResolvedValue({ id: "1", markedConflicting: ["o1"], convertedHoldId: null });
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    await user.click(within(region).getByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("1 overlapping request was marked Conflicting.");
+  });
+
+  it("SCRUM258_AC3_an_approval_of_a_request_with_no_names_and_no_marked_list_says_so_plainly", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([item("1", { eventName: null, venueName: null })]);
+    vi.mocked(approveBookingRequest).mockResolvedValue({ id: "1" });
+    const { user } = renderQueue();
+    await user.click(await screen.findByRole("button", { name: /Unnamed event/ }));
+    const region = regionFor("Unnamed event", "Unknown venue");
+
+    await user.click(within(region).getByRole("button", { name: "Approve" }));
+
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("Approved the venue for the event.");
+    expect(notice).not.toHaveTextContent(/Conflicting/);
+  });
+
+  it("SCRUM258_AC1_missing_details_read_as_not_specified_rather_than_blank", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", { venueLocation: null, expectedAttendance: null, overlapping: null }),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(fieldIn(region, "Venue")).toHaveTextContent(/^Hall 1$/);
+    expect(fieldIn(region, "Expected attendance")).toHaveTextContent("Not specified");
+    expect(within(region).getByText("No other requests overlap.")).toBeInTheDocument();
+    expect(within(region).queryByText(/Approving marks/)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM258_AC3_unnamed_events_in_the_way_or_overlapping_are_still_listed", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", { status: "conflicting", conflictingWith: [clash("b1", null)], overlapping: [overlap("o1", null)] }),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).getByText(/^Unnamed event was approved at this venue for/)).toBeInTheDocument();
+    expect(within(region).getByRole("listitem")).toHaveTextContent("Unnamed event");
+  });
+
+  it("SCRUM258_AC1_a_queue_that_is_not_a_list_is_shown_as_empty", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue({ unexpected: true });
+    renderQueue();
+
+    expect(await screen.findByText("No pending booking requests.")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["arrives", (pending) => pending.resolve([item("1")])],
+    ["fails", (pending) => pending.reject(httpError(500))],
+  ])("SCRUM258_AC1_a_first_load_that_%s_after_unmount_is_ignored_without_errors", async (_label, settle) => {
+    const pending = deferred();
+    vi.mocked(getPendingBookingRequests).mockReturnValue(pending.promise);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { unmount } = renderQueue();
+    unmount();
+
+    await act(async () => settle(pending));
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("SCRUM258_AC2_a_rejection_submitted_while_an_approval_is_in_flight_is_not_sent", async () => {
+    const approval = deferred();
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([item("1")]);
+    vi.mocked(approveBookingRequest).mockReturnValue(approval.promise);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+    await user.type(within(region).getByLabelText("Reason for rejecting (required)"), "Too small");
+
+    await user.click(within(region).getByRole("button", { name: "Approve" }));
+    // A form can be submitted without its (disabled) button, so the ref is
+    // what keeps a second decision from going out.
+    fireEvent.submit(within(region).getByRole("button", { name: "Reject" }).closest("form"));
+
+    expect(rejectBookingRequest).not.toHaveBeenCalled();
+    await act(async () => approval.resolve({ id: "1", markedConflicting: [] }));
   });
 });
