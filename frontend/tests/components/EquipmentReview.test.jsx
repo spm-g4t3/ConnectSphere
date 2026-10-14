@@ -319,10 +319,10 @@ describe("EquipmentReview: completing", () => {
     expect(screen.getByText(/2 items are not fully reserved/)).toBeInTheDocument();
   });
 
-  it("SCRUM290_complete_says_arranged_when_nothing_is_short", async () => {
+  it("SCRUM290_AC7_complete_is_not_offered_when_no_line_is_short", async () => {
     await open(underReview({ lines: [line({ reserved: 3, shortBy: 0 })] }));
-    await userEvent.click(screen.getByRole("button", { name: "Complete review" }));
-    expect(screen.getByText(/Every item is fully reserved, so this request will be marked Arranged/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Complete review" })).not.toBeInTheDocument();
+    expect(screen.getByText(/so there is nothing to complete/)).toBeInTheDocument();
   });
 
   it("SCRUM290_confirming_completes_and_shows_the_new_status", async () => {
