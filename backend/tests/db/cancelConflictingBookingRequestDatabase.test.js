@@ -5,7 +5,7 @@
  *
  * SCRUM-258 AC3 with the Week 7 rule that conflicting is a flag on an open
  * request, not an end state. Uses cancelEventReleasesReservationsDatabase's
- * stack (through 054), then 049 (the preview 069 restates), 067 and 069.
+ * stack (through 054), then 049 (the preview 069 restates), 067, 069, 070 and 071.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
@@ -145,6 +145,9 @@ describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests 
     // 067's enum value must commit before 069 uses it, so each is its own exec.
     await db.exec(migration('067_conflicting_booking_status.sql'));
     await db.exec(migration('069_withdraw_conflicting_on_cancellation.sql'));
+    // 070's enum value must commit before 071's converted-hold columns use it.
+    await db.exec(migration('070_converted_venue_hold_status.sql'));
+    await db.exec(migration('071_convert_event_hold_on_approval.sql'));
 
     organiser = (await one("insert into auth.users (email) values ('organiser@test') returning id")).id;
     coordinator = (await one("insert into auth.users (email) values ('coordinator@test') returning id")).id;
@@ -196,5 +199,29 @@ describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests 
       )
     ).rows;
     expect(toStaff.map((n) => n.recipient_id)).toEqual([venueStaff]);
+  });
+
+  it('SCRUM258_Week7_cancelling_cancels_the_approved_booking_and_leaves_its_converted_hold_converted', async () => {
+    const eventId = await makeApprovedEvent();
+    const approved = await makeBooking(eventId, venueId, 'approved');
+    // The hold 071 converts on approval, written directly: decide is not in this stack.
+    const holdId = (
+      await one(
+        `insert into venue_holds
+           (event_request_id, venue_id, placed_by, expires_at, status, converted_at, converted_booking_id)
+         values ($1, $2, $3, now() + interval '2 days', 'converted', now(), $4)
+         returning id`,
+        [eventId, venueId, venueStaff, approved],
+      )
+    ).id;
+
+    await cancel(eventId);
+
+    expect(await bookingStatus(approved)).toBe('cancelled');
+    const hold = await one(
+      'select status::text as status, released_at, converted_booking_id from venue_holds where id = $1',
+      [holdId],
+    );
+    expect(hold).toEqual({ status: 'converted', released_at: null, converted_booking_id: approved });
   });
 });

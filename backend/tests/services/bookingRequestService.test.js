@@ -868,6 +868,19 @@ describe('SCRUM258 approving and rejecting a booking request (066)', () => {
     expect((await approveBookingRequest(BOOKING, STAFF, { client })).markedConflicting).toEqual(marked);
   });
 
+  it.each([
+    [HOLD, HOLD],
+    [null, null],
+    [undefined, null],
+  ])('SCRUM258_Week7_approval_returns_the_converted_hold_id_%s_as_%s', async (converted, expected) => {
+    const client = clientAnswering({
+      data: { outcome: 'approved', booking: decidedRow(), marked_conflicting: [], converted_hold_id: converted },
+      error: null,
+    });
+
+    expect((await approveBookingRequest(BOOKING, STAFF, { client })).convertedHoldId).toBe(expected);
+  });
+
   it('SCRUM258_AC3_an_approval_reported_with_a_booking_still_pending_is_an_error_not_a_success', async () => {
     const client = clientAnswering(answer('approved', decidedRow({ status: 'pending' })));
     await expect(approveBookingRequest(BOOKING, STAFF, { client })).rejects.toThrow(/not approved/);

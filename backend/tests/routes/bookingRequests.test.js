@@ -1235,6 +1235,23 @@ describe('SCRUM-258 AC2-AC6: Venue Staff approve or reject a request', () => {
     expect(res.body).toMatchObject({ status: 'approved', markedConflicting: [OTHER_BOOKING_ID] });
   });
 
+  it('SCRUM258_Week7_approve_is_200_with_the_hold_it_converted', async () => {
+    const HOLD_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const client = createFakeClient([
+      ok({
+        outcome: 'approved',
+        booking: bookingRow({ status: 'approved', decided_by: STAFF_ID, decided_at: '2026-10-14T02:00:00+00:00' }),
+        marked_conflicting: [],
+        converted_hold_id: HOLD_ID,
+      }),
+    ]);
+
+    const res = await decide(client, 'approve');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: 'approved', convertedHoldId: HOLD_ID });
+  });
+
   it('SCRUM258_AC4_reject_is_200_with_the_reason_and_alternative_and_the_caller_from_the_token', async () => {
     const client = createFakeClient([
       decided('rejected', { decision_reason: 'Double-booked', suggested_alternative: 'Hall B' }),

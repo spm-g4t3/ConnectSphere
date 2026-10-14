@@ -159,10 +159,11 @@ export function createBookingRequestRouter({
 
   /**
    * SCRUM-260: approve a pending or conflicting request. 200 and the request,
-   * now approved, with who decided and when, and `markedConflicting`: the ids
-   * of other events' requests it made conflicting (068).
+   * now approved, with who decided and when, `markedConflicting`: the ids of
+   * other events' requests it made conflicting (068), and `convertedHoldId`:
+   * the event's hold on the venue it converted, or null (071).
    *
-   * Behind venueStaffOnly, and decide_booking_request (068) checks the role
+   * Behind venueStaffOnly, and decide_booking_request (071) checks the role
    * again. No pre-check: whether the request is still pending, the event still
    * live and on the same dates, and the venue still free for the padded period
    * are answered under its locks. There is no body; the caller is always
@@ -188,7 +189,7 @@ export function createBookingRequestRouter({
    *
    * Body: { reason, suggestedAlternative? } -- reason is required and not
    * blank; both are at most 1000 characters. Behind venueStaffOnly, and
-   * decide_booking_request (068) checks the role again. The caller is always
+   * decide_booking_request (071) checks the role again. The caller is always
    * req.user.id.
    *
    * Statuses: 400 malformed id, a missing or blank reason, or a text too long;

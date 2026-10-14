@@ -66,7 +66,7 @@ import { toSuitabilityRecord } from '../domain/suitabilityRecord.js';
 /**
  * The event statuses a venue can be requested for (SCRUM-243 AC1), and since
  * SCRUM-260 approved for: past approval and still live, through the safety
- * check. create_booking_request and decide_booking_request (068) hold the same list.
+ * check. create_booking_request (068) and decide_booking_request (071) hold the same list.
  */
 const BOOKABLE_EVENT_STATUSES = Object.freeze([
   STATUS.APPROVED,
@@ -723,7 +723,7 @@ function toDecidedBookingRequest(row) {
 }
 
 /**
- * One call to decide_booking_request (068) and its answer, shared by approve
+ * One call to decide_booking_request (071) and its answer, shared by approve
  * and reject. The function checks the caller is Venue Staff, locks the event,
  * the venue (approval only) and the booking, refuses a request that is not
  * pending, and writes the decision and the coordinator's notice together.
@@ -765,10 +765,12 @@ async function decideBookingRequest(
   }
   if (decision !== 'approve') return booking;
 
-  // The other events' requests this approval marked conflicting (068).
+  // The other events' requests this approval marked conflicting (068), and
+  // this event's hold on the venue it converted, if any (071).
   return {
     ...booking,
     markedConflicting: Array.isArray(data.marked_conflicting) ? data.marked_conflicting : [],
+    convertedHoldId: data.converted_hold_id ?? null,
   };
 }
 
@@ -797,13 +799,18 @@ function checkCaller(callerId) {
  * back as `markedConflicting`. A conflicting request can itself be approved
  * once nothing occupies its period.
  *
+ * Holds are not released: this event's own active, unexpired hold on the venue
+ * becomes converted (071), and its id comes back as `convertedHoldId`, or null
+ * when there was none.
+ *
  * @param {string} bookingId  the request's id
  * @param {string} callerId   from the JWT -- never the body
  * @param {object} [options]
  * @param {object} [options.client]
  * @returns {Promise<object>} the request, now approved, shaped by
  *                            toDecidedBookingRequest, plus markedConflicting
- *                            (ids, possibly empty)
+ *                            (ids, possibly empty) and convertedHoldId (an id
+ *                            or null)
  * @throws {ValidationError} no caller, or a malformed id, before any round trip
  * @throws {NotFoundError}   no such booking request
  * @throws {ForbiddenError}  the caller is not Venue Staff
