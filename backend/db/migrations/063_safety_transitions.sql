@@ -1,4 +1,4 @@
--- 054_safety_transitions.sql
+-- 063_safety_transitions.sql
 -- SCRUM-488 (SCRUM-551): the legal status changes, with the Operational Safety
 -- Check between Approved and Confirmed.
 --
@@ -23,7 +23,7 @@
 -- (docs/SCRUM-488-decisions.md, D4), so it is not a transition until recorded.
 -- Who may make each move is checked by the story that makes it, not here.
 --
--- Compared as text, as in 022, so the values need no enum literal. 053 has
+-- Compared as text, as in 022, so the values need no enum literal. 062 has
 -- already added the two statuses to the enum, and this file does not depend on
 -- that having committed.
 --

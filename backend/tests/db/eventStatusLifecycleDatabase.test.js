@@ -247,9 +247,9 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     // unassigned review (SCRUM-517), and the notices (SCRUM-518).
     await db.exec(migration('052_lead_assignment.sql'));
     // SCRUM-488: the safety statuses and the constraints that admit them.
-    await db.exec(migration('053_safety_statuses.sql'));
+    await db.exec(migration('062_safety_statuses.sql'));
     // SCRUM-488: the transition table with the safety check in it.
-    await db.exec(migration('054_safety_transitions.sql'));
+    await db.exec(migration('063_safety_transitions.sql'));
   }, 60_000);
 
   afterAll(async () => {
@@ -1263,7 +1263,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       STATUS.CONFIRMED,
     ])('SCRUM486_AC5_a_lead_reassigns_a_request_that_is_%s', async (status) => {
       // AC5-01 and AC5-03: the seven. 052 compares the status as text, so it
-      // ran for the safety statuses once 053 added them to the enum.
+      // ran for the safety statuses once 062 added them to the enum.
       const id = await request(status);
 
       const { rows: [moved] } = await reassign(id, otherCoordinator, lead);
@@ -1292,7 +1292,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       // AC5-03: the function in force names both, and compares as text. The
       // name is from when the enum lacked them, and is kept because
       // docs/SCRUM-486.md cites it; the reassignments above now run against
-      // the real values (053).
+      // the real values (062).
       const { rows: [fn] } = await db.query(
         "select prosrc from pg_proc where proname = 'reassign_event_request'",
       );

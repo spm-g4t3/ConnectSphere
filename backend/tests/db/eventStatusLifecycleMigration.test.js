@@ -16,7 +16,7 @@ import { dirname, resolve } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 
 // Migration 020 is history: it admitted the nine statuses of SCRUM-318 and is
-// never rewritten. The safety statuses are admitted by 053, which has its own
+// never rewritten. The safety statuses are admitted by 062, which has its own
 // test (scrum488SafetyStatusesDatabase.test.js), so this list is written out
 // and no longer follows the domain module.
 const NINE_STATUSES_OF_020 = [

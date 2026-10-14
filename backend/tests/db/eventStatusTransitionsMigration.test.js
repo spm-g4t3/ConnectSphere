@@ -148,8 +148,8 @@ describe('SCRUM-318: what migration 022 leaves alone', () => {
 });
 
 
-describe('SCRUM-488 AC2: migration 054 restates the transition table', () => {
-  const safety = sql('054_safety_transitions.sql');
+describe('SCRUM-488 AC2: migration 063 restates the transition table', () => {
+  const safety = sql('063_safety_transitions.sql');
   const start = safety.indexOf('create or replace function event_request_status_allows(');
   const body = safety.slice(start, safety.indexOf('$$;', safety.indexOf('$$', start) + 2));
   const pairs = [...body.matchAll(/\('([a-z_]+)', '([a-z_]+)'\)/g)].map((m) => `${m[1]}>${m[2]}`);

@@ -1,4 +1,4 @@
--- 053_safety_statuses.sql
+-- 062_safety_statuses.sql
 -- SCRUM-488 (SCRUM-550): the two statuses of the Operational Safety Check, and
 -- the constraints that decide where an event may be stored.
 --

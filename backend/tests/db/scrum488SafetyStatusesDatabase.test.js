@@ -1,13 +1,13 @@
 /**
- * SCRUM-488 AC1 and AC7 (SCRUM-550): migration 053 adds safety_review and
+ * SCRUM-488 AC1 and AC7 (SCRUM-550): migration 062 adds safety_review and
  * safety_approved to the event status, and to the three constraints that decide
  * which statuses a row and its history may hold, on a real Postgres (PGlite).
  *
  * Two databases, both built with the migrations in the order the other PGlite
  * suites use, up to 052:
  *   - upgraded: seeded with one event per existing status, and its status
- *     history, before 053 runs. AC7: afterwards every row is as it was.
- *   - clean: 053 applied straight after 052, with no rows.
+ *     history, before 062 runs. AC7: afterwards every row is as it was.
+ *   - clean: 062 applied straight after 052, with no rows.
  *
  * The constraints are read from pg_constraint as well as exercised, because a
  * constraint that accepts the right rows can still list a wrong status, and
@@ -23,7 +23,7 @@ import { dirname, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const MIGRATION = '053_safety_statuses.sql';
+const MIGRATION = '062_safety_statuses.sql';
 
 const SEQUENCE = [
   '001_event_requests.sql',
@@ -102,7 +102,7 @@ async function snapshot(db) {
 /** The distinct quoted words in a constraint's definition, sorted. */
 const quotedWords = (definition) => [...new Set([...definition.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]))].sort();
 
-describe('SCRUM-488 AC1, AC7: migration 053, the safety statuses and their constraints', () => {
+describe('SCRUM-488 AC1, AC7: migration 062, the safety statuses and their constraints', () => {
   let upgraded;
   let clean;
   let before;

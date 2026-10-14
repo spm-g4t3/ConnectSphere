@@ -133,7 +133,7 @@ describe('SCRUM-487 AC2, AC3, AC6: the overview over a real database, before and
     await db.exec(migration('052_lead_assignment.sql'));
     await db.exec(migration('042_event_cancellation_fields.sql'));
     // SCRUM-488: the safety statuses, which the overview now lists.
-    await db.exec(migration('053_safety_statuses.sql'));
+    await db.exec(migration('062_safety_statuses.sql'));
 
     const user = async (email, role, name) => {
       const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;

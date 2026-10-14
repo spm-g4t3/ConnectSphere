@@ -209,7 +209,7 @@ export const STATUS_DISPLAY = Object.freeze({
  * Clarification is requested from under_review only; submitted requests must
  * first be moved into review through the coordinator's review workflow.
  *
- * Migration 022 held this same table in SQL, and 054 restates it, so the
+ * Migration 022 held this same table in SQL, and 063 restates it, so the
  * database function refuses an illegal move whoever calls it. A test compares
  * the two pair by pair.
  */
