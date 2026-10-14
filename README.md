@@ -82,7 +82,7 @@ Each package can still be driven on its own from inside its own directory; the r
 
 ## Event status lifecycle
 
-An event request is always in exactly one of nine statuses, and moves between them only along the transitions below. The statuses and transitions are defined once, in `backend/src/domain/eventRequestStatus.js` (`STATUS`, `ALLOWED_TRANSITIONS`, `canTransition`). Every story uses these names.
+An event request is always in exactly one of eleven statuses, and moves between them only along the transitions below. The statuses and transitions are defined once, in `backend/src/domain/eventRequestStatus.js` (`STATUS`, `ALLOWED_TRANSITIONS`, `canTransition`). Every story uses these names.
 
 ### Statuses and what the Organiser sees
 
@@ -95,6 +95,8 @@ The stored value is internal. The Event Organiser never sees it: they see the la
 | Under review | `under_review` | Under review |
 | Pending clarification | `pending_clarification` | Awaiting your response |
 | Approved | `approved` | Planning |
+| Safety review | `safety_review` | Safety check (provisional, SCRUM-549) |
+| Safety approved | `safety_approved` | Safety approved (provisional, SCRUM-549) |
 | Confirmed | `confirmed` | Confirmed |
 | Completed | `completed` | Completed |
 | Rejected | `rejected` | Rejected |
@@ -113,19 +115,24 @@ Only these transitions are allowed. This story defines which moves are valid; wh
 | Under review | Approved or Rejected | The assigned coordinator decides (SCRUM-19) |
 | Approved | Rejected | The assigned coordinator rejects an event whose essential arrangements can't be met (SCRUM-19) |
 | Rejected | Draft | The organiser reopens a rejected request to revise and resubmit it (SCRUM-19) |
-| Approved | Confirmed | The assigned coordinator confirms (N07) |
+| Approved | Safety review | The assigned coordinator submits the event for the safety check (SCRUM-489) |
+| Safety review | Safety approved | The Safety Officer approves (SCRUM-490) |
+| Safety review | Approved | The Safety Officer sends the event back, with reasons (SCRUM-490) |
+| Safety approved | Confirmed | The assigned coordinator confirms (SCRUM-363). Replaces Approved to Confirmed, which no longer exists |
+| Safety review, Safety approved | Approved | A significant change is accepted, so the event needs re-planning (SCRUM-395) |
 | Confirmed | Approved | A significant change is accepted, so the event needs re-planning (N05, N06) |
 | Confirmed | Completed | The assigned coordinator marks the event completed after it ends (N23) |
-| Submitted, Under review, Pending clarification, Approved, Confirmed | Cancelled | The assigned coordinator cancels, including when the organiser asks to withdraw (N08) |
+| Submitted, Under review, Pending clarification, Approved, Safety review, Safety approved, Confirmed | Cancelled | The assigned coordinator cancels, including when the organiser asks to withdraw (N08) |
 
 ```
 Draft -> Submitted -> Under review <-> Pending clarification
                           |
-                          +-> Approved <-> Confirmed -> Completed
-                          |      |
+                          +-> Approved <-> Safety review -> Safety approved -> Confirmed -> Completed
+                          |      |              (Safety approved and Confirmed also go back to Approved)
                           +------+-> Rejected -> Draft (reopened)
 
-Cancelled: from Submitted, Under review, Pending clarification, Approved or Confirmed.
+Cancelled: from Submitted, Under review, Pending clarification, Approved, Safety review, Safety approved or Confirmed.
+A safety status cannot be rejected: that is SCRUM-347's open decision (docs/SCRUM-488-decisions.md, D4).
 ```
 
 - **Final statuses.** Completed and Cancelled are final: nothing leads out of them. A cancelled event cannot be reinstated; the organiser submits a new request instead. Rejected is not final, because a rejected request can be reopened as a draft.
@@ -134,7 +141,7 @@ Cancelled: from Submitted, Under review, Pending clarification, Approved or Conf
 
 ### How a status changes
 
-- **One rule.** `canTransition` is the only place the transition table is read. The service asks it before it calls the database; the database does not hold a second copy.
+- **One rule, held twice.** `canTransition` is how the service reads the transition table, before it calls the database. The Postgres function `event_request_status_allows` (migration `022`, restated in `054` for the safety statuses) holds the same table, so the database refuses an illegal move whoever calls it, and a test compares the two pair by pair.
 - **One mechanism.** `changeEventRequestStatus` (`backend/src/services/eventRequestService.js`) asks `canTransition`, then calls the Postgres function `change_event_request_status` (migration `021`) through RPC. In one transaction that function locks the row, refuses if the status is no longer the one the caller last saw, writes the new status and inserts the history row. Every story that changes a status calls this; none writes the status column itself.
 - **Draft → Submitted is the one exception, and it is its own path.** Submitting also assigns a coordinator and sets `submitted_at`, so it goes through `submitEventRequest` and the Postgres function `submit_event_request` (SCRUM-327, replaced in `021`). In one transaction it checks the request is a draft, picks the coordinator with `pick_event_coordinator`, sets the status, `submitted_at` and `assigned_coordinator_id`, writes the assignment history row and writes the status history row. `change_event_request_status` refuses `submitted` as a target, so there is exactly one way to submit, and `event_requests_assigned_when_submitted` (migration `017`) refuses a submitted request with no coordinator.
 - **Creating a draft** is not a transition: the row is inserted as `draft` and there is no previous status to record.

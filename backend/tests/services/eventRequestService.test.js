@@ -3573,6 +3573,76 @@ describe('SCRUM-321 AC3: a refused or failed change writes nothing', () => {
 });
 
 
+describe('SCRUM-488 AC2 to AC4: the safety transitions go through the same function', () => {
+  const SAFETY_MOVES = [
+    [STATUS.APPROVED, STATUS.SAFETY_REVIEW],
+    [STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_REVIEW, STATUS.APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.CONFIRMED],
+    [STATUS.SAFETY_REVIEW, STATUS.CANCELLED],
+    [STATUS.SAFETY_APPROVED, STATUS.CANCELLED],
+  ];
+
+  it.each(SAFETY_MOVES)(
+    'SCRUM488_AC4_%s_to_%s_is_one_call_carrying_the_statuses_the_actor_and_the_reason',
+    async (from, to) => {
+      const client = createFakeClient([ok(approvedRow({ status: to }))]);
+
+      const result = await change(client, {
+        expectedStatus: from, newStatus: to, reason: '  Sent back with reasons.  ',
+      });
+
+      expect(client.calls.map((call) => call.operation)).toEqual(['rpc']);
+      expect(rpcCallsOf(client)[0]).toMatchObject({
+        fn: 'change_event_request_status',
+        args: {
+          p_event_request_id: REQUEST_ID,
+          p_expected_status: from,
+          p_new_status: to,
+          p_changed_by: COORDINATOR_ID,
+          p_reason: 'Sent back with reasons.',
+        },
+      });
+      expect(result.status).toBe(to);
+    },
+  );
+
+  it.each([
+    [STATUS.APPROVED, STATUS.CONFIRMED],
+    [STATUS.APPROVED, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_REVIEW, STATUS.CONFIRMED],
+    // SCRUM-347 has not decided whether a safety status may be rejected.
+    [STATUS.SAFETY_REVIEW, STATUS.REJECTED],
+    [STATUS.SAFETY_APPROVED, STATUS.REJECTED],
+    [STATUS.CONFIRMED, STATUS.SAFETY_REVIEW],
+    [STATUS.COMPLETED, STATUS.SAFETY_REVIEW],
+    [STATUS.CANCELLED, STATUS.SAFETY_APPROVED],
+  ])('SCRUM488_AC3_refuses_%s_to_%s_naming_the_status_and_calling_nothing', async (from, to) => {
+    const client = createFakeClient([]);
+
+    const err = await errorFrom(change(client, { expectedStatus: from, newStatus: to }));
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.status).toBe(409);
+    expect(err.message).toContain(`'${from}'`);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM488_AC3_a_conflict_from_the_function_on_a_safety_move_is_a_409_with_no_retry', async () => {
+    // The stale-status refusal and the table's own refusal both raise 55000.
+    const client = createFakeClient([dbError('55000', 'event request has status safety_review, not approved')]);
+
+    const err = await errorFrom(change(client, {
+      expectedStatus: STATUS.APPROVED, newStatus: STATUS.SAFETY_REVIEW,
+    }));
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(rpcCallsOf(client)).toHaveLength(1);
+  });
+});
+
+
 describe('SCRUM-321: the other status changes go through the same function', () => {
   it('SCRUM321_a_clarification_request_that_is_not_allowed_calls_nothing_after_the_read', async () => {
     // Approved cannot go back to clarification. The refusal names the status

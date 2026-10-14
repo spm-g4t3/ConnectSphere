@@ -30,12 +30,14 @@ const ALL_STATUSES = Object.values(STATUS);
 /** Final: nothing leads out of them (SCRUM-318). Rejected is not, it reopens as a draft. */
 const TERMINAL = [STATUS.COMPLETED, STATUS.CANCELLED];
 
-/** The statuses SCRUM-318 allows the assigned coordinator to cancel from. */
+/** The statuses SCRUM-318 allows the assigned coordinator to cancel from, with SCRUM-488's two. */
 const CANCELLABLE = [
   STATUS.SUBMITTED,
   STATUS.UNDER_REVIEW,
   STATUS.PENDING_CLARIFICATION,
   STATUS.APPROVED,
+  STATUS.SAFETY_REVIEW,
+  STATUS.SAFETY_APPROVED,
   STATUS.CONFIRMED,
 ];
 
@@ -91,8 +93,8 @@ describe('STATUS mirrors the database enum', () => {
     expect(missing.sort()).toEqual([...OBSOLETE_STATUSES].sort());
   });
 
-  it('has nine statuses', () => {
-    expect(ALL_STATUSES).toHaveLength(9);
+  it('has the nine statuses of SCRUM-318 and the two safety statuses of SCRUM-488', () => {
+    expect(ALL_STATUSES).toHaveLength(11);
   });
 
   it('has no duplicate values', () => {
@@ -196,15 +198,39 @@ describe('only legal status transitions are permitted', () => {
     [STATUS.PENDING_CLARIFICATION, STATUS.UNDER_REVIEW],
     [STATUS.CONFIRMED, STATUS.COMPLETED],
     // SCRUM-318 additions
-    [STATUS.APPROVED, STATUS.CONFIRMED],
     [STATUS.CONFIRMED, STATUS.APPROVED],
     [STATUS.APPROVED, STATUS.REJECTED],
     [STATUS.REJECTED, STATUS.DRAFT],
+    // SCRUM-488: the Operational Safety Check, before Confirmed
+    [STATUS.APPROVED, STATUS.SAFETY_REVIEW],
+    [STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_REVIEW, STATUS.APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.CONFIRMED],
+    [STATUS.SAFETY_REVIEW, STATUS.CANCELLED],
+    [STATUS.SAFETY_APPROVED, STATUS.CANCELLED],
   ])('allows %s -> %s', (from, to) => {
     expect(canTransition(from, to)).toBe(true);
   });
 
   it.each([
+    // SCRUM-488: Confirmed is reached through the safety check only
+    [STATUS.APPROVED, STATUS.CONFIRMED],
+    [STATUS.APPROVED, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_REVIEW, STATUS.CONFIRMED],
+    [STATUS.UNDER_REVIEW, STATUS.SAFETY_REVIEW],
+    [STATUS.CONFIRMED, STATUS.SAFETY_REVIEW],
+    [STATUS.CONFIRMED, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.SAFETY_REVIEW],
+    [STATUS.SAFETY_REVIEW, STATUS.UNDER_REVIEW],
+    [STATUS.SAFETY_REVIEW, STATUS.DRAFT],
+    [STATUS.SAFETY_APPROVED, STATUS.COMPLETED],
+    // rejecting from a safety status is SCRUM-347's open decision (SCRUM-488 D4)
+    [STATUS.SAFETY_REVIEW, STATUS.REJECTED],
+    [STATUS.SAFETY_APPROVED, STATUS.REJECTED],
+    [STATUS.REJECTED, STATUS.SAFETY_REVIEW],
+    [STATUS.COMPLETED, STATUS.SAFETY_REVIEW],
+    [STATUS.CANCELLED, STATUS.SAFETY_APPROVED],
     // a rejected request is revised as a draft, never revived in place
     [STATUS.REJECTED, STATUS.CONFIRMED],
     [STATUS.REJECTED, STATUS.UNDER_REVIEW],
@@ -233,9 +259,9 @@ describe('only legal status transitions are permitted', () => {
     expect(canTransition(from, to)).toBe(false);
   });
 
-  it('refuses every transition outside the SCRUM-318 table', () => {
+  it('refuses every transition outside the SCRUM-318 table as SCRUM-488 changed it', () => {
     // The whole table, so a transition added by accident fails here even when
-    // nobody thought to write a case for it.
+    // nobody thought to write a case for it. All eleven statuses, 121 pairs.
     const permitted = new Set([
       'draft>submitted',
       'submitted>under_review',
@@ -245,17 +271,42 @@ describe('only legal status transitions are permitted', () => {
       'under_review>rejected',
       'approved>rejected',
       'rejected>draft',
-      'approved>confirmed',
+      'approved>safety_review',
+      'safety_review>safety_approved',
+      'safety_review>approved',
+      'safety_approved>approved',
+      'safety_approved>confirmed',
       'confirmed>approved',
       'confirmed>completed',
       ...CANCELLABLE.map((s) => `${s}>cancelled`),
     ]);
 
+    expect(permitted.size).toBe(22);
+    expect(ALL_STATUSES).toHaveLength(11);
     for (const from of ALL_STATUSES) {
       for (const to of ALL_STATUSES) {
         expect(canTransition(from, to), `${from} -> ${to}`)
           .toBe(permitted.has(`${from}>${to}`));
       }
+    }
+  });
+
+  it('SCRUM488_AC2_confirmed_is_reached_only_from_safety_approved', () => {
+    const into = ALL_STATUSES.filter((from) => canTransition(from, STATUS.CONFIRMED));
+
+    expect(into).toEqual([STATUS.SAFETY_APPROVED]);
+  });
+
+  it('SCRUM488_AC2_a_safety_status_is_left_only_to_approved_the_next_stage_or_cancelled', () => {
+    expect([...ALLOWED_TRANSITIONS[STATUS.SAFETY_REVIEW]].sort())
+      .toEqual([STATUS.APPROVED, STATUS.CANCELLED, STATUS.SAFETY_APPROVED].sort());
+    expect([...ALLOWED_TRANSITIONS[STATUS.SAFETY_APPROVED]].sort())
+      .toEqual([STATUS.APPROVED, STATUS.CANCELLED, STATUS.CONFIRMED].sort());
+  });
+
+  it('SCRUM488_AC2_the_safety_check_is_entered_only_from_approved', () => {
+    for (const from of ALL_STATUSES) {
+      expect(canTransition(from, STATUS.SAFETY_REVIEW), from).toBe(from === STATUS.APPROVED);
     }
   });
 

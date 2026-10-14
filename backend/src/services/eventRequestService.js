@@ -677,7 +677,7 @@ export async function updateEventRequest(id, changes, organiserId, { client } = 
  *
  * The rule is asked in two places on purpose. canTransition here refuses an
  * illegal move before any round trip, with the status named. The function
- * (migration 022) holds the same table in SQL and refuses it again under the
+ * (migration 022, restated by 054) holds the same table in SQL and refuses it again under the
  * row lock, because the function is callable by anything that reaches the
  * database, not only this service. A test compares the two tables pair by
  * pair, so they cannot drift unnoticed. The function also checks the thing
