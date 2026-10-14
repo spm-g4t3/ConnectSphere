@@ -43,7 +43,7 @@ export function bookingRequestEligibility(event, userId) {
   if (!BOOKABLE_EVENT_STATUSES.includes(event.status)) {
     return {
       eligible: false,
-      reason: `A venue can only be requested for an approved or confirmed event. This event is ${statusLabel(event.status)}.`,
+      reason: `A venue can only be requested for an approved or confirmed event, including one under or past safety review. This event is ${statusLabel(event.status)}.`,
     };
   }
 

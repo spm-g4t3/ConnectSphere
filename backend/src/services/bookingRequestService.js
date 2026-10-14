@@ -596,6 +596,23 @@ function toOverlappingRequest(entry) {
 }
 
 /**
+ * One booking a conflicting request clashes with now, in camelCase.
+ *
+ * @param {object} entry  from list_pending_booking_requests' `conflicting_with`
+ */
+function toConflictingBooking(entry) {
+  return {
+    bookingId: entry.booking_id,
+    eventRequestId: entry.event_request_id,
+    eventName: entry.event_name ?? null,
+    startsAt: entry.starts_at,
+    endsAt: entry.ends_at,
+    occupiedStartsAt: entry.occupied_starts_at ?? null,
+    occupiedEndsAt: entry.occupied_ends_at ?? null,
+  };
+}
+
+/**
  * One row of the Venue Staff queue, in camelCase. The suitability record is
  * shaped by toSuitabilityRecord, as on the venue's bookings list, so both
  * screens show the same verdict and overridden criteria.
@@ -628,6 +645,8 @@ function toPendingBookingRequest(row) {
     requestedBy: row.requested_by ?? null,
     createdAt: row.created_at,
     overlapping: (row.overlapping ?? []).map(toOverlappingRequest),
+    // Empty when the clash has gone, so the screen can say it may be approved.
+    conflictingWith: (row.conflicting_with ?? []).map(toConflictingBooking),
   };
 }
 

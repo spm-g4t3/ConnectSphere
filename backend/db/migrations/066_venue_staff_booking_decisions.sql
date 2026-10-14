@@ -255,6 +255,9 @@ revoke execute on function pending_request_overlaps(uuid, timestamptz, timestamp
 -- request still waits for Venue Staff, so it is listed; each element carries
 -- its `status` so the screen can tell the two apart. A jsonb array, '[]' when
 -- nothing is open, as the other jsonb readers answer.
+-- `conflicting_with` names the bookings occupying a conflicting request's
+-- period now, read from venue_occupancy_conflicts, not stored: '[]' once that
+-- clash is gone, and always '[]' on a pending row, so every row has the key.
 
 create or replace function list_pending_booking_requests(p_caller uuid)
 returns jsonb
@@ -332,7 +335,27 @@ begin
                         )
                    from pending_request_overlaps(p.venue_id, p.starts_at, p.ends_at,
                                                  p.event_request_id) o
-               ), '[]'::jsonb)
+               ), '[]'::jsonb),
+               -- Bookings only: a block or hold never marks a request
+               -- conflicting. Flagged-for-review bookings are kept, because
+               -- they still occupy the venue until the Coordinator decides.
+               'conflicting_with', case when p.status::text = 'conflicting' then coalesce((
+                 select jsonb_agg(
+                          jsonb_build_object(
+                            'booking_id',         c.id,
+                            'event_request_id',   c.event_request_id,
+                            'event_name',         c.event_name,
+                            'starts_at',          c.starts_at,
+                            'ends_at',            c.ends_at,
+                            'occupied_starts_at', c.occupied_starts_at,
+                            'occupied_ends_at',   c.occupied_ends_at
+                          )
+                          order by c.starts_at, c.id
+                        )
+                   from venue_occupancy_conflicts(p.venue_id, p.starts_at, p.ends_at, true,
+                                                  p.event_request_id) c
+                  where c.kind = 'booking'
+               ), '[]'::jsonb) else '[]'::jsonb end
              )
              order by p.created_at, p.id
            )

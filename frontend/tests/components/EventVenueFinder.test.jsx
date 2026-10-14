@@ -994,7 +994,7 @@ describe("SCRUM254 request this venue from the event's search", () => {
   });
   const PENDING_BOOKING = { id: "b1", status: "pending" };
   const NOT_APPROVED =
-    /A venue can only be requested for an approved or confirmed event\. This event is/;
+    /A venue can only be requested for an approved or confirmed event, including one under or past safety review\. This event is/;
 
   const requestButton = (name) =>
     screen.getByRole("button", { name: `Request this venue: ${name}` });

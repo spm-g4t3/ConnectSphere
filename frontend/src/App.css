@@ -841,3 +841,39 @@ button { cursor: pointer; }
 .coordinator-workload td { font-variant-numeric: tabular-nums; }
 .assigned-events__filters { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
 .assigned-events__filters select { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+
+/* SCRUM-258: Venue Staff's pending booking requests. Each card is a block, not
+   the flex row .dashboard li makes it, and its toggle reads as a row rather
+   than a teal button. Badge colours repeat the coordinator list's pair so a
+   status looks the same to both sides. */
+.dashboard .pending-bookings__card { display: block; padding: 0; }
+.dashboard .pending-bookings__toggle { align-items: center; background: transparent; border-radius: 0; color: var(--ink); display: flex; flex-wrap: wrap; font: inherit; gap: 6px 16px; padding: 14px 4px; text-align: left; width: 100%; }
+.dashboard .pending-bookings__toggle:hover, .dashboard .pending-bookings__toggle[aria-expanded="true"] { background: #f4f8f7; }
+.dashboard .pending-bookings__toggle span:not(.status-badge) { color: var(--muted); font-size: 0.9rem; }
+.dashboard .pending-bookings__toggle .status-badge { margin-left: auto; }
+.dashboard--venue-staff .status--booking-pending { background: #fff6e5; color: #8a5a00; }
+.dashboard--venue-staff .status--booking-conflicting { background: #fff0ee; color: #a43c32; }
+.dashboard--venue-staff .status--booking-unknown { background: #eef2f1; }
+.pending-bookings__detail { display: grid; gap: 12px; padding: 4px 4px 20px; }
+.pending-bookings__detail dl { display: grid; gap: 7px 16px; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); margin: 0; }
+.pending-bookings__detail dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.pending-bookings__detail dd { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.pending-bookings__breakdown { color: var(--muted); display: block; font-size: 0.85rem; }
+.pending-bookings__detail h3 { color: var(--teal-dark); font-size: 1rem; margin: 6px 0 0; }
+.dashboard .pending-bookings__detail p { margin: 0; }
+.dashboard .pending-bookings__overlapping { list-style: decimal inside; }
+.dashboard .pending-bookings__overlapping li { display: list-item; padding: 6px 0; }
+.pending-bookings__overlapping li > * { margin-right: 12px; }
+.dashboard .pending-bookings__conflicting { background: #fff0ee; border-left: 3px solid #a43c32; border-radius: 6px; color: #a43c32; padding: 8px 12px; }
+.pending-bookings__approve { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.pending-bookings__reject { display: grid; gap: 6px; max-width: 640px; }
+.pending-bookings__reject label { color: var(--muted); font-size: 0.9rem; margin-top: 6px; }
+.pending-bookings__reject textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 70px; padding: 10px 12px; resize: vertical; }
+.pending-bookings__reject textarea[aria-invalid="true"] { border-color: #a43c32; }
+.pending-bookings__reject button { justify-self: start; margin-top: 6px; }
+.dashboard .pending-bookings__field-error { color: #a43c32; font-size: 0.84rem; }
+.dashboard .pending-bookings__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+.dashboard .pending-bookings__notice { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 6px 0 0; padding: 8px 12px; }
+@media (max-width: 640px) {
+  .pending-bookings__detail dl { grid-template-columns: 1fr; }
+}

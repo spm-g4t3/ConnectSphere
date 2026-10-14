@@ -1,8 +1,8 @@
 // bookingRequestService.js
 //
-// SCRUM-254 (part of SCRUM-243). The one frontend call to the booking request
-// API from SCRUM-252, kept beside the other service files so components never
-// build a URL themselves.
+// SCRUM-254 (part of SCRUM-243). The frontend's calls to the booking request
+// API, kept beside the other service files so components never build a URL
+// themselves. SCRUM-258 adds Venue Staff's queue and decisions.
 
 import { apiClient } from "./apiClient";
 
@@ -88,5 +88,66 @@ export async function getMyBookingRequests() {
  */
 export async function withdrawBookingRequest(id) {
   const response = await apiClient.post(`/booking-requests/${id}/withdraw`);
+  return response.data;
+}
+/**
+ * Every open booking request Venue Staff decide on (GET /booking-requests/pending,
+ * SCRUM-258 AC1): pending and conflicting, oldest first, across all venues.
+ *
+ * Each item carries the event, the period and the occupied period (setup and
+ * turnaround included), the expected attendance, layout, requirements, setup
+ * notes, the suitability result with any overrides, a `statusDisplay`, and
+ * `overlapping`: other events' open requests at the same venue whose occupied
+ * periods overlap it, in submission order. Not re-sorted by callers: the
+ * server's order is the queue's.
+ *
+ * Failures: 401, 403 (not Venue Staff), 500. None open is 200 [].
+ *
+ * @returns {Promise<Array>} possibly empty
+ */
+export async function getPendingBookingRequests() {
+  const response = await apiClient.get("/booking-requests/pending");
+  return response.data;
+}
+
+/**
+ * Approves a pending or conflicting request (POST /booking-requests/:id/approve).
+ *
+ * The server re-checks everything under its locks (AC2), so a request that
+ * looked approvable on screen can still be refused. Failures: 400 (malformed
+ * id), 401, 403, 404, and 409 with a `code`: BOOKING_NOT_PENDING,
+ * EVENT_NOT_BOOKABLE, BOOKING_PERIOD_STALE (the event's dates moved since the
+ * request), VENUE_RETIRED, BOOKING_CHANGED, or BOOKING_PERIOD_CONFLICT with
+ * `conflicts` shaped as createBookingRequest's.
+ *
+ * @param {string} id  the request's id
+ * @returns {Promise<Object>} the request, now approved, with decidedBy,
+ *   decidedAt, markedConflicting (ids of the other events' requests it made
+ *   conflicting) and convertedHoldId (the event's own hold it converted, or null)
+ */
+export async function approveBookingRequest(id) {
+  const response = await apiClient.post(`/booking-requests/${id}/approve`);
+  return response.data;
+}
+
+/**
+ * Rejects a pending or conflicting request (POST /booking-requests/:id/reject).
+ *
+ * `reason` is required and not blank; both texts are at most 1000 characters.
+ * An empty suggestion is left out of the body rather than sent as "".
+ * Failures: 400 with details[] (missing, blank or too long), 401, 403, 404,
+ * and 409 BOOKING_NOT_PENDING or BOOKING_CHANGED.
+ *
+ * @param {string} id  the request's id
+ * @param {Object} input
+ * @param {string} input.reason
+ * @param {string} [input.suggestedAlternative]  another venue or arrangement
+ * @returns {Promise<Object>} the request, now rejected, with the decision
+ */
+export async function rejectBookingRequest(id, { reason, suggestedAlternative }) {
+  const response = await apiClient.post(`/booking-requests/${id}/reject`, {
+    reason,
+    ...(suggestedAlternative ? { suggestedAlternative } : {}),
+  });
   return response.data;
 }

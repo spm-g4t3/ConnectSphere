@@ -407,6 +407,91 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting (065, 066)', ()
     });
   });
 
+  describe('what the queue says a conflicting request clashes with', () => {
+    const queueItem = async (id) => {
+      const { queue } = await one('select list_pending_booking_requests($1) as queue', [staff]);
+      return queue.find((item) => item.id === id);
+    };
+    const ms = (value) => new Date(value).getTime();
+
+    it('SCRUM258_AC3_a_conflicting_item_names_the_approved_event_and_its_period', async () => {
+      const { approved, conflicting } = await conflictingBehindApproval(await makeVenue());
+      const approvedName = (await one('select event_name from event_requests where id = $1', [approved.eventId]))
+        .event_name;
+
+      const [clash, extra] = (await queueItem(conflicting.id)).conflicting_with;
+
+      expect(extra).toBeUndefined();
+      expect(clash).toMatchObject({
+        booking_id: approved.id,
+        event_request_id: approved.eventId,
+        event_name: approvedName,
+      });
+      expect(ms(clash.starts_at)).toBe(ms(at('10:00')));
+      expect(ms(clash.ends_at)).toBe(ms(at('12:00')));
+      // Padded by the venue's 30 minutes' setup and 45 minutes' turnaround.
+      expect(ms(clash.occupied_starts_at)).toBe(ms(at('09:30')));
+      expect(ms(clash.occupied_ends_at)).toBe(ms(at('12:45')));
+    });
+
+    it('SCRUM258_AC3_a_flagged_for_review_booking_is_still_named_as_it_still_holds_the_venue', async () => {
+      const { approved, conflicting } = await conflictingBehindApproval(await makeVenue());
+      await db.query("update bookings set status = 'flagged_for_review' where id = $1", [approved.id]);
+
+      const item = await queueItem(conflicting.id);
+
+      expect(item.conflicting_with.map((c) => c.booking_id)).toEqual([approved.id]);
+    });
+
+    it('SCRUM258_AC3_once_the_approved_booking_is_cancelled_the_item_names_nothing_but_stays_conflicting', async () => {
+      const { approved, conflicting } = await conflictingBehindApproval(await makeVenue());
+      await db.query("update bookings set status = 'cancelled' where id = $1", [approved.id]);
+
+      const item = await queueItem(conflicting.id);
+
+      expect(item.status).toBe('conflicting');
+      expect(item.conflicting_with).toEqual([]);
+    });
+
+    it('SCRUM258_AC3_a_pending_item_names_nothing_even_beside_an_approved_booking', async () => {
+      const venue = await makeVenue();
+      await conflictingBehindApproval(venue);
+      // Overlaps the approval but arrived after it, so nothing marked it.
+      const later = await pending(venue, at('11:30'), at('12:30'));
+      expect(await statusOf(later.id)).toBe('pending');
+
+      expect((await queueItem(later.id)).conflicting_with).toEqual([]);
+    });
+
+    it('SCRUM258_AC3_a_block_or_another_events_hold_over_a_conflicting_item_is_not_named', async () => {
+      const venue = await makeVenue();
+      const { approved, conflicting } = await conflictingBehindApproval(venue);
+      // Both over the conflicting request's 10:30-13:45, and clear of the approval's 09:30-12:45.
+      await db.query(
+        "insert into venue_blocks (venue_id, starts_at, ends_at, reason) values ($1, $2, $3, 'maintenance')",
+        [venue, at('12:50'), at('13:10')],
+      );
+      const holder = await makeEvent({ start: at('13:30'), end: at('14:00') });
+      await db.query(
+        `insert into venue_holds (event_request_id, venue_id, placed_by, expires_at)
+         values ($1, $2, $3, now() + interval '1 day')`,
+        [holder, venue, staff],
+      );
+
+      const occupants = await rows('select kind from venue_occupancy_conflicts($1, $2, $3, true, $4)', [
+        venue,
+        at('11:00'),
+        at('13:00'),
+        conflicting.eventId,
+      ]);
+      const item = await queueItem(conflicting.id);
+
+      // Both do occupy that period, so leaving them out is the filter's doing.
+      expect(occupants.map((o) => o.kind).sort()).toEqual(['block', 'booking', 'hold']);
+      expect(item.conflicting_with.map((c) => c.booking_id)).toEqual([approved.id]);
+    });
+  });
+
   describe('the shared surfaces 066 sets', () => {
     // A later story restating the list from an older migration would drop the
     // decision types; the list that wins is the highest-numbered one.

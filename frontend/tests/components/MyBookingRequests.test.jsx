@@ -329,6 +329,31 @@ describe("statuses and details", () => {
     expect(badge).not.toHaveClass("status--booking-pending");
   });
 
+  it("SCRUM258_AC6_a_rejected_request_shows_the_reason_and_suggested_alternative", async () => {
+    vi.mocked(getMyBookingRequests).mockResolvedValue([
+      item("1", "rejected", { decisionReason: "Under renovation", suggestedAlternative: "Hall B" }),
+      item("2", "rejected", { decisionReason: "Too small", suggestedAlternative: null }),
+    ]);
+    renderList();
+    await screen.findByText("Event 1");
+
+    expect(within(rowFor("Event 1")).getByText("Reason: Under renovation")).toBeInTheDocument();
+    expect(within(rowFor("Event 1")).getByText("Suggested alternative: Hall B")).toBeInTheDocument();
+    expect(within(rowFor("Event 2")).getByText("Reason: Too small")).toBeInTheDocument();
+    expect(within(rowFor("Event 2")).queryByText(/Suggested alternative/)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM258_AC6_only_a_rejected_request_shows_a_decision_reason", async () => {
+    // The fields are on every decided row; an approved one has nothing to explain.
+    vi.mocked(getMyBookingRequests).mockResolvedValue([
+      item("1", "approved", { decisionReason: "Leftover note", suggestedAlternative: "Hall B" }),
+    ]);
+    renderList();
+    await screen.findByText("Event 1");
+
+    expect(within(rowFor("Event 1")).queryByText(/Reason:|Suggested alternative/)).not.toBeInTheDocument();
+  });
+
   it("SCRUM255_has_no_staff_approve_or_reject_controls", async () => {
     vi.mocked(getMyBookingRequests).mockResolvedValue(ALL);
     renderList();

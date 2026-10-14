@@ -39,7 +39,6 @@ vi.mock("../../src/services/venueService", () => ({
   updateVenueBlock: vi.fn(),
   removeVenueBlock: vi.fn(),
   getVenueBlockHistory: vi.fn(),
-  getPendingBookingRequests: vi.fn(),
   listVenueHolds: vi.fn(),
   placeVenueHold: vi.fn(),
   getHoldCandidates: vi.fn(),

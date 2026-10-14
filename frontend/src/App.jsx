@@ -14,6 +14,7 @@ import UnassignedQueue from "./components/UnassignedQueue";
 import AssignedEvents from "./components/AssignedEvents";
 import EventRequestReviewPage from "./components/EventRequestReviewPage";
 import MyBookingRequests from "./components/MyBookingRequests";
+import PendingBookingRequests from "./components/PendingBookingRequests";
 import EquipmentCatalogue from "./components/EquipmentCatalogue";
 import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
@@ -266,14 +267,28 @@ function AppRoutes() {
             ProtectedRoute's `!user` branch redirects to /login before the role
             check runs. Wrapping it would only risk a redirect loop. */}
         <Route path="/unauthorized" element={<PagePlaceholder title="Not available to your role" description="Your account does not have access to that page. If you think it should, ask an administrator to check your role." />} />
-        {/* The next three are placeholders on purpose, and the nav links that point
-            at them are kept on purpose. A future sprint builds exactly these three
+        {/* SCRUM-258: Venue Staff's queue of open booking requests, the same
+            component the Venue Staff dashboard shows, so the nav link and the
+            dashboard are two ways into one screen. Gated and wrapped as
+            /venue-catalogue is: GET /booking-requests/pending answers 403 to
+            anyone else regardless, and the wrapper styles the cards and badges. */}
+        <Route
+          path="/booking-requests"
+          element={
+            <ProtectedRoute allowedRoles={["venue_staff"]}>
+              <div className="dashboard dashboard--venue-staff">
+                <PendingBookingRequests />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* The next two are placeholders on purpose, and the nav links that point
+            at them are kept on purpose. A future sprint builds exactly these two
             features, so deleting the links now just means re-adding them then. What
             was wrong before was not the links — it was that they fell through to the
             catch-all below and silently bounced the user to /dashboard with no
             explanation. An honest "being built" page is truthful today and becomes
             the real page later. Do not "tidy" these away. */}
-        <Route path="/booking-requests" element={<ProtectedRoute><PagePlaceholder title="Booking requests" description="Booking requests are still being built. Venue staff will review and respond to incoming booking requests here in a future release. Nothing is waiting for you behind this page yet." /></ProtectedRoute>} />
         <Route path="/tickets" element={<ProtectedRoute><PagePlaceholder title="Support tickets" description="Support tickets are still being built. Technical support staff will raise, triage and close event support tickets here in a future release. Nothing is waiting for you behind this page yet." /></ProtectedRoute>} />
         <Route path="/equipment" element={<ProtectedRoute><PagePlaceholder title="Equipment requests" description="Equipment requests are still being built. Technical support staff will track equipment allocated to each event here in a future release. Nothing is waiting for you behind this page yet." /></ProtectedRoute>} />
         {/* Catch-all stays last: React Router picks the best match rather than the

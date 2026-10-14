@@ -745,6 +745,40 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
     });
     expect(request.overlapping).toEqual([]);
   });
+
+  it('SCRUM258_AC3_a_conflicting_request_names_the_bookings_it_clashes_with_in_camelCase', async () => {
+    const clash = {
+      booking_id: OTHER_BOOKING,
+      event_request_id: OTHER_EVENT,
+      event_name: 'Fair',
+      starts_at: '2026-12-01T11:00:00+00:00',
+      ends_at: '2026-12-01T13:00:00+00:00',
+      occupied_starts_at: '2026-12-01T10:30:00+00:00',
+      occupied_ends_at: '2026-12-01T13:45:00+00:00',
+    };
+    const [request] = await listPendingBookingRequests(USER, {
+      client: clientAnswering({ data: [pendingRow({ status: 'conflicting', conflicting_with: [clash] })], error: null }),
+    });
+
+    expect(request.conflictingWith).toEqual([
+      {
+        bookingId: OTHER_BOOKING,
+        eventRequestId: OTHER_EVENT,
+        eventName: 'Fair',
+        startsAt: '2026-12-01T11:00:00+00:00',
+        endsAt: '2026-12-01T13:00:00+00:00',
+        occupiedStartsAt: '2026-12-01T10:30:00+00:00',
+        occupiedEndsAt: '2026-12-01T13:45:00+00:00',
+      },
+    ]);
+  });
+
+  it.each([null, undefined])('SCRUM258_AC3_a_%s_conflicting_with_list_is_empty_not_an_error', async (value) => {
+    const [request] = await listPendingBookingRequests(USER, {
+      client: clientAnswering({ data: [pendingRow({ conflicting_with: value })], error: null }),
+    });
+    expect(request.conflictingWith).toEqual([]);
+  });
 });
 
 describe('SCRUM258 approving and rejecting a booking request (066)', () => {

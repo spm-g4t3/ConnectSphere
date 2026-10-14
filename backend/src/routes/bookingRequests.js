@@ -87,7 +87,8 @@ export function createBookingRequestRouter({
    * SCRUM-259: every pending or conflicting booking request (066), oldest
    * first, for Venue Staff to decide on, each with its status and the other
    * events' open requests whose occupied periods overlap it, in submission
-   * order.
+   * order. A conflicting one also carries conflictingWith: the bookings
+   * occupying its period now, [] once that clash is gone (and on pending rows).
    *
    * Behind venueStaffOnly, and list_pending_booking_requests (066) checks the
    * caller's role again. A bare array; none pending is 200 [], never 404.

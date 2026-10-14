@@ -24,7 +24,8 @@
 // Withdrawing is a two-step inline confirm, the pattern BlockConflictList and
 // the venue retire button use: this frontend has no modal. One request is sent
 // at a time, guarded by a ref as well as by disabled buttons. There are no
-// staff approve or reject controls here.
+// staff approve or reject controls here (PendingBookingRequests has them); a
+// rejected request shows the reason and any suggested alternative.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -48,6 +49,7 @@ const LIST_ERROR_MESSAGES = {
 // A conflicting request is still open, so its coordinator can withdraw it too.
 const WITHDRAWABLE = new Set(["pending", "conflicting"]);
 const FLAGGED_FOR_REVIEW = "flagged_for_review";
+const REJECTED = "rejected";
 
 function RequestRow({ item, confirming, withdrawing, busy, onAsk, onCancel, onConfirm }) {
   const display = readBookingStatusDisplay(item);
@@ -77,6 +79,16 @@ function RequestRow({ item, confirming, withdrawing, busy, onAsk, onCancel, onCo
           <span className="my-booking-requests__flag">
             Flagged for review{item.flaggedAt ? ` on ${formatTimestamp(item.flaggedAt)}` : ""}
             {reason ? ` (${reason})` : ""}. It needs to be resolved.
+          </span>
+        )}
+        {/* SCRUM-258 (AC4, AC6): why Venue Staff said no, and what they
+            suggested instead, so the coordinator can act on it. */}
+        {item.status === REJECTED && item.decisionReason && (
+          <span className="my-booking-requests__note">Reason: {item.decisionReason}</span>
+        )}
+        {item.status === REJECTED && item.suggestedAlternative && (
+          <span className="my-booking-requests__note">
+            Suggested alternative: {item.suggestedAlternative}
           </span>
         )}
         {item.suitabilityOverridden && (
