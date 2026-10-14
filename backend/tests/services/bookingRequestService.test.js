@@ -11,7 +11,9 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import {
+  approveBookingRequest,
   createBookingRequest,
+  rejectBookingRequest,
   withdrawBookingRequest,
   listBookingRequestsForCoordinator,
   listPendingBookingRequests,
@@ -697,5 +699,158 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
       client: clientAnswering({ data: [pendingRow({ overlapping: value })], error: null }),
     });
     expect(request.overlapping).toEqual([]);
+  });
+});
+
+describe('SCRUM258 approving and rejecting a booking request (066)', () => {
+  const STAFF = '88888888-8888-4888-8888-888888888888';
+  const HOLD = '99999999-9999-4999-8999-999999999999';
+  const OTHER_EVENT = '66666666-6666-4666-8666-666666666666';
+
+  /** The booking decide_booking_request returns, as to_jsonb writes it. */
+  const decidedRow = (overrides = {}) => ({
+    id: BOOKING,
+    event_request_id: EVENT,
+    venue_id: VENUE,
+    status: 'approved',
+    starts_at: '2026-12-01T10:00:00+00:00',
+    ends_at: '2026-12-01T12:00:00+00:00',
+    created_at: '2026-10-01T00:00:00+00:00',
+    decided_by: STAFF,
+    decided_at: '2026-10-14T00:00:00+00:00',
+    decision_reason: null,
+    suggested_alternative: null,
+    ...overrides,
+  });
+  const answer = (outcome, row) => ({ data: { outcome, booking: row }, error: null });
+
+  it.each([undefined, null, '', '   ', 42])('SCRUM258_AC6_deciding_for_the_caller_%j_is_refused_before_any_call', async (caller) => {
+    const client = clientAnswering();
+    await expect(approveBookingRequest(BOOKING, caller, { client })).rejects.toBeInstanceOf(ValidationError);
+    await expect(rejectBookingRequest(BOOKING, caller, { reason: 'No' }, { client })).rejects.toBeInstanceOf(ValidationError);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM258_AC6_a_malformed_id_is_refused_before_any_call', async () => {
+    const client = clientAnswering();
+    await expect(approveBookingRequest('nope', STAFF, { client })).rejects.toBeInstanceOf(ValidationError);
+    await expect(rejectBookingRequest('nope', STAFF, { reason: 'No' }, { client })).rejects.toBeInstanceOf(ValidationError);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ['no reason', {}],
+    ['a blank reason', { reason: '' }],
+    ['a whitespace reason', { reason: '   ' }],
+    ['a reason over 1000 characters', { reason: 'x'.repeat(1001) }],
+    ['an alternative over 1000 characters', { reason: 'No', suggestedAlternative: 'x'.repeat(1001) }],
+  ])('SCRUM258_AC4_rejecting_with_%s_is_refused_before_any_call', async (_label, input) => {
+    const client = clientAnswering();
+    const err = await rejectBookingRequest(BOOKING, STAFF, input, { client }).catch((e) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM258_AC4_rejection_sends_the_trimmed_reason_and_alternative_and_returns_the_decision', async () => {
+    const row = decidedRow({ status: 'rejected', decision_reason: 'Double-booked', suggested_alternative: 'Room B' });
+    const client = clientAnswering(answer('rejected', row));
+
+    const booking = await rejectBookingRequest(
+      BOOKING.toUpperCase(),
+      STAFF,
+      { reason: '  Double-booked ', suggestedAlternative: ' Room B ' },
+      { client },
+    );
+
+    expect(client.calls).toEqual([
+      {
+        fn: 'decide_booking_request',
+        args: {
+          p_booking_id: BOOKING,
+          p_caller: STAFF,
+          p_decision: 'reject',
+          p_reason: 'Double-booked',
+          p_suggested_alternative: 'Room B',
+        },
+      },
+    ]);
+    expect(booking).toMatchObject({
+      id: BOOKING,
+      status: 'rejected',
+      decidedBy: STAFF,
+      decidedAt: '2026-10-14T00:00:00+00:00',
+      decisionReason: 'Double-booked',
+      suggestedAlternative: 'Room B',
+    });
+  });
+
+  it('SCRUM258_AC6_approval_sends_no_reason_and_returns_who_decided_and_when', async () => {
+    const client = clientAnswering(answer('approved', decidedRow()));
+
+    const booking = await approveBookingRequest(BOOKING, STAFF, { client });
+
+    expect(client.calls[0].args).toEqual({
+      p_booking_id: BOOKING,
+      p_caller: STAFF,
+      p_decision: 'approve',
+      p_reason: null,
+      p_suggested_alternative: null,
+    });
+    expect(booking).toMatchObject({ status: 'approved', decidedBy: STAFF, decidedAt: '2026-10-14T00:00:00+00:00', decisionReason: null });
+  });
+
+  it.each(['BOOKING_NOT_PENDING', 'EVENT_NOT_BOOKABLE', 'BOOKING_PERIOD_STALE', 'VENUE_RETIRED'])(
+    'SCRUM258_AC5_PT409_%s_is_a_conflict_with_that_code',
+    async (hint) => {
+      const client = clientAnswering(failure('PT409', 'refused', { hint }));
+      const err = await approveBookingRequest(BOOKING, STAFF, { client }).catch((e) => e);
+      expect(err).toBeInstanceOf(ConflictError);
+      expect(err.code).toBe(hint);
+    },
+  );
+
+  it('SCRUM258_AC2_a_conflict_outcome_is_BOOKING_PERIOD_CONFLICT_with_the_occupants', async () => {
+    const holdEntry = {
+      kind: 'hold',
+      hold_id: HOLD,
+      event_request_id: OTHER_EVENT,
+      event_name: 'Fair',
+      starts_at: '2026-12-01T12:30:00+00:00',
+      ends_at: '2026-12-01T14:00:00+00:00',
+      occupied_starts_at: '2026-12-01T12:00:00+00:00',
+      occupied_ends_at: '2026-12-01T14:45:00+00:00',
+      setup_minutes: 30,
+      turnaround_minutes: 45,
+    };
+    const client = clientAnswering({ data: { outcome: 'conflict', conflicts: [holdEntry] }, error: null });
+
+    const err = await approveBookingRequest(BOOKING, STAFF, { client }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.code).toBe('BOOKING_PERIOD_CONFLICT');
+    expect(err.conflicts).toEqual([
+      {
+        kind: 'hold',
+        holdId: HOLD,
+        eventRequestId: OTHER_EVENT,
+        eventName: 'Fair',
+        startsAt: '2026-12-01T12:30:00+00:00',
+        endsAt: '2026-12-01T14:00:00+00:00',
+        occupiedStartsAt: '2026-12-01T12:00:00+00:00',
+        occupiedEndsAt: '2026-12-01T14:45:00+00:00',
+        setupMinutes: 30,
+        turnaroundMinutes: 45,
+      },
+    ]);
+  });
+
+  it('SCRUM258_AC6_a_caller_who_is_not_venue_staff_is_forbidden', async () => {
+    const err = await rejectBookingRequest(BOOKING, USER, { reason: 'No' }, { client: clientAnswering(failure('42501')) }).catch((e) => e);
+    expect(err).toBeInstanceOf(ForbiddenError);
+  });
+
+  it('SCRUM258_AC3_an_approval_reported_with_a_booking_still_pending_is_an_error_not_a_success', async () => {
+    const client = clientAnswering(answer('approved', decidedRow({ status: 'pending' })));
+    await expect(approveBookingRequest(BOOKING, STAFF, { client })).rejects.toThrow(/not approved/);
   });
 });

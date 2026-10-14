@@ -314,8 +314,9 @@ describe('AC6: a block keeps its own period', () => {
     // active holds. Changed again for SCRUM-525: 051 redefines it with 040's
     // body, step 7's call unchanged, but one live request per event per venue
     // (step 6) and the request's own expected attendance, so 051 is now its
-    // latest definition.
-    expect(latestDefinitionFile('create_booking_request')).toBe('051_multi_venue_booking_requests.sql');
+    // latest definition. Changed for SCRUM-260: 066 restates 051's body with
+    // only step 3 widened to the safety statuses, so 066 is now the latest.
+    expect(latestDefinitionFile('create_booking_request')).toBe('066_decide_booking_request.sql');
   });
 
   it('SCRUM484_AC7_block_conflicts_carry_the_occupied_keys', () => {

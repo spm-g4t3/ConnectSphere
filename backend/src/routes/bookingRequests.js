@@ -5,9 +5,10 @@
  * Booking Request).
  *
  * GET /mine lists the signed-in coordinator's requests, POST / creates a request
- * for a venue against an approved or confirmed event, and POST /:id/withdraw
- * withdraws a pending one, all behind coordinatorOnly. GET /pending (SCRUM-259)
- * lists every pending request for Venue Staff, behind venueStaffOnly.
+ * for a venue against an approved, safety-checked or confirmed event, and
+ * POST /:id/withdraw withdraws a pending one, all behind coordinatorOnly. GET /pending (SCRUM-259)
+ * lists every pending request for Venue Staff, and POST /:id/approve and
+ * POST /:id/reject (SCRUM-260) decide one, behind venueStaffOnly.
  * Whether the caller is that event's assigned coordinator is checked in the
  * service and again, under lock, in create_booking_request (030), or only
  * under lock in withdraw_booking_request (031); the route only passes on what
@@ -28,9 +29,11 @@ import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorHandler } from '../http/handleError.js';
 import {
+  approveBookingRequest,
   createBookingRequest,
   listBookingRequestsForCoordinator,
   listPendingBookingRequests,
+  rejectBookingRequest,
   withdrawBookingRequest,
 } from '../services/bookingRequestService.js';
 
@@ -147,6 +150,52 @@ export function createBookingRequestRouter({
   router.post('/:id/withdraw', coordinatorOnly, async (req, res) => {
     try {
       const booking = await withdrawBookingRequest(req.params.id, req.user.id, { client });
+      res.status(200).json(booking);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-260: approve a pending request. 200 and the request, now approved,
+   * with who decided and when.
+   *
+   * Behind venueStaffOnly, and decide_booking_request (066) checks the role
+   * again. No pre-check: whether the request is still pending, the event still
+   * live and on the same dates, and the venue still free for the padded period
+   * are answered under its locks. There is no body; the caller is always
+   * req.user.id.
+   *
+   * Statuses: 400 malformed id; 401; 403 wrong role or no role; 404 no such
+   * request; 409 with `code`: BOOKING_NOT_PENDING, EVENT_NOT_BOOKABLE,
+   * BOOKING_PERIOD_STALE, VENUE_RETIRED, or BOOKING_PERIOD_CONFLICT with
+   * `conflicts` (see approveBookingRequest).
+   */
+  router.post('/:id/approve', venueStaffOnly, async (req, res) => {
+    try {
+      const booking = await approveBookingRequest(req.params.id, req.user.id, { client });
+      res.status(200).json(booking);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-260: reject a pending request. 200 and the request, now rejected,
+   * with who decided, when, the reason and any suggested alternative.
+   *
+   * Body: { reason, suggestedAlternative? } -- reason is required and not
+   * blank; both are at most 1000 characters. Behind venueStaffOnly, and
+   * decide_booking_request (066) checks the role again. The caller is always
+   * req.user.id.
+   *
+   * Statuses: 400 malformed id, a missing or blank reason, or a text too long;
+   * 401; 403 wrong role or no role; 404 no such request; 409
+   * BOOKING_NOT_PENDING.
+   */
+  router.post('/:id/reject', venueStaffOnly, async (req, res) => {
+    try {
+      const booking = await rejectBookingRequest(req.params.id, req.user.id, req.body, { client });
       res.status(200).json(booking);
     } catch (err) {
       handleError(err, res);

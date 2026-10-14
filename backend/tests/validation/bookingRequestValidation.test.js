@@ -12,6 +12,8 @@ import {
   validateCreateBookingRequest,
   validateBookingRequestId,
   SETUP_NOTES_MAX_LENGTH,
+  validateRejectBookingRequest,
+  DECISION_TEXT_MAX_LENGTH,
 } from '../../src/validation/bookingRequestValidation.js';
 import { ValidationError } from '../../src/errors.js';
 
@@ -229,5 +231,32 @@ describe('validateBookingRequestId (SCRUM-253)', () => {
 
   it.each([undefined, null, '', 'nope', 7, {}])('SCRUM253_refuses_%j', (id) => {
     expect(() => validateBookingRequestId(id)).toThrow(ValidationError);
+  });
+});
+
+describe('SCRUM258_AC4 validateRejectBookingRequest', () => {
+  it('SCRUM258_AC4_counts_the_reason_in_code_points_like_postgres', () => {
+    // 1000 emoji are 2000 UTF-16 units but 1000 characters to 066's length() check.
+    expect(validateRejectBookingRequest({ reason: '😀'.repeat(DECISION_TEXT_MAX_LENGTH) }).reason).toHaveLength(2000);
+    expect(() => validateRejectBookingRequest({ reason: 'x'.repeat(DECISION_TEXT_MAX_LENGTH + 1) })).toThrow(ValidationError);
+  });
+
+  it('SCRUM258_AC4_a_reason_that_is_not_text_is_reported_once_and_a_blank_alternative_is_none', () => {
+    const err = (() => {
+      try {
+        return validateRejectBookingRequest({ reason: 7, suggestedAlternative: [] });
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err.details).toEqual([
+      { field: 'reason', message: 'must be text' },
+      { field: 'suggestedAlternative', message: 'must be text' },
+    ]);
+    expect(validateRejectBookingRequest({ reason: 'No', suggestedAlternative: '  ' })).toEqual({ reason: 'No', suggestedAlternative: null });
+  });
+
+  it.each([null, undefined, 'No', []])('SCRUM258_AC4_refuses_%j_as_a_body', (input) => {
+    expect(() => validateRejectBookingRequest(input)).toThrow(ValidationError);
   });
 });

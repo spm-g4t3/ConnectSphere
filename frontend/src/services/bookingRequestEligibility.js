@@ -14,8 +14,8 @@
 // those venues themselves, and the server's BOOKING_REQUEST_EXISTS and
 // BOOKING_FLAGGED_FOR_REVIEW answers remain the gate.
 
-/** The event statuses a venue can be requested for (SCRUM-243 AC1). */
-export const BOOKABLE_EVENT_STATUSES = Object.freeze(["approved", "confirmed"]);
+/** The event statuses a venue can be requested for (SCRUM-243 AC1), the safety check included (066). */
+export const BOOKABLE_EVENT_STATUSES = Object.freeze(["approved", "safety_review", "safety_approved", "confirmed"]);
 
 function statusLabel(status) {
   return typeof status === "string" && status ? status.replaceAll("_", " ") : "unknown";
