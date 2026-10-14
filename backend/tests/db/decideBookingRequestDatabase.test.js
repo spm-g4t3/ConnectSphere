@@ -543,8 +543,13 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request (066)', () => {
       const from066 = notificationTypes(migration(MIGRATION_066));
 
       expect(from052.length).toBeGreaterThan(0);
+      // SCRUM-490's 058 is applied live but not on dev; its three types must
+      // survive, or 066 fails on existing rows and breaks that story's notices.
       expect(from066).toEqual([
         ...from052,
+        'safety_review_response',
+        'safety_booking_flagged',
+        'safety_equipment_review',
         'booking_request_approved',
         'booking_request_rejected',
         'booking_request_conflicting',

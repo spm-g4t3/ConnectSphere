@@ -136,7 +136,9 @@ alter table venue_holds
 -- ---------------------------------------------------------------------
 -- 3. Notifications accept the three decision types (extends 052)
 -- ---------------------------------------------------------------------
--- 052's eleven, unchanged and in 052's order, then this file's three.
+-- 052's eleven, unchanged and in 052's order, then SCRUM-490's three (its
+-- 058 is applied live but not yet on dev; leaving them out fails this file
+-- on existing rows and breaks that story's notices), then this file's three.
 
 alter table notifications drop constraint if exists notifications_type_known;
 alter table notifications
@@ -153,6 +155,9 @@ alter table notifications
       'event_request_awaiting_assignment',
       'event_request_assigned',
       'event_request_coordinator_assigned',
+      'safety_review_response',
+      'safety_booking_flagged',
+      'safety_equipment_review',
       'booking_request_approved',
       'booking_request_rejected',
       'booking_request_conflicting'
