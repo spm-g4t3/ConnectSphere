@@ -6,6 +6,9 @@
 // offsets, so the suite passes in any zone and locale.
 
 import { describe, it, expect } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
 
 import { describeNotification } from "../../src/services/notificationDisplay.js";
 import { formatRange, formatTimestamp } from "../../src/services/displayFormat.js";
@@ -488,4 +491,297 @@ describe("describeNotification: Venue Staff decisions (SCRUM-258 AC6)", () => {
       expect(headline).toMatch(/Unknown venue/);
     },
   );
+});
+
+// SCRUM-172 (AC6). The 052 assignment notices and the 058 safety notices.
+const of172 = (type, payload) => describeNotification({ id: "n10", type, payload });
+const NO_PAYLOAD = [
+  ["an empty", {}],
+  ["a null", null],
+  ["an undefined", undefined],
+];
+
+describe("describeNotification: event_request_awaiting_assignment (SCRUM-172 AC6)", () => {
+  const SUBMITTED = "2026-10-01T09:30:00+08:00";
+
+  it("SCRUM172_AC6_awaiting_assignment_wording", () => {
+    expect(of172("event_request_awaiting_assignment", {
+      eventRequestId: "e1",
+      eventName: "Tech Talk",
+      submittedAt: SUBMITTED,
+    })).toEqual({
+      headline: "Tech Talk is waiting for a coordinator",
+      detail: `Submitted ${formatTimestamp(SUBMITTED)}. Assign it from the unassigned queue.`,
+    });
+  });
+
+  it("SCRUM172_AC6_awaiting_assignment_unparseable_time_drops_the_sentence", () => {
+    expect(of172("event_request_awaiting_assignment", {
+      eventName: "Tech Talk",
+      submittedAt: "soon",
+    }).detail).toBe("Assign it from the unassigned queue.");
+  });
+
+  it.each(NO_PAYLOAD)("SCRUM172_AC6_awaiting_assignment_tolerates_missing_fields (%s payload)", (_l, payload) => {
+    expect(of172("event_request_awaiting_assignment", payload)).toEqual({
+      headline: "Unnamed event is waiting for a coordinator",
+      detail: "Assign it from the unassigned queue.",
+    });
+  });
+});
+
+describe("describeNotification: event_request_assigned (SCRUM-172 AC6)", () => {
+  const FIRST = {
+    eventRequestId: "e1",
+    eventName: "Tech Talk",
+    assignedById: "u1",
+    assignedByName: "Lena Lead",
+    previousCoordinatorId: null,
+    previousCoordinatorName: null,
+    note: null,
+  };
+  const HANDOVER = {
+    ...FIRST,
+    previousCoordinatorId: "u2",
+    previousCoordinatorName: "Cory Coord",
+  };
+
+  it("SCRUM172_AC6_assigned_first_assignment_names_the_lead", () => {
+    expect(of172("event_request_assigned", FIRST)).toEqual({
+      headline: "Tech Talk was assigned to you",
+      detail: "Assigned by Lena Lead.",
+    });
+  });
+
+  it("SCRUM172_AC6_assigned_reassignment_names_the_previous_coordinator", () => {
+    expect(of172("event_request_assigned", HANDOVER)).toEqual({
+      headline: "Tech Talk was handed over to you",
+      detail: "Assigned by Lena Lead. It was with Cory Coord.",
+    });
+  });
+
+  it("SCRUM172_AC6_assigned_reassignment_shows_the_handover_note", () => {
+    expect(of172("event_request_assigned", { ...HANDOVER, note: "Venue is pencilled in." }).detail)
+      .toBe("Assigned by Lena Lead. It was with Cory Coord. Handover note: Venue is pencilled in.");
+  });
+
+  it("SCRUM172_AC6_assigned_first_assignment_shows_a_note_when_given", () => {
+    expect(of172("event_request_assigned", { ...FIRST, note: "Urgent." }).detail)
+      .toBe("Assigned by Lena Lead. Handover note: Urgent.");
+  });
+
+  it("SCRUM172_AC6_assigned_missing_lead_name_reads_as_the_lead", () => {
+    expect(of172("event_request_assigned", { ...HANDOVER, assignedByName: null, previousCoordinatorName: null }))
+      .toEqual({
+        headline: "Tech Talk was handed over to you",
+        detail: "Assigned by the Lead. It was with the previous coordinator.",
+      });
+  });
+
+  it.each(NO_PAYLOAD)("SCRUM172_AC6_assigned_tolerates_missing_fields (%s payload)", (_l, payload) => {
+    expect(of172("event_request_assigned", payload)).toEqual({
+      headline: "Unnamed event was assigned to you",
+      detail: "Assigned by the Lead.",
+    });
+  });
+});
+
+describe("describeNotification: event_request_coordinator_assigned (SCRUM-172 AC6)", () => {
+  const FIRST = {
+    eventRequestId: "e1",
+    eventName: "Tech Talk",
+    coordinatorId: "u3",
+    coordinatorName: "Nia New",
+    previousCoordinatorId: null,
+    previousCoordinatorName: null,
+  };
+  const HANDOVER = { ...FIRST, previousCoordinatorId: "u2", previousCoordinatorName: "Cory Coord" };
+
+  it("SCRUM172_AC6_coordinator_assigned_first_assignment_wording", () => {
+    expect(of172("event_request_coordinator_assigned", FIRST)).toEqual({
+      headline: "Nia New is now coordinating Tech Talk",
+      detail: "They will review your request and contact you if anything is needed.",
+    });
+  });
+
+  it("SCRUM172_AC6_coordinator_assigned_reassignment_names_both_coordinators", () => {
+    expect(of172("event_request_coordinator_assigned", HANDOVER)).toEqual({
+      headline: "Tech Talk has a new coordinator",
+      detail: "Nia New has taken over from Cory Coord.",
+    });
+  });
+
+  it("SCRUM172_AC6_coordinator_assigned_reassignment_tolerates_missing_names", () => {
+    expect(of172("event_request_coordinator_assigned", { previousCoordinatorId: "u2" })).toEqual({
+      headline: "Unnamed event has a new coordinator",
+      detail: "A coordinator has taken over from the previous coordinator.",
+    });
+  });
+
+  it.each(NO_PAYLOAD)("SCRUM172_AC6_coordinator_assigned_tolerates_missing_fields (%s payload)", (_l, payload) => {
+    expect(of172("event_request_coordinator_assigned", payload)).toEqual({
+      headline: "A coordinator is now coordinating Unnamed event",
+      detail: "They will review your request and contact you if anything is needed.",
+    });
+  });
+
+  // The handover note is for the coordinator only (052).
+  it.each([
+    ["first assignment", FIRST],
+    ["reassignment", HANDOVER],
+  ])("SCRUM172_AC6_organiser_notice_never_shows_a_handover_note (%s)", (_l, base) => {
+    const { headline, detail } = of172("event_request_coordinator_assigned", {
+      ...base,
+      note: "Organiser is difficult",
+    });
+    expect(headline).not.toContain("Organiser is difficult");
+    expect(detail).not.toContain("Organiser is difficult");
+    expect(detail).not.toContain("note");
+  });
+});
+
+describe("describeNotification: safety_review_response (SCRUM-172 AC6)", () => {
+  const response = (outcome, note = null) =>
+    of172("safety_review_response", {
+      eventName: "Tech Talk",
+      outcome,
+      note,
+      responseId: "r1",
+      respondedAt: "2026-10-02T10:00:00+08:00",
+    });
+
+  it("SCRUM172_AC6_safety_review_response_approved_without_a_note", () => {
+    expect(response("approved")).toEqual({
+      headline: "Tech Talk passed the safety check",
+      detail: "No changes were needed.",
+    });
+  });
+
+  it("SCRUM172_AC6_safety_review_response_approved_with_a_note_shows_the_note", () => {
+    expect(response("approved", "Keep exits clear.")).toEqual({
+      headline: "Tech Talk passed the safety check",
+      detail: "Safety Officer's note: Keep exits clear.",
+    });
+  });
+
+  it("SCRUM172_AC6_safety_review_response_changes_requested_shows_the_note", () => {
+    expect(response("changes_requested", "Add a first-aider.")).toEqual({
+      headline: "The safety check asked for changes to Tech Talk",
+      detail: "Safety Officer's note: Add a first-aider.",
+    });
+  });
+
+  it("SCRUM172_AC6_safety_review_response_rejected_without_a_note_points_to_the_event", () => {
+    expect(response("rejected")).toEqual({
+      headline: "Tech Talk did not pass the safety check",
+      detail: "Open the event for details.",
+    });
+  });
+
+  it("SCRUM172_AC6_safety_review_response_unknown_outcome_still_says_who_responded", () => {
+    expect(response("deferred")).toEqual({
+      headline: "The Safety Officer responded about Tech Talk",
+      detail: "Open the event for details.",
+    });
+  });
+
+  it.each(NO_PAYLOAD)("SCRUM172_AC6_safety_review_response_tolerates_missing_fields (%s payload)", (_l, payload) => {
+    expect(of172("safety_review_response", payload)).toEqual({
+      headline: "The Safety Officer responded about Unnamed event",
+      detail: "Open the event for details.",
+    });
+  });
+});
+
+describe("describeNotification: safety_booking_flagged (SCRUM-172 AC6)", () => {
+  it("SCRUM172_AC6_safety_booking_flagged_wording", () => {
+    expect(of172("safety_booking_flagged", {
+      eventName: "Tech Talk",
+      venueName: "Hall A",
+      startsAt: PAYLOAD.startsAt,
+      endsAt: PAYLOAD.endsAt,
+      reason: "changes_requested",
+      responseId: "r1",
+    })).toEqual({
+      headline: "Tech Talk at Hall A needs review after the safety check",
+      detail: `Booked ${BOOKED}. The Safety Officer flagged this booking.`,
+    });
+  });
+
+  it.each(NO_PAYLOAD)("SCRUM172_AC6_safety_booking_flagged_tolerates_missing_fields (%s payload)", (_l, payload) => {
+    expect(of172("safety_booking_flagged", payload)).toEqual({
+      headline: "Unnamed event at Unknown venue needs review after the safety check",
+      detail: "Booked unknown – unknown. The Safety Officer flagged this booking.",
+    });
+  });
+});
+
+describe("describeNotification: safety_equipment_review (SCRUM-172 AC6)", () => {
+  it("SCRUM172_AC6_safety_equipment_review_wording", () => {
+    expect(of172("safety_equipment_review", {
+      eventName: "Tech Talk",
+      equipmentRequestId: "q1",
+      responseId: "r1",
+    })).toEqual({
+      headline: "Equipment for Tech Talk needs review after the safety check",
+      detail: "The Safety Officer flagged the equipment arrangements.",
+    });
+  });
+
+  it.each(NO_PAYLOAD)("SCRUM172_AC6_safety_equipment_review_tolerates_missing_fields (%s payload)", (_l, payload) => {
+    expect(of172("safety_equipment_review", payload)).toEqual({
+      headline: "Equipment for Unnamed event needs review after the safety check",
+      detail: "The Safety Officer flagged the equipment arrangements.",
+    });
+  });
+});
+
+// The latest migration that restates notifications_type_known is the list of
+// types the backend can send; a type there with no wording here would show
+// as "New notification".
+const MIGRATIONS = resolve(dirname(fileURLToPath(import.meta.url)), "../../../backend/db/migrations");
+const TYPE_LIST = /v_ours\s+text\[\]\s*:=\s*array\[([^\]]*)\]/;
+
+function knownNotificationTypes() {
+  const latest = readdirSync(MIGRATIONS)
+    .filter((name) => /^\d+_.*\.sql$/.test(name))
+    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+    .map((name) => readFileSync(join(MIGRATIONS, name), "utf8"))
+    .filter((sql) => TYPE_LIST.test(sql))
+    .pop();
+  return [...latest.match(TYPE_LIST)[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+}
+
+const FIXTURES = {
+  booking_flagged: PAYLOAD,
+  booking_request_withdrawn: WITHDRAWN_PAYLOAD,
+  clarification_requested: { eventName: "Tech Talk", message: "Please confirm." },
+  clarification_replied: { eventName: "Tech Talk", message: "Confirmed." },
+  clarification_closed: { eventName: "Tech Talk" },
+  booking_flagged_setup_change: SETUP_PAYLOAD,
+  venue_hold_expired: { eventName: "Tech Talk", venueName: "Hall A", expiresAt: PAYLOAD.startsAt },
+  event_cancelled: { audience: "organiser", eventName: "Tech Talk", reason: "Venue unavailable" },
+  event_request_awaiting_assignment: { eventName: "Tech Talk", submittedAt: PAYLOAD.startsAt },
+  event_request_assigned: { eventName: "Tech Talk", assignedByName: "Lena Lead" },
+  event_request_coordinator_assigned: { eventName: "Tech Talk", coordinatorName: "Nia New" },
+  safety_review_response: { eventName: "Tech Talk", outcome: "approved" },
+  safety_booking_flagged: { eventName: "Tech Talk", venueName: "Hall A", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt },
+  safety_equipment_review: { eventName: "Tech Talk" },
+  event_submitted_for_safety_review: { eventName: "Tech Talk", coordinatorName: "Nia New", startsAt: PAYLOAD.startsAt },
+  booking_request_approved: { eventName: "Tech Talk", venueName: "Hall A", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt },
+  booking_request_rejected: { eventName: "Tech Talk", venueName: "Hall A", reason: "Under renovation" },
+  booking_request_conflicting: { eventName: "Tech Talk", venueName: "Hall A", approvedEventName: "Gala Dinner" },
+};
+
+describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", () => {
+  it("SCRUM172_AC6_every_known_type_has_wording", () => {
+    const known = knownNotificationTypes();
+    expect(known.length).toBeGreaterThanOrEqual(18);
+    expect(Object.keys(FIXTURES).sort()).toEqual([...known].sort());
+
+    const generic = known.filter(
+      (type) => describeNotification({ id: "n11", type, payload: FIXTURES[type] }).headline === "New notification",
+    );
+    expect(generic).toEqual([]);
+  });
 });

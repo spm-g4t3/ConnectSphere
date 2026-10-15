@@ -25,6 +25,19 @@
 //   booking_request_conflicting (066): { eventRequestId, eventName, venueId,
 //     venueName, startsAt, endsAt, approvedBookingId, approvedEventRequestId,
 //     approvedEventName, approvedStartsAt, approvedEndsAt }
+//   event_request_awaiting_assignment (052): { eventRequestId, eventName,
+//     submittedAt }
+//   event_request_assigned (052): { eventRequestId, eventName, assignedById,
+//     assignedByName, previousCoordinatorId, previousCoordinatorName, note }
+//   event_request_coordinator_assigned (052): { eventRequestId, eventName,
+//     coordinatorId, coordinatorName, previousCoordinatorId,
+//     previousCoordinatorName }
+//   safety_review_response (058 on SCRUM-490's branch, SCRUM-490):
+//     { eventName, outcome, note, responseId, respondedAt }
+//   safety_booking_flagged (058): { eventName, venueName, startsAt, endsAt,
+//     reason, responseId }
+//   safety_equipment_review (058): { eventName, equipmentRequestId,
+//     responseId }
 // Every field is read defensively -- a notification outlives the build that
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
@@ -234,6 +247,104 @@ export function describeNotification(notification) {
       detail: payload.replyByDate
         ? `${detail} Reply by ${payload.replyByDate}.`
         : detail,
+    };
+  }
+
+  // SCRUM-172 (AC6). Sent to every Lead; submissions wait in the unassigned
+  // queue until a Lead picks a coordinator.
+  if (notification?.type === "event_request_awaiting_assignment") {
+    const eventName = payload.eventName || "Unnamed event";
+    const submittedAt = isInstant(payload.submittedAt)
+      ? `Submitted ${formatTimestamp(payload.submittedAt)}. `
+      : "";
+
+    return {
+      headline: `${eventName} is waiting for a coordinator`,
+      detail: `${submittedAt}Assign it from the unassigned queue.`,
+    };
+  }
+
+  // SCRUM-172 (AC6). Sent to the new coordinator. 052 sets the previous*
+  // fields to null on a first assignment, so a set previousCoordinatorId
+  // means a handover.
+  if (notification?.type === "event_request_assigned") {
+    const eventName = payload.eventName || "Unnamed event";
+    const assignedByName = payload.assignedByName || "the Lead";
+    const reassigned = Boolean(payload.previousCoordinatorId);
+    const previous = reassigned
+      ? ` It was with ${payload.previousCoordinatorName || "the previous coordinator"}.`
+      : "";
+    const note = payload.note ? ` Handover note: ${payload.note}` : "";
+
+    return {
+      headline: reassigned
+        ? `${eventName} was handed over to you`
+        : `${eventName} was assigned to you`,
+      detail: `Assigned by ${assignedByName}.${previous}${note}`,
+    };
+  }
+
+  // SCRUM-172 (AC6). Sent to the Organiser. payload.note is never shown: the
+  // handover note is for the coordinator only (052, SCRUM-327 D4).
+  if (notification?.type === "event_request_coordinator_assigned") {
+    const eventName = payload.eventName || "Unnamed event";
+    const coordinatorName = payload.coordinatorName || "A coordinator";
+
+    if (payload.previousCoordinatorId) {
+      const previousName = payload.previousCoordinatorName || "the previous coordinator";
+      return {
+        headline: `${eventName} has a new coordinator`,
+        detail: `${coordinatorName} has taken over from ${previousName}.`,
+      };
+    }
+    return {
+      headline: `${coordinatorName} is now coordinating ${eventName}`,
+      detail: "They will review your request and contact you if anything is needed.",
+    };
+  }
+
+  // SCRUM-172 (AC6). Sent to the Organiser and coordinator after the Safety
+  // Officer responds. An unknown outcome still says who responded.
+  if (notification?.type === "safety_review_response") {
+    const eventName = payload.eventName || "Unnamed event";
+    const headlineByOutcome = {
+      approved: `${eventName} passed the safety check`,
+      changes_requested: `The safety check asked for changes to ${eventName}`,
+      rejected: `${eventName} did not pass the safety check`,
+    };
+    let detail = "Open the event for details.";
+    if (payload.note) detail = `Safety Officer's note: ${payload.note}`;
+    else if (payload.outcome === "approved") detail = "No changes were needed.";
+
+    return {
+      headline:
+        headlineByOutcome[payload.outcome] ||
+        `The Safety Officer responded about ${eventName}`,
+      detail,
+    };
+  }
+
+  // SCRUM-172 (AC6). Sent to Venue Staff when a safety check asks for changes
+  // or rejects; a flag only, the booking itself is untouched.
+  if (notification?.type === "safety_booking_flagged") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+
+    return {
+      headline: `${eventName} at ${venueName} needs review after the safety check`,
+      detail:
+        `Booked ${formatRange(payload.startsAt, payload.endsAt)}. ` +
+        "The Safety Officer flagged this booking.",
+    };
+  }
+
+  // SCRUM-172 (AC6). Sent to Tech Support for the same safety outcomes.
+  if (notification?.type === "safety_equipment_review") {
+    const eventName = payload.eventName || "Unnamed event";
+
+    return {
+      headline: `Equipment for ${eventName} needs review after the safety check`,
+      detail: "The Safety Officer flagged the equipment arrangements.",
     };
   }
 
