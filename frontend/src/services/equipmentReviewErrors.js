@@ -5,7 +5,7 @@
 // are shown; a missing or odd one falls back to a fixed sentence. A 500 is
 // never shown as the server worded it.
 
-const FIELD_LABELS = { note: "Note", outcome: "Note", lines: "Lines" };
+const FIELD_LABELS = { note: "Note", outcome: "Note", lines: "Lines", quantity: "Quantity", reason: "Reason" };
 
 const FALLBACKS = {
   400: "That was not accepted. Check what you entered and try again.",

@@ -146,3 +146,54 @@ describe('SCRUM-318: what migration 022 leaves alone', () => {
     expect(migration).toMatch(/notify pgrst, 'reload schema'/);
   });
 });
+
+
+describe('SCRUM-488 AC2: migration 063 restates the transition table', () => {
+  const safety = sql('063_safety_transitions.sql');
+  const start = safety.indexOf('create or replace function event_request_status_allows(');
+  const body = safety.slice(start, safety.indexOf('$$;', safety.indexOf('$$', start) + 2));
+  const pairs = [...body.matchAll(/\('([a-z_]+)', '([a-z_]+)'\)/g)].map((m) => `${m[1]}>${m[2]}`);
+
+  it('replaces 022\'s function with the same signature, so no overload is left behind', () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(safety.match(/create or replace function/g)).toHaveLength(1);
+    expect(body).toMatch(/event_request_status_allows\( p_from event_request_status, p_to event_request_status \) returns boolean language sql immutable/);
+  });
+
+  it('lists twenty-two transitions, once each', () => {
+    expect(pairs).toHaveLength(22);
+    expect(new Set(pairs).size).toBe(22);
+  });
+
+  it('drops approved to confirmed and adds the seven safety moves', () => {
+    expect(pairs).not.toContain('approved>confirmed');
+    expect(pairs).toEqual(expect.arrayContaining([
+      'approved>safety_review', 'safety_review>safety_approved', 'safety_review>approved',
+      'safety_approved>approved', 'safety_approved>confirmed',
+      'safety_review>cancelled', 'safety_approved>cancelled',
+    ]));
+  });
+
+  it('keeps every other transition of 022', () => {
+    const original = functionBody('event_request_status_allows');
+    const before = [...original.matchAll(/\('([a-z_]+)', '([a-z_]+)'\)/g)].map((m) => `${m[1]}>${m[2]}`);
+
+    expect(before.filter((pair) => !pairs.includes(pair))).toEqual(['approved>confirmed']);
+  });
+
+  it('does not let either safety status be rejected, which SCRUM-347 has not decided', () => {
+    expect(pairs).not.toContain('safety_review>rejected');
+    expect(pairs).not.toContain('safety_approved>rejected');
+  });
+
+  it('names no planning status and compares as text', () => {
+    expect(body).not.toMatch(/planning/);
+    expect(body).toMatch(/t\.from_status = p_from::text and t\.to_status = p_to::text/);
+  });
+
+  it('redefines nothing else, so locking, stale-status checks, reasons and history are 022\'s', () => {
+    expect(safety).not.toMatch(/function change_event_request_status/);
+    expect(safety).not.toMatch(/create table|alter table|alter type/);
+    expect(safety).toMatch(/notify pgrst, 'reload schema'/);
+  });
+});

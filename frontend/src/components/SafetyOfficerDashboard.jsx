@@ -5,6 +5,7 @@ import {
   submitSafetyReviewResponse,
 } from "../services/safetyReviewService";
 import { formatRange, formatTimestamp } from "../services/displayFormat";
+import CoordinatorNotifications from "./CoordinatorNotifications";
 
 export const OUTCOME_LABELS = {
   approved: "Approved",
@@ -195,7 +196,6 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError }) {
     </section>
   );
 }
-
 export default function SafetyOfficerDashboard({ user }) {
   const [queue, setQueue] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -316,6 +316,7 @@ export default function SafetyOfficerDashboard({ user }) {
           </ul>
         </section>
       )}
+      <CoordinatorNotifications />
     </div>
   );
 }

@@ -17,6 +17,8 @@
 //     venueId, venueName, expiresAt }
 //   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
 //     cancelledAt }
+//   event_submitted_for_safety_review (064, SCRUM-489): { eventRequestId,
+//     eventName, coordinatorId, coordinatorName, startsAt, submittedAt }
 // Every field is read defensively -- a notification outlives the build that
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
@@ -177,6 +179,21 @@ export function describeNotification(notification) {
     return {
       headline: `Equipment for ${eventName} was returned for review`,
       detail: "A Safety Officer marked the equipment arrangement as affected.",
+    };
+  }
+
+  // SCRUM-489 (AC8). Sent to every Safety Officer when a coordinator submits
+  // an Approved event; the start date says how soon the check is needed.
+  if (notification?.type === "event_submitted_for_safety_review") {
+    const eventName = payload.eventName || "Unnamed event";
+    const coordinatorName = payload.coordinatorName || "its coordinator";
+    const startsAt = isInstant(payload.startsAt)
+      ? ` It starts ${formatTimestamp(payload.startsAt)}.`
+      : "";
+
+    return {
+      headline: "Event submitted for safety check",
+      detail: `${eventName} was submitted by ${coordinatorName}.${startsAt}`,
     };
   }
 

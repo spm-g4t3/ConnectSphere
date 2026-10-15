@@ -219,6 +219,32 @@ export async function cancelEventRequest(
   return response.data;
 }
 
+/**
+ * SCRUM-489 AC2-AC4: the safety check's readiness checklist,
+ * { eventRequestId, ready, items }. The flag is sent only when true, so the
+ * plain read is the path alone.
+ */
+export async function getEventReadiness(id, { noEquipmentConfirmed } = {}) {
+  const path = `/event-requests/${id}/readiness`;
+  const response = noEquipmentConfirmed === true
+    ? await apiClient.get(path, { params: { noEquipmentConfirmed: "true" } })
+    : await apiClient.get(path);
+  return response.data;
+}
+
+/**
+ * SCRUM-489 AC6: submits an Approved event for the safety check. Returns the
+ * event, now in safety_review. A 409 with code EVENT_NOT_READY carries the
+ * outstanding lines as `conflicts`.
+ */
+export async function submitForSafetyReview(id, { note, noEquipmentConfirmed = false } = {}) {
+  const response = await apiClient.post(`/event-requests/${id}/safety-review`, {
+    note,
+    noEquipmentConfirmed,
+  });
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // SCRUM-327: coordinator assignment
 // ---------------------------------------------------------------------------
@@ -469,10 +495,44 @@ export async function listCoordinatorWorkload() {
  * proposedStart, organiserName, assignedCoordinatorId,
  * assignedCoordinatorName }. Possibly empty.
  *
+ * SCRUM-487 AC3 (SCRUM-544): the Lead's filters, sent as query parameters
+ * and applied by the server (SCRUM-487 D2). Only the filters that are set are
+ * sent, and includeFinished only as "true": the server reads "true", "false"
+ * or absent and refuses anything else, so "off" is simply not sending it.
+ * Called with nothing, the request is exactly SCRUM-486's: no params at all.
+ *
+ * @param {object} [filters]
+ * @param {string} [filters.coordinatorId]     only this coordinator's events
+ * @param {string} [filters.status]            only this status
+ * @param {boolean} [filters.includeFinished]  also completed, rejected and cancelled
  * @returns {Promise<Object[]>}
  */
-export async function listAssignedEventsForLead() {
-  const response = await apiClient.get("/event-requests/assigned");
+export async function listAssignedEventsForLead(filters = {}) {
+  const params = {};
+  if (filters.coordinatorId) params.coordinatorId = filters.coordinatorId;
+  if (filters.status) params.status = filters.status;
+  if (filters.includeFinished) params.includeFinished = "true";
+
+  const response = Object.keys(params).length > 0
+    ? await apiClient.get("/event-requests/assigned", { params })
+    : await apiClient.get("/event-requests/assigned");
+  return response.data;
+}
+
+/**
+ * Every Event Coordinator with their active events counted in total and per
+ * status, for the Lead's overview (SCRUM-487 AC2), and the words for each
+ * status. Returns { statuses, coordinators }: statuses is { status, label,
+ * finished } for every active status then every finished one (SCRUM-546,
+ * D9); each coordinator is { id, fullName, activeEvents, byStatus }, byStatus
+ * keyed by every active status, 0 where there are none. Coordinators in name
+ * order, never workload order. Gated on event_coordinator_lead server-side.
+ *
+ * @returns {Promise<{statuses: Array<{status: string, label: string, finished: boolean}>,
+ *   coordinators: Array<{id: string, fullName: string|null, activeEvents: number, byStatus: Object<string, number>}>}>}
+ */
+export async function listCoordinatorOverview() {
+  const response = await apiClient.get("/event-requests/coordinator-overview");
   return response.data;
 }
 

@@ -1,7 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
-// SCRUM-17, SCRUM-186, SCRUM-178, SCRUM-137 and SCRUM-491 files are gated at 100%
+// SCRUM-17, SCRUM-186, SCRUM-178, SCRUM-137, SCRUM-491 and SCRUM-495 files are gated at 100%
 // lines/branches/functions/statements each.
 // There is deliberately no global threshold: shared files -- venueService.js,
 // VenueCatalogue.jsx, VenueSearch.jsx (other stories) and datetimeFormat.js
@@ -120,6 +120,36 @@ const SCRUM486_FILES = [
   'src/components/AssignedEvents.jsx',
 ]
 
+// SCRUM-487: the Lead's coordinator overview. New files only this story owns,
+// gated outright. AssignedEvents.jsx, which it extends, stays in
+// SCRUM486_FILES, so its 100% gate holds over both stories' code.
+const SCRUM487_FILES = [
+  // SCRUM-543 (AC4): the unassigned count at the top.
+  'src/components/UnassignedCount.jsx',
+  // SCRUM-544 (AC2, AC3): the coordinators' table and the list's filters.
+  'src/components/CoordinatorWorkloadTable.jsx',
+  'src/components/AssignedEventsFilters.jsx',
+]
+
+// SCRUM-495: the Attendee's browse pages. New files only this story owns.
+const SCRUM495_FILES = [
+  'src/components/BrowseOpenEvents.jsx',
+  'src/components/BrowseEventDetails.jsx',
+  'src/components/useRefreshOnReturn.js',
+  'src/components/useOpenEventRead.js',
+  'src/components/OpenEventAvailability.jsx',
+  'src/services/openEventDisplay.js',
+  'src/services/openEventRoutes.js',
+  'src/services/openEventService.js',
+]
+
+// SCRUM-489: the coordinator's safety check submission. Its one new file is
+// gated outright; the shared files it touches stay ungated.
+const SCRUM489_FILES = [
+  // SCRUM-557 (AC3 to AC6): the checklist, the confirmation, the note and Submit.
+  'src/components/SafetyCheckSubmissionPanel.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -159,6 +189,9 @@ export default defineConfig({
         ...SCRUM485_FILES.map((file) => [file, FULL]),
         ...SCRUM491_FILES.map((file) => [file, FULL]),
         ...SCRUM486_FILES.map((file) => [file, FULL]),
+        ...SCRUM487_FILES.map((file) => [file, FULL]),
+        ...SCRUM495_FILES.map((file) => [file, FULL]),
+        ...SCRUM489_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

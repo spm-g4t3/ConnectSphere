@@ -42,7 +42,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-import { STATUS } from '../../src/domain/eventRequestStatus.js';
+import { STATUS, canTransition } from '../../src/domain/eventRequestStatus.js';
+import { ELEVEN_STATUSES, EVERY_PAIR } from '../fixtures/expectedTransitionMatrix.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
@@ -105,7 +106,13 @@ const RECORDED_TRANSITIONS = [
   // approved. That is the AC9 question docs/test-cases/SCRUM-19.md records.
   [STATUS.APPROVED, STATUS.REJECTED],
   [STATUS.REJECTED, STATUS.DRAFT],
-  [STATUS.APPROVED, STATUS.CONFIRMED],
+  // SCRUM-488: the Operational Safety Check between approved and confirmed.
+  // approved -> confirmed is gone (it is refused below).
+  [STATUS.APPROVED, STATUS.SAFETY_REVIEW],
+  [STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED],
+  [STATUS.SAFETY_REVIEW, STATUS.APPROVED],
+  [STATUS.SAFETY_APPROVED, STATUS.APPROVED],
+  [STATUS.SAFETY_APPROVED, STATUS.CONFIRMED],
   [STATUS.CONFIRMED, STATUS.APPROVED],
   [STATUS.CONFIRMED, STATUS.COMPLETED],
   ...[
@@ -113,6 +120,8 @@ const RECORDED_TRANSITIONS = [
     STATUS.UNDER_REVIEW,
     STATUS.PENDING_CLARIFICATION,
     STATUS.APPROVED,
+    STATUS.SAFETY_REVIEW,
+    STATUS.SAFETY_APPROVED,
     STATUS.CONFIRMED,
   ].map((from) => [from, STATUS.CANCELLED]),
 ];
@@ -135,12 +144,15 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
    *
    * A row at a decided status carries the decision a real one would have, made
    * by its coordinator as reviewer, because 025 refuses such a row without one.
-   * approved, confirmed and completed were approved; rejected was rejected,
+   * approved, the two safety statuses, confirmed and completed were approved;
+   * rejected was rejected,
    * with the reason 025 requires. cancelled carries none: it is reachable both
    * with and without a decision. `extra` overrides any of it.
    */
   const DECISION_FOR = {
     [STATUS.APPROVED]: 'approved',
+    [STATUS.SAFETY_REVIEW]: 'approved',
+    [STATUS.SAFETY_APPROVED]: 'approved',
     [STATUS.CONFIRMED]: 'approved',
     [STATUS.COMPLETED]: 'approved',
     [STATUS.REJECTED]: 'rejected',
@@ -234,6 +246,10 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     // the Lead's assignment and reassignment (SCRUM-516), the refusal of an
     // unassigned review (SCRUM-517), and the notices (SCRUM-518).
     await db.exec(migration('052_lead_assignment.sql'));
+    // SCRUM-488: the safety statuses and the constraints that admit them.
+    await db.exec(migration('062_safety_statuses.sql'));
+    // SCRUM-488: the transition table with the safety check in it.
+    await db.exec(migration('063_safety_transitions.sql'));
   }, 60_000);
 
   afterAll(async () => {
@@ -476,7 +492,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
         ['the event was handed to another coordinator', (id) => change(id, STATUS.SUBMITTED, STATUS.UNDER_REVIEW, coordinator, null, otherCoordinator), '40001'],
         ['the reason is blank', (id) => change(id, STATUS.SUBMITTED, STATUS.UNDER_REVIEW, coordinator, '   '), '23514'],
         ['the user does not exist', (id) => change(id, STATUS.SUBMITTED, STATUS.UNDER_REVIEW, '99999999-9999-4999-8999-999999999999'), '23503'],
-        ['the move is not one of the sixteen (a submitted request cannot go back to draft)', (id) => change(id, STATUS.SUBMITTED, STATUS.DRAFT), '55000'],
+        ['the move is not a legal one (a submitted request cannot go back to draft)', (id) => change(id, STATUS.SUBMITTED, STATUS.DRAFT), '55000'],
       ])('SCRUM325_refuses_when_%s', async (_label, attempt, code) => {
         const id = await request(STATUS.SUBMITTED);
         const before = await row(id);
@@ -601,43 +617,165 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     });
   });
 
-  describe('the database holds the same transition table as the domain', () => {
-    // Hand-written from SCRUM-318, not read from either module, so neither copy
-    // can drift without this test saying so.
-    const SIXTEEN = [
-      ['draft', 'submitted'],
-      ['submitted', 'under_review'],
-      ['under_review', 'pending_clarification'],
-      ['pending_clarification', 'under_review'],
-      ['under_review', 'approved'],
-      ['under_review', 'rejected'],
-      ['approved', 'rejected'],
-      ['rejected', 'draft'],
-      ['approved', 'confirmed'],
-      ['confirmed', 'approved'],
-      ['confirmed', 'completed'],
-      ['submitted', 'cancelled'],
-      ['under_review', 'cancelled'],
-      ['pending_clarification', 'cancelled'],
-      ['approved', 'cancelled'],
-      ['confirmed', 'cancelled'],
-    ];
-    const NINE = [
-      STATUS.DRAFT,
-      STATUS.SUBMITTED,
-      STATUS.UNDER_REVIEW,
-      STATUS.PENDING_CLARIFICATION,
-      STATUS.APPROVED,
-      STATUS.CONFIRMED,
-      STATUS.COMPLETED,
-      STATUS.REJECTED,
-      STATUS.CANCELLED,
-    ];
-    const WITH_PLANNING = [...NINE, 'planning'];
-    const isSixteen = (from, to) => SIXTEEN.some(([f, t]) => f === from && t === to);
-    const legacyCanTransition = (from, to) => isSixteen(from, to);
+  describe('SCRUM-488 AC2 to AC4: the safety transitions through the shared status function', () => {
+    const SAFETY = [STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED];
 
-    it('SCRUM318_allows_exactly_the_sixteen_listed_transitions_and_nothing_else', async () => {
+    it('SCRUM488_AC2_an_approved_event_goes_through_the_safety_check_to_confirmed_one_history_row_each', async () => {
+      const id = await request(STATUS.APPROVED);
+      const approval = (await row(id));
+
+      await change(id, STATUS.APPROVED, STATUS.SAFETY_REVIEW, coordinator, 'Venue and equipment are arranged.');
+      await pause();
+      await change(id, STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED, safety, 'Meets the safety review.');
+      await pause();
+      const { rows: [confirmed] } = await change(id, STATUS.SAFETY_APPROVED, STATUS.CONFIRMED, coordinator);
+
+      expect(confirmed.status).toBe(STATUS.CONFIRMED);
+      const history = await statusHistory(id);
+      expect(history.map((h) => [h.previous_status, h.new_status, h.changed_by, h.reason])).toEqual([
+        ['approved', 'safety_review', coordinator, 'Venue and equipment are arranged.'],
+        ['safety_review', 'safety_approved', safety, 'Meets the safety review.'],
+        ['safety_approved', 'confirmed', coordinator, null],
+      ]);
+      // The approval the event carried through every step is the one it started with.
+      for (const column of ['decision', 'decision_note', 'decided_by', 'decided_at', 'reviewing_coordinator_id']) {
+        expect(confirmed[column], column).toEqual(approval[column]);
+      }
+    });
+
+    it('SCRUM488_AC2_a_send_back_returns_the_event_to_approved_and_records_the_reasons', async () => {
+      const id = await request(STATUS.SAFETY_REVIEW);
+
+      const { rows: [sentBack] } = await change(
+        id, STATUS.SAFETY_REVIEW, STATUS.APPROVED, safety, 'The second exit is blocked by the stage.',
+      );
+
+      expect(sentBack.status).toBe(STATUS.APPROVED);
+      expect((await statusHistory(id)).map((h) => [h.previous_status, h.new_status, h.changed_by, h.reason])).toEqual([
+        ['safety_review', 'approved', safety, 'The second exit is blocked by the stage.'],
+      ]);
+    });
+
+    it.each(SAFETY)('SCRUM488_AC2_a_significant_change_returns_%s_to_approved_with_its_reason', async (from) => {
+      const id = await request(from);
+
+      const { rows: [replanned] } = await change(id, from, STATUS.APPROVED, coordinator, 'Attendance doubled.');
+
+      expect(replanned.status).toBe(STATUS.APPROVED);
+      expect((await statusHistory(id))[0]).toMatchObject({
+        previous_status: from, new_status: 'approved', changed_by: coordinator, reason: 'Attendance doubled.',
+      });
+    });
+
+    it.each(SAFETY)('SCRUM488_AC2_%s_can_be_cancelled_and_keeps_its_approval', async (from) => {
+      const id = await request(from);
+      const approval = await row(id);
+
+      const { rows: [cancelled] } = await change(id, from, STATUS.CANCELLED, coordinator, 'The venue closed.');
+
+      expect(cancelled.status).toBe(STATUS.CANCELLED);
+      expect(cancelled.decision).toBe(approval.decision);
+      expect((await statusHistory(id))[0]).toMatchObject({ previous_status: from, new_status: 'cancelled', reason: 'The venue closed.' });
+    });
+
+    it('SCRUM488_AC2_direct_confirmation_from_approved_is_refused_naming_the_status_and_changes_nothing', async () => {
+      const id = await request(STATUS.APPROVED);
+      const before = await row(id);
+
+      const err = await refusal(change(id, STATUS.APPROVED, STATUS.CONFIRMED, coordinator));
+
+      expect(err.code).toBe('55000');
+      expect(err.message).toContain('status approved');
+      expect(err.message).toContain('confirmed');
+      expect(await row(id)).toEqual(before);
+      expect(await statusHistory(id)).toHaveLength(0);
+    });
+
+    it.each(SAFETY)('SCRUM488_AC2_rejecting_an_event_in_%s_is_refused_until_SCRUM_347_decides', async (from) => {
+      const id = await request(from);
+      const before = await row(id);
+
+      const err = await refusal(change(id, from, STATUS.REJECTED, coordinator, 'Not safe.'));
+
+      expect(err.code).toBe('55000');
+      expect(err.message).toContain(`status ${from}`);
+      expect(await row(id)).toEqual(before);
+      expect(await statusHistory(id)).toHaveLength(0);
+    });
+
+    it('SCRUM488_AC3_a_caller_who_saw_approved_is_told_the_event_is_in_safety_review', async () => {
+      // The stale-status check runs first, so the message names the status the
+      // event is really in, under the row lock.
+      const id = await request(STATUS.SAFETY_REVIEW);
+      const before = await row(id);
+
+      const err = await refusal(change(id, STATUS.APPROVED, STATUS.SAFETY_APPROVED, safety));
+
+      expect(err.code).toBe('55000');
+      expect(err.message).toContain('has status safety_review');
+      expect(await row(id)).toEqual(before);
+      expect(await statusHistory(id)).toHaveLength(0);
+    });
+
+    it('SCRUM488_AC4_the_history_time_is_the_databases_own', async () => {
+      const id = await request(STATUS.APPROVED);
+      const { rows: [{ started }] } = await db.query('select clock_timestamp() as started');
+
+      await change(id, STATUS.APPROVED, STATUS.SAFETY_REVIEW, coordinator);
+
+      const { rows: [{ finished }] } = await db.query('select clock_timestamp() as finished');
+      const [entry] = await statusHistory(id);
+      expect(entry.created_at.getTime()).toBeGreaterThanOrEqual(started.getTime() - 1000);
+      expect(entry.created_at.getTime()).toBeLessThanOrEqual(finished.getTime());
+    });
+
+    it('SCRUM488_AC4_a_failed_history_write_rolls_the_new_status_back', async () => {
+      // A blank reason is the history table's own refusal (23514). The status
+      // update ran first in the function, and must not survive it.
+      const id = await request(STATUS.APPROVED);
+      const before = await row(id);
+
+      const err = await refusal(change(id, STATUS.APPROVED, STATUS.SAFETY_REVIEW, coordinator, '   '));
+
+      expect(err.code).toBe('23514');
+      expect(await row(id)).toEqual(before);
+      expect(await statusHistory(id)).toHaveLength(0);
+    });
+
+    it('SCRUM488_AC3_lets_exactly_one_of_several_identical_submissions_for_the_safety_check_succeed', async () => {
+      const id = await request(STATUS.APPROVED);
+
+      const outcomes = await Promise.allSettled(
+        Array.from({ length: 5 }, () => change(id, STATUS.APPROVED, STATUS.SAFETY_REVIEW, coordinator)),
+      );
+
+      expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+      expect(outcomes.filter((o) => o.status === 'rejected').every((o) => o.reason.code === '55000')).toBe(true);
+      expect((await row(id)).status).toBe(STATUS.SAFETY_REVIEW);
+      expect(await statusHistory(id)).toHaveLength(1);
+    });
+
+    it('SCRUM488_AC3_a_move_to_submitted_is_still_the_submission_functions_alone', async () => {
+      const id = await request(STATUS.SAFETY_REVIEW);
+
+      const err = await refusal(change(id, STATUS.SAFETY_REVIEW, STATUS.SUBMITTED, coordinator));
+
+      expect(err.code).toBe('22023');
+      expect((await row(id)).status).toBe(STATUS.SAFETY_REVIEW);
+      expect(await statusHistory(id)).toHaveLength(0);
+    });
+  });
+
+  describe('the database holds the same transition table as the domain', () => {
+    // From tests/fixtures/expectedTransitionMatrix.js: written out from
+    // SCRUM-318 as changed by SCRUM-488 AC2, read by neither implementation,
+    // so neither copy can drift without this test saying so.
+    const LEGAL = EVERY_PAIR.filter(([, , allowed]) => allowed).map(([from, to]) => [from, to]);
+    const ELEVEN = ELEVEN_STATUSES;
+    const WITH_PLANNING = [...ELEVEN, 'planning'];
+    const isLegal = (from, to) => LEGAL.some(([f, t]) => f === from && t === to);
+
+    it('SCRUM488_AC2_allows_exactly_the_twenty_two_listed_transitions_and_nothing_else', async () => {
       const allowed = [];
       for (const from of WITH_PLANNING) {
         for (const to of WITH_PLANNING) {
@@ -646,23 +784,40 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
         }
       }
 
-      expect(allowed.map((pair) => pair.join('>')).sort()).toEqual(SIXTEEN.map((pair) => pair.join('>')).sort());
+      expect(LEGAL).toHaveLength(22);
+      expect(allowed.map((pair) => pair.join('>')).sort()).toEqual(LEGAL.map((pair) => pair.join('>')).sort());
     });
 
-    it('SCRUM318_agrees_with_canTransition_for_every_pair_of_statuses', async () => {
-      for (const from of WITH_PLANNING) {
-        for (const to of WITH_PLANNING) {
+    it('SCRUM553_AC2_every_pair_of_the_eleven_statuses_matches_the_expected_matrix_in_SQL_and_in_JavaScript', async () => {
+      expect([...Object.values(STATUS)].sort()).toEqual([...ELEVEN].sort());
+      for (const [from, to, allowed] of EVERY_PAIR) {
+        const { rows: [r] } = await db.query('select event_request_status_allows($1, $2) as allowed', [from, to]);
+        expect(r.allowed, `SQL ${from} -> ${to}`).toBe(allowed);
+        expect(canTransition(from, to), `JS ${from} -> ${to}`).toBe(allowed);
+      }
+    });
+
+    it('SCRUM553_AC2_the_retired_planning_status_is_allowed_to_and_from_nothing', async () => {
+      for (const other of ELEVEN) {
+        for (const [from, to] of [['planning', other], [other, 'planning']]) {
           const { rows: [r] } = await db.query('select event_request_status_allows($1, $2) as allowed', [from, to]);
-          expect(r.allowed, `${from} -> ${to}`).toBe(legacyCanTransition(from, to));
+          expect(r.allowed, `SQL ${from} -> ${to}`).toBe(false);
+          expect(canTransition(from, to), `JS ${from} -> ${to}`).toBe(false);
         }
       }
     });
 
-    describe('every other move between the nine statuses', () => {
+    it('SCRUM553_AC2_approved_to_confirmed_is_refused_by_both_guards', async () => {
+      const { rows: [r] } = await db.query("select event_request_status_allows('approved', 'confirmed') as allowed");
+
+      expect(r.allowed).toBe(false);
+      expect(canTransition('approved', 'confirmed')).toBe(false);
+    });
+    describe('every other move between the eleven statuses', () => {
       // A move to the status the request is already in, and a move to
       // submitted, are refused earlier and for their own reasons, tested above.
-      const REFUSED = NINE.flatMap((from) =>
-        NINE.filter((to) => to !== from && to !== STATUS.SUBMITTED && !isSixteen(from, to))
+      const REFUSED = ELEVEN.flatMap((from) =>
+        ELEVEN.filter((to) => to !== from && to !== STATUS.SUBMITTED && !isLegal(from, to))
           .map((to) => [from, to]),
       );
 
@@ -681,7 +836,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       it.each([STATUS.COMPLETED, STATUS.CANCELLED])(
         'SCRUM318_refuses_every_move_out_of_%s_when_the_caller_has_its_status_right',
         async (final) => {
-          for (const to of NINE.filter((s) => s !== final && s !== STATUS.SUBMITTED)) {
+          for (const to of ELEVEN.filter((s) => s !== final && s !== STATUS.SUBMITTED)) {
             const id = await request(final);
 
             const err = await refusal(change(id, final, to, coordinator));
@@ -1095,11 +1250,12 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       STATUS.UNDER_REVIEW,
       STATUS.PENDING_CLARIFICATION,
       STATUS.APPROVED,
+      STATUS.SAFETY_REVIEW,
+      STATUS.SAFETY_APPROVED,
       STATUS.CONFIRMED,
     ])('SCRUM486_AC5_a_lead_reassigns_a_request_that_is_%s', async (status) => {
-      // AC5-01, the five that exist. safety_review and safety_approved are on
-      // the function's list (as text) but cannot be written until SCRUM-488
-      // adds them to the enum (AC5-03).
+      // AC5-01 and AC5-03: the seven. 052 compares the status as text, so it
+      // ran for the safety statuses once 062 added them to the enum.
       const id = await request(status);
 
       const { rows: [moved] } = await reassign(id, otherCoordinator, lead);
@@ -1125,9 +1281,10 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     );
 
     it('SCRUM486_AC5_the_status_list_names_the_safety_statuses_before_they_exist', async () => {
-      // AC5-03 as far as it can go before SCRUM-488: the function in force
-      // names both, and every reassignment above runs, so naming them as text
-      // does not stop it running while the enum lacks them.
+      // AC5-03: the function in force names both, and compares as text. The
+      // name is from when the enum lacked them, and is kept because
+      // docs/SCRUM-486.md cites it; the reassignments above now run against
+      // the real values (062).
       const { rows: [fn] } = await db.query(
         "select prosrc from pg_proc where proname = 'reassign_event_request'",
       );

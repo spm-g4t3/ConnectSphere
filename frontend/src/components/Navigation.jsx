@@ -5,6 +5,7 @@ import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { normaliseRole } from "../auth/normaliseRole";
+import { BROWSE_OPEN_EVENTS_PATH, isOpenEventsEnabled } from "../services/openEventRoutes";
 
 const NAV_LINKS_BY_ROLE = {
   EVENT_ORGANISER: [
@@ -57,9 +58,9 @@ const NAV_LINKS_BY_ROLE = {
   ],
   ATTENDEE: [
     { to: "/dashboard", label: "Dashboard" },
-    // "Browse Open Events" (SCRUM-495) is not linked yet: that story has no
-    // route, page or branch, and /events is the Organiser's page. Add it here
-    // with the path SCRUM-495 registers.
+    // SCRUM-495. The Attendee's list of events open for registration. Its
+    // route is limited to Attendees; "My registrations" waits for its story.
+    { to: BROWSE_OPEN_EVENTS_PATH, label: "Browse Open Events" },
   ],
   // SCRUM-485 (SCRUM-510). One link each, deliberately: Dashboard, where
   // SCRUM-509 put each role's own screen. The pages that dashboard describes,
@@ -72,8 +73,9 @@ const NAV_LINKS_BY_ROLE = {
   //
   // SCRUM-486 (SCRUM-519) added the Lead's unassigned queue, with its route
   // /unassigned-queue, and SCRUM-486 AC6 the list of assigned events at
-  // /assigned-events, the Lead's way to an event to hand over. SCRUM-487's
-  // coordinator overview extends that list rather than adding another.
+  // /assigned-events, the Lead's way to an event to hand over. SCRUM-487
+  // extended that page into the coordinator overview rather than adding
+  // another page, so the link and its label stayed as they were.
   //
   // The keys are the whole normalised role, as TECHNICAL_SUPPORT_STAFF above
   // learned the hard way. EVENT_COORDINATOR would be the Coordinator's block,
@@ -99,7 +101,9 @@ export default function Navigation() {
 
   if (!user) return null;
 
-  const links = NAV_LINKS_BY_ROLE[normaliseRole(user.role)] || [];
+  const links = (NAV_LINKS_BY_ROLE[normaliseRole(user.role)] || []).filter(
+    (link) => link.to !== BROWSE_OPEN_EVENTS_PATH || isOpenEventsEnabled(),
+  );
 
   async function handleLogout() {
     setLoggingOut(true);

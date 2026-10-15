@@ -3573,6 +3573,76 @@ describe('SCRUM-321 AC3: a refused or failed change writes nothing', () => {
 });
 
 
+describe('SCRUM-488 AC2 to AC4: the safety transitions go through the same function', () => {
+  const SAFETY_MOVES = [
+    [STATUS.APPROVED, STATUS.SAFETY_REVIEW],
+    [STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_REVIEW, STATUS.APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.CONFIRMED],
+    [STATUS.SAFETY_REVIEW, STATUS.CANCELLED],
+    [STATUS.SAFETY_APPROVED, STATUS.CANCELLED],
+  ];
+
+  it.each(SAFETY_MOVES)(
+    'SCRUM488_AC4_%s_to_%s_is_one_call_carrying_the_statuses_the_actor_and_the_reason',
+    async (from, to) => {
+      const client = createFakeClient([ok(approvedRow({ status: to }))]);
+
+      const result = await change(client, {
+        expectedStatus: from, newStatus: to, reason: '  Sent back with reasons.  ',
+      });
+
+      expect(client.calls.map((call) => call.operation)).toEqual(['rpc']);
+      expect(rpcCallsOf(client)[0]).toMatchObject({
+        fn: 'change_event_request_status',
+        args: {
+          p_event_request_id: REQUEST_ID,
+          p_expected_status: from,
+          p_new_status: to,
+          p_changed_by: COORDINATOR_ID,
+          p_reason: 'Sent back with reasons.',
+        },
+      });
+      expect(result.status).toBe(to);
+    },
+  );
+
+  it.each([
+    [STATUS.APPROVED, STATUS.CONFIRMED],
+    [STATUS.APPROVED, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_REVIEW, STATUS.CONFIRMED],
+    // SCRUM-347 has not decided whether a safety status may be rejected.
+    [STATUS.SAFETY_REVIEW, STATUS.REJECTED],
+    [STATUS.SAFETY_APPROVED, STATUS.REJECTED],
+    [STATUS.CONFIRMED, STATUS.SAFETY_REVIEW],
+    [STATUS.COMPLETED, STATUS.SAFETY_REVIEW],
+    [STATUS.CANCELLED, STATUS.SAFETY_APPROVED],
+  ])('SCRUM488_AC3_refuses_%s_to_%s_naming_the_status_and_calling_nothing', async (from, to) => {
+    const client = createFakeClient([]);
+
+    const err = await errorFrom(change(client, { expectedStatus: from, newStatus: to }));
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.status).toBe(409);
+    expect(err.message).toContain(`'${from}'`);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM488_AC3_a_conflict_from_the_function_on_a_safety_move_is_a_409_with_no_retry', async () => {
+    // The stale-status refusal and the table's own refusal both raise 55000.
+    const client = createFakeClient([dbError('55000', 'event request has status safety_review, not approved')]);
+
+    const err = await errorFrom(change(client, {
+      expectedStatus: STATUS.APPROVED, newStatus: STATUS.SAFETY_REVIEW,
+    }));
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(rpcCallsOf(client)).toHaveLength(1);
+  });
+});
+
+
 describe('SCRUM-321: the other status changes go through the same function', () => {
   it('SCRUM321_a_clarification_request_that_is_not_allowed_calls_nothing_after_the_read', async () => {
     // Approved cannot go back to clarification. The refusal names the status
@@ -3771,6 +3841,57 @@ describe('SCRUM-322 AC6: the Organiser and the assigned coordinator see the full
       ['Under review', 'Awaiting your response'],
     ]);
   });
+
+  it('SCRUM488_AC6_shows_the_safety_statuses_by_label_with_reasons_actors_and_times_oldest_first', async () => {
+    // An event seeded through the safety check: submitted for it, sent back by
+    // the Safety Officer, submitted again, approved, confirmed. The raw
+    // statuses stay for code; what is read is the Organiser's label.
+    const SAFETY_OFFICER_ID = '55555555-5555-4555-8555-555555555555';
+    const rows = [
+      { previous_status: STATUS.APPROVED, new_status: STATUS.SAFETY_REVIEW, changed_by: COORDINATOR_ID, reason: 'Venue and equipment are arranged.', created_at: '2026-02-01T09:00:00+00:00' },
+      { previous_status: STATUS.SAFETY_REVIEW, new_status: STATUS.APPROVED, changed_by: SAFETY_OFFICER_ID, reason: 'The second exit is blocked.', created_at: '2026-02-02T09:00:00+00:00' },
+      { previous_status: STATUS.APPROVED, new_status: STATUS.SAFETY_REVIEW, changed_by: COORDINATOR_ID, reason: null, created_at: '2026-02-03T09:00:00+00:00' },
+      { previous_status: STATUS.SAFETY_REVIEW, new_status: STATUS.SAFETY_APPROVED, changed_by: SAFETY_OFFICER_ID, reason: 'Meets the safety review.', created_at: '2026-02-04T09:00:00+00:00' },
+      { previous_status: STATUS.SAFETY_APPROVED, new_status: STATUS.CONFIRMED, changed_by: COORDINATOR_ID, reason: null, created_at: '2026-02-05T09:00:00+00:00' },
+    ];
+    const people = [...profiles(), { id: SAFETY_OFFICER_ID, full_name: 'Sam Safety' }];
+    const client = readingHistory(heldEvent({ status: STATUS.CONFIRMED }), rows, people);
+
+    const history = await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(history.map((entry) => [entry.previousStatusLabel, entry.newStatusLabel])).toEqual([
+      ['Planning', 'Safety check'],
+      ['Safety check', 'Planning'],
+      ['Planning', 'Safety check'],
+      ['Safety check', 'Safety approved'],
+      ['Safety approved', 'Confirmed'],
+    ]);
+    expect(history.map((entry) => [entry.previousStatus, entry.newStatus])).toEqual(
+      rows.map((row) => [row.previous_status, row.new_status]),
+    );
+    expect(history.map((entry) => entry.reason)).toEqual(rows.map((row) => row.reason));
+    expect(history.map((entry) => entry.changedByName))
+      .toEqual(['Carlos Coordinator', 'Sam Safety', 'Carlos Coordinator', 'Sam Safety', 'Carlos Coordinator']);
+    expect(history.map((entry) => entry.changedAt)).toEqual(rows.map((row) => row.created_at));
+    for (const entry of history) {
+      expect(`${entry.previousStatusLabel} ${entry.newStatusLabel}`).not.toMatch(/_|Unknown|Unavailable/);
+    }
+    expect(client.calls[1].order).toEqual([['created_at', { ascending: true }]]);
+  });
+
+  it.each([STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED])(
+    'SCRUM488_AC6_an_event_in_%s_can_be_read_by_its_organiser_and_its_assigned_coordinator_only',
+    async (status) => {
+      for (const [userId, readable] of [[ORGANISER_ID, true], [COORDINATOR_ID, true], [STRANGER_ID, false]]) {
+        const client = readingHistory(heldEvent({ status }));
+
+        const read = getEventRequestStatusHistory(REQUEST_ID, userId, { client });
+
+        if (readable) await expect(read).resolves.toHaveLength(3);
+        else expect(await errorFrom(read)).toBeInstanceOf(NotFoundError);
+      }
+    },
+  );
 
   it('SCRUM322_AC6_exposes_only_those_seven_fields', async () => {
     // Not the user id, the row id or the event id: what the screen shows is the

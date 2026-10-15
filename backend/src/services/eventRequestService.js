@@ -75,6 +75,7 @@ import {
   canTransition,
   COORDINATOR_QUEUE_STATUSES,
   getOrganiserStatusLabel,
+  getStatusDisplay,
 } from '../domain/eventRequestStatus.js';
 // Imports nothing itself, so this service stays loadable without credentials.
 import { ROLE } from '../domain/userRole.js';
@@ -280,6 +281,12 @@ function translateError(error) {
 
   if (code === 'P0002' || /not found/i.test(detail)) {
     return new NotFoundError(detail || 'Event request not found');
+  }
+
+  // SCRUM-489: submit_event_for_safety_review (064) refuses an event that is not
+  // ready with every outstanding checklist line as JSON in DETAIL.
+  if (code === 'PT409' && error.hint === 'EVENT_NOT_READY') {
+    return new ConflictError(detail, { code: 'EVENT_NOT_READY', conflicts: parseOutstanding(error.details) });
   }
 
   // Left untyped on purpose. An unrecognised code is not the caller's fault and
@@ -676,7 +683,7 @@ export async function updateEventRequest(id, changes, organiserId, { client } = 
  *
  * The rule is asked in two places on purpose. canTransition here refuses an
  * illegal move before any round trip, with the status named. The function
- * (migration 022) holds the same table in SQL and refuses it again under the
+ * (migration 022, restated by 063) holds the same table in SQL and refuses it again under the
  * row lock, because the function is callable by anything that reaches the
  * database, not only this service. A test compares the two tables pair by
  * pair, so they cannot drift unnoticed. The function also checks the thing
@@ -1934,15 +1941,39 @@ export async function listUnassignedEventRequests({ client } = {}) {
  * (assigned, not yet reviewed) through confirmed: everything that still needs
  * the coordinator. Not draft, which nobody holds; not completed, rejected or
  * cancelled, which are finished. 015's selection rule also counted planning,
- * which 020 removed. SCRUM-488's safety_review and safety_approved belong here
- * once the enum has them; named now, the read would fail on an unknown value.
+ * which 020 removed. SCRUM-488's safety_review and safety_approved are in the
+ * list, between approved and confirmed, so a coordinator holding an event in
+ * the safety check still counts it. The order is the lifecycle's and is the
+ * order of the overview's columns and of the filter's options.
  */
-const ACTIVE_EVENT_STATUSES = Object.freeze([
+// Exported for scrum487StatusClassification.test.js, which fails if an enum value is in neither list, so a status added later cannot be left out of the overview unnoticed.
+export const ACTIVE_EVENT_STATUSES = Object.freeze([
   STATUS.SUBMITTED,
   STATUS.UNDER_REVIEW,
   STATUS.PENDING_CLARIFICATION,
   STATUS.APPROVED,
+  STATUS.SAFETY_REVIEW,
+  STATUS.SAFETY_APPROVED,
   STATUS.CONFIRMED,
+]);
+
+/**
+ * The statuses in which an event is finished, for the Lead's list when they
+ * ask to include finished events (SCRUM-487 AC3: "Completed, Rejected and
+ * Cancelled events are hidden unless the Lead asks to include them").
+ *
+ * SCRUM-542. Named beside ACTIVE_EVENT_STATUSES, and between them the two are
+ * every status an event someone holds can have, except draft: a draft is the
+ * Organiser's working copy, nobody's event to supervise, so it is in neither
+ * and the list never shows one (a reopened draft can keep a stale
+ * coordinator, 022). Not derived as "every STATUS not active", which would
+ * admit draft, and would silently admit any status added later; a new
+ * finished status is a decision to make here.
+ */
+export const FINISHED_EVENT_STATUSES = Object.freeze([
+  STATUS.COMPLETED,
+  STATUS.REJECTED,
+  STATUS.CANCELLED,
 ]);
 
 /**
@@ -1965,7 +1996,9 @@ const ACTIVE_EVENT_STATUSES = Object.freeze([
  * top in all but name.
  *
  * Two reads: the coordinators, then their active events, counted here. A
- * coordinator with none is listed with 0, not left out.
+ * coordinator with none is listed with 0, not left out. Both reads are
+ * readCoordinatorsAndActiveEvents, shared with the Lead's overview (SCRUM-487
+ * AC2), so the picker's count and the overview's total are one count.
  *
  * @param {object} [options]
  * @param {object} [options.client]
@@ -1974,29 +2007,11 @@ const ACTIVE_EVENT_STATUSES = Object.freeze([
 export async function listCoordinatorWorkload({ client } = {}) {
   const db = await resolveClient(client);
 
-  const { data: profiles, error: profilesError } = await db
-    .from('profiles')
-    .select('id, full_name')
-    .eq('role', ROLE.EVENT_COORDINATOR)
-    .order('full_name', { ascending: true, nullsFirst: false })
-    .order('id', { ascending: true });
-
-  if (profilesError) throw translateError(profilesError);
-
-  const coordinators = profiles ?? [];
-
-  if (coordinators.length === 0) return [];
-
-  const { data: events, error: eventsError } = await db
-    .from('event_requests')
-    .select('assigned_coordinator_id')
-    .in('assigned_coordinator_id', coordinators.map((profile) => profile.id))
-    .in('status', ACTIVE_EVENT_STATUSES);
-
-  if (eventsError) throw translateError(eventsError);
+  // Only the column the count needs: the picker shows a name and a number.
+  const { coordinators, events } = await readCoordinatorsAndActiveEvents(db, 'assigned_coordinator_id');
 
   const countOf = new Map();
-  for (const event of events ?? []) {
+  for (const event of events) {
     countOf.set(event.assigned_coordinator_id, (countOf.get(event.assigned_coordinator_id) ?? 0) + 1);
   }
 
@@ -2009,19 +2024,156 @@ export async function listCoordinatorWorkload({ client } = {}) {
 
 
 /**
+ * The two reads the picker's workload and the Lead's overview share: every
+ * Event Coordinator, by name then id, and their events in an active status.
+ *
+ * SCRUM-487 (SCRUM-541), extracted from listCoordinatorWorkload as it was, so
+ * that "N active events" in SCRUM-486's picker and a coordinator's total in
+ * SCRUM-487's overview are the same coordinators counted over the same events
+ * (SCRUM-487 D3). Two copies of these reads would agree only until someone
+ * changed one of them.
+ *
+ * `columns` is the caller's: the picker selects only assigned_coordinator_id,
+ * and SCRUM-486 pins exactly that select, while the overview also needs status
+ * to count each one. Everything else, the role, the order, the narrowing to
+ * the coordinators just read and the status set, is fixed here.
+ *
+ * No coordinators means no second read: there is nobody to count for. A
+ * failed read throws through translateError; a zero-filled list would look
+ * like coordinators with nothing to do.
+ *
+ * @param {object} db       a resolved client
+ * @param {string} columns  the event columns the caller counts by
+ * @returns {Promise<{ coordinators: Array<{ id: string, full_name: string|null }>, events: object[] }>}
+ */
+async function readCoordinatorsAndActiveEvents(db, columns) {
+  const { data: profiles, error: profilesError } = await db
+    .from('profiles')
+    .select('id, full_name')
+    .eq('role', ROLE.EVENT_COORDINATOR)
+    .order('full_name', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true });
+
+  if (profilesError) throw translateError(profilesError);
+
+  const coordinators = profiles ?? [];
+
+  if (coordinators.length === 0) return { coordinators, events: [] };
+
+  const { data: events, error: eventsError } = await db
+    .from('event_requests')
+    .select(columns)
+    .in('assigned_coordinator_id', coordinators.map((profile) => profile.id))
+    .in('status', ACTIVE_EVENT_STATUSES);
+
+  if (eventsError) throw translateError(eventsError);
+
+  return { coordinators, events: events ?? [] };
+}
+
+
+/**
+ * Every Event Coordinator, with their active events counted in total and per
+ * status, for the Lead's coordinator overview (SCRUM-487 AC2), and the words
+ * for each status the overview shows.
+ *
+ * SCRUM-541. AC2: "every Event Coordinator with their number of active events
+ * and the count in each status". Returned as { statuses, coordinators }:
+ * coordinators is { id, fullName, activeEvents, byStatus } per coordinator.
+ *
+ * SCRUM-546 (SCRUM-487 D9): statuses is { status, label, finished } for every
+ * status in ACTIVE_EVENT_STATUSES, then every one in FINISHED_EVENT_STATUSES,
+ * in that order. The screen heads the table's columns and fills the status
+ * filter from it. Before, the screen took each status's words from an event
+ * row it had happened to load with that status, and fell back to the raw key
+ * (pending_clarification) for a status no row had shown: a heading that
+ * depended on what the filters had fetched. The label is getStatusDisplay's,
+ * the same source as every row's statusDisplay, so a column heading and a
+ * status badge never give one status two names. They are the Organiser's
+ * words ("Requested", "Planning"), the ones on every badge the Lead already
+ * sees; coordinator-facing words would be a change to the whole status
+ * display, not this read. finished tells the screen which statuses to offer
+ * only when the Lead includes finished events (AC3). Changing this response
+ * cost nothing: it is new in SCRUM-487 and nothing else reads it.
+ *
+ * A read of its own rather than byStatus added to listCoordinatorWorkload
+ * (SCRUM-487 D3). The picker's response is pinned exactly by SCRUM-486 ("an
+ * extra key fails: no role, no recommended"): beside a choice, it shows a name
+ * and a number and nothing that reads as advice. The per-status breakdown is
+ * the supervision view's. Both count through readCoordinatorsAndActiveEvents,
+ * so activeEvents here equals the picker's count for the same coordinator.
+ *
+ * byStatus has one key for every status in ACTIVE_EVENT_STATUSES, each 0 when
+ * the coordinator holds none: a missing key would make the screen guess
+ * whether it means none or unknown. The keys come from the constant, not a
+ * list written here, so the safety statuses SCRUM-488 added to it appear here
+ * with no other change. Naming a status the database enum lacks in the filter
+ * would fail the whole read (SCRUM-487 D4), so the enum migration (SCRUM-550)
+ * has to reach a database before this list does. activeEvents is the sum of
+ * byStatus, so the two can never disagree on one row.
+ *
+ * Ordered by name, then id, like the picker, never by workload: the overview
+ * shows who has what, and does not rank anyone. A coordinator with nothing is
+ * listed with zeros, not left out; they are the one most able to take more.
+ * Who may call it is decided at the route: leadOnly.
+ *
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<{ statuses: Array<{ status: string, label: string, finished: boolean }>,
+ *   coordinators: Array<{ id: string, fullName: string|null, activeEvents: number,
+ *   byStatus: Object<string, number> }> }>}
+ */
+export async function listCoordinatorOverview({ client } = {}) {
+  const db = await resolveClient(client);
+
+  const { coordinators, events } = await readCoordinatorsAndActiveEvents(db, 'assigned_coordinator_id, status');
+
+  const byStatusOf = new Map(
+    coordinators.map((profile) => [profile.id, Object.fromEntries(ACTIVE_EVENT_STATUSES.map((status) => [status, 0]))]),
+  );
+  for (const event of events) {
+    const counts = byStatusOf.get(event.assigned_coordinator_id);
+    // The read is narrowed to these coordinators and these statuses, so both
+    // always match; the guard keeps activeEvents the sum of byStatus even if
+    // a row ever arrived that did not.
+    if (counts && Object.hasOwn(counts, event.status)) counts[event.status] += 1;
+  }
+
+  const statuses = [
+    ...ACTIVE_EVENT_STATUSES.map((status) => ({ status, label: getStatusDisplay(status).label, finished: false })),
+    ...FINISHED_EVENT_STATUSES.map((status) => ({ status, label: getStatusDisplay(status).label, finished: true })),
+  ];
+
+  return {
+    statuses,
+    coordinators: coordinators.map((profile) => {
+      const byStatus = byStatusOf.get(profile.id);
+      return {
+        id: profile.id,
+        fullName: profile.full_name ?? null,
+        activeEvents: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
+        byStatus,
+      };
+    }),
+  };
+}
+
+
+/**
  * Every event someone holds in an active status, for the Lead (SCRUM-486 AC6).
  *
  * The Lead may hand any held event to another coordinator (AC6), from the
  * event's own page. Until this read, nothing linked a Lead to that page: an
  * assigned request leaves the unassigned queue, and the coordinators' queue
- * and "My events" are coordinatorOnly. This is the list that leads there, and
- * the first slice of SCRUM-487 AC3's list, which will extend it (filters,
- * per-coordinator counts, finished events, the unassigned count) rather than
- * replace it.
+ * and "My events" are coordinatorOnly. This is the list that leads there. It
+ * was the first slice of SCRUM-487 AC3's list, and SCRUM-487 extended it
+ * (SCRUM-542: the filters and finished events, below) rather than replacing
+ * it; the per-coordinator counts are listCoordinatorOverview, and the
+ * unassigned count is the queue's own read on the screen.
  *
  * ACTIVE_EVENT_STATUSES, not a list of its own, so the events here are exactly
- * the ones the picker counts as "N active events" beside each name, and when
- * SCRUM-488 adds the safety statuses to that constant, both pick them up. Not
+ * the ones the picker counts as "N active events" beside each name, and the
+ * safety statuses SCRUM-488 added to that constant are in both. Not
  * the coordinators' queue statuses: those stop at pending clarification, and
  * approved and confirmed events, where an absent coordinator matters most, are
  * the ones a Lead most needs to reach.
@@ -2029,6 +2181,27 @@ export async function listCoordinatorWorkload({ client } = {}) {
  * Earliest event first (SCRUM-487 AC3), by proposed_start, nulls last for the
  * reason listEventRequestsForCoordinator gives, then id so two refetches never
  * reshuffle.
+ *
+ * SCRUM-487 AC3 (SCRUM-542) adds three options, each applied in the query,
+ * not left to the browser (SCRUM-487 D2: finished events only grow, so
+ * filtering on the screen would mean fetching every one of them to hide
+ * most). Called with none, the read is exactly SCRUM-486 AC6's, and SCRUM-486's
+ * tests of it pass unchanged.
+ *
+ *  - coordinatorId: only that coordinator's events. Checked with isPlausibleId
+ *    first, so a malformed id is a 400 rather than Postgres's 22P02. An id
+ *    that names no coordinator is an empty list, not a 404: the route would
+ *    otherwise tell anyone who calls it which ids are coordinators.
+ *  - status: one status. It must be active or finished; draft is a known
+ *    status but never in this list, so it is refused like an unknown one.
+ *    isKnownStatus would admit draft, so the two arrays decide.
+ *  - includeFinished: a boolean, false by default. Adds exactly
+ *    FINISHED_EVENT_STATUSES to the statuses read.
+ *
+ * Every option is checked before any query, so a refused filter costs no
+ * round trip. A finished status asked for while finished events are hidden is
+ * an empty list without a query: nothing in the list could match, and it is
+ * a coherent question with an empty answer, not a malformed one.
  *
  * Only the columns a row shows, not COLUMNS: the row opens the event page,
  * which reads the full event itself. The organiser's and the coordinator's
@@ -2038,18 +2211,54 @@ export async function listCoordinatorWorkload({ client } = {}) {
  *
  * @param {object} [options]
  * @param {object} [options.client]
+ * @param {string} [options.coordinatorId]     only this coordinator's events (SCRUM-487 AC3)
+ * @param {string} [options.status]            only this status, active or finished (SCRUM-487 AC3)
+ * @param {boolean} [options.includeFinished]  also completed, rejected and cancelled (SCRUM-487 AC3)
  * @returns {Promise<Array<{ id: string, eventName: string, status: string,
  *   proposedStart: string|null, organiserName: string|null,
  *   assignedCoordinatorId: string, assignedCoordinatorName: string|null }>>}
+ * @throws {ValidationError} a malformed coordinatorId, a status that is not
+ *   active or finished, or an includeFinished that is not a boolean, before any query
  */
-export async function listAssignedEventsForLead({ client } = {}) {
+export async function listAssignedEventsForLead({ client, coordinatorId, status, includeFinished = false } = {}) {
+  if (coordinatorId !== undefined && !isPlausibleId(coordinatorId)) {
+    throw new ValidationError(
+      'Invalid filter -- coordinatorId: must be a valid id',
+      [{ field: 'coordinatorId', message: 'must be a valid id' }],
+    );
+  }
+  if (status !== undefined && !ACTIVE_EVENT_STATUSES.includes(status) && !FINISHED_EVENT_STATUSES.includes(status)) {
+    throw new ValidationError(
+      'Invalid filter -- status: must be an active or finished status',
+      [{ field: 'status', message: 'must be an active or finished status' }],
+    );
+  }
+  if (typeof includeFinished !== 'boolean') {
+    throw new ValidationError(
+      'Invalid filter -- includeFinished: must be true or false',
+      [{ field: 'includeFinished', message: 'must be true or false' }],
+    );
+  }
+
+  const statuses = includeFinished ? [...ACTIVE_EVENT_STATUSES, ...FINISHED_EVENT_STATUSES] : ACTIVE_EVENT_STATUSES;
+
+  if (status !== undefined) {
+    // A finished status while finished events are hidden: nothing can match,
+    // so the answer is the empty list, and no query is made to learn it.
+    if (!statuses.includes(status)) return [];
+  }
+
   const db = await resolveClient(client);
 
-  const { data, error } = await db
+  let query = db
     .from('event_requests')
-    .select('id, event_name, status, proposed_start, organiser_id, assigned_coordinator_id')
-    .in('status', ACTIVE_EVENT_STATUSES)
-    .not('assigned_coordinator_id', 'is', null)
+    .select('id, event_name, status, proposed_start, organiser_id, assigned_coordinator_id');
+  // One status narrows the set to itself; it is already known to be in it.
+  query = status === undefined ? query.in('status', statuses) : query.eq('status', status);
+  query = query.not('assigned_coordinator_id', 'is', null);
+  if (coordinatorId !== undefined) query = query.eq('assigned_coordinator_id', coordinatorId.trim());
+
+  const { data, error } = await query
     .order('proposed_start', { ascending: true, nullsFirst: false })
     .order('id', { ascending: true });
 
@@ -2288,4 +2497,98 @@ export async function listAssignmentHistory(id, { includeNotes = false } = {}, {
 
     return entry;
   });
+}
+
+
+/** DETAIL's outstanding lines, or none: a malformed DETAIL must not become a 500. */
+function parseOutstanding(details) {
+  try {
+    const items = JSON.parse(details);
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return [];
+  }
+}
+
+const SAFETY_NOTE_MAX = 2000;
+
+/**
+ * The readiness checklist of SCRUM-489 AC2 and AC3, from event_readiness (064),
+ * the same function the submission and SCRUM-363's confirm run.
+ *
+ * @param {object} options
+ * @param {string} options.eventRequestId
+ * @param {boolean} [options.noEquipmentConfirmed]
+ * @param {object} [options.client]
+ * @returns {Promise<{ eventRequestId: string, ready: boolean, items: object[] }>}
+ */
+export async function getEventReadiness({ client, eventRequestId, noEquipmentConfirmed = false } = {}) {
+  if (!isPlausibleId(eventRequestId)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+  if (typeof noEquipmentConfirmed !== 'boolean') {
+    throw new ValidationError(
+      'Invalid noEquipmentConfirmed -- must be true or false',
+      [{ field: 'noEquipmentConfirmed', message: 'must be true or false' }],
+    );
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('event_readiness', {
+    p_event_request_id: eventRequestId,
+    p_no_equipment_confirmed: noEquipmentConfirmed,
+  });
+  if (error) throw translateError(error);
+  return data;
+}
+
+/**
+ * The assigned coordinator sends an Approved, ready event to the Safety
+ * Officers (SCRUM-489 AC1 to AC6, AC8), through submit_event_for_safety_review
+ * (064). The inputs are refused here first, by the database's own rules, so a
+ * bad one costs no round trip.
+ *
+ * @param {object} options
+ * @param {string} options.eventRequestId
+ * @param {string} options.coordinatorId     the caller, from the token
+ * @param {string} [options.note]            for the Safety Officer, up to 2,000 characters
+ * @param {boolean} [options.noEquipmentConfirmed]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the event, now in Safety review, in camelCase
+ */
+export async function submitForSafetyReview({
+  client, eventRequestId, coordinatorId, note, noEquipmentConfirmed = false,
+} = {}) {
+  if (!isPlausibleId(eventRequestId)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
+    throw new ValidationError('coordinatorId is required');
+  }
+  if (note !== undefined && note !== null && typeof note !== 'string') {
+    throw new ValidationError('Invalid note -- must be text', [{ field: 'note', message: 'must be text' }]);
+  }
+  const trimmed = typeof note === 'string' ? note.trim() : '';
+  if (trimmed.length > SAFETY_NOTE_MAX) {
+    throw new ValidationError(
+      'The note for the Safety Officer must be 2,000 characters or fewer',
+      [{ field: 'note', message: 'must be 2,000 characters or fewer' }],
+    );
+  }
+  if (typeof noEquipmentConfirmed !== 'boolean') {
+    throw new ValidationError(
+      'Invalid noEquipmentConfirmed -- must be true or false',
+      [{ field: 'noEquipmentConfirmed', message: 'must be true or false' }],
+    );
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('submit_event_for_safety_review', {
+    p_event_request_id: eventRequestId,
+    p_coordinator_id: coordinatorId,
+    p_note: trimmed === '' ? null : trimmed,
+    p_no_equipment_confirmed: noEquipmentConfirmed,
+  });
+  if (error) throw translateError(error);
+  return toEventRequest(data);
 }

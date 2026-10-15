@@ -21,6 +21,9 @@ import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck"
 import EquipmentReview from "./components/EquipmentReview";
 import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
 import SafetyReviewHistory from "./components/SafetyReviewHistory";
+import BrowseOpenEvents from "./components/BrowseOpenEvents";
+import BrowseEventDetails from "./components/BrowseEventDetails";
+import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE, isOpenEventsEnabled } from "./services/openEventRoutes";
 import "./App.css";
 
 function LoadingScreen() {
@@ -210,8 +213,8 @@ function AppRoutes() {
             hand it over (AC6). Coordinators may open it too. allowedRoles
             mirrors GET /event-requests/:id/review's gate; the API answers 403
             to anyone else regardless. The Lead reaches it from
-            /assigned-events above; SCRUM-487's coordinator overview will
-            extend that list (see the page's header).
+            /assigned-events above, the list SCRUM-486 built and SCRUM-487
+            extended into the coordinator overview (see the page's header).
 
             The coordinator wrapper for both roles, because App.css colours the
             status badge under .dashboard--coordinator only. */}
@@ -239,6 +242,33 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
+        {/* Attendees only, like the API, so a direct URL from another role lands
+            on /unauthorized, not on a page that is only an error. The
+            .dashboard wrapper gives the pages their card styling. */}
+        {isOpenEventsEnabled() && (
+          <>
+            <Route
+              path={BROWSE_OPEN_EVENTS_PATH}
+              element={
+                <ProtectedRoute allowedRoles={["attendee"]}>
+                  <div className="dashboard dashboard--attendee">
+                    <BrowseOpenEvents />
+                  </div>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path={OPEN_EVENT_DETAILS_ROUTE}
+              element={
+                <ProtectedRoute allowedRoles={["attendee"]}>
+                  <div className="dashboard dashboard--attendee">
+                    <BrowseEventDetails />
+                  </div>
+                </ProtectedRoute>
+              }
+            />
+          </>
+        )}
         <Route
           path="/equipment-catalogue"
           element={
