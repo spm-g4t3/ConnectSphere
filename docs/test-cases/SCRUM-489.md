@@ -7,6 +7,7 @@
 **Marked:** 14 October 2026, SCRUM-555 and SCRUM-556: every case their tests prove names them. The cases themselves are unchanged.
 **Marked:** 14 October 2026, SCRUM-557 and SCRUM-558: the screen's cases and AC7-01, AC8-04 marked; AC1-10, AC6-06, AC8-06 and AC8-07 added for the screen and the notice's wording.
 **Marked:** 14 October 2026, the AC8-07 fix-up: the Safety Officer's card mounted; AC8-05 and AC8-07 proved.
+**Marked:** 15 October 2026, SCRUM-559 after the merge of dev: AC2-14 and AC2-15 added for the seam with SCRUM-300's reservations.
 
 This document is the written layer between SCRUM-489's acceptance criteria and the
 Vitest files that implement them. The chain is **user story → acceptance criteria
@@ -30,6 +31,7 @@ are marked **(trap)**.
 | svc | `backend/tests/services/scrum489…` (fake client) | What the service refuses before the database, and how each SQLSTATE becomes an error |
 | route | `backend/tests/routes/scrum489…` (fake client) | Gates, status codes, the caller from the token, query and body parameters |
 | pglite-558 | `backend/tests/db/scrum489EquipmentLockDatabase.test.js` | AC7's lock and AC8's label, from a real submission (SCRUM-558) |
+| pglite-300 | `backend/tests/db/scrum489EquipmentArrangedDatabase.test.js` | Readiness over SCRUM-300's reservations, 053 to 061 loaded (SCRUM-559) |
 | screen | `frontend/tests/components/scrum489…` | What the coordinator sees (SCRUM-557) |
 | display | `frontend/tests/services/scrum489…` | The panel's two calls, and the notice's wording |
 
@@ -257,6 +259,8 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
 | AC2-11 | Everything met | `event_readiness` | `ready` true; the lines in a fixed order: venue (by start, then id), equipment, acknowledgement, date | Proved (pglite): `SCRUM489_AC2_an_approved_covering_booking_no_equipment_and_a_future_start_is_ready`, `SCRUM489_AC2_two_venues_each_a_line_one_met_one_outstanding` |
 | AC2-12 | — | `event_readiness` for an unknown id | P0002 | Proved (pglite): `SCRUM489_AC2_an_unknown_event_is_not_found`; (svc) `SCRUM489_AC2_an_unknown_event_is_a_404` |
 | AC2-13 | An active venue hold, and no booking | `event_readiness` | The hold is not a booking: "No venue booking" | Proved (pglite): `SCRUM489_AC2_no_live_booking_is_one_outstanding_line_and_dead_bookings_are_not_relied_on`, with an active hold on a stand-in `venue_holds` |
+| AC2-14 | Otherwise ready; one line reserved in full through SCRUM-300's `reserve_equipment` | `event_readiness` | 053's arrange check made the request Arranged; the equipment line is met and the event ready | Proved (pglite-300): `SCRUM489_AC2_a_request_scrum300_arranged_by_reserving_in_full_reads_as_met` |
+| AC2-15 **(trap)** | As AC2-14 | `flag_equipment_reservations` flags the reservation (061), then A submits | The request is back to `pending_review`; the equipment line is outstanding, not ready, and the submit is refused PT409 `EVENT_NOT_READY` with that line; the event stays Approved | Proved (pglite-300): `SCRUM489_AC2_a_flagged_reservation_makes_equipment_outstanding` |
 
 ### AC3 — every outstanding item listed; the checklist before submitting
 
@@ -374,12 +378,13 @@ AC8-04: the screen and SCRUM-558's proofs); the same 2. After SCRUM-557 and
 SCRUM-558: 60 cases (AC1-10, AC6-06, AC8-06 and AC8-07 added); **57 proved**; 1
 not yet implemented (AC8-07, the Safety Officer's card); the same 2. After the
 AC8-07 fix-up: **59 proved**; 0 not yet implemented; 1 that cannot be written
-(AC7-02, SCRUM-395's).
+(AC7-02, SCRUM-395's). After SCRUM-559: 62 cases (AC2-14 and AC2-15 added);
+**61 proved**; 0 not yet implemented; the same 1. Twenty-five are traps.
 
 | Section | Cases |
 |---|---|
 | AC1 | 10 |
-| AC2 | 13 |
+| AC2 | 15 |
 | AC3 | 9 |
 | AC4 | 7 |
 | AC5 | 6 |
