@@ -65,6 +65,9 @@ button { cursor: pointer; }
 .safety-review__back { margin-bottom: 10px; }
 .safety-review__error { background: #fff0ee; border-radius: 6px; color: #a43c32 !important; padding: 10px 12px; }
 .safety-review__success { background: #e8f7f1; border-radius: 6px; color: #17684f !important; padding: 10px 12px; }
+.safety-approval-notice { align-items: flex-start; background: #e8f7f1; border: 1px solid #9dd9c3; border-radius: 8px; color: #145b45; display: flex; gap: 10px; margin: 12px 0; padding: 12px 14px; }
+.safety-approval-notice__check { align-items: center; background: #17684f; border-radius: 50%; color: white; display: inline-flex; flex: 0 0 22px; font-size: 0.85rem; font-weight: 800; height: 22px; justify-content: center; line-height: 1; }
+.safety-approval-notice p { color: inherit; margin: 3px 0 0; }
 .dashboard h1 { overflow-wrap: anywhere; }
 .dashboard > section { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); margin-top: 22px; padding: 24px; }
 .dashboard h2 { color: var(--teal-dark); font-size: 1.2rem; margin: 0 0 18px; }

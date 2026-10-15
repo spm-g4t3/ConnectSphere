@@ -404,9 +404,11 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
     });
   });
 
-  it('approves without a note, and only Safety approved may proceed to Confirmed', async () => {
+  it('SCRUM490_AC6_and_AC12_approval_sets_safety_approved_before_confirmation', async () => {
     const safeEvent = await event('Safe Event');
     await respond(safeEvent, 'approved');
+    expect((await one('select status::text as status from event_requests where id = $1', [safeEvent])).status)
+      .toBe('safety_approved');
     await expect(
       db.query(
         `select change_event_request_status($1, 'safety_approved', 'confirmed', $2)`,

@@ -333,6 +333,10 @@ describe("SCRUM488_AC5 the Organiser's list shows the safety statuses", () => {
     const badge = (name) => within(screen.getByText(name).closest("li")).getByText(/^(Requested|Safety check|Safety approved|Confirmed)$/);
     expect(["A", "B", "C", "D"].map((name) => badge(name).textContent))
       .toEqual(["Requested", "Safety check", "Safety approved", "Confirmed"]);
+    expect(within(screen.getByText("C").closest("li")).getByRole("status"))
+      .toHaveTextContent("Safety approval complete");
+    expect(within(screen.getByText("B").closest("li")).queryByText("Safety approval complete"))
+      .not.toBeInTheDocument();
     expect(badge("A")).toHaveClass("status--awaiting-review");
     expect(badge("D")).toHaveClass("status--confirmed");
   });
