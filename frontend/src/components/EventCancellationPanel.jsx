@@ -9,6 +9,8 @@ const CANCELLABLE_STATUSES = new Set([
   "under_review",
   "pending_clarification",
   "approved",
+  "safety_review",
+  "safety_approved",
   "confirmed",
 ]);
 

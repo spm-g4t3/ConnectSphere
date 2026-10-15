@@ -356,4 +356,60 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
     ).rejects.toMatchObject({ code: '22004' });
     expect((await eventRow(eventId)).status).toBe('submitted');
   });
+
+  describe.each(['safety_review', 'safety_approved'])('SCRUM561: from %s', (status) => {
+    beforeAll(async () => {
+      if (!(await one("select 1 as ok from pg_enum where enumlabel = 'safety_review'"))) {
+        await db.exec(migration('062_safety_statuses.sql'));
+        await db.exec(migration('063_safety_transitions.sql'));
+      }
+      await db.exec(migration('071_cancel_event_in_safety_status.sql'));
+    });
+
+    async function makeSafetyEvent() {
+      return (
+        await one(
+          `insert into event_requests
+             (organiser_id, event_name, status, submitted_at, assigned_coordinator_id,
+              reviewing_coordinator_id, decision, decided_by, decided_at)
+           values ($1, 'Safety cancel', $2::event_request_status, now(), $3, $3, 'approved', $3, now())
+           returning id`,
+          [organiser, status, coordinator],
+        )
+      ).id;
+    }
+
+    it(`SCRUM561_AC1_AC2_assigned_coordinator_cancels_from_${status}_and_releases_arrangements`, async () => {
+      const eventId = await makeSafetyEvent();
+      const bookingId = await makeBooking(eventId, 'approved');
+      const holdId = await makeHold(eventId);
+
+      await cancel(eventId);
+
+      const event = await eventRow(eventId);
+      expect(event.status).toBe('cancelled');
+      expect(event.cancellation_reason).toBe('Venue issue');
+      expect(await bookingStatus(bookingId)).toBe('cancelled');
+      expect((await one('select status::text as status from venue_holds where id = $1', [holdId])).status)
+        .not.toBe('active');
+      expect((await statusHistory(eventId)).at(-1)).toMatchObject({
+        previous_status: status,
+        new_status: 'cancelled',
+      });
+      const notified = (
+        await db.query(
+          "select recipient_id from notifications where event_request_id = $1 and type = 'event_cancelled'",
+          [eventId],
+        )
+      ).rows.map((row) => row.recipient_id);
+      expect(notified).toEqual(expect.arrayContaining([organiser, venueStaff]));
+    });
+
+    it(`SCRUM561_AC1_another_coordinator_cannot_cancel_from_${status}`, async () => {
+      const eventId = await makeSafetyEvent();
+
+      await expect(cancel(eventId, otherCoordinator)).rejects.toMatchObject({ code: '42501' });
+      expect((await eventRow(eventId)).status).toBe(status);
+    });
+  });
 });
