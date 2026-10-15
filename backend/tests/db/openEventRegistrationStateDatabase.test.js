@@ -1,9 +1,6 @@
 /**
- * SCRUM-495: migration 068 counts places and finds the caller's own
- * registration in the database, so no row limit can cut a count short.
- *
- * Runs the real migration on an in-process Postgres (PGlite) against a stand-in
- * `registrations` table, since SCRUM-22's own migration is not on dev yet.
+ * Runs migration 068 on PGlite against a stand-in `registrations` table, since
+ * that table is not in the repo yet.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';

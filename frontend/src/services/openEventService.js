@@ -1,7 +1,4 @@
-// openEventService.js
-//
-// SCRUM-495. The one frontend call to the Attendee's open-events list, kept
-// beside the other service files so components never build a URL themselves.
+// The Attendee's calls to the open-events API; components never build a URL.
 
 import { apiClient } from "./apiClient";
 

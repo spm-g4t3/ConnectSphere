@@ -221,7 +221,7 @@ describe("SCRUM453_AC3 the browse page is refused to every other role", () => {
 const EVENT_ID = "9c1d1f0e-5a0e-4c3e-8d3a-1f5f6a7b8c9d";
 
 describe("SCRUM495 the browse routes while the feature is off", () => {
-  it.each(["/open-events", `/open-events/${EVENT_ID}`])("SCRUM495_an_attendee_at_%s_never_reaches_the_page_or_the_API", async (path) => {
+  it.each(["/open-events", `/open-events/${EVENT_ID}`])("SCRUM495_AC2_an_attendee_at_%s_never_reaches_the_page_or_the_api", async (path) => {
     vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "false");
     restoreSession("attendee");
     renderAppAt(path);
@@ -232,7 +232,7 @@ describe("SCRUM495 the browse routes while the feature is off", () => {
   });
 });
 describe("SCRUM495 the browse details route", () => {
-  it.each(OTHER_ROLES)("SCRUM495_%s_at_an_event's_details_URL_is_sent_to_unauthorized_and_nothing_is_fetched", async (role) => {
+  it.each(OTHER_ROLES)("SCRUM495_AC5_%s_at_an_event_s_details_url_is_sent_to_unauthorized_and_nothing_is_fetched", async (role) => {
     restoreSession(role);
     renderAppAt(`/open-events/${EVENT_ID}`);
 
@@ -241,14 +241,14 @@ describe("SCRUM495 the browse details route", () => {
     expect(apiClient.get).not.toHaveBeenCalledWith(`/open-events/${EVENT_ID}`);
   });
 
-  it("SCRUM495_a_signed_out_visitor_at_an_event's_details_URL_is_sent_to_login", async () => {
+  it("SCRUM495_AC5_a_signed_out_visitor_at_an_event_s_details_url_is_sent_to_login", async () => {
     renderAppAt(`/open-events/${EVENT_ID}`);
 
     await waitFor(() => expect(window.location.pathname).toBe("/login"));
     expect(apiClient.get).not.toHaveBeenCalled();
   });
 
-  it("SCRUM495_an_attendee_opening_the_details_URL_directly_reads_that_event_afresh", async () => {
+  it("SCRUM495_AC5_an_attendee_opening_the_details_url_directly_reads_that_event_afresh", async () => {
     vi.mocked(apiClient.get).mockResolvedValue({
       data: {
         id: EVENT_ID, eventName: "Open Day", description: "Come along.", startsAt: "2026-10-25T01:00:00.000Z",
@@ -263,7 +263,7 @@ describe("SCRUM495 the browse details route", () => {
     expect(window.location.pathname).toBe(`/open-events/${EVENT_ID}`);
   });
 
-  it("SCRUM495_a_direct_URL_for_an_event_that_is_not_open_says_so_and_links_back", async () => {
+  it("SCRUM495_AC5_a_direct_url_for_an_event_that_is_not_open_says_so_and_links_back", async () => {
     vi.mocked(apiClient.get).mockRejectedValue({ response: { status: 404 } });
     restoreSession("attendee");
     renderAppAt(`/open-events/${EVENT_ID}`);
@@ -273,7 +273,7 @@ describe("SCRUM495 the browse details route", () => {
     expect(screen.getByRole("link", { name: "Back to open events" })).toHaveAttribute("href", "/open-events");
   });
 
-  it("SCRUM495_selecting_an_event_in_the_list_opens_its_details", async () => {
+  it("SCRUM495_AC5_selecting_an_event_in_the_list_opens_its_details", async () => {
     vi.mocked(apiClient.get).mockImplementation(async (url) => {
       if (url === "/open-events") {
         return {
@@ -373,7 +373,7 @@ describe("SCRUM495_AC1 only the Attendee role reaches the browse routes", () => 
   it.each(EVERY_OTHER_ROLE.flatMap((role) => [
     [role, "/open-events"],
     [role, `/open-events/${EVENT_ID}`],
-  ]))("%s at %s is sent to unauthorized and nothing is fetched", async (role, path) => {
+  ]))("SCRUM495_AC1_%s_at_%s_is_sent_to_unauthorized_and_nothing_is_fetched", async (role, path) => {
     restoreSession(role);
     renderAppAt(path);
 
@@ -382,7 +382,7 @@ describe("SCRUM495_AC1 only the Attendee role reaches the browse routes", () => 
     expect(apiClient.get).not.toHaveBeenCalled();
   });
 
-  it.each(["attendee", "Attendee", " ATTENDEE "])("an Attendee whose role is spelled %j reaches the list and an event", async (spelling) => {
+  it.each(["attendee", "Attendee", " ATTENDEE "])("SCRUM495_AC1_an_attendee_whose_role_is_spelled_%j_reaches_the_list_and_an_event", async (spelling) => {
     vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
     restoreSession(spelling);
     const first = renderAppAt("/open-events");
@@ -397,7 +397,7 @@ describe("SCRUM495_AC1 only the Attendee role reaches the browse routes", () => 
 });
 
 describe("SCRUM495_AC5 the details match the list row", () => {
-  it("shows the same name, date, times and availability on the page it opens", async () => {
+  it("SCRUM495_AC5_shows_the_same_name_date_times_and_availability_on_the_page_it_opens", async () => {
     const listed = {
       id: EVENT_ID, eventName: "Open Day", description: "All welcome.\nBring a friend.",
       startsAt: "2026-10-25T01:00:00.000Z", endsAt: "2026-10-25T03:30:00.000Z",

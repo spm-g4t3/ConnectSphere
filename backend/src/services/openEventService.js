@@ -1,25 +1,13 @@
 /**
- * The events an Attendee can register for now, with places left and the
- * caller's own registration. Read-only; full events stay listed, marked.
- *
- * Eligibility is domain/registrationWindow.js, applied as query filters and
- * again over the rows, so a row the query should not return never leaves here.
- * Nothing is cached. Only counts and the caller's own state leave; the database
- * counts, so other attendees' ids never reach this service. toOpenEvent is an allowlist, so
- * a new column can never reach the response.
- *
- * Assumes SCRUM-494's settings on event_requests (registration_enabled,
- * registration_opens_at, registration_closes_at, registration_capacity; null
- * capacity is no limit; null close time is open until closed by hand) and
- * SCRUM-22's `registrations` table, counted by migration 068. None of these is
- * on dev yet, so the route is mounted only when OPEN_EVENTS_ENABLED=true
- * (config/featureFlags.js). No authorisation here: the route proves the caller
- * is an Attendee.
+ * The events an Attendee can register for now, with places left and their own
+ * registration. Eligibility (registrationWindow.js) is applied as query filters
+ * and again over the rows; toOpenEvent is an allowlist, so a new column can
+ * never reach the response. Role checks are the route's and the SQL function's.
  */
 import { STATUS } from '../domain/eventRequestStatus.js';
 import { isOpenForRegistration } from '../domain/registrationWindow.js';
 import { availability } from '../domain/registrationAvailability.js';
-import { ValidationError, NotFoundError } from '../errors.js';
+import { ValidationError, NotFoundError, ForbiddenError } from '../errors.js';
 // The repository's one uuid check, a pure module, so this service stays loadable
 // without credentials.
 import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
@@ -33,6 +21,20 @@ const SETTINGS_COLUMNS = `
 const COLUMNS = `id, event_name, description, proposed_start, proposed_end, status, ${SETTINGS_COLUMNS}`;
 
 const PAGE_SIZE = 1000;
+// Below PostgREST's 1,000-row cap, with room to spare.
+const RPC_BATCH = 500;
+
+/** The function's own refusals (migrations/AGENTS.md): 42501 forbidden, 22023 bad input. */
+function translateStateError(error) {
+  if (error.code === '42501') return new ForbiddenError('Only an Attendee can browse open events');
+  if (error.code === '22023') {
+    return new ValidationError(
+      'Invalid request -- attendeeId: is required',
+      [{ field: 'attendeeId', message: 'is required' }],
+    );
+  }
+  return error;
+}
 
 async function resolveClient(client) {
   if (client) return client;
@@ -105,20 +107,25 @@ function openEventsQuery(db, instant) {
 
 /**
  * Add availability and the caller's own state to eligible rows. The database
- * counts, so no row limit can cut a count short, and the ids travel in the
+ * counts, so no row limit can cut a count short. The call returns one row per
+ * event, so it is made for at most RPC_BATCH ids at a time: more would let
+ * PostgREST's 1,000-row cap drop events silently, and the ids travel in the
  * request body, not the URL.
  */
 async function withRegistrationState(db, rows, attendeeId) {
   if (rows.length === 0) return [];
 
-  const { data, error } = await db.rpc('open_event_registration_state', {
-    p_event_ids: rows.map((row) => row.id),
-    p_attendee_id: attendeeId,
-  });
+  const states = new Map();
+  for (let from = 0; from < rows.length; from += RPC_BATCH) {
+    const { data, error } = await db.rpc('open_event_registration_state', {
+      p_event_ids: rows.slice(from, from + RPC_BATCH).map((row) => row.id),
+      p_attendee_id: attendeeId,
+    });
 
-  if (error) throw error;
+    if (error) throw translateStateError(error);
 
-  const states = new Map((data ?? []).map((state) => [state.event_request_id, state]));
+    for (const state of data ?? []) states.set(state.event_request_id, state);
+  }
 
   return rows.map((row) => {
     const state = states.get(row.id);

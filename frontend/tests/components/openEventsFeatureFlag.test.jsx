@@ -22,26 +22,26 @@ beforeEach(() => {
 });
 
 describe("SCRUM495 the open events feature flag", () => {
-  it.each([undefined, "", "false", "TRUE", "1"])("SCRUM495_is_off_for_%j", (value) => {
+  it.each([undefined, "", "false", "TRUE", "1"])("SCRUM495_AC2_is_off_for_%j", (value) => {
     if (value !== undefined) vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", value);
 
     expect(isOpenEventsEnabled()).toBe(false);
   });
 
-  it("SCRUM495_is_on_only_for_true", () => {
+  it("SCRUM495_AC2_is_on_only_for_true", () => {
     vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "true");
 
     expect(isOpenEventsEnabled()).toBe(true);
   });
 
-  it("SCRUM495_the_nav_has_no_Browse_Open_Events_link_while_off", () => {
+  it("SCRUM495_AC2_the_nav_has_no_browse_open_events_link_while_off", () => {
     render(<MemoryRouter><Navigation /></MemoryRouter>);
 
     expect(screen.queryByRole("link", { name: "Browse Open Events" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
   });
 
-  it("SCRUM495_the_dashboard_has_no_Browse_Open_Events_entry_while_off", () => {
+  it("SCRUM495_AC2_the_dashboard_has_no_browse_open_events_entry_while_off", () => {
     render(<MemoryRouter><AttendeeDashboard user={{ name: "Ada" }} /></MemoryRouter>);
 
     expect(screen.getByRole("heading", { name: "Welcome, Ada" })).toBeInTheDocument();

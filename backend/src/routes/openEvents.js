@@ -33,18 +33,8 @@ export function createOpenEventRouter({
 
   const attendeeOnly = requireRole(ROLE.ATTENDEE);
 
-  /**
-   * A bare array, like the other lists; none open is 200 [], never 404. Each
-   * event says how many places are left, whether it is full, and whether the
-   * caller is already registered; the caller is always req.user.id, never
-   * anything in the query string or body.
-   *
-   * no-store: eligibility changes with the clock and with the organiser's
-   * settings, so a stored copy would keep listing an event that has closed.
-   *
-   * Statuses: 200, 401, 403 for any role but Attendee (or no role), 500 for
-   * anything untyped.
-   */
+  // The caller is always req.user.id. No-store: eligibility changes with the
+  // clock, so a stored copy would keep listing an event that has closed.
   router.get('/', attendeeOnly, async (req, res) => {
     try {
       const events = await listOpenEvents({ attendeeId: req.user.id, client, now: now() });
@@ -55,17 +45,8 @@ export function createOpenEventRouter({
     }
   });
 
-  /**
-   * One open event, for the details page. The same eligibility as the list,
-   * judged now, so a direct URL gets no more than the list would show: an
-   * event that is missing, not Confirmed, switched off, outside its window or
-   * already started is 404 with one message for all of them.
-   *
-   * The browse preview: no venue and no internal planning information. The
-   * registered-attendee view (SCRUM-24) is a separate endpoint and page.
-   *
-   * Statuses: 200, 401, 403 for any role but Attendee, 404, 500.
-   */
+  // Same eligibility as the list, so a direct URL gets no more than the list
+  // shows; every reason it is not on offer is the same 404.
   router.get('/:id', attendeeOnly, async (req, res) => {
     try {
       const event = await getOpenEvent({

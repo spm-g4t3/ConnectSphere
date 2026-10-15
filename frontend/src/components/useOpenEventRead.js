@@ -1,17 +1,7 @@
-// useOpenEventRead.js
-//
-// SCRUM-495. The read the browse list and the event details share: show a
-// spinner on the first load, then refresh in the background without blanking
-// what is on screen. A failed refresh keeps the last answer with a notice; a
-// lost session or refused role replaces it; the newest read wins.
-//
-// `fetcher` must be stable (module scope or useCallback): a new one is a new
-// subject, so the read starts again from scratch and nothing from the old one,
-// including its refresh notice, carries over.
-//
-// load() resolves to what was found, so a caller that needs the fresh state
-// can act on it: { kind: "ok", data }, { kind: "not-found" }, { kind: "error" }
-// or { kind: "superseded" } when a newer read took over.
+// The read the browse list and details share: a spinner on first load, then
+// background refreshes that keep what is on screen. `fetcher` must be stable;
+// a new one is a new subject and starts from scratch. load() resolves to
+// { kind: "ok", data } | "not-found" | "error" | "superseded".
 import { useCallback, useEffect, useRef, useState } from "react";
 
 // A refusal is not transient: keeping data on screen after one would be wrong.

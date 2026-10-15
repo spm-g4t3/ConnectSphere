@@ -224,13 +224,9 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
-        {/* SCRUM-495: the Attendee's list of events open for registration.
-            Attendees only, matching GET /open-events, which answers 403 to every
-            other role. Belt to the backend's braces: what this buys is that a
-            direct URL from another role lands on /unauthorized rather than on a
-            page whose only content is an error. The .dashboard wrapper is what
-            gives the list its card styling. The details page below is guarded
-            the same way, so a direct URL cannot skip the role check. */}
+        {/* Attendees only, like the API, so a direct URL from another role lands
+            on /unauthorized, not on a page that is only an error. The
+            .dashboard wrapper gives the pages their card styling. */}
         {isOpenEventsEnabled() && (
           <>
             <Route

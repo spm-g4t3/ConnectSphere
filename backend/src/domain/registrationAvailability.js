@@ -1,10 +1,6 @@
 /**
- * How many places an event has left, and whether it is full. Pure, so SCRUM-22
- * can share one definition of a current registration.
- *
- * Assumes a registration has a status and only 'registered' holds a place;
- * anything else frees it. The list is advisory (SCRUM-22 re-checks under a
- * lock), so ACTIVE_REGISTRATION_STATUS is the one place to change.
+ * Places left and fullness, pure so SCRUM-22 can share one definition of a
+ * current registration. Only 'registered' holds a place; the list is advisory.
  */
 export const ACTIVE_REGISTRATION_STATUS = 'registered';
 

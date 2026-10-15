@@ -1,14 +1,7 @@
-// BrowseEventDetails.jsx
-//
-// One open event, from the browse list: the browse preview, with no venue or
-// internal planning information (SCRUM-24's registered view is separate).
-//
-// Eligibility is the server's: the event is read afresh on open, after every
-// registration attempt and on return to the tab, and a 404 is one not-open
-// message. Register takes an onRegister(eventId) prop because SCRUM-22's flow
-// does not exist yet; without it the button stays disabled. A failed refresh
-// keeps the details with a notice and pauses Register. The description is
-// rendered as text, never HTML.
+// One open event: the browse preview, with no venue or internal planning
+// information. The server decides eligibility, so the event is re-read after
+// every registration attempt and on return to the tab; Register is disabled
+// until `onRegister` is supplied. The description is rendered as text, never HTML.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getOpenEvent } from "../services/openEventService";

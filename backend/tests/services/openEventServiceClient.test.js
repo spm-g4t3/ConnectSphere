@@ -50,7 +50,7 @@ beforeEach(() => {
 });
 
 describe('SCRUM495 the shared client and empty answers', () => {
-  it('reads through the shared Supabase client when none is passed', async () => {
+  it('SCRUM495_AC7_reads_through_the_shared_supabase_client_when_none_is_passed', async () => {
     answers.event_requests = { data: [openRow], error: null };
     answers.rpc = { data: [], error: null };
 
@@ -59,13 +59,13 @@ describe('SCRUM495 the shared client and empty answers', () => {
     expect(events.map((event) => event.id)).toEqual([EVENT_ID]);
   });
 
-  it('lists nothing when the read returns no rows and no error', async () => {
+  it('SCRUM495_AC7_lists_nothing_when_the_read_returns_no_rows_and_no_error', async () => {
     answers.event_requests = { data: null, error: null };
 
     await expect(listOpenEvents({ attendeeId: ATTENDEE_ID, now: NOW })).resolves.toEqual([]);
   });
 
-  it('treats an event as not open when the read returns no rows and no error', async () => {
+  it('SCRUM495_AC7_treats_an_event_as_not_open_when_the_read_returns_no_rows_and_no_error', async () => {
     answers.event_requests = { data: null, error: null };
 
     await expect(getOpenEvent({ attendeeId: ATTENDEE_ID, eventId: EVENT_ID, now: NOW })).rejects.toBeInstanceOf(
@@ -73,7 +73,7 @@ describe('SCRUM495 the shared client and empty answers', () => {
     );
   });
 
-  it('counts no registrations when the database returns no rows and no error', async () => {
+  it('SCRUM495_AC7_counts_no_registrations_when_the_database_returns_no_rows_and_no_error', async () => {
     answers.event_requests = { data: [openRow], error: null };
     answers.rpc = { data: null, error: null };
 

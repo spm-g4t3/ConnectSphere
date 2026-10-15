@@ -1,12 +1,5 @@
-// AttendeeDashboard.jsx
-//
-// The Attendee landing page: a greeting and the way into Browse Open Events
-// (SCRUM-495). Deliberately no counts, event data or registration state: the
-// browse page owns those, and this page shows nothing it cannot read from the
-// signed-in user.
-//
-// The section is a direct child of .dashboard so it picks up the
-// `.dashboard > section` card styling, as on the other dashboards.
+// The Attendee landing page: a greeting and the way into Browse Open Events.
+// The section is a direct child of .dashboard to get its card styling.
 
 import { Link } from "react-router-dom";
 import { BROWSE_OPEN_EVENTS_PATH, isOpenEventsEnabled } from "../services/openEventRoutes";

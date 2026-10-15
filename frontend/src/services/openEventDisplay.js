@@ -1,12 +1,5 @@
-// openEventDisplay.js
-//
-// SCRUM-495. How an open event's date, times and availability read on the
-// browse list. Pure, so the component interprets nothing itself.
-//
-// Dates and times are Singapore wall clock on every device, because the venue's
-// hours are kept in it, and are built from datetimeFormat.js rather than the
-// browser's locale, so they read the same everywhere. EVENT_TIME_NOTE names the
-// zone; show it once beside the times.
+// Date, times and availability for the browse pages, in Singapore wall clock
+// on every device (the venue's hours are kept in it). EVENT_TIME_NOTE names the zone.
 
 import { VENUE_TIME_NOTE, toVenueWallClock } from "./datetimeFormat";
 

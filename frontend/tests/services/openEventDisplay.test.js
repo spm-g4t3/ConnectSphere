@@ -46,7 +46,7 @@ describe.each(["Asia/Singapore", "America/New_York", "Pacific/Kiritimati"])(
     const startsAt = "2026-10-25T01:00:00.000Z";
     const endsAt = "2026-10-25T03:30:00.000Z";
 
-    it("reads 09:00 to 11:30 on the 25th", () => {
+    it("SCRUM495_AC3_reads_09_00_to_11_30_on_the_25th", () => {
       process.env.TZ = deviceZone;
 
       expect(formatEventDate(startsAt)).toBe("2026-10-25");
@@ -54,7 +54,7 @@ describe.each(["Asia/Singapore", "America/New_York", "Pacific/Kiritimati"])(
       expect(formatEventEndTime(startsAt, endsAt)).toBe("11:30");
     });
 
-    it("shows the end date only where the event crosses midnight in Singapore", () => {
+    it("SCRUM495_AC3_shows_the_end_date_only_where_the_event_crosses_midnight_in_singapore", () => {
       // 15:00Z to 17:00Z is 23:00 to 01:00 the next day in Singapore, the same afternoon in New York.
       process.env.TZ = deviceZone;
 
@@ -62,7 +62,7 @@ describe.each(["Asia/Singapore", "America/New_York", "Pacific/Kiritimati"])(
       expect(formatEventEndTime("2026-10-25T01:00:00.000Z", "2026-10-25T03:00:00.000Z")).toBe("11:00");
     });
 
-    it("accepts the same instant written with an offset", () => {
+    it("SCRUM495_AC3_accepts_the_same_instant_written_with_an_offset", () => {
       process.env.TZ = deviceZone;
 
       expect(formatEventStartTime("2026-10-25T09:00:00+08:00")).toBe(formatEventStartTime(startsAt));
@@ -72,7 +72,7 @@ describe.each(["Asia/Singapore", "America/New_York", "Pacific/Kiritimati"])(
 );
 
 describe("SCRUM495_AC3 unreadable times", () => {
-  it("falls back to plain text", () => {
+  it("SCRUM495_AC3_falls_back_to_plain_text", () => {
     expect(formatEventDate(null)).toBe("Date to be confirmed");
     expect(formatEventStartTime("not a date")).toBe("Not set");
     expect(formatEventEndTime("2026-10-25T01:00:00.000Z", undefined)).toBe("Not set");
@@ -80,7 +80,7 @@ describe("SCRUM495_AC3 unreadable times", () => {
 });
 
 describe("SCRUM495_AC3 the same text whatever the browser's locale", () => {
-  it("does not call the locale-dependent formatters", () => {
+  it("SCRUM495_AC3_does_not_call_the_locale_dependent_formatters", () => {
     const date = vi.spyOn(Date.prototype, "toLocaleDateString");
     const time = vi.spyOn(Date.prototype, "toLocaleTimeString");
 
@@ -93,7 +93,7 @@ describe("SCRUM495_AC3 the same text whatever the browser's locale", () => {
     vi.restoreAllMocks();
   });
 
-  it("carries one zone note, shared with the venue pages", () => {
+  it("SCRUM495_AC3_carries_one_zone_note_shared_with_the_venue_pages", () => {
     expect(EVENT_TIME_NOTE).toBe("(Singapore time)");
   });
 });

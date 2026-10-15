@@ -1,11 +1,5 @@
-// BrowseOpenEvents.jsx
-//
-// The Attendee's list of open events. The backend decides what is listed, the
-// order and the availability; nothing here filters, sorts or counts.
-//
-// It is read on open and when the reader returns to the tab, without blanking
-// the list. A failed refresh keeps the last list with a notice, a lost session
-// or refused role replaces it, and the newest read wins.
+// The Attendee's list of open events. The backend filters, sorts and counts;
+// nothing here does.
 import { Link } from "react-router-dom";
 import { getOpenEvents } from "../services/openEventService";
 import useRefreshOnReturn from "./useRefreshOnReturn";

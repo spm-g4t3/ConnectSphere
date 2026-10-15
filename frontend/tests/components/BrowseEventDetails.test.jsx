@@ -1,14 +1,5 @@
-// BrowseEventDetails.test.jsx
-//
-// SCRUM-495: one open event's browse preview. The service is mocked at its own
-// module, so what is under test is what the page does with each answer: the
-// fields it shows (and the ones it never does), the Register states, the
-// unavailable-event path back to the list, and that the organiser's
-// description is rendered as text, never as HTML.
-//
-// Registering is SCRUM-22's flow, which does not exist yet. The page takes it
-// as an onRegister prop, so these tests pass a stand-in handler to check the
-// seam, and check the page without one never claims to have registered anyone.
+// One open event's browse preview, with the service mocked. Registering takes an
+// onRegister prop, so a stand-in handler checks the seam.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -56,7 +47,7 @@ beforeEach(() => {
 });
 
 describe("SCRUM495 loading and fetching", () => {
-  it("says it is loading, and asks for the event named in the URL", async () => {
+  it("SCRUM495_AC5_says_it_is_loading_and_asks_for_the_event_named_in_the_url", async () => {
     vi.mocked(getOpenEvent).mockReturnValue(new Promise(() => {}));
 
     renderDetails({ path: "/open-events/abc-123" });
@@ -65,7 +56,7 @@ describe("SCRUM495 loading and fetching", () => {
     expect(getOpenEvent).toHaveBeenCalledWith("abc-123");
   });
 
-  it("reads the event again each time the page is opened, not from a copy", async () => {
+  it("SCRUM495_AC5_reads_the_event_again_each_time_the_page_is_opened_not_from_a_copy", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(event());
 
     const first = renderDetails();
@@ -79,7 +70,7 @@ describe("SCRUM495 loading and fetching", () => {
 });
 
 describe("SCRUM495_AC5 what the details show", () => {
-  it("shows the name, date, start and end times, availability and the description", async () => {
+  it("SCRUM495_AC5_shows_the_name_date_start_and_end_times_availability_and_the_description", async () => {
     const e = event();
     vi.mocked(getOpenEvent).mockResolvedValue(e);
 
@@ -94,7 +85,7 @@ describe("SCRUM495_AC5 what the details show", () => {
     expect(screen.getByText(/Come along\./)).toHaveTextContent("Come along. Bring a friend.");
   });
 
-  it("says No limit when there is no capacity", async () => {
+  it("SCRUM495_AC5_says_no_limit_when_there_is_no_capacity", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(event({ capacity: null, placesLeft: null }));
 
     renderDetails();
@@ -102,7 +93,7 @@ describe("SCRUM495_AC5 what the details show", () => {
     expect(await screen.findByText("No limit")).toBeInTheDocument();
   });
 
-  it("says Full when the capacity is used up", async () => {
+  it("SCRUM495_AC5_says_full_when_the_capacity_is_used_up", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(event({ placesLeft: 0, isFull: true, canRegister: false }));
 
     renderDetails();
@@ -112,7 +103,7 @@ describe("SCRUM495_AC5 what the details show", () => {
     expect(screen.queryByText(/places? left/)).not.toBeInTheDocument();
   });
 
-  it("says so when the organiser wrote no description", async () => {
+  it("SCRUM495_AC5_says_so_when_the_organiser_wrote_no_description", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(event({ description: null }));
 
     renderDetails();
@@ -120,7 +111,7 @@ describe("SCRUM495_AC5 what the details show", () => {
     expect(await screen.findByText("The organiser has not added a description.")).toBeInTheDocument();
   });
 
-  it("renders the description as text, so markup in it is shown, not run", async () => {
+  it("SCRUM495_AC5_renders_the_description_as_text_so_markup_in_it_is_shown_not_run", async () => {
     const hostile = '<img src=x onerror="window.__pwned = true"><script>window.__pwned = true</script><b>bold</b>';
     vi.mocked(getOpenEvent).mockResolvedValue(event({ description: hostile }));
 
@@ -133,7 +124,7 @@ describe("SCRUM495_AC5 what the details show", () => {
     expect(description).toHaveClass("browse-event-details__description");
   });
 
-  it("shows no venue, coordinator or internal planning field even if the response carried one", async () => {
+  it("SCRUM495_AC5_shows_no_venue_coordinator_or_internal_planning_field_even_if_the_response_carried_one", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(
       event({ venueName: "Grand Hall", venue_requirements: "Main hall", coordinatorName: "Casey", staffNotes: "internal" }),
     );
@@ -149,7 +140,7 @@ describe("SCRUM495_AC5 what the details show", () => {
 });
 
 describe("SCRUM495_AC5_AC6 the Register action", () => {
-  it("offers Register for an open event with a place free and no registration", async () => {
+  it("SCRUM495_AC5_AC6_offers_register_for_an_open_event_with_a_place_free_and_no_registration", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(event());
 
     renderDetails({ onRegister: vi.fn() });
@@ -159,7 +150,7 @@ describe("SCRUM495_AC5_AC6 the Register action", () => {
     expect(registerButton()).toBeEnabled();
   });
 
-  it("offers it for an event with no limit", async () => {
+  it("SCRUM495_AC5_AC6_offers_it_for_an_event_with_no_limit", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(event({ capacity: null, placesLeft: null }));
 
     renderDetails({ onRegister: vi.fn() });
@@ -168,7 +159,7 @@ describe("SCRUM495_AC5_AC6 the Register action", () => {
     expect(registerButton()).toBeEnabled();
   });
 
-  it("shows Registered and disables a duplicate registration", async () => {
+  it("SCRUM495_AC5_AC6_shows_registered_and_disables_a_duplicate_registration", async () => {
     const onRegister = vi.fn();
     vi.mocked(getOpenEvent).mockResolvedValue(event({ isRegistered: true, canRegister: false }));
 
@@ -182,7 +173,7 @@ describe("SCRUM495_AC5_AC6 the Register action", () => {
     expect(onRegister).not.toHaveBeenCalled();
   });
 
-  it("shows Full and disables registration", async () => {
+  it("SCRUM495_AC5_AC6_shows_full_and_disables_registration", async () => {
     const onRegister = vi.fn();
     vi.mocked(getOpenEvent).mockResolvedValue(event({ placesLeft: 0, isFull: true, canRegister: false }));
 
@@ -194,7 +185,7 @@ describe("SCRUM495_AC5_AC6 the Register action", () => {
     expect(onRegister).not.toHaveBeenCalled();
   });
 
-  it("shows a full event the caller has joined as Registered, not as an event they can join", async () => {
+  it("SCRUM495_AC5_AC6_shows_a_full_event_the_caller_has_joined_as_registered_not_as_an_event_they_can_join", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(
       event({ placesLeft: 0, isFull: true, isRegistered: true, canRegister: false }),
     );
@@ -207,7 +198,7 @@ describe("SCRUM495_AC5_AC6 the Register action", () => {
     expect(registerButton()).toBeDisabled();
   });
 
-  it("does not offer Register when the server says the caller cannot", async () => {
+  it("SCRUM495_AC5_AC6_does_not_offer_register_when_the_server_says_the_caller_cannot", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(event({ canRegister: false }));
 
     renderDetails({ onRegister: vi.fn() });
@@ -216,7 +207,7 @@ describe("SCRUM495_AC5_AC6 the Register action", () => {
     expect(registerButton()).toBeDisabled();
   });
 
-  it("calls the SCRUM-22 handler with the event id, then reads the event again", async () => {
+  it("SCRUM495_AC5_AC6_calls_the_scrum_22_handler_with_the_event_id_then_reads_the_event_again", async () => {
     const onRegister = vi.fn().mockResolvedValue(undefined);
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event())
@@ -230,7 +221,7 @@ describe("SCRUM495_AC5_AC6 the Register action", () => {
     expect(getOpenEvent).toHaveBeenCalledTimes(2);
   });
 
-  it("says so and reads the event again when registering fails, without claiming success", async () => {
+  it("SCRUM495_AC5_AC6_says_so_and_reads_the_event_again_when_registering_fails_without_claiming_success", async () => {
     const onRegister = vi.fn().mockRejectedValue(new Error("boom"));
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event())
@@ -244,7 +235,7 @@ describe("SCRUM495_AC5_AC6 the Register action", () => {
     expect(screen.queryByText("Already registered")).not.toBeInTheDocument();
     expect(screen.queryByText(/You are registered for/)).not.toBeInTheDocument();
   });
-  it("without a SCRUM-22 handler, disables Register and says it is not available, never registering anyone", async () => {
+  it("SCRUM495_AC5_AC6_without_a_scrum_22_handler_disables_register_and_says_it_is_not_available_never_registering_anyone", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(event());
 
     renderDetails();
@@ -257,7 +248,7 @@ describe("SCRUM495_AC5_AC6 the Register action", () => {
 });
 
 describe("SCRUM495_AC2 an event that is not open, and errors", () => {
-  it("says so and offers the way back to the list when the server answers 404", async () => {
+  it("SCRUM495_AC2_says_so_and_offers_the_way_back_to_the_list_when_the_server_answers_404", async () => {
     vi.mocked(getOpenEvent).mockRejectedValue({ response: { status: 404 } });
 
     renderDetails();
@@ -274,7 +265,7 @@ describe("SCRUM495_AC2 an event that is not open, and errors", () => {
     [401, "Your session has expired. Please sign in again."],
     [403, "Only Attendees can browse open events."],
     [500, "This event could not be loaded. Please try again."],
-  ])("explains a %i, with a way back to the list", async (status, message) => {
+  ])("SCRUM495_AC2_explains_a_%i_with_a_way_back_to_the_list", async (status, message) => {
     vi.mocked(getOpenEvent).mockRejectedValue({ response: { status } });
 
     renderDetails();
@@ -283,7 +274,7 @@ describe("SCRUM495_AC2 an event that is not open, and errors", () => {
     expect(screen.getByRole("link", { name: "Back to open events" })).toHaveAttribute("href", "/open-events");
   });
 
-  it("loads again on 'Try again' and shows the event when it works", async () => {
+  it("SCRUM495_AC2_loads_again_on_try_again_and_shows_the_event_when_it_works", async () => {
     vi.mocked(getOpenEvent)
       .mockRejectedValueOnce({ response: { status: 500 } })
       .mockResolvedValueOnce(event({ eventName: "Back again" }));
@@ -295,7 +286,7 @@ describe("SCRUM495_AC2 an event that is not open, and errors", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("always links back to the open events list from a loaded event", async () => {
+  it("SCRUM495_AC2_always_links_back_to_the_open_events_list_from_a_loaded_event", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(event());
 
     renderDetails();
@@ -329,7 +320,7 @@ function pending() {
 }
 
 describe("SCRUM495_AC4 stale availability is refreshed", () => {
-  it("shows an event that has since filled as Full, and no longer offers Register", async () => {
+  it("SCRUM495_AC4_shows_an_event_that_has_since_filled_as_full_and_no_longer_offers_register", async () => {
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event({ placesLeft: 1 }))
       .mockResolvedValueOnce(event({ placesLeft: 0, isFull: true, canRegister: false }));
@@ -345,7 +336,7 @@ describe("SCRUM495_AC4 stale availability is refreshed", () => {
     expect(screen.queryByText("1 place left")).not.toBeInTheDocument();
   });
 
-  it("does not blank the page while it refreshes: the details stay until the answer arrives", async () => {
+  it("SCRUM495_AC4_does_not_blank_the_page_while_it_refreshes_the_details_stay_until_the_answer_arrives", async () => {
     const refresh = pending();
     vi.mocked(getOpenEvent).mockResolvedValueOnce(event()).mockReturnValueOnce(refresh.promise);
 
@@ -360,7 +351,7 @@ describe("SCRUM495_AC4 stale availability is refreshed", () => {
     expect(await screen.findByText("3 places left")).toBeInTheDocument();
   });
 
-  it("does not refresh while the tab is hidden", async () => {
+  it("SCRUM495_AC4_does_not_refresh_while_the_tab_is_hidden", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(event());
     renderDetails();
     await screen.findByRole("heading", { name: "Open Day", level: 1 });
@@ -373,7 +364,7 @@ describe("SCRUM495_AC4 stale availability is refreshed", () => {
     visibility.mockRestore();
   });
 
-  it("keeps the newest answer when an older read finishes after it", async () => {
+  it("SCRUM495_AC4_keeps_the_newest_answer_when_an_older_read_finishes_after_it", async () => {
     const slow = pending();
     const fast = pending();
     vi.mocked(getOpenEvent)
@@ -398,7 +389,7 @@ describe("SCRUM495_AC4 stale availability is refreshed", () => {
 });
 
 describe("SCRUM495_AC6_AC7_AC8 Confirmed to Approved, and back", () => {
-  it("withdraws the Register action when the event is sent back to Approved", async () => {
+  it("SCRUM495_AC6_AC7_AC8_withdraws_the_register_action_when_the_event_is_sent_back_to_approved", async () => {
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event())
       .mockRejectedValueOnce({ response: { status: 404 } });
@@ -414,7 +405,7 @@ describe("SCRUM495_AC6_AC7_AC8 Confirmed to Approved, and back", () => {
     expect(screen.getByRole("link", { name: "Back to open events" })).toBeInTheDocument();
   });
 
-  it("offers the event again after reconfirmation, with the registration it already had", async () => {
+  it("SCRUM495_AC6_AC7_AC8_offers_the_event_again_after_reconfirmation_with_the_registration_it_already_had", async () => {
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event({ placesLeft: 4, isRegistered: true, canRegister: false }))
       .mockRejectedValueOnce({ response: { status: 404 } })
@@ -433,7 +424,7 @@ describe("SCRUM495_AC6_AC7_AC8 Confirmed to Approved, and back", () => {
     expect(screen.queryByText("This event is not open for registration.")).not.toBeInTheDocument();
   });
 
-  it("does not offer Register after reconfirmation unless the server says it can", async () => {
+  it("SCRUM495_AC6_AC7_AC8_does_not_offer_register_after_reconfirmation_unless_the_server_says_it_can", async () => {
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event())
       .mockRejectedValueOnce({ response: { status: 404 } })
@@ -452,7 +443,7 @@ describe("SCRUM495_AC6_AC7_AC8 Confirmed to Approved, and back", () => {
 });
 
 describe("SCRUM495_AC2_AC3 registering, then the page the server describes", () => {
-  it("shows the confirmation, the new places left and Registered after a successful registration", async () => {
+  it("SCRUM495_AC2_AC3_shows_the_confirmation_the_new_places_left_and_registered_after_a_successful_registration", async () => {
     const onRegister = vi.fn().mockResolvedValue(undefined);
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event({ placesLeft: 12 }))
@@ -468,7 +459,7 @@ describe("SCRUM495_AC2_AC3 registering, then the page the server describes", () 
     expect(onRegister).toHaveBeenCalledTimes(1);
   });
 
-  it("says the event filled up when another attendee took the last place, and refreshes the availability", async () => {
+  it("SCRUM495_AC2_AC3_says_the_event_filled_up_when_another_attendee_took_the_last_place_and_refreshes_the_availability", async () => {
     // The page still showed a place; the registration flow refused; the server now says Full.
     const onRegister = vi.fn().mockRejectedValue({ response: { status: 409 } });
     vi.mocked(getOpenEvent)
@@ -485,7 +476,7 @@ describe("SCRUM495_AC2_AC3 registering, then the page the server describes", () 
     expect(screen.queryByText("1 place left")).not.toBeInTheDocument();
   });
 
-  it("does not trust its own copy of the capacity: it asks the registration flow even when one place is shown", async () => {
+  it("SCRUM495_AC2_AC3_does_not_trust_its_own_copy_of_the_capacity_it_asks_the_registration_flow_even_when_one_place_is_shown", async () => {
     const onRegister = vi.fn().mockRejectedValue(new Error("full"));
     vi.mocked(getOpenEvent).mockResolvedValue(event({ placesLeft: 1 }));
 
@@ -496,7 +487,7 @@ describe("SCRUM495_AC2_AC3 registering, then the page the server describes", () 
     await screen.findByText("Registration could not be completed. Please try again.");
   });
 
-  it("says the caller is already registered when the flow refuses a duplicate", async () => {
+  it("SCRUM495_AC2_AC3_says_the_caller_is_already_registered_when_the_flow_refuses_a_duplicate", async () => {
     const onRegister = vi.fn().mockRejectedValue({ response: { status: 409 } });
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event())
@@ -510,7 +501,7 @@ describe("SCRUM495_AC2_AC3 registering, then the page the server describes", () 
     expect(screen.queryByText(/filled up/)).not.toBeInTheDocument();
   });
 
-  it("shows only the not-open message when registering fails because the event went back to Approved", async () => {
+  it("SCRUM495_AC2_AC3_shows_only_the_not_open_message_when_registering_fails_because_the_event_went_back_to_approved", async () => {
     const onRegister = vi.fn().mockRejectedValue({ response: { status: 409 } });
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event())
@@ -524,7 +515,7 @@ describe("SCRUM495_AC2_AC3 registering, then the page the server describes", () 
     expect(screen.queryByRole("button", { name: /register/i })).not.toBeInTheDocument();
   });
 
-  it("does not refresh on a tab return while a registration is in flight; the attempt refreshes when it ends", async () => {
+  it("SCRUM495_AC2_AC3_does_not_refresh_on_a_tab_return_while_a_registration_is_in_flight_the_attempt_refreshes_when_it_ends", async () => {
     const attempt = pending();
     const onRegister = vi.fn().mockReturnValue(attempt.promise);
     vi.mocked(getOpenEvent).mockResolvedValue(event());
@@ -541,7 +532,7 @@ describe("SCRUM495_AC2_AC3 registering, then the page the server describes", () 
     expect(getOpenEvent).toHaveBeenCalledTimes(2);
   });
 
-  it("cannot be registered twice by a double click", async () => {
+  it("SCRUM495_AC2_AC3_cannot_be_registered_twice_by_a_double_click", async () => {
     const attempt = pending();
     const onRegister = vi.fn().mockReturnValue(attempt.promise);
     vi.mocked(getOpenEvent).mockResolvedValue(event());
@@ -555,7 +546,7 @@ describe("SCRUM495_AC2_AC3 registering, then the page the server describes", () 
     await screen.findByText("You are registered for Open Day.");
   });
 
-  it("ignores a second click that arrives before the page has re-rendered", async () => {
+  it("SCRUM495_AC2_AC3_ignores_a_second_click_that_arrives_before_the_page_has_re_rendered", async () => {
     const attempt = pending();
     const onRegister = vi.fn().mockReturnValue(attempt.promise);
     vi.mocked(getOpenEvent).mockResolvedValue(event());
@@ -572,7 +563,7 @@ describe("SCRUM495_AC2_AC3 registering, then the page the server describes", () 
     await screen.findByText("You are registered for Open Day.");
   });
 
-  it("names a nameless event plainly, on the heading and in the confirmation", async () => {
+  it("SCRUM495_AC2_AC3_names_a_nameless_event_plainly_on_the_heading_and_in_the_confirmation", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(event({ eventName: "" }));
 
     renderDetails({ onRegister: vi.fn().mockResolvedValue() });
@@ -584,7 +575,7 @@ describe("SCRUM495_AC2_AC3 registering, then the page the server describes", () 
 });
 
 describe("SCRUM495 loading and error behaviour during a refresh", () => {
-  it("gives a general message when the first read gets no response at all", async () => {
+  it("SCRUM495_AC5_gives_a_general_message_when_the_first_read_gets_no_response_at_all", async () => {
     vi.mocked(getOpenEvent).mockRejectedValue(new Error("Network Error"));
 
     renderDetails();
@@ -592,7 +583,7 @@ describe("SCRUM495 loading and error behaviour during a refresh", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("This event could not be loaded. Please try again.");
   });
 
-  it("keeps the newest answer when an older read fails after it", async () => {
+  it("SCRUM495_AC5_keeps_the_newest_answer_when_an_older_read_fails_after_it", async () => {
     const slow = pending();
     const fast = pending();
     vi.mocked(getOpenEvent)
@@ -613,7 +604,7 @@ describe("SCRUM495 loading and error behaviour during a refresh", () => {
     expect(screen.queryByText(/Could not refresh this event/)).not.toBeInTheDocument();
   });
 
-  it("keeps the last details with a notice, and pauses Register, when a refresh cannot reach the server", async () => {
+  it("SCRUM495_AC5_keeps_the_last_details_with_a_notice_and_pauses_register_when_a_refresh_cannot_reach_the_server", async () => {
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event())
       .mockRejectedValueOnce({ response: { status: 500 } });
@@ -629,7 +620,7 @@ describe("SCRUM495 loading and error behaviour during a refresh", () => {
     expect(screen.getByText("Registration is paused until this event can be checked again.")).toBeInTheDocument();
   });
 
-  it("recovers on 'Try again' and offers Register again", async () => {
+  it("SCRUM495_AC5_recovers_on_try_again_and_offers_register_again", async () => {
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event())
       .mockRejectedValueOnce(new Error("Network Error"))
@@ -648,7 +639,7 @@ describe("SCRUM495 loading and error behaviour during a refresh", () => {
   it.each([
     [401, "Your session has expired. Please sign in again."],
     [403, "Only Attendees can browse open events."],
-  ])("replaces the details with the error when a refresh is refused with %i", async (status, message) => {
+  ])("SCRUM495_AC5_replaces_the_details_with_the_error_when_a_refresh_is_refused_with_%i", async (status, message) => {
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event())
       .mockRejectedValueOnce({ response: { status } });
@@ -663,7 +654,7 @@ describe("SCRUM495 loading and error behaviour during a refresh", () => {
     expect(screen.queryByRole("button", { name: "Register" })).not.toBeInTheDocument();
   });
 
-  it("gives a general message, and keeps the details, when registering fails and the refresh fails too", async () => {
+  it("SCRUM495_AC5_gives_a_general_message_and_keeps_the_details_when_registering_fails_and_the_refresh_fails_too", async () => {
     const onRegister = vi.fn().mockRejectedValue(new Error("boom"));
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event())
@@ -690,7 +681,7 @@ describe("SCRUM495 moving to another event", () => {
     );
   }
 
-  it("SCRUM495_clears_the_registered_notice_when_another_event_is_opened", async () => {
+  it("SCRUM495_AC5_clears_the_registered_notice_when_another_event_is_opened", async () => {
     vi.mocked(getOpenEvent).mockImplementation(async (id) =>
       id === "e1" ? event() : event({ id: "e2", eventName: "Workshop" }),
     );
@@ -706,7 +697,7 @@ describe("SCRUM495 moving to another event", () => {
     expect(screen.queryByText(/You are registered for/)).not.toBeInTheDocument();
   });
 
-  it("SCRUM495_clears_the_registration_error_when_another_event_is_opened", async () => {
+  it("SCRUM495_AC5_clears_the_registration_error_when_another_event_is_opened", async () => {
     vi.mocked(getOpenEvent).mockImplementation(async (id) =>
       id === "e1" ? event() : event({ id: "e2", eventName: "Workshop" }),
     );
@@ -722,7 +713,7 @@ describe("SCRUM495 moving to another event", () => {
     expect(screen.queryByText(/Registration could not be completed/)).not.toBeInTheDocument();
   });
 
-  it("SCRUM495_a_registration_that_finishes_after_the_move_leaves_the_new_event_alone", async () => {
+  it("SCRUM495_AC5_a_registration_that_finishes_after_the_move_leaves_the_new_event_alone", async () => {
     let finish;
     vi.mocked(getOpenEvent).mockImplementation(async (id) =>
       id === "e1" ? event() : event({ id: "e2", eventName: "Workshop" }),
@@ -799,7 +790,7 @@ describe("SCRUM495 registering while a refresh is in doubt", () => {
 });
 
 describe("SCRUM495 time zone note", () => {
-  it("SCRUM495_names_Singapore_time_beside_the_start_and_end", async () => {
+  it("SCRUM495_AC5_names_singapore_time_beside_the_start_and_end", async () => {
     vi.mocked(getOpenEvent).mockResolvedValue(event());
 
     renderDetails();

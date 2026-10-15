@@ -18,39 +18,39 @@ const open = (overrides = {}) => ({
 });
 
 describe('SCRUM495_AC2 isOpenForRegistration', () => {
-  it('is open for a Confirmed, enabled event inside its window that has not started', () => {
+  it('SCRUM495_AC2_is_open_for_a_confirmed_enabled_event_inside_its_window_that_has_not_started', () => {
     expect(isOpenForRegistration(open(), NOW)).toBe(true);
   });
 
   it.each([
     'draft', 'submitted', 'under_review', 'pending_clarification', 'approved',
     'completed', 'rejected', 'cancelled', 'safety_review', 'safety_approved', undefined,
-  ])('is not open when the status is %s', (status) => {
+  ])('SCRUM495_AC2_is_not_open_when_the_status_is_%s', (status) => {
     expect(isOpenForRegistration(open({ status }), NOW)).toBe(false);
   });
 
-  it.each([false, null, undefined, 'true', 1])('is not open when registration is %j', (flag) => {
+  it.each([false, null, undefined, 'true', 1])('SCRUM495_AC2_is_not_open_when_registration_is_%j', (flag) => {
     expect(isOpenForRegistration(open({ registrationEnabled: flag }), NOW)).toBe(false);
   });
 
-  it('is not open before the window opens', () => {
+  it('SCRUM495_AC2_is_not_open_before_the_window_opens', () => {
     expect(isOpenForRegistration(open({ registrationOpensAt: '2026-10-12T10:00:00.001Z' }), NOW)).toBe(false);
   });
 
-  it('is open at the exact opening instant', () => {
+  it('SCRUM495_AC2_is_open_at_the_exact_opening_instant', () => {
     expect(isOpenForRegistration(open({ registrationOpensAt: NOW.toISOString() }), NOW)).toBe(true);
   });
 
-  it('is not open at the exact closing instant, or after it', () => {
+  it('SCRUM495_AC2_is_not_open_at_the_exact_closing_instant_or_after_it', () => {
     expect(isOpenForRegistration(open({ registrationClosesAt: NOW.toISOString() }), NOW)).toBe(false);
     expect(isOpenForRegistration(open({ registrationClosesAt: '2026-10-12T09:59:59.999Z' }), NOW)).toBe(false);
   });
 
-  it('is open one millisecond before the window closes', () => {
+  it('SCRUM495_AC2_is_open_one_millisecond_before_the_window_closes', () => {
     expect(isOpenForRegistration(open({ registrationClosesAt: '2026-10-12T10:00:00.001Z' }), NOW)).toBe(true);
   });
 
-  it('is not open once the event has started, including at the start instant', () => {
+  it('SCRUM495_AC2_is_not_open_once_the_event_has_started_including_at_the_start_instant', () => {
     expect(isOpenForRegistration(open({ startsAt: NOW.toISOString() }), NOW)).toBe(false);
     expect(isOpenForRegistration(open({ startsAt: '2026-10-12T09:00:00.000Z' }), NOW)).toBe(false);
   });
@@ -60,20 +60,20 @@ describe('SCRUM495_AC2 isOpenForRegistration', () => {
     ['no start', { startsAt: null }],
     ['an unreadable opening time', { registrationOpensAt: 'soon' }],
     ['an unreadable closing time', { registrationClosesAt: 'soon' }],
-  ])('is not open with %s', (_label, overrides) => {
+  ])('SCRUM495_AC2_is_not_open_with_%s', (_label, overrides) => {
     expect(isOpenForRegistration(open(overrides), NOW)).toBe(false);
   });
 
-  it.each([null, undefined])('is open with no closing time (%s): open until the Organiser closes it by hand', (closes) => {
+  it.each([null, undefined])('SCRUM495_AC2_is_open_with_no_closing_time_%s_open_until_the_organiser_closes_it_by_hand', (closes) => {
     expect(isOpenForRegistration(open({ registrationClosesAt: closes }), NOW)).toBe(true);
   });
 
-  it('is not open with no closing time once the event has started, or while registration is off', () => {
+  it('SCRUM495_AC2_is_not_open_with_no_closing_time_once_the_event_has_started_or_while_registration_is_off', () => {
     expect(isOpenForRegistration(open({ registrationClosesAt: null, startsAt: NOW.toISOString() }), NOW)).toBe(false);
     expect(isOpenForRegistration(open({ registrationClosesAt: null, registrationEnabled: false }), NOW)).toBe(false);
   });
 
-  it('compares instants, so the same moment written with another offset is the same answer', () => {
+  it('SCRUM495_AC2_compares_instants_so_the_same_moment_written_with_another_offset_is_the_same_answer', () => {
     // 2026-10-12T18:00:00+08:00 is 10:00Z, the window's closing instant.
     expect(isOpenForRegistration(open({ registrationClosesAt: '2026-10-12T18:00:00+08:00' }), NOW)).toBe(false);
     expect(isOpenForRegistration(open({ registrationClosesAt: '2026-10-12T18:00:01+08:00' }), NOW)).toBe(true);

@@ -1,27 +1,10 @@
 -- 068_open_event_registration_state.sql
--- SCRUM-495: places taken and the caller's own registration, counted in the database
---
--- Run after 063. Safe to run twice.
---
--- The browse list used to read every registration row of the listed events and
--- count them in JavaScript. PostgREST returns at most 1,000 rows per request, so
--- a busy event could read as having free places, and the caller's own row could
--- be cut off. The event ids also travelled in the URL, which fails once a few
--- hundred events are open. This sends the ids in the request body and returns
--- one row per event.
---
--- Needs SCRUM-22's `registrations` table (event_request_id, attendee_id,
--- status). The body is not checked when the function is created, so this can be
--- run before that table exists; calling it before then fails.
--- Only 'registered' holds a place (ACTIVE_REGISTRATION_STATUS in
--- backend/src/domain/registrationAvailability.js).
---
--- The function trusts nothing but the database: p_attendee_id must be an
--- account whose role is attendee (42501 otherwise), and execute is revoked from
--- public, anon and authenticated, as for create_booking_request (030), so only
--- the API's secret key can call it. The route gates the role as well; both must
--- agree, so a caller cannot read another account's registrations by passing
--- its id.
+-- Places taken and the caller's own registration, counted in the database so
+-- PostgREST's 1,000-row cap cannot cut a count short. Returns one row per event
+-- that has registrations. Needs the `registrations` table only when called.
+-- Only 'registered' holds a place. p_attendee_id must be an attendee (42501),
+-- and execute is revoked from public, anon and authenticated (as 030): only the
+-- API's secret key calls it. The route checks the role too; both must agree.
 
 create or replace function open_event_registration_state(
   p_event_ids   uuid[],

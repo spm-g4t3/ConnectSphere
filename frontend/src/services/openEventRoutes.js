@@ -1,7 +1,5 @@
-// openEventRoutes.js
-//
-// SCRUM-495. Where the Attendee's browse pages live, in one place so the nav,
-// the dashboard, the route table and the list's links cannot drift apart.
+// Where the Attendee's browse pages live, so the nav, dashboard, routes and
+// links cannot drift apart.
 
 export const BROWSE_OPEN_EVENTS_PATH = "/open-events";
 

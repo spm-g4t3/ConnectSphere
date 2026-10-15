@@ -317,7 +317,7 @@ describe("Dashboard role map", () => {
     expect(screen.getByRole("heading", { name: "Welcome, user@example.com" })).toBeInTheDocument();
   });
 
-  it("shows the Browse Open Events entry as a link to the browse page, with no invented event data", () => {
+  it("SCRUM495_AC5_shows_the_browse_open_events_entry_as_a_link_to_the_browse_page_with_no_invented_event_data", () => {
     // The entry is a router Link, which is why renderAs wraps in a MemoryRouter.
     renderAs("attendee");
 

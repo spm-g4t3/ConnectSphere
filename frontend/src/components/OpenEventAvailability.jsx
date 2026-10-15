@@ -1,7 +1,4 @@
-// OpenEventAvailability.jsx
-//
-// SCRUM-495. How an open event's places are shown, and its "Registered" mark,
-// in one place so the list and the details cannot drift apart.
+// How an open event's places and "Registered" mark look, shared by the list and the details.
 import { availabilityLabel } from "../services/openEventDisplay";
 
 export function RegisteredBadge() {

@@ -1,14 +1,7 @@
 /**
- * Is an event open for registration at this instant? Pure, so the browse query
- * and SCRUM-22's check share one answer.
- *
- * Half-open, like venue occupancy: the window is [opens, closes), and an event
- * starting exactly now is no longer listed. A close time that was never set
- * means open until the Organiser closes registration by hand; one that is set
- * but unreadable never counts as open. Instants are compared, never
- * calendar dates, so no time zone is involved. The tickets give no boundary
- * for "has not passed"; if the team reads it as closes >= now, change this and
- * the filters in openEventService.js.
+ * Is an event open for registration at an instant? The window is [opens,
+ * closes) and compared as instants, so an event starting now is not listed and
+ * no time zone is involved. A null close time stays open until closed by hand.
  */
 import { STATUS } from './eventRequestStatus.js';
 
