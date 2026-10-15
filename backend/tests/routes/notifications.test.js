@@ -350,6 +350,23 @@ describe('PATCH /api/notifications/:id/read', () => {
     expect(res.body).toEqual({ error: `Notification ${NOTIFICATION_ID} not found` });
   });
 
+  it('SCRUM172_AC8_marking_another_users_notification_filters_on_the_caller', async () => {
+    const guardedUpdate = queryStub(ok(null));
+    const fallbackRead = queryStub(ok(null));
+    from.mockReturnValueOnce(guardedUpdate).mockReturnValueOnce(fallbackRead);
+
+    const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR, OTHER_USER_ID)))
+      .patch(`/api/notifications/${NOTIFICATION_ID}/read?recipientId=${COORDINATOR_ID}`)
+      .send({ recipientId: COORDINATOR_ID });
+
+    expect(res.status).toBe(404);
+    expect(guardedUpdate.called('update')).toBe(true);
+    for (const stub of [guardedUpdate, fallbackRead]) {
+      const recipientFilters = stub.allArgs('eq').filter(([column]) => column === 'recipient_id');
+      expect(recipientFilters).toEqual([['recipient_id', OTHER_USER_ID]]);
+    }
+  });
+
   it('SCRUM17_AC3_an_untyped_error_is_a_generic_500', async () => {
     from.mockReturnValue(queryStub(fail({ code: '57014', message: 'statement timeout' })));
 
