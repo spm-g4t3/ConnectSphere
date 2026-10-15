@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { apiClient } from "../../src/services/apiClient";
 import {
+  getUnreadCount,
   listNotifications,
   markNotificationRead,
 } from "../../src/services/notificationService.js";
@@ -73,5 +74,23 @@ describe("markNotificationRead", () => {
     vi.mocked(apiClient.patch).mockRejectedValue(err);
 
     await expect(markNotificationRead(ID)).rejects.toBe(err);
+  });
+});
+
+describe("getUnreadCount", () => {
+  it("SCRUM172_AC4_get_unread_count_reads_the_count_endpoint", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: { unreadCount: 73 } });
+
+    await expect(getUnreadCount()).resolves.toBe(73);
+
+    expect(apiClient.get).toHaveBeenCalledTimes(1);
+    expect(apiClient.get).toHaveBeenCalledWith("/notifications/unread-count");
+  });
+
+  it("lets an error through with its response intact", async () => {
+    const err = Object.assign(new Error("Request failed"), { response: { status: 401 } });
+    vi.mocked(apiClient.get).mockRejectedValue(err);
+
+    await expect(getUnreadCount()).rejects.toBe(err);
   });
 });

@@ -12,7 +12,7 @@
 
 import PendingBookingRequests from "./PendingBookingRequests";
 import VenueCatalogue from "./VenueCatalogue";
-import CoordinatorNotifications from "./CoordinatorNotifications";
+import NotificationInbox from "./NotificationInbox";
 
 export default function VenueStaffDashboard({ user }) {
   return (
@@ -27,7 +27,7 @@ export default function VenueStaffDashboard({ user }) {
           <section> root gets the `.dashboard > section` card styling. */}
       <PendingBookingRequests />
 
-      <CoordinatorNotifications />
+      <NotificationInbox />
 
       {/* Rendered as a direct child of .dashboard so its <section> root still
           picks up the `.dashboard > section` card styling it had inline.

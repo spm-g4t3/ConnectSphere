@@ -141,7 +141,7 @@ describe("SCRUM453_AC2 the Attendee dashboard and nav", () => {
     renderAppAt("/dashboard");
 
     const nav = await screen.findByRole("navigation");
-    const links = within(nav).getAllByRole("link");
+    const links = within(within(nav).getByRole("list")).getAllByRole("link");
     expect(links.map((link) => link.getAttribute("href"))).toEqual(["/dashboard"]);
     expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveClass("app-nav__link--active");
   });
@@ -224,6 +224,7 @@ describe("SCRUM453 existing roles keep their navigation", () => {
     renderAppAt("/dashboard");
 
     const nav = await screen.findByRole("navigation");
-    expect(within(nav).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(hrefs);
+    const roleLinks = within(within(nav).getByRole("list")).getAllByRole("link");
+    expect(roleLinks.map((link) => link.getAttribute("href"))).toEqual(hrefs);
   });
 });

@@ -1,8 +1,7 @@
-// CoordinatorNotifications.jsx
+// NotificationInbox.jsx
 //
-// The signed-in user's inbox. SCRUM-128 first used it for Coordinator
-// notifications; it is shared by the organiser, venue and technical-support
-// dashboards for the notification types addressed to those roles.
+// The signed-in user's inbox, mounted on every role's dashboard. The API
+// scopes it to the caller, so one component serves every role.
 //
 // Read and unread are listed together, newest first, with the unread count
 // in the heading. Hiding read ones would make "what did that message say?"
@@ -12,13 +11,15 @@
 // Like ReviewQueue it renders a <section> and not the dashboard wrapper, so
 // its card styling and scoped rules come from the parent that mounts it.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   listNotifications,
   markNotificationRead,
 } from "../services/notificationService";
 import { describeNotification } from "../services/notificationDisplay";
 import { formatTimestamp } from "../services/displayFormat";
+import { useUnreadCount } from "../notifications/UnreadCountContext";
 
 // Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES. No
 // 403: the route has no role gate, so a 403 cannot happen.
@@ -35,7 +36,7 @@ const MARK_ERROR_MESSAGES = {
   404: "This notification is no longer available.",
 };
 
-export default function CoordinatorNotifications() {
+export default function NotificationInbox() {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -45,12 +46,24 @@ export default function CoordinatorNotifications() {
   const [marking, setMarking] = useState({});
   const [rowErrors, setRowErrors] = useState({});
 
+  const { unreadCount: serverUnreadCount, refreshUnreadCount } = useUnreadCount();
+  const location = useLocation();
+  const sectionRef = useRef(null);
+
+  // Keyed on location.key too, so clicking the nav link while already on
+  // /dashboard#notifications still scrolls. jsdom has no scrollIntoView.
+  useEffect(() => {
+    if (location.hash !== "#notifications") return;
+    sectionRef.current?.scrollIntoView?.({ block: "start" });
+  }, [location.key, location.hash]);
+
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
       const data = await listNotifications();
       setNotifications(data);
       setError(null);
+      refreshUnreadCount();
     } catch (err) {
       setError(
         LIST_ERROR_MESSAGES[err.response?.status] ||
@@ -59,13 +72,13 @@ export default function CoordinatorNotifications() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshUnreadCount]);
 
   useEffect(() => {
     fetchNotifications();
   }, [fetchNotifications]);
 
-  // Refetch when the Coordinator comes back to the tab, copied from
+  // Refetch when the user comes back to the tab, copied from
   // ReviewQueue and for the same reason: notifications are written by other
   // people's actions (a Venue Staff member overriding a block) while this
   // screen is not being looked at, so the moment worth re-reading on is the
@@ -97,6 +110,7 @@ export default function CoordinatorNotifications() {
       setNotifications((current) =>
         current.map((notification) => (notification.id === id ? updated : notification)),
       );
+      refreshUnreadCount();
     } catch (err) {
       const status = err.response?.status;
       setRowErrors((current) => ({
@@ -113,15 +127,20 @@ export default function CoordinatorNotifications() {
     }
   }
 
-  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
+  // The list is capped at 50 and the server count is exact, so the server
+  // count wins whenever it is known: the nav badge shows the same number, and
+  // the two must never disagree.
+  const unreadCount = typeof serverUnreadCount === "number"
+    ? serverUnreadCount
+    : notifications.filter((notification) => !notification.readAt).length;
 
   return (
-    <section className="coordinator-notifications">
+    <section id="notifications" className="notification-inbox" ref={sectionRef}>
       <h2>Notifications{unreadCount > 0 && ` (${unreadCount} unread)`}</h2>
 
       {loading && <p>Loading...</p>}
       {error && (
-        <p className="coordinator-notifications__error" role="alert">
+        <p className="notification-inbox__error" role="alert">
           {error}
         </p>
       )}
@@ -142,21 +161,21 @@ export default function CoordinatorNotifications() {
               key={notification.id}
               className={
                 unread
-                  ? "coordinator-notifications__item coordinator-notifications__item--unread"
-                  : "coordinator-notifications__item coordinator-notifications__item--read"
+                  ? "notification-inbox__item notification-inbox__item--unread"
+                  : "notification-inbox__item notification-inbox__item--read"
               }
             >
-              <div className="coordinator-notifications__body">
-                <p className="coordinator-notifications__headline">
+              <div className="notification-inbox__body">
+                <p className="notification-inbox__headline">
                   <strong>{headline}</strong>
-                  {unread && <span className="coordinator-notifications__new">New</span>}
+                  {unread && <span className="notification-inbox__new">New</span>}
                 </p>
-                <p className="coordinator-notifications__detail">{detail}</p>
-                <p className="coordinator-notifications__time">
+                <p className="notification-inbox__detail">{detail}</p>
+                <p className="notification-inbox__time">
                   Received {formatTimestamp(notification.createdAt)}
                 </p>
                 {rowError && (
-                  <p className="coordinator-notifications__row-error" role="alert">
+                  <p className="notification-inbox__row-error" role="alert">
                     {rowError}
                   </p>
                 )}

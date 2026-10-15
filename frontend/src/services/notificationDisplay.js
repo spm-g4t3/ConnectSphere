@@ -1,7 +1,7 @@
 // notificationDisplay.js
 //
 // SCRUM-128 (SCRUM-17 AC3). Turns a stored notification into the two lines
-// the recipient reads. Kept out of CoordinatorNotifications.jsx so the
+// the recipient reads. Kept out of NotificationInbox.jsx so the
 // wording is testable without rendering, the same split as
 // eventRequestStatusDisplay.js.
 //

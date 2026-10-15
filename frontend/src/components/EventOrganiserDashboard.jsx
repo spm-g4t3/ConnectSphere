@@ -7,7 +7,7 @@ import {
   readStatusDisplay,
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
-import CoordinatorNotifications from "./CoordinatorNotifications";
+import NotificationInbox from "./NotificationInbox";
 
 function formatEventDate(value) {
   if (!value) return "Date not set";
@@ -176,7 +176,7 @@ export default function EventOrganiserDashboard({ user }) {
           {eventsError && <p className="dashboard--organiser__error" role="alert">{eventsError}</p>}
         </ul>
       </section>
-      <CoordinatorNotifications />
+      <NotificationInbox />
     </div>
   );
 }

@@ -14,7 +14,7 @@
 // The same page shape as the other dashboards, and the h1 names the role
 // exactly, as AC1 asks.
 
-import CoordinatorNotifications from "./CoordinatorNotifications";
+import NotificationInbox from "./NotificationInbox";
 
 export default function SafetyOfficerDashboard({ user }) {
   return (
@@ -32,7 +32,7 @@ export default function SafetyOfficerDashboard({ user }) {
         </p>
       </section>
 
-      <CoordinatorNotifications />
+      <NotificationInbox />
     </div>
   );
 }

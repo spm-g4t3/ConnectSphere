@@ -34,11 +34,11 @@ export default defineConfig([
       // move to a data-fetching approach the rule accepts.
       'react-hooks/set-state-in-effect': 'warn',
 
-      // AuthContext.jsx exports the useAuth hook beside its provider, which is
-      // the conventional shape for a context module.
+      // AuthContext.jsx and UnreadCountContext.jsx export their hook beside
+      // their provider, which is the conventional shape for a context module.
       'react-refresh/only-export-components': [
         'error',
-        { allowExportNames: ['useAuth'] },
+        { allowExportNames: ['useAuth', 'useUnreadCount'] },
       ],
     },
   },

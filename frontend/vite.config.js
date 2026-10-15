@@ -35,7 +35,7 @@ const SCRUM17_FILES = [
   'src/components/VenueBlockForm.jsx',
   'src/components/BlockConflictList.jsx',
   'src/components/BlockHistory.jsx',
-  'src/components/CoordinatorNotifications.jsx',
+  'src/components/NotificationInbox.jsx',
   'src/services/venueBlockValidation.js',
   'src/services/venueBlockReasons.js',
   'src/services/venueBlockErrors.js',
@@ -147,6 +147,11 @@ const SCRUM489_FILES = [
   'src/components/SafetyCheckSubmissionPanel.jsx',
 ]
 
+// SCRUM-172: the shared unread count behind the nav badge and the inbox
+// heading. NotificationInbox.jsx and notificationService.js stay in
+// SCRUM17_FILES, where their 100% gate already holds.
+const SCRUM172_FILES = ['src/notifications/UnreadCountContext.jsx']
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -189,6 +194,7 @@ export default defineConfig({
         ...SCRUM487_FILES.map((file) => [file, FULL]),
         ...SCRUM258_FILES.map((file) => [file, FULL]),
         ...SCRUM489_FILES.map((file) => [file, FULL]),
+        ...SCRUM172_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

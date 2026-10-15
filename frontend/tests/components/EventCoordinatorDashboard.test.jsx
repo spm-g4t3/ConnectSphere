@@ -136,7 +136,7 @@ describe("SCRUM17_AC3 EventCoordinatorDashboard", () => {
     expect(dashboard).not.toBeNull();
     const sections = [...dashboard.children].filter((el) => el.tagName === "SECTION");
     expect(sections.length).toBeGreaterThanOrEqual(2);
-    expect(dashboard.querySelector(":scope > section.coordinator-notifications")).not.toBeNull();
+    expect(dashboard.querySelector(":scope > section.notification-inbox")).not.toBeNull();
   });
 
   it("shows a notification from the service", async () => {

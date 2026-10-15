@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import Navigation from "./components/Navigation";
+import { UnreadCountProvider } from "./notifications/UnreadCountContext";
 import Dashboard from "./components/Dashboard";
 import LoginForm from "./components/LoginForm";
 import MyEventRequests from "./components/MyEventRequests";
@@ -303,9 +304,11 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <div className="app-shell">
-          <AppRoutes />
-        </div>
+        <UnreadCountProvider>
+          <div className="app-shell">
+            <AppRoutes />
+          </div>
+        </UnreadCountProvider>
       </AuthProvider>
     </BrowserRouter>
   );
