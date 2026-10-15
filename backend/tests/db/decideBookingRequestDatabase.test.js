@@ -92,10 +92,14 @@ const refusal = async (promise) => {
   }
 };
 
-/** The quoted words of the notifications_type_known check a migration sets. */
+/**
+ * The quoted words of the notifications_type_known list a migration sets: a
+ * fixed check (052), or the v_ours array a live-list migration adds (066).
+ */
 const notificationTypes = (sql) => {
-  const start = sql.indexOf('add constraint notifications_type_known');
-  const list = sql.slice(start, sql.indexOf(');', start));
+  const ours = sql.indexOf('v_ours');
+  const start = ours >= 0 ? ours : sql.indexOf('add constraint notifications_type_known');
+  const list = sql.slice(start, sql.indexOf(ours >= 0 ? '];' : ');', start));
   return [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 };
 
@@ -535,6 +539,80 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request (066)', () => {
       );
 
       expect(err?.code).toBe('23514');
+    });
+
+    it.each([
+      ['changing_the_reason', 'reject', 'No', "decision_reason = 'Another reason'"],
+      ['changing_who_decided', 'approve', null, 'decided_by = $2'],
+      ['rejected_to_approved', 'reject', 'No', "status = 'approved'"],
+      ['approved_to_pending', 'approve', null, "status = 'pending'"],
+    ])('SCRUM258_AC6_a_decided_request_cannot_be_changed_directly_%s', async (_label, decision, reason, set) => {
+      const { id } = await pending(await makeVenue());
+      await decide(id, decision, { reason });
+      const recorded = await bookingRow(id);
+
+      const params = set.includes('$2') ? [id, coordinator] : [id];
+      const err = await refusal(db.query(`update bookings set ${set} where id = $1`, params));
+
+      // 42501 is the trigger; the CHECKs alone would answer 23514 or let it through.
+      expect(err?.code).toBe('42501');
+      expect(await bookingRow(id)).toEqual(recorded);
+    });
+
+    it('SCRUM258_AC6_an_approval_can_still_be_flagged_then_cancelled', async () => {
+      const venueId = await makeVenue();
+      const { id } = await pending(venueId);
+      await decide(id, 'approve');
+      const decided = await bookingRow(id);
+      const blockId = (
+        await one(
+          `insert into venue_blocks (venue_id, starts_at, ends_at, reason)
+           values ($1, $2, $3, 'maintenance') returning id`,
+          [venueId, at('20:00'), at('21:00')],
+        )
+      ).id;
+
+      await db.query(
+        `update bookings
+            set status = 'flagged_for_review', review_block_id = $2, flagged_at = now(), flagged_by = $3
+          where id = $1`,
+        [id, blockId, staff],
+      );
+      expect((await bookingRow(id)).status).toBe('flagged_for_review');
+      await db.query("update bookings set status = 'cancelled' where id = $1", [id]);
+
+      const row = await bookingRow(id);
+      expect(row.status).toBe('cancelled');
+      expect(row).toMatchObject({
+        decided_by: decided.decided_by,
+        decided_at: decided.decided_at,
+        decision_reason: null,
+        suggested_alternative: null,
+      });
+    });
+
+    // A later migration (069) adds its types to the live list; re-running 066
+    // must keep them as well as its own.
+    it('SCRUM258_AC6_rerunning_066_keeps_notification_types_added_after_it', async () => {
+      const liveTypes = async () => {
+        const { def } = await one(
+          `select pg_get_constraintdef(oid) as def from pg_constraint
+            where conrelid = 'notifications'::regclass and conname = 'notifications_type_known'`,
+        );
+        return [...def.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+      };
+      const later = [...(await liveTypes()), 'equipment_requested'];
+      await db.exec(`
+        alter table notifications drop constraint notifications_type_known;
+        alter table notifications add constraint notifications_type_known
+          check (type in (${later.map((t) => `'${t}'`).join(', ')}));
+      `);
+
+      await db.exec(migration(MIGRATION_066));
+
+      const after = await liveTypes();
+      expect(after).toContain('equipment_requested');
+      expect(after).toEqual(expect.arrayContaining(notificationTypes(migration(MIGRATION_066))));
     });
 
     // Shared surface: a restatement from an older list would drop 052's types.

@@ -257,7 +257,7 @@ describe("decisionErrorMessage (SCRUM-258)", () => {
     ["BOOKING_NOT_PENDING", /already been decided or withdrawn\. The list has been refreshed\./],
     ["BOOKING_CHANGED", /changed while you were deciding/],
     ["BOOKING_PERIOD_STALE", /dates have changed .* request the venue again for the new dates/],
-    ["EVENT_NOT_BOOKABLE", /no longer approved or confirmed, so its venue request can't be approved/],
+    ["EVENT_NOT_BOOKABLE", /no longer approved, in the safety check, or confirmed \(it may have been cancelled\), so its venue request can't be approved/],
     ["VENUE_RETIRED", /retired, so the request can't be approved/],
   ])("SCRUM258_AC2_explains_the_409_%s_to_venue_staff", (code, pattern) => {
     expect(decisionErrorMessage(conflict(code))).toMatch(pattern);

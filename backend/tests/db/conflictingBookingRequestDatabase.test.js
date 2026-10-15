@@ -87,10 +87,14 @@ const refusal = async (promise) => {
   }
 };
 
-/** The quoted words of the notifications_type_known check a migration sets. */
+/**
+ * The quoted words of the notifications_type_known list a migration sets: a
+ * fixed check, or the v_ours array a live-list migration adds (066).
+ */
 const notificationTypes = (sql) => {
-  const start = sql.indexOf('add constraint notifications_type_known');
-  const list = sql.slice(start, sql.indexOf(');', start));
+  const ours = sql.indexOf('v_ours');
+  const start = ours >= 0 ? ours : sql.indexOf('add constraint notifications_type_known');
+  const list = sql.slice(start, sql.indexOf(ours >= 0 ? '];' : ');', start));
   return [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 };
 
@@ -403,7 +407,9 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting (065, 066)', ()
 
       const err = await refusal(db.query("update bookings set status = 'conflicting' where id = $1", [approved.id]));
 
-      expect(err?.code).toBe('23514');
+      // 066's trigger refuses it (42501) before bookings_decided_not_pending would (23514).
+      expect(err?.code).toBe('42501');
+      expect(await statusOf(approved.id)).toBe('approved');
     });
   });
 

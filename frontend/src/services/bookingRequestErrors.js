@@ -204,7 +204,7 @@ const DECISION_CODE_MESSAGES = {
   BOOKING_PERIOD_STALE:
     "The event's dates have changed since this request was made, so it can't be approved. The coordinator needs to request the venue again for the new dates.",
   EVENT_NOT_BOOKABLE:
-    "This event is no longer approved or confirmed, so its venue request can't be approved.",
+    "This event is no longer approved, in the safety check, or confirmed (it may have been cancelled), so its venue request can't be approved.",
   VENUE_RETIRED: "This venue has been retired, so the request can't be approved.",
 };
 

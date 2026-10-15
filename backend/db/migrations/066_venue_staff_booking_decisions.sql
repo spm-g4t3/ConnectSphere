@@ -19,8 +19,8 @@
 -- status 'active' only: venue_occupancy_conflicts and process_venue_hold_expiry
 -- (040) skip it, and cancellation (067) cancels the booking it became.
 --
--- Adds: decision columns on bookings; converted columns on venue_holds; the
--- decision notification types; pending_request_overlaps,
+-- Adds: decision columns on bookings, kept final by a trigger; converted
+-- columns on venue_holds; the decision notification types; pending_request_overlaps,
 -- list_pending_booking_requests and decide_booking_request; and restates
 -- withdraw_booking_request (031) and create_booking_request (051) to treat
 -- conflicting as open and, for create, to accept the safety statuses.
@@ -53,10 +53,9 @@
 -- status carries what was decided: a rejection stays rejected, and an approval
 -- may later be flagged or cancelled while keeping who approved it and when.
 --
--- No trigger keeps these columns from being edited. As 025 says, a CHECK
--- cannot tell a first write from an overwrite; the guarantee is that
--- decide_booking_request writes them only on a row still open under its
--- lock, and nothing else writes them.
+-- A CHECK cannot tell a first write from an overwrite (025), so the trigger
+-- after the constraints keeps a decision final once decide_booking_request
+-- has written it.
 
 alter table bookings
   add column if not exists decided_by            uuid references auth.users (id),
@@ -108,6 +107,45 @@ alter table bookings
         and length(suggested_alternative) <= 1000)
   );
 
+-- Once decided, who decided, when and why never change, and the status moves
+-- only the ways flagging (014, 033), a venue change (034-036) and cancellation
+-- (067) move an approval. Undecided rows, and approvals older than this file, pass.
+create or replace function refuse_decided_booking_change()
+returns trigger
+language plpgsql
+as $$
+begin
+  if old.decided_at is null then
+    return new;
+  end if;
+
+  if (new.decided_by, new.decided_at, new.decision_reason, new.suggested_alternative)
+     is distinct from
+     (old.decided_by, old.decided_at, old.decision_reason, old.suggested_alternative) then
+    raise exception 'booking % has been decided, and its decision cannot be changed', old.id
+      using errcode = '42501';
+  end if;
+
+  if new.status is distinct from old.status
+     and (old.status::text, new.status::text) not in (
+       ('approved', 'flagged_for_review'),
+       ('approved', 'cancelled'),
+       ('flagged_for_review', 'cancelled')
+     ) then
+    raise exception 'booking % has been decided, and cannot move from % to %',
+      old.id, old.status, new.status
+      using errcode = '42501';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists bookings_decision_final on bookings;
+create trigger bookings_decision_final
+  before update on bookings
+  for each row execute function refuse_decided_booking_change();
+
 
 -- ---------------------------------------------------------------------
 -- 2. Converted holds (as 048 records released ones)
@@ -136,35 +174,64 @@ alter table venue_holds
 -- ---------------------------------------------------------------------
 -- 3. Notifications accept the three decision types (extends 052)
 -- ---------------------------------------------------------------------
--- 052's eleven, unchanged and in 052's order, then SCRUM-490's three (its
--- 058 is applied live but not yet on dev; leaving them out fails this file
--- on existing rows and breaks that story's notices), then 064's one (this file
--- runs after it, so dropping it would break SCRUM-489's submit), then this file's three.
+-- 052's eleven, SCRUM-490's three, 064's one and this file's three. As 069
+-- does, the list is read from the live constraint and ours are added, so
+-- re-running this file never drops a type a later migration added. A migration
+-- that restates the list after this one must still include ours.
 
-alter table notifications drop constraint if exists notifications_type_known;
-alter table notifications
-  add constraint notifications_type_known check (
-    type in (
-      'booking_flagged',
-      'booking_request_withdrawn',
-      'clarification_requested',
-      'clarification_replied',
-      'clarification_closed',
-      'booking_flagged_setup_change',
-      'venue_hold_expired',
-      'event_cancelled',
-      'event_request_awaiting_assignment',
-      'event_request_assigned',
-      'event_request_coordinator_assigned',
-      'safety_review_response',
-      'safety_booking_flagged',
-      'safety_equipment_review',
-      'event_submitted_for_safety_review',
-      'booking_request_approved',
-      'booking_request_rejected',
-      'booking_request_conflicting'
-    )
+do $$
+declare
+  v_def   text;
+  v_known text[] := '{}';
+  v_ours  text[] := array[
+    'booking_flagged',
+    'booking_request_withdrawn',
+    'clarification_requested',
+    'clarification_replied',
+    'clarification_closed',
+    'booking_flagged_setup_change',
+    'venue_hold_expired',
+    'event_cancelled',
+    'event_request_awaiting_assignment',
+    'event_request_assigned',
+    'event_request_coordinator_assigned',
+    'safety_review_response',
+    'safety_booking_flagged',
+    'safety_equipment_review',
+    'event_submitted_for_safety_review',
+    'booking_request_approved',
+    'booking_request_rejected',
+    'booking_request_conflicting'
+  ];
+  v_item  text;
+begin
+  select pg_get_constraintdef(c.oid)
+    into v_def
+    from pg_constraint c
+   where c.conrelid = 'notifications'::regclass
+     and c.conname = 'notifications_type_known';
+
+  if v_def is not null then
+    select coalesce(array_agg(t.m[1] order by t.ord), '{}')
+      into v_known
+      from regexp_matches(v_def, '''([a-z_]+)''', 'g') with ordinality as t(m, ord);
+  end if;
+
+  foreach v_item in array v_ours loop
+    if not v_item = any (v_known) then
+      v_known := v_known || v_item;
+    end if;
+  end loop;
+
+  alter table notifications drop constraint if exists notifications_type_known;
+
+  execute format(
+    'alter table notifications add constraint notifications_type_known check (type in (%s))',
+    (select string_agg(quote_literal(x.item), ', ' order by x.ord)
+       from unnest(v_known) with ordinality as x(item, ord))
   );
+end;
+$$;
 
 -- As 031 does for a withdrawal: the notice names the booking it is about.
 alter table notifications drop constraint if exists notifications_booking_decision_needs_booking;
@@ -532,7 +599,7 @@ begin
     -- 7. An event past approval and still live: the statuses a venue can be
     --    requested for (create_booking_request, step 3).
     if v_event.status::text not in ('approved', 'safety_review', 'safety_approved', 'confirmed') then
-      raise exception 'event request % has status %, and a venue can only be booked for an approved, safety-checked or confirmed event',
+      raise exception 'event request % has status %, and a venue can only be booked for an event that is approved, in or through the safety check, or confirmed',
         v_event_id, v_event.status
         using errcode = 'PT409', hint = 'EVENT_NOT_BOOKABLE';
     end if;
@@ -865,7 +932,7 @@ begin
   -- 3. Only an event past approval and still live: approved, in or through
   --    the safety check, or confirmed. Compared as text, as 062 explains.
   if v_event.status::text not in ('approved', 'safety_review', 'safety_approved', 'confirmed') then
-    raise exception 'event request % has status %, and a venue can only be requested for an approved, safety-checked or confirmed event',
+    raise exception 'event request % has status %, and a venue can only be requested for an event that is approved, in or through the safety check, or confirmed',
       p_event_request_id, v_event.status
       using errcode = 'PT409', hint = 'EVENT_NOT_BOOKABLE';
   end if;

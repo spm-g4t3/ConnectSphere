@@ -485,7 +485,7 @@ describe("approving (AC2, AC3, AC5)", () => {
   });
 
   it.each([
-    ["EVENT_NOT_BOOKABLE", /no longer approved or confirmed, so its venue request can't be approved/],
+    ["EVENT_NOT_BOOKABLE", /no longer approved, in the safety check, or confirmed \(it may have been cancelled\), so its venue request can't be approved/],
     ["BOOKING_PERIOD_STALE", /dates have changed since this request was made/],
   ])("SCRUM258_AC5_a_%s_refusal_is_explained_in_the_card", async (code, pattern) => {
     vi.mocked(getPendingBookingRequests).mockResolvedValue([item("1")]);
@@ -515,7 +515,7 @@ describe("approving (AC2, AC3, AC5)", () => {
 
     expect(screen.queryByRole("region", { name: "Event 2 at Hall 2" })).not.toBeInTheDocument();
     expect(within(regionFor("Event 1", "Hall 1")).getByRole("alert")).toHaveTextContent(
-      /no longer approved or confirmed/,
+      /no longer approved, in the safety check, or confirmed/,
     );
   });
 

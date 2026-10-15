@@ -415,7 +415,7 @@ export async function createBookingRequest(
 
   if (!BOOKABLE_EVENT_STATUSES.includes(event.status)) {
     throw new ConflictError(
-      `A venue can only be requested for an approved, safety-checked or confirmed event; this one is ${event.status}`,
+      `A venue can only be requested for an event that is approved, in or through the safety check, or confirmed; this one is ${event.status}`,
       { code: 'EVENT_NOT_BOOKABLE' },
     );
   }
