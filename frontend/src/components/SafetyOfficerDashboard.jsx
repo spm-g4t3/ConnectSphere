@@ -248,6 +248,7 @@ export default function SafetyOfficerDashboard({ user }) {
     setError(responseError.message);
     if (responseError.status === 409 && selectedId) {
       await refreshQueue();
+      setError(responseError.message);
       try {
         setDetail(await getSafetyReview(selectedId));
       } catch {
