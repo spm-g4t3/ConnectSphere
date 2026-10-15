@@ -730,6 +730,27 @@ describe("SCRUM495 moving to another event", () => {
     expect(screen.queryByText(/You are registered for/)).not.toBeInTheDocument();
   });
 
+  it("SCRUM495_AC5_shows_no_notice_when_the_reader_moves_to_another_event_during_the_post_register_reload", async () => {
+    const reload = pending();
+    vi.mocked(getOpenEvent)
+      .mockResolvedValueOnce(event())
+      .mockReturnValueOnce(reload.promise)
+      .mockResolvedValueOnce(event({ id: "e2", eventName: "Workshop" }));
+    renderWithSwitch(vi.fn().mockResolvedValue(undefined));
+    await screen.findByRole("heading", { name: "Open Day", level: 1 });
+
+    await userEvent.click(registerButton());
+    await waitFor(() => expect(getOpenEvent).toHaveBeenCalledTimes(2));
+    await userEvent.click(screen.getByRole("link", { name: "Go to B" }));
+    await screen.findByRole("heading", { name: "Workshop", level: 1 });
+    await act(async () => reload.resolve(event({ placesLeft: 11, isRegistered: true, canRegister: false })));
+
+    expect(screen.getByRole("heading", { name: "Workshop", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText(/You are registered for/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(registerButton()).toBeEnabled();
+  });
+
   it("SCRUM495_AC5_a_refresh_notice_for_one_event_is_not_shown_on_the_next", async () => {
     const next = pending();
     vi.mocked(getOpenEvent)

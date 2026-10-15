@@ -137,6 +137,10 @@ export default function BrowseEventDetails({ onRegister }) {
     sending.current = false;
     setRegistering(false);
 
+    // Overtaken by another read (the reader moved on): this attempt's outcome
+    // belongs to a page that is no longer shown.
+    if (fresh.kind === "superseded") return;
+
     if (registered) {
       setNotice(`You are registered for ${name}.`);
     } else if (fresh.kind === "ok" && fresh.data.isRegistered) {
