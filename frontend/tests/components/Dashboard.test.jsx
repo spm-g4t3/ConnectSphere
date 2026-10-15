@@ -32,7 +32,7 @@ import { MemoryRouter } from "react-router-dom";
 import Dashboard from "../../src/components/Dashboard.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
 import { apiClient } from "../../src/services/apiClient";
-import { getOpenTickets, getEquipmentRequests } from "../../src/services/supportService";
+import { getOpenTickets } from "../../src/services/supportService";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -50,7 +50,6 @@ vi.mock("../../src/services/apiClient", () => ({
 
 vi.mock("../../src/services/supportService", () => ({
   getOpenTickets: vi.fn(),
-  getEquipmentRequests: vi.fn(),
 }));
 
 vi.mock("../../src/components/EventOrganiserDashboard", () => ({
@@ -86,7 +85,6 @@ function anyServiceCalled() {
   return [
     ...Object.values(apiClient),
     getOpenTickets,
-    getEquipmentRequests,
   ].some((fn) => vi.mocked(fn).mock.calls.length > 0);
 }
 
@@ -178,7 +176,6 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
       expect(apiClient[method]).not.toHaveBeenCalled();
     }
     expect(getOpenTickets).not.toHaveBeenCalled();
-    expect(getEquipmentRequests).not.toHaveBeenCalled();
   });
 
   it.each(["safety_officer"])(

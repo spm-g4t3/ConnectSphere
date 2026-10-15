@@ -131,6 +131,16 @@ const SCRUM487_FILES = [
   'src/components/AssignedEventsFilters.jsx',
 ]
 
+// SCRUM-284 (SCRUM-287) owns the equipment request queue and the dashboard that
+// mounts it, gated at 100%.
+const SCRUM284_FILES = [
+  'src/components/EquipmentRequestQueue.jsx',
+  'src/components/TechnicalSupportDashboard.jsx',
+  'src/services/equipmentQueueService.js',
+  'src/services/eventPeriodFormat.js',
+  'src/services/supportService.js',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -171,6 +181,7 @@ export default defineConfig({
         ...SCRUM491_FILES.map((file) => [file, FULL]),
         ...SCRUM486_FILES.map((file) => [file, FULL]),
         ...SCRUM487_FILES.map((file) => [file, FULL]),
+        ...SCRUM284_FILES.map((file) => [file, FULL]),
       ]),
     },
   },
