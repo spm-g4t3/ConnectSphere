@@ -405,6 +405,62 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
       expect(notified).toEqual(expect.arrayContaining([organiser, venueStaff]));
     });
 
+    it(`SCRUM561_AC2_${status}_preview_lists_the_arrangements_and_cancel_releases_equipment_and_notifies_staff`, async () => {
+      const eventId = await makeSafetyEvent();
+      const bookingId = await makeBooking(eventId, 'approved');
+      const holdId = await makeHold(eventId);
+      const equipmentRequestId = (
+        await one(
+          `insert into equipment_requests (event_request_id, status)
+           values ($1, 'pending_review') returning id`,
+          [eventId],
+        )
+      ).id;
+      const changeRequestId = await makeChangeRequest(eventId);
+
+      const { preview } = await one(
+        'select event_cancellation_impact_preview($1) as preview',
+        [eventId],
+      );
+      expect(preview.venueBookings.count).toBe(1);
+      expect(preview.venueHolds.details).toEqual([expect.objectContaining({ id: holdId })]);
+      expect(preview.equipmentRequests.count).toBe(1);
+
+      await cancel(eventId, coordinator, '  Called off in the safety check  ', 'organiser_request');
+
+      const cancelled = await eventRow(eventId);
+      expect(cancelled).toMatchObject({
+        status: 'cancelled',
+        cancellation_reason: 'Called off in the safety check',
+        cancellation_initiator: 'organiser_request',
+        cancelled_by: coordinator,
+      });
+      expect(cancelled.cancelled_at).not.toBeNull();
+      expect(await bookingStatus(bookingId)).toBe('cancelled');
+      expect((await one('select status::text as status from equipment_requests where id = $1', [equipmentRequestId])).status)
+        .toBe('cancelled');
+      expect((await one('select status::text as status from event_change_requests where id = $1', [changeRequestId])).status)
+        .toBe('processed');
+      const audiences = (
+        await db.query(
+          "select recipient_id, payload->>'audience' as audience from notifications where event_request_id = $1 and type = 'event_cancelled'",
+          [eventId],
+        )
+      ).rows;
+      expect(audiences).toEqual(expect.arrayContaining([
+        expect.objectContaining({ recipient_id: organiser, audience: 'organiser' }),
+        expect.objectContaining({ recipient_id: venueStaff, audience: 'venue_staff' }),
+        expect.objectContaining({ recipient_id: technicalSupport, audience: 'technical_support_staff' }),
+      ]));
+    });
+
+    it(`SCRUM561_AC1_a_blank_reason_is_refused_from_${status}`, async () => {
+      const eventId = await makeSafetyEvent();
+
+      await expect(cancel(eventId, coordinator, '  ')).rejects.toMatchObject({ code: '22023' });
+      expect((await eventRow(eventId)).status).toBe(status);
+    });
+
     it(`SCRUM561_AC1_another_coordinator_cannot_cancel_from_${status}`, async () => {
       const eventId = await makeSafetyEvent();
 
