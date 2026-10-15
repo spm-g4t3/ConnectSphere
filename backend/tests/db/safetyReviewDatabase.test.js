@@ -30,14 +30,18 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
   }
 
   async function event(eventName, enteredAt = '2026-10-10T09:00:00Z') {
+    await db.query('alter table event_requests disable trigger event_requests_safety_transitions');
     const created = await one(
       `insert into event_requests
-         (organiser_id, assigned_coordinator_id, event_name, status, proposed_start, proposed_end,
+         (organiser_id, assigned_coordinator_id, decision, decided_by, decided_at,
+          event_name, status, proposed_start, proposed_end,
           expected_attendance, accessibility_requirements, submitted_at)
-       values ($1, $2, $3, 'safety_review', $4, $5, 120, 'Step-free access and reserved seating', $6)
+       values ($1, $2, 'approved', $2, now(), $3, 'safety_review', $4, $5, 120,
+               'Step-free access and reserved seating', $6)
        returning id`,
       [organiser, coordinator, eventName, START, END, '2026-09-01T09:00:00Z'],
     );
+    await db.query('alter table event_requests enable trigger event_requests_safety_transitions');
     await db.query(
       `insert into event_request_status_history
          (event_request_id, previous_status, new_status, changed_by, reason, created_at)
@@ -106,6 +110,9 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
         id uuid primary key default gen_random_uuid(),
         organiser_id uuid not null,
         assigned_coordinator_id uuid,
+        decision text,
+        decided_by uuid,
+        decided_at timestamptz,
         event_name text not null,
         status event_request_status not null,
         proposed_start timestamptz,
@@ -192,8 +199,18 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
         created_at timestamptz not null default now()
       );
     `);
-    await db.exec(migration('057_event_safety_statuses.sql'));
+    await db.exec(migration('062_safety_statuses.sql'));
     await db.exec(migration('058_safety_review.sql'));
+    await db.exec(`
+      create table safety_review_submissions (
+        id uuid primary key default gen_random_uuid(),
+        event_request_id uuid not null references event_requests(id),
+        submitted_by uuid not null references auth.users(id),
+        note text,
+        created_at timestamptz not null default now()
+      );
+    `);
+    await db.exec(migration('070_safety_review_gates.sql'));
 
     organiser = await user('organiser@example.com', 'event_organiser', 'Alex Organiser');
     coordinator = await user('coordinator@example.com', 'event_coordinator', 'Casey Coordinator');
@@ -214,26 +231,69 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
     await db?.close();
   });
 
+  it('refuses direct status changes that have no current Safety Officer response', async () => {
+    const eventId = await event('No Response Event');
+
+    const approval = await reject(
+      db.query("update event_requests set status = 'safety_approved' where id = $1", [eventId]),
+    );
+    expect(approval.code).toBe('55000');
+
+    const returnToPlanning = await reject(
+      db.query("update event_requests set status = 'approved' where id = $1", [eventId]),
+    );
+    expect(returnToPlanning.code).toBe('55000');
+    expect((await one('select status::text as status from event_requests where id = $1', [eventId])).status)
+      .toBe('safety_review');
+  });
+
+  it('reapplies the safety gate migration without duplicating its trigger', async () => {
+    await db.exec(migration('070_safety_review_gates.sql'));
+
+    expect((await one(
+      "select count(*)::integer as count from pg_trigger where tgname = 'event_requests_safety_transitions'",
+    )).count).toBe(1);
+  });
+
   it('lists oldest safety-stage entry first and returns only the arrangements in the review', async () => {
     const later = await event('Later Event', '2026-10-09T09:00:00Z');
     const earlier = await event('Earlier Event', '2026-10-08T09:00:00Z');
+    await db.query(
+      `insert into safety_review_submissions (event_request_id, submitted_by, note, created_at)
+       values ($1, $2, 'Initial crowd movement note', '2026-10-08T09:00:01Z'),
+              ($1, $4, 'Follow-up crowd movement note', '2026-10-08T09:30:01Z'),
+              ($3, $2, 'Different coordinator note', '2026-10-09T09:00:01Z')`,
+      [earlier, coordinator, later, otherUser],
+    );
+    await db.query(
+      `update event_requests
+          set submitted_at = case id
+            when $1 then '2026-09-02T09:00:00Z'::timestamptz
+            when $2 then '2026-09-01T09:00:00Z'::timestamptz
+          end
+        where id = any($3::uuid[])`,
+      [earlier, later, [earlier, later]],
+    );
     await bookedVenue(earlier);
     const equipmentRequestId = await equipment(earlier);
 
     const queue = await json('select safety_review_queue()::text as answer');
-    expect(queue.map((item) => item.id)).toEqual([earlier, later]);
-    expect(queue[0]).toMatchObject({
+    const targetEvents = queue.filter((item) => [earlier, later].includes(item.id));
+    expect(targetEvents.map((item) => item.id)).toEqual([earlier, later]);
+    expect(targetEvents[0]).toMatchObject({
       eventName: 'Earlier Event',
-      coordinatorName: 'Casey Coordinator',
+      coordinatorName: 'Other User',
       venues: ['Hall A'],
     });
-    expect(queue[0].waitingSeconds).toBeGreaterThan(queue[1].waitingSeconds);
+    expect(targetEvents[1].coordinatorName).toBe('Casey Coordinator');
+    expect(targetEvents[0].waitingSeconds).toBeGreaterThan(targetEvents[1].waitingSeconds);
 
     const detail = await json('select safety_review_detail($1)::text as answer', [earlier]);
     expect(detail.event).toMatchObject({
       eventName: 'Earlier Event',
       expectedAttendance: 120,
       accessibilityRequirements: 'Step-free access and reserved seating',
+      coordinatorNote: 'Follow-up crowd movement note',
     });
     expect(detail.venues[0]).toMatchObject({
       name: 'Hall A',
@@ -243,12 +303,28 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
       emergencyAccess: 'Two east exits',
       knownRestrictions: null,
     });
+    expect(detail.venues[0]).not.toHaveProperty('startsAt');
+    expect(detail.venues[0]).not.toHaveProperty('endsAt');
     expect(detail.equipment).toMatchObject({
       requestId: equipmentRequestId,
       lines: [{ name: expect.stringContaining('Projector'), technicalNotes: 'Needs a dedicated circuit' }],
     });
     expect(detail.event).not.toHaveProperty('purpose');
     expect(detail.event).not.toHaveProperty('venueRequirements');
+  });
+
+  it('uses the original safety-stage submitter for events predating safety submissions', async () => {
+    const eventId = await event('Legacy Safety Event');
+    await db.query(
+      `update event_request_status_history
+          set changed_by = $2
+        where event_request_id = $1
+          and new_status = 'safety_review'`,
+      [eventId, otherUser],
+    );
+
+    const queue = await json('select safety_review_queue()::text as answer');
+    expect(queue.find((item) => item.id === eventId).coordinatorName).toBe('Other User');
   });
 
   it('records requested changes, returns only marked arrangements, and notifies the required roles', async () => {
@@ -281,10 +357,11 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
       .toEqual({ released: true, release_reason: 'Safety review' });
     expect((await rows('select type, recipient_id from notifications where event_request_id = $1', [eventId])))
       .toHaveLength(4);
-    expect(await rows(
+    expect((await rows(
       'select recipient_id from notifications where event_request_id = $1 and type = $2',
       [eventId, 'safety_review_response'],
-    )).toEqual([{ recipient_id: organiser }, { recipient_id: coordinator }]);
+    )).sort((a, b) => a.recipient_id.localeCompare(b.recipient_id)))
+      .toEqual([organiser, coordinator].sort().map((recipient_id) => ({ recipient_id })));
     expect(await rows(
       'select recipient_id from notifications where event_request_id = $1 and type = $2',
       [eventId, 'safety_booking_flagged'],
@@ -363,6 +440,23 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
       .rejects.toMatchObject({ code: '55000', message: expect.stringContaining('safety_approved') });
     expect((await one('select count(*)::integer as count from safety_review_responses where event_request_id = $1', [noNote])).count)
       .toBe(1);
+  });
+
+  it('accepts only one response when two Safety Officers respond at once', async () => {
+    const eventId = await event('Concurrent Response Event');
+    const results = await Promise.allSettled([
+      respond(eventId, 'approved', 'Approved by first officer.'),
+      respond(eventId, 'rejected', 'Rejected by second officer.'),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect((await one(
+      'select count(*)::integer as count from safety_review_responses where event_request_id = $1',
+      [eventId],
+    )).count).toBe(1);
+    expect((await one('select status::text as status from event_requests where id = $1', [eventId])).status)
+      .toMatch(/^(safety_approved|approved)$/);
   });
 });
 

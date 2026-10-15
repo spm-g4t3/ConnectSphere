@@ -46,6 +46,7 @@ const ARRANGEMENTS = [
   '038_equipment_review.sql',
 ];
 const MIGRATION = '064_safety_review_submission.sql';
+const SAFETY_GATE_MIGRATION = '070_safety_review_gates.sql';
 
 const DAY = 86_400_000;
 const at = (days) => new Date(Date.now() + days * DAY).toISOString();
@@ -189,6 +190,16 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     await db.exec(migration('062_safety_statuses.sql'));
     await db.exec(migration('063_safety_transitions.sql'));
     await db.exec(migration(MIGRATION));
+    await db.exec(`
+      create table safety_review_responses (
+        id uuid primary key default gen_random_uuid(),
+        event_request_id uuid not null,
+        safety_officer_id uuid not null,
+        outcome text not null,
+        created_at timestamptz not null default now()
+      );
+    `);
+    await db.exec(migration(SAFETY_GATE_MIGRATION));
     // A stand-in for 040's holds, as cancelEventRequestDatabase builds it: AC2-13
     // needs a hold to exist, and event_readiness must not count it.
     await db.exec(`
@@ -238,6 +249,7 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
           { key: 'date', met: true, detail: 'Starts in the future' },
         ],
       });
+
     });
 
     it.each([
@@ -340,6 +352,78 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
       // AC2-12.
       const err = await refusal(readiness('00000000-0000-4000-8000-000000000000'));
       expect(err?.code).toBe('P0002');
+    });
+  });
+
+  describe('the status update safety gate', () => {
+    it('SCRUM490_AC12_a_new_event_cannot_start_past_the_safety_gate', async () => {
+      const refused = await refusal(
+        db.query(
+          `insert into event_requests (organiser_id, event_name, status)
+           values ($1, 'Bypass event', 'confirmed')`,
+          [organiser],
+        ),
+      );
+
+      expect(refused?.code).toBe('55000');
+      expect(Number((await one("select count(*) from event_requests where event_name = 'Bypass event'")).count))
+        .toBe(0);
+    });
+
+    it('SCRUM490_AC12_direct_status_updates_cannot_skip_submission_or_safety_approval', async () => {
+      const id = await readyEvent();
+
+      const enterSafetyReview = await refusal(
+        db.query("update event_requests set status = 'safety_review' where id = $1", [id]),
+      );
+      expect(enterSafetyReview?.code).toBe('55000');
+      expect((await one('select status::text as status from event_requests where id = $1', [id])).status)
+        .toBe('approved');
+
+      const bypassSafetyReview = await refusal(
+        db.query("update event_requests set status = 'confirmed' where id = $1", [id]),
+      );
+      expect(bypassSafetyReview?.code).toBe('55000');
+      expect((await one('select status::text as status from event_requests where id = $1', [id])).status)
+        .toBe('approved');
+    });
+
+    it('SCRUM490_AC7_a_resubmission_after_changes_rechecks_each_returned_arrangement', async () => {
+      const id = await readyEvent();
+      const bookingId = (await one(
+        'select id from bookings where event_request_id = $1',
+        [id],
+      )).id;
+      const equipmentId = await equipment(id, 'arranged');
+      await submit(id, coordinatorA, 'Crowd moves through the east doors.');
+
+      await db.query(
+        `insert into safety_review_responses (event_request_id, safety_officer_id, outcome)
+         values ($1, $2, 'changes_requested')`,
+        [id, safetyOfficers[0]],
+      );
+      await db.query("update bookings set status = 'flagged_for_review' where id = $1", [bookingId]);
+      await db.query("update equipment_requests set status = 'pending_review' where id = $1", [equipmentId]);
+      await db.query("update event_requests set status = 'approved' where id = $1", [id]);
+      await db.query(
+        `insert into event_request_status_history
+           (event_request_id, previous_status, new_status, changed_by, reason)
+         values ($1, 'safety_review', 'approved', $2, 'Changes required')`,
+        [id, safetyOfficers[0]],
+      );
+
+      const refused = await refusal(submit(id, coordinatorA, 'Updated arrangements.'));
+      expect(refused?.code).toBe('PT409');
+      expect(JSON.parse(refused.detail).map((item) => item.key)).toEqual(['venue', 'equipment']);
+      expect((await written(id)).event.status).toBe('approved');
+      expect((await written(id)).submissions).toHaveLength(1);
+
+      await db.query("update bookings set status = 'approved' where id = $1", [bookingId]);
+      await db.query("update equipment_requests set status = 'arranged' where id = $1", [equipmentId]);
+      await submit(id, coordinatorA, 'Updated arrangements.');
+
+      expect((await written(id)).event.status).toBe('safety_review');
+      expect((await written(id)).submissions).toHaveLength(2);
     });
   });
 
@@ -602,6 +686,7 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     it('SCRUM489_AC6_064_is_safe_to_run_twice', async () => {
       // AC6-05.
       await db.exec(migration(MIGRATION));
+      await db.exec(migration(SAFETY_GATE_MIGRATION));
 
       const count = async (sql) => Number((await one(sql)).count);
       expect(await count("select count(*) from pg_constraint where conname = 'notifications_type_known'")).toBe(1);

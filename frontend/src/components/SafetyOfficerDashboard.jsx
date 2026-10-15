@@ -97,8 +97,6 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError }) {
                 <dt>Layout</dt><dd>{recorded(venue.layout)}</dd>
                 <dt>Emergency access</dt><dd>{recorded(venue.emergencyAccess)}</dd>
                 <dt>Known restrictions</dt><dd>{recorded(venue.knownRestrictions)}</dd>
-                <dt>Booked for</dt>
-                <dd>{formatRange(venue.startsAt, venue.endsAt, "Not recorded")}</dd>
               </dl>
               {canMarkArrangements && responseAllowed && (
                 <label className="safety-review__affected">
