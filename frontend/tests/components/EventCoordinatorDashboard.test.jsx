@@ -46,6 +46,12 @@ vi.mock("../../src/services/bookingRequestService", async (importOriginal) => ({
   getPendingBookingRequests: vi.fn(),
 }));
 
+// The inbox reads the signed-in user to link its rows; no user, no links, so
+// the dashboard renders as before.
+vi.mock("../../src/auth/AuthContext", () => ({
+  useAuth: () => ({ user: null }),
+}));
+
 const USER = { id: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d", email: "coord@example.com", role: "event_coordinator" };
 
 const NOTIFICATION = {

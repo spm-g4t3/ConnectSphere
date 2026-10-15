@@ -150,7 +150,11 @@ const SCRUM489_FILES = [
 // SCRUM-172: the shared unread count behind the nav badge and the inbox
 // heading. NotificationInbox.jsx and notificationService.js stay in
 // SCRUM17_FILES, where their 100% gate already holds.
-const SCRUM172_FILES = ['src/notifications/UnreadCountContext.jsx']
+const SCRUM172_FILES = [
+  'src/notifications/UnreadCountContext.jsx',
+  // AC7: where each role lands when it opens a notification.
+  'src/services/notificationLink.js',
+]
 
 // https://vite.dev/config/
 //

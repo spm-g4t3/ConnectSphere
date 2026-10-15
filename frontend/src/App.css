@@ -104,6 +104,8 @@ button { cursor: pointer; }
 .my-event-requests__back:hover, .review-queue__back:hover, .unassigned-queue__back:hover, .venue-search__back:hover { background: #eef6f3; }
 .my-event-requests__list { display: grid; gap: 14px; list-style: none; margin: 0; padding: 0; }
 .my-event-requests__item { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(24, 61, 58, 0.05); display: block; padding: 20px; }
+/* SCRUM-172 (AC7): the event a notification was opened for. */
+.my-event-requests__item--focused { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(8, 127, 123, 0.16); }
 .my-event-requests__item-main { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; }
 .my-event-requests__item-description { line-height: 1.5; margin: 10px 0; }
 /* SCRUM-486 (SCRUM-520). Where a submitted request stands with its

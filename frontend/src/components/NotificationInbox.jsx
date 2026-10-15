@@ -12,14 +12,16 @@
 // its card styling and scoped rules come from the parent that mounts it.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import {
   listNotifications,
   markNotificationRead,
 } from "../services/notificationService";
 import { describeNotification } from "../services/notificationDisplay";
 import { formatTimestamp } from "../services/displayFormat";
+import { notificationLink } from "../services/notificationLink";
 import { useUnreadCount } from "../notifications/UnreadCountContext";
+import { useAuth } from "../auth/AuthContext";
 
 // Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES. No
 // 403: the route has no role gate, so a 403 cannot happen.
@@ -47,6 +49,7 @@ export default function NotificationInbox() {
   const [rowErrors, setRowErrors] = useState({});
 
   const { unreadCount: serverUnreadCount, refreshUnreadCount } = useUnreadCount();
+  const { user } = useAuth();
   const location = useLocation();
   const sectionRef = useRef(null);
 
@@ -127,6 +130,16 @@ export default function NotificationInbox() {
     }
   }
 
+  // SCRUM-172 (AC7): opening a notification counts as reading it. The count
+  // re-reads when the user returns, so navigation never waits on this call
+  // and a failure is left for the next visit.
+  function markOpenedRead(notification) {
+    if (notification.readAt) return;
+    markNotificationRead(notification.id)
+      .then(() => refreshUnreadCount())
+      .catch(() => {});
+  }
+
   // The list is capped at 50 and the server count is exact, so the server
   // count wins whenever it is known: the nav badge shows the same number, and
   // the two must never disagree.
@@ -155,6 +168,7 @@ export default function NotificationInbox() {
           const { headline, detail } = describeNotification(notification);
           const unread = !notification.readAt;
           const rowError = rowErrors[notification.id];
+          const link = user ? notificationLink(notification, user.role) : null;
 
           return (
             <li
@@ -167,7 +181,18 @@ export default function NotificationInbox() {
             >
               <div className="notification-inbox__body">
                 <p className="notification-inbox__headline">
-                  <strong>{headline}</strong>
+                  {link ? (
+                    <Link
+                      className="notification-inbox__link"
+                      to={link.to}
+                      state={link.state}
+                      onClick={() => markOpenedRead(notification)}
+                    >
+                      <strong>{headline}</strong>
+                    </Link>
+                  ) : (
+                    <strong>{headline}</strong>
+                  )}
                   {unread && <span className="notification-inbox__new">New</span>}
                 </p>
                 <p className="notification-inbox__detail">{detail}</p>

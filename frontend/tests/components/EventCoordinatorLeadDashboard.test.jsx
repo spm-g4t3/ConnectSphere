@@ -37,6 +37,12 @@ vi.mock("../../src/services/notificationService", () => ({
   markNotificationRead: vi.fn(),
 }));
 
+// The inbox reads the signed-in user to link its rows; no user, no links, so
+// the dashboard renders as before.
+vi.mock("../../src/auth/AuthContext", () => ({
+  useAuth: () => ({ user: null }),
+}));
+
 const LEAD = { id: "77777777-7777-4777-8777-777777777777", email: "lead@example.com", role: "event_coordinator_lead" };
 const REQUEST_ID = "22222222-2222-4222-8222-222222222222";
 

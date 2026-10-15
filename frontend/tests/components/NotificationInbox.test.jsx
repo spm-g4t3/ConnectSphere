@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import NotificationInbox from "../../src/components/NotificationInbox.jsx";
 import Navigation from "../../src/components/Navigation.jsx";
@@ -30,8 +30,8 @@ vi.mock("../../src/services/notificationService", () => ({
   markNotificationRead: vi.fn(),
 }));
 
-// Only the SCRUM-172 cases below render under UnreadCountProvider, which reads
-// the signed-in user; the inbox itself never calls useAuth.
+// The inbox reads the signed-in user to link its rows, and the SCRUM-172 cases
+// below also render under UnreadCountProvider, which reads it too.
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
 }));
@@ -105,6 +105,8 @@ beforeEach(() => {
   vi.mocked(markNotificationRead).mockReset();
   vi.mocked(getUnreadCount).mockReset();
   vi.mocked(useAuth).mockReset();
+  // No user, no links: the rows render as they did before AC7.
+  vi.mocked(useAuth).mockReturnValue({ user: null });
   setVisibility("visible");
 });
 
@@ -748,5 +750,118 @@ describe("SCRUM172_AC4 the nav link lands on the inbox", () => {
     );
 
     expect(await screen.findByText("You have no notifications.")).toBeInTheDocument();
+  });
+});
+
+describe("SCRUM172_AC7 selecting a notification opens its event", () => {
+  const EVENT = "22222222-2222-4222-8222-222222222222";
+  const COORDINATOR = { id: "c1", name: "Priya Nair", role: "event_coordinator" };
+  const ORGANISER = { id: "o1", name: "Olivia Tan", role: "event_organiser" };
+  const LINKED = { ...UNREAD, eventRequestId: EVENT };
+  const LINKED_READ = { ...READ, eventRequestId: EVENT };
+
+  function ReviewProbe() {
+    const { id } = useParams();
+    return <p>Review page for {id}</p>;
+  }
+
+  function EventsProbe() {
+    const { state } = useLocation();
+    return <p>Events page with {JSON.stringify(state)}</p>;
+  }
+
+  /** The inbox at /dashboard under the real provider, with probe pages to land on. */
+  function renderAs(user) {
+    vi.mocked(useAuth).mockReturnValue({ user, logout: vi.fn() });
+    vi.mocked(getUnreadCount).mockResolvedValue(1);
+    return render(
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <UnreadCountProvider>
+          <Routes>
+            <Route path="/dashboard" element={<NotificationInbox />} />
+            <Route path="/event-requests/:id" element={<ReviewProbe />} />
+            <Route path="/events" element={<EventsProbe />} />
+          </Routes>
+        </UnreadCountProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it("SCRUM172_AC7_linked_headline_is_a_link_to_the_event", async () => {
+    vi.mocked(listNotifications).mockResolvedValue([LINKED]);
+    renderAs(COORDINATOR);
+
+    const link = await screen.findByRole("link", { name: "Tech Talk at Hall A needs review" });
+    expect(link).toHaveAttribute("href", `/event-requests/${EVENT}`);
+  });
+
+  it("SCRUM172_AC7_a_role_without_an_event_page_gets_no_link", async () => {
+    vi.mocked(listNotifications).mockResolvedValue([LINKED]);
+    renderAs({ id: "v1", name: "Victor", role: "venue_staff" });
+
+    await screen.findByText("Tech Talk at Hall A needs review");
+    expect(within(rowFor("Tech Talk")).queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM172_AC7_clicking_an_unread_link_marks_it_read_then_refreshes_and_navigates", async () => {
+    const user = userEvent.setup();
+    const mark = deferred();
+    vi.mocked(markNotificationRead).mockReturnValue(mark.promise);
+    vi.mocked(listNotifications).mockResolvedValue([LINKED]);
+    renderAs(COORDINATOR);
+    // Provider mount plus the list's own refresh.
+    await waitFor(() => expect(getUnreadCount).toHaveBeenCalledTimes(2));
+
+    await user.click(await screen.findByRole("link", { name: "Tech Talk at Hall A needs review" }));
+
+    // Navigation does not wait on the mark.
+    expect(await screen.findByText(`Review page for ${EVENT}`)).toBeInTheDocument();
+    expect(markNotificationRead).toHaveBeenCalledWith(LINKED.id);
+    expect(getUnreadCount).toHaveBeenCalledTimes(2);
+
+    await act(async () => mark.resolve({ ...LINKED, readAt: MARKED_AT }));
+    await waitFor(() => expect(getUnreadCount).toHaveBeenCalledTimes(3));
+  });
+
+  it("SCRUM172_AC7_clicking_a_read_link_does_not_mark_it_again", async () => {
+    const user = userEvent.setup();
+    vi.mocked(listNotifications).mockResolvedValue([LINKED_READ]);
+    renderAs(COORDINATOR);
+
+    await user.click(await screen.findByRole("link", { name: "Orientation at Hall A needs review" }));
+
+    expect(await screen.findByText(`Review page for ${EVENT}`)).toBeInTheDocument();
+    expect(markNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM172_AC7_a_failed_mark_still_navigates_without_an_error", async () => {
+    const user = userEvent.setup();
+    vi.mocked(markNotificationRead).mockRejectedValue(httpError(500));
+    vi.mocked(listNotifications).mockResolvedValue([LINKED]);
+    renderAs(COORDINATOR);
+    await waitFor(() => expect(getUnreadCount).toHaveBeenCalledTimes(2));
+
+    await user.click(await screen.findByRole("link", { name: "Tech Talk at Hall A needs review" }));
+
+    expect(await screen.findByText(`Review page for ${EVENT}`)).toBeInTheDocument();
+    await waitFor(() => expect(markNotificationRead).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    // A failed mark changed nothing, so the count is not re-read.
+    expect(getUnreadCount).toHaveBeenCalledTimes(2);
+  });
+
+  it("SCRUM172_AC7_organiser_link_carries_the_event_to_their_list", async () => {
+    const user = userEvent.setup();
+    vi.mocked(markNotificationRead).mockResolvedValue({ ...LINKED, readAt: MARKED_AT });
+    vi.mocked(listNotifications).mockResolvedValue([LINKED]);
+    renderAs(ORGANISER);
+
+    const link = await screen.findByRole("link", { name: "Tech Talk at Hall A needs review" });
+    expect(link).toHaveAttribute("href", "/events");
+    await user.click(link);
+
+    expect(
+      await screen.findByText(`Events page with ${JSON.stringify({ focusEventRequestId: EVENT })}`),
+    ).toBeInTheDocument();
   });
 });
