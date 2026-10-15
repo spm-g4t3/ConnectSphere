@@ -37,11 +37,15 @@ const NOTIFICATION_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
 const OTHER_NOTIFICATION_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae8';
 const BOOKING_ID = 'a1b2c3d4-0000-4000-8000-000000000001';
 const BLOCK_ID = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
+const EVENT_ID = 'c0ffee00-1234-4abc-8def-000000000001';
+const PAYLOAD_EVENT_ID = 'c0ffee00-1234-4abc-8def-000000000002';
+const BOOKING_EVENT_ID = 'c0ffee00-1234-4abc-8def-000000000003';
 const FROZEN_NOW = new Date('2026-09-28T06:30:00.000Z');
 const FIRST_READ = '2026-09-27T01:00:00+00:00';
 
 // SCRUM-491 added venue_hold_id, the hold a 'venue_hold_expired' notice is about.
-const COLUMNS = 'id, recipient_id, type, booking_id, block_id, venue_hold_id, event_request_id, payload, read_at, created_at';
+// SCRUM-172 added the booking embed, the event fallback for booking-only types.
+const COLUMNS = 'id, recipient_id, type, booking_id, block_id, venue_hold_id, event_request_id, payload, read_at, created_at, booking:bookings(event_request_id)';
 
 const PAYLOAD = {
   venueName: 'Seminar Room 2-1',
@@ -141,8 +145,11 @@ describe('the test double', () => {
 
 describe('toNotification', () => {
   it('SCRUM17_AC3_maps_a_row_to_exactly_the_contract_shape', () => {
-    const mapped = toNotification(notificationRow());
+    // The row carries the booking embed, as the real select returns it, so a
+    // leaked `booking` key would break the exact key list below.
+    const mapped = toNotification(notificationRow({ booking: { event_request_id: null } }));
     expect(mapped).toEqual(CAMEL_NOTIFICATION);
+    expect(mapped).not.toHaveProperty('booking');
     expect(Object.keys(mapped).sort()).toEqual(
       ['blockId', 'bookingId', 'createdAt', 'eventRequestId', 'id', 'payload', 'readAt', 'type', 'venueHoldId'],
     );
@@ -189,6 +196,55 @@ describe('toNotification', () => {
 
   it('carries read_at through when set', () => {
     expect(toNotification(notificationRow({ read_at: FIRST_READ })).readAt).toBe(FIRST_READ);
+  });
+});
+
+
+describe('toNotification: the related event (SCRUM-172)', () => {
+  it('SCRUM172_AC7_event_id_comes_from_the_column_first', () => {
+    const mapped = toNotification(
+      notificationRow({
+        event_request_id: EVENT_ID,
+        payload: { ...PAYLOAD, eventRequestId: PAYLOAD_EVENT_ID },
+        booking: { event_request_id: BOOKING_EVENT_ID },
+      }),
+    );
+    expect(mapped.eventRequestId).toBe(EVENT_ID);
+  });
+
+  it('SCRUM172_AC7_falls_back_to_the_payload_event_id', () => {
+    const mapped = toNotification(
+      notificationRow({
+        type: 'venue_hold_expired',
+        payload: { eventRequestId: PAYLOAD_EVENT_ID },
+        booking: { event_request_id: BOOKING_EVENT_ID },
+      }),
+    );
+    expect(mapped.eventRequestId).toBe(PAYLOAD_EVENT_ID);
+  });
+
+  it('SCRUM172_AC7_falls_back_to_the_booking_event_for_booking_only_types', () => {
+    const mapped = toNotification(
+      notificationRow({ booking: { event_request_id: BOOKING_EVENT_ID } }),
+    );
+    expect(mapped.type).toBe('booking_flagged');
+    expect(mapped.eventRequestId).toBe(BOOKING_EVENT_ID);
+  });
+
+  it.each([
+    ['a payload without it', PAYLOAD],
+    ['a null payload', null],
+  ])('SCRUM172_AC7_is_null_when_no_event_is_known (%s)', (_label, payload) => {
+    const mapped = toNotification(notificationRow({ booking_id: null, payload, booking: null }));
+    expect(mapped.eventRequestId).toBeNull();
+  });
+
+  it('SCRUM172_AC7_does_not_return_the_embedded_booking', () => {
+    const mapped = toNotification(
+      notificationRow({ booking: { event_request_id: BOOKING_EVENT_ID } }),
+    );
+    expect(mapped).not.toHaveProperty('booking');
+    expect(Object.values(mapped)).not.toContainEqual({ event_request_id: BOOKING_EVENT_ID });
   });
 });
 
@@ -259,6 +315,19 @@ describe('listNotifications', () => {
 
     expect(list.map((n) => n.id)).toEqual([OTHER_NOTIFICATION_ID, NOTIFICATION_ID]);
     expect(list[1].readAt).toBe(FIRST_READ);
+  });
+
+  it('SCRUM172_AC7_list_resolves_the_event_for_each_row', async () => {
+    const rows = [
+      notificationRow({ booking: { event_request_id: BOOKING_EVENT_ID } }),
+      notificationRow({ id: OTHER_NOTIFICATION_ID, booking_id: null, booking: null }),
+    ];
+    from.mockReturnValue(queryStub(ok(rows)));
+
+    const list = await listNotifications(COORDINATOR_ID);
+
+    expect(list.map((n) => n.eventRequestId)).toEqual([BOOKING_EVENT_ID, null]);
+    expect(list[0]).not.toHaveProperty('booking');
   });
 
   it('SCRUM17_AC3_returns_an_empty_list_when_there_are_none', async () => {

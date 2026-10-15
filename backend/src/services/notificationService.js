@@ -34,7 +34,7 @@ import { validateNotificationId } from '../validation/notificationValidation.js'
 
 /** Every column toNotification reads, so each read selects the same shape. */
 const NOTIFICATION_COLUMNS =
-  'id, recipient_id, type, booking_id, block_id, venue_hold_id, event_request_id, payload, read_at, created_at';
+  'id, recipient_id, type, booking_id, block_id, venue_hold_id, event_request_id, payload, read_at, created_at, booking:bookings(event_request_id)';
 
 /**
  * Enough for a dashboard card without paging. Read notifications stay in the
@@ -89,7 +89,11 @@ export function toNotification(row) {
     // SCRUM-491: the hold a 'venue_hold_expired' notice is about (040); null
     // for every other type.
     venueHoldId: row.venue_hold_id,
-    eventRequestId: row.event_request_id ?? null,
+    // SCRUM-172: older types store the event only in the payload, or only via
+    // their booking, so fall back in that order. The embedded booking itself
+    // is not returned.
+    eventRequestId:
+      row.event_request_id ?? row.payload?.eventRequestId ?? row.booking?.event_request_id ?? null,
     payload: row.payload ?? {},
     readAt: row.read_at,
     createdAt: row.created_at,
