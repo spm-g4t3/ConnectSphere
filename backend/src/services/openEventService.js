@@ -32,6 +32,8 @@ const SETTINGS_COLUMNS = `
 // status is read only to re-check it; it is not part of the response.
 const COLUMNS = `id, event_name, description, proposed_start, proposed_end, status, ${SETTINGS_COLUMNS}`;
 
+const PAGE_SIZE = 1000;
+
 async function resolveClient(client) {
   if (client) return client;
 
@@ -141,15 +143,27 @@ export async function listOpenEvents({ attendeeId, client, now = new Date() } = 
 
   const db = await resolveClient(client);
 
-  const { data, error } = await openEventsQuery(db, now.toISOString())
-    .order('proposed_start', { ascending: true })
-    .order('id', { ascending: true });
+  const instant = now.toISOString();
+  const rows = [];
 
-  // Untyped on purpose: the route logs it and answers a generic 500, so a
-  // driver message never reaches the caller.
-  if (error) throw error;
+  // PostgREST caps a response at 1,000 rows and says nothing when it cuts one
+  // off, so read page by page. The id tiebreak keeps the order stable between pages.
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await openEventsQuery(db, instant)
+      .order('proposed_start', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
 
-  const events = (data ?? []).filter((row) => isOpenForRegistration(toSettings(row), now));
+    // Untyped on purpose: the route logs it and answers a generic 500, so a
+    // driver message never reaches the caller.
+    if (error) throw error;
+
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+
+  const events = rows.filter((row) => isOpenForRegistration(toSettings(row), now));
 
   return withRegistrationState(db, events, attendeeId);
 }

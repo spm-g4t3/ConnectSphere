@@ -14,7 +14,14 @@
 -- status). The body is not checked when the function is created, so this can be
 -- run before that table exists; calling it before then fails.
 -- Only 'registered' holds a place (ACTIVE_REGISTRATION_STATUS in
--- backend/src/domain/registrationAvailability.js). The route gates the role.
+-- backend/src/domain/registrationAvailability.js).
+--
+-- The function trusts nothing but the database: p_attendee_id must be an
+-- account whose role is attendee (42501 otherwise), and execute is revoked from
+-- public, anon and authenticated, as for create_booking_request (030), so only
+-- the API's secret key can call it. The route gates the role as well; both must
+-- agree, so a caller cannot read another account's registrations by passing
+-- its id.
 
 create or replace function open_event_registration_state(
   p_event_ids   uuid[],
@@ -33,6 +40,16 @@ begin
     raise exception 'An attendee is required' using errcode = '22023';
   end if;
 
+  if not exists (
+    select 1
+      from profiles p
+     where p.id = p_attendee_id
+       and p.role = 'attendee'
+  ) then
+    raise exception 'Only an attendee may read registration state'
+      using errcode = '42501';
+  end if;
+
   return query
     select r.event_request_id,
            count(*),
@@ -43,3 +60,6 @@ begin
      group by r.event_request_id;
 end;
 $$;
+
+revoke execute on function open_event_registration_state(uuid[], uuid)
+  from public, anon, authenticated;

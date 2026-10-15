@@ -13,10 +13,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getOpenEvent } from "../services/openEventService";
 import useRefreshOnReturn from "./useRefreshOnReturn";
+import useOpenEventRead from "./useOpenEventRead";
+import OpenEventAvailability, { RegisteredBadge } from "./OpenEventAvailability";
 import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import {
   EVENT_TIME_NOTE,
-  availabilityLabel,
   formatEventDate,
   formatEventEndTime,
   formatEventStartTime,
@@ -76,93 +77,42 @@ const FILLED_MESSAGE = "Sorry, this event filled up before your registration wen
 const ALREADY_MESSAGE = "You are already registered for this event.";
 const GENERIC_REGISTER_MESSAGE = "Registration could not be completed. Please try again.";
 
-// A refusal is not transient: keeping the details on screen after one would be wrong.
-const REFUSALS = [401, 403];
+const DETAILS_FALLBACK = "This event could not be loaded. Please try again.";
 
 export default function BrowseEventDetails({ onRegister }) {
   const { eventId } = useParams();
-  const [event, setEvent] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [notOpen, setNotOpen] = useState(false);
-  const [error, setError] = useState(null);
-  const [refreshFailed, setRefreshFailed] = useState(false);
+  const fetchEvent = useCallback(() => getOpenEvent(eventId), [eventId]);
+  const {
+    data: event,
+    loading,
+    notFound: notOpen,
+    error,
+    refreshFailed,
+    load,
+  } = useOpenEventRead(fetchEvent, {
+    messages: LOAD_ERROR_MESSAGES,
+    fallback: DETAILS_FALLBACK,
+    notFoundIsAnswer: true,
+  });
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState(null);
   const [notice, setNotice] = useState(null);
-  const latest = useRef(0);
-  const loaded = useRef(false);
   const sending = useRef(false);
   const currentEventId = useRef(eventId);
-  // Reads the event and shows the answer. Resolves to what was found, so a
-  // caller that needs the fresh state (a failed registration) can act on it:
-  // { kind: "open", event }, { kind: "not-open" } or { kind: "error" }, or
-  // { kind: "superseded" } when a newer read took over.
-  const load = useCallback(async () => {
-    const mine = ++latest.current;
-    const background = loaded.current;
-    if (!background) {
-      setLoading(true);
-      setError(null);
-      setNotOpen(false);
-      setEvent(null);
-    }
-
-    try {
-      const fresh = await getOpenEvent(eventId);
-      if (mine !== latest.current) return { kind: "superseded" };
-      loaded.current = true;
-      setEvent(fresh);
-      setNotOpen(false);
-      setError(null);
-      setRefreshFailed(false);
-      return { kind: "open", event: fresh };
-    } catch (err) {
-      if (mine !== latest.current) return { kind: "superseded" };
-      const status = err.response?.status;
-
-      if (status === 404) {
-        // No longer open, for whatever reason: nothing may still offer to register.
-        loaded.current = true;
-        setEvent(null);
-        setNotOpen(true);
-        setError(null);
-        setRefreshFailed(false);
-        return { kind: "not-open" };
-      }
-
-      if (background && !REFUSALS.includes(status)) {
-        setRefreshFailed(true);
-        return { kind: "error" };
-      }
-
-      loaded.current = false;
-      setEvent(null);
-      setNotOpen(false);
-      setRefreshFailed(false);
-      setError(
-        LOAD_ERROR_MESSAGES[status] || "This event could not be loaded. Please try again.",
-      );
-      return { kind: "error" };
-    } finally {
-      if (mine === latest.current) setLoading(false);
-    }
-  }, [eventId]);
 
   useEffect(() => {
     currentEventId.current = eventId;
-    loaded.current = false;
     // Banners belong to the event they were raised on.
     setNotice(null);
     setRegisterError(null);
-    load();
-  }, [eventId, load]);
+  }, [eventId]);
 
-  // Not while a registration is in flight: that attempt refreshes when it ends.
-  const refreshOnReturn = useCallback(() => {
+  // Not while a registration is in flight: that attempt refreshes when it ends,
+  // and a read started now would supersede that one and hide what happened.
+  const refreshUnlessRegistering = useCallback(() => {
     if (!sending.current) load();
   }, [load]);
-  useRefreshOnReturn(refreshOnReturn);
-
+  useRefreshOnReturn(refreshUnlessRegistering);
   async function handleRegister() {
     if (!onRegister || sending.current || !event) return;
     sending.current = true;
@@ -196,11 +146,11 @@ export default function BrowseEventDetails({ onRegister }) {
 
     if (registered) {
       setNotice(`You are registered for ${name}.`);
-    } else if (fresh.kind === "open" && fresh.event.isRegistered) {
+    } else if (fresh.kind === "ok" && fresh.data.isRegistered) {
       setRegisterError(ALREADY_MESSAGE);
-    } else if (fresh.kind === "open" && fresh.event.isFull) {
+    } else if (fresh.kind === "ok" && fresh.data.isFull) {
       setRegisterError(FILLED_MESSAGE);
-    } else if (fresh.kind !== "not-open") {
+    } else if (fresh.kind !== "not-found") {
       // When the event is no longer open, the not-open message already says so.
       setRegisterError(GENERIC_REGISTER_MESSAGE);
     }
@@ -220,6 +170,14 @@ export default function BrowseEventDetails({ onRegister }) {
           </div>
         )}
 
+        {/* Outside the details: the reload after registering can find the event
+            closed, and the attendee must still be told they are registered. */}
+        {notice && (
+          <div className="browse-event-details__success" role="status">
+            <p>{notice}</p>
+          </div>
+        )}
+
         {!loading && error && (
           <div className="browse-event-details__error" role="alert">
             <p>{error}</p>
@@ -232,7 +190,7 @@ export default function BrowseEventDetails({ onRegister }) {
         {refreshFailed && (
           <div className="browse-event-details__notice" role="status">
             <p>Could not refresh this event. Showing the details as last loaded.</p>
-            <button type="button" onClick={load}>
+            <button type="button" onClick={refreshUnlessRegistering} disabled={registering}>
               Try again
             </button>
           </div>
@@ -260,20 +218,8 @@ export default function BrowseEventDetails({ onRegister }) {
               <div>
                 <dt>Availability</dt>
                 <dd>
-                  <span
-                    className={
-                      event.isFull
-                        ? "browse-open-events__availability browse-open-events__availability--full"
-                        : "browse-open-events__availability"
-                    }
-                  >
-                    {availabilityLabel(event)}
-                  </span>
-                  {event.isRegistered && (
-                    <span className="browse-open-events__badge browse-open-events__badge--registered">
-                      Registered
-                    </span>
-                  )}
+                  <OpenEventAvailability event={event} />
+                  {event.isRegistered && <RegisteredBadge />}
                 </dd>
               </div>
             </dl>
@@ -290,11 +236,6 @@ export default function BrowseEventDetails({ onRegister }) {
               stale={refreshFailed}
               onClick={handleRegister}
             />
-            {notice && (
-              <div className="browse-event-details__success" role="status">
-                <p>{notice}</p>
-              </div>
-            )}
             {registerError && (
               <div className="browse-event-details__error" role="alert">
                 <p>{registerError}</p>

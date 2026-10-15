@@ -136,6 +136,8 @@ const SCRUM495_FILES = [
   'src/components/BrowseOpenEvents.jsx',
   'src/components/BrowseEventDetails.jsx',
   'src/components/useRefreshOnReturn.js',
+  'src/components/useOpenEventRead.js',
+  'src/components/OpenEventAvailability.jsx',
   'src/services/openEventDisplay.js',
   'src/services/openEventRoutes.js',
   'src/services/openEventService.js',

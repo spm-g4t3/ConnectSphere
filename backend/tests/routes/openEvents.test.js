@@ -131,6 +131,10 @@ function createFakeClient(
           call.orders.push([column, options]);
           return chain;
         },
+        range: (first, last) => {
+          call.range = [first, last];
+          return chain;
+        },
         then: (resolve, reject) => {
           if (failure) return Promise.resolve({ data: null, error: failure }).then(resolve, reject);
 
@@ -154,6 +158,9 @@ function createFakeClient(
               return x < y ? -direction : x > y ? direction : 0;
             });
           }
+          // Like PostgREST, a response never holds more than 1,000 rows.
+          const [first, last] = call.range ?? [0, 999];
+          result = result.slice(first, Math.min(last, first + 999) + 1);
           return Promise.resolve({ data: result, error: null }).then(resolve, reject);
         },
       };
@@ -700,6 +707,19 @@ describe('SCRUM495_AC4 sorted by start, earliest first', () => {
     expect(client.calls[0].orders).toEqual([
       ['proposed_start', { ascending: true }],
       ['id', { ascending: true }],
+    ]);
+  });
+
+  it('SCRUM495_AC4_lists_every_open_event_when_more_than_one_page_is_open', async () => {
+    const rows = Array.from({ length: 1001 }, () => eventRow());
+    const client = createFakeClient(rows);
+
+    const res = await get(client);
+
+    expect(res.body).toHaveLength(1001);
+    expect(client.calls.filter((c) => c.table === 'event_requests').map((c) => c.range)).toEqual([
+      [0, 999],
+      [1000, 1999],
     ]);
   });
 });

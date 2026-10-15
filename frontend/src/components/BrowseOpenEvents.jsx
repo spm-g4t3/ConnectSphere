@@ -6,14 +6,14 @@
 // It is read on open and when the reader returns to the tab, without blanking
 // the list. A failed refresh keeps the last list with a notice, a lost session
 // or refused role replaces it, and the newest read wins.
-import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getOpenEvents } from "../services/openEventService";
 import useRefreshOnReturn from "./useRefreshOnReturn";
+import useOpenEventRead from "./useOpenEventRead";
+import OpenEventAvailability, { RegisteredBadge } from "./OpenEventAvailability";
 import { openEventDetailsPath } from "../services/openEventRoutes";
 import {
   EVENT_TIME_NOTE,
-  availabilityLabel,
   formatEventDate,
   formatEventEndTime,
   formatEventStartTime,
@@ -33,11 +33,7 @@ function EventRow({ event }) {
           <Link to={openEventDetailsPath(event.id)}>
             <strong>{event.eventName || "Unnamed event"}</strong>
           </Link>
-          {event.isRegistered && (
-            <span className="browse-open-events__badge browse-open-events__badge--registered">
-              Registered
-            </span>
-          )}
+          {event.isRegistered && <RegisteredBadge />}
         </span>
         <span className="browse-open-events__meta">
           <span>{formatEventDate(event.startsAt)}</span>
@@ -46,67 +42,19 @@ function EventRow({ event }) {
           <span>{EVENT_TIME_NOTE}</span>
         </span>
       </div>
-      <span
-        className={
-          event.isFull
-            ? "browse-open-events__availability browse-open-events__availability--full"
-            : "browse-open-events__availability"
-        }
-      >
-        {availabilityLabel(event)}
-      </span>
+      <OpenEventAvailability event={event} />
     </li>
   );
 }
 
-// A refusal is not transient: keeping the list on screen after one would be wrong.
-const REFUSALS = [401, 403];
+const LIST_FALLBACK = "Open events could not be loaded. Please try again.";
 
 export default function BrowseOpenEvents() {
-  const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [refreshFailed, setRefreshFailed] = useState(false);
-  const latest = useRef(0);
-  const loaded = useRef(false);
-
-  const fetchEvents = useCallback(async () => {
-    const mine = ++latest.current;
-    const background = loaded.current;
-    if (!background) {
-      setLoading(true);
-      setError(null);
-    }
-
-    try {
-      const data = await getOpenEvents();
-      if (mine !== latest.current) return;
-      loaded.current = true;
-      setEvents(data);
-      setError(null);
-      setRefreshFailed(false);
-    } catch (err) {
-      if (mine !== latest.current) return;
-      const status = err.response?.status;
-      if (background && !REFUSALS.includes(status)) {
-        setRefreshFailed(true);
-        return;
-      }
-      loaded.current = false;
-      setEvents([]);
-      setRefreshFailed(false);
-      setError(
-        LIST_ERROR_MESSAGES[status] || "Open events could not be loaded. Please try again.",
-      );
-    } finally {
-      if (mine === latest.current) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchEvents();
-  }, [fetchEvents]);
-
+  const { data, loading, error, refreshFailed, load: fetchEvents } = useOpenEventRead(getOpenEvents, {
+    messages: LIST_ERROR_MESSAGES,
+    fallback: LIST_FALLBACK,
+  });
+  const events = data ?? [];
   useRefreshOnReturn(fetchEvents);
   return (
     <>

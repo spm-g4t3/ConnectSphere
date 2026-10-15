@@ -738,6 +738,64 @@ describe("SCRUM495 moving to another event", () => {
     expect(screen.getByRole("heading", { name: "Workshop", level: 1 })).toBeInTheDocument();
     expect(screen.queryByText(/You are registered for/)).not.toBeInTheDocument();
   });
+
+  it("SCRUM495_AC5_a_refresh_notice_for_one_event_is_not_shown_on_the_next", async () => {
+    const next = pending();
+    vi.mocked(getOpenEvent)
+      .mockResolvedValueOnce(event())
+      .mockRejectedValueOnce({ response: { status: 500 } })
+      .mockReturnValueOnce(next.promise);
+    renderWithSwitch(vi.fn());
+    await screen.findByText("12 places left");
+    returnToTab();
+    await screen.findByText(/Could not refresh this event/);
+
+    await userEvent.click(screen.getByRole("link", { name: "Go to B" }));
+
+    expect(screen.queryByText(/Could not refresh this event/)).not.toBeInTheDocument();
+    await act(async () => next.resolve(event({ id: "e2", eventName: "Workshop" })));
+    await screen.findByRole("heading", { name: "Workshop", level: 1 });
+    expect(registerButton()).toBeEnabled();
+  });
+});
+
+describe("SCRUM495 registering while a refresh is in doubt", () => {
+  it("SCRUM495_AC6_still_says_registered_when_the_event_has_closed_by_the_time_it_is_reloaded", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(getOpenEvent)
+      .mockResolvedValueOnce(event())
+      .mockRejectedValueOnce({ response: { status: 404 } });
+
+    renderDetails({ onRegister });
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+
+    expect(await screen.findByText("You are registered for Open Day.")).toBeInTheDocument();
+    expect(screen.getByText("This event is not open for registration.")).toBeInTheDocument();
+  });
+
+  it("SCRUM495_AC3_cannot_retry_a_refresh_mid_registration_and_still_reports_a_full_event", async () => {
+    const refresh = pending();
+    const registration = pending();
+    const onRegister = vi.fn().mockReturnValue(registration.promise);
+    vi.mocked(getOpenEvent)
+      .mockResolvedValueOnce(event({ placesLeft: 1 }))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValueOnce(event({ placesLeft: 0, isFull: true, canRegister: false }));
+
+    renderDetails({ onRegister });
+    await screen.findByText("1 place left");
+    returnToTab();
+    await userEvent.click(screen.getByRole("button", { name: "Register" }));
+    await act(async () => refresh.reject({ response: { status: 500 } }));
+
+    expect(await screen.findByText(/Could not refresh this event/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeDisabled();
+
+    await act(async () => registration.reject({ response: { status: 409 } }));
+
+    expect(await screen.findByText(/filled up before your registration went through/)).toBeInTheDocument();
+    expect(getOpenEvent).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe("SCRUM495 time zone note", () => {

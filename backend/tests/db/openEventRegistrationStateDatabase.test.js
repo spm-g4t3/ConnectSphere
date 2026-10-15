@@ -21,6 +21,7 @@ const EVENT_B = '00000000-0000-4000-8000-00000000000b';
 const EVENT_C = '00000000-0000-4000-8000-00000000000c';
 const ME = '44444444-4444-4444-8444-444444444444';
 const OTHER = '55555555-5555-4555-8555-555555555555';
+const COORDINATOR = '66666666-6666-4666-8666-666666666666';
 
 let db;
 
@@ -35,6 +36,9 @@ const state = async (ids, attendee) => {
 beforeAll(async () => {
   db = new PGlite();
   await db.exec(`
+    create role anon;
+    create role authenticated;
+    create table profiles (id uuid primary key, role text not null);
     create table registrations (
       id uuid primary key default gen_random_uuid(),
       event_request_id uuid not null,
@@ -43,6 +47,10 @@ beforeAll(async () => {
     );
   `);
   await db.exec(readFileSync(MIGRATION, 'utf8'));
+  await db.query(
+    `insert into profiles (id, role) values ($1, 'attendee'), ($2, 'attendee'), ($3, 'event_coordinator')`,
+    [ME, OTHER, COORDINATOR],
+  );
 
   // 1,200 places taken on A: more than the 1,000 rows an API read returns.
   await db.query(
@@ -66,41 +74,59 @@ afterAll(async () => {
 });
 
 describe('SCRUM495 open_event_registration_state', () => {
-  it('SCRUM495_counts_every_registration_however_many_there_are', async () => {
+  it('SCRUM495_AC3_counts_every_registration_however_many_there_are', async () => {
     const [a] = await state([EVENT_A], OTHER);
 
     expect(a).toMatchObject({ event_request_id: EVENT_A, active_count: 1201, is_registered: false });
   });
 
-  it('SCRUM495_finds_the_callers_own_registration_among_more_than_1000', async () => {
+  it('SCRUM495_AC6_finds_the_callers_own_registration_among_more_than_1000', async () => {
     const [a] = await state([EVENT_A], ME);
 
     expect(a.is_registered).toBe(true);
   });
 
-  it('SCRUM495_counts_only_registered_and_ignores_withdrawn', async () => {
+  it('SCRUM495_AC3_counts_only_registered_and_ignores_withdrawn', async () => {
     const rows = await state([EVENT_B, EVENT_C], OTHER);
 
     expect(rows).toEqual([{ event_request_id: EVENT_B, active_count: 1, is_registered: false }]);
   });
 
-  it('SCRUM495_returns_one_row_per_event_and_none_for_events_not_asked_about', async () => {
+  it('SCRUM495_AC3_returns_one_row_per_event_and_none_for_events_not_asked_about', async () => {
     const rows = await state([EVENT_A, EVENT_B], ME);
 
     expect(rows.map((row) => row.event_request_id)).toEqual([EVENT_A, EVENT_B]);
     expect(rows.find((row) => row.event_request_id === EVENT_B).is_registered).toBe(true);
   });
 
-  it('SCRUM495_returns_nothing_for_an_empty_or_null_list', async () => {
+  it('SCRUM495_AC7_returns_nothing_for_an_empty_or_null_list', async () => {
     expect(await state([], ME)).toEqual([]);
     expect(await state(null, ME)).toEqual([]);
   });
 
-  it('SCRUM495_refuses_a_null_caller', async () => {
+  it('SCRUM495_AC1_refuses_a_null_caller', async () => {
     await expect(state([EVENT_A], null)).rejects.toThrow(/attendee is required/);
   });
 
-  it('SCRUM495_uses_the_status_the_application_treats_as_holding_a_place', () => {
+  it('SCRUM495_AC1_refuses_an_account_that_is_not_an_attendee', async () => {
+    await expect(state([EVENT_A], COORDINATOR)).rejects.toMatchObject({ code: '42501' });
+  });
+
+  it('SCRUM495_AC1_refuses_an_account_that_does_not_exist', async () => {
+    await expect(state([EVENT_A], '99999999-9999-4999-8999-999999999999')).rejects.toMatchObject({ code: '42501' });
+  });
+
+  it('SCRUM495_AC1_is_not_executable_by_public_anon_or_authenticated', async () => {
+    for (const role of ['anon', 'authenticated']) {
+      const { rows } = await db.query(
+        `select has_function_privilege($1, 'open_event_registration_state(uuid[], uuid)', 'execute') as allowed`,
+        [role],
+      );
+      expect(rows[0].allowed).toBe(false);
+    }
+  });
+
+  it('SCRUM495_AC3_uses_the_status_the_application_treats_as_holding_a_place', () => {
     const sql = readFileSync(MIGRATION, 'utf8').replace(/--[^\n]*/g, '');
 
     expect(sql).toContain(`r.status = '${ACTIVE_REGISTRATION_STATUS}'`);

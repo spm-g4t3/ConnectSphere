@@ -281,8 +281,8 @@
 --     later run of process_venue_hold_expiry (040) fails with 23514 on its
 --     notice insert; because the expiry and the notice are one statement,
 --     venue holds would silently stop expiring, with nothing on any screen to
---     show it. The test suite checks that reapplying 052 preserves existing
---     notification types and proves the expiry still runs after
+--     show it. The test suite pins all eight (SCRUM486_AC10_052_keeps_every
+--     _type_048_allows_and_adds_three) and proves the expiry still runs after
 --     this file. 040's
 --     other notification objects (the venue_hold_id column,
 --     notifications_hold_expired_needs_hold, and the partial index
@@ -405,8 +405,9 @@ $$;
 alter table notifications
   add column if not exists event_request_id uuid references event_requests (id) on delete cascade;
 
--- Preserve the existing assignment and live safety notification types so
--- reapplying this migration also succeeds when safety notices already exist.
+-- 048's eight, unchanged and in 048's order (040's seven, then event_cancelled),
+-- then this story's three. Restated from 048 and not 040 or 034; see the
+-- header, which says what happens otherwise.
 
 alter table notifications drop constraint if exists notifications_type_known;
 alter table notifications
@@ -422,11 +423,7 @@ alter table notifications
       'event_cancelled',
       'event_request_awaiting_assignment',
       'event_request_assigned',
-      'event_request_coordinator_assigned',
-      'safety_review_response',
-      'safety_booking_flagged',
-      'safety_equipment_review',
-      'event_submitted_for_safety_review'
+      'event_request_coordinator_assigned'
     )
   );
 
