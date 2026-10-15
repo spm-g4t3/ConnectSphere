@@ -138,7 +138,8 @@ alter table venue_holds
 -- ---------------------------------------------------------------------
 -- 052's eleven, unchanged and in 052's order, then SCRUM-490's three (its
 -- 058 is applied live but not yet on dev; leaving them out fails this file
--- on existing rows and breaks that story's notices), then this file's three.
+-- on existing rows and breaks that story's notices), then 064's one (this file
+-- runs after it, so dropping it would break SCRUM-489's submit), then this file's three.
 
 alter table notifications drop constraint if exists notifications_type_known;
 alter table notifications
@@ -158,6 +159,7 @@ alter table notifications
       'safety_review_response',
       'safety_booking_flagged',
       'safety_equipment_review',
+      'event_submitted_for_safety_review',
       'booking_request_approved',
       'booking_request_rejected',
       'booking_request_conflicting'

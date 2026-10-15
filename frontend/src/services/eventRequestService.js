@@ -219,6 +219,32 @@ export async function cancelEventRequest(
   return response.data;
 }
 
+/**
+ * SCRUM-489 AC2-AC4: the safety check's readiness checklist,
+ * { eventRequestId, ready, items }. The flag is sent only when true, so the
+ * plain read is the path alone.
+ */
+export async function getEventReadiness(id, { noEquipmentConfirmed } = {}) {
+  const path = `/event-requests/${id}/readiness`;
+  const response = noEquipmentConfirmed === true
+    ? await apiClient.get(path, { params: { noEquipmentConfirmed: "true" } })
+    : await apiClient.get(path);
+  return response.data;
+}
+
+/**
+ * SCRUM-489 AC6: submits an Approved event for the safety check. Returns the
+ * event, now in safety_review. A 409 with code EVENT_NOT_READY carries the
+ * outstanding lines as `conflicts`.
+ */
+export async function submitForSafetyReview(id, { note, noEquipmentConfirmed = false } = {}) {
+  const response = await apiClient.post(`/event-requests/${id}/safety-review`, {
+    note,
+    noEquipmentConfirmed,
+  });
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // SCRUM-327: coordinator assignment
 // ---------------------------------------------------------------------------

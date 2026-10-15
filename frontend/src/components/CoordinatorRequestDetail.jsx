@@ -50,6 +50,7 @@ import ReassignEventPanel from "./ReassignEventPanel";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import EventEquipmentSection from "./EventEquipmentSection";
 import EventCancellationPanel from "./EventCancellationPanel";
+import SafetyCheckSubmissionPanel from "./SafetyCheckSubmissionPanel";
 import {
   decideEventRequest,
   getCoordinatorChangeRequests,
@@ -526,6 +527,18 @@ export default function CoordinatorRequestDetail({
         >
           Cancel event
         </button>
+      )}
+      {/* SCRUM-489 AC1: the holder, while Approved. The server checks both again. */}
+      {isAssignedCoordinator && current.status === "approved" && (
+        <SafetyCheckSubmissionPanel
+          key={current.id}
+          eventRequest={current}
+          onSubmitted={(updated) => {
+            setUpdatedRequest(updated);
+            onChangeRequestProcessed?.();
+          }}
+          onStale={() => onChangeRequestProcessed?.()}
+        />
       )}
 
       <section>

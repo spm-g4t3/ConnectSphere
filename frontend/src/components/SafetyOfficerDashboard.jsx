@@ -5,13 +5,16 @@
 // story building it exists, the dashboard "is a screen that says what the role
 // will do there". This is that screen.
 //
-// For the reasons EventCoordinatorLeadDashboard.jsx gives: it fetches nothing
-// (there is no endpoint, and AC3-08 pins that no service is called), shows no
+// For the reasons EventCoordinatorLeadDashboard.jsx gives: the list fetches
+// nothing (there is no endpoint yet; the notifications card, SCRUM-489 AC8, is
+// the one read), shows no
 // invented rows, and links nowhere (App.jsx has no route for the list yet).
 // What a Safety Officer may do is SCRUM-490's to grant.
 //
 // The same page shape as the other dashboards, and the h1 names the role
 // exactly, as AC1 asks.
+
+import CoordinatorNotifications from "./CoordinatorNotifications";
 
 export default function SafetyOfficerDashboard({ user }) {
   return (
@@ -28,6 +31,8 @@ export default function SafetyOfficerDashboard({ user }) {
           by SCRUM-490; until then there is nothing to show.
         </p>
       </section>
+
+      <CoordinatorNotifications />
     </div>
   );
 }
