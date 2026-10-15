@@ -64,7 +64,11 @@ function renderPanel(props = {}) {
 
 const submitButton = () => screen.getByRole("button", { name: /submit for safety check|submitting/i });
 const noteBox = () => screen.getByLabelText(/note for the safety officer/i);
-const checklistRows = () => within(screen.getByRole("list", { name: "Readiness checklist" })).getAllByRole("listitem");
+// The body rows of a checklist table (the first row is the column headers),
+// and each row's cells as text: Item, Status, Detail.
+const bodyRows = (table) => within(table).getAllByRole("row").slice(1);
+const checklistRows = () => bodyRows(screen.getByRole("table", { name: "Readiness checklist" }));
+const cellsOf = (row) => within(row).getAllByRole("cell").map((cell) => cell.textContent);
 
 beforeEach(() => {
   vi.mocked(getEventReadiness).mockReset();
@@ -80,12 +84,29 @@ describe("SCRUM489_AC3 the readiness checklist", () => {
 
     const rows = await waitFor(checklistRows);
 
-    expect(rows.map((row) => row.textContent)).toEqual([
-      "VenueRoom 2OutstandingAwaiting approval",
-      "EquipmentMetArranged",
-      "DateOutstandingThe event's start has passed",
+    expect(rows.map(cellsOf)).toEqual([
+      ["Venue: Room 2", "Outstanding", "Awaiting approval"],
+      ["Equipment", "Met", "Arranged"],
+      ["Date", "Outstanding", "The event's start has passed"],
     ]);
     expect(getEventReadiness).toHaveBeenCalledWith(EVENT_ID, { noEquipmentConfirmed: false });
+  });
+
+  it("SCRUM489_AC3_the_checklist_is_a_table_with_item_status_and_detail", async () => {
+    // Calven's click-through: one row per server line, in the server's order.
+    const NO_VENUE = { key: "venue", met: false, detail: "No venue booking" };
+    vi.mocked(getEventReadiness).mockResolvedValue(checklist([VENUE_MET, NO_VENUE, EQUIPMENT_MET, DATE_MET]));
+    renderPanel();
+
+    const table = await screen.findByRole("table", { name: "Readiness checklist" });
+
+    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual(["Item", "Status", "Detail"]);
+    expect(bodyRows(table)).toHaveLength(4);
+    const venue = within(table).getByRole("row", { name: /Venue: Room 2/ });
+    expect(within(venue).getByText("Met")).toBeInTheDocument();
+    expect(within(venue).getByText("Approved")).toBeInTheDocument();
+    // A venue line with no booking has no name to show.
+    expect(cellsOf(bodyRows(table)[1])).toEqual(["Venue", "Outstanding", "No venue booking"]);
   });
 
   it("SCRUM489_AC3_submit_is_disabled_while_the_checklist_loads", () => {
@@ -149,11 +170,11 @@ describe("SCRUM489_AC3 the readiness checklist", () => {
 
     await user.click(submitButton());
 
-    const listed = await screen.findByRole("list", { name: "Outstanding items" });
-    expect(within(listed).getAllByRole("listitem").map((row) => row.textContent)).toEqual([
-      "VenueRoom 2OutstandingAwaiting approval",
-      "EquipmentOutstandingCannot be fully arranged",
-      "DateOutstandingThe event's start has passed",
+    const listed = await screen.findByRole("table", { name: "Still outstanding" });
+    expect(bodyRows(listed).map(cellsOf)).toEqual([
+      ["Venue: Room 2", "Outstanding", "Awaiting approval"],
+      ["Equipment", "Outstanding", "Cannot be fully arranged"],
+      ["Date", "Outstanding", "The event's start has passed"],
     ]);
     await waitFor(() => expect(getEventReadiness).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(submitButton()).toBeDisabled());
@@ -168,8 +189,8 @@ describe("SCRUM489_AC3 the readiness checklist", () => {
 
     await user.click(submitButton());
 
-    const listed = await screen.findByRole("list", { name: "Outstanding items" });
-    expect(within(listed).queryAllByRole("listitem")).toHaveLength(0);
+    const listed = await screen.findByRole("table", { name: "Still outstanding" });
+    expect(bodyRows(listed)).toHaveLength(0);
     expect(screen.getByText(/not ready for the safety check/)).toBeInTheDocument();
   });
 
@@ -179,7 +200,7 @@ describe("SCRUM489_AC3 the readiness checklist", () => {
 
     const rows = await waitFor(checklistRows);
 
-    expect(rows.map((row) => row.textContent)).toEqual(["OtherOutstandingNot open"]);
+    expect(rows.map(cellsOf)).toEqual([["Other", "Outstanding", "Not open"]]);
   });
 
   it("SCRUM489_AC3_a_read_that_lands_after_a_newer_one_is_ignored", async () => {
@@ -244,7 +265,7 @@ describe("SCRUM489_AC4 the no-equipment confirmation", () => {
 
     await waitFor(() => expect(submitButton()).toBeEnabled());
     expect(getEventReadiness).toHaveBeenLastCalledWith(EVENT_ID, { noEquipmentConfirmed: true });
-    expect(checklistRows()[1]).toHaveTextContent("No equipment neededMetConfirm that this event needs no equipment");
+    expect(cellsOf(checklistRows()[1])).toEqual(["No equipment needed", "Met", "Confirm that this event needs no equipment"]);
   });
 
   it("SCRUM489_AC4_the_confirmation_is_sent_on_submit", async () => {
@@ -377,7 +398,6 @@ describe("SCRUM489_AC6 a successful submission", () => {
 describe("SCRUM489 refusals, keyed on the status and the code", () => {
   it.each([
     [403, "", {}, "You are no longer this event's coordinator, so you cannot submit it."],
-    [400, "", {}, "The note could not be sent. It must be 2,000 characters or fewer."],
     [409, "_with_another_code", { code: "INVALID_STATUS" }, "This event is no longer Approved, so it cannot be submitted for the safety check. The page has been refreshed to show where it stands."],
     [409, "_with_no_code", {}, "This event is no longer Approved, so it cannot be submitted for the safety check. The page has been refreshed to show where it stands."],
     [500, "", {}, "The event could not be submitted for the safety check. No changes have been made; try again."],
@@ -393,6 +413,41 @@ describe("SCRUM489 refusals, keyed on the status and the code", () => {
     expect(screen.queryByText("server words")).not.toBeInTheDocument();
     expect(onSubmitted).not.toHaveBeenCalled();
     expect(onStale).toHaveBeenCalledTimes(status === 409 ? 1 : 0);
+  });
+
+  it("SCRUM489_AC5_a_400_about_the_note_shows_the_note_message", async () => {
+    // Was the 400 row of SCRUM489_AC1_a_%s%s_shows_its_own_message, renamed by
+    // design: the note message is now keyed on details naming the note, since
+    // the database's own refusals are 400s too (Calven's click-through, check C).
+    vi.mocked(submitForSafetyReview).mockRejectedValue(httpError(400, {
+      error: "server words", details: [{ field: "note", message: "must be 2,000 characters or fewer" }],
+    }));
+    const { user } = renderPanel();
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+
+    await user.click(submitButton());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The note could not be sent. It must be 2,000 characters or fewer.");
+  });
+
+  it.each([
+    ["with_no_details", {}],
+    ["with_empty_details", { details: [] }],
+    ["about_another_field", { details: [{ field: "noEquipmentConfirmed", message: "must be true or false" }] }],
+    ["with_details_that_are_not_a_list", { details: "note" }],
+  ])("SCRUM489_AC1_a_400_%s_shows_the_other_message_not_the_note_message", async (_label, data) => {
+    vi.mocked(submitForSafetyReview).mockRejectedValue(httpError(400, { error: "server words", ...data }));
+    const { user, onStale } = renderPanel();
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+
+    await user.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "The submission was refused and nothing was changed. Please try again, or tell the team if it keeps happening.",
+    );
+    expect(alert).not.toHaveTextContent(/note/i);
+    expect(onStale).not.toHaveBeenCalled();
   });
 
   it("SCRUM489_AC1_a_request_that_never_reached_the_server_shows_the_generic_message", async () => {

@@ -24,8 +24,14 @@ const KEY_LABEL = {
 const NOT_APPROVED_MESSAGE =
   "This event is no longer Approved, so it cannot be submitted for the safety check. The page has been refreshed to show where it stands.";
 
+const NOTE_REFUSED_MESSAGE = "The note could not be sent. It must be 2,000 characters or fewer.";
+
+// A 400 is about the note only when its details name the note field: the
+// database's own refusals (a check or a foreign key) are 400s too.
+const OTHER_400_MESSAGE =
+  "The submission was refused and nothing was changed. Please try again, or tell the team if it keeps happening.";
+
 const SUBMIT_ERROR_MESSAGES = {
-  400: "The note could not be sent. It must be 2,000 characters or fewer.",
   403: "You are no longer this event's coordinator, so you cannot submit it.",
 };
 
@@ -36,14 +42,41 @@ function formatCount(value) {
   return value.toLocaleString("en-US");
 }
 
-function ChecklistLine({ item }) {
+function isAboutTheNote(data) {
+  return Array.isArray(data?.details) && data.details.some((entry) => entry?.field === "note");
+}
+
+function itemLabel(item) {
+  const label = KEY_LABEL[item.key] ?? "Other";
+  return item.key === "venue" && item.venueName ? `${label}: ${item.venueName}` : label;
+}
+
+/** The server's lines, in its order. The status is a word; colour only adds to it. */
+function ChecklistTable({ caption, items }) {
   return (
-    <li className={`safety-check-submission__item safety-check-submission__item--${item.met ? "met" : "outstanding"}`}>
-      <strong>{KEY_LABEL[item.key] ?? "Other"}</strong>
-      {item.venueName && <span>{item.venueName}</span>}
-      <span>{item.met ? "Met" : "Outstanding"}</span>
-      <span>{item.detail}</span>
-    </li>
+    <table className="safety-check-submission__checklist">
+      <caption>{caption}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Item</th>
+          <th scope="col">Status</th>
+          <th scope="col">Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((item, index) => (
+          <tr key={`${item.key}-${item.bookingId ?? item.equipmentRequestId ?? index}`}>
+            <td>{itemLabel(item)}</td>
+            <td>
+              <span className={`safety-check-submission__badge safety-check-submission__badge--${item.met ? "met" : "outstanding"}`}>
+                {item.met ? "Met" : "Outstanding"}
+              </span>
+            </td>
+            <td>{item.detail}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -110,6 +143,8 @@ export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, 
       } else if (status === 409) {
         setSubmitError(NOT_APPROVED_MESSAGE);
         onStale?.();
+      } else if (status === 400) {
+        setSubmitError(isAboutTheNote(data) ? NOTE_REFUSED_MESSAGE : OTHER_400_MESSAGE);
       } else {
         setSubmitError(SUBMIT_ERROR_MESSAGES[status] ?? GENERIC_SUBMIT_ERROR);
       }
@@ -136,11 +171,7 @@ export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, 
         </div>
       )}
       {!loading && readiness && (
-        <ul className="safety-check-submission__checklist" aria-label="Readiness checklist">
-          {items.map((item, index) => (
-            <ChecklistLine key={`${item.key}-${item.bookingId ?? item.equipmentRequestId ?? index}`} item={item} />
-          ))}
-        </ul>
+        <ChecklistTable caption="Readiness checklist" items={items} />
       )}
 
       <form onSubmit={handleSubmit}>
@@ -160,7 +191,7 @@ export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, 
           </div>
         )}
 
-        <label>
+        <label className="safety-check-submission__note">
           Note for the Safety Officer (optional)
           <textarea
             value={note}
@@ -169,7 +200,7 @@ export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, 
             aria-describedby="safety-check-note-hint"
           />
         </label>
-        <p id="safety-check-note-hint">
+        <p className="safety-check-submission__hint" id="safety-check-note-hint">
           For example, how the crowd will move and where equipment will be placed.
         </p>
         <p className="safety-check-submission__counter">
@@ -186,12 +217,8 @@ export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, 
 
       {notReadyLines && (
         <div role="alert">
-          <p>This event is not ready for the safety check. Still outstanding:</p>
-          <ul aria-label="Outstanding items">
-            {notReadyLines.map((item, index) => (
-              <ChecklistLine key={`${item.key}-${index}`} item={item} />
-            ))}
-          </ul>
+          <p>This event is not ready for the safety check.</p>
+          <ChecklistTable caption="Still outstanding" items={notReadyLines} />
         </div>
       )}
       {submitError && <p role="alert">{submitError}</p>}
