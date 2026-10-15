@@ -160,3 +160,4 @@ function validateUuid(id, field, label) {
 
 export const validateEventRequestId = (id) => validateUuid(id, 'id', 'event request id');
 export const validateEquipmentLineId = (id) => validateUuid(id, 'lineId', 'equipment line id');
+export const validateReservationId = (id) => validateUuid(id, 'reservationId', 'reservation id');

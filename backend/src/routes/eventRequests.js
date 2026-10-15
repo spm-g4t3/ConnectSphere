@@ -98,6 +98,8 @@ import {
   decideEventRequest,
   getEventCancellationImpact,
   cancelEventRequest,
+  getEventReadiness,
+  submitForSafetyReview,
 } from '../services/eventRequestService.js';
 import {
   createChangeRequestFromClient,
@@ -122,6 +124,8 @@ import { ROLE } from '../domain/userRole.js';
 // Credential-free too: http/handleError.js imports only errors.js.
 import { createErrorHandler } from '../http/handleError.js';
 import { ForbiddenError, ValidationError } from '../errors.js';
+// Pure, like the two above: the repository's one uuid check (SCRUM-489's readiness read).
+import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
 
 
 /** Map an error to a response; see src/http/handleError.js (SCRUM-127). */
@@ -744,6 +748,33 @@ export function createEventRequestRouter({
     }
   });
 
+  /**
+   * SCRUM-489 AC2, AC3: the safety-check readiness checklist, every line met or
+   * outstanding. Read as the coordinator reads the event first, so a draft is a
+   * 404 like a missing id. ?noEquipmentConfirmed= is 'true', 'false' or absent.
+   */
+  router.get('/:id/readiness', coordinatorOrLead, async (req, res) => {
+    try {
+      if (!isPlausibleId(req.params.id)) {
+        throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+      }
+      const raw = req.query.noEquipmentConfirmed;
+      if (raw !== undefined && raw !== 'true' && raw !== 'false') {
+        throw new ValidationError(
+          'Invalid noEquipmentConfirmed -- must be true or false',
+          [{ field: 'noEquipmentConfirmed', message: 'must be true or false' }],
+        );
+      }
+      await getEventRequestForCoordinator(req.params.id, { client });
+
+      res.status(200).json(await getEventReadiness({
+        client, eventRequestId: req.params.id, noEquipmentConfirmed: raw === 'true',
+      }));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
   /** AC1: one request in full, with its status. */
   router.get('/:id', async (req, res) => {
     try {
@@ -833,6 +864,25 @@ export function createEventRequestRouter({
 
       const submitted = await submitEventRequest(req.params.id, { client, changedBy: req.user.id });
       res.status(200).json(withStatusDisplay(submitted));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-489 AC1, AC4 to AC6, AC8: the assigned coordinator sends the event to
+   * the Safety Officers. The caller is the token's user, never the body's.
+   */
+  router.post('/:id/safety-review', coordinatorOnly, async (req, res) => {
+    try {
+      const updated = await submitForSafetyReview({
+        client,
+        eventRequestId: req.params.id,
+        coordinatorId: req.user.id,
+        note: req.body?.note,
+        noEquipmentConfirmed: req.body?.noEquipmentConfirmed ?? false,
+      });
+      res.status(200).json(withStatusDisplay(updated));
     } catch (err) {
       handleError(err, res);
     }

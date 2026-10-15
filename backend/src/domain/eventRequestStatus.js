@@ -14,8 +14,9 @@
 
 
 /**
- * The nine statuses of the lifecycle (SCRUM-318), spelled as in the Postgres
- * enum `event_request_status`.
+ * The statuses of the lifecycle: the nine of SCRUM-318, and the two safety
+ * statuses SCRUM-488 puts between APPROVED and CONFIRMED. Spelled as in the
+ * Postgres enum `event_request_status`.
  *
  * There is no PLANNING status. The customer treats planning as approval, so
  * that stage is APPROVED. The enum still carries 'planning', because Postgres
@@ -30,6 +31,8 @@ export const STATUS = Object.freeze({
   UNDER_REVIEW: 'under_review',
   PENDING_CLARIFICATION: 'pending_clarification',
   APPROVED: 'approved',
+  SAFETY_REVIEW: 'safety_review',
+  SAFETY_APPROVED: 'safety_approved',
   CONFIRMED: 'confirmed',
   COMPLETED: 'completed',
   REJECTED: 'rejected',
@@ -89,6 +92,9 @@ export const ORGANISER_STATUS_LABEL = Object.freeze({
   [STATUS.UNDER_REVIEW]: 'Under review',
   [STATUS.PENDING_CLARIFICATION]: 'Awaiting your response',
   [STATUS.APPROVED]: 'Planning',
+  // SCRUM-488 AC5, labels still to be confirmed by the team (docs/SCRUM-488-decisions.md, D3).
+  [STATUS.SAFETY_REVIEW]: 'Safety check',
+  [STATUS.SAFETY_APPROVED]: 'Safety approved',
   [STATUS.CONFIRMED]: 'Confirmed',
   [STATUS.COMPLETED]: 'Completed',
   [STATUS.REJECTED]: 'Rejected',
@@ -132,6 +138,17 @@ export const STATUS_DISPLAY = Object.freeze({
     group: STATUS_GROUP.APPROVED,
     description: 'Your request has been accepted. Arrangements will now begin.',
   }),
+  // The safety statuses reuse existing groups, so the UI needs no new style.
+  [STATUS.SAFETY_REVIEW]: Object.freeze({
+    label: ORGANISER_STATUS_LABEL[STATUS.SAFETY_REVIEW],
+    group: STATUS_GROUP.UNDER_REVIEW,
+    description: 'A Safety Officer is checking the arrangements for your event before it can be confirmed.',
+  }),
+  [STATUS.SAFETY_APPROVED]: Object.freeze({
+    label: ORGANISER_STATUS_LABEL[STATUS.SAFETY_APPROVED],
+    group: STATUS_GROUP.APPROVED,
+    description: 'The safety check is complete. Your Coordinator can now confirm your event.',
+  }),
   [STATUS.CONFIRMED]: Object.freeze({
     label: ORGANISER_STATUS_LABEL[STATUS.CONFIRMED],
     group: STATUS_GROUP.CONFIRMED,
@@ -168,13 +185,23 @@ export const STATUS_DISPLAY = Object.freeze({
  *    not re-joining the queue.
  *
  *  - cancelled is reachable from submitted, under_review, pending_clarification,
- *    approved and confirmed. A draft is deleted rather than cancelled, because
- *    it has no coordinator yet to cancel it.
+ *    approved, safety_review, safety_approved and confirmed. A draft is deleted
+ *    rather than cancelled, because it has no coordinator yet to cancel it.
  *
  *  - rejected leads back to draft only: the Organiser may revise and resubmit.
  *    An approved event whose essential arrangements cannot be met is rejected.
  *    A confirmed event goes back to approved when a significant change needs
  *    re-planning.
+ *
+ *  - The Operational Safety Check (SCRUM-488) sits between approved and
+ *    confirmed, and confirmed is reachable only through it: approved goes to
+ *    safety_review, safety_review to safety_approved, and safety_approved to
+ *    confirmed. approved -> confirmed no longer exists. Either safety status
+ *    goes back to approved (the Safety Officer sends the event back, or a
+ *    significant change needs re-planning) and may be cancelled. Neither may be
+ *    rejected: whether one should be is SCRUM-347's open decision
+ *    (docs/SCRUM-488-decisions.md, D4), so it is not a transition until it is
+ *    recorded.
  *
  *  - completed and cancelled are terminal: nothing leads out of them. A
  *    cancelled event is never reinstated; a new request is submitted instead.
@@ -182,8 +209,9 @@ export const STATUS_DISPLAY = Object.freeze({
  * Clarification is requested from under_review only; submitted requests must
  * first be moved into review through the coordinator's review workflow.
  *
- * Migration 022 holds this same table in SQL, so the database function refuses
- * an illegal move whoever calls it. A test compares the two.
+ * Migration 022 held this same table in SQL, and 063 restates it, so the
+ * database function refuses an illegal move whoever calls it. A test compares
+ * the two pair by pair.
  */
 export const ALLOWED_TRANSITIONS = Object.freeze({
   [STATUS.DRAFT]: Object.freeze([
@@ -205,7 +233,17 @@ export const ALLOWED_TRANSITIONS = Object.freeze({
   ]),
   [STATUS.APPROVED]: Object.freeze([
     STATUS.REJECTED,
+    STATUS.SAFETY_REVIEW,
+    STATUS.CANCELLED,
+  ]),
+  [STATUS.SAFETY_REVIEW]: Object.freeze([
+    STATUS.SAFETY_APPROVED,
+    STATUS.APPROVED,
+    STATUS.CANCELLED,
+  ]),
+  [STATUS.SAFETY_APPROVED]: Object.freeze([
     STATUS.CONFIRMED,
+    STATUS.APPROVED,
     STATUS.CANCELLED,
   ]),
   [STATUS.CONFIRMED]: Object.freeze([

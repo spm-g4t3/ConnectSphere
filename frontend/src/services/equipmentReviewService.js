@@ -14,7 +14,9 @@
 //                reviewStartedAt, createdAt, updatedAt,
 //                lines: [{ id, equipmentTypeId, name, quantity, technicalNotes,
 //                          typeRetired, reserved, shortBy, outcome, outcomeNote,
-//                          outcomeBy, outcomeAt, availability }] } }
+//                          outcomeBy, outcomeAt, availability, flaggedCount,
+//                          reservations: [{ id, quantity, startAt, endAt, flagged,
+//                                           flagReason, flaggedAt }] }] } }
 //
 // The status codes a caller will want to tell apart:
 //
@@ -62,5 +64,38 @@ export async function clearEquipmentLineOutcome(eventRequestId, lineId) {
 /** Finish the review: Cannot be fully arranged unless every line is reserved. */
 export async function completeEquipmentReview(eventRequestId) {
   const response = await apiClient.post(`${base(eventRequestId)}/complete`);
+  return response.data;
+}
+
+// SCRUM-300: the reservation actions. Same state back from each, same refusals
+// (400 with details naming quantity or reason, 403, 404, 409).
+
+/** Reserve `quantity` units for a line, covering the event's current start to end. */
+export async function reserveEquipment(eventRequestId, lineId, quantity) {
+  const response = await apiClient.post(`${base(eventRequestId)}/lines/${lineId}/reservations`, { quantity });
+  return response.data;
+}
+
+/** Reduce a reservation to a smaller quantity, with a reason. */
+export async function reduceEquipmentReservation(eventRequestId, reservationId, quantity, reason) {
+  const response = await apiClient.patch(`${base(eventRequestId)}/reservations/${reservationId}`, { quantity, reason });
+  return response.data;
+}
+
+/** Release a reservation, with a reason. It stays in the history. */
+export async function releaseEquipmentReservation(eventRequestId, reservationId, reason) {
+  const response = await apiClient.post(`${base(eventRequestId)}/reservations/${reservationId}/release`, { reason });
+  return response.data;
+}
+
+/** Move a flagged reservation to the event's current date and time. */
+export async function moveEquipmentReservation(eventRequestId, reservationId) {
+  const response = await apiClient.post(`${base(eventRequestId)}/reservations/${reservationId}/move`, {});
+  return response.data;
+}
+
+/** Keep a flagged reservation as it is, when it still fits. */
+export async function keepEquipmentReservation(eventRequestId, reservationId) {
+  const response = await apiClient.post(`${base(eventRequestId)}/reservations/${reservationId}/keep`, {});
   return response.data;
 }

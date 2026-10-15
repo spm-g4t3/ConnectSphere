@@ -345,6 +345,21 @@ describe('AC3: editing a type', () => {
     expect(updated.category).toBe('AV');
   });
 
+  it('SCRUM300_AC3_a_deadlock_with_a_reservation_is_a_409_that_says_to_try_again', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(failed('40P01', 'deadlock detected')));
+
+    const attempt = updateEquipmentType(TYPE_ID, { location: 'X' });
+
+    await expect(attempt).rejects.toBeInstanceOf(ConflictError);
+    await expect(attempt).rejects.toMatchObject({
+      status: 409,
+      code: 'EQUIPMENT_CHANGED_AT_THE_SAME_TIME',
+      message: 'Someone changed this equipment at the same moment. Please try again.',
+    });
+  });
+
   it('SCRUM275_AC3_translates_a_database_refusal_on_write', async () => {
     from
       .mockReturnValueOnce(queryStub(ok(typeRow())))

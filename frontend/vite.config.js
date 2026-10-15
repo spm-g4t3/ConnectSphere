@@ -141,6 +141,13 @@ const SCRUM495_FILES = [
   'src/services/openEventService.js',
 ]
 
+// SCRUM-489: the coordinator's safety check submission. Its one new file is
+// gated outright; the shared files it touches stay ungated.
+const SCRUM489_FILES = [
+  // SCRUM-557 (AC3 to AC6): the checklist, the confirmation, the note and Submit.
+  'src/components/SafetyCheckSubmissionPanel.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -182,6 +189,7 @@ export default defineConfig({
         ...SCRUM486_FILES.map((file) => [file, FULL]),
         ...SCRUM487_FILES.map((file) => [file, FULL]),
         ...SCRUM495_FILES.map((file) => [file, FULL]),
+        ...SCRUM489_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

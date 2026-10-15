@@ -436,6 +436,24 @@ button { cursor: pointer; }
 .coordinator-clarification__fields label { align-items: center; display: flex; gap: 8px; }
 .dashboard--coordinator .coordinator-request-detail__cancel { background: #a43c32; margin: 0 0 8px; }
 .dashboard--coordinator .coordinator-request-detail__cancel:hover { background: #842e27; }
+/* SCRUM-489: the safety check submission panel. A table, not a list, so
+   .dashboard li's spread-out flex row never reaches it. The badge's word carries
+   the meaning; the colours are the approved and action-required pairs above. */
+.safety-check-submission__checklist { border-collapse: collapse; margin: 4px 0 12px; width: 100%; }
+.safety-check-submission__checklist caption { color: var(--muted); font-size: 0.86rem; font-weight: 700; padding-bottom: 6px; text-align: left; }
+.safety-check-submission__checklist th, .safety-check-submission__checklist td { border-bottom: 1px solid var(--line); overflow-wrap: anywhere; padding: 8px; text-align: left; vertical-align: top; }
+.safety-check-submission__checklist thead th { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
+.safety-check-submission__badge { border-radius: 999px; display: inline-block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; padding: 3px 10px; text-transform: uppercase; white-space: nowrap; }
+.safety-check-submission__badge--met { background: #e8f7f1; color: #17684f; }
+.safety-check-submission__badge--outstanding { background: #fff0ee; color: #a43c32; }
+.safety-check-submission form { display: grid; gap: 8px; }
+.safety-check-submission__confirmation label { align-items: flex-start; display: flex; gap: 9px; }
+.safety-check-submission__confirmation p, .safety-check-submission__confirmation blockquote { margin: 4px 0; }
+.safety-check-submission__note { color: var(--muted); display: grid; gap: 7px; margin-top: 8px; }
+.safety-check-submission__note textarea { border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box; color: var(--ink); font: inherit; min-height: 96px; padding: 10px 12px; resize: vertical; width: 100%; }
+.safety-check-submission__hint, .safety-check-submission__counter { color: var(--muted); font-size: 0.86rem; margin: 0; }
+.safety-check-submission__counter { font-variant-numeric: tabular-nums; }
+.safety-check-submission form > button { justify-self: start; margin-top: 6px; }
 .event-cancellation-page { display: grid; gap: 18px; }
 .event-cancellation-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
 .event-cancellation-page__back { background: transparent !important; color: var(--teal-dark) !important; justify-self: start; padding: 6px 0 !important; text-decoration: underline; }
