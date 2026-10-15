@@ -6,12 +6,7 @@ import {
 } from "../services/safetyReviewService";
 import { formatRange, formatTimestamp } from "../services/displayFormat";
 import CoordinatorNotifications from "./CoordinatorNotifications";
-
-export const OUTCOME_LABELS = {
-  approved: "Approved",
-  changes_requested: "Changes requested",
-  rejected: "Safety arrangement rejected",
-};
+import { OUTCOME_LABELS } from "./safetyReviewLabels";
 
 function waitingLabel(seconds) {
   const elapsed = Math.max(0, Number(seconds) || 0);

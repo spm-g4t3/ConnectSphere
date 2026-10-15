@@ -4,7 +4,8 @@ import {
   getSafetyReviewHistory,
 } from "../services/safetyReviewService";
 import { formatRange, formatTimestamp } from "../services/displayFormat";
-import { OUTCOME_LABELS, SafetyReviewDetail } from "./SafetyOfficerDashboard";
+import { OUTCOME_LABELS } from "./safetyReviewLabels";
+import { SafetyReviewDetail } from "./SafetyOfficerDashboard";
 
 const noop = () => {};
 
