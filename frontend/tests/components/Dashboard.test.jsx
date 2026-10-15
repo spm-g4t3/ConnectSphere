@@ -83,6 +83,7 @@ function renderDashboardAs(role) {
 }
 
 beforeEach(() => {
+  vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "true");
   vi.clearAllMocks();
 });
 
@@ -242,7 +243,7 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     unmount();
 
     vi.mocked(useAuth).mockReturnValue({ user: { name: "Priya Nair", email: "so@example.com", role: "safety_officer" } });
-    render(<Dashboard />);
+    render(<Dashboard />, { wrapper: MemoryRouter });
     expect(screen.getByText("Signed in as Priya Nair.")).toBeInTheDocument();
   });
 });
@@ -301,7 +302,7 @@ function renderAs(role) {
   vi.mocked(useAuth).mockReturnValue({
     user: { id: "u1", email: "user@example.com", role },
   });
-  return render(<Dashboard />);
+  return render(<Dashboard />, { wrapper: MemoryRouter });
 }
 
 beforeEach(() => {
@@ -316,11 +317,12 @@ describe("Dashboard role map", () => {
     expect(screen.getByRole("heading", { name: "Welcome, user@example.com" })).toBeInTheDocument();
   });
 
-  it("shows the Browse Open Events entry, with no invented event data", () => {
+  it("SCRUM495_AC5_shows_the_browse_open_events_entry_as_a_link_to_the_browse_page_with_no_invented_event_data", () => {
+    // The entry is a router Link, which is why renderAs wraps in a MemoryRouter.
     renderAs("attendee");
 
     expect(screen.getByRole("heading", { name: "Browse Open Events" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("not available yet");
+    expect(screen.getByRole("link", { name: "Browse Open Events" })).toHaveAttribute("href", "/open-events");
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 

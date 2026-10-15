@@ -112,6 +112,11 @@ export default defineConfig({
         'src/validation/venueHoldValidation.js': FULL,
         'src/services/venueHoldService.js': FULL,
         'src/jobs/venueHoldExpiryScheduler.js': FULL,
+        // SCRUM-495: the browse files are new and owned outright.
+        'src/routes/openEvents.js': FULL,
+        'src/services/openEventService.js': FULL,
+        'src/domain/registrationWindow.js': FULL,
+        'src/domain/registrationAvailability.js': FULL,
       },
     },
   },

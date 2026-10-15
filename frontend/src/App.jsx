@@ -19,6 +19,9 @@ import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
 import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck";
 import EquipmentReview from "./components/EquipmentReview";
+import BrowseOpenEvents from "./components/BrowseOpenEvents";
+import BrowseEventDetails from "./components/BrowseEventDetails";
+import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE, isOpenEventsEnabled } from "./services/openEventRoutes";
 import "./App.css";
 
 function LoadingScreen() {
@@ -221,6 +224,33 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
+        {/* Attendees only, like the API, so a direct URL from another role lands
+            on /unauthorized, not on a page that is only an error. The
+            .dashboard wrapper gives the pages their card styling. */}
+        {isOpenEventsEnabled() && (
+          <>
+            <Route
+              path={BROWSE_OPEN_EVENTS_PATH}
+              element={
+                <ProtectedRoute allowedRoles={["attendee"]}>
+                  <div className="dashboard dashboard--attendee">
+                    <BrowseOpenEvents />
+                  </div>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path={OPEN_EVENT_DETAILS_ROUTE}
+              element={
+                <ProtectedRoute allowedRoles={["attendee"]}>
+                  <div className="dashboard dashboard--attendee">
+                    <BrowseEventDetails />
+                  </div>
+                </ProtectedRoute>
+              }
+            />
+          </>
+        )}
         <Route
           path="/equipment-catalogue"
           element={

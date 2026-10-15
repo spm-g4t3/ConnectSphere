@@ -30,6 +30,7 @@ function renderAs(role) {
 }
 
 beforeEach(() => {
+  vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "true");
   vi.mocked(useAuth).mockReset();
 });
 
@@ -89,11 +90,12 @@ describe("Navigation links by role", () => {
   expect(screen.getByRole("link", { name: "Check Availability" })).toHaveAttribute("href", "/equipment-availability");
 });
 
-  it("gives an Attendee only the Dashboard link, with no staff-facing pages", () => {
+  it("SCRUM495_AC5_gives_an_attendee_dashboard_and_browse_open_events_with_no_staff_facing_pages", () => {
     renderAs("attendee");
 
     expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
-    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Browse Open Events" })).toHaveAttribute("href", "/open-events");
+    expect(screen.getAllByRole("link")).toHaveLength(2);
   });
 });
 
@@ -283,15 +285,13 @@ describe("SCRUM485_AC6 the existing roles keep exactly their links", () => {
   });
 
   it("SCRUM485_AC6_an_attendee_keeps_the_links_scrum453_gave_it", () => {
-    // AC6-04 for the Attendee. When this story began an attendee had no nav
-    // block, and this case pinned an empty list. SCRUM-453 (merged into dev on
-    // 11 October) gave the Attendee one: Dashboard, with Browse Open Events to
-    // follow in SCRUM-495. That is another story's change, not one this story
-    // made, so the case now pins what SCRUM-453 built, exactly and by count,
-    // and SCRUM-485 must leave it so.
+    // Pins the Attendee's links exactly and by count.
     const links = linksOf("attendee");
 
-    expect(links).toHaveLength(1);
-    expect(links).toEqual([["Dashboard", "/dashboard"]]);
+    expect(links).toHaveLength(2);
+    expect(links).toEqual([
+      ["Dashboard", "/dashboard"],
+      ["Browse Open Events", "/open-events"],
+    ]);
   });
 });
