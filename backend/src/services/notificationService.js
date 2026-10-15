@@ -130,6 +130,31 @@ export async function listNotifications(userId, { limit = DEFAULT_LIMIT } = {}) 
 }
 
 /**
+ * How many of the caller's notifications are unread.
+ *
+ * SCRUM-172 (AC4): counted by the database, not from listNotifications, whose
+ * cap would undercount past 50. head: true returns no rows, so a badge that
+ * polls this stays cheap.
+ *
+ * @param {string} userId  the recipient; the route passes req.user.id
+ * @returns {Promise<number>} 0 when none are unread
+ * @throws {ValidationError} when userId is missing
+ */
+export async function countUnreadNotifications(userId) {
+  requireUserId(userId);
+
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('recipient_id', userId)
+    .is('read_at', null);
+
+  if (error) throw translateError(error);
+
+  return count ?? 0;
+}
+
+/**
  * Mark one of the caller's notifications as read.
  *
  * Idempotent. The update is guarded by read_at IS NULL, so marking an

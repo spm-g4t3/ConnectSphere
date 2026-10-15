@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { supabase } from '../../src/config/supabaseClient.js';
 import {
   listNotifications,
+  countUnreadNotifications,
   markNotificationRead,
   toNotification,
 } from '../../src/services/notificationService.js';
@@ -128,6 +129,8 @@ function queryStub(result) {
 
 const ok = (data) => ({ data, error: null });
 const fail = (error) => ({ data: null, error });
+// A head: true count query answers with no rows, only a count.
+const counted = (count) => ({ data: null, count, error: null });
 
 beforeEach(() => {
   rpc.mockReset();
@@ -385,6 +388,71 @@ describe('listNotifications', () => {
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toBe('A signed-in user is required to read notifications');
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('countUnreadNotifications', () => {
+  it('SCRUM172_AC4_counts_only_the_callers_unread', async () => {
+    const stub = queryStub(counted(3));
+    from.mockReturnValue(stub);
+
+    await expect(countUnreadNotifications(COORDINATOR_ID)).resolves.toBe(3);
+
+    expect(from).toHaveBeenCalledTimes(1);
+    expect(from).toHaveBeenCalledWith('notifications');
+    expect(stub.calls).toEqual([
+      ['select', 'id', { count: 'exact', head: true }],
+      ['eq', 'recipient_id', COORDINATOR_ID],
+      ['is', 'read_at', null],
+    ]);
+  });
+
+  it('SCRUM172_AC4_counts_beyond_the_list_limit', async () => {
+    const stub = queryStub(counted(73));
+    from.mockReturnValue(stub);
+
+    await expect(countUnreadNotifications(COORDINATOR_ID)).resolves.toBe(73);
+    expect(stub.called('limit')).toBe(false);
+  });
+
+  it.each([
+    ['0', 0],
+    ['null', null],
+  ])('SCRUM172_AC4_zero_when_none (count %s)', async (_label, count) => {
+    from.mockReturnValue(queryStub(counted(count)));
+    await expect(countUnreadNotifications(COORDINATOR_ID)).resolves.toBe(0);
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['empty', ''],
+  ])('SCRUM172_AC1_refuses_a_missing_user_before_any_query (%s)', async (_label, userId) => {
+    const err = await errorFromAsync(() => countUnreadNotifications(userId));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('A signed-in user is required to read notifications');
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('throws an untyped error on a database failure', async () => {
+    from.mockReturnValue(queryStub(fail({ code: '08006', message: 'connection failure' })));
+
+    const err = await errorFromAsync(() => countUnreadNotifications(COORDINATOR_ID));
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(AppError);
+    expect(err.message).toBe('connection failure');
+  });
+
+  it('translates 22P02 into a ValidationError', async () => {
+    from.mockReturnValue(queryStub(fail({ code: '22P02', message: 'bad uuid' })));
+
+    const err = await errorFromAsync(() => countUnreadNotifications(COORDINATOR_ID));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('A value was rejected by the database: bad uuid');
   });
 });
 

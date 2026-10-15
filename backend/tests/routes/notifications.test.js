@@ -92,6 +92,7 @@ function queryStub(result) {
 
 const ok = (data) => ({ data, error: null });
 const fail = (error) => ({ data: null, error });
+const counted = (count) => ({ data: null, count, error: null });
 
 /** Stands in for a signed-in user of a given role. */
 const signedInAs = (role, id = COORDINATOR_ID) => (req, _res, next) => {
@@ -239,6 +240,50 @@ describe('GET /api/notifications', () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('A signed-in user is required to read notifications');
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('GET /api/notifications/unread-count', () => {
+  it('SCRUM172_AC4_returns_the_unread_count', async () => {
+    from.mockReturnValue(queryStub(counted(73)));
+
+    const res = await request(appWith()).get('/api/notifications/unread-count');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ unreadCount: 73 });
+  });
+
+  it('SCRUM172_AC1_counts_for_the_signed_in_user_only', async () => {
+    const stub = queryStub(counted(0));
+    from.mockReturnValue(stub);
+
+    const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR, OTHER_USER_ID))).get(
+      `/api/notifications/unread-count?recipientId=${COORDINATOR_ID}`,
+    );
+
+    expect(res.body).toEqual({ unreadCount: 0 });
+    expect(stub.allArgs('eq')).toEqual([['recipient_id', OTHER_USER_ID]]);
+    expect(stub.allArgs('is')).toEqual([['read_at', null]]);
+  });
+
+  it('without a session is 401 and counts nothing', async () => {
+    const res = await request(appWith(signedOut)).get('/api/notifications/unread-count');
+
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: 'Authentication required' });
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('an untyped error is a generic 500', async () => {
+    from.mockReturnValue(queryStub(fail({ code: '08006', message: 'secret internals' })));
+
+    const res = await request(appWith()).get('/api/notifications/unread-count');
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    expect(JSON.stringify(res.body)).not.toContain('secret internals');
+    expect(consoleError).toHaveBeenCalled();
   });
 });
 
