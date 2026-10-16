@@ -1,6 +1,5 @@
 /**
- * Runs migration 068 on PGlite against a stand-in `registrations` table, since
- * that table is not in the repo yet.
+ * Runs migration 068 on PGlite against the persisted registration schema.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
@@ -33,26 +32,35 @@ const state = async (ids, attendee) => {
 beforeAll(async () => {
   db = new PGlite();
   await db.exec(`
+    create schema auth;
+    create table auth.users (id uuid primary key);
     create role anon;
     create role authenticated;
-    create table profiles (id uuid primary key, role text not null);
-    create table registrations (
-      id uuid primary key default gen_random_uuid(),
-      event_request_id uuid not null,
-      attendee_id uuid not null,
-      status text not null
-    );
+    create role service_role bypassrls;
   `);
+  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '079_registrations.sql']) {
+    await db.exec(readFileSync(resolve(here, '../../db/migrations', name), 'utf8'));
+  }
   await db.exec(readFileSync(MIGRATION, 'utf8'));
+  await db.query('insert into auth.users (id) values ($1), ($2), ($3)', [ME, OTHER, COORDINATOR]);
   await db.query(
     `insert into profiles (id, role) values ($1, 'attendee'), ($2, 'attendee'), ($3, 'event_coordinator')`,
     [ME, OTHER, COORDINATOR],
   );
+  await db.query(
+    `insert into event_requests (id, organiser_id, event_name)
+     values ($1, $4, 'A'), ($2, $4, 'B'), ($3, $4, 'C')`,
+    [EVENT_A, EVENT_B, EVENT_C, ME],
+  );
 
   // 1,200 places taken on A: more than the 1,000 rows an API read returns.
   await db.query(
-    `insert into registrations (event_request_id, attendee_id, status)
-     select $1::uuid, gen_random_uuid(), 'registered' from generate_series(1, 1200)`,
+    `with attendees as (
+       insert into auth.users (id) select gen_random_uuid() from generate_series(1, 1200)
+       returning id
+     )
+     insert into registrations (event_request_id, attendee_id, status)
+     select $1::uuid, id, 'registered' from attendees`,
     [EVENT_A],
   );
   await db.query(
