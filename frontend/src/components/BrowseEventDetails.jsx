@@ -116,11 +116,13 @@ export default function BrowseEventDetails({ onRegister }) {
     const name = event.eventName || "this event";
     const startedOn = eventId;
     let registered;
+    let failure;
     try {
       await onRegister(event.id);
       registered = true;
-    } catch {
+    } catch (err) {
       registered = false;
+      failure = err?.response;
     }
 
     // The reader moved to another event meanwhile: nothing about this attempt
@@ -143,6 +145,15 @@ export default function BrowseEventDetails({ onRegister }) {
 
     if (registered) {
       setNotice(`You are registered for ${name}.`);
+    } else if (failure?.status === 401) {
+      setRegisterError(LOAD_ERROR_MESSAGES[401]);
+    } else if (failure?.status === 403) {
+      setRegisterError("Only Attendees can register for events.");
+    } else if (
+      [400, 404, 409].includes(failure?.status) &&
+      typeof failure.data?.error === "string" && failure.data.error.trim()
+    ) {
+      setRegisterError(failure.data.error);
     } else if (fresh.kind === "ok" && fresh.data.isRegistered) {
       setRegisterError(ALREADY_MESSAGE);
     } else if (fresh.kind === "ok" && fresh.data.isFull) {

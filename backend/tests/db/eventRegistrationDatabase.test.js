@@ -5,6 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { registerForEvent } from '../../src/services/registrationService.js';
+import express from 'express';
+import request from 'supertest';
+import { createOpenEventRouter } from '../../src/routes/openEvents.js';
+import { createRequireAuth } from '../../src/middleware/requireAuth.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
@@ -210,5 +214,32 @@ describe('SCRUM39 atomic event registration', () => {
       await expect(registerForEvent({ attendeeId: ME, eventId: event, client })).rejects.toMatchObject({ status: 409, code: 'ALREADY_REGISTERED' });
     } finally { await db.exec('reset role'); }
     expect(await records()).toHaveLength(1);
+  });
+
+  it('SCRUM36_AC3_verifies_the_HTTP_service_and_SQL_registration_integration', async () => {
+    const client = { rpc: async (_name, args) => {
+      try {
+        const { rows } = await register(args.p_attendee_id, args.p_event_request_id);
+        return { data: rows[0].result, error: null };
+      } catch (error) { return { error }; }
+    } };
+    const requireAuth = createRequireAuth({
+      verifyToken: async (token) => token === 'attendee-token' ? { id: ME } : null,
+      loadRole: async (id) => (await db.query('select role from profiles where id = $1', [id])).rows[0]?.role,
+    });
+    const app = express().use('/api/open-events', createOpenEventRouter({ client, requireAuth }));
+    await db.exec('set role service_role');
+    try {
+      const success = await request(app).post(`/api/open-events/${event}/registrations`)
+        .set('Authorization', 'Bearer attendee-token');
+      expect(success.status).toBe(201);
+      expect(success.body).toMatchObject({ attendeeId: ME, eventRequestId: event, status: 'registered' });
+      expect((await records()).map((row) => row.id)).toEqual([success.body.id]);
+      const repeated = await request(app).post(`/api/open-events/${event}/registrations`)
+        .set('Authorization', 'Bearer attendee-token');
+      expect(repeated.status).toBe(409);
+      expect(repeated.body).toMatchObject({ code: 'ALREADY_REGISTERED', error: 'Already registered' });
+      expect(await records()).toHaveLength(1);
+    } finally { await db.exec('reset role'); }
   });
 });

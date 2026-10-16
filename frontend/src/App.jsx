@@ -24,6 +24,7 @@ import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
 import SafetyReviewHistory from "./components/SafetyReviewHistory";
 import BrowseOpenEvents from "./components/BrowseOpenEvents";
 import BrowseEventDetails from "./components/BrowseEventDetails";
+import { registerForEvent } from "./services/registrationService";
 import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE, isOpenEventsEnabled } from "./services/openEventRoutes";
 import "./App.css";
 
@@ -263,7 +264,7 @@ function AppRoutes() {
               element={
                 <ProtectedRoute allowedRoles={["attendee"]}>
                   <div className="dashboard dashboard--attendee">
-                    <BrowseEventDetails />
+                    <BrowseEventDetails onRegister={registerForEvent} />
                   </div>
                 </ProtectedRoute>
               }
