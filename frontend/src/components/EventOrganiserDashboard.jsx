@@ -8,6 +8,7 @@ import {
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
 import NotificationInbox from "./NotificationInbox";
+import SafetyApprovalNotice from "./SafetyApprovalNotice";
 
 function formatEventDate(value) {
   if (!value) return "Date not set";
@@ -104,6 +105,7 @@ export default function EventOrganiserDashboard({ user }) {
                     <dt>Equipment requirements</dt>
                     <dd>{event.equipmentRequirements || "Not specified"}</dd>
                   </dl>
+                  <SafetyApprovalNotice status={event.status} />
                   {event.clarificationNote && (
                     <p className="dashboard--organiser__clarification">
                       <strong>Coordinator clarification:</strong> {event.clarificationNote}

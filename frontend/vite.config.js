@@ -1,7 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
-// SCRUM-17, SCRUM-186, SCRUM-178, SCRUM-137 and SCRUM-491 files are gated at 100%
+// SCRUM-17, SCRUM-186, SCRUM-178, SCRUM-137, SCRUM-491 and SCRUM-495 files are gated at 100%
 // lines/branches/functions/statements each.
 // There is deliberately no global threshold: shared files -- venueService.js,
 // VenueCatalogue.jsx, VenueSearch.jsx (other stories) and datetimeFormat.js
@@ -140,6 +140,18 @@ const SCRUM258_FILES = [
   'src/components/PendingBookingRequestCard.jsx',
 ]
 
+// SCRUM-495: the Attendee's browse pages. New files only this story owns.
+const SCRUM495_FILES = [
+  'src/components/BrowseOpenEvents.jsx',
+  'src/components/BrowseEventDetails.jsx',
+  'src/components/useRefreshOnReturn.js',
+  'src/components/useOpenEventRead.js',
+  'src/components/OpenEventAvailability.jsx',
+  'src/services/openEventDisplay.js',
+  'src/services/openEventRoutes.js',
+  'src/services/openEventService.js',
+]
+
 // SCRUM-489: the coordinator's safety check submission. Its one new file is
 // gated outright; the shared files it touches stay ungated.
 const SCRUM489_FILES = [
@@ -199,6 +211,7 @@ export default defineConfig({
         ...SCRUM486_FILES.map((file) => [file, FULL]),
         ...SCRUM487_FILES.map((file) => [file, FULL]),
         ...SCRUM258_FILES.map((file) => [file, FULL]),
+        ...SCRUM495_FILES.map((file) => [file, FULL]),
         ...SCRUM489_FILES.map((file) => [file, FULL]),
         ...SCRUM172_FILES.map((file) => [file, FULL]),
       ]),

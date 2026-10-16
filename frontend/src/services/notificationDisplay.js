@@ -16,7 +16,8 @@
 //   venue_hold_expired (040, SCRUM-491): { eventRequestId, eventName,
 //     venueId, venueName, expiresAt }
 //   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
-//     cancelledAt }
+//     cancelledAt }; audience is organiser, venue_staff,
+//     technical_support_staff or safety_officer
 //   event_submitted_for_safety_review (064, SCRUM-489): { eventRequestId,
 //     eventName, coordinatorId, coordinatorName, startsAt, submittedAt }
 //   booking_request_approved and booking_request_rejected (066, SCRUM-258):
@@ -212,6 +213,16 @@ const DESCRIBERS = {
       return {
         headline: `${eventName} was cancelled`,
         detail: `Reason: ${reason}.${cancelledAt}`,
+      };
+    }
+    if (payload.audience === "safety_officer") {
+      const reason = payload.reason || NO_REASON;
+      const cancelledAt = payload.cancelledAt
+        ? ` Cancelled ${formatTimestamp(payload.cancelledAt)}.`
+        : "";
+      return {
+        headline: `${eventName} was cancelled`,
+        detail: `It no longer needs a safety review. Reason: ${reason}.${cancelledAt}`,
       };
     }
     if (payload.audience === "venue_staff") {

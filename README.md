@@ -62,6 +62,8 @@ npm run install:all      # installs root, backend and frontend
 
 Copy `backend/.env.example` to `backend/.env` and fill in the real values. Real `.env` files are gitignored and must never be committed. The frontend needs no `.env`: it defaults to `http://localhost:5000/api`, and `VITE_API_BASE_URL` overrides that if you need it to.
 
+Browse Open Events (SCRUM-495) is off by default, because it needs the registration settings (SCRUM-494), the `registrations` table (SCRUM-22) and migration 068. Once those are in the database, set `OPEN_EVENTS_ENABLED=true` for the backend and `VITE_OPEN_EVENTS_ENABLED=true` for the frontend build; until then the route answers 404 and the nav and dashboard links are hidden.
+
 Then, from the repository root:
 
 ```bash
@@ -127,8 +129,10 @@ Only these transitions are allowed. This story defines which moves are valid; wh
 ```
 Draft -> Submitted -> Under review <-> Pending clarification
                           |
-                          +-> Approved <-> Safety review -> Safety approved -> Confirmed -> Completed
-                          |      |              (Safety approved and Confirmed also go back to Approved)
+                          +-> Approved -> Safety review -> Safety approved -> Confirmed -> Completed
+                          |      ^              |                |
+                          |      +--------------+----------------+
+                          |      |
                           +------+-> Rejected -> Draft (reopened)
 
 Cancelled: from Submitted, Under review, Pending clarification, Approved, Safety review, Safety approved or Confirmed.

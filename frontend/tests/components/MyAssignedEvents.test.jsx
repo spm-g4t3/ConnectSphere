@@ -102,6 +102,8 @@ describe("SCRUM-488 AC6: My events with events in the safety statuses", () => {
       .toHaveClass("status--under-review");
     expect(within(screen.getByText("Cleared by safety").closest("li")).getByText("Safety approved"))
       .toHaveClass("status--approved");
+    expect(within(screen.getByText("Cleared by safety").closest("li")).getByRole("status"))
+      .toHaveTextContent("Safety approval complete");
   });
 
   it("SCRUM488_AC6_never_shows_an_internal_status_name_or_an_unknown_group", async () => {

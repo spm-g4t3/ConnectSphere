@@ -59,7 +59,6 @@ describe('STATUS mirrors the database enum', () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const migrations = resolve(here, '../../db/migrations');
     const sql = readFileSync(resolve(migrations, '001_event_requests.sql'), 'utf8');
-
     const block = sql.match(
       /create type event_request_status as enum \(([\s\S]*?)\);/i,
     );
@@ -76,7 +75,6 @@ describe('STATUS mirrors the database enum', () => {
         if (!values.includes(value)) values.push(value);
       }
     }
-
     return values;
   }
 
@@ -199,7 +197,6 @@ describe('only legal status transitions are permitted', () => {
     [STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION],
     [STATUS.PENDING_CLARIFICATION, STATUS.UNDER_REVIEW],
     [STATUS.CONFIRMED, STATUS.COMPLETED],
-    // SCRUM-318 additions
     [STATUS.CONFIRMED, STATUS.APPROVED],
     [STATUS.APPROVED, STATUS.REJECTED],
     [STATUS.REJECTED, STATUS.DRAFT],
