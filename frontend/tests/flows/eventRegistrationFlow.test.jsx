@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "../../src/App.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
-import { getOpenEvent } from "../../src/services/openEventService";
+import { getOpenEvent, getOpenEvents } from "../../src/services/openEventService";
 import { registerForEvent } from "../../src/services/registrationService";
 
 vi.mock("../../src/auth/AuthContext", () => ({
@@ -17,6 +17,120 @@ const event = (overrides = {}) => ({
   startsAt: "2026-10-25T01:00:00Z", endsAt: "2026-10-25T03:00:00Z",
   placesLeft: 1, capacity: 1, isFull: false, isRegistered: false, canRegister: true,
   ...overrides,
+});
+
+describe("SCRUM43 registration feedback", () => {
+  const successNotice = () => document.querySelector(".browse-event-details__success");
+
+  it("SCRUM43_AC1_AC2_AC6_confirms_immediately_and_does_not_reenable_registration_after_a_stale_read", async () => {
+    let finishRefresh;
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event())
+      .mockReturnValueOnce(new Promise((resolve) => { finishRefresh = resolve; }));
+    vi.mocked(registerForEvent).mockResolvedValue({ id: "r1", eventRequestId: "e1", status: "registered" });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    expect(await screen.findByText("You are registered for Open Day.")).toBeInTheDocument();
+    expect(successNotice()).toHaveAttribute("role", "status");
+    expect(screen.getByText("Registered")).toBeInTheDocument();
+    const registeredButton = screen.getByRole("button", { name: "Already registered" });
+    expect(registeredButton).toBeDisabled();
+    fireEvent.click(registeredButton);
+    await act(async () => { finishRefresh(event()); });
+    expect(screen.getByRole("button", { name: "Already registered" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Already registered" }));
+    expect(registerForEvent).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText("You are registered for Open Day.")).toHaveLength(1);
+  });
+
+  it("SCRUM43_AC1_AC2_preserves_confirmed_registration_when_refresh_fails", async () => {
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event()).mockRejectedValueOnce(new Error("Read failed"));
+    vi.mocked(registerForEvent).mockResolvedValue({ id: "r1", status: "registered" });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    await screen.findByText(/Could not refresh this event/);
+    expect(successNotice()).toHaveTextContent("You are registered for Open Day.");
+    expect(screen.getByText("Registered")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Already registered" })).toBeDisabled();
+  });
+
+  it("SCRUM43_AC2_AC3_AC6_marks_an_existing_registration_without_a_success_notification", async () => {
+    vi.mocked(registerForEvent).mockRejectedValue({ response: {
+      status: 409, data: { code: "ALREADY_REGISTERED", error: "Already registered" },
+    } });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("You are already registered for this event.");
+    expect(screen.getByText("Registered")).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "Already registered" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(registerForEvent).toHaveBeenCalledTimes(1);
+    expect(successNotice()).toBeNull();
+  });
+
+  it.each([
+    ["EVENT_FULL", "This event is full."],
+    ["REGISTRATION_NOT_OPEN", "Registration has not opened yet."],
+    ["REGISTRATION_CLOSED", "Registration has closed for this event."],
+    ["EVENT_NOT_CONFIRMED", "Registration is only available for Confirmed events."],
+    ["REGISTRATION_DISABLED", "Registration is disabled for this event."],
+    ["EVENT_STARTED", "Registration is closed because the event has started."],
+    ["REGISTRATION_DATES_MISSING", "Registration dates have not been configured for this event."],
+  ])("SCRUM43_AC4_AC5_displays_%s_accessibly_without_success", async (code, message) => {
+    vi.mocked(registerForEvent).mockRejectedValue({ response: { status: 409, data: { code } } });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(successNotice()).toBeNull();
+    expect(screen.queryByText("Registered")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM43_AC4_preserves_the_specific_refusal_when_the_event_is_no_longer_browsable", async () => {
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event()).mockRejectedValueOnce({ response: { status: 404 } });
+    vi.mocked(registerForEvent).mockRejectedValue({ response: { status: 409, data: { code: "REGISTRATION_DISABLED" } } });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    await screen.findByText("This event is not open for registration.");
+    expect(screen.getByText("Registration is disabled for this event.").closest('[role="alert"]')).toBeInTheDocument();
+    expect(successNotice()).toBeNull();
+  });
+
+  it("SCRUM43_AC4_AC5_handles_network_errors_even_if_a_read_finds_an_existing_registration", async () => {
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event()).mockResolvedValue(event({ isRegistered: true, canRegister: false }));
+    vi.mocked(registerForEvent).mockRejectedValue({ code: "ERR_NETWORK" });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the server. Check your connection and try again.");
+    expect(screen.getByRole("button", { name: "Already registered" })).toBeDisabled();
+    expect(successNotice()).toBeNull();
+  });
+
+  it("SCRUM43_AC4_shows_one_session_error_when_the_refresh_also_refuses_access", async () => {
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event()).mockRejectedValueOnce({ response: { status: 401 } });
+    vi.mocked(registerForEvent).mockRejectedValue({ response: { status: 401 } });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    await screen.findByText("Your session has expired. Please sign in again.");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(successNotice()).toBeNull();
+  });
+
+  it("SCRUM43_AC2_keeps_registered_status_on_return_to_the_browse_list_and_details", async () => {
+    const registered = event({ isRegistered: true, canRegister: false });
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event()).mockResolvedValue(registered);
+    vi.mocked(getOpenEvents).mockResolvedValue([registered]);
+    vi.mocked(registerForEvent).mockResolvedValue({ id: "r1", status: "registered" });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    await screen.findByText("You are registered for Open Day.");
+    await userEvent.click(screen.getByRole("link", { name: "Back to open events" }));
+    expect(await screen.findByText("Registered")).toBeInTheDocument();
+    expect(getOpenEvents).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("link", { name: "Open Day" }));
+    expect(await screen.findByRole("button", { name: "Already registered" })).toBeDisabled();
+    expect(successNotice()).toBeNull();
+    expect(registerForEvent).toHaveBeenCalledTimes(1);
+  });
 });
 const auth = (user = { id: "a1", role: "attendee" }, loading = false) => {
   vi.mocked(useAuth).mockReturnValue({ user, loading, logoutMessage: null, clearLogoutMessage: vi.fn() });

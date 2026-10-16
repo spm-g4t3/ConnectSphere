@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getOpenEvent } from "../services/openEventService";
+import { registrationErrorMessage } from "../services/registrationErrors";
 import useRefreshOnReturn from "./useRefreshOnReturn";
 import useOpenEventRead from "./useOpenEventRead";
 import OpenEventAvailability, { RegisteredBadge } from "./OpenEventAvailability";
@@ -32,14 +33,13 @@ function BackLink() {
   );
 }
 
-function RegisterAction({ event, onRegister, registering, stale, onClick }) {
-  if (event.isRegistered) {
+function RegisterAction({ event, isRegistered, onRegister, registering, stale, onClick }) {
+  if (isRegistered) {
     return (
       <div className="browse-event-details__register">
         <button type="button" disabled>
           Already registered
         </button>
-        <p>You are registered for this event.</p>
       </div>
     );
   }
@@ -90,6 +90,8 @@ export default function BrowseEventDetails({ onRegister }) {
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [registeredEventId, setRegisteredEventId] = useState(null);
+  const isRegistered = event?.isRegistered || registeredEventId === eventId;
   const sending = useRef(false);
   const currentEventId = useRef(eventId);
 
@@ -98,6 +100,7 @@ export default function BrowseEventDetails({ onRegister }) {
     // Banners belong to the event they were raised on.
     setNotice(null);
     setRegisterError(null);
+    setRegisteredEventId(null);
   }, [eventId]);
 
   // Not while a registration is in flight: that attempt refreshes when it ends,
@@ -107,7 +110,7 @@ export default function BrowseEventDetails({ onRegister }) {
   }, [load]);
   useRefreshOnReturn(refreshUnlessRegistering);
   async function handleRegister() {
-    if (!onRegister || sending.current || !event) return;
+    if (!onRegister || sending.current || !event || isRegistered) return;
     sending.current = true;
     setRegistering(true);
     setRegisterError(null);
@@ -122,7 +125,7 @@ export default function BrowseEventDetails({ onRegister }) {
       registered = true;
     } catch (err) {
       registered = false;
-      failure = err?.response;
+      failure = err;
     }
 
     // The reader moved to another event meanwhile: nothing about this attempt
@@ -131,6 +134,17 @@ export default function BrowseEventDetails({ onRegister }) {
       sending.current = false;
       setRegistering(false);
       return;
+    }
+
+    const failureMessage = registered ? null : registrationErrorMessage(failure);
+    if (registered) {
+      setRegisteredEventId(startedOn);
+      setNotice(`You are registered for ${name}.`);
+    } else {
+      if (failure?.response?.status === 409 && failure.response.data?.code === "ALREADY_REGISTERED") {
+        setRegisteredEventId(startedOn);
+      }
+      if (failureMessage) setRegisterError(failureMessage);
     }
 
     // Success or not, what is on offer may have changed, and the server's
@@ -143,18 +157,8 @@ export default function BrowseEventDetails({ onRegister }) {
     // belongs to a page that is no longer shown.
     if (fresh.kind === "superseded") return;
 
-    if (registered) {
-      setNotice(`You are registered for ${name}.`);
-    } else if (failure?.status === 401) {
-      setRegisterError(LOAD_ERROR_MESSAGES[401]);
-    } else if (failure?.status === 403) {
-      setRegisterError("Only Attendees can register for events.");
-    } else if (
-      [400, 404, 409].includes(failure?.status) &&
-      typeof failure.data?.error === "string" && failure.data.error.trim()
-    ) {
-      setRegisterError(failure.data.error);
-    } else if (fresh.kind === "ok" && fresh.data.isRegistered) {
+    if (registered || failureMessage) return;
+    if (fresh.kind === "ok" && fresh.data.isRegistered) {
       setRegisterError(ALREADY_MESSAGE);
     } else if (fresh.kind === "ok" && fresh.data.isFull) {
       setRegisterError(FILLED_MESSAGE);
@@ -227,7 +231,7 @@ export default function BrowseEventDetails({ onRegister }) {
                 <dt>Availability</dt>
                 <dd>
                   <OpenEventAvailability event={event} />
-                  {event.isRegistered && <RegisteredBadge />}
+                  {isRegistered && <RegisteredBadge />}
                 </dd>
               </div>
             </dl>
@@ -239,17 +243,19 @@ export default function BrowseEventDetails({ onRegister }) {
 
             <RegisterAction
               event={event}
+              isRegistered={isRegistered}
               onRegister={onRegister}
               registering={registering}
               stale={refreshFailed}
               onClick={handleRegister}
             />
-            {registerError && (
-              <div className="browse-event-details__error" role="alert">
-                <p>{registerError}</p>
-              </div>
-            )}
           </>
+        )}
+
+        {registerError && registerError !== error && (
+          <div className="browse-event-details__error" role="alert">
+            <p>{registerError}</p>
+          </div>
         )}
 
         <BackLink />
