@@ -359,6 +359,9 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
 
   describe.each(['safety_review', 'safety_approved'])('SCRUM561: from %s', (status) => {
     beforeAll(async () => {
+      if (!(await one("select 1 as ok from pg_enum where enumlabel = 'safety_officer'"))) {
+        await db.exec(migration('039_coordinator_lead_and_safety_officer_roles.sql'));
+      }
       if (!(await one("select 1 as ok from pg_enum where enumlabel = 'safety_review'"))) {
         await db.exec(migration('062_safety_statuses.sql'));
         await db.exec(migration('063_safety_transitions.sql'));

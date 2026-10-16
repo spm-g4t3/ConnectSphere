@@ -31,6 +31,17 @@ const CLASS_BY_GROUP = {
   UNKNOWN: "status--unknown",
 };
 
+/** Statuses the assigned coordinator can cancel from; mirrors the transition table in 063. */
+export const CANCELLABLE_STATUSES = new Set([
+  "submitted",
+  "under_review",
+  "pending_clarification",
+  "approved",
+  "safety_review",
+  "safety_approved",
+  "confirmed",
+]);
+
 /**
  * The CSS class for a status group.
  *

@@ -3,16 +3,7 @@ import {
   cancelEventRequest,
   getEventCancellationImpact,
 } from "../services/eventRequestService";
-
-const CANCELLABLE_STATUSES = new Set([
-  "submitted",
-  "under_review",
-  "pending_clarification",
-  "approved",
-  "safety_review",
-  "safety_approved",
-  "confirmed",
-]);
+import { CANCELLABLE_STATUSES } from "../services/eventRequestStatusDisplay";
 
 const CANCEL_ERROR_MESSAGES = {
   400: "Enter a cancellation reason and select who initiated it.",
