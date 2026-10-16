@@ -3,8 +3,8 @@
  *
  * SCRUM-266. tests/routes/flaggedBookings.test.js drives the service through
  * HTTP; these pin what the route cannot reach -- a caller with no id, the
- * default client -- and how each answer reinstate_flagged_booking (076) and
- * cancel_flagged_booking (077) give becomes a result or a typed error. What the function decides is proved in
+ * default client -- and how each answer list_flagged_bookings (078),
+ * reinstate_flagged_booking (076) and cancel_flagged_booking (077) give becomes a result or a typed error. What the function decides is proved in
  * tests/db/reinstateFlaggedBookingDatabase.test.js and
  * tests/db/cancelFlaggedBookingDatabase.test.js. The client is a queue-fed
  * fake, so nothing here needs credentials.
@@ -16,7 +16,12 @@ import { describe, it, expect, vi } from 'vitest';
 const defaultClient = vi.hoisted(() => ({ rpc: null }));
 vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: defaultClient, supabaseAdmin: {}, default: defaultClient }));
 
-import { cancelFlaggedBooking, reinstateFlaggedBooking } from '../../src/services/flaggedBookingService.js';
+import {
+  cancelFlaggedBooking,
+  listFlaggedBookings,
+  reinstateFlaggedBooking,
+} from '../../src/services/flaggedBookingService.js';
+import { getBookingStatusDisplay } from '../../src/domain/bookingStatus.js';
 import {
   ValidationError,
   NotFoundError,
@@ -503,6 +508,206 @@ describe('SCRUM266 cancelling a flagged booking', () => {
       const err = await cancel(clientAnswering({ data: null, error: { code: 'P0002' } })).catch((e) => e);
       expect(err).toBeInstanceOf(NotFoundError);
       expect(err.message).toBe('Unexpected database error');
+    });
+  });
+});
+
+describe('SCRUM266 listing flagged bookings', () => {
+  /** One element of list_flagged_bookings (078), as jsonb_build_object writes it. */
+  const flaggedRow = (overrides = {}) => ({
+    id: BOOKING,
+    event_request_id: EVENT,
+    venue_id: VENUE,
+    starts_at: '2026-12-01T06:00:00+00:00',
+    ends_at: '2026-12-01T08:00:00+00:00',
+    occupied_starts_at: '2026-12-01T05:30:00+00:00',
+    occupied_ends_at: '2026-12-01T08:45:00+00:00',
+    flagged_at: '2026-10-10T00:00:00+00:00',
+    flagged_by: STAFF,
+    review_reason: 'safety_review',
+    event_name: 'Open Day',
+    event_status: 'approved',
+    event_starts_at: '2026-12-01T06:30:00+00:00',
+    event_ends_at: '2026-12-01T08:30:00+00:00',
+    assigned_coordinator_id: COORDINATOR,
+    venue_name: 'Harbour Room',
+    venue_location: 'Block A',
+    block_id: BLOCK,
+    block_reason: 'maintenance',
+    block_notes: 'Roof repair',
+    block_starts_at: '2026-12-01T07:00:00+00:00',
+    block_ends_at: '2026-12-01T09:00:00+00:00',
+    block_removed_at: '2026-10-12T00:00:00+00:00',
+    reinstatable: false,
+    ...overrides,
+  });
+
+  const listed = (...rows) => ({ data: rows, error: null });
+  const list = (client) => listFlaggedBookings(STAFF, { client });
+
+  describe('refusals before any call', () => {
+    it.each([undefined, null, '', '   ', 42])('SCRUM266_AC1_the_caller_%j_is_refused_before_any_call', async (caller) => {
+      const client = clientAnswering(listed());
+      const err = await listFlaggedBookings(caller, { client }).catch((e) => e);
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.details).toEqual([{ field: 'callerId', message: 'is required' }]);
+      expect(client.calls).toHaveLength(0);
+    });
+  });
+
+  describe('the call and its result', () => {
+    it('SCRUM266_AC1_calls_list_flagged_bookings_with_only_the_caller', async () => {
+      const client = clientAnswering(listed());
+
+      await list(client);
+
+      expect(client.calls).toEqual([{ fn: 'list_flagged_bookings', args: { p_caller: STAFF } }]);
+    });
+
+    it('SCRUM266_AC1_nothing_flagged_is_an_empty_array', async () => {
+      expect(await list(clientAnswering(listed()))).toEqual([]);
+    });
+
+    it('SCRUM266_AC1_maps_every_field_to_camel_case_with_the_block_nested', async () => {
+      const [item] = await list(clientAnswering(listed(flaggedRow())));
+
+      expect(item).toEqual({
+        id: BOOKING,
+        eventRequestId: EVENT,
+        venueId: VENUE,
+        statusDisplay: getBookingStatusDisplay('flagged_for_review'),
+        startsAt: '2026-12-01T06:00:00+00:00',
+        endsAt: '2026-12-01T08:00:00+00:00',
+        occupiedStartsAt: '2026-12-01T05:30:00+00:00',
+        occupiedEndsAt: '2026-12-01T08:45:00+00:00',
+        flaggedAt: '2026-10-10T00:00:00+00:00',
+        flaggedBy: STAFF,
+        reviewReason: 'safety_review',
+        eventName: 'Open Day',
+        eventStatus: 'approved',
+        eventStartsAt: '2026-12-01T06:30:00+00:00',
+        eventEndsAt: '2026-12-01T08:30:00+00:00',
+        assignedCoordinatorId: COORDINATOR,
+        venueName: 'Harbour Room',
+        venueLocation: 'Block A',
+        block: {
+          id: BLOCK,
+          reason: 'maintenance',
+          notes: 'Roof repair',
+          startsAt: '2026-12-01T07:00:00+00:00',
+          endsAt: '2026-12-01T09:00:00+00:00',
+          removedAt: '2026-10-12T00:00:00+00:00',
+        },
+        reinstatable: false,
+      });
+    });
+
+    it('SCRUM266_AC1_status_display_reads_flagged_for_review', async () => {
+      const [item] = await list(clientAnswering(listed(flaggedRow())));
+
+      expect(item.statusDisplay).toMatchObject({ label: 'Flagged for review', group: 'FLAGGED' });
+    });
+
+    it('SCRUM266_AC1_keeps_the_order_the_function_gave', async () => {
+      const result = await list(clientAnswering(listed(flaggedRow({ id: OTHER_BOOKING }), flaggedRow())));
+
+      expect(result.map((item) => item.id)).toEqual([OTHER_BOOKING, BOOKING]);
+    });
+
+    it.each([
+      ['null', null],
+      ['undefined', undefined],
+    ])('SCRUM266_AC1_the_block_is_null_when_block_id_is_%s', async (_label, blockId) => {
+      const [item] = await list(
+        clientAnswering(listed(flaggedRow({ block_id: blockId, review_reason: 'setup_or_turnaround_changed' }))),
+      );
+
+      expect(item.block).toBeNull();
+      expect(item.reviewReason).toBe('setup_or_turnaround_changed');
+    });
+
+    it('SCRUM266_AC1_a_sparse_row_maps_every_missing_field_to_null', async () => {
+      const sparse = { id: BOOKING, event_request_id: EVENT, venue_id: VENUE, starts_at: 's', ends_at: 'e', block_id: BLOCK };
+
+      const [item] = await list(clientAnswering(listed(sparse)));
+
+      expect(item).toEqual({
+        id: BOOKING,
+        eventRequestId: EVENT,
+        venueId: VENUE,
+        statusDisplay: getBookingStatusDisplay('flagged_for_review'),
+        startsAt: 's',
+        endsAt: 'e',
+        occupiedStartsAt: null,
+        occupiedEndsAt: null,
+        flaggedAt: null,
+        flaggedBy: null,
+        reviewReason: null,
+        eventName: null,
+        eventStatus: null,
+        eventStartsAt: null,
+        eventEndsAt: null,
+        assignedCoordinatorId: null,
+        venueName: null,
+        venueLocation: null,
+        block: { id: BLOCK, reason: null, notes: null, startsAt: null, endsAt: null, removedAt: null },
+        reinstatable: false,
+      });
+    });
+
+    it.each([
+      ['true', true, true],
+      ['false', false, false],
+      ['the string true', 'true', false],
+      ['1', 1, false],
+      ['missing', undefined, false],
+    ])('SCRUM266_AC1_reinstatable_%s_maps_to_%s', async (_label, value, expected) => {
+      const [item] = await list(clientAnswering(listed(flaggedRow({ reinstatable: value }))));
+
+      expect(item.reinstatable).toBe(expected);
+    });
+
+    it('SCRUM266_AC1_list_uses_the_default_client_when_none_is_given', async () => {
+      const calls = [];
+      defaultClient.rpc = (fn, args) => {
+        calls.push({ fn, args });
+        return Promise.resolve(listed(flaggedRow()));
+      };
+
+      const result = await listFlaggedBookings(STAFF);
+
+      expect(result.map((item) => item.id)).toEqual([BOOKING]);
+      expect(calls).toEqual([{ fn: 'list_flagged_bookings', args: { p_caller: STAFF } }]);
+    });
+  });
+
+  describe('errors and unexpected results', () => {
+    it('SCRUM266_AC1_list_42501_is_forbidden', async () => {
+      const err = await list(clientAnswering(failure('42501', 'only Venue Staff can view flagged bookings'))).catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenError);
+      expect(err.message).toBe('only Venue Staff can view flagged bookings');
+    });
+
+    it('SCRUM266_AC1_list_an_unmapped_code_is_a_plain_error_with_the_message', async () => {
+      const err = await list(clientAnswering(failure('XX000', 'boom'))).catch((e) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(ForbiddenError);
+      expect(err.status).toBeUndefined();
+      expect(err.message).toBe('boom');
+    });
+
+    it.each([
+      ['null', null],
+      ['undefined', undefined],
+      ['an object', { outcome: 'listed' }],
+      ['a string', '[]'],
+    ])('SCRUM266_AC1_list_with_%s_data_is_a_plain_error', async (_label, data) => {
+      const err = await list(clientAnswering({ data, error: null })).catch((e) => e);
+
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(ConflictError);
+      expect(err.status).toBeUndefined();
+      expect(err.message).toBe('Unexpected result from list_flagged_bookings');
     });
   });
 });

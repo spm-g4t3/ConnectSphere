@@ -414,3 +414,114 @@ describe('SCRUM-266: the coordinator or Venue Staff cancel a flagged booking', (
     spy.mockRestore();
   });
 });
+
+describe('SCRUM-266: Venue Staff list the flagged bookings', () => {
+  /** One element of list_flagged_bookings (078). */
+  const flaggedRow = (overrides = {}) => ({
+    id: BOOKING_ID,
+    event_request_id: EVENT_ID,
+    venue_id: VENUE_ID,
+    starts_at: START,
+    ends_at: END,
+    occupied_starts_at: '2026-12-01T08:30:00+00:00',
+    occupied_ends_at: '2026-12-01T17:45:00+00:00',
+    flagged_at: '2026-10-10T00:00:00+00:00',
+    flagged_by: STAFF_ID,
+    review_reason: null,
+    event_name: 'Open Day',
+    event_status: 'approved',
+    event_starts_at: START,
+    event_ends_at: END,
+    assigned_coordinator_id: COORDINATOR_ID,
+    venue_name: 'Harbour Room',
+    venue_location: 'Block A',
+    block_id: RESOLUTION_ID,
+    block_reason: 'maintenance',
+    block_notes: null,
+    block_starts_at: START,
+    block_ends_at: END,
+    block_removed_at: null,
+    reinstatable: true,
+    ...overrides,
+  });
+
+  const list = (client, { requireAuth } = {}) =>
+    request(appWith({ client, requireAuth })).get('/api/flagged-bookings');
+
+  it('SCRUM266_AC1_list_is_200_with_an_array_in_camel_case_and_the_caller_from_the_token', async () => {
+    const client = createFakeClient([
+      ok([flaggedRow(), flaggedRow({ id: OTHER_BOOKING_ID, review_reason: 'safety_review', block_id: null, reinstatable: false })]),
+    ]);
+
+    const res = await list(client);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(2);
+    expect(res.body[0]).toMatchObject({
+      id: BOOKING_ID,
+      eventRequestId: EVENT_ID,
+      venueId: VENUE_ID,
+      statusDisplay: expect.objectContaining({ status: 'flagged_for_review' }),
+      eventName: 'Open Day',
+      venueName: 'Harbour Room',
+      block: { id: RESOLUTION_ID, reason: 'maintenance' },
+      reinstatable: true,
+    });
+    expect(res.body[1]).toMatchObject({ id: OTHER_BOOKING_ID, reviewReason: 'safety_review', block: null, reinstatable: false });
+    expect(client.calls).toEqual([{ fn: 'list_flagged_bookings', args: { p_caller: STAFF_ID } }]);
+  });
+
+  it('SCRUM266_AC1_list_is_200_with_an_empty_array_when_nothing_is_flagged', async () => {
+    const res = await list(createFakeClient([ok([])]));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM266_AC1_list_returns_401_without_a_token_and_never_queries', async () => {
+    const client = createFakeClient([ok([])]);
+    const res = await list(client, { requireAuth: signedOut });
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ROLE.EVENT_COORDINATOR,
+    ROLE.EVENT_ORGANISER,
+    ROLE.EVENT_COORDINATOR_LEAD,
+    ROLE.TECHNICAL_SUPPORT_STAFF,
+    ROLE.SAFETY_OFFICER,
+    ROLE.ATTENDEE,
+    null,
+  ])('SCRUM266_AC1_list_refuses_%s_with_403_and_never_queries', async (role) => {
+    const client = createFakeClient([ok([])]);
+    const res = await list(client, { requireAuth: signedInWithRole(role, COORDINATOR_ID) });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('This action is restricted to Venue Staff');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM266_AC1_a_refusal_from_the_list_function_is_403', async () => {
+    const res = await list(createFakeClient([dbFailure('42501', 'only Venue Staff can view flagged bookings')]));
+    expect(res.status).toBe(403);
+  });
+
+  it.each([
+    ['no data', null],
+    ['an object', { outcome: 'listed' }],
+  ])('SCRUM266_AC1_list_with_%s_is_500_without_the_detail', async (_label, data) => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await list(createFakeClient([ok(data)]));
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    spy.mockRestore();
+  });
+
+  it('SCRUM266_AC1_an_unmapped_database_error_on_list_is_500_without_the_detail', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await list(createFakeClient([dbFailure('XX000', 'secret detail')]));
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    spy.mockRestore();
+  });
+});

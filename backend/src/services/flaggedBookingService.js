@@ -1,11 +1,12 @@
 /**
- * Resolving a booking flagged for review: Venue Staff reinstate it, and the
- * event's coordinator or Venue Staff cancel it.
+ * Bookings flagged for review: Venue Staff list them and reinstate them, and
+ * the event's coordinator or Venue Staff cancel them.
  *
  * The rules, the locks and the record of the resolution live in
- * reinstate_flagged_booking (076) and cancel_flagged_booking (077); this
- * module checks the input, makes the call and maps the answer. The client is
- * optional, so it tests without credentials.
+ * list_flagged_bookings (078), reinstate_flagged_booking (076) and
+ * cancel_flagged_booking (077); this module checks the input, makes the call
+ * and maps the answer. The client is optional, so it tests without
+ * credentials.
  */
 
 import {
@@ -14,7 +15,7 @@ import {
   NotFoundError,
   ValidationError,
 } from '../errors.js';
-import { getBookingStatusDisplay } from '../domain/bookingStatus.js';
+import { BOOKING_STATUS, getBookingStatusDisplay } from '../domain/bookingStatus.js';
 import { toBookingRequest, toPeriodConflict } from './bookingRequestService.js';
 import {
   validateFlaggedBookingId,
@@ -69,6 +70,73 @@ function toResolvedBooking(data) {
     statusDisplay: getBookingStatusDisplay(data.booking.status),
     resolution: toResolution(data.resolution),
   };
+}
+
+/** The block that flagged the booking, or null when no block did. */
+function toFlagBlock(row) {
+  if (!row.block_id) return null;
+  return {
+    id: row.block_id,
+    reason: row.block_reason ?? null,
+    notes: row.block_notes ?? null,
+    startsAt: row.block_starts_at ?? null,
+    endsAt: row.block_ends_at ?? null,
+    removedAt: row.block_removed_at ?? null,
+  };
+}
+
+/** @param {object} row  one element of list_flagged_bookings (078) */
+function toFlaggedBooking(row) {
+  return {
+    id: row.id,
+    eventRequestId: row.event_request_id,
+    venueId: row.venue_id,
+    statusDisplay: getBookingStatusDisplay(BOOKING_STATUS.FLAGGED_FOR_REVIEW),
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    occupiedStartsAt: row.occupied_starts_at ?? null,
+    occupiedEndsAt: row.occupied_ends_at ?? null,
+    // Null on a booking flagged before 014, which recorded no flag time.
+    flaggedAt: row.flagged_at ?? null,
+    flaggedBy: row.flagged_by ?? null,
+    reviewReason: row.review_reason ?? null,
+    eventName: row.event_name ?? null,
+    eventStatus: row.event_status ?? null,
+    eventStartsAt: row.event_starts_at ?? null,
+    eventEndsAt: row.event_ends_at ?? null,
+    assignedCoordinatorId: row.assigned_coordinator_id ?? null,
+    venueName: row.venue_name ?? null,
+    venueLocation: row.venue_location ?? null,
+    block: toFlagBlock(row),
+    reinstatable: row.reinstatable === true,
+  };
+}
+
+/**
+ * Every booking flagged for review, oldest flag first, each with what flagged
+ * it: a block, a review reason, or both when a safety flag sits on a block's.
+ *
+ * @param {string} callerId  from the JWT -- never the client
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object[]>} possibly empty, in camelCase
+ * @throws {ValidationError} when no caller was supplied, before any round trip
+ * @throws {ForbiddenError}  the caller is not Venue Staff
+ */
+export async function listFlaggedBookings(callerId, { client } = {}) {
+  checkCaller(callerId);
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('list_flagged_bookings', { p_caller: callerId });
+
+  if (error) throw translateError(error);
+
+  // 078 always answers an array, '[]' when nothing is flagged.
+  if (!Array.isArray(data)) {
+    throw new Error('Unexpected result from list_flagged_bookings');
+  }
+
+  return data.map(toFlaggedBooking);
 }
 
 /**

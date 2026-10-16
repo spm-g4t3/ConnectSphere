@@ -46,6 +46,7 @@ const NAV_LINKS_BY_ROLE = {
     { to: "/dashboard", label: "Dashboard" },
     { to: "/venue-catalogue", label: "Venue Catalogue" },
     { to: "/booking-requests", label: "Booking Requests" },
+    { to: "/flagged-bookings", label: "Flagged Bookings" },
   ],
   // TECHNICAL_SUPPORT_STAFF, not TECHNICAL_SUPPORT. normaliseRole yields the
   // full role name from the token, so the short key matched nothing and this

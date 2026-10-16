@@ -1,7 +1,8 @@
 // VenueStaffDashboard.jsx
 //
 // The Venue Staff landing page: a greeting, the pending booking requests
-// queue (SCRUM-258), notifications, and the venue catalogue.
+// queue (SCRUM-258), the flagged bookings list, notifications, and the venue
+// catalogue.
 //
 // The catalogue used to live inline here. It moved to VenueCatalogue.jsx
 // unchanged when SCRUM-15's create/edit/detail panels were wired up: the
@@ -11,6 +12,7 @@
 // the retire flow changed in the move.
 
 import PendingBookingRequests from "./PendingBookingRequests";
+import FlaggedBookings from "./FlaggedBookings";
 import VenueCatalogue from "./VenueCatalogue";
 import NotificationInbox from "./NotificationInbox";
 
@@ -26,6 +28,8 @@ export default function VenueStaffDashboard({ user }) {
       {/* A direct child of .dashboard, like VenueCatalogue below, so its
           <section> root gets the `.dashboard > section` card styling. */}
       <PendingBookingRequests />
+
+      <FlaggedBookings />
 
       <NotificationInbox />
 

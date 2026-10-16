@@ -140,6 +140,18 @@ const SCRUM258_FILES = [
   'src/components/PendingBookingRequestCard.jsx',
 ]
 
+// SCRUM-266 owns Venue Staff's flagged bookings list and its card, and the
+// services behind them. flaggedBookingDisplay.js, shared with the venue
+// catalogue and the coordinator's list, is gated here too: its older tests
+// already cover every line, and this story adds flagReasons and its tests.
+const SCRUM266_FILES = [
+  'src/components/FlaggedBookings.jsx',
+  'src/components/FlaggedBookingCard.jsx',
+  'src/services/flaggedBookingService.js',
+  'src/services/flaggedBookingErrors.js',
+  'src/services/flaggedBookingDisplay.js',
+]
+
 // SCRUM-495: the Attendee's browse pages. New files only this story owns.
 const SCRUM495_FILES = [
   'src/components/BrowseOpenEvents.jsx',
@@ -211,6 +223,7 @@ export default defineConfig({
         ...SCRUM486_FILES.map((file) => [file, FULL]),
         ...SCRUM487_FILES.map((file) => [file, FULL]),
         ...SCRUM258_FILES.map((file) => [file, FULL]),
+        ...SCRUM266_FILES.map((file) => [file, FULL]),
         ...SCRUM495_FILES.map((file) => [file, FULL]),
         ...SCRUM489_FILES.map((file) => [file, FULL]),
         ...SCRUM172_FILES.map((file) => [file, FULL]),

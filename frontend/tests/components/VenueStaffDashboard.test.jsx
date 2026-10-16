@@ -3,7 +3,8 @@
 // SCRUM-258 AC1. The Venue Staff landing page shows the pending booking
 // requests queue, read from the real endpoint through the real service:
 // only apiClient is mocked, so a wrong URL or a leftover stub would leave the
-// queue empty and fail here.
+// queue empty and fail here. SCRUM-266 AC1 adds the flagged bookings list,
+// read the same way.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -53,5 +54,40 @@ describe("SCRUM258 VenueStaffDashboard", () => {
     expect(await within(queue).findByText("Tech Talk")).toBeInTheDocument();
     expect(within(queue).getByText("Hall A")).toBeInTheDocument();
     expect(apiClient.get).toHaveBeenCalledWith("/booking-requests/pending");
+  });
+});
+
+const FLAGGED = {
+  id: "f1",
+  eventName: "Board Retreat",
+  venueName: "Hall B",
+  startsAt: "2026-12-03T09:00:00+08:00",
+  endsAt: "2026-12-03T17:00:00+08:00",
+  flaggedAt: "2026-11-20T10:00:00+08:00",
+  reviewReason: "setup_or_turnaround_changed",
+  block: null,
+  reinstatable: true,
+};
+
+describe("SCRUM266 VenueStaffDashboard", () => {
+  it("SCRUM266_AC1_the_dashboard_shows_the_flagged_bookings_from_the_endpoint_under_the_pending_queue", async () => {
+    vi.mocked(apiClient.get).mockImplementation(async (url) => ({
+      data: url === "/flagged-bookings" ? [FLAGGED] : [],
+    }));
+    render(
+      <MemoryRouter>
+        <VenueStaffDashboard user={{ id: "u1", email: "staff@example.com", role: "venue_staff" }} />
+      </MemoryRouter>,
+    );
+
+    const flagged = screen.getByRole("heading", { name: "Flagged bookings" }).closest("section");
+    expect(await within(flagged).findByText("Board Retreat")).toBeInTheDocument();
+    expect(within(flagged).getByText("Hall B")).toBeInTheDocument();
+    expect(within(flagged).getByText("Setup or turnaround time changed")).toBeInTheDocument();
+    expect(apiClient.get).toHaveBeenCalledWith("/flagged-bookings");
+
+    const pending = screen.getByRole("heading", { name: "Pending booking requests" }).closest("section");
+    expect(pending.compareDocumentPosition(flagged) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(pending).queryByText("Board Retreat")).not.toBeInTheDocument();
   });
 });

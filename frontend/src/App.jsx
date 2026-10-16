@@ -16,6 +16,7 @@ import AssignedEvents from "./components/AssignedEvents";
 import EventRequestReviewPage from "./components/EventRequestReviewPage";
 import MyBookingRequests from "./components/MyBookingRequests";
 import PendingBookingRequests from "./components/PendingBookingRequests";
+import FlaggedBookings from "./components/FlaggedBookings";
 import EquipmentCatalogue from "./components/EquipmentCatalogue";
 import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
@@ -327,6 +328,19 @@ function AppRoutes() {
             <ProtectedRoute allowedRoles={["venue_staff"]}>
               <div className="dashboard dashboard--venue-staff">
                 <PendingBookingRequests />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* Venue Staff's flagged bookings, the same component the dashboard
+            shows, wrapped as /booking-requests is. GET /flagged-bookings
+            answers 403 to anyone else regardless. */}
+        <Route
+          path="/flagged-bookings"
+          element={
+            <ProtectedRoute allowedRoles={["venue_staff"]}>
+              <div className="dashboard dashboard--venue-staff">
+                <FlaggedBookings />
               </div>
             </ProtectedRoute>
           }

@@ -1,10 +1,11 @@
 /**
- * Flagged booking routes: resolving a booking flagged for review.
+ * Flagged booking routes: listing and resolving bookings flagged for review.
  *
- * POST /:id/reinstate approves a flagged booking again, behind venueStaffOnly;
- * POST /:id/cancel cancels it, behind coordinatorOrVenueStaff. The functions
- * (076, 077) check the role again under lock, and 077 also checks that a
- * coordinator is the event's assigned one. The caller is always req.user.id,
+ * GET / lists them, behind venueStaffOnly. POST /:id/reinstate approves a
+ * flagged booking again, behind venueStaffOnly; POST /:id/cancel cancels it,
+ * behind coordinatorOrVenueStaff. The functions (078, 076, 077) check the
+ * role again, 076 and 077 under lock, and 077 also checks that a coordinator
+ * is the event's assigned one. The caller is always req.user.id,
  * and only the reason is read from the body.
  *
  * A factory over an injected client and verifier, as the other routers are, so
@@ -19,6 +20,7 @@ import { ROLE } from '../domain/userRole.js';
 import { createErrorHandler } from '../http/handleError.js';
 import {
   cancelFlaggedBooking,
+  listFlaggedBookings,
   reinstateFlaggedBooking,
 } from '../services/flaggedBookingService.js';
 
@@ -43,6 +45,20 @@ export function createFlaggedBookingRouter({
   const coordinatorOrVenueStaff = requireRole(ROLE.EVENT_COORDINATOR, ROLE.VENUE_STAFF);
 
   router.use(requireAuth);
+
+  /**
+   * Every booking flagged for review, oldest flag first, each with what
+   * flagged it. 200 and an array, possibly empty.
+   *
+   * Statuses: 401; 403 wrong role or no role.
+   */
+  router.get('/', venueStaffOnly, async (req, res) => {
+    try {
+      res.status(200).json(await listFlaggedBookings(req.user.id, { client }));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
 
   /**
    * Reinstate a flagged booking with a reason. 200 and the booking, now
