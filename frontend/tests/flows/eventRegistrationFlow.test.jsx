@@ -22,6 +22,42 @@ const event = (overrides = {}) => ({
 describe("SCRUM43 registration feedback", () => {
   const successNotice = () => document.querySelector(".browse-event-details__success");
 
+  it.each([false, true])("SCRUM46_AC6_reconciles_registered_status_after_a_later_server_update_%s", async (duplicate) => {
+    const registered = event({ isRegistered: true, canRegister: false, isFull: true, placesLeft: 0 });
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event()).mockResolvedValueOnce(registered)
+      .mockResolvedValue(event());
+    if (duplicate) {
+      vi.mocked(registerForEvent).mockRejectedValue({ response: { status: 409, data: { code: "ALREADY_REGISTERED" } } });
+    } else {
+      vi.mocked(registerForEvent).mockResolvedValue({ id: "r1", status: "registered" });
+    }
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    await screen.findByText("Full");
+    fireEvent.focus(window);
+    expect(await screen.findByRole("button", { name: "Register" })).toBeEnabled();
+    expect(screen.getByText("1 place left")).toBeInTheDocument();
+    expect(screen.queryByText("Registered")).not.toBeInTheDocument();
+    expect(successNotice()).toBeNull();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(registerForEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([null, undefined])("SCRUM46_AC6_recovers_when_the_post_registration_read_rejects_with_%s", async (failure) => {
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event()).mockRejectedValueOnce(failure)
+      .mockResolvedValue(event({ placesLeft: 0, isFull: true, isRegistered: true, canRegister: false }));
+    vi.mocked(registerForEvent).mockResolvedValue({ id: "r1", status: "registered" });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    await screen.findByText("Availability could not be refreshed.");
+    const retry = screen.getByRole("button", { name: "Try again" });
+    expect(retry).toBeEnabled();
+    await userEvent.click(retry);
+    expect(await screen.findByText("Full")).toBeInTheDocument();
+    expect(successNotice()).toHaveTextContent("You are registered for Open Day.");
+    expect(registerForEvent).toHaveBeenCalledTimes(1);
+  });
+
   it("SCRUM43_AC1_AC2_AC6_confirms_immediately_and_does_not_reenable_registration_after_a_stale_read", async () => {
     let finishRefresh;
     vi.mocked(getOpenEvent).mockResolvedValueOnce(event())

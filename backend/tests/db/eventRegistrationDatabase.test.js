@@ -66,6 +66,7 @@ beforeAll(async () => {
       add column registration_capacity integer;
     grant select on profiles to service_role;
     grant select, update on event_requests to service_role;
+    grant execute on function open_event_registration_state(uuid[], uuid) to service_role;
     create function fail_test_registration() returns trigger language plpgsql as $$
     begin
       if new.event_request_id::text = current_setting('test.fail_event', true) then
@@ -300,25 +301,82 @@ describe('SCRUM39 atomic event registration', () => {
     expect(await records()).toHaveLength(1);
   });
 
-  it('SCRUM36_AC3_verifies_the_HTTP_service_and_SQL_registration_integration', async () => {
-    const client = { rpc: async (_name, args) => {
-      try {
-        const { rows } = await register(args.p_attendee_id, args.p_event_request_id);
-        return { data: rows[0].result, error: null };
-      } catch (error) { return { error }; }
-    } };
+  it('SCRUM22_AC4_AC5_AC6_AC7_HTTP_registration_and_browsing_share_authoritative_SQL_state', async () => {
+    const client = {
+      async rpc(name, args) {
+        try {
+          if (name === 'register_for_event') {
+            const { rows } = await register(args.p_attendee_id, args.p_event_request_id);
+            return { data: rows[0].result, error: null };
+          }
+          expect(name).toBe('open_event_registration_state');
+          const { rows } = await db.query(
+            'select * from open_event_registration_state($1::uuid[], $2::uuid)',
+            [args.p_event_ids, args.p_attendee_id],
+          );
+          return { data: rows, error: null };
+        } catch (error) { return { error }; }
+      },
+      from(table) {
+        expect(table).toBe('event_requests');
+        const clauses = [];
+        const params = [];
+        const filter = (column, operator, value) => {
+          params.push(value);
+          clauses.push(`${column} ${operator} $${params.length}`);
+          return chain;
+        };
+        // Translate only this detail query's Supabase interface to real SQL.
+        const chain = {
+          select: () => chain,
+          eq: (column, value) => filter(column, '=', value),
+          lte: (column, value) => filter(column, '<=', value),
+          gt: (column, value) => filter(column, '>', value),
+          or: (expression) => {
+            const prefix = 'registration_closes_at.is.null,registration_closes_at.gt.';
+            expect(expression.startsWith(prefix)).toBe(true);
+            params.push(expression.slice(prefix.length));
+            clauses.push(`(registration_closes_at is null or registration_closes_at > $${params.length})`);
+            return chain;
+          },
+          then: (resolve, reject) => db.query(
+            `select * from event_requests where ${clauses.join(' and ')}`, params,
+          ).then(({ rows }) => ({ data: rows, error: null })).then(resolve, reject),
+        };
+        return chain;
+      },
+    };
     const requireAuth = createRequireAuth({
-      verifyToken: async (token) => token === 'attendee-token' ? { id: ME } : null,
+      verifyToken: async (token) => {
+        if (token === 'attendee-token') return { id: ME };
+        if (token === 'other-token') return { id: OTHER };
+        return null;
+      },
       loadRole: async (id) => (await db.query('select role from profiles where id = $1', [id])).rows[0]?.role,
     });
     const app = express().use('/api/open-events', createOpenEventRouter({ client, requireAuth }));
     await db.exec('set role service_role');
     try {
+      const before = await request(app).get(`/api/open-events/${event}`)
+        .set('Authorization', 'Bearer attendee-token');
+      expect(before.status).toBe(200);
+      expect(before.body).toMatchObject({ placesLeft: 1, isRegistered: false, isFull: false, canRegister: true });
       const success = await request(app).post(`/api/open-events/${event}/registrations`)
         .set('Authorization', 'Bearer attendee-token');
       expect(success.status).toBe(201);
       expect(success.body).toMatchObject({ attendeeId: ME, eventRequestId: event, status: 'registered' });
       expect((await records()).map((row) => row.id)).toEqual([success.body.id]);
+      for (const token of ['attendee-token', 'other-token']) {
+        const fresh = await request(app).get(`/api/open-events/${event}`)
+          .set('Authorization', `Bearer ${token}`);
+        expect(fresh.status).toBe(200);
+        expect(fresh.headers['cache-control']).toBe('no-store');
+        expect(fresh.body).toMatchObject({ placesLeft: 0, isFull: true, canRegister: false, isRegistered: token === 'attendee-token' });
+      }
+      const full = await request(app).post(`/api/open-events/${event}/registrations`)
+        .set('Authorization', 'Bearer other-token');
+      expect(full.status).toBe(409);
+      expect(full.body).toMatchObject({ code: 'EVENT_FULL', error: 'Event is full' });
       const repeated = await request(app).post(`/api/open-events/${event}/registrations`)
         .set('Authorization', 'Bearer attendee-token');
       expect(repeated.status).toBe(409);

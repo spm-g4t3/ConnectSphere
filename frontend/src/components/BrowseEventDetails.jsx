@@ -113,8 +113,15 @@ export default function BrowseEventDetails({ onRegister }) {
 
   // Not while a registration is in flight: that attempt refreshes when it ends,
   // and a read started now would supersede that one and hide what happened.
-  const refreshUnlessRegistering = useCallback(() => {
-    if (!sending.current) refreshEvent();
+  const refreshUnlessRegistering = useCallback(async () => {
+    if (sending.current) return;
+    const fresh = await refreshEvent();
+    if (fresh.kind === "ok") {
+      // A later authoritative read supersedes the immediate submission feedback.
+      setRegisteredEventId(null);
+      setRegisterError(null);
+      if (!fresh.data.isRegistered) setNotice(null);
+    }
   }, [refreshEvent]);
   useRefreshOnReturn(refreshUnlessRegistering);
   async function handleRegister() {
@@ -202,7 +209,7 @@ export default function BrowseEventDetails({ onRegister }) {
         {!loading && error && (
           <div className="browse-event-details__error" role="alert">
             <p>{error}</p>
-            <button type="button" onClick={refreshEvent}>
+            <button type="button" onClick={refreshUnlessRegistering}>
               Try again
             </button>
           </div>
