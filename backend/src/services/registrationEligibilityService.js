@@ -1,0 +1,34 @@
+import {
+  ValidationError, NotFoundError, ConflictError, ForbiddenError, UnauthorizedError,
+} from '../errors.js';
+import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
+
+/** Shared with the eventual registration writer, which calls the same SQL check. */
+export function translateRegistrationEligibilityError(error) {
+  if (error.code === '42501') return new ForbiddenError(error.message);
+  if (error.code === 'P0002') return new NotFoundError('Event not found');
+  if (error.code === '22023') return new ValidationError(error.message);
+  if (error.code === '55000') return new ConflictError(error.message, { code: error.hint });
+  return error;
+}
+
+/**
+ * Preflight only: attendeeId comes from requireAuth's req.user.id. Role, status,
+ * settings and time come from the database, never the request. SCRUM-39 must
+ * call assert_event_registration_eligible again within its insertion transaction.
+ */
+export async function validateRegistrationEligibility({ attendeeId, eventId, client } = {}) {
+  if (!attendeeId) throw new UnauthorizedError('Authentication required');
+  for (const [field, value] of [['attendeeId', attendeeId], ['eventId', eventId]]) {
+    if (!isPlausibleId(value)) {
+      throw new ValidationError('Invalid registration request', [{ field, message: 'must be a valid UUID' }]);
+    }
+  }
+
+  const db = client ?? (await import('../config/supabaseClient.js')).supabase;
+  const { error } = await db.rpc('assert_event_registration_eligible', {
+    p_event_request_id: eventId,
+    p_attendee_id: attendeeId,
+  });
+  if (error) throw translateRegistrationEligibilityError(error);
+}
