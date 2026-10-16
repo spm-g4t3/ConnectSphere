@@ -117,8 +117,7 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     renderDashboardAs("safety_officer");
 
     expect(screen.getByRole("heading", { level: 1, name: "Safety Officer" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Safety review list" })).toBeInTheDocument();
-    expect(screen.getByText(/built by SCRUM-490/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Safety review" })).toBeInTheDocument();
   });
 
   it.each(["event_coordinator_lead", "safety_officer"])(
@@ -165,13 +164,15 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     expect(getEquipmentRequests).not.toHaveBeenCalled();
   });
 
-  it("SCRUM489_AC8_the_safety_officer_dashboard_reads_only_its_notifications", () => {
-    // The safety_officer row of AC3-08, carried on: the one read is the card
-    // that shows a Safety Officer the event_submitted_for_safety_review notices.
-    // The review list itself still has no endpoint (SCRUM-490) and reads nothing.
+  it("SCRUM489_AC8_the_safety_officer_dashboard_reads_its_review_queue_and_notifications", () => {
+    // The queue is built by SCRUM-490; the card reads the
+    // event_submitted_for_safety_review notices.
     renderDashboardAs("safety_officer");
 
-    expect(vi.mocked(apiClient.get).mock.calls.map(([path]) => path)).toEqual(["/notifications"]);
+    expect(vi.mocked(apiClient.get).mock.calls.map(([path]) => path)).toEqual([
+      "/notifications",
+      "/safety-reviews",
+    ]);
     for (const method of ["post", "put", "patch", "delete"]) {
       expect(apiClient[method]).not.toHaveBeenCalled();
     }
@@ -181,13 +182,15 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
 
   it("SCRUM489_AC8_a_safety_officer_reads_a_submission_notice_on_the_dashboard_in_words", async () => {
     // AC8-05: the notice 064 writes, through the real card and describeNotification.
-    vi.mocked(apiClient.get).mockResolvedValue({ data: [{
-      id: "n1",
-      type: "event_submitted_for_safety_review",
-      readAt: null,
-      createdAt: "2026-10-14T09:00:00+08:00",
-      payload: { eventName: "IS212 Industry Night", coordinatorName: "Priya Nair" },
-    }] });
+    vi.mocked(apiClient.get).mockImplementation((path) => Promise.resolve({
+      data: path === "/safety-reviews" ? [] : [{
+        id: "n1",
+        type: "event_submitted_for_safety_review",
+        readAt: null,
+        createdAt: "2026-10-14T09:00:00+08:00",
+        payload: { eventName: "IS212 Industry Night", coordinatorName: "Priya Nair" },
+      }],
+    }));
     renderDashboardAs("safety_officer");
 
     expect(await screen.findByText("Event submitted for safety check")).toBeInTheDocument();

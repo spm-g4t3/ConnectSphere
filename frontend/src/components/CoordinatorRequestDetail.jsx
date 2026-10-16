@@ -51,6 +51,7 @@ import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import EventEquipmentSection from "./EventEquipmentSection";
 import EventCancellationPanel from "./EventCancellationPanel";
 import SafetyCheckSubmissionPanel from "./SafetyCheckSubmissionPanel";
+import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import {
   decideEventRequest,
   getCoordinatorChangeRequests,
@@ -513,6 +514,7 @@ export default function CoordinatorRequestDetail({
         </span>
       </h2>
       <p>{display.description}</p>
+      <SafetyApprovalNotice status={current.status} />
       {isAssignedCoordinator && CANCELLABLE_STATUSES.has(current.status) && (
         <button
           className="coordinator-request-detail__cancel"

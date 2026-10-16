@@ -746,6 +746,12 @@ describe("SCRUM19 statuses with nothing to decide", () => {
     const heading = screen.getByRole("heading", { name: new RegExp(`IS212 Industry Night\\s*${label}`) });
     expect(within(heading).getByText(label)).toHaveClass("status-badge");
     expect(screen.getByText(description)).toBeInTheDocument();
+    if (status === "safety_approved") {
+      expect(screen.getByText("Safety approval complete").closest(".safety-approval-notice"))
+        .toHaveTextContent("A Safety Officer has approved the event arrangements.");
+    } else {
+      expect(screen.queryByText("Safety approval complete")).not.toBeInTheDocument();
+    }
     expect(screen.queryByText(status)).not.toBeInTheDocument();
     expect(screen.queryByText("Waiting for organiser reply")).not.toBeInTheDocument();
     expect(actionButtonsShown()).toEqual([]);

@@ -129,8 +129,10 @@ Only these transitions are allowed. This story defines which moves are valid; wh
 ```
 Draft -> Submitted -> Under review <-> Pending clarification
                           |
-                          +-> Approved <-> Safety review -> Safety approved -> Confirmed -> Completed
-                          |      |              (Safety approved and Confirmed also go back to Approved)
+                          +-> Approved -> Safety review -> Safety approved -> Confirmed -> Completed
+                          |      ^              |                |
+                          |      +--------------+----------------+
+                          |      |
                           +------+-> Rejected -> Draft (reopened)
 
 Cancelled: from Submitted, Under review, Pending clarification, Approved, Safety review, Safety approved or Confirmed.

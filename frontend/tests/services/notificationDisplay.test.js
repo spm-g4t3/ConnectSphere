@@ -413,3 +413,66 @@ describe("describeNotification: venue_hold_expired (SCRUM-491 AC8)", () => {
     expect(`${headline} ${detail}`).not.toMatch(/undefined|null/);
   });
 });
+
+describe("describeNotification: Safety Officer outcomes (SCRUM-490)", () => {
+  it.each([
+    ["approved", "Industry Night was approved after safety review"],
+    ["changes_requested", "Industry Night needs changes after safety review"],
+    ["rejected", "Industry Night had its safety arrangement rejected"],
+  ])("describes a %s response with its recorded note", (outcome, headline) => {
+    expect(describeNotification({
+      type: "safety_review_response",
+      payload: { eventName: "Industry Night", outcome, note: "See the review note." },
+    })).toEqual({
+      headline,
+      detail: "See the review note.",
+    });
+  });
+
+  it("uses the response defaults when event name, outcome, or note are missing", () => {
+    expect(describeNotification({ type: "safety_review_response", payload: {} })).toEqual({
+      headline: "The event received a safety review response",
+      detail: "Open the event to review the Safety Officer's response.",
+    });
+  });
+
+  it("describes a booking marked for safety review", () => {
+    expect(describeNotification({
+      type: "safety_booking_flagged",
+      payload: {
+        eventName: "Industry Night",
+        venueName: "Hall A",
+        reason: "Safety review",
+        startsAt: "2026-12-01T10:00:00Z",
+        endsAt: "2026-12-01T12:00:00Z",
+      },
+    })).toMatchObject({
+      headline: "Industry Night at Hall A needs review",
+      detail: expect.stringMatching(/^Reason: Safety review\. Booked /),
+    });
+  });
+
+  it("uses safe defaults for a booking safety notification with missing fields", () => {
+    expect(describeNotification({ type: "safety_booking_flagged", payload: {} })).toEqual({
+      headline: "Unnamed event at Unknown venue needs review",
+      detail: "Reason: Safety review. Booked unknown – unknown.",
+    });
+  });
+
+  it("describes an equipment request returned to review", () => {
+    expect(describeNotification({
+      type: "safety_equipment_review",
+      payload: { eventName: "Industry Night" },
+    })).toEqual({
+      headline: "Equipment for Industry Night was returned for review",
+      detail: "A Safety Officer marked the equipment arrangement as affected.",
+    });
+  });
+
+  it("uses a safe default event name for an equipment safety notification", () => {
+    expect(describeNotification({ type: "safety_equipment_review", payload: {} })).toEqual({
+      headline: "Equipment for Unnamed event was returned for review",
+      detail: "A Safety Officer marked the equipment arrangement as affected.",
+    });
+  });
+});

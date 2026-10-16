@@ -248,6 +248,18 @@ describe("statuses and details", () => {
     ).toBeInTheDocument();
   });
 
+  it("SCRUM490_AC8_a_safety_review_flag_names_its_reason", async () => {
+    vi.mocked(getMyBookingRequests).mockResolvedValue([
+      item("6", "flagged_for_review", {
+        flaggedAt: "2026-10-05T09:00:00Z",
+        reviewReason: "safety_review",
+      }),
+    ]);
+    renderList();
+
+    expect(await screen.findByText(/Flagged for review .*Safety review/)).toBeInTheDocument();
+  });
+
   it.each([
     ["null", null],
     ["missing", undefined],

@@ -175,9 +175,12 @@ describe("SCRUM485_AC4 each new role sees only its own links", () => {
     expect(screen.getByRole("link", { name: "Assigned Events" })).toHaveAttribute("href", "/assigned-events");
   });
 
-  it("SCRUM485_AC4_a_safety_officer_has_exactly_the_dashboard_link", () => {
-    // AC4-02.
-    expect(linksOf("safety_officer")).toEqual(DASHBOARD_ONLY);
+  it("SCRUM490_a_safety_officer_has_the_safety_review_link", () => {
+    expect(linksOf("safety_officer")).toEqual([
+      ...DASHBOARD_ONLY,
+      ["Safety review", "/safety-review"],
+      ["Review history", "/safety-review/history"],
+    ]);
   });
 
   it("SCRUM485_AC4_a_lead_sees_none_of_the_coordinators_links", () => {
@@ -215,15 +218,9 @@ describe("SCRUM485_AC4 each new role sees only its own links", () => {
   );
 
   it.each(["Safety Officer", "safety officer"])(
-    "SCRUM485_AC4_the_role_spelt_%j_reaches_the_same_single_link",
+    "SCRUM490_the_role_spelt_%j_reaches_the_safety_officer_links",
     (spelling) => {
-      // AC4-05. normaliseRole absorbs case, spaces and hyphens, as the
-      // American-spelling test above shows for the Organiser.
-      //
-      // The two Lead spellings that were rows here moved to the case below
-      // when the Lead gained a second link (SCRUM-519). They were right when
-      // written: the Lead had the same single link as the Safety Officer.
-      expect(linksOf(spelling)).toEqual(DASHBOARD_ONLY);
+      expect(linksOf(spelling)).toEqual(linksOf("safety_officer"));
     },
   );
 
