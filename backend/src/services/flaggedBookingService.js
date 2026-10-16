@@ -1,10 +1,11 @@
 /**
- * Venue Staff resolving a booking flagged for review.
+ * Resolving a booking flagged for review: Venue Staff reinstate it, and the
+ * event's coordinator or Venue Staff cancel it.
  *
  * The rules, the locks and the record of the resolution live in
- * reinstate_flagged_booking (076); this module checks the input, makes the
- * call and maps the answer. The client is optional, so it tests without
- * credentials.
+ * reinstate_flagged_booking (076) and cancel_flagged_booking (077); this
+ * module checks the input, makes the call and maps the answer. The client is
+ * optional, so it tests without credentials.
  */
 
 import {
@@ -61,6 +62,15 @@ function toResolution(row) {
   };
 }
 
+/** The booking as the API shows it, with the resolution just recorded. */
+function toResolvedBooking(data) {
+  return {
+    ...toBookingRequest(data.booking),
+    statusDisplay: getBookingStatusDisplay(data.booking.status),
+    resolution: toResolution(data.resolution),
+  };
+}
+
 /**
  * Reinstate a flagged booking: approved again, with its flag cleared, once it
  * still covers the event's period and nothing else occupies the venue. Only
@@ -108,9 +118,44 @@ export async function reinstateFlaggedBooking(bookingId, callerId, input, { clie
     throw new Error(`Unexpected outcome from reinstate_flagged_booking: ${data?.outcome}`);
   }
 
-  return {
-    ...toBookingRequest(data.booking),
-    statusDisplay: getBookingStatusDisplay(data.booking.status),
-    resolution: toResolution(data.resolution),
-  };
+  return toResolvedBooking(data);
+}
+
+/**
+ * Cancel a flagged booking, whatever flagged it. The flag stays on the booking
+ * as a record; the event and its other bookings are untouched, and the
+ * coordinator can then request another venue or period.
+ *
+ * @param {string} bookingId  the flagged booking's id
+ * @param {string} callerId   from the JWT -- never the body
+ * @param {object} input      see validateResolution
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the booking, now cancelled, with `resolution`
+ * @throws {ValidationError} no caller, a malformed id or a missing or long
+ *                           reason, before any round trip
+ * @throws {NotFoundError}   no such booking
+ * @throws {ForbiddenError}  the caller is neither the event's assigned
+ *                           coordinator nor Venue Staff
+ * @throws {ConflictError}   by code: BOOKING_NOT_FLAGGED, BOOKING_CHANGED
+ */
+export async function cancelFlaggedBooking(bookingId, callerId, input, { client } = {}) {
+  checkCaller(callerId);
+  const id = validateFlaggedBookingId(bookingId);
+  const { reason } = validateResolution(input);
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('cancel_flagged_booking', {
+    p_booking_id: id,
+    p_caller: callerId,
+    p_reason: reason,
+  });
+
+  if (error) throw translateError(error);
+
+  if (data?.outcome !== 'cancelled') {
+    throw new Error(`Unexpected outcome from cancel_flagged_booking: ${data?.outcome}`);
+  }
+
+  return toResolvedBooking(data);
 }

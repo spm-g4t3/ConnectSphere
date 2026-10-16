@@ -2,11 +2,12 @@
  * Tests for the flagged booking routes.
  *
  * SCRUM-266. Real Express routing and the real service, over a fake Supabase
- * client: reinstate_flagged_booking's (076) answers are queued, and what is
- * proved is what the endpoint does with them -- the status, the error code and
- * the conflict list the UI reads, and that the caller always comes from the
- * token. What the function decides is proved in
- * tests/db/reinstateFlaggedBookingDatabase.test.js.
+ * client: reinstate_flagged_booking's (076) and cancel_flagged_booking's (077)
+ * answers are queued, and what is proved is what the endpoint does with them
+ * -- the status, the error code and the conflict list the UI reads, and that
+ * the caller always comes from the token. What the function decides is proved in
+ * tests/db/reinstateFlaggedBookingDatabase.test.js and
+ * tests/db/cancelFlaggedBookingDatabase.test.js.
  *
  * The router is mounted here at the path app.js uses, rather than imported
  * from src/app.js, which calls app.listen() and needs a .env.
@@ -231,6 +232,14 @@ describe('SCRUM-266: Venue Staff reinstate a flagged booking', () => {
     spy.mockRestore();
   });
 
+  it('SCRUM266_AC2_a_coordinator_still_cannot_reinstate_and_never_queries', async () => {
+    const client = createFakeClient([reinstated()]);
+    const res = await reinstate(client, { requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_ID) });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('This action is restricted to Venue Staff');
+    expect(client.calls).toHaveLength(0);
+  });
+
   it('SCRUM266_AC2_the_default_export_is_a_router', () => {
     expect(typeof defaultRouter).toBe('function');
     expect(typeof defaultRouter.use).toBe('function');
@@ -241,5 +250,167 @@ describe('SCRUM-266: Venue Staff reinstate a flagged booking', () => {
     const app = readFileSync(resolve(here, '../../src/app.js'), 'utf8');
     expect(app).toMatch(/import flaggedBookingRoutes from '\.\/routes\/flaggedBookings\.js';/);
     expect(app).toMatch(/app\.use\('\/api\/flagged-bookings', flaggedBookingRoutes\);/);
+  });
+});
+
+const cancelled = (resolvedBy = COORDINATOR_ID) =>
+  ok({
+    outcome: 'cancelled',
+    booking: {
+      id: BOOKING_ID,
+      venue_id: VENUE_ID,
+      event_request_id: EVENT_ID,
+      starts_at: START,
+      ends_at: END,
+      status: 'cancelled',
+      created_at: '2026-10-06T10:00:00+00:00',
+      flagged_at: '2026-10-10T00:00:00+00:00',
+      review_block_id: OTHER_BOOKING_ID,
+      review_reason: null,
+    },
+    resolution: {
+      id: RESOLUTION_ID,
+      booking_id: BOOKING_ID,
+      outcome: 'cancelled',
+      reason: 'Venue no longer fits',
+      resolved_by: resolvedBy,
+      created_at: '2026-10-16T02:00:00+00:00',
+    },
+  });
+
+const asCoordinator = signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_ID);
+
+/** Sends { reason: 'Venue no longer fits' } as a coordinator unless told otherwise. */
+const cancel = (client, options = {}) => {
+  const { requireAuth = asCoordinator, id = BOOKING_ID } = options;
+  const body = 'body' in options ? options.body : { reason: 'Venue no longer fits' };
+  const req = request(appWith({ client, requireAuth })).post(`/api/flagged-bookings/${id}/cancel`);
+  return body === undefined ? req : req.send(body);
+};
+
+describe('SCRUM-266: the coordinator or Venue Staff cancel a flagged booking', () => {
+  it('SCRUM266_AC3_cancel_is_200_for_a_coordinator_with_the_booking_and_its_resolution_and_the_caller_from_the_token', async () => {
+    const client = createFakeClient([cancelled()]);
+
+    const res = await cancel(client, { body: { reason: '  Venue no longer fits ', callerId: STAFF_ID, status: 'approved' } });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      id: BOOKING_ID,
+      eventRequestId: EVENT_ID,
+      venueId: VENUE_ID,
+      status: 'cancelled',
+      statusDisplay: expect.objectContaining({ status: 'cancelled' }),
+      resolution: {
+        id: RESOLUTION_ID,
+        outcome: 'cancelled',
+        reason: 'Venue no longer fits',
+        resolvedBy: COORDINATOR_ID,
+        resolvedAt: '2026-10-16T02:00:00+00:00',
+      },
+    });
+    expect(client.calls).toEqual([
+      {
+        fn: 'cancel_flagged_booking',
+        args: { p_booking_id: BOOKING_ID, p_caller: COORDINATOR_ID, p_reason: 'Venue no longer fits' },
+      },
+    ]);
+  });
+
+  it('SCRUM266_AC3_cancel_is_200_for_venue_staff_with_the_caller_from_the_token', async () => {
+    const client = createFakeClient([cancelled(STAFF_ID)]);
+
+    const res = await cancel(client, { requireAuth: asStaff, body: { reason: 'Venue no longer fits', callerId: COORDINATOR_ID } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.resolution.resolvedBy).toBe(STAFF_ID);
+    expect(client.calls).toEqual([
+      {
+        fn: 'cancel_flagged_booking',
+        args: { p_booking_id: BOOKING_ID, p_caller: STAFF_ID, p_reason: 'Venue no longer fits' },
+      },
+    ]);
+  });
+
+  it('SCRUM266_AC3_cancel_returns_401_without_a_token_and_never_queries', async () => {
+    const client = createFakeClient([cancelled()]);
+    const res = await cancel(client, { requireAuth: signedOut });
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ROLE.EVENT_ORGANISER,
+    ROLE.EVENT_COORDINATOR_LEAD,
+    ROLE.TECHNICAL_SUPPORT_STAFF,
+    ROLE.SAFETY_OFFICER,
+    ROLE.ATTENDEE,
+    null,
+  ])('SCRUM266_AC3_cancel_refuses_%s_with_403_and_never_queries', async (role) => {
+    const client = createFakeClient([cancelled()]);
+    const res = await cancel(client, { requireAuth: signedInWithRole(role, COORDINATOR_ID) });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('This action is restricted to Event Coordinators or Venue Staff');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM266_AC3_a_coordinator_not_assigned_to_the_event_is_403_from_the_function', async () => {
+    const client = createFakeClient([dbFailure('42501', 'only the coordinator assigned to event request x or Venue Staff can cancel a flagged booking')]);
+    const res = await cancel(client);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/only the coordinator assigned/);
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it.each([
+    ['no body', undefined],
+    ['no reason', {}],
+    ['a blank reason', { reason: '   ' }],
+    ['a reason over 1000 characters', { reason: 'x'.repeat(1001) }],
+  ])('SCRUM266_AC5_cancelling_with_%s_is_400_and_never_queries', async (_label, body) => {
+    const client = createFakeClient([cancelled()]);
+    const res = await cancel(client, { body });
+    expect(res.status).toBe(400);
+    if (body !== undefined) expect(res.body.details).toEqual([expect.objectContaining({ field: 'reason' })]);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM266_AC3_cancel_with_a_malformed_id_is_400_and_never_queries', async () => {
+    const client = createFakeClient([cancelled()]);
+    const res = await cancel(client, { id: 'not-a-uuid' });
+    expect(res.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each(['22023', '23514'])('SCRUM266_AC5_a_%s_reason_refusal_from_the_function_is_400', async (code) => {
+    const res = await cancel(createFakeClient([dbFailure(code, 'bad reason')]));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('bad reason');
+  });
+
+  it('SCRUM266_AC3_cancel_of_an_unknown_booking_is_404', async () => {
+    const res = await cancel(createFakeClient([dbFailure('P0002', 'booking not found')]));
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('booking not found');
+  });
+
+  it('SCRUM266_AC3_cancel_of_a_booking_that_is_not_flagged_is_409_BOOKING_NOT_FLAGGED', async () => {
+    const res = await cancel(createFakeClient([dbFailure('PT409', 'refused', { hint: 'BOOKING_NOT_FLAGGED' })]));
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'refused', code: 'BOOKING_NOT_FLAGGED', conflicts: [] });
+  });
+
+  it('SCRUM266_AC3_cancel_of_a_booking_changed_under_the_call_is_409_BOOKING_CHANGED', async () => {
+    const res = await cancel(createFakeClient([dbFailure('40001', 'changed')]));
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('BOOKING_CHANGED');
+  });
+
+  it('SCRUM266_AC3_cancel_with_an_unexpected_outcome_is_500_without_the_detail', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await cancel(createFakeClient([ok({ outcome: 'reinstated' })]));
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    spy.mockRestore();
   });
 });
