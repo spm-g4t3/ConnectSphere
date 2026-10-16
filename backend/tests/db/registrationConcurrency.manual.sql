@@ -25,6 +25,11 @@ rollback;
 select attendee_id, status from registrations
  where event_request_id = :'event_id'::uuid and status = 'registered';
 
+-- SCRUM46_AC2 / AC5: the authoritative browse count must also report one place
+-- taken and a registered flag only for A. Both callers see the same active count.
+select * from open_event_registration_state(array[:'event_id'::uuid], :'attendee_a'::uuid);
+select * from open_event_registration_state(array[:'event_id'::uuid], :'attendee_b'::uuid);
+
 -- Duplicate race: repeat on a fresh empty test event, using attendee_a in BOTH
 -- sessions. B must wait, then fail with "Already registered"; one row remains.
 

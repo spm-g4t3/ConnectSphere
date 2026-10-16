@@ -91,6 +91,7 @@ export default function BrowseEventDetails({ onRegister }) {
   const [registerError, setRegisterError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [registeredEventId, setRegisteredEventId] = useState(null);
+  const [availabilityInvalidated, setAvailabilityInvalidated] = useState(false);
   const isRegistered = event?.isRegistered || registeredEventId === eventId;
   const sending = useRef(false);
   const currentEventId = useRef(eventId);
@@ -101,13 +102,20 @@ export default function BrowseEventDetails({ onRegister }) {
     setNotice(null);
     setRegisterError(null);
     setRegisteredEventId(null);
+    setAvailabilityInvalidated(false);
   }, [eventId]);
+
+  const refreshEvent = useCallback(async () => {
+    const fresh = await load();
+    if (fresh.kind === "ok" || fresh.kind === "not-found") setAvailabilityInvalidated(false);
+    return fresh;
+  }, [load]);
 
   // Not while a registration is in flight: that attempt refreshes when it ends,
   // and a read started now would supersede that one and hide what happened.
   const refreshUnlessRegistering = useCallback(() => {
-    if (!sending.current) load();
-  }, [load]);
+    if (!sending.current) refreshEvent();
+  }, [refreshEvent]);
   useRefreshOnReturn(refreshUnlessRegistering);
   async function handleRegister() {
     if (!onRegister || sending.current || !event || isRegistered) return;
@@ -149,7 +157,8 @@ export default function BrowseEventDetails({ onRegister }) {
 
     // Success or not, what is on offer may have changed, and the server's
     // answer, not this page's copy, says what happened.
-    const fresh = await load();
+    setAvailabilityInvalidated(true);
+    const fresh = await refreshEvent();
     sending.current = false;
     setRegistering(false);
 
@@ -193,7 +202,7 @@ export default function BrowseEventDetails({ onRegister }) {
         {!loading && error && (
           <div className="browse-event-details__error" role="alert">
             <p>{error}</p>
-            <button type="button" onClick={load}>
+            <button type="button" onClick={refreshEvent}>
               Try again
             </button>
           </div>
@@ -230,7 +239,11 @@ export default function BrowseEventDetails({ onRegister }) {
               <div>
                 <dt>Availability</dt>
                 <dd>
-                  <OpenEventAvailability event={event} />
+                  {availabilityInvalidated ? (
+                    <span role="status">
+                      {registering ? "Updating availability..." : "Availability could not be refreshed."}
+                    </span>
+                  ) : <OpenEventAvailability event={event} />}
                   {isRegistered && <RegisteredBadge />}
                 </dd>
               </div>

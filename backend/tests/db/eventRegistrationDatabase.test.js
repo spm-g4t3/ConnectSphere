@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { registerForEvent } from '../../src/services/registrationService.js';
+import { availability } from '../../src/domain/registrationAvailability.js';
 import express from 'express';
 import request from 'supertest';
 import { createOpenEventRouter } from '../../src/routes/openEvents.js';
@@ -28,6 +29,19 @@ const seed = (attendee, status = 'registered') => db.query(
   'insert into registrations (event_request_id, attendee_id, status) values ($1, $2, $3)',
   [event, attendee, status],
 );
+const readAvailability = async (attendee = ME) => {
+  const { rows: [row] } = await db.query(`
+    select e.registration_capacity, coalesce(s.active_count, 0)::int as active_count,
+           coalesce(s.is_registered, false) as is_registered
+      from event_requests e
+      left join lateral open_event_registration_state(array[e.id], $2::uuid) s on true
+     where e.id = $1
+  `, [event, attendee]);
+  return {
+    ...availability(row.registration_capacity, row.active_count),
+    activeCount: row.active_count, isRegistered: row.is_registered,
+  };
+};
 
 beforeAll(async () => {
   db = new PGlite();
@@ -38,7 +52,7 @@ beforeAll(async () => {
     create role authenticated;
     create role service_role bypassrls;
   `);
-  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '079_registrations.sql',
+  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '068_open_event_registration_state.sql', '079_registrations.sql',
     '080_registration_eligibility.sql', '081_register_for_event.sql']) {
     await db.exec(migration(name));
   }
@@ -65,6 +79,76 @@ beforeAll(async () => {
   `);
   await db.query('insert into auth.users (id) values ($1), ($2), ($3), ($4)', [ME, OTHER, ORGANISER, THIRD]);
   await db.query("insert into profiles (id, role) values ($1, 'attendee'), ($2, 'attendee'), ($3, 'event_organiser'), ($4, 'attendee')", [ME, OTHER, ORGANISER, THIRD]);
+});
+
+describe('SCRUM46 authoritative registration availability', () => {
+  it('SCRUM46_AC1_AC2_decreases_places_from_the_persisted_count_and_preserves_existing_records', async () => {
+    await db.query('update event_requests set registration_capacity = 3 where id = $1', [event]);
+    await seed(OTHER);
+    const existing = await records();
+    expect(await readAvailability()).toMatchObject({ placesLeft: 2, activeCount: 1, isRegistered: false });
+    await register();
+    expect(await readAvailability()).toEqual({ placesLeft: 1, activeCount: 2, isFull: false, isRegistered: true });
+    expect(await records()).toEqual(expect.arrayContaining(existing));
+  });
+
+  it('SCRUM46_AC3_the_last_place_becomes_full_for_every_attendee_and_rejects_further_registration', async () => {
+    await register();
+    expect(await readAvailability()).toEqual({ placesLeft: 0, activeCount: 1, isFull: true, isRegistered: true });
+    expect(await readAvailability(OTHER)).toEqual({ placesLeft: 0, activeCount: 1, isFull: true, isRegistered: false });
+    const before = await records();
+    await expect(register(OTHER)).rejects.toMatchObject({ hint: 'EVENT_FULL' });
+    expect(await readAvailability(OTHER)).toMatchObject({ placesLeft: 0, activeCount: 1, isFull: true });
+    expect(await records()).toEqual(before);
+  });
+
+  it('SCRUM46_AC4_unlimited_events_keep_null_places_left_as_registrations_increase', async () => {
+    await db.query('update event_requests set registration_capacity = null where id = $1', [event]);
+    await register();
+    await register(OTHER);
+    await register(THIRD);
+    expect(await readAvailability()).toEqual({ placesLeft: null, activeCount: 3, isFull: false, isRegistered: true });
+  });
+
+  it('SCRUM46_AC5_queued_last_place_requests_produce_one_winner_and_one_authoritative_full_count', async () => {
+    // PGlite serialises calls; the existing two-session SQL check verifies real lock contention.
+    await db.query('update event_requests set registration_capacity = 2 where id = $1', [event]);
+    await seed(THIRD);
+    const outcomes = await Promise.allSettled([register(), register(OTHER)]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected').map((outcome) => outcome.reason.hint)).toEqual(['EVENT_FULL']);
+    expect(await readAvailability(THIRD)).toEqual({ placesLeft: 0, activeCount: 2, isFull: true, isRegistered: true });
+  });
+
+  it('SCRUM46_AC7_duplicate_attempts_do_not_double_count_or_change_existing_registrations', async () => {
+    await db.query('update event_requests set registration_capacity = 2 where id = $1', [event]);
+    await register();
+    const before = await records();
+    const beforeAvailability = await readAvailability();
+    await expect(register()).rejects.toMatchObject({ hint: 'ALREADY_REGISTERED' });
+    expect(await readAvailability()).toEqual(beforeAvailability);
+    expect(await records()).toEqual(before);
+  });
+
+  it('SCRUM46_AC7_a_failed_insert_does_not_consume_availability', async () => {
+    const before = await readAvailability();
+    await db.query("select set_config('test.fail_event', $1, false)", [event]);
+    await expect(register()).rejects.toThrow('Injected post-insert failure');
+    await db.query("select set_config('test.fail_event', '', false)");
+    expect(await readAvailability()).toEqual(before);
+    expect(await records()).toEqual([]);
+  });
+
+  it.each(['withdrawn', 'cancelled'])('SCRUM46_AC7_%s_rows_release_places_and_remain_as_history', async (status) => {
+    await seed(OTHER);
+    const before = await records();
+    expect(await readAvailability()).toMatchObject({ placesLeft: 0, isFull: true });
+    await db.query('update registrations set status = $1 where id = $2', [status, before[0].id]);
+    expect(await readAvailability()).toMatchObject({ placesLeft: 1, activeCount: 0, isFull: false });
+    await register();
+    expect(await readAvailability()).toMatchObject({ placesLeft: 0, activeCount: 1, isFull: true });
+    expect((await records()).find((row) => row.id === before[0].id)).toMatchObject({ status, attendee_id: OTHER });
+  });
 });
 afterAll(async () => { await db.close(); });
 beforeEach(async () => {

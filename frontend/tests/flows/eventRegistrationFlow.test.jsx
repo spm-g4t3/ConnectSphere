@@ -244,3 +244,83 @@ describe("SCRUM36 attendee registration through the real App route", () => {
     expect(registerForEvent).not.toHaveBeenCalled();
   });
 });
+
+describe("SCRUM46 refreshed event availability", () => {
+  it("SCRUM46_AC1_AC3_AC5_AC6_uses_the_refreshed_count_and_shows_full_on_details_and_the_list", async () => {
+    let finishRefresh;
+    const full = event({ placesLeft: 0, isFull: true, isRegistered: true, canRegister: false, capacity: 4 });
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event({ capacity: 4, placesLeft: 3 }))
+      .mockReturnValueOnce(new Promise((resolve) => { finishRefresh = resolve; }));
+    vi.mocked(getOpenEvents).mockResolvedValue([full]);
+    vi.mocked(registerForEvent).mockResolvedValue({ id: "r1", status: "registered" });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    expect(await screen.findByText("Updating availability...")).toBeInTheDocument();
+    expect(screen.queryByText("3 places left")).not.toBeInTheDocument();
+    expect(screen.queryByText("2 places left")).not.toBeInTheDocument();
+    // Other attendees can take places too; the refresh wins over subtracting one locally.
+    await act(async () => { finishRefresh(full); });
+    expect(await screen.findByText("Full")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Already registered" })).toBeDisabled();
+    expect(getOpenEvent).toHaveBeenCalledTimes(2);
+    await userEvent.click(screen.getByRole("link", { name: "Back to open events" }));
+    expect(await screen.findByText("Full")).toBeInTheDocument();
+    expect(getOpenEvents).toHaveBeenCalledTimes(1);
+    expect(registerForEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("SCRUM46_AC4_refreshes_unlimited_events_without_inventing_a_numeric_capacity", async () => {
+    const unlimited = event({ capacity: null, placesLeft: null });
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(unlimited)
+      .mockResolvedValue({ ...unlimited, isRegistered: true, canRegister: false });
+    vi.mocked(registerForEvent).mockResolvedValue({ id: "r1", status: "registered" });
+    render(<App />);
+    expect(await screen.findByText("No limit")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Register" }));
+    expect(await screen.findByRole("button", { name: "Already registered" })).toBeDisabled();
+    expect(await screen.findByText("No limit")).toBeInTheDocument();
+    expect(screen.queryByText("Full")).not.toBeInTheDocument();
+    expect(getOpenEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("SCRUM46_AC7_failed_registration_refreshes_without_decreasing_available_places", async () => {
+    vi.mocked(getOpenEvent).mockResolvedValue(event({ capacity: 3, placesLeft: 2 }));
+    vi.mocked(registerForEvent).mockRejectedValue({ response: { status: 500 } });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    await screen.findByRole("alert");
+    expect(screen.getByText("2 places left")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Register" })).toBeEnabled();
+    expect(screen.queryByText("Registered")).not.toBeInTheDocument();
+    expect(getOpenEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("SCRUM46_AC7_duplicate_registration_does_not_decrease_places_a_second_time", async () => {
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event({ capacity: 2, placesLeft: 1 }))
+      .mockResolvedValue(event({ capacity: 2, placesLeft: 1, isRegistered: true, canRegister: false }));
+    vi.mocked(registerForEvent).mockRejectedValue({ response: { status: 409, data: { code: "ALREADY_REGISTERED" } } });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    await screen.findByRole("alert");
+    expect(await screen.findByText("1 place left")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Already registered" })).toBeDisabled();
+    expect(screen.queryByText("Full")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM46_AC6_hides_invalidated_numbers_after_a_failed_refresh_and_retries_the_authoritative_read", async () => {
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event({ capacity: 3, placesLeft: 2 }))
+      .mockRejectedValueOnce(new Error("Refresh failed"))
+      .mockResolvedValueOnce(event({ capacity: 3, placesLeft: 1, isRegistered: true, canRegister: false }));
+    vi.mocked(registerForEvent).mockResolvedValue({ id: "r1", status: "registered" });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
+    expect(await screen.findByText("Availability could not be refreshed.")).toBeInTheDocument();
+    expect(screen.queryByText("2 places left")).not.toBeInTheDocument();
+    expect(screen.getByText("You are registered for Open Day.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("1 place left")).toBeInTheDocument();
+    expect(screen.queryByText("Availability could not be refreshed.")).not.toBeInTheDocument();
+    expect(getOpenEvent).toHaveBeenCalledTimes(3);
+    expect(registerForEvent).toHaveBeenCalledTimes(1);
+  });
+});

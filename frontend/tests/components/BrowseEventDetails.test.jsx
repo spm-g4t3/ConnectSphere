@@ -654,7 +654,7 @@ describe("SCRUM495 loading and error behaviour during a refresh", () => {
     expect(screen.queryByRole("button", { name: "Register" })).not.toBeInTheDocument();
   });
 
-  it("SCRUM495_AC5_gives_a_general_message_and_keeps_the_details_when_registering_fails_and_the_refresh_fails_too", async () => {
+  it("SCRUM46_AC6_keeps_details_but_hides_unverified_places_when_registration_and_refresh_fail", async () => {
     const onRegister = vi.fn().mockRejectedValue(new Error("boom"));
     vi.mocked(getOpenEvent)
       .mockResolvedValueOnce(event())
@@ -665,7 +665,9 @@ describe("SCRUM495 loading and error behaviour during a refresh", () => {
 
     expect(await screen.findByText("Registration could not be completed. Please try again.")).toBeInTheDocument();
     expect(screen.getByText(/Could not refresh this event/)).toBeInTheDocument();
-    expect(screen.getByText("12 places left")).toBeInTheDocument();
+    expect(screen.getByText("Availability could not be refreshed.")).toBeInTheDocument();
+    expect(screen.queryByText("12 places left")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Open Day", level: 1 })).toBeInTheDocument();
   });
 });
 
