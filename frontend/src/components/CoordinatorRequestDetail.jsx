@@ -61,6 +61,7 @@ import {
   closeEventClarification,
 } from "../services/eventRequestService";
 import {
+  CANCELLABLE_STATUSES,
   readStatusDisplay,
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
@@ -161,13 +162,6 @@ const RETURN_FOR_AMENDMENT_ERROR_MESSAGES = {
 const START_DATE_PASSED_MESSAGE =
   "This request cannot be approved because its proposed start date has passed or is missing. Agree a new date with the organiser, or reject the request.";
 
-const CANCELLABLE_STATUSES = new Set([
-  "submitted",
-  "under_review",
-  "pending_clarification",
-  "approved",
-  "confirmed",
-]);
 
 /**
  * Has this event's proposed start passed, by this browser's clock?

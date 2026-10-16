@@ -16,7 +16,8 @@
 //   venue_hold_expired (040, SCRUM-491): { eventRequestId, eventName,
 //     venueId, venueName, expiresAt }
 //   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
-//     cancelledAt }
+//     cancelledAt }; audience is organiser, venue_staff,
+//     technical_support_staff or safety_officer
 //   event_submitted_for_safety_review (064, SCRUM-489): { eventRequestId,
 //     eventName, coordinatorId, coordinatorName, startsAt, submittedAt }
 // Every field is read defensively -- a notification outlives the build that
@@ -136,6 +137,16 @@ export function describeNotification(notification) {
       return {
         headline: `${eventName} was cancelled`,
         detail: `Reason: ${reason}.${cancelledAt}`,
+      };
+    }
+    if (payload.audience === "safety_officer") {
+      const reason = payload.reason || "No reason recorded";
+      const cancelledAt = payload.cancelledAt
+        ? ` Cancelled ${formatTimestamp(payload.cancelledAt)}.`
+        : "";
+      return {
+        headline: `${eventName} was cancelled`,
+        detail: `It no longer needs a safety review. Reason: ${reason}.${cancelledAt}`,
       };
     }
     if (payload.audience === "venue_staff") {
