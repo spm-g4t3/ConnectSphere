@@ -6,6 +6,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { getUnreadCount } from "../services/notificationService";
+import { useRefetchOnReturn } from "./useRefetchOnReturn";
 
 const UnreadCountContext = createContext(null);
 
@@ -37,24 +38,8 @@ export function UnreadCountProvider({ children }) {
     refreshUnreadCount();
   }, [refreshUnreadCount]);
 
-  // Re-read when the user comes back to the tab, the inbox's pattern and its
-  // reason: notifications are written by other people's actions while this
-  // screen is not being looked at. No polling.
-  useEffect(() => {
-    if (!user) return undefined;
-
-    function refetchIfVisible() {
-      if (document.visibilityState === "visible") refreshUnreadCount();
-    }
-
-    window.addEventListener("focus", refetchIfVisible);
-    document.addEventListener("visibilitychange", refetchIfVisible);
-
-    return () => {
-      window.removeEventListener("focus", refetchIfVisible);
-      document.removeEventListener("visibilitychange", refetchIfVisible);
-    };
-  }, [user, refreshUnreadCount]);
+  // With no one signed in there is nothing to re-read, so nothing listens.
+  useRefetchOnReturn(refreshUnreadCount, Boolean(user));
 
   return (
     <UnreadCountContext.Provider value={{ unreadCount, refreshUnreadCount }}>

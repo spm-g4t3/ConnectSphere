@@ -15,6 +15,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
+import {
+  COORDINATOR_ID,
+  NOTIFICATION_ID,
+  FIRST_READ,
+  notificationRow,
+  CAMEL_NOTIFICATION,
+  queryStub,
+  ok,
+  fail,
+  counted,
+} from '../fixtures/notifications.js';
+
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
 vi.mock('../../src/config/supabaseClient.js', () => {
@@ -29,70 +41,7 @@ const { supabase } = await import('../../src/config/supabaseClient.js');
 const { ROLE } = await import('../../src/domain/userRole.js');
 
 
-const COORDINATOR_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
 const OTHER_USER_ID = '11111111-1111-4111-8111-111111111111';
-const NOTIFICATION_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
-const BOOKING_ID = 'a1b2c3d4-0000-4000-8000-000000000001';
-const BLOCK_ID = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
-const FIRST_READ = '2026-09-27T01:00:00+00:00';
-
-const PAYLOAD = {
-  venueName: 'Seminar Room 2-1',
-  eventName: 'Tech Talk',
-  startsAt: '2026-10-01T02:00:00+00:00',
-  endsAt: '2026-10-01T04:00:00+00:00',
-  reason: 'maintenance',
-  blockStartsAt: '2026-10-01T01:00:00+00:00',
-  blockEndsAt: '2026-10-01T09:00:00+00:00',
-};
-
-function notificationRow(overrides = {}) {
-  return {
-    id: NOTIFICATION_ID,
-    recipient_id: COORDINATOR_ID,
-    type: 'booking_flagged',
-    booking_id: BOOKING_ID,
-    block_id: BLOCK_ID,
-    venue_hold_id: null,
-    event_request_id: null,
-    payload: PAYLOAD,
-    read_at: null,
-    created_at: '2026-09-26T03:00:00+00:00',
-    ...overrides,
-  };
-}
-
-const CAMEL_NOTIFICATION = {
-  id: NOTIFICATION_ID,
-  type: 'booking_flagged',
-  bookingId: BOOKING_ID,
-  blockId: BLOCK_ID,
-  venueHoldId: null,
-  eventRequestId: null,
-  payload: PAYLOAD,
-  readAt: null,
-  createdAt: '2026-09-26T03:00:00+00:00',
-};
-
-/** The same thenable query stub the service tests use, with update. */
-function queryStub(result) {
-  const calls = [];
-  const stub = {
-    calls,
-    called: (method) => calls.some(([name]) => name === method),
-    allArgs: (method) => calls.filter(([name]) => name === method).map((c) => c.slice(1)),
-    then: (onFulfilled, onRejected) => Promise.resolve(result).then(onFulfilled, onRejected),
-  };
-  for (const method of ['select', 'update', 'eq', 'is', 'order', 'limit']) {
-    stub[method] = (...args) => { calls.push([method, ...args]); return stub; };
-  }
-  stub.maybeSingle = (...args) => { calls.push(['maybeSingle', ...args]); return Promise.resolve(result); };
-  return stub;
-}
-
-const ok = (data) => ({ data, error: null });
-const fail = (error) => ({ data: null, error });
-const counted = (count) => ({ data: null, count, error: null });
 
 /** Stands in for a signed-in user of a given role. */
 const signedInAs = (role, id = COORDINATOR_ID) => (req, _res, next) => {
@@ -175,19 +124,10 @@ describe('GET /api/notifications', () => {
     from.mockReturnValue(stub);
 
     await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR, OTHER_USER_ID))).get(
-      '/api/notifications',
+      `/api/notifications?recipientId=${COORDINATOR_ID}`,
     );
 
     expect(stub.allArgs('eq')).toEqual([['recipient_id', OTHER_USER_ID]]);
-  });
-
-  it('ignores a recipient in the query string', async () => {
-    const stub = queryStub(ok([]));
-    from.mockReturnValue(stub);
-
-    await request(appWith()).get(`/api/notifications?recipientId=${OTHER_USER_ID}`);
-
-    expect(stub.allArgs('eq')).toEqual([['recipient_id', COORDINATOR_ID]]);
   });
 
   it('SCRUM17_AC3_answers_200_with_an_empty_array_when_there_are_none', async () => {
@@ -197,26 +137,6 @@ describe('GET /api/notifications', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
-  });
-
-  it('never exposes recipient ids', async () => {
-    from.mockReturnValue(queryStub(ok([notificationRow()])));
-
-    const res = await request(appWith()).get('/api/notifications');
-
-    expect(res.body[0]).not.toHaveProperty('recipientId');
-    expect(res.body[0]).not.toHaveProperty('recipient_id');
-  });
-
-  it('SCRUM17_AC3_an_untyped_error_is_a_generic_500', async () => {
-    from.mockReturnValue(queryStub(fail({ code: '08006', message: 'secret internals' })));
-
-    const res = await request(appWith()).get('/api/notifications');
-
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({ error: 'Unexpected server error' });
-    expect(JSON.stringify(res.body)).not.toContain('secret internals');
-    expect(consoleError).toHaveBeenCalled();
   });
 
   it('a 22P02 from the database is a 400', async () => {
@@ -273,17 +193,6 @@ describe('GET /api/notifications/unread-count', () => {
     expect(res.status).toBe(401);
     expect(res.body).toEqual({ error: 'Authentication required' });
     expect(from).not.toHaveBeenCalled();
-  });
-
-  it('an untyped error is a generic 500', async () => {
-    from.mockReturnValue(queryStub(fail({ code: '08006', message: 'secret internals' })));
-
-    const res = await request(appWith()).get('/api/notifications/unread-count');
-
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({ error: 'Unexpected server error' });
-    expect(JSON.stringify(res.body)).not.toContain('secret internals');
-    expect(consoleError).toHaveBeenCalled();
   });
 });
 
@@ -367,16 +276,6 @@ describe('PATCH /api/notifications/:id/read', () => {
     }
   });
 
-  it('SCRUM17_AC3_an_untyped_error_is_a_generic_500', async () => {
-    from.mockReturnValue(queryStub(fail({ code: '57014', message: 'statement timeout' })));
-
-    const res = await request(appWith()).patch(`/api/notifications/${NOTIFICATION_ID}/read`);
-
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({ error: 'Unexpected server error' });
-    expect(consoleError).toHaveBeenCalled();
-  });
-
   it('a GET on the read path is not routed', async () => {
     const res = await request(appWith()).get(`/api/notifications/${NOTIFICATION_ID}/read`);
     expect(res.status).toBe(404);
@@ -390,6 +289,29 @@ describe('PATCH /api/notifications/:id/read', () => {
     expect(post.status).toBe(404);
     expect(del.status).toBe(404);
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('untyped database errors', () => {
+  it.each([
+    ['SCRUM17_AC3', 'GET /api/notifications', (agent) => agent.get('/api/notifications'),
+      { code: '08006', message: 'secret internals' }],
+    ['SCRUM172_AC4', 'GET /api/notifications/unread-count',
+      (agent) => agent.get('/api/notifications/unread-count'),
+      { code: '08006', message: 'secret internals' }],
+    ['SCRUM17_AC3', 'PATCH /api/notifications/:id/read',
+      (agent) => agent.patch(`/api/notifications/${NOTIFICATION_ID}/read`),
+      { code: '57014', message: 'statement timeout' }],
+  ])('%s_an_untyped_error_is_a_generic_500 (%s)', async (_story, _label, send, error) => {
+    from.mockReturnValue(queryStub(fail(error)));
+
+    const res = await send(request(appWith()));
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    expect(JSON.stringify(res.body)).not.toContain(error.message);
+    expect(consoleError).toHaveBeenCalled();
   });
 });
 

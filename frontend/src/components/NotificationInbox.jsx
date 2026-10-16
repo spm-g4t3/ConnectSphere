@@ -21,13 +21,14 @@ import { describeNotification } from "../services/notificationDisplay";
 import { formatTimestamp } from "../services/displayFormat";
 import { notificationLink } from "../services/notificationLink";
 import { useUnreadCount } from "../notifications/UnreadCountContext";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { useAuth } from "../auth/AuthContext";
 
 // Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES. No
-// 403: the route has no role gate, so a 403 cannot happen.
+// 403: the route has no role gate, so a 403 cannot happen. A 500 reads the
+// same as any other failure, so it takes the fallback below.
 const LIST_ERROR_MESSAGES = {
   401: "Your session has expired. Please sign in again.",
-  500: "Notifications could not be loaded. Please try again.",
 };
 
 // The same idea for a single row. 404 gets its own words because it is the
@@ -81,24 +82,9 @@ export default function NotificationInbox() {
     fetchNotifications();
   }, [fetchNotifications]);
 
-  // Refetch when the user comes back to the tab, copied from
-  // ReviewQueue and for the same reason: notifications are written by other
-  // people's actions (a Venue Staff member overriding a block) while this
-  // screen is not being looked at, so the moment worth re-reading on is the
-  // moment it is looked at again. No polling.
-  useEffect(() => {
-    function refetchIfVisible() {
-      if (document.visibilityState === "visible") fetchNotifications();
-    }
-
-    window.addEventListener("focus", refetchIfVisible);
-    document.addEventListener("visibilitychange", refetchIfVisible);
-
-    return () => {
-      window.removeEventListener("focus", refetchIfVisible);
-      document.removeEventListener("visibilitychange", refetchIfVisible);
-    };
-  }, [fetchNotifications]);
+  // Re-read on returning to the tab, as ReviewQueue does: other people's
+  // actions (a Venue Staff member overriding a block) land while it is hidden.
+  useRefetchOnReturn(fetchNotifications);
 
   // Not optimistic: the row changes only once the server has said it is read.
   // Flipping it first and rolling back on failure would briefly show the

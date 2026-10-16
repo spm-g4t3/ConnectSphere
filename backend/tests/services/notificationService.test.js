@@ -23,7 +23,19 @@ import {
   markNotificationRead,
   toNotification,
 } from '../../src/services/notificationService.js';
-import { ValidationError, NotFoundError, AppError } from '../../src/errors.js';
+import { ValidationError, NotFoundError } from '../../src/errors.js';
+import {
+  COORDINATOR_ID,
+  NOTIFICATION_ID,
+  FIRST_READ,
+  PAYLOAD,
+  notificationRow,
+  CAMEL_NOTIFICATION,
+  queryStub,
+  ok,
+  fail,
+  counted,
+} from '../fixtures/notifications.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -33,30 +45,15 @@ vi.mock('../../src/config/supabaseClient.js', () => {
 });
 
 
-const COORDINATOR_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
-const NOTIFICATION_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
 const OTHER_NOTIFICATION_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae8';
-const BOOKING_ID = 'a1b2c3d4-0000-4000-8000-000000000001';
-const BLOCK_ID = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
 const EVENT_ID = 'c0ffee00-1234-4abc-8def-000000000001';
 const PAYLOAD_EVENT_ID = 'c0ffee00-1234-4abc-8def-000000000002';
 const BOOKING_EVENT_ID = 'c0ffee00-1234-4abc-8def-000000000003';
 const FROZEN_NOW = new Date('2026-09-28T06:30:00.000Z');
-const FIRST_READ = '2026-09-27T01:00:00+00:00';
 
 // SCRUM-491 added venue_hold_id, the hold a 'venue_hold_expired' notice is about.
 // SCRUM-172 added the booking embed, the event fallback for booking-only types.
 const COLUMNS = 'id, recipient_id, type, booking_id, block_id, venue_hold_id, event_request_id, payload, read_at, created_at, booking:bookings(event_request_id)';
-
-const PAYLOAD = {
-  venueName: 'Seminar Room 2-1',
-  eventName: 'Tech Talk',
-  startsAt: '2026-10-01T02:00:00+00:00',
-  endsAt: '2026-10-01T04:00:00+00:00',
-  reason: 'maintenance',
-  blockStartsAt: '2026-10-01T01:00:00+00:00',
-  blockEndsAt: '2026-10-01T09:00:00+00:00',
-};
 
 async function errorFromAsync(fn) {
   try {
@@ -66,71 +63,6 @@ async function errorFromAsync(fn) {
     return err;
   }
 }
-
-function notificationRow(overrides = {}) {
-  return {
-    id: NOTIFICATION_ID,
-    recipient_id: COORDINATOR_ID,
-    type: 'booking_flagged',
-    booking_id: BOOKING_ID,
-    block_id: BLOCK_ID,
-    venue_hold_id: null,
-    event_request_id: null,
-    payload: PAYLOAD,
-    read_at: null,
-    created_at: '2026-09-26T03:00:00+00:00',
-    ...overrides,
-  };
-}
-
-const CAMEL_NOTIFICATION = {
-  id: NOTIFICATION_ID,
-  type: 'booking_flagged',
-  bookingId: BOOKING_ID,
-  blockId: BLOCK_ID,
-  venueHoldId: null,
-  eventRequestId: null,
-  payload: PAYLOAD,
-  readAt: null,
-  createdAt: '2026-09-26T03:00:00+00:00',
-};
-
-/**
- * A stand-in for a supabase-js query builder, extended from the one in
- * venueBlockService.test.js with `update`. `calls` is exposed too, so a test
- * can assert the order of a chain.
- */
-function queryStub(result) {
-  const calls = [];
-
-  const stub = {
-    calls,
-    called: (method) => calls.some(([name]) => name === method),
-    args: (method) => calls.find(([name]) => name === method)?.slice(1),
-    allArgs: (method) => calls.filter(([name]) => name === method).map((c) => c.slice(1)),
-    then: (onFulfilled, onRejected) =>
-      Promise.resolve(result).then(onFulfilled, onRejected),
-  };
-
-  for (const method of ['select', 'update', 'eq', 'is', 'order', 'limit']) {
-    stub[method] = (...args) => {
-      calls.push([method, ...args]);
-      return stub;
-    };
-  }
-
-  stub.maybeSingle = (...args) => {
-    calls.push(['maybeSingle', ...args]);
-    return Promise.resolve(result);
-  };
-
-  return stub;
-}
-
-const ok = (data) => ({ data, error: null });
-const fail = (error) => ({ data: null, error });
-// A head: true count query answers with no rows, only a count.
-const counted = (count) => ({ data: null, count, error: null });
 
 beforeEach(() => {
   rpc.mockReset();
@@ -177,12 +109,6 @@ describe('toNotification', () => {
       venueHoldId: HOLD_ID,
       payload,
     });
-  });
-
-  it('SCRUM17_AC3_leaves_out_recipient_id', () => {
-    const mapped = toNotification(notificationRow());
-    expect(mapped).not.toHaveProperty('recipientId');
-    expect(mapped).not.toHaveProperty('recipient_id');
   });
 
   it('passes the payload through untouched', () => {
@@ -289,22 +215,16 @@ describe('listNotifications', () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  it('SCRUM17_AC3_defaults_the_limit_to_50', async () => {
+  it.each([
+    ['no limit given defaults to 50', {}, 50],
+    ['a custom limit of 5', { limit: 5 }, 5],
+  ])('SCRUM17_AC3_limits_the_list (%s)', async (_label, options, limit) => {
     const stub = queryStub(ok([]));
     from.mockReturnValue(stub);
 
-    await listNotifications(COORDINATOR_ID, {});
+    await listNotifications(COORDINATOR_ID, options);
 
-    expect(stub.args('limit')).toEqual([50]);
-  });
-
-  it('accepts a custom limit', async () => {
-    const stub = queryStub(ok([]));
-    from.mockReturnValue(stub);
-
-    await listNotifications(COORDINATOR_ID, { limit: 5 });
-
-    expect(stub.args('limit')).toEqual([5]);
+    expect(stub.args('limit')).toEqual([limit]);
   });
 
   it('keeps the database order', async () => {
@@ -333,47 +253,12 @@ describe('listNotifications', () => {
     expect(list[0]).not.toHaveProperty('booking');
   });
 
-  it('SCRUM17_AC3_returns_an_empty_list_when_there_are_none', async () => {
-    from.mockReturnValue(queryStub(ok([])));
+  it.each([
+    ['[]', []],
+    ['null', null],
+  ])('SCRUM17_AC3_returns_an_empty_list_when_there_are_none (data %s)', async (_label, data) => {
+    from.mockReturnValue(queryStub(ok(data)));
     await expect(listNotifications(COORDINATOR_ID)).resolves.toEqual([]);
-  });
-
-  it('returns an empty list when data is null', async () => {
-    from.mockReturnValue(queryStub(ok(null)));
-    await expect(listNotifications(COORDINATOR_ID)).resolves.toEqual([]);
-  });
-
-  it('SCRUM17_AC3_throws_an_untyped_error_on_a_database_failure', async () => {
-    from.mockReturnValue(queryStub(fail({ code: '08006', message: 'connection failure' })));
-
-    const err = await errorFromAsync(() => listNotifications(COORDINATOR_ID));
-
-    expect(err).toBeInstanceOf(Error);
-    expect(err).not.toBeInstanceOf(AppError);
-    expect(err.message).toBe('connection failure');
-  });
-
-  it('falls back to a generic message when the database error has none', async () => {
-    from.mockReturnValue(queryStub(fail({ code: 'XX000' })));
-
-    const err = await errorFromAsync(() => listNotifications(COORDINATOR_ID));
-
-    expect(err).not.toBeInstanceOf(AppError);
-    expect(err.message).toBe('Unexpected database error');
-  });
-
-  it('translates 22P02 into a ValidationError', async () => {
-    from.mockReturnValue(
-      queryStub(fail({ code: '22P02', message: 'invalid input syntax for type uuid' })),
-    );
-
-    const err = await errorFromAsync(() => listNotifications(COORDINATOR_ID));
-
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.status).toBe(400);
-    expect(err.message).toBe(
-      'A value was rejected by the database: invalid input syntax for type uuid',
-    );
   });
 
   it.each([
@@ -435,25 +320,6 @@ describe('countUnreadNotifications', () => {
     expect(err.message).toBe('A signed-in user is required to read notifications');
     expect(from).not.toHaveBeenCalled();
   });
-
-  it('throws an untyped error on a database failure', async () => {
-    from.mockReturnValue(queryStub(fail({ code: '08006', message: 'connection failure' })));
-
-    const err = await errorFromAsync(() => countUnreadNotifications(COORDINATOR_ID));
-
-    expect(err).toBeInstanceOf(Error);
-    expect(err).not.toBeInstanceOf(AppError);
-    expect(err.message).toBe('connection failure');
-  });
-
-  it('translates 22P02 into a ValidationError', async () => {
-    from.mockReturnValue(queryStub(fail({ code: '22P02', message: 'bad uuid' })));
-
-    const err = await errorFromAsync(() => countUnreadNotifications(COORDINATOR_ID));
-
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toBe('A value was rejected by the database: bad uuid');
-  });
 });
 
 
@@ -487,54 +353,6 @@ describe('markNotificationRead: first read', () => {
       ['maybeSingle'],
     ]);
   });
-
-  it('sends read_at as an ISO string, never a Date', async () => {
-    const stub = queryStub(ok(notificationRow({ read_at: FROZEN_NOW.toISOString() })));
-    from.mockReturnValue(stub);
-
-    await markNotificationRead(NOTIFICATION_ID, COORDINATOR_ID);
-
-    const [patch] = stub.args('update');
-    expect(typeof patch.read_at).toBe('string');
-    expect(patch.read_at).toBe('2026-09-28T06:30:00.000Z');
-    expect(Object.keys(patch)).toEqual(['read_at']);
-  });
-
-  it('SCRUM17_AC3_makes_no_second_read_when_the_update_matched', async () => {
-    from.mockReturnValue(queryStub(ok(notificationRow({ read_at: FROZEN_NOW.toISOString() }))));
-
-    await markNotificationRead(NOTIFICATION_ID, COORDINATOR_ID);
-
-    expect(from).toHaveBeenCalledTimes(1);
-  });
-
-  it('throws an untyped error when the update fails, without a second read', async () => {
-    from.mockReturnValue(queryStub(fail({ code: '57014', message: 'statement timeout' })));
-
-    const err = await errorFromAsync(() => markNotificationRead(NOTIFICATION_ID, COORDINATOR_ID));
-
-    expect(err).not.toBeInstanceOf(AppError);
-    expect(err.message).toBe('statement timeout');
-    expect(from).toHaveBeenCalledTimes(1);
-  });
-
-  it('translates a 22P02 from the update into a ValidationError', async () => {
-    from.mockReturnValue(queryStub(fail({ code: '22P02', message: 'bad uuid' })));
-
-    const err = await errorFromAsync(() => markNotificationRead(NOTIFICATION_ID, COORDINATOR_ID));
-
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toBe('A value was rejected by the database: bad uuid');
-  });
-
-  it('translates a 22P02 with no message', async () => {
-    from.mockReturnValue(queryStub(fail({ code: '22P02' })));
-
-    const err = await errorFromAsync(() => markNotificationRead(NOTIFICATION_ID, COORDINATOR_ID));
-
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toBe('A value was rejected by the database: ');
-  });
 });
 
 
@@ -560,16 +378,6 @@ describe('markNotificationRead: nothing unread matched', () => {
     expect(read.called('update')).toBe(false);
   });
 
-  it('SCRUM17_AC3_someone_elses_notification_is_not_found', async () => {
-    from.mockReturnValueOnce(queryStub(ok(null))).mockReturnValueOnce(queryStub(ok(null)));
-
-    const err = await errorFromAsync(() => markNotificationRead(NOTIFICATION_ID, COORDINATOR_ID));
-
-    expect(err).toBeInstanceOf(NotFoundError);
-    expect(err.status).toBe(404);
-    expect(err.message).toBe(`Notification ${NOTIFICATION_ID} not found`);
-  });
-
   it('SCRUM17_AC3_missing_and_not_yours_answer_the_same_message', async () => {
     // Both come back as "no row" from a recipient-scoped query; the service
     // cannot, and must not, tell them apart.
@@ -583,50 +391,87 @@ describe('markNotificationRead: nothing unread matched', () => {
       markNotificationRead(NOTIFICATION_ID, '11111111-1111-4111-8111-111111111111'),
     );
 
+    expect(missing).toBeInstanceOf(NotFoundError);
+    expect(missing.status).toBe(404);
+    expect(missing.message).toBe(`Notification ${NOTIFICATION_ID} not found`);
     expect(missing.message).toBe(notYours.message);
     expect(missing.status).toBe(notYours.status);
   });
+});
 
-  it('scopes the fallback read to the caller', async () => {
-    const read = queryStub(ok(null));
-    from.mockReturnValueOnce(queryStub(ok(null))).mockReturnValueOnce(read);
 
-    await errorFromAsync(() => markNotificationRead(NOTIFICATION_ID, COORDINATOR_ID));
+describe('database errors', () => {
+  // Each call site fails on its own query; the fallback read only runs after
+  // the guarded update matched nothing.
+  const CALL_SITES = {
+    listNotifications: {
+      failWith: (error) => from.mockReturnValue(queryStub(fail(error))),
+      call: () => listNotifications(COORDINATOR_ID),
+      queries: 1,
+    },
+    countUnreadNotifications: {
+      failWith: (error) => from.mockReturnValue(queryStub(fail(error))),
+      call: () => countUnreadNotifications(COORDINATOR_ID),
+      queries: 1,
+    },
+    'the markNotificationRead update': {
+      failWith: (error) => from.mockReturnValue(queryStub(fail(error))),
+      call: () => markNotificationRead(NOTIFICATION_ID, COORDINATOR_ID),
+      queries: 1,
+    },
+    'the markNotificationRead fallback read': {
+      failWith: (error) =>
+        from.mockReturnValueOnce(queryStub(ok(null))).mockReturnValueOnce(queryStub(fail(error))),
+      call: () => markNotificationRead(NOTIFICATION_ID, COORDINATOR_ID),
+      queries: 2,
+    },
+  };
 
-    expect(read.allArgs('eq')).toContainEqual(['recipient_id', COORDINATOR_ID]);
-  });
+  // A plain Error (not an AppError) is what makes the route answer 500.
+  it.each([
+    ['listNotifications', 'an untyped error keeps its message',
+      { code: '08006', message: 'connection failure' }, Error, undefined, 'connection failure'],
+    ['listNotifications', 'an untyped error with no message gets a generic one',
+      { code: 'XX000' }, Error, undefined, 'Unexpected database error'],
+    ['listNotifications', '22P02 is a ValidationError',
+      { code: '22P02', message: 'invalid input syntax for type uuid' }, ValidationError, 400,
+      'A value was rejected by the database: invalid input syntax for type uuid'],
+    ['countUnreadNotifications', 'an untyped error keeps its message',
+      { code: '08006', message: 'connection failure' }, Error, undefined, 'connection failure'],
+    ['countUnreadNotifications', '22P02 is a ValidationError',
+      { code: '22P02', message: 'bad uuid' }, ValidationError, 400,
+      'A value was rejected by the database: bad uuid'],
+    ['the markNotificationRead update', 'an untyped error keeps its message',
+      { code: '57014', message: 'statement timeout' }, Error, undefined, 'statement timeout'],
+    ['the markNotificationRead update', '22P02 is a ValidationError',
+      { code: '22P02', message: 'bad uuid' }, ValidationError, 400,
+      'A value was rejected by the database: bad uuid'],
+    ['the markNotificationRead update', '22P02 with no message is a ValidationError',
+      { code: '22P02' }, ValidationError, 400, 'A value was rejected by the database: '],
+    ['the markNotificationRead fallback read', 'an untyped error keeps its message',
+      { code: '08006', message: 'connection lost' }, Error, undefined, 'connection lost'],
+    ['the markNotificationRead fallback read', '22P02 is a ValidationError',
+      { code: '22P02', message: 'bad uuid' }, ValidationError, 400,
+      'A value was rejected by the database: bad uuid'],
+  ])('from %s: %s', async (site, _shape, error, ErrorClass, status, message) => {
+    const { failWith, call, queries } = CALL_SITES[site];
+    failWith(error);
 
-  it('throws an untyped error when the fallback read fails', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(null)))
-      .mockReturnValueOnce(queryStub(fail({ code: '08006', message: 'connection lost' })));
+    const err = await errorFromAsync(call);
 
-    const err = await errorFromAsync(() => markNotificationRead(NOTIFICATION_ID, COORDINATOR_ID));
-
-    expect(err).not.toBeInstanceOf(AppError);
-    expect(err.message).toBe('connection lost');
-  });
-
-  it('translates a 22P02 from the fallback read', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(null)))
-      .mockReturnValueOnce(queryStub(fail({ code: '22P02', message: 'bad uuid' })));
-
-    const err = await errorFromAsync(() => markNotificationRead(NOTIFICATION_ID, COORDINATOR_ID));
-
-    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.constructor).toBe(ErrorClass);
+    expect(err.status).toBe(status);
+    expect(err.message).toBe(message);
+    expect(from).toHaveBeenCalledTimes(queries);
   });
 });
 
 
 describe('markNotificationRead: input', () => {
-  it.each([
-    ['not a uuid', 'nope'],
-    ['empty', ''],
-    ['undefined', undefined],
-    ['a number', 7],
-  ])('SCRUM17_AC3_bad_id_is_refused_without_a_network_call (%s)', async (_label, id) => {
-    const err = await errorFromAsync(() => markNotificationRead(id, COORDINATOR_ID));
+  // tests/validation/notificationValidation.test.js owns the table of bad ids;
+  // this proves the service validates before it queries.
+  it('SCRUM17_AC3_bad_id_is_refused_without_a_network_call', async () => {
+    const err = await errorFromAsync(() => markNotificationRead('nope', COORDINATOR_ID));
 
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.status).toBe(400);

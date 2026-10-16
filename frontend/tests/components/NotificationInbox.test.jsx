@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
 
 import NotificationInbox from "../../src/components/NotificationInbox.jsx";
 import Navigation from "../../src/components/Navigation.jsx";
@@ -23,6 +23,9 @@ import {
   markNotificationRead,
 } from "../../src/services/notificationService";
 import { describeNotification } from "../../src/services/notificationDisplay";
+import { deferred, httpError } from "../helpers/async.js";
+import { setVisibility } from "../helpers/visibility.js";
+import { PAYLOAD, SETUP_PAYLOAD } from "../fixtures/notifications.js";
 
 vi.mock("../../src/services/notificationService", () => ({
   getUnreadCount: vi.fn(),
@@ -35,16 +38,6 @@ vi.mock("../../src/services/notificationService", () => ({
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
 }));
-
-const PAYLOAD = {
-  venueName: "Hall A",
-  eventName: "Tech Talk",
-  startsAt: "2026-10-01T10:00:00+08:00",
-  endsAt: "2026-10-01T12:00:00+08:00",
-  reason: "maintenance",
-  blockStartsAt: "2026-10-01T09:00:00+08:00",
-  blockEndsAt: "2026-10-01T17:00:00+08:00",
-};
 
 function notification(overrides = {}) {
   return {
@@ -74,30 +67,30 @@ const READ = notification({
 
 const MARKED_AT = "2026-09-28T14:30:00+08:00";
 
-function httpError(status) {
-  return Object.assign(new Error(`Request failed with status code ${status}`), {
-    response: { status },
-  });
-}
-
-/** A promise the test settles by hand, to hold a request in flight. */
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+const ATTENDEE = { id: "u1", name: "Test User", role: "attendee" };
 
 /** The <li> whose headline names this event. */
 function rowFor(eventName) {
   return screen.getByText(`${eventName} at Hall A needs review`).closest("li");
 }
 
-function setVisibility(state) {
-  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+/**
+ * The inbox at /dashboard under the real provider, as App.jsx mounts it.
+ * `nav` adds the nav bar beside it; `routes` adds pages a link can land on.
+ */
+function renderInbox({ user = ATTENDEE, entries = ["/dashboard"], nav = false, routes = null } = {}) {
+  vi.mocked(useAuth).mockReturnValue({ user, logout: vi.fn() });
+  return render(
+    <MemoryRouter initialEntries={entries}>
+      <UnreadCountProvider>
+        {nav && <Navigation />}
+        <Routes>
+          <Route path="/dashboard" element={<NotificationInbox />} />
+          {routes}
+        </Routes>
+      </UnreadCountProvider>
+    </MemoryRouter>,
+  );
 }
 
 beforeEach(() => {
@@ -145,12 +138,13 @@ describe("SCRUM17_AC3 loading and empty states", () => {
 
 describe("SCRUM17_AC3 list errors", () => {
   it.each([
-    [401, "Your session has expired. Please sign in again."],
-    [500, "Notifications could not be loaded. Please try again."],
-    [403, "Notifications could not be loaded. Please try again."],
-    [503, "Notifications could not be loaded. Please try again."],
-  ])("a %s shows its message as an alert", async (status, message) => {
-    vi.mocked(listNotifications).mockRejectedValue(httpError(status));
+    ["a 401", httpError(401), "Your session has expired. Please sign in again."],
+    ["a 500", httpError(500), "Notifications could not be loaded. Please try again."],
+    ["a 403", httpError(403), "Notifications could not be loaded. Please try again."],
+    ["a 503", httpError(503), "Notifications could not be loaded. Please try again."],
+    ["a network error with no response", new Error("Network Error"), "Notifications could not be loaded. Please try again."],
+  ])("%s shows its message as an alert", async (_label, error, message) => {
+    vi.mocked(listNotifications).mockRejectedValue(error);
 
     render(<NotificationInbox />, { wrapper: MemoryRouter });
 
@@ -158,16 +152,6 @@ describe("SCRUM17_AC3 list errors", () => {
     expect(alert).toHaveTextContent(message);
     expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     expect(screen.queryByText("You have no notifications.")).not.toBeInTheDocument();
-  });
-
-  it("a network error with no response shows the generic message", async () => {
-    vi.mocked(listNotifications).mockRejectedValue(new Error("Network Error"));
-
-    render(<NotificationInbox />, { wrapper: MemoryRouter });
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Notifications could not be loaded. Please try again.",
-    );
   });
 
   it("a later successful refetch clears the error", async () => {
@@ -254,17 +238,7 @@ describe("SCRUM17_AC3 rows", () => {
       id: "7c9e6679-7425-40de-944b-e07fc1f90af0",
       type: "booking_flagged_setup_change",
       blockId: null,
-      payload: {
-        venueName: "Harbour Room",
-        eventName: "Orientation",
-        startsAt: "2026-11-02T10:00:00+08:00",
-        endsAt: "2026-11-02T12:00:00+08:00",
-        occupiedStartsAt: "2026-11-02T09:30:00+08:00",
-        occupiedEndsAt: "2026-11-02T12:15:00+08:00",
-        setupMinutes: 30,
-        turnaroundMinutes: 15,
-        reason: "The venue's setup or turnaround time changed.",
-      },
+      payload: SETUP_PAYLOAD,
     });
     vi.mocked(listNotifications).mockResolvedValue([setupChange, UNREAD]);
 
@@ -391,48 +365,24 @@ describe("SCRUM17_AC3 marking a notification read", () => {
     expect(within(rowFor("Career Fair")).getByRole("button", { name: "Mark as read" })).toBeEnabled();
   });
 
-  it("SCRUM17_AC3_a_500_shows_an_inline_error_and_re_enables_the_button", async () => {
+  // Only a 404 refetches; it has its own test below.
+  it.each([
+    ["a_500", httpError(500), "This notification could not be marked as read. Please try again."],
+    ["a_401", httpError(401), "Your session has expired. Please sign in again."],
+    ["a_network_error", new Error("Network Error"), "This notification could not be marked as read. Please try again."],
+  ])("SCRUM17_AC3_%s_shows_its_row_message_re_enables_the_button_and_does_not_refetch", async (_label, error, message) => {
     const user = userEvent.setup();
     vi.mocked(listNotifications).mockResolvedValue([UNREAD]);
-    vi.mocked(markNotificationRead).mockRejectedValue(httpError(500));
+    vi.mocked(markNotificationRead).mockRejectedValue(error);
 
     render(<NotificationInbox />, { wrapper: MemoryRouter });
     await user.click(await screen.findByRole("button", { name: "Mark as read" }));
 
     const row = rowFor("Tech Talk");
-    expect(await within(row).findByRole("alert")).toHaveTextContent(
-      "This notification could not be marked as read. Please try again.",
-    );
+    expect(await within(row).findByRole("alert")).toHaveTextContent(message);
     expect(within(row).getByRole("button", { name: "Mark as read" })).toBeEnabled();
     expect(within(row).getByText("New")).toBeInTheDocument();
     expect(listNotifications).toHaveBeenCalledTimes(1);
-  });
-
-  it("a 401 says the session expired and does not refetch", async () => {
-    const user = userEvent.setup();
-    vi.mocked(listNotifications).mockResolvedValue([UNREAD]);
-    vi.mocked(markNotificationRead).mockRejectedValue(httpError(401));
-
-    render(<NotificationInbox />, { wrapper: MemoryRouter });
-    await user.click(await screen.findByRole("button", { name: "Mark as read" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Your session has expired. Please sign in again.",
-    );
-    expect(listNotifications).toHaveBeenCalledTimes(1);
-  });
-
-  it("a network error with no response shows the generic row message", async () => {
-    const user = userEvent.setup();
-    vi.mocked(listNotifications).mockResolvedValue([UNREAD]);
-    vi.mocked(markNotificationRead).mockRejectedValue(new Error("Network Error"));
-
-    render(<NotificationInbox />, { wrapper: MemoryRouter });
-    await user.click(await screen.findByRole("button", { name: "Mark as read" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This notification could not be marked as read. Please try again.",
-    );
   });
 
   it("a retry clears the previous row error, and success keeps it cleared", async () => {
@@ -500,6 +450,8 @@ describe("SCRUM17_AC3 marking a notification read", () => {
 });
 
 
+// Visibility, hidden tabs and unmounting are useRefetchOnReturn's own tests;
+// this proves the inbox is wired to it.
 describe("SCRUM17_AC3 refetching when the Coordinator returns", () => {
   it("refetches on window focus", async () => {
     vi.mocked(listNotifications).mockResolvedValueOnce([]).mockResolvedValueOnce([UNREAD]);
@@ -512,70 +464,12 @@ describe("SCRUM17_AC3 refetching when the Coordinator returns", () => {
     expect(await screen.findByText("Tech Talk at Hall A needs review")).toBeInTheDocument();
     expect(listNotifications).toHaveBeenCalledTimes(2);
   });
-
-  it("refetches when the tab becomes visible", async () => {
-    vi.mocked(listNotifications).mockResolvedValue([]);
-
-    render(<NotificationInbox />, { wrapper: MemoryRouter });
-    await screen.findByText("You have no notifications.");
-
-    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
-
-    await waitFor(() => expect(listNotifications).toHaveBeenCalledTimes(2));
-  });
-
-  it("does not refetch while the tab is hidden", async () => {
-    vi.mocked(listNotifications).mockResolvedValue([]);
-
-    render(<NotificationInbox />, { wrapper: MemoryRouter });
-    await screen.findByText("You have no notifications.");
-
-    setVisibility("hidden");
-    await act(async () => {
-      document.dispatchEvent(new Event("visibilitychange"));
-      window.dispatchEvent(new Event("focus"));
-    });
-
-    expect(listNotifications).toHaveBeenCalledTimes(1);
-  });
-
-  it("SCRUM17_AC3_removes_its_listeners_on_unmount", async () => {
-    const removeWindow = vi.spyOn(window, "removeEventListener");
-    const removeDocument = vi.spyOn(document, "removeEventListener");
-    vi.mocked(listNotifications).mockResolvedValue([]);
-
-    const { unmount } = render(<NotificationInbox />, { wrapper: MemoryRouter });
-    await screen.findByText("You have no notifications.");
-    unmount();
-
-    expect(removeWindow).toHaveBeenCalledWith("focus", expect.any(Function));
-    expect(removeDocument).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
-
-    window.dispatchEvent(new Event("focus"));
-    document.dispatchEvent(new Event("visibilitychange"));
-    expect(listNotifications).toHaveBeenCalledTimes(1);
-
-    removeWindow.mockRestore();
-    removeDocument.mockRestore();
-  });
 });
 
 
 // ---------------------------------------------------------------------------
 // SCRUM-172 AC4: the shared, exact unread count
 // ---------------------------------------------------------------------------
-
-const ATTENDEE = { id: "u1", name: "Test User", role: "attendee" };
-
-/** The inbox (and optionally the nav) under the real provider, as App.jsx mounts them. */
-function renderWithCount(ui, { initialEntries = ["/dashboard"] } = {}) {
-  vi.mocked(useAuth).mockReturnValue({ user: ATTENDEE, logout: vi.fn() });
-  return render(
-    <MemoryRouter initialEntries={initialEntries}>
-      <UnreadCountProvider>{ui}</UnreadCountProvider>
-    </MemoryRouter>,
-  );
-}
 
 describe("SCRUM172_AC4 the heading's count", () => {
   it("SCRUM172_AC4_heading_uses_the_exact_server_count", async () => {
@@ -586,7 +480,7 @@ describe("SCRUM172_AC4 the heading's count", () => {
     vi.mocked(listNotifications).mockResolvedValue(fifty);
     vi.mocked(getUnreadCount).mockResolvedValue(73);
 
-    renderWithCount(<NotificationInbox />);
+    renderInbox();
 
     await waitFor(() =>
       expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(/^Notifications \(73 unread\)$/),
@@ -598,7 +492,7 @@ describe("SCRUM172_AC4 the heading's count", () => {
     vi.mocked(listNotifications).mockResolvedValue([UNREAD]);
     vi.mocked(getUnreadCount).mockResolvedValue(0);
 
-    renderWithCount(<NotificationInbox />);
+    renderInbox();
     await screen.findByText("Tech Talk at Hall A needs review");
 
     await waitFor(() =>
@@ -611,7 +505,7 @@ describe("SCRUM172_AC4 the heading's count", () => {
     vi.mocked(listNotifications).mockResolvedValue([UNREAD, UNREAD_2, READ]);
     vi.mocked(getUnreadCount).mockRejectedValue(httpError(500));
 
-    renderWithCount(<NotificationInbox />);
+    renderInbox();
     await screen.findAllByRole("listitem");
 
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(/^Notifications \(2 unread\)$/);
@@ -621,7 +515,7 @@ describe("SCRUM172_AC4 the heading's count", () => {
     vi.mocked(listNotifications).mockResolvedValue([UNREAD]);
     vi.mocked(getUnreadCount).mockResolvedValue(1);
 
-    renderWithCount(<NotificationInbox />);
+    renderInbox();
     await screen.findByText("Tech Talk at Hall A needs review");
 
     // Once on the provider's mount, once after the list arrived.
@@ -632,7 +526,7 @@ describe("SCRUM172_AC4 the heading's count", () => {
     vi.mocked(listNotifications).mockRejectedValue(httpError(500));
     vi.mocked(getUnreadCount).mockResolvedValue(1);
 
-    renderWithCount(<NotificationInbox />);
+    renderInbox();
     await screen.findByRole("alert");
 
     expect(getUnreadCount).toHaveBeenCalledTimes(1);
@@ -651,12 +545,7 @@ describe("SCRUM172_AC5 marking read updates the shared count", () => {
       return { ...(id === UNREAD.id ? UNREAD : UNREAD_2), readAt: MARKED_AT };
     });
 
-    renderWithCount(
-      <>
-        <Navigation />
-        <NotificationInbox />
-      </>,
-    );
+    renderInbox({ nav: true });
 
     expect(await screen.findByRole("link", { name: "Notifications, 2 unread" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("(2 unread)");
@@ -673,7 +562,7 @@ describe("SCRUM172_AC5 marking read updates the shared count", () => {
     vi.mocked(listNotifications).mockResolvedValue([UNREAD]);
     vi.mocked(markNotificationRead).mockRejectedValue(httpError(500));
 
-    renderWithCount(<NotificationInbox />);
+    renderInbox();
     await waitFor(() => expect(getUnreadCount).toHaveBeenCalledTimes(2));
     await user.click(await screen.findByRole("button", { name: "Mark as read" }));
     await screen.findByRole("alert");
@@ -726,12 +615,7 @@ describe("SCRUM172_AC4 the nav link lands on the inbox", () => {
     const user = userEvent.setup();
     vi.mocked(getUnreadCount).mockResolvedValue(0);
 
-    renderWithCount(
-      <>
-        <Navigation />
-        <NotificationInbox />
-      </>,
-    );
+    renderInbox({ nav: true });
     await screen.findByText("You have no notifications.");
     expect(scrollIntoView).not.toHaveBeenCalled();
 
@@ -756,7 +640,6 @@ describe("SCRUM172_AC4 the nav link lands on the inbox", () => {
 describe("SCRUM172_AC7 selecting a notification opens its event", () => {
   const EVENT = "22222222-2222-4222-8222-222222222222";
   const COORDINATOR = { id: "c1", name: "Priya Nair", role: "event_coordinator" };
-  const ORGANISER = { id: "o1", name: "Olivia Tan", role: "event_organiser" };
   const LINKED = { ...UNREAD, eventRequestId: EVENT };
   const LINKED_READ = { ...READ, eventRequestId: EVENT };
 
@@ -765,42 +648,21 @@ describe("SCRUM172_AC7 selecting a notification opens its event", () => {
     return <p>Review page for {id}</p>;
   }
 
-  function EventsProbe() {
-    const { state } = useLocation();
-    return <p>Events page with {JSON.stringify(state)}</p>;
-  }
+  // The coordinator's link lands here.
+  const REVIEW_PAGE = <Route path="/event-requests/:id" element={<ReviewProbe />} />;
 
-  /** The inbox at /dashboard under the real provider, with probe pages to land on. */
-  function renderAs(user) {
-    vi.mocked(useAuth).mockReturnValue({ user, logout: vi.fn() });
+  beforeEach(() => {
     vi.mocked(getUnreadCount).mockResolvedValue(1);
-    return render(
-      <MemoryRouter initialEntries={["/dashboard"]}>
-        <UnreadCountProvider>
-          <Routes>
-            <Route path="/dashboard" element={<NotificationInbox />} />
-            <Route path="/event-requests/:id" element={<ReviewProbe />} />
-            <Route path="/events" element={<EventsProbe />} />
-          </Routes>
-        </UnreadCountProvider>
-      </MemoryRouter>,
-    );
-  }
+  });
 
+  // Other roles' links (the organiser's /events, none for Venue Staff) are
+  // proved by notificationLink.test.js and the inbox flow test.
   it("SCRUM172_AC7_linked_headline_is_a_link_to_the_event", async () => {
     vi.mocked(listNotifications).mockResolvedValue([LINKED]);
-    renderAs(COORDINATOR);
+    renderInbox({ user: COORDINATOR, routes: REVIEW_PAGE });
 
     const link = await screen.findByRole("link", { name: "Tech Talk at Hall A needs review" });
     expect(link).toHaveAttribute("href", `/event-requests/${EVENT}`);
-  });
-
-  it("SCRUM172_AC7_a_role_without_an_event_page_gets_no_link", async () => {
-    vi.mocked(listNotifications).mockResolvedValue([LINKED]);
-    renderAs({ id: "v1", name: "Victor", role: "venue_staff" });
-
-    await screen.findByText("Tech Talk at Hall A needs review");
-    expect(within(rowFor("Tech Talk")).queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("SCRUM172_AC7_clicking_an_unread_link_marks_it_read_then_refreshes_and_navigates", async () => {
@@ -808,7 +670,7 @@ describe("SCRUM172_AC7 selecting a notification opens its event", () => {
     const mark = deferred();
     vi.mocked(markNotificationRead).mockReturnValue(mark.promise);
     vi.mocked(listNotifications).mockResolvedValue([LINKED]);
-    renderAs(COORDINATOR);
+    renderInbox({ user: COORDINATOR, routes: REVIEW_PAGE });
     // Provider mount plus the list's own refresh.
     await waitFor(() => expect(getUnreadCount).toHaveBeenCalledTimes(2));
 
@@ -826,7 +688,7 @@ describe("SCRUM172_AC7 selecting a notification opens its event", () => {
   it("SCRUM172_AC7_clicking_a_read_link_does_not_mark_it_again", async () => {
     const user = userEvent.setup();
     vi.mocked(listNotifications).mockResolvedValue([LINKED_READ]);
-    renderAs(COORDINATOR);
+    renderInbox({ user: COORDINATOR, routes: REVIEW_PAGE });
 
     await user.click(await screen.findByRole("link", { name: "Orientation at Hall A needs review" }));
 
@@ -838,7 +700,7 @@ describe("SCRUM172_AC7 selecting a notification opens its event", () => {
     const user = userEvent.setup();
     vi.mocked(markNotificationRead).mockRejectedValue(httpError(500));
     vi.mocked(listNotifications).mockResolvedValue([LINKED]);
-    renderAs(COORDINATOR);
+    renderInbox({ user: COORDINATOR, routes: REVIEW_PAGE });
     await waitFor(() => expect(getUnreadCount).toHaveBeenCalledTimes(2));
 
     await user.click(await screen.findByRole("link", { name: "Tech Talk at Hall A needs review" }));
@@ -848,20 +710,5 @@ describe("SCRUM172_AC7 selecting a notification opens its event", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     // A failed mark changed nothing, so the count is not re-read.
     expect(getUnreadCount).toHaveBeenCalledTimes(2);
-  });
-
-  it("SCRUM172_AC7_organiser_link_carries_the_event_to_their_list", async () => {
-    const user = userEvent.setup();
-    vi.mocked(markNotificationRead).mockResolvedValue({ ...LINKED, readAt: MARKED_AT });
-    vi.mocked(listNotifications).mockResolvedValue([LINKED]);
-    renderAs(ORGANISER);
-
-    const link = await screen.findByRole("link", { name: "Tech Talk at Hall A needs review" });
-    expect(link).toHaveAttribute("href", "/events");
-    await user.click(link);
-
-    expect(
-      await screen.findByText(`Events page with ${JSON.stringify({ focusEventRequestId: EVENT })}`),
-    ).toBeInTheDocument();
   });
 });

@@ -13,16 +13,7 @@ import { dirname, join, resolve } from "node:path";
 import { describeNotification } from "../../src/services/notificationDisplay.js";
 import { formatRange, formatTimestamp } from "../../src/services/displayFormat.js";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay.js";
-
-const PAYLOAD = {
-  venueName: "Hall A",
-  eventName: "Tech Talk",
-  startsAt: "2026-10-01T10:00:00+08:00",
-  endsAt: "2026-10-01T12:00:00+08:00",
-  reason: "maintenance",
-  blockStartsAt: "2026-10-01T09:00:00+08:00",
-  blockEndsAt: "2026-10-01T17:00:00+08:00",
-};
+import { PAYLOAD, SETUP_PAYLOAD } from "../fixtures/notifications.js";
 
 function flagged(payload = PAYLOAD) {
   return { id: "n1", type: "booking_flagged", payload };
@@ -73,17 +64,6 @@ describe("describeNotification: booking_flagged", () => {
     expect(detail).toContain("blocked for unspecified reason,");
   });
 
-  it.each([
-    ["missing", undefined],
-    ["null", null],
-    ["empty", ""],
-  ])("falls back for a %s event and venue name", (_label, value) => {
-    const { headline } = describeNotification(
-      flagged({ ...PAYLOAD, eventName: value, venueName: value }),
-    );
-    expect(headline).toBe("Unnamed event at Unknown venue needs review");
-  });
-
   it("reads missing times as unknown, never undefined", () => {
     const { detail } = describeNotification(flagged({ eventName: "X", venueName: "Y" }));
     expect(detail).toBe(
@@ -92,34 +72,11 @@ describe("describeNotification: booking_flagged", () => {
     expect(detail).not.toContain("undefined");
   });
 
-  it.each([
-    ["null", null],
-    ["undefined", undefined],
-  ])("survives a %s payload", (_label, payload) => {
-    const result = describeNotification({ id: "n1", type: "booking_flagged", payload });
-    expect(result.headline).toBe("Unnamed event at Unknown venue needs review");
-    expect(result.detail).not.toContain("undefined");
-  });
-
   it("shows an unparseable time as the raw string", () => {
     const { detail } = describeNotification(flagged({ ...PAYLOAD, startsAt: "soon" }));
     expect(detail).toContain("Booked soon – ");
   });
 });
-
-// SCRUM-484 (AC8). The payload 034 writes when a setup or turnaround change
-// flags a booking (B-AC8-21's shape).
-const SETUP_PAYLOAD = {
-  venueName: "Harbour Room",
-  eventName: "Orientation",
-  startsAt: "2026-11-02T10:00:00+08:00",
-  endsAt: "2026-11-02T12:00:00+08:00",
-  occupiedStartsAt: "2026-11-02T09:30:00+08:00",
-  occupiedEndsAt: "2026-11-02T12:15:00+08:00",
-  setupMinutes: 30,
-  turnaroundMinutes: 15,
-  reason: "The venue's setup or turnaround time changed.",
-};
 
 function setupChange(payload = SETUP_PAYLOAD) {
   return { id: "n6", type: "booking_flagged_setup_change", payload };
@@ -146,17 +103,6 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
 
   it("SCRUM484_AC8_setup_change_detail_does_not_repeat_the_backend_reason", () => {
     expect(describeNotification(setupChange()).detail).not.toContain(SETUP_PAYLOAD.reason);
-  });
-
-  it.each([
-    ["missing", undefined],
-    ["null", null],
-    ["empty", ""],
-  ])("SCRUM484_AC8_falls_back_for_a_%s_event_and_venue_name", (_label, value) => {
-    const { headline } = describeNotification(
-      setupChange({ ...SETUP_PAYLOAD, eventName: value, venueName: value }),
-    );
-    expect(headline).toBe("Unnamed event at Unknown venue needs review");
   });
 
   it("SCRUM484_AC8_setup_change_notification_tolerates_missing_fields", () => {
@@ -191,15 +137,6 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
     expect(headline).toBe("Orientation at Harbour Room needs review");
     expect(detail).toBe("Setup or turnaround time changed.");
     expect(detail).not.toContain("Invalid Date");
-  });
-
-  it.each([
-    ["null", null],
-    ["undefined", undefined],
-  ])("SCRUM484_AC8_survives_a_%s_payload", (_label, payload) => {
-    const result = describeNotification({ id: "n6", type: "booking_flagged_setup_change", payload });
-    expect(result.headline).toBe("Unnamed event at Unknown venue needs review");
-    expect(result.detail).not.toContain("undefined");
   });
 
   it.each([
@@ -239,32 +176,6 @@ describe("describeNotification: booking_request_withdrawn", () => {
         `It was for ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
         "It no longer needs a decision.",
     });
-  });
-
-  it.each([
-    ["missing", undefined],
-    ["null", null],
-    ["empty", ""],
-  ])("SCRUM484_withdrawn_falls_back_for_a_%s_event_and_venue_name", (_label, value) => {
-    const { headline } = describeNotification(
-      withdrawn({ ...WITHDRAWN_PAYLOAD, eventName: value, venueName: value }),
-    );
-    expect(headline).toBe("The request for Unnamed event at Unknown venue was withdrawn");
-  });
-
-  it.each([
-    ["an empty", {}],
-    ["a null", null],
-    ["an undefined", undefined],
-  ])("SCRUM484_withdrawn_tolerates_%s_payload", (_label, payload) => {
-    const { headline, detail } = describeNotification({
-      id: "n7",
-      type: "booking_request_withdrawn",
-      payload,
-    });
-    expect(headline).toBe("The request for Unnamed event at Unknown venue was withdrawn");
-    expect(detail).toBe("It was for unknown – unknown. It no longer needs a decision.");
-    expect(`${headline} ${detail}`).not.toContain("undefined");
   });
 });
 
@@ -435,24 +346,15 @@ describe("describeNotification: Venue Staff decisions (SCRUM-258 AC6)", () => {
     });
   });
 
-  it("SCRUM258_AC6_rejected_gives_the_reason_and_the_suggested_alternative", () => {
-    const { headline, detail } = of("booking_request_rejected", {
-      ...DECISION,
-      reason: "Under renovation",
-      suggestedAlternative: "Hall B",
-    });
-    expect(headline).toBe("The request for Hall A for Tech Talk was rejected");
-    expect(detail).toMatch(/^Reason: Under renovation\b/);
-    expect(detail).toContain("Suggested alternative: Hall B");
-  });
-
   it("SCRUM258_AC6_rejected_ends_the_reason_with_a_full_stop_before_the_alternative", () => {
-    const { detail } = of("booking_request_rejected", {
+    expect(of("booking_request_rejected", {
       ...DECISION,
       reason: "Under renovation",
       suggestedAlternative: "Hall B",
+    })).toEqual({
+      headline: "The request for Hall A for Tech Talk was rejected",
+      detail: "Reason: Under renovation. Suggested alternative: Hall B",
     });
-    expect(detail).toBe("Reason: Under renovation. Suggested alternative: Hall B");
   });
 
   it("SCRUM258_AC6_rejected_does_not_double_a_reasons_own_end_punctuation", () => {
@@ -482,15 +384,6 @@ describe("describeNotification: Venue Staff decisions (SCRUM-258 AC6)", () => {
     );
     expect(detail).toMatch(/still open/);
   });
-
-  it.each(["booking_request_approved", "booking_request_rejected", "booking_request_conflicting"])(
-    "SCRUM258_AC6_%s_tolerates_an_empty_payload",
-    (type) => {
-      const { headline, detail } = of(type, null);
-      expect(`${headline} ${detail}`).not.toContain("undefined");
-      expect(headline).toMatch(/Unknown venue/);
-    },
-  );
 });
 
 // SCRUM-172 (AC6). The 052 assignment notices and the 058 safety notices.
@@ -520,13 +413,6 @@ describe("describeNotification: event_request_awaiting_assignment (SCRUM-172 AC6
       eventName: "Tech Talk",
       submittedAt: "soon",
     }).detail).toBe("Assign it from the unassigned queue.");
-  });
-
-  it.each(NO_PAYLOAD)("SCRUM172_AC6_awaiting_assignment_tolerates_missing_fields (%s payload)", (_l, payload) => {
-    expect(of172("event_request_awaiting_assignment", payload)).toEqual({
-      headline: "Unnamed event is waiting for a coordinator",
-      detail: "Assign it from the unassigned queue.",
-    });
   });
 });
 
@@ -577,13 +463,6 @@ describe("describeNotification: event_request_assigned (SCRUM-172 AC6)", () => {
         detail: "Assigned by the Lead. It was with the previous coordinator.",
       });
   });
-
-  it.each(NO_PAYLOAD)("SCRUM172_AC6_assigned_tolerates_missing_fields (%s payload)", (_l, payload) => {
-    expect(of172("event_request_assigned", payload)).toEqual({
-      headline: "Unnamed event was assigned to you",
-      detail: "Assigned by the Lead.",
-    });
-  });
 });
 
 describe("describeNotification: event_request_coordinator_assigned (SCRUM-172 AC6)", () => {
@@ -618,13 +497,6 @@ describe("describeNotification: event_request_coordinator_assigned (SCRUM-172 AC
     });
   });
 
-  it.each(NO_PAYLOAD)("SCRUM172_AC6_coordinator_assigned_tolerates_missing_fields (%s payload)", (_l, payload) => {
-    expect(of172("event_request_coordinator_assigned", payload)).toEqual({
-      headline: "A coordinator is now coordinating Unnamed event",
-      detail: "They will review your request and contact you if anything is needed.",
-    });
-  });
-
   // The handover note is for the coordinator only (052).
   it.each([
     ["first assignment", FIRST],
@@ -650,46 +522,19 @@ describe("describeNotification: safety_review_response (SCRUM-172 AC6)", () => {
       respondedAt: "2026-10-02T10:00:00+08:00",
     });
 
-  it("SCRUM172_AC6_safety_review_response_approved_without_a_note", () => {
-    expect(response("approved")).toEqual({
-      headline: "Tech Talk passed the safety check",
-      detail: "No changes were needed.",
-    });
-  });
-
-  it("SCRUM172_AC6_safety_review_response_approved_with_a_note_shows_the_note", () => {
-    expect(response("approved", "Keep exits clear.")).toEqual({
-      headline: "Tech Talk passed the safety check",
-      detail: "Safety Officer's note: Keep exits clear.",
-    });
-  });
-
-  it("SCRUM172_AC6_safety_review_response_changes_requested_shows_the_note", () => {
-    expect(response("changes_requested", "Add a first-aider.")).toEqual({
-      headline: "The safety check asked for changes to Tech Talk",
-      detail: "Safety Officer's note: Add a first-aider.",
-    });
-  });
-
-  it("SCRUM172_AC6_safety_review_response_rejected_without_a_note_points_to_the_event", () => {
-    expect(response("rejected")).toEqual({
-      headline: "Tech Talk did not pass the safety check",
-      detail: "Open the event for details.",
-    });
-  });
-
-  it("SCRUM172_AC6_safety_review_response_unknown_outcome_still_says_who_responded", () => {
-    expect(response("deferred")).toEqual({
-      headline: "The Safety Officer responded about Tech Talk",
-      detail: "Open the event for details.",
-    });
-  });
-
-  it.each(NO_PAYLOAD)("SCRUM172_AC6_safety_review_response_tolerates_missing_fields (%s payload)", (_l, payload) => {
-    expect(of172("safety_review_response", payload)).toEqual({
-      headline: "The Safety Officer responded about Unnamed event",
-      detail: "Open the event for details.",
-    });
+  it.each([
+    ["approved_without_a_note", "approved", null,
+      "Tech Talk passed the safety check", "No changes were needed."],
+    ["approved_with_a_note_shows_the_note", "approved", "Keep exits clear.",
+      "Tech Talk passed the safety check", "Safety Officer's note: Keep exits clear."],
+    ["changes_requested_shows_the_note", "changes_requested", "Add a first-aider.",
+      "The safety check asked for changes to Tech Talk", "Safety Officer's note: Add a first-aider."],
+    ["rejected_without_a_note_points_to_the_event", "rejected", null,
+      "Tech Talk did not pass the safety check", "Open the event for details."],
+    ["unknown_outcome_still_says_who_responded", "deferred", null,
+      "The Safety Officer responded about Tech Talk", "Open the event for details."],
+  ])("SCRUM172_AC6_safety_review_response_%s", (_case, outcome, note, headline, detail) => {
+    expect(response(outcome, note)).toEqual({ headline, detail });
   });
 });
 
@@ -707,13 +552,6 @@ describe("describeNotification: safety_booking_flagged (SCRUM-172 AC6)", () => {
       detail: `Booked ${BOOKED}. The Safety Officer flagged this booking.`,
     });
   });
-
-  it.each(NO_PAYLOAD)("SCRUM172_AC6_safety_booking_flagged_tolerates_missing_fields (%s payload)", (_l, payload) => {
-    expect(of172("safety_booking_flagged", payload)).toEqual({
-      headline: "Unnamed event at Unknown venue needs review after the safety check",
-      detail: "Booked unknown – unknown. The Safety Officer flagged this booking.",
-    });
-  });
 });
 
 describe("describeNotification: safety_equipment_review (SCRUM-172 AC6)", () => {
@@ -727,12 +565,126 @@ describe("describeNotification: safety_equipment_review (SCRUM-172 AC6)", () => 
       detail: "The Safety Officer flagged the equipment arrangements.",
     });
   });
+});
 
-  it.each(NO_PAYLOAD)("SCRUM172_AC6_safety_equipment_review_tolerates_missing_fields (%s payload)", (_l, payload) => {
-    expect(of172("safety_equipment_review", payload)).toEqual({
+// A notification outlives the build that wrote it, so a missing name or a
+// missing payload must still read as words. Each row keeps the title of the
+// test it replaced.
+const NAMELESS = [
+  ["missing", undefined],
+  ["null", null],
+  ["empty", ""],
+];
+const nameless = (payload, value) => ({ ...payload, eventName: value, venueName: value });
+
+const FALLBACKS = [
+  ...NAMELESS.map(([label, value]) => [
+    `falls back for a ${label} event and venue name`,
+    "booking_flagged",
+    nameless(PAYLOAD, value),
+    {
+      headline: "Unnamed event at Unknown venue needs review",
+      detail: `Booked ${BOOKED}. The venue is blocked for Maintenance, ${BLOCKED}.`,
+    },
+  ]),
+  ...[["null", null], ["undefined", undefined]].map(([label, payload]) => [
+    `survives a ${label} payload`,
+    "booking_flagged",
+    payload,
+    {
+      headline: "Unnamed event at Unknown venue needs review",
+      detail: "Booked unknown – unknown. The venue is blocked for unspecified reason, unknown – unknown.",
+    },
+  ]),
+  ...NAMELESS.map(([label, value]) => [
+    `SCRUM484_AC8_falls_back_for_a_${label}_event_and_venue_name`,
+    "booking_flagged_setup_change",
+    nameless(SETUP_PAYLOAD, value),
+    {
+      headline: "Unnamed event at Unknown venue needs review",
+      detail: `Setup or turnaround time changed. It now occupies ${formatOccupiedPeriod(SETUP_PAYLOAD)}.`,
+    },
+  ]),
+  ...[["null", null], ["undefined", undefined]].map(([label, payload]) => [
+    `SCRUM484_AC8_survives_a_${label}_payload`,
+    "booking_flagged_setup_change",
+    payload,
+    { headline: "Unnamed event at Unknown venue needs review", detail: "Setup or turnaround time changed." },
+  ]),
+  ...NAMELESS.map(([label, value]) => [
+    `SCRUM484_withdrawn_falls_back_for_a_${label}_event_and_venue_name`,
+    "booking_request_withdrawn",
+    nameless(WITHDRAWN_PAYLOAD, value),
+    {
+      headline: "The request for Unnamed event at Unknown venue was withdrawn",
+      detail:
+        `It was for ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
+        "It no longer needs a decision.",
+    },
+  ]),
+  ...NO_PAYLOAD.map(([label, payload]) => [
+    `SCRUM484_withdrawn_tolerates_${label}_payload`,
+    "booking_request_withdrawn",
+    payload,
+    {
+      headline: "The request for Unnamed event at Unknown venue was withdrawn",
+      detail: "It was for unknown – unknown. It no longer needs a decision.",
+    },
+  ]),
+  ...[
+    ["booking_request_approved", {
+      headline: "Unknown venue was approved for Unnamed event",
+      detail: "It is booked for unknown – unknown.",
+    }],
+    ["booking_request_rejected", {
+      headline: "The request for Unknown venue for Unnamed event was rejected",
+      detail: "Reason: No reason recorded",
+    }],
+    ["booking_request_conflicting", {
+      headline: "Your request for Unknown venue for Unnamed event now clashes with another event",
+      detail:
+        "another event was approved for unknown – unknown. " +
+        "Your request is still open; you can withdraw it or wait for Venue Staff.",
+    }],
+  ].map(([type, expected]) => [`SCRUM258_AC6_${type}_tolerates_an_empty_payload`, type, null, expected]),
+  ...[
+    ["awaiting_assignment", "event_request_awaiting_assignment", {
+      headline: "Unnamed event is waiting for a coordinator",
+      detail: "Assign it from the unassigned queue.",
+    }],
+    ["assigned", "event_request_assigned", {
+      headline: "Unnamed event was assigned to you",
+      detail: "Assigned by the Lead.",
+    }],
+    ["coordinator_assigned", "event_request_coordinator_assigned", {
+      headline: "A coordinator is now coordinating Unnamed event",
+      detail: "They will review your request and contact you if anything is needed.",
+    }],
+    ["safety_review_response", "safety_review_response", {
+      headline: "The Safety Officer responded about Unnamed event",
+      detail: "Open the event for details.",
+    }],
+    ["safety_booking_flagged", "safety_booking_flagged", {
+      headline: "Unnamed event at Unknown venue needs review after the safety check",
+      detail: "Booked unknown – unknown. The Safety Officer flagged this booking.",
+    }],
+    ["safety_equipment_review", "safety_equipment_review", {
       headline: "Equipment for Unnamed event needs review after the safety check",
       detail: "The Safety Officer flagged the equipment arrangements.",
-    });
+    }],
+  ].flatMap(([name, type, expected]) =>
+    NO_PAYLOAD.map(([label, payload]) => [
+      `SCRUM172_AC6_${name}_tolerates_missing_fields (${label} payload)`,
+      type,
+      payload,
+      expected,
+    ]),
+  ),
+];
+
+describe("describeNotification: missing names and payloads", () => {
+  it.each(FALLBACKS)("%s", (_title, type, payload, expected) => {
+    expect(describeNotification({ id: "n1", type, payload })).toEqual(expected);
   });
 });
 

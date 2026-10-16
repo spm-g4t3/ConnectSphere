@@ -152,6 +152,8 @@ const SCRUM489_FILES = [
 // SCRUM17_FILES, where their 100% gate already holds.
 const SCRUM172_FILES = [
   'src/notifications/UnreadCountContext.jsx',
+  // AC4: the re-read on returning to the tab, shared with the inbox.
+  'src/notifications/useRefetchOnReturn.js',
   // AC7: where each role lands when it opens a notification.
   'src/services/notificationLink.js',
 ]

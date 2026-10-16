@@ -10,6 +10,8 @@ import { act, render, screen } from "@testing-library/react";
 import { UnreadCountProvider, useUnreadCount } from "../../src/notifications/UnreadCountContext.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
 import { getUnreadCount } from "../../src/services/notificationService";
+import { deferred, httpError } from "../helpers/async.js";
+import { setVisibility } from "../helpers/visibility.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -21,17 +23,6 @@ vi.mock("../../src/services/notificationService", () => ({
 
 const ALICE = { id: "u1", name: "Alice", role: "attendee" };
 const BOB = { id: "u2", name: "Bob", role: "attendee" };
-
-/** A promise the test settles by hand, to hold a request in flight. */
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 /** Prints the count as the provider exposes it ("none" stands for null), with a way to refresh it. */
 function Probe() {
@@ -57,10 +48,6 @@ function renderAs(user) {
 }
 
 const shown = () => screen.getByTestId("count").textContent;
-
-function setVisibility(state) {
-  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
-}
 
 beforeEach(() => {
   vi.mocked(useAuth).mockReset();
@@ -105,7 +92,7 @@ describe("SCRUM172_AC4 reading the count", () => {
   it("SCRUM172_AC4_keeps_the_last_count_when_a_read_fails", async () => {
     vi.mocked(getUnreadCount)
       .mockResolvedValueOnce(5)
-      .mockRejectedValueOnce(Object.assign(new Error("fail"), { response: { status: 500 } }));
+      .mockRejectedValueOnce(httpError(500));
 
     renderAs(ALICE);
     await act(async () => {});
