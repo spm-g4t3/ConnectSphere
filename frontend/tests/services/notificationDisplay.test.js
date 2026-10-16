@@ -293,6 +293,31 @@ describe("describeNotification: event_cancelled (SCRUM-374)", () => {
     });
   });
 
+  it("tells the Safety Officer the event no longer needs a safety review, with reason and time", () => {
+    expect(describeNotification({
+      type: "event_cancelled",
+      payload: {
+        audience: "safety_officer",
+        eventName: "Tech Talk",
+        reason: "Venue unavailable",
+        cancelledAt: "2026-10-01T10:00:00+08:00",
+      },
+    })).toEqual({
+      headline: "Tech Talk was cancelled",
+      detail: `It no longer needs a safety review. Reason: Venue unavailable. Cancelled ${formatTimestamp("2026-10-01T10:00:00+08:00")}.`,
+    });
+  });
+
+  it("uses safe defaults when the Safety Officer cancellation details are missing", () => {
+    expect(describeNotification({
+      type: "event_cancelled",
+      payload: { audience: "safety_officer", reason: "", cancelledAt: null },
+    })).toEqual({
+      headline: "Unnamed event was cancelled",
+      detail: "It no longer needs a safety review. Reason: No reason recorded.",
+    });
+  });
+
   it("uses the generic notification for an unknown cancellation audience", () => {
     expect(describeNotification({
       type: "event_cancelled",

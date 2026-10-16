@@ -366,7 +366,7 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
         await db.exec(migration('062_safety_statuses.sql'));
         await db.exec(migration('063_safety_transitions.sql'));
       }
-      await db.exec(migration('071_cancel_event_in_safety_status.sql'));
+      await db.exec(migration('074_cancel_event_in_safety_status.sql'));
     });
 
     async function makeSafetyEvent() {

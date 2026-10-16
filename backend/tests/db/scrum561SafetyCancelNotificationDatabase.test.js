@@ -134,7 +134,10 @@ describe('SCRUM-561: cancelling from Safety review tells the Safety Officers', (
     await db.exec(migration('062_safety_statuses.sql'));
     await db.exec(migration('063_safety_transitions.sql'));
     await db.exec(migration('064_safety_review_submission.sql'));
-    await db.exec(migration('071_cancel_event_in_safety_status.sql'));
+    await db.exec(migration('071_safety_review.sql'));
+    await db.exec(migration('072_safety_review_history.sql'));
+    await db.exec(migration('073_safety_review_gates.sql'));
+    await db.exec(migration('074_cancel_event_in_safety_status.sql'));
 
     const user = async (email, role) => {
       const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
@@ -150,6 +153,18 @@ describe('SCRUM-561: cancelling from Safety review tells the Safety Officers', (
 
   afterAll(async () => {
     await db?.close();
+  });
+
+  it('SCRUM561_AC2_submitting_for_safety_review_still_succeeds_after_the_cancel_migration', async () => {
+    const id = await eventInSafetyReview();
+
+    const status = (await one('select status::text as status from event_requests where id = $1', [id])).status;
+    const submissions = (await one(
+      'select count(*)::int as n from safety_review_submissions where event_request_id = $1',
+      [id],
+    )).n;
+    expect(status).toBe('safety_review');
+    expect(submissions).toBe(1);
   });
 
   it('SCRUM561_AC2_cancelling_from_safety_review_notifies_the_same_officers_who_were_asked_to_review', async () => {
@@ -168,6 +183,10 @@ describe('SCRUM-561: cancelling from Safety review tells the Safety Officers', (
 
   it('SCRUM561_AC2_cancelling_from_safety_approved_does_not_notify_the_officers_again', async () => {
     const id = await eventInSafetyReview();
+    await db.query(
+      "insert into safety_review_responses (event_request_id, safety_officer_id, outcome) values ($1, $2, 'approved')",
+      [id, safetyOfficers[0]],
+    );
     await db.query(
       "select change_event_request_status($1, 'safety_review', 'safety_approved', $2, null, $2)",
       [id, coordinator],
