@@ -20,6 +20,11 @@ import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
 import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck";
 import EquipmentReview from "./components/EquipmentReview";
+import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
+import SafetyReviewHistory from "./components/SafetyReviewHistory";
+import BrowseOpenEvents from "./components/BrowseOpenEvents";
+import BrowseEventDetails from "./components/BrowseEventDetails";
+import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE, isOpenEventsEnabled } from "./services/openEventRoutes";
 import "./App.css";
 
 function LoadingScreen() {
@@ -79,6 +84,22 @@ function AppRoutes() {
       <Routes>
         <Route path="/login" element={<LoginForm />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route
+          path="/safety-review"
+          element={
+            <ProtectedRoute allowedRoles={["safety_officer"]}>
+              <SafetyOfficerDashboard user={user} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/safety-review/history"
+          element={
+            <ProtectedRoute allowedRoles={["safety_officer"]}>
+              <SafetyReviewHistory />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/events" element={<ProtectedRoute><MyEventRequests /></ProtectedRoute>} />
         {/* VenueSearch was written, correct, and imported by nothing — the route
             rendered a placeholder over a working component. Swapped for the real one. */}
@@ -222,6 +243,33 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
+        {/* Attendees only, like the API, so a direct URL from another role lands
+            on /unauthorized, not on a page that is only an error. The
+            .dashboard wrapper gives the pages their card styling. */}
+        {isOpenEventsEnabled() && (
+          <>
+            <Route
+              path={BROWSE_OPEN_EVENTS_PATH}
+              element={
+                <ProtectedRoute allowedRoles={["attendee"]}>
+                  <div className="dashboard dashboard--attendee">
+                    <BrowseOpenEvents />
+                  </div>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path={OPEN_EVENT_DETAILS_ROUTE}
+              element={
+                <ProtectedRoute allowedRoles={["attendee"]}>
+                  <div className="dashboard dashboard--attendee">
+                    <BrowseEventDetails />
+                  </div>
+                </ProtectedRoute>
+              }
+            />
+          </>
+        )}
         <Route
           path="/equipment-catalogue"
           element={

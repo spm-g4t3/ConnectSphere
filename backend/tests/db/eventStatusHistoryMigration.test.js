@@ -200,6 +200,9 @@ describe('SCRUM-321: only the lifecycle and decision functions write the status 
       // no new live writer. This was 1 after SCRUM-515, right then; SCRUM-517's
       // two redefinitions are named, not hidden.
       '052_lead_assignment.sql: 3',
+      // SCRUM-490 records each immutable Safety Officer response in the same
+      // transaction as the status transition it causes.
+      '071_safety_review.sql: 1',
     ]);
   });
 });

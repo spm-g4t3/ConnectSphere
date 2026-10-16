@@ -257,6 +257,35 @@ describe("SCRUM-375 coordinator cancellation page", () => {
   });
 });
 
+describe("SCRUM-561 cancel an event in a safety status", () => {
+  it.each(["safety_review", "safety_approved"])(
+    "SCRUM561_AC3_the_assigned_coordinator_sees_Cancel_event_for_%s",
+    (status) => {
+      renderAs(ASSIGNED, eventRequest({ status, decision: "approved" }));
+
+      expect(screen.getByRole("button", { name: "Cancel event" })).toBeInTheDocument();
+    },
+  );
+
+  it.each(["safety_review", "safety_approved"])(
+    "SCRUM561_AC3_another_coordinator_does_not_see_Cancel_event_for_%s",
+    (status) => {
+      renderAs(OTHER, eventRequest({ status, decision: "approved" }));
+
+      expect(screen.queryByRole("button", { name: "Cancel event" })).not.toBeInTheDocument();
+    },
+  );
+
+  it("SCRUM561_AC3_opening_Cancel_event_from_safety_review_shows_the_cancellation_page", async () => {
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest({ status: "safety_review", decision: "approved" }));
+
+    await user.click(screen.getByRole("button", { name: "Cancel event" }));
+
+    expect(screen.getByRole("heading", { name: "Cancel IS212 Industry Night" })).toBeInTheDocument();
+  });
+});
+
 describe("SCRUM20_AC2 the event view holds the venue search", () => {
   it("SCRUM20_AC2_find_a_venue_renders_the_form_prefilled_from_the_event", async () => {
     renderDetail();
@@ -717,6 +746,12 @@ describe("SCRUM19 statuses with nothing to decide", () => {
     const heading = screen.getByRole("heading", { name: new RegExp(`IS212 Industry Night\\s*${label}`) });
     expect(within(heading).getByText(label)).toHaveClass("status-badge");
     expect(screen.getByText(description)).toBeInTheDocument();
+    if (status === "safety_approved") {
+      expect(screen.getByText("Safety approval complete").closest(".safety-approval-notice"))
+        .toHaveTextContent("A Safety Officer has approved the event arrangements.");
+    } else {
+      expect(screen.queryByText("Safety approval complete")).not.toBeInTheDocument();
+    }
     expect(screen.queryByText(status)).not.toBeInTheDocument();
     expect(screen.queryByText("Waiting for organiser reply")).not.toBeInTheDocument();
     expect(actionButtonsShown()).toEqual([]);

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { normaliseRole } from "../auth/normaliseRole";
+import { BROWSE_OPEN_EVENTS_PATH, isOpenEventsEnabled } from "../services/openEventRoutes";
 
 const NAV_LINKS_BY_ROLE = {
   EVENT_ORGANISER: [
@@ -57,9 +58,9 @@ const NAV_LINKS_BY_ROLE = {
   ],
   ATTENDEE: [
     { to: "/dashboard", label: "Dashboard" },
-    // "Browse Open Events" (SCRUM-495) is not linked yet: that story has no
-    // route, page or branch, and /events is the Organiser's page. Add it here
-    // with the path SCRUM-495 registers.
+    // SCRUM-495. The Attendee's list of events open for registration. Its
+    // route is limited to Attendees; "My registrations" waits for its story.
+    { to: BROWSE_OPEN_EVENTS_PATH, label: "Browse Open Events" },
   ],
   // SCRUM-485 (SCRUM-510). One link each, deliberately: Dashboard, where
   // SCRUM-509 put each role's own screen. The pages that dashboard describes,
@@ -88,6 +89,8 @@ const NAV_LINKS_BY_ROLE = {
   ],
   SAFETY_OFFICER: [
     { to: "/dashboard", label: "Dashboard" },
+    { to: "/safety-review", label: "Safety review" },
+    { to: "/safety-review/history", label: "Review history" },
   ],
 };
 
@@ -98,7 +101,9 @@ export default function Navigation() {
 
   if (!user) return null;
 
-  const links = NAV_LINKS_BY_ROLE[normaliseRole(user.role)] || [];
+  const links = (NAV_LINKS_BY_ROLE[normaliseRole(user.role)] || []).filter(
+    (link) => link.to !== BROWSE_OPEN_EVENTS_PATH || isOpenEventsEnabled(),
+  );
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -115,7 +120,7 @@ export default function Navigation() {
           <li key={link.to}>
             <NavLink
               to={link.to}
-              end={link.to === "/dashboard"}
+              end={link.to === "/dashboard" || link.to === "/safety-review"}
               className={({ isActive }) => isActive ? "app-nav__link app-nav__link--active" : "app-nav__link"}
             >
               {link.label}

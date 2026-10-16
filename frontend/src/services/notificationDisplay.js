@@ -16,7 +16,8 @@
 //   venue_hold_expired (040, SCRUM-491): { eventRequestId, eventName,
 //     venueId, venueName, expiresAt }
 //   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
-//     cancelledAt }
+//     cancelledAt }; audience is organiser, venue_staff,
+//     technical_support_staff or safety_officer
 //   event_submitted_for_safety_review (064, SCRUM-489): { eventRequestId,
 //     eventName, coordinatorId, coordinatorName, startsAt, submittedAt }
 //   booking_request_approved and booking_request_rejected (066, SCRUM-258):
@@ -188,6 +189,16 @@ export function describeNotification(notification) {
         detail: `Reason: ${reason}.${cancelledAt}`,
       };
     }
+    if (payload.audience === "safety_officer") {
+      const reason = payload.reason || "No reason recorded";
+      const cancelledAt = payload.cancelledAt
+        ? ` Cancelled ${formatTimestamp(payload.cancelledAt)}.`
+        : "";
+      return {
+        headline: `${eventName} was cancelled`,
+        detail: `It no longer needs a safety review. Reason: ${reason}.${cancelledAt}`,
+      };
+    }
     if (payload.audience === "venue_staff") {
       return {
         headline: `Bookings for ${eventName} were released`,
@@ -200,6 +211,36 @@ export function describeNotification(notification) {
         detail: "The equipment request was cancelled and its active reservations were released.",
       };
     }
+  }
+
+  if (notification?.type === "safety_review_response") {
+    const eventName = payload.eventName || "The event";
+    const outcome = {
+      approved: "was approved after safety review",
+      changes_requested: "needs changes after safety review",
+      rejected: "had its safety arrangement rejected",
+    }[payload.outcome] || "received a safety review response";
+    return {
+      headline: `${eventName} ${outcome}`,
+      detail: payload.note || "Open the event to review the Safety Officer's response.",
+    };
+  }
+
+  if (notification?.type === "safety_booking_flagged") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+    return {
+      headline: `${eventName} at ${venueName} needs review`,
+      detail: `Reason: ${payload.reason || "Safety review"}. Booked ${formatRange(payload.startsAt, payload.endsAt)}.`,
+    };
+  }
+
+  if (notification?.type === "safety_equipment_review") {
+    const eventName = payload.eventName || "Unnamed event";
+    return {
+      headline: `Equipment for ${eventName} was returned for review`,
+      detail: "A Safety Officer marked the equipment arrangement as affected.",
+    };
   }
 
   // SCRUM-489 (AC8). Sent to every Safety Officer when a coordinator submits

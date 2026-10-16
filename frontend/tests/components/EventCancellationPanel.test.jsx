@@ -160,6 +160,22 @@ describe("EventCancellationPanel", () => {
     expect(getEventCancellationImpact).not.toHaveBeenCalled();
   });
 
+  it.each(["safety_review", "safety_approved"])(
+    "SCRUM561_AC3_%s_exposes_the_cancellation_controls_and_previews_the_impact",
+    async (status) => {
+      const user = userEvent.setup();
+      render(<EventCancellationPanel eventRequest={{ ...REQUEST, eventName: "Night Run", status }} />);
+
+      expect(screen.getByRole("heading", { name: "Cancel Night Run" })).toBeInTheDocument();
+      await user.type(screen.getByLabelText("Internal cancellation reason"), "Called off in safety check");
+      await user.click(screen.getByLabelText("The organiser’s request"));
+      await user.click(screen.getByRole("button", { name: "Preview cancellation" }));
+
+      expect(await screen.findByText("Auditorium")).toBeInTheDocument();
+      expect(getEventCancellationImpact).toHaveBeenCalledWith("event-1");
+    },
+  );
+
   it("does not expose cancellation controls for an unsupported status", () => {
     render(<EventCancellationPanel eventRequest={{ ...REQUEST, status: "draft" }} />);
     expect(screen.queryByRole("heading", { name: "Cancel event" })).not.toBeInTheDocument();

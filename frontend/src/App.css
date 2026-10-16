@@ -47,6 +47,27 @@ button { cursor: pointer; }
 .placeholder-page p, .loading-screen { color: var(--muted); }
 .loading-screen { align-items: center; display: grid; min-height: 100svh; place-items: center; }
 .dashboard { padding-top: 54px; }
+.safety-review__queue > li { align-items: flex-start; }
+.safety-review__queue > li > div { min-width: 0; }
+.safety-review__queue p { margin: 5px 0; }
+.safety-review__detail h3 { color: var(--teal-dark); margin: 24px 0 12px; }
+.safety-review__facts { display: grid; gap: 7px 16px; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); margin: 14px 0; }
+.safety-review__facts dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.safety-review__facts dd { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.safety-review__arrangements > li { align-items: flex-start; display: block; }
+.safety-review__affected { align-items: center; display: flex; gap: 8px; margin: 12px 0; }
+.safety-review__response { border-top: 1px solid var(--line); display: grid; gap: 14px; margin-top: 24px; padding-top: 8px; }
+.safety-review__response label { color: var(--muted); display: grid; gap: 7px; max-width: 720px; }
+.safety-review__response select, .safety-review__response textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px; }
+.safety-review__response textarea { resize: vertical; }
+.safety-review__history li { align-items: flex-start; display: grid; justify-content: start; }
+.safety-review__history span { color: var(--muted); font-size: 0.88rem; }
+.safety-review__back { margin-bottom: 10px; }
+.safety-review__error { background: #fff0ee; border-radius: 6px; color: #a43c32 !important; padding: 10px 12px; }
+.safety-review__success { background: #e8f7f1; border-radius: 6px; color: #17684f !important; padding: 10px 12px; }
+.safety-approval-notice { align-items: flex-start; background: #e8f7f1; border: 1px solid #9dd9c3; border-radius: 8px; color: #145b45; display: flex; gap: 10px; margin: 12px 0; padding: 12px 14px; }
+.safety-approval-notice__check { align-items: center; background: #17684f; border-radius: 50%; color: white; display: inline-flex; flex: 0 0 22px; font-size: 0.85rem; font-weight: 800; height: 22px; justify-content: center; line-height: 1; }
+.safety-approval-notice p { color: inherit; margin: 3px 0 0; }
 .dashboard h1 { overflow-wrap: anywhere; }
 .dashboard > section { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); margin-top: 22px; padding: 24px; }
 .dashboard h2 { color: var(--teal-dark); font-size: 1.2rem; margin: 0 0 18px; }
@@ -343,6 +364,36 @@ button { cursor: pointer; }
 .my-booking-requests__confirm { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 10px; }
 .my-booking-requests__confirm span { color: var(--muted); font-size: 0.9rem; }
 .my-booking-requests__notice { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 6px 0 0; padding: 8px 12px; }
+/* SCRUM-495. The Attendee's open events. Rows inherit `.dashboard li`, which
+   spreads the details left and the availability right. */
+.dashboard--attendee__browse-link { background: var(--teal); border-radius: 6px; color: white; display: inline-block; padding: 10px 16px; text-decoration: none; }
+.dashboard--attendee__browse-link:hover { background: var(--teal-dark); }
+.browse-open-events__summary { display: grid; gap: 4px; min-width: 0; }
+.browse-open-events__title { align-items: center; display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.browse-open-events__title a { color: var(--teal-dark); overflow-wrap: anywhere; }
+.browse-open-events__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
+.browse-open-events__badge { border-radius: 999px; display: inline-block; flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; line-height: 1.3; padding: 4px 10px; text-transform: uppercase; }
+.browse-open-events__badge--registered { background: #e8f7f1; color: #17684f; }
+.browse-open-events__availability { color: var(--teal-dark); flex: 0 0 auto; font-size: 0.9rem; font-weight: 700; }
+.browse-open-events__availability--full { color: #a43c32; }
+.browse-open-events__error { align-items: center; background: #fff0ee; border-radius: 6px; color: #a43c32; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; padding: 8px 12px; }
+.dashboard .browse-open-events__error p { color: #a43c32; margin: 0; }
+/* SCRUM-495. One open event. Its facts are a definition list, not .dashboard li
+   rows, and the description keeps the organiser's line breaks. */
+.browse-event-details__facts { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin: 0 0 18px; }
+.browse-event-details__facts dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.browse-event-details__facts dd { align-items: center; color: var(--ink); display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 2px 0 0; overflow-wrap: anywhere; }
+.dashboard .browse-event-details h3 { color: var(--teal-dark); font-size: 1rem; margin: 0 0 8px; }
+.browse-event-details__description { color: var(--ink) !important; overflow-wrap: anywhere; white-space: pre-wrap; }
+.browse-event-details__register { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 18px 0; }
+.browse-event-details__register p { margin: 0; }
+.browse-event-details button:disabled { cursor: not-allowed; opacity: 0.55; }
+.browse-open-events__notice, .browse-event-details__notice { align-items: center; background: #fff6e5; border-radius: 6px; color: #8a5a00; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; margin: 0 0 12px; padding: 8px 12px; }
+.dashboard .browse-open-events__notice p, .dashboard .browse-event-details__notice p { color: #8a5a00; margin: 0; }
+.browse-event-details__success { background: #e8f7f1; border-radius: 6px; margin: 0 0 12px; padding: 8px 12px; }
+.dashboard .browse-event-details__success p { color: #17684f; margin: 0; }
+.browse-event-details__unavailable, .browse-event-details__error { background: #fff0ee; border-radius: 6px; color: #a43c32; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; margin: 0 0 12px; padding: 8px 12px; }
+.dashboard .browse-event-details__unavailable p, .dashboard .browse-event-details__error p { color: #a43c32; margin: 0; }
 .dashboard--coordinator .my-booking-requests button:disabled { cursor: not-allowed; opacity: 0.55; }
 .dashboard--coordinator .status--booking-pending { background: #fff6e5; color: #8a5a00; }
 .dashboard--coordinator .status--booking-conflicting { background: #fff0ee; color: #a43c32; }
