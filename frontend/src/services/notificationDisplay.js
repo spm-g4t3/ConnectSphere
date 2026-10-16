@@ -20,6 +20,12 @@
 //     technical_support_staff or safety_officer
 //   event_submitted_for_safety_review (064, SCRUM-489): { eventRequestId,
 //     eventName, coordinatorId, coordinatorName, startsAt, submittedAt }
+//   booking_request_approved and booking_request_rejected (066, SCRUM-258):
+//     { eventRequestId, eventName, venueId, venueName, startsAt, endsAt,
+//     decidedAt, reason, suggestedAlternative }
+//   booking_request_conflicting (066): { eventRequestId, eventName, venueId,
+//     venueName, startsAt, endsAt, approvedBookingId, approvedEventRequestId,
+//     approvedEventName, approvedStartsAt, approvedEndsAt }
 // Every field is read defensively -- a notification outlives the build that
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
@@ -124,6 +130,50 @@ export function describeNotification(notification) {
       detail:
         `It was for ${formatRange(payload.startsAt, payload.endsAt)}. ` +
         "It no longer needs a decision.",
+    };
+  }
+
+  // 066 (SCRUM-258 AC6). Sent to the event's coordinator when Venue Staff
+  // decide on one of its requests.
+  if (notification?.type === "booking_request_approved") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+
+    return {
+      headline: `${venueName} was approved for ${eventName}`,
+      detail: `It is booked for ${formatRange(payload.startsAt, payload.endsAt)}.`,
+    };
+  }
+
+  if (notification?.type === "booking_request_rejected") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+    const reason = payload.reason || "No reason recorded";
+    // Both are free text; the reason gets a full stop of its own (unless it
+    // already ends a sentence) so the two do not run together.
+    const detail = payload.suggestedAlternative
+      ? `Reason: ${/[.!?]$/.test(reason) ? reason : `${reason}.`} Suggested alternative: ${payload.suggestedAlternative}`
+      : `Reason: ${reason}`;
+
+    return {
+      headline: `The request for ${venueName} for ${eventName} was rejected`,
+      detail,
+    };
+  }
+
+  // 066. Another event's request for the same venue and an overlapping time
+  // was approved. Said plainly that this one is still open (a flag, not a
+  // refusal), so the coordinator knows the choice is theirs.
+  if (notification?.type === "booking_request_conflicting") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+    const approvedEventName = payload.approvedEventName || "another event";
+
+    return {
+      headline: `Your request for ${venueName} for ${eventName} now clashes with ${approvedEventName}`,
+      detail:
+        `${approvedEventName} was approved for ${formatRange(payload.approvedStartsAt, payload.approvedEndsAt)}. ` +
+        "Your request is still open; you can withdraw it or wait for Venue Staff.",
     };
   }
 

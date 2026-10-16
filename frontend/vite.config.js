@@ -131,6 +131,15 @@ const SCRUM487_FILES = [
   'src/components/AssignedEventsFilters.jsx',
 ]
 
+// SCRUM-258 owns the Venue Staff queue and its decision card outright.
+// VenueStaffDashboard.jsx, which mounts the queue, and the shared services
+// it calls (bookingRequestService.js, already gated under SCRUM-254) are not
+// added here.
+const SCRUM258_FILES = [
+  'src/components/PendingBookingRequests.jsx',
+  'src/components/PendingBookingRequestCard.jsx',
+]
+
 // SCRUM-495: the Attendee's browse pages. New files only this story owns.
 const SCRUM495_FILES = [
   'src/components/BrowseOpenEvents.jsx',
@@ -190,6 +199,7 @@ export default defineConfig({
         ...SCRUM491_FILES.map((file) => [file, FULL]),
         ...SCRUM486_FILES.map((file) => [file, FULL]),
         ...SCRUM487_FILES.map((file) => [file, FULL]),
+        ...SCRUM258_FILES.map((file) => [file, FULL]),
         ...SCRUM495_FILES.map((file) => [file, FULL]),
         ...SCRUM489_FILES.map((file) => [file, FULL]),
       ]),

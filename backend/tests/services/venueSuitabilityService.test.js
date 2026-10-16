@@ -664,9 +664,9 @@ describe('SCRUM188_AC6 which bookings are rechecked', () => {
     const read = client.calls.find((c) => c.table === 'bookings');
     expect(read.filters).toEqual([
       ['event_request_id', EVENT],
-      ['status', ['pending', 'approved', 'flagged_for_review']],
+      ['status', ['pending', 'conflicting', 'approved', 'flagged_for_review']],
     ]);
-    expect(LIVE_BOOKING_STATUSES).toEqual(['pending', 'approved', 'flagged_for_review']);
+    expect(LIVE_BOOKING_STATUSES).toEqual(['pending', 'conflicting', 'approved', 'flagged_for_review']);
     expect(read.order).toBe('created_at');
     expect(read.columns).toMatch(/suitability_result/);
     expect(read.columns).toMatch(/venues\(name, location\)/);

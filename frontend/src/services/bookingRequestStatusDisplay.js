@@ -12,6 +12,7 @@ import { readStatusDisplay } from "./eventRequestStatusDisplay";
 
 const CLASS_BY_GROUP = {
   PENDING: "status--booking-pending",
+  CONFLICTING: "status--booking-conflicting",
   APPROVED: "status--booking-approved",
   FLAGGED: "status--booking-flagged",
   REJECTED: "status--booking-rejected",

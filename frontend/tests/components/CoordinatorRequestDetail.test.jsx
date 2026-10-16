@@ -818,7 +818,7 @@ describe("SCRUM254 requesting a venue from the event view", () => {
 
     expect(await searchInFinder(user)).toBeDisabled();
     expect(within(finderSection()).getByRole("status")).toHaveTextContent(
-      "A venue can only be requested for an approved or confirmed event. This event is submitted.",
+      "A venue can only be requested for an approved or confirmed event, including one under or past safety review. This event is submitted.",
     );
   });
 

@@ -263,3 +263,45 @@ export function validateCreateBookingRequest(input) {
     expectedAttendance,
   };
 }
+
+/** Mirrors the 1000-character cap 066 puts on decision_reason and suggested_alternative. */
+export const DECISION_TEXT_MAX_LENGTH = 1000;
+
+/**
+ * SCRUM-260: what Venue Staff send to reject a request (SCRUM-258 AC4). The
+ * reason is required and must say something; the suggested alternative venue
+ * or arrangement is optional, and blank means none.
+ *
+ * @param {object} input
+ * @param {string} input.reason                 why the request is rejected
+ * @param {string} [input.suggestedAlternative] another venue or arrangement
+ * @returns {{reason: string, suggestedAlternative: string|null}} both trimmed
+ * @throws {ValidationError} listing every problem found
+ */
+export function validateRejectBookingRequest(input) {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new ValidationError('Invalid rejection -- expected an object');
+  }
+
+  const errors = createErrorCollector();
+
+  const reason = checkOptionalText(errors, 'reason', input.reason, DECISION_TEXT_MAX_LENGTH);
+  // checkOptionalText reads blank as absent; for the reason, absent is the error.
+  if (reason === null && !errors.details.some(({ field }) => field === 'reason')) {
+    errors.add('reason', 'is required');
+  }
+
+  const suggestedAlternative = checkOptionalText(
+    errors,
+    'suggestedAlternative',
+    input.suggestedAlternative,
+    DECISION_TEXT_MAX_LENGTH,
+  );
+
+  if (errors.hasErrors) {
+    const summary = errors.details.map(({ field, message }) => `${field}: ${message}`).join('; ');
+    throw new ValidationError(`Invalid rejection -- ${summary}`, errors.details);
+  }
+
+  return { reason, suggestedAlternative };
+}

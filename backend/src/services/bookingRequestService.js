@@ -3,10 +3,10 @@
  *
  * SCRUM-252, a subtask of SCRUM-243 (Submit a Venue Booking Request).
  *
- * A coordinator requests a venue for an approved or confirmed event. The
- * request is a bookings row in the 'pending' status, written by
- * create_booking_request in 051_multi_venue_booking_requests.sql (first
- * written by 030) rather than by a direct insert, for the reason 012 gives
+ * A coordinator requests a venue for an approved, safety-checked or confirmed
+ * event. The request is a bookings row in the 'pending' status, written by
+ * create_booking_request in 066_venue_staff_booking_decisions.sql (first written by
+ * 030) rather than by a direct insert, for the reason 012 gives
  * for block creation: the checks have
  * to hold until the insert commits, and supabase-js gives each call its own
  * transaction. The function locks the event row and then the venue row ("for
@@ -52,14 +52,28 @@ import {
   ConflictError,
   ForbiddenError,
 } from '../errors.js';
-import { validateCreateBookingRequest, validateBookingRequestId } from '../validation/bookingRequestValidation.js';
+import {
+  validateCreateBookingRequest,
+  validateBookingRequestId,
+  validateRejectBookingRequest,
+} from '../validation/bookingRequestValidation.js';
 import { getEventRequestForCoordinator } from './eventRequestService.js';
 import { checkVenueSuitability } from './venueSuitabilityService.js';
 import { STATUS } from '../domain/eventRequestStatus.js';
 import { BOOKING_STATUS, getBookingStatusDisplay } from '../domain/bookingStatus.js';
+import { toSuitabilityRecord } from '../domain/suitabilityRecord.js';
 
-/** The event statuses a venue can be requested for (SCRUM-243 AC1). */
-const BOOKABLE_EVENT_STATUSES = Object.freeze([STATUS.APPROVED, STATUS.CONFIRMED]);
+/**
+ * The event statuses a venue can be requested for (SCRUM-243 AC1), and since
+ * SCRUM-260 approved for: past approval and still live, through the safety
+ * check. create_booking_request and decide_booking_request (066) hold the same list.
+ */
+const BOOKABLE_EVENT_STATUSES = Object.freeze([
+  STATUS.APPROVED,
+  STATUS.SAFETY_REVIEW,
+  STATUS.SAFETY_APPROVED,
+  STATUS.CONFIRMED,
+]);
 
 /** The shape gen_random_uuid() produces; what a clashing booking's id looks like. */
 const UUID_PATTERN =
@@ -117,9 +131,10 @@ function translateError(error) {
     return new ForbiddenError(detail);
   }
 
-  // serialization_failure: withdraw_booking_request's guarded update matched no
-  // row, meaning the request changed under it. 031 explains why that cannot
-  // happen while its locks hold; if it does, the caller reloads.
+  // serialization_failure: withdraw_booking_request's or decide_booking_request's
+  // guarded update matched no row, meaning the request changed under it. 031
+  // explains why that cannot happen while the locks hold; if it does, the
+  // caller reloads.
   if (code === '40001') {
     return new ConflictError(detail, { code: 'BOOKING_CHANGED' });
   }
@@ -211,6 +226,7 @@ function one(embedded) {
 const LIST_COLUMNS = `
   id, event_request_id, venue_id, starts_at, ends_at, status,
   room_layout_code, setup_notes, suitability_overridden, created_at, flagged_at, review_reason,
+  decided_at, decision_reason, suggested_alternative,
   venues(name, location),
   event_requests!inner(event_name, status, assigned_coordinator_id)
 `;
@@ -225,6 +241,10 @@ const LIST_COLUMNS = `
  * reviewReason is the code a setup or turnaround change stored when it
  * flagged the booking (034, 'setup_or_turnaround_changed'); null for a block
  * flag or an unflagged booking.
+ * decidedAt, decisionReason and suggestedAlternative are Venue Staff's
+ * decision (066), named as toDecidedBookingRequest names them; null until
+ * decided, and both texts are null on an approval. decided_by is not read:
+ * a Venue Staff user id tells the coordinator nothing.
  *
  * @param {object} row  from LIST_COLUMNS
  */
@@ -248,6 +268,9 @@ function toBookingRequestListItem(row) {
     suitabilityOverridden: row.suitability_overridden ?? false,
     flaggedAt: row.flagged_at ?? null,
     reviewReason: row.review_reason ?? null,
+    decidedAt: row.decided_at ?? null,
+    decisionReason: row.decision_reason ?? null,
+    suggestedAlternative: row.suggested_alternative ?? null,
     createdAt: row.created_at,
   };
 }
@@ -392,7 +415,7 @@ export async function createBookingRequest(
 
   if (!BOOKABLE_EVENT_STATUSES.includes(event.status)) {
     throw new ConflictError(
-      `A venue can only be requested for an approved or confirmed event; this one is ${event.status}`,
+      `A venue can only be requested for an event that is approved, in or through the safety check, or confirmed; this one is ${event.status}`,
       { code: 'EVENT_NOT_BOOKABLE' },
     );
   }
@@ -554,6 +577,109 @@ export async function listBookingRequestsForCoordinator(coordinatorId, { client 
 }
 
 /**
+ * One open (pending or conflicting) request clashing with another, in
+ * camelCase (SCRUM-259).
+ *
+ * @param {object} entry  from list_pending_booking_requests' `overlapping`
+ */
+function toOverlappingRequest(entry) {
+  return {
+    id: entry.id,
+    eventRequestId: entry.event_request_id,
+    eventName: entry.event_name ?? null,
+    startsAt: entry.starts_at,
+    endsAt: entry.ends_at,
+    occupiedStartsAt: entry.occupied_starts_at,
+    occupiedEndsAt: entry.occupied_ends_at,
+    createdAt: entry.created_at,
+  };
+}
+
+/**
+ * One booking a conflicting request clashes with now, in camelCase.
+ *
+ * @param {object} entry  from list_pending_booking_requests' `conflicting_with`
+ */
+function toConflictingBooking(entry) {
+  return {
+    bookingId: entry.booking_id,
+    eventRequestId: entry.event_request_id,
+    eventName: entry.event_name ?? null,
+    startsAt: entry.starts_at,
+    endsAt: entry.ends_at,
+    occupiedStartsAt: entry.occupied_starts_at ?? null,
+    occupiedEndsAt: entry.occupied_ends_at ?? null,
+  };
+}
+
+/**
+ * One row of the Venue Staff queue, in camelCase. The suitability record is
+ * shaped by toSuitabilityRecord, as on the venue's bookings list, so both
+ * screens show the same verdict and overridden criteria.
+ *
+ * @param {object} row  one element of list_pending_booking_requests (066)
+ */
+function toPendingBookingRequest(row) {
+  // Pending or conflicting (066); a row without a status is read as pending.
+  const status = row.status ?? BOOKING_STATUS.PENDING;
+  return {
+    id: row.id,
+    eventRequestId: row.event_request_id,
+    eventName: row.event_name ?? null,
+    eventStatus: row.event_status ?? null,
+    venueId: row.venue_id,
+    venueName: row.venue_name ?? null,
+    venueLocation: row.venue_location ?? null,
+    status,
+    statusDisplay: getBookingStatusDisplay(status),
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    occupiedStartsAt: row.occupied_starts_at ?? null,
+    occupiedEndsAt: row.occupied_ends_at ?? null,
+    expectedAttendance: row.expected_attendance ?? null,
+    roomLayoutCode: row.room_layout_code ?? null,
+    venueRequirements: row.venue_requirements ?? null,
+    accessibilityRequirements: row.accessibility_requirements ?? null,
+    setupNotes: row.setup_notes ?? null,
+    ...toSuitabilityRecord(row),
+    requestedBy: row.requested_by ?? null,
+    createdAt: row.created_at,
+    overlapping: (row.overlapping ?? []).map(toOverlappingRequest),
+    // Empty when the clash has gone, so the screen can say it may be approved.
+    conflictingWith: (row.conflicting_with ?? []).map(toConflictingBooking),
+  };
+}
+
+/**
+ * The pending booking requests Venue Staff decide on (SCRUM-259, SCRUM-258 AC1).
+ *
+ * Pending and conflicting requests (066), each with its status. Oldest first,
+ * every venue, each with the other events' open requests at
+ * its venue whose occupied periods overlap, in submission order. Read through
+ * list_pending_booking_requests (066), which refuses anyone but Venue Staff
+ * (42501, a ForbiddenError) and pads periods with venue_occupied_period(), so
+ * the formula is not repeated here.
+ *
+ * @param {string} callerId  from the JWT -- never the client
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object[]>} possibly empty, in camelCase
+ * @throws {ValidationError} when no caller was supplied, before any round trip
+ * @throws {ForbiddenError}  the caller is not Venue Staff
+ */
+export async function listPendingBookingRequests(callerId, { client } = {}) {
+  checkCaller(callerId);
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('list_pending_booking_requests', { p_caller: callerId });
+
+  if (error) throw translateError(error);
+
+  return (Array.isArray(data) ? data : []).map(toPendingBookingRequest);
+}
+
+/**
  * Withdraw a pending booking request.
  *
  * SCRUM-253. Goes through withdraw_booking_request (031), which locks the
@@ -563,8 +689,9 @@ export async function listBookingRequestsForCoordinator(coordinatorId, { client 
  * pre-check here: the question that matters is answered under the lock, where
  * it cannot change before the write.
  *
- * A request that is not pending -- including one already withdrawn -- is a
- * ConflictError and nothing is changed. Withdrawing twice is not a success the
+ * A conflicting request can be withdrawn as a pending one can (066). Any other
+ * -- including one already withdrawn -- is a ConflictError and nothing is
+ * changed. Withdrawing twice is not a success the
  * second time.
  *
  * @param {string} bookingId  the request's id
@@ -602,4 +729,156 @@ export async function withdrawBookingRequest(bookingId, userId, { client } = {})
     throw new Error(`withdraw_booking_request returned a ${booking.status} booking, not a withdrawn one`);
   }
   return booking;
+}
+
+/**
+ * A decided request: toBookingRequest's fields and the decision recorded with
+ * it (066). suggestedAlternative is null when none was given, and both texts
+ * are null on an approval.
+ *
+ * @param {object} row  snake_case, from to_jsonb in decide_booking_request
+ */
+function toDecidedBookingRequest(row) {
+  return {
+    ...toBookingRequest(row),
+    statusDisplay: getBookingStatusDisplay(row.status),
+    decidedBy: row.decided_by ?? null,
+    decidedAt: row.decided_at ?? null,
+    decisionReason: row.decision_reason ?? null,
+    suggestedAlternative: row.suggested_alternative ?? null,
+  };
+}
+
+/**
+ * One call to decide_booking_request (066) and its answer, shared by approve
+ * and reject. The function checks the caller is Venue Staff, locks the event,
+ * the venue (approval only) and the booking, refuses a request that is not
+ * pending, and writes the decision and the coordinator's notice together.
+ */
+async function decideBookingRequest(
+  bookingId,
+  callerId,
+  decision,
+  { reason = null, suggestedAlternative = null, client } = {},
+) {
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('decide_booking_request', {
+    p_booking_id: bookingId,
+    p_caller: callerId,
+    p_decision: decision,
+    p_reason: reason,
+    p_suggested_alternative: suggestedAlternative,
+  });
+
+  if (error) throw translateError(error);
+
+  // Something now occupies the request's padded period; nothing was written.
+  if (data?.outcome === 'conflict') {
+    throw new ConflictError('The venue is no longer available for the whole of this request', {
+      code: 'BOOKING_PERIOD_CONFLICT',
+      conflicts: (data.conflicts ?? []).map(toPeriodConflict),
+    });
+  }
+
+  const expected = decision === 'approve' ? BOOKING_STATUS.APPROVED : BOOKING_STATUS.REJECTED;
+  if (data?.outcome !== expected) {
+    throw new Error(`Unexpected outcome from decide_booking_request: ${data?.outcome}`);
+  }
+
+  const booking = toDecidedBookingRequest(data.booking);
+  if (booking.status !== expected) {
+    throw new Error(`decide_booking_request returned a ${booking.status} booking, not ${expected}`);
+  }
+  if (decision !== 'approve') return booking;
+
+  // The other events' requests this approval marked conflicting, and this
+  // event's hold on the venue it converted, if any (both 066).
+  return {
+    ...booking,
+    markedConflicting: Array.isArray(data.marked_conflicting) ? data.marked_conflicting : [],
+    convertedHoldId: data.converted_hold_id ?? null,
+  };
+}
+
+/** The Venue Staff caller, from the JWT; refused before any round trip. */
+function checkCaller(callerId) {
+  if (typeof callerId !== 'string' || callerId.trim() === '') {
+    throw new ValidationError(
+      'Invalid caller -- callerId: is required',
+      [{ field: 'callerId', message: 'is required' }],
+    );
+  }
+}
+
+/**
+ * Approve a pending booking request (SCRUM-260, SCRUM-258 AC2, AC3, AC5).
+ *
+ * Under its locks, decide_booking_request re-checks that the event is still
+ * approved, in the safety check or confirmed, that the request is for the
+ * event's current period, and that its occupied period meets no occupying
+ * booking, block or other event's active hold. Two approvals at one venue take
+ * turns on the venue lock, so only one of two overlapping requests can pass.
+ * Only this request changes; the event's other bookings are untouched.
+ *
+ * Other events' pending requests whose occupied periods overlap this one are
+ * marked conflicting and their coordinators notified (066); their ids come
+ * back as `markedConflicting`. A conflicting request can itself be approved
+ * once nothing occupies its period.
+ *
+ * Holds are not released: this event's own active, unexpired hold on the venue
+ * becomes converted (066), and its id comes back as `convertedHoldId`, or null
+ * when there was none.
+ *
+ * @param {string} bookingId  the request's id
+ * @param {string} callerId   from the JWT -- never the body
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the request, now approved, shaped by
+ *                            toDecidedBookingRequest, plus markedConflicting
+ *                            (ids, possibly empty) and convertedHoldId (an id
+ *                            or null)
+ * @throws {ValidationError} no caller, or a malformed id, before any round trip
+ * @throws {NotFoundError}   no such booking request
+ * @throws {ForbiddenError}  the caller is not Venue Staff
+ * @throws {ConflictError}   by code: BOOKING_NOT_PENDING, EVENT_NOT_BOOKABLE,
+ *                           BOOKING_PERIOD_STALE (the event has moved since the
+ *                           request), VENUE_RETIRED, BOOKING_PERIOD_CONFLICT
+ *                           (conflicts shaped by toPeriodConflict),
+ *                           BOOKING_CHANGED
+ */
+export async function approveBookingRequest(bookingId, callerId, { client } = {}) {
+  checkCaller(callerId);
+  const id = validateBookingRequestId(bookingId);
+
+  return decideBookingRequest(id, callerId, 'approve', { client });
+}
+
+/**
+ * Reject a pending booking request (SCRUM-260, SCRUM-258 AC4, AC6).
+ *
+ * A reason is required, and an alternative venue or arrangement may be
+ * suggested; both are stored on the request with who decided and when, and the
+ * coordinator is notified. Allowed whatever the event's status: refusing a
+ * request books nothing, so there is no reason to keep a pending one open.
+ *
+ * @param {string} bookingId  the request's id
+ * @param {string} callerId   from the JWT -- never the body
+ * @param {object} input      see validateRejectBookingRequest
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the request, now rejected, shaped by
+ *                            toDecidedBookingRequest
+ * @throws {ValidationError} no caller, a malformed id, a blank reason, or a
+ *                           text too long, before any round trip
+ * @throws {NotFoundError}   no such booking request
+ * @throws {ForbiddenError}  the caller is not Venue Staff
+ * @throws {ConflictError}   BOOKING_NOT_PENDING, or BOOKING_CHANGED
+ */
+export async function rejectBookingRequest(bookingId, callerId, input, { client } = {}) {
+  checkCaller(callerId);
+  const id = validateBookingRequestId(bookingId);
+  const { reason, suggestedAlternative } = validateRejectBookingRequest(input);
+
+  return decideBookingRequest(id, callerId, 'reject', { reason, suggestedAlternative, client });
 }

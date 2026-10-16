@@ -9,7 +9,8 @@
 // shown is a 400's details[].message, and that goes beside its field.
 
 const CODE_MESSAGES = {
-  EVENT_NOT_BOOKABLE: "A venue can only be requested for an approved or confirmed event.",
+  EVENT_NOT_BOOKABLE:
+    "A venue can only be requested for an approved or confirmed event, including one under or past safety review.",
   EVENT_DATES_MISSING:
     "This event has no proposed start and end, so a venue cannot be requested yet.",
   VENUE_RETIRED: "This venue has been retired and can no longer be requested. Choose another venue.",
@@ -190,4 +191,71 @@ export function withdrawErrorMessage(err) {
 export function isStaleWithdrawError(err) {
   const status = err?.response?.status;
   return status === 403 || status === 404 || status === 409;
+}
+// SCRUM-258: Venue Staff approving or rejecting from the pending queue. The
+// server re-checks everything under its locks (AC2), so each refusal says why
+// in the reader's terms; the ones meaning the queue was out of date also say
+// it has been refreshed.
+const DECISION_CODE_MESSAGES = {
+  BOOKING_NOT_PENDING:
+    "This request has already been decided or withdrawn. The list has been refreshed.",
+  BOOKING_CHANGED:
+    "This request changed while you were deciding. The list has been refreshed; please try again.",
+  BOOKING_PERIOD_STALE:
+    "The event's dates have changed since this request was made, so it can't be approved. The coordinator needs to request the venue again for the new dates.",
+  EVENT_NOT_BOOKABLE:
+    "This event is no longer approved, in the safety check, or confirmed (it may have been cancelled), so its venue request can't be approved.",
+  VENUE_RETIRED: "This venue has been retired, so the request can't be approved.",
+};
+
+const DECISION_STATUS_MESSAGES = {
+  400: "The decision was not accepted. A reason is required, and each text must be at most 1000 characters.",
+  401: "Your session has expired. Please sign in again.",
+  403: "Only Venue Staff can approve or reject booking requests.",
+  404: "That request no longer exists. The list has been refreshed.",
+};
+
+const DECISION_DEFAULT_MESSAGE = "Could not record the decision. Please try again.";
+
+/** One thing in the way of an approval, named for Venue Staff. */
+function occupantText(conflict) {
+  const eventName = conflict.eventName || "another event";
+  if (conflict.kind === "block") return "a venue block";
+  if (conflict.kind === "hold") return `a tentative hold for ${eventName}`;
+  return `the approved booking for ${eventName}`;
+}
+
+/**
+ * The message for a failed approve or reject. A BOOKING_PERIOD_CONFLICT names
+ * what now occupies the venue, from periodConflicts.
+ *
+ * @param {unknown} err  what approveBookingRequest or rejectBookingRequest threw
+ * @returns {string}
+ */
+export function decisionErrorMessage(err) {
+  const code = codeOf(err);
+  if (code === "BOOKING_PERIOD_CONFLICT") {
+    const occupants = [...new Set(periodConflicts(err).map(occupantText))];
+    const inTheWay = occupants.length > 0 ? ` In the way: ${occupants.join(", ")}.` : "";
+    return `The venue is no longer free for this request's period, setup and turnaround included, so it can't be approved.${inTheWay}`;
+  }
+  if (code && Object.hasOwn(DECISION_CODE_MESSAGES, code)) return DECISION_CODE_MESSAGES[code];
+
+  const status = err?.response?.status;
+  if (Object.hasOwn(DECISION_STATUS_MESSAGES, status)) return DECISION_STATUS_MESSAGES[status];
+
+  return DECISION_DEFAULT_MESSAGE;
+}
+
+/**
+ * Whether a failed decision means the queue on screen is out of date, so the
+ * caller should refetch: the request is gone (404), already decided or
+ * withdrawn, or changed under the call.
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isStaleDecisionError(err) {
+  const code = codeOf(err);
+  return err?.response?.status === 404 || code === "BOOKING_NOT_PENDING" || code === "BOOKING_CHANGED";
 }

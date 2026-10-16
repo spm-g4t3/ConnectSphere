@@ -439,6 +439,82 @@ describe("describeNotification: venue_hold_expired (SCRUM-491 AC8)", () => {
   });
 });
 
+describe("describeNotification: Venue Staff decisions (SCRUM-258 AC6)", () => {
+  const DECISION = {
+    eventName: "Tech Talk",
+    venueName: "Hall A",
+    startsAt: "2026-10-01T10:00:00+08:00",
+    endsAt: "2026-10-01T12:00:00+08:00",
+    reason: null,
+    suggestedAlternative: null,
+  };
+  const of = (type, payload) => describeNotification({ id: "n8", type, payload });
+
+  it("SCRUM258_AC6_approved_names_the_venue_event_and_period", () => {
+    expect(of("booking_request_approved", DECISION)).toEqual({
+      headline: "Hall A was approved for Tech Talk",
+      detail: `It is booked for ${formatRange(DECISION.startsAt, DECISION.endsAt)}.`,
+    });
+  });
+
+  it("SCRUM258_AC6_rejected_gives_the_reason_and_the_suggested_alternative", () => {
+    const { headline, detail } = of("booking_request_rejected", {
+      ...DECISION,
+      reason: "Under renovation",
+      suggestedAlternative: "Hall B",
+    });
+    expect(headline).toBe("The request for Hall A for Tech Talk was rejected");
+    expect(detail).toMatch(/^Reason: Under renovation\b/);
+    expect(detail).toContain("Suggested alternative: Hall B");
+  });
+
+  it("SCRUM258_AC6_rejected_ends_the_reason_with_a_full_stop_before_the_alternative", () => {
+    const { detail } = of("booking_request_rejected", {
+      ...DECISION,
+      reason: "Under renovation",
+      suggestedAlternative: "Hall B",
+    });
+    expect(detail).toBe("Reason: Under renovation. Suggested alternative: Hall B");
+  });
+
+  it("SCRUM258_AC6_rejected_does_not_double_a_reasons_own_end_punctuation", () => {
+    const { detail } = of("booking_request_rejected", {
+      ...DECISION,
+      reason: "Closed for an audit!",
+      suggestedAlternative: "Hall B",
+    });
+    expect(detail).toBe("Reason: Closed for an audit! Suggested alternative: Hall B");
+  });
+
+  it("SCRUM258_AC6_rejected_without_an_alternative_gives_only_the_reason", () => {
+    const { detail } = of("booking_request_rejected", { ...DECISION, reason: "Under renovation" });
+    expect(detail).toBe("Reason: Under renovation");
+  });
+
+  it("SCRUM258_AC3_conflicting_names_the_approved_event_and_says_the_request_is_still_open", () => {
+    const { headline, detail } = of("booking_request_conflicting", {
+      ...DECISION,
+      approvedEventName: "Gala Dinner",
+      approvedStartsAt: "2026-10-01T11:00:00+08:00",
+      approvedEndsAt: "2026-10-01T14:00:00+08:00",
+    });
+    expect(headline).toBe("Your request for Hall A for Tech Talk now clashes with Gala Dinner");
+    expect(detail).toContain(
+      `Gala Dinner was approved for ${formatRange("2026-10-01T11:00:00+08:00", "2026-10-01T14:00:00+08:00")}.`,
+    );
+    expect(detail).toMatch(/still open/);
+  });
+
+  it.each(["booking_request_approved", "booking_request_rejected", "booking_request_conflicting"])(
+    "SCRUM258_AC6_%s_tolerates_an_empty_payload",
+    (type) => {
+      const { headline, detail } = of(type, null);
+      expect(`${headline} ${detail}`).not.toContain("undefined");
+      expect(headline).toMatch(/Unknown venue/);
+    },
+  );
+});
+
 describe("describeNotification: Safety Officer outcomes (SCRUM-490)", () => {
   it.each([
     ["approved", "Industry Night was approved after safety review"],
