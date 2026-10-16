@@ -89,6 +89,8 @@ const NAV_LINKS_BY_ROLE = {
   ],
   SAFETY_OFFICER: [
     { to: "/dashboard", label: "Dashboard" },
+    { to: "/safety-review", label: "Safety review" },
+    { to: "/safety-review/history", label: "Review history" },
   ],
 };
 
@@ -118,7 +120,7 @@ export default function Navigation() {
           <li key={link.to}>
             <NavLink
               to={link.to}
-              end={link.to === "/dashboard"}
+              end={link.to === "/dashboard" || link.to === "/safety-review"}
               className={({ isActive }) => isActive ? "app-nav__link app-nav__link--active" : "app-nav__link"}
             >
               {link.label}

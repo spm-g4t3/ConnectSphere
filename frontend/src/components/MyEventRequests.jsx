@@ -23,6 +23,7 @@ import AssignmentHistory from "./AssignmentHistory";
 import DecisionOutcome from "./DecisionOutcome";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import ClarificationReplyForm from "./ClarificationReplyForm";
+import SafetyApprovalNotice from "./SafetyApprovalNotice";
 
 function formatEventDate(value) {
   if (!value) return "Not specified";
@@ -272,6 +273,7 @@ export default function MyEventRequests() {
               <p className="my-event-requests__item-description">
                 {display.description}
               </p>
+              <SafetyApprovalNotice status={req.status} />
               {assignment && (
                 <p className="my-event-requests__assignment">{assignment}</p>
               )}

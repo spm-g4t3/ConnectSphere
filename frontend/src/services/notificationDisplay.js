@@ -152,6 +152,36 @@ export function describeNotification(notification) {
     }
   }
 
+  if (notification?.type === "safety_review_response") {
+    const eventName = payload.eventName || "The event";
+    const outcome = {
+      approved: "was approved after safety review",
+      changes_requested: "needs changes after safety review",
+      rejected: "had its safety arrangement rejected",
+    }[payload.outcome] || "received a safety review response";
+    return {
+      headline: `${eventName} ${outcome}`,
+      detail: payload.note || "Open the event to review the Safety Officer's response.",
+    };
+  }
+
+  if (notification?.type === "safety_booking_flagged") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+    return {
+      headline: `${eventName} at ${venueName} needs review`,
+      detail: `Reason: ${payload.reason || "Safety review"}. Booked ${formatRange(payload.startsAt, payload.endsAt)}.`,
+    };
+  }
+
+  if (notification?.type === "safety_equipment_review") {
+    const eventName = payload.eventName || "Unnamed event";
+    return {
+      headline: `Equipment for ${eventName} was returned for review`,
+      detail: "A Safety Officer marked the equipment arrangement as affected.",
+    };
+  }
+
   // SCRUM-489 (AC8). Sent to every Safety Officer when a coordinator submits
   // an Approved event; the start date says how soon the check is needed.
   if (notification?.type === "event_submitted_for_safety_review") {

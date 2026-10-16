@@ -68,6 +68,12 @@ describe("SCRUM-488 AC5: the Organiser's dashboard with events in the safety sta
     const row = (await screen.findByText("Industry Night")).closest("li");
     expect(within(row).getByText(label)).toHaveClass("status-badge", cssClass);
     expect(within(row).getByText(DISPLAY[status].description)).toBeInTheDocument();
+    if (status === "safety_approved") {
+      expect(within(row).getByRole("status")).toHaveTextContent("Safety approval complete");
+      expect(within(row).getByRole("status")).toHaveTextContent("A Safety Officer has approved the event arrangements.");
+    } else {
+      expect(within(row).queryByText("Safety approval complete")).not.toBeInTheDocument();
+    }
   });
 
   it("SCRUM488_AC5_never_shows_an_internal_status_name_or_an_unknown_status", async () => {

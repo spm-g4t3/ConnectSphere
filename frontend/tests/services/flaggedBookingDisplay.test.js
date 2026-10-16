@@ -18,6 +18,10 @@ describe("reviewReasonLabel", () => {
     expect(reviewReasonLabel("setup_or_turnaround_changed")).toBe("Setup or turnaround time changed");
   });
 
+  it("SCRUM490_AC8_labels_a_safety_review_flag", () => {
+    expect(reviewReasonLabel("safety_review")).toBe("Safety review");
+  });
+
   it.each([
     ["an unknown code", "flood"],
     ["an inherited property name", "toString"],
