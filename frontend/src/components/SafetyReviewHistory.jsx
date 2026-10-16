@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   getSafetyReview,
   getSafetyReviewHistory,
 } from "../services/safetyReviewService";
 import { formatRange, formatTimestamp } from "../services/displayFormat";
 import { OUTCOME_LABELS } from "./safetyReviewLabels";
-import { SafetyReviewDetail } from "./SafetyOfficerDashboard";
-
-const noop = () => {};
+import { SafetyReviewDetail } from "./SafetyReviewDetail";
 
 export default function SafetyReviewHistory() {
   const [history, setHistory] = useState([]);
@@ -69,7 +68,17 @@ export default function SafetyReviewHistory() {
           </button>
           {detailLoading && <p>Loading event arrangements...</p>}
           {error && <p className="safety-review__error" role="alert">{error}</p>}
-          {detail && <SafetyReviewDetail detail={detail} onSubmitted={noop} onError={noop} />}
+          {detail && (
+            <>
+              {detail.event.status === "safety_review" && (
+                <p>
+                  This event is in the live queue.{" "}
+                  <Link to="/safety-review">Open the Safety review queue</Link>
+                </p>
+              )}
+              <SafetyReviewDetail detail={detail} readOnly />
+            </>
+          )}
         </section>
       ) : (
         <section>

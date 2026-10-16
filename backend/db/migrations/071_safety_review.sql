@@ -1,13 +1,19 @@
--- 051_safety_review.sql
+-- 071_safety_review.sql
 -- SCRUM-490: review event arrangements and record an immutable response.
 --
--- Apply after 050_event_safety_statuses.sql and after migrations 030, 036,
--- 038, 040 and 048. Every response and its status/arrangement/notification
--- effects are committed by one function call.
+-- Apply after 064_safety_review_submission.sql and 054_equipment_reservation_actions.sql.
+-- Every response and its status/arrangement/notification effects are committed
+-- by one function call.
 
+alter table bookings add column if not exists review_reason text;
+alter table bookings drop constraint if exists bookings_review_reason_known;
 alter table bookings
-  add column if not exists safety_review_reason text,
-  add column if not exists safety_review_response_id uuid;
+  add constraint bookings_review_reason_known
+  check (review_reason in ('setup_or_turnaround_changed', 'safety_review'));
+
+alter table bookings drop constraint if exists bookings_safety_review_response_fk;
+alter table bookings drop column if exists safety_review_reason;
+alter table bookings drop column if exists safety_review_response_id;
 
 create table if not exists safety_review_responses (
   id                    uuid primary key default gen_random_uuid(),
@@ -87,13 +93,6 @@ create trigger safety_review_responses_immutable
   before update or delete on safety_review_responses
   for each row execute function reject_safety_review_response_edits();
 
-alter table bookings
-  drop constraint if exists bookings_safety_review_response_fk;
-alter table bookings
-  add constraint bookings_safety_review_response_fk
-  foreign key (safety_review_response_id)
-  references safety_review_responses(id) on delete set null;
-
 alter table notifications drop constraint if exists notifications_type_known;
 alter table notifications
   add constraint notifications_type_known check (
@@ -106,167 +105,15 @@ alter table notifications
       'booking_flagged_setup_change',
       'venue_hold_expired',
       'event_cancelled',
-      'event_request_assigned',
       'event_request_awaiting_assignment',
+      'event_request_assigned',
       'event_request_coordinator_assigned',
       'safety_review_response',
       'safety_booking_flagged',
-      'safety_equipment_review'
+      'safety_equipment_review',
+      'event_submitted_for_safety_review'
     )
   );
-
-create or replace function event_request_status_allows(
-  p_from event_request_status,
-  p_to event_request_status
-)
-returns boolean
-language sql
-immutable
-as $$
-  select exists (
-    select 1
-      from (values
-        ('draft', 'submitted'),
-        ('submitted', 'under_review'),
-        ('under_review', 'pending_clarification'),
-        ('pending_clarification', 'under_review'),
-        ('under_review', 'approved'),
-        ('under_review', 'rejected'),
-        ('approved', 'rejected'),
-        ('rejected', 'draft'),
-        ('approved', 'safety_review'),
-        ('safety_review', 'safety_approved'),
-        ('safety_review', 'approved'),
-        ('safety_review', 'cancelled'),
-        ('safety_approved', 'confirmed'),
-        ('safety_approved', 'approved'),
-        ('safety_approved', 'cancelled'),
-        ('confirmed', 'approved'),
-        ('confirmed', 'completed'),
-        ('submitted', 'cancelled'),
-        ('under_review', 'cancelled'),
-        ('pending_clarification', 'cancelled'),
-        ('approved', 'cancelled'),
-        ('confirmed', 'cancelled')
-      ) as t (from_status, to_status)
-     where t.from_status = p_from::text
-       and t.to_status = p_to::text
-  );
-$$;
-
-alter table event_request_status_history
-  drop constraint if exists event_request_status_history_statuses_in_lifecycle;
-alter table event_request_status_history
-  add constraint event_request_status_history_statuses_in_lifecycle check (
-    previous_status in (
-      'draft', 'submitted', 'under_review', 'pending_clarification', 'approved',
-      'safety_review', 'safety_approved', 'confirmed', 'completed', 'rejected', 'cancelled'
-    )
-    and new_status in (
-      'draft', 'submitted', 'under_review', 'pending_clarification', 'approved',
-      'safety_review', 'safety_approved', 'confirmed', 'completed', 'rejected', 'cancelled'
-    )
-  );
-
-create or replace function change_event_request_status(
-  p_event_request_id      uuid,
-  p_expected_status       event_request_status,
-  p_new_status            event_request_status,
-  p_changed_by            uuid,
-  p_reason                text default null,
-  p_expected_coordinator  uuid default null
-)
-returns event_requests
-language plpgsql
-as $$
-declare
-  v_request event_requests;
-begin
-  if p_expected_status is null or p_new_status is null or p_changed_by is null then
-    raise exception 'change_event_request_status needs the expected status, the new status and the user'
-      using errcode = 'null_value_not_allowed';
-  end if;
-
-  if p_new_status = 'submitted' then
-    raise exception 'a request is submitted with submit_event_request, not change_event_request_status'
-      using errcode = 'invalid_parameter_value';
-  end if;
-
-  if p_new_status = p_expected_status then
-    raise exception 'event request status cannot change from % to itself', p_expected_status
-      using errcode = 'invalid_parameter_value';
-  end if;
-
-  select * into v_request
-    from event_requests
-   where id = p_event_request_id
-     for update;
-
-  if not found then
-    raise exception 'event request % not found', p_event_request_id
-      using errcode = 'no_data_found';
-  end if;
-
-  if v_request.status <> p_expected_status then
-    raise exception 'event request % has status %, not %',
-      p_event_request_id, v_request.status, p_expected_status
-      using errcode = 'object_not_in_prerequisite_state';
-  end if;
-
-  if not event_request_status_allows(v_request.status, p_new_status) then
-    raise exception 'event request % has status %, which cannot change to %',
-      p_event_request_id, v_request.status, p_new_status
-      using errcode = 'object_not_in_prerequisite_state';
-  end if;
-
-  if p_expected_coordinator is not null
-     and v_request.assigned_coordinator_id is distinct from p_expected_coordinator then
-    raise exception 'event request % is no longer assigned to this coordinator', p_event_request_id
-      using errcode = 'serialization_failure';
-  end if;
-
-  if p_new_status = 'draft'
-     and exists (
-       select 1 from information_schema.columns
-        where table_schema = 'public'
-          and table_name = 'event_requests'
-          and column_name = 'decision'
-     ) then
-    execute
-      'update event_requests
-          set status = $1, submitted_at = null, decision = null,
-              decision_note = null, decided_by = null, decided_at = null
-        where id = $2 and status = $3
-       returning *'
-      into v_request
-      using p_new_status, p_event_request_id, p_expected_status;
-  else
-    update event_requests
-       set status = p_new_status,
-           submitted_at = case when p_new_status = 'draft' then null else submitted_at end,
-           clarification_note = case
-             when p_new_status = 'pending_clarification' then p_reason
-             when p_expected_status = 'pending_clarification' then null
-             else clarification_note
-           end
-     where id = p_event_request_id
-       and status = p_expected_status
-    returning * into v_request;
-  end if;
-
-  if v_request.id is null then
-    raise exception 'event request % changed status while it was being updated', p_event_request_id
-      using errcode = 'serialization_failure';
-  end if;
-
-  insert into event_request_status_history
-    (event_request_id, previous_status, new_status, changed_by, reason)
-  values
-    (p_event_request_id, p_expected_status, p_new_status, p_changed_by, p_reason);
-
-  return v_request;
-end;
-$$;
 
 create or replace function safety_review_queue()
 returns jsonb
@@ -510,8 +357,9 @@ begin
   if cardinality(v_booking_ids) > 0 then
     update bookings
        set status = 'flagged_for_review',
-           safety_review_reason = 'Safety review',
-           safety_review_response_id = v_response.id
+           review_reason = 'safety_review',
+           flagged_at = now(),
+           flagged_by = p_safety_officer_id
      where event_request_id = p_event_request_id
        and id = any(v_booking_ids)
        and status in ('approved', 'flagged_for_review');
@@ -523,12 +371,9 @@ begin
   end if;
 
   if p_equipment_affected then
-    update equipment_reservations
-       set released_at = now(),
-           released_by = p_safety_officer_id,
-           release_reason = 'Safety review'
-     where event_request_id = p_event_request_id
-       and released_at is null;
+    perform release_equipment_reservations(
+      p_event_request_id, null, 'Safety review', p_safety_officer_id
+    );
 
     update equipment_requests
        set status = 'pending_review'

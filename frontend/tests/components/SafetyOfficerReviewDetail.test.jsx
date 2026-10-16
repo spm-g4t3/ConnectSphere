@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SafetyReviewDetail } from "../../src/components/SafetyOfficerDashboard.jsx";
+import { SafetyReviewDetail } from "../../src/components/SafetyReviewDetail.jsx";
 import { submitSafetyReviewResponse } from "../../src/services/safetyReviewService";
 
 vi.mock("../../src/services/safetyReviewService", () => ({
@@ -177,6 +177,29 @@ describe("SCRUM-490 Safety Officer review details", () => {
     expect(screen.queryByLabelText("Mark this booking as affected")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Mark the equipment request as affected")).not.toBeInTheDocument();
     expect(screen.getByText("No earlier safety responses.")).toBeInTheDocument();
+  });
+
+  it("SCRUM490_AC13_readOnly_details_hide_all_response_controls", () => {
+    render(
+      <SafetyReviewDetail
+        detail={{
+          event: {
+            id: "event-read-only",
+            eventName: "Historical review",
+            status: "safety_review",
+          },
+          venues: [{ bookingId: "booking-read-only", name: "Hall A" }],
+          equipment: { lines: [{ id: "line-read-only", name: "Projector", quantity: 1 }] },
+          history: [],
+        }}
+        readOnly
+      />,
+    );
+
+    expect(screen.queryByRole("form")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Submit response" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Mark this booking as affected")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Mark the equipment request as affected")).not.toBeInTheDocument();
   });
 
   it("reports the server error when a response fails", async () => {

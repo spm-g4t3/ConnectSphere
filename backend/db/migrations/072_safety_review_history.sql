@@ -1,8 +1,8 @@
--- 059_safety_review_history.sql
+-- 072_safety_review_history.sql
 -- SCRUM-490: list events a Safety Officer has already responded to, so the
 -- Safety review page shows past outcomes once the queue is empty.
 --
--- Apply after 058_safety_review.sql. One row per event, using its latest
+-- Apply after 071_safety_review.sql. One row per event, using its latest
 -- response, newest first. Read-only.
 
 create or replace function safety_review_history()

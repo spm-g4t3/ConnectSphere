@@ -1,3 +1,4 @@
+-- 073_safety_review_gates.sql
 -- Keep the review queue tied to its submission and enforce safety-stage gates
 -- at the database boundary, including on resubmission.
 
