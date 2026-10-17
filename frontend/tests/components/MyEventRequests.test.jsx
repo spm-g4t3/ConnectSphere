@@ -13,14 +13,15 @@
 // function the screen's component tree reaches when modules load is on the
 // mock, because a vi.mock factory is strict.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 
 import MyEventRequests from "../../src/components/MyEventRequests.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
 import {
   getAssignmentHistory,
+  getEventClarificationHistory,
   getMyEventRequests,
 } from "../../src/services/eventRequestService";
 
@@ -339,5 +340,120 @@ describe("SCRUM488_AC5 the Organiser's list shows the safety statuses", () => {
       .not.toBeInTheDocument();
     expect(badge("A")).toHaveClass("status--awaiting-review");
     expect(badge("D")).toHaveClass("status--confirmed");
+  });
+});
+
+describe("SCRUM172_AC7 a notification opens the Organiser's list on its event", () => {
+  const FIRST = eventRequest({ id: "aaaaaaaa-0000-4000-8000-000000000001", eventName: "Career Fair" });
+  const SECOND = eventRequest({ id: "aaaaaaaa-0000-4000-8000-000000000002", eventName: "Tech Talk" });
+  const original = Element.prototype.scrollIntoView;
+  let scrollIntoView;
+
+  beforeEach(() => {
+    scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+  });
+
+  afterEach(() => {
+    if (original === undefined) delete Element.prototype.scrollIntoView;
+    else Element.prototype.scrollIntoView = original;
+  });
+
+  // Shows the router state the list leaves behind, so a test can see it cleared.
+  function StateProbe() {
+    const { state } = useLocation();
+    return <p data-testid="router-state">{JSON.stringify(state)}</p>;
+  }
+
+  function renderWithState(requests, state) {
+    vi.mocked(getMyEventRequests).mockResolvedValue(requests);
+    return render(
+      <MemoryRouter initialEntries={[{ pathname: "/events", state }]}>
+        <MyEventRequests />
+        <StateProbe />
+      </MemoryRouter>,
+    );
+  }
+
+  const rowOf = (name) => screen.getByText(name).closest("li");
+
+  it("SCRUM172_AC7_focuses_and_scrolls_to_the_named_event_only", async () => {
+    renderWithState([FIRST, SECOND], { focusEventRequestId: SECOND.id });
+    await screen.findByText("Tech Talk");
+
+    expect(rowOf("Tech Talk")).toHaveClass("my-event-requests__item--focused");
+    expect(rowOf("Career Fair")).not.toHaveClass("my-event-requests__item--focused");
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.contexts[0]).toBe(rowOf("Tech Talk"));
+    expect(screen.queryByText("That event is no longer in your list.")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM172_AC7_an_event_not_in_the_list_says_so_and_focuses_nothing", async () => {
+    renderWithState([FIRST, SECOND], { focusEventRequestId: "bbbbbbbb-0000-4000-8000-000000000009" });
+
+    expect(await screen.findByRole("status")).toHaveTextContent("That event is no longer in your list.");
+    expect(document.querySelector(".my-event-requests__item--focused")).toBeNull();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM172_AC7_without_a_focus_id_nothing_is_focused_or_announced", async () => {
+    renderWithState([FIRST, SECOND], null);
+    await screen.findByText("Tech Talk");
+
+    expect(document.querySelector(".my-event-requests__item--focused")).toBeNull();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM172_AC7_clears_the_router_state_but_keeps_the_focus", async () => {
+    // Cleared so a reload or Back does not re-run the jump.
+    renderWithState([FIRST, SECOND], { focusEventRequestId: SECOND.id });
+    await screen.findByText("Tech Talk");
+
+    expect(screen.getByTestId("router-state")).toHaveTextContent("null");
+    expect(rowOf("Tech Talk")).toHaveClass("my-event-requests__item--focused");
+  });
+
+  it("SCRUM172_AC7_focuses_without_scrollIntoView", async () => {
+    delete Element.prototype.scrollIntoView;
+    renderWithState([FIRST, SECOND], { focusEventRequestId: SECOND.id });
+    await screen.findByText("Tech Talk");
+
+    expect(rowOf("Tech Talk")).toHaveClass("my-event-requests__item--focused");
+  });
+
+  it("SCRUM172_AC7_a_clarification_notification_opens_the_reply_form", async () => {
+    vi.mocked(getEventClarificationHistory).mockResolvedValue([]);
+    const waiting = eventRequest({ status: "pending_clarification", clarificationNote: "Which hall?" });
+    renderWithState([waiting], { openClarificationRequestId: waiting.id });
+
+    expect(await screen.findByRole("heading", { name: "Reply to the Coordinator" })).toBeInTheDocument();
+    expect(screen.getByTestId("router-state")).toHaveTextContent("null");
+  });
+});
+
+// SCRUM-266: the Organiser sees which confirmed events have a flagged booking.
+describe("SCRUM266_AC4 Needs attention on the Organiser's list", () => {
+  const confirmed = (id, eventName, needsAttention) =>
+    eventRequest({
+      id,
+      eventName,
+      status: "confirmed",
+      needsAttention,
+      statusDisplay: { status: "confirmed", label: "Confirmed", group: "CONFIRMED", description: "Going ahead." },
+    });
+
+  it("SCRUM266_AC4_marks_only_the_rows_the_server_says_need_attention", async () => {
+    renderList([
+      confirmed("e1", "Flagged event", true),
+      confirmed("e2", "Fine event", false),
+      confirmed("e3", "Older payload", undefined),
+    ]);
+
+    const row = (name) => screen.getByText(name).closest("li");
+    await screen.findByText("Flagged event");
+    expect(within(row("Flagged event")).getByText("Needs attention")).toHaveClass("status-badge", "status--action-required");
+    expect(within(row("Fine event")).queryByText("Needs attention")).not.toBeInTheDocument();
+    expect(within(row("Older payload")).queryByText("Needs attention")).not.toBeInTheDocument();
   });
 });

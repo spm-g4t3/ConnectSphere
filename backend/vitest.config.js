@@ -117,6 +117,10 @@ export default defineConfig({
         'src/services/openEventService.js': FULL,
         'src/domain/registrationWindow.js': FULL,
         'src/domain/registrationAvailability.js': FULL,
+        // SCRUM-266: the flagged-booking resolution files are new and owned outright.
+        'src/routes/flaggedBookings.js': FULL,
+        'src/services/flaggedBookingService.js': FULL,
+        'src/validation/flaggedBookingValidation.js': FULL,
       },
     },
   },

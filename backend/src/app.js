@@ -15,6 +15,7 @@ import eventRequestRoutes from './routes/eventRequests.js';
 import venueRoutes from './routes/venues.js';
 import notificationRoutes from './routes/notifications.js';
 import bookingRequestRoutes from './routes/bookingRequests.js';
+import flaggedBookingRoutes from './routes/flaggedBookings.js';
 import equipmentAvailabilityRoutes from './routes/equipmentAvailability.js';
 import equipmentRoutes from './routes/equipment.js';
 import eventEquipmentRoutes from './routes/eventEquipment.js';
@@ -62,6 +63,9 @@ app.use('/api/equipment/availability', equipmentAvailabilityRoutes);
 
 // SCRUM-252: an Event Coordinator requests a venue for an approved event.
 app.use('/api/booking-requests', bookingRequestRoutes);
+
+// SCRUM-266: Venue Staff resolve a booking flagged for review.
+app.use('/api/flagged-bookings', flaggedBookingRoutes);
 
 // SCRUM-495: the events an authenticated Attendee can register for.
 app.use('/api/open-events', openEventRoutes);

@@ -18,7 +18,7 @@
 //     from then until SCRUM-487 it pointed to the unfiltered list and named
 //     SCRUM-487 as still to build. Rejected: the counts on the dashboard too,
 //     a second copy of the overview and a third read on every login.
-//   * The Lead's notifications (CoordinatorNotifications, the Coordinator's
+//   * The Lead's notifications (NotificationInbox, the Coordinator's
 //     card, reused as it is). Submission now tells every Lead a request is
 //     waiting (052, event_request_awaiting_assignment), and without this card
 //     those notices would be written and never seen. This build does not yet
@@ -36,7 +36,7 @@
 
 import { Link } from "react-router-dom";
 import UnassignedQueue from "./UnassignedQueue";
-import CoordinatorNotifications from "./CoordinatorNotifications";
+import NotificationInbox from "./NotificationInbox";
 
 export default function EventCoordinatorLeadDashboard({ user }) {
   return (
@@ -56,7 +56,7 @@ export default function EventCoordinatorLeadDashboard({ user }) {
         </p>
       </section>
 
-      <CoordinatorNotifications />
+      <NotificationInbox />
     </div>
   );
 }

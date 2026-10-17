@@ -141,7 +141,7 @@ describe("SCRUM453_AC2 the Attendee dashboard and nav", () => {
     renderAppAt("/dashboard");
 
     const nav = await screen.findByRole("navigation");
-    const links = within(nav).getAllByRole("link");
+    const links = within(within(nav).getByRole("list")).getAllByRole("link");
     expect(links.map((link) => link.getAttribute("href"))).toEqual(["/dashboard", "/open-events"]);
     expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveClass("app-nav__link--active");
   });
@@ -328,7 +328,7 @@ describe("SCRUM453 existing roles keep their navigation", () => {
   it.each([
     ["event_organiser", ["/dashboard", "/events"]],
     ["event_coordinator", ["/dashboard", "/my-events", "/my-venue-requests", "/review-queue", "/venue-search"]],
-    ["venue_staff", ["/dashboard", "/venue-catalogue", "/booking-requests"]],
+    ["venue_staff", ["/dashboard", "/venue-catalogue", "/booking-requests", "/flagged-bookings"]],
     [
       "technical_support_staff",
       ["/dashboard", "/tickets", "/equipment", "/equipment-catalogue", "/equipment-availability"],
@@ -338,7 +338,8 @@ describe("SCRUM453 existing roles keep their navigation", () => {
     renderAppAt("/dashboard");
 
     const nav = await screen.findByRole("navigation");
-    expect(within(nav).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(hrefs);
+    const roleLinks = within(within(nav).getByRole("list")).getAllByRole("link");
+    expect(roleLinks.map((link) => link.getAttribute("href"))).toEqual(hrefs);
   });
 });
 
@@ -367,7 +368,8 @@ describe("SCRUM495_AC1 only the Attendee role reaches the browse routes", () => 
 
     expect(await screen.findByRole("heading", { name: "Not available to your role" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/unauthorized");
-    expect(apiClient.get).not.toHaveBeenCalled();
+    // The shell's unread-count fetch runs for every signed-in role; no event data may.
+    expect(apiClient.get).not.toHaveBeenCalledWith(expect.stringContaining("/open-events"));
   });
 
   it.each(["attendee", "Attendee", " ATTENDEE "])("SCRUM495_AC1_an_attendee_whose_role_is_spelled_%j_reaches_the_list_and_an_event", async (spelling) => {

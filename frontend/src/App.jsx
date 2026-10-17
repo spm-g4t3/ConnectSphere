@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import Navigation from "./components/Navigation";
+import { UnreadCountProvider } from "./notifications/UnreadCountContext";
 import Dashboard from "./components/Dashboard";
 import LoginForm from "./components/LoginForm";
 import MyEventRequests from "./components/MyEventRequests";
@@ -15,6 +16,7 @@ import AssignedEvents from "./components/AssignedEvents";
 import EventRequestReviewPage from "./components/EventRequestReviewPage";
 import MyBookingRequests from "./components/MyBookingRequests";
 import PendingBookingRequests from "./components/PendingBookingRequests";
+import FlaggedBookings from "./components/FlaggedBookings";
 import EquipmentCatalogue from "./components/EquipmentCatalogue";
 import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
@@ -327,6 +329,19 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
+        {/* Venue Staff's flagged bookings, the same component the dashboard
+            shows, wrapped as /booking-requests is. GET /flagged-bookings
+            answers 403 to anyone else regardless. */}
+        <Route
+          path="/flagged-bookings"
+          element={
+            <ProtectedRoute allowedRoles={["venue_staff"]}>
+              <div className="dashboard dashboard--venue-staff">
+                <FlaggedBookings />
+              </div>
+            </ProtectedRoute>
+          }
+        />
         {/* The next two are placeholders on purpose, and the nav links that point
             at them are kept on purpose. A future sprint builds exactly these two
             features, so deleting the links now just means re-adding them then. What
@@ -348,9 +363,11 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <div className="app-shell">
-          <AppRoutes />
-        </div>
+        <UnreadCountProvider>
+          <div className="app-shell">
+            <AppRoutes />
+          </div>
+        </UnreadCountProvider>
       </AuthProvider>
     </BrowserRouter>
   );
