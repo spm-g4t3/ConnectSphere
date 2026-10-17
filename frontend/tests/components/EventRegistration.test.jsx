@@ -83,7 +83,8 @@ describe("SCRUM-363 organiser registration controls", () => {
 });
 
 describe("SCRUM-22 attendee registration", () => {
-  it("lists open events and updates the attendee's registration state", async () => {
+  it("SCRUM494_AC5_keeps_the_attendee_registered_when_registration_reaches_capacity", async () => {
+    vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "false");
     vi.mocked(getOpenRegistrationEvents).mockResolvedValue([{
       id: EVENT_ID,
       eventName: "Industry Night",
@@ -103,5 +104,26 @@ describe("SCRUM-22 attendee registration", () => {
 
     await waitFor(() => expect(registerForEvent).toHaveBeenCalledWith(EVENT_ID));
     expect(await screen.findByText("Registered")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Industry Night" })).toBeInTheDocument();
+  });
+
+  it("SCRUM494_AC5_shows_a_full_event_to_an_attendee_who_already_registered", async () => {
+    vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "false");
+    vi.mocked(getOpenRegistrationEvents).mockResolvedValue([{
+      id: EVENT_ID,
+      eventName: "Industry Night",
+      startsAt: "2030-01-01T12:00:00.000Z",
+      registrationClosesAt: "2030-01-01T12:00:00.000Z",
+      capacity: 1,
+      registeredCount: 1,
+      isRegistered: true,
+      isFull: true,
+    }]);
+
+    render(<AttendeeDashboard user={{ name: "Ari" }} />);
+
+    expect(await screen.findByRole("heading", { name: "Industry Night" })).toBeInTheDocument();
+    expect(screen.getByText("Registered")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Register" })).not.toBeInTheDocument();
   });
 });

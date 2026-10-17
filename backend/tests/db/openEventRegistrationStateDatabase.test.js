@@ -36,11 +36,12 @@ beforeAll(async () => {
     create role authenticated;
     create role service_role;
     create table profiles (id uuid primary key references auth.users(id), role text not null);
-  `);
+  `  );
   await db.exec(migration('001_event_requests.sql'));
-  await db.exec(migration('050_event_registration.sql'));
   await db.exec(migration('068_open_event_registration_state.sql'));
+  await db.exec(migration('079_event_registration.sql'));
   await db.exec(migration('082_event_registration_state.sql'));
+  await db.exec(migration('083_active_event_registrations.sql'));
   await db.query(
     'insert into auth.users (id, email) values ($1, $2), ($3, $4), ($5, $6), ($7, $8)',
     [ME, 'me@test', OTHER, 'other@test', COORDINATOR, 'coordinator@test', ORGANISER, 'organiser@test'],
@@ -66,6 +67,11 @@ beforeAll(async () => {
        ($1, $3), ($2, $3)`,
     [EVENT_A, EVENT_B, ME],
   );
+  await db.query(
+    `insert into event_registrations (event_request_id, attendee_id, status)
+       values ($1, $2, 'withdrawn')`,
+    [EVENT_C, OTHER],
+  );
 });
 
 afterAll(async () => {
@@ -73,10 +79,14 @@ afterAll(async () => {
 });
 
 describe('SCRUM495 open_event_registration_state', () => {
-  it('SCRUM495_AC3_counts_every_registration_however_many_there_are', async () => {
+  it('SCRUM495_AC3_counts_every_active_registration_however_many_there_are', async () => {
     const [a] = await state([EVENT_A], OTHER);
 
     expect(a).toMatchObject({ event_request_id: EVENT_A, active_count: 1201, is_registered: false });
+  });
+
+  it('SCRUM494_AC5_excludes_withdrawn_registrations_from_active_capacity', async () => {
+    expect(await state([EVENT_C], OTHER)).toEqual([]);
   });
 
   it('SCRUM495_AC6_finds_the_callers_own_registration_among_more_than_1000', async () => {

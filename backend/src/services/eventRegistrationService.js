@@ -5,26 +5,19 @@ import {
   ValidationError,
 } from '../errors.js';
 import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
-
-const CONFIGURABLE_STATUSES = new Set([
-  'approved',
-  'safety_review',
-  'safety_approved',
-  'confirmed',
-]);
+import { getStatusDisplay } from '../domain/eventRequestStatus.js';
+import { REGISTRATION_CONFIGURABLE_STATUSES } from '../domain/registrationStatuses.js';
+import { listOpenEventsForRegistration } from './openEventService.js';
 
 function displayStatus(status) {
-  return {
-    approved: 'Approved',
-    safety_review: 'Safety review',
-    safety_approved: 'Safety approved',
-    confirmed: 'Confirmed',
-  }[status] ?? status;
+  return getStatusDisplay(status).label;
 }
 
 function statusConflict(status) {
+  const allowed = REGISTRATION_CONFIGURABLE_STATUSES.map(displayStatus);
+  const list = `${allowed.slice(0, -1).join(', ')} or ${allowed.at(-1)}`;
   return new ConflictError(
-    `Registration can only be set up while the event is Approved, Safety review, Safety approved or Confirmed. Current status: ${displayStatus(status)}.`,
+    `Registration can only be set up while the event is ${list}. Current status: ${displayStatus(status)}.`,
   );
 }
 
@@ -49,13 +42,13 @@ function parseDate(value, field, details, { optional = false } = {}) {
   return new Date(value).toISOString();
 }
 
-function validateSettings(input, proposedStart, registeredCount) {
+function normalizeSettings(input) {
   const details = [];
-  if (typeof input.enabled !== 'boolean') {
-    details.push({ field: 'registrationEnabled', message: 'Choose whether registration is on or off.' });
+  if (input.enabled !== null && input.enabled !== undefined && typeof input.enabled !== 'boolean') {
+    details.push({ field: 'registrationEnabled', message: 'Must be true or false.' });
   }
-  const opensAt = parseDate(input.opensAt, 'registrationOpensAt', details);
-  const closesAt = parseDate(input.closesAt, 'registrationClosesAt', details);
+  const opensAt = parseDate(input.opensAt, 'registrationOpensAt', details, { optional: true });
+  const closesAt = parseDate(input.closesAt, 'registrationClosesAt', details, { optional: true });
   const withdrawalDeadline = parseDate(
     input.withdrawalDeadline,
     'registrationWithdrawalDeadline',
@@ -63,47 +56,13 @@ function validateSettings(input, proposedStart, registeredCount) {
     { optional: true },
   );
 
-  if (opensAt && closesAt && Date.parse(opensAt) >= Date.parse(closesAt)) {
-    details.push({
-      field: 'registrationOpensAt',
-      message: 'Must be before the closing date and time.',
-    });
-  }
-  if (closesAt && !proposedStart) {
-    details.push({
-      field: 'proposedStart',
-      message: 'Set the event start before setting the registration closing time.',
-    });
-  } else if (closesAt && Date.parse(closesAt) > Date.parse(proposedStart)) {
-    details.push({
-      field: 'registrationClosesAt',
-      message: 'Must be no later than the event start.',
-    });
-  }
-  if (withdrawalDeadline && !proposedStart) {
-    details.push({
-      field: 'proposedStart',
-      message: 'Set the event start before setting the withdrawal deadline.',
-    });
-  } else if (withdrawalDeadline && Date.parse(withdrawalDeadline) > Date.parse(proposedStart)) {
-    details.push({
-      field: 'registrationWithdrawalDeadline',
-      message: 'Must be no later than the event start.',
-    });
-  }
-
   let capacity = null;
   if (input.capacity !== null && input.capacity !== undefined && input.capacity !== '') {
     capacity = Number(input.capacity);
-    if (!Number.isInteger(capacity) || capacity <= 0) {
+    if (!Number.isInteger(capacity)) {
       details.push({
         field: 'registrationCapacity',
-        message: 'Must be a whole number above zero.',
-      });
-    } else if (capacity < registeredCount) {
-      details.push({
-        field: 'registrationCapacity',
-        message: `Cannot be below the ${registeredCount} attendees already registered.`,
+        message: 'Must be a whole number.',
       });
     }
   }
@@ -112,7 +71,7 @@ function validateSettings(input, proposedStart, registeredCount) {
     throw new ValidationError('Registration settings are invalid.', details);
   }
 
-  return { enabled: input.enabled, opensAt, closesAt, capacity, withdrawalDeadline };
+  return { enabled: input.enabled ?? null, opensAt, closesAt, capacity, withdrawalDeadline };
 }
 
 function toSettings(result, registeredCount) {
@@ -143,6 +102,16 @@ function mapSetupOutcome(result) {
   return toSettings(result.settings, result.registeredCount);
 }
 
+function translateRegistrationError(error, forbiddenMessage) {
+  if (error.code === '42501') return new ForbiddenError(forbiddenMessage);
+  if (error.code === '22023') {
+    return new ValidationError('An attendee is required.', [
+      { field: 'attendeeId', message: 'An attendee is required.' },
+    ]);
+  }
+  return error;
+}
+
 export async function getRegistrationSettings(eventRequestId, userId, { client } = {}) {
   requireId(eventRequestId);
   const db = await resolveClient(client);
@@ -159,7 +128,8 @@ export async function getRegistrationSettings(eventRequestId, userId, { client }
   const { count, error: countError } = await db
     .from('event_registrations')
     .select('id', { count: 'exact', head: true })
-    .eq('event_request_id', eventRequestId);
+    .eq('event_request_id', eventRequestId)
+    .eq('status', 'registered');
   if (countError) throw countError;
   return {
     id: event.id,
@@ -182,26 +152,8 @@ export async function updateRegistrationSettings(eventRequestId, input, userId, 
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new ValidationError('Registration settings must be an object.');
   }
+  const settings = normalizeSettings(input);
   const db = await resolveClient(client);
-  const { data: event, error } = await db
-    .from('event_requests')
-    .select('id, organiser_id, status, proposed_start')
-    .eq('id', eventRequestId)
-    .maybeSingle();
-  if (error) throw error;
-  if (!event) throw new NotFoundError('Event not found.');
-  if (event.organiser_id !== userId) {
-    throw new ForbiddenError('Only the Event Organiser who created this event can set up its registration.');
-  }
-  if (!CONFIGURABLE_STATUSES.has(event.status)) {
-    throw statusConflict(event.status);
-  }
-  const { count, error: countError } = await db
-    .from('event_registrations')
-    .select('id', { count: 'exact', head: true })
-    .eq('event_request_id', eventRequestId);
-  if (countError) throw countError;
-  const settings = validateSettings(input, event.proposed_start, count ?? 0);
 
   const { data, error: rpcError } = await db.rpc('setup_event_registration', {
     p_event_request_id: eventRequestId,
@@ -212,27 +164,28 @@ export async function updateRegistrationSettings(eventRequestId, input, userId, 
     p_capacity: settings.capacity,
     p_withdrawal_deadline: settings.withdrawalDeadline,
   });
-  if (rpcError) throw rpcError;
+  if (rpcError) {
+    throw translateRegistrationError(
+      rpcError,
+      'Only the Event Organiser who created this event can set up its registration.',
+    );
+  }
   return mapSetupOutcome(data);
 }
 
-export async function listOpenRegistrationEvents(attendeeId, { client } = {}) {
-  const db = await resolveClient(client);
-  const { data, error } = await db.rpc('list_open_registration_events', {
-    p_attendee_id: attendeeId,
-  });
-  if (error) throw error;
-  if (!Array.isArray(data)) throw new Error('list_open_registration_events returned an invalid result.');
-  return data.map((event) => ({
+export async function listOpenRegistrationEvents(attendeeId, { client, now } = {}) {
+  const events = await listOpenEventsForRegistration({ attendeeId, client, now });
+  return events.map((event) => ({
     id: event.id,
-    eventName: event.event_name,
+    eventName: event.eventName,
     description: event.description,
-    startsAt: event.proposed_start,
-    registrationOpensAt: event.registration_opens_at,
-    registrationClosesAt: event.registration_closes_at,
-    capacity: event.registration_capacity,
-    registeredCount: event.registered_count,
-    isRegistered: event.is_registered,
+    startsAt: event.startsAt,
+    registrationOpensAt: event.registrationOpensAt,
+    registrationClosesAt: event.registrationClosesAt,
+    capacity: event.capacity,
+    registeredCount: event.registeredCount,
+    isRegistered: event.isRegistered,
+    isFull: event.isFull,
   }));
 }
 
@@ -243,7 +196,7 @@ export async function registerForEvent(eventRequestId, attendeeId, { client } = 
     p_event_request_id: eventRequestId,
     p_attendee_id: attendeeId,
   });
-  if (error) throw error;
+  if (error) throw translateRegistrationError(error, 'Only an Attendee may register for this event.');
   switch (data?.outcome) {
     case 'registered':
       return data.registration;
@@ -257,6 +210,8 @@ export async function registerForEvent(eventRequestId, attendeeId, { client } = 
       throw new ConflictError('Registration is full.');
     case 'already_registered':
       throw new ConflictError('You are already registered for this event.');
+    case 'forbidden':
+      throw new ForbiddenError('Only an Attendee may register for this event.');
     default:
       throw new Error(`Unexpected register_for_event outcome: ${data?.outcome}`);
   }

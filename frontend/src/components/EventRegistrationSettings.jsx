@@ -4,13 +4,14 @@ import {
   getRegistrationSettings,
   saveRegistrationSettings,
 } from "../services/eventRegistrationService";
+import { isRegistrationConfigurable } from "../services/registrationStatuses";
 
-const EDITABLE_STATUSES = new Set([
-  "approved",
-  "safety_review",
-  "safety_approved",
-  "confirmed",
-]);
+function loadErrorMessage(error) {
+  const message = apiError(error);
+  return message === "Unexpected server error"
+    ? `${message} Check that the registration migrations are applied to the API database, then retry.`
+    : message;
+}
 
 function toLocalInput(value) {
   if (!value) return "";
@@ -55,30 +56,28 @@ export default function EventRegistrationSettings({ eventId }) {
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState(false);
   const [event, setEvent] = useState(null);
-  const canEdit = EDITABLE_STATUSES.has(event?.status);
+  const canEdit = isRegistrationConfigurable(event?.status);
+
+  function applyLoaded(data) {
+    setEvent(data);
+    setSettings(data.settings);
+    setForm({
+      enabled: data.settings.enabled,
+      opensAt: toLocalInput(data.settings.opensAt),
+      closesAt: toLocalInput(data.settings.closesAt),
+      capacity: data.settings.capacity ?? "",
+      withdrawalDeadline: toLocalInput(data.settings.withdrawalDeadline),
+    });
+    setLoaded(true);
+  }
 
   async function loadSettings() {
     setLoading(true);
     setError(null);
     try {
-      const data = await getRegistrationSettings(eventId);
-      setEvent(data);
-      setSettings(data.settings);
-      setForm({
-        enabled: data.settings.enabled,
-        opensAt: toLocalInput(data.settings.opensAt),
-        closesAt: toLocalInput(data.settings.closesAt),
-        capacity: data.settings.capacity ?? "",
-        withdrawalDeadline: toLocalInput(data.settings.withdrawalDeadline),
-      });
-      setLoaded(true);
+      applyLoaded(await getRegistrationSettings(eventId));
     } catch (loadError) {
-      const message = apiError(loadError);
-      setError(
-        message === "Unexpected server error"
-          ? `${message} Check that migration 050 is applied to the API database, then retry.`
-          : message,
-      );
+      setError(loadErrorMessage(loadError));
     } finally {
       setLoading(false);
     }
@@ -88,26 +87,10 @@ export default function EventRegistrationSettings({ eventId }) {
     let active = true;
     getRegistrationSettings(eventId)
       .then((data) => {
-        if (!active) return;
-        setEvent(data);
-        setSettings(data.settings);
-        setForm({
-          enabled: data.settings.enabled,
-          opensAt: toLocalInput(data.settings.opensAt),
-          closesAt: toLocalInput(data.settings.closesAt),
-          capacity: data.settings.capacity ?? "",
-          withdrawalDeadline: toLocalInput(data.settings.withdrawalDeadline),
-        });
-        setLoaded(true);
+        if (active) applyLoaded(data);
       })
       .catch((loadError) => {
-        if (!active) return;
-        const message = apiError(loadError);
-        setError(
-          message === "Unexpected server error"
-            ? `${message} Check that migration 050 is applied to the API database, then retry.`
-            : message,
-        );
+        if (active) setError(loadErrorMessage(loadError));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -115,6 +98,8 @@ export default function EventRegistrationSettings({ eventId }) {
     return () => {
       active = false;
     };
+    // applyLoaded only calls state setters, so it is safe to leave out.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
   async function save(eventObject) {
@@ -226,7 +211,7 @@ export default function EventRegistrationSettings({ eventId }) {
                   Opens at
                   <input
                     type="datetime-local"
-                    required
+                    required={form.enabled}
                     value={form.opensAt}
                     onChange={(inputEvent) => setForm({ ...form, opensAt: inputEvent.target.value })}
                   />
@@ -235,7 +220,7 @@ export default function EventRegistrationSettings({ eventId }) {
                   Closes at
                   <input
                     type="datetime-local"
-                    required
+                    required={form.enabled}
                     value={form.closesAt}
                     onChange={(inputEvent) => setForm({ ...form, closesAt: inputEvent.target.value })}
                   />

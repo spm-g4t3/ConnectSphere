@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getMyEventRequests } from "../services/eventRequestService";
-
-// Statuses from which an Organiser can set up registration (SCRUM-494 AC2).
-const CONFIGURABLE_STATUSES = ["approved", "safety_review", "safety_approved", "confirmed"];
+import { isRegistrationConfigurable } from "../services/registrationStatuses";
 
 function statusLabel(status) {
   const text = String(status).replace(/_/g, " ");
@@ -25,7 +23,7 @@ export default function RegistrationEventsList() {
     let active = true;
     getMyEventRequests()
       .then((data) => {
-        if (active) setEvents(data.filter((req) => CONFIGURABLE_STATUSES.includes(req.status)));
+        if (active) setEvents(data.filter((req) => isRegistrationConfigurable(req.status)));
       })
       .catch(() => {
         if (active) setError("Could not load your events.");

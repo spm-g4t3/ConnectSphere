@@ -12,6 +12,7 @@ import { BROWSE_OPEN_EVENTS_PATH, isOpenEventsEnabled } from "../services/openEv
 import NotificationInbox from "./NotificationInbox";
 
 function displayDate(value) {
+  if (value === null || value === undefined) return "No closing time set";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
@@ -22,7 +23,6 @@ export default function AttendeeDashboard({ user }) {
   const [error, setError] = useState(null);
   const [registering, setRegistering] = useState(null);
   const [expanded, setExpanded] = useState(null);
-  const [registered, setRegistered] = useState([]);
   const browseEnabled = isOpenEventsEnabled();
 
   useEffect(() => {
@@ -33,7 +33,6 @@ export default function AttendeeDashboard({ user }) {
       .then((openEvents) => {
         if (active) {
           setEvents(openEvents);
-          setRegistered(openEvents.filter((event) => event.isRegistered).map((event) => event.id));
         }
       })
       .catch((loadError) => {
@@ -52,10 +51,14 @@ export default function AttendeeDashboard({ user }) {
     setError(null);
     try {
       await registerForEvent(eventId);
-      setRegistered((current) => [...current, eventId]);
       setEvents((current) => current.map((event) => (
         event.id === eventId
-          ? { ...event, registeredCount: event.registeredCount + 1 }
+          ? {
+            ...event,
+            registeredCount: event.registeredCount + 1,
+            isRegistered: true,
+            isFull: event.capacity != null && event.registeredCount + 1 >= event.capacity,
+          }
           : event
       )));
     } catch (registrationError) {
@@ -79,19 +82,19 @@ export default function AttendeeDashboard({ user }) {
       ) : (
         <section aria-labelledby="attendee-browse-heading">
           <h2 id="attendee-browse-heading">Open for registration</h2>
-          <p>Events are listed only while registration is open and capacity remains.</p>
+          <p>Events remain listed while registration is open, including events you have already joined.</p>
           {loading && <p>Loading open events...</p>}
           {error && <p role="alert">{error}</p>}
           {!loading && !error && events.length === 0 && (
             <div className="attendee-open-events__empty" role="status">
               <p>There are no events open for registration right now.</p>
-              <p>An event appears here only when it is Confirmed, registration is on, the opening time has passed, the closing time has not passed, and capacity remains.</p>
+              <p>An event appears here only when it is Confirmed, registration is on, its opening time has passed, its closing time has not passed, and it has not started.</p>
               <p>If the organiser has just changed the event or its settings, refresh this page and check again.</p>
             </div>
           )}
           <ul className="attendee-open-events__list">
             {events.map((event) => {
-              const hasRegistered = registered.includes(event.id);
+              const hasRegistered = event.isRegistered;
               const isOpen = expanded === event.id;
               return (
                 <li key={event.id} className="attendee-open-events__item">
@@ -99,6 +102,8 @@ export default function AttendeeDashboard({ user }) {
                     <h3>{event.eventName}</h3>
                     {hasRegistered ? (
                       <span className="attendee-open-events__registered">Registered</span>
+                    ) : event.isFull ? (
+                      <span className="attendee-open-events__full">Full</span>
                     ) : (
                       <button
                         type="button"
@@ -109,7 +114,7 @@ export default function AttendeeDashboard({ user }) {
                       </button>
                     )}
                   </div>
-                  {isOpen && !hasRegistered && (
+                  {isOpen && !hasRegistered && !event.isFull && (
                     <div className="attendee-open-events__details">
                       {event.description && <p>{event.description}</p>}
                       <dl>

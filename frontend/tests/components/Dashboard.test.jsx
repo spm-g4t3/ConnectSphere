@@ -329,7 +329,7 @@ describe("Dashboard role map", () => {
     expect(screen.getByRole("heading", { name: "Open for registration" })).toBeInTheDocument();
     expect(await screen.findByRole("status")).toHaveTextContent("no events open for registration");
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Confirmed, registration is on, the opening time has passed",
+      "Confirmed, registration is on, its opening time has passed",
     );
     expect(apiClient.get).toHaveBeenCalledWith("/registration/open");
   });

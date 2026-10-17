@@ -378,6 +378,7 @@ button { cursor: pointer; }
 .attendee-open-events__head { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
 .attendee-open-events__head h3 { margin: 0; }
 .attendee-open-events__registered { background: #e8f7f1; border-radius: 999px; color: #17684f; font-size: 0.8rem; font-weight: 700; padding: 4px 12px; }
+.attendee-open-events__full { background: #f2f4f5; border-radius: 999px; color: #59636e; font-size: 0.8rem; font-weight: 700; padding: 4px 12px; }
 .attendee-open-events__details { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
 .attendee-open-events__details dl { display: grid; gap: 8px 16px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin: 10px 0 14px; }
 .attendee-open-events__details dt { color: var(--muted); font-size: 0.78rem; font-weight: 700; }
