@@ -52,6 +52,7 @@ import EventEquipmentSection from "./EventEquipmentSection";
 import EventCancellationPanel from "./EventCancellationPanel";
 import SafetyCheckSubmissionPanel from "./SafetyCheckSubmissionPanel";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
+import EventConfirmationPanel from "./EventConfirmationPanel";
 import {
   decideEventRequest,
   getCoordinatorChangeRequests,
@@ -203,6 +204,7 @@ export default function CoordinatorRequestDetail({
   // the row the parent loaded; this overrides it once this panel has changed
   // the request itself.
   const [updatedRequest, setUpdatedRequest] = useState(null);
+  const [confirmationFeedback, setConfirmationFeedback] = useState(null);
   const current = updatedRequest ?? request;
 
   const display = readStatusDisplay(current);
@@ -268,6 +270,8 @@ export default function CoordinatorRequestDetail({
   // (052's status list leaves cancelled out). Both conditions kept from the
   // merge of dev, neither dropped.
   const isLead = normaliseRole(user?.role) === "EVENT_COORDINATOR_LEAD";
+  const canConfirm = normaliseRole(user?.role) === "EVENT_COORDINATOR"
+    && isAssignedCoordinator && current.status === "safety_approved";
   const canReassign = assignedCoordinatorId != null
     && current.status !== "cancelled"
     && (isAssignedCoordinator || isLead);
@@ -515,6 +519,25 @@ export default function CoordinatorRequestDetail({
       </h2>
       <p>{display.description}</p>
       <SafetyApprovalNotice status={current.status} />
+      {confirmationFeedback?.eventId === current.id && (confirmationFeedback.success || !canConfirm) && (
+        <p role={confirmationFeedback.success ? "status" : "alert"}>{confirmationFeedback.message}</p>
+      )}
+      {canConfirm && (
+        <EventConfirmationPanel
+          key={current.id}
+          eventRequest={current}
+          onConfirmed={(updated) => {
+            setUpdatedRequest(updated);
+            setConfirmationFeedback({ eventId: updated.id, success: true, message: "Event confirmed successfully." });
+            onChangeRequestProcessed?.();
+          }}
+          onStale={(message) => {
+            setUpdatedRequest(null);
+            setConfirmationFeedback({ eventId: current.id, success: false, message });
+            return onChangeRequestProcessed?.();
+          }}
+        />
+      )}
       {isAssignedCoordinator && CANCELLABLE_STATUSES.has(current.status) && (
         <button
           className="coordinator-request-detail__cancel"

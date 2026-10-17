@@ -16,7 +16,10 @@ import {
   getCoordinatorChangeRequests,
   getEventReadiness,
   submitForSafetyReview,
+  confirmEventRequest,
+  getMyAssignedEvents,
 } from "../../src/services/eventRequestService";
+import MyAssignedEvents from "../../src/components/MyAssignedEvents";
 
 vi.mock("../../src/auth/AuthContext", () => ({ useAuth: vi.fn() }));
 
@@ -29,6 +32,8 @@ vi.mock("../../src/services/eventRequestService", () => ({
   requestEventClarification: vi.fn(),
   startEventReview: vi.fn(),
   submitForSafetyReview: vi.fn(),
+  confirmEventRequest: vi.fn(),
+  getMyAssignedEvents: vi.fn(),
 }));
 
 // vi.mock is hoisted above every const, so the stub maker is hoisted with it.
@@ -83,12 +88,12 @@ function signIn(id, role) {
 
 function renderPage(request, props = {}) {
   const user = userEvent.setup();
-  render(
+  const view = render(
     <MemoryRouter>
       <CoordinatorRequestDetail request={request} {...props} />
     </MemoryRouter>,
   );
-  return { user };
+  return { user, ...view };
 }
 
 const panel = () => screen.queryByRole("region", { name: "Submit for the safety check" });
@@ -96,8 +101,102 @@ const panel = () => screen.queryByRole("region", { name: "Submit for the safety 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getEventReadiness).mockResolvedValue(READY);
+  vi.mocked(confirmEventRequest).mockReset();
+  vi.mocked(getMyAssignedEvents).mockReset();
   // The change-request list the page reads on mount; empty here.
   vi.mocked(getCoordinatorChangeRequests).mockResolvedValue([]);
+});
+
+const safetyApproved = (overrides = {}) => eventRequest({
+  status: "safety_approved",
+  statusDisplay: { status: "safety_approved", label: "Safety approved", group: "APPROVED", description: "The safety check is complete." },
+  ...overrides,
+});
+const confirmedEvent = () => safetyApproved({
+  status: "confirmed",
+  statusDisplay: { status: "confirmed", label: "Confirmed", group: "CONFIRMED", description: "The event is going ahead." },
+});
+const confirmPanel = () => screen.queryByRole("region", { name: "Confirm event" });
+
+describe("SCRUM363 coordinator confirmation", () => {
+  it.each([
+    [ASSIGNED, "event_coordinator_lead"], [OTHER, "event_coordinator"],
+    [ASSIGNED, "event_organiser"], [ASSIGNED, "attendee"], [ASSIGNED, "venue_staff"],
+    [ASSIGNED, "technical_support_staff"], [ASSIGNED, "safety_officer"], [null, null],
+  ])("SCRUM363_AC1_user_%s_with_role_%s_has_no_confirmation_action", (id, role) => {
+    signIn(id, role);
+    renderPage(safetyApproved());
+    expect(confirmPanel()).not.toBeInTheDocument();
+    expect(getEventReadiness).not.toHaveBeenCalled();
+    expect(confirmEventRequest).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM363_AC1_an_unassigned_event_has_no_confirmation_action", () => {
+    signIn(ASSIGNED, "event_coordinator");
+    renderPage(safetyApproved({ assignedCoordinatorId: null }));
+    expect(confirmPanel()).not.toBeInTheDocument();
+    expect(getEventReadiness).not.toHaveBeenCalled();
+  });
+
+  it.each(["approved", ...NOT_APPROVED.filter((status) => status !== "safety_approved")])(
+    "SCRUM363_AC1_status_%s_has_no_confirmation_action", (status) => {
+      signIn(ASSIGNED, "event_coordinator");
+      renderPage(safetyApproved({ status }));
+      expect(confirmPanel()).not.toBeInTheDocument();
+      expect(confirmEventRequest).not.toHaveBeenCalled();
+    },
+  );
+
+  it("SCRUM363_AC6_success_updates_the_parent_status_and_announces_confirmation_once", async () => {
+    signIn(ASSIGNED, "event_coordinator");
+    vi.mocked(confirmEventRequest).mockResolvedValue(confirmedEvent());
+    const refresh = vi.fn();
+    const { user } = renderPage(safetyApproved(), { onChangeRequestProcessed: refresh });
+    expect(screen.getByText("Safety approval complete")).toBeInTheDocument();
+    const confirm = await screen.findByRole("button", { name: "Confirm Event" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    await user.click(confirm);
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Event confirmed successfully.");
+    expect(screen.getAllByText("Event confirmed successfully.")).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Confirmed");
+    expect(confirmPanel()).not.toBeInTheDocument();
+    expect(screen.queryByText("Safety approval complete")).not.toBeInTheDocument();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([403, 409])("SCRUM363_AC3_refusal_%s_refreshes_parent_data_and_preserves_feedback_after_the_action_disappears", async (status) => {
+    signIn(ASSIGNED, "event_coordinator");
+    vi.mocked(confirmEventRequest).mockRejectedValue({ response: { status, data: { error: "Its current status is confirmed." } } });
+    const refresh = vi.fn();
+    const { user, rerender } = renderPage(safetyApproved(), { onChangeRequestProcessed: refresh });
+    const confirm = await screen.findByRole("button", { name: "Confirm Event" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    await user.click(confirm);
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    const fresh = status === 403 ? safetyApproved({ assignedCoordinatorId: OTHER }) : confirmedEvent();
+    rerender(<MemoryRouter><CoordinatorRequestDetail request={fresh} onChangeRequestProcessed={refresh} /></MemoryRouter>);
+    expect(confirmPanel()).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(status === 403 ? "assigned Event Coordinator" : "current status is confirmed");
+    expect(screen.queryByText("Event confirmed successfully.")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM363_AC6_my_events_open_confirmation_and_back_navigation_show_the_server_updated_status", async () => {
+    signIn(ASSIGNED, "event_coordinator");
+    vi.mocked(getMyAssignedEvents).mockResolvedValueOnce([safetyApproved()]).mockResolvedValue([confirmedEvent()]);
+    vi.mocked(confirmEventRequest).mockResolvedValue(confirmedEvent());
+    render(<MemoryRouter><MyAssignedEvents /></MemoryRouter>);
+    await userEvent.click(await screen.findByRole("button", { name: "Open" }));
+    const confirm = await screen.findByRole("button", { name: "Confirm Event" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    await userEvent.click(confirm);
+    expect(await screen.findByText("Event confirmed successfully.")).toBeInTheDocument();
+    await waitFor(() => expect(getMyAssignedEvents).toHaveBeenCalledTimes(2));
+    await userEvent.click(screen.getByRole("button", { name: /Back to my events/ }));
+    expect(screen.getByRole("heading", { name: /Confirmed/ })).toBeInTheDocument();
+    expect(screen.getByText("IS212 Industry Night")).toBeInTheDocument();
+    expect(confirmEventRequest).toHaveBeenCalledTimes(1);
+  });
 });
 
 
@@ -126,7 +225,7 @@ describe("SCRUM489_AC1 who is offered the submission", () => {
     renderPage(eventRequest({ status }));
 
     expect(panel()).not.toBeInTheDocument();
-    expect(getEventReadiness).not.toHaveBeenCalled();
+    if (status !== "safety_approved") expect(getEventReadiness).not.toHaveBeenCalled();
   });
 });
 
