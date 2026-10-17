@@ -1,7 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { useEffect } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
-import { normaliseRole } from "./auth/normaliseRole";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import Navigation from "./components/Navigation";
 import { UnreadCountProvider } from "./notifications/UnreadCountContext";
@@ -71,16 +70,8 @@ function VenueCalendarRoute() {
   );
 }
 
-function EventRegistrationSettingsRoute({ user }) {
+function EventRegistrationSettingsRoute() {
   const { eventId } = useParams();
-  if (normaliseRole(user?.role) !== "EVENT_ORGANISER") {
-    return (
-      <PagePlaceholder
-        title="Registration settings are restricted"
-        description="Only the Event Organiser who created this event can set up its registration."
-      />
-    );
-  }
   return <EventRegistrationSettings key={eventId} eventId={eventId} />;
 }
 
@@ -131,8 +122,8 @@ function AppRoutes() {
         <Route
           path="/events/:eventId/registration"
           element={
-            <ProtectedRoute>
-              <EventRegistrationSettingsRoute user={user} />
+            <ProtectedRoute allowedRoles={["event_organiser"]}>
+              <EventRegistrationSettingsRoute />
             </ProtectedRoute>
           }
         />

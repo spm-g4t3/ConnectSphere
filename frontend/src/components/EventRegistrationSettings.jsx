@@ -5,6 +5,7 @@ import {
   saveRegistrationSettings,
 } from "../services/eventRegistrationService";
 import { isRegistrationConfigurable } from "../services/registrationStatuses";
+import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
 
 function loadErrorMessage(error) {
   const message = apiError(error);
@@ -31,11 +32,8 @@ function displayDate(value) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-function displayStatus(value) {
-  return value
-    .split("_")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
+function displayStatus(event) {
+  return readStatusDisplay(event).label;
 }
 
 function apiError(error) {
@@ -99,7 +97,6 @@ export default function EventRegistrationSettings({ eventId }) {
       active = false;
     };
     // applyLoaded only calls state setters, so it is safe to leave out.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
   async function save(eventObject) {
@@ -156,7 +153,7 @@ export default function EventRegistrationSettings({ eventId }) {
           <header className="event-registration-page__header">
             <p className="eyebrow">Event registration</p>
             <h1>{event.eventName}</h1>
-            <p>Event status: <strong>{displayStatus(event.status)}</strong></p>
+            <p>Event status: <strong>{displayStatus(event)}</strong></p>
             <p>Event starts: {displayDate(event.proposedStart)}</p>
           </header>
           {settings && !editing && (
@@ -191,7 +188,7 @@ export default function EventRegistrationSettings({ eventId }) {
           {!canEdit && (
             <p className="event-registration-page__notice">
               Settings can only be changed while the event is Approved, Safety review, Safety approved or Confirmed.
-              Current status: {displayStatus(event.status)}.
+              Current status: {displayStatus(event)}.
             </p>
           )}
           {canEdit && loaded && form && editing && (
@@ -217,13 +214,15 @@ export default function EventRegistrationSettings({ eventId }) {
                   />
                 </label>
                 <label>
-                  Closes at
+                  Closes at <span className="event-registration-page__optional">(optional)</span>
                   <input
                     type="datetime-local"
-                    required={form.enabled}
                     value={form.closesAt}
                     onChange={(inputEvent) => setForm({ ...form, closesAt: inputEvent.target.value })}
                   />
+                  <span className="event-registration-page__hint">
+                    Leave blank to keep registration open until you switch it off.
+                  </span>
                 </label>
                 <label>
                   Maximum capacity <span className="event-registration-page__optional">(optional)</span>

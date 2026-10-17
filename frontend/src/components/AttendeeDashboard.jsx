@@ -51,18 +51,15 @@ export default function AttendeeDashboard({ user }) {
     setError(null);
     try {
       await registerForEvent(eventId);
-      setEvents((current) => current.map((event) => (
-        event.id === eventId
-          ? {
-            ...event,
-            registeredCount: event.registeredCount + 1,
-            isRegistered: true,
-            isFull: event.capacity != null && event.registeredCount + 1 >= event.capacity,
-          }
-          : event
-      )));
     } catch (registrationError) {
       setError(registrationError?.response?.data?.error || "Could not register for this event.");
+    }
+    // Re-read from the server on success and failure alike, so the counts and the
+    // Registered/Full badges never disagree with the details page.
+    try {
+      setEvents(await getOpenRegistrationEvents());
+    } catch {
+      // Any registration error above is already shown.
     } finally {
       setRegistering(null);
     }

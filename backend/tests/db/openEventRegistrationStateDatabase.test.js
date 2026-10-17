@@ -39,9 +39,9 @@ beforeAll(async () => {
   `  );
   await db.exec(migration('001_event_requests.sql'));
   await db.exec(migration('068_open_event_registration_state.sql'));
-  await db.exec(migration('079_event_registration.sql'));
+  await db.exec(migration('050_event_registration.sql'));
   await db.exec(migration('082_event_registration_state.sql'));
-  await db.exec(migration('083_active_event_registrations.sql'));
+  await db.exec(migration('085_event_registration_hardening.sql'));
   await db.query(
     'insert into auth.users (id, email) values ($1, $2), ($3, $4), ($5, $6), ($7, $8)',
     [ME, 'me@test', OTHER, 'other@test', COORDINATOR, 'coordinator@test', ORGANISER, 'organiser@test'],

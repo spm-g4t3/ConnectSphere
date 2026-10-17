@@ -135,6 +135,7 @@ export async function getRegistrationSettings(eventRequestId, userId, { client }
     id: event.id,
     eventName: event.event_name,
     status: event.status,
+    statusDisplay: getStatusDisplay(event.status),
     proposedStart: event.proposed_start,
     settings: {
       enabled: event.registration_enabled,

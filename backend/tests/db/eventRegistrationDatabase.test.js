@@ -34,8 +34,7 @@ describe('SCRUM-363: event registration in Postgres', () => {
       );
     `);
     await db.exec(migration('050_event_registration.sql'));
-    await db.exec(migration('079_event_registration.sql'));
-    await db.exec(migration('084_registration_schedule_guard.sql'));
+    await db.exec(migration('085_event_registration_hardening.sql'));
 
     organiser = (await one("insert into auth.users (email) values ('organiser@test') returning id")).id;
     attendee = (await one("insert into auth.users (email) values ('attendee@test') returning id")).id;
@@ -204,7 +203,7 @@ describe('SCRUM-363: event registration in Postgres', () => {
     expect(wrongRoleRegistration.result.outcome).toBe('forbidden');
 
 
-    const source = migration('079_event_registration.sql').toLowerCase();
+    const source = migration('085_event_registration_hardening.sql').toLowerCase();
     for (const functionName of ['setup_event_registration', 'register_for_event']) {
       const bodyStart = source.indexOf(`create or replace function ${functionName}`);
       const bodyEnd = source.indexOf('$$;', source.indexOf('$$', bodyStart) + 2);
@@ -291,7 +290,7 @@ describe('SCRUM-363: event registration in Postgres', () => {
     await expect(db.query(
       "update event_requests set proposed_start = '2030-01-01T11:00:00Z' where id = $1",
       [scheduleEvent],
-    )).rejects.toMatchObject({ code: '23514' });
+    )).rejects.toMatchObject({ code: 'RS409' });
 
     const withWithdrawalConflict = await one(
       `select setup_event_registration($1, $2, true, $3, $4, null, $5) as result`,
@@ -308,9 +307,33 @@ describe('SCRUM-363: event registration in Postgres', () => {
       "update event_requests set proposed_start = '2030-01-01T11:00:00Z' where id = $1",
       [scheduleEvent],
     )).rejects.toMatchObject({
-      code: '23514',
+      code: 'RS409',
       message: expect.stringContaining('registration withdrawal deadline'),
     });
+  });
+
+  it('SCRUM494_AC1_allows_registration_with_no_closing_time_until_the_organiser_closes_it', async () => {
+    const openEnded = (await one(
+      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
+       values ($1, 'Open ended', 'confirmed', $2, '2030-01-01T14:00:00Z')
+       returning id`,
+      [organiser, START],
+    )).id;
+    const opened = new Date(Date.now() - 3_600_000).toISOString();
+    const saved = await one(
+      'select setup_event_registration($1, $2, true, $3, null, null, null) as result',
+      [openEnded, organiser, opened],
+    );
+    expect(saved.result.outcome).toBe('saved');
+    const registered = await one('select register_for_event($1, $2) as result', [openEnded, attendee]);
+    expect(registered.result.outcome).toBe('registered');
+    const closed = await one(
+      'select setup_event_registration($1, $2, false, $3, null, null, null) as result',
+      [openEnded, organiser, opened],
+    );
+    expect(closed.result.outcome).toBe('saved');
+    const refused = await one('select register_for_event($1, $2) as result', [openEnded, secondAttendee]);
+    expect(refused.result.outcome).toBe('registration_closed');
   });
 
   it('SCRUM494_AC1_allows_switching_registration_off_with_the_window_cleared', async () => {
@@ -338,10 +361,10 @@ describe('SCRUM-363: event registration in Postgres', () => {
     );
     expect(enabledWithoutDates.result.outcome).toBe('invalid');
 
-    const halfSet = await one(
-      'select setup_event_registration($1, $2, false, $3, null, null, null) as result',
-      [offEvent, organiser, '2029-12-01T00:00:00Z'],
+    const closingWithoutOpening = await one(
+      'select setup_event_registration($1, $2, false, null, $3, null, null) as result',
+      [offEvent, organiser, '2030-01-01T10:00:00Z'],
     );
-    expect(halfSet.result.outcome).toBe('invalid');
+    expect(closingWithoutOpening.result.outcome).toBe('invalid');
   });
 });

@@ -17,35 +17,19 @@ begin
       check (registration_capacity is null or registration_capacity > 0);
   end if;
 
-  if not exists (
-    select 1 from pg_constraint
-     where conname = 'event_requests_registration_window_ordered'
-       and conrelid = 'public.event_requests'::regclass
-  ) then
-    alter table event_requests
-      add constraint event_requests_registration_window_ordered
-      check (
-        (registration_opens_at is null and registration_closes_at is null)
-        or (
-          registration_opens_at is not null
-          and registration_closes_at is not null
-          and registration_opens_at < registration_closes_at
-        )
-      );
-  end if;
+  -- An open-ended window (no closing time) is allowed: the Organiser closes it by hand.
+  alter table event_requests drop constraint if exists event_requests_registration_window_ordered;
+  alter table event_requests
+    add constraint event_requests_registration_window_ordered
+    check (
+      registration_closes_at is null
+      or (registration_opens_at is not null and registration_opens_at < registration_closes_at)
+    );
 
-  if not exists (
-    select 1 from pg_constraint
-     where conname = 'event_requests_enabled_registration_has_window'
-       and conrelid = 'public.event_requests'::regclass
-  ) then
-    alter table event_requests
-      add constraint event_requests_enabled_registration_has_window
-      check (
-        not registration_enabled
-        or (registration_opens_at is not null and registration_closes_at is not null)
-      );
-  end if;
+  alter table event_requests drop constraint if exists event_requests_enabled_registration_has_window;
+  alter table event_requests
+    add constraint event_requests_enabled_registration_has_window
+    check (not registration_enabled or registration_opens_at is not null);
 
   if not exists (
     select 1 from pg_constraint
@@ -169,15 +153,11 @@ begin
       'field', 'registrationEnabled', 'message', 'Choose whether registration is on or off.'
     ));
   end if;
-  -- The window may be cleared only when registration is off; a half-set window is never valid.
+  -- The opening time is required while registration is on. The closing time is
+  -- optional: with none, registration stays open until the Organiser switches it off.
   if p_opens_at is null and (p_enabled or p_closes_at is not null) then
     v_details := v_details || jsonb_build_array(jsonb_build_object(
       'field', 'registrationOpensAt', 'message', 'An opening date and time is required.'
-    ));
-  end if;
-  if p_closes_at is null and (p_enabled or p_opens_at is not null) then
-    v_details := v_details || jsonb_build_array(jsonb_build_object(
-      'field', 'registrationClosesAt', 'message', 'A closing date and time is required.'
     ));
   end if;
   if p_opens_at is not null and p_closes_at is not null and p_opens_at >= p_closes_at then
@@ -354,5 +334,84 @@ revoke all on function register_for_event(uuid, uuid) from public, anon, authent
 
 grant execute on function setup_event_registration(uuid, uuid, boolean, timestamptz, timestamptz, integer, timestamptz) to service_role;
 grant execute on function register_for_event(uuid, uuid) to service_role;
+
+drop function if exists list_open_registration_events(uuid);
+
+create or replace function open_event_registration_state(
+  p_event_ids   uuid[],
+  p_attendee_id uuid
+)
+returns table (
+  event_request_id uuid,
+  active_count     bigint,
+  is_registered    boolean
+)
+language plpgsql
+stable
+as $fn$
+begin
+  if p_attendee_id is null then
+    raise exception 'An attendee is required' using errcode = '22023';
+  end if;
+
+  if not exists (
+    select 1
+      from profiles p
+     where p.id = p_attendee_id
+       and p.role = 'attendee'
+  ) then
+    raise exception 'Only an attendee may read registration state'
+      using errcode = '42501';
+  end if;
+
+  return query
+    select r.event_request_id,
+           count(*),
+           coalesce(bool_or(r.attendee_id = p_attendee_id), false)
+      from event_registrations r
+     where r.event_request_id = any (coalesce(p_event_ids, '{}'::uuid[]))
+       and r.status = 'registered'
+     group by r.event_request_id;
+end;
+$fn$;
+
+revoke execute on function open_event_registration_state(uuid[], uuid)
+  from public, anon, authenticated;
+grant execute on function open_event_registration_state(uuid[], uuid) to service_role;
+
+-- RS409 is a dedicated SQLSTATE so the API can tell this conflict from other
+-- check failures (PostgREST does not pass the constraint name through).
+create or replace function guard_registration_schedule_on_start_change()
+returns trigger
+language plpgsql
+set search_path = public
+as $fn$
+begin
+  if new.proposed_start is not distinct from old.proposed_start
+     or new.proposed_start is null then
+    return new;
+  end if;
+
+  if new.registration_closes_at is not null
+     and new.registration_closes_at > new.proposed_start then
+    raise exception 'The new event start is earlier than the registration closing time. Adjust the registration settings before changing the start.'
+      using errcode = 'RS409';
+  end if;
+
+  if new.registration_withdrawal_deadline is not null
+     and new.registration_withdrawal_deadline > new.proposed_start then
+    raise exception 'The new event start is earlier than the registration withdrawal deadline. Adjust the registration settings before changing the start.'
+      using errcode = 'RS409';
+  end if;
+
+  return new;
+end;
+$fn$;
+
+drop trigger if exists event_requests_guard_registration_schedule on event_requests;
+create trigger event_requests_guard_registration_schedule
+  before update of proposed_start on event_requests
+  for each row
+  execute function guard_registration_schedule_on_start_change();
 
 notify pgrst, 'reload schema';

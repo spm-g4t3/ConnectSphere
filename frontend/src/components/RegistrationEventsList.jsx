@@ -2,11 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getMyEventRequests } from "../services/eventRequestService";
 import { isRegistrationConfigurable } from "../services/registrationStatuses";
-
-function statusLabel(status) {
-  const text = String(status).replace(/_/g, " ");
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
+import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
 
 function formatStart(value) {
   const date = value ? new Date(value) : null;
@@ -55,7 +51,7 @@ export default function RegistrationEventsList() {
           {events.map((event) => (
             <li key={event.id}>
               <strong>{event.eventName}</strong>
-              <span> · {statusLabel(event.status)} · {formatStart(event.proposedStart)} </span>
+              <span> · {readStatusDisplay(event).label} · {formatStart(event.proposedStart)} </span>
               <Link to={`/events/${event.id}/registration`}>Configure registration</Link>
             </li>
           ))}

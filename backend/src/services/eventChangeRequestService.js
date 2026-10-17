@@ -111,20 +111,17 @@ function translateError(error) {
   const code = error.code;
   const detail = error.message ?? '';
 
+  if (code === 'RS409') {
+    return new ConflictError(
+      'The new event start conflicts with registration closing or withdrawal settings. Ask the organiser to adjust those settings before approving this change.',
+      { code: 'REGISTRATION_SCHEDULE_CONFLICT' },
+    );
+  }
+
   // check constraint: blank requested_change slipping past validation, or an
   // approved change process_change_request could not apply (e.g. a new
   // proposed_start that would now fall after proposed_end)
   if (code === '23514') {
-    if (
-      error.constraint === 'event_requests_registration_closes_before_start'
-      || error.constraint === 'event_requests_withdrawal_before_start'
-      || /event_requests_(registration_closes_before_start|withdrawal_before_start)/.test(detail)
-    ) {
-      return new ConflictError(
-        'The new event start conflicts with registration closing or withdrawal settings. Ask the organiser to adjust those settings before approving this change.',
-        { code: 'REGISTRATION_SCHEDULE_CONFLICT' },
-      );
-    }
     return new ValidationError(`A value was rejected by the database: ${detail}`);
   }
 

@@ -1153,9 +1153,8 @@ describe('SCRUM-47: Coordinators decide organiser change requests', () => {
     const rpc = vi.fn().mockResolvedValue({
       data: null,
       error: {
-        code: '23514',
-        constraint: 'event_requests_registration_closes_before_start',
-        message: 'new row violates check constraint "event_requests_registration_closes_before_start"',
+        code: 'RS409',
+        message: 'The new event start is earlier than the registration closing time.',
       },
     });
     const res = await request(appWith({ client: { rpc }, requireAuth: coordinatorAuth }))

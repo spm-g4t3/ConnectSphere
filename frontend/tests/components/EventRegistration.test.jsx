@@ -85,7 +85,7 @@ describe("SCRUM-363 organiser registration controls", () => {
 describe("SCRUM-22 attendee registration", () => {
   it("SCRUM494_AC5_keeps_the_attendee_registered_when_registration_reaches_capacity", async () => {
     vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "false");
-    vi.mocked(getOpenRegistrationEvents).mockResolvedValue([{
+    const openEvent = {
       id: EVENT_ID,
       eventName: "Industry Night",
       description: "Meet employers.",
@@ -93,7 +93,10 @@ describe("SCRUM-22 attendee registration", () => {
       registrationClosesAt: "2030-01-01T12:00:00.000Z",
       capacity: 1,
       registeredCount: 0,
-    }]);
+    };
+    vi.mocked(getOpenRegistrationEvents)
+      .mockResolvedValueOnce([openEvent])
+      .mockResolvedValue([{ ...openEvent, registeredCount: 1, isRegistered: true, isFull: true }]);
     vi.mocked(registerForEvent).mockResolvedValue({ id: "registration-1" });
 
     render(<AttendeeDashboard user={{ name: "Ari" }} />);
@@ -105,6 +108,31 @@ describe("SCRUM-22 attendee registration", () => {
     await waitFor(() => expect(registerForEvent).toHaveBeenCalledWith(EVENT_ID));
     expect(await screen.findByText("Registered")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Industry Night" })).toBeInTheDocument();
+  });
+
+  it("SCRUM494_AC5_rereads_the_list_after_a_failed_registration", async () => {
+    vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "false");
+    const openEvent = {
+      id: EVENT_ID,
+      eventName: "Industry Night",
+      description: "",
+      startsAt: "2030-01-01T12:00:00.000Z",
+      registrationClosesAt: null,
+      capacity: 1,
+      registeredCount: 0,
+    };
+    vi.mocked(getOpenRegistrationEvents)
+      .mockResolvedValueOnce([openEvent])
+      .mockResolvedValue([{ ...openEvent, registeredCount: 1, isFull: true }]);
+    vi.mocked(registerForEvent).mockRejectedValue({ response: { data: { error: "This event is full." } } });
+
+    render(<AttendeeDashboard user={{ name: "Ari" }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Register" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm registration" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This event is full.");
+    expect(await screen.findByText("Full")).toBeInTheDocument();
+    expect(getOpenRegistrationEvents).toHaveBeenCalledTimes(2);
   });
 
   it("SCRUM494_AC5_shows_a_full_event_to_an_attendee_who_already_registered", async () => {

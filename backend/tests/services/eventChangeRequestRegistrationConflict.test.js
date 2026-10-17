@@ -13,14 +13,13 @@ function clientFor(error) {
 }
 
 describe('SCRUM-494 registration schedule conflicts', () => {
-  it.each([
-    'event_requests_registration_closes_before_start',
-    'event_requests_withdrawal_before_start',
-  ])('SCRUM494_AC1_blocks_approval_with_a_clear_message_for_%s', async (constraint) => {
+  it('SCRUM494_AC1_blocks_approval_with_a_clear_message_on_a_start_time_clash', async () => {
+    // The shape Supabase returns: a SQLSTATE and message only, never a constraint name.
     const client = clientFor({
-      code: '23514',
-      constraint,
-      message: `new row violates check constraint "${constraint}"`,
+      code: 'RS409',
+      message: 'The new event start is earlier than the registration closing time.',
+      details: null,
+      hint: null,
     });
 
     await expect(processChangeRequest(
@@ -38,7 +37,6 @@ describe('SCRUM-494 registration schedule conflicts', () => {
   it('SCRUM494_AC1_keeps_other_check_constraint_errors_as_validation_errors', async () => {
     const client = clientFor({
       code: '23514',
-      constraint: 'event_requests_dates_ordered',
       message: 'new row violates check constraint "event_requests_dates_ordered"',
     });
 
