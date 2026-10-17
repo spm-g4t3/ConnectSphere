@@ -853,16 +853,21 @@ describe("describeNotification: missing names and payloads", () => {
 // types the backend can send; a type there with no wording here would show
 // as "New notification".
 const MIGRATIONS = resolve(dirname(fileURLToPath(import.meta.url)), "../../../backend/db/migrations");
-const TYPE_LIST = /v_ours\s+text\[\]\s*:=\s*array\[([^\]]*)\]/;
+// Migrations write the list either as a plain check or as 066's v_ours array.
+// Filenames sort as the backend migration tests sort them, so a tied number
+// resolves the same way.
+const TYPE_LIST =
+  /add constraint notifications_type_known\s+check\s*\(\s*type\s+in\s*\(([^)]*)\)|v_ours\s+text\[\]\s*:=\s*array\[([^\]]*)\]/;
 
 function knownNotificationTypes() {
   const latest = readdirSync(MIGRATIONS)
     .filter((name) => /^\d+_.*\.sql$/.test(name))
-    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+    .sort()
     .map((name) => readFileSync(join(MIGRATIONS, name), "utf8"))
     .filter((sql) => TYPE_LIST.test(sql))
     .pop();
-  return [...latest.match(TYPE_LIST)[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  const [, plain, ours] = latest.match(TYPE_LIST);
+  return [...(plain ?? ours).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 }
 
 const FIXTURES = {

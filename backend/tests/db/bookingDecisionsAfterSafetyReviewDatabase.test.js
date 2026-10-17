@@ -360,6 +360,8 @@ describe('SCRUM-258: booking decisions restated after the safety review migratio
 
       expect(ours).toContain('booking_request_conflicting');
       expect(types(latest)).toEqual(expect.arrayContaining(ours));
+    it('SCRUM258_AC6_075_is_the_latest_migration_setting_notifications_type_known', () => {
+      expect(latestFileWith('add constraint notifications_type_known')).toBe(MIGRATION);
     });
   });
 });
