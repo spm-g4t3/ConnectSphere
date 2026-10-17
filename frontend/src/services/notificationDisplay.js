@@ -39,6 +39,12 @@
 //     reason, responseId }
 //   safety_equipment_review (058): { eventName, equipmentRequestId,
 //     responseId }
+//   flagged_booking_resolved (SCRUM-266): { audience, outcome, eventRequestId,
+//     eventName, venueId, venueName, startsAt, endsAt, reason, resolvedAt,
+//     resolvedByRole, replacementBookingId, replacementVenueName,
+//     replacementStartsAt, replacementEndsAt }; audience is coordinator or
+//     organiser, outcome reinstated, cancelled or replaced, and the
+//     replacement* fields are null unless replaced
 // Every field is read defensively -- a notification outlives the build that
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
@@ -51,6 +57,8 @@ const UNNAMED_EVENT = "Unnamed event";
 const UNKNOWN_VENUE = "Unknown venue";
 const NO_REASON = "No reason recorded";
 const PREVIOUS_COORDINATOR = "the previous coordinator";
+// Week 7: a flagged booking tells its coordinator another plan is needed.
+const ALTERNATIVE_ARRANGEMENTS = " Alternative arrangements are required.";
 
 /** True when `value` is a time that will parse. */
 function isInstant(value) {
@@ -91,6 +99,11 @@ function needsReview(eventName, venueName) {
   return `${eventName} at ${venueName} needs review`;
 }
 
+/** Free text ended with a full stop, unless it already ends a sentence. */
+function asSentence(text) {
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
 /** "Booked <range>. ", the start of a flagged booking's detail. */
 function bookedFor(payload) {
   return `Booked ${formatRange(payload.startsAt, payload.endsAt)}. `;
@@ -127,7 +140,8 @@ const DESCRIBERS = {
       headline: needsReview(eventName, venueName),
       detail:
         bookedFor(payload) +
-        `The venue is blocked for ${reason}, ${formatRange(payload.blockStartsAt, payload.blockEndsAt)}.`,
+        `The venue is blocked for ${reason}, ${formatRange(payload.blockStartsAt, payload.blockEndsAt)}.` +
+        ALTERNATIVE_ARRANGEMENTS,
     };
   },
 
@@ -139,7 +153,7 @@ const DESCRIBERS = {
   booking_flagged_setup_change(payload, { eventName, venueName }) {
     return {
       headline: needsReview(eventName, venueName),
-      detail: `Setup or turnaround time changed.${setupChangePeriod(payload)}`,
+      detail: `Setup or turnaround time changed.${setupChangePeriod(payload)}${ALTERNATIVE_ARRANGEMENTS}`,
     };
   },
 
@@ -179,7 +193,7 @@ const DESCRIBERS = {
     // Both are free text; the reason gets a full stop of its own (unless it
     // already ends a sentence) so the two do not run together.
     const detail = payload.suggestedAlternative
-      ? `Reason: ${/[.!?]$/.test(reason) ? reason : `${reason}.`} Suggested alternative: ${payload.suggestedAlternative}`
+      ? `Reason: ${asSentence(reason)} Suggested alternative: ${payload.suggestedAlternative}`
       : `Reason: ${reason}`;
 
     return {
@@ -200,6 +214,48 @@ const DESCRIBERS = {
         `${approvedEventName} was approved for ${formatRange(payload.approvedStartsAt, payload.approvedEndsAt)}. ` +
         "Your request is still open; you can withdraw it or wait for Venue Staff.",
     };
+  },
+
+  // SCRUM-266 (AC6). Sent to the coordinator when Venue Staff resolve a
+  // flagged booking, and to the Organiser of a Confirmed event. Only the
+  // coordinator is told what to do next; the Organiser has nothing to act on.
+  // An unknown audience or outcome reads as the generic notification.
+  flagged_booking_resolved(payload, { eventName, venueName }) {
+    const forCoordinator = payload.audience === "coordinator";
+    if (!forCoordinator && payload.audience !== "organiser") return undefined;
+    const reason = `Reason: ${asSentence(payload.reason || NO_REASON)}`;
+
+    if (payload.outcome === "reinstated") {
+      return {
+        headline: `${venueName} for ${eventName} was reinstated`,
+        detail: `It is booked again for ${formatRange(payload.startsAt, payload.endsAt)}. ${reason}`,
+      };
+    }
+    if (payload.outcome === "cancelled") {
+      const byRole = {
+        venue_staff: " by Venue Staff",
+        event_coordinator: " by the event's coordinator",
+      };
+      // Own keys only, as in describeNotification; an unknown role names no one.
+      const by = Object.hasOwn(byRole, payload.resolvedByRole) ? byRole[payload.resolvedByRole] : "";
+      const nextStep = forCoordinator
+        ? "You can request another venue from the event."
+        : "Your event is not cancelled.";
+      return {
+        headline: `The booking of ${venueName} for ${eventName} was cancelled`,
+        detail: `It was cancelled${by}. ${reason} ${nextStep}`,
+      };
+    }
+    if (payload.outcome === "replaced") {
+      const replacement = payload.replacementVenueName || UNKNOWN_VENUE;
+      return {
+        headline: `${venueName} for ${eventName} was replaced by ${replacement}`,
+        detail:
+          `${replacement} is booked for ${formatRange(payload.replacementStartsAt, payload.replacementEndsAt)}. ` +
+          reason,
+      };
+    }
+    return undefined;
   },
 
   // An audience this build does not know returns undefined, so it reads as

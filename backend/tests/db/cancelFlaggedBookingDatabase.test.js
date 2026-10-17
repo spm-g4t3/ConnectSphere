@@ -550,6 +550,101 @@ describe('SCRUM-266 AC3 and AC5: cancelling a flagged booking (077)', () => {
     });
   });
 
+  describe('AC6: cancelling notifies the event\'s people', () => {
+    const noticesFor = (bookingId) =>
+      rows(
+        `select recipient_id, payload from notifications
+          where booking_id = $1 and type = 'flagged_booking_resolved'
+          order by payload->>'audience'`,
+        [bookingId],
+      );
+    const told = async (bookingId) =>
+      (await noticesFor(bookingId)).map((n) => [n.payload.audience, n.recipient_id, n.payload.resolvedByRole]);
+
+    /** A flagged booking for an event in the given status and with the given coordinator. */
+    async function flaggedOn(status, { assigned } = {}) {
+      const eventId = await makeEvent({ assigned });
+      const f = await flagged({ eventId });
+      await db.query('update event_requests set status = $2 where id = $1', [eventId, status]);
+      return f;
+    }
+
+    it('SCRUM266_AC6_venue_staff_cancelling_tells_the_coordinator_what_was_recorded', async () => {
+      const { id, venueId, eventId } = await flaggedOn('approved');
+
+      await cancel(id, { caller: staff, reason: '  Venue closed for repairs  ' });
+
+      const [resolution] = await resolutionsFor(id);
+      const booking = await bookingRow(id);
+      const notices = await noticesFor(id);
+      expect(notices).toEqual([
+        {
+          recipient_id: coordinator,
+          payload: {
+            audience: 'coordinator',
+            outcome: 'cancelled',
+            eventRequestId: eventId,
+            eventName: (await eventRow(eventId)).event_name,
+            venueId,
+            venueName: (await one('select name from venues where id = $1', [venueId])).name,
+            startsAt: expect.any(String),
+            endsAt: expect.any(String),
+            reason: 'Venue closed for repairs',
+            resolvedAt: expect.any(String),
+            resolvedByRole: 'venue_staff',
+            replacementBookingId: null,
+            replacementVenueName: null,
+            replacementStartsAt: null,
+            replacementEndsAt: null,
+          },
+        },
+      ]);
+      const { payload } = notices[0];
+      expect(payload.reason).toBe(resolution.reason);
+      expect(new Date(payload.resolvedAt)).toEqual(resolution.created_at);
+      expect(new Date(payload.startsAt)).toEqual(booking.starts_at);
+      expect(new Date(payload.endsAt)).toEqual(booking.ends_at);
+    });
+
+    it('SCRUM266_AC6_venue_staff_cancelling_a_confirmed_events_booking_tells_coordinator_and_organiser', async () => {
+      const { id } = await flaggedOn('confirmed');
+
+      await cancel(id, { caller: staff });
+
+      expect(await told(id)).toEqual([
+        ['coordinator', coordinator, 'venue_staff'],
+        ['organiser', organiser, 'venue_staff'],
+      ]);
+    });
+
+    it('SCRUM266_AC6_the_coordinator_cancelling_is_not_told_but_a_confirmed_events_organiser_is', async () => {
+      const { id } = await flaggedOn('confirmed');
+
+      await cancel(id, { caller: coordinator });
+
+      expect(await told(id)).toEqual([['organiser', organiser, 'event_coordinator']]);
+    });
+
+    it('SCRUM266_AC6_the_coordinator_cancelling_an_unconfirmed_events_booking_tells_nobody', async () => {
+      const { id } = await flaggedOn('safety_approved');
+
+      await cancel(id, { caller: coordinator });
+
+      expect(await noticesFor(id)).toEqual([]);
+    });
+
+    it.each([
+      ['approved', false],
+      ['confirmed', true],
+    ])('SCRUM266_AC6_an_event_with_no_coordinator_has_no_coordinator_notice_when_%s', async (status, organiserTold) => {
+      const { id } = await flaggedOn(status, { assigned: null });
+
+      await cancel(id, { caller: staff });
+
+      expect(await told(id)).toEqual(organiserTold ? [['organiser', organiser, 'venue_staff']] : []);
+    });
+  });
+
   describe('Week 7: each booking is resolved on its own', () => {
     it('SCRUM266_W7_cancelling_one_booking_leaves_the_events_other_flagged_booking_untouched', async () => {
       const eventId = await makeEvent();

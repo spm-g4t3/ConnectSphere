@@ -173,6 +173,15 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
     (await one('select list_event_flagged_bookings($1, $2) as result', [caller, eventId])).result;
 
   const bookingRow = (id) => one('select * from bookings where id = $1', [id]);
+  const noticesFor = async (bookingId) =>
+    (
+      await db.query(
+        `select recipient_id, payload from notifications
+          where booking_id = $1 and type = 'flagged_booking_resolved'
+          order by payload->>'audience'`,
+        [bookingId],
+      )
+    ).rows;
   const resolutionsOf = async (id) =>
     (await db.query('select * from booking_resolutions where booking_id = $1 order by created_at', [id])).rows;
 
@@ -362,6 +371,65 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
       expect(resolutions[0].flagged_at).toEqual(before.flagged_at);
     });
 
+    it('SCRUM266_W7_approving_a_replacement_tells_the_coordinator_both_bookings', async () => {
+      const event = await makeEvent();
+      const isFlagged = await flagged(event);
+      const flaggedRow = await bookingRow(isFlagged);
+      const newVenue = await makeVenue();
+      const replacement = (await request(event, newVenue, isFlagged)).booking.id;
+
+      await decide(replacement);
+
+      const [resolution] = await resolutionsOf(isFlagged);
+      const replacementRow = await bookingRow(replacement);
+      const venueName = async (id) => (await one('select name from venues where id = $1', [id])).name;
+      const notices = await noticesFor(isFlagged);
+      expect(notices).toEqual([
+        {
+          recipient_id: coordinator,
+          payload: {
+            audience: 'coordinator',
+            outcome: 'replaced',
+            eventRequestId: event,
+            eventName: (await one('select event_name from event_requests where id = $1', [event])).event_name,
+            venueId: flaggedRow.venue_id,
+            venueName: await venueName(flaggedRow.venue_id),
+            startsAt: expect.any(String),
+            endsAt: expect.any(String),
+            reason: 'Replaced by an approved booking',
+            resolvedAt: expect.any(String),
+            resolvedByRole: 'venue_staff',
+            replacementBookingId: replacement,
+            replacementVenueName: await venueName(newVenue),
+            replacementStartsAt: expect.any(String),
+            replacementEndsAt: expect.any(String),
+          },
+        },
+      ]);
+      const { payload } = notices[0];
+      expect(payload.reason).toBe(resolution.reason);
+      expect(new Date(payload.resolvedAt)).toEqual(resolution.created_at);
+      expect(new Date(payload.startsAt)).toEqual(flaggedRow.starts_at);
+      expect(new Date(payload.replacementStartsAt)).toEqual(replacementRow.starts_at);
+      expect(new Date(payload.replacementEndsAt)).toEqual(replacementRow.ends_at);
+    });
+
+    it('SCRUM266_W7_a_confirmed_events_organiser_is_told_of_the_replacement_too', async () => {
+      const event = await makeEvent();
+      const isFlagged = await flagged(event);
+      const replacement = (await request(event, await makeVenue(), isFlagged)).booking.id;
+      await db.query(`update event_requests set status = 'confirmed' where id = $1`, [event]);
+
+      await decide(replacement);
+
+      const notices = await noticesFor(isFlagged);
+      expect(notices.map((n) => [n.payload.audience, n.recipient_id])).toEqual([
+        ['coordinator', coordinator],
+        ['organiser', organiser],
+      ]);
+      expect(notices[1].payload).toEqual({ ...notices[0].payload, audience: 'organiser' });
+    });
+
     it('SCRUM266_W7_a_safety_flag_is_replaced_too', async () => {
       const event = await makeEvent();
       const isFlagged = await flagged(event, 'safety_review');
@@ -385,6 +453,8 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
       expect(result.replaced_booking_id).toBeNull();
       expect((await bookingRow(isFlagged)).status).toBe('approved');
       expect((await resolutionsOf(isFlagged)).map((r) => r.outcome)).toEqual(['reinstated']);
+      // Only the reinstatement was announced; approving the stale replacement adds nothing.
+      expect((await noticesFor(isFlagged)).map((n) => n.payload.outcome)).toEqual(['reinstated']);
     });
 
     it('SCRUM266_W7_approving_after_the_flag_was_cancelled_changes_nothing_else', async () => {
@@ -398,6 +468,8 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
       expect(result.outcome).toBe('approved');
       expect((await bookingRow(isFlagged)).status).toBe('cancelled');
       expect((await resolutionsOf(isFlagged)).map((r) => r.outcome)).toEqual(['cancelled']);
+      // The coordinator cancelled it, so nobody was told, and approving adds nothing.
+      expect(await noticesFor(isFlagged)).toEqual([]);
     });
 
     it('SCRUM266_W7_rejecting_the_replacement_leaves_the_flag', async () => {
@@ -409,6 +481,7 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
 
       expect((await bookingRow(isFlagged)).status).toBe('flagged_for_review');
       expect(await resolutionsOf(isFlagged)).toEqual([]);
+      expect(await noticesFor(isFlagged)).toEqual([]);
     });
 
     it('SCRUM266_W7_once_replaced_the_booking_drops_off_the_coordinators_list', async () => {

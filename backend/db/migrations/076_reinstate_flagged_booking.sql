@@ -1,11 +1,75 @@
 -- Venue Staff resolve a booking flagged for review by reinstating it: the flag
 -- is cleared and the booking is approved again, once it still covers the
 -- event's period and nothing else occupies the venue. booking_resolutions
--- records every resolution, so cancelling and replacing can write to it too.
+-- records every resolution, so cancelling and replacing can write to it too,
+-- and notify_flagged_booking_resolved tells the event's people about each one.
 
 
 -- ---------------------------------------------------------------------
--- 1. A flagged booking may go back to approved (066's trigger)
+-- 1. Notification types (extends 075)
+-- ---------------------------------------------------------------------
+-- 075's list plus flagged_booking_resolved, added to the live constraint as
+-- 075 does, so re-running this file never drops a type. A migration that
+-- restates the list after this one must still include all of ours.
+
+do $$
+declare
+  v_def   text;
+  v_known text[] := '{}';
+  v_ours  text[] := array[
+    'booking_flagged',
+    'booking_request_withdrawn',
+    'clarification_requested',
+    'clarification_replied',
+    'clarification_closed',
+    'booking_flagged_setup_change',
+    'venue_hold_expired',
+    'event_cancelled',
+    'event_request_awaiting_assignment',
+    'event_request_assigned',
+    'event_request_coordinator_assigned',
+    'safety_review_response',
+    'safety_booking_flagged',
+    'safety_equipment_review',
+    'event_submitted_for_safety_review',
+    'booking_request_approved',
+    'booking_request_rejected',
+    'booking_request_conflicting',
+    'flagged_booking_resolved'
+  ];
+  v_item  text;
+begin
+  select pg_get_constraintdef(c.oid)
+    into v_def
+    from pg_constraint c
+   where c.conrelid = 'notifications'::regclass
+     and c.conname = 'notifications_type_known';
+
+  if v_def is not null then
+    select coalesce(array_agg(t.m[1] order by t.ord), '{}')
+      into v_known
+      from regexp_matches(v_def, '''([a-z_]+)''', 'g') with ordinality as t(m, ord);
+  end if;
+
+  foreach v_item in array v_ours loop
+    if not v_item = any (v_known) then
+      v_known := v_known || v_item;
+    end if;
+  end loop;
+
+  alter table notifications drop constraint if exists notifications_type_known;
+
+  execute format(
+    'alter table notifications add constraint notifications_type_known check (type in (%s))',
+    (select string_agg(quote_literal(x.item), ', ' order by x.ord)
+       from unnest(v_known) with ordinality as x(item, ord))
+  );
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 2. A flagged booking may go back to approved (066's trigger)
 -- ---------------------------------------------------------------------
 -- 066's function with one more allowed move. Reinstating leaves the decision
 -- columns as they were, so they stay immutable.
@@ -49,7 +113,7 @@ create trigger bookings_decision_final
 
 
 -- ---------------------------------------------------------------------
--- 2. booking_resolutions
+-- 3. booking_resolutions
 -- ---------------------------------------------------------------------
 -- One row per resolved flag: the outcome, who, why and when. Reinstating
 -- clears the flag from the booking, so the flag being resolved is copied here.
@@ -90,7 +154,64 @@ alter table booking_resolutions enable row level security;
 
 
 -- ---------------------------------------------------------------------
--- 3. reinstate_flagged_booking
+-- 4. notify_flagged_booking_resolved
+-- ---------------------------------------------------------------------
+-- One notice per person told about a resolution, built once for 076, 077 and
+-- 078's replacement. The coordinator is told unless they resolved it; the
+-- organiser only once the event is confirmed. Nobody is told of their own act.
+-- Callers hold the event lock, so the status read here is the one they checked.
+
+create or replace function notify_flagged_booking_resolved(
+  p_resolution_id    uuid,
+  p_resolved_by_role text
+)
+returns void
+language sql
+as $$
+  insert into notifications (recipient_id, type, booking_id, payload)
+  select r.recipient_id,
+         'flagged_booking_resolved',
+         b.id,
+         jsonb_build_object(
+           'audience',             r.audience,
+           'outcome',              br.outcome,
+           'eventRequestId',       b.event_request_id,
+           'eventName',            er.event_name,
+           'venueId',              b.venue_id,
+           'venueName',            v.name,
+           'startsAt',             b.starts_at,
+           'endsAt',               b.ends_at,
+           'reason',               br.reason,
+           'resolvedAt',           br.created_at,
+           'resolvedByRole',       p_resolved_by_role,
+           'replacementBookingId', rb.id,
+           'replacementVenueName', rv.name,
+           'replacementStartsAt',  rb.starts_at,
+           'replacementEndsAt',    rb.ends_at
+         )
+    from booking_resolutions br
+    join bookings b        on b.id = br.booking_id
+    join venues v          on v.id = b.venue_id
+    join event_requests er on er.id = b.event_request_id
+    left join bookings rb  on rb.id = br.replacement_booking_id
+    left join venues rv    on rv.id = rb.venue_id
+   cross join lateral (
+     values ('coordinator', er.assigned_coordinator_id),
+            ('organiser',   case when er.status::text = 'confirmed' then er.organiser_id end)
+   ) as r (audience, recipient_id)
+   where br.id = p_resolution_id
+     and r.recipient_id is not null
+     and r.recipient_id <> br.resolved_by
+   order by r.audience;
+$$;
+
+-- It writes for whichever caller passes an id, so only the functions reach it.
+revoke execute on function notify_flagged_booking_resolved(uuid, text)
+  from public, anon, authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 5. reinstate_flagged_booking
 -- ---------------------------------------------------------------------
 -- decide_booking_request's (066) approval path, for a flagged booking: the
 -- same caller check, lock order and refusals. The period must still cover the
@@ -257,6 +378,9 @@ begin
     raise exception 'booking % changed while it was being reinstated', p_booking_id
       using errcode = 'serialization_failure';
   end if;
+
+  -- 10. Tell the event's people, in the same transaction.
+  perform notify_flagged_booking_resolved(v_resolution.id, 'venue_staff');
 
   return jsonb_build_object('outcome', 'reinstated',
                             'booking', to_jsonb(v_booking),

@@ -653,6 +653,119 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking (076)', () => {
     });
   });
 
+  describe('AC6: reinstating notifies the event\'s people', () => {
+    const noticesFor = (bookingId) =>
+      rows(
+        `select recipient_id, payload from notifications
+          where booking_id = $1 and type = 'flagged_booking_resolved'
+          order by payload->>'audience'`,
+        [bookingId],
+      );
+
+    /** A flagged booking whose block is gone, for an event in the given status. */
+    async function reinstatable(status) {
+      const eventId = await makeEvent();
+      const f = await flagged({ eventId });
+      await db.query('update venue_blocks set removed_at = now() where id = $1', [f.blockId]);
+      await db.query('update event_requests set status = $2 where id = $1', [eventId, status]);
+      return f;
+    }
+
+    it('SCRUM266_AC6_reinstating_tells_the_coordinator_what_was_recorded', async () => {
+      const { id, venueId, eventId } = await reinstatable('approved');
+
+      await reinstate(id, { reason: '  The block was moved  ' });
+
+      const [resolution] = await resolutionsFor(id);
+      const booking = await bookingRow(id);
+      const event = await one('select event_name from event_requests where id = $1', [eventId]);
+      const venue = await one('select name from venues where id = $1', [venueId]);
+      const notices = await noticesFor(id);
+      expect(notices).toEqual([
+        {
+          recipient_id: coordinator,
+          payload: {
+            audience: 'coordinator',
+            outcome: 'reinstated',
+            eventRequestId: eventId,
+            eventName: event.event_name,
+            venueId,
+            venueName: venue.name,
+            startsAt: expect.any(String),
+            endsAt: expect.any(String),
+            reason: 'The block was moved',
+            resolvedAt: expect.any(String),
+            resolvedByRole: 'venue_staff',
+            replacementBookingId: null,
+            replacementVenueName: null,
+            replacementStartsAt: null,
+            replacementEndsAt: null,
+          },
+        },
+      ]);
+      const { payload } = notices[0];
+      expect(payload.reason).toBe(resolution.reason);
+      expect(new Date(payload.resolvedAt)).toEqual(resolution.created_at);
+      expect(new Date(payload.startsAt)).toEqual(booking.starts_at);
+      expect(new Date(payload.endsAt)).toEqual(booking.ends_at);
+    });
+
+    it('SCRUM266_AC6_reinstating_a_confirmed_events_booking_tells_the_organiser_too', async () => {
+      const { id } = await reinstatable('confirmed');
+
+      await reinstate(id);
+
+      const notices = await noticesFor(id);
+      expect(notices.map((n) => [n.payload.audience, n.recipient_id])).toEqual([
+        ['coordinator', coordinator],
+        ['organiser', organiser],
+      ]);
+      expect(notices[1].payload).toEqual({ ...notices[0].payload, audience: 'organiser' });
+    });
+
+    it.each(['approved', 'safety_review', 'safety_approved'])(
+      'SCRUM266_AC6_the_organiser_of_a_%s_event_is_not_told',
+      async (status) => {
+        const { id } = await reinstatable(status);
+
+        await reinstate(id);
+
+        expect((await noticesFor(id)).map((n) => n.payload.audience)).toEqual(['coordinator']);
+      },
+    );
+
+    it('SCRUM266_AC6_a_conflict_notifies_nobody', async () => {
+      const { id, eventId } = await flagged();
+      await db.query(`update event_requests set status = 'confirmed' where id = $1`, [eventId]);
+
+      expect((await reinstate(id)).outcome).toBe('conflict');
+
+      expect(await noticesFor(id)).toEqual([]);
+    });
+
+    it('SCRUM266_AC6_076_keeps_every_type_075_allows_and_a_rerun_changes_nothing', async () => {
+      const types = async () => {
+        const { def } = await one(
+          `select pg_get_constraintdef(oid) as def from pg_constraint
+            where conrelid = 'notifications'::regclass and conname = 'notifications_type_known'`,
+        );
+        return [...def.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+      };
+      // 075's v_ours, read from the file so a type it gains is checked too.
+      const sql075 = migration('075_notification_types_after_safety_review.sql');
+      const list075 = sql075.slice(sql075.indexOf('v_ours'), sql075.indexOf('];'));
+      const from075 = [...list075.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+      expect(from075).toContain('booking_request_conflicting');
+
+      const before = await types();
+      expect(before).toEqual(expect.arrayContaining([...from075, 'flagged_booking_resolved']));
+
+      await db.exec(migration(MIGRATION_076));
+
+      expect(await types()).toEqual(before);
+    });
+  });
+
   describe('Week 7: each booking is resolved on its own', () => {
     it('SCRUM266_W7_reinstating_one_booking_leaves_the_events_other_flagged_booking_untouched', async () => {
       const eventId = await makeEvent();

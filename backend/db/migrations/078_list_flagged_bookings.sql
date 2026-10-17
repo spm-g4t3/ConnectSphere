@@ -474,9 +474,9 @@ revoke execute on function create_booking_request(uuid, uuid, uuid, text, text, 
 -- 6. decide_booking_request (066, step 14)
 -- ---------------------------------------------------------------------
 -- 066's function word for word plus step 14: approving a replacement cancels
--- the flagged booking it names and records the resolution as 'replaced'. 076's
--- trigger already allows flagged_for_review -> cancelled. Rejecting changes
--- nothing on the flagged booking. Same signature, so `create or replace`.
+-- the flagged booking it names, records the resolution as 'replaced' and
+-- notifies as 076 does. 076's trigger already allows flagged_for_review ->
+-- cancelled. Rejecting changes nothing on the flagged booking. Same signature, so `create or replace`.
 
 create or replace function decide_booking_request(
   p_booking_id            uuid,
@@ -501,6 +501,7 @@ declare
   v_marked_ids  uuid[] := '{}';
   v_converted_hold_id uuid;
   v_replaced    bookings;
+  v_resolution_id uuid;
 begin
   -- 1. Only Venue Staff, as place_venue_hold (040) checks it. A null caller is
   --    refused too.
@@ -759,7 +760,10 @@ begin
       values (v_replaced.id, 'replaced', 'Replaced by an approved booking', p_caller,
               v_replaced.review_block_id, v_replaced.review_reason,
               v_replaced.flagged_at, v_replaced.flagged_by,
-              v_booking.id);
+              v_booking.id)
+      returning id into v_resolution_id;
+
+      perform notify_flagged_booking_resolved(v_resolution_id, 'venue_staff');
     end if;
   end if;
 

@@ -1,7 +1,8 @@
 -- The event's assigned coordinator or Venue Staff resolve a booking flagged for
 -- review by cancelling it. Only this booking changes; the coordinator can then
 -- request another venue or period. 076's trigger and booking_resolutions
--- already allow the move and the outcome.
+-- already allow the move and the outcome, and 076's notify function tells the
+-- event's people.
 
 
 -- ---------------------------------------------------------------------
@@ -112,6 +113,13 @@ begin
     raise exception 'booking % changed while it was being cancelled', p_booking_id
       using errcode = 'serialization_failure';
   end if;
+
+  -- 7. Tell the event's people, in the same transaction, naming which side
+  --    resolved it. Venue Staff who are not the coordinator act as staff.
+  perform notify_flagged_booking_resolved(
+    v_resolution.id,
+    case when v_event.assigned_coordinator_id = p_caller then 'event_coordinator' else 'venue_staff' end
+  );
 
   return jsonb_build_object('outcome', 'cancelled',
                             'booking', to_jsonb(v_booking),
