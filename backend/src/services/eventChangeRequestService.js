@@ -52,7 +52,7 @@
  * typed error, the same division venueService.js uses.
  */
 
-import { ValidationError, NotFoundError, ForbiddenError } from '../errors.js';
+import { ValidationError, NotFoundError, ForbiddenError, ConflictError } from '../errors.js';
 import {
   validateCreateChangeRequest,
   validateProcessChangeRequest,
@@ -134,6 +134,10 @@ function translateError(error) {
   // message patterns below; 019 words its message so it matches neither.
   if (code === '42501') {
     return new ForbiddenError(detail);
+  }
+
+  if (code === '55000') {
+    return new ConflictError(detail);
   }
 
   // raised by process_change_request when the id matches nothing

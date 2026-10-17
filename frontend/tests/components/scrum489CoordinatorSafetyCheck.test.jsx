@@ -6,7 +6,7 @@
 // panel itself renders for real.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
@@ -165,6 +165,32 @@ describe("SCRUM363 coordinator confirmation", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("SCRUM363_AC4_a_fresh_safety_approval_replaces_the_local_safety_submission_state", async () => {
+    signIn(ASSIGNED, 'event_coordinator');
+    vi.mocked(submitForSafetyReview).mockResolvedValue(eventRequest({ status: 'safety_review' }));
+    const { user, rerender } = renderPage(eventRequest());
+    const submit = await screen.findByRole('button', { name: 'Submit for safety check' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    await user.click(submit);
+    rerender(<MemoryRouter><CoordinatorRequestDetail request={safetyApproved()} /></MemoryRouter>);
+    expect(await screen.findByRole('button', { name: 'Confirm Event' })).toBeInTheDocument();
+  });
+
+  it("SCRUM363_AC6_fresh_planning_data_replaces_local_confirmation_and_clears_stale_success_feedback", async () => {
+    signIn(ASSIGNED, 'event_coordinator');
+    vi.mocked(confirmEventRequest).mockResolvedValue(confirmedEvent());
+    const { user, rerender } = renderPage(safetyApproved());
+    const confirm = await screen.findByRole('button', { name: 'Confirm Event' });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    await user.click(confirm);
+    await screen.findByText('Event confirmed successfully.');
+    rerender(<MemoryRouter><CoordinatorRequestDetail request={eventRequest()} /></MemoryRouter>);
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Planning');
+    expect(screen.queryByText('Event confirmed successfully.')).not.toBeInTheDocument();
+    rerender(<MemoryRouter><CoordinatorRequestDetail request={safetyApproved()} /></MemoryRouter>);
+    expect(await screen.findByRole('button', { name: 'Confirm Event' })).toBeInTheDocument();
+  });
+
   it.each([403, 409])("SCRUM363_AC3_refusal_%s_refreshes_parent_data_and_preserves_feedback_after_the_action_disappears", async (status) => {
     signIn(ASSIGNED, "event_coordinator");
     vi.mocked(confirmEventRequest).mockRejectedValue({ response: { status, data: { error: "Its current status is confirmed." } } });
@@ -196,6 +222,18 @@ describe("SCRUM363 coordinator confirmation", () => {
     expect(screen.getByRole("heading", { name: /Confirmed/ })).toBeInTheDocument();
     expect(screen.getByText("IS212 Industry Night")).toBeInTheDocument();
     expect(confirmEventRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("SCRUM363_AC4_returning_to_my_events_refreshes_the_open_detail_and_reveals_fresh_safety_approval", async () => {
+    signIn(ASSIGNED, "event_coordinator");
+    vi.mocked(getMyAssignedEvents).mockResolvedValueOnce([eventRequest({ status: "safety_review" })])
+      .mockResolvedValue([safetyApproved()]);
+    render(<MemoryRouter><MyAssignedEvents /></MemoryRouter>);
+    await userEvent.click(await screen.findByRole("button", { name: "Open" }));
+    expect(confirmPanel()).not.toBeInTheDocument();
+    fireEvent.focus(window);
+    const confirm = await screen.findByRole("button", { name: "Confirm Event" });
+    await waitFor(() => expect(confirm).toBeEnabled());
   });
 });
 

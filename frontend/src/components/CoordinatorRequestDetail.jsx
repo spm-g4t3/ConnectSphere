@@ -197,15 +197,14 @@ export default function CoordinatorRequestDetail({
   onReviewDecisionProcessed,
   onChangeRequestProcessed,
 }) {
-  // SCRUM-19. The request as this panel last saw it change. Starting a review
-  // or deciding returns the updated request, and the panel stays open on it,
-  // showing the next step or the recorded decision, rather than closing and
-  // leaving the coordinator to find the request again. The `request` prop is
-  // the row the parent loaded; this overrides it once this panel has changed
-  // the request itself.
-  const [updatedRequest, setUpdatedRequest] = useState(null);
+  // A mutation response belongs to the parent record it started from.
+  const [localUpdate, setLocalUpdate] = useState(null);
   const [confirmationFeedback, setConfirmationFeedback] = useState(null);
-  const current = updatedRequest ?? request;
+  const current = localUpdate?.source === request ? localUpdate.record : request;
+
+  function setUpdatedRequest(record) {
+    setLocalUpdate(record ? { source: request, record } : null);
+  }
 
   const display = readStatusDisplay(current);
   const capacity = seedableCapacity(request.expectedAttendance);
@@ -519,7 +518,7 @@ export default function CoordinatorRequestDetail({
       </h2>
       <p>{display.description}</p>
       <SafetyApprovalNotice status={current.status} />
-      {confirmationFeedback?.eventId === current.id && (confirmationFeedback.success || !canConfirm) && (
+      {confirmationFeedback?.eventId === current.id && (confirmationFeedback.success ? current.status === "confirmed" : !canConfirm) && (
         <p role={confirmationFeedback.success ? "status" : "alert"}>{confirmationFeedback.message}</p>
       )}
       {canConfirm && (

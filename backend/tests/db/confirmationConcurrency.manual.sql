@@ -1,5 +1,5 @@
 -- SCRUM363_AC2 / AC3 / AC6: manual, real PostgreSQL two-connection races.
--- Use a disposable test database with migrations through 086, including 085.
+-- Use a disposable test database with migrations through 087, including 085.
 -- These checks write data. Do not run against a real event or as one script.
 -- Run each labelled block separately in two psql sessions, using service_role
 -- or equivalent trusted permissions, at the default READ COMMITTED isolation.

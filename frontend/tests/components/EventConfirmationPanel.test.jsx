@@ -133,6 +133,54 @@ describe("SCRUM-363: confirmation panel", () => {
     expect(confirmEventRequest).toHaveBeenCalledTimes(1);
   });
 
+  it("SCRUM363_AC5_a_new_event_revision_clears_the_checkbox_and_rechecks_without_replaying_acknowledgement", async () => {
+    vi.mocked(getEventReadiness).mockImplementation(async (_id, { noEquipmentConfirmed }) => ({
+      ...READY, ready: noEquipmentConfirmed, items: [{ ...ACK, met: noEquipmentConfirmed }],
+    }));
+    const onConfirmed = vi.fn();
+    const onStale = vi.fn();
+    const initial = { ...EVENT, updatedAt: '2026-11-01T00:00:00.000Z' };
+    const { rerender } = setup({ eventRequest: initial, onConfirmed, onStale });
+    const checkbox = await screen.findByRole('checkbox');
+    await userEvent.click(checkbox);
+    await ready();
+    const fresh = { ...initial, updatedAt: '2026-11-02T00:00:00.000Z' };
+    rerender(<EventConfirmationPanel eventRequest={fresh} onConfirmed={onConfirmed} onStale={onStale} />);
+    expect(checkbox).not.toBeChecked();
+    expect(button()).toBeDisabled();
+    await waitFor(() => expect(getEventReadiness).toHaveBeenLastCalledWith(EVENT.id, { noEquipmentConfirmed: false }));
+    await waitFor(() => expect(checkbox).toBeEnabled());
+    await userEvent.click(checkbox);
+    await ready();
+    await userEvent.click(button());
+    expect(confirmEventRequest).toHaveBeenCalledWith(EVENT.id, { noEquipmentConfirmed: true, expectedUpdatedAt: fresh.updatedAt });
+  });
+
+  it.each([false, true])("SCRUM363_AC6_a_late_submission_for_an_old_revision_is_ignored_failure_%s", async (failed) => {
+    const pending = deferred();
+    vi.mocked(confirmEventRequest).mockReturnValue(pending.promise);
+    const { onConfirmed, onStale, rerender } = setup({ eventRequest: { ...EVENT, updatedAt: "2026-11-01T00:00:00Z" } });
+    await ready();
+    await userEvent.click(button());
+    rerender(<EventConfirmationPanel eventRequest={{ ...EVENT, updatedAt: "2026-11-02T00:00:00Z" }} onConfirmed={onConfirmed} onStale={onStale} />);
+    await act(async () => failed ? pending.reject(failure(409)) : pending.resolve(CONFIRMED));
+    expect(onConfirmed).not.toHaveBeenCalled();
+    expect(onStale).not.toHaveBeenCalled();
+    await ready();
+  });
+
+  it("SCRUM363_AC3_a_fresh_revision_clears_obsolete_refusals_and_allows_a_new_attempt", async () => {
+    vi.mocked(confirmEventRequest).mockRejectedValue(failure(409, { error: "This event has changed. Refresh its checklist." }));
+    const { onConfirmed, onStale, rerender } = setup({ eventRequest: { ...EVENT, updatedAt: "2026-11-01T00:00:00Z" } });
+    await ready();
+    await userEvent.click(button());
+    expect(await screen.findByRole("alert")).toHaveTextContent("This event has changed");
+    expect(button()).toBeDisabled();
+    rerender(<EventConfirmationPanel eventRequest={{ ...EVENT, updatedAt: "2026-11-02T00:00:00Z" }} onConfirmed={onConfirmed} onStale={onStale} />);
+    await ready();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("SCRUM363_AC3_lists_all_outstanding_items_and_refreshes_after_stale_readiness", async () => {
     const conflicts = [{ key: "venue", met: false, detail: "Flagged for review" }, { key: "equipment", met: false, detail: "Pending review" }];
     vi.mocked(confirmEventRequest).mockRejectedValue(failure(409, { code: "EVENT_NOT_READY", error: "This event is not ready for confirmation.", conflicts }));

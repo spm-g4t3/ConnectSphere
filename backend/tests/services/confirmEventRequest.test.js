@@ -17,7 +17,7 @@ describe('SCRUM-363: confirmation service', () => {
       id: EVENT_ID, status: 'confirmed', assignedCoordinatorId: COORDINATOR_ID,
     });
     expect(client.rpc.mock.calls).toEqual([['confirm_event_request', {
-      p_event_request_id: EVENT_ID, p_coordinator_id: COORDINATOR_ID, p_no_equipment_confirmed: acknowledged,
+      p_event_request_id: EVENT_ID, p_coordinator_id: COORDINATOR_ID, p_no_equipment_confirmed: acknowledged, p_expected_updated_at: null,
     }]]);
   });
 
@@ -27,6 +27,9 @@ describe('SCRUM-363: confirmation service', () => {
     [{ coordinatorId: 'bad' }, 'coordinatorId'],
     [{ noEquipmentConfirmed: 'true' }, 'noEquipmentConfirmed'],
     [{ noEquipmentConfirmed: null }, 'noEquipmentConfirmed'],
+    [{ expectedUpdatedAt: '2026-06-01' }, 'expectedUpdatedAt'],
+    [{ expectedUpdatedAt: '2026-06-01T09:00:00' }, 'expectedUpdatedAt'],
+    [{ expectedUpdatedAt: 12 }, 'expectedUpdatedAt'],
   ])('SCRUM363_AC1_invalid_input_%j_is_refused_before_rpc', async (options, field) => {
     const client = { rpc: vi.fn() };
     await expect(confirm(client, options)).rejects.toMatchObject({ status: 400, details: [{ field, message: expect.any(String) }] });
@@ -38,6 +41,13 @@ describe('SCRUM-363: confirmation service', () => {
   ])('SCRUM363_AC1_database_%s_uses_the_established_error_response_%s', async (code, status) => {
     const client = { rpc: vi.fn().mockResolvedValue({ data: null, error: { code, message: 'Confirmation refused' } }) };
     await expect(confirm(client)).rejects.toMatchObject({ status, message: 'Confirmation refused' });
+  });
+
+  it('SCRUM363_AC5_preserves_the_observed_database_revision_including_microseconds', async () => {
+    const client = { rpc: vi.fn().mockResolvedValue({ data: { id: EVENT_ID, status: 'confirmed' }, error: null }) };
+    const expectedUpdatedAt = '2026-06-01T09:00:00.123456+00:00';
+    await confirm(client, { expectedUpdatedAt, noEquipmentConfirmed: true });
+    expect(client.rpc.mock.calls[0][1].p_expected_updated_at).toBe(expectedUpdatedAt);
   });
 
   it('SCRUM363_AC3_keeps_every_outstanding_readiness_condition', async () => {

@@ -151,7 +151,7 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
     await db.exec(migration('063_safety_transitions.sql'));
     await db.exec(migration('064_safety_review_submission.sql'));
     for (const name of ['071_safety_review.sql', '072_safety_review_history.sql', '073_safety_review_gates.sql',
-      '085_event_readiness_details.sql', '086_confirm_event_request.sql']) {
+      '085_event_readiness_details.sql', '086_confirm_event_request.sql', '087_confirmation_revision.sql']) {
       await db.exec(migration(name));
     }
 

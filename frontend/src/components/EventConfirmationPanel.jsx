@@ -9,17 +9,24 @@ const ACCESS_ERRORS = {
 };
 
 export default function EventConfirmationPanel({ eventRequest, onConfirmed, onStale }) {
+  const revision = `${eventRequest.id}:${eventRequest.updatedAt ?? ""}`;
   const [readiness, setReadiness] = useState(null);
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [acknowledgedRevision, setAcknowledgedRevision] = useState(null);
+  const acknowledged = acknowledgedRevision === revision;
   const [readVersion, setReadVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [readError, setReadError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const [blocked, setBlocked] = useState(false);
-  const [submitError, setSubmitError] = useState(null);
-  const [outstanding, setOutstanding] = useState(null);
+  const [blockedRevision, setBlockedRevision] = useState(null);
+  const blocked = blockedRevision === revision;
+  const [refusal, setRefusal] = useState(null);
+  const submitError = refusal?.revision === revision ? refusal.message : null;
+  const outstanding = refusal?.revision === revision ? refusal.conflicts : null;
   const sending = useRef(false);
   const mounted = useRef(false);
+  const currentRevision = useRef(revision);
+
+  useEffect(() => { currentRevision.current = revision; }, [revision]);
 
   useEffect(() => {
     mounted.current = true;
@@ -36,7 +43,7 @@ export default function EventConfirmationPanel({ eventRequest, onConfirmed, onSt
         if (result?.eventRequestId !== eventRequest.id || typeof result.ready !== "boolean" || !Array.isArray(result.items)) {
           throw new Error("Unexpected readiness response");
         }
-        if (!cancelled) setReadiness(result);
+        if (!cancelled) setReadiness({ data: result, revision, acknowledged });
       } catch (error) {
         if (!cancelled) {
           setReadiness(null);
@@ -48,16 +55,18 @@ export default function EventConfirmationPanel({ eventRequest, onConfirmed, onSt
     }
     read();
     return () => { cancelled = true; };
-  }, [eventRequest.id, acknowledged, readVersion]);
+  }, [eventRequest.id, revision, acknowledged, readVersion]);
 
   function refreshChecklist() {
     setLoading(true);
     setReadVersion((version) => version + 1);
   }
 
-  const items = readiness?.items ?? [];
+  const items = readiness?.data.items ?? [];
+  const currentReadiness = readiness?.revision === revision && readiness?.acknowledged === acknowledged
+    ? readiness.data : null;
   const acknowledgement = items.find((item) => item.key === "no_equipment_confirmation");
-  const canSubmit = !loading && !submitting && !blocked && readiness?.ready === true
+  const canSubmit = !loading && !submitting && !blocked && currentReadiness?.ready === true
     && (!acknowledgement || acknowledged);
 
   async function handleSubmit(event) {
@@ -65,27 +74,29 @@ export default function EventConfirmationPanel({ eventRequest, onConfirmed, onSt
     if (!canSubmit || sending.current) return;
     sending.current = true;
     setSubmitting(true);
-    setSubmitError(null);
-    setOutstanding(null);
+    setRefusal(null);
     let updated;
     try {
-      updated = await confirmEventRequest(eventRequest.id, { noEquipmentConfirmed: acknowledged });
+      updated = await confirmEventRequest(eventRequest.id, {
+        noEquipmentConfirmed: acknowledged,
+        ...(eventRequest.updatedAt != null ? { expectedUpdatedAt: eventRequest.updatedAt } : {}),
+      });
       if (updated?.id !== eventRequest.id || updated.status !== "confirmed") {
         throw new Error("Unexpected confirmation response");
       }
     } catch (error) {
-      if (!mounted.current) return;
+      if (!mounted.current || currentRevision.current !== revision) return;
       const status = error?.response?.status;
       const data = error?.response?.data;
       const message = ACCESS_ERRORS[status]
         ?? ((status === 409 || status === 400) && typeof data?.error === "string" ? data.error : null)
         ?? "Confirmation could not be verified. Check the event status before trying again.";
-      setSubmitError(message);
+      setRefusal({ revision, message, conflicts: status === 409 && data?.code === "EVENT_NOT_READY"
+        ? (Array.isArray(data.conflicts) ? data.conflicts : []) : null });
       if (status === 409 && data?.code === "EVENT_NOT_READY") {
-        setOutstanding(Array.isArray(data.conflicts) ? data.conflicts : []);
-        setAcknowledged(false);
+        setAcknowledgedRevision(null);
       } else if (status === 401 || status === 403 || status === 404 || status === 409) {
-        setBlocked(true);
+        setBlockedRevision(revision);
       }
       refreshChecklist();
       // A failed refresh must not replace the original confirmation refusal.
@@ -95,8 +106,8 @@ export default function EventConfirmationPanel({ eventRequest, onConfirmed, onSt
       sending.current = false;
       if (mounted.current) setSubmitting(false);
     }
-    if (mounted.current) {
-      setBlocked(true);
+    if (mounted.current && currentRevision.current === revision) {
+      setBlockedRevision(revision);
       onConfirmed(updated);
     }
   }
@@ -122,7 +133,7 @@ export default function EventConfirmationPanel({ eventRequest, onConfirmed, onSt
                 checked={acknowledged}
                 disabled={loading || submitting || blocked}
                 onChange={(event) => {
-                  setAcknowledged(event.target.checked);
+                  setAcknowledgedRevision(event.target.checked ? revision : null);
                   refreshChecklist();
                 }}
               />

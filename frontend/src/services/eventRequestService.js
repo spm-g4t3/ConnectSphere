@@ -245,8 +245,11 @@ export async function submitForSafetyReview(id, { note, noEquipmentConfirmed = f
   return response.data;
 }
 
-export async function confirmEventRequest(id, { noEquipmentConfirmed = false } = {}) {
-  const response = await apiClient.post(`/event-requests/${id}/confirm`, { noEquipmentConfirmed });
+export async function confirmEventRequest(id, { noEquipmentConfirmed = false, expectedUpdatedAt } = {}) {
+  const response = await apiClient.post(`/event-requests/${id}/confirm`, {
+    noEquipmentConfirmed,
+    ...(expectedUpdatedAt != null ? { expectedUpdatedAt } : {}),
+  });
   return response.data;
 }
 

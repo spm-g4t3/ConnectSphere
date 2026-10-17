@@ -100,7 +100,7 @@ describe('SCRUM-363: POST /:id/confirm', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: EVENT_ID, status: 'confirmed', statusDisplay: { label: 'Confirmed' } });
     expect(client.calls).toEqual([expect.objectContaining({ fn: 'confirm_event_request', args: {
-      p_event_request_id: EVENT_ID, p_coordinator_id: COORDINATOR_A, p_no_equipment_confirmed: true,
+      p_event_request_id: EVENT_ID, p_coordinator_id: COORDINATOR_A, p_no_equipment_confirmed: true, p_expected_updated_at: null,
     } })]);
   });
 
@@ -108,6 +108,13 @@ describe('SCRUM-363: POST /:id/confirm', () => {
     const client = createFakeClient([ok(eventRow({ status: 'confirmed' }))]);
     await confirm(client);
     expect(client.calls[0].args.p_no_equipment_confirmed).toBe(false);
+  });
+
+  it('SCRUM363_AC5_the_endpoint_passes_the_observed_revision_to_the_atomic_rpc', async () => {
+    const client = createFakeClient([ok(eventRow({ status: 'confirmed' }))]);
+    const expectedUpdatedAt = '2026-06-01T09:00:00.123456+00:00';
+    expect((await confirm(client, { noEquipmentConfirmed: true, expectedUpdatedAt })).status).toBe(200);
+    expect(client.calls[0].args.p_expected_updated_at).toBe(expectedUpdatedAt);
   });
 
   it.each([[ROLE.EVENT_COORDINATOR_LEAD], ...OTHER_ROLES.map((role) => [role])])(

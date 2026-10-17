@@ -42,6 +42,13 @@ describe("SCRUM363 confirmation service", () => {
     });
   });
 
+  it("SCRUM363_AC5_posts_the_observed_revision_with_the_explicit_acknowledgement", async () => {
+    apiClient.post.mockResolvedValue({ data: { id: EVENT_ID, status: "confirmed" } });
+    const options = { noEquipmentConfirmed: true, expectedUpdatedAt: "2026-06-01T09:00:00.123456Z" };
+    await confirmEventRequest(EVENT_ID, options);
+    expect(apiClient.post).toHaveBeenCalledWith(`/event-requests/${EVENT_ID}/confirm`, options);
+  });
+
   it("SCRUM363_AC3_passes_backend_refusals_through_unchanged", async () => {
     const error = { response: { status: 409, data: { code: "EVENT_NOT_READY", conflicts: CHECKLIST.items } } };
     vi.mocked(apiClient.post).mockRejectedValue(error);

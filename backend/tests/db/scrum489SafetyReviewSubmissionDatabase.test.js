@@ -51,7 +51,7 @@ const ARRANGEMENTS = [
 ];
 const MIGRATION = '064_safety_review_submission.sql';
 const READINESS_MIGRATION = '085_event_readiness_details.sql';
-const CONFIRM_MIGRATION = '086_confirm_event_request.sql';
+const CONFIRM_MIGRATION = '087_confirmation_revision.sql';
 const LATE_SAFETY_MIGRATIONS = [
   '071_safety_review.sql',
   '072_safety_review_history.sql',
@@ -159,8 +159,10 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
   const submit = (id, by = coordinatorA, note = null, confirmed = false) =>
     db.query('select * from submit_event_for_safety_review($1, $2, $3, $4)', [id, by, note, confirmed]);
 
-  const confirm = (id, by = coordinatorA, acknowledged = false) =>
-    db.query('select * from confirm_event_request($1, $2, $3)', [id, by, acknowledged]);
+  const confirm = async (id, by = coordinatorA, acknowledged = false) => {
+    const revision = (await one('select updated_at::text as revision from event_requests where id = $1', [id]))?.revision;
+    return db.query('select * from confirm_event_request($1, $2, $3, $4::timestamptz)', [id, by, acknowledged, revision]);
+  };
 
   async function readyToConfirm(overrides = {}) {
     const id = await readyEvent(overrides);
@@ -243,6 +245,7 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     await db.exec(migration('065_booking_decision_statuses.sql'));
     await db.exec(migration('075_booking_decisions_after_safety_review.sql'));
     await db.exec(migration(READINESS_MIGRATION));
+    await db.exec(migration('086_confirm_event_request.sql'));
     await db.exec(migration(CONFIRM_MIGRATION));
     await db.exec(migration('079_registrations.sql'));
     // Settings belong to SCRUM-494; confirmation must leave its contract untouched.
@@ -593,7 +596,9 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
         async rpc(fn, args) {
           expect(fn).toBe('confirm_event_request');
           try {
-            const { rows: [data] } = await confirm(args.p_event_request_id, args.p_coordinator_id, args.p_no_equipment_confirmed);
+            const { rows: [data] } = await db.query('select * from confirm_event_request($1, $2, $3, $4)', [
+              args.p_event_request_id, args.p_coordinator_id, args.p_no_equipment_confirmed, args.p_expected_updated_at,
+            ]);
             return { data, error: null };
           } catch (error) {
             return { data: null, error: { code: error.code, message: error.message, hint: error.hint, details: error.detail } };
@@ -621,6 +626,18 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
       expect(failed.body.code).toBe('EVENT_NOT_READY');
       expect(failed.body.conflicts).toEqual((await readiness(flagged)).items.filter((item) => !item.met));
       expect((await written(flagged)).event.status).toBe('safety_approved');
+
+      const needsAcknowledgement = await readyToConfirm({ equipment_requirements: 'Projectors' });
+      const unversioned = await request(app).post(`/api/event-requests/${needsAcknowledgement}/confirm`)
+        .send({ noEquipmentConfirmed: true });
+      expect(unversioned.status).toBe(409);
+      expect(unversioned.body.error).toMatch(/refresh/i);
+      expect((await written(needsAcknowledgement)).event.status).toBe('safety_approved');
+      const { updated_at: expectedUpdatedAt } = await one('select updated_at from event_requests where id = $1', [needsAcknowledgement]);
+      const acknowledged = await request(app).post(`/api/event-requests/${needsAcknowledgement}/confirm`)
+        .send({ noEquipmentConfirmed: true, expectedUpdatedAt });
+      expect(acknowledged.status).toBe(200);
+      expect((await written(needsAcknowledgement)).history.at(-1).reason).toMatch(/acknowledged that no equipment is needed/i);
     });
 
     it('SCRUM363_AC6_a_safety_approved_event_is_confirmed_with_its_coordinator_and_timestamp_in_history', async () => {
@@ -740,6 +757,31 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
       });
     });
 
+    it('SCRUM363_AC5_acknowledgement_without_an_observed_revision_cannot_confirm', async () => {
+      const id = await readyToConfirm({ equipment_requirements: 'Projectors' });
+      const before = await written(id);
+      const err = await refusal(db.query('select confirm_event_request($1, $2, true)', [id, coordinatorA]));
+      expect(err?.code).toBe('55000');
+      expect(err?.message).toMatch(/refresh/i);
+      expect(await written(id)).toEqual(before);
+    });
+
+    it('SCRUM363_AC5_an_old_acknowledgement_revision_is_refused_after_a_new_safety_cycle', async () => {
+      const id = await readyToConfirm({ equipment_requirements: 'Projectors' });
+      const oldRevision = (await one('select updated_at::text as revision from event_requests where id = $1', [id])).revision;
+      await confirm(id, coordinatorA, true);
+      await db.query("select change_event_request_status($1, 'confirmed', 'approved', $2, 'Reopened for replay test', $2)", [id, coordinatorA]);
+      await db.query("update event_requests set equipment_requirements = 'Microphones' where id = $1", [id]);
+      await submit(id, coordinatorA, null, true);
+      await db.query("select respond_to_safety_review($1, $2, 'approved', null, '{}', false)", [id, safetyOfficers[0]]);
+      const before = await written(id);
+      const err = await refusal(db.query('select confirm_event_request($1, $2, true, $3::timestamptz)', [id, coordinatorA, oldRevision]));
+      expect(err?.code).toBe('55000');
+      expect(err?.message).toMatch(/refresh/i);
+      expect(await written(id)).toEqual(before);
+      await confirm(id, coordinatorA, true);
+    });
+
     it('SCRUM363_AC5_reconfirmation_requires_a_new_acknowledgement_after_a_direct_revert_and_fresh_safety_cycle', async () => {
       const id = await readyToConfirm({ equipment_requirements: 'Projectors' });
       await confirm(id, coordinatorA, true);
@@ -835,6 +877,48 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
       expect((await refusal(db.query('select assert_equipment_editable($1, $2)', [id, coordinatorA])))?.code).toBe('55000');
     });
 
+    it('SCRUM363_AC8_legacy_change_acceptance_cannot_edit_confirmed_fields_and_rolls_back_the_decision', async () => {
+      const id = await readyToConfirm();
+      await confirm(id);
+      const { id: changeId } = await one(`insert into event_change_requests
+        (event_request_id, requested_by, change_field, requested_change)
+        values ($1, $2, 'event_name', 'Changed without review') returning id`, [id, organiser]);
+      const before = await written(id);
+      const client = { async rpc(fn, args) {
+        expect(fn).toBe('process_change_request');
+        try {
+          const { rows: [data] } = await db.query('select * from process_change_request($1, $2, $3, $4)', [
+            args.p_change_request_id, args.p_decision, args.p_decision_notes, args.p_processed_by,
+          ]);
+          return { data, error: null };
+        } catch (error) {
+          return { data: null, error: { code: error.code, message: error.message } };
+        }
+      } };
+      const app = express().use(express.json()).use('/api/event-requests', createEventRequestRouter({
+        client, requireAuth: (req, _res, next) => { req.user = { id: coordinatorA, role: 'event_coordinator' }; next(); },
+      }));
+      const response = await request(app).post(`/api/event-requests/change-requests/${changeId}/decision`).send({ decision: 'approved' });
+      expect(response.status).toBe(409);
+      expect(response.body.error).toMatch(/confirmed event details are locked/i);
+      expect(await written(id)).toEqual(before);
+      expect(await one('select status, decision, processed_by from event_change_requests where id = $1', [changeId]))
+        .toEqual({ status: 'outstanding', decision: null, processed_by: null });
+    });
+
+    it.each([
+      ['proposed_start', "proposed_start + interval '1 hour'"],
+      ['expected_attendance', 'coalesce(expected_attendance, 1) + 1'],
+      ['equipment_requirements', "'Additional microphones'"],
+    ])('SCRUM363_AC8_confirmed_%s_is_locked_even_for_a_trusted_table_writer', async (field, value) => {
+      const id = await readyToConfirm();
+      await confirm(id);
+      const before = await written(id);
+      const error = await refusal(db.query(`update event_requests set ${field} = ${value} where id = $1`, [id]));
+      expect(error?.code).toBe('55000');
+      expect(await written(id)).toEqual(before);
+    });
+
     it('SCRUM363_AC2_confirmation_does_not_open_registration_until_independent_settings_allow_it', async () => {
       const id = await readyToConfirm();
       const register = () => db.query('select register_for_event($1, $2) as result', [id, attendee]);
@@ -912,9 +996,30 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
       expect(prosecdef).toBe(false);
       expect(Number(count)).toBe(1);
       for (const role of ['anon', 'authenticated', 'service_role']) {
-        const { allowed } = await one("select has_function_privilege($1, 'confirm_event_request(uuid,uuid,boolean)', 'execute') as allowed", [role]);
+        const { allowed } = await one("select has_function_privilege($1, 'confirm_event_request(uuid,uuid,boolean,timestamptz)', 'execute') as allowed", [role]);
         expect(allowed).toBe(role === 'service_role');
       }
+    });
+
+    it.each(['anon', 'authenticated'])('SCRUM363_AC1_database_role_%s_cannot_spoof_confirmation_or_write_status_directly', async (role) => {
+      const id = await readyToConfirm();
+      const before = await written(id);
+      // Model Supabase's table grants: deny-all RLS must still stop client roles.
+      await db.exec(`grant usage on schema public to ${role};
+        grant select, update on event_requests to ${role};
+        grant select, insert on event_request_status_history to ${role};`);
+      try {
+        await db.exec(`set role ${role}`);
+        const rpc = await refusal(db.query('select confirm_event_request($1, $2)', [id, coordinatorA]));
+        expect(rpc?.code).toBe('42501');
+        const direct = await db.query("update event_requests set status = 'confirmed' where id = $1 returning id", [id]);
+        expect(direct.rows).toEqual([]);
+        const transition = await refusal(db.query("select change_event_request_status($1, 'safety_approved', 'confirmed', $2)", [id, coordinatorA]));
+        expect(transition?.code).toBe('P0002');
+      } finally {
+        await db.exec('reset role');
+      }
+      expect(await written(id)).toEqual(before);
     });
   });
 

@@ -55,6 +55,7 @@
  *    reinterpret a value the timestamptz column already understands.
  */
 
+import { checkTimestamp } from '../validation/timestampValidation.js';
 import {
   ValidationError,
   NotFoundError,
@@ -2580,7 +2581,7 @@ export async function getEventReadiness({ client, eventRequestId, noEquipmentCon
 
 /** Confirm through one RPC; assignment, status and readiness are checked under its locks. */
 export async function confirmEventRequest({
-  client, eventRequestId, coordinatorId, noEquipmentConfirmed = false,
+  client, eventRequestId, coordinatorId, noEquipmentConfirmed = false, expectedUpdatedAt = null,
 } = {}) {
   if (!isPlausibleId(eventRequestId)) {
     throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
@@ -2595,11 +2596,18 @@ export async function confirmEventRequest({
     );
   }
 
+  if (expectedUpdatedAt !== null) {
+    const details = [];
+    checkTimestamp({ add: (field, message) => details.push({ field, message }) }, 'expectedUpdatedAt', expectedUpdatedAt);
+    if (details.length) throw new ValidationError('Invalid event revision', details);
+  }
+
   const db = await resolveClient(client);
   const { data, error } = await db.rpc('confirm_event_request', {
     p_event_request_id: eventRequestId,
     p_coordinator_id: coordinatorId,
     p_no_equipment_confirmed: noEquipmentConfirmed,
+    p_expected_updated_at: expectedUpdatedAt,
   });
   if (error) throw translateError(error);
   return toEventRequest(data);

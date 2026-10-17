@@ -908,6 +908,7 @@ export function createEventRequestRouter({
         eventRequestId: req.params.id,
         coordinatorId: req.user.id,
         noEquipmentConfirmed: req.body?.noEquipmentConfirmed,
+        expectedUpdatedAt: req.body?.expectedUpdatedAt,
       });
       res.status(200).json(withStatusDisplay(updated));
     } catch (err) {
