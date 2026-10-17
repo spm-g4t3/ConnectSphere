@@ -351,8 +351,15 @@ describe('SCRUM-258: booking decisions restated after the safety review migratio
       expect(latestFileWith('create or replace function event_readiness(')).toBe(MIGRATION);
     });
 
-    it('SCRUM258_AC6_075_is_the_latest_migration_setting_notifications_type_known', () => {
-      expect(latestFileWith('add constraint notifications_type_known')).toBe(MIGRATION);
+    // Later migrations may restate the list (076 adds flagged_booking_resolved);
+    // what matters is that none drops a type 075 lists.
+    it('SCRUM258_AC6_the_latest_migration_setting_notifications_type_known_keeps_every_075_type', () => {
+      const types = (sql) => [...sql.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+      const ours = types(migration(MIGRATION).match(/type in \(([\s\S]*?)\)/)[1]);
+      const latest = migration(latestFileWith('add constraint notifications_type_known'));
+
+      expect(ours).toContain('booking_request_conflicting');
+      expect(types(latest)).toEqual(expect.arrayContaining(ours));
     });
   });
 });

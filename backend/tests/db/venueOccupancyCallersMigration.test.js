@@ -316,8 +316,10 @@ describe('AC6: a block keeps its own period', () => {
     // (step 6) and the request's own expected attendance, so 051 is now its
     // latest definition. Changed for SCRUM-258: 066 restates 051's body with
     // step 3 widened to the safety statuses and step 6's live statuses to
-    // conflicting, step 7's call unchanged, so 066 is now the latest.
-    expect(latestDefinitionFile('create_booking_request')).toBe('066_venue_staff_booking_decisions.sql');
+    // conflicting, step 7's call unchanged, so 066 was the latest. Changed for
+    // SCRUM-266: 078 restates 066's body with step 3a (the booking it
+    // replaces), step 7's call unchanged, so 078 is now the latest.
+    expect(latestDefinitionFile('create_booking_request')).toBe('078_list_flagged_bookings.sql');
   });
 
   it('SCRUM484_AC7_block_conflicts_carry_the_occupied_keys', () => {

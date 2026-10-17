@@ -13,7 +13,7 @@ vi.mock("../../src/services/safetyReviewService", () => ({
   getSafetyReviewQueue: vi.fn(),
   submitSafetyReviewResponse: vi.fn(),
 }));
-vi.mock("../../src/components/CoordinatorNotifications", () => ({
+vi.mock("../../src/components/NotificationInbox", () => ({
   default: () => <div>Notifications</div>,
 }));
 

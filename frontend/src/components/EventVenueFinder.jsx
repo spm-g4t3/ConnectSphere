@@ -128,9 +128,16 @@
 // another venue" shows the same sentence in the suitability panel in place of
 // its Request button (requestBlockedReason), so it is never offered there
 // either.
+//
+// SCRUM-266: `replacing` is the flagged booking the coordinator chose to
+// replace from Flagged bookings above. While set, a notice names it, focus
+// moves there so the coordinator lands on the search, and the request panel
+// sends its id as replacesBookingId. The parent owns it: "Stop replacing"
+// calls onStopReplacing, and onReplacementRefused(code) reports a flagged
+// booking the server says can no longer be replaced.
 
-import { useId, useRef, useState } from "react";
-import { VENUE_TIME_ZONE } from "../services/datetimeFormat";
+import { useEffect, useId, useRef, useState } from "react";
+import { VENUE_TIME_ZONE, formatVenuePeriod } from "../services/datetimeFormat";
 import { bookingRequestEligibility } from "../services/bookingRequestEligibility";
 import {
   mapServerDetails,
@@ -344,6 +351,9 @@ export default function EventVenueFinder({
   liveRequests = NO_LIVE_REQUESTS,
   onRequestSubmitted,
   onVenueAlreadyRequested,
+  replacing,
+  onStopReplacing,
+  onReplacementRefused,
 }) {
   // Lazy: the function runs on the first render only. See the header.
   const [seed] = useState(() => seedFromEvent(request));
@@ -380,6 +390,13 @@ export default function EventVenueFinder({
   const canCheck = Boolean(request?.id) && Boolean(userId) && request.assignedCoordinatorId === userId;
   const [checkingVenue, setCheckingVenue] = useState(null);
   const checkCount = useRef(0);
+
+  // SCRUM-266. Focus follows each new choice of booking to replace.
+  const replacingNotice = useRef(null);
+  const replacingId = replacing?.id ?? null;
+  useEffect(() => {
+    if (replacingId) replacingNotice.current?.focus();
+  }, [replacingId]);
 
   const idPrefix = useId();
   const idFor = (field) => `${idPrefix}-${field}`;
@@ -511,6 +528,17 @@ export default function EventVenueFinder({
 
   return (
     <>
+      {replacing && (
+        <div className="event-venue-finder__replacing" role="status" tabIndex={-1} ref={replacingNotice}>
+          <p>
+            Requesting a replacement for {replacing.venueName},{" "}
+            {formatVenuePeriod(replacing.startsAt, replacing.endsAt)}
+          </p>
+          <button type="button" onClick={onStopReplacing}>
+            Stop replacing
+          </button>
+        </div>
+      )}
       <form className="event-venue-finder" onSubmit={handleSearch} noValidate>
         <div className="event-venue-finder__row">
           <div className="event-venue-finder__field">
@@ -711,6 +739,8 @@ export default function EventVenueFinder({
             lockVenue(requesting.venue.id, code === "BOOKING_FLAGGED_FOR_REVIEW" ? "Flagged for review" : null);
             onVenueAlreadyRequested?.(code);
           }}
+          replacesBookingId={replacing?.id}
+          onReplacementRefused={onReplacementRefused}
           onClose={() => setRequesting(null)}
         />
       )}

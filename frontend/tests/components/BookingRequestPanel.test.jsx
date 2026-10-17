@@ -415,6 +415,39 @@ describe("errors the coordinator can act on", () => {
     expect(onVenueAlreadyRequested).toHaveBeenCalledWith(code);
   });
 
+  // SCRUM-266: a request made to replace a flagged booking names it; any
+  // other request must not, or approving it would close a booking by mistake.
+  it("SCRUM266_W7_sends_replacesBookingId_only_when_replacing", async () => {
+    vi.mocked(createBookingRequest).mockResolvedValue(PENDING);
+    const { user } = renderPanel({ replacesBookingId: "f1" });
+
+    await user.click(submit());
+
+    expect(createBookingRequest).toHaveBeenCalledWith({
+      eventRequestId: "e1",
+      venueId: "v1",
+      expectedAttendance: 150,
+      replacesBookingId: "f1",
+    });
+  });
+
+  it.each([
+    ["REPLACED_BOOKING_NOT_FLAGGED", /no longer flagged for review/],
+    ["REPLACED_BOOKING_NOT_ON_EVENT", /does not belong to this event/],
+  ])("SCRUM266_W7_%s_is_explained_and_reported_to_the_parent", async (code, pattern) => {
+    vi.mocked(createBookingRequest).mockRejectedValue(conflict409(code));
+    const onReplacementRefused = vi.fn();
+    const { user, onVenueAlreadyRequested } = renderPanel({ replacesBookingId: "f1", onReplacementRefused });
+
+    await user.click(submit());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(pattern);
+    expect(alert).not.toHaveTextContent("prose");
+    expect(onReplacementRefused).toHaveBeenCalledWith(code);
+    expect(onVenueAlreadyRequested).not.toHaveBeenCalled();
+  });
+
   it("SCRUM254_works_when_the_parent_gives_no_callbacks", async () => {
     vi.mocked(createBookingRequest).mockRejectedValue(conflict409("BOOKING_REQUEST_EXISTS"));
     const { user } = renderPanel({ onVenueAlreadyRequested: undefined });

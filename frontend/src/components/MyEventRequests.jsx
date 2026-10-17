@@ -24,6 +24,7 @@ import DecisionOutcome from "./DecisionOutcome";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import ClarificationReplyForm from "./ClarificationReplyForm";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
+import NeedsAttentionBadge from "./NeedsAttentionBadge";
 
 function formatEventDate(value) {
   if (!value) return "Not specified";
@@ -134,9 +135,20 @@ export default function MyEventRequests() {
     location.state?.openNewEventRequest ? { mode: "create" } : null,
   );
   const pendingClarificationId = useRef(location.state?.openClarificationRequestId ?? null);
+  // SCRUM-172 (AC7): a notification opened from the inbox names the event to
+  // show. Read once, like the clarification shortcut, because the state is
+  // cleared below.
+  const pendingFocusId = useRef(location.state?.focusEventRequestId ?? null);
+  const [focusedId, setFocusedId] = useState(null);
+  const [focusMissing, setFocusMissing] = useState(false);
+  const focusedRowRef = useRef(null);
 
   useEffect(() => {
-    if (location.state?.openNewEventRequest || location.state?.openClarificationRequestId) {
+    if (
+      location.state?.openNewEventRequest ||
+      location.state?.openClarificationRequestId ||
+      location.state?.focusEventRequestId
+    ) {
       navigate(location.pathname, { replace: true, state: null });
     }
   }, [location.pathname, location.state, navigate]);
@@ -153,6 +165,14 @@ export default function MyEventRequests() {
         setActivePanel({ mode: "clarification-response", request: requestedEvent });
       }
       pendingClarificationId.current = null;
+      // Not in the list means not theirs or gone; say so rather than land on
+      // the list as if the link had worked.
+      if (pendingFocusId.current) {
+        const found = data.some((item) => item.id === pendingFocusId.current);
+        setFocusedId(found ? pendingFocusId.current : null);
+        setFocusMissing(!found);
+      }
+      pendingFocusId.current = null;
       setError(null);
     } catch {
       setError("Could not load your event requests.");
@@ -164,6 +184,11 @@ export default function MyEventRequests() {
   useEffect(() => {
     fetchRequests();
   }, [fetchRequests]);
+
+  // jsdom has no scrollIntoView, hence the guard.
+  useEffect(() => {
+    if (focusedId) focusedRowRef.current?.scrollIntoView?.({ block: "center" });
+  }, [focusedId]);
 
   // AC4: the displayed status is updated when the event request changes.
   //
@@ -251,6 +276,7 @@ export default function MyEventRequests() {
 
       {loading && <p>Loading...</p>}
       {error && <p className="my-event-requests__error">{error}</p>}
+      {focusMissing && <p role="status">That event is no longer in your list.</p>}
 
       {!loading && !error && requests.length === 0 && (
         <p>You haven't created any event requests yet.</p>
@@ -263,12 +289,21 @@ export default function MyEventRequests() {
           const display = readStatusDisplay(req);
           const assignment = assignmentLine(req);
           return (
-            <li key={req.id} className="my-event-requests__item">
+            <li
+              key={req.id}
+              ref={req.id === focusedId ? focusedRowRef : undefined}
+              className={
+                req.id === focusedId
+                  ? "my-event-requests__item my-event-requests__item--focused"
+                  : "my-event-requests__item"
+              }
+            >
               <div className="my-event-requests__item-main">
                 <strong>{req.eventName}</strong>
                 <span className={`status-badge ${statusClassName(display.group)}`}>
                   {display.label}
                 </span>
+                <NeedsAttentionBadge event={req} />
               </div>
               <p className="my-event-requests__item-description">
                 {display.description}

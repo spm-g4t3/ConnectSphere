@@ -46,6 +46,12 @@ vi.mock("../../src/services/bookingRequestService", async (importOriginal) => ({
   getPendingBookingRequests: vi.fn(),
 }));
 
+// The inbox reads the signed-in user to link its rows; no user, no links, so
+// the dashboard renders as before.
+vi.mock("../../src/auth/AuthContext", () => ({
+  useAuth: () => ({ user: null }),
+}));
+
 const USER = { id: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d", email: "coord@example.com", role: "event_coordinator" };
 
 const NOTIFICATION = {
@@ -136,7 +142,7 @@ describe("SCRUM17_AC3 EventCoordinatorDashboard", () => {
     expect(dashboard).not.toBeNull();
     const sections = [...dashboard.children].filter((el) => el.tagName === "SECTION");
     expect(sections.length).toBeGreaterThanOrEqual(2);
-    expect(dashboard.querySelector(":scope > section.coordinator-notifications")).not.toBeNull();
+    expect(dashboard.querySelector(":scope > section.notification-inbox")).not.toBeNull();
   });
 
   it("shows a notification from the service", async () => {

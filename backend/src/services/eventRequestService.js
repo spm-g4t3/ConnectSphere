@@ -79,6 +79,7 @@ import {
 } from '../domain/eventRequestStatus.js';
 // Imports nothing itself, so this service stays loadable without credentials.
 import { ROLE } from '../domain/userRole.js';
+import { BOOKING_STATUS } from '../domain/bookingStatus.js';
 
 
 /**
@@ -113,6 +114,13 @@ const COLUMNS = `
   cancellation_reason, cancellation_initiator, cancelled_by, cancelled_at,
   created_at, updated_at, submitted_at
 `;
+
+/**
+ * SCRUM-266: COLUMNS plus each event's booking statuses, embedded along
+ * bookings.event_request_id (009), so the event lists and single reads can
+ * say whether the event needs attention without a second round trip.
+ */
+const ATTENTION_COLUMNS = `${COLUMNS}, bookings(status)`;
 
 /**
  * The two vocabularies this module bridges: camelCase above it, the column
@@ -346,6 +354,23 @@ function toEventRequest(row) {
 }
 
 /**
+ * SCRUM-266: a confirmed event with a booking flagged for review needs its
+ * coordinator. Only confirmed counts: before that the event is still being
+ * arranged, and the flag is one item of that work. The embed is read
+ * defensively, as bookingRequestService's one() reads its embeds.
+ */
+function needsAttention(row) {
+  if (row.status !== STATUS.CONFIRMED) return false;
+  const bookings = Array.isArray(row.bookings) ? row.bookings : [row.bookings];
+  return bookings.some((booking) => booking?.status === BOOKING_STATUS.FLAGGED_FOR_REVIEW);
+}
+
+/** toEventRequest, with needsAttention, for a row read with ATTENTION_COLUMNS. */
+function toEventRequestWithAttention(row) {
+  return { ...toEventRequest(row), needsAttention: needsAttention(row) };
+}
+
+/**
  * The column payload for a validated request.
  *
  * Only fields the caller actually supplied are included. The validator already
@@ -452,18 +477,23 @@ export async function createEventRequest(input, organiserId, { client } = {}) {
  * @throws {NotFoundError} when no request has that id
  */
 export async function getEventRequestById(id, { client } = {}) {
+  return toEventRequest(await readEventRequestRow(id, COLUMNS, client));
+}
+
+/** The stored row behind getEventRequestById, read with the columns given. */
+async function readEventRequestRow(id, columns, client) {
   const db = await resolveClient(client);
 
   const { data, error } = await db
     .from('event_requests')
-    .select(COLUMNS)
+    .select(columns)
     .eq('id', id)
     .maybeSingle();
 
   if (error) throw translateError(error);
   if (!data) throw new NotFoundError(`Event request ${id} not found`);
 
-  return toEventRequest(data);
+  return data;
 }
 
 /**
@@ -1317,7 +1347,7 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
 
   const { data, error } = await db
     .from('event_requests')
-    .select(COLUMNS)
+    .select(ATTENTION_COLUMNS)
     .eq('organiser_id', organiserId)
     .order('updated_at', { ascending: false })
     .order('id', { ascending: false });
@@ -1342,7 +1372,7 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
   const nameOf = coordinatorIds.length > 0 ? await readNames(db, coordinatorIds) : () => null;
 
   return rows.map((row) => ({
-    ...toEventRequest(row),
+    ...toEventRequestWithAttention(row),
     assignedCoordinatorName: nameOf(row.assigned_coordinator_id ?? null),
   }));
 }
@@ -1361,7 +1391,7 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
  * over a table whose row level security is deny-all specifically so that the
  * API can be the only gate.
  *
- * Reads through getEventRequestById rather than repeating the query, so there
+ * Reads through readEventRequestRow, as getEventRequestById does, so there
  * is one definition of what a stored request looks like -- the same reason
  * submitEventRequest gives for doing it.
  *
@@ -1376,7 +1406,7 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
 export async function getEventRequestForOrganiser(id, organiserId, { client } = {}) {
   assertOrganiser(organiserId);
 
-  const request = await getEventRequestById(id, { client });
+  const request = toEventRequestWithAttention(await readEventRequestRow(id, ATTENTION_COLUMNS, client));
 
   if (request.organiserId !== organiserId) {
     // Deliberately the same message getEventRequestById raises for an id that
@@ -1416,7 +1446,7 @@ export async function getEventRequestForOrganiser(id, organiserId, { client } = 
  * ForbiddenError to records the caller can already see, and nobody but its
  * Organiser can see a draft.
  *
- * Reads through getEventRequestById, as getEventRequestForOrganiser does, so
+ * Reads through readEventRequestRow, as getEventRequestForOrganiser does, so
  * there is one definition of what a stored request looks like.
  *
  * @param {string} id
@@ -1426,7 +1456,7 @@ export async function getEventRequestForOrganiser(id, organiserId, { client } = 
  * @throws {NotFoundError} when no such request exists, or it is a draft
  */
 export async function getEventRequestForCoordinator(id, { client } = {}) {
-  const request = await getEventRequestById(id, { client });
+  const request = toEventRequestWithAttention(await readEventRequestRow(id, ATTENTION_COLUMNS, client));
 
   if (request.status === STATUS.DRAFT) {
     // The same message getEventRequestById raises for an id that does not
@@ -1660,7 +1690,7 @@ export async function listEventRequestsForReview({ client } = {}) {
 
   const { data, error } = await db
     .from('event_requests')
-    .select(COLUMNS)
+    .select(ATTENTION_COLUMNS)
     .in('status', COORDINATOR_QUEUE_STATUSES)
     // SCRUM-486 AC2-06: a request nobody holds is the Lead's (see above).
     .not('assigned_coordinator_id', 'is', null)
@@ -1671,7 +1701,7 @@ export async function listEventRequestsForReview({ client } = {}) {
 
   // An empty queue is the good state, not a missing resource: it means nothing
   // is waiting on a Coordinator. 200 [] all the way up, never a NotFoundError.
-  return (data ?? []).map(toEventRequest);
+  return (data ?? []).map(toEventRequestWithAttention);
 }
 
 
@@ -1772,7 +1802,7 @@ export async function listEventRequestsForCoordinator(coordinatorId, { client } 
 
   const { data, error } = await db
     .from('event_requests')
-    .select(COLUMNS)
+    .select(ATTENTION_COLUMNS)
     .eq('assigned_coordinator_id', coordinatorId)
     .order('proposed_start', { ascending: true, nullsFirst: false })
     .order('id', { ascending: true });
@@ -1787,7 +1817,7 @@ export async function listEventRequestsForCoordinator(coordinatorId, { client } 
   const nameOf = await readNames(db, rows.map((row) => row.organiser_id));
 
   return rows.map((row) => ({
-    ...toEventRequest(row),
+    ...toEventRequestWithAttention(row),
     organiserName: nameOf(row.organiser_id),
   }));
 }

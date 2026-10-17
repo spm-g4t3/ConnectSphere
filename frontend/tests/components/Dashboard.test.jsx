@@ -27,7 +27,7 @@
 // call, apiClient, plus supportService, the one stub that does not go through it.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import Dashboard from "../../src/components/Dashboard.jsx";
@@ -247,7 +247,7 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     unmount();
 
     vi.mocked(useAuth).mockReturnValue({ user: { name: "Priya Nair", email: "so@example.com", role: "safety_officer" } });
-    render(<Dashboard />, { wrapper: MemoryRouter });
+    inRouter(<Dashboard />);
     expect(screen.getByText("Signed in as Priya Nair.")).toBeInTheDocument();
   });
 });
@@ -306,7 +306,7 @@ function renderAs(role) {
   vi.mocked(useAuth).mockReturnValue({
     user: { id: "u1", email: "user@example.com", role },
   });
-  return render(<Dashboard />, { wrapper: MemoryRouter });
+  return inRouter(<Dashboard />);
 }
 
 beforeEach(() => {
@@ -339,8 +339,28 @@ describe("Dashboard role map", () => {
 
     expect(screen.getByRole("heading", { name: "Browse Open Events" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Browse Open Events" })).toHaveAttribute("href", "/open-events");
-    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    // Scoped to the browse section: the notifications inbox below it has a list of its own.
+    const browse = screen.getByRole("region", { name: "Browse Open Events" });
+    expect(within(browse).queryByRole("list")).not.toBeInTheDocument();
     expect(apiClient.get).not.toHaveBeenCalledWith("/registration/open");
+  });
+
+  it("SCRUM172_AC1_attendee_dashboard_shows_the_inbox", async () => {
+    // The real inbox, through the real service: the attendee's own list, read
+    // from the caller-scoped endpoint.
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [{
+      id: "n1",
+      type: "event_submitted_for_safety_review",
+      readAt: null,
+      createdAt: "2026-10-14T09:00:00+08:00",
+      payload: { eventName: "IS212 Industry Night", coordinatorName: "Priya Nair" },
+    }] });
+    const { container } = renderAs("attendee");
+
+    expect(container.querySelector("section#notifications")).toBeInTheDocument();
+    expect(await screen.findByText("Event submitted for safety check")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Notifications (1 unread)" })).toBeInTheDocument();
+    expect(vi.mocked(apiClient.get).mock.calls.map(([path]) => path)).toEqual(["/notifications"]);
   });
 
   it("falls back for an unrecognised role", () => {

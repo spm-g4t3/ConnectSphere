@@ -46,6 +46,11 @@ import { apiClient } from "./apiClient";
  *   the unmet criteria the coordinator confirmed; sent with confirmUnsuitable.
  *   The server accepts the override only when they cover every criterion it
  *   finds unmet, otherwise it answers SUITABILITY_CONFIRMATION_REQUIRED again.
+ * @param {string} [input.replacesBookingId]  SCRUM-266, the event's flagged
+ *   booking this request replaces; left out of an ordinary request. Approving
+ *   the replacement closes that booking. Adds the 409 codes
+ *   REPLACED_BOOKING_NOT_FLAGGED (it was resolved meanwhile) and
+ *   REPLACED_BOOKING_NOT_ON_EVENT.
  * @returns {Promise<Object>} the new request, always status "pending", with
  *   the expectedAttendance it was stored with
  */
