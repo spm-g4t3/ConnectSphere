@@ -56,10 +56,14 @@ describe("SCRUM-363 organiser registration controls", () => {
       </MemoryRouter>,
     );
 
-    const form = await screen.findByRole("form");
+    const configure = await screen.findByRole("button", { name: "Configure registration" });
     expect(screen.getByRole("heading", { name: "Industry Night" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Registration settings" })).not.toBeInTheDocument();
     expect(screen.getByText("12 / 80")).toBeInTheDocument();
+    expect(screen.queryByRole("form")).not.toBeInTheDocument();
+    fireEvent.click(configure);
+    const form = await screen.findByRole("form");
+    expect(screen.queryByText("12 / 80")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Registration settings" })).not.toBeInTheDocument();
     fireEvent.click(within(form).getByLabelText("Registration is on"));
     fireEvent.change(within(form).getByRole("spinbutton"), {
       target: { value: "90" },
@@ -90,8 +94,10 @@ describe("SCRUM-22 attendee registration", () => {
     render(<AttendeeDashboard user={{ name: "Ari" }} />);
     expect(await screen.findByRole("heading", { name: "Industry Night" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Register" }));
+    expect(screen.getByText("Event starts")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm registration" }));
 
     await waitFor(() => expect(registerForEvent).toHaveBeenCalledWith(EVENT_ID));
-    expect(await screen.findByRole("button", { name: "Registered" })).toBeDisabled();
+    expect(await screen.findByText("Registered")).toBeInTheDocument();
   });
 });

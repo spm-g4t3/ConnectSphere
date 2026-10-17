@@ -11,6 +11,7 @@ const NAV_LINKS_BY_ROLE = {
   EVENT_ORGANISER: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/events", label: "My Events" },
+    { to: "/registration", label: "Registration" },
     // No "Find a Venue": an Organiser states venue needs on the request
     // (SCRUM-10); Coordinators search and book venues (SCRUM-20, SCRUM-243).
   ],

@@ -16,6 +16,7 @@ export default function AttendeeDashboard({ user }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [registering, setRegistering] = useState(null);
+  const [expanded, setExpanded] = useState(null);
   const [registered, setRegistered] = useState([]);
   const browseEnabled = isOpenEventsEnabled();
 
@@ -72,7 +73,7 @@ export default function AttendeeDashboard({ user }) {
         </section>
       ) : (
         <section aria-labelledby="attendee-browse-heading">
-          <h2 id="attendee-browse-heading">Browse Open Events</h2>
+          <h2 id="attendee-browse-heading">Open for registration</h2>
           <p>Events are listed only while registration is open and capacity remains.</p>
           {loading && <p>Loading open events...</p>}
           {error && <p role="alert">{error}</p>}
@@ -83,26 +84,49 @@ export default function AttendeeDashboard({ user }) {
               <p>If the organiser has just changed the event or its settings, refresh this page and check again.</p>
             </div>
           )}
-          <ul>
+          <ul className="attendee-open-events__list">
             {events.map((event) => {
               const hasRegistered = registered.includes(event.id);
+              const isOpen = expanded === event.id;
               return (
-                <li key={event.id}>
-                  <h3>{event.eventName}</h3>
-                  {event.description && <p>{event.description}</p>}
-                  <p>Event starts {displayDate(event.startsAt)}</p>
-                  <p>Registration closes {displayDate(event.registrationClosesAt)}</p>
-                  <p>
-                    Registered: {event.registeredCount}
-                    {event.capacity ? ` / ${event.capacity}` : ""}
-                  </p>
-                  <button
-                    type="button"
-                    disabled={hasRegistered || registering === event.id}
-                    onClick={() => handleRegister(event.id)}
-                  >
-                    {hasRegistered ? "Registered" : registering === event.id ? "Registering..." : "Register"}
-                  </button>
+                <li key={event.id} className="attendee-open-events__item">
+                  <div className="attendee-open-events__head">
+                    <h3>{event.eventName}</h3>
+                    {hasRegistered ? (
+                      <span className="attendee-open-events__registered">Registered</span>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-expanded={isOpen}
+                        onClick={() => setExpanded(isOpen ? null : event.id)}
+                      >
+                        {isOpen ? "Hide" : "Register"}
+                      </button>
+                    )}
+                  </div>
+                  {isOpen && !hasRegistered && (
+                    <div className="attendee-open-events__details">
+                      {event.description && <p>{event.description}</p>}
+                      <dl>
+                        <div><dt>Event starts</dt><dd>{displayDate(event.startsAt)}</dd></div>
+                        <div><dt>Registration closes</dt><dd>{displayDate(event.registrationClosesAt)}</dd></div>
+                        <div>
+                          <dt>Registered</dt>
+                          <dd>
+                            {event.registeredCount}
+                            {event.capacity ? ` / ${event.capacity}` : ""}
+                          </dd>
+                        </div>
+                      </dl>
+                      <button
+                        type="button"
+                        disabled={registering === event.id}
+                        onClick={() => handleRegister(event.id)}
+                      >
+                        {registering === event.id ? "Registering..." : "Confirm registration"}
+                      </button>
+                    </div>
+                  )}
                 </li>
               );
             })}

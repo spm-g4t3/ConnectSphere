@@ -326,7 +326,7 @@ describe("Dashboard role map", () => {
     vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
     renderAs("attendee");
 
-    expect(screen.getByRole("heading", { name: "Browse Open Events" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Open for registration" })).toBeInTheDocument();
     expect(await screen.findByRole("status")).toHaveTextContent("no events open for registration");
     expect(screen.getByRole("status")).toHaveTextContent(
       "Confirmed, registration is on, the opening time has passed",

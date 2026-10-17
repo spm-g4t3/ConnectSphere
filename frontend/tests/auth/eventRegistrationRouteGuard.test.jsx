@@ -44,7 +44,10 @@ describe("event registration settings route", () => {
       renderRegistrationPage(role);
 
       expect(screen.queryByTestId("registration-settings")).not.toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: "Not available to your role" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Registration settings are restricted" })).toBeInTheDocument();
+      expect(screen.getByText(
+        "Only the Event Organiser who created this event can set up its registration.",
+      )).toBeInTheDocument();
     },
   );
 

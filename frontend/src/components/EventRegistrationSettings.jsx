@@ -53,6 +53,7 @@ export default function EventRegistrationSettings({ eventId }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [event, setEvent] = useState(null);
   const canEdit = EDITABLE_STATUSES.has(event?.status);
 
@@ -132,6 +133,7 @@ export default function EventRegistrationSettings({ eventId }) {
       setSettings(updated);
       setEvent((current) => ({ ...current, settings: updated }));
       setSaved(true);
+      setEditing(false);
     } catch (saveError) {
       setError(apiError(saveError));
     } finally {
@@ -141,7 +143,20 @@ export default function EventRegistrationSettings({ eventId }) {
 
   return (
     <main className="event-registration-page">
-      <Link className="event-registration-page__back" to="/events">← Back to My Events</Link>
+      {editing ? (
+        <button
+          type="button"
+          className="event-registration-page__back"
+          onClick={() => {
+            setEditing(false);
+            setError(null);
+          }}
+        >
+          ← Back to registration settings
+        </button>
+      ) : (
+        <Link className="event-registration-page__back" to="/registration">← Back to Registration</Link>
+      )}
       {loading && <p role="status">Loading registration settings...</p>}
       {error && (
         <div className="event-registration-page__error" role="alert">
@@ -159,7 +174,7 @@ export default function EventRegistrationSettings({ eventId }) {
             <p>Event status: <strong>{displayStatus(event.status)}</strong></p>
             <p>Event starts: {displayDate(event.proposedStart)}</p>
           </header>
-          {settings && (
+          {settings && !editing && (
             <section className="event-registration-page__summary" aria-labelledby="registration-summary-heading">
               <h2 id="registration-summary-heading">Current registration</h2>
               <dl>
@@ -173,6 +188,19 @@ export default function EventRegistrationSettings({ eventId }) {
                 </div>
                 <div><dt>Withdrawal deadline</dt><dd>{displayDate(settings.withdrawalDeadline)}</dd></div>
               </dl>
+              {saved && <p role="status">Registration settings saved.</p>}
+              {canEdit && loaded && form && (
+                <button
+                  type="button"
+                  className="event-registration-page__configure"
+                  onClick={() => {
+                    setSaved(false);
+                    setEditing(true);
+                  }}
+                >
+                  Configure registration
+                </button>
+              )}
             </section>
           )}
           {!canEdit && (
@@ -181,7 +209,7 @@ export default function EventRegistrationSettings({ eventId }) {
               Current status: {displayStatus(event.status)}.
             </p>
           )}
-          {canEdit && loaded && form && (
+          {canEdit && loaded && form && editing && (
             <form className="event-registration-page__form" aria-label="Registration settings" onSubmit={save}>
               <h2>Configure registration</h2>
               <p>Set when attendees can register and the maximum number of places available.</p>
@@ -239,7 +267,6 @@ export default function EventRegistrationSettings({ eventId }) {
                 <button type="submit" disabled={saving}>
                   {saving ? "Saving..." : "Save registration settings"}
                 </button>
-                {saved && <p role="status">Registration settings saved.</p>}
               </div>
             </form>
           )}
