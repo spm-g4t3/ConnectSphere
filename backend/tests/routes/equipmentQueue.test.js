@@ -1,7 +1,7 @@
 /**
  * Route tests for the equipment request queue.
  *
- * SCRUM-285 for SCRUM-284. Named N22_ACn_<what_it_checks>. About transport and
+ * SCRUM-284. Named N22_ACn_<what_it_checks>. About transport and
  * authorisation: only Technical Support Staff reach the route (AC1), a refused
  * attempt reaches no database function, and each fault has the right status. The
  * client is injected, so the real Express routing and the real service run and
@@ -25,11 +25,10 @@ const queueRow = {
   event_name: 'Annual Dinner',
   proposed_start: '2030-01-10T10:00:00+00:00',
   proposed_end: '2030-01-10T12:00:00+00:00',
-  venue_id: null,
-  venue_name: null,
+  venues: [],
   coordinator_id: null,
   coordinator_name: null,
-  line_count: 2,
+  item_count: 2,
   status: 'pending_review',
   reviewer_id: null,
   reviewer_name: null,
@@ -92,14 +91,24 @@ describe('AC1: only Technical Support Staff open the dashboard', () => {
 describe('AC2 to AC4: what comes back', () => {
   it('N22_AC2_answers_with_the_two_lists', async () => {
     const res = await request(appWith(fakeClient())).get('/api/equipment-requests');
-    expect(Object.keys(res.body).sort()).toEqual(['needsAction', 'requests']);
+    expect(Object.keys(res.body).sort()).toEqual([
+      'needsAction',
+      'needsActionTruncated',
+      'requests',
+      'requestsTruncated',
+      'statuses',
+    ]);
     expect(res.body.requests[0]).toMatchObject({ eventRequestId: EVENT_ID, eventName: 'Annual Dinner', statusLabel: 'Pending review' });
   });
 
   it('N22_AC2_passes_the_filter_and_the_past_flag_to_the_database', async () => {
     const client = fakeClient();
     await request(appWith(client)).get('/api/equipment-requests?status=cancelled&includePast=true');
-    expect(client.rpc).toHaveBeenCalledWith('equipment_request_queue', { p_status: 'cancelled', p_include_past: true });
+    expect(client.rpc).toHaveBeenCalledWith('equipment_request_queue', {
+      p_caller: USER_ID,
+      p_status: 'cancelled',
+      p_include_past: true,
+    });
   });
 
   it('N22_AC2_a_bad_status_is_a_400_naming_the_field_and_reaches_no_function', async () => {
@@ -129,6 +138,12 @@ describe('AC2 to AC4: what comes back', () => {
 });
 
 describe('failures', () => {
+  it('N22_AC1_the_database_refusing_the_role_is_a_403', async () => {
+    const client = fakeClient({ data: null, error: { code: '42501', message: 'Only technical support staff can see the equipment request queue' } });
+    const res = await request(appWith(client)).get('/api/equipment-requests');
+    expect(res.status).toBe(403);
+  });
+
   it('N22_an_unexpected_database_failure_is_a_500_without_its_message', async () => {
     const client = fakeClient({ data: null, error: { code: 'XX000', message: 'relation "x" exploded' } });
     const res = await request(appWith(client)).get('/api/equipment-requests');

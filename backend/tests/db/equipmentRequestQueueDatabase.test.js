@@ -1,8 +1,9 @@
 /**
- * SCRUM-285 for SCRUM-284: the equipment request queue, against a real Postgres (PGlite).
+ * SCRUM-284: the equipment request queue (056), against a real Postgres (PGlite).
  *
  * Named N21_ACn_<what_it_checks>, the ACs being SCRUM-284's. Applies 022, 024, 037,
- * 038, 053, 054, 055 and 056 and calls equipment_request_queue the way the service does.
+ * 038, 053, 054, 055, 056 and 060 and calls equipment_request_queue the way the
+ * service does, as a Technical Support user.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -46,15 +47,16 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
   let organiser;
   let coordinator;
   let sam;
+  let tech;
   let alex;
   let hall;
 
   const one = async (sql, params) => (await db.query(sql, params)).rows[0];
   const asJson = (row) => JSON.parse(row.answer);
 
-  const newUser = async (email, name) => {
+  const newUser = async (email, name, role = 'event_coordinator') => {
     const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    await db.query('insert into profiles (id, full_name) values ($1, $2)', [id, name]);
+    await db.query('insert into profiles (id, full_name, role) values ($1, $2, $3)', [id, name, role]);
     return id;
   };
   const newType = async (name, total = 10) =>
@@ -82,8 +84,9 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
   const setStatus = (event, status) =>
     db.query('update equipment_requests set status = $2::equipment_request_status where event_request_id = $1', [event, status]);
   const startReview = (event, who) => one('select start_equipment_review($1, $2)::text as answer', [event, who]);
-  const queue = async (status = null, includePast = false) =>
-    asJson(await one('select equipment_request_queue($1, $2)::text as answer', [status, includePast]));
+  const queueFor = async (caller, status = null, includePast = false, limit = 200) =>
+    asJson(await one('select equipment_request_queue($1, $2, $3, $4)::text as answer', [caller, status, includePast, limit]));
+  const queue = (status = null, includePast = false, limit = 200) => queueFor(tech, status, includePast, limit);
   const rowFor = (list, event) => list.find((r) => r.event_request_id === event);
   const names = (list) => list.map((r) => r.event_name);
 
@@ -92,7 +95,7 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
     await db.exec(`
       create schema auth;
       create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create table profiles (id uuid primary key references auth.users(id), full_name text);
+      create table profiles (id uuid primary key references auth.users(id), full_name text, role text);
 
       create function set_updated_at() returns trigger language plpgsql as $$
       begin new.updated_at = now(); return new; end $$;
@@ -127,6 +130,7 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
     coordinator = await newUser('coordinator@example.com', 'Rae Tan');
     sam = await newUser('sam@example.com', 'Sam Lee');
     alex = await newUser('alex@example.com', 'Alex Koh');
+    tech = await newUser('tech@example.com', 'Tessa Support', 'technical_support_staff');
     hall = (await one("insert into venues (name) values ('Hall A') returning id")).id;
   }, 60000);
 
@@ -137,6 +141,26 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
 
   it('N21_runs_a_second_time_without_error', async () => {
     await expect(db.exec(migration('056_equipment_request_queue.sql'))).resolves.not.toThrow();
+  });
+
+  it('N21_the_old_two_argument_function_is_gone', async () => {
+    const old = await one("select to_regprocedure('equipment_request_queue(text, boolean)') as fn");
+    expect(old.fn).toBeNull();
+  });
+
+  describe('AC1: only Technical Support Staff can read it', () => {
+    it.each([
+      ['a coordinator', () => coordinator],
+      ['an organiser-role profile', () => organiser],
+      ['a user with no profile', () => '00000000-0000-4000-8000-000000000000'],
+      ['no caller', () => null],
+    ])('N21_AC1_%s_is_refused_with_42501', async (_label, who) => {
+      expect((await refusal(queueFor(who())))?.code).toBe('42501');
+    });
+
+    it('N21_AC1_a_technical_support_user_can_read_it', async () => {
+      await expect(queue()).resolves.toHaveProperty('needs_action');
+    });
   });
 
   it('N21_an_empty_database_gives_two_empty_lists', async () => {
@@ -157,30 +181,28 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
         'event_request_id',
         'flag_reasons',
         'flagged_count',
-        'line_count',
+        'item_count',
         'proposed_end',
         'proposed_start',
         'reviewer_id',
         'reviewer_name',
         'status',
-        'venue_id',
-        'venue_name',
+        'venues',
       ]);
     });
 
-    it('N21_AC3_a_row_shows_the_event_the_coordinator_the_line_count_and_the_status', async () => {
+    it('N21_AC3_a_row_shows_the_event_the_coordinator_the_item_count_and_the_status', async () => {
       const { event } = await makeEvent({ name: 'Annual Dinner', lines: 3 });
       const row = rowFor((await queue()).requests, event);
       expect(row).toMatchObject({
         event_name: 'Annual Dinner',
         coordinator_id: coordinator,
         coordinator_name: 'Rae Tan',
-        line_count: 3,
+        item_count: 6,
         status: 'pending_review',
         reviewer_id: null,
         reviewer_name: null,
-        venue_id: null,
-        venue_name: null,
+        venues: [],
       });
       expect(new Date(row.proposed_start).toISOString()).toBe(day(10));
       expect(new Date(row.proposed_end).toISOString()).toBe(plus(day(10), 2));
@@ -206,7 +228,7 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
       await db.query('insert into bookings (venue_id, event_request_id, starts_at, ends_at) values ($1, $2, $3, $4)', [
         hall, event, day(10), plus(day(10), 2),
       ]);
-      expect(rowFor((await queue()).requests, event)).toMatchObject({ venue_id: hall, venue_name: 'Hall A' });
+      expect(rowFor((await queue()).requests, event)).toMatchObject({ venues: [{ id: hall, name: 'Hall A' }] });
     });
 
     it('N21_AC3_a_booking_under_review_still_shows_its_venue_and_a_cancelled_one_does_not', async () => {
@@ -221,11 +243,11 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
         [hall, cancelled.event, day(10), plus(day(10), 2)],
       );
       const list = (await queue()).requests;
-      expect(rowFor(list, flagged.event).venue_name).toBe('Hall A');
-      expect(rowFor(list, cancelled.event).venue_name).toBeNull();
+      expect(rowFor(list, flagged.event).venues).toEqual([{ id: hall, name: 'Hall A' }]);
+      expect(rowFor(list, cancelled.event).venues).toEqual([]);
     });
 
-    it('N21_AC3_an_event_with_two_bookings_shows_one_row_with_the_earliest_venue', async () => {
+    it('N21_AC3_an_event_with_two_venues_shows_one_row_naming_both_earliest_first', async () => {
       const { event } = await makeEvent({ name: 'Two Bookings' });
       const other = (await one("insert into venues (name) values ('Hall B') returning id")).id;
       await db.query('insert into bookings (venue_id, event_request_id, starts_at, ends_at) values ($1, $2, $3, $4)', [
@@ -236,7 +258,35 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
       ]);
       const list = (await queue()).requests.filter((r) => r.event_request_id === event);
       expect(list).toHaveLength(1);
-      expect(list[0].venue_name).toBe('Hall A');
+      expect(list[0].venues).toEqual([
+        { id: hall, name: 'Hall A' },
+        { id: other, name: 'Hall B' },
+      ]);
+    });
+
+    it('N21_AC3_two_bookings_at_the_same_venue_name_it_once', async () => {
+      const { event } = await makeEvent({ name: 'Same Venue Twice' });
+      for (const d of [10, 11]) {
+        await db.query('insert into bookings (venue_id, event_request_id, starts_at, ends_at) values ($1, $2, $3, $4)', [
+          hall, event, day(d), plus(day(d), 2),
+        ]);
+      }
+      expect(rowFor((await queue()).requests, event).venues).toEqual([{ id: hall, name: 'Hall A' }]);
+    });
+
+    it('N21_AC3_the_item_count_adds_up_units_across_lines', async () => {
+      const { event } = await makeEvent({ name: 'Mics And Projectors', lines: 0 });
+      const mics = await newType('Mics', 50);
+      const projectors = await newType('Projectors', 50);
+      await db.query('select add_equipment_line($1, $2, $3, 20, null)', [event, coordinator, mics]);
+      await db.query('select add_equipment_line($1, $2, $3, 2, null)', [event, coordinator, projectors]);
+      expect(rowFor((await queue()).requests, event).item_count).toBe(22);
+    });
+
+    it('N21_AC3_a_removed_line_is_not_counted', async () => {
+      const { event, lineIds } = await makeEvent({ name: 'One Removed', lines: 2 });
+      await db.query('update equipment_lines set removed_at = now() where id = $1', [lineIds[0]]);
+      expect(rowFor((await queue()).requests, event).item_count).toBe(2);
     });
 
     it('N21_AC3_a_coordinator_with_no_name_gives_null_and_the_row_is_still_listed', async () => {
@@ -452,6 +502,34 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
       const { event } = await makeEvent({ name: 'Both Lists' });
       const result = await queue();
       expect(rowFor(result.needs_action, event)).toEqual(rowFor(result.requests, event));
+    });
+  });
+
+
+  describe('the limit', () => {
+    it('N21_each_list_is_cut_at_the_limit_and_says_so', async () => {
+      for (let i = 0; i < 3; i += 1) await makeEvent({ name: `Capped ${i}` });
+      const result = await queue(null, false, 2);
+      expect(result.requests).toHaveLength(2);
+      expect(result.requests_truncated).toBe(true);
+      expect(result.needs_action).toHaveLength(2);
+      expect(result.needs_action_truncated).toBe(true);
+    });
+
+    it('N21_the_cut_keeps_the_earliest_events', async () => {
+      const all = (await queue()).requests;
+      const capped = (await queue(null, false, 2)).requests;
+      expect(capped.map((r) => r.event_request_id)).toEqual(all.slice(0, 2).map((r) => r.event_request_id));
+    });
+
+    it('N21_a_list_within_the_limit_is_not_marked_truncated', async () => {
+      const result = await queue();
+      expect(result.requests_truncated).toBe(false);
+      expect(result.needs_action_truncated).toBe(false);
+    });
+
+    it('N21_a_limit_below_one_still_returns_a_row', async () => {
+      expect((await queue(null, false, 0)).requests).toHaveLength(1);
     });
   });
 

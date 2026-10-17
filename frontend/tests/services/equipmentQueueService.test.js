@@ -1,4 +1,4 @@
-// Tests for the equipment queue service call (SCRUM-287, part of SCRUM-284).
+// Tests for the equipment queue service call.
 // It sends the right path and only the filters that were set, and returns the body.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -8,7 +8,7 @@ vi.mock("../../src/services/apiClient", () => ({
 }));
 
 import { apiClient } from "../../src/services/apiClient";
-import { QUEUE_STATUSES, getEquipmentQueue } from "../../src/services/equipmentQueueService";
+import { getEquipmentQueue } from "../../src/services/equipmentQueueService";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -48,15 +48,5 @@ describe("equipmentQueueService", () => {
     const failure = { response: { status: 403 } };
     apiClient.get.mockRejectedValue(failure);
     await expect(getEquipmentQueue()).rejects.toBe(failure);
-  });
-
-  it("SCRUM287_AC2_the_filter_offers_the_five_statuses_the_server_knows", () => {
-    expect(QUEUE_STATUSES.map((s) => s.value)).toEqual([
-      "pending_review",
-      "under_review",
-      "arranged",
-      "cannot_be_fully_arranged",
-      "cancelled",
-    ]);
   });
 });

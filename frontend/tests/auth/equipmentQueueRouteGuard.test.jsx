@@ -42,7 +42,7 @@ describe("SCRUM-284 AC1: /equipment is for Technical Support Staff only", () => 
     renderAppAt("/equipment", "technical_support_staff");
 
     expect(screen.getByTestId("queue-stub")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Equipment requests" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Equipment request queue" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/equipment");
   });
 

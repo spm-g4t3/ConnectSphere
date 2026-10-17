@@ -1,7 +1,7 @@
 /**
  * Service tests for the equipment request queue.
  *
- * SCRUM-285 for SCRUM-284. Named N22_ACn_<what_it_checks>. The client is a test
+ * SCRUM-284. Named N22_ACn_<what_it_checks>. The client is a test
  * double, so these are about what the service sends, what it refuses before the
  * database is called, and how the answer is reshaped. What the database does is
  * tested against Postgres in tests/db/equipmentRequestQueueDatabase.test.js.
@@ -14,23 +14,23 @@ const defaultClient = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: defaultClient, supabaseAdmin: {} }));
 
 import { getEquipmentRequestQueue, toQueueRow } from '../../src/services/equipmentQueueService.js';
-import { ValidationError } from '../../src/errors.js';
+import { ForbiddenError, ValidationError } from '../../src/errors.js';
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const COORDINATOR_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
 const REVIEWER_ID = '66666666-6666-4666-8666-666666666666';
 const VENUE_ID = '88888888-8888-4888-8888-888888888888';
+const CALLER_ID = '77777777-7777-4777-8777-777777777777';
 
 const row = (overrides = {}) => ({
   event_request_id: EVENT_ID,
   event_name: 'Annual Dinner',
   proposed_start: '2030-01-10T10:00:00+00:00',
   proposed_end: '2030-01-10T12:00:00+00:00',
-  venue_id: VENUE_ID,
-  venue_name: 'Hall A',
+  venues: [{ id: VENUE_ID, name: 'Hall A' }],
   coordinator_id: COORDINATOR_ID,
   coordinator_name: 'Rae Tan',
-  line_count: 3,
+  item_count: 22,
   status: 'under_review',
   reviewer_id: REVIEWER_ID,
   reviewer_name: 'Sam Lee',
@@ -57,15 +57,23 @@ const failure = async (promise) => {
 describe('what the service asks the database', () => {
   it('N22_AC2_calls_the_one_function_with_the_status_and_the_past_flag', async () => {
     const client = fakeClient();
-    await getEquipmentRequestQueue({ status: 'arranged', includePast: 'true' }, { client });
+    await getEquipmentRequestQueue({ status: 'arranged', includePast: 'true' }, { callerId: CALLER_ID, client });
     expect(client.rpc).toHaveBeenCalledTimes(1);
-    expect(client.rpc).toHaveBeenCalledWith('equipment_request_queue', { p_status: 'arranged', p_include_past: true });
+    expect(client.rpc).toHaveBeenCalledWith('equipment_request_queue', {
+      p_caller: CALLER_ID,
+      p_status: 'arranged',
+      p_include_past: true,
+    });
   });
 
   it('N22_AC2_no_query_asks_for_every_status_without_past_events', async () => {
     const client = fakeClient();
-    await getEquipmentRequestQueue({}, { client });
-    expect(client.rpc).toHaveBeenCalledWith('equipment_request_queue', { p_status: null, p_include_past: false });
+    await getEquipmentRequestQueue({}, { callerId: CALLER_ID, client });
+    expect(client.rpc).toHaveBeenCalledWith('equipment_request_queue', {
+      p_caller: CALLER_ID,
+      p_status: null,
+      p_include_past: false,
+    });
   });
 
   it('N22_AC2_reads_only_through_the_function_never_a_table', async () => {
@@ -100,9 +108,9 @@ describe('what the service gives back', () => {
         eventName: 'Annual Dinner',
         proposedStart: '2030-01-10T10:00:00+00:00',
         proposedEnd: '2030-01-10T12:00:00+00:00',
-        venue: { id: VENUE_ID, name: 'Hall A' },
+        venues: [{ id: VENUE_ID, name: 'Hall A' }],
         coordinator: { id: COORDINATOR_ID, name: 'Rae Tan' },
-        lineCount: 3,
+        itemCount: 22,
         status: 'under_review',
         statusLabel: 'Under review',
         reviewer: { id: REVIEWER_ID, name: 'Sam Lee' },
@@ -120,22 +128,28 @@ describe('what the service gives back', () => {
       'eventRequestId',
       'flagReasons',
       'flaggedCount',
-      'lineCount',
+      'itemCount',
       'proposedEnd',
       'proposedStart',
       'reviewer',
       'status',
       'statusLabel',
-      'venue',
+      'venues',
     ]);
     expect(JSON.stringify(shaped)).not.toMatch(/secret|private|400/);
   });
 
-  it('N22_AC3_no_venue_no_reviewer_and_no_coordinator_become_null', () => {
+  it('N22_AC3_every_venue_the_database_sent_comes_through_in_order', () => {
+    const second = { id: 'v2', name: 'Room B' };
+    const shaped = toQueueRow(row({ venues: [{ id: VENUE_ID, name: 'Hall A' }, second] }));
+    expect(shaped.venues).toEqual([{ id: VENUE_ID, name: 'Hall A' }, second]);
+  });
+
+  it('N22_AC3_no_venue_no_reviewer_and_no_coordinator_become_empty_or_null', () => {
     const shaped = toQueueRow(
-      row({ venue_id: null, venue_name: null, reviewer_id: null, reviewer_name: null, coordinator_id: null, coordinator_name: null, status: 'pending_review' }),
+      row({ venues: [], reviewer_id: null, reviewer_name: null, coordinator_id: null, coordinator_name: null, status: 'pending_review' }),
     );
-    expect(shaped.venue).toBeNull();
+    expect(shaped.venues).toEqual([]);
     expect(shaped.reviewer).toBeNull();
     expect(shaped.coordinator).toBeNull();
   });
@@ -165,9 +179,31 @@ describe('what the service gives back', () => {
     expect(result.requests.map((r) => r.eventRequestId)).toEqual(['a', 'b']);
   });
 
-  it.each([null, undefined, {}])('N22_an_answer_of_%j_gives_two_empty_lists', async (data) => {
+  it('N22_the_status_choices_come_from_the_server_in_review_order', async () => {
+    const { statuses } = await getEquipmentRequestQueue({}, { callerId: CALLER_ID, client: fakeClient() });
+    expect(statuses).toEqual([
+      { value: 'pending_review', label: 'Pending review' },
+      { value: 'under_review', label: 'Under review' },
+      { value: 'arranged', label: 'Arranged' },
+      { value: 'cannot_be_fully_arranged', label: 'Cannot be fully arranged' },
+      { value: 'cancelled', label: 'Cancelled' },
+    ]);
+  });
+
+  it('N22_a_cut_list_is_marked_truncated', async () => {
+    const client = fakeClient(ok({ needs_action: [], needs_action_truncated: true, requests: [], requests_truncated: true }));
+    const result = await getEquipmentRequestQueue({}, { callerId: CALLER_ID, client });
+    expect(result).toMatchObject({ needsActionTruncated: true, requestsTruncated: true });
+  });
+
+  it.each([null, undefined, {}])('N22_an_answer_of_%j_gives_two_empty_lists_not_truncated', async (data) => {
     const client = fakeClient(ok(data));
-    expect(await getEquipmentRequestQueue({}, { client })).toEqual({ needsAction: [], requests: [] });
+    expect(await getEquipmentRequestQueue({}, { callerId: CALLER_ID, client })).toMatchObject({
+      needsAction: [],
+      needsActionTruncated: false,
+      requests: [],
+      requestsTruncated: false,
+    });
   });
 
   it('N22_an_unknown_status_label_falls_back_to_the_status_itself', () => {
@@ -178,29 +214,41 @@ describe('what the service gives back', () => {
 describe('a row with the optional parts missing', () => {
   const bare = toQueueRow({ event_request_id: EVENT_ID, event_name: 'Annual Dinner', status: 'pending' });
 
-  it('SCRUM284_AC2_missing_times_and_venue_and_people_come_back_as_null', () => {
+  it('SCRUM284_AC2_missing_times_and_people_come_back_as_null_and_missing_venues_as_empty', () => {
     expect(bare.proposedStart).toBeNull();
     expect(bare.proposedEnd).toBeNull();
-    expect(bare.venue).toBeNull();
+    expect(bare.venues).toEqual([]);
     expect(bare.coordinator).toBeNull();
     expect(bare.reviewer).toBeNull();
   });
 
   it('SCRUM284_AC2_missing_counts_are_zero_and_missing_reasons_are_an_empty_list', () => {
-    expect(bare.lineCount).toBe(0);
+    expect(bare.itemCount).toBe(0);
     expect(bare.flaggedCount).toBe(0);
     expect(bare.flagReasons).toEqual([]);
   });
 
   it('SCRUM284_AC2_a_venue_or_person_with_no_name_keeps_its_id_and_a_null_name', () => {
-    const r = toQueueRow(row({ venue_name: undefined, coordinator_name: undefined, reviewer_name: undefined }));
-    expect(r.venue).toEqual({ id: VENUE_ID, name: null });
+    const r = toQueueRow(row({ venues: [{ id: VENUE_ID }], coordinator_name: undefined, reviewer_name: undefined }));
+    expect(r.venues).toEqual([{ id: VENUE_ID, name: null }]);
     expect(r.coordinator).toEqual({ id: COORDINATOR_ID, name: null });
     expect(r.reviewer).toEqual({ id: REVIEWER_ID, name: null });
   });
 });
 
 describe('how the database refuses', () => {
+  it('N22_AC1_42501_becomes_a_ForbiddenError', async () => {
+    const client = fakeClient({ data: null, error: { code: '42501', message: 'Only technical support staff can see the equipment request queue' } });
+    const err = await failure(getEquipmentRequestQueue({}, { callerId: CALLER_ID, client }));
+    expect(err).toBeInstanceOf(ForbiddenError);
+  });
+
+  it('N22_AC1_a_missing_caller_is_sent_as_null_for_the_database_to_refuse', async () => {
+    const client = fakeClient();
+    await getEquipmentRequestQueue({}, { client });
+    expect(client.rpc).toHaveBeenCalledWith('equipment_request_queue', expect.objectContaining({ p_caller: null }));
+  });
+
   it('N22_22023_becomes_a_ValidationError', async () => {
     const client = fakeClient({ data: null, error: { code: '22023', message: 'Unknown status x' } });
     const err = await failure(getEquipmentRequestQueue({}, { client }));
@@ -226,7 +274,11 @@ describe('how the database refuses', () => {
 describe('the default client', () => {
   it('SCRUM284_AC2_uses_the_shared_Supabase_client_when_none_is_passed', async () => {
     defaultClient.rpc.mockResolvedValueOnce(ok({ needs_action: [], requests: [] }));
-    expect(await getEquipmentRequestQueue({})).toEqual({ needsAction: [], requests: [] });
-    expect(defaultClient.rpc).toHaveBeenCalledWith('equipment_request_queue', { p_status: null, p_include_past: false });
+    expect(await getEquipmentRequestQueue({}, { callerId: CALLER_ID })).toMatchObject({ needsAction: [], requests: [] });
+    expect(defaultClient.rpc).toHaveBeenCalledWith('equipment_request_queue', {
+      p_caller: CALLER_ID,
+      p_status: null,
+      p_include_past: false,
+    });
   });
 });
