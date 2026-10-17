@@ -484,6 +484,28 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
       expect(await noticesFor(isFlagged)).toEqual([]);
     });
 
+    it('SCRUM266_W7_replacing_one_booking_leaves_the_events_other_bookings_and_status_alone', async () => {
+      const event = await makeEvent();
+      const replaced = await flagged(event);
+      const otherFlagged = await flagged(event);
+      const otherApproved = (await request(event, await makeVenue())).booking.id;
+      expect((await decide(otherApproved)).outcome).toBe('approved');
+      const flaggedBefore = await bookingRow(otherFlagged);
+      const approvedBefore = await bookingRow(otherApproved);
+      const eventBefore = await one('select status, updated_at from event_requests where id = $1', [event]);
+      const replacement = (await request(event, await makeVenue(), replaced)).booking.id;
+
+      expect((await decide(replacement)).replaced_booking_id).toBe(replaced);
+
+      expect((await bookingRow(replaced)).status).toBe('cancelled');
+      expect(await bookingRow(otherFlagged)).toEqual(flaggedBefore);
+      expect(await bookingRow(otherApproved)).toEqual(approvedBefore);
+      expect(await resolutionsOf(otherFlagged)).toEqual([]);
+      expect(await resolutionsOf(otherApproved)).toEqual([]);
+      expect(await one('select status, updated_at from event_requests where id = $1', [event])).toEqual(eventBefore);
+      expect((await listForEvent(event)).map((b) => b.id)).toEqual([otherFlagged]);
+    });
+
     it('SCRUM266_W7_once_replaced_the_booking_drops_off_the_coordinators_list', async () => {
       const event = await makeEvent();
       const isFlagged = await flagged(event);

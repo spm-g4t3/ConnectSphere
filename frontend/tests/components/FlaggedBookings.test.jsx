@@ -642,6 +642,40 @@ describe("refusals (AC2, AC3)", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  it("SCRUM266_AC2_a_retry_after_the_clash_is_cleared_reinstates_and_drops_the_booking_and_conflict", async () => {
+    vi.mocked(getFlaggedBookings).mockResolvedValueOnce([item("1"), item("2")]).mockResolvedValueOnce([item("2")]);
+    vi.mocked(reinstateFlaggedBooking)
+      .mockRejectedValueOnce(
+        conflict("BOOKING_PERIOD_CONFLICT", { conflicts: [{ kind: "block", reason: "renovation" }] }),
+      )
+      .mockResolvedValueOnce({ id: "1", status: "approved" });
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    await user.type(within(region).getByLabelText(REINSTATE_LABEL), "Lifted");
+    await user.click(within(region).getByRole("button", { name: "Reinstate" }));
+    expect(await within(region).findByRole("alert")).toHaveTextContent(/In the way: a venue block \(Renovation\)/);
+    expect(within(region).getByRole("heading", { name: "What is in the way" })).toBeInTheDocument();
+
+    // The block has since been shortened elsewhere, so the same request now succeeds.
+    const reason = within(region).getByLabelText(REINSTATE_LABEL);
+    await user.clear(reason);
+    await user.type(reason, "Block shortened");
+    await user.click(within(region).getByRole("button", { name: "Reinstate" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Reinstated the booking of Hall 1 for Event 1; it is approved again.",
+    );
+    expect(reinstateFlaggedBooking).toHaveBeenNthCalledWith(2, "1", "Block shortened");
+    expect(getFlaggedBookings).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Event 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Event 2")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "What is in the way" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/no longer free/)).not.toBeInTheDocument();
+  });
+
   it.each([
     ["SAFETY_FLAG_NOT_REINSTATABLE", conflict("SAFETY_FLAG_NOT_REINSTATABLE"), /flagged by the safety review/],
     ["EVENT_NOT_BOOKABLE", conflict("EVENT_NOT_BOOKABLE"), /no longer approved, in the safety check, or confirmed/],

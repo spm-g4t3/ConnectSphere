@@ -746,7 +746,7 @@ describe('SCRUM266 the coordinator lists one event\'s flagged bookings', () => {
     ...overrides,
   });
 
-  it.each([undefined, null, '', 42])('SCRUM266_AC1_the_caller_%j_is_refused_before_any_call', async (caller) => {
+  it.each([undefined, null, '', 42])('SCRUM266_AC1_the_event_list_caller_%j_is_refused_before_any_call', async (caller) => {
     const client = clientAnswering(listed());
     const err = await listEventFlaggedBookings(EVENT, caller, { client }).catch((e) => e);
     expect(err).toBeInstanceOf(ValidationError);

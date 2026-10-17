@@ -1322,6 +1322,48 @@ describe("SCRUM266 flagged bookings on the event view", () => {
     expect(onChangeRequestProcessed).toHaveBeenCalled();
   });
 
+  it("SCRUM266_AC3_a_cancelled_flagged_booking_frees_its_venue_in_find_a_venue", async () => {
+    const OLD_HALL = { id: "v5", name: "Old Hall", location: "Level 5", maxCapacity: 200 };
+    const FLAGGED_ITEM = {
+      bookingId: "f1",
+      venueId: "v5",
+      venueName: "Old Hall",
+      venueLocation: "Level 5",
+      status: "flagged_for_review",
+      statusDisplay: { status: "flagged_for_review", label: "Flagged for review" },
+      roomLayoutCode: null,
+      expectedAttendance: 120,
+      attendanceSource: "booking",
+      suitabilityOverridden: false,
+      current: { suitable: true, criteria: [], checked: {} },
+      atRequest: null,
+      newlyUnmet: [],
+      error: null,
+    };
+    vi.mocked(getEventFlaggedBookings).mockResolvedValueOnce([FLAGGED]).mockResolvedValueOnce([]);
+    vi.mocked(getEventVenueSuitability).mockResolvedValueOnce([FLAGGED_ITEM]).mockResolvedValueOnce([]);
+    vi.mocked(cancelFlaggedBooking).mockResolvedValue({ id: "f1", status: "cancelled" });
+    vi.mocked(findVenuesForEvent).mockResolvedValue([OLD_HALL]);
+    const user = renderAssigned(confirmed());
+    const suitability = (await screen.findByRole("heading", { name: "Venue suitability" })).closest("section");
+    await within(suitability).findByRole("heading", { name: "Old Hall" });
+
+    await user.click(within(finder()).getByRole("button", { name: "Search venues" }));
+    const oldHall = () => within(finder()).getByRole("button", { name: "Request this venue: Old Hall" });
+    await within(finder()).findByRole("button", { name: "Request this venue: Old Hall" });
+    expect(oldHall()).toBeDisabled();
+    expect(oldHall()).toHaveAccessibleDescription(/already has a request for this venue \(Flagged for review\)/);
+
+    await user.type(within(flaggedSection()).getByLabelText("Reason for cancelling (required)"), "Venue closed");
+    await user.click(within(flaggedSection()).getByRole("button", { name: "Cancel this booking" }));
+
+    await waitFor(() => expect(getEventVenueSuitability).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(within(suitability).queryByRole("heading", { name: "Old Hall" })).toBeNull());
+    expect(oldHall()).toBeEnabled();
+    expect(oldHall()).not.toHaveAccessibleDescription(/already has a request/);
+    expect(within(finder()).queryByText(/already has a request for this venue/)).not.toBeInTheDocument();
+  });
+
   it("SCRUM266_W7_find_a_replacement_names_the_booking_in_find_a_venue_and_moves_focus_there", async () => {
     vi.mocked(getEventFlaggedBookings).mockResolvedValue([FLAGGED]);
     const user = renderAssigned(confirmed());
