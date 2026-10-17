@@ -24,8 +24,8 @@ describe("bookingRequestEligibility", () => {
     expect(bookingRequestEligibility({ ...EVENT, status }, USER)).toEqual({ eligible: true, reason: null });
   });
 
-  it("SCRUM254_only_approved_and_confirmed_are_bookable", () => {
-    expect(BOOKABLE_EVENT_STATUSES).toEqual(["approved", "confirmed"]);
+  it("SCRUM254_only_approved_safety_and_confirmed_are_bookable", () => {
+    expect(BOOKABLE_EVENT_STATUSES).toEqual(["approved", "safety_review", "safety_approved", "confirmed"]);
   });
 
   it.each(["submitted", "under_review", "pending_clarification", "planning", "completed", "rejected", "cancelled"])(

@@ -10,13 +10,23 @@ import VenueSearch from "./components/VenueSearch";
 import VenueCatalogue from "./components/VenueCatalogue";
 import ReviewQueue from "./components/ReviewQueue";
 import MyAssignedEvents from "./components/MyAssignedEvents";
+import UnassignedQueue from "./components/UnassignedQueue";
+import AssignedEvents from "./components/AssignedEvents";
+import EventRequestReviewPage from "./components/EventRequestReviewPage";
 import MyBookingRequests from "./components/MyBookingRequests";
+import PendingBookingRequests from "./components/PendingBookingRequests";
 import EquipmentCatalogue from "./components/EquipmentCatalogue";
 import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
 import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck";
 import EquipmentReview from "./components/EquipmentReview";
 import EventRegistrationSettings from "./components/EventRegistrationSettings";
+import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
+import SafetyReviewHistory from "./components/SafetyReviewHistory";
+import BrowseOpenEvents from "./components/BrowseOpenEvents";
+import BrowseEventDetails from "./components/BrowseEventDetails";
+import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE, isOpenEventsEnabled } from "./services/openEventRoutes";
+import { registerForEvent } from "./services/eventRegistrationService";
 import "./App.css";
 
 function LoadingScreen() {
@@ -81,6 +91,22 @@ function AppRoutes() {
       <Routes>
         <Route path="/login" element={<LoginForm />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route
+          path="/safety-review"
+          element={
+            <ProtectedRoute allowedRoles={["safety_officer"]}>
+              <SafetyOfficerDashboard user={user} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/safety-review/history"
+          element={
+            <ProtectedRoute allowedRoles={["safety_officer"]}>
+              <SafetyReviewHistory />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/events" element={<ProtectedRoute><MyEventRequests /></ProtectedRoute>} />
         <Route
           path="/events/:eventId/registration"
@@ -163,6 +189,61 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
+        {/* SCRUM-486 (SCRUM-519): the Event Coordinator Lead's unassigned queue,
+            also on the Lead's dashboard, given a route of its own as the review
+            queue is, so the Lead's nav can link to it. Gated as /review-queue
+            is, for the same reason: GET /event-requests/unassigned answers 403
+            to anyone else regardless, and allowedRoles turns them away at
+            /unauthorized instead of on a page of one error message. Wrapped in
+            the Lead's dashboard class so the card styling matches the
+            dashboard's. */}
+        <Route
+          path="/unassigned-queue"
+          element={
+            <ProtectedRoute allowedRoles={["event_coordinator_lead"]}>
+              <div className="dashboard dashboard--coordinator-lead">
+                <UnassignedQueue />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* SCRUM-486 AC6: every event someone holds in an active status, for
+            the Event Coordinator Lead, each row opening the event's page below.
+            Gated as /unassigned-queue is, for the same reason: GET
+            /event-requests/assigned answers 403 to anyone else regardless.
+            Wrapped in the coordinator class, not the Lead's, as the event page
+            below is: App.css colours the status badge under
+            .dashboard--coordinator only, and this list shows one per row. */}
+        <Route
+          path="/assigned-events"
+          element={
+            <ProtectedRoute allowedRoles={["event_coordinator_lead"]}>
+              <div className="dashboard dashboard--coordinator">
+                <AssignedEvents />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* SCRUM-486 (SCRUM-521): one event's coordinator screen by its address,
+            so the Event Coordinator Lead can open an event they do not hold and
+            hand it over (AC6). Coordinators may open it too. allowedRoles
+            mirrors GET /event-requests/:id/review's gate; the API answers 403
+            to anyone else regardless. The Lead reaches it from
+            /assigned-events above, the list SCRUM-486 built and SCRUM-487
+            extended into the coordinator overview (see the page's header).
+
+            The coordinator wrapper for both roles, because App.css colours the
+            status badge under .dashboard--coordinator only. */}
+        <Route
+          path="/event-requests/:eventRequestId"
+          element={
+            <ProtectedRoute allowedRoles={["event_coordinator", "event_coordinator_lead"]}>
+              <div className="dashboard dashboard--coordinator">
+                <EventRequestReviewPage />
+              </div>
+            </ProtectedRoute>
+          }
+        />
         {/* SCRUM-255: the coordinator's venue booking requests and their
             statuses. Gated and wrapped as /my-events is, for the same reasons:
             GET /booking-requests/mine is role-checked server-side, and the
@@ -177,6 +258,33 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
+        {/* Attendees only, like the API, so a direct URL from another role lands
+            on /unauthorized, not on a page that is only an error. The
+            .dashboard wrapper gives the pages their card styling. */}
+        {isOpenEventsEnabled() && (
+          <>
+            <Route
+              path={BROWSE_OPEN_EVENTS_PATH}
+              element={
+                <ProtectedRoute allowedRoles={["attendee"]}>
+                  <div className="dashboard dashboard--attendee">
+                    <BrowseOpenEvents />
+                  </div>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path={OPEN_EVENT_DETAILS_ROUTE}
+              element={
+                <ProtectedRoute allowedRoles={["attendee"]}>
+                  <div className="dashboard dashboard--attendee">
+                    <BrowseEventDetails onRegister={registerForEvent} />
+                  </div>
+                </ProtectedRoute>
+              }
+            />
+          </>
+        )}
         <Route
           path="/equipment-catalogue"
           element={
@@ -222,14 +330,28 @@ function AppRoutes() {
             ProtectedRoute's `!user` branch redirects to /login before the role
             check runs. Wrapping it would only risk a redirect loop. */}
         <Route path="/unauthorized" element={<PagePlaceholder title="Not available to your role" description="Your account does not have access to that page. If you think it should, ask an administrator to check your role." />} />
-        {/* The next three are placeholders on purpose, and the nav links that point
-            at them are kept on purpose. A future sprint builds exactly these three
+        {/* SCRUM-258: Venue Staff's queue of open booking requests, the same
+            component the Venue Staff dashboard shows, so the nav link and the
+            dashboard are two ways into one screen. Gated and wrapped as
+            /venue-catalogue is: GET /booking-requests/pending answers 403 to
+            anyone else regardless, and the wrapper styles the cards and badges. */}
+        <Route
+          path="/booking-requests"
+          element={
+            <ProtectedRoute allowedRoles={["venue_staff"]}>
+              <div className="dashboard dashboard--venue-staff">
+                <PendingBookingRequests />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        {/* The next two are placeholders on purpose, and the nav links that point
+            at them are kept on purpose. A future sprint builds exactly these two
             features, so deleting the links now just means re-adding them then. What
             was wrong before was not the links — it was that they fell through to the
             catch-all below and silently bounced the user to /dashboard with no
             explanation. An honest "being built" page is truthful today and becomes
             the real page later. Do not "tidy" these away. */}
-        <Route path="/booking-requests" element={<ProtectedRoute><PagePlaceholder title="Booking requests" description="Booking requests are still being built. Venue staff will review and respond to incoming booking requests here in a future release. Nothing is waiting for you behind this page yet." /></ProtectedRoute>} />
         <Route path="/tickets" element={<ProtectedRoute><PagePlaceholder title="Support tickets" description="Support tickets are still being built. Technical support staff will raise, triage and close event support tickets here in a future release. Nothing is waiting for you behind this page yet." /></ProtectedRoute>} />
         <Route path="/equipment" element={<ProtectedRoute><PagePlaceholder title="Equipment requests" description="Equipment requests are still being built. Technical support staff will track equipment allocated to each event here in a future release. Nothing is waiting for you behind this page yet." /></ProtectedRoute>} />
         {/* Catch-all stays last: React Router picks the best match rather than the

@@ -219,6 +219,32 @@ export async function cancelEventRequest(
   return response.data;
 }
 
+/**
+ * SCRUM-489 AC2-AC4: the safety check's readiness checklist,
+ * { eventRequestId, ready, items }. The flag is sent only when true, so the
+ * plain read is the path alone.
+ */
+export async function getEventReadiness(id, { noEquipmentConfirmed } = {}) {
+  const path = `/event-requests/${id}/readiness`;
+  const response = noEquipmentConfirmed === true
+    ? await apiClient.get(path, { params: { noEquipmentConfirmed: "true" } })
+    : await apiClient.get(path);
+  return response.data;
+}
+
+/**
+ * SCRUM-489 AC6: submits an Approved event for the safety check. Returns the
+ * event, now in safety_review. A 409 with code EVENT_NOT_READY carries the
+ * outstanding lines as `conflicts`.
+ */
+export async function submitForSafetyReview(id, { note, noEquipmentConfirmed = false } = {}) {
+  const response = await apiClient.post(`/event-requests/${id}/safety-review`, {
+    note,
+    noEquipmentConfirmed,
+  });
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // SCRUM-327: coordinator assignment
 // ---------------------------------------------------------------------------
@@ -330,7 +356,9 @@ export async function listCoordinators() {
  * Two things a caller must understand before rendering one:
  *
  *  - automatic: true means the system assigned the event when it was
- *    submitted. There is no person behind it, so assignedById and
+ *    submitted, which only happened before SCRUM-486; every row written since
+ *    names the Lead or the coordinator who made it. There is no person behind
+ *    an automatic row, so assignedById and
  *    assignedByName are null by design, not because data is missing. Render
  *    it as "Assigned automatically", not as a handover by nobody. Test
  *    automatic rather than assignedByName, because a name is also null for a
@@ -427,6 +455,106 @@ export async function reassignEventRequest(id, { newCoordinatorId, handoverNote 
   const response = await apiClient.post(`/event-requests/${id}/reassign`, {
     newCoordinatorId,
     handoverNote,
+  });
+  return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// SCRUM-486 (SCRUM-519): the Event Coordinator Lead's queue and assignment
+// ---------------------------------------------------------------------------
+// All three are gated on event_coordinator_lead server-side.
+
+/**
+ * Every submitted request nobody has been assigned yet, oldest submission
+ * first (SCRUM-486 AC2). Each carries organiserName and submittedAt, from
+ * which the screen says how long it has waited. Possibly empty.
+ *
+ * @returns {Promise<Object[]>}
+ */
+export async function listUnassignedEventRequests() {
+  const response = await apiClient.get("/event-requests/unassigned");
+  return response.data;
+}
+
+/**
+ * Every Event Coordinator, with their count of active events, for the Lead's
+ * picker (SCRUM-486 AC3). In name order, never workload order: the system
+ * suggests nobody. Leads are never in it; they cannot be assigned events.
+ *
+ * @returns {Promise<Array<{id: string, fullName: string|null, activeEvents: number}>>}
+ */
+export async function listCoordinatorWorkload() {
+  const response = await apiClient.get("/event-requests/coordinator-workload");
+  return response.data;
+}
+
+/**
+ * Every event someone holds in an active status, earliest event first, for
+ * the Lead (SCRUM-486 AC6): the way to an assigned event's page, where the
+ * Lead hands it over. Each row is { id, eventName, status, statusDisplay,
+ * proposedStart, organiserName, assignedCoordinatorId,
+ * assignedCoordinatorName }. Possibly empty.
+ *
+ * SCRUM-487 AC3 (SCRUM-544): the Lead's filters, sent as query parameters
+ * and applied by the server (SCRUM-487 D2). Only the filters that are set are
+ * sent, and includeFinished only as "true": the server reads "true", "false"
+ * or absent and refuses anything else, so "off" is simply not sending it.
+ * Called with nothing, the request is exactly SCRUM-486's: no params at all.
+ *
+ * @param {object} [filters]
+ * @param {string} [filters.coordinatorId]     only this coordinator's events
+ * @param {string} [filters.status]            only this status
+ * @param {boolean} [filters.includeFinished]  also completed, rejected and cancelled
+ * @returns {Promise<Object[]>}
+ */
+export async function listAssignedEventsForLead(filters = {}) {
+  const params = {};
+  if (filters.coordinatorId) params.coordinatorId = filters.coordinatorId;
+  if (filters.status) params.status = filters.status;
+  if (filters.includeFinished) params.includeFinished = "true";
+
+  const response = Object.keys(params).length > 0
+    ? await apiClient.get("/event-requests/assigned", { params })
+    : await apiClient.get("/event-requests/assigned");
+  return response.data;
+}
+
+/**
+ * Every Event Coordinator with their active events counted in total and per
+ * status, for the Lead's overview (SCRUM-487 AC2), and the words for each
+ * status. Returns { statuses, coordinators }: statuses is { status, label,
+ * finished } for every active status then every finished one (SCRUM-546,
+ * D9); each coordinator is { id, fullName, activeEvents, byStatus }, byStatus
+ * keyed by every active status, 0 where there are none. Coordinators in name
+ * order, never workload order. Gated on event_coordinator_lead server-side.
+ *
+ * @returns {Promise<{statuses: Array<{status: string, label: string, finished: boolean}>,
+ *   coordinators: Array<{id: string, fullName: string|null, activeEvents: number, byStatus: Object<string, number>}>}>}
+ */
+export async function listCoordinatorOverview() {
+  const response = await apiClient.get("/event-requests/coordinator-overview");
+  return response.data;
+}
+
+/**
+ * The Lead assigns an unassigned request to one Event Coordinator (SCRUM-486
+ * AC3). The note is optional and becomes the assignment history's handover
+ * note; the Organiser never sees it.
+ *
+ * A 409 whose err.response.data.code is "ALREADY_ASSIGNED" means another
+ * Lead got there first; err.response.data.conflicts[0].assignedCoordinatorName
+ * says who (AC4). Any other 409 means the request is no longer submitted.
+ * 400 is no coordinator chosen, or someone who is not an Event Coordinator;
+ * 403 is not a Lead; 404 is no such request.
+ *
+ * @param {string} id
+ * @param {{coordinatorId: string, note?: string}} assignment
+ * @returns {Promise<Object>} the request, now assigned
+ */
+export async function assignEventRequest(id, { coordinatorId, note }) {
+  const response = await apiClient.post(`/event-requests/${id}/assign`, {
+    coordinatorId,
+    note,
   });
   return response.data;
 }

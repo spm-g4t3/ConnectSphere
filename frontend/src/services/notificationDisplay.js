@@ -16,7 +16,16 @@
 //   venue_hold_expired (040, SCRUM-491): { eventRequestId, eventName,
 //     venueId, venueName, expiresAt }
 //   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
-//     cancelledAt }
+//     cancelledAt }; audience is organiser, venue_staff,
+//     technical_support_staff or safety_officer
+//   event_submitted_for_safety_review (064, SCRUM-489): { eventRequestId,
+//     eventName, coordinatorId, coordinatorName, startsAt, submittedAt }
+//   booking_request_approved and booking_request_rejected (066, SCRUM-258):
+//     { eventRequestId, eventName, venueId, venueName, startsAt, endsAt,
+//     decidedAt, reason, suggestedAlternative }
+//   booking_request_conflicting (066): { eventRequestId, eventName, venueId,
+//     venueName, startsAt, endsAt, approvedBookingId, approvedEventRequestId,
+//     approvedEventName, approvedStartsAt, approvedEndsAt }
 // Every field is read defensively -- a notification outlives the build that
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
@@ -124,6 +133,50 @@ export function describeNotification(notification) {
     };
   }
 
+  // 066 (SCRUM-258 AC6). Sent to the event's coordinator when Venue Staff
+  // decide on one of its requests.
+  if (notification?.type === "booking_request_approved") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+
+    return {
+      headline: `${venueName} was approved for ${eventName}`,
+      detail: `It is booked for ${formatRange(payload.startsAt, payload.endsAt)}.`,
+    };
+  }
+
+  if (notification?.type === "booking_request_rejected") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+    const reason = payload.reason || "No reason recorded";
+    // Both are free text; the reason gets a full stop of its own (unless it
+    // already ends a sentence) so the two do not run together.
+    const detail = payload.suggestedAlternative
+      ? `Reason: ${/[.!?]$/.test(reason) ? reason : `${reason}.`} Suggested alternative: ${payload.suggestedAlternative}`
+      : `Reason: ${reason}`;
+
+    return {
+      headline: `The request for ${venueName} for ${eventName} was rejected`,
+      detail,
+    };
+  }
+
+  // 066. Another event's request for the same venue and an overlapping time
+  // was approved. Said plainly that this one is still open (a flag, not a
+  // refusal), so the coordinator knows the choice is theirs.
+  if (notification?.type === "booking_request_conflicting") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+    const approvedEventName = payload.approvedEventName || "another event";
+
+    return {
+      headline: `Your request for ${venueName} for ${eventName} now clashes with ${approvedEventName}`,
+      detail:
+        `${approvedEventName} was approved for ${formatRange(payload.approvedStartsAt, payload.approvedEndsAt)}. ` +
+        "Your request is still open; you can withdraw it or wait for Venue Staff.",
+    };
+  }
+
   if (notification?.type === "event_cancelled") {
     const eventName = payload.eventName || "Unnamed event";
     if (payload.audience === "organiser") {
@@ -134,6 +187,16 @@ export function describeNotification(notification) {
       return {
         headline: `${eventName} was cancelled`,
         detail: `Reason: ${reason}.${cancelledAt}`,
+      };
+    }
+    if (payload.audience === "safety_officer") {
+      const reason = payload.reason || "No reason recorded";
+      const cancelledAt = payload.cancelledAt
+        ? ` Cancelled ${formatTimestamp(payload.cancelledAt)}.`
+        : "";
+      return {
+        headline: `${eventName} was cancelled`,
+        detail: `It no longer needs a safety review. Reason: ${reason}.${cancelledAt}`,
       };
     }
     if (payload.audience === "venue_staff") {
@@ -148,6 +211,51 @@ export function describeNotification(notification) {
         detail: "The equipment request was cancelled and its active reservations were released.",
       };
     }
+  }
+
+  if (notification?.type === "safety_review_response") {
+    const eventName = payload.eventName || "The event";
+    const outcome = {
+      approved: "was approved after safety review",
+      changes_requested: "needs changes after safety review",
+      rejected: "had its safety arrangement rejected",
+    }[payload.outcome] || "received a safety review response";
+    return {
+      headline: `${eventName} ${outcome}`,
+      detail: payload.note || "Open the event to review the Safety Officer's response.",
+    };
+  }
+
+  if (notification?.type === "safety_booking_flagged") {
+    const eventName = payload.eventName || "Unnamed event";
+    const venueName = payload.venueName || "Unknown venue";
+    return {
+      headline: `${eventName} at ${venueName} needs review`,
+      detail: `Reason: ${payload.reason || "Safety review"}. Booked ${formatRange(payload.startsAt, payload.endsAt)}.`,
+    };
+  }
+
+  if (notification?.type === "safety_equipment_review") {
+    const eventName = payload.eventName || "Unnamed event";
+    return {
+      headline: `Equipment for ${eventName} was returned for review`,
+      detail: "A Safety Officer marked the equipment arrangement as affected.",
+    };
+  }
+
+  // SCRUM-489 (AC8). Sent to every Safety Officer when a coordinator submits
+  // an Approved event; the start date says how soon the check is needed.
+  if (notification?.type === "event_submitted_for_safety_review") {
+    const eventName = payload.eventName || "Unnamed event";
+    const coordinatorName = payload.coordinatorName || "its coordinator";
+    const startsAt = isInstant(payload.startsAt)
+      ? ` It starts ${formatTimestamp(payload.startsAt)}.`
+      : "";
+
+    return {
+      headline: "Event submitted for safety check",
+      detail: `${eventName} was submitted by ${coordinatorName}.${startsAt}`,
+    };
   }
 
   if (

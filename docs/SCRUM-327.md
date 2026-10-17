@@ -3,6 +3,15 @@
 **Story:** Assign and Reassign an Event Coordinator
 **Closing subtask:** SCRUM-336 (this document)
 **Status as of 3 October 2026:** closed, with the gaps in section 4 recorded rather than hidden.
+**Superseded in part, 12 October 2026, by SCRUM-486.** The customer's Week 7 change 5 moved the
+first assignment from submission to the Event Coordinator Lead (migration 052). This story stays
+Done: it met the requirement it was given, and the change is a new requirement, not a missed one
+(`docs/SCRUM-486.md`, section 6, argues it). What no longer describes the system: **AC1, AC2, AC3,
+AC5, and the resubmission rule recorded here as AC4**; decisions **D1** (in part), **D2** (in part),
+**D11**, and the side notes of **D13**; and section 4's **"AC4 unreachable"** row. Each carries a
+note where it stands. Everything else stands, AC6 and AC7 included. The text below is left as it
+was argued, because it is the record of what was decided and why; test names renamed since are
+updated, with the old name beside them, so every name cited here exists.
 
 This document is the record of what SCRUM-327 delivered, how each acceptance
 criterion is proved, why the design looks the way it does, and what is still
@@ -84,7 +93,7 @@ document should be corrected rather than defended.
 | Migration | `016` `submit_event_request`: locks the row, checks it is a draft, calls `pick_event_coordinator`, writes the status, `submitted_at` and the coordinator in one update, and inserts the first history row (`previous_coordinator_id` null, `assigned_by` null), all in one transaction |
 | Service | `submitEventRequest` — validates the stored draft, then `rpc('submit_event_request')`; makes no write of its own |
 | Route | `POST /api/event-requests/:id/submit`, behind the Organiser ownership pre-check |
-| Unit tests | `SCRUM330_AC1_assigns_a_coordinator_on_submission`, `…_submits_only_through_the_function`, `…_never_assigns_a_coordinator_to_an_incomplete_draft`, `…_returns_the_assigned_coordinator_in_camelCase`, `…_leaves_the_draft_check_to_the_function` (service suite) |
+| Unit tests | `SCRUM330_AC1_submits_through_one_call_that_names_no_coordinator` (was `SCRUM330_AC1_assigns_a_coordinator_on_submission`), `…_submits_only_through_the_function`, `SCRUM330_AC1_never_submits_an_incomplete_draft` (was `…_never_assigns_a_coordinator_to_an_incomplete_draft`), `SCRUM330_AC1_returns_the_submitted_request_in_camelCase_with_no_coordinator` (was `…_returns_the_assigned_coordinator_in_camelCase`), `…_leaves_the_draft_check_to_the_function` (service suite). Renamed and re-expected by SCRUM-522: since 052 submission assigns nobody |
 | Check script | Section 2: "the submission wrote exactly one history row", "it is a first assignment: no previous coordinator", "made by the system: assigned_by is null" |
 | Screen | An Organiser submits; the event appears in the assigned coordinator's My Events at once |
 
@@ -119,7 +128,7 @@ unproven, for whichever story adds a path back.
 |---|---|
 | Migration | `015` returns null rather than raising (D11); `016` raises `No coordinator is available; please try again later` as `P0001`, which rolls back, so the request stays a draft |
 | Service | `translateError` maps `P0001` to `ServiceUnavailableError` (503), passing the message through |
-| Unit tests | `SCRUM330_AC5_refuses_when_no_coordinator_is_available`; the `ServiceUnavailableError` rows in `tests/errors.test.js` |
+| Unit tests | `SCRUM330_AC5_refuses_when_no_coordinator_is_available` (reversed by SCRUM-515: now `SCRUM486_AC11_submission_no_longer_reports_a_missing_coordinator_as_a_503`, because submission no longer looks for a coordinator); the `ServiceUnavailableError` rows in `tests/errors.test.js` |
 | Screen | `EventRequestForm` shows `err.response.data.error`, so the Organiser sees the AC's own message |
 | Not live-tested | Proving it against the database needs zero coordinators in the shared project, which means taking the role away from real users |
 
@@ -129,7 +138,7 @@ unproven, for whichever story adds a path back.
 |---|---|
 | Migration | `018` `reassign_event_request`: `for update` on the event; refuses a null or non-matching caller (`42501`); refuses any status outside the five (`55000`) |
 | Service / route | `reassignEventRequest`; `POST /:id/reassign` behind `coordinatorOnly`, with no ownership pre-check (D9) |
-| Unit tests | `SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over`, `…_refuses_a_status_that_does_not_allow_a_handover`, `…_an_organiser_is_refused_with_403_and_never_queries`, `…_returns_401_without_a_token_and_never_queries` |
+| Unit tests | `SCRUM331_AC6_a_caller_who_neither_holds_the_event_nor_leads_is_refused` (was `SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over`; renamed by SCRUM-521 when the Lead was allowed to hand over too), `…_refuses_a_status_that_does_not_allow_a_handover`, `…_an_organiser_is_refused_with_403_and_never_queries`, `…_returns_401_without_a_token_and_never_queries` |
 | Check script | Section 4: the 42501, 55000 and null-caller refusals |
 | Screen | The hand-over button appears only when `user.id` matches the event's assigned coordinator |
 
@@ -210,7 +219,7 @@ submitted event is the one with the fewest active events.
 | On a tie, the coordinator longest without a new assignment wins | same | B (assigned 1 Jan 2000) beats C (assigned 2 Jan 2000), both with no active events |
 | A coordinator never assigned anything sorts first | same | D (no history) beats C. With nulls last, C would win |
 | A non-coordinator is never chosen | same | A Venue Staff member, best on every other key, never receives an assignment |
-| `SCRUM330_AC1_assigns_a_coordinator_on_submission` | `tests/services/eventRequestService.test.js` | The service takes the coordinator from the function's result and invents none of its own |
+| `SCRUM330_AC1_submits_through_one_call_that_names_no_coordinator` (was `SCRUM330_AC1_assigns_a_coordinator_on_submission`) | `tests/services/eventRequestService.test.js` | The service takes the coordinator from the function's result and invents none of its own. Since SCRUM-486 the function returns none |
 
 **Why the unit suite cannot prove this criterion.** The rule is an `order by`
 inside `pick_event_coordinator`. A fake client returns whatever row the test
@@ -254,11 +263,11 @@ clarification, approved or confirmed.
 
 | Case | File | Proves |
 |---|---|---|
-| `SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over` | service suite | 42501 from the function becomes `ForbiddenError`, 403, with the function's message |
+| `SCRUM331_AC6_a_caller_who_neither_holds_the_event_nor_leads_is_refused` (was `SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over`) | service suite | 42501 from the function becomes `ForbiddenError`, 403, with the function's message |
 | `SCRUM331_AC6_refuses_a_status_that_does_not_allow_a_handover` | service suite | 55000 becomes `ConflictError`, 409 |
 | `SCRUM331_AC6_reports_an_event_that_does_not_exist_as_not_found` | service suite | P0002 becomes 404 |
 | `SCRUM331_AC6_reports_a_handover_that_lost_a_race_as_a_conflict` | service suite | 40001 becomes 409 |
-| `SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over` | `tests/routes/eventRequests.test.js` | The route answers 403 with the function's message |
+| `SCRUM331_AC6_a_coordinator_who_does_not_hold_the_event_cannot_hand_it_over` (was `SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over`) | `tests/routes/eventRequests.test.js` | The route answers 403 with the function's message |
 | `SCRUM331_AC6_an_organiser_is_refused_with_403_and_never_queries` | route suite | The role gate refuses before the database is touched |
 | `SCRUM331_AC6_returns_401_without_a_token_and_never_queries` | route suite | No token, no query |
 | The previous coordinator can no longer hand it over (42501) | check script, section 4 | The real function refuses the real outgoing coordinator |
@@ -348,6 +357,10 @@ Each is stated as the argument, because that is what will be asked for.
 
 ### D1. A new `assigned_coordinator_id`, rather than reusing `reviewing_coordinator_id`
 
+> **SCRUM-486, 12 October 2026:** the decision stands. One premise does not: "a request is
+> assigned the moment it is submitted". Since 052 a submitted request has no coordinator until
+> the Lead assigns one (`docs/SCRUM-486.md`, section 6).
+
 The two columns record different facts, and the database already depends on one
 of them never changing. `reviewing_coordinator_id` (010, SCRUM-19) records who
 reviews a request, and 010's `event_requests_decided_by_is_reviewer` requires the
@@ -366,6 +379,10 @@ someone is reviewing it. Then the reviewer follows the new coordinator, so the
 person responsible is the person allowed to decide (018).
 
 ### D2. The assignment logic is in Postgres functions, not the service
+
+> **SCRUM-486, 12 October 2026:** the argument stands and 052 follows it. "An event must never be
+> submitted without a coordinator" does not: 052 relaxes 017's constraint so a submitted request
+> may have none, and only a submitted one.
 
 Submission and handover each write to two tables, and every part must happen or
 none of it. An event must never be submitted without a coordinator, a coordinator
@@ -513,6 +530,10 @@ coordinators everywhere, worded exactly like a missing id.
 
 ### D11. The selection function returns null rather than raising, and takes the event id
 
+> **SCRUM-486, 12 October 2026: superseded.** Nothing calls `pick_event_coordinator` since 052;
+> it is still in the database, unused (`docs/SCRUM-486.md`, section 5). The reasoning below is the
+> record of why it was built that way.
+
 **Null, not an exception.** AC5 needs the caller to ask "is anyone available?" and
 refuse cleanly. A function that raised would force every caller to catch it and
 work out which exception meant "nobody available". 014's backfill does raise, and
@@ -542,6 +563,12 @@ handover or a status change. That is a race, and a race is a 409, as it is
 everywhere else in this service. A 403 would be false when only the status moved.
 
 ### D13. The reviewer follows a handover only before a decision
+
+> **SCRUM-486, 12 October 2026:** the rule stands, and 052 applies it to the Lead's handovers too.
+> Two statements beside it are out of date: the second half no longer waits for SCRUM-19's fields
+> (both halves are proved in PGlite: `SCRUM486_AC6_the_reviewer_follows_an_undecided_event_the_lead_moves`,
+> `SCRUM486_AC6_a_decided_event_keeps_its_reviewer_when_the_lead_moves_it`), and submission now
+> clears the reviewer as well as the coordinator (052).
 
 Before a decision, the reviewer moves with the event, because 010 lets only the
 reviewer decide. After a decision it stays, because it now records who decided:
@@ -578,7 +605,7 @@ apart would mean matching message text, and both have the same remedy.
 | Gap | Detail | Owner |
 |---|---|---|
 | AC8 untraced | No code cites it. Read it off the ticket and record it here | SCRUM-327, before the exam |
-| AC4 unreachable | 015's step 1 is correct but nothing moves an event back to draft, so no test can reach it | Whichever story adds a path back to draft |
+| AC4 unreachable | 015's step 1 is correct but nothing moves an event back to draft, so no test can reach it. **Out of date twice:** SCRUM-318's 022 added rejected → draft, which made the step reachable; then SCRUM-486's 052 superseded the rule, so a resubmission goes to the Lead's queue, and nothing calls 015 at all | Closed by SCRUM-486 (TR-02) |
 | AC5 not live-tested | Would need zero coordinators in the shared project | None; unit-tested only |
 | Concurrency untested | Simultaneous handovers, a handover racing a decision, a role revoked mid-handover: all rest on row locks a single-threaded script cannot provoke. The 40001 refusal is unreachable by design | None; argued in 018's header |
 | Approve and Reject buttons do nothing | `CoordinatorRequestDetail` shows them; `handleReviewDecision` returns early for anything but "return for amendment" | SCRUM-19 |

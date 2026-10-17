@@ -1,9 +1,6 @@
 // flaggedBookingDisplay.js
 //
-// SCRUM-484 (AC8). Changing a venue's setup or turnaround time can make its
-// approved bookings overlap, and the backend flags those for review (034).
-// This module holds the wording for that, so the venue catalogue's notice and
-// the coordinator's booking-request list say the same thing.
+// Shared wording for the review reasons stored on flagged bookings.
 //
 // A services module, not part of a component, because the react-refresh lint
 // rule lets component files export components only.
@@ -12,6 +9,7 @@
 // A booking flagged for any other cause (a venue block, 014) has no code.
 export const REVIEW_REASON_LABELS = Object.freeze({
   setup_or_turnaround_changed: "Setup or turnaround time changed",
+  safety_review: "Safety review",
 });
 
 /**

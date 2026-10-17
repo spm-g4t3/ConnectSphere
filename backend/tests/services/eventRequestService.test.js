@@ -629,13 +629,25 @@ describe('AC4: an incomplete or missing request is not submitted', () => {
 //   - the history row's contents: it is written inside the function and never
 //     reaches the client, so there is nothing for the fake to observe.
 //   - reassignment: a separate subtask.
+//
+// SCRUM-486 (SCRUM-522). Everything above about choosing a coordinator was
+// SCRUM-327's requirement, and right until the customer changed it on
+// 11 October: 052's submit_event_request chooses nobody, writes no assignment
+// row, and leaves the request for the Event Coordinator Lead. The service call
+// itself did not change -- one read, one rpc, the same three arguments -- so
+// the tests below keep their assertions about it; what moved is the row the
+// function returns, and the names and fixtures that said "assigned".
 
-/** The row submit_event_request returns: submitted, timed and assigned. */
+/**
+ * The row submit_event_request returns: submitted and timed, with no
+ * coordinator. Until SCRUM-486 it was "submitted, timed and assigned", with
+ * assigned_coordinator_id set, because 016 assigned one. 052 does not.
+ */
 function submittedRow() {
   return storedRow({
     status: STATUS.SUBMITTED,
     submitted_at: NOW.toISOString(),
-    assigned_coordinator_id: COORDINATOR_ID,
+    assigned_coordinator_id: null,
   });
 }
 
@@ -643,14 +655,19 @@ function submittedRow() {
 const submittingWith = (rpcResult, row = storedRow()) =>
   createFakeClient([ok(row), rpcResult]);
 
-describe('SCRUM-327 AC1: a coordinator is assigned as part of submission', () => {
-  it('SCRUM330_AC1_never_assigns_a_coordinator_to_an_incomplete_draft', async () => {
+describe('SCRUM-327 AC1, as amended by SCRUM-486: submission is one call, and assigns nobody', () => {
+  it('SCRUM330_AC1_never_submits_an_incomplete_draft', async () => {
+    // Was SCRUM330_AC1_never_assigns_a_coordinator_to_an_incomplete_draft.
+    // Right when written, and trivially still true, since nothing assigns a
+    // coordinator on submission any more; renamed to what it proves, that an
+    // incomplete draft is never submitted at all (the function is not called).
+    //
     // Validation stays in the service, before the function, for two reasons.
     // First, validateSubmitEventRequest reports every gap at once, which a
     // Postgres exception cannot. Second, and more importantly here: 016's
     // function has no completeness check of its own (its header says so), so
     // this validation is the only thing that stops an incomplete draft being
-    // submitted and given a coordinator. The assertion that matters is
+    // submitted (and, before SCRUM-486, given a coordinator). The assertion that matters is
     // therefore that the function is never called, not merely that an error
     // came back.
     const client = createFakeClient([
@@ -664,12 +681,17 @@ describe('SCRUM-327 AC1: a coordinator is assigned as part of submission', () =>
     expect(rpcCallsOf(client)).toHaveLength(0);
   });
 
-  it('SCRUM330_AC1_assigns_a_coordinator_on_submission', async () => {
+  it('SCRUM330_AC1_submits_through_one_call_that_names_no_coordinator', async () => {
+    // Was SCRUM330_AC1_assigns_a_coordinator_on_submission. Its assertions
+    // all still hold and are unchanged; its name and the reason it gave --
+    // "the service does not choose one, the function does (015)" -- became
+    // false when 052 stopped the function choosing. The reason it still holds
+    // now: nobody is chosen at submission; the Lead chooses later
+    // (assign_event_request). SCRUM-486 AC1-03.
+    //
     // One read, then exactly one call to the function, and nothing else. The
     // arguments are compared with toEqual, so an extra argument fails the test
-    // as surely as a missing one. In particular, nothing names a coordinator:
-    // the service does not choose one, the function does, and the rule lives
-    // in one place (015).
+    // as surely as a missing one. In particular, nothing names a coordinator.
     //
     // p_submitted_at is the injected `now` as an ISO string. The clock stays
     // in the service, as 005 and 016 both record, so this test can state the
@@ -690,12 +712,17 @@ describe('SCRUM-327 AC1: a coordinator is assigned as part of submission', () =>
     });
   });
 
-  it('SCRUM330_AC1_returns_the_assigned_coordinator_in_camelCase', async () => {
+  it('SCRUM330_AC1_returns_the_submitted_request_in_camelCase_with_no_coordinator', async () => {
+    // Was SCRUM330_AC1_returns_the_assigned_coordinator_in_camelCase, with a
+    // fixture whose coordinator it expected back. Right when written: 016
+    // returned every submitted row with one. Since 052 the row comes back with
+    // none (SCRUM-486 AC1-03), so the fixture says so and the expectation is
+    // null -- the key present, not missing, which is what lets the Organiser's
+    // screen say "waiting for the Lead" (SCRUM-520) rather than nothing.
+    //
     // The row the function returns goes through toEventRequest like every
     // other row this module returns, so the caller sees camelCase and never
-    // assigned_coordinator_id. This is the start of "the Organiser sees their
-    // coordinator": the id has to survive the mapping before anything can
-    // turn it into a name.
+    // assigned_coordinator_id.
     //
     // This needs two changes in the implementation, not just the rpc call:
     // toEventRequest has to map the new column, and COLUMNS has to select it,
@@ -707,7 +734,8 @@ describe('SCRUM-327 AC1: a coordinator is assigned as part of submission', () =>
 
     const record = await submitEventRequest(REQUEST_ID, { client, now: NOW });
 
-    expect(record.assignedCoordinatorId).toBe(COORDINATOR_ID);
+    expect(record).toHaveProperty('assignedCoordinatorId', null);
+    expect(record).toHaveProperty('reviewingCoordinatorId', null);
     expect(record.status).toBe(STATUS.SUBMITTED);
     expect(instantOf(record.submittedAt)).toBe(NOW.getTime());
     expect(Object.keys(record).some((key) => key.includes('_'))).toBe(false);
@@ -805,31 +833,21 @@ describe("SCRUM-330: the function's refusals become typed errors", () => {
     expect(err.message).toMatch(/cancelled/);
   });
 
-  it('SCRUM330_AC5_refuses_when_no_coordinator_is_available', async () => {
-    // P0001: pick_event_coordinator found nobody. 503, not 409: the request is
-    // valid and the Organiser did nothing wrong, and trying again later may
-    // succeed, which is what the AC's own message says. errors.test.js gives
-    // the full argument for the new class.
-    //
-    // The message is asserted exactly, because it is the AC's text. It is
-    // also exactly what 016 raises, so the service must pass it through
-    // without adding to it, not wrap it the way translateError wraps a check
-    // violation ("A value was rejected by the database: ...").
-    //
-    // "The request stays a draft" is guaranteed by the function: it raises
-    // inside its own transaction, so nothing it did is kept. This fake cannot
-    // observe that, and SCRUM-335's database tests do. What the fake can
-    // observe is the service's half: after the refusal, the service makes no
-    // write of its own to "tidy up".
-    const message = 'No coordinator is available; please try again later';
-    const client = submittingWith(dbError('P0001', message));
+  it('SCRUM486_AC11_submission_no_longer_reports_a_missing_coordinator_as_a_503', async () => {
+    // AC11-03. Was SCRUM330_AC5_refuses_when_no_coordinator_is_available,
+    // which pinned SCRUM-327 AC5: P0001 from pick_event_coordinator finding
+    // nobody became a ServiceUnavailableError, a 503 with the AC's message.
+    // Right then. Since 052 submission chooses no coordinator, so it cannot
+    // raise that, and translateError has no P0001 branch. A P0001 arriving here
+    // now would be unexpected, and is reported as the untyped server fault it
+    // is, not as "try again later".
+    const client = submittingWith(dbError('P0001', 'No coordinator is available; please try again later'));
 
     const err = await errorFrom(submitEventRequest(REQUEST_ID, { client, now: NOW }));
 
     expect(rpcCallsOf(client)).toHaveLength(1);
-    expect(err).toBeInstanceOf(ServiceUnavailableError);
-    expect(err.status).toBe(503);
-    expect(err.message).toBe(message);
+    expect(err).not.toBeInstanceOf(ServiceUnavailableError);
+    expect(err.status).toBeUndefined();
     expect(client.calls.some((call) => call.operation === 'update')).toBe(false);
   });
 
@@ -1045,9 +1063,17 @@ describe("SCRUM-331: the function's refusals become typed errors", () => {
       // AC6 itself. Raised under the row lock, so it is also how the second of
       // two simultaneous handovers is refused: by the time it runs, the caller
       // no longer holds the event (see 018's header).
-      name: 'SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over',
+      //
+      // Was SCRUM331_AC6_only_the_assigned_coordinator_can_hand_over, with
+      // 018's message. Right when written: only the holder could hand over.
+      // Since 052 (SCRUM-486 AC6) the Lead may too, so "only the assigned
+      // coordinator" is no longer the rule, and the message the function
+      // raises names both. Renamed to the refusal that is still true, with
+      // 052's text; what is asserted (a 42501 becomes a 403 with the message
+      // passed through untouched) is unchanged.
+      name: 'SCRUM331_AC6_a_caller_who_neither_holds_the_event_nor_leads_is_refused',
       code: '42501',
-      message: `only the coordinator assigned to event request ${REQUEST_ID} can hand it over`,
+      message: `only the coordinator assigned to event request ${REQUEST_ID}, or the Event Coordinator Lead, can hand it over`,
       Err: ForbiddenError,
       status: 403,
       exact: true,
@@ -1984,6 +2010,13 @@ function createQueueFakeClient(results = []) {
         call.inFilters.push([column, values]);
         return chain;
       },
+      // SCRUM-486 (SCRUM-520): the review queue's "has a coordinator",
+      // .not('assigned_coordinator_id', 'is', null). Its own list too, so
+      // "no eq at all" above still means what it says.
+      not(column, operator, value) {
+        call.notFilters.push([column, operator, value]);
+        return chain;
+      },
       order(column, options) {
         call.order.push([column, options]);
         return chain;
@@ -2005,6 +2038,7 @@ function createQueueFakeClient(results = []) {
         select: null,
         filters: [],
         inFilters: [],
+        notFilters: [],
         order: [],
       };
       calls.push(call);
@@ -2014,9 +2048,27 @@ function createQueueFakeClient(results = []) {
 }
 
 
+/**
+ * A row the review queue can return. SCRUM-486 (SCRUM-520): since 052 the
+ * queue reads only requests someone holds, so every row it returns has a
+ * coordinator. The SCRUM-45 fixtures below used storedRow, which has none:
+ * right when written, because the coordinator was not part of what the queue
+ * selected on, and wrong to keep, because a fixture the read can no longer
+ * return would let these tests pass on data production cannot produce.
+ */
+const heldRow = (overrides = {}) => storedRow({ assigned_coordinator_id: COORDINATOR_ID, ...overrides });
+
 describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers', () => {
-  it('SCRUM45_AC1_filters_on_the_three_review_statuses_and_nothing_else', async () => {
-    const client = createQueueFakeClient([ok([storedRow({ status: STATUS.SUBMITTED })])]);
+  it('SCRUM45_AC1_filters_on_the_three_review_statuses_and_on_a_coordinator_holding_the_request', async () => {
+    // Was SCRUM45_AC1_filters_on_the_three_review_statuses_and_nothing_else.
+    // Right when written: from SCRUM-330 until SCRUM-486 every submitted
+    // request was given a coordinator in the same transaction, so a status
+    // filter alone already meant "held by someone". Migration 052 removed
+    // that: a submitted request now waits with no coordinator until the Lead
+    // assigns one, and it is the Lead's alone (AC2-06). So the read gained one
+    // filter, and "nothing else" is no longer true. Renamed for that; the
+    // two halves below are unchanged and still asserted in full.
+    const client = createQueueFakeClient([ok([heldRow({ status: STATUS.SUBMITTED })])]);
 
     await listEventRequestsForReview({ client });
 
@@ -2027,6 +2079,10 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
     // Half one: the status filter is present, and it is the domain's list
     // rather than three literals copied into the service.
     expect(call.inFilters).toEqual([['status', COORDINATOR_QUEUE_STATUSES]]);
+
+    // SCRUM-486 AC2-06: and the request has a coordinator. Exactly this one
+    // negative filter, so an unassigned request cannot reach the shared queue.
+    expect(call.notFilters).toEqual([['assigned_coordinator_id', 'is', null]]);
 
     // Half two, and the more important half: there is no organiser filter at
     // all. Every other read in this module narrows to one organiser_id, and
@@ -2039,7 +2095,7 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
 
   it('SCRUM45_AC1_selects_the_same_columns_as_the_organisers_own_list', async () => {
     const client = createQueueFakeClient([
-      ok([storedRow({ status: STATUS.SUBMITTED })]),
+      ok([heldRow({ status: STATUS.SUBMITTED })]),
       ok([storedRow()]),
     ]);
 
@@ -2062,8 +2118,8 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
   it('SCRUM45_AC1_returns_requests_belonging_to_more_than_one_organiser', async () => {
     const client = createQueueFakeClient([
       ok([
-        storedRow({ id: 'a', organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
-        storedRow({ id: 'b', organiser_id: OTHER_ORGANISER_ID, status: STATUS.UNDER_REVIEW }),
+        heldRow({ id: 'a', organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
+        heldRow({ id: 'b', organiser_id: OTHER_ORGANISER_ID, status: STATUS.UNDER_REVIEW }),
       ]),
     ]);
 
@@ -2079,8 +2135,8 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
   it('SCRUM45_AC1_maps_every_row_into_camelCase', async () => {
     const client = createQueueFakeClient([
       ok([
-        storedRow({ id: 'a', status: STATUS.SUBMITTED }),
-        storedRow({ id: 'b', status: STATUS.PENDING_CLARIFICATION }),
+        heldRow({ id: 'a', status: STATUS.SUBMITTED }),
+        heldRow({ id: 'b', status: STATUS.PENDING_CLARIFICATION }),
       ]),
     ]);
 
@@ -2102,7 +2158,7 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
   });
 
   it('SCRUM45_AC1_orders_by_oldest_waiting_first_with_nulls_last', async () => {
-    const client = createQueueFakeClient([ok([storedRow({ status: STATUS.SUBMITTED })])]);
+    const client = createQueueFakeClient([ok([heldRow({ status: STATUS.SUBMITTED })])]);
 
     await listEventRequestsForReview({ client });
 
@@ -2133,7 +2189,7 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
   });
 
   it('SCRUM45_AC1_takes_no_organiser_and_asserts_none', async () => {
-    const client = createQueueFakeClient([ok([storedRow({ status: STATUS.SUBMITTED })])]);
+    const client = createQueueFakeClient([ok([heldRow({ status: STATUS.SUBMITTED })])]);
 
     // Called with no organiser at all, and both the call and the signature
     // are checked. The missing parameter is not an oversight: the module
@@ -3517,6 +3573,76 @@ describe('SCRUM-321 AC3: a refused or failed change writes nothing', () => {
 });
 
 
+describe('SCRUM-488 AC2 to AC4: the safety transitions go through the same function', () => {
+  const SAFETY_MOVES = [
+    [STATUS.APPROVED, STATUS.SAFETY_REVIEW],
+    [STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_REVIEW, STATUS.APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.CONFIRMED],
+    [STATUS.SAFETY_REVIEW, STATUS.CANCELLED],
+    [STATUS.SAFETY_APPROVED, STATUS.CANCELLED],
+  ];
+
+  it.each(SAFETY_MOVES)(
+    'SCRUM488_AC4_%s_to_%s_is_one_call_carrying_the_statuses_the_actor_and_the_reason',
+    async (from, to) => {
+      const client = createFakeClient([ok(approvedRow({ status: to }))]);
+
+      const result = await change(client, {
+        expectedStatus: from, newStatus: to, reason: '  Sent back with reasons.  ',
+      });
+
+      expect(client.calls.map((call) => call.operation)).toEqual(['rpc']);
+      expect(rpcCallsOf(client)[0]).toMatchObject({
+        fn: 'change_event_request_status',
+        args: {
+          p_event_request_id: REQUEST_ID,
+          p_expected_status: from,
+          p_new_status: to,
+          p_changed_by: COORDINATOR_ID,
+          p_reason: 'Sent back with reasons.',
+        },
+      });
+      expect(result.status).toBe(to);
+    },
+  );
+
+  it.each([
+    [STATUS.APPROVED, STATUS.CONFIRMED],
+    [STATUS.APPROVED, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_REVIEW, STATUS.CONFIRMED],
+    // SCRUM-347 has not decided whether a safety status may be rejected.
+    [STATUS.SAFETY_REVIEW, STATUS.REJECTED],
+    [STATUS.SAFETY_APPROVED, STATUS.REJECTED],
+    [STATUS.CONFIRMED, STATUS.SAFETY_REVIEW],
+    [STATUS.COMPLETED, STATUS.SAFETY_REVIEW],
+    [STATUS.CANCELLED, STATUS.SAFETY_APPROVED],
+  ])('SCRUM488_AC3_refuses_%s_to_%s_naming_the_status_and_calling_nothing', async (from, to) => {
+    const client = createFakeClient([]);
+
+    const err = await errorFrom(change(client, { expectedStatus: from, newStatus: to }));
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.status).toBe(409);
+    expect(err.message).toContain(`'${from}'`);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM488_AC3_a_conflict_from_the_function_on_a_safety_move_is_a_409_with_no_retry', async () => {
+    // The stale-status refusal and the table's own refusal both raise 55000.
+    const client = createFakeClient([dbError('55000', 'event request has status safety_review, not approved')]);
+
+    const err = await errorFrom(change(client, {
+      expectedStatus: STATUS.APPROVED, newStatus: STATUS.SAFETY_REVIEW,
+    }));
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(rpcCallsOf(client)).toHaveLength(1);
+  });
+});
+
+
 describe('SCRUM-321: the other status changes go through the same function', () => {
   it('SCRUM321_a_clarification_request_that_is_not_allowed_calls_nothing_after_the_read', async () => {
     // Approved cannot go back to clarification. The refusal names the status
@@ -3588,14 +3714,18 @@ describe('SCRUM-321 with SCRUM-327: Draft -> Submitted keeps its own path and ga
   });
 
   it('SCRUM321_a_refused_submission_still_calls_the_function_once_and_writes_nothing_else', async () => {
+    // The refusal used to be P0001, "No coordinator is available", which
+    // submission raised until SCRUM-486. It can no longer, so the refusal here
+    // is one it still can: the request is no longer a draft (55000). What the
+    // test proves is unchanged: one call, and no write after a refusal.
     const client = createFakeClient([
       ok(storedRow()),
-      dbError('P0001', 'No coordinator is available; please try again later'),
+      dbError('55000', `event request ${REQUEST_ID} has status submitted, and only a draft can be submitted`),
     ]);
 
     const err = await errorFrom(submitEventRequest(REQUEST_ID, { client, now: NOW }));
 
-    expect(err).toBeInstanceOf(ServiceUnavailableError);
+    expect(err).toBeInstanceOf(ConflictError);
     expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
   });
 });
@@ -3711,6 +3841,57 @@ describe('SCRUM-322 AC6: the Organiser and the assigned coordinator see the full
       ['Under review', 'Awaiting your response'],
     ]);
   });
+
+  it('SCRUM488_AC6_shows_the_safety_statuses_by_label_with_reasons_actors_and_times_oldest_first', async () => {
+    // An event seeded through the safety check: submitted for it, sent back by
+    // the Safety Officer, submitted again, approved, confirmed. The raw
+    // statuses stay for code; what is read is the Organiser's label.
+    const SAFETY_OFFICER_ID = '55555555-5555-4555-8555-555555555555';
+    const rows = [
+      { previous_status: STATUS.APPROVED, new_status: STATUS.SAFETY_REVIEW, changed_by: COORDINATOR_ID, reason: 'Venue and equipment are arranged.', created_at: '2026-02-01T09:00:00+00:00' },
+      { previous_status: STATUS.SAFETY_REVIEW, new_status: STATUS.APPROVED, changed_by: SAFETY_OFFICER_ID, reason: 'The second exit is blocked.', created_at: '2026-02-02T09:00:00+00:00' },
+      { previous_status: STATUS.APPROVED, new_status: STATUS.SAFETY_REVIEW, changed_by: COORDINATOR_ID, reason: null, created_at: '2026-02-03T09:00:00+00:00' },
+      { previous_status: STATUS.SAFETY_REVIEW, new_status: STATUS.SAFETY_APPROVED, changed_by: SAFETY_OFFICER_ID, reason: 'Meets the safety review.', created_at: '2026-02-04T09:00:00+00:00' },
+      { previous_status: STATUS.SAFETY_APPROVED, new_status: STATUS.CONFIRMED, changed_by: COORDINATOR_ID, reason: null, created_at: '2026-02-05T09:00:00+00:00' },
+    ];
+    const people = [...profiles(), { id: SAFETY_OFFICER_ID, full_name: 'Sam Safety' }];
+    const client = readingHistory(heldEvent({ status: STATUS.CONFIRMED }), rows, people);
+
+    const history = await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(history.map((entry) => [entry.previousStatusLabel, entry.newStatusLabel])).toEqual([
+      ['Planning', 'Safety check'],
+      ['Safety check', 'Planning'],
+      ['Planning', 'Safety check'],
+      ['Safety check', 'Safety approved'],
+      ['Safety approved', 'Confirmed'],
+    ]);
+    expect(history.map((entry) => [entry.previousStatus, entry.newStatus])).toEqual(
+      rows.map((row) => [row.previous_status, row.new_status]),
+    );
+    expect(history.map((entry) => entry.reason)).toEqual(rows.map((row) => row.reason));
+    expect(history.map((entry) => entry.changedByName))
+      .toEqual(['Carlos Coordinator', 'Sam Safety', 'Carlos Coordinator', 'Sam Safety', 'Carlos Coordinator']);
+    expect(history.map((entry) => entry.changedAt)).toEqual(rows.map((row) => row.created_at));
+    for (const entry of history) {
+      expect(`${entry.previousStatusLabel} ${entry.newStatusLabel}`).not.toMatch(/_|Unknown|Unavailable/);
+    }
+    expect(client.calls[1].order).toEqual([['created_at', { ascending: true }]]);
+  });
+
+  it.each([STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED])(
+    'SCRUM488_AC6_an_event_in_%s_can_be_read_by_its_organiser_and_its_assigned_coordinator_only',
+    async (status) => {
+      for (const [userId, readable] of [[ORGANISER_ID, true], [COORDINATOR_ID, true], [STRANGER_ID, false]]) {
+        const client = readingHistory(heldEvent({ status }));
+
+        const read = getEventRequestStatusHistory(REQUEST_ID, userId, { client });
+
+        if (readable) await expect(read).resolves.toHaveLength(3);
+        else expect(await errorFrom(read)).toBeInstanceOf(NotFoundError);
+      }
+    },
+  );
 
   it('SCRUM322_AC6_exposes_only_those_seven_fields', async () => {
     // Not the user id, the row id or the event id: what the screen shows is the

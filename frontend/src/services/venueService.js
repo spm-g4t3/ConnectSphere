@@ -580,14 +580,3 @@ export async function getHoldCandidates() {
   const response = await apiClient.get("/event-requests/hold-candidates");
   return response.data;
 }
-
-// --- STUB below: no backend endpoint exists yet for this ------------------
-// It exists purely so the import in VenueStaffDashboard.jsx resolves and the
-// app can actually run. Its Coordinator twin was removed by SCRUM-128, when
-// CoordinatorNotifications took the section that called it.
-
-/** @returns {Promise<Array>} always empty for now */
-export async function getPendingBookingRequests() {
-  console.warn("getPendingBookingRequests: not implemented yet — no backend endpoint exists.");
-  return [];
-}

@@ -37,7 +37,6 @@ vi.mock("../../src/services/venueService", () => ({
   updateVenueBlock: vi.fn(),
   removeVenueBlock: vi.fn(),
   getVenueBlockHistory: vi.fn(),
-  getPendingBookingRequests: vi.fn(),
 }));
 
 const MINUTE = 60 * 1000;

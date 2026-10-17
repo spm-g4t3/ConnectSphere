@@ -92,6 +92,14 @@ describe('SCRUM-251: the booking status default in Postgres', () => {
     existingBookingId = before.id;
 
     await db.exec(migration(MIGRATION_028));
+    // 065 appends conflicting, so every status in the JS vocabulary exists.
+    // Only its booking_status line: venue_hold_status is not in this stack.
+    await db.exec(
+      migration('065_booking_decision_statuses.sql')
+        .split('\n')
+        .filter((line) => line.startsWith('alter type booking_status add value'))
+        .join('\n'),
+    );
   }, 60_000);
 
   afterAll(async () => {

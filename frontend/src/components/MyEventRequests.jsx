@@ -23,6 +23,7 @@ import AssignmentHistory from "./AssignmentHistory";
 import DecisionOutcome from "./DecisionOutcome";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import ClarificationReplyForm from "./ClarificationReplyForm";
+import SafetyApprovalNotice from "./SafetyApprovalNotice";
 
 function formatEventDate(value) {
   if (!value) return "Not specified";
@@ -56,7 +57,7 @@ function formatEventDate(value) {
  * backend change and a follow-up. Once opened it stays loaded; closing and
  * reopening does not read it again.
  */
-function CoordinatorDetails({ eventRequestId }) {
+function CoordinatorDetails({ eventRequestId, currentCoordinatorId }) {
   const [opened, setOpened] = useState(false);
 
   return (
@@ -67,9 +68,57 @@ function CoordinatorDetails({ eventRequestId }) {
       }}
     >
       <summary>Your coordinator and assignment history</summary>
-      {opened && <AssignmentHistory eventRequestId={eventRequestId} view="organiser" />}
+      {/* SCRUM-486 TR-03: who holds it now comes from the request, so a
+          resubmitted request waiting for the Lead is not shown as still
+          held by its old coordinator. */}
+      {opened && (
+        <AssignmentHistory eventRequestId={eventRequestId} view="organiser" currentCoordinatorId={currentCoordinatorId} />
+      )}
     </details>
   );
+}
+
+/**
+ * SCRUM-486 (SCRUM-520), AC1-05: where a submitted request stands with its
+ * coordinator, said on the row, or null when there is nothing to add.
+ *
+ * Since migration 052 "submitted" covers two situations an Organiser needs to
+ * tell apart: nobody has been assigned yet (the Event Coordinator Lead will
+ * choose someone), or a coordinator has been and has not started the review.
+ * Before SCRUM-486 they were one situation, because a coordinator was assigned
+ * in the same transaction as the submission.
+ *
+ * A line of its own, beside the status, rather than a status display that
+ * takes the assignment into account. The display (getStatusDisplay in the
+ * backend's domain/eventRequestStatus.js, SCRUM-14's) is keyed on the status
+ * alone and is "the one definition of these words" for every screen: it has
+ * three call sites in the backend, one of which (withStatusDisplay) puts it on
+ * all sixteen event-request responses, and five frontend screens render it,
+ * three of them the coordinators' (ReviewQueue, MyAssignedEvents,
+ * CoordinatorRequestDetail). Making it depend on the assignment
+ * would mean every one of those passing the coordinator in, including
+ * GET /:id/status, which reads only the status, or two responses describing
+ * the same request differently. And the assignment is not a status: 052
+ * deliberately added none. The shared description, "waiting to be picked up
+ * by a Coordinator", is still true in both situations; this line says which.
+ *
+ * Only for "submitted". Under review, pending clarification, approved and
+ * confirmed always have a coordinator (052's relaxed constraint still requires
+ * one), and the status itself says what is happening; a draft or a cancelled
+ * request is waiting for nobody.
+ */
+function assignmentLine(request) {
+  if (request.status !== "submitted") return null;
+
+  if (request.assignedCoordinatorId == null) {
+    return "Waiting for the Event Coordinator Lead to assign a coordinator to your request.";
+  }
+
+  // AC1-06: named, from the list's own read (assignedCoordinatorName). A
+  // coordinator with no name on record is still said to be assigned, never
+  // shown as "null".
+  const who = request.assignedCoordinatorName ?? "A coordinator";
+  return `${who} has been assigned; your request is waiting for them to start the review.`;
 }
 
 export default function MyEventRequests() {
@@ -212,6 +261,7 @@ export default function MyEventRequests() {
           // The labels and descriptions come from the API now (SCRUM-42), so
           // this component no longer interprets a status itself.
           const display = readStatusDisplay(req);
+          const assignment = assignmentLine(req);
           return (
             <li key={req.id} className="my-event-requests__item">
               <div className="my-event-requests__item-main">
@@ -223,6 +273,10 @@ export default function MyEventRequests() {
               <p className="my-event-requests__item-description">
                 {display.description}
               </p>
+              <SafetyApprovalNotice status={req.status} />
+              {assignment && (
+                <p className="my-event-requests__assignment">{assignment}</p>
+              )}
 
               {req.status === "pending_clarification" && req.clarificationNote && (
                 <div className="my-event-requests__clarification" role="status">
@@ -294,9 +348,13 @@ export default function MyEventRequests() {
                 </dl>
               </details>
 
-              {/* Not on a draft: a coordinator is assigned at submission, so a
-                  draft has nobody and no history to show. */}
-              {req.status !== "draft" && <CoordinatorDetails eventRequestId={req.id} />}
+              {/* Not on a draft: a draft has never had a coordinator, so it has
+                  no history to show. (Since 052 a submitted request may not
+                  have one yet either; its history then says so, and the line
+                  above has already told the Organiser why.) */}
+              {req.status !== "draft" && (
+                <CoordinatorDetails eventRequestId={req.id} currentCoordinatorId={req.assignedCoordinatorId ?? null} />
+              )}
               {req.status !== "draft" && (
                 <ClarificationHistoryDialog
                   eventRequestId={req.id}

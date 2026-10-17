@@ -2,8 +2,9 @@
 //
 // SCRUM-128 (part of SCRUM-17, AC3). The notifications card took the seat of
 // the "Pending venue bookings" stub. Both service modules the page reaches are
-// mocked, so nothing touches the network, and venueService is mocked too so a
-// stray call to a removed stub would show up rather than console.warn.
+// mocked, so nothing touches the network. bookingRequestService's Venue Staff
+// queue call is spied on: it is not the coordinator's (SCRUM-258), and would
+// only answer 403 here.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -12,7 +13,7 @@ import { MemoryRouter } from "react-router-dom";
 import EventCoordinatorDashboard from "../../src/components/EventCoordinatorDashboard.jsx";
 import { getEventRequestQueue, getMyAssignedEvents } from "../../src/services/eventRequestService";
 import { listNotifications } from "../../src/services/notificationService";
-import * as venueService from "../../src/services/venueService";
+import { getPendingBookingRequests } from "../../src/services/bookingRequestService";
 
 // Every export the dashboard's component tree reaches, not only the queue's.
 // A vi.mock factory is strict: reading an export it did not return throws,
@@ -40,7 +41,8 @@ vi.mock("../../src/services/notificationService", () => ({
   markNotificationRead: vi.fn(),
 }));
 
-vi.mock("../../src/services/venueService", () => ({
+vi.mock("../../src/services/bookingRequestService", async (importOriginal) => ({
+  ...(await importOriginal()),
   getPendingBookingRequests: vi.fn(),
 }));
 
@@ -113,13 +115,17 @@ describe("SCRUM17_AC3 EventCoordinatorDashboard", () => {
     expect(screen.queryByText(/No pending bookings/i)).not.toBeInTheDocument();
   });
 
-  it("the removed venueService stub is not exported and nothing else is called", async () => {
+  it("the removed venueService stub is not exported", async () => {
     const actual = await vi.importActual("../../src/services/venueService");
     expect(Object.keys(actual)).not.toContain("getPendingVenueBookings");
+  });
 
+  it("SCRUM258_AC1_the_coordinator_dashboard_does_not_load_the_venue_staff_queue", async () => {
     renderDashboard();
     await screen.findByText("You have no notifications.");
-    expect(venueService.getPendingBookingRequests).not.toHaveBeenCalled();
+
+    expect(getPendingBookingRequests).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Pending booking requests" })).not.toBeInTheDocument();
   });
 
   it("both sections are direct children of the dashboard wrapper, for the card styling", async () => {

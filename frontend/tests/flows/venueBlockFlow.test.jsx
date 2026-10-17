@@ -42,7 +42,6 @@ vi.mock("../../src/services/venueService", () => ({
   updateVenueBlock: vi.fn(),
   removeVenueBlock: vi.fn(),
   getVenueBlockHistory: vi.fn(),
-  getPendingBookingRequests: vi.fn(),
 }));
 
 const OFFSET_SUFFIX = /[+-]\d{2}:\d{2}$|Z$/;

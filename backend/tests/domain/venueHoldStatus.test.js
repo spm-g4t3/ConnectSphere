@@ -5,7 +5,7 @@
  * is active until its expiry passes, then expired (AC7).
  *
  * Mirrors venueBlockReason.test.js: the JS list and the database enum in
- * 040_venue_holds.sql and the cancellation extension must not drift apart.
+ * 040_venue_holds.sql and its extensions (047, 065) must not drift apart.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -19,7 +19,7 @@ import { VENUE_HOLD_STATUS, isVenueHoldStatus } from '../../src/domain/venueHold
 /** The hold migrations with every `--` comment stripped. */
 function migrationSql() {
   const here = dirname(fileURLToPath(import.meta.url));
-  return ['040_venue_holds.sql', '047_add_released_venue_hold_status.sql']
+  return ['040_venue_holds.sql', '047_add_released_venue_hold_status.sql', '065_booking_decision_statuses.sql']
     .map((name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8'))
     .join('\n')
     .replace(/--[^\n]*/g, '');
@@ -32,9 +32,10 @@ function statusesDeclaredInSql() {
   if (!block) throw new Error('could not find the enum in the migration');
 
   const statuses = [...block[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-  const extension = sql.match(/alter type venue_hold_status add value if not exists '([a-z_]+)'/i);
-  if (!extension) throw new Error('could not find the cancellation hold status');
-  return [...statuses, extension[1]];
+  const extensions = [...sql.matchAll(/alter type venue_hold_status add value if not exists '([a-z_]+)'/gi)]
+    .map((m) => m[1]);
+  if (extensions.length !== 2) throw new Error('could not find the released and converted hold statuses');
+  return [...statuses, ...extensions];
 }
 
 
@@ -43,8 +44,8 @@ describe('VENUE_HOLD_STATUS mirrors the database enum', () => {
     expect(Object.values(VENUE_HOLD_STATUS)).toEqual(statusesDeclaredInSql());
   });
 
-  it('exposes active, expired, and released in order', () => {
-    expect(Object.values(VENUE_HOLD_STATUS)).toEqual(['active', 'expired', 'released']);
+  it('exposes active, expired, released, and converted in order', () => {
+    expect(Object.values(VENUE_HOLD_STATUS)).toEqual(['active', 'expired', 'released', 'converted']);
   });
 
   it('is frozen, so no caller can add or rewrite a status at runtime', () => {
@@ -54,7 +55,7 @@ describe('VENUE_HOLD_STATUS mirrors the database enum', () => {
 
 
 describe('isVenueHoldStatus', () => {
-  it.each(['active', 'expired', 'released'])('accepts %s', (value) => {
+  it.each(['active', 'expired', 'released', 'converted'])('accepts %s', (value) => {
     expect(isVenueHoldStatus(value)).toBe(true);
   });
 

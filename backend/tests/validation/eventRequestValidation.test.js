@@ -525,6 +525,19 @@ describe('AC4: expected attendance must be a whole number greater than zero', ()
 
     expect(messageFor(err, 'expectedAttendance')).toMatch(/whole number greater than zero/i);
   });
+
+  it('SCRUM525_expected_attendance_stops_at_the_postgres_integer_maximum', () => {
+    // event_requests.expected_attendance is an integer column. The largest
+    // value it holds is kept; one more is refused here, naming the field,
+    // rather than failing the insert.
+    expect(validateCreateEventRequest({ ...DRAFT, expectedAttendance: 2147483647 }).expectedAttendance)
+      .toBe(2147483647);
+    const err = errorFrom(() =>
+      validateCreateEventRequest({ ...DRAFT, expectedAttendance: 2147483648 }),
+    );
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(messageFor(err, 'expectedAttendance')).toBe('must be at most 2147483647');
+  });
 });
 
 

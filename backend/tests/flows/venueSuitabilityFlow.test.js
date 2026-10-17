@@ -286,12 +286,16 @@ describe('SCRUM188 venue suitability journey: check, request, Venue Staff, reche
       ...checkSteps(),
       rpcStep('create_booking_request', undefined, (args) => {
         journey.stored = args.p_suitability;
+        // SCRUM-525: kept, so the stored booking holds what the function was sent.
+        journey.attendance = args.p_expected_attendance;
         expect(args).toMatchObject({
           p_event_request_id: EVENT_ID,
           p_venue_id: VENUE_ID,
           p_requested_by: COORDINATOR_ID,
           p_room_layout_code: 'theatre',
           p_confirm_unsuitable: true,
+          // No attendance in the body, so the event's.
+          p_expected_attendance: 150,
         });
         expect(args.p_suitability.suitable).toBe(false);
         expect(args.p_suitability.criteria.filter((c) => !c.met).map((c) => c.criterion)).toEqual(['Capacity']);
@@ -319,6 +323,8 @@ describe('SCRUM188 venue suitability journey: check, request, Venue Staff, reche
             status: 'pending',
             requested_by: COORDINATOR_ID,
             room_layout_code: 'theatre',
+            // SCRUM-525 (051): the attendance as create_booking_request stored it.
+            expected_attendance: journey.attendance,
             setup_notes: null,
             suitability_result: journey.stored,
             suitability_overridden: true,
@@ -374,12 +380,17 @@ describe('SCRUM188 venue suitability journey: check, request, Venue Staff, reche
     fromStep('event_requests', ok(event)),
     fromStep('bookings', ok([{ ...journey.bookingRow, venues: { name: 'Seminar Room', location: 'Level 2' } }]), (q) => {
       expect(q.allArgs('eq')).toEqual([['event_request_id', EVENT_ID]]);
-      expect(q.args('in')).toEqual(['status', ['pending', 'approved', 'flagged_for_review']]);
+      expect(q.args('in')).toEqual(['status', ['pending', 'conflicting', 'approved', 'flagged_for_review']]);
     }),
     ...judgeSteps(occupancy),
   ];
 
-  it('SCRUM188_AC6_flow_attendance_raised_again_still_shows_capacity_unmet_not_newly', async () => {
+  // SCRUM-525 rewrote SCRUM188_AC6_flow_attendance_raised_again_still_shows_
+  // capacity_unmet_not_newly. R15 (Terence, 2026-10-12): a booking's own
+  // attendance wins, so raising the event's to 180 does not re-judge a
+  // booking requested for 150 (SCRUM-188 AC6 narrowed; SCRUM-395 owns
+  // changing a booking's number).
+  it('SCRUM525_AC3_flow_the_event_raised_to_180_does_not_change_a_booking_requested_for_150', async () => {
     script(rpcStep(
       'process_change_request',
       ok({
@@ -415,10 +426,18 @@ describe('SCRUM188 venue suitability journey: check, request, Venue Staff, reche
 
     expect(res.status).toBe(200);
     const [item] = res.body;
-    expect(item).toMatchObject({ bookingId: BOOKING_ID, suitabilityOverridden: true, error: null });
+    expect(item).toMatchObject({
+      bookingId: BOOKING_ID,
+      suitabilityOverridden: true,
+      error: null,
+      expectedAttendance: 150,
+      attendanceSource: 'booking',
+    });
+    // Judged on the booking's own 150, read back from what was stored, not
+    // on the event's new 180.
     expect(criterion(item.current, 'Capacity')).toMatchObject({
       met: false,
-      detail: 'Capacity 80 < expected attendance 180',
+      detail: 'Capacity 80 < expected attendance 150',
     });
     expect(item.atRequest).toEqual({ suitable: false, unmet: ['Capacity'] });
     // Already overridden by name, so not raised again (open point 6).

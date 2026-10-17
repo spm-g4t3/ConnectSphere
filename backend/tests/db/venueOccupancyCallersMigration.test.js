@@ -309,10 +309,15 @@ describe('AC6: a block keeps its own period', () => {
     for (const name of BLOCK_FUNCTIONS) {
       expect(latestDefinitionFile(name), name).toBe(FILE);
     }
-    // Changed for SCRUM-491: 040 redefines create_booking_request with 033's
+    // Changed for SCRUM-491: 040 redefined create_booking_request with 033's
     // body word for word except step 7, which also counts other events'
-    // active holds, so 040 is now its latest definition.
-    expect(latestDefinitionFile('create_booking_request')).toBe('040_venue_holds.sql');
+    // active holds. Changed again for SCRUM-525: 051 redefines it with 040's
+    // body, step 7's call unchanged, but one live request per event per venue
+    // (step 6) and the request's own expected attendance, so 051 is now its
+    // latest definition. Changed for SCRUM-258: 066 restates 051's body with
+    // step 3 widened to the safety statuses and step 6's live statuses to
+    // conflicting, step 7's call unchanged, so 066 is now the latest.
+    expect(latestDefinitionFile('create_booking_request')).toBe('066_venue_staff_booking_decisions.sql');
   });
 
   it('SCRUM484_AC7_block_conflicts_carry_the_occupied_keys', () => {

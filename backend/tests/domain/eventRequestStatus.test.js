@@ -9,9 +9,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+
+import { ELEVEN_STATUSES, EXPECTED_TRANSITIONS, EVERY_PAIR } from '../fixtures/expectedTransitionMatrix.js';
 
 import {
   STATUS,
@@ -30,12 +32,14 @@ const ALL_STATUSES = Object.values(STATUS);
 /** Final: nothing leads out of them (SCRUM-318). Rejected is not, it reopens as a draft. */
 const TERMINAL = [STATUS.COMPLETED, STATUS.CANCELLED];
 
-/** The statuses SCRUM-318 allows the assigned coordinator to cancel from. */
+/** The statuses SCRUM-318 allows the assigned coordinator to cancel from, with SCRUM-488's two. */
 const CANCELLABLE = [
   STATUS.SUBMITTED,
   STATUS.UNDER_REVIEW,
   STATUS.PENDING_CLARIFICATION,
   STATUS.APPROVED,
+  STATUS.SAFETY_REVIEW,
+  STATUS.SAFETY_APPROVED,
   STATUS.CONFIRMED,
 ];
 
@@ -47,21 +51,31 @@ const OBSOLETE_STATUSES = ['planning'];
 // The JS list and the database enum must not drift apart
 // ---------------------------------------------------------------------------
 describe('STATUS mirrors the database enum', () => {
-  /** Pull the enum values straight out of the migration, comments stripped. */
+  /**
+   * The enum's values: 001's create type, comments stripped, then every
+   * `alter type event_request_status add value` in the later migrations.
+   */
   function statusesDeclaredInSql() {
     const here = dirname(fileURLToPath(import.meta.url));
-    const sql = readFileSync(
-      resolve(here, '../../db/migrations/001_event_requests.sql'),
-      'utf8',
-    );
-
+    const migrations = resolve(here, '../../db/migrations');
+    const sql = readFileSync(resolve(migrations, '001_event_requests.sql'), 'utf8');
     const block = sql.match(
       /create type event_request_status as enum \(([\s\S]*?)\);/i,
     );
     if (!block) throw new Error('could not find the enum in the migration');
 
-    return [...block[1].replace(/--[^\n]*/g, '').matchAll(/'([a-z_]+)'/g)]
+    const values = [...block[1].replace(/--[^\n]*/g, '').matchAll(/'([a-z_]+)'/g)]
       .map((m) => m[1]);
+
+    for (const file of readdirSync(migrations).filter((name) => /^\d{3}_.*\.sql$/.test(name)).sort()) {
+      const text = readFileSync(resolve(migrations, file), 'utf8').replace(/--[^\n]*/g, '');
+      for (const [, value] of text.matchAll(
+        /alter type (?:public\.)?event_request_status\s+add value (?:if not exists )?'([a-z_]+)'/gi,
+      )) {
+        if (!values.includes(value)) values.push(value);
+      }
+    }
+    return values;
   }
 
   it('only uses values the SQL migration declares', () => {
@@ -79,8 +93,8 @@ describe('STATUS mirrors the database enum', () => {
     expect(missing.sort()).toEqual([...OBSOLETE_STATUSES].sort());
   });
 
-  it('has nine statuses', () => {
-    expect(ALL_STATUSES).toHaveLength(9);
+  it('has the nine statuses of SCRUM-318 and the two safety statuses of SCRUM-488', () => {
+    expect(ALL_STATUSES).toHaveLength(11);
   });
 
   it('has no duplicate values', () => {
@@ -183,16 +197,39 @@ describe('only legal status transitions are permitted', () => {
     [STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION],
     [STATUS.PENDING_CLARIFICATION, STATUS.UNDER_REVIEW],
     [STATUS.CONFIRMED, STATUS.COMPLETED],
-    // SCRUM-318 additions
-    [STATUS.APPROVED, STATUS.CONFIRMED],
     [STATUS.CONFIRMED, STATUS.APPROVED],
     [STATUS.APPROVED, STATUS.REJECTED],
     [STATUS.REJECTED, STATUS.DRAFT],
+    // SCRUM-488: the Operational Safety Check, before Confirmed
+    [STATUS.APPROVED, STATUS.SAFETY_REVIEW],
+    [STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_REVIEW, STATUS.APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.CONFIRMED],
+    [STATUS.SAFETY_REVIEW, STATUS.CANCELLED],
+    [STATUS.SAFETY_APPROVED, STATUS.CANCELLED],
   ])('allows %s -> %s', (from, to) => {
     expect(canTransition(from, to)).toBe(true);
   });
 
   it.each([
+    // SCRUM-488: Confirmed is reached through the safety check only
+    [STATUS.APPROVED, STATUS.CONFIRMED],
+    [STATUS.APPROVED, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_REVIEW, STATUS.CONFIRMED],
+    [STATUS.UNDER_REVIEW, STATUS.SAFETY_REVIEW],
+    [STATUS.CONFIRMED, STATUS.SAFETY_REVIEW],
+    [STATUS.CONFIRMED, STATUS.SAFETY_APPROVED],
+    [STATUS.SAFETY_APPROVED, STATUS.SAFETY_REVIEW],
+    [STATUS.SAFETY_REVIEW, STATUS.UNDER_REVIEW],
+    [STATUS.SAFETY_REVIEW, STATUS.DRAFT],
+    [STATUS.SAFETY_APPROVED, STATUS.COMPLETED],
+    // rejecting from a safety status is SCRUM-347's open decision (SCRUM-488 D4)
+    [STATUS.SAFETY_REVIEW, STATUS.REJECTED],
+    [STATUS.SAFETY_APPROVED, STATUS.REJECTED],
+    [STATUS.REJECTED, STATUS.SAFETY_REVIEW],
+    [STATUS.COMPLETED, STATUS.SAFETY_REVIEW],
+    [STATUS.CANCELLED, STATUS.SAFETY_APPROVED],
     // a rejected request is revised as a draft, never revived in place
     [STATUS.REJECTED, STATUS.CONFIRMED],
     [STATUS.REJECTED, STATUS.UNDER_REVIEW],
@@ -221,29 +258,49 @@ describe('only legal status transitions are permitted', () => {
     expect(canTransition(from, to)).toBe(false);
   });
 
-  it('refuses every transition outside the SCRUM-318 table', () => {
-    // The whole table, so a transition added by accident fails here even when
-    // nobody thought to write a case for it.
-    const permitted = new Set([
-      'draft>submitted',
-      'submitted>under_review',
-      'under_review>pending_clarification',
-      'pending_clarification>under_review',
-      'under_review>approved',
-      'under_review>rejected',
-      'approved>rejected',
-      'rejected>draft',
-      'approved>confirmed',
-      'confirmed>approved',
-      'confirmed>completed',
-      ...CANCELLABLE.map((s) => `${s}>cancelled`),
-    ]);
+  it('SCRUM553_AC2_agrees_with_the_expected_matrix_for_every_pair_of_the_eleven_statuses', () => {
+    // 121 pairs against tests/fixtures/expectedTransitionMatrix.js, which is
+    // written out and read by no implementation.
+    expect([...ALL_STATUSES].sort()).toEqual([...ELEVEN_STATUSES].sort());
+    expect(EVERY_PAIR).toHaveLength(121);
+    expect(EVERY_PAIR.filter(([, , allowed]) => allowed)).toHaveLength(22);
+    for (const [from, to, allowed] of EVERY_PAIR) {
+      expect(canTransition(from, to), `${from} -> ${to}`).toBe(allowed);
+    }
+  });
 
+  it('SCRUM553_AC2_ALLOWED_TRANSITIONS_lists_exactly_the_expected_targets_for_every_status', () => {
+    for (const status of ELEVEN_STATUSES) {
+      expect([...ALLOWED_TRANSITIONS[status]].sort(), status).toEqual([...EXPECTED_TRANSITIONS[status]].sort());
+    }
+  });
+
+  it('SCRUM553_AC2_approved_to_confirmed_is_refused', () => {
+    expect(canTransition('approved', 'confirmed')).toBe(false);
+    expect(ALLOWED_TRANSITIONS[STATUS.APPROVED]).not.toContain(STATUS.CONFIRMED);
+  });
+
+  it('SCRUM553_AC2_completed_and_cancelled_lead_nowhere_among_the_eleven', () => {
+    for (const from of ['completed', 'cancelled']) {
+      expect(ELEVEN_STATUSES.filter((to) => canTransition(from, to)), from).toEqual([]);
+    }
+  });
+  it('SCRUM488_AC2_confirmed_is_reached_only_from_safety_approved', () => {
+    const into = ALL_STATUSES.filter((from) => canTransition(from, STATUS.CONFIRMED));
+
+    expect(into).toEqual([STATUS.SAFETY_APPROVED]);
+  });
+
+  it('SCRUM488_AC2_a_safety_status_is_left_only_to_approved_the_next_stage_or_cancelled', () => {
+    expect([...ALLOWED_TRANSITIONS[STATUS.SAFETY_REVIEW]].sort())
+      .toEqual([STATUS.APPROVED, STATUS.CANCELLED, STATUS.SAFETY_APPROVED].sort());
+    expect([...ALLOWED_TRANSITIONS[STATUS.SAFETY_APPROVED]].sort())
+      .toEqual([STATUS.APPROVED, STATUS.CANCELLED, STATUS.CONFIRMED].sort());
+  });
+
+  it('SCRUM488_AC2_the_safety_check_is_entered_only_from_approved', () => {
     for (const from of ALL_STATUSES) {
-      for (const to of ALL_STATUSES) {
-        expect(canTransition(from, to), `${from} -> ${to}`)
-          .toBe(permitted.has(`${from}>${to}`));
-      }
+      expect(canTransition(from, STATUS.SAFETY_REVIEW), from).toBe(from === STATUS.APPROVED);
     }
   });
 
@@ -600,6 +657,8 @@ const AC7_LABELS = [
   [STATUS.UNDER_REVIEW, 'Under review'],
   [STATUS.PENDING_CLARIFICATION, 'Awaiting your response'],
   [STATUS.APPROVED, 'Planning'],
+  [STATUS.SAFETY_REVIEW, 'Safety check'],
+  [STATUS.SAFETY_APPROVED, 'Safety approved'],
   [STATUS.CONFIRMED, 'Confirmed'],
   [STATUS.COMPLETED, 'Completed'],
   [STATUS.REJECTED, 'Rejected'],
@@ -644,7 +703,8 @@ describe('SCRUM-323 AC7: every status has its Organiser label', () => {
   it('SCRUM323_AC7_leaves_the_internal_statuses_unchanged', () => {
     expect(Object.values(STATUS).sort()).toEqual([
       'approved', 'cancelled', 'completed', 'confirmed', 'draft',
-      'pending_clarification', 'rejected', 'submitted', 'under_review',
+      'pending_clarification', 'rejected', 'safety_approved', 'safety_review',
+      'submitted', 'under_review',
     ]);
   });
 
@@ -673,4 +733,44 @@ describe('SCRUM-323: a status that is not one of the nine', () => {
       expect(getOrganiserStatusLabel(value)).toBe(STATUS_FALLBACK.UNAVAILABLE.label);
     },
   );
+});
+
+
+describe('SCRUM-488 AC5: the safety statuses as the Organiser sees them', () => {
+  // Written out, not read from the table, so a changed word fails here by name.
+  // The labels are provisional until SCRUM-549's decision is confirmed.
+  it.each([
+    [STATUS.SAFETY_REVIEW, 'Safety check', STATUS_GROUP.UNDER_REVIEW],
+    [STATUS.SAFETY_APPROVED, 'Safety approved', STATUS_GROUP.APPROVED],
+  ])('SCRUM488_AC5_shows_%s_as_%s_in_an_existing_group', (status, label, group) => {
+    const display = getStatusDisplay(status);
+
+    expect(display).toMatchObject({ status, label, group });
+    expect(getOrganiserStatusLabel(status)).toBe(label);
+    expect(isKnownStatus(status)).toBe(true);
+  });
+
+  it.each([STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED])(
+    'SCRUM488_AC5_never_shows_the_internal_name_or_an_unknown_fallback_for_%s',
+    (status) => {
+      const { label, description } = getStatusDisplay(status);
+
+      for (const text of [label, description]) {
+        expect(text).not.toMatch(/_/);
+        expect(text).not.toContain(status);
+      }
+      expect(label).not.toBe(STATUS_FALLBACK.UNKNOWN.label);
+      expect(label).not.toBe(STATUS_FALLBACK.UNAVAILABLE.label);
+      expect(description.trim()).not.toBe('');
+    },
+  );
+
+  it('SCRUM488_AC5_reuses_groups_the_frontend_already_styles_so_no_group_is_added', () => {
+    // frontend/src/services/eventRequestStatusDisplay.js styles on the group.
+    // A new group would need a CSS class there; reusing one needs none.
+    expect(Object.values(STATUS_GROUP).sort()).toEqual([
+      'ACTION_REQUIRED', 'APPROVED', 'AWAITING_REVIEW', 'CANCELLED', 'COMPLETED',
+      'CONFIRMED', 'DRAFT', 'REJECTED', 'UNAVAILABLE', 'UNDER_REVIEW', 'UNKNOWN',
+    ]);
+  });
 });

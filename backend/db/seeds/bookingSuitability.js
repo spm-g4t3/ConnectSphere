@@ -3,7 +3,9 @@
  *
  * Run with: npm run booking-suitability:seed
  *
- * Run 040_venue_holds.sql first. Requests two venues on existing data, so
+ * Run 051_multi_venue_booking_requests.sql first: every request now carries
+ * its own expected attendance, and the function this calls takes it. Requests
+ * three venues on existing data, so
  * AC7 -- "the suitability result, including any criterion the coordinator
  * chose to override, is attached to the booking request so that Venue Staff
  * can see it" -- can be shown on the Venue Staff venue screen without
@@ -11,12 +13,21 @@
  *
  *   - a SUITABLE request: pending, every one of the six criteria met, for an
  *     Approved event on an active venue that holds its expected attendance
- *     and offers a layout, which is requested.
+ *     and offers a layout, which is requested. The request's attendance is
+ *     the event's, sent explicitly.
  *   - an OVERRIDDEN request: pending, suitable false with Capacity unmet
  *     ("Capacity 80 < expected attendance 150", from the real numbers), and
  *     suitability_overridden true, for a second Approved event on an active
  *     venue smaller than its expected attendance. A venue where Capacity is
  *     the only unmet criterion is preferred.
+ *   - a SECOND VENUE request (SCRUM-525): pending, for the event of the
+ *     seed's own suitable request (found by its note) and only that event,
+ *     at a different venue, with its own attendance of a third of the
+ *     event's (at least 1) -- one event using several spaces at once, each
+ *     judged on its own number. Only venues that hold that number are tried;
+ *     when none is suitable and free, it says so and adds nothing. When the
+ *     suitable request is missing, or its event has started, it says so and
+ *     adds nothing.
  *
  * Why through createBookingRequest and not straight into bookings, unlike
  * venueHolds.js's lapsed hold. Nothing here needs a state the real path
@@ -24,7 +35,8 @@
  * So the result stored is the one checkVenueSuitability really computes from
  * the stored event and venue -- real criteria, real details, real `checked`
  * -- and create_booking_request applies every rule the form does: one live
- * request per event, the period clear of blocks, approved bookings and
+ * request per event per venue (SCRUM-525), the period clear of blocks,
+ * approved bookings and
  * other events' holds, the venue active, the caller the event's assigned
  * coordinator. A hand-written result could claim a capacity the venue does
  * not have. The cost is that the outcome depends on the data: each kind is
@@ -41,9 +53,18 @@
  *
  * Skips cleanly, changing nothing, when there is no active venue. Each kind
  * is otherwise reported as kept, created or "none" with the reason -- for
- * instance when no Approved event with dates, an expected attendance and an
- * assigned coordinator is free of a live request, or (overridden) when no
- * active venue is smaller than such an event's expected attendance.
+ * instance when no Approved event has dates, an expected attendance and an
+ * assigned coordinator, or (overridden) when no active venue is smaller than
+ * such an event's expected attendance.
+ *
+ * Seeds never take a real event's slots silently. SCRUM-525 lets an event
+ * hold several venues, but the suitable and overridden requests still go
+ * only on events with no live request at all, so a real event the team is
+ * working on never gains a demo request beside its real ones. The second
+ * venue request is the one exception, and it is bounded: it is added only
+ * to the event the seed itself already requested, never to any other. So
+ * it reads that event directly by the suitable request's note, rather than
+ * from the requestable events, which by then exclude it.
  *
  * Safe to run twice: each seeded request is marked in its setup notes, and a
  * kind already present as a live request (pending, approved, flagged) is left
@@ -65,6 +86,7 @@ import { ConflictError } from '../../src/errors.js';
 const SEED_NOTE_PREFIX = 'Seeded demo (SCRUM-188 AC7)';
 const SUITABLE_NOTE = `${SEED_NOTE_PREFIX}: suitable request`;
 const OVERRIDDEN_NOTE = `${SEED_NOTE_PREFIX}: overridden request`;
+const SECOND_VENUE_NOTE = `${SEED_NOTE_PREFIX}: second venue request`;
 const LIVE_STATUSES = ['pending', 'approved', 'flagged_for_review'];
 const EVENT_LIMIT = 20;
 
@@ -73,6 +95,12 @@ const SKIPPABLE = new Set([
   'BOOKING_PERIOD_CONFLICT',
   'SUITABILITY_CONFIRMATION_REQUIRED',
   'VENUE_RETIRED',
+  // A backstop: the seed only requests events with no live request, plus a
+  // second venue on its own suitable request's event, but a request made
+  // by someone else since those reads is refused by the function (one per
+  // event per venue, 051) and is no fault of the seed.
+  'BOOKING_REQUEST_EXISTS',
+  'BOOKING_FLAGGED_FOR_REVIEW',
 ]);
 
 async function seededRequest(note) {
@@ -88,7 +116,9 @@ async function seededRequest(note) {
 
 /**
  * Approved events that can take a request: dated, not yet started, sized,
- * coordinated, none live yet.
+ * coordinated, and with no live request at any venue. SCRUM-525 would let
+ * such an event take another venue, but a demo request beside a real one
+ * would take a real event's slot silently (see the header).
  */
 async function requestableEvents() {
   const { data, error } = await supabase
@@ -134,7 +164,11 @@ async function activeVenues() {
 }
 
 /** Request through the real path; null when this venue cannot take it. */
-async function tryRequest(event, venue, { note, confirmUnsuitable, acknowledgedCriteria = [] }) {
+async function tryRequest(
+  event,
+  venue,
+  { note, confirmUnsuitable, acknowledgedCriteria = [], expectedAttendance },
+) {
   try {
     return await createBookingRequest(
       {
@@ -144,6 +178,7 @@ async function tryRequest(event, venue, { note, confirmUnsuitable, acknowledgedC
         setupNotes: note,
         confirmUnsuitable,
         acknowledgedCriteria,
+        expectedAttendance,
       },
       event.assigned_coordinator_id,
       { client: supabase },
@@ -174,7 +209,11 @@ async function seedSuitable(events, venues) {
 
   for (const event of events) {
     for (const venue of venues.filter((v) => v.maxCapacity >= event.expected_attendance)) {
-      const booking = await tryRequest(event, venue, { note: SUITABLE_NOTE, confirmUnsuitable: false });
+      const booking = await tryRequest(event, venue, {
+        note: SUITABLE_NOTE,
+        confirmUnsuitable: false,
+        expectedAttendance: event.expected_attendance,
+      });
       if (booking) {
         console.log(`  created  suitable request on ${venue.name} for ${event.event_name}`
           + ` (${summarise(booking)})`);
@@ -206,6 +245,7 @@ async function seedOverridden(events, venues, avoidEventId) {
         eventRequestId: event.id,
         venueId: venue.id,
         roomLayoutCode: venue.layouts[0] ?? null,
+        expectedAttendance: event.expected_attendance,
         client: supabase,
       });
       const unmet = unmetOf(result);
@@ -223,6 +263,7 @@ async function seedOverridden(events, venues, avoidEventId) {
       note: OVERRIDDEN_NOTE,
       confirmUnsuitable: true,
       acknowledgedCriteria: unmet,
+      expectedAttendance: event.expected_attendance,
     });
     if (booking) {
       const capacity = booking.suitability.criteria.find((c) => c.criterion === 'Capacity');
@@ -234,6 +275,71 @@ async function seedOverridden(events, venues, avoidEventId) {
 
   console.log('  none     no active venue is smaller than a remaining upcoming Approved event\'s'
     + ' expected attendance and free for it; no overridden request');
+}
+
+/**
+ * SCRUM-525: the second venue request -- the event of the seed's own
+ * suitable request, at another venue, for a third of its attendance. Only
+ * that event, so a demo request never lands beside a real event's own
+ * requests. Only venues that hold that number are tried, so the request is
+ * suitable without confirming anything; the check still judges hours,
+ * layout and availability, and a venue failing one of those is skipped.
+ */
+async function seedSecondVenue(venues) {
+  const existing = await seededRequest(SECOND_VENUE_NOTE);
+  if (existing) {
+    console.log(`  kept     second venue request ${existing.id} (${existing.status})`);
+    return;
+  }
+
+  const suitable = await seededRequest(SUITABLE_NOTE);
+  if (!suitable) {
+    console.log('  none     no live seeded suitable request to add a second venue to;'
+      + ' no second venue request');
+    return;
+  }
+
+  // Read directly, not from requestableEvents: that list leaves out every
+  // event with a live request, and this one has the seed's own.
+  const { data, error } = await supabase
+    .from('event_requests')
+    .select('id, event_name, status, proposed_start, expected_attendance, assigned_coordinator_id')
+    .eq('id', suitable.event_request_id)
+    .maybeSingle();
+  if (error) throw error;
+
+  // SCRUM-193/194 (B10): never seed onto an event that has already started.
+  if (!data || !data.proposed_start || new Date(data.proposed_start) <= new Date()) {
+    console.log(`  none     the suitable request's event ${data?.event_name ?? suitable.event_request_id}`
+      + ' has started (or has no start); no second venue request');
+    return;
+  }
+  // The function would refuse these anyway; said here so the log gives the reason.
+  if (!['approved', 'confirmed'].includes(data.status)
+      || data.expected_attendance == null || !data.assigned_coordinator_id) {
+    console.log(`  none     the suitable request's event ${data.event_name} is ${data.status},`
+      + ' or has no expected attendance or coordinator; no second venue request');
+    return;
+  }
+
+  const event = data;
+  const attendance = Math.max(1, Math.round(event.expected_attendance / 3));
+  // Its own venue is left out: the function refuses it (one per event per venue, 051).
+  for (const venue of venues.filter((v) => v.id !== suitable.venue_id && v.maxCapacity >= attendance)) {
+    const booking = await tryRequest(event, venue, {
+      note: SECOND_VENUE_NOTE,
+      confirmUnsuitable: false,
+      expectedAttendance: attendance,
+    });
+    if (booking) {
+      console.log(`  created  second venue request on ${venue.name} for ${event.event_name}`
+        + ` at ${booking.expectedAttendance} of ${event.expected_attendance} (${summarise(booking)})`);
+      return;
+    }
+  }
+
+  console.log(`  none     no other active venue holding ${attendance} is suitable and free for`
+    + ` ${event.event_name}; no second venue request`);
 }
 
 async function main() {
@@ -249,11 +355,12 @@ async function main() {
   // as kept, and one that cannot be placed says why.
   const events = await requestableEvents();
   if (events.length === 0) {
-    console.log('  note     no upcoming Approved event with dates, an expected attendance and an'
-      + ' assigned coordinator is free of live booking requests.\n');
+    console.log('  note     no upcoming Approved event has dates, an expected attendance and an'
+      + ' assigned coordinator.\n');
   }
 
   const suitableEventId = await seedSuitable(events, venues);
+  await seedSecondVenue(venues);
   await seedOverridden(events, venues, suitableEventId);
 
   console.log('\nDone. Sign in as Venue Staff and open each venue\'s bookings to see the'

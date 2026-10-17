@@ -8,15 +8,17 @@
 // checks all of it again under a lock (create_booking_request, migration 030)
 // and a refusal there is shown by bookingRequestErrors.js.
 //
-// What it cannot know: whether the event already has a pending, approved or
-// review-flagged booking. No read of an event's bookings exists yet, so that is
-// left to the server's BOOKING_REQUEST_EXISTS and BOOKING_FLAGGED_FOR_REVIEW
-// answers.
+// What it does not judge: whether a venue already has a pending, approved or
+// review-flagged booking for this event. Since SCRUM-525 that is a per-venue
+// question, not an eligibility one: EventVenueFinder and VenueSearch lock
+// those venues themselves, and the server's BOOKING_REQUEST_EXISTS and
+// BOOKING_FLAGGED_FOR_REVIEW answers remain the gate.
 
-/** The event statuses a venue can be requested for (SCRUM-243 AC1). */
-export const BOOKABLE_EVENT_STATUSES = Object.freeze(["approved", "confirmed"]);
+/** The event statuses a venue can be requested for (SCRUM-243 AC1), the safety check included (066). */
+export const BOOKABLE_EVENT_STATUSES = Object.freeze(["approved", "safety_review", "safety_approved", "confirmed"]);
 
-function statusLabel(status) {
+/** An event status in plain words ("safety review"), or "unknown" when none arrived. */
+export function statusLabel(status) {
   return typeof status === "string" && status ? status.replaceAll("_", " ") : "unknown";
 }
 
@@ -42,7 +44,7 @@ export function bookingRequestEligibility(event, userId) {
   if (!BOOKABLE_EVENT_STATUSES.includes(event.status)) {
     return {
       eligible: false,
-      reason: `A venue can only be requested for an approved or confirmed event. This event is ${statusLabel(event.status)}.`,
+      reason: `A venue can only be requested for an approved or confirmed event, including one under or past safety review. This event is ${statusLabel(event.status)}.`,
     };
   }
 

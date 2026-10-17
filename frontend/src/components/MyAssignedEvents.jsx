@@ -23,6 +23,7 @@ import {
   readStatusDisplay,
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
+import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
 
 // Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES.
@@ -177,6 +178,7 @@ function EventRow({ event, onOpen }) {
             Organiser: <OrganiserName event={event} />
           </span>
         </span>
+        <SafetyApprovalNotice status={event.status} />
       </div>
       <button onClick={() => onOpen(event)}>Open</button>
     </li>

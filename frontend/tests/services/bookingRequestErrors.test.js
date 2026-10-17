@@ -7,12 +7,14 @@ import { describe, it, expect } from "vitest";
 import {
   bookingRequestErrorMessage,
   fieldErrorsFrom,
-  isEventAlreadyRequested,
   isSuitabilityConfirmationRequired,
+  isVenueAlreadyRequested,
   periodConflicts,
   unmetCriteria,
   isStaleWithdrawError,
   withdrawErrorMessage,
+  decisionErrorMessage,
+  isStaleDecisionError,
 } from "../../src/services/bookingRequestErrors.js";
 
 const http = (status, data = {}) => Object.assign(new Error(`status ${status}`), { response: { status, data } });
@@ -23,12 +25,31 @@ describe("bookingRequestErrorMessage", () => {
     ["EVENT_NOT_BOOKABLE", /approved or confirmed/],
     ["EVENT_DATES_MISSING", /no proposed start and end/],
     ["VENUE_RETIRED", /retired/],
-    ["BOOKING_REQUEST_EXISTS", /pending or approved venue request/],
-    ["BOOKING_FLAGGED_FOR_REVIEW", /flagged for review/],
     ["BOOKING_PERIOD_CONFLICT", /not available for the whole of the event/],
     ["BOOKING_CHANGED", /changed while you were working/],
   ])("SCRUM254_explains_the_409_%s", (code, pattern) => {
     expect(bookingRequestErrorMessage(conflict(code))).toMatch(pattern);
+  });
+
+  // SCRUM-525 (AC1): one live request per venue, so both refusals are about
+  // the venue asked for, and the old event-wide wording would wrongly tell the
+  // coordinator that no other venue can be requested.
+  it.each([
+    // SCRUM-525: names where to withdraw it, the Venue Requests page.
+    ["BOOKING_REQUEST_EXISTS", /pending or approved request for this venue\..*withdraw that request first under Venue Requests\.$/],
+    ["BOOKING_FLAGGED_FOR_REVIEW", /booking for this venue is flagged for review/],
+  ])("SCRUM525_AC1_%s_is_explained_per_venue", (code, pattern) => {
+    const message = bookingRequestErrorMessage(conflict(code, [{ kind: "booking_request", bookingId: "b9" }]));
+    expect(message).toMatch(pattern);
+    expect(message).toMatch(/this venue/);
+    expect(message).not.toMatch(/only one is allowed/);
+  });
+
+  // SCRUM-525 (R4): no attendance in the body and none on the event.
+  it("SCRUM525_AC2_explains_EVENT_ATTENDANCE_MISSING", () => {
+    expect(bookingRequestErrorMessage(conflict("EVENT_ATTENDANCE_MISSING"))).toBe(
+      "This event has no expected attendance saved, so enter one for this venue before requesting it.",
+    );
   });
 
   it.each([
@@ -117,15 +138,16 @@ describe("periodConflicts", () => {
   });
 });
 
-describe("isEventAlreadyRequested", () => {
+// SCRUM-525 renamed isEventAlreadyRequested: the codes now name a venue.
+describe("isVenueAlreadyRequested", () => {
   it.each(["BOOKING_REQUEST_EXISTS", "BOOKING_FLAGGED_FOR_REVIEW"])("SCRUM254_is_true_for_%s", (code) => {
-    expect(isEventAlreadyRequested(conflict(code))).toBe(true);
+    expect(isVenueAlreadyRequested(conflict(code))).toBe(true);
   });
 
   it.each([conflict("VENUE_RETIRED"), http(403, { code: "BOOKING_REQUEST_EXISTS" }), undefined])(
     "SCRUM254_is_false_for_%s",
     (err) => {
-      expect(isEventAlreadyRequested(err)).toBe(false);
+      expect(isVenueAlreadyRequested(err)).toBe(false);
     },
   );
 });
@@ -211,9 +233,81 @@ describe("SCRUM-188 unrecognised requirement codes", () => {
     },
   );
 
+  // SCRUM-525 (AC2): the attendance is typed on the request form, so a
+  // refused number must not send the coordinator to the search form.
+  it("SCRUM525_AC2_a_400_naming_expectedAttendance_points_at_the_attendance_not_the_search_form", () => {
+    const message = bookingRequestErrorMessage(
+      http(400, { error: "prose", details: [{ field: "expectedAttendance", message: "must be at least 1" }] }),
+    );
+    expect(message).toBe(
+      "The expected attendance for this venue was not accepted. Enter a whole number of 1 or more.",
+    );
+    expect(message).not.toMatch(/search form/);
+  });
+
   it("SCRUM188_AC7_a_400_about_other_fields_keeps_the_general_message", () => {
     expect(
       bookingRequestErrorMessage(http(400, { details: [{ field: "setupNotes", message: "Too long" }] })),
     ).toBe("Some details were not accepted. Please check the form.");
+  });
+});
+
+describe("decisionErrorMessage (SCRUM-258)", () => {
+  it.each([
+    ["BOOKING_NOT_PENDING", /already been decided or withdrawn\. The list has been refreshed\./],
+    ["BOOKING_CHANGED", /changed while you were deciding/],
+    ["BOOKING_PERIOD_STALE", /dates have changed .* request the venue again for the new dates/],
+    ["EVENT_NOT_BOOKABLE", /no longer approved, in the safety check, or confirmed \(it may have been cancelled\), so its venue request can't be approved/],
+    ["VENUE_RETIRED", /retired, so the request can't be approved/],
+  ])("SCRUM258_AC2_explains_the_409_%s_to_venue_staff", (code, pattern) => {
+    expect(decisionErrorMessage(conflict(code))).toMatch(pattern);
+  });
+
+  it("SCRUM258_AC2_a_period_conflict_names_each_kind_of_occupant_once", () => {
+    const message = decisionErrorMessage(
+      conflict("BOOKING_PERIOD_CONFLICT", [
+        { kind: "booking", eventName: "Gala" },
+        { kind: "booking", eventName: "Gala" },
+        { kind: "hold", eventName: "Expo" },
+        { kind: "block", reason: "maintenance" },
+        { kind: "criterion" },
+      ]),
+    );
+    expect(message).toMatch(/setup and turnaround included/);
+    expect(message).toMatch(
+      /In the way: the approved booking for Gala, a tentative hold for Expo, a venue block\.$/,
+    );
+  });
+
+  it("SCRUM258_AC2_a_period_conflict_with_no_listed_occupant_still_explains_itself", () => {
+    expect(decisionErrorMessage(conflict("BOOKING_PERIOD_CONFLICT"))).toMatch(/no longer free.*can't be approved\.$/);
+  });
+
+  it.each([
+    [400, /A reason is required/],
+    [403, /Only Venue Staff/],
+    [404, /no longer exists/],
+    [500, /Could not record the decision/],
+  ])("SCRUM258_AC2_explains_a_%i", (status, pattern) => {
+    expect(decisionErrorMessage(http(status))).toMatch(pattern);
+  });
+
+  it("SCRUM258_AC2_never_shows_the_servers_error_prose", () => {
+    expect(decisionErrorMessage(conflict("SOMETHING_NEW"))).not.toContain("database prose");
+  });
+});
+
+describe("isStaleDecisionError (SCRUM-258)", () => {
+  it.each([
+    [http(404), true],
+    [conflict("BOOKING_NOT_PENDING"), true],
+    [conflict("BOOKING_CHANGED"), true],
+    [conflict("BOOKING_PERIOD_CONFLICT"), false],
+    [conflict("EVENT_NOT_BOOKABLE"), false],
+    [conflict("BOOKING_PERIOD_STALE"), false],
+    [http(403), false],
+    [new Error("network"), false],
+  ])("SCRUM258_AC2_case_%#_refetches_only_when_the_queue_is_out_of_date", (err, stale) => {
+    expect(isStaleDecisionError(err)).toBe(stale);
   });
 });

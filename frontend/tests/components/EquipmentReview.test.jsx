@@ -27,7 +27,12 @@ vi.mock("../../src/services/equipmentReviewService", () => ({
   clearEquipmentLineOutcome: vi.fn(),
   completeEquipmentReview: vi.fn(),
   getEquipmentReview: vi.fn(),
+  keepEquipmentReservation: vi.fn(),
   markEquipmentLineUnavailable: vi.fn(),
+  moveEquipmentReservation: vi.fn(),
+  reduceEquipmentReservation: vi.fn(),
+  releaseEquipmentReservation: vi.fn(),
+  reserveEquipment: vi.fn(),
   startEquipmentReview: vi.fn(),
   takeOverEquipmentReview: vi.fn(),
 }));
@@ -119,8 +124,8 @@ describe("EquipmentReview: what is shown", () => {
   it("SCRUM290_shows_event_venue_coordinator_and_status", async () => {
     await open(state());
     expect(getEquipmentReview).toHaveBeenCalledWith(EVENT_ID);
-    expect(screen.getByText("Venue: Hall A")).toBeInTheDocument();
-    expect(screen.getByText("Coordinator: Rae Tan")).toBeInTheDocument();
+    expect(screen.getByText("Hall A")).toBeInTheDocument();
+    expect(screen.getByText("Rae Tan")).toBeInTheDocument();
     expect(screen.getByText("Pending review")).toBeInTheDocument();
   });
 
@@ -133,19 +138,21 @@ describe("EquipmentReview: what is shown", () => {
 
   it("SCRUM290_shows_each_line_with_requested_reserved_and_availability", async () => {
     await open(state({ lines: [line(), line({ id: MIC, name: "Microphone", quantity: 1, reserved: 1, shortBy: 0, availability: availability("Fully available", 1, 5) })] }));
-    expect(screen.getByText("Requested: 3")).toBeInTheDocument();
-    expect(screen.getByText("Reserved: 1 of 3")).toBeInTheDocument();
-    expect(screen.getByText("Partially available")).toBeInTheDocument();
-    expect(screen.getByText("Only 2 of 3 requested are available.")).toBeInTheDocument();
-    expect(screen.getByText("Fully available")).toBeInTheDocument();
-    expect(screen.getAllByText("HDMI please")).toHaveLength(2);
+    await userEvent.click(screen.getByRole("tab", { name: /^All/ }));
+    expect(screen.getByText("1 of 3 reserved")).toBeInTheDocument();
+    expect(screen.getByText("1 of 1 reserved")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Projector/ }));
+    expect(screen.getByText("Only 2 of 3 available.")).toBeInTheDocument();
+    expect(screen.getByText("Note: HDMI please")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Microphone/ }));
+    expect(screen.getByText("Enough in stock: 5 available.")).toBeInTheDocument();
   });
 
   it("SCRUM290_lists_overlapping_reservations", async () => {
     const a = availability("Partially available", 3, 2);
     a.reservations = [{ id: "x", eventName: "Gala", quantity: 8, startAt: "2026-11-01T09:00:00Z", endAt: "2026-11-01T13:00:00Z", flagged: true }];
     await open(state({ lines: [line({ availability: a })] }));
-    expect(screen.getByText("Overlapping reservations (1)")).toBeInTheDocument();
+    expect(screen.getByText("Other events using this equipment (1)")).toBeInTheDocument();
     expect(screen.getByText(/Gala: 8/)).toHaveTextContent("(flagged for review)");
   });
 
@@ -183,13 +190,19 @@ describe("EquipmentReview: starting and taking over", () => {
     startEquipmentReview.mockResolvedValue(underReview());
     await userEvent.click(screen.getByRole("button", { name: "Start review" }));
     expect(startEquipmentReview).toHaveBeenCalledWith(EVENT_ID);
-    expect(await screen.findByText(/You are reviewing this request/)).toBeInTheDocument();
+    expect(await screen.findByText("Reserve the rest of the equipment")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start review" })).not.toBeInTheDocument();
   });
 
   it("SCRUM290_cannot_be_fully_arranged_offers_review_again", async () => {
     await open(state({ status: "cannot_be_fully_arranged", statusLabel: "Cannot be fully arranged" }));
     expect(screen.getByRole("button", { name: "Review again" })).toBeInTheDocument();
+  });
+
+  it("SCRUM290_the_reviewer_is_told_they_own_the_review_and_since_when", async () => {
+    await open(underReview());
+    expect(screen.getByText(/You are reviewing this request \(since /)).toBeInTheDocument();
+    expect(screen.queryByText(/Being reviewed by/)).not.toBeInTheDocument();
   });
 
   it("SCRUM290_someone_elses_review_shows_their_name_and_take_over_only", async () => {
@@ -230,13 +243,13 @@ describe("EquipmentReview: marking lines", () => {
   it("SCRUM290_pending_review_offers_no_line_actions", async () => {
     await open(state());
     expect(screen.queryByRole("button", { name: /Cannot be provided/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reserve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Reserve/ })).not.toBeInTheDocument();
   });
 
-  it("SCRUM290_reviewer_sees_a_disabled_reserve_and_a_mark_button_on_short_lines_only", async () => {
+  it("SCRUM290_reviewer_sees_a_reserve_and_a_mark_button_on_short_lines_only", async () => {
     await open(underReview({ lines: [line(), line({ id: MIC, name: "Microphone", quantity: 1, reserved: 1, shortBy: 0 })] }));
-    expect(screen.getAllByRole("button", { name: "Reserve" })).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Reserve" })).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: /^Reserve/ })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /^Reserve( \d+)?( more)?: Projector$/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Mark as cannot be provided: Projector" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Microphone/ })).not.toBeInTheDocument();
   });
@@ -296,14 +309,20 @@ describe("EquipmentReview: completing", () => {
   it("SCRUM290_complete_asks_first_and_says_what_will_happen_when_lines_are_short", async () => {
     await open(underReview());
     await userEvent.click(screen.getByRole("button", { name: "Complete review" }));
-    expect(screen.getByText(/1 line is not fully reserved/)).toBeInTheDocument();
+    expect(screen.getByText(/1 item is not fully reserved/)).toBeInTheDocument();
     expect(completeEquipmentReview).not.toHaveBeenCalled();
   });
 
-  it("SCRUM290_complete_says_arranged_when_nothing_is_short", async () => {
-    await open(underReview({ lines: [line({ reserved: 3, shortBy: 0 })] }));
+  it("SCRUM290_complete_counts_the_short_lines_in_words", async () => {
+    await open(underReview({ lines: [line(), line({ id: "line-2", name: "Microphone" })] }));
     await userEvent.click(screen.getByRole("button", { name: "Complete review" }));
-    expect(screen.getByText(/will be marked Arranged/)).toBeInTheDocument();
+    expect(screen.getByText(/2 items are not fully reserved/)).toBeInTheDocument();
+  });
+
+  it("SCRUM290_AC7_complete_is_not_offered_when_no_line_is_short", async () => {
+    await open(underReview({ lines: [line({ reserved: 3, shortBy: 0 })] }));
+    expect(screen.queryByRole("button", { name: "Complete review" })).not.toBeInTheDocument();
+    expect(screen.getByText(/so there is nothing to complete/)).toBeInTheDocument();
   });
 
   it("SCRUM290_confirming_completes_and_shows_the_new_status", async () => {

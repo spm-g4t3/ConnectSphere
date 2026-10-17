@@ -1,7 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
-// SCRUM-17, SCRUM-186, SCRUM-178, SCRUM-137 and SCRUM-491 files are gated at 100%
+// SCRUM-17, SCRUM-186, SCRUM-178, SCRUM-137, SCRUM-491 and SCRUM-495 files are gated at 100%
 // lines/branches/functions/statements each.
 // There is deliberately no global threshold: shared files -- venueService.js,
 // VenueCatalogue.jsx, VenueSearch.jsx (other stories) and datetimeFormat.js
@@ -23,6 +23,12 @@ const PANEL = { lines: 100, branches: 97.56, functions: 100, statements: 97.81 }
 // Withdraw button is disabled while one is being sent and React does not
 // dispatch clicks to disabled buttons. The ref is cheap defence behind them.
 const MY_BOOKING_REQUESTS = { lines: 100, branches: 98.07, functions: 100, statements: 98.24 }
+
+// SCRUM-525's one exception, measured the same way: if (checking) return in
+// BookingRequestPanel.jsx's handleSubmit is unreachable, because the send
+// button is disabled while a recheck runs and Enter in the attendance field
+// only starts the check. The guard is cheap defence behind the button.
+const BOOKING_REQUEST_PANEL = { lines: 100, branches: 99.4, functions: 100, statements: 99.3 }
 
 const SCRUM17_FILES = [
   'src/components/VenueBlocksPanel.jsx',
@@ -98,6 +104,61 @@ const SCRUM491_FILES = [
   'src/services/venueHoldValidation.js',
 ]
 
+// SCRUM-486 (SCRUM-519) owns the Lead's unassigned queue, the assignment
+// picker and the waiting-time helper outright. EventCoordinatorLeadDashboard.jsx,
+// which now mounts the queue, is already gated above under SCRUM-485. The
+// edits it makes to shared files (eventRequestService.js, ReassignEventPanel.jsx,
+// CoordinatorRequestDetail.jsx, Navigation.jsx, App.jsx) stay ungated, as
+// those files always have been.
+const SCRUM486_FILES = [
+  'src/components/UnassignedQueue.jsx',
+  'src/components/AssignCoordinatorPanel.jsx',
+  'src/services/waitingTime.js',
+  // SCRUM-521: an event's coordinator screen by its address.
+  'src/components/EventRequestReviewPage.jsx',
+  // AC6: the Lead's list of assigned events, the way to that screen.
+  'src/components/AssignedEvents.jsx',
+]
+
+// SCRUM-487: the Lead's coordinator overview. New files only this story owns,
+// gated outright. AssignedEvents.jsx, which it extends, stays in
+// SCRUM486_FILES, so its 100% gate holds over both stories' code.
+const SCRUM487_FILES = [
+  // SCRUM-543 (AC4): the unassigned count at the top.
+  'src/components/UnassignedCount.jsx',
+  // SCRUM-544 (AC2, AC3): the coordinators' table and the list's filters.
+  'src/components/CoordinatorWorkloadTable.jsx',
+  'src/components/AssignedEventsFilters.jsx',
+]
+
+// SCRUM-258 owns the Venue Staff queue and its decision card outright.
+// VenueStaffDashboard.jsx, which mounts the queue, and the shared services
+// it calls (bookingRequestService.js, already gated under SCRUM-254) are not
+// added here.
+const SCRUM258_FILES = [
+  'src/components/PendingBookingRequests.jsx',
+  'src/components/PendingBookingRequestCard.jsx',
+]
+
+// SCRUM-495: the Attendee's browse pages. New files only this story owns.
+const SCRUM495_FILES = [
+  'src/components/BrowseOpenEvents.jsx',
+  'src/components/BrowseEventDetails.jsx',
+  'src/components/useRefreshOnReturn.js',
+  'src/components/useOpenEventRead.js',
+  'src/components/OpenEventAvailability.jsx',
+  'src/services/openEventDisplay.js',
+  'src/services/openEventRoutes.js',
+  'src/services/openEventService.js',
+]
+
+// SCRUM-489: the coordinator's safety check submission. Its one new file is
+// gated outright; the shared files it touches stay ungated.
+const SCRUM489_FILES = [
+  // SCRUM-557 (AC3 to AC6): the checklist, the confirmation, the note and Submit.
+  'src/components/SafetyCheckSubmissionPanel.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -128,10 +189,19 @@ export default defineConfig({
         ...SCRUM141_FILES.map((file) => [file, FULL]),
         ...SCRUM254_FILES.map((file) => [
           file,
-          file === 'src/components/MyBookingRequests.jsx' ? MY_BOOKING_REQUESTS : FULL,
+          file === 'src/components/MyBookingRequests.jsx'
+            ? MY_BOOKING_REQUESTS
+            : file === 'src/components/BookingRequestPanel.jsx'
+              ? BOOKING_REQUEST_PANEL
+              : FULL,
         ]),
         ...SCRUM485_FILES.map((file) => [file, FULL]),
         ...SCRUM491_FILES.map((file) => [file, FULL]),
+        ...SCRUM486_FILES.map((file) => [file, FULL]),
+        ...SCRUM487_FILES.map((file) => [file, FULL]),
+        ...SCRUM258_FILES.map((file) => [file, FULL]),
+        ...SCRUM495_FILES.map((file) => [file, FULL]),
+        ...SCRUM489_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

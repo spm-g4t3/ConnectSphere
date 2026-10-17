@@ -28,6 +28,12 @@
 //     coordinator confirmed. The panel says so instead (AC4/AC7).
 //   - A note says the check uses the event's saved date, time and attendance,
 //     not the search form's, since the form beside it can say otherwise (AC3).
+//     SCRUM-525 (AC2/AC3): attendance is per request now, so the note adds
+//     that the request form can change it for this venue and checks again.
+//
+// SCRUM-525 (AC1, R13): `requestBlockedReason` is the finder's sentence for a
+// venue this event already has a live request for. It shows in place of
+// "Request this venue", so a locked venue is never offered here either.
 //   - On opening, focus moves to the heading and the panel scrolls into view,
 //     and the live status names the venue, so a keyboard or screen reader
 //     user knows the check opened and what it answered (AC1).
@@ -51,6 +57,7 @@ export default function VenueSuitabilityPanel({
   venue,
   requirements,
   canRequest,
+  requestBlockedReason,
   onRequest,
   onClose,
 }) {
@@ -105,7 +112,8 @@ export default function VenueSuitabilityPanel({
       <p className="venue-suitability-panel__note">
         Checked against this event&apos;s saved date, time and expected attendance, not the search
         form&apos;s. The layout, accessibility features and facilities are the ones chosen in the
-        search form.
+        search form. You can change the expected attendance for this venue on the request form, and
+        the venue is checked again for that number.
       </p>
 
       {state.status === "loading" && (
@@ -125,6 +133,8 @@ export default function VenueSuitabilityPanel({
       {state.status === "done" && canRequest && unavailable && (
         <p className="venue-suitability-panel__unavailable">{UNAVAILABLE_MESSAGE}</p>
       )}
+
+      {requestBlockedReason && <p className="venue-suitability-panel__blocked">{requestBlockedReason}</p>}
 
       <div className="venue-suitability-panel__actions">
         {state.status === "done" && canRequest && !unavailable && (
