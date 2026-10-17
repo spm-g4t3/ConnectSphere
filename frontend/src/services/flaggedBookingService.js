@@ -22,6 +22,23 @@ export async function getFlaggedBookings() {
 }
 
 /**
+ * One event's flagged bookings (GET /flagged-bookings/events/:eventRequestId),
+ * oldest flag first, for its assigned coordinator. Items are shaped as
+ * getFlaggedBookings' are, plus `replacementRequests`: the live (pending or
+ * conflicting) requests made to replace each one.
+ *
+ * Failures: 400 (malformed id), 401, 403 (not this event's assigned
+ * coordinator), 404 (no such event), 500. None flagged is 200 [].
+ *
+ * @param {string} eventRequestId
+ * @returns {Promise<Array>} possibly empty
+ */
+export async function getEventFlaggedBookings(eventRequestId) {
+  const response = await apiClient.get(`/flagged-bookings/events/${eventRequestId}`);
+  return response.data;
+}
+
+/**
  * Reinstates a flagged booking (POST /flagged-bookings/:id/reinstate).
  *
  * The server re-checks everything under its locks. Failures: 400 (malformed

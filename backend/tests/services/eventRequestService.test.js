@@ -4576,3 +4576,74 @@ describe("SCRUM-19: decide_event_request's refusals become typed errors", () => 
     expect(err.status).toBeUndefined();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-266: a confirmed event with a flagged booking needs attention
+// ---------------------------------------------------------------------------
+describe('SCRUM-266: event reads say whether the event needs attention', () => {
+  const booking = (status) => ({ status });
+
+  it.each([
+    ['confirmed with a flagged booking', STATUS.CONFIRMED, [booking('approved'), booking('flagged_for_review')], true],
+    ['confirmed with no flagged booking', STATUS.CONFIRMED, [booking('approved'), booking('cancelled')], false],
+    ['confirmed with no bookings', STATUS.CONFIRMED, [], false],
+    ['approved with a flagged booking', STATUS.APPROVED, [booking('flagged_for_review')], false],
+    ['in safety review with a flagged booking', STATUS.SAFETY_REVIEW, [booking('flagged_for_review')], false],
+  ])('SCRUM266_AC4_an_event_%s_needs_attention_%s', async (_label, status, bookings, expected) => {
+    const client = createQueueFakeClient([
+      ok([myEventRow({ status, bookings })]),
+      ok([profileRow(ORGANISER_ID, 'Aisha Rahman')]),
+    ]);
+
+    const [event] = await listEventRequestsForCoordinator(COORDINATOR_ID, { client });
+
+    expect(event.needsAttention).toBe(expected);
+    expect(event).not.toHaveProperty('bookings');
+  });
+
+  it('SCRUM266_AC4_an_embed_read_as_one_object_is_still_read', async () => {
+    const client = createQueueFakeClient([
+      ok([myEventRow({ status: STATUS.CONFIRMED, bookings: booking('flagged_for_review') })]),
+      ok([profileRow(ORGANISER_ID, 'Aisha Rahman')]),
+    ]);
+
+    const [event] = await listEventRequestsForCoordinator(COORDINATOR_ID, { client });
+
+    expect(event.needsAttention).toBe(true);
+  });
+
+  it('SCRUM266_AC4_the_queue_my_events_and_the_organisers_list_embed_booking_statuses', async () => {
+    const flaggedConfirmed = heldRow({ status: STATUS.CONFIRMED, bookings: [booking('flagged_for_review')] });
+    const client = createQueueFakeClient([
+      ok([flaggedConfirmed]),
+      ok([flaggedConfirmed]),
+      ok([profileRow(ORGANISER_ID, 'Aisha Rahman')]),
+      ok([flaggedConfirmed]),
+      ok([profileRow(COORDINATOR_ID, 'Wei Ling')]),
+    ]);
+
+    const results = [
+      await listEventRequestsForReview({ client }),
+      await listEventRequestsForCoordinator(COORDINATOR_ID, { client }),
+      await listEventRequestsForOrganiser(ORGANISER_ID, { client }),
+    ];
+
+    expect(results.map(([event]) => event.needsAttention)).toEqual([true, true, true]);
+    const eventReads = client.calls.filter((call) => call.table === 'event_requests');
+    expect(eventReads).toHaveLength(3);
+    for (const call of eventReads) expect(call.select).toMatch(/bookings\(status\)/);
+  });
+
+  it('SCRUM266_AC4_the_coordinator_and_organiser_single_reads_carry_needs_attention', async () => {
+    const flaggedConfirmed = heldRow({ status: STATUS.CONFIRMED, bookings: [booking('flagged_for_review')] });
+    const client = createQueueFakeClient([ok(flaggedConfirmed), ok(flaggedConfirmed)]);
+
+    const forCoordinator = await getEventRequestForCoordinator(REQUEST_ID, { client });
+    const forOrganiser = await getEventRequestForOrganiser(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(forCoordinator.needsAttention).toBe(true);
+    expect(forOrganiser.needsAttention).toBe(true);
+    for (const call of client.calls) expect(call.select).toMatch(/bookings\(status\)/);
+  });
+});

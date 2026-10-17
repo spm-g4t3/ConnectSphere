@@ -24,6 +24,7 @@ import DecisionOutcome from "./DecisionOutcome";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import ClarificationReplyForm from "./ClarificationReplyForm";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
+import NeedsAttentionBadge from "./NeedsAttentionBadge";
 
 function formatEventDate(value) {
   if (!value) return "Not specified";
@@ -302,6 +303,7 @@ export default function MyEventRequests() {
                 <span className={`status-badge ${statusClassName(display.group)}`}>
                   {display.label}
                 </span>
+                <NeedsAttentionBadge event={req} />
               </div>
               <p className="my-event-requests__item-description">
                 {display.description}

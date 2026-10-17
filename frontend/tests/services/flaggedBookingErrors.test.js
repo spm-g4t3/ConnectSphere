@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   conflictText,
+  coordinatorCancelErrorMessage,
   isStaleResolutionError,
   resolutionConflicts,
   resolutionErrorMessage,
@@ -166,5 +167,19 @@ describe("isStaleResolutionError", () => {
     ["nothing", undefined],
   ])("SCRUM266_AC2_%s_is_not_stale", (_label, err) => {
     expect(isStaleResolutionError(err)).toBe(false);
+  });
+});
+
+describe("coordinatorCancelErrorMessage", () => {
+  it("SCRUM266_AC3_a_403_names_the_assigned_coordinator_not_venue_staff", () => {
+    const message = coordinatorCancelErrorMessage(http(403, { error: PROSE }));
+    expect(message).toBe("Only the coordinator assigned to this event can cancel its flagged bookings.");
+  });
+
+  it.each([
+    ["BOOKING_NOT_FLAGGED", /no longer flagged for review/],
+    ["BOOKING_CHANGED", /changed while you were resolving it/],
+  ])("SCRUM266_AC3_the_409_%s_reads_as_it_does_for_venue_staff", (code, pattern) => {
+    expect(coordinatorCancelErrorMessage(conflict(code))).toMatch(pattern);
   });
 });

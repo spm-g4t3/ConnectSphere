@@ -204,6 +204,7 @@ describe('toBookingRequest', () => {
       suitability: null,
       suitabilityOverridden: false,
       requestedBy: null,
+      replacesBookingId: null,
       createdAt: 'c',
     });
   });

@@ -297,6 +297,8 @@ export function toBookingRequest(row) {
     suitability: row.suitability_result ?? null,
     suitabilityOverridden: row.suitability_overridden ?? false,
     requestedBy: row.requested_by ?? null,
+    // SCRUM-266: the flagged booking this request replaces (078), else null.
+    replacesBookingId: row.replaces_booking_id ?? null,
     createdAt: row.created_at,
   };
 }
@@ -348,7 +350,10 @@ function checkedSuitability(result) {
  *                           VENUE_RETIRED, BOOKING_REQUEST_EXISTS and
  *                           BOOKING_FLAGGED_FOR_REVIEW at this venue
  *                           (conflicts name the existing booking),
- *                           BOOKING_PERIOD_CONFLICT
+ *                           REPLACED_BOOKING_NOT_ON_EVENT and
+ *                           REPLACED_BOOKING_NOT_FLAGGED (SCRUM-266: the
+ *                           replacesBookingId given is not this event's
+ *                           flagged booking), BOOKING_PERIOD_CONFLICT
  *                           (conflicts are blocks, occupying bookings and
  *                           other events' active holds (SCRUM-491),
  *                           each with its occupied period, shaped by
@@ -482,6 +487,7 @@ export async function createBookingRequest(
     p_confirm_unsuitable: confirmUnsuitable,
     // SCRUM-525: the number just judged, so what is stored is what was checked.
     p_expected_attendance: expectedAttendance,
+    p_replaces_booking_id: request.replacesBookingId,
   });
 
   if (error) throw translateError(error);

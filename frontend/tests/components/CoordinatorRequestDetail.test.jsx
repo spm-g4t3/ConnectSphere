@@ -30,6 +30,10 @@
 // the view, and when it rechecks. EventVenueSuitability.test.jsx covers what
 // it shows.
 //
+// SCRUM-266: the "Flagged bookings" section above Venue suitability, the
+// Needs attention badge, and requesting a replacement through Find a venue.
+// EventFlaggedBookings.test.jsx covers what the section shows.
+//
 // What these tests do not prove: that the server refuses the wrong person or
 // the wrong status. The screen's checks are a convenience; the backend tests
 // and the live checks against migration 029 prove the gate.
@@ -38,6 +42,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { formatVenuePeriod } from "../../src/services/datetimeFormat.js";
 
 import CoordinatorRequestDetail from "../../src/components/CoordinatorRequestDetail.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
@@ -56,6 +61,7 @@ import {
 import { findVenuesForEvent } from "../../src/services/venueService";
 import { createBookingRequest } from "../../src/services/bookingRequestService";
 import { getEventVenueSuitability } from "../../src/services/venueSuitabilityService";
+import { cancelFlaggedBooking, getEventFlaggedBookings } from "../../src/services/flaggedBookingService";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -93,6 +99,12 @@ vi.mock("../../src/services/bookingRequestService", () => ({
 vi.mock("../../src/services/venueSuitabilityService", () => ({
   checkVenueSuitability: vi.fn(),
   getEventVenueSuitability: vi.fn(),
+}));
+
+// SCRUM-266: "Flagged bookings" loads when the assigned coordinator opens it.
+vi.mock("../../src/services/flaggedBookingService", () => ({
+  getEventFlaggedBookings: vi.fn(),
+  cancelFlaggedBooking: vi.fn(),
 }));
 
 const COORDINATOR = { id: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d", role: "event_coordinator" };
@@ -236,6 +248,9 @@ beforeEach(() => {
   vi.mocked(createBookingRequest).mockReset();
   vi.mocked(getEventVenueSuitability).mockReset();
   vi.mocked(getEventVenueSuitability).mockResolvedValue([]);
+  vi.mocked(getEventFlaggedBookings).mockReset();
+  vi.mocked(getEventFlaggedBookings).mockResolvedValue([]);
+  vi.mocked(cancelFlaggedBooking).mockReset();
   // ClarificationHistory calls .then() on this the moment it mounts, so it
   // has to hand back a promise, not undefined.
   vi.mocked(getEventClarificationHistory).mockReset();
@@ -1198,5 +1213,203 @@ describe("SCRUM-188 a live request known on load", () => {
     expect(
       within(finderSection()).getByText("Only the coordinator assigned to this event can request a venue for it."),
     ).toBeInTheDocument();
+  });
+});
+
+// SCRUM-266: a confirmed event's flagged bookings on its coordinator screen.
+describe("SCRUM266 flagged bookings on the event view", () => {
+  const PERIOD = { proposedStart: START_ISO, proposedEnd: END_ISO };
+  const HALL = { id: "v1", name: "Hall A", location: "Level 2", maxCapacity: 200 };
+  const FLAGGED = {
+    id: "f1",
+    eventRequestId: REQUEST_ID,
+    venueId: "v5",
+    venueName: "Old Hall",
+    venueLocation: "Level 5",
+    startsAt: START_ISO,
+    endsAt: END_ISO,
+    flaggedAt: "2026-11-01T10:00:00+08:00",
+    reviewReason: "safety_review",
+    block: null,
+    replacementRequests: [],
+  };
+  const confirmed = (overrides = {}) =>
+    eventRequest({
+      ...PERIOD,
+      status: "confirmed",
+      needsAttention: true,
+      statusDisplay: { status: "confirmed", label: "Confirmed", group: "CONFIRMED", description: "" },
+      ...overrides,
+    });
+  const flaggedSection = () => screen.queryByRole("heading", { name: "Flagged bookings" })?.closest("section") ?? null;
+  const finder = () => screen.getByRole("heading", { name: "Find a venue" }).closest("section");
+  const header = () => screen.getByRole("heading", { level: 2 });
+  const replaceButton = async () =>
+    within((await screen.findByRole("heading", { name: "Flagged bookings" })).closest("section")).getByRole("button", {
+      name: "Find a replacement venue",
+    });
+
+  function renderAssigned(request, onChangeRequestProcessed = vi.fn()) {
+    vi.mocked(useAuth).mockReturnValue({ user: { id: ASSIGNED, role: "event_coordinator" } });
+    render(
+      <MemoryRouter>
+        <CoordinatorRequestDetail request={request} onChangeRequestProcessed={onChangeRequestProcessed} />
+      </MemoryRouter>,
+    );
+    return userEvent.setup();
+  }
+
+  async function requestHallA(user) {
+    await user.click(within(finder()).getByRole("button", { name: "Search venues" }));
+    await user.click(await within(finder()).findByRole("button", { name: "Request this venue: Hall A" }));
+    const panel = screen.getByRole("region", { name: "Request Hall A" });
+    await user.click(within(panel).getByRole("button", { name: "Request this venue" }));
+    return panel;
+  }
+
+  it("SCRUM266_AC1_the_assigned_coordinator_sees_flagged_bookings_just_above_venue_suitability", async () => {
+    vi.mocked(getEventFlaggedBookings).mockResolvedValue([FLAGGED]);
+    renderAssigned(confirmed());
+
+    const section = await screen.findByRole("heading", { name: "Flagged bookings" });
+    expect(getEventFlaggedBookings).toHaveBeenCalledWith(REQUEST_ID);
+    expect(within(section.closest("section")).getByText("Safety review")).toBeInTheDocument();
+    const suitability = screen.getByRole("heading", { name: "Venue suitability" });
+    expect(section.compareDocumentPosition(suitability) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("SCRUM266_AC1_a_coordinator_not_assigned_sees_no_flagged_bookings_and_none_are_loaded", async () => {
+    vi.mocked(getEventFlaggedBookings).mockResolvedValue([FLAGGED]);
+    renderAs(OTHER, confirmed());
+
+    await waitFor(() => expect(getCoordinatorChangeRequests).toHaveBeenCalled());
+    expect(getEventFlaggedBookings).not.toHaveBeenCalled();
+    expect(flaggedSection()).toBeNull();
+  });
+
+  it("SCRUM266_AC1_an_event_with_nothing_flagged_shows_no_section", async () => {
+    renderAssigned(confirmed({ needsAttention: false }));
+
+    await waitFor(() => expect(getEventFlaggedBookings).toHaveBeenCalledTimes(1));
+    expect(flaggedSection()).toBeNull();
+  });
+
+  it.each([
+    ["true", { needsAttention: true }, true],
+    ["false", { needsAttention: false }, false],
+    ["missing", { needsAttention: undefined }, false],
+  ])("SCRUM266_AC4_the_header_shows_needs_attention_only_when_the_flag_is_%s", async (_label, overrides, shown) => {
+    renderAssigned(confirmed(overrides));
+
+    expect(within(header()).getByText("Confirmed")).toBeInTheDocument();
+    expect(within(header()).queryByText("Needs attention") !== null).toBe(shown);
+    await waitFor(() => expect(getEventFlaggedBookings).toHaveBeenCalled());
+  });
+
+  it("SCRUM266_AC3_cancelling_a_flagged_booking_reloads_venue_suitability_and_the_parent", async () => {
+    vi.mocked(getEventFlaggedBookings).mockResolvedValueOnce([FLAGGED]).mockResolvedValueOnce([]);
+    vi.mocked(cancelFlaggedBooking).mockResolvedValue({ id: "f1", status: "cancelled" });
+    const onChangeRequestProcessed = vi.fn();
+    const user = renderAssigned(confirmed(), onChangeRequestProcessed);
+    await screen.findByRole("heading", { name: "Flagged bookings" });
+    await waitFor(() => expect(getEventVenueSuitability).toHaveBeenCalledTimes(1));
+
+    await user.type(within(flaggedSection()).getByLabelText("Reason for cancelling (required)"), "Venue closed");
+    await user.click(within(flaggedSection()).getByRole("button", { name: "Cancel this booking" }));
+
+    expect(cancelFlaggedBooking).toHaveBeenCalledWith("f1", "Venue closed");
+    await waitFor(() => expect(getEventVenueSuitability).toHaveBeenCalledTimes(2));
+    expect(onChangeRequestProcessed).toHaveBeenCalled();
+  });
+
+  it("SCRUM266_W7_find_a_replacement_names_the_booking_in_find_a_venue_and_moves_focus_there", async () => {
+    vi.mocked(getEventFlaggedBookings).mockResolvedValue([FLAGGED]);
+    const user = renderAssigned(confirmed());
+
+    await user.click(await replaceButton());
+
+    const notice = within(finder()).getByRole("status");
+    expect(notice).toHaveTextContent(`Requesting a replacement for Old Hall, ${formatVenuePeriod(START_ISO, END_ISO)}`);
+    expect(notice).toHaveFocus();
+  });
+
+  it("SCRUM266_W7_a_request_sent_while_replacing_names_the_flagged_booking_then_stops_replacing", async () => {
+    vi.mocked(getEventFlaggedBookings).mockResolvedValue([FLAGGED]);
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    vi.mocked(createBookingRequest).mockResolvedValue({ id: "b1", status: "pending" });
+    const user = renderAssigned(confirmed());
+    await user.click(await replaceButton());
+
+    await requestHallA(user);
+
+    await waitFor(() => expect(createBookingRequest).toHaveBeenCalledTimes(1));
+    expect(createBookingRequest.mock.calls[0][0]).toMatchObject({ venueId: "v1", replacesBookingId: "f1" });
+    await waitFor(() => expect(within(finder()).queryByText(/Requesting a replacement for/)).not.toBeInTheDocument());
+    await waitFor(() => expect(getEventFlaggedBookings).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getEventVenueSuitability).toHaveBeenCalledTimes(2));
+  });
+
+  it("SCRUM266_W7_an_ordinary_request_names_no_flagged_booking", async () => {
+    vi.mocked(getEventFlaggedBookings).mockResolvedValue([FLAGGED]);
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    vi.mocked(createBookingRequest).mockResolvedValue({ id: "b1", status: "pending" });
+    const user = renderAssigned(confirmed());
+    await screen.findByRole("heading", { name: "Flagged bookings" });
+
+    await requestHallA(user);
+
+    await waitFor(() => expect(createBookingRequest).toHaveBeenCalledTimes(1));
+    expect(createBookingRequest.mock.calls[0][0]).not.toHaveProperty("replacesBookingId");
+    // Not a replacement, so the flagged list is not reloaded for it.
+    expect(getEventFlaggedBookings).toHaveBeenCalledTimes(1);
+  });
+
+  it("SCRUM266_W7_stop_replacing_clears_the_notice_and_the_request_names_no_flagged_booking", async () => {
+    vi.mocked(getEventFlaggedBookings).mockResolvedValue([FLAGGED]);
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    vi.mocked(createBookingRequest).mockResolvedValue({ id: "b1", status: "pending" });
+    const user = renderAssigned(confirmed());
+    await user.click(await replaceButton());
+
+    await user.click(within(finder()).getByRole("button", { name: "Stop replacing" }));
+    expect(within(finder()).queryByText(/Requesting a replacement for/)).not.toBeInTheDocument();
+    await requestHallA(user);
+
+    await waitFor(() => expect(createBookingRequest).toHaveBeenCalledTimes(1));
+    expect(createBookingRequest.mock.calls[0][0]).not.toHaveProperty("replacesBookingId");
+  });
+
+  it("SCRUM266_W7_a_replacement_refused_as_no_longer_flagged_says_so_stops_replacing_and_reloads", async () => {
+    vi.mocked(getEventFlaggedBookings).mockResolvedValueOnce([FLAGGED]).mockResolvedValueOnce([]);
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL]);
+    vi.mocked(createBookingRequest).mockRejectedValue(
+      Object.assign(new Error("409"), { response: { status: 409, data: { code: "REPLACED_BOOKING_NOT_FLAGGED", error: "prose" } } }),
+    );
+    const user = renderAssigned(confirmed());
+    await user.click(await replaceButton());
+
+    const panel = await requestHallA(user);
+
+    expect(await within(panel).findByText(/no longer flagged for review.*Nothing was requested/)).toBeInTheDocument();
+    expect(within(finder()).queryByText(/Requesting a replacement for/)).not.toBeInTheDocument();
+    await waitFor(() => expect(getEventFlaggedBookings).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(flaggedSection()).toBeNull());
+  });
+
+  it("SCRUM266_W7_a_booking_resolved_elsewhere_is_no_longer_being_replaced_after_a_reload", async () => {
+    vi.mocked(getEventFlaggedBookings).mockResolvedValueOnce([FLAGGED, { ...FLAGGED, id: "f2", venueName: "Annex" }]);
+    vi.mocked(getEventFlaggedBookings).mockResolvedValueOnce([{ ...FLAGGED, id: "f2", venueName: "Annex" }]);
+    vi.mocked(cancelFlaggedBooking).mockRejectedValue(
+      Object.assign(new Error("409"), { response: { status: 409, data: { code: "BOOKING_NOT_FLAGGED" } } }),
+    );
+    const user = renderAssigned(confirmed());
+    const oldHall = await screen.findByRole("listitem", { name: "Old Hall, Level 5" });
+    await user.click(within(oldHall).getByRole("button", { name: "Find a replacement venue" }));
+    expect(within(finder()).getByText(/Requesting a replacement for Old Hall/)).toBeInTheDocument();
+
+    await user.type(within(oldHall).getByLabelText("Reason for cancelling (required)"), "Gone");
+    await user.click(within(oldHall).getByRole("button", { name: "Cancel this booking" }));
+
+    await waitFor(() => expect(within(finder()).queryByText(/Requesting a replacement for/)).not.toBeInTheDocument());
   });
 });

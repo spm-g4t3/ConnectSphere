@@ -95,3 +95,19 @@ export function isStaleResolutionError(err) {
   const code = codeOf(err);
   return err?.response?.status === 404 || code === "BOOKING_NOT_FLAGGED" || code === "BOOKING_CHANGED";
 }
+
+// The coordinator's 403 names the coordinator, not Venue Staff; every other
+// refusal of a cancel reads the same on either screen.
+const COORDINATOR_CANCEL_FORBIDDEN =
+  "Only the coordinator assigned to this event can cancel its flagged bookings.";
+
+/**
+ * The message for a failed cancel from the coordinator's event screen.
+ *
+ * @param {unknown} err  what cancelFlaggedBooking threw
+ * @returns {string}
+ */
+export function coordinatorCancelErrorMessage(err) {
+  if (err?.response?.status === 403) return COORDINATOR_CANCEL_FORBIDDEN;
+  return resolutionErrorMessage(err);
+}

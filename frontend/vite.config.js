@@ -144,9 +144,16 @@ const SCRUM258_FILES = [
 // services behind them. flaggedBookingDisplay.js, shared with the venue
 // catalogue and the coordinator's list, is gated here too: its older tests
 // already cover every line, and this story adds flagReasons and its tests.
+// The coordinator's side adds the event's flagged bookings section, the reason
+// form both screens share, and the Needs attention badge; the screens they
+// sit on (CoordinatorRequestDetail.jsx, MyAssignedEvents.jsx,
+// MyEventRequests.jsx, EventOrganiserDashboard.jsx) are shared, so not gated.
 const SCRUM266_FILES = [
   'src/components/FlaggedBookings.jsx',
   'src/components/FlaggedBookingCard.jsx',
+  'src/components/FlaggedBookingReasonForm.jsx',
+  'src/components/EventFlaggedBookings.jsx',
+  'src/components/NeedsAttentionBadge.jsx',
   'src/services/flaggedBookingService.js',
   'src/services/flaggedBookingErrors.js',
   'src/services/flaggedBookingDisplay.js',

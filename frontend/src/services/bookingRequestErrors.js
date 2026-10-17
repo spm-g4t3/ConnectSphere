@@ -30,6 +30,11 @@ const CODE_MESSAGES = {
   BOOKING_PERIOD_CONFLICT:
     "This venue is not available for the whole of the event. See what is in the way below, or choose another venue.",
   BOOKING_CHANGED: "This request changed while you were working on it. Please try again.",
+  // SCRUM-266: a request sent as the replacement for a flagged booking.
+  REPLACED_BOOKING_NOT_FLAGGED:
+    "The booking you were replacing is no longer flagged for review; it may already have been resolved. Nothing was requested. Check Flagged bookings above.",
+  REPLACED_BOOKING_NOT_ON_EVENT:
+    "The booking you were replacing does not belong to this event, so nothing was requested. Stop replacing and try again.",
 };
 
 const STATUS_MESSAGES = {
@@ -102,6 +107,16 @@ export function bookingRequestErrorMessage(err) {
   if (Object.hasOwn(STATUS_MESSAGES, status)) return STATUS_MESSAGES[status];
 
   return DEFAULT_MESSAGE;
+}
+
+const REPLACEMENT_CODES = new Set(["REPLACED_BOOKING_NOT_FLAGGED", "REPLACED_BOOKING_NOT_ON_EVENT"]);
+
+/**
+ * SCRUM-266: was a replacement refused because the flagged booking it named
+ * is no longer one this event can replace? The caller stops replacing it.
+ */
+export function isReplacementRefused(err) {
+  return err?.response?.status === 409 && REPLACEMENT_CODES.has(codeOf(err));
 }
 
 /** Did the server ask for an explicit confirmation of an unsuitable venue? */

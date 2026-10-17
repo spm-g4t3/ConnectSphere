@@ -1,11 +1,12 @@
 /**
  * Flagged booking routes: listing and resolving bookings flagged for review.
  *
- * GET / lists them, behind venueStaffOnly. POST /:id/reinstate approves a
+ * GET / lists them, behind venueStaffOnly; GET /events/:eventRequestId lists
+ * one event's, behind coordinatorOnly. POST /:id/reinstate approves a
  * flagged booking again, behind venueStaffOnly; POST /:id/cancel cancels it,
  * behind coordinatorOrVenueStaff. The functions (078, 076, 077) check the
- * role again, 076 and 077 under lock, and 077 also checks that a coordinator
- * is the event's assigned one. The caller is always req.user.id,
+ * role again, 076 and 077 under lock, and 078's event list and 077 also check
+ * that a coordinator is the event's assigned one. The caller is always req.user.id,
  * and only the reason is read from the body.
  *
  * A factory over an injected client and verifier, as the other routers are, so
@@ -20,6 +21,7 @@ import { ROLE } from '../domain/userRole.js';
 import { createErrorHandler } from '../http/handleError.js';
 import {
   cancelFlaggedBooking,
+  listEventFlaggedBookings,
   listFlaggedBookings,
   reinstateFlaggedBooking,
 } from '../services/flaggedBookingService.js';
@@ -41,6 +43,8 @@ export function createFlaggedBookingRouter({
   const router = express.Router();
 
   const venueStaffOnly = requireRole(ROLE.VENUE_STAFF);
+  // Any coordinator passes the gate; 078 refuses one not assigned to the event.
+  const coordinatorOnly = requireRole(ROLE.EVENT_COORDINATOR);
   // Any coordinator passes the gate; 077 refuses one not assigned to the event.
   const coordinatorOrVenueStaff = requireRole(ROLE.EVENT_COORDINATOR, ROLE.VENUE_STAFF);
 
@@ -55,6 +59,23 @@ export function createFlaggedBookingRouter({
   router.get('/', venueStaffOnly, async (req, res) => {
     try {
       res.status(200).json(await listFlaggedBookings(req.user.id, { client }));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * One event's flagged bookings, for its assigned coordinator, each with the
+   * live requests replacing it. 200 and an array, possibly empty.
+   *
+   * Statuses: 400 malformed event id; 401; 403 wrong role or no role, or a
+   * coordinator not assigned to the event; 404 no such event.
+   */
+  router.get('/events/:eventRequestId', coordinatorOnly, async (req, res) => {
+    try {
+      res.status(200).json(
+        await listEventFlaggedBookings(req.params.eventRequestId, req.user.id, { client }),
+      );
     } catch (err) {
       handleError(err, res);
     }

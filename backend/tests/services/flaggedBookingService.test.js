@@ -3,7 +3,8 @@
  *
  * SCRUM-266. tests/routes/flaggedBookings.test.js drives the service through
  * HTTP; these pin what the route cannot reach -- a caller with no id, the
- * default client -- and how each answer list_flagged_bookings (078),
+ * default client -- and how each answer list_flagged_bookings and
+ * list_event_flagged_bookings (078),
  * reinstate_flagged_booking (076) and cancel_flagged_booking (077) give becomes a result or a typed error. What the function decides is proved in
  * tests/db/reinstateFlaggedBookingDatabase.test.js and
  * tests/db/cancelFlaggedBookingDatabase.test.js. The client is a queue-fed
@@ -18,6 +19,7 @@ vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: defaultClient, 
 
 import {
   cancelFlaggedBooking,
+  listEventFlaggedBookings,
   listFlaggedBookings,
   reinstateFlaggedBooking,
 } from '../../src/services/flaggedBookingService.js';
@@ -159,6 +161,7 @@ describe('SCRUM266 the call and its result', () => {
       suitability: null,
       suitabilityOverridden: false,
       requestedBy: null,
+      replacesBookingId: null,
       createdAt: '2026-10-01T00:00:00+00:00',
       statusDisplay: expect.objectContaining({ status: 'approved' }),
       resolution: {
@@ -407,6 +410,7 @@ describe('SCRUM266 cancelling a flagged booking', () => {
         suitability: null,
         suitabilityOverridden: false,
         requestedBy: null,
+        replacesBookingId: null,
         createdAt: '2026-10-01T00:00:00+00:00',
         statusDisplay: expect.objectContaining({ status: 'cancelled' }),
         resolution: {
@@ -709,5 +713,123 @@ describe('SCRUM266 listing flagged bookings', () => {
       expect(err.status).toBeUndefined();
       expect(err.message).toBe('Unexpected result from list_flagged_bookings');
     });
+  });
+});
+
+describe('SCRUM266 the coordinator lists one event\'s flagged bookings', () => {
+  const REPLACEMENT = '12121212-1212-4212-8212-121212121212';
+  const listed = (...rows) => ({ data: rows, error: null });
+  const listForEvent = (client, eventId = EVENT, caller = COORDINATOR) =>
+    listEventFlaggedBookings(eventId, caller, { client });
+
+  const replacementRow = (overrides = {}) => ({
+    id: REPLACEMENT,
+    venue_id: VENUE,
+    venue_name: 'Garden Hall',
+    status: 'conflicting',
+    starts_at: '2026-12-01T06:00:00+00:00',
+    ends_at: '2026-12-01T08:00:00+00:00',
+    created_at: '2026-10-11T00:00:00+00:00',
+    ...overrides,
+  });
+
+  /** A sparse element of list_event_flagged_bookings; the shared fields are pinned above. */
+  const eventRow = (overrides = {}) => ({
+    id: BOOKING,
+    event_request_id: EVENT,
+    venue_id: VENUE,
+    starts_at: 's',
+    ends_at: 'e',
+    review_reason: 'safety_review',
+    reinstatable: false,
+    replacement_requests: [replacementRow()],
+    ...overrides,
+  });
+
+  it.each([undefined, null, '', 42])('SCRUM266_AC1_the_caller_%j_is_refused_before_any_call', async (caller) => {
+    const client = clientAnswering(listed());
+    const err = await listEventFlaggedBookings(EVENT, caller, { client }).catch((e) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM266_AC1_a_malformed_event_id_is_refused_before_any_call', async () => {
+    const client = clientAnswering(listed());
+    const err = await listForEvent(client, 'nope').catch((e) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'eventRequestId', message: 'must be a valid event request id' }]);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM266_AC1_calls_list_event_flagged_bookings_with_the_caller_and_the_normalised_event', async () => {
+    const client = clientAnswering(listed());
+
+    expect(await listForEvent(client, ` ${EVENT.toUpperCase()} `)).toEqual([]);
+
+    expect(client.calls).toEqual([
+      { fn: 'list_event_flagged_bookings', args: { p_caller: COORDINATOR, p_event_request_id: EVENT } },
+    ]);
+  });
+
+  it('SCRUM266_W7_each_item_is_the_list_shape_plus_its_replacement_requests_in_camel_case', async () => {
+    const [venueStaffItem] = await listFlaggedBookings(STAFF, { client: clientAnswering(listed(eventRow())) });
+
+    const [item] = await listForEvent(clientAnswering(listed(eventRow())));
+
+    expect(item).toEqual({
+      ...venueStaffItem,
+      replacementRequests: [
+        {
+          id: REPLACEMENT,
+          venueId: VENUE,
+          venueName: 'Garden Hall',
+          status: 'conflicting',
+          startsAt: '2026-12-01T06:00:00+00:00',
+          endsAt: '2026-12-01T08:00:00+00:00',
+          createdAt: '2026-10-11T00:00:00+00:00',
+        },
+      ],
+    });
+  });
+
+  it('SCRUM266_W7_no_replacement_requests_is_an_empty_list', async () => {
+    const result = await listForEvent(
+      clientAnswering(listed(eventRow({ replacement_requests: [] }), eventRow({ id: OTHER_BOOKING, replacement_requests: undefined }))),
+    );
+
+    expect(result.map((item) => item.replacementRequests)).toEqual([[], []]);
+  });
+
+  it('SCRUM266_W7_a_replacement_with_no_venue_name_reads_null', async () => {
+    const [item] = await listForEvent(
+      clientAnswering(listed(eventRow({ replacement_requests: [replacementRow({ venue_name: undefined })] }))),
+    );
+
+    expect(item.replacementRequests[0].venueName).toBeNull();
+  });
+
+  it.each([
+    ['42501', ForbiddenError],
+    ['P0002', NotFoundError],
+  ])('SCRUM266_AC1_event_list_%s_is_a_typed_error', async (code, type) => {
+    const err = await listForEvent(clientAnswering(failure(code))).catch((e) => e);
+    expect(err).toBeInstanceOf(type);
+  });
+
+  it('SCRUM266_AC1_event_list_that_is_not_an_array_is_an_unexpected_result', async () => {
+    await expect(listForEvent(clientAnswering({ data: null, error: null }))).rejects.toThrow(
+      'Unexpected result from list_event_flagged_bookings',
+    );
+  });
+
+  it('SCRUM266_AC1_event_list_uses_the_default_client_when_none_is_given', async () => {
+    const calls = [];
+    defaultClient.rpc = (fn, args) => {
+      calls.push({ fn, args });
+      return Promise.resolve(listed());
+    };
+
+    expect(await listEventFlaggedBookings(EVENT, COORDINATOR)).toEqual([]);
+    expect(calls.map((c) => c.fn)).toEqual(['list_event_flagged_bookings']);
   });
 });

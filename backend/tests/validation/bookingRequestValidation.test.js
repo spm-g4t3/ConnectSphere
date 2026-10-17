@@ -33,6 +33,7 @@ describe('validateCreateBookingRequest', () => {
       facilities: [],
       acknowledgedCriteria: [],
       expectedAttendance: null,
+      replacesBookingId: null,
     });
   });
 
@@ -54,6 +55,7 @@ describe('validateCreateBookingRequest', () => {
       facilities: [],
       acknowledgedCriteria: [],
       expectedAttendance: null,
+      replacesBookingId: null,
     });
   });
 
@@ -220,6 +222,32 @@ describe('SCRUM525_AC2 validateCreateBookingRequest reads expectedAttendance', (
     }
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.details).toEqual([{ field: 'expectedAttendance', message: 'must be at most 2147483647' }]);
+  });
+});
+
+
+describe('SCRUM266_W7 validateCreateBookingRequest reads replacesBookingId', () => {
+  const FLAGGED_ID = '44444444-4444-4444-8444-444444444444';
+
+  it('SCRUM266_W7_replaces_booking_id_is_optional_and_normalised', () => {
+    expect(validateCreateBookingRequest(BASE).replacesBookingId).toBeNull();
+    expect(validateCreateBookingRequest({ ...BASE, replacesBookingId: null }).replacesBookingId).toBeNull();
+    expect(
+      validateCreateBookingRequest({ ...BASE, replacesBookingId: ` ${FLAGGED_ID.toUpperCase()} ` }).replacesBookingId,
+    ).toBe(FLAGGED_ID);
+  });
+
+  it.each(['', 'nope', 42])('SCRUM266_W7_replaces_booking_id_%j_is_refused', (value) => {
+    const err = (() => {
+      try {
+        validateCreateBookingRequest({ ...BASE, replacesBookingId: value });
+      } catch (e) {
+        return e;
+      }
+      return null;
+    })();
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toEqual(['replacesBookingId']);
   });
 });
 

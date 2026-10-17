@@ -431,3 +431,29 @@ describe("SCRUM172_AC7 a notification opens the Organiser's list on its event", 
     expect(screen.getByTestId("router-state")).toHaveTextContent("null");
   });
 });
+
+// SCRUM-266: the Organiser sees which confirmed events have a flagged booking.
+describe("SCRUM266_AC4 Needs attention on the Organiser's list", () => {
+  const confirmed = (id, eventName, needsAttention) =>
+    eventRequest({
+      id,
+      eventName,
+      status: "confirmed",
+      needsAttention,
+      statusDisplay: { status: "confirmed", label: "Confirmed", group: "CONFIRMED", description: "Going ahead." },
+    });
+
+  it("SCRUM266_AC4_marks_only_the_rows_the_server_says_need_attention", async () => {
+    renderList([
+      confirmed("e1", "Flagged event", true),
+      confirmed("e2", "Fine event", false),
+      confirmed("e3", "Older payload", undefined),
+    ]);
+
+    const row = (name) => screen.getByText(name).closest("li");
+    await screen.findByText("Flagged event");
+    expect(within(row("Flagged event")).getByText("Needs attention")).toHaveClass("status-badge", "status--action-required");
+    expect(within(row("Fine event")).queryByText("Needs attention")).not.toBeInTheDocument();
+    expect(within(row("Older payload")).queryByText("Needs attention")).not.toBeInTheDocument();
+  });
+});

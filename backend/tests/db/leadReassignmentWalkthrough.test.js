@@ -76,7 +76,9 @@ function pgliteClient(db) {
       let columns = '*';
       const where = [];
       const chain = {
-        select(cols = '*') { columns = cols; return chain; },
+        // A PostgREST embed such as SCRUM-266's bookings(status) is not SQL.
+        // This path's migrations have no bookings, so the embed is dropped.
+        select(cols = '*') { columns = cols.replace(/,\s*\w+\([^)]*\)/g, ''); return chain; },
         eq(column, value) { where.push([column, value]); return chain; },
         maybeSingle() {
           const clause = where.map(([column], i) => `${column} = $${i + 1}`).join(' and ');

@@ -1,6 +1,7 @@
 // flaggedBookingService.test.js
 //
-// SCRUM-266. The three calls Venue Staff's flagged bookings list makes.
+// SCRUM-266. The three calls Venue Staff's flagged bookings list makes, and
+// the one the coordinator's event screen makes for its own flagged bookings.
 // apiClient is mocked, so nothing touches the network.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -8,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { apiClient } from "../../src/services/apiClient";
 import {
   cancelFlaggedBooking,
+  getEventFlaggedBookings,
   getFlaggedBookings,
   reinstateFlaggedBooking,
 } from "../../src/services/flaggedBookingService.js";
@@ -39,6 +41,25 @@ describe("getFlaggedBookings", () => {
     vi.mocked(apiClient.get).mockRejectedValue(err);
 
     await expect(getFlaggedBookings()).rejects.toBe(err);
+  });
+});
+
+describe("getEventFlaggedBookings", () => {
+  it("SCRUM266_AC1_gets_the_events_flagged_bookings_by_its_id_and_returns_the_body", async () => {
+    const rows = [{ id: "b1", replacementRequests: [] }];
+    vi.mocked(apiClient.get).mockResolvedValue({ data: rows });
+
+    await expect(getEventFlaggedBookings("e1")).resolves.toBe(rows);
+
+    expect(apiClient.get).toHaveBeenCalledTimes(1);
+    expect(apiClient.get).toHaveBeenCalledWith("/flagged-bookings/events/e1");
+  });
+
+  it("SCRUM266_AC1_lets_a_load_failure_through_for_the_caller_to_read", async () => {
+    const err = failure(403);
+    vi.mocked(apiClient.get).mockRejectedValue(err);
+
+    await expect(getEventFlaggedBookings("e1")).rejects.toBe(err);
   });
 });
 

@@ -525,3 +525,114 @@ describe('SCRUM-266: Venue Staff list the flagged bookings', () => {
     spy.mockRestore();
   });
 });
+
+describe('SCRUM-266: the coordinator lists one event\'s flagged bookings', () => {
+  const REPLACEMENT_ID = '66666666-6666-4666-8666-666666666666';
+  const asCoordinator = signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_ID);
+
+  /** One element of list_event_flagged_bookings (078): list_flagged_bookings' plus its replacements. */
+  const eventRow = (overrides = {}) => ({
+    id: BOOKING_ID,
+    event_request_id: EVENT_ID,
+    venue_id: VENUE_ID,
+    starts_at: START,
+    ends_at: END,
+    flagged_at: '2026-10-10T00:00:00+00:00',
+    review_reason: 'safety_review',
+    event_name: 'Open Day',
+    venue_name: 'Harbour Room',
+    block_id: null,
+    reinstatable: false,
+    replacement_requests: [
+      {
+        id: REPLACEMENT_ID,
+        venue_id: OTHER_BOOKING_ID,
+        venue_name: 'Garden Hall',
+        status: 'pending',
+        starts_at: START,
+        ends_at: END,
+        created_at: '2026-10-11T00:00:00+00:00',
+      },
+    ],
+    ...overrides,
+  });
+
+  const listForEvent = (client, { requireAuth = asCoordinator, id = EVENT_ID } = {}) =>
+    request(appWith({ client, requireAuth })).get(`/api/flagged-bookings/events/${id}`);
+
+  it('SCRUM266_AC1_event_list_is_200_in_the_list_shape_with_replacement_requests_and_the_caller_from_the_token', async () => {
+    const client = createFakeClient([ok([eventRow()])]);
+
+    const res = await listForEvent(client, { id: EVENT_ID.toUpperCase() });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0]).toMatchObject({
+      id: BOOKING_ID,
+      eventRequestId: EVENT_ID,
+      statusDisplay: expect.objectContaining({ status: 'flagged_for_review' }),
+      reviewReason: 'safety_review',
+      venueName: 'Harbour Room',
+      block: null,
+      reinstatable: false,
+      replacementRequests: [
+        {
+          id: REPLACEMENT_ID,
+          venueId: OTHER_BOOKING_ID,
+          venueName: 'Garden Hall',
+          status: 'pending',
+          startsAt: START,
+          endsAt: END,
+          createdAt: '2026-10-11T00:00:00+00:00',
+        },
+      ],
+    });
+    expect(client.calls).toEqual([
+      { fn: 'list_event_flagged_bookings', args: { p_caller: COORDINATOR_ID, p_event_request_id: EVENT_ID } },
+    ]);
+  });
+
+  it('SCRUM266_AC1_event_list_is_200_with_an_empty_array_when_nothing_is_flagged', async () => {
+    const res = await listForEvent(createFakeClient([ok([])]));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM266_AC1_event_list_with_a_malformed_id_is_400_and_never_queries', async () => {
+    const client = createFakeClient([ok([])]);
+    const res = await listForEvent(client, { id: 'not-an-id' });
+    expect(res.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM266_AC1_event_list_returns_401_without_a_token_and_never_queries', async () => {
+    const client = createFakeClient([ok([])]);
+    const res = await listForEvent(client, { requireAuth: signedOut });
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ROLE.VENUE_STAFF,
+    ROLE.EVENT_ORGANISER,
+    ROLE.EVENT_COORDINATOR_LEAD,
+    null,
+  ])('SCRUM266_AC1_event_list_refuses_%s_with_403_and_never_queries', async (role) => {
+    const client = createFakeClient([ok([])]);
+    const res = await listForEvent(client, { requireAuth: signedInWithRole(role, STAFF_ID) });
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM266_AC1_a_coordinator_not_assigned_to_the_event_is_403_from_the_function', async () => {
+    const res = await listForEvent(
+      createFakeClient([dbFailure('42501', 'only the coordinator assigned to event request can view its flagged bookings')]),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('SCRUM266_AC1_event_list_of_an_unknown_event_is_404', async () => {
+    const res = await listForEvent(createFakeClient([dbFailure('P0002', 'event request not found')]));
+    expect(res.status).toBe(404);
+  });
+});

@@ -4,70 +4,19 @@
 // venue, period, why it was flagged); expanded, the detail and the reinstate
 // and cancel forms.
 //
-// Holds only the two forms' drafts. Whether it is expanded, whether a
+// The two forms hold their own drafts. Whether it is expanded, whether a
 // resolution is in flight and what went wrong belong to FlaggedBookings, which
 // owns the list and refetches it after every resolution.
 
-import { useState } from "react";
+import FlaggedBookingReasonForm from "./FlaggedBookingReasonForm";
 import { statusLabel } from "../services/bookingRequestEligibility";
 import { formatTimestamp } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { conflictText } from "../services/flaggedBookingErrors";
 import { flagReasons } from "../services/flaggedBookingDisplay";
 
-// The server's limit on the reason (booking_resolutions, 076).
-const MAX_TEXT = 1000;
-
 function capitalise(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-/** The reason as sent, or the message to show beside the field instead. */
-function checkReason(reason, verb) {
-  const trimmed = reason.trim();
-  if (!trimmed) return { error: `Enter a reason for ${verb} this booking.` };
-  // Code points, as the server counts them.
-  if (Array.from(trimmed).length > MAX_TEXT) {
-    return { error: `The reason must be ${MAX_TEXT} characters or fewer.` };
-  }
-  return { reason: trimmed };
-}
-
-/** One reason form: a required textarea and its submit button. */
-function ReasonForm({ id, label, verb, busy, sendingLabel, buttonLabel, onSubmit }) {
-  const [reason, setReason] = useState("");
-  const [reasonError, setReasonError] = useState(null);
-  const errorId = `${id}-error`;
-
-  function handleSubmit(e) {
-    e.preventDefault();
-    const checked = checkReason(reason, verb);
-    setReasonError(checked.error ?? null);
-    if (checked.reason) onSubmit(checked.reason);
-  }
-
-  return (
-    <form className="pending-bookings__reject" onSubmit={handleSubmit} noValidate>
-      <label htmlFor={id}>{label}</label>
-      <textarea
-        id={id}
-        value={reason}
-        maxLength={MAX_TEXT}
-        required
-        aria-invalid={reasonError ? "true" : undefined}
-        aria-describedby={reasonError ? errorId : undefined}
-        onChange={(e) => setReason(e.target.value)}
-      />
-      {reasonError && (
-        <p id={errorId} className="pending-bookings__field-error">
-          {reasonError}
-        </p>
-      )}
-      <button type="submit" disabled={busy}>
-        {sendingLabel ?? buttonLabel}
-      </button>
-    </form>
-  );
 }
 
 export default function FlaggedBookingCard({
@@ -155,7 +104,7 @@ export default function FlaggedBookingCard({
           )}
 
           {item.reinstatable ? (
-            <ReasonForm
+            <FlaggedBookingReasonForm
               id={`${regionId}-reinstate`}
               label="Reason for reinstating (required)"
               verb="reinstating"
@@ -170,7 +119,7 @@ export default function FlaggedBookingCard({
             </p>
           )}
 
-          <ReasonForm
+          <FlaggedBookingReasonForm
             id={`${regionId}-cancel`}
             label="Reason for cancelling (required)"
             verb="cancelling"

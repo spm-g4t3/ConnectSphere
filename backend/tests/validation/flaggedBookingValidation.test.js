@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  validateFlaggedBookingEventId,
   validateFlaggedBookingId,
   validateResolution,
   RESOLUTION_REASON_MAX_LENGTH,
@@ -35,6 +36,20 @@ describe('validateFlaggedBookingId', () => {
     const err = refusalOf(() => validateFlaggedBookingId(id));
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.details).toEqual([{ field: 'id', message: 'must be a valid booking request id' }]);
+  });
+});
+
+describe('validateFlaggedBookingEventId', () => {
+  const EVENT_ID = '22222222-2222-4222-8222-222222222222';
+
+  it('SCRUM266_AC1_an_event_id_is_trimmed_and_lower_cased', () => {
+    expect(validateFlaggedBookingEventId(`  ${EVENT_ID.toUpperCase()}  `)).toBe(EVENT_ID);
+  });
+
+  it.each([undefined, null, '', 'nope', 42])('SCRUM266_AC1_the_event_id_%j_is_refused', (id) => {
+    const err = refusalOf(() => validateFlaggedBookingEventId(id));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'eventRequestId', message: 'must be a valid event request id' }]);
   });
 });
 

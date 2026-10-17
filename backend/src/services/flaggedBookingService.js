@@ -1,9 +1,11 @@
 /**
- * Bookings flagged for review: Venue Staff list them and reinstate them, and
- * the event's coordinator or Venue Staff cancel them.
+ * Bookings flagged for review: Venue Staff list them and reinstate them, the
+ * event's coordinator lists that event's, and the coordinator or Venue Staff
+ * cancel them.
  *
  * The rules, the locks and the record of the resolution live in
- * list_flagged_bookings (078), reinstate_flagged_booking (076) and
+ * list_flagged_bookings and list_event_flagged_bookings (078),
+ * reinstate_flagged_booking (076) and
  * cancel_flagged_booking (077); this module checks the input, makes the call
  * and maps the answer. The client is optional, so it tests without
  * credentials.
@@ -18,6 +20,7 @@ import {
 import { BOOKING_STATUS, getBookingStatusDisplay } from '../domain/bookingStatus.js';
 import { toBookingRequest, toPeriodConflict } from './bookingRequestService.js';
 import {
+  validateFlaggedBookingEventId,
   validateFlaggedBookingId,
   validateResolution,
 } from '../validation/flaggedBookingValidation.js';
@@ -137,6 +140,54 @@ export async function listFlaggedBookings(callerId, { client } = {}) {
   }
 
   return data.map(toFlaggedBooking);
+}
+
+/** One live request raised to replace a flagged booking (078, section 4). */
+function toReplacementRequest(row) {
+  return {
+    id: row.id,
+    venueId: row.venue_id,
+    venueName: row.venue_name ?? null,
+    status: row.status,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * One event's bookings flagged for review, for its assigned coordinator: the
+ * shape listFlaggedBookings gives, each with the live requests replacing it.
+ *
+ * @param {string} eventRequestId
+ * @param {string} callerId  from the JWT -- never the client
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object[]>} possibly empty, in camelCase
+ * @throws {ValidationError} no caller or a malformed event id, before any round trip
+ * @throws {NotFoundError}   no such event
+ * @throws {ForbiddenError}  the caller is not the event's assigned coordinator
+ */
+export async function listEventFlaggedBookings(eventRequestId, callerId, { client } = {}) {
+  checkCaller(callerId);
+  const eventId = validateFlaggedBookingEventId(eventRequestId);
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('list_event_flagged_bookings', {
+    p_caller: callerId,
+    p_event_request_id: eventId,
+  });
+
+  if (error) throw translateError(error);
+
+  if (!Array.isArray(data)) {
+    throw new Error('Unexpected result from list_event_flagged_bookings');
+  }
+
+  return data.map((row) => ({
+    ...toFlaggedBooking(row),
+    replacementRequests: (row.replacement_requests ?? []).map(toReplacementRequest),
+  }));
 }
 
 /**
