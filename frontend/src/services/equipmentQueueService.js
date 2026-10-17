@@ -1,39 +1,24 @@
 // equipmentQueueService.js
 //
-// SCRUM-287, for SCRUM-284 (Technical Support Dashboard and Request Queue). The
-// call behind the dashboard's equipment request lists, one route in
-// backend/src/routes/equipmentQueue.js.
+// The call behind the dashboard's equipment request lists
+// (GET /equipment-requests, backend/src/routes/equipmentQueue.js).
 //
-// The answer:
-//
-//   { needsAction: Row[], requests: Row[] }
-//
+//   { needsAction: Row[], needsActionTruncated, requests: Row[], requestsTruncated,
+//     statuses: [{ value, label }] }
 //   Row = { eventRequestId, eventName, proposedStart, proposedEnd,
-//           venue: { id, name } | null, coordinator: { id, name } | null,
-//           lineCount, status, statusLabel,
-//           reviewer: { id, name } | null,
+//           venues: [{ id, name }], coordinator: { id, name } | null,
+//           itemCount, status, statusLabel, reviewer: { id, name } | null,
 //           flaggedCount, flagReasons: string[] }
 //
-// needsAction is Pending review requests and requests with flagged reservations,
-// whatever the status filter says. requests is every status, or the one asked for.
-//
-// Status codes a caller will want to tell apart: 400 (a filter the server does
-// not know), 403 (not technical support staff), anything else is a failure to load.
+// needsAction ignores the status filter; requests is every status, or the one
+// asked for. statuses is the filter's choices, so labels are not kept here.
+// A 400 is a filter the server does not know, a 403 is not Technical Support.
 
 import { apiClient } from "./apiClient";
 
-/** The five statuses of an equipment request, in the order a reviewer meets them. */
-export const QUEUE_STATUSES = [
-  { value: "pending_review", label: "Pending review" },
-  { value: "under_review", label: "Under review" },
-  { value: "arranged", label: "Arranged" },
-  { value: "cannot_be_fully_arranged", label: "Cannot be fully arranged" },
-  { value: "cancelled", label: "Cancelled" },
-];
-
 /**
  * @param {object} [filters]
- * @param {string} [filters.status]        one of QUEUE_STATUSES' values; empty means all
+ * @param {string} [filters.status]        one of the answer's statuses; empty means all
  * @param {boolean} [filters.includePast]  also list events that have ended
  */
 export async function getEquipmentQueue({ status = "", includePast = false } = {}) {

@@ -1,38 +1,19 @@
 // EquipmentRequestQueue.jsx
 //
-// SCRUM-287, for SCRUM-284 (Technical Support Dashboard and Request Queue).
 // The equipment request lists on the Technical Support dashboard and on
-// /equipment: a "Needs action" section on top, then every request, filterable
-// by status. Selecting a request opens its review screen (SCRUM-290).
+// /equipment: "Needs action" on top, then every request, filterable by status.
+// The server decides what each list holds and in what order; this file never
+// sorts or filters rows, it asks (status, include past events) and draws.
 //
-// What the screen decides and what the server decides. The server decides what
-// is in each list, in what order, and which events have ended: this file never
-// sorts or filters the rows it is given. It only asks (the status filter and the
-// "include past events" box) and draws what comes back. Both lists arrive in one
-// response, so a request cannot be in one and missing from the other.
-//
-// Each row shows what AC3 lists and nothing more: the event, its date and times,
-// the booked venue, the assigned coordinator, how many equipment items, the status and, for
-// a request under review, who is reviewing it. A row in Needs action also says
-// why a reservation was flagged.
-//
-// Renders <section>s and NOT a `dashboard` wrapper, so the card styling comes
-// from whichever parent mounted it, as ReviewQueue does. App.jsx's /equipment
-// route supplies the wrapper.
+// Renders <section>s and no `dashboard` wrapper, so the parent supplies the card
+// styling, as ReviewQueue does.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { QUEUE_STATUSES, getEquipmentQueue } from "../services/equipmentQueueService";
+import { getEquipmentQueue } from "../services/equipmentQueueService";
+import { equipmentStatusClass } from "../services/equipmentRequestStatus";
 import { formatEventPeriod } from "../services/eventPeriodFormat";
 import "./EquipmentRequestQueue.css";
-
-const STATUS_CLASS = {
-  pending_review: "pending",
-  under_review: "under",
-  arranged: "arranged",
-  cannot_be_fully_arranged: "cannot",
-  cancelled: "cancelled",
-};
 
 const LOAD_ERRORS = {
   400: "That filter was not accepted. Choose another status and try again.",
@@ -40,10 +21,20 @@ const LOAD_ERRORS = {
 };
 const GENERIC_LOAD_ERROR = "The equipment requests could not be loaded. Try again.";
 
-const linesLabel = (count) => `${count} ${count === 1 ? "item" : "items"}`;
+const itemsLabel = (count) => `${count} ${count === 1 ? "item" : "items"}`;
+
+function venuesLabel(venues) {
+  if (venues.length === 0) return "No venue booked";
+  const names = venues.map((venue) => venue.name ?? "Unnamed venue").join(", ");
+  return `${venues.length === 1 ? "Venue" : "Venues"}: ${names}`;
+}
 
 function loadErrorMessage(err) {
   return LOAD_ERRORS[err?.response?.status] ?? GENERIC_LOAD_ERROR;
+}
+
+function TruncatedNote({ shown }) {
+  return <p role="note">{`Showing the first ${shown}. Choose a status or leave out past events to narrow the list.`}</p>;
 }
 
 function RequestRow({ row, showFlagReasons }) {
@@ -52,17 +43,17 @@ function RequestRow({ row, showFlagReasons }) {
       <div className="equipment-queue__main">
         <div className="equipment-queue__title">
           <strong>{row.eventName}</strong>
-          <span className={`equipment-queue__status equipment-queue__status--${STATUS_CLASS[row.status]}`}>
+          <span className={`equipment-queue__status equipment-queue__status--${equipmentStatusClass(row.status)}`}>
             {row.statusLabel}
           </span>
         </div>
         <p className="equipment-queue__detail">{formatEventPeriod(row.proposedStart, row.proposedEnd)}</p>
         <p className="equipment-queue__detail">
-          {row.venue ? `Venue: ${row.venue.name ?? "Unnamed venue"}` : "No venue booked"}
+          {venuesLabel(row.venues)}
           {" · "}
           {row.coordinator ? `Coordinator: ${row.coordinator.name ?? "Name not set"}` : "No coordinator assigned"}
           {" · "}
-          {linesLabel(row.lineCount)}
+          {itemsLabel(row.itemCount)}
         </p>
         {row.status === "under_review" && row.reviewer && (
           <p className="equipment-queue__detail">{`Reviewing: ${row.reviewer.name ?? "Name not set"}`}</p>
@@ -88,7 +79,10 @@ function RequestRow({ row, showFlagReasons }) {
 export default function EquipmentRequestQueue() {
   const [status, setStatus] = useState("");
   const [includePast, setIncludePast] = useState(false);
+  // The lists, cleared when a read fails so rows from another filter never stay.
   const [queue, setQueue] = useState(null);
+  // The filter's choices, kept from the last good read so the filter survives a failure.
+  const [statuses, setStatuses] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   // A slow answer to an earlier filter must not overwrite the answer to a later one.
@@ -102,8 +96,10 @@ export default function EquipmentRequestQueue() {
       const data = await getEquipmentQueue({ status, includePast });
       if (ticket !== latest.current) return;
       setQueue(data);
+      setStatuses(data.statuses);
     } catch (err) {
       if (ticket !== latest.current) return;
+      setQueue(null);
       setError(loadErrorMessage(err));
     } finally {
       if (ticket === latest.current) setLoading(false);
@@ -116,7 +112,7 @@ export default function EquipmentRequestQueue() {
 
   const needsAction = queue?.needsAction ?? [];
   const requests = queue?.requests ?? [];
-  const firstLoad = loading && queue === null;
+  const firstLoad = loading && statuses === null;
 
   return (
     <>
@@ -138,58 +134,61 @@ export default function EquipmentRequestQueue() {
       )}
 
       {queue && (
-        <>
-          <section className="equipment-queue" aria-labelledby="equipment-queue-needs-action" aria-busy={loading}>
-            <h2 id="equipment-queue-needs-action">{`Needs action (${needsAction.length})`}</h2>
-            {needsAction.length === 0 ? (
-              <p>Nothing needs your action.</p>
-            ) : (
-              <ul>
-                {needsAction.map((row) => (
-                  <RequestRow key={row.eventRequestId} row={row} showFlagReasons />
-                ))}
-              </ul>
-            )}
-          </section>
+        <section className="equipment-queue" aria-labelledby="equipment-queue-needs-action" aria-busy={loading}>
+          <h2 id="equipment-queue-needs-action">{`Needs action (${needsAction.length})`}</h2>
+          {needsAction.length === 0 ? (
+            <p>Nothing needs your action.</p>
+          ) : (
+            <ul>
+              {needsAction.map((row) => (
+                <RequestRow key={row.eventRequestId} row={row} showFlagReasons />
+              ))}
+            </ul>
+          )}
+          {queue.needsActionTruncated && <TruncatedNote shown={needsAction.length} />}
+        </section>
+      )}
 
-          <section className="equipment-queue" aria-labelledby="equipment-queue-all" aria-busy={loading}>
-            <h2 id="equipment-queue-all">Equipment requests</h2>
-            <div className="equipment-queue__filters">
-              <label>
-                Status
-                <select value={status} onChange={(event) => setStatus(event.target.value)}>
-                  <option value="">All statuses</option>
-                  {QUEUE_STATUSES.map(({ value, label }) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="equipment-queue__check">
-                <input
-                  type="checkbox"
-                  checked={includePast}
-                  onChange={(event) => setIncludePast(event.target.checked)}
-                />
-                Include past events
-              </label>
-            </div>
-            {requests.length === 0 ? (
-              <p>
-                {status || includePast
-                  ? "No equipment requests match these filters."
-                  : "No equipment requests for upcoming events."}
-              </p>
-            ) : (
-              <ul>
-                {requests.map((row) => (
-                  <RequestRow key={row.eventRequestId} row={row} showFlagReasons={false} />
+      {statuses && (
+        <section className="equipment-queue" aria-labelledby="equipment-queue-all" aria-busy={loading}>
+          <h2 id="equipment-queue-all">Equipment requests</h2>
+          <div className="equipment-queue__filters">
+            <label>
+              Status
+              <select value={status} onChange={(event) => setStatus(event.target.value)}>
+                <option value="">All statuses</option>
+                {statuses.map(({ value, label }) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
                 ))}
-              </ul>
-            )}
-          </section>
-        </>
+              </select>
+            </label>
+            <label className="equipment-queue__check">
+              <input
+                type="checkbox"
+                checked={includePast}
+                onChange={(event) => setIncludePast(event.target.checked)}
+              />
+              Include past events
+            </label>
+          </div>
+          {queue && requests.length === 0 && (
+            <p>
+              {status || includePast
+                ? "No equipment requests match these filters."
+                : "No equipment requests for upcoming events."}
+            </p>
+          )}
+          {requests.length > 0 && (
+            <ul>
+              {requests.map((row) => (
+                <RequestRow key={row.eventRequestId} row={row} showFlagReasons={false} />
+              ))}
+            </ul>
+          )}
+          {queue?.requestsTruncated && <TruncatedNote shown={requests.length} />}
+        </section>
       )}
     </>
   );
