@@ -643,6 +643,8 @@ button { cursor: pointer; }
 .dashboard .notification-inbox__item--unread { border-left: 3px solid var(--teal); padding-left: 12px; }
 .dashboard .notification-inbox__item--read { opacity: 0.7; }
 .dashboard .notification-inbox__new { background: #e8f7f1; border-radius: 999px; color: #17684f; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-left: 10px; padding: 3px 10px; text-transform: uppercase; }
+/* The prototype's "Needs your action" rule: solid dark teal, for whoever must act next. */
+.dashboard .notification-inbox__action { background: var(--teal-dark); border-radius: 999px; color: #fff; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-left: 10px; padding: 3px 10px; }
 /* The handoff banner on venue search. Needs a rule of its own because
    .venue-search has no card styling at all -- it is a bare filter bar -- so
    without one the context reads as a stray sentence above the inputs rather

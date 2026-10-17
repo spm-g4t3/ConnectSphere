@@ -188,6 +188,7 @@ describe("describeNotification: booking_request_submitted", () => {
       detail:
         `It is for ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
         "It needs a decision.",
+      needsAction: true,
     });
   });
 });
@@ -407,6 +408,11 @@ describe("describeNotification: Venue Staff decisions (SCRUM-258 AC6)", () => {
   it("SCRUM258_AC6_rejected_without_an_alternative_gives_only_the_reason", () => {
     const { detail } = of("booking_request_rejected", { ...DECISION, reason: "Under renovation" });
     expect(detail).toBe("Reason: Under renovation");
+  });
+
+  it("SCRUM174_AC4_rejected_with_alternative_but_no_reason", () => {
+    const { detail } = of("booking_request_rejected", { ...DECISION, suggestedAlternative: "Hall B" });
+    expect(detail).toBe("Reason: No reason recorded. Suggested alternative: Hall B");
   });
 
   it("SCRUM258_AC3_conflicting_names_the_approved_event_and_says_the_request_is_still_open", () => {

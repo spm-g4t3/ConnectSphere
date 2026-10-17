@@ -182,11 +182,13 @@ const DESCRIBERS = {
   },
 
   // 083 (SCRUM-174 AC1). Sent to every Venue Staff user when a coordinator
-  // submits a booking request, so it reaches the queue's deciders.
+  // submits a booking request, so it reaches the queue's deciders. The
+  // reader is who must act next, so the inbox marks it as needing action.
   booking_request_submitted(payload, { eventName, venueName }) {
     return {
       headline: `New request: ${eventName} at ${venueName}`,
       detail: `It is for ${formatRange(payload.startsAt, payload.endsAt)}. It needs a decision.`,
+      needsAction: true,
     };
   },
 
@@ -417,7 +419,7 @@ const DESCRIBERS = {
  * A notification as a headline and a detail line.
  *
  * @param {Object} notification  as returned by GET /api/notifications
- * @returns {{headline: string, detail: string}}
+ * @returns {{headline: string, detail: string, needsAction?: true}}
  */
 export function describeNotification(notification) {
   const payload = notification?.payload ?? {};
