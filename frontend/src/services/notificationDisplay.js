@@ -45,6 +45,10 @@
 //     replacementStartsAt, replacementEndsAt }; audience is coordinator or
 //     organiser, outcome reinstated, cancelled or replaced, and the
 //     replacement* fields are null unless replaced
+//   booking_released (089, SCRUM-492): { eventRequestId, eventName, venueId,
+//     venueName, startsAt, endsAt, releasedBy, releasedByName, reason }
+//   booking_request_conflict_cleared (089): { eventRequestId, eventName,
+//     venueId, venueName, startsAt, endsAt, releasedBookingId, releasedEventName }
 // Every field is read defensively -- a notification outlives the build that
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
@@ -213,6 +217,32 @@ const DESCRIBERS = {
       detail:
         `${approvedEventName} was approved for ${formatRange(payload.approvedStartsAt, payload.approvedEndsAt)}. ` +
         "Your request is still open; you can withdraw it or wait for Venue Staff.",
+    };
+  },
+
+  // SCRUM-492 (AC6). Sent to every Venue Staff member when a coordinator gives
+  // an approved booking up, so they know the venue is free again.
+  booking_released(payload, { eventName, venueName }) {
+    const by = payload.releasedByName || "the event's coordinator";
+
+    return {
+      headline: `${venueName} was released for ${eventName}`,
+      detail:
+        `It is free again for ${formatRange(payload.startsAt, payload.endsAt)}, released by ${by}. ` +
+        `Reason: ${asSentence(payload.reason || NO_REASON)}`,
+    };
+  },
+
+  // SCRUM-492 (AC4). The reverse of booking_request_conflicting: the booking
+  // this request clashed with was released, and nothing else blocks it.
+  booking_request_conflict_cleared(payload, { eventName, venueName }) {
+    const releasedEventName = payload.releasedEventName || "Another event";
+
+    return {
+      headline: `Your request for ${venueName} for ${eventName} no longer clashes`,
+      detail:
+        `${releasedEventName} released the venue, so your request for ` +
+        `${formatRange(payload.startsAt, payload.endsAt)} is pending again and waits for Venue Staff.`,
     };
   },
 

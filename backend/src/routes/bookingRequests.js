@@ -34,6 +34,7 @@ import {
   listBookingRequestsForCoordinator,
   listPendingBookingRequests,
   rejectBookingRequest,
+  releaseVenueBooking,
   withdrawBookingRequest,
 } from '../services/bookingRequestService.js';
 
@@ -159,6 +160,31 @@ export function createBookingRequestRouter({
     try {
       const booking = await withdrawBookingRequest(req.params.id, req.user.id, { client });
       res.status(200).json(booking);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * SCRUM-492: release one approved venue booking. 200 and { booking,
+   * returnedToPending }: the booking, now released, with who, when and why,
+   * and the ids of other events' requests it returned to Pending.
+   *
+   * Body: { reason } -- required, not blank, at most 1000 characters. Behind
+   * coordinatorOnly, with no pre-check: whether the caller holds the event,
+   * the event is Approved and the booking approved are answered by
+   * release_venue_booking (089) under its locks. The caller is always
+   * req.user.id; nothing in the body names a user.
+   *
+   * Statuses: 400 malformed id or bad reason; 401; 403 wrong role, or not this
+   * event's coordinator; 404 no such booking; 409 with `code`:
+   * EVENT_NOT_APPROVED, BOOKING_NOT_APPROVED (a flagged booking, a request, or
+   * one already released or ended), BOOKING_CHANGED.
+   */
+  router.post('/:id/release', coordinatorOnly, async (req, res) => {
+    try {
+      const result = await releaseVenueBooking(req.params.id, req.user.id, req.body ?? {}, { client });
+      res.status(200).json(result);
     } catch (err) {
       handleError(err, res);
     }

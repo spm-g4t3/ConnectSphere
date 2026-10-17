@@ -316,3 +316,36 @@ export function validateRejectBookingRequest(input) {
 
   return { reason, suggestedAlternative };
 }
+
+/** Mirrors the 1000-character cap 089 puts on release_reason. */
+export const RELEASE_REASON_MAX_LENGTH = 1000;
+
+/**
+ * SCRUM-492: what the coordinator sends to release an approved booking (AC1).
+ * The reason is required and must say something.
+ *
+ * @param {object} input
+ * @param {string} input.reason  why the venue is released
+ * @returns {{reason: string}} trimmed
+ * @throws {ValidationError}
+ */
+export function validateReleaseBooking(input) {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new ValidationError('Invalid release -- expected an object');
+  }
+
+  const errors = createErrorCollector();
+
+  const reason = checkOptionalText(errors, 'reason', input.reason, RELEASE_REASON_MAX_LENGTH);
+  // checkOptionalText reads blank as absent; for the reason, absent is the error.
+  if (reason === null && !errors.details.some(({ field }) => field === 'reason')) {
+    errors.add('reason', 'is required');
+  }
+
+  if (errors.hasErrors) {
+    const summary = errors.details.map(({ field, message }) => `${field}: ${message}`).join('; ');
+    throw new ValidationError(`Invalid release -- ${summary}`, errors.details);
+  }
+
+  return { reason };
+}
