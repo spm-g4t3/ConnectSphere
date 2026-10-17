@@ -10,6 +10,8 @@
 //     blockStartsAt, blockEndsAt }
 //   booking_request_withdrawn (031): { eventRequestId, eventName, venueId,
 //     venueName, startsAt, endsAt }
+//   booking_request_submitted (083, SCRUM-174): { eventRequestId, eventName,
+//     venueId, venueName, startsAt, endsAt }
 //   booking_flagged_setup_change (034, SCRUM-484): { venueName, eventName,
 //     startsAt, endsAt, occupiedStartsAt, occupiedEndsAt, setupMinutes,
 //     turnaroundMinutes, reason }
@@ -176,6 +178,15 @@ const DESCRIBERS = {
       detail:
         `It was for ${formatRange(payload.startsAt, payload.endsAt)}. ` +
         "It no longer needs a decision.",
+    };
+  },
+
+  // 083 (SCRUM-174 AC1). Sent to every Venue Staff user when a coordinator
+  // submits a booking request, so it reaches the queue's deciders.
+  booking_request_submitted(payload, { eventName, venueName }) {
+    return {
+      headline: `New request: ${eventName} at ${venueName}`,
+      detail: `It is for ${formatRange(payload.startsAt, payload.endsAt)}. It needs a decision.`,
     };
   },
 

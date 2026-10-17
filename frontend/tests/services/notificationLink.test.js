@@ -89,3 +89,9 @@ describe("SCRUM266_AC1 Venue Staff's flag notice", () => {
     expect(notificationLink(note("safety_booking_flagged"), "venue_staff")).toEqual({ to: "/flagged-bookings" });
   });
 });
+
+describe("SCRUM174_AC1 Venue Staff's new request notice", () => {
+  it("SCRUM174_AC1_venue_staff_submitted_links_to_queue", () => {
+    expect(notificationLink(note("booking_request_submitted"), "venue_staff")).toEqual({ to: "/booking-requests" });
+  });
+});

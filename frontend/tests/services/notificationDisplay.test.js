@@ -179,6 +179,19 @@ describe("describeNotification: booking_request_withdrawn", () => {
   });
 });
 
+// 083. Sent to every Venue Staff user when a coordinator submits a request.
+describe("describeNotification: booking_request_submitted", () => {
+  it("SCRUM174_AC1_submitted_request_headline_and_detail", () => {
+    const submitted = { id: "n12", type: "booking_request_submitted", payload: WITHDRAWN_PAYLOAD };
+    expect(describeNotification(submitted)).toEqual({
+      headline: "New request: Tech Talk at Hall A",
+      detail:
+        `It is for ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
+        "It needs a decision.",
+    });
+  });
+});
+
 describe("describeNotification: event_cancelled (SCRUM-374)", () => {
   it("shows the reason and cancellation date to the Organiser", () => {
     const result = describeNotification({
@@ -873,6 +886,7 @@ function knownNotificationTypes() {
 const FIXTURES = {
   booking_flagged: PAYLOAD,
   booking_request_withdrawn: WITHDRAWN_PAYLOAD,
+  booking_request_submitted: WITHDRAWN_PAYLOAD,
   clarification_requested: { eventName: "Tech Talk", message: "Please confirm." },
   clarification_replied: { eventName: "Tech Talk", message: "Confirmed." },
   clarification_closed: { eventName: "Tech Talk" },
