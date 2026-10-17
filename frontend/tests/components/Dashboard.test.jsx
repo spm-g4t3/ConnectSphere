@@ -83,7 +83,6 @@ function renderDashboardAs(role) {
 }
 
 beforeEach(() => {
-  vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "true");
   vi.clearAllMocks();
 });
 

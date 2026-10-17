@@ -62,7 +62,7 @@ npm run install:all      # installs root, backend and frontend
 
 Copy `backend/.env.example` to `backend/.env` and fill in the real values. Real `.env` files are gitignored and must never be committed. The frontend needs no `.env`: it defaults to `http://localhost:5000/api`, and `VITE_API_BASE_URL` overrides that if you need it to.
 
-Browse Open Events (SCRUM-495) is off by default, because it needs the registration settings (SCRUM-494), the `registrations` table (SCRUM-22) and migration 068. Once those are in the database, set `OPEN_EVENTS_ENABLED=true` for the backend and `VITE_OPEN_EVENTS_ENABLED=true` for the frontend build; until then the route answers 404 and the nav and dashboard links are hidden.
+Browse Open Events (SCRUM-495) is available to authenticated Attendees through the navigation, dashboard and `/open-events` routes. It requires the registration settings (SCRUM-494), the `registrations` table (SCRUM-22) and migration 068 in the database. Events must be Confirmed with registration enabled and within their registration window to appear.
 
 Then, from the repository root:
 

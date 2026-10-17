@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "../../src/App.jsx";
@@ -174,12 +174,10 @@ const auth = (user = { id: "a1", role: "attendee" }, loading = false) => {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "true");
   window.history.replaceState({}, "", "/open-events/e1");
   auth();
   vi.mocked(getOpenEvent).mockResolvedValue(event());
 });
-afterEach(() => { vi.unstubAllEnvs(); });
 
 describe("SCRUM36 attendee registration through the real App route", () => {
   it("SCRUM36_AC1_AC2_AC7_submits_the_selected_event_and_shows_server_confirmed_success", async () => {
