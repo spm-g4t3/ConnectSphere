@@ -46,6 +46,7 @@ const ARRANGEMENTS = [
   '038_equipment_review.sql',
 ];
 const MIGRATION = '064_safety_review_submission.sql';
+const READINESS_MIGRATION = '085_event_readiness_details.sql';
 const LATE_SAFETY_MIGRATIONS = [
   '071_safety_review.sql',
   '072_safety_review_history.sql',
@@ -214,14 +215,18 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     // A stand-in for 040's holds, as cancelEventRequestDatabase builds it: AC2-13
     // needs a hold to exist, and event_readiness must not count it.
     await db.exec(`
+      create type venue_hold_status as enum ('active', 'expired');
       create table venue_holds (
         id uuid primary key default gen_random_uuid(),
         event_request_id uuid not null references event_requests (id),
         venue_id uuid not null references venues (id),
         expires_at timestamptz not null,
-        status text not null default 'active'
+        status venue_hold_status not null default 'active'
       );
     `);
+    await db.exec(migration('065_booking_decision_statuses.sql'));
+    await db.exec(migration('075_booking_decisions_after_safety_review.sql'));
+    await db.exec(migration(READINESS_MIGRATION));
 
     const user = async (email, role, name) => {
       const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
@@ -255,7 +260,10 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
         eventRequestId: id,
         ready: true,
         items: [
-          { key: 'venue', met: true, detail: 'Approved', bookingId, venueName: 'Hall A' },
+          {
+            key: 'venue', met: true, detail: 'Approved', bookingId, venueName: 'Hall A',
+            startsAt: expect.any(String), endsAt: expect.any(String),
+          },
           { key: 'equipment', met: true, detail: 'No equipment requested' },
           { key: 'date', met: true, detail: 'Starts in the future' },
         ],
@@ -366,6 +374,189 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     });
   });
 
+  describe('SCRUM-363: shared readiness', () => {
+    it.each([
+      ['exact coverage', '0 seconds', '0 seconds', true],
+      ['wider coverage', '-1 hour', '1 hour', true],
+      ['starts one microsecond late', '1 microsecond', '0 seconds', false],
+      ['ends one microsecond early', '0 seconds', '-1 microsecond', false],
+    ])('SCRUM363_AC2_booking_%s_and_its_period_are_reported', async (_label, startOffset, endOffset, met) => {
+      const id = await event();
+      const { id: bookingId } = await one(
+        `insert into bookings (event_request_id, venue_id, status, starts_at, ends_at)
+         select id, $2, 'approved', proposed_start + $3::interval, proposed_end + $4::interval
+           from event_requests where id = $1 returning id`,
+        [id, hallA, startOffset, endOffset],
+      );
+
+      const result = await readiness(id);
+      const { starts_at, ends_at } = await one('select starts_at, ends_at from bookings where id = $1', [bookingId]);
+      expect(result.ready).toBe(met);
+      expect(result.items[0]).toEqual({
+        key: 'venue', met, bookingId, venueName: 'Hall A',
+        detail: met ? 'Approved' : "Does not cover the event's start to end",
+        startsAt: expect.any(String), endsAt: expect.any(String),
+      });
+      expect(new Date(result.items[0].startsAt)).toEqual(new Date(starts_at));
+      expect(new Date(result.items[0].endsAt)).toEqual(new Date(ends_at));
+    });
+
+    it.each([
+      ['approved', true, 'Approved'],
+      ['pending', false, 'Awaiting approval'],
+      ['conflicting', false, 'Conflicting, awaiting a decision'],
+      ['flagged_for_review', false, 'Flagged for review'],
+    ])('SCRUM363_AC2_every_booking_must_pass_including_a_second_%s_booking', async (status, met, detail) => {
+      const id = await readyEvent();
+      const bookingId = await booking(id, room2, status);
+      const result = await readiness(id);
+
+      expect(result.ready).toBe(met);
+      expect(result.items.filter((item) => item.key === 'venue')).toHaveLength(2);
+      expect(result.items.find((item) => item.bookingId === bookingId)).toMatchObject({ met, detail });
+      if (!met) {
+        const err = await refusal(submit(id));
+        expect(err?.hint).toBe('EVENT_NOT_READY');
+        expect(JSON.parse(err.detail)).toEqual(result.items.filter((item) => !item.met));
+      }
+    });
+
+    it('SCRUM363_AC2_every_active_equipment_request_must_be_arranged_and_cancelled_requests_are_ignored', async () => {
+      const id = await readyEvent({ equipment_requirements: 'Projectors' });
+      const arranged = await equipment(id, 'arranged');
+      const pending = await equipment(id, 'pending_review');
+      const reviewing = await equipment(id, 'under_review');
+      const unavailable = await equipment(id, 'cannot_be_fully_arranged');
+      await equipment(id, 'cancelled');
+
+      const result = await readiness(id, true);
+      expect(result.ready).toBe(false);
+      expect(result.items.filter((item) => item.key === 'equipment')).toEqual(expect.arrayContaining([
+        { key: 'equipment', equipmentRequestId: arranged, met: true, detail: 'Arranged' },
+        { key: 'equipment', equipmentRequestId: pending, met: false, detail: 'Pending review' },
+        { key: 'equipment', equipmentRequestId: reviewing, met: false, detail: 'Under review' },
+        { key: 'equipment', equipmentRequestId: unavailable, met: false, detail: 'Cannot be fully arranged' },
+      ]));
+      expect(result.items.filter((item) => item.key === 'equipment')).toHaveLength(4);
+      expect(result.items.some((item) => item.key === 'no_equipment_confirmation')).toBe(false);
+    });
+
+    it.each([null, '', '   ', '\t\r\n\f\v '])(
+      'SCRUM363_AC5_blank_requirements_%j_do_not_need_acknowledgement_and_still_submit', async (requirements) => {
+        const id = await readyEvent({ equipment_requirements: requirements });
+        expect((await readiness(id)).ready).toBe(true);
+        expect((await readiness(id)).items.some((item) => item.key === 'no_equipment_confirmation')).toBe(false);
+        await submit(id);
+        expect((await written(id)).submissions[0].no_equipment_confirmed).toBe(false);
+      },
+    );
+
+    it('SCRUM363_AC5_cancelled_equipment_does_not_remove_the_need_for_explicit_acknowledgement', async () => {
+      const requirements = '\t Projectors\n';
+      const id = await readyEvent({ equipment_requirements: requirements });
+      await equipment(id, 'cancelled');
+      const before = await written(id);
+
+      for (const confirmed of [false, null, true]) {
+        const result = await readiness(id, confirmed);
+        expect(result.ready).toBe(confirmed === true);
+        expect(result.items[1]).toEqual({
+          key: 'no_equipment_confirmation', met: confirmed === true,
+          detail: 'Confirm that this event needs no equipment', organiserRequirements: requirements,
+        });
+      }
+      expect(await written(id)).toEqual(before);
+    });
+
+    it.each([
+      ['past', '-1 microsecond', false],
+      ['at the boundary', '0 seconds', false],
+      ['future', '1 day', true],
+    ])('SCRUM363_AC2_start_%s_uses_database_time_and_is_timezone_independent', async (_label, offset, met) => {
+      const id = await event();
+      await db.exec('begin');
+      try {
+        await db.query(
+          `update event_requests set proposed_start = now() + $2::interval,
+             proposed_end = now() + $2::interval + interval '1 hour' where id = $1`, [id, offset],
+        );
+        for (const zone of ['UTC', 'Asia/Singapore']) {
+          await db.query("select set_config('TimeZone', $1, true)", [zone]);
+          expect((await readiness(id)).items.at(-1)).toEqual({
+            key: 'date', met, detail: met ? 'Starts in the future' : "The event's start has passed",
+          });
+        }
+      } finally {
+        await db.exec('rollback');
+      }
+    });
+
+    it('SCRUM363_AC2_rechecks_current_time_instead_of_the_start_of_a_longer_transaction', async () => {
+      const id = await event();
+      await db.exec('begin');
+      try {
+        await db.query(
+          `update event_requests set proposed_start = clock_timestamp(),
+             proposed_end = clock_timestamp() + interval '1 hour' where id = $1`, [id],
+        );
+        expect((await one('select proposed_start > now() as after_start from event_requests where id = $1', [id])).after_start).toBe(true);
+        expect((await readiness(id)).items.at(-1)).toMatchObject({ met: false, detail: "The event's start has passed" });
+      } finally {
+        await db.exec('rollback');
+      }
+    });
+
+    it.each(['0 seconds', '-1 hour'])(
+      'SCRUM363_AC2_invalid_event_period_%s_is_rejected_by_the_existing_date_constraint', async (offset) => {
+        const id = await event();
+        const err = await refusal(db.query(
+          'update event_requests set proposed_end = proposed_start + $2::interval where id = $1', [id, offset],
+        ));
+        expect(err?.code).toBe('23514');
+        expect(err?.constraint).toBe('event_requests_dates_ordered');
+      },
+    );
+
+    it('SCRUM363_AC4_lists_all_conditions_in_a_read_only_transaction_without_changing_arrangements_or_history', async () => {
+      const id = await event({ proposed_start: at(-1), proposed_end: at(-0.9) });
+      await booking(id, hallA, 'conflicting');
+      await booking(id, room2, 'flagged_for_review');
+      await equipment(id, 'pending_review');
+      const snapshot = async () => ({
+        ...await written(id),
+        bookings: (await db.query('select * from bookings where event_request_id = $1 order by id', [id])).rows,
+        equipment: (await db.query('select * from equipment_requests where event_request_id = $1 order by id', [id])).rows,
+      });
+      const before = await snapshot();
+      await db.exec('begin read only');
+      try {
+        const result = await readiness(id);
+        expect(result.ready).toBe(false);
+        expect(result.items.map(({ key, met, detail }) => ({ key, met, detail }))).toEqual([
+          { key: 'venue', met: false, detail: expect.any(String) },
+          { key: 'venue', met: false, detail: expect.any(String) },
+          { key: 'equipment', met: false, detail: 'Pending review' },
+          { key: 'date', met: false, detail: "The event's start has passed" },
+        ]);
+      } finally {
+        await db.exec('rollback');
+      }
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it('SCRUM363_AC4_readiness_migration_is_rerunnable_and_keeps_execution_on_the_trusted_backend', async () => {
+      const id = await readyEvent();
+      const before = await readiness(id);
+      await db.exec(migration(READINESS_MIGRATION));
+      expect(await readiness(id)).toEqual(before);
+      expect(Number((await one("select count(*) from pg_proc where proname = 'event_readiness'")).count)).toBe(1);
+      for (const role of ['anon', 'authenticated', 'service_role']) {
+        const { allowed } = await one("select has_function_privilege($1, 'event_readiness(uuid,boolean)', 'execute') as allowed", [role]);
+        expect(allowed).toBe(role === 'service_role');
+      }
+    });
+  });
+
   describe('the status update safety gate', () => {
     it('SCRUM490_AC12_a_new_event_cannot_start_past_the_safety_gate', async () => {
       const refused = await refusal(
@@ -456,7 +647,10 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
       expect(err.hint).toBe('EVENT_NOT_READY');
       expect(err.message).toBe('This event is not ready for the safety check.');
       expect(JSON.parse(err.detail)).toEqual([
-        { key: 'venue', met: false, detail: 'Awaiting approval', bookingId, venueName: 'Room 2' },
+        {
+          key: 'venue', met: false, detail: 'Awaiting approval', bookingId, venueName: 'Room 2',
+          startsAt: expect.any(String), endsAt: expect.any(String),
+        },
         { key: 'equipment', met: false, detail: 'Cannot be fully arranged', equipmentRequestId: requestId },
         { key: 'date', met: false, detail: "The event's start has passed" },
       ]);
@@ -691,6 +885,7 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
         'event_request_awaiting_assignment', 'event_request_assigned', 'event_request_coordinator_assigned',
         'safety_review_response', 'safety_booking_flagged', 'safety_equipment_review',
         'event_submitted_for_safety_review',
+        'booking_request_approved', 'booking_request_rejected', 'booking_request_conflicting',
       ]);
     });
 
@@ -698,6 +893,8 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
       // AC6-05.
       await db.exec(migration(MIGRATION));
       for (const name of LATE_SAFETY_MIGRATIONS) await db.exec(migration(name));
+      await db.exec(migration('075_booking_decisions_after_safety_review.sql'));
+      await db.exec(migration(READINESS_MIGRATION));
 
       const count = async (sql) => Number((await one(sql)).count);
       expect(await count("select count(*) from pg_constraint where conname = 'notifications_type_known'")).toBe(1);

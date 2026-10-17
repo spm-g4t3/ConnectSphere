@@ -97,6 +97,29 @@ describe('SCRUM-489 AC3: GET /:id/readiness', () => {
   const readiness = (client, query = '', requireAuth) =>
     request(appWith({ client, requireAuth })).get(`/api/event-requests/${EVENT_ID}/readiness${query}`);
 
+  it('SCRUM363_AC4_returns_every_database_condition_and_booking_period_without_a_second_checker', async () => {
+    const checklist = {
+      ...CHECKLIST,
+      items: [
+        {
+          key: 'venue', met: false, detail: 'Flagged for review',
+          bookingId: '33333333-3333-4333-8333-333333333333', venueName: 'Hall A',
+          startsAt: '2026-11-01T01:00:00+00:00', endsAt: '2026-11-01T03:00:00+00:00',
+        },
+        { key: 'no_equipment_confirmation', met: false, detail: 'Confirm that this event needs no equipment', organiserRequirements: 'Projectors' },
+        { key: 'date', met: true, detail: 'Starts in the future' },
+      ],
+    };
+    const client = createFakeClient([ok(eventRow({ status: 'safety_approved' })), ok(checklist)]);
+
+    const res = await readiness(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(checklist);
+    expect(client.calls.map((call) => call.fn ?? call.table)).toEqual(['event_requests', 'event_readiness']);
+    expect(client.calls[1].args).toEqual({ p_event_request_id: EVENT_ID, p_no_equipment_confirmed: false });
+  });
+
   it.each([
     ['a coordinator', ROLE.EVENT_COORDINATOR, COORDINATOR_A],
     ['a Lead', ROLE.EVENT_COORDINATOR_LEAD, LEAD_ID],
