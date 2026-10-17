@@ -1,21 +1,12 @@
 /**
- * Input validation for the equipment request queue.
- *
- * SCRUM-285, for SCRUM-284. The queue reads two optional query parameters:
- *
- *   status        one of the five equipment request statuses (AC2)
- *   includePast   "true" or "false": also list events that have ended (AC2)
+ * Validation for the equipment request queue's query: an optional status, and
+ * includePast ("true" or "false").
  *
  * Pure and synchronous. A value that is present and wrong is refused with a 400
- * that names it, never ignored: a mistyped "status=arrange" quietly returning
- * every request would look like a filter that found nothing wrong. Every fault
- * is reported at once.
+ * that names it, never ignored, and every fault is reported at once.
  */
 
 import { EQUIPMENT_REQUEST_STATUS } from '../domain/equipmentRequestStatus.js';
-import { throwIfInvalid } from './equipmentLineValidation.js';
-
-export { throwIfInvalid };
 
 const STATUSES = Object.values(EQUIPMENT_REQUEST_STATUS);
 

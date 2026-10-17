@@ -1,18 +1,12 @@
 /**
- * The Technical Support dashboard's equipment request queue.
+ * The Technical Support dashboard's equipment request queue, mounted at
+ * /api/equipment-requests.
  *
- * SCRUM-285, for SCRUM-284 "Technical Support Dashboard and Request Queue".
- * Mounted at /api/equipment-requests, in its own file so the review router, which
- * is about one event's request, is left alone.
+ *   GET /    ?status=pending_review|under_review|arranged|cannot_be_fully_arranged|cancelled
+ *            ?includePast=true   also events that have ended
  *
- *   GET /    the queue: { needsAction, requests }
- *            ?status=pending_review|under_review|arranged|cannot_be_fully_arranged|cancelled
- *            ?includePast=true   also events that have ended (the default hides them)
- *
- * Technical Support Staff only (AC1). Everyone else, signed in or not, is refused
- * before any service runs. Reading changes nothing.
- *
- * Statuses: 200; 400 for a status or includePast that is not valid; 401; 403; 500.
+ * Technical Support Staff only; reading changes nothing.
+ * Statuses: 200; 400 bad status or includePast; 401; 403; 500.
  */
 
 import express from 'express';
@@ -29,8 +23,7 @@ const handleError = createErrorHandler('equipment request queue route');
 
 
 /**
- * Build the router, optionally over injected middleware and client, for the
- * reason routes/equipmentReview.js gives.
+ * Build the router, optionally over injected middleware and client.
  *
  * @param {object} [options]
  * @param {Function} [options.requireAuth]
@@ -47,10 +40,9 @@ export function createEquipmentQueueRouter({
 
   router.use(requireAuth);
 
-  /** AC2, AC4: the dashboard's data. */
   router.get('/', requireRole(ROLE.TECHNICAL_SUPPORT_STAFF), async (req, res) => {
     try {
-      res.status(200).json(await getEquipmentRequestQueue(req.query, { client }));
+      res.status(200).json(await getEquipmentRequestQueue(req.query, { callerId: req.user.id, client }));
     } catch (err) {
       handleError(err, res);
     }

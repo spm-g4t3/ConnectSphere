@@ -1,38 +1,33 @@
 /**
- * The equipment request queue: what the Technical Support dashboard lists.
+ * The equipment request queue behind the Technical Support dashboard.
  *
- * SCRUM-285, for SCRUM-284 "Technical Support Dashboard and Request Queue".
  * One read-only Postgres function (056_equipment_request_queue.sql) answers the
- * whole page, so the two lists on it always agree with each other and a request
- * cannot appear in one and be missing from the other.
+ * whole page, so the two lists always agree. It checks the caller's role itself;
+ * the route checks it too. The rows hold only the fields the dashboard shows.
  *
- * Who may call is the route's job (Technical Support Staff only, AC1). The rows
- * hold exactly the fields AC3 lists and the function selects nothing else, so
- * nothing about the event beyond them can leak (AC6); this file only renames
- * the keys.
- *
- * The result:
- *
- *   {
- *     needsAction: Row[],   // AC4: Pending review, and reservations flagged
- *     requests:    Row[],   // AC2: every status, or the one asked for
- *   }
- *
+ *   { needsAction, needsActionTruncated, requests, requestsTruncated, statuses }
  *   Row = { eventRequestId, eventName, proposedStart, proposedEnd,
- *           venue: { id, name } | null, coordinator: { id, name } | null,
- *           lineCount, status, statusLabel,
- *           reviewer: { id, name } | null,
+ *           venues: [{ id, name }], coordinator: { id, name } | null,
+ *           itemCount, status, statusLabel, reviewer: { id, name } | null,
  *           flaggedCount, flagReasons }
+ *   statuses = [{ value, label }], the filter's choices, in review order
  *
- * SQLSTATEs the function raises, and what they become:
- *   22023  an unknown status                  ValidationError  400
- * Anything else is left untyped, so it reaches the API as a 500.
+ * SQLSTATEs: 42501 not Technical Support (403), 22023 unknown status (400).
+ * Anything else is untyped and reaches the API as a 500.
  */
 
-import { ValidationError } from '../errors.js';
-import { equipmentRequestStatusLabel } from '../domain/equipmentRequestStatus.js';
-import { checkQueueQuery, throwIfInvalid } from '../validation/equipmentQueueValidation.js';
+import { ForbiddenError, ValidationError } from '../errors.js';
+import {
+  EQUIPMENT_REQUEST_STATUS,
+  equipmentRequestStatusLabel,
+} from '../domain/equipmentRequestStatus.js';
+import { checkQueueQuery } from '../validation/equipmentQueueValidation.js';
+import { throwIfInvalid } from '../validation/equipmentLineValidation.js';
 
+const STATUS_CHOICES = Object.values(EQUIPMENT_REQUEST_STATUS).map((value) => ({
+  value,
+  label: equipmentRequestStatusLabel(value),
+}));
 
 /** The client to use. Imported only when none was supplied, as the other services do. */
 async function resolveClient(client) {
@@ -54,9 +49,9 @@ export function toQueueRow(row) {
     eventName: row.event_name,
     proposedStart: row.proposed_start ?? null,
     proposedEnd: row.proposed_end ?? null,
-    venue: row.venue_id ? { id: row.venue_id, name: row.venue_name ?? null } : null,
+    venues: (row.venues ?? []).map((venue) => ({ id: venue.id, name: venue.name ?? null })),
     coordinator: person(row.coordinator_id, row.coordinator_name),
-    lineCount: row.line_count ?? 0,
+    itemCount: row.item_count ?? 0,
     status: row.status,
     statusLabel: equipmentRequestStatusLabel(row.status),
     reviewer: person(row.reviewer_id, row.reviewer_name),
@@ -69,30 +64,34 @@ export function toQueueRow(row) {
 export function toQueue(data) {
   return {
     needsAction: (data?.needs_action ?? []).map(toQueueRow),
+    needsActionTruncated: data?.needs_action_truncated === true,
     requests: (data?.requests ?? []).map(toQueueRow),
+    requestsTruncated: data?.requests_truncated === true,
+    statuses: STATUS_CHOICES,
   };
 }
 
 /**
- * The dashboard's data.
- *
  * @param {object} query            req.query: { status?, includePast? }
- * @param {object} [options]
+ * @param {object} options
+ * @param {string} options.callerId the signed-in user, from the token
  * @param {object} [options.client] a Supabase client, usually a test double
- * @returns {Promise<{needsAction: object[], requests: object[]}>}
  * @throws {ValidationError} a status or includePast that is not valid (400)
+ * @throws {ForbiddenError}  the caller is not Technical Support (403)
  */
-export async function getEquipmentRequestQueue(query, { client } = {}) {
+export async function getEquipmentRequestQueue(query, { callerId, client } = {}) {
   const { value, details } = checkQueueQuery(query);
   throwIfInvalid(details);
 
   const db = await resolveClient(client);
   const { data, error } = await db.rpc('equipment_request_queue', {
+    p_caller: callerId ?? null,
     p_status: value.status,
     p_include_past: value.includePast,
   });
 
   if (error) {
+    if (error.code === '42501') throw new ForbiddenError(error.message);
     if (error.code === '22023') throw new ValidationError(error.message, [{ field: 'status', message: error.message }]);
     throw new Error(error.message || 'Unexpected database error');
   }
