@@ -79,6 +79,8 @@ import {
 } from '../domain/eventRequestStatus.js';
 // Imports nothing itself, so this service stays loadable without credentials.
 import { ROLE } from '../domain/userRole.js';
+import { BOOKING_STATUS } from '../domain/bookingStatus.js';
+import { EQUIPMENT_REQUEST_STATUS } from '../domain/equipmentRequestStatus.js';
 
 
 /**
@@ -1386,6 +1388,40 @@ export async function getEventRequestForOrganiser(id, organiserId, { client } = 
   }
 
   return request;
+}
+
+/** One owner-scoped query keeps the event status and its arrangements in the same snapshot. */
+export async function getConfirmedArrangementsForOrganiser(id, organiserId, { client } = {}) {
+  assertOrganiser(organiserId);
+  if (!isPlausibleId(id)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+  const db = await resolveClient(client);
+  const { data, error } = await db.from('event_requests').select(`
+    id, organiser_id, status, proposed_start, proposed_end,
+    bookings(id, status, venues(name, location)),
+    equipment_requests(id, status, equipment_lines(id, quantity, removed_at, equipment_types(name)))
+  `).eq('id', id).eq('organiser_id', organiserId).maybeSingle();
+  if (error) throw translateError(error);
+  if (!data || data.organiser_id !== organiserId) throw new NotFoundError(`Event request ${id} not found`);
+
+  const confirmed = data.status === STATUS.CONFIRMED;
+  return {
+    eventRequestId: data.id,
+    status: data.status,
+    startsAt: confirmed ? data.proposed_start : null,
+    endsAt: confirmed ? data.proposed_end : null,
+    venues: confirmed ? (data.bookings ?? [])
+      .filter((booking) => booking.status === BOOKING_STATUS.APPROVED)
+      .map((booking) => ({
+        bookingId: booking.id, name: booking.venues?.name ?? null, location: booking.venues?.location ?? null,
+      })) : [],
+    equipment: confirmed ? (data.equipment_requests ?? [])
+      .filter((request) => request.status === EQUIPMENT_REQUEST_STATUS.ARRANGED)
+      .flatMap((request) => (request.equipment_lines ?? [])
+        .filter((line) => line.removed_at == null)
+        .map((line) => ({ lineId: line.id, name: line.equipment_types?.name ?? null, quantity: line.quantity }))) : [],
+  };
 }
 
 

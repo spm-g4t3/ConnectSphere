@@ -10,6 +10,7 @@ import {
   getEventReadiness,
   submitForSafetyReview,
   confirmEventRequest,
+  getConfirmedArrangements,
 } from "../../src/services/eventRequestService.js";
 
 vi.mock("../../src/services/apiClient", () => ({
@@ -25,6 +26,13 @@ beforeEach(() => {
 });
 
 describe("SCRUM363 confirmation service", () => {
+  it("SCRUM363_AC7_reads_organiser_arrangements_through_the_narrow_endpoint", async () => {
+    const data = { eventRequestId: EVENT_ID, status: "confirmed", venues: [], equipment: [] };
+    vi.mocked(apiClient.get).mockResolvedValue({ data });
+    await expect(getConfirmedArrangements(EVENT_ID)).resolves.toBe(data);
+    expect(apiClient.get).toHaveBeenCalledExactlyOnceWith(`/event-requests/${EVENT_ID}/confirmed-arrangements`);
+  });
+
   it.each([undefined, { noEquipmentConfirmed: true }])("SCRUM363_AC5_posts_%j_to_the_actual_confirmation_endpoint", async (options) => {
     const confirmed = { id: EVENT_ID, status: "confirmed" };
     vi.mocked(apiClient.post).mockResolvedValue({ data: confirmed });

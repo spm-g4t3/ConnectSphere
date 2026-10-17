@@ -101,6 +101,7 @@ import {
   getEventReadiness,
   submitForSafetyReview,
   confirmEventRequest,
+  getConfirmedArrangementsForOrganiser,
 } from '../services/eventRequestService.js';
 import {
   createChangeRequestFromClient,
@@ -183,6 +184,7 @@ export function createEventRequestRouter({
   // build time is safe: createRequireRole only throws when handed zero roles,
   // and with one it just closes over the list.
   const coordinatorOnly = requireRole(ROLE.EVENT_COORDINATOR);
+  const organiserOnly = requireRole(ROLE.EVENT_ORGANISER);
   // SCRUM-491: the hold form's event picker is Venue Staff's alone.
   const venueStaffOnly = requireRole(ROLE.VENUE_STAFF);
   // SCRUM-486 (SCRUM-519): the unassigned queue, the picker's workload and the
@@ -771,6 +773,16 @@ export function createEventRequestRouter({
       res.status(200).json(await getEventReadiness({
         client, eventRequestId: req.params.id, noEquipmentConfirmed: raw === 'true',
       }));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  router.get('/:id/confirmed-arrangements', organiserOnly, async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store');
+      const arrangements = await getConfirmedArrangementsForOrganiser(req.params.id, req.user.id, { client });
+      res.status(200).json(withStatusDisplay(arrangements));
     } catch (err) {
       handleError(err, res);
     }

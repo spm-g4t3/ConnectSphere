@@ -250,6 +250,11 @@ export async function confirmEventRequest(id, { noEquipmentConfirmed = false } =
   return response.data;
 }
 
+export async function getConfirmedArrangements(id) {
+  const response = await apiClient.get(`/event-requests/${id}/confirmed-arrangements`);
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // SCRUM-327: coordinator assignment
 // ---------------------------------------------------------------------------

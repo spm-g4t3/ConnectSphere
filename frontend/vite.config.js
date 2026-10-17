@@ -154,7 +154,7 @@ const SCRUM495_FILES = [
 
 const SCRUM36_FILES = ['src/services/registrationService.js']
 const SCRUM43_FILES = ['src/services/registrationErrors.js']
-const SCRUM363_FILES = ['src/components/EventConfirmationPanel.jsx', 'src/components/ReadinessChecklist.jsx']
+const SCRUM363_FILES = ['src/components/EventConfirmationPanel.jsx', 'src/components/ReadinessChecklist.jsx', 'src/components/ConfirmedArrangements.jsx']
 
 // SCRUM-489: the coordinator's safety check submission. Its one new file is
 // gated outright; the shared files it touches stay ungated.
