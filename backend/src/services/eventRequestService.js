@@ -2513,7 +2513,7 @@ function parseOutstanding(details) {
 const SAFETY_NOTE_MAX = 2000;
 
 /**
- * The readiness checklist of SCRUM-489 AC2 and AC3, from event_readiness (064),
+ * The readiness checklist of SCRUM-489 AC2 and AC3, from event_readiness (075),
  * the same function the submission and SCRUM-363's confirm run.
  *
  * @param {object} options
