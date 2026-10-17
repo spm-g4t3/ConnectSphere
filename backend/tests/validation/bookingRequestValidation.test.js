@@ -12,6 +12,8 @@ import {
   validateCreateBookingRequest,
   validateBookingRequestId,
   SETUP_NOTES_MAX_LENGTH,
+  validateRejectBookingRequest,
+  DECISION_TEXT_MAX_LENGTH,
 } from '../../src/validation/bookingRequestValidation.js';
 import { ValidationError } from '../../src/errors.js';
 
@@ -31,6 +33,7 @@ describe('validateCreateBookingRequest', () => {
       facilities: [],
       acknowledgedCriteria: [],
       expectedAttendance: null,
+      replacesBookingId: null,
     });
   });
 
@@ -52,6 +55,7 @@ describe('validateCreateBookingRequest', () => {
       facilities: [],
       acknowledgedCriteria: [],
       expectedAttendance: null,
+      replacesBookingId: null,
     });
   });
 
@@ -222,6 +226,32 @@ describe('SCRUM525_AC2 validateCreateBookingRequest reads expectedAttendance', (
 });
 
 
+describe('SCRUM266_W7 validateCreateBookingRequest reads replacesBookingId', () => {
+  const FLAGGED_ID = '44444444-4444-4444-8444-444444444444';
+
+  it('SCRUM266_W7_replaces_booking_id_is_optional_and_normalised', () => {
+    expect(validateCreateBookingRequest(BASE).replacesBookingId).toBeNull();
+    expect(validateCreateBookingRequest({ ...BASE, replacesBookingId: null }).replacesBookingId).toBeNull();
+    expect(
+      validateCreateBookingRequest({ ...BASE, replacesBookingId: ` ${FLAGGED_ID.toUpperCase()} ` }).replacesBookingId,
+    ).toBe(FLAGGED_ID);
+  });
+
+  it.each(['', 'nope', 42])('SCRUM266_W7_replaces_booking_id_%j_is_refused', (value) => {
+    const err = (() => {
+      try {
+        validateCreateBookingRequest({ ...BASE, replacesBookingId: value });
+      } catch (e) {
+        return e;
+      }
+      return null;
+    })();
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toEqual(['replacesBookingId']);
+  });
+});
+
+
 describe('validateBookingRequestId (SCRUM-253)', () => {
   it('SCRUM253_trims_and_lower_cases_an_id', () => {
     expect(validateBookingRequestId(` ${EVENT_ID.toUpperCase()} `)).toBe(EVENT_ID);
@@ -229,5 +259,32 @@ describe('validateBookingRequestId (SCRUM-253)', () => {
 
   it.each([undefined, null, '', 'nope', 7, {}])('SCRUM253_refuses_%j', (id) => {
     expect(() => validateBookingRequestId(id)).toThrow(ValidationError);
+  });
+});
+
+describe('SCRUM258_AC4 validateRejectBookingRequest', () => {
+  it('SCRUM258_AC4_counts_the_reason_in_code_points_like_postgres', () => {
+    // 1000 emoji are 2000 UTF-16 units but 1000 characters to 066's length() check.
+    expect(validateRejectBookingRequest({ reason: '😀'.repeat(DECISION_TEXT_MAX_LENGTH) }).reason).toHaveLength(2000);
+    expect(() => validateRejectBookingRequest({ reason: 'x'.repeat(DECISION_TEXT_MAX_LENGTH + 1) })).toThrow(ValidationError);
+  });
+
+  it('SCRUM258_AC4_a_reason_that_is_not_text_is_reported_once_and_a_blank_alternative_is_none', () => {
+    const err = (() => {
+      try {
+        return validateRejectBookingRequest({ reason: 7, suggestedAlternative: [] });
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err.details).toEqual([
+      { field: 'reason', message: 'must be text' },
+      { field: 'suggestedAlternative', message: 'must be text' },
+    ]);
+    expect(validateRejectBookingRequest({ reason: 'No', suggestedAlternative: '  ' })).toEqual({ reason: 'No', suggestedAlternative: null });
+  });
+
+  it.each([null, undefined, 'No', []])('SCRUM258_AC4_refuses_%j_as_a_body', (input) => {
+    expect(() => validateRejectBookingRequest(input)).toThrow(ValidationError);
   });
 });

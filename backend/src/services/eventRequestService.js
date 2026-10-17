@@ -79,6 +79,7 @@ import {
 } from '../domain/eventRequestStatus.js';
 // Imports nothing itself, so this service stays loadable without credentials.
 import { ROLE } from '../domain/userRole.js';
+import { BOOKING_STATUS } from '../domain/bookingStatus.js';
 
 
 /**
@@ -113,6 +114,13 @@ const COLUMNS = `
   cancellation_reason, cancellation_initiator, cancelled_by, cancelled_at,
   created_at, updated_at, submitted_at
 `;
+
+/**
+ * SCRUM-266: COLUMNS plus each event's booking statuses, embedded along
+ * bookings.event_request_id (009), so the event lists and single reads can
+ * say whether the event needs attention without a second round trip.
+ */
+const ATTENTION_COLUMNS = `${COLUMNS}, bookings(status)`;
 
 /**
  * The two vocabularies this module bridges: camelCase above it, the column
@@ -283,6 +291,12 @@ function translateError(error) {
     return new NotFoundError(detail || 'Event request not found');
   }
 
+  // SCRUM-489: submit_event_for_safety_review (064) refuses an event that is not
+  // ready with every outstanding checklist line as JSON in DETAIL.
+  if (code === 'PT409' && error.hint === 'EVENT_NOT_READY') {
+    return new ConflictError(detail, { code: 'EVENT_NOT_READY', conflicts: parseOutstanding(error.details) });
+  }
+
   // Left untyped on purpose. An unrecognised code is not the caller's fault and
   // there is nothing for them to correct, so it must not reach the API dressed
   // as a 400 telling an Organiser to fix their form.
@@ -337,6 +351,23 @@ function toEventRequest(row) {
     updatedAt: row.updated_at,
     submittedAt: row.submitted_at,
   };
+}
+
+/**
+ * SCRUM-266: a confirmed event with a booking flagged for review needs its
+ * coordinator. Only confirmed counts: before that the event is still being
+ * arranged, and the flag is one item of that work. The embed is read
+ * defensively, as bookingRequestService's one() reads its embeds.
+ */
+function needsAttention(row) {
+  if (row.status !== STATUS.CONFIRMED) return false;
+  const bookings = Array.isArray(row.bookings) ? row.bookings : [row.bookings];
+  return bookings.some((booking) => booking?.status === BOOKING_STATUS.FLAGGED_FOR_REVIEW);
+}
+
+/** toEventRequest, with needsAttention, for a row read with ATTENTION_COLUMNS. */
+function toEventRequestWithAttention(row) {
+  return { ...toEventRequest(row), needsAttention: needsAttention(row) };
 }
 
 /**
@@ -446,18 +477,23 @@ export async function createEventRequest(input, organiserId, { client } = {}) {
  * @throws {NotFoundError} when no request has that id
  */
 export async function getEventRequestById(id, { client } = {}) {
+  return toEventRequest(await readEventRequestRow(id, COLUMNS, client));
+}
+
+/** The stored row behind getEventRequestById, read with the columns given. */
+async function readEventRequestRow(id, columns, client) {
   const db = await resolveClient(client);
 
   const { data, error } = await db
     .from('event_requests')
-    .select(COLUMNS)
+    .select(columns)
     .eq('id', id)
     .maybeSingle();
 
   if (error) throw translateError(error);
   if (!data) throw new NotFoundError(`Event request ${id} not found`);
 
-  return toEventRequest(data);
+  return data;
 }
 
 /**
@@ -1311,7 +1347,7 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
 
   const { data, error } = await db
     .from('event_requests')
-    .select(COLUMNS)
+    .select(ATTENTION_COLUMNS)
     .eq('organiser_id', organiserId)
     .order('updated_at', { ascending: false })
     .order('id', { ascending: false });
@@ -1336,7 +1372,7 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
   const nameOf = coordinatorIds.length > 0 ? await readNames(db, coordinatorIds) : () => null;
 
   return rows.map((row) => ({
-    ...toEventRequest(row),
+    ...toEventRequestWithAttention(row),
     assignedCoordinatorName: nameOf(row.assigned_coordinator_id ?? null),
   }));
 }
@@ -1355,7 +1391,7 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
  * over a table whose row level security is deny-all specifically so that the
  * API can be the only gate.
  *
- * Reads through getEventRequestById rather than repeating the query, so there
+ * Reads through readEventRequestRow, as getEventRequestById does, so there
  * is one definition of what a stored request looks like -- the same reason
  * submitEventRequest gives for doing it.
  *
@@ -1370,7 +1406,7 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
 export async function getEventRequestForOrganiser(id, organiserId, { client } = {}) {
   assertOrganiser(organiserId);
 
-  const request = await getEventRequestById(id, { client });
+  const request = toEventRequestWithAttention(await readEventRequestRow(id, ATTENTION_COLUMNS, client));
 
   if (request.organiserId !== organiserId) {
     // Deliberately the same message getEventRequestById raises for an id that
@@ -1410,7 +1446,7 @@ export async function getEventRequestForOrganiser(id, organiserId, { client } = 
  * ForbiddenError to records the caller can already see, and nobody but its
  * Organiser can see a draft.
  *
- * Reads through getEventRequestById, as getEventRequestForOrganiser does, so
+ * Reads through readEventRequestRow, as getEventRequestForOrganiser does, so
  * there is one definition of what a stored request looks like.
  *
  * @param {string} id
@@ -1420,7 +1456,7 @@ export async function getEventRequestForOrganiser(id, organiserId, { client } = 
  * @throws {NotFoundError} when no such request exists, or it is a draft
  */
 export async function getEventRequestForCoordinator(id, { client } = {}) {
-  const request = await getEventRequestById(id, { client });
+  const request = toEventRequestWithAttention(await readEventRequestRow(id, ATTENTION_COLUMNS, client));
 
   if (request.status === STATUS.DRAFT) {
     // The same message getEventRequestById raises for an id that does not
@@ -1654,7 +1690,7 @@ export async function listEventRequestsForReview({ client } = {}) {
 
   const { data, error } = await db
     .from('event_requests')
-    .select(COLUMNS)
+    .select(ATTENTION_COLUMNS)
     .in('status', COORDINATOR_QUEUE_STATUSES)
     // SCRUM-486 AC2-06: a request nobody holds is the Lead's (see above).
     .not('assigned_coordinator_id', 'is', null)
@@ -1665,7 +1701,7 @@ export async function listEventRequestsForReview({ client } = {}) {
 
   // An empty queue is the good state, not a missing resource: it means nothing
   // is waiting on a Coordinator. 200 [] all the way up, never a NotFoundError.
-  return (data ?? []).map(toEventRequest);
+  return (data ?? []).map(toEventRequestWithAttention);
 }
 
 
@@ -1766,7 +1802,7 @@ export async function listEventRequestsForCoordinator(coordinatorId, { client } 
 
   const { data, error } = await db
     .from('event_requests')
-    .select(COLUMNS)
+    .select(ATTENTION_COLUMNS)
     .eq('assigned_coordinator_id', coordinatorId)
     .order('proposed_start', { ascending: true, nullsFirst: false })
     .order('id', { ascending: true });
@@ -1781,7 +1817,7 @@ export async function listEventRequestsForCoordinator(coordinatorId, { client } 
   const nameOf = await readNames(db, rows.map((row) => row.organiser_id));
 
   return rows.map((row) => ({
-    ...toEventRequest(row),
+    ...toEventRequestWithAttention(row),
     organiserName: nameOf(row.organiser_id),
   }));
 }
@@ -2491,4 +2527,98 @@ export async function listAssignmentHistory(id, { includeNotes = false } = {}, {
 
     return entry;
   });
+}
+
+
+/** DETAIL's outstanding lines, or none: a malformed DETAIL must not become a 500. */
+function parseOutstanding(details) {
+  try {
+    const items = JSON.parse(details);
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return [];
+  }
+}
+
+const SAFETY_NOTE_MAX = 2000;
+
+/**
+ * The readiness checklist of SCRUM-489 AC2 and AC3, from event_readiness (075),
+ * the same function the submission and SCRUM-363's confirm run.
+ *
+ * @param {object} options
+ * @param {string} options.eventRequestId
+ * @param {boolean} [options.noEquipmentConfirmed]
+ * @param {object} [options.client]
+ * @returns {Promise<{ eventRequestId: string, ready: boolean, items: object[] }>}
+ */
+export async function getEventReadiness({ client, eventRequestId, noEquipmentConfirmed = false } = {}) {
+  if (!isPlausibleId(eventRequestId)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+  if (typeof noEquipmentConfirmed !== 'boolean') {
+    throw new ValidationError(
+      'Invalid noEquipmentConfirmed -- must be true or false',
+      [{ field: 'noEquipmentConfirmed', message: 'must be true or false' }],
+    );
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('event_readiness', {
+    p_event_request_id: eventRequestId,
+    p_no_equipment_confirmed: noEquipmentConfirmed,
+  });
+  if (error) throw translateError(error);
+  return data;
+}
+
+/**
+ * The assigned coordinator sends an Approved, ready event to the Safety
+ * Officers (SCRUM-489 AC1 to AC6, AC8), through submit_event_for_safety_review
+ * (064). The inputs are refused here first, by the database's own rules, so a
+ * bad one costs no round trip.
+ *
+ * @param {object} options
+ * @param {string} options.eventRequestId
+ * @param {string} options.coordinatorId     the caller, from the token
+ * @param {string} [options.note]            for the Safety Officer, up to 2,000 characters
+ * @param {boolean} [options.noEquipmentConfirmed]
+ * @param {object} [options.client]
+ * @returns {Promise<object>} the event, now in Safety review, in camelCase
+ */
+export async function submitForSafetyReview({
+  client, eventRequestId, coordinatorId, note, noEquipmentConfirmed = false,
+} = {}) {
+  if (!isPlausibleId(eventRequestId)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
+    throw new ValidationError('coordinatorId is required');
+  }
+  if (note !== undefined && note !== null && typeof note !== 'string') {
+    throw new ValidationError('Invalid note -- must be text', [{ field: 'note', message: 'must be text' }]);
+  }
+  const trimmed = typeof note === 'string' ? note.trim() : '';
+  if (trimmed.length > SAFETY_NOTE_MAX) {
+    throw new ValidationError(
+      'The note for the Safety Officer must be 2,000 characters or fewer',
+      [{ field: 'note', message: 'must be 2,000 characters or fewer' }],
+    );
+  }
+  if (typeof noEquipmentConfirmed !== 'boolean') {
+    throw new ValidationError(
+      'Invalid noEquipmentConfirmed -- must be true or false',
+      [{ field: 'noEquipmentConfirmed', message: 'must be true or false' }],
+    );
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('submit_event_for_safety_review', {
+    p_event_request_id: eventRequestId,
+    p_coordinator_id: coordinatorId,
+    p_note: trimmed === '' ? null : trimmed,
+    p_no_equipment_confirmed: noEquipmentConfirmed,
+  });
+  if (error) throw translateError(error);
+  return toEventRequest(data);
 }

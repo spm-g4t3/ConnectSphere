@@ -26,6 +26,12 @@ vi.mock("../../src/services/notificationService", () => ({
   markNotificationRead: vi.fn(),
 }));
 
+// The inbox reads the signed-in user to link its rows; no user, no links, so
+// the dashboard renders as before.
+vi.mock("../../src/auth/AuthContext", () => ({
+  useAuth: () => ({ user: null }),
+}));
+
 const USER = { id: "11111111-1111-4111-8111-111111111111", name: "Aisha", role: "event_organiser" };
 
 const DISPLAY = {
@@ -68,6 +74,12 @@ describe("SCRUM-488 AC5: the Organiser's dashboard with events in the safety sta
     const row = (await screen.findByText("Industry Night")).closest("li");
     expect(within(row).getByText(label)).toHaveClass("status-badge", cssClass);
     expect(within(row).getByText(DISPLAY[status].description)).toBeInTheDocument();
+    if (status === "safety_approved") {
+      expect(within(row).getByRole("status")).toHaveTextContent("Safety approval complete");
+      expect(within(row).getByRole("status")).toHaveTextContent("A Safety Officer has approved the event arrangements.");
+    } else {
+      expect(within(row).queryByText("Safety approval complete")).not.toBeInTheDocument();
+    }
   });
 
   it("SCRUM488_AC5_never_shows_an_internal_status_name_or_an_unknown_status", async () => {
@@ -94,5 +106,20 @@ describe("SCRUM-488 AC5: the Organiser's dashboard with events in the safety sta
       .toEqual(["Planning", "Safety check", "Confirmed"]);
     // Only a pending clarification puts an event under the deadlines.
     expect(screen.getByText("No outstanding amendments before your event dates.")).toBeInTheDocument();
+  });
+});
+
+// SCRUM-266: the dashboard's event detail marks a confirmed event with a
+// flagged booking, as the Organiser's list does.
+describe("SCRUM-266 AC4: Needs attention on the Organiser's dashboard", () => {
+  it("SCRUM266_AC4_marks_only_the_events_the_server_says_need_attention", async () => {
+    renderDashboard([
+      { ...event("e1", "confirmed", "Flagged event"), needsAttention: true },
+      { ...event("e2", "confirmed", "Fine event"), needsAttention: false },
+    ]);
+
+    const row = async (name) => (await screen.findByText(name)).closest("li");
+    expect(within(await row("Flagged event")).getByText("Needs attention")).toHaveClass("status-badge", "status--action-required");
+    expect(within(await row("Fine event")).queryByText("Needs attention")).not.toBeInTheDocument();
   });
 });

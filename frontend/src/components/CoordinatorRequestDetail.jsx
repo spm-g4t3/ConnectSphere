@@ -37,6 +37,9 @@
 // venue": the event's requested and booked venues, rechecked live each time
 // this view opens or the event's period or attendance changes. See the
 // comment above that section.
+//
+// SCRUM-266 added "Flagged bookings" above it: the event's flagged bookings,
+// each cancelled there or replaced through Find a venue.
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -45,11 +48,15 @@ import { normaliseRole } from "../auth/normaliseRole";
 import AssignmentHistory from "./AssignmentHistory";
 import EventVenueFinder from "./EventVenueFinder";
 import EventVenueSuitability from "./EventVenueSuitability";
+import EventFlaggedBookings from "./EventFlaggedBookings";
+import NeedsAttentionBadge from "./NeedsAttentionBadge";
 import DecisionOutcome from "./DecisionOutcome";
 import ReassignEventPanel from "./ReassignEventPanel";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import EventEquipmentSection from "./EventEquipmentSection";
 import EventCancellationPanel from "./EventCancellationPanel";
+import SafetyCheckSubmissionPanel from "./SafetyCheckSubmissionPanel";
+import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import {
   decideEventRequest,
   getCoordinatorChangeRequests,
@@ -59,6 +66,7 @@ import {
   closeEventClarification,
 } from "../services/eventRequestService";
 import {
+  CANCELLABLE_STATUSES,
   readStatusDisplay,
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
@@ -159,13 +167,6 @@ const RETURN_FOR_AMENDMENT_ERROR_MESSAGES = {
 const START_DATE_PASSED_MESSAGE =
   "This request cannot be approved because its proposed start date has passed or is missing. Agree a new date with the organiser, or reject the request.";
 
-const CANCELLABLE_STATUSES = new Set([
-  "submitted",
-  "under_review",
-  "pending_clarification",
-  "approved",
-  "confirmed",
-]);
 
 /**
  * Has this event's proposed start passed, by this browser's clock?
@@ -251,6 +252,11 @@ export default function CoordinatorRequestDetail({
   // offering one the server would refuse. Every other venue stays on.
   // Kept with the event it was loaded for, so another event never inherits it.
   const [liveVenueRequests, setLiveVenueRequests] = useState({ eventId: null, venues: new Map() });
+  // SCRUM-266. The flagged booking Find a venue is requesting a replacement
+  // for, or null. flaggedVersion remounts Flagged bookings after a request,
+  // so a replacement just sent is listed under the booking it replaces.
+  const [replacing, setReplacing] = useState(null);
+  const [flaggedVersion, setFlaggedVersion] = useState(0);
 
   const assignedCoordinatorId = handedOverTo?.id ?? request.assignedCoordinatorId;
 
@@ -516,8 +522,10 @@ export default function CoordinatorRequestDetail({
         <span className={`status-badge ${statusClassName(display.group)}`}>
           {display.label}
         </span>
+        <NeedsAttentionBadge event={current} />
       </h2>
       <p>{display.description}</p>
+      <SafetyApprovalNotice status={current.status} />
       {isAssignedCoordinator && CANCELLABLE_STATUSES.has(current.status) && (
         <button
           className="coordinator-request-detail__cancel"
@@ -526,6 +534,18 @@ export default function CoordinatorRequestDetail({
         >
           Cancel event
         </button>
+      )}
+      {/* SCRUM-489 AC1: the holder, while Approved. The server checks both again. */}
+      {isAssignedCoordinator && current.status === "approved" && (
+        <SafetyCheckSubmissionPanel
+          key={current.id}
+          eventRequest={current}
+          onSubmitted={(updated) => {
+            setUpdatedRequest(updated);
+            onChangeRequestProcessed?.();
+          }}
+          onStale={() => onChangeRequestProcessed?.()}
+        />
       )}
 
       <section>
@@ -939,6 +959,31 @@ export default function CoordinatorRequestDetail({
           SCRUM-188: what it loads tells Find a venue which venues already
           have a live request (onLoaded -> liveRequests; per venue since
           SCRUM-525). */}
+      {/* SCRUM-266: the assigned coordinator's flagged bookings, hidden when
+          there are none. Cancelling one reloads Venue suitability below. */}
+      {isAssignedCoordinator && (
+        <EventFlaggedBookings
+          key={`${current.id}|${flaggedVersion}`}
+          eventRequestId={current.id}
+          replacingId={replacing?.id ?? null}
+          // Find a venue moves focus to its notice, which brings it into view.
+          onReplace={(item) => {
+            setReplacing({
+              id: item.id,
+              venueName: item.venueName || "Unknown venue",
+              startsAt: item.startsAt,
+              endsAt: item.endsAt,
+            });
+          }}
+          onCancelled={(item) => {
+            setReplacing((cur) => (cur?.id === item.id ? null : cur));
+            setVenueVersion((n) => n + 1);
+            onChangeRequestProcessed?.();
+          }}
+          // A booking resolved elsewhere is no longer one to replace.
+          onLoaded={(items) => setReplacing((cur) => (cur && !items.some((i) => i.id === cur.id) ? null : cur))}
+        />
+      )}
       {isAssignedCoordinator && (
         <section className="event-venue-suitability-section">
           <h3>Venue suitability</h3>
@@ -965,11 +1010,22 @@ export default function CoordinatorRequestDetail({
           }
           onRequestSubmitted={() => {
             setVenueVersion((n) => n + 1);
+            // SCRUM-266: a replacement sent is listed under its flagged booking.
+            if (replacing) {
+              setReplacing(null);
+              setFlaggedVersion((n) => n + 1);
+            }
             onChangeRequestProcessed?.();
           }}
           // SCRUM-525 (R13): a venue refused as already requested reloads
           // Venue suitability, so the request it collided with is listed.
           onVenueAlreadyRequested={() => setVenueVersion((n) => n + 1)}
+          replacing={isAssignedCoordinator ? replacing : null}
+          onStopReplacing={() => setReplacing(null)}
+          onReplacementRefused={() => {
+            setReplacing(null);
+            setFlaggedVersion((n) => n + 1);
+          }}
         />
         <p className="event-venue-finder__browse">
           <Link to="/venue-search">Browse all venues</Link>

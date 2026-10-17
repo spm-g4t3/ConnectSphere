@@ -42,6 +42,11 @@ const refusal = async (promise) => {
   }
 };
 
+/** The JS vocabulary as 027 leaves the enum: 065 appends conflicting later. */
+const STATUSES_THROUGH_027 = Object.values(BOOKING_STATUS).filter(
+  (status) => status !== BOOKING_STATUS.CONFLICTING,
+);
+
 describe('SCRUM-250: booking request statuses in Postgres', () => {
   let db;
   let venueId;
@@ -110,7 +115,7 @@ describe('SCRUM-250: booking request statuses in Postgres', () => {
   });
 
   it('SCRUM250_the_database_enum_matches_the_JS_vocabulary', async () => {
-    expect(await enumValues()).toEqual(Object.values(BOOKING_STATUS));
+    expect(await enumValues()).toEqual(STATUSES_THROUGH_027);
   });
 
   it('SCRUM250_leaves_an_existing_booking_untouched', async () => {
@@ -156,6 +161,6 @@ describe('SCRUM-250: booking request statuses in Postgres', () => {
 
   it('SCRUM250_can_be_run_again_without_error_or_change', async () => {
     await db.exec(migration(MIGRATION_027));
-    expect(await enumValues()).toEqual(Object.values(BOOKING_STATUS));
+    expect(await enumValues()).toEqual(STATUSES_THROUGH_027);
   });
 });

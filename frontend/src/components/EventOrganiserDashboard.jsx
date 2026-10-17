@@ -7,7 +7,9 @@ import {
   readStatusDisplay,
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
-import CoordinatorNotifications from "./CoordinatorNotifications";
+import NotificationInbox from "./NotificationInbox";
+import SafetyApprovalNotice from "./SafetyApprovalNotice";
+import NeedsAttentionBadge from "./NeedsAttentionBadge";
 
 function formatEventDate(value) {
   if (!value) return "Date not set";
@@ -79,6 +81,7 @@ export default function EventOrganiserDashboard({ user }) {
                       <span className={`status-badge ${statusClassName(statusDisplay.group)}`}>
                         {statusDisplay.label}
                       </span>
+                      <NeedsAttentionBadge event={event} />
                     </span>
                     <span className="dashboard--organiser__event-date">
                       {formatEventDate(event.proposedStart)}
@@ -104,6 +107,7 @@ export default function EventOrganiserDashboard({ user }) {
                     <dt>Equipment requirements</dt>
                     <dd>{event.equipmentRequirements || "Not specified"}</dd>
                   </dl>
+                  <SafetyApprovalNotice status={event.status} />
                   {event.clarificationNote && (
                     <p className="dashboard--organiser__clarification">
                       <strong>Coordinator clarification:</strong> {event.clarificationNote}
@@ -176,7 +180,7 @@ export default function EventOrganiserDashboard({ user }) {
           {eventsError && <p className="dashboard--organiser__error" role="alert">{eventsError}</p>}
         </ul>
       </section>
-      <CoordinatorNotifications />
+      <NotificationInbox />
     </div>
   );
 }

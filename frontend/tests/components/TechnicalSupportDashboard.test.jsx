@@ -17,7 +17,7 @@ vi.mock("../../src/services/supportService", () => ({
 vi.mock("../../src/components/EquipmentRequestQueue", () => ({
   default: () => <section data-testid="queue-stub">Equipment request queue</section>,
 }));
-vi.mock("../../src/components/CoordinatorNotifications", () => ({
+vi.mock("../../src/components/NotificationInbox", () => ({
   default: () => <section data-testid="notifications-stub">Notifications</section>,
 }));
 

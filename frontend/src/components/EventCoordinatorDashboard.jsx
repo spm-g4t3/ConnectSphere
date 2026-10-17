@@ -14,7 +14,7 @@
 //
 // SCRUM-128 replaced the pending-bookings stub that sat below the queue. It
 // called a venueService stub that console.warn'd and returned [] with no
-// endpoint behind it, and that stub is now deleted. Its seat now holds CoordinatorNotifications: when a
+// endpoint behind it, and that stub is now deleted. Its seat now holds NotificationInbox: when a
 // Venue Staff member blocks a venue over an approved booking, the booking is
 // flagged for review and every Coordinator is notified there (SCRUM-17 AC3).
 // Both sections are components of their own, so this file is only the page
@@ -22,7 +22,7 @@
 
 import MyAssignedEvents from "./MyAssignedEvents";
 import ReviewQueue from "./ReviewQueue";
-import CoordinatorNotifications from "./CoordinatorNotifications";
+import NotificationInbox from "./NotificationInbox";
 
 export default function EventCoordinatorDashboard({ user }) {
   return (
@@ -61,7 +61,7 @@ export default function EventCoordinatorDashboard({ user }) {
       <ReviewQueue />
 
       {/* Also a direct child of .dashboard, for the same card styling. */}
-      <CoordinatorNotifications />
+      <NotificationInbox />
     </div>
   );
 }

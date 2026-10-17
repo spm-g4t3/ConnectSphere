@@ -237,6 +237,7 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
       suitability: SUITABLE,
       suitabilityOverridden: false,
       requestedBy: COORDINATOR_ID,
+      replacesBookingId: null,
       createdAt: '2026-10-06T10:00:00+00:00',
     });
     expect(client.calls.map((c) => c.operation)).toEqual(['select', 'rpc']);
@@ -258,6 +259,7 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
       p_suitability: SUITABLE,
       p_confirm_unsuitable: false,
       p_expected_attendance: 150,
+      p_replaces_booking_id: null,
     });
     expect(checkSuitability).toHaveBeenCalledWith({
       eventRequestId: EVENT_ID,
@@ -289,6 +291,7 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
       'p_confirm_unsuitable',
       'p_event_request_id',
       'p_expected_attendance',
+      'p_replaces_booking_id',
       'p_requested_by',
       'p_room_layout_code',
       'p_setup_notes',
@@ -537,6 +540,42 @@ describe('SCRUM-252/SCRUM-525: one live request per event per venue', () => {
     );
     expect(res.body.conflicts).toEqual([]);
   });
+});
+
+
+describe('SCRUM-266: a request can replace a flagged booking', () => {
+  it('SCRUM266_W7_sends_replaces_booking_id_and_echoes_it_on_the_new_request', async () => {
+    const client = clientFor(created({ replaces_booking_id: OTHER_BOOKING_ID }));
+
+    const res = await post(client, { ...BODY, replacesBookingId: OTHER_BOOKING_ID.toUpperCase() });
+
+    expect(res.status).toBe(201);
+    expect(res.body.replacesBookingId).toBe(OTHER_BOOKING_ID);
+    expect(rpcCall(client).args.p_replaces_booking_id).toBe(OTHER_BOOKING_ID);
+  });
+
+  it('SCRUM266_W7_a_malformed_replaces_booking_id_is_400_and_never_queries', async () => {
+    const client = clientFor();
+
+    const res = await post(client, { ...BODY, replacesBookingId: 'not-an-id' });
+
+    expect(res.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each(['REPLACED_BOOKING_NOT_ON_EVENT', 'REPLACED_BOOKING_NOT_FLAGGED'])(
+    'SCRUM266_W7_%s_is_409_with_that_code',
+    async (hint) => {
+      const res = await post(
+        clientFor(dbFailure('PT409', 'cannot replace that booking', { hint })),
+        { ...BODY, replacesBookingId: OTHER_BOOKING_ID },
+      );
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe(hint);
+      expect(res.body.conflicts).toEqual([]);
+    },
+  );
 });
 
 
@@ -928,9 +967,35 @@ describe('SCRUM-255: the coordinator lists their booking requests', () => {
         suitabilityOverridden: false,
         flaggedAt: null,
         reviewReason: null,
+        decidedAt: null,
+        decisionReason: null,
+        suggestedAlternative: null,
         createdAt: '2026-10-06T10:00:00+00:00',
       },
     ]);
+  });
+
+  it('SCRUM258_AC6_a_rejected_request_returns_the_reason_and_suggested_alternative', async () => {
+    const res = await list(
+      createFakeClient([
+        ok([
+          listRow({
+            status: 'rejected',
+            decided_at: '2026-10-08T10:00:00+00:00',
+            decision_reason: 'Hall closed for repairs',
+            suggested_alternative: 'Annex, same time',
+          }),
+        ]),
+      ]),
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body[0]).toMatchObject({
+      status: 'rejected',
+      decidedAt: '2026-10-08T10:00:00+00:00',
+      decisionReason: 'Hall closed for repairs',
+      suggestedAlternative: 'Annex, same time',
+    });
   });
 
   it.each([
@@ -1118,5 +1183,225 @@ describe('SCRUM-255: a coordinator sees only requests on their own events', () =
     const client = createFakeClient([ok({ outcome: 'withdrawn', booking: bookingRow({ status: 'withdrawn' }) })]);
     const res = await request(appWith({ client })).post(`/api/booking-requests/${OTHER_EVENT_ID}/withdraw`);
     expect(res.status).toBe(200);
+  });
+});
+describe('SCRUM-258 AC1: Venue Staff see the pending requests', () => {
+  const STAFF_ID = '99999999-9999-4999-8999-999999999999';
+  const asStaff = signedInWithRole(ROLE.VENUE_STAFF, STAFF_ID);
+
+  /** One element of list_pending_booking_requests (078). */
+  const pendingRow = (overrides = {}) => ({
+    ...bookingRow(),
+    event_name: 'IS212 Industry Night',
+    event_status: STATUS.APPROVED,
+    venue_name: 'Hall A',
+    venue_location: 'Level 1',
+    occupied_starts_at: START,
+    occupied_ends_at: END,
+    overlapping: [],
+    ...overrides,
+  });
+
+  const listPending = (client, { requireAuth = asStaff, query = '' } = {}) =>
+    request(appWith({ client, requireAuth })).get(`/api/booking-requests/pending${query}`);
+
+  it('SCRUM258_AC1_venue_staff_get_200_and_the_queue_in_the_functions_order', async () => {
+    const client = createFakeClient([ok([pendingRow(), pendingRow({ id: OTHER_BOOKING_ID })])]);
+
+    const res = await listPending(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((r) => r.id)).toEqual([BOOKING_ID, OTHER_BOOKING_ID]);
+    expect(res.body[0]).toMatchObject({ eventName: 'IS212 Industry Night', venueName: 'Hall A', status: 'pending', overlapping: [] });
+  });
+
+  it('SCRUM266_W7_the_queue_names_the_flagged_booking_a_request_replaces', async () => {
+    const replaces = { booking_id: OTHER_BOOKING_ID, venue_name: 'Hall B', starts_at: START, ends_at: END };
+    const client = createFakeClient([ok([pendingRow({ replaces }), pendingRow({ id: OTHER_BOOKING_ID, replaces: null })])]);
+
+    const res = await listPending(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((r) => r.replaces)).toEqual([
+      { bookingId: OTHER_BOOKING_ID, venueName: 'Hall B', startsAt: START, endsAt: END },
+      null,
+    ]);
+  });
+
+  it('SCRUM258_AC1_an_empty_queue_is_200_not_404', async () => {
+    const res = await listPending(createFakeClient([ok([])]));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('SCRUM258_AC1_the_caller_is_the_token_user_never_the_query', async () => {
+    const client = createFakeClient([ok([])]);
+
+    await listPending(client, { query: `?p_caller=${COORDINATOR_ID}&callerId=${COORDINATOR_ID}` });
+
+    expect(client.calls).toEqual([
+      expect.objectContaining({ operation: 'rpc', fn: 'list_pending_booking_requests', args: { p_caller: STAFF_ID } }),
+    ]);
+  });
+
+  it('SCRUM258_AC1_returns_401_without_a_token_and_never_queries', async () => {
+    const client = createFakeClient([ok([])]);
+    const res = await listPending(client, { requireAuth: signedOut });
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([ROLE.EVENT_COORDINATOR, ROLE.EVENT_ORGANISER, ROLE.EVENT_COORDINATOR_LEAD, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.SAFETY_OFFICER, ROLE.ATTENDEE, null])(
+    'SCRUM258_AC1_refuses_%s_with_403_and_never_queries',
+    async (role) => {
+      const client = createFakeClient([ok([])]);
+      const res = await listPending(client, { requireAuth: signedInWithRole(role) });
+      expect(res.status).toBe(403);
+      expect(client.calls).toHaveLength(0);
+    },
+  );
+
+  it('SCRUM258_AC1_a_refusal_from_the_function_is_403', async () => {
+    const res = await listPending(createFakeClient([dbFailure('42501', 'only Venue Staff can view pending booking requests')]));
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('SCRUM-258 AC2-AC6: Venue Staff approve or reject a request', () => {
+  const STAFF_ID = '99999999-9999-4999-8999-999999999999';
+  const asStaff = signedInWithRole(ROLE.VENUE_STAFF, STAFF_ID);
+
+  /** decide_booking_request's answer (066) for a decided request. */
+  const decided = (status, overrides = {}) =>
+    ok({
+      outcome: status,
+      booking: bookingRow({ status, decided_by: STAFF_ID, decided_at: '2026-10-14T02:00:00+00:00', ...overrides }),
+    });
+
+  const decide = (client, action, { body, requireAuth = asStaff, id = BOOKING_ID } = {}) => {
+    const req = request(appWith({ client, requireAuth })).post(`/api/booking-requests/${id}/${action}`);
+    return body === undefined ? req : req.send(body);
+  };
+
+  it('SCRUM258_AC6_approve_is_200_with_who_decided_and_the_caller_from_the_token', async () => {
+    const client = createFakeClient([decided('approved')]);
+
+    const res = await decide(client, 'approve', { body: { p_caller: COORDINATOR_ID, reason: 'ok' } });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: BOOKING_ID, status: 'approved', decidedBy: STAFF_ID, decidedAt: '2026-10-14T02:00:00+00:00' });
+    expect(client.calls).toEqual([
+      expect.objectContaining({
+        fn: 'decide_booking_request',
+        args: { p_booking_id: BOOKING_ID, p_caller: STAFF_ID, p_decision: 'approve', p_reason: null, p_suggested_alternative: null },
+      }),
+    ]);
+  });
+
+  it('SCRUM258_AC3_approve_is_200_with_the_requests_it_marked_conflicting', async () => {
+    const client = createFakeClient([
+      ok({
+        outcome: 'approved',
+        booking: bookingRow({ status: 'approved', decided_by: STAFF_ID, decided_at: '2026-10-14T02:00:00+00:00' }),
+        marked_conflicting: [OTHER_BOOKING_ID],
+      }),
+    ]);
+
+    const res = await decide(client, 'approve');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: 'approved', markedConflicting: [OTHER_BOOKING_ID] });
+  });
+
+  it('SCRUM258_Week7_approve_is_200_with_the_hold_it_converted', async () => {
+    const HOLD_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const client = createFakeClient([
+      ok({
+        outcome: 'approved',
+        booking: bookingRow({ status: 'approved', decided_by: STAFF_ID, decided_at: '2026-10-14T02:00:00+00:00' }),
+        marked_conflicting: [],
+        converted_hold_id: HOLD_ID,
+      }),
+    ]);
+
+    const res = await decide(client, 'approve');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: 'approved', convertedHoldId: HOLD_ID });
+  });
+
+  it('SCRUM258_AC4_reject_is_200_with_the_reason_and_alternative_and_the_caller_from_the_token', async () => {
+    const client = createFakeClient([
+      decided('rejected', { decision_reason: 'Double-booked', suggested_alternative: 'Hall B' }),
+    ]);
+
+    const res = await decide(client, 'reject', {
+      body: { reason: 'Double-booked', suggestedAlternative: 'Hall B', callerId: COORDINATOR_ID },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: 'rejected', decisionReason: 'Double-booked', suggestedAlternative: 'Hall B' });
+    expect(client.calls[0].args).toMatchObject({ p_caller: STAFF_ID, p_decision: 'reject', p_reason: 'Double-booked' });
+  });
+
+  it.each([{}, { reason: '   ' }, undefined])('SCRUM258_AC4_reject_with_body_%j_is_400_and_never_queries', async (body) => {
+    const client = createFakeClient([decided('rejected')]);
+
+    const res = await decide(client, 'reject', { body });
+
+    expect(res.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each(['approve', 'reject'])('SCRUM258_AC6_%s_returns_401_without_a_token_and_never_queries', async (action) => {
+    const client = createFakeClient([decided('approved')]);
+    const res = await decide(client, action, { body: { reason: 'No' }, requireAuth: signedOut });
+    expect(res.status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([ROLE.EVENT_COORDINATOR, ROLE.EVENT_ORGANISER, ROLE.EVENT_COORDINATOR_LEAD, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.SAFETY_OFFICER, ROLE.ATTENDEE, null])(
+    'SCRUM258_AC6_refuses_%s_with_403_on_both_and_never_queries',
+    async (role) => {
+      const client = createFakeClient([decided('approved'), decided('rejected')]);
+      const requireAuth = signedInWithRole(role);
+      expect((await decide(client, 'approve', { requireAuth })).status).toBe(403);
+      expect((await decide(client, 'reject', { body: { reason: 'No' }, requireAuth })).status).toBe(403);
+      expect(client.calls).toHaveLength(0);
+    },
+  );
+
+  it('SCRUM258_AC6_a_refusal_from_the_function_is_403', async () => {
+    const res = await decide(createFakeClient([dbFailure('42501', 'only Venue Staff can decide a booking request')]), 'approve');
+    expect(res.status).toBe(403);
+  });
+
+  it.each(['BOOKING_NOT_PENDING', 'EVENT_NOT_BOOKABLE', 'BOOKING_PERIOD_STALE', 'VENUE_RETIRED'])(
+    'SCRUM258_AC5_a_%s_refusal_is_409_with_its_code',
+    async (hint) => {
+      const res = await decide(createFakeClient([dbFailure('PT409', 'refused', { hint })]), 'approve');
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe(hint);
+    },
+  );
+
+  it('SCRUM258_AC2_an_occupied_period_is_409_BOOKING_PERIOD_CONFLICT_with_what_occupies_it', async () => {
+    const conflict = {
+      kind: 'booking',
+      booking_id: OTHER_BOOKING_ID,
+      event_request_id: '12121212-1212-4212-8212-121212121212',
+      event_name: 'Careers Fair',
+      starts_at: START,
+      ends_at: END,
+      occupied_starts_at: START,
+      occupied_ends_at: END,
+      setup_minutes: 0,
+      turnaround_minutes: 0,
+    };
+    const res = await decide(createFakeClient([ok({ outcome: 'conflict', conflicts: [conflict] })]), 'approve');
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('BOOKING_PERIOD_CONFLICT');
+    expect(res.body.conflicts).toEqual([expect.objectContaining({ kind: 'booking', bookingId: OTHER_BOOKING_ID, eventName: 'Careers Fair' })]);
   });
 });

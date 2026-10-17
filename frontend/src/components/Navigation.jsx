@@ -2,9 +2,11 @@
 // Renders only the nav links relevant to the logged-in user's role.
 
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { useUnreadCount } from "../notifications/UnreadCountContext";
 import { normaliseRole } from "../auth/normaliseRole";
+import { BROWSE_OPEN_EVENTS_PATH, isOpenEventsEnabled } from "../services/openEventRoutes";
 
 const NAV_LINKS_BY_ROLE = {
   EVENT_ORGANISER: [
@@ -44,6 +46,7 @@ const NAV_LINKS_BY_ROLE = {
     { to: "/dashboard", label: "Dashboard" },
     { to: "/venue-catalogue", label: "Venue Catalogue" },
     { to: "/booking-requests", label: "Booking Requests" },
+    { to: "/flagged-bookings", label: "Flagged Bookings" },
   ],
   // TECHNICAL_SUPPORT_STAFF, not TECHNICAL_SUPPORT. normaliseRole yields the
   // full role name from the token, so the short key matched nothing and this
@@ -57,9 +60,9 @@ const NAV_LINKS_BY_ROLE = {
   ],
   ATTENDEE: [
     { to: "/dashboard", label: "Dashboard" },
-    // "Browse Open Events" (SCRUM-495) is not linked yet: that story has no
-    // route, page or branch, and /events is the Organiser's page. Add it here
-    // with the path SCRUM-495 registers.
+    // SCRUM-495. The Attendee's list of events open for registration. Its
+    // route is limited to Attendees; "My registrations" waits for its story.
+    { to: BROWSE_OPEN_EVENTS_PATH, label: "Browse Open Events" },
   ],
   // SCRUM-485 (SCRUM-510). One link each, deliberately: Dashboard, where
   // SCRUM-509 put each role's own screen. The pages that dashboard describes,
@@ -88,17 +91,23 @@ const NAV_LINKS_BY_ROLE = {
   ],
   SAFETY_OFFICER: [
     { to: "/dashboard", label: "Dashboard" },
+    { to: "/safety-review", label: "Safety review" },
+    { to: "/safety-review/history", label: "Review history" },
   ],
 };
 
 export default function Navigation() {
   const { user, logout } = useAuth();
+  const { unreadCount } = useUnreadCount();
   const [logoutError, setLogoutError] = useState(null);
   const [loggingOut, setLoggingOut] = useState(false);
 
   if (!user) return null;
 
-  const links = NAV_LINKS_BY_ROLE[normaliseRole(user.role)] || [];
+  const links = (NAV_LINKS_BY_ROLE[normaliseRole(user.role)] || []).filter(
+    (link) => link.to !== BROWSE_OPEN_EVENTS_PATH || isOpenEventsEnabled(),
+  );
+  const hasUnread = unreadCount > 0;
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -115,7 +124,7 @@ export default function Navigation() {
           <li key={link.to}>
             <NavLink
               to={link.to}
-              end={link.to === "/dashboard"}
+              end={link.to === "/dashboard" || link.to === "/safety-review"}
               className={({ isActive }) => isActive ? "app-nav__link app-nav__link--active" : "app-nav__link"}
             >
               {link.label}
@@ -124,6 +133,19 @@ export default function Navigation() {
         ))}
       </ul>
       <div className="app-nav__user">
+        {/* Every role's dashboard mounts the inbox, so one link serves all;
+            the hash scrolls it into view. Not for a role with no links: it
+            has no dashboard, so the link would promise an inbox it lacks. */}
+        {links.length > 0 && (
+          <Link
+            to="/dashboard#notifications"
+            className="app-nav__notifications"
+            aria-label={hasUnread ? `Notifications, ${unreadCount} unread` : "Notifications"}
+          >
+            Notifications
+            {hasUnread && <span className="app-nav__badge">{unreadCount}</span>}
+          </Link>
+        )}
         <span>{user.name} ({user.role})</span>
         <button onClick={handleLogout} disabled={loggingOut}>
           {loggingOut ? "Logging out..." : "Log out"}

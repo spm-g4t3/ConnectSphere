@@ -116,6 +116,15 @@ export default defineConfig({
         'src/routes/equipmentQueue.js': FULL,
         'src/validation/equipmentQueueValidation.js': FULL,
         'src/services/equipmentQueueService.js': FULL,
+        // SCRUM-495: the browse files are new and owned outright.
+        'src/routes/openEvents.js': FULL,
+        'src/services/openEventService.js': FULL,
+        'src/domain/registrationWindow.js': FULL,
+        'src/domain/registrationAvailability.js': FULL,
+        // SCRUM-266: the flagged-booking resolution files are new and owned outright.
+        'src/routes/flaggedBookings.js': FULL,
+        'src/services/flaggedBookingService.js': FULL,
+        'src/validation/flaggedBookingValidation.js': FULL,
       },
     },
   },

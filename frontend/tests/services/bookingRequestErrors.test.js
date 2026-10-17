@@ -9,10 +9,13 @@ import {
   fieldErrorsFrom,
   isSuitabilityConfirmationRequired,
   isVenueAlreadyRequested,
+  isReplacementRefused,
   periodConflicts,
   unmetCriteria,
   isStaleWithdrawError,
   withdrawErrorMessage,
+  decisionErrorMessage,
+  isStaleDecisionError,
 } from "../../src/services/bookingRequestErrors.js";
 
 const http = (status, data = {}) => Object.assign(new Error(`status ${status}`), { response: { status, data } });
@@ -150,6 +153,24 @@ describe("isVenueAlreadyRequested", () => {
   );
 });
 
+// SCRUM-266: a replacement whose flagged booking can no longer be replaced.
+describe("replacement refusals (SCRUM-266)", () => {
+  it.each([
+    ["REPLACED_BOOKING_NOT_FLAGGED", /no longer flagged for review.*Nothing was requested/],
+    ["REPLACED_BOOKING_NOT_ON_EVENT", /does not belong to this event/],
+  ])("SCRUM266_W7_explains_the_409_%s_and_marks_it_a_replacement_refusal", (code, pattern) => {
+    expect(bookingRequestErrorMessage(conflict(code))).toMatch(pattern);
+    expect(isReplacementRefused(conflict(code))).toBe(true);
+  });
+
+  it.each([conflict("BOOKING_REQUEST_EXISTS"), http(400, { code: "REPLACED_BOOKING_NOT_FLAGGED" }), undefined])(
+    "SCRUM266_W7_is_not_a_replacement_refusal_for_%s",
+    (err) => {
+      expect(isReplacementRefused(err)).toBe(false);
+    },
+  );
+});
+
 describe("fieldErrorsFrom", () => {
   it("SCRUM254_keeps_only_the_fields_the_form_has", () => {
     const details = [
@@ -247,5 +268,65 @@ describe("SCRUM-188 unrecognised requirement codes", () => {
     expect(
       bookingRequestErrorMessage(http(400, { details: [{ field: "setupNotes", message: "Too long" }] })),
     ).toBe("Some details were not accepted. Please check the form.");
+  });
+});
+
+describe("decisionErrorMessage (SCRUM-258)", () => {
+  it.each([
+    ["BOOKING_NOT_PENDING", /already been decided or withdrawn\. The list has been refreshed\./],
+    ["BOOKING_CHANGED", /changed while you were deciding/],
+    ["BOOKING_PERIOD_STALE", /dates have changed .* request the venue again for the new dates/],
+    ["EVENT_NOT_BOOKABLE", /no longer approved, in the safety check, or confirmed \(it may have been cancelled\), so its venue request can't be approved/],
+    ["VENUE_RETIRED", /retired, so the request can't be approved/],
+  ])("SCRUM258_AC2_explains_the_409_%s_to_venue_staff", (code, pattern) => {
+    expect(decisionErrorMessage(conflict(code))).toMatch(pattern);
+  });
+
+  it("SCRUM258_AC2_a_period_conflict_names_each_kind_of_occupant_once", () => {
+    const message = decisionErrorMessage(
+      conflict("BOOKING_PERIOD_CONFLICT", [
+        { kind: "booking", eventName: "Gala" },
+        { kind: "booking", eventName: "Gala" },
+        { kind: "hold", eventName: "Expo" },
+        { kind: "block", reason: "maintenance" },
+        { kind: "criterion" },
+      ]),
+    );
+    expect(message).toMatch(/setup and turnaround included/);
+    expect(message).toMatch(
+      /In the way: the approved booking for Gala, a tentative hold for Expo, a venue block\.$/,
+    );
+  });
+
+  it("SCRUM258_AC2_a_period_conflict_with_no_listed_occupant_still_explains_itself", () => {
+    expect(decisionErrorMessage(conflict("BOOKING_PERIOD_CONFLICT"))).toMatch(/no longer free.*can't be approved\.$/);
+  });
+
+  it.each([
+    [400, /A reason is required/],
+    [403, /Only Venue Staff/],
+    [404, /no longer exists/],
+    [500, /Could not record the decision/],
+  ])("SCRUM258_AC2_explains_a_%i", (status, pattern) => {
+    expect(decisionErrorMessage(http(status))).toMatch(pattern);
+  });
+
+  it("SCRUM258_AC2_never_shows_the_servers_error_prose", () => {
+    expect(decisionErrorMessage(conflict("SOMETHING_NEW"))).not.toContain("database prose");
+  });
+});
+
+describe("isStaleDecisionError (SCRUM-258)", () => {
+  it.each([
+    [http(404), true],
+    [conflict("BOOKING_NOT_PENDING"), true],
+    [conflict("BOOKING_CHANGED"), true],
+    [conflict("BOOKING_PERIOD_CONFLICT"), false],
+    [conflict("EVENT_NOT_BOOKABLE"), false],
+    [conflict("BOOKING_PERIOD_STALE"), false],
+    [http(403), false],
+    [new Error("network"), false],
+  ])("SCRUM258_AC2_case_%#_refetches_only_when_the_queue_is_out_of_date", (err, stale) => {
+    expect(isStaleDecisionError(err)).toBe(stale);
   });
 });

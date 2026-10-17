@@ -22,7 +22,11 @@
 
 import express from 'express';
 
-import { listNotifications, markNotificationRead } from '../services/notificationService.js';
+import {
+  listNotifications,
+  countUnreadNotifications,
+  markNotificationRead,
+} from '../services/notificationService.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createErrorHandler } from '../http/handleError.js';
 
@@ -60,6 +64,23 @@ export function createNotificationRouter({ requireAuth = defaultRequireAuth } = 
     try {
       const notifications = await listNotifications(req.user.id);
       res.status(200).json(notifications);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  /**
+   * How many of the caller's notifications are unread (SCRUM-172, AC4).
+   *
+   * An object rather than a bare number, so fields can be added later without
+   * breaking callers. None unread is 200 { unreadCount: 0 }.
+   *
+   * Statuses: 200, 401 from requireAuth, 500 for anything untyped.
+   */
+  router.get('/unread-count', async (req, res) => {
+    try {
+      const unreadCount = await countUnreadNotifications(req.user.id);
+      res.status(200).json({ unreadCount });
     } catch (err) {
       handleError(err, res);
     }

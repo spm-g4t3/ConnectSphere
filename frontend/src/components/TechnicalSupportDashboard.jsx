@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getOpenTickets } from "../services/supportService";
 import EquipmentRequestQueue from "./EquipmentRequestQueue";
-import CoordinatorNotifications from "./CoordinatorNotifications";
+import NotificationInbox from "./NotificationInbox";
 
 export default function TechnicalSupportDashboard({ user }) {
   const [tickets, setTickets] = useState([]);
@@ -29,12 +29,10 @@ export default function TechnicalSupportDashboard({ user }) {
         </ul>
       </section>
 
-      {/* SCRUM-287 (SCRUM-284): the equipment request queue. It renders its own
-          <section>s, as direct children of .dashboard so each picks up the card
-          styling, and replaces the stub list that stood here. */}
+      {/* Renders its own <section>s, so each is a direct child of .dashboard and gets the card styling. */}
       <EquipmentRequestQueue />
 
-      <CoordinatorNotifications />
+      <NotificationInbox />
     </div>
   );
 }

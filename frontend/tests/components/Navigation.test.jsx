@@ -7,14 +7,21 @@
 // also exercise normaliseRole's mapping onto the nav's keys.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import Navigation from "../../src/components/Navigation.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
+import { useUnreadCount } from "../../src/notifications/UnreadCountContext";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
+}));
+
+// The count's own behaviour is tested in tests/notifications; here only what
+// the nav does with a given count matters.
+vi.mock("../../src/notifications/UnreadCountContext", () => ({
+  useUnreadCount: vi.fn(),
 }));
 
 function renderAs(role) {
@@ -30,7 +37,9 @@ function renderAs(role) {
 }
 
 beforeEach(() => {
+  vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "true");
   vi.mocked(useAuth).mockReset();
+  vi.mocked(useUnreadCount).mockReturnValue({ unreadCount: null, refreshUnreadCount: vi.fn() });
 });
 
 describe("Navigation links by role", () => {
@@ -41,7 +50,7 @@ describe("Navigation links by role", () => {
     expect(screen.getByRole("link", { name: "My Events" })).toHaveAttribute("href", "/events");
     expect(screen.queryByRole("link", { name: "Find a Venue" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /venue/i })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("link")).toHaveLength(2);
+    expect(within(screen.getByRole("list")).getAllByRole("link")).toHaveLength(2);
   });
 
   it("treats the American spelling of organiser the same way", () => {
@@ -89,11 +98,12 @@ describe("Navigation links by role", () => {
   expect(screen.getByRole("link", { name: "Check Availability" })).toHaveAttribute("href", "/equipment-availability");
 });
 
-  it("gives an Attendee only the Dashboard link, with no staff-facing pages", () => {
+  it("SCRUM495_AC5_gives_an_attendee_dashboard_and_browse_open_events_with_no_staff_facing_pages", () => {
     renderAs("attendee");
 
     expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
-    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Browse Open Events" })).toHaveAttribute("href", "/open-events");
+    expect(within(screen.getByRole("list")).getAllByRole("link")).toHaveLength(2);
   });
 });
 
@@ -128,7 +138,8 @@ const ALL_ROLES = [
  */
 function linksOf(role) {
   const { unmount } = renderAs(role);
-  const links = screen
+  // The role's own list; the Notifications link beside it is the same for every role.
+  const links = within(screen.getByRole("list"))
     .queryAllByRole("link")
     .map((link) => [link.textContent, link.getAttribute("href")]);
   unmount();
@@ -173,9 +184,12 @@ describe("SCRUM485_AC4 each new role sees only its own links", () => {
     expect(screen.getByRole("link", { name: "Assigned Events" })).toHaveAttribute("href", "/assigned-events");
   });
 
-  it("SCRUM485_AC4_a_safety_officer_has_exactly_the_dashboard_link", () => {
-    // AC4-02.
-    expect(linksOf("safety_officer")).toEqual(DASHBOARD_ONLY);
+  it("SCRUM490_a_safety_officer_has_the_safety_review_link", () => {
+    expect(linksOf("safety_officer")).toEqual([
+      ...DASHBOARD_ONLY,
+      ["Safety review", "/safety-review"],
+      ["Review history", "/safety-review/history"],
+    ]);
   });
 
   it("SCRUM485_AC4_a_lead_sees_none_of_the_coordinators_links", () => {
@@ -213,15 +227,9 @@ describe("SCRUM485_AC4 each new role sees only its own links", () => {
   );
 
   it.each(["Safety Officer", "safety officer"])(
-    "SCRUM485_AC4_the_role_spelt_%j_reaches_the_same_single_link",
+    "SCRUM490_the_role_spelt_%j_reaches_the_safety_officer_links",
     (spelling) => {
-      // AC4-05. normaliseRole absorbs case, spaces and hyphens, as the
-      // American-spelling test above shows for the Organiser.
-      //
-      // The two Lead spellings that were rows here moved to the case below
-      // when the Lead gained a second link (SCRUM-519). They were right when
-      // written: the Lead had the same single link as the Safety Officer.
-      expect(linksOf(spelling)).toEqual(DASHBOARD_ONLY);
+      expect(linksOf(spelling)).toEqual(linksOf("safety_officer"));
     },
   );
 
@@ -267,6 +275,7 @@ describe("SCRUM485_AC6 the existing roles keep exactly their links", () => {
       ["Dashboard", "/dashboard"],
       ["Venue Catalogue", "/venue-catalogue"],
       ["Booking Requests", "/booking-requests"],
+      ["Flagged Bookings", "/flagged-bookings"],
     ]],
     ["technical_support_staff", [
       ["Dashboard", "/dashboard"],
@@ -283,15 +292,68 @@ describe("SCRUM485_AC6 the existing roles keep exactly their links", () => {
   });
 
   it("SCRUM485_AC6_an_attendee_keeps_the_links_scrum453_gave_it", () => {
-    // AC6-04 for the Attendee. When this story began an attendee had no nav
-    // block, and this case pinned an empty list. SCRUM-453 (merged into dev on
-    // 11 October) gave the Attendee one: Dashboard, with Browse Open Events to
-    // follow in SCRUM-495. That is another story's change, not one this story
-    // made, so the case now pins what SCRUM-453 built, exactly and by count,
-    // and SCRUM-485 must leave it so.
+    // Pins the Attendee's links exactly and by count.
     const links = linksOf("attendee");
 
-    expect(links).toHaveLength(1);
-    expect(links).toEqual([["Dashboard", "/dashboard"]]);
+    expect(links).toHaveLength(2);
+    expect(links).toEqual([
+      ["Dashboard", "/dashboard"],
+      ["Browse Open Events", "/open-events"],
+    ]);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-172 AC4: the unread count in the nav
+// ---------------------------------------------------------------------------
+
+function withCount(unreadCount) {
+  vi.mocked(useUnreadCount).mockReturnValue({ unreadCount, refreshUnreadCount: vi.fn() });
+}
+
+describe("SCRUM172_AC4 the nav's Notifications link", () => {
+  it("SCRUM172_AC4_nav_shows_the_unread_count", () => {
+    withCount(3);
+    renderAs("attendee");
+
+    const link = screen.getByRole("link", { name: "Notifications, 3 unread" });
+    expect(link).toHaveAttribute("href", "/dashboard#notifications");
+    expect(link.querySelector(".app-nav__badge")).toHaveTextContent(/^3$/);
+  });
+
+  it("SCRUM172_AC4_nav_shows_the_exact_count_past_the_list_cap", () => {
+    withCount(73);
+    renderAs("event_coordinator");
+
+    expect(screen.getByRole("link", { name: "Notifications, 73 unread" })).toHaveTextContent(/^Notifications73$/);
+  });
+
+  it.each([
+    ["zero", 0],
+    ["unknown", null],
+  ])("SCRUM172_AC4_nav_shows_no_badge_when_the_count_is_%s", (_label, count) => {
+    withCount(count);
+    const { container } = renderAs("venue_staff");
+
+    const link = screen.getByRole("link", { name: "Notifications" });
+    expect(link).toHaveAttribute("href", "/dashboard#notifications");
+    expect(link).toHaveTextContent(/^Notifications$/);
+    expect(container.querySelector(".app-nav__badge")).not.toBeInTheDocument();
+  });
+
+  it.each(ALL_ROLES)("SCRUM172_AC1_%s_has_the_notifications_link", (role) => {
+    // Every role has a dashboard, and every dashboard mounts the inbox.
+    withCount(null);
+    renderAs(role);
+
+    expect(screen.getByRole("link", { name: "Notifications" })).toHaveAttribute("href", "/dashboard#notifications");
+  });
+
+  it("SCRUM172_AC4_a_role_with_no_links_gets_no_notifications_link", () => {
+    withCount(3);
+    renderAs("saftey_officer");
+
+    expect(screen.queryByRole("link", { name: /Notifications/ })).not.toBeInTheDocument();
   });
 });

@@ -380,7 +380,7 @@ describe('SCRUM188 venue suitability journey: check, request, Venue Staff, reche
     fromStep('event_requests', ok(event)),
     fromStep('bookings', ok([{ ...journey.bookingRow, venues: { name: 'Seminar Room', location: 'Level 2' } }]), (q) => {
       expect(q.allArgs('eq')).toEqual([['event_request_id', EVENT_ID]]);
-      expect(q.args('in')).toEqual(['status', ['pending', 'approved', 'flagged_for_review']]);
+      expect(q.args('in')).toEqual(['status', ['pending', 'conflicting', 'approved', 'flagged_for_review']]);
     }),
     ...judgeSteps(occupancy),
   ];

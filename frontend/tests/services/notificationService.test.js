@@ -9,9 +9,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { apiClient } from "../../src/services/apiClient";
 import {
+  getUnreadCount,
   listNotifications,
   markNotificationRead,
 } from "../../src/services/notificationService.js";
+import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/apiClient", () => ({
   apiClient: { get: vi.fn(), patch: vi.fn() },
@@ -48,13 +50,6 @@ describe("listNotifications", () => {
     vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
     await expect(listNotifications()).resolves.toEqual([]);
   });
-
-  it("lets an error through with its response intact", async () => {
-    const err = Object.assign(new Error("Request failed"), { response: { status: 401 } });
-    vi.mocked(apiClient.get).mockRejectedValue(err);
-
-    await expect(listNotifications()).rejects.toBe(err);
-  });
 });
 
 describe("markNotificationRead", () => {
@@ -67,11 +62,30 @@ describe("markNotificationRead", () => {
     expect(apiClient.patch).toHaveBeenCalledTimes(1);
     expect(apiClient.patch).toHaveBeenCalledWith(`/notifications/${ID}/read`);
   });
+});
 
-  it("lets a 404 through with its response intact", async () => {
-    const err = Object.assign(new Error("Request failed"), { response: { status: 404 } });
-    vi.mocked(apiClient.patch).mockRejectedValue(err);
+describe("getUnreadCount", () => {
+  it("SCRUM172_AC4_get_unread_count_reads_the_count_endpoint", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: { unreadCount: 73 } });
 
-    await expect(markNotificationRead(ID)).rejects.toBe(err);
+    await expect(getUnreadCount()).resolves.toBe(73);
+
+    expect(apiClient.get).toHaveBeenCalledTimes(1);
+    expect(apiClient.get).toHaveBeenCalledWith("/notifications/unread-count");
+  });
+});
+
+// The callers read err.response.status, so each call must pass the error on
+// as it came, not wrap it.
+describe("errors", () => {
+  it.each([
+    ["listNotifications", 401, "get", () => listNotifications()],
+    ["markNotificationRead", 404, "patch", () => markNotificationRead(ID)],
+    ["getUnreadCount", 401, "get", () => getUnreadCount()],
+  ])("%s lets a %s through with its response intact", async (_name, status, method, call) => {
+    const err = httpError(status);
+    vi.mocked(apiClient[method]).mockRejectedValue(err);
+
+    await expect(call()).rejects.toBe(err);
   });
 });

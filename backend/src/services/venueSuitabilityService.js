@@ -552,12 +552,13 @@ async function judgeVenue(
 
 /**
  * The booking statuses that still hold, or may yet hold, a venue for the
- * event: a request awaiting Venue Staff, an approved booking, and one a venue
- * change has flagged. Rejected, withdrawn and cancelled ones no longer claim
- * the venue, so there is nothing to recheck.
+ * event: a request awaiting Venue Staff (pending or conflicting), an approved
+ * booking, and one a venue change has flagged. Rejected, withdrawn and
+ * cancelled ones no longer claim the venue, so there is nothing to recheck.
  */
 export const LIVE_BOOKING_STATUSES = Object.freeze([
   BOOKING_STATUS.PENDING,
+  BOOKING_STATUS.CONFLICTING,
   BOOKING_STATUS.APPROVED,
   BOOKING_STATUS.FLAGGED_FOR_REVIEW,
 ]);

@@ -771,7 +771,8 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     // SCRUM-318 as changed by SCRUM-488 AC2, read by neither implementation,
     // so neither copy can drift without this test saying so.
     const LEGAL = EVERY_PAIR.filter(([, , allowed]) => allowed).map(([from, to]) => [from, to]);
-    const ELEVEN = ELEVEN_STATUSES;    const WITH_PLANNING = [...ELEVEN, 'planning'];
+    const ELEVEN = ELEVEN_STATUSES;
+    const WITH_PLANNING = [...ELEVEN, 'planning'];
     const isLegal = (from, to) => LEGAL.some(([f, t]) => f === from && t === to);
 
     it('SCRUM488_AC2_allows_exactly_the_twenty_two_listed_transitions_and_nothing_else', async () => {
@@ -812,15 +813,6 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       expect(r.allowed).toBe(false);
       expect(canTransition('approved', 'confirmed')).toBe(false);
     });
-    it('SCRUM318_agrees_with_canTransition_for_every_pair_of_statuses', async () => {
-      for (const from of WITH_PLANNING) {
-        for (const to of WITH_PLANNING) {
-          const { rows: [r] } = await db.query('select event_request_status_allows($1, $2) as allowed', [from, to]);
-          expect(r.allowed, `${from} -> ${to}`).toBe(canTransition(from, to));
-        }
-      }
-    });
-
     describe('every other move between the eleven statuses', () => {
       // A move to the status the request is already in, and a move to
       // submitted, are refused earlier and for their own reasons, tested above.

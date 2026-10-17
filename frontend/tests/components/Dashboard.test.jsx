@@ -21,12 +21,12 @@
 // Coordinator's sections call the API), which would make this a test of four
 // other screens. Their own tests cover them.
 //
-// "No service is called" (AC3-08) is asserted at the one place every real
-// service makes its HTTP call, apiClient, plus supportService, the one stub
-// that does not go through it.
+// Each new dashboard's reads (AC3-08, since narrowed to exactly what each
+// reads) are asserted at the one place every real service makes its HTTP
+// call, apiClient, plus supportService, the one stub that does not go through it.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import Dashboard from "../../src/components/Dashboard.jsx";
@@ -81,14 +81,8 @@ function renderDashboardAs(role) {
   return inRouter(<Dashboard />);
 }
 
-function anyServiceCalled() {
-  return [
-    ...Object.values(apiClient),
-    getOpenTickets,
-  ].some((fn) => vi.mocked(fn).mock.calls.length > 0);
-}
-
 beforeEach(() => {
+  vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "true");
   vi.clearAllMocks();
 });
 
@@ -122,8 +116,7 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     renderDashboardAs("safety_officer");
 
     expect(screen.getByRole("heading", { level: 1, name: "Safety Officer" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Safety review list" })).toBeInTheDocument();
-    expect(screen.getByText(/built by SCRUM-490/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Safety review" })).toBeInTheDocument();
   });
 
   it.each(["event_coordinator_lead", "safety_officer"])(
@@ -146,21 +139,12 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     expect(screen.queryByTestId("dashboard-stub")).not.toBeInTheDocument();
   });
 
-  it.each(["safety_officer"])(
-    "SCRUM485_AC3_the_%s_dashboard_calls_no_service",
-    (role) => {
-      // AC3-08. The Safety Officer's section has no endpoint yet; a call to
-      // one that does not exist would fail at every demo.
-      //
-      // The event_coordinator_lead row was right when written: the Lead's
-      // sections had no endpoint either. SCRUM-486 (SCRUM-519) built the
-      // queue's and mounted the notifications card, so the Lead's dashboard
-      // now reads exactly those two; the case below pins that.
-      renderDashboardAs(role);
-
-      expect(anyServiceCalled()).toBe(false);
-    },
-  );
+  // SCRUM485_AC3_the_%s_dashboard_calls_no_service (AC3-08) had one row per
+  // new dashboard and now has none, so it is gone; every read is still pinned.
+  // Its event_coordinator_lead row was right when written; SCRUM-486 (SCRUM-519)
+  // built the queue and mounted the notifications card, pinned by the SCRUM486_AC2
+  // case below. Its safety_officer row was right when written too; SCRUM-489
+  // mounted the notifications card (AC8), pinned by the SCRUM489_AC8 case below.
 
   it("SCRUM486_AC2_the_lead_dashboard_reads_only_the_unassigned_queue_and_its_notifications", () => {
     // Every call the Lead's dashboard makes on render, and nothing else: no
@@ -176,6 +160,39 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
       expect(apiClient[method]).not.toHaveBeenCalled();
     }
     expect(getOpenTickets).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM489_AC8_the_safety_officer_dashboard_reads_its_review_queue_and_notifications", () => {
+    // The queue is built by SCRUM-490; the card reads the
+    // event_submitted_for_safety_review notices.
+    renderDashboardAs("safety_officer");
+
+    expect(vi.mocked(apiClient.get).mock.calls.map(([path]) => path)).toEqual([
+      "/notifications",
+      "/safety-reviews",
+    ]);
+    for (const method of ["post", "put", "patch", "delete"]) {
+      expect(apiClient[method]).not.toHaveBeenCalled();
+    }
+    expect(getOpenTickets).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM489_AC8_a_safety_officer_reads_a_submission_notice_on_the_dashboard_in_words", async () => {
+    // AC8-05: the notice 064 writes, through the real card and describeNotification.
+    vi.mocked(apiClient.get).mockImplementation((path) => Promise.resolve({
+      data: path === "/safety-reviews" ? [] : [{
+        id: "n1",
+        type: "event_submitted_for_safety_review",
+        readAt: null,
+        createdAt: "2026-10-14T09:00:00+08:00",
+        payload: { eventName: "IS212 Industry Night", coordinatorName: "Priya Nair" },
+      }],
+    }));
+    renderDashboardAs("safety_officer");
+
+    expect(await screen.findByText("Event submitted for safety check")).toBeInTheDocument();
+    expect(screen.getByText("IS212 Industry Night was submitted by Priya Nair.")).toBeInTheDocument();
+    expect(screen.queryByText("This notification type cannot be displayed yet.")).not.toBeInTheDocument();
   });
 
   it.each(["safety_officer"])(
@@ -226,7 +243,7 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     unmount();
 
     vi.mocked(useAuth).mockReturnValue({ user: { name: "Priya Nair", email: "so@example.com", role: "safety_officer" } });
-    render(<Dashboard />);
+    inRouter(<Dashboard />);
     expect(screen.getByText("Signed in as Priya Nair.")).toBeInTheDocument();
   });
 });
@@ -285,7 +302,7 @@ function renderAs(role) {
   vi.mocked(useAuth).mockReturnValue({
     user: { id: "u1", email: "user@example.com", role },
   });
-  return render(<Dashboard />);
+  return inRouter(<Dashboard />);
 }
 
 beforeEach(() => {
@@ -300,12 +317,33 @@ describe("Dashboard role map", () => {
     expect(screen.getByRole("heading", { name: "Welcome, user@example.com" })).toBeInTheDocument();
   });
 
-  it("shows the Browse Open Events entry, with no invented event data", () => {
+  it("SCRUM495_AC5_shows_the_browse_open_events_entry_as_a_link_to_the_browse_page_with_no_invented_event_data", () => {
+    // The entry is a router Link, which is why renderAs wraps in a MemoryRouter.
     renderAs("attendee");
 
     expect(screen.getByRole("heading", { name: "Browse Open Events" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("not available yet");
-    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Browse Open Events" })).toHaveAttribute("href", "/open-events");
+    // Scoped to the browse section: the notifications inbox below it has a list of its own.
+    const browse = screen.getByRole("region", { name: "Browse Open Events" });
+    expect(within(browse).queryByRole("list")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM172_AC1_attendee_dashboard_shows_the_inbox", async () => {
+    // The real inbox, through the real service: the attendee's own list, read
+    // from the caller-scoped endpoint.
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [{
+      id: "n1",
+      type: "event_submitted_for_safety_review",
+      readAt: null,
+      createdAt: "2026-10-14T09:00:00+08:00",
+      payload: { eventName: "IS212 Industry Night", coordinatorName: "Priya Nair" },
+    }] });
+    const { container } = renderAs("attendee");
+
+    expect(container.querySelector("section#notifications")).toBeInTheDocument();
+    expect(await screen.findByText("Event submitted for safety check")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Notifications (1 unread)" })).toBeInTheDocument();
+    expect(vi.mocked(apiClient.get).mock.calls.map(([path]) => path)).toEqual(["/notifications"]);
   });
 
   it("falls back for an unrecognised role", () => {

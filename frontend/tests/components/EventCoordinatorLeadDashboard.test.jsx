@@ -37,6 +37,12 @@ vi.mock("../../src/services/notificationService", () => ({
   markNotificationRead: vi.fn(),
 }));
 
+// The inbox reads the signed-in user to link its rows; no user, no links, so
+// the dashboard renders as before.
+vi.mock("../../src/auth/AuthContext", () => ({
+  useAuth: () => ({ user: null }),
+}));
+
 const LEAD = { id: "77777777-7777-4777-8777-777777777777", email: "lead@example.com", role: "event_coordinator_lead" };
 const REQUEST_ID = "22222222-2222-4222-8222-222222222222";
 
@@ -107,22 +113,23 @@ describe("SCRUM486_AC2 the Lead's dashboard", () => {
 });
 
 
-describe("SCRUM486_AC10 the new notification types degrade until SCRUM-172 words them", () => {
-  it("SCRUM486_AC10_each_new_type_is_shown_as_a_notification_that_cannot_be_displayed_yet", async () => {
+describe("SCRUM486_AC10 the new notification types are shown in words (SCRUM-172)", () => {
+  // These two pinned the "cannot be displayed yet" fallback until SCRUM-172
+  // worded the types (SCRUM-526); they now pin the wording AC10-06 waited for.
+  it("SCRUM486_AC10_each_new_type_is_shown_in_words", async () => {
     vi.mocked(listNotifications).mockResolvedValue(NEW_TYPES);
     renderDashboard();
 
-    // Three rows, not none: every notice is shown, with the fallback text.
     const card = (await screen.findByRole("heading", { name: "Notifications (3 unread)" })).closest("section");
     const items = within(card).getAllByRole("listitem");
     expect(items).toHaveLength(3);
+    expect(within(items[0]).getByText("IS212 Industry Night is waiting for a coordinator")).toBeInTheDocument();
+    expect(within(items[1]).getByText("Unnamed event was assigned to you")).toBeInTheDocument();
+    expect(within(items[2]).getByText("Priya Nair is now coordinating Unnamed event")).toBeInTheDocument();
     for (const item of items) {
-      expect(within(item).getByText("New notification")).toBeInTheDocument();
-      expect(within(item).getByText("This notification type cannot be displayed yet.")).toBeInTheDocument();
       expect(within(item).getByRole("button", { name: "Mark as read" })).toBeInTheDocument();
     }
-    // Nothing from the payload leaks through as half-rendered wording.
-    expect(card).not.toHaveTextContent("Over to you");
+    expect(card).not.toHaveTextContent("New notification");
   });
 
   it("SCRUM486_AC10_a_new_type_can_be_marked_read_and_leaves_the_unread_count", async () => {
@@ -135,6 +142,6 @@ describe("SCRUM486_AC10 the new notification types degrade until SCRUM-172 words
 
     expect(markNotificationRead).toHaveBeenCalledWith("n1");
     expect(await screen.findByRole("heading", { name: "Notifications" })).toBeInTheDocument();
-    expect(screen.getByText("New notification")).toBeInTheDocument();
+    expect(screen.getByText("IS212 Industry Night is waiting for a coordinator")).toBeInTheDocument();
   });
 });
