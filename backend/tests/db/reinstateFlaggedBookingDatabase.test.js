@@ -757,9 +757,10 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking (076)', () => {
         );
         return [...def.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
       };
-      // 075's v_ours, read from the file so a type it gains is checked too.
-      const sql075 = migration('075_notification_types_after_safety_review.sql');
-      const list075 = sql075.slice(sql075.indexOf('v_ours'), sql075.indexOf('];'));
+      // 075's type list, read from the file so a type it gains is checked too.
+      const sql075 = migration('075_booking_decisions_after_safety_review.sql');
+      const start075 = sql075.indexOf('type in (');
+      const list075 = sql075.slice(start075, sql075.indexOf(')', start075));
       const from075 = [...list075.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
       expect(from075).toContain('booking_request_conflicting');
 
