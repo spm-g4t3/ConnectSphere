@@ -619,11 +619,27 @@ function toConflictingBooking(entry) {
 }
 
 /**
+ * The flagged booking a request would replace, or null when it replaces none
+ * or that booking is no longer flagged (078).
+ *
+ * @param {object|null} [entry]  list_pending_booking_requests' `replaces`
+ */
+function toReplacedBooking(entry) {
+  if (!entry) return null;
+  return {
+    bookingId: entry.booking_id,
+    venueName: entry.venue_name ?? null,
+    startsAt: entry.starts_at,
+    endsAt: entry.ends_at,
+  };
+}
+
+/**
  * One row of the Venue Staff queue, in camelCase. The suitability record is
  * shaped by toSuitabilityRecord, as on the venue's bookings list, so both
  * screens show the same verdict and overridden criteria.
  *
- * @param {object} row  one element of list_pending_booking_requests (066)
+ * @param {object} row  one element of list_pending_booking_requests (078)
  */
 function toPendingBookingRequest(row) {
   // Pending or conflicting (066); a row without a status is read as pending.
@@ -653,6 +669,7 @@ function toPendingBookingRequest(row) {
     overlapping: (row.overlapping ?? []).map(toOverlappingRequest),
     // Empty when the clash has gone, so the screen can say it may be approved.
     conflictingWith: (row.conflicting_with ?? []).map(toConflictingBooking),
+    replaces: toReplacedBooking(row.replaces),
   };
 }
 
@@ -661,8 +678,9 @@ function toPendingBookingRequest(row) {
  *
  * Pending and conflicting requests (066), each with its status. Oldest first,
  * every venue, each with the other events' open requests at
- * its venue whose occupied periods overlap, in submission order. Read through
- * list_pending_booking_requests (066), which refuses anyone but Venue Staff
+ * its venue whose occupied periods overlap, in submission order, and the
+ * flagged booking it would replace. Read through
+ * list_pending_booking_requests (078), which refuses anyone but Venue Staff
  * (42501, a ForbiddenError) and pads periods with venue_occupied_period(), so
  * the formula is not repeated here.
  *

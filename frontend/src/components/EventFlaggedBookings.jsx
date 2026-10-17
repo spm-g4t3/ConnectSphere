@@ -13,10 +13,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import FlaggedBookingReasonForm from "./FlaggedBookingReasonForm";
-import { statusLabel } from "../services/bookingRequestEligibility";
 import { formatTimestamp } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
-import { flagReasons } from "../services/flaggedBookingDisplay";
+import { flagReasons, replacementRequestText, replacementRequests } from "../services/flaggedBookingDisplay";
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../services/flaggedBookingService";
 import { coordinatorCancelErrorMessage, isStaleResolutionError } from "../services/flaggedBookingErrors";
 
@@ -35,24 +34,14 @@ function asList(data) {
   return Array.isArray(data) ? data : [];
 }
 
-function capitalise(text) {
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
 function venueText(item) {
   const name = item.venueName || "Unknown venue";
   return item.venueLocation ? `${name}, ${item.venueLocation}` : name;
 }
 
-function replacementText(r) {
-  const venue = r.venueName || "Unknown venue";
-  const period = formatVenuePeriod(r.startsAt, r.endsAt);
-  return `Replacement requested: ${venue}, ${period} (${capitalise(statusLabel(r.status))})`;
-}
-
 function FlaggedBooking({ item, busy, cancelling, error, replacing, onCancel, onReplace }) {
   const reasons = flagReasons(item);
-  const replacements = Array.isArray(item.replacementRequests) ? item.replacementRequests : [];
+  const replacements = replacementRequests(item);
   const regionId = `event-flagged-booking-${item.id}`;
 
   return (
@@ -83,7 +72,7 @@ function FlaggedBooking({ item, busy, cancelling, error, replacing, onCancel, on
           <>
             <ul className="pending-bookings__overlapping">
               {replacements.map((r) => (
-                <li key={r.id}>{replacementText(r)}</li>
+                <li key={r.id}>{replacementRequestText(r)}</li>
               ))}
             </ul>
             <p className="pending-bookings__event-status">
@@ -98,9 +87,12 @@ function FlaggedBooking({ item, busy, cancelling, error, replacing, onCancel, on
           </p>
         )}
 
-        <button type="button" aria-pressed={replacing} disabled={busy} onClick={() => onReplace(item)}>
+        {/* Not a toggle: it picks this booking for Find a venue below, so the
+            choice is said in text rather than as a pressed state. */}
+        <button type="button" disabled={busy} onClick={() => onReplace(item)}>
           Find a replacement venue
         </button>
+        {replacing && <p className="pending-bookings__event-status">Finding a replacement below.</p>}
         <FlaggedBookingReasonForm
           id={`${regionId}-cancel`}
           label="Reason for cancelling (required)"

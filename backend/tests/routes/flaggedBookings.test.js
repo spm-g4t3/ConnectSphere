@@ -442,6 +442,7 @@ describe('SCRUM-266: Venue Staff list the flagged bookings', () => {
     block_ends_at: END,
     block_removed_at: null,
     reinstatable: true,
+    replacement_requests: [],
     ...overrides,
   });
 
@@ -470,6 +471,37 @@ describe('SCRUM-266: Venue Staff list the flagged bookings', () => {
     });
     expect(res.body[1]).toMatchObject({ id: OTHER_BOOKING_ID, reviewReason: 'safety_review', block: null, reinstatable: false });
     expect(client.calls).toEqual([{ fn: 'list_flagged_bookings', args: { p_caller: STAFF_ID } }]);
+  });
+
+  it('SCRUM266_W7_list_shows_venue_staff_the_requests_replacing_each_booking', async () => {
+    const replacement = {
+      id: OTHER_BOOKING_ID,
+      venue_id: VENUE_ID,
+      venue_name: 'Garden Hall',
+      status: 'conflicting',
+      starts_at: START,
+      ends_at: END,
+      created_at: '2026-10-11T00:00:00+00:00',
+    };
+    const client = createFakeClient([ok([flaggedRow({ replacement_requests: [replacement] }), flaggedRow()])]);
+
+    const res = await list(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((item) => item.replacementRequests)).toEqual([
+      [
+        {
+          id: OTHER_BOOKING_ID,
+          venueId: VENUE_ID,
+          venueName: 'Garden Hall',
+          status: 'conflicting',
+          startsAt: START,
+          endsAt: END,
+          createdAt: '2026-10-11T00:00:00+00:00',
+        },
+      ],
+      [],
+    ]);
   });
 
   it('SCRUM266_AC1_list_is_200_with_an_empty_array_when_nothing_is_flagged', async () => {

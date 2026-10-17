@@ -97,7 +97,7 @@ const KEYS = [
   'occupied_starts_at', 'occupied_ends_at', 'flagged_at', 'flagged_by', 'review_reason',
   'event_name', 'event_status', 'event_starts_at', 'event_ends_at', 'assigned_coordinator_id',
   'venue_name', 'venue_location', 'block_id', 'block_reason', 'block_notes',
-  'block_starts_at', 'block_ends_at', 'block_removed_at', 'reinstatable',
+  'block_starts_at', 'block_ends_at', 'block_removed_at', 'reinstatable', 'replacement_requests',
 ];
 
 /** The error a promise rejected with; null if it resolved. */

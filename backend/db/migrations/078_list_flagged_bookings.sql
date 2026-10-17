@@ -23,16 +23,37 @@ alter table bookings
 
 
 -- ---------------------------------------------------------------------
--- 2. flagged_bookings_json and list_flagged_bookings
+-- 2. bookings.replaces_booking_id
+-- ---------------------------------------------------------------------
+-- A coordinator resolves a flag by requesting another venue in its place. The
+-- request names the flagged booking, so approving it can cancel the flag
+-- (section 6) and the flagged lists (section 3) and the Venue Staff queue
+-- (section 7) can show it. Added first
+-- because section 3's SQL function is checked against it when created.
+
+alter table bookings
+  add column if not exists replaces_booking_id uuid references bookings (id);
+
+create index if not exists idx_bookings_replaces_booking
+  on bookings (replaces_booking_id)
+  where replaces_booking_id is not null;
+
+
+-- ---------------------------------------------------------------------
+-- 3. flagged_bookings_json and list_flagged_bookings
 -- ---------------------------------------------------------------------
 -- list_pending_booking_requests' (066) shape, for flagged bookings. A safety
 -- flag keeps the block that flagged the booking before it (071), so the block
 -- columns are read whatever the review reason is. Oldest flag first; a
 -- booking flagged before 014 has no flag time, so it is the oldest.
 -- `reinstatable` is a hint for the screen only: 076 enforces the rule.
+-- `replacement_requests` are the live requests raised to replace the booking,
+-- oldest first. Venue Staff see them too, so they do not reinstate a booking
+-- the coordinator is already replacing. A rejected or withdrawn one is no
+-- longer an answer to the flag.
 --
 -- The shape is built once, here, for Venue Staff's list (every event) and the
--- coordinator's (one event, section 3). It checks no caller, so only the two
+-- coordinator's (one event, section 4). It checks no caller, so only the two
 -- functions that do reach it.
 
 create or replace function flagged_bookings_json(p_event_request_id uuid)
@@ -89,7 +110,25 @@ as $$
                'block_starts_at',         f.block_starts_at,
                'block_ends_at',           f.block_ends_at,
                'block_removed_at',        f.block_removed_at,
-               'reinstatable',            f.review_reason is distinct from 'safety_review'
+               'reinstatable',            f.review_reason is distinct from 'safety_review',
+               'replacement_requests',    coalesce((
+                 select jsonb_agg(
+                          jsonb_build_object(
+                            'id',         r.id,
+                            'venue_id',   r.venue_id,
+                            'venue_name', rv.name,
+                            'status',     r.status,
+                            'starts_at',  r.starts_at,
+                            'ends_at',    r.ends_at,
+                            'created_at', r.created_at
+                          )
+                          order by r.created_at, r.id
+                        )
+                   from bookings r
+                   join venues rv on rv.id = r.venue_id
+                  where r.replaces_booking_id = f.id
+                    and r.status in ('pending', 'conflicting')
+               ), '[]'::jsonb)
              )
              order by f.flagged_at nulls first, f.created_at, f.id
            ),
@@ -131,26 +170,10 @@ revoke execute on function list_flagged_bookings(uuid)
 
 
 -- ---------------------------------------------------------------------
--- 3. bookings.replaces_booking_id
--- ---------------------------------------------------------------------
--- A coordinator resolves a flag by requesting another venue in its place. The
--- request names the flagged booking, so approving it can cancel the flag
--- (section 6) and the coordinator's list can show it (section 4).
-
-alter table bookings
-  add column if not exists replaces_booking_id uuid references bookings (id);
-
-create index if not exists idx_bookings_replaces_booking
-  on bookings (replaces_booking_id)
-  where replaces_booking_id is not null;
-
-
--- ---------------------------------------------------------------------
 -- 4. list_event_flagged_bookings
 -- ---------------------------------------------------------------------
--- One event's flagged bookings, for its assigned coordinator: section 2's
--- shape and order, each with the live requests raised to replace it, oldest
--- first. A rejected or withdrawn replacement is no longer an answer to the flag.
+-- One event's flagged bookings, for its assigned coordinator, in section 3's
+-- shape and order.
 
 create or replace function list_event_flagged_bookings(
   p_caller           uuid,
@@ -185,34 +208,7 @@ begin
       using errcode = 'insufficient_privilege';
   end if;
 
-  return coalesce((
-    select jsonb_agg(
-             item || jsonb_build_object(
-               'replacement_requests',
-               coalesce((
-                 select jsonb_agg(
-                          jsonb_build_object(
-                            'id',         r.id,
-                            'venue_id',   r.venue_id,
-                            'venue_name', v.name,
-                            'status',     r.status,
-                            'starts_at',  r.starts_at,
-                            'ends_at',    r.ends_at,
-                            'created_at', r.created_at
-                          )
-                          order by r.created_at, r.id
-                        )
-                   from bookings r
-                   join venues v on v.id = r.venue_id
-                  where r.replaces_booking_id = (item ->> 'id')::uuid
-                    and r.status in ('pending', 'conflicting')
-               ), '[]'::jsonb)
-             )
-             order by ordinal
-           )
-      from jsonb_array_elements(flagged_bookings_json(p_event_request_id))
-           with ordinality as e(item, ordinal)
-  ), '[]'::jsonb);
+  return flagged_bookings_json(p_event_request_id);
 end;
 $$;
 
@@ -777,6 +773,137 @@ $$;
 -- As in 031: it trusts p_caller to be who the API authenticated, so only the
 -- API should reach this. Nothing is granted.
 revoke execute on function decide_booking_request(uuid, uuid, text, text, text)
+  from public, anon, authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 7. list_pending_booking_requests (066, with `replaces`)
+-- ---------------------------------------------------------------------
+-- 066's function word for word plus `replaces`: the flagged booking a request
+-- would replace, so Venue Staff do not reinstate that booking and then approve
+-- its replacement, leaving the event two venues.
+
+create or replace function list_pending_booking_requests(p_caller uuid)
+returns jsonb
+language plpgsql
+stable
+as $$
+declare
+  v_role text;
+begin
+  -- Only Venue Staff, as place_venue_hold (040) checks it. A null caller is
+  -- refused too.
+  select p.role::text
+    into v_role
+    from profiles p
+   where p.id = p_caller;
+
+  if p_caller is null or v_role is distinct from 'venue_staff' then
+    raise exception 'only Venue Staff can view pending booking requests'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  return coalesce((
+    with pending as (
+      select b.*,
+             er.event_name,
+             er.status::text                      as event_status,
+             v.name                               as venue_name,
+             v.location                           as venue_location,
+             venue_occupied_period(b.starts_at, b.ends_at,
+                                   v.setup_minutes, v.turnaround_minutes) as occupied
+        from bookings b
+        join event_requests er on er.id = b.event_request_id
+        join venues v          on v.id  = b.venue_id
+       where b.status in ('pending', 'conflicting')
+    )
+    select jsonb_agg(
+             jsonb_build_object(
+               'id',                         p.id,
+               'status',                     p.status,
+               'event_request_id',           p.event_request_id,
+               'event_name',                 p.event_name,
+               'event_status',               p.event_status,
+               'venue_id',                   p.venue_id,
+               'venue_name',                 p.venue_name,
+               'venue_location',             p.venue_location,
+               'starts_at',                  p.starts_at,
+               'ends_at',                    p.ends_at,
+               'occupied_starts_at',         lower(p.occupied),
+               'occupied_ends_at',           upper(p.occupied),
+               'expected_attendance',        p.expected_attendance,
+               'room_layout_code',           p.room_layout_code,
+               'venue_requirements',         p.venue_requirements,
+               'accessibility_requirements', p.accessibility_requirements,
+               'setup_notes',                p.setup_notes,
+               'suitability_result',         p.suitability_result,
+               'suitability_overridden',     p.suitability_overridden,
+               'requested_by',               p.requested_by,
+               'created_at',                 p.created_at,
+               -- Other events only, which also leaves this request out: 051
+               -- refuses a second live request for the same event and venue,
+               -- so a same-event clash is not a choice Venue Staff make.
+               'overlapping', coalesce((
+                 select jsonb_agg(
+                          jsonb_build_object(
+                            'id',                 o.id,
+                            'event_request_id',   o.event_request_id,
+                            'event_name',         o.event_name,
+                            'starts_at',          o.starts_at,
+                            'ends_at',            o.ends_at,
+                            'occupied_starts_at', o.occupied_starts_at,
+                            'occupied_ends_at',   o.occupied_ends_at,
+                            'created_at',         o.created_at
+                          )
+                          order by o.created_at, o.id
+                        )
+                   from pending_request_overlaps(p.venue_id, p.starts_at, p.ends_at,
+                                                 p.event_request_id) o
+               ), '[]'::jsonb),
+               -- Bookings only: a block or hold never marks a request
+               -- conflicting. Flagged-for-review bookings are kept, because
+               -- they still occupy the venue until the Coordinator decides.
+               'conflicting_with', case when p.status::text = 'conflicting' then coalesce((
+                 select jsonb_agg(
+                          jsonb_build_object(
+                            'booking_id',         c.id,
+                            'event_request_id',   c.event_request_id,
+                            'event_name',         c.event_name,
+                            'starts_at',          c.starts_at,
+                            'ends_at',            c.ends_at,
+                            'occupied_starts_at', c.occupied_starts_at,
+                            'occupied_ends_at',   c.occupied_ends_at
+                          )
+                          order by c.starts_at, c.id
+                        )
+                   from venue_occupancy_conflicts(p.venue_id, p.starts_at, p.ends_at, true,
+                                                  p.event_request_id) c
+                  where c.kind = 'booking'
+               ), '[]'::jsonb) else '[]'::jsonb end,
+               -- Null once the booking it names is no longer flagged: then
+               -- approving this request leaves that booking alone (section 6).
+               'replaces', (
+                 select jsonb_build_object(
+                          'booking_id', fb.id,
+                          'venue_name', fv.name,
+                          'starts_at',  fb.starts_at,
+                          'ends_at',    fb.ends_at
+                        )
+                   from bookings fb
+                   join venues fv on fv.id = fb.venue_id
+                  where fb.id = p.replaces_booking_id
+                    and fb.status = 'flagged_for_review'
+               )
+             )
+             order by p.created_at, p.id
+           )
+      from pending p
+  ), '[]'::jsonb);
+end;
+$$;
+
+-- As in 030, 040 and 051: only the API should reach this. Nothing is granted.
+revoke execute on function list_pending_booking_requests(uuid)
   from public, anon, authenticated;
 
 

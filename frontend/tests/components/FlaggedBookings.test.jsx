@@ -757,6 +757,50 @@ describe("refusals (AC2, AC3)", () => {
   });
 });
 
+describe("replacement requests (W7)", () => {
+  const REPLACEMENTS = [
+    { id: "r1", venueId: "v7", venueName: "Room B", status: "pending", startsAt: EVENT_STARTS, endsAt: EVENT_ENDS, createdAt: FLAGGED_AT },
+    { id: "r2", venueId: "v8", venueName: null, status: "conflicting", startsAt: EVENT_STARTS, endsAt: EVENT_ENDS, createdAt: FLAGGED_AT },
+  ];
+  const KEEPS_OPEN =
+    "Reinstating keeps the replacement request open; approve or reject it separately under Pending booking requests.";
+
+  it("SCRUM266_W7_venue_staff_see_each_replacement_requested_and_that_reinstating_keeps_it_open", async () => {
+    vi.mocked(getFlaggedBookings).mockResolvedValue([item("1", { replacementRequests: REPLACEMENTS })]);
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+
+    const region = await openCard(user, "1");
+    const period = formatVenuePeriod(EVENT_STARTS, EVENT_ENDS);
+    expect(within(region).getByText(`Replacement requested: Room B, ${period} (Pending)`)).toBeInTheDocument();
+    expect(within(region).getByText(`Replacement requested: Unknown venue, ${period} (Conflicting)`)).toBeInTheDocument();
+    expect(within(region).getByText(KEEPS_OPEN)).toBeInTheDocument();
+  });
+
+  it("SCRUM266_W7_a_safety_flag_lists_the_replacement_but_has_no_reinstate_note", async () => {
+    vi.mocked(getFlaggedBookings).mockResolvedValue([item("1", { ...SAFETY, replacementRequests: REPLACEMENTS })]);
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+
+    const region = await openCard(user, "1");
+    expect(within(region).getAllByText(/^Replacement requested: /)).toHaveLength(2);
+    expect(within(region).queryByText(KEEPS_OPEN)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["empty", []],
+    ["missing", undefined],
+  ])("SCRUM266_W7_no_replacement_shown_when_the_list_is_%s", async (_label, replacementRequests) => {
+    vi.mocked(getFlaggedBookings).mockResolvedValue([item("1", { replacementRequests })]);
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+
+    const region = await openCard(user, "1");
+    expect(within(region).queryByText(/Replacement requested/)).not.toBeInTheDocument();
+    expect(within(region).queryByText(KEEPS_OPEN)).not.toBeInTheDocument();
+  });
+});
+
 describe("FlaggedBookingCard on its own", () => {
   function renderCard(props = {}) {
     return render(

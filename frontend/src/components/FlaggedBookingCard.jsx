@@ -13,7 +13,7 @@ import { statusLabel } from "../services/bookingRequestEligibility";
 import { formatTimestamp } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { conflictText } from "../services/flaggedBookingErrors";
-import { flagReasons } from "../services/flaggedBookingDisplay";
+import { flagReasons, replacementRequestText, replacementRequests } from "../services/flaggedBookingDisplay";
 
 function capitalise(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -32,6 +32,7 @@ export default function FlaggedBookingCard({
 }) {
   const reasons = flagReasons(item);
   const clashes = Array.isArray(conflicts) ? conflicts : [];
+  const replacements = replacementRequests(item);
   const eventName = item.eventName || "Unnamed event";
   const venueName = item.venueName || "Unknown venue";
   const regionId = `flagged-booking-${item.id}`;
@@ -84,6 +85,14 @@ export default function FlaggedBookingCard({
             ))}
           </ul>
 
+          {replacements.length > 0 && (
+            <ul className="pending-bookings__overlapping">
+              {replacements.map((r) => (
+                <li key={r.id}>{replacementRequestText(r)}</li>
+              ))}
+            </ul>
+          )}
+
           {error && (
             <p className="pending-bookings__error" role="alert">
               {error}
@@ -103,6 +112,12 @@ export default function FlaggedBookingCard({
             </>
           )}
 
+          {item.reinstatable && replacements.length > 0 && (
+            <p className="pending-bookings__event-status">
+              Reinstating keeps the replacement request open; approve or reject it separately under Pending
+              booking requests.
+            </p>
+          )}
           {item.reinstatable ? (
             <FlaggedBookingReasonForm
               id={`${regionId}-reinstate`}

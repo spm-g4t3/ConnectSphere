@@ -11,6 +11,8 @@
 //
 // After every decision the queue is refetched, not patched: an approval turns
 // other cards Conflicting, and the server is the one that knows which.
+// onDecided, when given, tells a parent that a decision went through, as an
+// approval can close a flagged booking it replaces.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import PendingBookingRequestCard from "./PendingBookingRequestCard";
@@ -61,7 +63,7 @@ function marksOnApproval(item, pendingIds) {
   return overlapping.filter((other) => pendingIds.has(other.id)).length;
 }
 
-export default function PendingBookingRequests() {
+export default function PendingBookingRequests({ onDecided }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -125,6 +127,7 @@ export default function PendingBookingRequests() {
           : "Rejected; the coordinator has been notified.",
       );
       setExpandedId(null);
+      onDecided?.();
       await refreshRequests();
     } catch (err) {
       const message = decisionErrorMessage(err);

@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
 import VenueStaffDashboard from "../../src/components/VenueStaffDashboard.jsx";
@@ -89,5 +90,43 @@ describe("SCRUM266 VenueStaffDashboard", () => {
     const pending = screen.getByRole("heading", { name: "Pending booking requests" }).closest("section");
     expect(pending.compareDocumentPosition(flagged) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(pending).queryByText("Board Retreat")).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM266 approving a replacement on the dashboard (W7)", () => {
+  it("SCRUM266_W7_an_approval_in_the_queue_refreshes_the_flagged_bookings_list", async () => {
+    const user = userEvent.setup();
+    const replacement = {
+      ...PENDING,
+      eventStatus: "approved",
+      replaces: { bookingId: "f1", venueName: "Hall B", startsAt: FLAGGED.startsAt, endsAt: FLAGGED.endsAt },
+    };
+    let flagged = [FLAGGED];
+    let pending = [replacement];
+    vi.mocked(apiClient.get).mockImplementation(async (url) => ({
+      data: url === "/flagged-bookings" ? flagged : url === "/booking-requests/pending" ? pending : [],
+    }));
+    // The server closes the flagged booking as replaced when its replacement is approved.
+    vi.mocked(apiClient.post).mockImplementation(async () => {
+      flagged = [];
+      pending = [];
+      return { data: { markedConflicting: [] } };
+    });
+    render(
+      <MemoryRouter>
+        <VenueStaffDashboard user={{ id: "u1", email: "staff@example.com", role: "venue_staff" }} />
+      </MemoryRouter>,
+    );
+
+    // Looked up each time, as the refresh may replace the section's element.
+    const flaggedSection = () => screen.getByRole("heading", { name: "Flagged bookings" }).closest("section");
+    expect(await within(flaggedSection()).findByText("Board Retreat")).toBeInTheDocument();
+
+    const queue = screen.getByRole("heading", { name: "Pending booking requests" }).closest("section");
+    await user.click(await within(queue).findByText("Tech Talk"));
+    await user.click(within(queue).getByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByText("No bookings are flagged for review.")).toBeInTheDocument();
+    expect(within(flaggedSection()).queryByText("Board Retreat")).not.toBeInTheDocument();
   });
 });

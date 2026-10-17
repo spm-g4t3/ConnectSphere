@@ -83,3 +83,9 @@ describe("SCRUM172_AC7 where each role lands", () => {
     expect(notificationLink(note(type), role)).toEqual(expected);
   });
 });
+
+describe("SCRUM266_AC1 Venue Staff's flag notice", () => {
+  it("SCRUM266_AC1_venue_staff_safety_flag_opens_the_flagged_bookings_list", () => {
+    expect(notificationLink(note("safety_booking_flagged"), "venue_staff")).toEqual({ to: "/flagged-bookings" });
+  });
+});

@@ -1,10 +1,12 @@
 // flaggedBookingDisplay.js
 //
-// Shared wording for the review reasons stored on flagged bookings.
+// Shared wording for the review reasons stored on flagged bookings, and for
+// the replacement requests linked to them.
 //
 // A services module, not part of a component, because the react-refresh lint
 // rule lets component files export components only.
 
+import { statusLabel } from "./bookingRequestEligibility";
 import { formatVenuePeriod } from "./datetimeFormat";
 import { reasonLabel } from "./venueBlockReasons";
 
@@ -78,4 +80,45 @@ export function flagReasons(item) {
   if (review) reasons.push({ kind: "review", text: review, details: [] });
   if (reasons.length === 0) reasons.push({ kind: "unknown", text: "Reason not recorded", details: [] });
   return reasons;
+}
+
+function capitalise(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * One open replacement request on a flagged booking, as both the coordinator
+ * and Venue Staff see it: "Replacement requested: Room B, <period> (Pending)".
+ *
+ * @param {{venueName?: string|null, status?: string, startsAt?: string, endsAt?: string}} request
+ * @returns {string}
+ */
+export function replacementRequestText(request) {
+  const venue = request.venueName || "Unknown venue";
+  const period = formatVenuePeriod(request.startsAt, request.endsAt);
+  return `Replacement requested: ${venue}, ${period} (${capitalise(statusLabel(request.status))})`;
+}
+
+/**
+ * A row's open replacement requests; a missing or malformed field reads as
+ * none, so an older server shows nothing rather than failing.
+ *
+ * @param {object} item  a flagged booking row
+ * @returns {object[]}
+ */
+export function replacementRequests(item) {
+  return Array.isArray(item.replacementRequests) ? item.replacementRequests : [];
+}
+
+/**
+ * The note on a pending request that would replace a still-flagged booking,
+ * since approving it also cancels that booking.
+ *
+ * @param {{venueName?: string|null, startsAt?: string, endsAt?: string}} replaces
+ * @returns {string}
+ */
+export function replacesFlaggedBookingText(replaces) {
+  const venue = replaces.venueName || "Unknown venue";
+  const period = formatVenuePeriod(replaces.startsAt, replaces.endsAt);
+  return `Replaces the flagged booking at ${venue}, ${period}. Approving this request cancels that booking.`;
 }

@@ -1189,7 +1189,7 @@ describe('SCRUM-258 AC1: Venue Staff see the pending requests', () => {
   const STAFF_ID = '99999999-9999-4999-8999-999999999999';
   const asStaff = signedInWithRole(ROLE.VENUE_STAFF, STAFF_ID);
 
-  /** One element of list_pending_booking_requests (066). */
+  /** One element of list_pending_booking_requests (078). */
   const pendingRow = (overrides = {}) => ({
     ...bookingRow(),
     event_name: 'IS212 Industry Night',
@@ -1213,6 +1213,19 @@ describe('SCRUM-258 AC1: Venue Staff see the pending requests', () => {
     expect(res.status).toBe(200);
     expect(res.body.map((r) => r.id)).toEqual([BOOKING_ID, OTHER_BOOKING_ID]);
     expect(res.body[0]).toMatchObject({ eventName: 'IS212 Industry Night', venueName: 'Hall A', status: 'pending', overlapping: [] });
+  });
+
+  it('SCRUM266_W7_the_queue_names_the_flagged_booking_a_request_replaces', async () => {
+    const replaces = { booking_id: OTHER_BOOKING_ID, venue_name: 'Hall B', starts_at: START, ends_at: END };
+    const client = createFakeClient([ok([pendingRow({ replaces }), pendingRow({ id: OTHER_BOOKING_ID, replaces: null })])]);
+
+    const res = await listPending(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((r) => r.replaces)).toEqual([
+      { bookingId: OTHER_BOOKING_ID, venueName: 'Hall B', startsAt: START, endsAt: END },
+      null,
+    ]);
   });
 
   it('SCRUM258_AC1_an_empty_queue_is_200_not_404', async () => {

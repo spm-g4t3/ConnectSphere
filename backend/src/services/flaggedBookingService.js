@@ -88,6 +88,19 @@ function toFlagBlock(row) {
   };
 }
 
+/** One live request raised to replace a flagged booking (078, section 3). */
+function toReplacementRequest(row) {
+  return {
+    id: row.id,
+    venueId: row.venue_id,
+    venueName: row.venue_name ?? null,
+    status: row.status,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    createdAt: row.created_at,
+  };
+}
+
 /** @param {object} row  one element of list_flagged_bookings (078) */
 function toFlaggedBooking(row) {
   return {
@@ -112,12 +125,14 @@ function toFlaggedBooking(row) {
     venueLocation: row.venue_location ?? null,
     block: toFlagBlock(row),
     reinstatable: row.reinstatable === true,
+    replacementRequests: (row.replacement_requests ?? []).map(toReplacementRequest),
   };
 }
 
 /**
  * Every booking flagged for review, oldest flag first, each with what flagged
- * it: a block, a review reason, or both when a safety flag sits on a block's.
+ * it: a block, a review reason, or both when a safety flag sits on a block's,
+ * and the live requests replacing it.
  *
  * @param {string} callerId  from the JWT -- never the client
  * @param {object} [options]
@@ -142,22 +157,9 @@ export async function listFlaggedBookings(callerId, { client } = {}) {
   return data.map(toFlaggedBooking);
 }
 
-/** One live request raised to replace a flagged booking (078, section 4). */
-function toReplacementRequest(row) {
-  return {
-    id: row.id,
-    venueId: row.venue_id,
-    venueName: row.venue_name ?? null,
-    status: row.status,
-    startsAt: row.starts_at,
-    endsAt: row.ends_at,
-    createdAt: row.created_at,
-  };
-}
-
 /**
  * One event's bookings flagged for review, for its assigned coordinator: the
- * shape listFlaggedBookings gives, each with the live requests replacing it.
+ * shape listFlaggedBookings gives.
  *
  * @param {string} eventRequestId
  * @param {string} callerId  from the JWT -- never the client
@@ -184,10 +186,7 @@ export async function listEventFlaggedBookings(eventRequestId, callerId, { clien
     throw new Error('Unexpected result from list_event_flagged_bookings');
   }
 
-  return data.map((row) => ({
-    ...toFlaggedBooking(row),
-    replacementRequests: (row.replacement_requests ?? []).map(toReplacementRequest),
-  }));
+  return data.map(toFlaggedBooking);
 }
 
 /**

@@ -223,7 +223,7 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
       const staffView = (await one('select list_flagged_bookings($1) as result', [staff])).result.find(
         (row) => row.id === isFlagged,
       );
-      expect(listed[0]).toEqual({ ...staffView, replacement_requests: [] });
+      expect(listed[0]).toEqual(staffView);
     });
 
     it('SCRUM266_AC1_an_event_with_nothing_flagged_is_an_empty_array', async () => {
@@ -291,6 +291,67 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
       expect(listed.find((r) => r.id === otherFlagged).replacement_requests.map((r) => r.id)).toEqual([
         forTheOther,
       ]);
+    });
+  });
+
+  describe('W7: Venue Staff see that a flagged booking is being replaced', () => {
+    const staffListed = async (bookingId) =>
+      (await one('select list_flagged_bookings($1) as result', [staff])).result.find((row) => row.id === bookingId);
+    const queued = async (bookingId) =>
+      (await one('select list_pending_booking_requests($1) as result', [staff])).result.find(
+        (row) => row.id === bookingId,
+      );
+
+    it('SCRUM266_W7_venue_staff_list_carries_a_live_replacement_and_drops_a_rejected_or_withdrawn_one', async () => {
+      const event = await makeEvent();
+      const isFlagged = await flagged(event);
+      const rejected = (await request(event, await makeVenue(), isFlagged)).booking.id;
+      await decide(rejected, 'reject', 'Not available');
+      const withdrawn = (await request(event, await makeVenue(), isFlagged)).booking.id;
+      await one('select withdraw_booking_request($1, $2)', [withdrawn, coordinator]);
+      const live = (await request(event, await makeVenue(), isFlagged)).booking.id;
+
+      const row = await staffListed(isFlagged);
+
+      expect(row.replacement_requests.map((r) => r.id)).toEqual([live]);
+      expect(row.replacement_requests).toEqual((await listForEvent(event))[0].replacement_requests);
+    });
+
+    it('SCRUM266_W7_the_queue_names_the_still_flagged_booking_a_request_replaces', async () => {
+      const event = await makeEvent();
+      const isFlagged = await flagged(event);
+      const flaggedBooking = await bookingRow(isFlagged);
+      const venue = await one('select v.name from venues v where v.id = $1', [flaggedBooking.venue_id]);
+      const replacement = (await request(event, await makeVenue(), isFlagged)).booking.id;
+      const ordinary = (await request(await makeEvent(), await makeVenue())).booking.id;
+
+      const row = await queued(replacement);
+
+      expect(row.replaces).toEqual({
+        booking_id: isFlagged,
+        venue_name: venue.name,
+        starts_at: expect.any(String),
+        ends_at: expect.any(String),
+      });
+      expect(new Date(row.replaces.starts_at)).toEqual(flaggedBooking.starts_at);
+      expect(new Date(row.replaces.ends_at)).toEqual(flaggedBooking.ends_at);
+      expect((await queued(ordinary)).replaces).toBeNull();
+    });
+
+    it.each([
+      ['reinstated', () => ['select reinstate_flagged_booking($1, $2, $3)', staff, 'Block moved']],
+      ['cancelled', () => ['select cancel_flagged_booking($1, $2, $3)', coordinator, 'Not needed']],
+    ])('SCRUM266_W7_once_the_flagged_booking_is_%s_the_queue_shows_no_replaces', async (_label, resolve) => {
+      const event = await makeEvent();
+      const isFlagged = await flagged(event);
+      const replacement = (await request(event, await makeVenue(), isFlagged)).booking.id;
+      const [sql, caller, reason] = resolve();
+      await one(sql, [isFlagged, caller, reason]);
+
+      const row = await queued(replacement);
+
+      expect(row.status).toBe('pending');
+      expect(row.replaces).toBeNull();
     });
   });
 
@@ -518,7 +579,7 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
   });
 
   describe('the migration is re-runnable', () => {
-    it('SCRUM266_W7_running_078_again_keeps_one_create_booking_request_and_the_column', async () => {
+    it('SCRUM266_W7_running_078_again_keeps_one_of_each_function_and_the_column', async () => {
       const event = await makeEvent();
       const isFlagged = await flagged(event);
       const replacement = (await request(event, await makeVenue(), isFlagged)).booking.id;
@@ -526,16 +587,21 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
       await db.exec(migration(MIGRATION_078));
       await db.exec(migration(MIGRATION_078));
 
-      const { fns } = await one(`select count(*)::int as fns from pg_proc where proname = 'create_booking_request'`);
-      expect(fns).toBe(1);
+      const fns = await one(
+        `select count(*) filter (where proname = 'create_booking_request')::int as create,
+                count(*) filter (where proname = 'list_pending_booking_requests')::int as queue
+           from pg_proc`,
+      );
+      expect(fns).toEqual({ create: 1, queue: 1 });
       expect((await bookingRow(replacement)).replaces_booking_id).toBe(isFlagged);
       const grants = await one(
         `select has_function_privilege('anon',
                   'create_booking_request(uuid, uuid, uuid, text, text, jsonb, boolean, integer, uuid)',
                   'execute') as anon,
-                has_function_privilege('anon', 'flagged_bookings_json(uuid)', 'execute') as helper`,
+                has_function_privilege('anon', 'flagged_bookings_json(uuid)', 'execute') as helper,
+                has_function_privilege('anon', 'list_pending_booking_requests(uuid)', 'execute') as queue`,
       );
-      expect(grants).toEqual({ anon: false, helper: false });
+      expect(grants).toEqual({ anon: false, helper: false, queue: false });
     });
   });
 });

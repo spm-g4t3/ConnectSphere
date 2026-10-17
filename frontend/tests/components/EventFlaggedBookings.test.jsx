@@ -236,14 +236,22 @@ describe("find a replacement venue (W7)", () => {
     expect(onReplace).toHaveBeenCalledWith(target);
   });
 
-  it("SCRUM266_W7_marks_the_booking_being_replaced_and_only_that_one", async () => {
+  it("SCRUM266_W7_says_in_text_which_booking_is_being_replaced_and_only_that_one", async () => {
     vi.mocked(getEventFlaggedBookings).mockResolvedValue([item("1"), item("2")]);
     renderSection({ replacingId: "2" });
 
-    const replace = async (name) =>
-      within(await screen.findByRole("listitem", { name })).getByRole("button", { name: "Find a replacement venue" });
-    expect(await replace("Hall 2, Level 2")).toHaveAttribute("aria-pressed", "true");
-    expect(await replace("Hall 1, Level 2")).toHaveAttribute("aria-pressed", "false");
+    const target = await screen.findByRole("listitem", { name: "Hall 2, Level 2" });
+    const other = screen.getByRole("listitem", { name: "Hall 1, Level 2" });
+    expect(within(target).getByText("Finding a replacement below.")).toBeInTheDocument();
+    expect(within(other).queryByText("Finding a replacement below.")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM266_W7_the_replace_button_is_a_plain_button_not_a_toggle", async () => {
+    vi.mocked(getEventFlaggedBookings).mockResolvedValue([item("1")]);
+    renderSection({ replacingId: "1" });
+
+    const card = await screen.findByRole("listitem", { name: "Hall 1, Level 2" });
+    expect(within(card).getByRole("button", { name: "Find a replacement venue" })).not.toHaveAttribute("aria-pressed");
   });
 });
 

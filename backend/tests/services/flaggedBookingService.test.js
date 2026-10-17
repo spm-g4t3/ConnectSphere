@@ -543,6 +543,7 @@ describe('SCRUM266 listing flagged bookings', () => {
     block_ends_at: '2026-12-01T09:00:00+00:00',
     block_removed_at: '2026-10-12T00:00:00+00:00',
     reinstatable: false,
+    replacement_requests: [],
     ...overrides,
   });
 
@@ -603,7 +604,34 @@ describe('SCRUM266 listing flagged bookings', () => {
           removedAt: '2026-10-12T00:00:00+00:00',
         },
         reinstatable: false,
+        replacementRequests: [],
       });
+    });
+
+    it('SCRUM266_W7_venue_staff_see_each_bookings_replacement_requests_in_camel_case', async () => {
+      const replacement = {
+        id: OTHER_BOOKING,
+        venue_id: VENUE,
+        venue_name: 'Garden Hall',
+        status: 'pending',
+        starts_at: '2026-12-01T06:00:00+00:00',
+        ends_at: '2026-12-01T08:00:00+00:00',
+        created_at: '2026-10-11T00:00:00+00:00',
+      };
+
+      const [item] = await list(clientAnswering(listed(flaggedRow({ replacement_requests: [replacement] }))));
+
+      expect(item.replacementRequests).toEqual([
+        {
+          id: OTHER_BOOKING,
+          venueId: VENUE,
+          venueName: 'Garden Hall',
+          status: 'pending',
+          startsAt: '2026-12-01T06:00:00+00:00',
+          endsAt: '2026-12-01T08:00:00+00:00',
+          createdAt: '2026-10-11T00:00:00+00:00',
+        },
+      ]);
     });
 
     it('SCRUM266_AC1_status_display_reads_flagged_for_review', async () => {
@@ -656,6 +684,7 @@ describe('SCRUM266 listing flagged bookings', () => {
         venueLocation: null,
         block: { id: BLOCK, reason: null, notes: null, startsAt: null, endsAt: null, removedAt: null },
         reinstatable: false,
+        replacementRequests: [],
       });
     });
 

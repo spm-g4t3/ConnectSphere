@@ -89,8 +89,9 @@ export function createBookingRequestRouter({
    * events' open requests whose occupied periods overlap it, in submission
    * order. A conflicting one also carries conflictingWith: the bookings
    * occupying its period now, [] once that clash is gone (and on pending rows).
+   * replaces is the flagged booking a request would replace, null otherwise.
    *
-   * Behind venueStaffOnly, and list_pending_booking_requests (066) checks the
+   * Behind venueStaffOnly, and list_pending_booking_requests (078) checks the
    * caller's role again. A bare array; none pending is 200 [], never 404.
    * Declared before any /:id route, so "pending" is never read as an id.
    *

@@ -654,7 +654,7 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
     ],
   };
 
-  /** One element of list_pending_booking_requests (066), as jsonb returns it. */
+  /** One element of list_pending_booking_requests (078), as jsonb returns it. */
   const pendingRow = (overrides = {}) => ({
     id: BOOKING,
     event_request_id: EVENT,
@@ -779,6 +779,32 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
       client: clientAnswering({ data: [pendingRow({ conflicting_with: value })], error: null }),
     });
     expect(request.conflictingWith).toEqual([]);
+  });
+
+  it('SCRUM266_W7_a_request_replacing_a_flagged_booking_names_it_in_camelCase', async () => {
+    const replaces = {
+      booking_id: OTHER_BOOKING,
+      venue_name: 'Harbour Room',
+      starts_at: '2026-12-01T10:00:00+00:00',
+      ends_at: '2026-12-01T12:00:00+00:00',
+    };
+    const [request] = await listPendingBookingRequests(USER, {
+      client: clientAnswering({ data: [pendingRow({ replaces })], error: null }),
+    });
+
+    expect(request.replaces).toEqual({
+      bookingId: OTHER_BOOKING,
+      venueName: 'Harbour Room',
+      startsAt: '2026-12-01T10:00:00+00:00',
+      endsAt: '2026-12-01T12:00:00+00:00',
+    });
+  });
+
+  it.each([null, undefined])('SCRUM266_W7_a_%s_replaces_is_null', async (value) => {
+    const [request] = await listPendingBookingRequests(USER, {
+      client: clientAnswering({ data: [pendingRow({ replaces: value })], error: null }),
+    });
+    expect(request.replaces).toBeNull();
   });
 });
 

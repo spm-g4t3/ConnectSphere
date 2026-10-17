@@ -11,12 +11,18 @@
 // rendering a second copy of the greeting and the queue below. Nothing about
 // the retire flow changed in the move.
 
+import { useState } from "react";
 import PendingBookingRequests from "./PendingBookingRequests";
 import FlaggedBookings from "./FlaggedBookings";
 import VenueCatalogue from "./VenueCatalogue";
 import NotificationInbox from "./NotificationInbox";
 
 export default function VenueStaffDashboard({ user }) {
+  // Remounts Flagged bookings after a decision in the queue: approving a
+  // replacement closes the flagged booking it replaces, and rejecting one
+  // drops it from that booking's replacement list.
+  const [flaggedVersion, setFlaggedVersion] = useState(0);
+
   return (
     <div className="dashboard dashboard--venue-staff">
       {/* user.name does not exist: auth.js:44-51 returns { id, email, role }
@@ -27,9 +33,9 @@ export default function VenueStaffDashboard({ user }) {
 
       {/* A direct child of .dashboard, like VenueCatalogue below, so its
           <section> root gets the `.dashboard > section` card styling. */}
-      <PendingBookingRequests />
+      <PendingBookingRequests onDecided={() => setFlaggedVersion((n) => n + 1)} />
 
-      <FlaggedBookings />
+      <FlaggedBookings key={flaggedVersion} />
 
       <NotificationInbox />
 
