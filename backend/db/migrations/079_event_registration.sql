@@ -349,74 +349,10 @@ begin
 end;
 $$;
 
-create or replace function list_open_registration_events(p_attendee_id uuid)
-returns table (
-  id uuid,
-  event_name text,
-  description text,
-  proposed_start timestamptz,
-  registration_opens_at timestamptz,
-  registration_closes_at timestamptz,
-  registration_capacity integer,
-  registered_count integer,
-  is_registered boolean
-)
-language plpgsql
-stable
-set search_path = public
-as $$
-begin
-  if p_attendee_id is null then
-    raise exception 'An attendee is required' using errcode = '22023';
-  end if;
-  if not exists (
-    select 1 from profiles p
-     where p.id = p_attendee_id
-       and p.role = 'attendee'
-  ) then
-    raise exception 'Only an attendee may list registration events' using errcode = '42501';
-  end if;
-
-  return query
-    select er.id,
-           er.event_name,
-           er.description,
-           er.proposed_start,
-           er.registration_opens_at,
-           er.registration_closes_at,
-           er.registration_capacity,
-           counts.registered_count,
-           own.is_registered
-      from event_requests er
-      cross join lateral (
-        select count(*)::integer as registered_count
-          from event_registrations r
-         where r.event_request_id = er.id
-           and r.status = 'registered'
-      ) counts
-      cross join lateral (
-        select exists (
-          select 1 from event_registrations r
-           where r.event_request_id = er.id
-             and r.attendee_id = p_attendee_id
-             and r.status = 'registered'
-        ) as is_registered
-      ) own
-     where er.status = 'confirmed'
-       and er.registration_enabled
-       and er.registration_opens_at <= now()
-       and (er.registration_closes_at is null or er.registration_closes_at > now())
-       and er.proposed_start > now()
-     order by er.proposed_start, er.event_name;
-end;
-$$;
-
 revoke all on function setup_event_registration(uuid, uuid, boolean, timestamptz, timestamptz, integer, timestamptz) from public, anon, authenticated;
 revoke all on function register_for_event(uuid, uuid) from public, anon, authenticated;
-revoke all on function list_open_registration_events(uuid) from public, anon, authenticated;
 
 grant execute on function setup_event_registration(uuid, uuid, boolean, timestamptz, timestamptz, integer, timestamptz) to service_role;
 grant execute on function register_for_event(uuid, uuid) to service_role;
-grant execute on function list_open_registration_events(uuid) to service_role;
 
 notify pgrst, 'reload schema';

@@ -32,3 +32,7 @@ create trigger event_requests_guard_registration_schedule
   before update of proposed_start on event_requests
   for each row
   execute function guard_registration_schedule_on_start_change();
+
+-- The attendee list reuses the shared open-event service, so the SQL copy of its rule is retired.
+drop function if exists list_open_registration_events(uuid);
+
