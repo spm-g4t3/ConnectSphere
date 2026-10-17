@@ -131,3 +131,22 @@ describe("SCRUM-488 AC6: My events with events in the safety statuses", () => {
     expect(screen.getByText(/^Cancelled/, { selector: "summary" }).closest("details")).not.toHaveAttribute("open");
   });
 });
+
+// SCRUM-266: a confirmed event with a flagged booking is marked on its row.
+describe("SCRUM-266 AC4: Needs attention on My events", () => {
+  it("SCRUM266_AC4_marks_only_the_rows_the_server_says_need_attention", async () => {
+    renderList([
+      { ...event("e1", "confirmed", "Flagged event"), needsAttention: true },
+      { ...event("e2", "confirmed", "Fine event"), needsAttention: false },
+      event("e3", "confirmed", "Older payload"),
+    ]);
+
+    const row = (name) => screen.getByText(name).closest("li");
+    await screen.findByText("Flagged event");
+    expect(within(row("Flagged event")).getByText("Needs attention", { selector: ".status-badge" })).toHaveClass(
+      "status--action-required",
+    );
+    expect(within(row("Fine event")).queryByText("Needs attention")).not.toBeInTheDocument();
+    expect(within(row("Older payload")).queryByText("Needs attention")).not.toBeInTheDocument();
+  });
+});

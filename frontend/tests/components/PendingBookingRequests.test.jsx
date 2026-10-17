@@ -774,3 +774,38 @@ describe("after a decision, and incomplete data", () => {
     await act(async () => approval.resolve({ id: "1", markedConflicting: [] }));
   });
 });
+
+describe("a request that replaces a flagged booking (W7)", () => {
+  const FLAGGED_STARTS = "2026-11-30T09:00:00+08:00";
+  const FLAGGED_ENDS = "2026-11-30T17:00:00+08:00";
+
+  it.each([
+    ["named", "Hall Z", "Hall Z"],
+    ["unnamed", null, "Unknown venue"],
+  ])("SCRUM266_W7_says_approving_cancels_the_%s_flagged_booking_it_replaces", async (_label, venueName, shown) => {
+    const replaces = { bookingId: "f1", venueName, startsAt: FLAGGED_STARTS, endsAt: FLAGGED_ENDS };
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([item("1", { replaces })]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+
+    const region = await openCard(user, "1");
+    expect(
+      within(region).getByText(
+        `Replaces the flagged booking at ${shown}, ${formatVenuePeriod(FLAGGED_STARTS, FLAGGED_ENDS)}. ` +
+          "Approving this request cancels that booking.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    ["null", null],
+    ["missing", undefined],
+  ])("SCRUM266_W7_no_replaces_note_when_the_field_is_%s", async (_label, replaces) => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([item("1", { replaces })]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+
+    const region = await openCard(user, "1");
+    expect(within(region).queryByText(/Replaces the flagged booking/)).not.toBeInTheDocument();
+  });
+});

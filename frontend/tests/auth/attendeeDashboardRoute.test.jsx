@@ -340,7 +340,7 @@ describe("SCRUM453 existing roles keep their navigation", () => {
   it.each([
     ["event_organiser", ["/dashboard", "/events"]],
     ["event_coordinator", ["/dashboard", "/my-events", "/my-venue-requests", "/review-queue", "/venue-search"]],
-    ["venue_staff", ["/dashboard", "/venue-catalogue", "/booking-requests"]],
+    ["venue_staff", ["/dashboard", "/venue-catalogue", "/booking-requests", "/flagged-bookings"]],
     [
       "technical_support_staff",
       ["/dashboard", "/tickets", "/equipment", "/equipment-catalogue", "/equipment-availability"],

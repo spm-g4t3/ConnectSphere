@@ -28,6 +28,7 @@ vi.mock("../../src/components/MyAssignedEvents", () => ({ default: () => null })
 vi.mock("../../src/components/ReviewQueue", () => ({ default: () => null }));
 vi.mock("../../src/components/UnassignedQueue", () => ({ default: () => null }));
 vi.mock("../../src/components/PendingBookingRequests", () => ({ default: () => null }));
+vi.mock("../../src/components/FlaggedBookings", () => ({ default: () => null }));
 vi.mock("../../src/components/VenueCatalogue", () => ({ default: () => null }));
 
 vi.mock("../../src/services/eventRequestService", () => ({

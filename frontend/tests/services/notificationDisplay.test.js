@@ -29,7 +29,7 @@ describe("describeNotification: booking_flagged", () => {
 
   it("SCRUM17_AC3_detail_gives_booking_times_reason_label_and_block_times", () => {
     expect(describeNotification(flagged()).detail).toBe(
-      `Booked ${BOOKED}. The venue is blocked for Maintenance, ${BLOCKED}.`,
+      `Booked ${BOOKED}. The venue is blocked for Maintenance, ${BLOCKED}. Alternative arrangements are required.`,
     );
   });
 
@@ -67,7 +67,7 @@ describe("describeNotification: booking_flagged", () => {
   it("reads missing times as unknown, never undefined", () => {
     const { detail } = describeNotification(flagged({ eventName: "X", venueName: "Y" }));
     expect(detail).toBe(
-      "Booked unknown – unknown. The venue is blocked for unspecified reason, unknown – unknown.",
+      "Booked unknown – unknown. The venue is blocked for unspecified reason, unknown – unknown. Alternative arrangements are required.",
     );
     expect(detail).not.toContain("undefined");
   });
@@ -88,7 +88,7 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
 
     expect(headline).toBe("Orientation at Harbour Room needs review");
     expect(detail).toBe(
-      `Setup or turnaround time changed. It now occupies ${formatOccupiedPeriod(SETUP_PAYLOAD)}.`,
+      `Setup or turnaround time changed. It now occupies ${formatOccupiedPeriod(SETUP_PAYLOAD)}. Alternative arrangements are required.`,
     );
     // The parts, each from the same instants.
     expect(detail).toContain(
@@ -109,7 +109,7 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
     const { headline, detail } = describeNotification(setupChange({}));
     expect(headline).toBe("Unnamed event at Unknown venue needs review");
     // Nothing usable: no time sentence at all, rather than "unknown – unknown".
-    expect(detail).toBe("Setup or turnaround time changed.");
+    expect(detail).toBe("Setup or turnaround time changed. Alternative arrangements are required.");
     expect(detail).not.toContain("unknown");
     expect(`${headline} ${detail}`).not.toContain("undefined");
   });
@@ -119,7 +119,7 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
       setupChange({ ...SETUP_PAYLOAD, startsAt: undefined, endsAt: undefined }),
     );
     expect(detail).toBe(
-      `Setup or turnaround time changed. It now occupies ${formatRange(SETUP_PAYLOAD.occupiedStartsAt, SETUP_PAYLOAD.occupiedEndsAt)}.`,
+      `Setup or turnaround time changed. It now occupies ${formatRange(SETUP_PAYLOAD.occupiedStartsAt, SETUP_PAYLOAD.occupiedEndsAt)}. Alternative arrangements are required.`,
     );
     expect(detail).not.toContain("unknown");
     expect(detail).not.toContain("Setup 0");
@@ -135,7 +135,7 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
   ])("SCRUM484_AC8_%s_times_give_no_time_sentence", (_label, overrides) => {
     const { headline, detail } = describeNotification(setupChange({ ...SETUP_PAYLOAD, ...overrides }));
     expect(headline).toBe("Orientation at Harbour Room needs review");
-    expect(detail).toBe("Setup or turnaround time changed.");
+    expect(detail).toBe("Setup or turnaround time changed. Alternative arrangements are required.");
     expect(detail).not.toContain("Invalid Date");
   });
 
@@ -146,7 +146,7 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
   ])("SCRUM484_AC8_%s_fall_back_to_the_plain_range", (_label, overrides) => {
     const { detail } = describeNotification(setupChange({ ...SETUP_PAYLOAD, ...overrides }));
     expect(detail).toBe(
-      `Setup or turnaround time changed. It now occupies ${formatRange(SETUP_PAYLOAD.startsAt, SETUP_PAYLOAD.endsAt)}.`,
+      `Setup or turnaround time changed. It now occupies ${formatRange(SETUP_PAYLOAD.startsAt, SETUP_PAYLOAD.endsAt)}. Alternative arrangements are required.`,
     );
     expect(detail).not.toContain("·");
     expect(detail).not.toContain("Turnaround ");
@@ -592,6 +592,142 @@ describe("describeNotification: safety_equipment_review (SCRUM-172 AC6)", () => 
   });
 });
 
+// Week 7: a flagged booking tells its coordinator that another plan is needed.
+describe("describeNotification: flagged bookings need alternative arrangements (SCRUM-266 Week 7)", () => {
+  it.each([
+    ["booking_flagged", PAYLOAD],
+    ["booking_flagged_setup_change", SETUP_PAYLOAD],
+  ])("SCRUM266_W7_%s_says_alternative_arrangements_are_required", (type, payload) => {
+    const { detail } = describeNotification({ id: "n1", type, payload });
+    expect(detail).toMatch(/\. Alternative arrangements are required\.$/);
+  });
+});
+
+// SCRUM-266 (AC6). The payload sent when a flagged booking is resolved.
+const RESOLVED_PAYLOAD = {
+  audience: "coordinator",
+  outcome: "reinstated",
+  eventRequestId: "e0000000-0000-4000-8000-000000000001",
+  eventName: "Tech Talk",
+  venueId: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+  venueName: "Hall A",
+  startsAt: "2026-10-01T10:00:00+08:00",
+  endsAt: "2026-10-01T12:00:00+08:00",
+  reason: "Maintenance finished early",
+  resolvedAt: "2026-09-20T09:00:00+08:00",
+  resolvedByRole: "venue_staff",
+  replacementBookingId: null,
+  replacementVenueName: null,
+  replacementStartsAt: null,
+  replacementEndsAt: null,
+};
+const REPLACED = {
+  outcome: "replaced",
+  replacementBookingId: "b0000000-0000-4000-8000-000000000002",
+  replacementVenueName: "Hall B",
+  replacementStartsAt: "2026-10-01T13:00:00+08:00",
+  replacementEndsAt: "2026-10-01T15:00:00+08:00",
+};
+const resolved = (overrides = {}) => describeNotification({
+  id: "n12",
+  type: "flagged_booking_resolved",
+  payload: { ...RESOLVED_PAYLOAD, ...overrides },
+});
+const RESOLVED_RANGE = formatRange(RESOLVED_PAYLOAD.startsAt, RESOLVED_PAYLOAD.endsAt);
+const REPLACED_RANGE = formatRange(REPLACED.replacementStartsAt, REPLACED.replacementEndsAt);
+
+describe("describeNotification: flagged_booking_resolved (SCRUM-266 AC6)", () => {
+  it.each(["coordinator", "organiser"])("SCRUM266_AC6_reinstated_tells_the_%s_it_is_booked_again", (audience) => {
+    expect(resolved({ audience })).toEqual({
+      headline: "Hall A for Tech Talk was reinstated",
+      detail: `It is booked again for ${RESOLVED_RANGE}. Reason: Maintenance finished early.`,
+    });
+  });
+
+  it("SCRUM266_AC6_cancelled_tells_the_coordinator_they_can_request_another_venue", () => {
+    expect(resolved({ outcome: "cancelled", reason: "Flood damage." })).toEqual({
+      headline: "The booking of Hall A for Tech Talk was cancelled",
+      detail:
+        "It was cancelled by Venue Staff. Reason: Flood damage. " +
+        "You can request another venue from the event.",
+    });
+  });
+
+  it("SCRUM266_AC6_cancelled_gives_the_organiser_nothing_to_do", () => {
+    const { detail } = resolved({ audience: "organiser", outcome: "cancelled", reason: "Flood damage" });
+    expect(detail).toBe(
+      "It was cancelled by Venue Staff. Reason: Flood damage. Your event is not cancelled.",
+    );
+    expect(detail).not.toContain("You can request");
+  });
+
+  it("SCRUM266_AC6_cancelled_by_the_coordinator_says_so_to_the_organiser", () => {
+    expect(resolved({
+      audience: "organiser",
+      outcome: "cancelled",
+      resolvedByRole: "event_coordinator",
+    }).detail).toBe(
+      "It was cancelled by the event's coordinator. Reason: Maintenance finished early. " +
+        "Your event is not cancelled.",
+    );
+  });
+
+  it.each([
+    ["unknown", "lead"],
+    ["missing", undefined],
+    ["prototype key", "toString"],
+  ])("SCRUM266_AC6_cancelled_by_an_%s_role_names_no_one", (_label, resolvedByRole) => {
+    expect(resolved({ outcome: "cancelled", resolvedByRole }).detail).toBe(
+      "It was cancelled. Reason: Maintenance finished early. You can request another venue from the event.",
+    );
+  });
+
+  it.each(["coordinator", "organiser"])("SCRUM266_W7_replaced_tells_the_%s_the_new_venue_and_time", (audience) => {
+    expect(resolved({ audience, ...REPLACED })).toEqual({
+      headline: "Hall A for Tech Talk was replaced by Hall B",
+      detail: `Hall B is booked for ${REPLACED_RANGE}. Reason: Maintenance finished early.`,
+    });
+  });
+
+  it("SCRUM266_W7_replaced_without_replacement_details_reads_as_unknown", () => {
+    expect(resolved({ outcome: "replaced" })).toEqual({
+      headline: "Hall A for Tech Talk was replaced by Unknown venue",
+      detail: "Unknown venue is booked for unknown – unknown. Reason: Maintenance finished early.",
+    });
+  });
+
+  it.each([
+    ["reinstated", {
+      headline: "Unknown venue for Unnamed event was reinstated",
+      detail: "It is booked again for unknown – unknown. Reason: No reason recorded.",
+    }],
+    ["cancelled", {
+      headline: "The booking of Unknown venue for Unnamed event was cancelled",
+      detail: "It was cancelled. Reason: No reason recorded. You can request another venue from the event.",
+    }],
+  ])("SCRUM266_AC6_%s_tolerates_missing_fields", (outcome, expected) => {
+    const result = describeNotification({
+      id: "n12",
+      type: "flagged_booking_resolved",
+      payload: { audience: "coordinator", outcome },
+    });
+    expect(result).toEqual(expected);
+    expect(`${result.headline} ${result.detail}`).not.toContain("undefined");
+  });
+
+  it.each([
+    ["an unknown outcome", { outcome: "deleted" }],
+    ["a missing outcome", { outcome: undefined }],
+    ["an unknown audience", { audience: "venue_staff" }],
+    ["a missing audience", { audience: undefined }],
+  ])("SCRUM266_AC6_%s_reads_as_the_generic_notification", (_label, overrides) => {
+    expect(resolved(overrides)).toEqual({
+      headline: "New notification",
+      detail: "This notification type cannot be displayed yet.",
+    });
+  });
+});
+
 // A notification outlives the build that wrote it, so a missing name or a
 // missing payload must still read as words. Each row keeps the title of the
 // test it replaced.
@@ -609,7 +745,7 @@ const FALLBACKS = [
     nameless(PAYLOAD, value),
     {
       headline: "Unnamed event at Unknown venue needs review",
-      detail: `Booked ${BOOKED}. The venue is blocked for Maintenance, ${BLOCKED}.`,
+      detail: `Booked ${BOOKED}. The venue is blocked for Maintenance, ${BLOCKED}. Alternative arrangements are required.`,
     },
   ]),
   ...[["null", null], ["undefined", undefined]].map(([label, payload]) => [
@@ -618,7 +754,7 @@ const FALLBACKS = [
     payload,
     {
       headline: "Unnamed event at Unknown venue needs review",
-      detail: "Booked unknown – unknown. The venue is blocked for unspecified reason, unknown – unknown.",
+      detail: "Booked unknown – unknown. The venue is blocked for unspecified reason, unknown – unknown. Alternative arrangements are required.",
     },
   ]),
   ...NAMELESS.map(([label, value]) => [
@@ -627,14 +763,14 @@ const FALLBACKS = [
     nameless(SETUP_PAYLOAD, value),
     {
       headline: "Unnamed event at Unknown venue needs review",
-      detail: `Setup or turnaround time changed. It now occupies ${formatOccupiedPeriod(SETUP_PAYLOAD)}.`,
+      detail: `Setup or turnaround time changed. It now occupies ${formatOccupiedPeriod(SETUP_PAYLOAD)}. Alternative arrangements are required.`,
     },
   ]),
   ...[["null", null], ["undefined", undefined]].map(([label, payload]) => [
     `SCRUM484_AC8_survives_a_${label}_payload`,
     "booking_flagged_setup_change",
     payload,
-    { headline: "Unnamed event at Unknown venue needs review", detail: "Setup or turnaround time changed." },
+    { headline: "Unnamed event at Unknown venue needs review", detail: "Setup or turnaround time changed. Alternative arrangements are required." },
   ]),
   ...NAMELESS.map(([label, value]) => [
     `SCRUM484_withdrawn_falls_back_for_a_${label}_event_and_venue_name`,
@@ -753,6 +889,7 @@ const FIXTURES = {
   booking_request_approved: { eventName: "Tech Talk", venueName: "Hall A", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt },
   booking_request_rejected: { eventName: "Tech Talk", venueName: "Hall A", reason: "Under renovation" },
   booking_request_conflicting: { eventName: "Tech Talk", venueName: "Hall A", approvedEventName: "Gala Dinner" },
+  flagged_booking_resolved: RESOLVED_PAYLOAD,
 };
 
 describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", () => {

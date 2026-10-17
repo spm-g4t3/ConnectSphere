@@ -89,8 +89,9 @@ export function createBookingRequestRouter({
    * events' open requests whose occupied periods overlap it, in submission
    * order. A conflicting one also carries conflictingWith: the bookings
    * occupying its period now, [] once that clash is gone (and on pending rows).
+   * replaces is the flagged booking a request would replace, null otherwise.
    *
-   * Behind venueStaffOnly, and list_pending_booking_requests (066) checks the
+   * Behind venueStaffOnly, and list_pending_booking_requests (078) checks the
    * caller's role again. A bare array; none pending is 200 [], never 404.
    * Declared before any /:id route, so "pending" is never read as an id.
    *
@@ -111,19 +112,23 @@ export function createBookingRequestRouter({
    *
    * Body: { eventRequestId, venueId, roomLayoutCode?, setupNotes?,
    * confirmUnsuitable?, accessibility?, facilities?, acknowledgedCriteria?,
-   * expectedAttendance? } -- expectedAttendance (SCRUM-525) is this venue's
+   * expectedAttendance?, replacesBookingId? } -- expectedAttendance (SCRUM-525) is this venue's
    * own attendance, a whole number from 1, defaulting to the event's; the two
    * code lists are SCRUM-190's, judged by the suitability check and
    * stored in its result. acknowledgedCriteria (SCRUM-193/194) names, by
    * label, the criteria the coordinator accepts the venue does not meet; an
    * unsuitable venue is requested only when confirmUnsuitable is true and it
    * names every unmet criterion, else 409 SUITABILITY_CONFIRMATION_REQUIRED.
+   * replacesBookingId? (SCRUM-266) names this event's flagged booking that the
+   * request replaces; approving the request then cancels that booking.
    *
    * Statuses: 400 bad input, or an unknown requirement code; 401; 403 wrong
    * role, or not this event's coordinator; 404 no such event or venue; 409
    * with `code` and `conflicts` (see createBookingRequest), including
    * EVENT_ATTENDANCE_MISSING when neither the body nor the event gives an
-   * expected attendance.
+   * expected attendance, and REPLACED_BOOKING_NOT_ON_EVENT or
+   * REPLACED_BOOKING_NOT_FLAGGED for a replacesBookingId that is not this
+   * event's flagged booking.
    */
   router.post('/', coordinatorOnly, async (req, res) => {
     try {

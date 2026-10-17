@@ -9,6 +9,7 @@ import {
 } from "../services/eventRequestStatusDisplay";
 import NotificationInbox from "./NotificationInbox";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
+import NeedsAttentionBadge from "./NeedsAttentionBadge";
 
 function formatEventDate(value) {
   if (!value) return "Date not set";
@@ -80,6 +81,7 @@ export default function EventOrganiserDashboard({ user }) {
                       <span className={`status-badge ${statusClassName(statusDisplay.group)}`}>
                         {statusDisplay.label}
                       </span>
+                      <NeedsAttentionBadge event={event} />
                     </span>
                     <span className="dashboard--organiser__event-date">
                       {formatEventDate(event.proposedStart)}

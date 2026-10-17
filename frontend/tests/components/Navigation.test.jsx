@@ -275,6 +275,7 @@ describe("SCRUM485_AC6 the existing roles keep exactly their links", () => {
       ["Dashboard", "/dashboard"],
       ["Venue Catalogue", "/venue-catalogue"],
       ["Booking Requests", "/booking-requests"],
+      ["Flagged Bookings", "/flagged-bookings"],
     ]],
     ["technical_support_staff", [
       ["Dashboard", "/dashboard"],
