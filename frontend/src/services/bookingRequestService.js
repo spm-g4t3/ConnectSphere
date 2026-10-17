@@ -95,6 +95,23 @@ export async function withdrawBookingRequest(id) {
   const response = await apiClient.post(`/booking-requests/${id}/withdraw`);
   return response.data;
 }
+
+/**
+ * Releases one approved venue booking (POST /booking-requests/:id/release,
+ * SCRUM-492). The reason is required.
+ *
+ * Failures: 400 (malformed id, or a missing or over-long reason), 401, 403 (not
+ * the event's assigned coordinator), 404, and 409 EVENT_NOT_APPROVED,
+ * BOOKING_NOT_APPROVED or BOOKING_CHANGED.
+ *
+ * @param {string} id      the booking's id
+ * @param {string} reason  why the venue is released
+ * @returns {Promise<{booking: Object, returnedToPending: string[]}>}
+ */
+export async function releaseVenueBooking(id, reason) {
+  const response = await apiClient.post(`/booking-requests/${id}/release`, { reason });
+  return response.data;
+}
 /**
  * Every open booking request Venue Staff decide on (GET /booking-requests/pending,
  * SCRUM-258 AC1): pending and conflicting, oldest first, across all venues.

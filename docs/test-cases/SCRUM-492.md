@@ -6,6 +6,7 @@
 **Written:** 18 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; each **Implemented by** says so, and the subtask that writes its tests fills it in.
 **Marked:** 18 October 2026, SCRUM-564 to SCRUM-566: every case their tests prove names them. The cases themselves are unchanged.
 **Marked:** 18 October 2026, the trigger fix-up: AC6-02 widened to a release from any status but approved; D6 says so.
+**Marked:** 18 October 2026, SCRUM-567 and SCRUM-568: the screen's cases and the proofs of what was already built (AC3-02, AC3-03, AC5, AC8-03, AC8-04).
 
 This document is the written layer between SCRUM-492's acceptance criteria and the
 Vitest files that implement them. The chain is **user story → acceptance criteria
@@ -24,12 +25,12 @@ are marked **(trap)**.
 
 | Short | File | Proves |
 |---|---|---|
-| pglite | `backend/tests/db/scrum492ReleaseVenueBookingDatabase.test.js` | What the database does: the refusals and their SQLSTATEs, what is written and what is not, the trigger, the conflicting requests freed |
+| pglite | `backend/tests/db/scrum492ReleaseVenueBookingDatabase.test.js` | What the database does: the refusals and their SQLSTATEs, what is written and what is not, the trigger, the conflicting requests freed; and (SCRUM-568) search, the calendar, a new request, 266's cancel and 253's withdraw after a release |
 | svc | `backend/tests/services/scrum492…` (fake client) | What the service refuses before the database, and how each SQLSTATE and hint becomes an error |
 | route | `backend/tests/routes/scrum492…` (fake client) | The gate, status codes, the caller from the token, the body |
 | domain | `backend/tests/domain/…` | The Released status and its display |
-| display | `frontend/tests/services/scrum492NotificationDisplay.test.js` | The two notices' wording, brought forward from SCRUM-567 because SCRUM-172's every-type test reads 089's list |
-| screen | `frontend/tests/…/scrum492…` | What the coordinator sees (SCRUM-567) |
+| display | `frontend/tests/services/scrum492NotificationDisplay.test.js`, `scrum492BookingRequestService.test.js` | The two notices' wording, brought forward from SCRUM-567 because SCRUM-172's every-type test reads 089's list |
+| screen | `frontend/tests/components/scrum492EventVenueBookings.test.jsx`, `scrum492CoordinatorVenueBookings.test.jsx` | What the coordinator sees (SCRUM-567) |
 
 Which subtask writes each: SCRUM-564 (AC2's status, AC6's record and the trigger),
 SCRUM-565 (AC1, AC2, AC6's notice, AC7), SCRUM-566 (AC4), SCRUM-567 (every screen
@@ -235,7 +236,7 @@ question 4.
 | AC1-12 **(trap)** | A coordinator | The body carries `coordinatorId` or `releasedBy` | The caller is the token's user; the body's ids are ignored | Proved (route): `SCRUM492_AC1_the_caller_is_the_tokens_user_and_the_bodys_ids_are_ignored` |
 | AC1-13 | — | A malformed id; a missing, blank, non-text or over-long reason | 400 from the service, no rpc | Proved (svc): `SCRUM492_AC1_%s_is_refused_with_400_before_any_rpc`, `SCRUM492_AC1_an_input_of_%j_is_refused_with_400_before_any_rpc`; (route) `SCRUM492_AC1_%s_is_400_and_queries_nothing` |
 | AC1-14 | — | The function answers PT409 with each hint; 40001 | 409 with `code` `EVENT_NOT_APPROVED`, `BOOKING_NOT_APPROVED`; 409 `BOOKING_CHANGED` | Proved (svc): `SCRUM492_AC1_the_functions_%s_arrives_as_a_409_with_that_code`, `SCRUM492_AC1_the_functions_%s_arrives_as_its_status`; (route) `SCRUM492_AC1_a_%s_refusal_is_a_409_with_its_code`, `SCRUM492_AC1_the_functions_%s_is_a_%s` |
-| AC1-15 | The coordinator's event page | Open it as A while Approved; as a Lead; as B; in other statuses; on a booking that is not approved | Release offered only to A, only while Approved, only on an approved booking (a convenience: AC1-02 to AC1-06 are the gate) | **not yet implemented** (SCRUM-567) |
+| AC1-15 | The coordinator's event page | Open it as A while Approved; as a Lead; as B; in other statuses; on a booking that is not approved | Release offered only to A, only while Approved, only on an approved booking (a convenience: AC1-02 to AC1-06 are the gate) | Proved (screen): `SCRUM492_AC1_the_assigned_coordinator_of_an_approved_event_is_offered_it`, `SCRUM492_AC1_%s_is_not_offered_it`, `SCRUM492_AC1_an_event_that_is_%s_offers_no_release` (the page); `SCRUM492_AC2_lists_this_events_approved_and_released_bookings_in_the_servers_order`, `SCRUM492_AC6_a_released_booking_shows_when_and_why_and_no_button` (only an approved booking has the button); `SCRUM492_AC1_confirm_is_disabled_while_the_reason_is_blank`, `SCRUM492_AC1_a_%s_is_shown_with_the_booking`, `SCRUM492_AC1_a_409_%s_is_said_and_the_list_refetches`, `SCRUM492_AC1_a_double_click_sends_once_and_every_release_waits`; (display) `SCRUM492_AC1_%s_reads_in_the_coordinators_words` |
 
 ### AC2 — the booking becomes Released; the others stay approved
 
@@ -248,15 +249,15 @@ question 4.
 | AC2-05 | — | `BOOKING_STATUS`, its display | `RELEASED: 'released'`, last, matching the enum after 088; label "Released", group `RELEASED` | Proved (domain): `SCRUM492_AC2_released_is_a_booking_status_last_in_the_enum_order`, `SCRUM492_AC2_released_reads_as_released_in_its_own_group`, `SCRUM17_AC3_booking_statuses_match_the_sql_enum` |
 | AC2-06 | A release | The API's answer | 200 with `booking` (camelCase, `statusDisplay` "Released", the release fields) and `returnedToPending` | Proved (svc): `SCRUM492_AC2_the_answer_is_the_released_booking_and_the_requests_returned_to_pending`, `SCRUM492_AC2_%s_is_an_error_not_a_success`; (route) `SCRUM492_AC2_the_holder_releases_and_gets_the_booking_and_the_requests_returned_to_pending` |
 | AC2-07 | A released booking | `GET /booking-requests/mine` | The row carries `releasedAt` and `releaseReason` | Proved (route): `SCRUM492_AC2_a_released_booking_in_the_list_carries_when_and_why` |
-| AC2-08 | The coordinator's event page | After a release | The booking shows Released; the others are unchanged | **not yet implemented** (SCRUM-567) |
+| AC2-08 | The coordinator's event page | After a release | The booking shows Released; the others are unchanged | Proved (screen): `SCRUM492_AC2_only_the_chosen_booking_is_sent_with_the_reason_trimmed_then_the_list_refetches`, `SCRUM492_AC2_a_release_reloads_venue_suitability_and_the_parent_and_keeps_its_notice` |
 
 ### AC3 — the occupied period is free at once
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
 | AC3-01 | An approved booking, released | `venue_occupancy_conflicts` for its period | No booking row: nothing occupies it | Proved (pglite): `SCRUM492_AC3_the_released_period_has_no_occupant` |
-| AC3-02 | The same | Venue search for the period | The venue is available | **not yet implemented** (SCRUM-568) |
-| AC3-03 | The same | The venue calendar for the day | The released booking is not shown as booked | **not yet implemented** (SCRUM-568) |
+| AC3-02 | The same | Venue search for the period | The venue is available | Proved (pglite): `SCRUM492_AC3_search_offers_the_released_venue_again` (`available_venue_ids`, which venue search calls) |
+| AC3-03 | The same | The venue calendar for the day | The released booking is not shown as booked | Proved (pglite): `SCRUM492_AC3_the_calendars_read_shows_no_released_booking` (the calendar's own unpadded read); SCRUM-178's `SCRUM178_AC3_bookings_query_is_an_allow_list_of_approved_and_flagged` pins that the calendar reads bookings only through it |
 
 ### AC4 — Conflicting requests freed by this release return to Pending
 
@@ -277,8 +278,8 @@ question 4.
 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
-| AC5-01 | A released booking at venue V | A raises a new request for V, same period | Created, pending: the released booking is not a live request (D10) | **not yet implemented** (SCRUM-568) |
-| AC5-02 | The same | A raises a request for another venue | Created, pending | **not yet implemented** (SCRUM-568) |
+| AC5-01 | A released booking at venue V | A raises a new request for V, same period | Created, pending: the released booking is not a live request (D10) | Proved (pglite): `SCRUM492_AC5_after_a_release_the_same_venue_and_period_can_be_requested_again` |
+| AC5-02 | The same | A raises a request for another venue | Created, pending | Proved (pglite): `SCRUM492_AC5_after_a_release_another_venue_can_be_requested` |
 
 ### AC6 — the record is kept; Venue Staff are told
 
@@ -305,8 +306,8 @@ question 4.
 |---|---|---|---|---|
 | AC8-01 | A flagged booking | Release it | Refused (AC1-04) | Proved (pglite): `SCRUM492_AC1_a_flagged_booking_is_refused_and_pointed_to_flagged_bookings` |
 | AC8-02 | A pending request | Release it | Refused (AC1-05) | Proved (pglite): `SCRUM492_AC1_a_%s_request_is_refused_and_pointed_to_withdraw` |
-| AC8-03 | A flagged booking | `cancel_flagged_booking` | Still cancels it, as SCRUM-266 built it | **not yet implemented** (SCRUM-568) |
-| AC8-04 | A pending request | `withdraw_booking_request` | Still withdraws it, as SCRUM-253 built it | **not yet implemented** (SCRUM-568) |
+| AC8-03 | A flagged booking | `cancel_flagged_booking` | Still cancels it, as SCRUM-266 built it | Proved (pglite): `SCRUM492_AC8_a_flagged_booking_is_refused_release_and_still_cancelled_through_scrum266` |
+| AC8-04 | A pending request | `withdraw_booking_request` | Still withdraws it, as SCRUM-253 built it | Proved (pglite): `SCRUM492_AC8_a_pending_request_is_refused_release_and_still_withdrawn_through_scrum253` |
 
 ---
 
@@ -338,7 +339,8 @@ marked for SCRUM-567 or SCRUM-568); 0 that cannot be written as specified. Sixte
 are traps. After SCRUM-564 to SCRUM-566: **41 proved**; 10 not yet
 implemented (the same ten, for SCRUM-567 and SCRUM-568). Then AC4-10 and AC6-08's
 wording was brought forward (SCRUM-172's every-type test needs it): **43 proved**; 8
-not yet implemented (AC1-15, AC2-08, AC3-02, AC3-03, AC5-01, AC5-02, AC8-03, AC8-04).
+not yet implemented (AC1-15, AC2-08, AC3-02, AC3-03, AC5-01, AC5-02, AC8-03, AC8-04). After SCRUM-567 and
+SCRUM-568: **51 proved**; 0 not yet implemented; 0 that cannot be written.
 
 | Section | Cases |
 |---|---|

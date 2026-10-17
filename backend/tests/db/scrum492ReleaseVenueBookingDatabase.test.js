@@ -4,8 +4,9 @@
  * its other bookings are untouched; other events' requests the release alone
  * made Conflicting go back to Pending. Cases: docs/test-cases/SCRUM-492.md.
  *
- * Migrations: cancelFlaggedBookingDatabase.test.js's stack without 077 (nothing
- * here cancels a flag), plus 039 for the Lead's role, 052's
+ * Migrations: cancelFlaggedBookingDatabase.test.js's stack (077 for AC8's
+ * proof that a flag is still cancelled through SCRUM-266), plus 039 for the
+ * Lead's role, 052's
  * profile_display_name (read from the file, not retyped), 078 for the latest
  * create and decide functions, then 088 on its own and 089.
  *
@@ -57,6 +58,7 @@ const MIGRATIONS = [
   '066_venue_staff_booking_decisions.sql',
   'SAFETY_REASON',
   '076_reinstate_flagged_booking.sql',
+  '077_cancel_flagged_booking.sql',
   '078_list_flagged_bookings.sql',
   'LIVE_ONLY_TYPE',
   MIGRATION_088,
@@ -768,6 +770,110 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
                  where t.typname = 'booking_status' and e.enumlabel = 'released') as released_values
       `);
       expect(Object.values(counts).map(Number)).toEqual([1, 1, 1, 3, 1]);
+    });
+  });
+
+
+  // -------------------------------------------------------------------------
+  // AC3, AC5, AC8 (SCRUM-568): what is already built, after a release
+  // -------------------------------------------------------------------------
+  describe('AC3: search and the calendar see the period as free', () => {
+    it('SCRUM492_AC3_search_offers_the_released_venue_again', async () => {
+      // AC3-02: available_venue_ids (040), which venue search calls, asks
+      // venue_occupancy_conflicts with the period padded.
+      const venue = await makeVenue();
+      const id = await approved(venue, await makeEvent());
+      const free = async () =>
+        (await rows('select venue_id from available_venue_ids($1::uuid[], $2, $3)', [[venue], at('13:00'), at('14:00')]))
+          .map((r) => r.venue_id);
+      expect(await free()).toEqual([]);
+
+      await release(id);
+
+      expect(await free()).toEqual([venue]);
+    });
+
+    it('SCRUM492_AC3_the_calendars_read_shows_no_released_booking', async () => {
+      // AC3-03: the calendar's one bookings read, as venueCalendarService.js
+      // makes it: the day as a window, unpadded (p_pad_requested false).
+      const venue = await makeVenue();
+      const id = await approved(venue, await makeEvent());
+      const bookingsShown = async () =>
+        (await rows(
+          "select id from venue_occupancy_conflicts($1, $2, $3, false) where kind = 'booking'",
+          [venue, at('00:00'), at('23:59')],
+        )).map((r) => r.id);
+      expect(await bookingsShown()).toEqual([id]);
+
+      await release(id);
+
+      expect(await bookingsShown()).toEqual([]);
+    });
+  });
+
+  describe('AC5: a new request can follow', () => {
+    const request = async (eventId, venueId) =>
+      (await one(
+        `select create_booking_request($1, $2, $3, null, null, '{"suitable": true}'::jsonb, false, 100) as result`,
+        [eventId, venueId, coordinator],
+      )).result;
+
+    it('SCRUM492_AC5_after_a_release_the_same_venue_and_period_can_be_requested_again', async () => {
+      // AC5-01: the released row is neither a live request (078 step 6) nor an
+      // occupant (078 step 7).
+      const event = await makeEvent();
+      const venue = await makeVenue();
+      const id = await approved(venue, event);
+      expect((await refusal(request(event, venue)))?.hint).toBe('BOOKING_REQUEST_EXISTS');
+
+      await release(id);
+      const result = await request(event, venue);
+
+      expect(result.outcome).toBe('created');
+      expect(result.booking).toMatchObject({ venue_id: venue, event_request_id: event, status: 'pending' });
+      expect(result.booking.id).not.toBe(id);
+      expect(await statusOf(id)).toBe('released');
+    });
+
+    it('SCRUM492_AC5_after_a_release_another_venue_can_be_requested', async () => {
+      // AC5-02.
+      const event = await makeEvent();
+      await release(await approved(await makeVenue(), event));
+
+      const result = await request(event, await makeVenue());
+
+      expect(result.outcome).toBe('created');
+      expect(result.booking.status).toBe('pending');
+    });
+  });
+
+  describe('AC8: flagged and pending are still handled where they were', () => {
+    it('SCRUM492_AC8_a_flagged_booking_is_refused_release_and_still_cancelled_through_scrum266', async () => {
+      // AC8-03, with AC8-01's refusal: 089's restated trigger keeps 076's
+      // flagged -> cancelled move.
+      const id = await approved(await makeVenue(), await makeEvent());
+      await db.query(
+        `update bookings set status = 'flagged_for_review', review_reason = 'safety_review',
+                flagged_at = now(), flagged_by = $2 where id = $1`,
+        [id, staff],
+      );
+      expect((await refusal(release(id)))?.hint).toBe('BOOKING_NOT_APPROVED');
+
+      const { result } = await one('select cancel_flagged_booking($1, $2, $3) as result', [id, coordinator, 'Venue no longer fits']);
+
+      expect(result.outcome).toBe('cancelled');
+      expect(await statusOf(id)).toBe('cancelled');
+    });
+
+    it('SCRUM492_AC8_a_pending_request_is_refused_release_and_still_withdrawn_through_scrum253', async () => {
+      // AC8-04, with AC8-02's refusal.
+      const id = await insertBooking(await makeEvent(), await makeVenue());
+      expect((await refusal(release(id)))?.hint).toBe('BOOKING_NOT_APPROVED');
+
+      const { result } = await one('select withdraw_booking_request($1, $2) as result', [id, coordinator]);
+
+      expect(result.outcome).toBe('withdrawn');
+      expect(await statusOf(id)).toBe('withdrawn');
     });
   });
 
