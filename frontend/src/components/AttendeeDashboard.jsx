@@ -1,8 +1,10 @@
-// The Attendee landing page: a greeting and the way into Browse Open Events.
-// The section is a direct child of .dashboard to get its card styling.
+// The Attendee landing page: a greeting, the way into Browse Open Events and
+// the attendee's notifications. Each section is a direct child of .dashboard
+// to get its card styling.
 
 import { Link } from "react-router-dom";
 import { BROWSE_OPEN_EVENTS_PATH, isOpenEventsEnabled } from "../services/openEventRoutes";
+import NotificationInbox from "./NotificationInbox";
 
 export default function AttendeeDashboard({ user }) {
   return (
@@ -18,6 +20,8 @@ export default function AttendeeDashboard({ user }) {
           </Link>
         </section>
       )}
+
+      <NotificationInbox />
     </div>
   );
 }

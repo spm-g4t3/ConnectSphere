@@ -15,8 +15,8 @@ import { apiClient } from "./apiClient";
  * The caller's notifications, newest first, read and unread together (the
  * backend caps the list at 50).
  *
- * @returns {Promise<Array<{id, type, bookingId, blockId,
- *          payload, readAt, createdAt}>>}
+ * @returns {Promise<Array<{id, type, bookingId, blockId, venueHoldId,
+ *          eventRequestId, payload, readAt, createdAt}>>}
  */
 export async function listNotifications() {
   const response = await apiClient.get("/notifications");
@@ -33,4 +33,15 @@ export async function listNotifications() {
 export async function markNotificationRead(id) {
   const response = await apiClient.patch(`/notifications/${id}/read`);
   return response.data;
+}
+
+/**
+ * The caller's exact unread count. Not derived from listNotifications, which
+ * is capped at 50 and so undercounts past that.
+ *
+ * @returns {Promise<number>}
+ */
+export async function getUnreadCount() {
+  const response = await apiClient.get("/notifications/unread-count");
+  return response.data.unreadCount;
 }

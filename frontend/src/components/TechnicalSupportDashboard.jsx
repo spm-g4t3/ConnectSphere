@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getOpenTickets, getEquipmentRequests } from "../services/supportService";
-import CoordinatorNotifications from "./CoordinatorNotifications";
+import NotificationInbox from "./NotificationInbox";
 
 export default function TechnicalSupportDashboard({ user }) {
   const [tickets, setTickets] = useState([]);
@@ -43,7 +43,7 @@ export default function TechnicalSupportDashboard({ user }) {
         </ul>
       </section>
 
-      <CoordinatorNotifications />
+      <NotificationInbox />
     </div>
   );
 }

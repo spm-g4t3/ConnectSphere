@@ -7,7 +7,7 @@ import {
   readStatusDisplay,
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
-import CoordinatorNotifications from "./CoordinatorNotifications";
+import NotificationInbox from "./NotificationInbox";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 
 function formatEventDate(value) {
@@ -178,7 +178,7 @@ export default function EventOrganiserDashboard({ user }) {
           {eventsError && <p className="dashboard--organiser__error" role="alert">{eventsError}</p>}
         </ul>
       </section>
-      <CoordinatorNotifications />
+      <NotificationInbox />
     </div>
   );
 }

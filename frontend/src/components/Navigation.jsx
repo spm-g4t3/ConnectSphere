@@ -2,8 +2,9 @@
 // Renders only the nav links relevant to the logged-in user's role.
 
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { useUnreadCount } from "../notifications/UnreadCountContext";
 import { normaliseRole } from "../auth/normaliseRole";
 import { BROWSE_OPEN_EVENTS_PATH, isOpenEventsEnabled } from "../services/openEventRoutes";
 
@@ -96,6 +97,7 @@ const NAV_LINKS_BY_ROLE = {
 
 export default function Navigation() {
   const { user, logout } = useAuth();
+  const { unreadCount } = useUnreadCount();
   const [logoutError, setLogoutError] = useState(null);
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -104,6 +106,7 @@ export default function Navigation() {
   const links = (NAV_LINKS_BY_ROLE[normaliseRole(user.role)] || []).filter(
     (link) => link.to !== BROWSE_OPEN_EVENTS_PATH || isOpenEventsEnabled(),
   );
+  const hasUnread = unreadCount > 0;
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -129,6 +132,19 @@ export default function Navigation() {
         ))}
       </ul>
       <div className="app-nav__user">
+        {/* Every role's dashboard mounts the inbox, so one link serves all;
+            the hash scrolls it into view. Not for a role with no links: it
+            has no dashboard, so the link would promise an inbox it lacks. */}
+        {links.length > 0 && (
+          <Link
+            to="/dashboard#notifications"
+            className="app-nav__notifications"
+            aria-label={hasUnread ? `Notifications, ${unreadCount} unread` : "Notifications"}
+          >
+            Notifications
+            {hasUnread && <span className="app-nav__badge">{unreadCount}</span>}
+          </Link>
+        )}
         <span>{user.name} ({user.role})</span>
         <button onClick={handleLogout} disabled={loggingOut}>
           {loggingOut ? "Logging out..." : "Log out"}

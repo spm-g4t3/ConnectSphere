@@ -4,7 +4,7 @@ import {
   getSafetyReviewQueue,
 } from "../services/safetyReviewService";
 import { formatRange } from "../services/displayFormat";
-import CoordinatorNotifications from "./CoordinatorNotifications";
+import NotificationInbox from "./NotificationInbox";
 import { SafetyReviewDetail } from "./SafetyReviewDetail";
 import { OUTCOME_LABELS } from "./safetyReviewLabels";
 
@@ -138,7 +138,7 @@ export default function SafetyOfficerDashboard({ user }) {
           </ul>
         </section>
       )}
-      <CoordinatorNotifications />
+      <NotificationInbox />
     </div>
   );
 }
