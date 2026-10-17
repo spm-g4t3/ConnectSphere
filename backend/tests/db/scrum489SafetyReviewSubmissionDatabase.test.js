@@ -15,6 +15,10 @@ import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { STATUS } from '../../src/domain/eventRequestStatus.js';
+import express from 'express';
+import request from 'supertest';
+import { createEventRequestRouter } from '../../src/routes/eventRequests.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
@@ -47,6 +51,7 @@ const ARRANGEMENTS = [
 ];
 const MIGRATION = '064_safety_review_submission.sql';
 const READINESS_MIGRATION = '085_event_readiness_details.sql';
+const CONFIRM_MIGRATION = '086_confirm_event_request.sql';
 const LATE_SAFETY_MIGRATIONS = [
   '071_safety_review.sql',
   '072_safety_review_history.sql',
@@ -68,6 +73,7 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
   let coordinatorA;
   let coordinatorB;
   let lead;
+  let attendee;
   let safetyOfficers;
   let hallA;
   let room2;
@@ -153,6 +159,16 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
   const submit = (id, by = coordinatorA, note = null, confirmed = false) =>
     db.query('select * from submit_event_for_safety_review($1, $2, $3, $4)', [id, by, note, confirmed]);
 
+  const confirm = (id, by = coordinatorA, acknowledged = false) =>
+    db.query('select * from confirm_event_request($1, $2, $3)', [id, by, acknowledged]);
+
+  async function readyToConfirm(overrides = {}) {
+    const id = await readyEvent(overrides);
+    await submit(id, coordinatorA, null, true);
+    await db.query("select respond_to_safety_review($1, $2, 'approved', null, '{}', false)", [id, safetyOfficers[0]]);
+    return id;
+  }
+
   /** Everything a submission writes, for one event. */
   async function written(id) {
     return {
@@ -227,6 +243,14 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     await db.exec(migration('065_booking_decision_statuses.sql'));
     await db.exec(migration('075_booking_decisions_after_safety_review.sql'));
     await db.exec(migration(READINESS_MIGRATION));
+    await db.exec(migration(CONFIRM_MIGRATION));
+    await db.exec(migration('079_registrations.sql'));
+    // Settings belong to SCRUM-494; confirmation must leave its contract untouched.
+    await db.exec(`alter table event_requests
+      add column registration_enabled boolean default false,
+      add column registration_capacity integer,
+      add column registration_opens_at timestamptz,
+      add column registration_closes_at timestamptz`);
 
     const user = async (email, role, name) => {
       const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
@@ -237,6 +261,7 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     coordinatorA = await user('a@x', 'event_coordinator', 'Priya Nair');
     coordinatorB = await user('b@x', 'event_coordinator', 'Omar Okafor');
     lead = await user('lead@x', 'event_coordinator_lead', 'Lena Lead');
+    attendee = await user('attendee@x', 'attendee', 'Taylor Attendee');
     safetyOfficers = [await user('so1@x', 'safety_officer', 'Sam Safe'), await user('so2@x', 'safety_officer', 'Sol Secure')];
     hallA = (await one("insert into venues (name, location, max_capacity) values ('Hall A', 'SMU', 200) returning id")).id;
     room2 = (await one("insert into venues (name, location, max_capacity) values ('Room 2', 'SMU', 40) returning id")).id;
@@ -495,6 +520,8 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
       const id = await event();
       await db.exec('begin');
       try {
+        // Adjacent PGlite calls can share a clock tick; advance before seeding the start.
+        await new Promise((resolve) => setTimeout(resolve, 25));
         await db.query(
           `update event_requests set proposed_start = clock_timestamp(),
              proposed_end = clock_timestamp() + interval '1 hour' where id = $1`, [id],
@@ -552,6 +579,231 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
       expect(Number((await one("select count(*) from pg_proc where proname = 'event_readiness'")).count)).toBe(1);
       for (const role of ['anon', 'authenticated', 'service_role']) {
         const { allowed } = await one("select has_function_privilege($1, 'event_readiness(uuid,boolean)', 'execute') as allowed", [role]);
+        expect(allowed).toBe(role === 'service_role');
+      }
+    });
+  });
+
+  describe('SCRUM-363: atomic confirmation', () => {
+    it('SCRUM363_AC6_HTTP_confirmation_uses_the_real_SQL_transaction_and_returns_safe_repeated_and_not_ready_responses', async () => {
+      const client = {
+        async rpc(fn, args) {
+          expect(fn).toBe('confirm_event_request');
+          try {
+            const { rows: [data] } = await confirm(args.p_event_request_id, args.p_coordinator_id, args.p_no_equipment_confirmed);
+            return { data, error: null };
+          } catch (error) {
+            return { data: null, error: { code: error.code, message: error.message, hint: error.hint, details: error.detail } };
+          }
+        },
+      };
+      const app = express().use(express.json()).use('/api/event-requests', createEventRequestRouter({
+        client,
+        requireAuth: (req, _res, next) => {
+          req.user = { id: coordinatorA, role: 'event_coordinator' };
+          next();
+        },
+      }));
+      const id = await readyToConfirm();
+      const success = await request(app).post(`/api/event-requests/${id}/confirm`).send({});
+      expect(success.status).toBe(200);
+      expect(success.body).toMatchObject({ id, status: 'confirmed', statusDisplay: { label: 'Confirmed' } });
+      expect((await request(app).post(`/api/event-requests/${id}/confirm`).send({})).status).toBe(409);
+      expect((await written(id)).history.filter((row) => row.new_status === 'confirmed')).toHaveLength(1);
+
+      const flagged = await readyToConfirm();
+      await db.query("update bookings set status = 'flagged_for_review' where event_request_id = $1", [flagged]);
+      const failed = await request(app).post(`/api/event-requests/${flagged}/confirm`).send({});
+      expect(failed.status).toBe(409);
+      expect(failed.body.code).toBe('EVENT_NOT_READY');
+      expect(failed.body.conflicts).toEqual((await readiness(flagged)).items.filter((item) => !item.met));
+      expect((await written(flagged)).event.status).toBe('safety_approved');
+    });
+
+    it('SCRUM363_AC6_a_safety_approved_event_is_confirmed_with_its_coordinator_and_timestamp_in_history', async () => {
+      const id = await readyToConfirm();
+      const before = await one('select clock_timestamp() as at');
+      const { rows: [result] } = await confirm(id);
+      const history = (await written(id)).history.filter((row) => row.new_status === 'confirmed');
+
+      expect(result.status).toBe('confirmed');
+      expect(history).toEqual([{
+        previous_status: 'safety_approved', new_status: 'confirmed', changed_by: coordinatorA, reason: 'Event confirmed.',
+      }]);
+      const { created_at } = await one("select created_at from event_request_status_history where event_request_id = $1 and new_status = 'confirmed'", [id]);
+      expect(new Date(created_at).getTime()).toBeGreaterThanOrEqual(new Date(before.at).getTime());
+      expect(new Date(created_at).getTime()).toBeLessThanOrEqual(Date.now());
+    });
+
+    it.each([
+      ['another coordinator', () => coordinatorB], ['organiser', () => organiser],
+      ['lead', () => lead], ['attendee', () => attendee], ['safety officer', () => safetyOfficers[0]], ['null caller', () => null],
+    ])('SCRUM363_AC1_%s_is_refused_without_changes', async (_label, caller) => {
+      const id = await readyToConfirm();
+      const before = await written(id);
+      expect((await refusal(confirm(id, caller())))?.code).toBe('42501');
+      expect(await written(id)).toEqual(before);
+    });
+
+    it.each(['event_organiser', 'event_coordinator_lead', 'venue_staff', 'technical_support_staff', 'attendee', 'safety_officer'])(
+      'SCRUM363_AC1_assigned_user_with_database_role_%s_is_refused', async (role) => {
+        const id = await readyToConfirm();
+        const before = await written(id);
+        await db.exec('begin');
+        try {
+          await db.query('update profiles set role = $2 where id = $1', [coordinatorA, role]);
+          expect((await refusal(confirm(id)))?.code).toBe('42501');
+        } finally {
+          await db.exec('rollback');
+        }
+        expect(await written(id)).toEqual(before);
+      },
+    );
+
+    it('SCRUM363_AC1_reassignment_before_confirmation_is_revalidated', async () => {
+      const id = await readyToConfirm();
+      await db.query('update event_requests set assigned_coordinator_id = $2 where id = $1', [id, coordinatorB]);
+      expect((await refusal(confirm(id)))?.code).toBe('42501');
+      expect((await confirm(id, coordinatorB)).rows[0].status).toBe('confirmed');
+    });
+
+    it('SCRUM363_AC1_an_assigned_caller_without_a_current_profile_is_refused', async () => {
+      const id = await readyToConfirm();
+      await db.exec('begin');
+      try {
+        await db.query('delete from profiles where id = $1', [coordinatorA]);
+        expect((await refusal(confirm(id)))?.code).toBe('42501');
+      } finally {
+        await db.exec('rollback');
+      }
+      expect((await written(id)).event.status).toBe('safety_approved');
+    });
+
+    it.each(Object.values(STATUS).filter((status) => status !== STATUS.SAFETY_APPROVED))(
+      'SCRUM363_AC1_current_status_%s_is_refused_and_named_without_writes', async (status) => {
+        const id = await readyToConfirm();
+        await putInStatus(id, status);
+        const before = await written(id);
+        const err = await refusal(confirm(id));
+        expect(err?.code).toBe('55000');
+        expect(err?.message).toContain(`current status is ${status}`);
+        expect(await written(id)).toEqual(before);
+      },
+    );
+
+    it('SCRUM363_AC1_missing_and_null_events_are_refused', async () => {
+      expect((await refusal(confirm('00000000-0000-4000-8000-000000000000')))?.code).toBe('P0002');
+      expect((await refusal(confirm(null)))?.code).toBe('22023');
+    });
+
+    it.each(['pending', 'conflicting', 'flagged_for_review', 'cancelled'])(
+      'SCRUM363_AC2_booking_changed_to_%s_is_rechecked_after_safety_approval', async (status) => {
+        const id = await readyToConfirm();
+        await db.query('update bookings set status = $2::booking_status where event_request_id = $1', [id, status]);
+        const before = await written(id);
+        const err = await refusal(confirm(id));
+        expect(err?.hint).toBe('EVENT_NOT_READY');
+        expect(JSON.parse(err.detail)).toEqual((await readiness(id)).items.filter((item) => !item.met));
+        expect(await written(id)).toEqual(before);
+      },
+    );
+
+    it('SCRUM363_AC3_all_current_booking_equipment_and_date_failures_are_returned_together', async () => {
+      const id = await readyToConfirm();
+      await db.query("update bookings set status = 'flagged_for_review' where event_request_id = $1", [id]);
+      await booking(id, room2, 'conflicting');
+      await equipment(id, 'pending_review');
+      await db.query("update event_requests set proposed_start = now() - interval '1 day', proposed_end = now() - interval '23 hours' where id = $1", [id]);
+      const before = await written(id);
+      const err = await refusal(confirm(id));
+      expect(err?.code).toBe('PT409');
+      expect(err?.hint).toBe('EVENT_NOT_READY');
+      expect(JSON.parse(err.detail)).toEqual((await readiness(id)).items.filter((item) => !item.met));
+      expect(JSON.parse(err.detail).map((item) => item.key)).toEqual(['venue', 'venue', 'equipment', 'date']);
+      expect(await written(id)).toEqual(before);
+    });
+
+    it('SCRUM363_AC5_safety_submission_acknowledgement_is_not_reused_and_explicit_confirmation_is_recorded', async () => {
+      const id = await readyToConfirm({ equipment_requirements: 'Projectors' });
+      expect((await written(id)).submissions[0].no_equipment_confirmed).toBe(true);
+      for (const ack of [false, null]) {
+        const err = await refusal(confirm(id, coordinatorA, ack));
+        expect(JSON.parse(err.detail).map((item) => item.key)).toEqual(['no_equipment_confirmation']);
+      }
+      await confirm(id, coordinatorA, true);
+      expect((await written(id)).history.find((row) => row.new_status === 'confirmed')).toMatchObject({
+        new_status: 'confirmed', changed_by: coordinatorA,
+        reason: 'Event confirmed. Coordinator acknowledged that no equipment is needed.',
+      });
+    });
+
+    it('SCRUM363_AC5_reconfirmation_requires_a_new_acknowledgement_after_a_fresh_safety_cycle', async () => {
+      const id = await readyToConfirm({ equipment_requirements: 'Projectors' });
+      await confirm(id, coordinatorA, true);
+      await db.query("select change_event_request_status($1, 'confirmed', 'approved', $2, 'Significant change', $2)", [id, coordinatorA]);
+      expect((await refusal(confirm(id, coordinatorA, true)))?.code).toBe('55000');
+      await submit(id, coordinatorA, null, true);
+      await db.query("select respond_to_safety_review($1, $2, 'approved', null, '{}', false)", [id, safetyOfficers[0]]);
+      expect((await refusal(confirm(id)))?.hint).toBe('EVENT_NOT_READY');
+      await confirm(id, coordinatorA, true);
+      expect((await written(id)).history.filter((row) => row.new_status === 'confirmed')).toHaveLength(2);
+    });
+
+    it('SCRUM363_AC6_queued_repeated_confirmations_write_one_history_row', async () => {
+      const id = await readyToConfirm();
+      // PGlite queues these on one connection; the two-session race is documented separately.
+      const results = await Promise.allSettled([confirm(id), confirm(id)]);
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      expect(results.find((result) => result.status === 'rejected').reason.code).toBe('55000');
+      expect((await written(id)).history.filter((row) => row.new_status === 'confirmed')).toHaveLength(1);
+    });
+
+    it('SCRUM363_AC6_a_history_write_failure_rolls_back_the_status_and_all_other_state', async () => {
+      const id = await readyToConfirm();
+      const before = await written(id);
+      await db.exec(`
+        create function fail_test_confirmation_history() returns trigger language plpgsql as $$
+        begin
+          if new.new_status = 'confirmed' then raise exception 'Injected history failure'; end if;
+          return new;
+        end $$;
+        create trigger fail_test_confirmation_history before insert on event_request_status_history
+          for each row execute function fail_test_confirmation_history();
+      `);
+      try {
+        expect((await refusal(confirm(id)))?.code).toBe('P0001');
+        expect(await written(id)).toEqual(before);
+      } finally {
+        await db.exec('drop trigger fail_test_confirmation_history on event_request_status_history; drop function fail_test_confirmation_history()');
+      }
+      expect((await confirm(id)).rows[0].status).toBe('confirmed');
+    });
+
+    it('SCRUM363_AC6_confirmation_preserves_bookings_equipment_registrations_and_registration_settings', async () => {
+      const id = await readyToConfirm();
+      await equipment(id, 'arranged');
+      await db.query("insert into registrations (event_request_id, attendee_id) values ($1, $2)", [id, attendee]);
+      await db.query("update event_requests set registration_capacity = 20, registration_opens_at = now() + interval '1 day', registration_closes_at = now() + interval '2 days' where id = $1", [id]);
+      const snapshot = async () => ({
+        bookings: (await db.query('select * from bookings where event_request_id = $1', [id])).rows,
+        equipment: (await db.query('select * from equipment_requests where event_request_id = $1', [id])).rows,
+        registrations: (await db.query('select * from registrations where event_request_id = $1', [id])).rows,
+        settings: await one('select registration_enabled, registration_capacity, registration_opens_at, registration_closes_at from event_requests where id = $1', [id]),
+        notices: (await db.query('select * from notifications where event_request_id = $1 order by id', [id])).rows,
+      });
+      const before = await snapshot();
+      await confirm(id);
+      expect(await snapshot()).toEqual(before);
+      expect(before.settings.registration_enabled).toBe(false);
+    });
+
+    it('SCRUM363_AC6_confirm_rpc_is_rerunnable_invoker_security_and_backend_only', async () => {
+      await db.exec(migration(CONFIRM_MIGRATION));
+      const { prosecdef, count } = await one("select bool_or(prosecdef) as prosecdef, count(*) as count from pg_proc where proname = 'confirm_event_request'");
+      expect(prosecdef).toBe(false);
+      expect(Number(count)).toBe(1);
+      for (const role of ['anon', 'authenticated', 'service_role']) {
+        const { allowed } = await one("select has_function_privilege($1, 'confirm_event_request(uuid,uuid,boolean)', 'execute') as allowed", [role]);
         expect(allowed).toBe(role === 'service_role');
       }
     });

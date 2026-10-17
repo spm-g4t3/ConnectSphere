@@ -2542,6 +2542,33 @@ export async function getEventReadiness({ client, eventRequestId, noEquipmentCon
   return data;
 }
 
+/** Confirm through one RPC; assignment, status and readiness are checked under its locks. */
+export async function confirmEventRequest({
+  client, eventRequestId, coordinatorId, noEquipmentConfirmed = false,
+} = {}) {
+  if (!isPlausibleId(eventRequestId)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+  if (!isPlausibleId(coordinatorId)) {
+    throw new ValidationError('Invalid coordinator id', [{ field: 'coordinatorId', message: 'must be a valid id' }]);
+  }
+  if (typeof noEquipmentConfirmed !== 'boolean') {
+    throw new ValidationError(
+      'Invalid noEquipmentConfirmed -- must be true or false',
+      [{ field: 'noEquipmentConfirmed', message: 'must be true or false' }],
+    );
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('confirm_event_request', {
+    p_event_request_id: eventRequestId,
+    p_coordinator_id: coordinatorId,
+    p_no_equipment_confirmed: noEquipmentConfirmed,
+  });
+  if (error) throw translateError(error);
+  return toEventRequest(data);
+}
+
 /**
  * The assigned coordinator sends an Approved, ready event to the Safety
  * Officers (SCRUM-489 AC1 to AC6, AC8), through submit_event_for_safety_review

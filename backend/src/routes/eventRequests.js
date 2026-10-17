@@ -100,6 +100,7 @@ import {
   cancelEventRequest,
   getEventReadiness,
   submitForSafetyReview,
+  confirmEventRequest,
 } from '../services/eventRequestService.js';
 import {
   createChangeRequestFromClient,
@@ -881,6 +882,20 @@ export function createEventRequestRouter({
         coordinatorId: req.user.id,
         note: req.body?.note,
         noEquipmentConfirmed: req.body?.noEquipmentConfirmed ?? false,
+      });
+      res.status(200).json(withStatusDisplay(updated));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  router.post('/:id/confirm', coordinatorOnly, async (req, res) => {
+    try {
+      const updated = await confirmEventRequest({
+        client,
+        eventRequestId: req.params.id,
+        coordinatorId: req.user.id,
+        noEquipmentConfirmed: req.body?.noEquipmentConfirmed,
       });
       res.status(200).json(withStatusDisplay(updated));
     } catch (err) {
