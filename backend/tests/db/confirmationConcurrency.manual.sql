@@ -91,3 +91,55 @@ begin;
 set local lock_timeout = '30s';
 select confirm_event_request(:'event_id'::uuid, :'coordinator_id'::uuid, false);
 rollback;
+
+-- CASES 5 AND 6: real equipment-reservation flagging, both lock orders.
+-- Use fresh ready events with equipment fully arranged through SCRUM-300's
+-- reservation workflow. Set these extra variables in BOTH sessions:
+--   \set equipment_request_id '...'
+--   \set reservation_id '...'
+-- The request/reservation must belong to event_id; the reservation must be
+-- active and unflagged. Verify these rows before running either case.
+select id, event_request_id, status from equipment_requests
+ where id = :'equipment_request_id'::uuid;
+select id, event_request_id, flagged, released_at from equipment_reservations
+ where id = :'reservation_id'::uuid;
+
+-- CASE 5, Session A: flag first; start Session B while A sleeps.
+begin;
+select flag_equipment_reservations(array[:'reservation_id'::uuid], 'SCRUM363 equipment race');
+select pg_sleep(15);
+commit;
+
+-- Session B: waits for A's equipment-request lock, then refuses with
+-- EVENT_NOT_READY, listing the Pending review equipment condition.
+begin;
+set local lock_timeout = '30s';
+select confirm_event_request(:'event_id'::uuid, :'coordinator_id'::uuid, false);
+rollback;
+
+-- Expect safety_approved, pending_review, flagged=true, released_at=null,
+-- and confirmed_rows=0. No booking or registration may have been removed.
+select e.status, q.status as equipment_status, r.flagged, r.released_at,
+       (select count(*) from event_request_status_history h
+         where h.event_request_id = e.id and h.new_status = 'confirmed') as confirmed_rows
+  from event_requests e
+  join equipment_requests q on q.event_request_id = e.id
+  join equipment_reservations r on r.event_request_id = e.id
+ where e.id = :'event_id'::uuid and q.id = :'equipment_request_id'::uuid
+   and r.id = :'reservation_id'::uuid;
+
+-- CASE 6, Session A: use another fresh ready event; confirm first, then start B.
+begin;
+select confirm_event_request(:'event_id'::uuid, :'coordinator_id'::uuid, false);
+select pg_sleep(15);
+commit;
+
+-- Session B: the flag transaction must wait for A's equipment-request FOR SHARE
+-- lock. After A commits it flags the reservation and returns the request for
+-- review, preserving the confirmed event and its reservations.
+begin;
+set local lock_timeout = '30s';
+select flag_equipment_reservations(array[:'reservation_id'::uuid], 'SCRUM363 equipment race');
+commit;
+-- Repeat the verification query: expect confirmed, pending_review,
+-- flagged=true, released_at=null, confirmed_rows=1.

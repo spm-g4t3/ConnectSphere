@@ -17,6 +17,7 @@ import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { getConfirmedArrangementsForOrganiser } from '../../src/services/eventRequestService.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
@@ -65,6 +66,7 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
   let organiser;
   let coordinator;
   let technician;
+  let safetyOfficer;
   let hall;
 
   const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
@@ -148,6 +150,10 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
     await db.exec(migration('062_safety_statuses.sql'));
     await db.exec(migration('063_safety_transitions.sql'));
     await db.exec(migration('064_safety_review_submission.sql'));
+    for (const name of ['071_safety_review.sql', '072_safety_review_history.sql', '073_safety_review_gates.sql',
+      '085_event_readiness_details.sql', '086_confirm_event_request.sql']) {
+      await db.exec(migration(name));
+    }
 
     const user = async (email, role, name) => {
       const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
@@ -157,7 +163,7 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
     organiser = await user('o@x', 'event_organiser', 'Aisha Rahman');
     coordinator = await user('a@x', 'event_coordinator', 'Priya Nair');
     technician = await user('t@x', 'technical_support_staff', 'Tan Tech');
-    await user('so@x', 'safety_officer', 'Sam Safe');
+    safetyOfficer = await user('so@x', 'safety_officer', 'Sam Safe');
     hall = (await one("insert into venues (name, location, max_capacity) values ('Hall A', 'SMU', 200) returning id")).id;
   }, 60_000);
 
@@ -192,5 +198,60 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
     expect(err.hint).toBe('EVENT_NOT_READY');
     expect(JSON.parse(err.detail)).toEqual([line]);
     expect((await one('select status::text as s from event_requests where id = $1', [id])).s).toBe('approved');
+  });
+
+  it('SCRUM363_AC2_an_actual_reservation_flag_after_safety_approval_blocks_confirmation_without_releasing_equipment', async () => {
+    const { id, reservation } = await readyEventArrangedBySCRUM300();
+    await db.query('select submit_event_for_safety_review($1, $2)', [id, coordinator]);
+    await db.query("select respond_to_safety_review($1, $2, 'approved', null, '{}', false)", [id, safetyOfficer]);
+    await db.query('select flag_equipment_reservations($1::uuid[], $2)', [[reservation], 'Equipment condition changed']);
+    const before = await one('select * from equipment_reservations where id = $1', [reservation]);
+    const err = await refusal(db.query('select confirm_event_request($1, $2)', [id, coordinator]));
+    expect(err?.hint).toBe('EVENT_NOT_READY');
+    expect(JSON.parse(err.detail)).toEqual([expect.objectContaining({ key: 'equipment', met: false, detail: 'Pending review' })]);
+    expect(await requestStatus(id)).toBe('pending_review');
+    expect(before.flagged).toBe(true);
+    expect(before.released_at).toBeNull();
+    expect(await one('select * from equipment_reservations where id = $1', [reservation])).toEqual(before);
+    expect((await one('select status::text as s from event_requests where id = $1', [id])).s).toBe('safety_approved');
+    expect(Number((await one("select count(*) from event_request_status_history where event_request_id = $1 and new_status = 'confirmed'", [id])).count)).toBe(0);
+  });
+
+  it('SCRUM363_AC7_the_owner_reads_actual_confirmed_booking_and_reserved_equipment_records_and_planning_hides_them', async () => {
+    const { id } = await readyEventArrangedBySCRUM300();
+    await db.query('select submit_event_for_safety_review($1, $2)', [id, coordinator]);
+    await db.query("select respond_to_safety_review($1, $2, 'approved', null, '{}', false)", [id, safetyOfficer]);
+    await db.query('select confirm_event_request($1, $2)', [id, coordinator]);
+    const client = { from(table) {
+      expect(table).toBe('event_requests');
+      const filters = {};
+      // Translate only the read service's embedded relationships to SQL; no arrangement is stubbed.
+      const chain = {
+        select: () => chain,
+        eq: (key, value) => { filters[key] = value; return chain; },
+        maybeSingle: async () => ({ error: null, data: await one(`
+          select e.id, e.organiser_id, e.status, e.proposed_start, e.proposed_end,
+            (select coalesce(jsonb_agg(jsonb_build_object('id', b.id, 'status', b.status,
+              'venues', jsonb_build_object('name', v.name, 'location', v.location))), '[]')
+             from bookings b join venues v on v.id = b.venue_id where b.event_request_id = e.id) as bookings,
+            (select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'status', r.status,
+              'equipment_lines', (select coalesce(jsonb_agg(jsonb_build_object('id', l.id,
+                'quantity', l.quantity, 'removed_at', l.removed_at,
+                'equipment_types', jsonb_build_object('name', t.name))), '[]')
+                from equipment_lines l join equipment_types t on t.id = l.equipment_type_id
+               where l.equipment_request_id = r.id))), '[]')
+             from equipment_requests r where r.event_request_id = e.id) as equipment_requests
+          from event_requests e where e.id = $1 and e.organiser_id = $2`, [filters.id, filters.organiser_id]) }),
+      };
+      return chain;
+    } };
+    const visible = await getConfirmedArrangementsForOrganiser(id, organiser, { client });
+    expect(visible.status).toBe('confirmed');
+    expect(visible.venues).toEqual([expect.objectContaining({ name: 'Hall A', location: 'SMU' })]);
+    expect(visible.equipment).toEqual([expect.objectContaining({ name: expect.stringMatching(/^Projector /), quantity: 2 })]);
+    await expect(getConfirmedArrangementsForOrganiser(id, technician, { client })).rejects.toMatchObject({ status: 404 });
+    // This isolates visibility on a status change; the full significant-change workflow is still a dependency.
+    await db.query("select change_event_request_status($1, 'confirmed', 'approved', $2, 'Visibility check', $2)", [id, coordinator]);
+    expect(await getConfirmedArrangementsForOrganiser(id, organiser, { client })).toMatchObject({ status: 'approved', startsAt: null, endsAt: null, venues: [], equipment: [] });
   });
 });
