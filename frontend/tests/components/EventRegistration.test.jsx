@@ -18,6 +18,10 @@ vi.mock("../../src/services/eventRegistrationService", () => ({
   saveRegistrationSettings: vi.fn(),
 }));
 
+vi.mock("../../src/components/NotificationInbox", () => ({
+  default: () => null,
+}));
+
 const EVENT_ID = "22222222-2222-4222-8222-222222222222";
 
 beforeEach(() => {
