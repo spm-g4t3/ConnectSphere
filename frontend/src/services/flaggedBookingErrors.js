@@ -4,6 +4,7 @@
 // `code` first, then by status, then a default, as bookingRequestErrors.js
 // does it. data.error is never read: it is database prose carrying raw uuids.
 
+import { inTheWayText, occupantText, periodConflicts } from "./bookingRequestErrors";
 import { reasonLabel } from "./venueBlockReasons";
 
 const CODE_MESSAGES = {
@@ -30,35 +31,22 @@ const STATUS_MESSAGES = {
 const DEFAULT_MESSAGE = "Could not resolve the flagged booking. Please try again.";
 
 const CONFLICT_CODE = "BOOKING_PERIOD_CONFLICT";
-const CONFLICT_KINDS = new Set(["block", "booking", "hold"]);
 
 function codeOf(err) {
   return err?.response?.data?.code ?? null;
 }
 
-function conflictsOf(err) {
-  const conflicts = err?.response?.data?.conflicts;
-  return Array.isArray(conflicts) ? conflicts : [];
-}
-
 /**
  * What now occupies the venue, from a BOOKING_PERIOD_CONFLICT answer: venue
- * blocks, other bookings and tentative holds, as { kind, ... }.
- *
- * @param {unknown} err  what reinstateFlaggedBooking threw
- * @returns {Array<Object>}
+ * blocks, other bookings and tentative holds, as { kind, ... }. The same
+ * filter as a pending request's approval, under this screen's name.
  */
-export function resolutionConflicts(err) {
-  if (codeOf(err) !== CONFLICT_CODE) return [];
-  return conflictsOf(err).filter((c) => CONFLICT_KINDS.has(c?.kind));
-}
+export const resolutionConflicts = periodConflicts;
 
-/** One thing in the way of a reinstatement, named for Venue Staff. */
+/** One thing in the way of a reinstatement, named for Venue Staff, with the block's reason. */
 export function conflictText(conflict) {
-  const eventName = conflict.eventName || "another event";
-  if (conflict.kind === "block") return `a venue block (${reasonLabel(conflict.reason)})`;
-  if (conflict.kind === "hold") return `a tentative hold for ${eventName}`;
-  return `the booking for ${eventName}`;
+  const text = occupantText(conflict, "booking");
+  return conflict.kind === "block" ? `${text} (${reasonLabel(conflict.reason)})` : text;
 }
 
 /**
@@ -71,8 +59,7 @@ export function conflictText(conflict) {
 export function resolutionErrorMessage(err) {
   const code = codeOf(err);
   if (code === CONFLICT_CODE) {
-    const occupants = [...new Set(resolutionConflicts(err).map(conflictText))];
-    const inTheWay = occupants.length > 0 ? ` In the way: ${occupants.join(", ")}.` : "";
+    const inTheWay = inTheWayText(resolutionConflicts(err), conflictText);
     return `The venue is no longer free for this booking's period, setup and turnaround included, so it can't be reinstated.${inTheWay}`;
   }
   if (code && Object.hasOwn(CODE_MESSAGES, code)) return CODE_MESSAGES[code];

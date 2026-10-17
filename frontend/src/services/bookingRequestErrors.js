@@ -232,12 +232,33 @@ const DECISION_STATUS_MESSAGES = {
 
 const DECISION_DEFAULT_MESSAGE = "Could not record the decision. Please try again.";
 
-/** One thing in the way of an approval, named for Venue Staff. */
-function occupantText(conflict) {
+/**
+ * One thing in the way of an approval, named for Venue Staff. The flagged
+ * screens reuse it with their own word for a booking and add the block reason.
+ *
+ * @param {Object} conflict          one entry from periodConflicts
+ * @param {string} [bookingNoun]     what a 'booking' conflict is called
+ * @returns {string}
+ */
+export function occupantText(conflict, bookingNoun = "approved booking") {
   const eventName = conflict.eventName || "another event";
   if (conflict.kind === "block") return "a venue block";
   if (conflict.kind === "hold") return `a tentative hold for ${eventName}`;
-  return `the approved booking for ${eventName}`;
+  return `the ${bookingNoun} for ${eventName}`;
+}
+
+/**
+ * The " In the way: a, b." tail of a period-conflict message, each occupant
+ * named once; empty when the answer listed none. describe gets only the
+ * conflict, so occupantText's second argument is never a map index.
+ *
+ * @param {Object[]} conflicts         from periodConflicts
+ * @param {(conflict: Object) => string} describe
+ * @returns {string}
+ */
+export function inTheWayText(conflicts, describe) {
+  const occupants = [...new Set(conflicts.map((c) => describe(c)))];
+  return occupants.length > 0 ? ` In the way: ${occupants.join(", ")}.` : "";
 }
 
 /**
@@ -250,8 +271,7 @@ function occupantText(conflict) {
 export function decisionErrorMessage(err) {
   const code = codeOf(err);
   if (code === "BOOKING_PERIOD_CONFLICT") {
-    const occupants = [...new Set(periodConflicts(err).map(occupantText))];
-    const inTheWay = occupants.length > 0 ? ` In the way: ${occupants.join(", ")}.` : "";
+    const inTheWay = inTheWayText(periodConflicts(err), occupantText);
     return `The venue is no longer free for this request's period, setup and turnaround included, so it can't be approved.${inTheWay}`;
   }
   if (code && Object.hasOwn(DECISION_CODE_MESSAGES, code)) return DECISION_CODE_MESSAGES[code];

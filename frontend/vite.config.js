@@ -153,6 +153,7 @@ const SCRUM266_FILES = [
   'src/components/FlaggedBookingCard.jsx',
   'src/components/FlaggedBookingReasonForm.jsx',
   'src/components/EventFlaggedBookings.jsx',
+  'src/components/FlaggedBookingFlagDetail.jsx',
   'src/components/NeedsAttentionBadge.jsx',
   'src/services/flaggedBookingService.js',
   'src/services/flaggedBookingErrors.js',

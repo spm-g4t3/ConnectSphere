@@ -1454,4 +1454,31 @@ describe("SCRUM266 flagged bookings on the event view", () => {
 
     await waitFor(() => expect(within(finder()).queryByText(/Requesting a replacement for/)).not.toBeInTheDocument());
   });
+
+  it("SCRUM266_W7_cancelling_the_booking_being_replaced_stops_replacing", async () => {
+    // The reload still lists the booking, so only the cancel itself can stop replacing.
+    vi.mocked(getEventFlaggedBookings).mockResolvedValue([FLAGGED]);
+    vi.mocked(cancelFlaggedBooking).mockResolvedValue({ id: "f1", status: "cancelled" });
+    const user = renderAssigned(confirmed());
+    await user.click(await replaceButton());
+    expect(within(finder()).getByText(/Requesting a replacement for Old Hall/)).toBeInTheDocument();
+
+    await user.type(within(flaggedSection()).getByLabelText("Reason for cancelling (required)"), "Venue closed");
+    await user.click(within(flaggedSection()).getByRole("button", { name: "Cancel this booking" }));
+
+    expect(await within(flaggedSection()).findByText("Cancelled the booking of Old Hall.")).toBeInTheDocument();
+    await waitFor(() => expect(getEventFlaggedBookings).toHaveBeenCalledTimes(2));
+    expect(within(finder()).queryByText(/Requesting a replacement for/)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM266_W7_a_replacement_for_a_booking_without_a_venue_name_says_unknown_venue", async () => {
+    vi.mocked(getEventFlaggedBookings).mockResolvedValue([{ ...FLAGGED, venueName: null }]);
+    const user = renderAssigned(confirmed());
+
+    await user.click(await replaceButton());
+
+    expect(within(finder()).getByRole("status")).toHaveTextContent(
+      `Requesting a replacement for Unknown venue, ${formatVenuePeriod(START_ISO, END_ISO)}`,
+    );
+  });
 });

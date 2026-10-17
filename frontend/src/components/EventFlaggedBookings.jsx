@@ -12,10 +12,11 @@
 // is requested from Find a venue; the parent owns which booking is replaced.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import FlaggedBookingFlagDetail from "./FlaggedBookingFlagDetail";
 import FlaggedBookingReasonForm from "./FlaggedBookingReasonForm";
 import { formatTimestamp } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
-import { flagReasons, replacementRequestText, replacementRequests } from "../services/flaggedBookingDisplay";
+import { venueText } from "../services/flaggedBookingDisplay";
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../services/flaggedBookingService";
 import { coordinatorCancelErrorMessage, isStaleResolutionError } from "../services/flaggedBookingErrors";
 
@@ -34,14 +35,7 @@ function asList(data) {
   return Array.isArray(data) ? data : [];
 }
 
-function venueText(item) {
-  const name = item.venueName || "Unknown venue";
-  return item.venueLocation ? `${name}, ${item.venueLocation}` : name;
-}
-
 function FlaggedBooking({ item, busy, cancelling, error, replacing, onCancel, onReplace }) {
-  const reasons = flagReasons(item);
-  const replacements = replacementRequests(item);
   const regionId = `event-flagged-booking-${item.id}`;
 
   return (
@@ -55,31 +49,16 @@ function FlaggedBooking({ item, busy, cancelling, error, replacing, onCancel, on
           <dd>{formatTimestamp(item.flaggedAt, "at an unknown time")}</dd>
         </dl>
 
-        <h5>Why it was flagged</h5>
-        <ul className="pending-bookings__overlapping">
-          {reasons.map((r) => (
-            <li key={r.kind}>
-              <strong>{r.text}</strong>
-              {r.details.map((detail) => (
-                <span key={detail}>{detail}</span>
-              ))}
-            </li>
-          ))}
-        </ul>
-        <p className="pending-bookings__event-status">Alternative arrangements are required.</p>
-
-        {replacements.length > 0 && (
-          <>
-            <ul className="pending-bookings__overlapping">
-              {replacements.map((r) => (
-                <li key={r.id}>{replacementRequestText(r)}</li>
-              ))}
-            </ul>
+        <FlaggedBookingFlagDetail
+          item={item}
+          headingLevel={5}
+          reasonsNote={<p className="pending-bookings__event-status">Alternative arrangements are required.</p>}
+          replacementsNote={
             <p className="pending-bookings__event-status">
               This booking stays flagged until Venue Staff approve a replacement.
             </p>
-          </>
-        )}
+          }
+        />
 
         {error && (
           <p className="pending-bookings__error" role="alert">

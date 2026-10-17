@@ -82,8 +82,31 @@ export function flagReasons(item) {
   return reasons;
 }
 
-function capitalise(text) {
+/** Text with its first letter upper-cased, for labels that start a line. */
+export function capitalise(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * An event or booking status as a label that starts a line: "pending" reads
+ * "Pending", and a missing status "Unknown".
+ *
+ * @param {string|null|undefined} status
+ * @returns {string}
+ */
+export function bookingStatusText(status) {
+  return capitalise(statusLabel(status));
+}
+
+/**
+ * A flagged booking's venue, with its location when known: "Room A, Level 2".
+ *
+ * @param {{venueName?: string|null, venueLocation?: string|null}} item
+ * @returns {string}
+ */
+export function venueText(item) {
+  const name = item.venueName || "Unknown venue";
+  return item.venueLocation ? `${name}, ${item.venueLocation}` : name;
 }
 
 /**
@@ -96,7 +119,7 @@ function capitalise(text) {
 export function replacementRequestText(request) {
   const venue = request.venueName || "Unknown venue";
   const period = formatVenuePeriod(request.startsAt, request.endsAt);
-  return `Replacement requested: ${venue}, ${period} (${capitalise(statusLabel(request.status))})`;
+  return `Replacement requested: ${venue}, ${period} (${bookingStatusText(request.status)})`;
 }
 
 /**

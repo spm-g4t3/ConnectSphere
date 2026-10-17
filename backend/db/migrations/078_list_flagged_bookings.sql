@@ -3,6 +3,8 @@
 -- that event's and can request a venue to replace one, which approval then
 -- resolves. Two more review reasons are allowed for the event and venue edits
 -- that will flag bookings later.
+-- It also restates create_booking_request (section 5), decide_booking_request
+-- (section 6) and list_pending_booking_requests (section 7) from 066.
 
 
 -- ---------------------------------------------------------------------

@@ -806,6 +806,24 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
     });
     expect(request.replaces).toBeNull();
   });
+
+  it('SCRUM266_W7_a_replaced_booking_without_a_venue_name_maps_to_null', async () => {
+    const replaces = {
+      booking_id: OTHER_BOOKING,
+      starts_at: '2026-12-01T10:00:00+00:00',
+      ends_at: '2026-12-01T12:00:00+00:00',
+    };
+    const [request] = await listPendingBookingRequests(USER, {
+      client: clientAnswering({ data: [pendingRow({ replaces })], error: null }),
+    });
+
+    expect(request.replaces).toEqual({
+      bookingId: OTHER_BOOKING,
+      venueName: null,
+      startsAt: '2026-12-01T10:00:00+00:00',
+      endsAt: '2026-12-01T12:00:00+00:00',
+    });
+  });
 });
 
 describe('SCRUM258 approving and rejecting a booking request (066)', () => {

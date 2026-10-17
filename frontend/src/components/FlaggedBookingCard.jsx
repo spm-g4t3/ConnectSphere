@@ -8,16 +8,18 @@
 // resolution is in flight and what went wrong belong to FlaggedBookings, which
 // owns the list and refetches it after every resolution.
 
+import FlaggedBookingFlagDetail from "./FlaggedBookingFlagDetail";
 import FlaggedBookingReasonForm from "./FlaggedBookingReasonForm";
-import { statusLabel } from "../services/bookingRequestEligibility";
 import { formatTimestamp } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { conflictText } from "../services/flaggedBookingErrors";
-import { flagReasons, replacementRequestText, replacementRequests } from "../services/flaggedBookingDisplay";
-
-function capitalise(text) {
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
+import {
+  bookingStatusText,
+  capitalise,
+  flagReasons,
+  replacementRequests,
+  venueText,
+} from "../services/flaggedBookingDisplay";
 
 export default function FlaggedBookingCard({
   item,
@@ -59,12 +61,9 @@ export default function FlaggedBookingCard({
         <div id={regionId} role="region" aria-label={`${eventName} at ${venueName}`} className="pending-bookings__detail">
           <dl>
             <dt>Event status</dt>
-            <dd>{capitalise(statusLabel(item.eventStatus))}</dd>
+            <dd>{bookingStatusText(item.eventStatus)}</dd>
             <dt>Venue</dt>
-            <dd>
-              {venueName}
-              {item.venueLocation ? `, ${item.venueLocation}` : ""}
-            </dd>
+            <dd>{venueText(item)}</dd>
             <dt>Booking period</dt>
             <dd>{formatVenuePeriod(item.startsAt, item.endsAt)}</dd>
             <dt>Event&apos;s current period</dt>
@@ -73,25 +72,7 @@ export default function FlaggedBookingCard({
             <dd>{formatTimestamp(item.flaggedAt, "at an unknown time")}</dd>
           </dl>
 
-          <h3>Why it was flagged</h3>
-          <ul className="pending-bookings__overlapping">
-            {reasons.map((r) => (
-              <li key={r.kind}>
-                <strong>{r.text}</strong>
-                {r.details.map((detail) => (
-                  <span key={detail}>{detail}</span>
-                ))}
-              </li>
-            ))}
-          </ul>
-
-          {replacements.length > 0 && (
-            <ul className="pending-bookings__overlapping">
-              {replacements.map((r) => (
-                <li key={r.id}>{replacementRequestText(r)}</li>
-              ))}
-            </ul>
-          )}
+          <FlaggedBookingFlagDetail item={item} headingLevel={3} />
 
           {error && (
             <p className="pending-bookings__error" role="alert">
