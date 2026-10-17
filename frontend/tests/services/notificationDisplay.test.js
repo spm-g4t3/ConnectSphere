@@ -616,9 +616,71 @@ describe("describeNotification: flagged bookings need alternative arrangements (
   it.each([
     ["booking_flagged", PAYLOAD],
     ["booking_flagged_setup_change", SETUP_PAYLOAD],
+    ["booking_flagged_venue_retired", RETIRED_PAYLOAD],
   ])("SCRUM266_W7_%s_says_alternative_arrangements_are_required", (type, payload) => {
     const { detail } = describeNotification({ id: "n1", type, payload });
     expect(detail).toMatch(/\. Alternative arrangements are required\.$/);
+  });
+});
+
+// SCRUM-174. A block or retirement reaches the coordinator of each affected
+// booking or request; the payloads 084 and 085 write.
+const UNAVAILABLE_PAYLOAD = {
+  ...WITHDRAWN_PAYLOAD,
+  cause: "block",
+  reason: "maintenance",
+  blockStartsAt: PAYLOAD.blockStartsAt,
+  blockEndsAt: PAYLOAD.blockEndsAt,
+};
+const RETIRED_PAYLOAD = { ...WITHDRAWN_PAYLOAD, retiredAt: "2026-09-20T09:00:00+08:00" };
+const REQUESTED = `Requested ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}.`;
+const STILL_OPEN = "The request is still open; you may want to request another venue.";
+const unavailable = (overrides = {}) => describeNotification({
+  id: "n13",
+  type: "booking_request_venue_unavailable",
+  payload: { ...UNAVAILABLE_PAYLOAD, ...overrides },
+});
+
+describe("describeNotification: booking_request_venue_unavailable (SCRUM-174 AC5)", () => {
+  it("SCRUM174_AC5_block_names_the_reason_and_block_period_and_says_the_request_is_open", () => {
+    expect(unavailable()).toEqual({
+      headline: "Hall A is unavailable for your request for Tech Talk",
+      detail: `${REQUESTED} The venue is blocked for Maintenance, ${BLOCKED}. ${STILL_OPEN}`,
+    });
+  });
+
+  it("SCRUM174_AC5_block_without_a_reason_reads_as_unspecified", () => {
+    expect(unavailable({ reason: null }).detail).toBe(
+      `${REQUESTED} The venue is blocked for unspecified reason, ${BLOCKED}. ${STILL_OPEN}`,
+    );
+  });
+
+  it("SCRUM174_AC5_retired_says_the_venue_was_retired_not_blocked", () => {
+    expect(unavailable({ cause: "retired", reason: undefined, blockStartsAt: undefined, blockEndsAt: undefined })).toEqual({
+      headline: "Hall A is unavailable for your request for Tech Talk",
+      detail: `${REQUESTED} The venue has been retired. ${STILL_OPEN}`,
+    });
+  });
+
+  it.each([
+    ["an unknown cause", { cause: "demolished" }],
+    ["a missing cause", { cause: undefined }],
+  ])("SCRUM174_AC5_%s_reads_as_the_generic_notification", (_label, overrides) => {
+    expect(unavailable(overrides)).toEqual({
+      headline: "New notification",
+      detail: "This notification type cannot be displayed yet.",
+    });
+  });
+});
+
+describe("describeNotification: booking_flagged_venue_retired (SCRUM-174 AC6)", () => {
+  it("SCRUM174_AC6_retired_flag_gives_the_booked_period_and_asks_for_alternatives", () => {
+    expect(describeNotification({ id: "n14", type: "booking_flagged_venue_retired", payload: RETIRED_PAYLOAD })).toEqual({
+      headline: "Tech Talk at Hall A needs review",
+      detail:
+        `Booked ${formatRange(RETIRED_PAYLOAD.startsAt, RETIRED_PAYLOAD.endsAt)}. ` +
+        "The venue has been retired. Alternative arrangements are required.",
+    });
   });
 });
 
@@ -827,6 +889,24 @@ const FALLBACKS = [
         "Your request is still open; you can withdraw it or wait for Venue Staff.",
     }],
   ].map(([type, expected]) => [`SCRUM258_AC6_${type}_tolerates_an_empty_payload`, type, null, expected]),
+  ...NO_PAYLOAD.map(([label, payload]) => [
+    `SCRUM174_AC6_venue_retired_flag_tolerates_${label}_payload`,
+    "booking_flagged_venue_retired",
+    payload,
+    {
+      headline: "Unnamed event at Unknown venue needs review",
+      detail: "Booked unknown – unknown. The venue has been retired. Alternative arrangements are required.",
+    },
+  ]),
+  ...NAMELESS.map(([label, value]) => [
+    `SCRUM174_AC5_venue_unavailable_falls_back_for_a_${label}_event_and_venue_name`,
+    "booking_request_venue_unavailable",
+    { cause: "retired", eventName: value, venueName: value },
+    {
+      headline: "Unknown venue is unavailable for your request for Unnamed event",
+      detail: `Requested unknown – unknown. The venue has been retired. ${STILL_OPEN}`,
+    },
+  ]),
   ...[
     ["awaiting_assignment", "event_request_awaiting_assignment", {
       headline: "Unnamed event is waiting for a coordinator",
@@ -910,6 +990,8 @@ const FIXTURES = {
   booking_request_rejected: { eventName: "Tech Talk", venueName: "Hall A", reason: "Under renovation" },
   booking_request_conflicting: { eventName: "Tech Talk", venueName: "Hall A", approvedEventName: "Gala Dinner" },
   flagged_booking_resolved: RESOLVED_PAYLOAD,
+  booking_request_venue_unavailable: UNAVAILABLE_PAYLOAD,
+  booking_flagged_venue_retired: RETIRED_PAYLOAD,
 };
 
 describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", () => {

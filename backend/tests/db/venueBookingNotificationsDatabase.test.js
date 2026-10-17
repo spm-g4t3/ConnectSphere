@@ -2,13 +2,14 @@
  * Booking-progress notices for Venue Staff and Event Coordinators, against a
  * real Postgres, through the latest definitions the API calls:
  * create_booking_request (083), decide_booking_request (078) and
- * create_venue_block / flag_bookings_for_block (033).
+ * create_venue_block (033) / flag_bookings_for_block (084).
  *
  * SCRUM-174 AC1 (Venue Staff told of every new request), AC2-AC5 (the
  * coordinator told of approval, rejection, conflict and a flag) and AC6 (each
  * notice names its own event and venue).
  *
- * Migrations: notifyVenueStaffBookingRequestDatabase.test.js's stack.
+ * Migrations: notifyVenueStaffBookingRequestDatabase.test.js's stack, plus
+ * 039 for the Lead role and 084 for the block flag's recipients.
  *
  * Dates: D is the Singapore date 10 days from now, never hard-coded, because
  * a booking counts only while it has not ended.
@@ -47,6 +48,7 @@ const MIGRATIONS = [
   '032_venue_occupancy.sql',
   '033_venue_occupancy_callers.sql',
   '034_setup_change_recheck.sql',
+  '039_coordinator_lead_and_safety_officer_roles.sql',
   '040_venue_holds.sql',
   '051_multi_venue_booking_requests.sql',
   '065_booking_decision_statuses.sql',
@@ -57,6 +59,7 @@ const MIGRATIONS = [
   '077_cancel_flagged_booking.sql',
   '078_list_flagged_bookings.sql',
   '083_notify_venue_staff_booking_request.sql',
+  '084_block_flag_notifies_event_coordinator.sql',
 ];
 
 /** What 014 reads from SCRUM-19's migration, which is not on this branch. */
@@ -91,6 +94,7 @@ describe('SCRUM-174: booking-progress notices name their event and venue', () =>
   let otherCoordinator;
   let staff;
   let otherStaff;
+  let leads;
   let counter = 0;
 
   const one = async (sql, params) => (await db.query(sql, params)).rows[0];
@@ -112,7 +116,8 @@ describe('SCRUM-174: booking-progress notices name their event and venue', () =>
     ).id;
   }
 
-  async function makeEvent({ assigned } = {}) {
+  /** `assigned: null` leaves the event without a coordinator. */
+  async function makeEvent({ assigned = coordinator } = {}) {
     counter += 1;
     return (
       await one(
@@ -120,7 +125,7 @@ describe('SCRUM-174: booking-progress notices name their event and venue', () =>
            (organiser_id, event_name, status, proposed_start, proposed_end,
             expected_attendance, submitted_at, assigned_coordinator_id)
          values ($1, $2, 'approved', $3, $4, 150, now(), $5) returning id`,
-        [organiser, `Event ${counter}`, at('14:00'), at('16:00'), assigned ?? coordinator],
+        [organiser, `Event ${counter}`, at('14:00'), at('16:00'), assigned],
       )
     ).id;
   }
@@ -185,6 +190,7 @@ describe('SCRUM-174: booking-progress notices name their event and venue', () =>
     otherCoordinator = await makeUser('c2@x', 'event_coordinator');
     staff = await makeUser('s@x', 'venue_staff');
     otherStaff = await makeUser('s2@x', 'venue_staff');
+    leads = [await makeUser('l@x', 'event_coordinator_lead'), await makeUser('l2@x', 'event_coordinator_lead')].sort();
   }, 60_000);
 
   afterAll(async () => {
@@ -261,30 +267,51 @@ describe('SCRUM-174: booking-progress notices name their event and venue', () =>
     });
   });
 
-  it('SCRUM174_AC5_AC6_block_flag_names_event_and_venue', async () => {
-    const event = await makeEvent();
-    const venue = await makeVenue();
+  /** An approved booking for the event at the venue. */
+  async function approvedBooking(event, venue) {
     const booking = (await request(event, venue)).booking.id;
     await decide(booking);
+    return booking;
+  }
 
-    // The override path the API takes: confirmed, with the booking acknowledged.
-    const block = (
+  /** A block over the booking on the API's override path: confirmed, with the booking acknowledged. */
+  const blockOver = async (venue, booking) =>
+    (
       await one(
         `select create_venue_block($1, $2, $3, 'maintenance', null, $4, true, $5::uuid[]) as result`,
         [venue, at('13:00'), at('15:00'), staff, [booking]],
       )
     ).result;
 
+  it('SCRUM174_AC5_AC6_block_flag_reaches_the_assigned_coordinator_and_names_event_and_venue', async () => {
+    const event = await makeEvent();
+    const venue = await makeVenue();
+    const booking = await approvedBooking(event, venue);
+
+    const block = await blockOver(venue, booking);
+
     expect(block.outcome).toBe('created');
     expect((await bookingRow(booking)).status).toBe('flagged_for_review');
+    // Not otherCoordinator and not the Leads: the event has its own coordinator.
     const notices = await noticesOf('booking_flagged', booking);
-    expect(notices.length).toBeGreaterThan(0);
+    expect(notices.map((n) => n.recipient_id)).toEqual([coordinator]);
     const names = await namesOf(event, venue);
-    for (const notice of notices) {
-      expect(notice.booking_id).toBe(booking);
-      expect(notice.block_id).toBe(block.block.id);
-      expect(notice.payload).toMatchObject({ eventName: names.event_name, venueName: names.venue_name });
-    }
+    expect(notices[0].block_id).toBe(block.block.id);
+    expect(notices[0].payload).toMatchObject({ eventName: names.event_name, venueName: names.venue_name });
+  });
+
+  it('SCRUM174_AC5_block_flag_on_an_unassigned_event_reaches_the_leads', async () => {
+    const event = await makeEvent();
+    const venue = await makeVenue();
+    const booking = await approvedBooking(event, venue);
+    // create_booking_request needs the assigned coordinator, so the event
+    // loses its coordinator only once the booking is approved.
+    await db.query('update event_requests set assigned_coordinator_id = null where id = $1', [event]);
+
+    await blockOver(venue, booking);
+
+    const notices = await noticesOf('booking_flagged', booking);
+    expect(notices.map((n) => n.recipient_id)).toEqual(leads);
   });
 
   it('SCRUM174_AC1_each_venue_of_a_multi_venue_event_notifies_separately', async () => {
@@ -347,5 +374,113 @@ describe('SCRUM-174: booking-progress notices name their event and venue', () =>
         venueName: names.venue_name,
       });
     }
+  });
+
+  /** A block with no approved booking under it, so no override is needed. */
+  const blockAt = async (venue, startsAt, endsAt) =>
+    (
+      await one(`select create_venue_block($1, $2, $3, 'maintenance', null, $4) as result`, [
+        venue,
+        startsAt,
+        endsAt,
+        staff,
+      ])
+    ).result;
+
+  const UNAVAILABLE = 'booking_request_venue_unavailable';
+
+  it('SCRUM174_AC5_a_block_over_a_pending_request_tells_its_coordinator_without_changing_it', async () => {
+    const event = await makeEvent();
+    const venue = await makeVenue();
+    const created = await request(event, venue);
+
+    const block = await blockAt(venue, at('13:00'), at('15:00'));
+
+    expect(block.outcome).toBe('created');
+    // Flag and notify only: the request stays open for Venue Staff to decide.
+    const row = await bookingRow(created.booking.id);
+    expect(row.status).toBe('pending');
+    expect(row.review_block_id).toBeNull();
+    expect(await noticesOf('booking_flagged', created.booking.id)).toEqual([]);
+    const notices = await noticesOf(UNAVAILABLE, created.booking.id);
+    expect(notices.map((n) => n.recipient_id)).toEqual([coordinator]);
+    expect(notices[0].block_id).toBe(block.block.id);
+    const names = await namesOf(event, venue);
+    expect(notices[0].payload).toMatchObject({
+      cause: 'block',
+      eventRequestId: event,
+      eventName: names.event_name,
+      venueId: venue,
+      venueName: names.venue_name,
+      startsAt: created.booking.starts_at,
+      endsAt: created.booking.ends_at,
+      reason: 'maintenance',
+      blockStartsAt: block.block.starts_at,
+      blockEndsAt: block.block.ends_at,
+    });
+  });
+
+  it('SCRUM174_AC5_a_conflicting_request_under_a_block_is_told_too', async () => {
+    const venue = await makeVenue();
+    const approvedEvent = await makeEvent();
+    const clashingEvent = await makeEvent({ assigned: otherCoordinator });
+    const toApprove = (await request(approvedEvent, venue)).booking.id;
+    const clashing = (await request(clashingEvent, venue, { caller: otherCoordinator })).booking.id;
+    await decide(toApprove);
+    expect((await bookingRow(clashing)).status).toBe('conflicting');
+
+    await blockOver(venue, toApprove);
+
+    expect((await bookingRow(clashing)).status).toBe('conflicting');
+    const notices = await noticesOf(UNAVAILABLE, clashing);
+    expect(notices.map((n) => n.recipient_id)).toEqual([otherCoordinator]);
+    // The approved booking is flagged instead, not also told it is unavailable.
+    expect(await noticesOf(UNAVAILABLE, toApprove)).toEqual([]);
+  });
+
+  it('SCRUM174_AC5_extending_the_same_block_does_not_repeat_the_notice', async () => {
+    const event = await makeEvent();
+    const venue = await makeVenue();
+    const created = await request(event, venue);
+    const block = await blockAt(venue, at('13:00'), at('15:00'));
+
+    const updated = (
+      await one(
+        `select update_venue_block($1, $2, $3, $4, null, null, false, $5) as result`,
+        [venue, block.block.id, at('12:00'), at('15:30'), staff],
+      )
+    ).result;
+
+    expect(updated.outcome).toBe('updated');
+    expect(await noticesOf(UNAVAILABLE, created.booking.id)).toHaveLength(1);
+  });
+
+  it('SCRUM174_AC5_a_request_outside_the_block_is_not_told', async () => {
+    // The request is 14:00-16:00; with the venue's 30 min setup and 45 min
+    // turnaround it occupies 13:30-16:45. Each case gets its own venue.
+    const cases = [
+      { from: '13:00', to: '13:30', told: false },
+      { from: '16:45', to: '17:30', told: false },
+      { from: '13:00', to: '13:31', told: true }, // inside setup only
+      { from: '16:44', to: '17:30', told: true }, // inside turnaround only
+    ];
+    for (const { from, to, told } of cases) {
+      const event = await makeEvent();
+      const venue = await makeVenue();
+      const created = await request(event, venue);
+
+      await blockAt(venue, at(from), at(to));
+
+      expect(await noticesOf(UNAVAILABLE, created.booking.id), `${from}-${to}`).toHaveLength(told ? 1 : 0);
+    }
+  });
+
+  it('SCRUM174_AC5_unavailable_notice_requires_booking', async () => {
+    await expect(
+      db.query(`insert into notifications (recipient_id, type, payload) values ($1, $2, '{}'::jsonb)`, [
+        coordinator,
+        UNAVAILABLE,
+      ]),
+    ).rejects.toMatchObject({ code: '23514' });
   });
 });

@@ -306,9 +306,15 @@ describe('AC6: a block keeps its own period', () => {
   });
 
   it('SCRUM484_AC6_latest_block_definitions_supersede_013_to_015', () => {
-    for (const name of BLOCK_FUNCTIONS) {
+    // Changed for SCRUM-174: 084 restates 033's flag_bookings_for_block with
+    // only step 3's recipients changed (the event's coordinator, else the
+    // Leads), its overlap call unchanged, so 084 is now its latest definition.
+    for (const name of ['create_venue_block', 'update_venue_block']) {
       expect(latestDefinitionFile(name), name).toBe(FILE);
     }
+    expect(latestDefinitionFile('flag_bookings_for_block')).toBe('084_block_flag_notifies_event_coordinator.sql');
+    const overlapCalls = (sql) => functionText(sql, 'flag_bookings_for_block').match(/venue_occupancy_conflicts\([^)]*\)/g);
+    expect(overlapCalls(normalised('084_block_flag_notifies_event_coordinator.sql'))).toEqual(overlapCalls(SQL));
     // Changed for SCRUM-491: 040 redefined create_booking_request with 033's
     // body word for word except step 7, which also counts other events'
     // active holds. Changed again for SCRUM-525: 051 redefines it with 040's

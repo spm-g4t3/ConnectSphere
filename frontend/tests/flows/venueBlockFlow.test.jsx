@@ -350,7 +350,7 @@ describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
     await user.click(screen.getByRole("button", { name: "Override and flag 1 booking" }));
     expect(venueService.createVenueBlock).toHaveBeenCalledTimes(1);
     expect(
-      screen.getByText("Flag these bookings for review and notify Event Coordinators?"),
+      screen.getByText("Flag these bookings for review and notify each event's coordinator?"),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Yes, override" }));
 
