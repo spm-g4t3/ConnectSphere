@@ -58,6 +58,14 @@
 //     venueName, startsAt, endsAt, releasedBy, releasedByName, reason }
 //   booking_request_conflict_cleared (089): { eventRequestId, eventName,
 //     venueId, venueName, startsAt, endsAt, releasedBookingId, releasedEventName }
+//   event_significant_change (091): { eventRequestId, eventName, reason,
+//     changedFields, statusBefore, statusAfter }
+//   event_significant_change_attendee (091): { eventRequestId, eventName,
+//     startsAt, endsAt, reason }
+//   booking_flagged_event_change (091): { eventName, venueName, startsAt,
+//     endsAt, reason }
+//   equipment_reservation_flagged_event_change (091): { eventName,
+//     reservationIds, reservationCount, reason }
 // Every field is read defensively -- a notification outlives the build that
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
@@ -476,6 +484,38 @@ const DESCRIBERS = {
     return {
       headline: `Equipment for ${eventName} needs review after the safety check`,
       detail: "The Safety Officer flagged the equipment arrangements.",
+    };
+  },
+
+  event_significant_change(payload, { eventName }) {
+    return {
+      headline: `${eventName} has a significant change`,
+      detail: `The event was updated by its Coordinator. Reason: ${payload.reason || NO_REASON}.`,
+    };
+  },
+
+  event_significant_change_attendee(payload, { eventName }) {
+    const period = payload.startsAt && payload.endsAt
+      ? ` The event now runs ${formatRange(payload.startsAt, payload.endsAt)}.`
+      : "";
+    return {
+      headline: `An event you registered for has changed: ${eventName}`,
+      detail: `Reason: ${payload.reason || NO_REASON}.${period}`,
+    };
+  },
+
+  booking_flagged_event_change(payload, { eventName, venueName }) {
+    return {
+      headline: `${needsReview(eventName, venueName)} after a significant event change`,
+      detail: bookedFor(payload) + `Coordinator's reason: ${payload.reason || NO_REASON}.`,
+    };
+  },
+
+  equipment_reservation_flagged_event_change(payload, { eventName }) {
+    const count = Number(payload.reservationCount) || 0;
+    return {
+      headline: `Equipment reservations for ${eventName} need review`,
+      detail: `${count} reservation${count === 1 ? "" : "s"} flagged after a significant event change. Reason: ${payload.reason || NO_REASON}.`,
     };
   },
 };

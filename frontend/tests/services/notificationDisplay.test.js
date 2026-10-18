@@ -101,6 +101,66 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
     expect(headline).not.toBe("New notification");
   });
 
+  describe("describeNotification: significant event changes (SCRUM-395)", () => {
+    it("explains the change to the organiser", () => {
+      const notification = {
+        id: "n395-1",
+        type: "event_significant_change",
+        payload: { eventName: "Tech Talk", reason: "Updated schedule" },
+      };
+      expect(describeNotification(notification)).toEqual({
+        headline: "Tech Talk has a significant change",
+        detail: "The event was updated by its Coordinator. Reason: Updated schedule.",
+      });
+    });
+
+    it("shows the changed period to registered attendees", () => {
+      const notification = {
+        id: "n395-2",
+        type: "event_significant_change_attendee",
+        payload: {
+          eventName: "Tech Talk",
+          reason: "Updated schedule",
+          startsAt: PAYLOAD.startsAt,
+          endsAt: PAYLOAD.endsAt,
+        },
+      };
+      const { headline, detail } = describeNotification(notification);
+      expect(headline).toBe("An event you registered for has changed: Tech Talk");
+      expect(detail).toContain("Reason: Updated schedule.");
+      expect(detail).toContain(formatRange(PAYLOAD.startsAt, PAYLOAD.endsAt));
+    });
+
+    it("explains a venue booking flag", () => {
+      const notification = {
+        id: "n395-3",
+        type: "booking_flagged_event_change",
+        payload: {
+          eventName: "Tech Talk",
+          venueName: "Hall A",
+          startsAt: PAYLOAD.startsAt,
+          endsAt: PAYLOAD.endsAt,
+          reason: "Updated schedule",
+        },
+      };
+      const { headline, detail } = describeNotification(notification);
+      expect(headline).toBe("Tech Talk at Hall A needs review after a significant event change");
+      expect(detail).toContain("Coordinator's reason: Updated schedule.");
+    });
+
+    it("explains flagged equipment reservations", () => {
+      const notification = {
+        id: "n395-4",
+        type: "equipment_reservation_flagged_event_change",
+        payload: { eventName: "Tech Talk", reservationCount: 2, reason: "Updated schedule" },
+      };
+      expect(describeNotification(notification)).toEqual({
+        headline: "Equipment reservations for Tech Talk need review",
+        detail: "2 reservations flagged after a significant event change. Reason: Updated schedule.",
+      });
+    });
+  });
+
   it("SCRUM484_AC8_setup_change_detail_does_not_repeat_the_backend_reason", () => {
     expect(describeNotification(setupChange()).detail).not.toContain(SETUP_PAYLOAD.reason);
   });
@@ -967,6 +1027,13 @@ function knownNotificationTypes() {
 
 const FIXTURES = {
   booking_flagged: PAYLOAD,
+  booking_flagged_event_change: {
+    eventName: "Tech Talk",
+    venueName: "Hall A",
+    startsAt: PAYLOAD.startsAt,
+    endsAt: PAYLOAD.endsAt,
+    reason: "Updated schedule",
+  },
   booking_request_withdrawn: WITHDRAWN_PAYLOAD,
   booking_request_submitted: WITHDRAWN_PAYLOAD,
   clarification_requested: { eventName: "Tech Talk", message: "Please confirm." },
@@ -981,6 +1048,18 @@ const FIXTURES = {
   safety_review_response: { eventName: "Tech Talk", outcome: "approved" },
   safety_booking_flagged: { eventName: "Tech Talk", venueName: "Hall A", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt },
   safety_equipment_review: { eventName: "Tech Talk" },
+  equipment_reservation_flagged_event_change: {
+    eventName: "Tech Talk",
+    reservationCount: 2,
+    reason: "Updated schedule",
+  },
+  event_significant_change: { eventName: "Tech Talk", reason: "Updated schedule" },
+  event_significant_change_attendee: {
+    eventName: "Tech Talk",
+    startsAt: PAYLOAD.startsAt,
+    endsAt: PAYLOAD.endsAt,
+    reason: "Updated schedule",
+  },
   event_submitted_for_safety_review: { eventName: "Tech Talk", coordinatorName: "Nia New", startsAt: PAYLOAD.startsAt },
   booking_request_approved: { eventName: "Tech Talk", venueName: "Hall A", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt },
   booking_request_rejected: { eventName: "Tech Talk", venueName: "Hall A", reason: "Under renovation" },

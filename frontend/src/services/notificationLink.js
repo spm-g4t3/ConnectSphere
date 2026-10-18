@@ -10,6 +10,7 @@ const eventRequestPage = (id) => ({ to: `/event-requests/${id}` });
 const VENUE_STAFF_PAGES = {
   booking_request_submitted: { to: "/booking-requests" },
   safety_booking_flagged: { to: "/flagged-bookings" },
+  booking_flagged_event_change: { to: "/flagged-bookings" },
 };
 
 // One entry per role, so a later story adds a line rather than a branch.
@@ -28,7 +29,10 @@ const LINKS_BY_ROLE = {
 
   // A cancelled event's review has nothing left to act on.
   TECHNICAL_SUPPORT_STAFF: (type, id) =>
-    type === "safety_equipment_review" ? { to: `/equipment-review/${id}` } : null,
+    type === "safety_equipment_review" ||
+    type === "equipment_reservation_flagged_event_change"
+      ? { to: `/equipment-review/${id}` }
+      : null,
 
   // A new request is decided in their queue and a safety flag on their flagged
   // bookings list. A withdrawn request has nothing left to decide, so no link.

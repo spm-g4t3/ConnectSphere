@@ -81,6 +81,8 @@ import {
   getEventRequestById,
   listEventRequestsForOrganiser,
   getEventRequestForOrganiser,
+  getSignificantEventChangeImpact,
+  applySignificantEventChange,
   requestEventClarification,
   respondToEventClarification,
   closeEventClarification,
@@ -4112,6 +4114,115 @@ describe('SCRUM-325 AC4: nothing leaves a final status', () => {
       expect(err.message).toContain(`'${final}'`);
       expect(client.calls).toHaveLength(0);
     }
+  });
+
+  describe('SCRUM-395 significant event change service calls', () => {
+    const current = storedRow({
+      status: STATUS.CONFIRMED,
+      assigned_coordinator_id: COORDINATOR_ID,
+      proposed_start: '2027-04-01T09:00:00+08:00',
+      proposed_end: '2027-04-01T11:00:00+08:00',
+    });
+    const changes = { proposedStart: '2027-04-01T10:00:00+08:00' };
+
+    it('previews the validated merged event through the shared database calculation', async () => {
+      const impact = { venueBookings: [], equipmentReservations: [], registeredAttendeesToNotify: 0 };
+      const client = createFakeClient([ok(current), ok(impact)]);
+
+      await expect(getSignificantEventChangeImpact(
+        REQUEST_ID,
+        changes,
+        COORDINATOR_ID,
+        { client },
+      )).resolves.toEqual(impact);
+
+      expect(client.calls[0].table).toBe('event_requests');
+      expect(rpcCallsOf(client)).toEqual([expect.objectContaining({
+        fn: 'preview_significant_event_change',
+        args: {
+          p_event_request_id: REQUEST_ID,
+          p_changes: changes,
+          p_user_id: COORDINATOR_ID,
+        },
+      })]);
+    });
+
+    it('applies changes through the atomic database function and maps its event', async () => {
+      const impact = { venueBookings: [], equipmentReservations: [], registeredAttendeesToNotify: 0 };
+      const updated = storedRow({
+        ...current,
+        status: STATUS.APPROVED,
+        proposed_start: '2027-04-01T10:00:00+08:00',
+      });
+      const client = createFakeClient([
+        ok(current),
+        ok({
+          event: updated,
+          impact,
+          flaggedBookingIds: [],
+          flaggedReservationCount: 0,
+        }),
+      ]);
+
+      await expect(applySignificantEventChange(
+        REQUEST_ID,
+        { changes, reason: 'Updated schedule', expectedImpact: impact },
+        COORDINATOR_ID,
+        { client },
+      )).resolves.toMatchObject({
+        event: { id: REQUEST_ID, status: STATUS.APPROVED },
+        impact,
+        flaggedBookingIds: [],
+        flaggedReservationCount: 0,
+      });
+      expect(rpcCallsOf(client)).toEqual([expect.objectContaining({
+        fn: 'apply_significant_event_change',
+        args: {
+          p_event_request_id: REQUEST_ID,
+          p_changes: changes,
+          p_reason: 'Updated schedule',
+          p_user_id: COORDINATOR_ID,
+          p_expected_impact: impact,
+        },
+      })]);
+    });
+
+    it('refuses a missing reason and a different coordinator before the write RPC', async () => {
+      const wrongAssignment = storedRow({
+        ...current,
+        assigned_coordinator_id: '66666666-6666-4666-8666-666666666666',
+      });
+      const client = createFakeClient([ok(wrongAssignment)]);
+
+      await expect(applySignificantEventChange(
+        REQUEST_ID,
+        { changes, reason: ' ' },
+        COORDINATOR_ID,
+        { client },
+      )).rejects.toBeInstanceOf(ValidationError);
+      await expect(applySignificantEventChange(
+        REQUEST_ID,
+        {
+          changes,
+          reason: 'Updated schedule',
+          expectedImpact: { venueBookings: [], equipmentReservations: [] },
+        },
+        COORDINATOR_ID,
+        { client },
+      )).rejects.toBeInstanceOf(ForbiddenError);
+      expect(rpcCallsOf(client)).toHaveLength(0);
+    });
+
+    it('requires a preview impact before the apply RPC', async () => {
+      const client = createFakeClient([]);
+      await expect(applySignificantEventChange(
+        REQUEST_ID,
+        { changes, reason: 'Updated schedule' },
+        COORDINATOR_ID,
+        { client },
+      )).rejects.toBeInstanceOf(ValidationError);
+      expect(client.calls).toHaveLength(0);
+    });
   });
 
   it('SCRUM325_AC4_lets_a_rejected_request_go_back_to_a_draft_and_nowhere_else', () => {

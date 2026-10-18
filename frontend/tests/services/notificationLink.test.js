@@ -95,3 +95,25 @@ describe("SCRUM174_AC1 Venue Staff's new request notice", () => {
     expect(notificationLink(note("booking_request_submitted"), "venue_staff")).toEqual({ to: "/booking-requests" });
   });
 });
+
+describe("SCRUM395 significant change notification destinations", () => {
+  it("sends venue staff to the flagged booking list", () => {
+    expect(notificationLink(note("booking_flagged_event_change"), "venue_staff")).toEqual({
+      to: "/flagged-bookings",
+    });
+  });
+
+  it("sends technical support to the equipment review", () => {
+    expect(notificationLink(
+      note("equipment_reservation_flagged_event_change"),
+      "technical_support_staff",
+    )).toEqual({ to: `/equipment-review/${EVENT}` });
+  });
+
+  it("focuses the changed event for its organiser", () => {
+    expect(notificationLink(note("event_significant_change"), "event_organiser")).toEqual({
+      to: "/events",
+      state: { focusEventRequestId: EVENT },
+    });
+  });
+});
