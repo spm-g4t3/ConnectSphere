@@ -47,8 +47,11 @@ function httpError(status, data = {}) {
 function renderSection(props = {}) {
   const user = userEvent.setup();
   const onReleased = vi.fn();
-  const utils = render(<EventVenueBookings eventRequestId={EVENT_ID} onReleased={onReleased} {...props} />);
-  return { user, onReleased, ...utils };
+  const onStale = vi.fn();
+  const utils = render(
+    <EventVenueBookings eventRequestId={EVENT_ID} onReleased={onReleased} onStale={onStale} {...props} />,
+  );
+  return { user, onReleased, onStale, ...utils };
 }
 
 const card = (venue) => screen.getByRole("listitem", { name: venue });
@@ -326,6 +329,71 @@ describe("SCRUM492 refusals, keyed on the status and the code", () => {
 
     expect(await within(card("Hall A")).findByRole("alert")).toHaveTextContent(
       "The venue could not be released. Please try again.",
+    );
+  });
+
+  it("SCRUM492_AC1_a_409_event_not_approved_tells_the_parent_the_event_is_stale", async () => {
+    // The event left Approved (another tab, the safety check): the page must
+    // refresh, or the section stays and every Release fails.
+    const { user, onStale } = renderSection();
+
+    await refuse(user, httpError(409, { code: "EVENT_NOT_APPROVED" }));
+
+    await waitFor(() => expect(getMyBookingRequests).toHaveBeenCalledTimes(2));
+    expect(onStale).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("Venues can be released only while the event is Approved.");
+  });
+
+  it("SCRUM492_AC1_a_403_tells_the_parent_the_event_is_stale", async () => {
+    // The event was handed to another coordinator.
+    const { user, onStale } = renderSection();
+
+    await refuse(user, httpError(403));
+
+    expect(await within(card("Hall A")).findByRole("alert")).toHaveTextContent(
+      "Only the coordinator assigned to this event can release its venues.",
+    );
+    expect(onStale).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["BOOKING_NOT_APPROVED", "BOOKING_CHANGED"])(
+    "SCRUM492_AC1_a_stale_booking_reloads_the_list_without_telling_the_parent_%s",
+    async (code) => {
+      // Only the row changed; reloading this list is enough.
+      const { user, onStale } = renderSection();
+
+      await refuse(user, httpError(409, { code }));
+
+      await waitFor(() => expect(getMyBookingRequests).toHaveBeenCalledTimes(2));
+      expect(onStale).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([400, 401, 404])("SCRUM492_AC1_a_%s_does_not_tell_the_parent", async (status) => {
+    const { user, onStale } = renderSection();
+
+    await refuse(user, httpError(status));
+
+    await within(card("Hall A")).findByRole("alert");
+    expect(onStale).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM492_AC1_a_409_with_no_body_reloads_the_list_without_telling_the_parent", async () => {
+    const { user, onStale } = renderSection();
+
+    await refuse(user, Object.assign(new Error("HTTP 409"), { response: { status: 409 } }));
+
+    await waitFor(() => expect(getMyBookingRequests).toHaveBeenCalledTimes(2));
+    expect(onStale).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM492_AC1_a_stale_event_with_no_parent_handler_still_says_so", async () => {
+    const { user } = renderSection({ onStale: undefined });
+
+    await refuse(user, httpError(403));
+
+    expect(await within(card("Hall A")).findByRole("alert")).toHaveTextContent(
+      "Only the coordinator assigned to this event can release its venues.",
     );
   });
 

@@ -996,6 +996,7 @@ export default function CoordinatorRequestDetail({
             setVenueVersion((n) => n + 1);
             onChangeRequestProcessed?.();
           }}
+          onStale={() => onChangeRequestProcessed?.()}
         />
       )}
       {isAssignedCoordinator && (

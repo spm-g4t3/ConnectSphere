@@ -110,7 +110,7 @@ function VenueBooking({ row, open, busy, error, onOpen, onKeep, onConfirm }) {
   );
 }
 
-export default function EventVenueBookings({ eventRequestId, onReleased }) {
+export default function EventVenueBookings({ eventRequestId, onReleased, onStale }) {
   const [rows, setRows] = useState([]);
   const [error, setError] = useState(null);
   const [openId, setOpenId] = useState(null);
@@ -162,7 +162,11 @@ export default function EventVenueBookings({ eventRequestId, onReleased }) {
       await load();
     } catch (err) {
       const message = releaseErrorMessage(err);
-      if (err?.response?.status === 409) {
+      const status = err?.response?.status;
+      // The event itself moved on (left Approved, or was handed to someone
+      // else), so the page must refresh, not only this list.
+      if (status === 403 || (status === 409 && err.response.data?.code === "EVENT_NOT_APPROVED")) onStale?.();
+      if (status === 409) {
         setListError(message);
         setOpenId(null);
         await load();

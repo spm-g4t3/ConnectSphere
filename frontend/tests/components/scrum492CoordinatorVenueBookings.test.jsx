@@ -144,6 +144,25 @@ describe("SCRUM492_AC1 who is offered Release", () => {
   });
 });
 
+describe("SCRUM492_AC1 a stale event refreshes the page", () => {
+  it("SCRUM492_AC1_a_409_event_not_approved_from_release_refreshes_the_parent", async () => {
+    signIn(ASSIGNED, "event_coordinator");
+    const onChangeRequestProcessed = vi.fn();
+    vi.mocked(releaseVenueBooking).mockRejectedValue(
+      Object.assign(new Error("HTTP 409"), { response: { status: 409, data: { code: "EVENT_NOT_APPROVED" } } }),
+    );
+    const { user } = renderPage(eventRequest(), { onChangeRequestProcessed });
+    const card = await screen.findByRole("listitem", { name: "Hall A" });
+
+    await user.click(within(card).getByRole("button", { name: "Release this venue" }));
+    await user.type(screen.getByLabelText("Reason for releasing this venue (required)"), "Moved");
+    await user.click(screen.getByRole("button", { name: "Confirm release" }));
+
+    await waitFor(() => expect(onChangeRequestProcessed).toHaveBeenCalledTimes(1));
+    expect(suitabilityMounts.count).toBe(1);
+  });
+});
+
 describe("SCRUM492_AC2 what a release refreshes", () => {
   it("SCRUM492_AC2_a_release_reloads_venue_suitability_and_the_parent_and_keeps_its_notice", async () => {
     signIn(ASSIGNED, "event_coordinator");

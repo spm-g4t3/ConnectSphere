@@ -226,7 +226,8 @@ released booking stops counting everywhere at once. None was restated.
 ### D11. Cancellation does not free Conflicting requests — **open**
 
 Cancelling an event or a flagged booking also frees a venue, but leaves other
-events' requests Conflicting. Only a release clears them. Recorded, not fixed.
+events' requests Conflicting. Only a release clears them. Recorded, not fixed here;
+now tracked as SCRUM-571 (backlog story, created 18 October 2026).
 
 ---
 
@@ -236,7 +237,7 @@ events' requests Conflicting. Only a release clears them. Recorded, not fixed.
 
 | Gap | Detail | Owner |
 |---|---|---|
-| D11 | Cancelling an event (370, `cancel_event_request`) or a flagged booking (077, `cancel_flagged_booking`) frees the venue but leaves other events' Conflicting requests as they were; only a release returns them to Pending | The team (open question 3) |
+| D11 | Cancelling an event (370, `cancel_event_request`) or a flagged booking (077, `cancel_flagged_booking`) frees the venue but leaves other events' Conflicting requests as they were; only a release returns them to Pending. Now tracked as SCRUM-571 (backlog story, created 18 October 2026) | SCRUM-571 (open question 3) |
 | No releaser name on the card | `/mine` carries `releasedAt` and `releaseReason` but not who released it, so a released booking reads "Released on {date}: {reason}". The name is stored (`released_by`) and shown to Venue Staff in the notice (`releasedByName`) | A later change to `/mine`, if wanted |
 | Whitespace-only reasons | SQL `btrim` trims spaces only, so the database alone would accept a reason of only tabs or newlines; the service refuses any whitespace-only reason before the rpc. The same as 077 | — |
 | The approve-versus-release race | An approval and a release at the same venue take turns on the venue lock (`089:264`, the lock `decide_booking_request` takes), so an approval cannot slip in between the release and AC4's check. PGlite is one connection, so two transactions never overlap and this is untested | — |
@@ -285,6 +286,15 @@ events' requests Conflicting. Only a release clears them. Recorded, not fixed.
   docs-only run, `SCRUM258_AC3_075_is_the_latest_definition_of_cancel_event_request_and_event_readiness`
   each timed out once in a full backend run and passed alone and in the next full run; a frontend
   `SCRUM172_AC7` scroll test failed once the same way. None touches this story's code.
+- **PR review, fixed and deferred:** fixed: a 409 `EVENT_NOT_APPROVED` or a 403 from
+  Release now also tells the page the event is stale (`onStale`, as
+  SafetyCheckSubmissionPanel does), and Released has its own status class rather than
+  unknown's. Deferred: the textarea's `maxLength` counts the untrimmed text in UTF-16
+  units while the counter counts trimmed code points, which can only be stricter than
+  the server (FlaggedBookingReasonForm does the same); cancellation leaving requests
+  Conflicting is D11, now tracked as SCRUM-571 (backlog story, created 18 October
+  2026); `/mine` erroring before 089 runs is a deploy order note, and 089 is already
+  live.
 - **Briefs corrected by the code:** the enum test did not read every migration;
   the calendar has no status filter of its own; the search suite stops at 033, so
   the search proof lives in this story's PGlite suite; the list mapper needs
@@ -299,7 +309,7 @@ events' requests Conflicting. Only a release clears them. Recorded, not fixed.
 2. **AC4's rule (D8).** Is "nothing else occupies its period now" the right reading
    of "only because of this booking"? **Open**; the ticket says "To confirm".
 3. **Cancellation and Conflicting requests (D11).** Should cancelling an event or a
-   flagged booking also return the requests it frees to Pending? **Open.**
+   flagged booking also return the requests it frees to Pending? **Open**; tracked as SCRUM-571 (backlog story, created 18 October 2026).
 4. **Venue Staff cannot release (D1).** **Decided** by requirements §7 [C4 14 Sep].
 
 ---

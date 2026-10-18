@@ -213,7 +213,7 @@ So 492 restates none of them.
 
 Cancelling an event (370) or a flagged booking (077) also frees a venue, but leaves
 other events' requests Conflicting. After 492 only a release clears them. Open
-question 4.
+question 4; now tracked as SCRUM-571 (backlog story, created 18 October 2026).
 
 ---
 
@@ -320,7 +320,7 @@ question 4.
 3. **AC4's rule (D8).** The ticket says "To confirm"; built as worded.
 4. **Cancellation does not free Conflicting requests (D11).** Should event
    cancellation (370) and flagged-booking cancellation (077) also return the
-   requests they free to Pending?
+   requests they free to Pending? Now tracked as SCRUM-571 (backlog story, created 18 October 2026).
 
 ---
 
