@@ -1,7 +1,7 @@
 /**
  * Tests for the equipment review routes.
  *
- * SCRUM-290, subtasks SCRUM-292, 293 and 294. Named N14_ACn_<what_it_checks>.
+ * SCRUM-290, subtasks SCRUM-292, 293 and 294. Named SCRUM290_AC<n>_<what_it_checks>.
  * These are about transport and authorisation: the right routes exist, only
  * Technical Support Staff reach them, a refused attempt reaches no database
  * function so it changes nothing, and the caller is the signed-in user and never
@@ -136,7 +136,7 @@ const ROUTES = [
 
 describe('AC1: only Technical Support Staff reach any route', () => {
   it.each(OTHER_ROLES.flatMap((role) => ROUTES.map(([what, call]) => [role, what, call])))(
-    'N14_AC1_refuses_%s_who_%s_with_403_and_reaches_nothing',
+    'SCRUM290_AC1_refuses_%s_who_%s_with_403_and_reaches_nothing',
     async (role, _what, call) => {
       const client = fakeClient();
 
@@ -149,7 +149,7 @@ describe('AC1: only Technical Support Staff reach any route', () => {
     },
   );
 
-  it.each(ROUTES)('N14_AC1_refuses_a_signed_out_caller_who_%s_with_401', async (_what, call) => {
+  it.each(ROUTES)('SCRUM290_AC1_refuses_a_signed_out_caller_who_%s_with_401', async (_what, call) => {
     const client = fakeClient();
 
     const res = await call(appWith(client, signedOut));
@@ -161,7 +161,7 @@ describe('AC1: only Technical Support Staff reach any route', () => {
 
 
 describe('the routes for Technical Support Staff', () => {
-  it('N14_AC4_get_answers_200_with_the_review_data_and_calls_only_the_read', async () => {
+  it('SCRUM290_AC4_get_answers_200_with_the_review_data_and_calls_only_the_read', async () => {
     const client = fakeClient();
 
     const res = await request(appWith(client)).get(BASE);
@@ -178,7 +178,7 @@ describe('the routes for Technical Support Staff', () => {
     expect(client.rpcCalls.map((c) => c.name)).toEqual(['equipment_review_for_event']);
   });
 
-  it('N14_AC2_viewing_does_not_call_any_write_function', async () => {
+  it('SCRUM290_AC2_viewing_does_not_call_any_write_function', async () => {
     const client = fakeClient();
 
     await request(appWith(client)).get(BASE);
@@ -187,7 +187,7 @@ describe('the routes for Technical Support Staff', () => {
       .toEqual([]);
   });
 
-  it('N14_AC4_get_answers_404_for_an_event_that_does_not_exist', async () => {
+  it('SCRUM290_AC4_get_answers_404_for_an_event_that_does_not_exist', async () => {
     const client = fakeClient({ equipment_review_for_event: dbError('P0002', 'Event request not found') });
 
     const res = await request(appWith(client)).get(BASE);
@@ -195,7 +195,7 @@ describe('the routes for Technical Support Staff', () => {
     expect(res.status).toBe(404);
   });
 
-  it('N14_AC2_start_answers_200_and_records_the_signed_in_user', async () => {
+  it('SCRUM290_AC2_start_answers_200_and_records_the_signed_in_user', async () => {
     const client = fakeClient();
 
     const res = await request(appWith(client)).post(`${BASE}/start`);
@@ -206,7 +206,7 @@ describe('the routes for Technical Support Staff', () => {
     ]);
   });
 
-  it('N14_AC1_the_acting_user_is_the_token_and_never_the_body', async () => {
+  it('SCRUM290_AC1_the_acting_user_is_the_token_and_never_the_body', async () => {
     const client = fakeClient();
 
     await request(appWith(client))
@@ -216,7 +216,7 @@ describe('the routes for Technical Support Staff', () => {
     expect(client.rpcCalls[0].args.p_user_id).toBe(REVIEWER_ID);
   });
 
-  it('N14_AC2_start_when_the_status_does_not_allow_it_answers_409_with_a_code', async () => {
+  it('SCRUM290_AC2_start_when_the_status_does_not_allow_it_answers_409_with_a_code', async () => {
     const message = 'This equipment request is already Under review. Take over the review instead.';
     const client = fakeClient({ start_equipment_review: dbError('55000', message) });
 
@@ -226,7 +226,7 @@ describe('the routes for Technical Support Staff', () => {
     expect(res.body).toMatchObject({ error: message, code: 'EQUIPMENT_REVIEW_NOT_ALLOWED', conflicts: [] });
   });
 
-  it('N14_AC3_take_over_answers_200_and_names_the_new_reviewer', async () => {
+  it('SCRUM290_AC3_take_over_answers_200_and_names_the_new_reviewer', async () => {
     const client = fakeClient();
 
     const res = await request(appWith(client, signedInAs(ROLE.TECHNICAL_SUPPORT_STAFF, SOMEONE_ELSE)))
@@ -238,7 +238,7 @@ describe('the routes for Technical Support Staff', () => {
     ]);
   });
 
-  it('N14_AC3_take_over_when_not_under_review_answers_409', async () => {
+  it('SCRUM290_AC3_take_over_when_not_under_review_answers_409', async () => {
     const client = fakeClient({
       take_over_equipment_review: dbError('55000', 'A review can only be taken over while the request is Under review.'),
     });
@@ -248,7 +248,7 @@ describe('the routes for Technical Support Staff', () => {
     expect(res.status).toBe(409);
   });
 
-  it('N14_AC3_a_staff_member_who_is_not_the_reviewer_cannot_mark_a_line_403', async () => {
+  it('SCRUM290_AC3_a_staff_member_who_is_not_the_reviewer_cannot_mark_a_line_403', async () => {
     const client = fakeClient({
       mark_equipment_line_unavailable: dbError('42501', 'Only the current reviewer can do this'),
     });
@@ -261,7 +261,7 @@ describe('the routes for Technical Support Staff', () => {
     expect(res.body.error).toBe('Only the current reviewer can do this');
   });
 
-  it('N14_AC7_mark_sends_the_trimmed_note_for_the_line', async () => {
+  it('SCRUM290_AC7_mark_sends_the_trimmed_note_for_the_line', async () => {
     const client = fakeClient();
 
     const res = await request(appWith(client))
@@ -282,7 +282,7 @@ describe('the routes for Technical Support Staff', () => {
     ['an empty note', { note: '' }],
     ['a blank note', { note: '   ' }],
     ['a note that is not text', { note: 5 }],
-  ])('N14_AC7_mark_with_%s_answers_400_and_reaches_nothing', async (_label, body) => {
+  ])('SCRUM290_AC7_mark_with_%s_answers_400_and_reaches_nothing', async (_label, body) => {
     const client = fakeClient();
 
     const res = await request(appWith(client)).put(`${BASE}/lines/${LINE_ID}/outcome`).send(body);
@@ -292,7 +292,7 @@ describe('the routes for Technical Support Staff', () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  it('N14_AC7_clear_answers_200_for_that_line', async () => {
+  it('SCRUM290_AC7_clear_answers_200_for_that_line', async () => {
     const client = fakeClient();
 
     const res = await request(appWith(client)).delete(`${BASE}/lines/${LINE_ID}/outcome`);
@@ -304,7 +304,7 @@ describe('the routes for Technical Support Staff', () => {
     });
   });
 
-  it('N14_AC7_complete_answers_200_with_the_new_status', async () => {
+  it('SCRUM290_AC7_complete_answers_200_with_the_new_status', async () => {
     const client = fakeClient({ complete_equipment_review: ok(reviewRow('cannot_be_fully_arranged')) });
 
     const res = await request(appWith(client)).post(`${BASE}/complete`);
@@ -317,7 +317,7 @@ describe('the routes for Technical Support Staff', () => {
     });
   });
 
-  it('N14_AC7_complete_with_lines_missing_notes_answers_400_naming_each', async () => {
+  it('SCRUM290_AC7_complete_with_lines_missing_notes_answers_400_naming_each', async () => {
     const client = fakeClient({
       complete_equipment_review: dbError(
         '22023',
@@ -334,7 +334,7 @@ describe('the routes for Technical Support Staff', () => {
   it.each([
     ['the event id', `/api/event-requests/not-a-uuid/equipment-review/start`, 'post'],
     ['the line id', `${BASE}/lines/not-a-uuid/outcome`, 'delete'],
-  ])('N14_AC1_a_bad_%s_answers_400_and_reaches_nothing', async (_what, url, method) => {
+  ])('SCRUM290_AC1_a_bad_%s_answers_400_and_reaches_nothing', async (_what, url, method) => {
     const client = fakeClient();
 
     const res = await request(appWith(client))[method](url);
@@ -343,7 +343,7 @@ describe('the routes for Technical Support Staff', () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  it('N14_an_unexpected_database_error_answers_500_without_the_drivers_words', async () => {
+  it('SCRUM290_AC1_an_unexpected_database_error_answers_500_without_the_drivers_words', async () => {
     const client = fakeClient({ start_equipment_review: dbError('XX000', 'secret internal detail') });
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
