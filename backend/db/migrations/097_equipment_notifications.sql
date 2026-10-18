@@ -141,7 +141,7 @@ $$;
 
 -- Writes one notification per recipient. p_once drops a notification that an
 -- identical one in this same transaction already sent, for changes that touch
--- several rows at once (a date change flags every reservation of the event).
+-- several rows at once (retiring a type flags every reservation of it).
 create or replace function notify_equipment_audiences(
   p_event_request_id uuid,
   p_type             text,
@@ -356,13 +356,52 @@ create trigger equipment_requests_notify_outcome
 
 
 -- ---------------------------------------------------------------------
--- 6. A reservation is flagged (AC5, AC6)
+-- 6. The event's date or time moves (AC5)
+-- ---------------------------------------------------------------------
+-- Watched on the event itself, not on the flags it causes: 054 only flags
+-- reservations that are held, so a request still waiting for review, or a second
+-- move before the first flag is resolved, would otherwise go unannounced.
+-- Technical Support and the coordinator are told once per move, for any event
+-- with a live equipment request, whether or not anything was reserved.
+
+create or replace function equipment_notify_event_period_changed()
+returns trigger
+language plpgsql
+as $$
+begin
+  if exists (
+       select 1
+         from equipment_requests r
+        where r.event_request_id = new.id
+          and r.status <> 'cancelled'
+     ) then
+    perform notify_equipment_audiences(
+      new.id, 'equipment_request_changed', true, true,
+      jsonb_build_object('change', 'event_period', 'startsAt', new.proposed_start, 'endsAt', new.proposed_end),
+      true
+    );
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists event_requests_notify_equipment_period_changed on event_requests;
+create trigger event_requests_notify_equipment_period_changed
+  after update of proposed_start, proposed_end on event_requests
+  for each row
+  when (new.proposed_start is distinct from old.proposed_start
+        or new.proposed_end is distinct from old.proposed_end)
+  execute function equipment_notify_event_period_changed();
+
+
+-- ---------------------------------------------------------------------
+-- 7. A reservation is flagged (AC5, AC6)
 -- ---------------------------------------------------------------------
 -- Every flag is one history row of action 'flagged' (054), so this watches that
 -- table instead of each cause. By reason:
 --   the line was amended    skipped: the line trigger above already told
 --                           Technical Support, and the coordinator made it
---   the date or time moved  Technical Support and the coordinator, once
+--   the date or time moved  skipped: section 6 tells both of them, flags or not
 --   anything else           the coordinator: equipment became unusable. An
 --                           unrecognised reason lands here, so it is reported
 --                           rather than lost.
@@ -372,24 +411,9 @@ returns trigger
 language plpgsql
 as $$
 declare
-  v_type  text;
-  v_start timestamptz;
-  v_end   timestamptz;
+  v_type text;
 begin
-  if new.reason = 'The line quantity or notes were changed' then
-    return null;
-  end if;
-
-  if new.reason = 'The event date or time changed' then
-    select proposed_start, proposed_end into v_start, v_end
-      from event_requests
-     where id = new.event_request_id;
-
-    perform notify_equipment_audiences(
-      new.event_request_id, 'equipment_request_changed', true, true,
-      jsonb_build_object('change', 'event_period', 'startsAt', v_start, 'endsAt', v_end),
-      true
-    );
+  if new.reason in ('The line quantity or notes were changed', 'The event date or time changed') then
     return null;
   end if;
 

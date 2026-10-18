@@ -200,11 +200,12 @@ function describeEquipmentNotification(notification) {
       if (payload.change === "event_period") {
         const period =
           isInstant(payload.startsAt) && isInstant(payload.endsAt)
-            ? ` The event is now ${formatRange(payload.startsAt, payload.endsAt)}.`
+            ? `The event is now ${formatRange(payload.startsAt, payload.endsAt)}. `
             : "";
         return {
           headline: `The date or time of ${eventName} changed`,
-          detail: `Reserved equipment was flagged for review.${period}`,
+          // Sent even when nothing is reserved yet, so the flag is conditional.
+          detail: `${period}Any reserved equipment is flagged for review.`,
         };
       }
       const [line] = lines;

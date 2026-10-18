@@ -417,6 +417,62 @@ describe('SCRUM-176: equipment notifications in Postgres', () => {
       expect(await notes(event)).toHaveLength(3);
     });
 
+    it('SCRUM176_AC5_a_date_change_with_nothing_reserved_still_tells_technical_support_and_the_coordinator', async () => {
+      const { event } = await eventWithLine(2);
+      await clear();
+
+      await changePeriod(event);
+
+      const changed = await notes(event);
+      expect(types(changed)).toEqual(['equipment_request_changed', 'equipment_request_changed', 'equipment_request_changed']);
+      expect(changed.map((n) => n.recipient_id).sort()).toEqual([techA, techB, coordinator].sort());
+      expect(changed[0].payload).toMatchObject({ change: 'event_period' });
+    });
+
+    it('SCRUM176_AC5_a_second_date_change_before_the_flags_are_resolved_tells_them_again', async () => {
+      const { event, line } = await eventWithLine(2);
+      await start(event);
+      await reserve(event, line, 2);
+      await changePeriod(event);
+      await clear();
+
+      await db.query(
+        'update event_requests set proposed_start = $2, proposed_end = $3 where id = $1',
+        [event, '2026-12-09T09:00:00Z', '2026-12-09T11:00:00Z'],
+      );
+
+      expect(types(await notes(event))).toEqual(['equipment_request_changed', 'equipment_request_changed', 'equipment_request_changed']);
+      expect(new Date((await notes(event))[0].payload.startsAt).toISOString()).toBe('2026-12-09T09:00:00.000Z');
+    });
+
+    it('SCRUM176_AC5_a_date_change_on_a_cancelled_request_tells_no_one', async () => {
+      const { event, line } = await eventWithLine(2);
+      await removeLine(event, line);
+      await clear();
+
+      await changePeriod(event);
+
+      expect(await notes(event)).toEqual([]);
+    });
+
+    it('SCRUM176_AC5_an_event_with_no_equipment_request_tells_no_one_when_its_date_changes', async () => {
+      const event = await newEvent();
+
+      await changePeriod(event);
+
+      expect(await notes(event)).toEqual([]);
+    });
+
+    it('SCRUM176_AC5_an_update_that_leaves_the_date_alone_tells_no_one', async () => {
+      const { event } = await eventWithLine(2);
+      await clear();
+
+      await db.query("update event_requests set event_name = 'Renamed' where id = $1", [event]);
+      await db.query('update event_requests set proposed_start = proposed_start where id = $1', [event]);
+
+      expect(await notes(event)).toEqual([]);
+    });
+
     it('SCRUM176_AC5_amending_a_reserved_line_tells_the_coordinator_nothing_about_their_own_edit', async () => {
       const { event, line } = await eventWithLine(2);
       await start(event);

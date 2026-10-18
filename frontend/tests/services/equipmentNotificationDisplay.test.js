@@ -210,7 +210,7 @@ describe("SCRUM-176 AC5: equipment_request_changed", () => {
 
     expect(headline).toBe("The date or time of Tech Talk changed");
     expect(detail).toBe(
-      `Reserved equipment was flagged for review. The event is now ${formatRange(startsAt, endsAt)}.`,
+      `The event is now ${formatRange(startsAt, endsAt)}. Any reserved equipment is flagged for review.`,
     );
   });
 
@@ -219,7 +219,7 @@ describe("SCRUM-176 AC5: equipment_request_changed", () => {
       note("equipment_request_changed", { change: "event_period", startsAt: null, endsAt: "nonsense" }),
     );
 
-    expect(detail).toBe("Reserved equipment was flagged for review.");
+    expect(detail).toBe("Any reserved equipment is flagged for review.");
   });
 });
 
