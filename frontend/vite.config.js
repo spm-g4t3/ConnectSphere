@@ -184,6 +184,14 @@ const SCRUM489_FILES = [
   'src/components/SafetyCheckSubmissionPanel.jsx',
 ]
 
+// SCRUM-492: the event screen's Venue bookings section, gated outright. Its
+// error messages join bookingRequestErrors.js, already gated in SCRUM254_FILES;
+// bookingRequestService.js and CoordinatorRequestDetail.jsx stay as they were.
+const SCRUM492_FILES = [
+  // SCRUM-567 (AC1, AC2, AC4, AC6): the list and the Release action.
+  'src/components/EventVenueBookings.jsx',
+]
+
 // SCRUM-172: the shared unread count behind the nav badge and the inbox
 // heading. NotificationInbox.jsx and notificationService.js stay in
 // SCRUM17_FILES, where their 100% gate already holds.
@@ -240,6 +248,7 @@ export default defineConfig({
         ...SCRUM495_FILES.map((file) => [file, FULL]),
         ...SCRUM22_FILES.map((file) => [file, FULL]),
         ...SCRUM489_FILES.map((file) => [file, FULL]),
+        ...SCRUM492_FILES.map((file) => [file, FULL]),
         ...SCRUM172_FILES.map((file) => [file, FULL]),
       ]),
     },

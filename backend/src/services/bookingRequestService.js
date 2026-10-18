@@ -56,6 +56,7 @@ import {
   validateCreateBookingRequest,
   validateBookingRequestId,
   validateRejectBookingRequest,
+  validateReleaseBooking,
 } from '../validation/bookingRequestValidation.js';
 import { getEventRequestForCoordinator } from './eventRequestService.js';
 import { checkVenueSuitability } from './venueSuitabilityService.js';
@@ -226,7 +227,7 @@ function one(embedded) {
 const LIST_COLUMNS = `
   id, event_request_id, venue_id, starts_at, ends_at, status,
   room_layout_code, setup_notes, suitability_overridden, created_at, flagged_at, review_reason,
-  decided_at, decision_reason, suggested_alternative,
+  decided_at, decision_reason, suggested_alternative, released_at, release_reason,
   venues(name, location),
   event_requests!inner(event_name, status, assigned_coordinator_id)
 `;
@@ -245,6 +246,8 @@ const LIST_COLUMNS = `
  * decision (066), named as toDecidedBookingRequest names them; null until
  * decided, and both texts are null on an approval. decided_by is not read:
  * a Venue Staff user id tells the coordinator nothing.
+ * releasedAt and releaseReason are the coordinator's release (SCRUM-492, 089);
+ * null unless released.
  *
  * @param {object} row  from LIST_COLUMNS
  */
@@ -271,6 +274,8 @@ function toBookingRequestListItem(row) {
     decidedAt: row.decided_at ?? null,
     decisionReason: row.decision_reason ?? null,
     suggestedAlternative: row.suggested_alternative ?? null,
+    releasedAt: row.released_at ?? null,
+    releaseReason: row.release_reason ?? null,
     createdAt: row.created_at,
   };
 }
@@ -905,4 +910,72 @@ export async function rejectBookingRequest(bookingId, callerId, input, { client 
   const { reason, suggestedAlternative } = validateRejectBookingRequest(input);
 
   return decideBookingRequest(id, callerId, 'reject', { reason, suggestedAlternative, client });
+}
+
+
+/**
+ * A released booking (SCRUM-492): toDecidedBookingRequest's fields, since an
+ * approval may have been decided, and who released it, when and why (089).
+ *
+ * @param {object} row  snake_case, from to_jsonb in release_venue_booking
+ */
+function toReleasedBooking(row) {
+  return {
+    ...toDecidedBookingRequest(row),
+    releasedBy: row.released_by ?? null,
+    releasedAt: row.released_at ?? null,
+    releaseReason: row.release_reason ?? null,
+  };
+}
+
+/**
+ * Release one approved venue booking (SCRUM-492 AC1, AC2, AC4, AC6, AC7).
+ *
+ * release_venue_booking (089) checks under its locks that the caller holds the
+ * event, the event is Approved and the booking approved; it releases only this
+ * booking, returns to Pending the other events' requests nothing else now
+ * blocks, and tells them and Venue Staff. The event's status never changes.
+ *
+ * @param {string} bookingId  the booking's id
+ * @param {string} callerId   from the JWT -- never the body
+ * @param {object} input      { reason }, see validateReleaseBooking
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<{booking: object, returnedToPending: string[]}>} the
+ *          booking shaped by toReleasedBooking, and the ids of the requests
+ *          returned to Pending (possibly none)
+ * @throws {ValidationError} no caller, a malformed id, or a missing, blank or
+ *                           over-long reason, before any round trip
+ * @throws {NotFoundError}   no such booking
+ * @throws {ForbiddenError}  the caller is not the event's assigned coordinator
+ * @throws {ConflictError}   by code: EVENT_NOT_APPROVED, BOOKING_NOT_APPROVED,
+ *                           BOOKING_CHANGED
+ */
+export async function releaseVenueBooking(bookingId, callerId, input, { client } = {}) {
+  checkCaller(callerId);
+  const id = validateBookingRequestId(bookingId);
+  const { reason } = validateReleaseBooking(input);
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('release_venue_booking', {
+    p_booking_id: id,
+    p_caller: callerId,
+    p_reason: reason,
+  });
+
+  if (error) throw translateError(error);
+
+  if (data?.outcome !== 'released') {
+    throw new Error(`Unexpected outcome from release_venue_booking: ${data?.outcome}`);
+  }
+
+  const booking = toReleasedBooking(data.booking);
+  if (booking.status !== BOOKING_STATUS.RELEASED) {
+    throw new Error(`release_venue_booking returned a ${booking.status} booking, not a released one`);
+  }
+  return {
+    booking,
+    returnedToPending: Array.isArray(data.returned_to_pending) ? data.returned_to_pending : [],
+  };
 }
