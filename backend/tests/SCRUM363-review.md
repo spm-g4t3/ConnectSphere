@@ -38,6 +38,7 @@ unless a different file is named. Parameterized IDs below show an executed case.
   - `SCRUM363_AC2_rechecks_current_time_instead_of_the_start_of_a_longer_transaction`
   - `SCRUM363_AC2_an_actual_reservation_flag_after_safety_approval_blocks_confirmation_without_releasing_equipment` (`db/scrum489EquipmentArrangedDatabase.test.js`).
   - `SCRUM363_AC2_confirmation_does_not_open_registration_until_independent_settings_allow_it`.
+  - `SCRUM363_AC2_actual_registration_settings_workflow_is_independent_of_confirmation`.
 - AC3:
   - `SCRUM363_AC3_all_current_booking_equipment_and_date_failures_are_returned_together`
   - `SCRUM363_AC3_lists_all_outstanding_items_and_refreshes_after_stale_readiness` (`frontend/tests/components/EventConfirmationPanel.test.jsx`).
@@ -82,6 +83,12 @@ unless a different file is named. Parameterized IDs below show an executed case.
   087 SQL is preserved unchanged under `db/migration-history/scrum363/` and must
   not be deployed again. SQL tests cover an old three-argument RPC upgrade and
   fresh installation without that obsolete signature.
+- After merging SCRUM-22, the confirmation SQL suite loads the actual registration
+  migrations 050, 068, 082 and 091-094. It uses canonical `event_registrations`,
+  the current structured RPC outcomes and the real enabled-window constraint.
+  The former registration-settings TODO now executes the organiser's setup RPC
+  and verifies that confirmation preserves settings/history and closing preserves
+  registrations. It does not claim deployed UI or Supabase verification.
 - New `db/migrations/099_confirmation_revision.sql` retains the existing atomic
   confirmation implementation, removes the old three-argument overload and adds
   `p_expected_updated_at`. Acknowledgements require the reviewed event revision;
@@ -108,9 +115,10 @@ unless a different file is named. Parameterized IDs below show an executed case.
 
 ## Executed local verification
 
-- Backend: **631 passed, 4 TODO**, 12 focused suites after migration relocation
-  (309 confirmation/dependency tests and 322 status/role-domain regressions).
-- Frontend: **259 passed**, 9 focused suites. All three SCRUM-363 component coverage
+- Latest full backend coverage run after SCRUM-22 integration: **7,579 passed,
+  3 TODO across 175 suites**, with all coverage gates passing (`--maxWorkers=2`).
+  The previously failing SQL suite passes independently: **135 passed, 3 TODO**.
+- Earlier frontend evidence: **259 passed**, 9 focused suites. All three SCRUM-363 component coverage
   gates pass at **100% lines, branches, functions and statements**.
 - The two previously failing frontend suites also pass together: **72 passed**.
 - Full frontend lint: **0 errors, 24 existing warnings**. Production build passed
@@ -121,6 +129,7 @@ unless a different file is named. Parameterized IDs below show an executed case.
 Backend command (inside `backend/`):
 
 ```powershell
+npm.cmd run test:coverage -- --maxWorkers=2 --reporter=dot
 npx.cmd vitest run tests/db/scrum489SafetyReviewSubmissionDatabase.test.js tests/db/scrum489EquipmentArrangedDatabase.test.js tests/db/scrum489EquipmentLockDatabase.test.js tests/db/bookingDecisionsAfterSafetyReviewDatabase.test.js tests/routes/scrum489SafetyReviewRoutes.test.js tests/routes/confirmedArrangements.test.js tests/services/confirmEventRequest.test.js tests/services/scrum489SafetyReviewSubmission.test.js tests/middleware/requireAuth.test.js tests/middleware/requireRole.test.js --maxWorkers=2 --reporter=dot
 npx.cmd vitest run tests/domain/eventRequestStatus.test.js tests/domain/userRole.test.js --maxWorkers=2 --reporter=dot
 ```
@@ -132,8 +141,8 @@ npx.cmd vitest run tests/components/EventConfirmationPanel.test.jsx tests/compon
 ```
 
 PGlite executes real SQL with local fixtures. The main suite constructs its
-notification table and hold fixture and adds SCRUM-494's four expected registration
-columns. Its HTTP adapter executes SQL but does not exercise live PostgREST or
+notification table and hold fixture and loads SCRUM-494/22's actual registration
+schema and functions, without hand-added settings columns. Its HTTP adapter executes SQL but does not exercise live PostgREST or
 Supabase JWT verification. Organiser SQL-adapter tests do not verify deployed
 PostgREST relationship discovery. Queued PGlite promises are not concurrent connections.
 

@@ -247,14 +247,10 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     await db.exec(migration(READINESS_MIGRATION));
     await db.exec(migration('../migration-history/scrum363/086_confirm_event_request.sql'));
     await db.exec(migration(CONFIRM_MIGRATION));
-    await db.exec(migration('079_registrations.sql'));
-    // Settings belong to SCRUM-494; confirmation must leave its contract untouched.
-    await db.exec(`alter table event_requests
-      add column registration_enabled boolean default false,
-      add column registration_capacity integer,
-      add column registration_opens_at timestamptz,
-      add column registration_closes_at timestamptz`);
-    for (const name of ['068_open_event_registration_state.sql', '080_registration_eligibility.sql', '081_register_for_event.sql']) {
+    // Use the merged registration schema and writer, including settings constraints.
+    for (const name of ['050_event_registration.sql', '068_open_event_registration_state.sql',
+      '082_event_registration_state.sql', '091_event_registration_hardening.sql',
+      '092_event_registration_persistence.sql', '093_registration_eligibility.sql', '094_register_for_event.sql']) {
       await db.exec(migration(name));
     }
 
@@ -922,25 +918,54 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     it('SCRUM363_AC2_confirmation_does_not_open_registration_until_independent_settings_allow_it', async () => {
       const id = await readyToConfirm();
       const register = () => db.query('select register_for_event($1, $2) as result', [id, attendee]);
-      expect((await refusal(register()))?.hint).toBe('EVENT_NOT_CONFIRMED');
+      expect((await register()).rows[0].result).toEqual({ outcome: 'not_found' });
       await confirm(id);
-      expect((await refusal(register()))?.hint).toBe('REGISTRATION_DISABLED');
-      await db.query('update event_requests set registration_enabled = true where id = $1', [id]);
-      expect((await refusal(register()))?.hint).toBe('REGISTRATION_DATES_MISSING');
-      await db.query("update event_requests set registration_opens_at = clock_timestamp() + interval '1 day' where id = $1", [id]);
-      expect((await refusal(register()))?.hint).toBe('REGISTRATION_NOT_OPEN');
+      expect((await register()).rows[0].result).toEqual({ outcome: 'not_found' });
+      await expect(db.query('update event_requests set registration_enabled = true where id = $1', [id]))
+        .rejects.toMatchObject({ code: '23514', constraint: 'event_requests_enabled_registration_has_window' });
+      await db.query("update event_requests set registration_enabled = true, registration_opens_at = clock_timestamp() + interval '1 day' where id = $1", [id]);
+      expect((await register()).rows[0].result).toEqual({ outcome: 'not_found' });
       await db.query("update event_requests set registration_opens_at = clock_timestamp() - interval '2 days', registration_closes_at = clock_timestamp() - interval '1 day' where id = $1", [id]);
-      expect((await refusal(register()))?.hint).toBe('REGISTRATION_CLOSED');
-      expect((await db.query('select * from registrations where event_request_id = $1', [id])).rows).toEqual([]);
+      expect((await register()).rows[0].result).toEqual({ outcome: 'not_found' });
+      expect((await db.query('select * from event_registrations where event_request_id = $1', [id])).rows).toEqual([]);
       await db.query('update event_requests set registration_closes_at = null where id = $1', [id]);
       const { rows: [{ result }] } = await register();
-      expect(result).toMatchObject({ outcome: 'registered', registration: { event_request_id: id, attendee_id: attendee } });
+      expect(result).toMatchObject({ outcome: 'registered', registration: { eventRequestId: id, attendeeId: attendee } });
     });
 
     it.todo('SCRUM363_AC8_actual_significant_change_to_Approved_safety_review_and_reconfirmation_requires_SCRUM395_and_SCRUM402');
     it.todo('SCRUM363_AC9_organiser_confirmation_notification_requires_SCRUM175');
     it.todo('SCRUM363_AC9_reconfirmation_notifies_only_active_registered_attendees_requires_SCRUM175');
-    it.todo('SCRUM363_AC2_registration_settings_schema_and_management_integration_requires_SCRUM494');
+    it('SCRUM363_AC2_actual_registration_settings_workflow_is_independent_of_confirmation', async () => {
+      const id = await readyToConfirm();
+      const settings = () => one(`select registration_enabled, registration_opens_at,
+        registration_closes_at, registration_capacity, registration_withdrawal_deadline
+        from event_requests where id = $1`, [id]);
+      const settingsHistory = async () => (await db.query(
+        'select * from event_registration_settings_history where event_request_id = $1 order by changed_at, id', [id],
+      )).rows;
+      const save = (enabled) => one(`select setup_event_registration(
+        $1, $2, $3, clock_timestamp() - interval '1 day', null, 1, null) as result`, [id, organiser, enabled]);
+      const register = () => one('select register_for_event($1, $2) as result', [id, attendee]);
+
+      expect((await save(true)).result).toMatchObject({ outcome: 'saved', registeredCount: 0 });
+      const beforeSettings = await settings();
+      const beforeHistory = await settingsHistory();
+      expect(beforeHistory).toHaveLength(1);
+      expect((await register()).result).toEqual({ outcome: 'not_found' });
+
+      await confirm(id);
+
+      expect(await settings()).toEqual(beforeSettings);
+      expect(await settingsHistory()).toEqual(beforeHistory);
+      expect((await register()).result).toMatchObject({
+        outcome: 'registered', registeredCount: 1,
+        registration: { eventRequestId: id, attendeeId: attendee },
+      });
+      expect((await save(false)).result).toMatchObject({ outcome: 'saved', registeredCount: 1 });
+      expect((await db.query('select * from event_registrations where event_request_id = $1', [id])).rows)
+        .toEqual([expect.objectContaining({ event_request_id: id, attendee_id: attendee, status: 'registered' })]);
+    });
 
     it('SCRUM363_AC6_queued_repeated_confirmations_write_one_history_row', async () => {
       const id = await readyToConfirm();
@@ -975,13 +1000,13 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     it('SCRUM363_AC6_confirmation_preserves_bookings_equipment_registrations_and_registration_settings', async () => {
       const id = await readyToConfirm();
       await equipment(id, 'arranged');
-      await db.query("insert into registrations (event_request_id, attendee_id) values ($1, $2)", [id, attendee]);
-      await db.query("update event_requests set registration_capacity = 20, registration_opens_at = now() + interval '1 day', registration_closes_at = now() + interval '2 days' where id = $1", [id]);
+      await db.query("insert into event_registrations (event_request_id, attendee_id) values ($1, $2)", [id, attendee]);
+      await db.query("update event_requests set registration_capacity = 20, registration_opens_at = now() + interval '1 day', registration_closes_at = now() + interval '2 days', registration_withdrawal_deadline = now() + interval '3 days' where id = $1", [id]);
       const snapshot = async () => ({
         bookings: (await db.query('select * from bookings where event_request_id = $1', [id])).rows,
         equipment: (await db.query('select * from equipment_requests where event_request_id = $1', [id])).rows,
-        registrations: (await db.query('select * from registrations where event_request_id = $1', [id])).rows,
-        settings: await one('select registration_enabled, registration_capacity, registration_opens_at, registration_closes_at from event_requests where id = $1', [id]),
+        registrations: (await db.query('select * from event_registrations where event_request_id = $1', [id])).rows,
+        settings: await one('select registration_enabled, registration_capacity, registration_opens_at, registration_closes_at, registration_withdrawal_deadline from event_requests where id = $1', [id]),
         notices: (await db.query('select * from notifications where event_request_id = $1 order by id', [id])).rows,
       });
       const before = await snapshot();
