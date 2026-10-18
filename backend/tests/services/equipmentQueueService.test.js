@@ -190,6 +190,19 @@ describe('what the service gives back', () => {
     ]);
   });
 
+  it('N22_the_real_totals_are_passed_through_even_when_the_lists_are_cut', async () => {
+    const client = fakeClient(ok({
+      needs_action: [row()],
+      needs_action_total: 350,
+      needs_action_truncated: true,
+      requests: [row()],
+      requests_total: '512',
+      requests_truncated: true,
+    }));
+    const result = await getEquipmentRequestQueue({}, { callerId: CALLER_ID, client });
+    expect(result).toMatchObject({ needsActionTotal: 350, requestsTotal: 512 });
+  });
+
   it('N22_a_cut_list_is_marked_truncated', async () => {
     const client = fakeClient(ok({ needs_action: [], needs_action_truncated: true, requests: [], requests_truncated: true }));
     const result = await getEquipmentRequestQueue({}, { callerId: CALLER_ID, client });
@@ -200,8 +213,10 @@ describe('what the service gives back', () => {
     const client = fakeClient(ok(data));
     expect(await getEquipmentRequestQueue({}, { callerId: CALLER_ID, client })).toMatchObject({
       needsAction: [],
+      needsActionTotal: 0,
       needsActionTruncated: false,
       requests: [],
+      requestsTotal: 0,
       requestsTruncated: false,
     });
   });

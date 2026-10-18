@@ -93,8 +93,10 @@ describe('AC2 to AC4: what comes back', () => {
     const res = await request(appWith(fakeClient())).get('/api/equipment-requests');
     expect(Object.keys(res.body).sort()).toEqual([
       'needsAction',
+      'needsActionTotal',
       'needsActionTruncated',
       'requests',
+      'requestsTotal',
       'requestsTruncated',
       'statuses',
     ]);

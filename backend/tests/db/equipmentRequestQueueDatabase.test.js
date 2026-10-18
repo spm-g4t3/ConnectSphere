@@ -422,6 +422,39 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
       for (const e of [under, arranged, cannot, cancelled]) expect(rowFor(needs, e.event)).toBeUndefined();
     });
 
+    it.each(['rejected', 'draft', 'submitted', 'under_review', 'pending_clarification', 'completed'])(
+      'N21_AC4_a_pending_request_on_a_%s_event_is_not_offered_for_action',
+      async (eventStatus) => {
+        // Lines can only be added while the event is Approved; the status moves on afterwards.
+        const { event } = await makeEvent({ name: `Not reservable ${eventStatus}` });
+        await db.query('update event_requests set status = $2::event_request_status where id = $1', [event, eventStatus]);
+        const result = await queue();
+        expect(rowFor(result.needs_action, event)).toBeUndefined();
+        // It is still listed with every request, so it can be opened.
+        expect(rowFor(result.requests, event)).toBeDefined();
+      },
+    );
+
+    it('N21_AC4_a_flagged_request_on_a_rejected_event_is_not_offered_for_action', async () => {
+      const { event, lineIds } = await makeEvent({ name: 'Flagged then rejected', start: day(15), end: plus(day(15), 2) });
+      await startReview(event, sam);
+      await db.query('select reserve_equipment($1, $2, $3, 2)', [event, sam, lineIds[0]]);
+      await db.query('update event_requests set proposed_start = $2, proposed_end = $3 where id = $1', [event, day(16), plus(day(16), 2)]);
+      expect(rowFor((await queue()).needs_action, event)).toBeDefined();
+
+      await db.query("update event_requests set status = 'rejected' where id = $1", [event]);
+
+      const result = await queue();
+      expect(rowFor(result.needs_action, event)).toBeUndefined();
+      expect(rowFor(result.requests, event)).toBeDefined();
+    });
+
+    it('N21_AC4_a_confirmed_event_still_needs_action', async () => {
+      const { event } = await makeEvent({ name: 'Confirmed and pending' });
+      await db.query("update event_requests set status = 'confirmed' where id = $1", [event]);
+      expect(rowFor((await queue()).needs_action, event)).toBeDefined();
+    });
+
     it('N21_AC4_a_flagged_reservation_puts_the_request_there_with_its_reason', async () => {
       const { event, lineIds } = await makeEvent({ name: 'Flagged One', start: day(15), end: plus(day(15), 2) });
       await startReview(event, sam);
@@ -514,6 +547,23 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
       expect(result.requests_truncated).toBe(true);
       expect(result.needs_action).toHaveLength(2);
       expect(result.needs_action_truncated).toBe(true);
+    });
+
+    it('N21_the_totals_count_every_row_not_just_the_ones_returned', async () => {
+      const all = await queue();
+      const capped = await queue(null, false, 2);
+      expect(capped.requests).toHaveLength(2);
+      expect(capped.requests_total).toBe(all.requests.length);
+      expect(capped.needs_action).toHaveLength(2);
+      expect(capped.needs_action_total).toBe(all.needs_action.length);
+      expect(capped.requests_total).toBeGreaterThan(2);
+    });
+
+    it('N21_the_totals_follow_the_filters_that_apply_to_each_list', async () => {
+      const arranged = await queue('arranged');
+      expect(arranged.requests_total).toBe(arranged.requests.length);
+      // The status filter does not narrow Needs action, so its total is unchanged.
+      expect(arranged.needs_action_total).toBe((await queue()).needs_action_total);
     });
 
     it('N21_the_cut_keeps_the_earliest_events', async () => {

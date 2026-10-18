@@ -11,10 +11,14 @@
 --
 --   requests      every status, or the one asked for
 --   needs_action  Pending review, and any request holding a live flagged
---                 reservation; the status filter does not narrow it
+--                 reservation, for events still in a status that allows
+--                 reserving (equipment_reservable_event_statuses); a rejected
+--                 event's request stays out, since every reservation for it is
+--                 refused. The status filter does not narrow it
 --
 -- Events that have ended are left out unless p_include_past. Each list is cut at
--- p_limit (default 200, at most 500); *_truncated says when rows were left off.
+-- p_limit (default 200, at most 500); *_truncated says when rows were left off
+-- and *_total is the real count before the cut.
 -- item_count is units across the request's live lines; venues is every venue the
 -- event holds an approved or flagged booking at.
 --
@@ -65,6 +69,7 @@ begin
            p.event_request_id,
            p.status,
            e.proposed_start,
+           e.status::text as event_status,
            exists (
              select 1
                from equipment_reservations res
@@ -76,19 +81,28 @@ begin
       from picked p
       join event_requests e on e.id = p.event_request_id
   ),
-  needs as (
+  needs_all as (
     select b.*
       from base b
-     where b.status = 'pending_review' or b.has_flag
-     order by b.proposed_start asc nulls last, b.event_request_id
-     limit v_limit + 1
+     where (b.status = 'pending_review' or b.has_flag)
+       and b.event_status = any (equipment_reservable_event_statuses())
   ),
-  reqs as (
+  needs as (
+    select n.*
+      from needs_all n
+     order by n.proposed_start asc nulls last, n.event_request_id
+     limit v_limit
+  ),
+  reqs_all as (
     select b.*
       from base b
      where v_status is null or b.status = v_status
-     order by b.proposed_start asc nulls last, b.event_request_id
-     limit v_limit + 1
+  ),
+  reqs as (
+    select r.*
+      from reqs_all r
+     order by r.proposed_start asc nulls last, r.event_request_id
+     limit v_limit
   ),
   wanted as (
     select request_id from needs
@@ -149,19 +163,17 @@ begin
            'needs_action', coalesce((
              select jsonb_agg(to_jsonb(r) - 'request_id' order by r.proposed_start asc nulls last, r.event_request_id)
                from queue_rows r
-              where r.request_id in (select request_id from (
-                      select request_id from needs
-                       order by proposed_start asc nulls last, event_request_id limit v_limit) n)
+              where r.request_id in (select request_id from needs)
            ), '[]'::jsonb),
-           'needs_action_truncated', (select count(*) from needs) > v_limit,
+           'needs_action_total', (select count(*) from needs_all),
+           'needs_action_truncated', (select count(*) from needs_all) > v_limit,
            'requests', coalesce((
              select jsonb_agg(to_jsonb(r) - 'request_id' order by r.proposed_start asc nulls last, r.event_request_id)
                from queue_rows r
-              where r.request_id in (select request_id from (
-                      select request_id from reqs
-                       order by proposed_start asc nulls last, event_request_id limit v_limit) q)
+              where r.request_id in (select request_id from reqs)
            ), '[]'::jsonb),
-           'requests_truncated', (select count(*) from reqs) > v_limit
+           'requests_total', (select count(*) from reqs_all),
+           'requests_truncated', (select count(*) from reqs_all) > v_limit
          )
     into v_result;
 

@@ -64,8 +64,10 @@ export function toQueueRow(row) {
 export function toQueue(data) {
   return {
     needsAction: (data?.needs_action ?? []).map(toQueueRow),
+    needsActionTotal: Number(data?.needs_action_total ?? 0),
     needsActionTruncated: data?.needs_action_truncated === true,
     requests: (data?.requests ?? []).map(toQueueRow),
+    requestsTotal: Number(data?.requests_total ?? 0),
     requestsTruncated: data?.requests_truncated === true,
     statuses: STATUS_CHOICES,
   };
