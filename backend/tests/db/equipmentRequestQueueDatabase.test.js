@@ -102,7 +102,7 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
 
       create type event_request_status as enum (
         'draft', 'submitted', 'under_review', 'pending_clarification',
-        'approved', 'confirmed', 'completed', 'rejected', 'cancelled'
+        'approved', 'safety_review', 'safety_approved', 'confirmed', 'completed', 'rejected', 'cancelled'
       );
       create table event_requests (
         id                      uuid primary key default gen_random_uuid(),
@@ -449,6 +449,45 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
       expect(rowFor(result.requests, event)).toBeDefined();
     });
 
+    it.each(['safety_review', 'safety_approved'])(
+      'SCRUM286_AC4_a_pending_request_on_a_%s_event_needs_action',
+      async (eventStatus) => {
+        const { event } = await makeEvent({ name: `Safety pending ${eventStatus}` });
+        await db.query('update event_requests set status = $2::event_request_status where id = $1', [event, eventStatus]);
+        expect(rowFor((await queue()).needs_action, event)).toBeDefined();
+      },
+    );
+
+    it('SCRUM286_AC4_a_flagged_reservation_on_a_safety_review_event_needs_action', async () => {
+      const { event, lineIds } = await makeEvent({ name: 'Flagged in safety review', start: day(15), end: plus(day(15), 2) });
+      await startReview(event, sam);
+      await db.query('select reserve_equipment($1, $2, $3, 2)', [event, sam, lineIds[0]]);
+      await db.query("update event_requests set status = 'safety_review' where id = $1", [event]);
+      await db.query('update event_requests set proposed_start = $2, proposed_end = $3 where id = $1', [event, day(16), plus(day(16), 2)]);
+
+      const row = rowFor((await queue()).needs_action, event);
+      expect(row).toBeDefined();
+      expect(row.flagged_count).toBe(1);
+    });
+
+    it('SCRUM286_AC4_a_pending_request_on_an_ended_event_still_needs_action', async () => {
+      const { event } = await makeEvent({ name: 'Ended but unresolved' });
+      await db.query("update event_requests set proposed_start = '2020-01-01T10:00:00Z', proposed_end = '2020-01-01T12:00:00Z' where id = $1", [event]);
+      const result = await queue();
+      expect(rowFor(result.needs_action, event)).toBeDefined();
+      // AC2 still holds: the requests list leaves ended events out by default.
+      expect(rowFor(result.requests, event)).toBeUndefined();
+    });
+
+    it('SCRUM286_AC4_the_past_events_option_does_not_change_needs_action', async () => {
+      const { event } = await makeEvent({ name: 'Ended, option off and on' });
+      await db.query("update event_requests set proposed_start = '2020-01-01T10:00:00Z', proposed_end = '2020-01-01T12:00:00Z' where id = $1", [event]);
+      const without = await queue();
+      const withPast = await queue(null, true);
+      expect(withPast.needs_action).toEqual(without.needs_action);
+      expect(withPast.needs_action_total).toBe(without.needs_action_total);
+    });
+
     it('N21_AC4_a_confirmed_event_still_needs_action', async () => {
       const { event } = await makeEvent({ name: 'Confirmed and pending' });
       await db.query("update event_requests set status = 'confirmed' where id = $1", [event]);
@@ -522,13 +561,6 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
       await makeEvent({ name: 'Need Middle', start: day(27), end: plus(day(27), 2) });
       const needs = names((await queue()).needs_action).filter((n) => n.startsWith('Need '));
       expect(needs).toEqual(['Need Early', 'Need Middle', 'Need Late']);
-    });
-
-    it('N21_AC4_an_event_that_has_ended_is_left_out_unless_past_events_are_included', async () => {
-      const { event } = await makeEvent({ name: 'Needs But Over' });
-      await db.query("update event_requests set proposed_start = '2020-01-01T10:00:00Z', proposed_end = '2020-01-01T12:00:00Z' where id = $1", [event]);
-      expect(rowFor((await queue()).needs_action, event)).toBeUndefined();
-      expect(rowFor((await queue(null, true)).needs_action, event)).toBeDefined();
     });
 
     it('N21_AC4_the_same_request_is_in_both_lists_with_the_same_row', async () => {

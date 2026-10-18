@@ -11,14 +11,14 @@
 --
 --   requests      every status, or the one asked for
 --   needs_action  Pending review, and any request holding a live flagged
---                 reservation, for events still in a status that allows
---                 reserving (equipment_reservable_event_statuses); a rejected
---                 event's request stays out, since every reservation for it is
---                 refused. The status filter does not narrow it
+--                 reservation, for events still going ahead (approved, the
+--                 safety statuses, confirmed); a rejected or draft event's
+--                 request stays out. Neither the status filter nor
+--                 p_include_past narrows it
 --
--- Events that have ended are left out unless p_include_past. Each list is cut at
--- p_limit (default 200, at most 500); *_truncated says when rows were left off
--- and *_total is the real count before the cut.
+-- Events that have ended are left out of requests unless p_include_past. Each
+-- list is cut at p_limit (default 200, at most 500); *_truncated says when rows
+-- were left off and *_total is the real count before the cut.
 -- item_count is units across the request's live lines; venues is every venue the
 -- event holds an approved or flagged booking at.
 --
@@ -41,6 +41,9 @@ as $$
 declare
   v_status equipment_request_status;
   v_limit  integer := least(greatest(coalesce(p_limit, 200), 1), 500);
+  -- Statuses where the event, and so its equipment request, is still going ahead.
+  -- Not equipment_reservable_event_statuses(): that is who may reserve, a separate rule.
+  v_live_event_statuses constant text[] := array['approved', 'safety_review', 'safety_approved', 'confirmed'];
   v_result jsonb;
 begin
   if p_caller is null
@@ -61,7 +64,10 @@ begin
     select distinct on (r.event_request_id) r.*
       from equipment_requests r
       join event_requests e on e.id = r.event_request_id
-     where p_include_past or e.proposed_end is null or e.proposed_end >= now()
+     where p_include_past
+        or e.proposed_end is null
+        or e.proposed_end >= now()
+        or e.status::text = any (v_live_event_statuses)
      order by r.event_request_id, (r.status = 'cancelled'), r.created_at desc, r.id desc
   ),
   base as (
@@ -70,6 +76,7 @@ begin
            p.status,
            e.proposed_start,
            e.status::text as event_status,
+           not (e.proposed_end is null or e.proposed_end >= now()) as ended,
            exists (
              select 1
                from equipment_reservations res
@@ -85,7 +92,7 @@ begin
     select b.*
       from base b
      where (b.status = 'pending_review' or b.has_flag)
-       and b.event_status = any (equipment_reservable_event_statuses())
+       and b.event_status = any (v_live_event_statuses)
   ),
   needs as (
     select n.*
@@ -96,7 +103,8 @@ begin
   reqs_all as (
     select b.*
       from base b
-     where v_status is null or b.status = v_status
+     where (p_include_past or not b.ended)
+       and (v_status is null or b.status = v_status)
   ),
   reqs as (
     select r.*
