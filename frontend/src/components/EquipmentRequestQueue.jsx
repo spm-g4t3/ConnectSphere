@@ -33,8 +33,16 @@ function loadErrorMessage(err) {
   return LOAD_ERRORS[err?.response?.status] ?? GENERIC_LOAD_ERROR;
 }
 
-function TruncatedNote({ shown }) {
-  return <p role="note">{`Showing the first ${shown}. Choose a status or leave out past events to narrow the list.`}</p>;
+// How the person can shorten a list, from the filters that actually apply to it.
+function narrowing({ status, includePast }) {
+  const ways = [];
+  if (!status) ways.push("choose a status");
+  if (includePast) ways.push("leave out past events");
+  return ways.length > 0 ? ` You can ${ways.join(" or ")} to narrow it.` : "";
+}
+
+function TruncatedNote({ shown, total, advice }) {
+  return <p role="note">{`Showing the first ${shown} of ${total}.${advice}`}</p>;
 }
 
 function RequestRow({ row, showFlagReasons }) {
@@ -79,8 +87,12 @@ function RequestRow({ row, showFlagReasons }) {
 export default function EquipmentRequestQueue() {
   const [status, setStatus] = useState("");
   const [includePast, setIncludePast] = useState(false);
-  // The lists, cleared when a read fails so rows from another filter never stay.
-  const [queue, setQueue] = useState(null);
+  // Requests depend on both filters, so they are cleared when a read fails and
+  // rows from another filter never stay.
+  const [requestList, setRequestList] = useState(null);
+  // Needs action ignores the status filter, so it is kept through a failed
+  // reload unless the past-events choice it was read under has changed.
+  const [needsList, setNeedsList] = useState(null);
   // The filter's choices, kept from the last good read so the filter survives a failure.
   const [statuses, setStatuses] = useState(null);
   const [error, setError] = useState(null);
@@ -95,11 +107,18 @@ export default function EquipmentRequestQueue() {
     try {
       const data = await getEquipmentQueue({ status, includePast });
       if (ticket !== latest.current) return;
-      setQueue(data);
+      setRequestList({ rows: data.requests, total: data.requestsTotal, truncated: data.requestsTruncated });
+      setNeedsList({
+        rows: data.needsAction,
+        total: data.needsActionTotal,
+        truncated: data.needsActionTruncated,
+        includePast,
+      });
       setStatuses(data.statuses);
     } catch (err) {
       if (ticket !== latest.current) return;
-      setQueue(null);
+      setRequestList(null);
+      setNeedsList((current) => (current?.includePast === includePast ? current : null));
       setError(loadErrorMessage(err));
     } finally {
       if (ticket === latest.current) setLoading(false);
@@ -110,8 +129,8 @@ export default function EquipmentRequestQueue() {
     load();
   }, [load]);
 
-  const needsAction = queue?.needsAction ?? [];
-  const requests = queue?.requests ?? [];
+  const needsAction = needsList?.rows ?? [];
+  const requests = requestList?.rows ?? [];
   const firstLoad = loading && statuses === null;
 
   return (
@@ -133,9 +152,9 @@ export default function EquipmentRequestQueue() {
         </section>
       )}
 
-      {queue && (
+      {needsList && (
         <section className="equipment-queue" aria-labelledby="equipment-queue-needs-action" aria-busy={loading}>
-          <h2 id="equipment-queue-needs-action">{`Needs action (${needsAction.length})`}</h2>
+          <h2 id="equipment-queue-needs-action">{`Needs action (${needsList.total})`}</h2>
           {needsAction.length === 0 ? (
             <p>Nothing needs your action.</p>
           ) : (
@@ -145,7 +164,13 @@ export default function EquipmentRequestQueue() {
               ))}
             </ul>
           )}
-          {queue.needsActionTruncated && <TruncatedNote shown={needsAction.length} />}
+          {needsList.truncated && (
+            <TruncatedNote
+              shown={needsAction.length}
+              total={needsList.total}
+              advice=" The rest appear here as these are dealt with."
+            />
+          )}
         </section>
       )}
 
@@ -173,7 +198,7 @@ export default function EquipmentRequestQueue() {
               Include past events
             </label>
           </div>
-          {queue && requests.length === 0 && (
+          {requestList && requests.length === 0 && (
             <p>
               {status || includePast
                 ? "No equipment requests match these filters."
@@ -187,7 +212,13 @@ export default function EquipmentRequestQueue() {
               ))}
             </ul>
           )}
-          {queue?.requestsTruncated && <TruncatedNote shown={requests.length} />}
+          {requestList?.truncated && (
+            <TruncatedNote
+              shown={requests.length}
+              total={requestList.total}
+              advice={narrowing({ status, includePast })}
+            />
+          )}
         </section>
       )}
     </>

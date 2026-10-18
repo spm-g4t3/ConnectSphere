@@ -52,8 +52,10 @@ const STATUSES = [
 
 const answer = (needsAction = [], requests = needsAction, extra = {}) => ({
   needsAction,
+  needsActionTotal: needsAction.length,
   needsActionTruncated: false,
   requests,
+  requestsTotal: requests.length,
   requestsTruncated: false,
   statuses: STATUSES,
   ...extra,
@@ -245,6 +247,14 @@ describe("AC4: the Needs action section", () => {
     expect(await screen.findByRole("heading", { level: 2, name: "Needs action (2)" })).toBeInTheDocument();
   });
 
+  it("SCRUM287_AC4_the_heading_counts_every_request_not_just_the_rows_sent", async () => {
+    vi.mocked(getEquipmentQueue).mockResolvedValue(
+      answer([row()], [row()], { needsActionTotal: 350, needsActionTruncated: true }),
+    );
+    renderQueue();
+    expect(await screen.findByRole("heading", { level: 2, name: "Needs action (350)" })).toBeInTheDocument();
+  });
+
   it("SCRUM287_AC4_an_empty_section_says_nothing_needs_action_and_counts_zero", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([], [row({ status: "arranged", statusLabel: "Arranged" })]));
     renderQueue();
@@ -406,7 +416,7 @@ describe("AC2: the filters", () => {
     expect(screen.getByText("Newer answer", { selector: "strong" })).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC2_a_failed_filter_change_clears_the_old_rows", async () => {
+  it("SCRUM287_AC2_a_failed_status_change_clears_the_old_requests_but_keeps_needs_action", async () => {
     vi.mocked(getEquipmentQueue)
       .mockResolvedValueOnce(answer([row({ eventName: "Old Needs" })], [row({ eventName: "Old Row" })]))
       .mockRejectedValueOnce({ response: { status: 500 } });
@@ -417,10 +427,26 @@ describe("AC2: the filters", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/);
     expect(screen.queryByText("Old Row")).not.toBeInTheDocument();
-    expect(screen.queryByText("Old Needs")).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: /Needs action/ })).not.toBeInTheDocument();
+    // Needs action does not depend on the status, so it is still true.
+    expect(within(needsActionSection()).getByText("Old Needs", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Needs action (1)" })).toBeInTheDocument();
     expect(screen.queryByText("No equipment requests match these filters.")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Status")).toHaveValue("arranged");
+  });
+
+  it("SCRUM287_AC2_a_failed_past_events_change_clears_needs_action_too", async () => {
+    vi.mocked(getEquipmentQueue)
+      .mockResolvedValueOnce(answer([row({ eventName: "Old Needs" })], [row({ eventName: "Old Row" })]))
+      .mockRejectedValueOnce({ response: { status: 500 } });
+    renderQueue();
+    expect(await screen.findAllByText("Old Row", { selector: "strong" })).not.toHaveLength(0);
+
+    await userEvent.click(screen.getByLabelText("Include past events"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/);
+    expect(screen.queryByText("Old Needs")).not.toBeInTheDocument();
+    expect(screen.queryByText("Old Row")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Needs action/ })).not.toBeInTheDocument();
   });
 
   it("SCRUM287_AC2_Try_again_after_a_failed_filter_change_reads_with_that_filter", async () => {
@@ -448,22 +474,52 @@ describe("AC2: the filters", () => {
 
 
 describe("lists the server cut short", () => {
-  it("SCRUM287_AC2_a_cut_requests_list_says_how_many_are_shown", async () => {
-    vi.mocked(getEquipmentQueue).mockResolvedValue(
-      answer([], [row(), row({ eventRequestId: EVENT_B, eventName: "Second" })], { requestsTruncated: true }),
-    );
+  const cutRequests = (extra = {}) =>
+    answer([], [row(), row({ eventRequestId: EVENT_B, eventName: "Second" })], {
+      requestsTruncated: true,
+      requestsTotal: 350,
+      ...extra,
+    });
+  const requestsNote = async () =>
+    within(await screen.findByRole("region", { name: "Equipment requests" })).findByRole("note");
+
+  it("SCRUM287_AC2_a_cut_requests_list_says_how_many_are_shown_of_how_many", async () => {
+    vi.mocked(getEquipmentQueue).mockResolvedValue(cutRequests());
     renderQueue();
-    expect(await within(await screen.findByRole("region", { name: "Equipment requests" })).findByRole("note")).toHaveTextContent(
-      "Showing the first 2.",
+    expect(await requestsNote()).toHaveTextContent("Showing the first 2 of 350.");
+  });
+
+  it("SCRUM287_AC2_a_cut_requests_list_offers_a_status_when_none_is_chosen", async () => {
+    vi.mocked(getEquipmentQueue).mockResolvedValue(cutRequests());
+    renderQueue();
+    expect(await requestsNote()).toHaveTextContent("You can choose a status to narrow it.");
+  });
+
+  it("SCRUM287_AC2_a_cut_requests_list_offers_leaving_out_past_events_only_when_they_are_in", async () => {
+    vi.mocked(getEquipmentQueue).mockResolvedValue(cutRequests());
+    renderQueue();
+    await userEvent.click(await screen.findByLabelText("Include past events"));
+    expect(await screen.findByText(/leave out past events/)).toHaveTextContent(
+      "You can choose a status or leave out past events to narrow it.",
     );
   });
 
-  it("SCRUM287_AC4_a_cut_needs_action_list_says_so", async () => {
-    vi.mocked(getEquipmentQueue).mockResolvedValue(answer([row()], [row()], { needsActionTruncated: true }));
+  it("SCRUM287_AC2_a_cut_list_under_a_status_with_past_events_out_gives_no_advice", async () => {
+    vi.mocked(getEquipmentQueue).mockResolvedValue(cutRequests());
     renderQueue();
-    expect(await within(await screen.findByRole("region", { name: /Needs action/ })).findByRole("note")).toHaveTextContent(
-      "Showing the first 1.",
+    await userEvent.selectOptions(await screen.findByLabelText("Status"), "arranged");
+    await waitFor(() => expect(getEquipmentQueue).toHaveBeenCalledTimes(2));
+    expect(await requestsNote()).toHaveTextContent(/^Showing the first 2 of 350\.$/);
+  });
+
+  it("SCRUM287_AC4_a_cut_needs_action_list_says_so_without_advice_the_filter_cannot_follow", async () => {
+    vi.mocked(getEquipmentQueue).mockResolvedValue(
+      answer([row()], [row()], { needsActionTruncated: true, needsActionTotal: 350 }),
     );
+    renderQueue();
+    const note = await within(await screen.findByRole("region", { name: /Needs action/ })).findByRole("note");
+    expect(note).toHaveTextContent("Showing the first 1 of 350. The rest appear here as these are dealt with.");
+    expect(note).not.toHaveTextContent(/status/i);
   });
 
   it("SCRUM287_AC2_a_complete_list_has_no_note", async () => {
