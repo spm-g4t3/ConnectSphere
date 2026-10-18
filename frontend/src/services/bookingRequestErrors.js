@@ -207,6 +207,37 @@ export function isStaleWithdrawError(err) {
   const status = err?.response?.status;
   return status === 403 || status === 404 || status === 409;
 }
+
+// SCRUM-492: releasing an approved booking from the event screen. Every 409
+// means the list on screen is out of date, so the caller refetches.
+const RELEASE_CODE_MESSAGES = {
+  EVENT_NOT_APPROVED: "Venues can be released only while the event is Approved.",
+  BOOKING_NOT_APPROVED: "This booking is no longer approved. The list has been refreshed.",
+  BOOKING_CHANGED: "This booking changed while you were releasing it. The list has been refreshed.",
+};
+
+const RELEASE_STATUS_MESSAGES = {
+  400: "Give a reason of up to 1,000 characters.",
+  401: "Your session has expired. Please sign in again.",
+  403: "Only the coordinator assigned to this event can release its venues.",
+  404: "This booking no longer exists.",
+};
+
+const RELEASE_DEFAULT_MESSAGE = "The venue could not be released. Please try again.";
+
+/**
+ * The message for a failed release: by the 409's code, then by status.
+ *
+ * @param {unknown} err  what releaseVenueBooking threw
+ * @returns {string}
+ */
+export function releaseErrorMessage(err) {
+  const status = err?.response?.status;
+  const code = codeOf(err);
+  if (status === 409 && code && Object.hasOwn(RELEASE_CODE_MESSAGES, code)) return RELEASE_CODE_MESSAGES[code];
+  if (Object.hasOwn(RELEASE_STATUS_MESSAGES, status)) return RELEASE_STATUS_MESSAGES[status];
+  return RELEASE_DEFAULT_MESSAGE;
+}
 // SCRUM-258: Venue Staff approving or rejecting from the pending queue. The
 // server re-checks everything under its locks (AC2), so each refusal says why
 // in the reader's terms; the ones meaning the queue was out of date also say

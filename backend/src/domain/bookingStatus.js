@@ -11,7 +11,8 @@
  *
  * Mirrors the Postgres enum `booking_status` exactly, in the same order: 011
  * creates it, 027_booking_request_statuses.sql appends the request statuses
- * and 065_booking_decision_statuses.sql appends conflicting. These two lists
+ * and 065_booking_decision_statuses.sql appends conflicting. SCRUM-492's
+ * 088_booking_released_status.sql appends released. These two lists
  * must stay identical -- a test asserts the match.
  *
  * Deliberately free of imports, database calls and framework code -- pure data
@@ -26,6 +27,7 @@ export const BOOKING_STATUS = Object.freeze({
   REJECTED: 'rejected',
   WITHDRAWN: 'withdrawn',
   CONFLICTING: 'conflicting',
+  RELEASED: 'released',
 });
 
 // Keyed by value, so the membership check below is a single own-property test.
@@ -98,6 +100,12 @@ export const BOOKING_STATUS_DISPLAY = Object.freeze({
     label: 'Cancelled',
     group: 'CANCELLED',
     description: 'This booking was called off and no longer holds the venue.',
+  }),
+  // SCRUM-492: the coordinator gave this venue up; the event goes ahead.
+  [BOOKING_STATUS.RELEASED]: Object.freeze({
+    label: 'Released',
+    group: 'RELEASED',
+    description: 'The coordinator released this venue, so it no longer holds the venue for this event.',
   }),
 });
 
