@@ -87,8 +87,8 @@ function RequestRow({ row, showFlagReasons }) {
 export default function EquipmentRequestQueue() {
   const [status, setStatus] = useState("");
   const [includePast, setIncludePast] = useState(false);
-  // Requests depend on both filters, so they are cleared when a read fails and
-  // rows from another filter never stay.
+  // Requests depend on both filters, so they are cleared as each read starts and
+  // rows from another filter never show.
   const [requestList, setRequestList] = useState(null);
   // Needs action ignores both filters, so a failed reload keeps it.
   const [needsList, setNeedsList] = useState(null);
@@ -103,6 +103,7 @@ export default function EquipmentRequestQueue() {
     const ticket = ++latest.current;
     setLoading(true);
     setError(null);
+    setRequestList(null);
     try {
       const data = await getEquipmentQueue({ status, includePast });
       if (ticket !== latest.current) return;
@@ -195,6 +196,7 @@ export default function EquipmentRequestQueue() {
               Include past events
             </label>
           </div>
+          {loading && !requestList && <p role="status">Loading equipment requests...</p>}
           {requestList && requests.length === 0 && (
             <p>
               {status || includePast
