@@ -1,7 +1,7 @@
 /**
  * Service tests for the equipment request queue.
  *
- * SCRUM-284. Named N22_ACn_<what_it_checks>. The client is a test
+ * SCRUM-284. Named SCRUM284_AC<n>_<what_it_checks>. The client is a test
  * double, so these are about what the service sends, what it refuses before the
  * database is called, and how the answer is reshaped. What the database does is
  * tested against Postgres in tests/db/equipmentRequestQueueDatabase.test.js.
@@ -55,7 +55,7 @@ const failure = async (promise) => {
 };
 
 describe('what the service asks the database', () => {
-  it('N22_AC2_calls_the_one_function_with_the_status_and_the_past_flag', async () => {
+  it('SCRUM284_AC2_calls_the_one_function_with_the_status_and_the_past_flag', async () => {
     const client = fakeClient();
     await getEquipmentRequestQueue({ status: 'arranged', includePast: 'true' }, { callerId: CALLER_ID, client });
     expect(client.rpc).toHaveBeenCalledTimes(1);
@@ -66,7 +66,7 @@ describe('what the service asks the database', () => {
     });
   });
 
-  it('N22_AC2_no_query_asks_for_every_status_without_past_events', async () => {
+  it('SCRUM284_AC2_no_query_asks_for_every_status_without_past_events', async () => {
     const client = fakeClient();
     await getEquipmentRequestQueue({}, { callerId: CALLER_ID, client });
     expect(client.rpc).toHaveBeenCalledWith('equipment_request_queue', {
@@ -76,13 +76,13 @@ describe('what the service asks the database', () => {
     });
   });
 
-  it('N22_AC2_reads_only_through_the_function_never_a_table', async () => {
+  it('SCRUM284_AC2_reads_only_through_the_function_never_a_table', async () => {
     const client = fakeClient();
     await getEquipmentRequestQueue({}, { client });
     expect(client.from).not.toHaveBeenCalled();
   });
 
-  it('N22_AC2_a_bad_status_is_refused_before_the_database_is_called', async () => {
+  it('SCRUM284_AC2_a_bad_status_is_refused_before_the_database_is_called', async () => {
     const client = fakeClient();
     const err = await failure(getEquipmentRequestQueue({ status: 'nope' }, { client }));
     expect(err).toBeInstanceOf(ValidationError);
@@ -90,7 +90,7 @@ describe('what the service asks the database', () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  it('N22_AC2_a_bad_includePast_is_refused_before_the_database_is_called', async () => {
+  it('SCRUM284_AC2_a_bad_includePast_is_refused_before_the_database_is_called', async () => {
     const client = fakeClient();
     const err = await failure(getEquipmentRequestQueue({ includePast: 'maybe' }, { client }));
     expect(err).toBeInstanceOf(ValidationError);
@@ -99,7 +99,7 @@ describe('what the service asks the database', () => {
 });
 
 describe('what the service gives back', () => {
-  it('N22_AC3_a_row_is_renamed_to_camel_case_with_a_label_for_the_status', async () => {
+  it('SCRUM284_AC3_a_row_is_renamed_to_camel_case_with_a_label_for_the_status', async () => {
     const client = fakeClient(ok({ needs_action: [], requests: [row()] }));
     const { requests } = await getEquipmentRequestQueue({}, { client });
     expect(requests).toEqual([
@@ -120,7 +120,7 @@ describe('what the service gives back', () => {
     ]);
   });
 
-  it('N22_AC6_the_row_has_exactly_the_listed_fields_even_if_the_database_sent_more', () => {
+  it('SCRUM284_AC6_the_row_has_exactly_the_listed_fields_even_if_the_database_sent_more', () => {
     const shaped = toQueueRow(row({ organiser_id: 'secret', event_description: 'private', attendees: 400 }));
     expect(Object.keys(shaped).sort()).toEqual([
       'coordinator',
@@ -139,13 +139,13 @@ describe('what the service gives back', () => {
     expect(JSON.stringify(shaped)).not.toMatch(/secret|private|400/);
   });
 
-  it('N22_AC3_every_venue_the_database_sent_comes_through_in_order', () => {
+  it('SCRUM284_AC3_every_venue_the_database_sent_comes_through_in_order', () => {
     const second = { id: 'v2', name: 'Room B' };
     const shaped = toQueueRow(row({ venues: [{ id: VENUE_ID, name: 'Hall A' }, second] }));
     expect(shaped.venues).toEqual([{ id: VENUE_ID, name: 'Hall A' }, second]);
   });
 
-  it('N22_AC3_no_venue_no_reviewer_and_no_coordinator_become_empty_or_null', () => {
+  it('SCRUM284_AC3_no_venue_no_reviewer_and_no_coordinator_become_empty_or_null', () => {
     const shaped = toQueueRow(
       row({ venues: [], reviewer_id: null, reviewer_name: null, coordinator_id: null, coordinator_name: null, status: 'pending_review' }),
     );
@@ -154,23 +154,23 @@ describe('what the service gives back', () => {
     expect(shaped.coordinator).toBeNull();
   });
 
-  it('N22_AC3_a_person_with_no_name_keeps_their_id_and_gets_a_null_name', () => {
+  it('SCRUM284_AC3_a_person_with_no_name_keeps_their_id_and_gets_a_null_name', () => {
     expect(toQueueRow(row({ reviewer_name: null })).reviewer).toEqual({ id: REVIEWER_ID, name: null });
   });
 
-  it('N22_AC3_an_event_with_no_period_has_null_times', () => {
+  it('SCRUM284_AC3_an_event_with_no_period_has_null_times', () => {
     const shaped = toQueueRow(row({ proposed_start: null, proposed_end: null }));
     expect(shaped.proposedStart).toBeNull();
     expect(shaped.proposedEnd).toBeNull();
   });
 
-  it('N22_AC4_the_flag_reasons_come_through', () => {
+  it('SCRUM284_AC4_the_flag_reasons_come_through', () => {
     const shaped = toQueueRow(row({ flagged_count: 2, flag_reasons: ['Event dates changed', 'Quantity changed'] }));
     expect(shaped.flaggedCount).toBe(2);
     expect(shaped.flagReasons).toEqual(['Event dates changed', 'Quantity changed']);
   });
 
-  it('N22_AC4_the_two_lists_stay_apart', async () => {
+  it('SCRUM284_AC4_the_two_lists_stay_apart', async () => {
     const needs = row({ event_request_id: 'a' });
     const other = row({ event_request_id: 'b' });
     const client = fakeClient(ok({ needs_action: [needs], requests: [needs, other] }));
@@ -179,7 +179,7 @@ describe('what the service gives back', () => {
     expect(result.requests.map((r) => r.eventRequestId)).toEqual(['a', 'b']);
   });
 
-  it('N22_the_status_choices_come_from_the_server_in_review_order', async () => {
+  it('SCRUM284_AC2_the_status_choices_come_from_the_server_in_review_order', async () => {
     const { statuses } = await getEquipmentRequestQueue({}, { callerId: CALLER_ID, client: fakeClient() });
     expect(statuses).toEqual([
       { value: 'pending_review', label: 'Pending review' },
@@ -190,7 +190,7 @@ describe('what the service gives back', () => {
     ]);
   });
 
-  it('N22_the_real_totals_are_passed_through_even_when_the_lists_are_cut', async () => {
+  it('SCRUM284_AC4_the_real_totals_are_passed_through_even_when_the_lists_are_cut', async () => {
     const client = fakeClient(ok({
       needs_action: [row()],
       needs_action_total: 350,
@@ -203,13 +203,13 @@ describe('what the service gives back', () => {
     expect(result).toMatchObject({ needsActionTotal: 350, requestsTotal: 512 });
   });
 
-  it('N22_a_cut_list_is_marked_truncated', async () => {
+  it('SCRUM284_AC2_a_cut_list_is_marked_truncated', async () => {
     const client = fakeClient(ok({ needs_action: [], needs_action_truncated: true, requests: [], requests_truncated: true }));
     const result = await getEquipmentRequestQueue({}, { callerId: CALLER_ID, client });
     expect(result).toMatchObject({ needsActionTruncated: true, requestsTruncated: true });
   });
 
-  it.each([null, undefined, {}])('N22_an_answer_of_%j_gives_two_empty_lists_not_truncated', async (data) => {
+  it.each([null, undefined, {}])('SCRUM284_AC2_an_answer_of_%j_gives_two_empty_lists_not_truncated', async (data) => {
     const client = fakeClient(ok(data));
     expect(await getEquipmentRequestQueue({}, { callerId: CALLER_ID, client })).toMatchObject({
       needsAction: [],
@@ -221,7 +221,7 @@ describe('what the service gives back', () => {
     });
   });
 
-  it('N22_an_unknown_status_label_falls_back_to_the_status_itself', () => {
+  it('SCRUM284_AC3_an_unknown_status_label_falls_back_to_the_status_itself', () => {
     expect(toQueueRow(row({ status: 'something_new' })).statusLabel).toBe('something_new');
   });
 });
@@ -252,32 +252,32 @@ describe('a row with the optional parts missing', () => {
 });
 
 describe('how the database refuses', () => {
-  it('N22_AC1_42501_becomes_a_ForbiddenError', async () => {
+  it('SCRUM284_AC1_42501_becomes_a_ForbiddenError', async () => {
     const client = fakeClient({ data: null, error: { code: '42501', message: 'Only technical support staff can see the equipment request queue' } });
     const err = await failure(getEquipmentRequestQueue({}, { callerId: CALLER_ID, client }));
     expect(err).toBeInstanceOf(ForbiddenError);
   });
 
-  it('N22_AC1_a_missing_caller_is_sent_as_null_for_the_database_to_refuse', async () => {
+  it('SCRUM284_AC1_a_missing_caller_is_sent_as_null_for_the_database_to_refuse', async () => {
     const client = fakeClient();
     await getEquipmentRequestQueue({}, { client });
     expect(client.rpc).toHaveBeenCalledWith('equipment_request_queue', expect.objectContaining({ p_caller: null }));
   });
 
-  it('N22_22023_becomes_a_ValidationError', async () => {
+  it('SCRUM284_AC2_22023_becomes_a_ValidationError', async () => {
     const client = fakeClient({ data: null, error: { code: '22023', message: 'Unknown status x' } });
     const err = await failure(getEquipmentRequestQueue({}, { client }));
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toBe('Unknown status x');
   });
 
-  it('SCRUM284_a_failure_with_no_message_still_says_what_went_wrong', async () => {
+  it('SCRUM284_AC2_a_failure_with_no_message_still_says_what_went_wrong', async () => {
     const client = fakeClient({ data: null, error: { code: 'XX000' } });
     const err = await failure(getEquipmentRequestQueue({}, { client }));
     expect(err.message).toBe('Unexpected database error');
   });
 
-  it('N22_any_other_failure_is_left_untyped_so_it_is_a_500', async () => {
+  it('SCRUM284_AC6_any_other_failure_is_left_untyped_so_it_is_a_500', async () => {
     const client = fakeClient({ data: null, error: { code: 'XX000', message: 'boom' } });
     const err = await failure(getEquipmentRequestQueue({}, { client }));
     expect(err).toBeInstanceOf(Error);

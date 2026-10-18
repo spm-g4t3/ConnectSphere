@@ -15,20 +15,20 @@ beforeEach(() => {
 });
 
 describe("equipmentQueueService", () => {
-  it("SCRUM287_AC2_asks_for_every_status_without_past_events_by_default", async () => {
+  it("SCRUM284_AC2_asks_for_every_status_without_past_events_by_default", async () => {
     apiClient.get.mockResolvedValue({ data: { needsAction: [], requests: [] } });
 
     await expect(getEquipmentQueue()).resolves.toEqual({ needsAction: [], requests: [] });
     expect(apiClient.get).toHaveBeenCalledWith("/equipment-requests", { params: {} });
   });
 
-  it("SCRUM287_AC2_sends_the_status_filter", async () => {
+  it("SCRUM284_AC2_sends_the_status_filter", async () => {
     apiClient.get.mockResolvedValue({ data: {} });
     await getEquipmentQueue({ status: "arranged" });
     expect(apiClient.get).toHaveBeenCalledWith("/equipment-requests", { params: { status: "arranged" } });
   });
 
-  it("SCRUM287_AC2_sends_includePast_only_when_it_is_on", async () => {
+  it("SCRUM284_AC2_sends_includePast_only_when_it_is_on", async () => {
     apiClient.get.mockResolvedValue({ data: {} });
     await getEquipmentQueue({ includePast: true });
     expect(apiClient.get).toHaveBeenCalledWith("/equipment-requests", { params: { includePast: "true" } });
@@ -38,13 +38,13 @@ describe("equipmentQueueService", () => {
     expect(apiClient.get).toHaveBeenCalledWith("/equipment-requests", { params: {} });
   });
 
-  it("SCRUM287_AC2_an_empty_status_is_not_sent", async () => {
+  it("SCRUM284_AC2_an_empty_status_is_not_sent", async () => {
     apiClient.get.mockResolvedValue({ data: {} });
     await getEquipmentQueue({ status: "", includePast: true });
     expect(apiClient.get).toHaveBeenCalledWith("/equipment-requests", { params: { includePast: "true" } });
   });
 
-  it("SCRUM287_AC2_lets_a_failure_reach_the_caller", async () => {
+  it("SCRUM284_AC2_lets_a_failure_reach_the_caller", async () => {
     const failure = { response: { status: 403 } };
     apiClient.get.mockRejectedValue(failure);
     await expect(getEquipmentQueue()).rejects.toBe(failure);

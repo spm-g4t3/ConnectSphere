@@ -1,6 +1,6 @@
 // EquipmentRequestQueue.test.jsx
 //
-// Named SCRUM287_ACn_<what_it_checks>, the ACs being SCRUM-284's.
+// Named SCRUM284_AC<n>_<what_it_checks>, the ACs being SCRUM-284's.
 //
 // The service is mocked, so nothing touches the network. What the server puts in
 // each list, and in what order, is proved by the backend and database tests; this
@@ -86,7 +86,7 @@ beforeEach(() => {
 
 
 describe("loading and failing", () => {
-  it("SCRUM287_says_it_is_loading_until_the_answer_arrives", async () => {
+  it("SCRUM284_AC2_says_it_is_loading_until_the_answer_arrives", async () => {
     let finish;
     vi.mocked(getEquipmentQueue).mockReturnValue(new Promise((resolve) => (finish = resolve)));
     renderQueue();
@@ -103,19 +103,19 @@ describe("loading and failing", () => {
     [403, /Only technical support staff/],
     [500, /could not be loaded/],
     [undefined, /could not be loaded/],
-  ])("SCRUM287_a_%s_failure_is_said_in_a_sentence", async (status, message) => {
+  ])("SCRUM284_AC2_a_%s_failure_is_said_in_a_sentence", async (status, message) => {
     vi.mocked(getEquipmentQueue).mockRejectedValue(status ? { response: { status } } : new Error("network"));
     renderQueue();
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
   });
 
-  it("SCRUM287_a_server_message_is_never_shown_for_a_500", async () => {
+  it("SCRUM284_AC6_a_server_message_is_never_shown_for_a_500", async () => {
     vi.mocked(getEquipmentQueue).mockRejectedValue({ response: { status: 500, data: { error: "relation x exploded" } } });
     renderQueue();
     expect(await screen.findByRole("alert")).not.toHaveTextContent("exploded");
   });
 
-  it("SCRUM287_Try_again_reads_the_queue_again_and_clears_the_error", async () => {
+  it("SCRUM284_AC2_Try_again_reads_the_queue_again_and_clears_the_error", async () => {
     vi.mocked(getEquipmentQueue).mockRejectedValueOnce({ response: { status: 500 } }).mockResolvedValue(answer([row()]));
     renderQueue();
     await userEvent.click(await screen.findByRole("button", { name: "Try again" }));
@@ -126,7 +126,7 @@ describe("loading and failing", () => {
 
 
 describe("AC3: what a row shows", () => {
-  it("SCRUM287_AC3_a_row_shows_the_event_dates_venue_coordinator_lines_and_status", async () => {
+  it("SCRUM284_AC3_a_row_shows_the_event_dates_venue_coordinator_lines_and_status", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([], [row()]));
     renderQueue();
 
@@ -142,13 +142,13 @@ describe("AC3: what a row shows", () => {
     expect(item).toHaveTextContent("3 items");
   });
 
-  it("SCRUM287_AC3_one_item_is_singular", async () => {
+  it("SCRUM284_AC3_one_item_is_singular", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([], [row({ itemCount: 1 })]));
     renderQueue();
     expect(await screen.findByText(/1 item$/)).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC3_an_event_at_two_venues_names_both", async () => {
+  it("SCRUM284_AC3_an_event_at_two_venues_names_both", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(
       answer([], [row({ venues: [{ id: "v1", name: "Hall A" }, { id: "v2", name: "Room B" }] })]),
     );
@@ -157,13 +157,13 @@ describe("AC3: what a row shows", () => {
     expect(item).toHaveTextContent("Venues: Hall A, Room B");
   });
 
-  it("SCRUM287_AC3_the_item_count_is_the_server_figure_not_a_count_of_lines", async () => {
+  it("SCRUM284_AC3_the_item_count_is_the_server_figure_not_a_count_of_lines", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([], [row({ itemCount: 22 })]));
     renderQueue();
     expect(await screen.findByText(/22 items$/)).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC3_a_missing_venue_and_coordinator_are_said_in_words", async () => {
+  it("SCRUM284_AC3_a_missing_venue_and_coordinator_are_said_in_words", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([], [row({ venues: [], coordinator: null })]));
     renderQueue();
     const item = within(await screen.findByRole("region", { name: "Equipment requests" })).getByRole("listitem");
@@ -171,7 +171,7 @@ describe("AC3: what a row shows", () => {
     expect(item).toHaveTextContent("No coordinator assigned");
   });
 
-  it("SCRUM287_AC3_a_coordinator_with_no_name_does_not_render_the_word_null", async () => {
+  it("SCRUM284_AC3_a_coordinator_with_no_name_does_not_render_the_word_null", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([], [row({ coordinator: { id: "c1", name: null } })]));
     renderQueue();
     const item = within(await screen.findByRole("region", { name: "Equipment requests" })).getByRole("listitem");
@@ -179,7 +179,7 @@ describe("AC3: what a row shows", () => {
     expect(item).not.toHaveTextContent("null");
   });
 
-  it("SCRUM287_AC3_the_reviewer_is_shown_when_the_request_is_under_review", async () => {
+  it("SCRUM284_AC3_the_reviewer_is_shown_when_the_request_is_under_review", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(
       answer([], [row({ status: "under_review", statusLabel: "Under review", reviewer: { id: "r1", name: "Sam Lee" } })]),
     );
@@ -187,7 +187,7 @@ describe("AC3: what a row shows", () => {
     expect(await screen.findByText("Reviewing: Sam Lee")).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC3_a_venue_with_no_name_does_not_render_the_word_null", async () => {
+  it("SCRUM284_AC3_a_venue_with_no_name_does_not_render_the_word_null", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([], [row({ venues: [{ id: "v1", name: null }] })]));
     renderQueue();
     const item = within(await screen.findByRole("region", { name: "Equipment requests" })).getByRole("listitem");
@@ -195,7 +195,7 @@ describe("AC3: what a row shows", () => {
     expect(item).not.toHaveTextContent("null");
   });
 
-  it("SCRUM287_AC3_a_reviewer_with_no_name_does_not_render_the_word_null", async () => {
+  it("SCRUM284_AC3_a_reviewer_with_no_name_does_not_render_the_word_null", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(
       answer([], [row({ status: "under_review", statusLabel: "Under review", reviewer: { id: "r1", name: null } })]),
     );
@@ -203,14 +203,14 @@ describe("AC3: what a row shows", () => {
     expect(await screen.findByText("Reviewing: Name not set")).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC3_no_reviewer_line_for_a_request_that_is_not_under_review", async () => {
+  it("SCRUM284_AC3_no_reviewer_line_for_a_request_that_is_not_under_review", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([], [row({ reviewer: { id: "r1", name: "Sam Lee" } })]));
     renderQueue();
     await screen.findByText("Annual Dinner", { selector: "strong" });
     expect(screen.queryByText(/Reviewing:/)).not.toBeInTheDocument();
   });
 
-  it("SCRUM287_AC6_nothing_the_server_did_not_list_is_drawn", async () => {
+  it("SCRUM284_AC6_nothing_the_server_did_not_list_is_drawn", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(
       answer([], [{ ...row(), organiserEmail: "secret@example.com", notes: "private notes" }]),
     );
@@ -219,7 +219,7 @@ describe("AC3: what a row shows", () => {
     expect(document.body).not.toHaveTextContent(/secret@example.com|private notes/);
   });
 
-  it("SCRUM287_AC3_every_status_is_written_not_just_coloured", async () => {
+  it("SCRUM284_AC3_every_status_is_written_not_just_coloured", async () => {
     const rows = [
       row({ eventRequestId: "a", eventName: "One", status: "pending_review", statusLabel: "Pending review" }),
       row({ eventRequestId: "b", eventName: "Two", status: "under_review", statusLabel: "Under review" }),
@@ -239,7 +239,7 @@ describe("AC3: what a row shows", () => {
 
 
 describe("AC4: the Needs action section", () => {
-  it("SCRUM287_AC4_the_heading_carries_the_count", async () => {
+  it("SCRUM284_AC4_the_heading_carries_the_count", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(
       answer([row({ eventRequestId: "a" }), row({ eventRequestId: "b", eventName: "Two" })], [row()]),
     );
@@ -247,7 +247,7 @@ describe("AC4: the Needs action section", () => {
     expect(await screen.findByRole("heading", { level: 2, name: "Needs action (2)" })).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC4_the_heading_counts_every_request_not_just_the_rows_sent", async () => {
+  it("SCRUM284_AC4_the_heading_counts_every_request_not_just_the_rows_sent", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(
       answer([row()], [row()], { needsActionTotal: 350, needsActionTruncated: true }),
     );
@@ -255,14 +255,14 @@ describe("AC4: the Needs action section", () => {
     expect(await screen.findByRole("heading", { level: 2, name: "Needs action (350)" })).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC4_an_empty_section_says_nothing_needs_action_and_counts_zero", async () => {
+  it("SCRUM284_AC4_an_empty_section_says_nothing_needs_action_and_counts_zero", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([], [row({ status: "arranged", statusLabel: "Arranged" })]));
     renderQueue();
     expect(await screen.findByRole("heading", { name: "Needs action (0)" })).toBeInTheDocument();
     expect(within(needsActionSection()).getByText("Nothing needs your action.")).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC4_a_flagged_request_shows_why_it_was_flagged", async () => {
+  it("SCRUM284_AC4_a_flagged_request_shows_why_it_was_flagged", async () => {
     const flagged = row({
       eventName: "Flagged Gala",
       flaggedCount: 2,
@@ -274,7 +274,7 @@ describe("AC4: the Needs action section", () => {
     expect(within(needsActionSection()).getByText("2 reservations flagged: Event dates changed; Quantity changed")).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC4_one_flag_is_singular", async () => {
+  it("SCRUM284_AC4_one_flag_is_singular", async () => {
     const flagged = row({ flaggedCount: 1, flagReasons: ["Event dates changed"] });
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([flagged], [flagged]));
     renderQueue();
@@ -282,7 +282,7 @@ describe("AC4: the Needs action section", () => {
     expect(within(needsActionSection()).getByText("1 reservation flagged: Event dates changed")).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC4_rows_stay_in_the_order_the_server_gave", async () => {
+  it("SCRUM284_AC4_rows_stay_in_the_order_the_server_gave", async () => {
     const rows = [
       row({ eventRequestId: "a", eventName: "Early" }),
       row({ eventRequestId: "b", eventName: "Middle" }),
@@ -295,7 +295,7 @@ describe("AC4: the Needs action section", () => {
     expect(order).toEqual(["Early", "Middle", "Late"]);
   });
 
-  it("SCRUM287_AC4_a_flagged_row_in_the_main_list_shows_the_count_without_the_long_reasons", async () => {
+  it("SCRUM284_AC4_a_flagged_row_in_the_main_list_shows_the_count_without_the_long_reasons", async () => {
     const flagged = row({ flaggedCount: 1, flagReasons: ["Event dates changed"] });
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([flagged], [flagged]));
     renderQueue();
@@ -306,7 +306,7 @@ describe("AC4: the Needs action section", () => {
 
 
 describe("AC2: the filters", () => {
-  it("SCRUM287_AC2_the_first_read_asks_for_every_status_without_past_events", async () => {
+  it("SCRUM284_AC2_the_first_read_asks_for_every_status_without_past_events", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer());
     renderQueue();
     await screen.findByRole("heading", { name: /Needs action/ });
@@ -314,7 +314,7 @@ describe("AC2: the filters", () => {
     expect(getEquipmentQueue).toHaveBeenCalledWith({ status: "", includePast: false });
   });
 
-  it("SCRUM287_AC2_the_status_filter_offers_all_and_the_five_statuses", async () => {
+  it("SCRUM284_AC2_the_status_filter_offers_all_and_the_five_statuses", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer());
     renderQueue();
     const select = await screen.findByLabelText("Status");
@@ -328,7 +328,7 @@ describe("AC2: the filters", () => {
     ]);
   });
 
-  it("SCRUM287_AC2_the_filter_offers_whatever_statuses_the_server_sent", async () => {
+  it("SCRUM284_AC2_the_filter_offers_whatever_statuses_the_server_sent", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(
       answer([], [], { statuses: [{ value: "arranged", label: "Sorted out" }] }),
     );
@@ -337,21 +337,21 @@ describe("AC2: the filters", () => {
     expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["All statuses", "Sorted out"]);
   });
 
-  it("SCRUM287_AC2_choosing_a_status_reads_the_queue_again_with_it", async () => {
+  it("SCRUM284_AC2_choosing_a_status_reads_the_queue_again_with_it", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer());
     renderQueue();
     await userEvent.selectOptions(await screen.findByLabelText("Status"), "arranged");
     await waitFor(() => expect(getEquipmentQueue).toHaveBeenLastCalledWith({ status: "arranged", includePast: false }));
   });
 
-  it("SCRUM287_AC2_ticking_include_past_events_reads_again_with_it", async () => {
+  it("SCRUM284_AC2_ticking_include_past_events_reads_again_with_it", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer());
     renderQueue();
     await userEvent.click(await screen.findByLabelText("Include past events"));
     await waitFor(() => expect(getEquipmentQueue).toHaveBeenLastCalledWith({ status: "", includePast: true }));
   });
 
-  it("SCRUM287_AC2_the_two_filters_combine_and_can_be_cleared", async () => {
+  it("SCRUM284_AC2_the_two_filters_combine_and_can_be_cleared", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer());
     renderQueue();
     await userEvent.selectOptions(await screen.findByLabelText("Status"), "cancelled");
@@ -361,7 +361,7 @@ describe("AC2: the filters", () => {
     await waitFor(() => expect(getEquipmentQueue).toHaveBeenLastCalledWith({ status: "", includePast: true }));
   });
 
-  it("SCRUM287_AC2_the_filters_survive_a_reload_of_the_lists_they_do_not_disappear", async () => {
+  it("SCRUM284_AC2_the_filters_survive_a_reload_of_the_lists_they_do_not_disappear", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer());
     renderQueue();
     await userEvent.selectOptions(await screen.findByLabelText("Status"), "arranged");
@@ -369,20 +369,20 @@ describe("AC2: the filters", () => {
     expect(screen.getByLabelText("Status")).toHaveValue("arranged");
   });
 
-  it("SCRUM287_AC2_an_empty_filtered_list_says_nothing_matches", async () => {
+  it("SCRUM284_AC2_an_empty_filtered_list_says_nothing_matches", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer());
     renderQueue();
     await userEvent.selectOptions(await screen.findByLabelText("Status"), "arranged");
     expect(await within(allSection()).findByText("No equipment requests match these filters.")).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC2_an_empty_unfiltered_list_says_there_are_none_upcoming", async () => {
+  it("SCRUM284_AC2_an_empty_unfiltered_list_says_there_are_none_upcoming", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer());
     renderQueue();
     expect(await within(await screen.findByRole("region", { name: "Equipment requests" })).findByText("No equipment requests for upcoming events.")).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC2_a_slow_answer_to_an_old_filter_does_not_overwrite_a_newer_one", async () => {
+  it("SCRUM284_AC2_a_slow_answer_to_an_old_filter_does_not_overwrite_a_newer_one", async () => {
     let finishSlow;
     vi.mocked(getEquipmentQueue)
       .mockResolvedValueOnce(answer())
@@ -399,7 +399,7 @@ describe("AC2: the filters", () => {
     expect(screen.getByText("Newer answer", { selector: "strong" })).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC2_a_slow_failure_of_an_old_filter_does_not_show_an_error_over_a_newer_answer", async () => {
+  it("SCRUM284_AC2_a_slow_failure_of_an_old_filter_does_not_show_an_error_over_a_newer_answer", async () => {
     let failSlow;
     vi.mocked(getEquipmentQueue)
       .mockResolvedValueOnce(answer())
@@ -416,7 +416,29 @@ describe("AC2: the filters", () => {
     expect(screen.getByText("Newer answer", { selector: "strong" })).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC2_a_failed_status_change_clears_the_old_requests_but_keeps_needs_action", async () => {
+  it("SCRUM284_AC2_the_old_requests_disappear_while_a_new_filter_loads_and_needs_action_stays", async () => {
+    let finishSlow;
+    vi.mocked(getEquipmentQueue)
+      .mockResolvedValueOnce(answer([row({ eventName: "Old Needs" })], [row({ eventName: "Old Row" })]))
+      .mockReturnValueOnce(new Promise((resolve) => (finishSlow = resolve)));
+    renderQueue();
+    expect(await screen.findAllByText("Old Row", { selector: "strong" })).not.toHaveLength(0);
+
+    await userEvent.selectOptions(screen.getByLabelText("Status"), "arranged");
+
+    // The new answer has not arrived: nothing from the old filter is on screen, and
+    // neither is the empty-state text that belongs to an answer.
+    expect(screen.queryByText("Old Row")).not.toBeInTheDocument();
+    expect(screen.queryByText("No equipment requests match these filters.")).not.toBeInTheDocument();
+    expect(within(allSection()).getByRole("status")).toHaveTextContent("Loading equipment requests...");
+    expect(within(needsActionSection()).getByText("Old Needs", { selector: "strong" })).toBeInTheDocument();
+
+    finishSlow(answer([row({ eventName: "Old Needs" })], [row({ eventName: "New Row" })]));
+    expect(await screen.findByText("New Row", { selector: "strong" })).toBeInTheDocument();
+    expect(within(allSection()).queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM284_AC2_a_failed_status_change_clears_the_old_requests_but_keeps_needs_action", async () => {
     vi.mocked(getEquipmentQueue)
       .mockResolvedValueOnce(answer([row({ eventName: "Old Needs" })], [row({ eventName: "Old Row" })]))
       .mockRejectedValueOnce({ response: { status: 500 } });
@@ -434,7 +456,7 @@ describe("AC2: the filters", () => {
     expect(screen.getByLabelText("Status")).toHaveValue("arranged");
   });
 
-  it("SCRUM287_AC4_a_failed_past_events_change_keeps_needs_action", async () => {
+  it("SCRUM284_AC4_a_failed_past_events_change_keeps_needs_action", async () => {
     vi.mocked(getEquipmentQueue)
       .mockResolvedValueOnce(answer([row({ eventName: "Old Needs" })], [row({ eventName: "Old Row" })]))
       .mockRejectedValueOnce({ response: { status: 500 } });
@@ -450,7 +472,7 @@ describe("AC2: the filters", () => {
     expect(screen.getByRole("heading", { name: "Needs action (1)" })).toBeInTheDocument();
   });
 
-  it("SCRUM287_AC2_Try_again_after_a_failed_filter_change_reads_with_that_filter", async () => {
+  it("SCRUM284_AC2_Try_again_after_a_failed_filter_change_reads_with_that_filter", async () => {
     vi.mocked(getEquipmentQueue)
       .mockResolvedValueOnce(answer())
       .mockRejectedValueOnce({ response: { status: 500 } })
@@ -464,7 +486,7 @@ describe("AC2: the filters", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("SCRUM287_AC2_a_failed_filter_keeps_the_filter_so_it_can_be_corrected", async () => {
+  it("SCRUM284_AC2_a_failed_filter_keeps_the_filter_so_it_can_be_corrected", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValueOnce(answer()).mockRejectedValueOnce({ response: { status: 500 } });
     renderQueue();
     await userEvent.selectOptions(await screen.findByLabelText("Status"), "arranged");
@@ -484,19 +506,19 @@ describe("lists the server cut short", () => {
   const requestsNote = async () =>
     within(await screen.findByRole("region", { name: "Equipment requests" })).findByRole("note");
 
-  it("SCRUM287_AC2_a_cut_requests_list_says_how_many_are_shown_of_how_many", async () => {
+  it("SCRUM284_AC2_a_cut_requests_list_says_how_many_are_shown_of_how_many", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(cutRequests());
     renderQueue();
     expect(await requestsNote()).toHaveTextContent("Showing the first 2 of 350.");
   });
 
-  it("SCRUM287_AC2_a_cut_requests_list_offers_a_status_when_none_is_chosen", async () => {
+  it("SCRUM284_AC2_a_cut_requests_list_offers_a_status_when_none_is_chosen", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(cutRequests());
     renderQueue();
     expect(await requestsNote()).toHaveTextContent("You can choose a status to narrow it.");
   });
 
-  it("SCRUM287_AC2_a_cut_requests_list_offers_leaving_out_past_events_only_when_they_are_in", async () => {
+  it("SCRUM284_AC2_a_cut_requests_list_offers_leaving_out_past_events_only_when_they_are_in", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(cutRequests());
     renderQueue();
     await userEvent.click(await screen.findByLabelText("Include past events"));
@@ -505,7 +527,7 @@ describe("lists the server cut short", () => {
     );
   });
 
-  it("SCRUM287_AC2_a_cut_list_under_a_status_with_past_events_out_gives_no_advice", async () => {
+  it("SCRUM284_AC2_a_cut_list_under_a_status_with_past_events_out_gives_no_advice", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(cutRequests());
     renderQueue();
     await userEvent.selectOptions(await screen.findByLabelText("Status"), "arranged");
@@ -513,7 +535,7 @@ describe("lists the server cut short", () => {
     expect(await requestsNote()).toHaveTextContent(/^Showing the first 2 of 350\.$/);
   });
 
-  it("SCRUM287_AC4_a_cut_needs_action_list_says_so_without_advice_the_filter_cannot_follow", async () => {
+  it("SCRUM284_AC4_a_cut_needs_action_list_says_so_without_advice_the_filter_cannot_follow", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(
       answer([row()], [row()], { needsActionTruncated: true, needsActionTotal: 350 }),
     );
@@ -523,7 +545,7 @@ describe("lists the server cut short", () => {
     expect(note).not.toHaveTextContent(/status/i);
   });
 
-  it("SCRUM287_AC2_a_complete_list_has_no_note", async () => {
+  it("SCRUM284_AC2_a_complete_list_has_no_note", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([row()], [row()]));
     renderQueue();
     await screen.findByRole("region", { name: /Needs action/ });
@@ -533,7 +555,7 @@ describe("lists the server cut short", () => {
 
 
 describe("AC5: selecting a request opens its review screen", () => {
-  it("SCRUM287_AC5_Open_on_a_row_goes_to_that_events_review_screen", async () => {
+  it("SCRUM284_AC5_Open_on_a_row_goes_to_that_events_review_screen", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(
       answer([], [row({ eventRequestId: EVENT_A, eventName: "First" }), row({ eventRequestId: EVENT_B, eventName: "Second" })]),
     );
@@ -542,7 +564,7 @@ describe("AC5: selecting a request opens its review screen", () => {
     expect(screen.getByTestId("where")).toHaveTextContent(`/equipment-review/${EVENT_B}`);
   });
 
-  it("SCRUM287_AC5_each_link_names_its_own_event", async () => {
+  it("SCRUM284_AC5_each_link_names_its_own_event", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(
       answer([], [row({ eventRequestId: EVENT_A, eventName: "First" }), row({ eventRequestId: EVENT_C, eventName: "Third" })]),
     );
@@ -551,7 +573,7 @@ describe("AC5: selecting a request opens its review screen", () => {
     expect(screen.getByRole("link", { name: "Open Third" })).toHaveAttribute("href", `/equipment-review/${EVENT_C}`);
   });
 
-  it("SCRUM287_AC5_a_needs_action_row_opens_the_same_review_screen", async () => {
+  it("SCRUM284_AC5_a_needs_action_row_opens_the_same_review_screen", async () => {
     vi.mocked(getEquipmentQueue).mockResolvedValue(answer([row({ eventRequestId: EVENT_B, eventName: "Urgent" })], []));
     renderQueue();
     await screen.findByRole("heading", { name: /Needs action/ });
@@ -562,20 +584,20 @@ describe("AC5: selecting a request opens its review screen", () => {
 
 
 describe("formatEventPeriod", () => {
-  it("SCRUM287_AC3_a_one_day_event_shows_the_date_once_with_both_times", () => {
+  it("SCRUM284_AC3_a_one_day_event_shows_the_date_once_with_both_times", () => {
     const text = formatEventPeriod("2030-01-10T10:00:00Z", "2030-01-10T12:00:00Z");
     expect(text.match(/2030/g)).toHaveLength(1);
     expect(text).toContain(" to ");
   });
 
-  it("SCRUM287_AC3_times_are_Singapore_time_whatever_the_device_zone", () => {
+  it("SCRUM284_AC3_times_are_Singapore_time_whatever_the_device_zone", () => {
     // 16:30 to 18:00 UTC on the 10th is 00:30 to 02:00 on the 11th in Singapore.
     const text = formatEventPeriod("2030-01-10T16:30:00Z", "2030-01-10T18:00:00Z");
     expect(text).toMatch(/Fri, 11 Jan 2030/);
     expect(text).toMatch(/12:30\s?am to 2:00\s?am/i);
   });
 
-  it("SCRUM287_AC3_a_multi_day_event_shows_both_dates", () => {
+  it("SCRUM284_AC3_a_multi_day_event_shows_both_dates", () => {
     const text = formatEventPeriod("2030-01-10T10:00:00Z", "2030-01-12T12:00:00Z");
     expect(text.match(/2030/g)).toHaveLength(2);
   });
@@ -586,11 +608,11 @@ describe("formatEventPeriod", () => {
     ["2030-01-10T10:00:00Z", null],
     [null, "2030-01-10T12:00:00Z"],
     ["not a date", "2030-01-10T12:00:00Z"],
-  ])("SCRUM287_AC3_%s to %s is shown as Date not set", (start, end) => {
+  ])("SCRUM284_AC3_%s to %s is shown as Date not set", (start, end) => {
     expect(formatEventPeriod(start, end)).toBe("Date not set");
   });
 
-  it("SCRUM287_AC3_uses_no_dash_characters_between_times", () => {
+  it("SCRUM284_AC3_uses_no_dash_characters_between_times", () => {
     expect(formatEventPeriod("2030-01-10T10:00:00Z", "2030-01-10T12:00:00Z")).not.toMatch(/[–—]/);
   });
 });

@@ -38,7 +38,7 @@ beforeEach(() => {
 });
 
 describe("SCRUM-284 AC1: /equipment is for Technical Support Staff only", () => {
-  it("SCRUM287_AC1_technical_support_staff_open_the_queue_under_its_own_heading", () => {
+  it("SCRUM284_AC1_technical_support_staff_open_the_queue_under_its_own_heading", () => {
     renderAppAt("/equipment", "technical_support_staff");
 
     expect(screen.getByTestId("queue-stub")).toBeInTheDocument();
@@ -53,14 +53,14 @@ describe("SCRUM-284 AC1: /equipment is for Technical Support Staff only", () => 
     "attendee",
     "event_coordinator_lead",
     "safety_officer",
-  ])("SCRUM287_AC1_sends_%s_to_unauthorized", (role) => {
+  ])("SCRUM284_AC1_sends_%s_to_unauthorized", (role) => {
     renderAppAt("/equipment", role);
 
     expect(screen.queryByTestId("queue-stub")).not.toBeInTheDocument();
     expect(window.location.pathname).toBe("/unauthorized");
   });
 
-  it("SCRUM287_AC1_sends_a_signed_out_visitor_to_login", () => {
+  it("SCRUM284_AC1_sends_a_signed_out_visitor_to_login", () => {
     renderAppAt("/equipment", null);
 
     expect(screen.queryByTestId("queue-stub")).not.toBeInTheDocument();
