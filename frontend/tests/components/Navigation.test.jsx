@@ -103,7 +103,8 @@ describe("Navigation links by role", () => {
 
     expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
     expect(screen.getByRole("link", { name: "Browse Open Events" })).toHaveAttribute("href", "/open-events");
-    expect(within(screen.getByRole("list")).getAllByRole("link")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "Registered events" })).toHaveAttribute("href", "/registered-events");
+    expect(within(screen.getByRole("list")).getAllByRole("link")).toHaveLength(3);
   });
 });
 
@@ -295,9 +296,10 @@ describe("SCRUM485_AC6 the existing roles keep exactly their links", () => {
     // Pins the Attendee's links exactly and by count.
     const links = linksOf("attendee");
 
-    expect(links).toHaveLength(2);
+    expect(links).toHaveLength(3);
     expect(links).toEqual([
       ["Dashboard", "/dashboard"],
+      ["Registered events", "/registered-events"],
       ["Browse Open Events", "/open-events"],
     ]);
   });

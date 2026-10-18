@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { getAttendeeEvent } from '../../src/services/attendeeEventService.js';
+import { getAttendeeEvent, listAttendeeEvents } from '../../src/services/attendeeEventService.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
 import { BOOKING_STATUS } from '../../src/domain/bookingStatus.js';
 
@@ -52,13 +52,30 @@ describe.skipIf(missing.length > 0)(`SCRUM-52 SQL read${missing.length ? ` BLOCK
     from(table) {
       expect(table).toBe('event_registrations');
       const filters = [];
+      let isList = false;
       const query = {
         select(columns) {
+          isList = columns === 'event_request_id, attendee_id, status, event_requests!inner(id, event_name)';
+          if (isList) return query;
           expect(columns.replace(/\s+/g, '')).toBe('event_request_id,attendee_id,status,'
             + 'event_requests!inner(id,status,proposed_start,proposed_end,bookings(id,status,venues(name,location)))');
           return query;
         },
         eq(field, value) { filters.push([field, value]); return query; },
+        order() { return query; },
+        async range(first, last) {
+          expect(isList).toBe(true);
+          expect(filters.map(([field]) => field)).toEqual(['attendee_id', 'status']);
+          queries += 1;
+          const { rows } = await db.query(`
+            select r.attendee_id, r.event_request_id, r.status,
+              jsonb_build_object('id', e.id, 'event_name', e.event_name) as event_requests
+            from event_registrations r join event_requests e on e.id = r.event_request_id
+            where r.attendee_id = $1 and r.status = $2
+            order by r.registered_at desc, r.id asc limit $3 offset $4
+          `, [...filters.map(([, value]) => value), last - first + 1, first]);
+          return { data: rows, error: null };
+        },
         async maybeSingle() {
           expect(filters.map(([field]) => field)).toEqual(['attendee_id', 'event_request_id', 'status']);
           queries += 1;
@@ -205,6 +222,17 @@ describe.skipIf(missing.length > 0)(`SCRUM-52 SQL read${missing.length ? ` BLOCK
     expect(Object.keys(result).sort()).toEqual(['endsAt', 'eventRequestId', 'startsAt', 'state', 'venues']);
     expect(Object.keys(result.venues[0]).sort()).toEqual(['bookingId', 'location', 'name']);
     expect(JSON.stringify(result)).not.toContain('private');
+  });
+
+  it('SCRUM24_AC1_SQL_registered_entry_points_survive_registration_closure_and_unconfirmed_state', async () => {
+    await db.query(`update event_requests set status = 'approved', registration_enabled = false,
+      registration_capacity = 1, registration_opens_at = '2000-01-01', registration_closes_at = '2000-01-02'
+      where id = $1`, [eventId]);
+    await db.query("update event_requests set description = 'PRIVATE_PLANNING' where id = $1", [eventId]);
+    expect(await listAttendeeEvents({ user, client })).toEqual([{ eventRequestId: eventId, eventName: 'Registered event' }]);
+    expect(queries).toBe(1);
+    await db.query("update event_registrations set status = 'withdrawn' where event_request_id = $1", [eventId]);
+    expect(await listAttendeeEvents({ user, client })).toEqual([]);
   });
 
   it('SCRUM24_AC1_SQL_missing_schema_fails_without_returning_event_data', async () => {

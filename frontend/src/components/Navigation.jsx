@@ -7,6 +7,7 @@ import { useAuth } from "../auth/AuthContext";
 import { useUnreadCount } from "../notifications/UnreadCountContext";
 import { normaliseRole } from "../auth/normaliseRole";
 import { BROWSE_OPEN_EVENTS_PATH, isOpenEventsEnabled } from "../services/openEventRoutes";
+import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
 
 const NAV_LINKS_BY_ROLE = {
   EVENT_ORGANISER: [
@@ -60,8 +61,7 @@ const NAV_LINKS_BY_ROLE = {
   ],
   ATTENDEE: [
     { to: "/dashboard", label: "Dashboard" },
-    // SCRUM-495. The Attendee's list of events open for registration. Its
-    // route is limited to Attendees; "My registrations" waits for its story.
+    { to: REGISTERED_EVENTS_PATH, label: "Registered events" },
     { to: BROWSE_OPEN_EVENTS_PATH, label: "Browse Open Events" },
   ],
   // SCRUM-485 (SCRUM-510). One link each, deliberately: Dashboard, where

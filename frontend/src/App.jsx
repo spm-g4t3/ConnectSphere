@@ -27,6 +27,9 @@ import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
 import SafetyReviewHistory from "./components/SafetyReviewHistory";
 import BrowseOpenEvents from "./components/BrowseOpenEvents";
 import BrowseEventDetails from "./components/BrowseEventDetails";
+import RegisteredEvents from "./components/RegisteredEvents";
+import AttendeeEventInformation from "./components/AttendeeEventInformation";
+import { REGISTERED_EVENTS_PATH, ATTENDEE_EVENT_ROUTE } from "./services/attendeeEventRoutes";
 import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE, isOpenEventsEnabled } from "./services/openEventRoutes";
 import "./App.css";
 
@@ -104,6 +107,16 @@ function AppRoutes() {
           }
         />
         <Route path="/events" element={<ProtectedRoute><MyEventRequests /></ProtectedRoute>} />
+        <Route path={REGISTERED_EVENTS_PATH} element={
+          <ProtectedRoute allowedRoles={["attendee"]}>
+            <div className="dashboard dashboard--attendee"><RegisteredEvents /></div>
+          </ProtectedRoute>
+        } />
+        <Route path={ATTENDEE_EVENT_ROUTE} element={
+          <ProtectedRoute allowedRoles={["attendee"]}>
+            <div className="dashboard dashboard--attendee"><AttendeeEventInformation /></div>
+          </ProtectedRoute>
+        } />
         {/* VenueSearch was written, correct, and imported by nothing — the route
             rendered a placeholder over a working component. Swapped for the real one. */}
         {/* Internal roles only. Venue search is the Coordinator's planning tool

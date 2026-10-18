@@ -183,6 +183,13 @@ const SCRUM495_FILES = [
   'src/services/openEventService.js',
 ]
 
+const SCRUM24_FILES = [
+  'src/components/RegisteredEvents.jsx',
+  'src/components/AttendeeEventInformation.jsx',
+  'src/services/attendeeEventService.js',
+  'src/services/attendeeEventRoutes.js',
+]
+
 // SCRUM-489: the coordinator's safety check submission. Its one new file is
 // gated outright; the shared files it touches stay ungated.
 const SCRUM489_FILES = [
@@ -253,6 +260,7 @@ export default defineConfig({
         ...SCRUM258_FILES.map((file) => [file, FULL]),
         ...SCRUM266_FILES.map((file) => [file, FULL]),
         ...SCRUM495_FILES.map((file) => [file, FULL]),
+        ...SCRUM24_FILES.map((file) => [file, FULL]),
         ...SCRUM489_FILES.map((file) => [file, FULL]),
         ...SCRUM492_FILES.map((file) => [file, FULL]),
         ...SCRUM172_FILES.map((file) => [file, FULL]),

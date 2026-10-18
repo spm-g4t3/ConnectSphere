@@ -3,7 +3,7 @@ import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRequireAuth } from '../../src/middleware/requireAuth.js';
 import { createAttendeeEventRouter } from '../../src/routes/attendeeEvents.js';
-import { getAttendeeEvent } from '../../src/services/attendeeEventService.js';
+import { getAttendeeEvent, listAttendeeEvents } from '../../src/services/attendeeEventService.js';
 import { ROLE } from '../../src/domain/userRole.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
 import { BOOKING_STATUS } from '../../src/domain/bookingStatus.js';
@@ -92,14 +92,19 @@ function database(rows = [], { error = null, ignoreFilters = false } = {}) {
     from(table) {
       const call = { table, columns: null, filters: [] };
       calls.push(call);
+      const matching = () => ignoreFilters ? rows : rows.filter(row => (
+        call.filters.every(([field, value]) => row[field] === value) && row.event_requests?.id
+      ));
       const query = {
         select(columns) { call.columns = columns; return query; },
         eq(field, value) { call.filters.push([field, value]); return query; },
+        order(field, options) { (call.orders ??= []).push([field, options]); return query; },
+        async range(first, last) {
+          call.range = [first, last];
+          return { data: matching().slice(first, last + 1), error };
+        },
         async maybeSingle() {
-          const data = ignoreFilters ? rows[0] : rows.find(row => (
-            call.filters.every(([field, value]) => row[field] === value)
-            && row.event_requests?.id
-          ));
+          const data = matching()[0];
           return { data: data ?? null, error };
         },
       };
@@ -418,5 +423,87 @@ describe('SCRUM-24 protected attendee event read', () => {
       { bookingId: 'missing', name: null, location: null },
       { bookingId: 'partial', name: 'Hall', location: null },
     ]);
+  });
+});
+
+describe('SCRUM-24 registered event entry points', () => {
+  const list = app => request(app).get('/api/attendee-events').set('Authorization', 'Bearer valid');
+
+  it('SCRUM24_AC1_lists_only_own_active_event_links_without_registration_availability_filters', async () => {
+    const row = sensitiveRegistration();
+    row.event_requests.event_name = 'Registered event';
+    row.event_requests.registration_enabled = false;
+    row.event_requests.registration_capacity = 1;
+    row.event_requests.registration_closes_at = '2000-01-01';
+    const client = database([row, { ...row, attendee_id: OTHER_ATTENDEE },
+      ...['withdrawn', 'cancelled', 'waitlisted'].map(status => ({ ...row, status }))]);
+    const response = await list(application(client));
+    expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.body).toEqual([{ eventRequestId: EVENT, eventName: 'Registered event' }]);
+    expectPrivateValuesExcluded(response.body);
+    expect(client.calls).toEqual([{
+      table: 'event_registrations',
+      columns: 'event_request_id, attendee_id, status, event_requests!inner(id, event_name)',
+      filters: [['attendee_id', ATTENDEE], ['status', 'registered']],
+      orders: [['registered_at', { ascending: false }], ['id', { ascending: true }]],
+      range: [0, 999],
+    }]);
+  });
+
+  it.each([undefined, ...Object.values(ROLE).filter(role => role !== ROLE.ATTENDEE)])(
+    'SCRUM24_AC1_registered_list_requires_authentication_and_attendee_role_%s', async role => {
+      const client = database([sensitiveRegistration()]);
+      const response = role === undefined
+        ? await request(application(client)).get('/api/attendee-events')
+        : await list(application(client, { role }));
+      expect(response.status).toBe(role === undefined ? 401 : 403);
+      expect(client.calls).toEqual([]);
+    },
+  );
+
+  it('SCRUM24_AC1_registered_list_ignores_forged_identity_parameters', async () => {
+    const client = database([sensitiveRegistration()]);
+    const response = await list(application(client, { id: OTHER_ATTENDEE })).query({ attendeeId: ATTENDEE });
+    expect(response.body).toEqual([]);
+    expect(client.calls[0].filters[0]).toEqual(['attendee_id', OTHER_ATTENDEE]);
+  });
+
+  it('SCRUM24_AC1_registered_list_pages_past_the_database_row_limit', async () => {
+    const rows = Array.from({ length: 1001 }, (_, index) => {
+      const id = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+      return registration({ event_request_id: id, event_requests: { id, event_name: `Event ${index}` } });
+    });
+    const client = database(rows);
+    expect((await list(application(client))).body).toHaveLength(1001);
+    expect(client.calls.map(call => call.range)).toEqual([[0, 999], [1000, 1999]]);
+  });
+
+  it('SCRUM24_AC8_registered_list_refuses_mismatched_and_missing_registration_relations', async () => {
+    const row = sensitiveRegistration();
+    const client = database([row, { ...row, attendee_id: OTHER_ATTENDEE },
+      { ...row, status: 'waitlisted' }, { ...row, event_request_id: null },
+      { ...row, event_requests: undefined }, { ...row, event_requests: { id: OTHER_EVENT } }], { ignoreFilters: true });
+    expect((await list(application(client))).body).toEqual([{ eventRequestId: EVENT }]);
+  });
+
+  it.each(['42703', 'XX000'])(
+    'SCRUM24_AC1_registered_list_database_errors_are_safe_%s', async code => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const response = await list(application(database([], { error: { code, message: secrets.notes } })));
+      expect(response.status).toBe(code === '42703' ? 503 : 500);
+      expectPrivateValuesExcluded(response.body);
+      expect(Object.keys(response.body)).toEqual(['error']);
+    },
+  );
+
+  it('SCRUM24_AC1_registered_list_reuses_the_default_client_and_handles_no_rows', async () => {
+    const query = {
+      select() { return query; }, eq() { return query; }, order() { return query; },
+      async range() { return { data: null, error: null }; },
+    };
+    defaultClient.from.mockReturnValue(query);
+    await expect(listAttendeeEvents({ user })).resolves.toEqual([]);
+    await expect(listAttendeeEvents()).rejects.toMatchObject({ status: 401 });
   });
 });

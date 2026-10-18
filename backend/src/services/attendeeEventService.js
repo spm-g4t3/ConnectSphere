@@ -6,18 +6,33 @@ import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
 
 const REGISTERED = 'registered';
 const SCHEMA_ERRORS = ['42P01', '42703', 'PGRST200', 'PGRST202', 'PGRST204', 'PGRST205'];
+const PAGE_SIZE = 1000;
+
+function validateId(field, value) {
+  if (!isPlausibleId(value)) {
+    throw new ValidationError('Invalid attendee event request', [{ field, message: 'must be a valid UUID' }]);
+  }
+}
+
+function attendeeIdentity(user) {
+  if (!user?.id) throw new UnauthorizedError('Authentication required');
+  if (user.role !== ROLE.ATTENDEE) throw new ForbiddenError('This action is restricted to Attendees');
+  validateId('attendeeId', user.id);
+  return user.id.trim().toLowerCase();
+}
+
+function checkReadError(error) {
+  if (!error) return;
+  if (SCHEMA_ERRORS.includes(error.code)) {
+    throw new ServiceUnavailableError('Event information is temporarily unavailable. Please try again later.');
+  }
+  throw error;
+}
 
 /** user is supplied by requireAuth, never by request parameters or the body. */
 export async function getAttendeeEvent({ user, eventRequestId, client } = {}) {
-  if (!user?.id) throw new UnauthorizedError('Authentication required');
-  if (user.role !== ROLE.ATTENDEE) throw new ForbiddenError('This action is restricted to Attendees');
-  for (const [field, value] of [['attendeeId', user.id], ['eventRequestId', eventRequestId]]) {
-    if (!isPlausibleId(value)) {
-      throw new ValidationError('Invalid attendee event request', [{ field, message: 'must be a valid UUID' }]);
-    }
-  }
-
-  const attendeeId = user.id.trim().toLowerCase();
+  const attendeeId = attendeeIdentity(user);
+  validateId('eventRequestId', eventRequestId);
   const eventId = eventRequestId.trim().toLowerCase();
   const db = client ?? (await import('../config/supabaseClient.js')).supabase;
   // Registration, event state and arrangements share one database snapshot;
@@ -31,12 +46,7 @@ export async function getAttendeeEvent({ user, eventRequestId, client } = {}) {
     .eq('status', REGISTERED)
     .maybeSingle();
 
-  if (error) {
-    if (SCHEMA_ERRORS.includes(error.code)) {
-      throw new ServiceUnavailableError('Event information is temporarily unavailable. Please try again later.');
-    }
-    throw error;
-  }
+  checkReadError(error);
   if (!data || data.attendee_id !== attendeeId || data.event_request_id !== eventId
       || data.status !== REGISTERED || data.event_requests?.id !== eventId) {
     throw new NotFoundError('Event information not found');
@@ -61,4 +71,30 @@ export async function getAttendeeEvent({ user, eventRequestId, client } = {}) {
         location: booking.venues?.location ?? null,
       })),
   };
+}
+
+/** Entry points only: arrangement visibility remains the protected detail read's decision. */
+export async function listAttendeeEvents({ user, client } = {}) {
+  const attendeeId = attendeeIdentity(user);
+  const db = client ?? (await import('../config/supabaseClient.js')).supabase;
+  const events = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await db.from('event_registrations')
+      .select('event_request_id, attendee_id, status, event_requests!inner(id, event_name)')
+      .eq('attendee_id', attendeeId)
+      .eq('status', REGISTERED)
+      .order('registered_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    checkReadError(error);
+    const page = data ?? [];
+    for (const row of page) {
+      if (row.attendee_id === attendeeId && row.status === REGISTERED
+          && row.event_request_id && row.event_requests?.id === row.event_request_id) {
+        events.push({ eventRequestId: row.event_request_id, eventName: row.event_requests.event_name });
+      }
+    }
+    if (page.length < PAGE_SIZE) break;
+  }
+  return events;
 }
