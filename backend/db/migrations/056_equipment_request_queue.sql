@@ -188,3 +188,9 @@ begin
   return v_result;
 end;
 $$;
+
+-- p_caller is trusted: the role check inside reads whatever id it is given. Only
+-- the API (service_role) may call this, so a direct call through Supabase's REST
+-- endpoint cannot skip requireRole. Same as the other p_caller functions.
+revoke execute on function equipment_request_queue(uuid, text, boolean, integer)
+  from public, anon, authenticated;
