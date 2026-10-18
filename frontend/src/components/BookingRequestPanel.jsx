@@ -78,6 +78,9 @@
 // BOOKING_FLAGGED_FOR_REVIEW, and either means this venue (not the event)
 // already has a live request; the parent knows which venue it opened this
 // panel for. data.error is never shown; see bookingRequestErrors.js.
+// SCRUM-266: given replacesBookingId, the request replaces that flagged
+// booking, and onReplacementRefused(code) reports one the server says can no
+// longer be replaced.
 
 import { useId, useRef, useState } from "react";
 import { createBookingRequest } from "../services/bookingRequestService";
@@ -85,6 +88,7 @@ import {
   bookingRequestErrorMessage,
   fieldErrorsFrom,
   isSuitabilityConfirmationRequired,
+  isReplacementRefused,
   isVenueAlreadyRequested,
   periodConflicts,
   unmetCriteria,
@@ -210,6 +214,8 @@ export default function BookingRequestPanel({
   requirements,
   onSubmitted,
   onVenueAlreadyRequested,
+  replacesBookingId,
+  onReplacementRefused,
   onClose,
 }) {
   const idPrefix = useId();
@@ -324,6 +330,9 @@ export default function BookingRequestPanel({
         ...(needsConfirmation && confirmed
           ? { confirmUnsuitable: true, acknowledgedCriteria: criterionNames(unmet) }
           : {}),
+        // SCRUM-266: only while replacing a flagged booking, so an ordinary
+        // request never names one.
+        ...(replacesBookingId ? { replacesBookingId } : {}),
       });
       setSubmitted(request);
       onSubmitted?.(request);
@@ -344,6 +353,7 @@ export default function BookingRequestPanel({
         setConflicts(periodConflicts(err));
         setFieldErrors(fieldErrorsFrom(err, FORM_FIELDS));
         if (isVenueAlreadyRequested(err)) onVenueAlreadyRequested?.(err.response.data.code);
+        if (isReplacementRefused(err)) onReplacementRefused?.(err.response.data.code);
       }
     } finally {
       sending.current = false;

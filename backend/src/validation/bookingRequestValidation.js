@@ -195,12 +195,15 @@ export function validateBookingRequestId(id) {
  * @param {number} [input.expectedAttendance] SCRUM-525: the attendance for this
  *                                        venue, a whole number above zero;
  *                                        absent or null means the event's
+ * @param {string} [input.replacesBookingId] SCRUM-266: the flagged booking of
+ *                                        this event that this request replaces
  * @returns {{eventRequestId: string, venueId: string, roomLayoutCode: string|null,
  *            setupNotes: string|null, confirmUnsuitable: boolean,
  *            accessibility: string[], facilities: string[],
- *            acknowledgedCriteria: string[], expectedAttendance: number|null}}
+ *            acknowledgedCriteria: string[], expectedAttendance: number|null,
+ *            replacesBookingId: string|null}}
  *            the code lists trimmed, and [] when none were sent;
- *            expectedAttendance null when none was sent
+ *            expectedAttendance and replacesBookingId null when none was sent
  * @throws {ValidationError} listing every problem found, not just the first
  */
 export function validateCreateBookingRequest(input) {
@@ -246,6 +249,13 @@ export function validateCreateBookingRequest(input) {
       ? null
       : checkAttendance(errors, input.expectedAttendance);
 
+  // SCRUM-266: optional. Whether it is this event's flagged booking is 078's
+  // to say, under the event lock.
+  const replacesBookingId =
+    input.replacesBookingId === undefined || input.replacesBookingId === null
+      ? null
+      : checkId(errors, 'replacesBookingId', 'booking', input.replacesBookingId);
+
   if (errors.hasErrors) {
     const summary = errors.details.map(({ field, message }) => `${field}: ${message}`).join('; ');
     throw new ValidationError(`Invalid booking request -- ${summary}`, errors.details);
@@ -261,6 +271,7 @@ export function validateCreateBookingRequest(input) {
     facilities,
     acknowledgedCriteria,
     expectedAttendance,
+    replacesBookingId,
   };
 }
 
@@ -304,4 +315,37 @@ export function validateRejectBookingRequest(input) {
   }
 
   return { reason, suggestedAlternative };
+}
+
+/** Mirrors the 1000-character cap 089 puts on release_reason. */
+export const RELEASE_REASON_MAX_LENGTH = 1000;
+
+/**
+ * SCRUM-492: what the coordinator sends to release an approved booking (AC1).
+ * The reason is required and must say something.
+ *
+ * @param {object} input
+ * @param {string} input.reason  why the venue is released
+ * @returns {{reason: string}} trimmed
+ * @throws {ValidationError}
+ */
+export function validateReleaseBooking(input) {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new ValidationError('Invalid release -- expected an object');
+  }
+
+  const errors = createErrorCollector();
+
+  const reason = checkOptionalText(errors, 'reason', input.reason, RELEASE_REASON_MAX_LENGTH);
+  // checkOptionalText reads blank as absent; for the reason, absent is the error.
+  if (reason === null && !errors.details.some(({ field }) => field === 'reason')) {
+    errors.add('reason', 'is required');
+  }
+
+  if (errors.hasErrors) {
+    const summary = errors.details.map(({ field, message }) => `${field}: ${message}`).join('; ');
+    throw new ValidationError(`Invalid release -- ${summary}`, errors.details);
+  }
+
+  return { reason };
 }

@@ -15,11 +15,13 @@ import eventRequestRoutes from './routes/eventRequests.js';
 import venueRoutes from './routes/venues.js';
 import notificationRoutes from './routes/notifications.js';
 import bookingRequestRoutes from './routes/bookingRequests.js';
+import flaggedBookingRoutes from './routes/flaggedBookings.js';
 import equipmentAvailabilityRoutes from './routes/equipmentAvailability.js';
 import equipmentRoutes from './routes/equipment.js';
 import eventEquipmentRoutes from './routes/eventEquipment.js';
 import venueSuitabilityRoutes from './routes/venueSuitability.js';
 import equipmentReviewRoutes from './routes/equipmentReview.js';
+import equipmentQueueRoutes from './routes/equipmentQueue.js';
 import safetyReviewRoutes from './routes/safetyReviews.js';
 import openEventRoutes from './routes/openEvents.js';
 import { isOpenEventsEnabled } from './config/featureFlags.js';
@@ -61,8 +63,15 @@ app.use('/api/notifications', notificationRoutes);
 // later GET /api/equipment/:id can never answer "availability" as an id.
 app.use('/api/equipment/availability', equipmentAvailabilityRoutes);
 
+// SCRUM-285 (SCRUM-284): the Technical Support dashboard's equipment request queue.
+// Technical Support Staff only, behind requireAuth; see the route file.
+app.use('/api/equipment-requests', equipmentQueueRoutes);
+
 // SCRUM-252: an Event Coordinator requests a venue for an approved event.
 app.use('/api/booking-requests', bookingRequestRoutes);
+
+// SCRUM-266: Venue Staff resolve a booking flagged for review.
+app.use('/api/flagged-bookings', flaggedBookingRoutes);
 
 // SCRUM-495: the events an Attendee can register for. Attendee only. Off until
 // the registration tables exist; see config/featureFlags.js.

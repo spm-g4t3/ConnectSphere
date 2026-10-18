@@ -35,7 +35,7 @@ const SCRUM17_FILES = [
   'src/components/VenueBlockForm.jsx',
   'src/components/BlockConflictList.jsx',
   'src/components/BlockHistory.jsx',
-  'src/components/CoordinatorNotifications.jsx',
+  'src/components/NotificationInbox.jsx',
   'src/services/venueBlockValidation.js',
   'src/services/venueBlockReasons.js',
   'src/services/venueBlockErrors.js',
@@ -131,6 +131,17 @@ const SCRUM487_FILES = [
   'src/components/AssignedEventsFilters.jsx',
 ]
 
+// SCRUM-284 (SCRUM-287) owns the equipment request queue and the dashboard that
+// mounts it, gated at 100%.
+const SCRUM284_FILES = [
+  'src/components/EquipmentRequestQueue.jsx',
+  'src/components/TechnicalSupportDashboard.jsx',
+  'src/services/equipmentQueueService.js',
+  'src/services/equipmentRequestStatus.js',
+  'src/services/eventPeriodFormat.js',
+  'src/services/supportService.js',
+]
+
 // SCRUM-258 owns the Venue Staff queue and its decision card outright.
 // VenueStaffDashboard.jsx, which mounts the queue, and the shared services
 // it calls (bookingRequestService.js, already gated under SCRUM-254) are not
@@ -138,6 +149,26 @@ const SCRUM487_FILES = [
 const SCRUM258_FILES = [
   'src/components/PendingBookingRequests.jsx',
   'src/components/PendingBookingRequestCard.jsx',
+]
+
+// SCRUM-266 owns Venue Staff's flagged bookings list and its card, and the
+// services behind them. flaggedBookingDisplay.js, shared with the venue
+// catalogue and the coordinator's list, is gated here too: its older tests
+// already cover every line, and this story adds flagReasons and its tests.
+// The coordinator's side adds the event's flagged bookings section, the reason
+// form both screens share, and the Needs attention badge; the screens they
+// sit on (CoordinatorRequestDetail.jsx, MyAssignedEvents.jsx,
+// MyEventRequests.jsx, EventOrganiserDashboard.jsx) are shared, so not gated.
+const SCRUM266_FILES = [
+  'src/components/FlaggedBookings.jsx',
+  'src/components/FlaggedBookingCard.jsx',
+  'src/components/FlaggedBookingReasonForm.jsx',
+  'src/components/EventFlaggedBookings.jsx',
+  'src/components/FlaggedBookingFlagDetail.jsx',
+  'src/components/NeedsAttentionBadge.jsx',
+  'src/services/flaggedBookingService.js',
+  'src/services/flaggedBookingErrors.js',
+  'src/services/flaggedBookingDisplay.js',
 ]
 
 // SCRUM-495: the Attendee's browse pages. New files only this story owns.
@@ -161,6 +192,25 @@ const SCRUM363_FILES = ['src/components/EventConfirmationPanel.jsx', 'src/compon
 const SCRUM489_FILES = [
   // SCRUM-557 (AC3 to AC6): the checklist, the confirmation, the note and Submit.
   'src/components/SafetyCheckSubmissionPanel.jsx',
+]
+
+// SCRUM-492: the event screen's Venue bookings section, gated outright. Its
+// error messages join bookingRequestErrors.js, already gated in SCRUM254_FILES;
+// bookingRequestService.js and CoordinatorRequestDetail.jsx stay as they were.
+const SCRUM492_FILES = [
+  // SCRUM-567 (AC1, AC2, AC4, AC6): the list and the Release action.
+  'src/components/EventVenueBookings.jsx',
+]
+
+// SCRUM-172: the shared unread count behind the nav badge and the inbox
+// heading. NotificationInbox.jsx and notificationService.js stay in
+// SCRUM17_FILES, where their 100% gate already holds.
+const SCRUM172_FILES = [
+  'src/notifications/UnreadCountContext.jsx',
+  // AC4: the re-read on returning to the tab, shared with the inbox.
+  'src/notifications/useRefetchOnReturn.js',
+  // AC7: where each role lands when it opens a notification.
+  'src/services/notificationLink.js',
 ]
 
 // https://vite.dev/config/
@@ -203,12 +253,16 @@ export default defineConfig({
         ...SCRUM491_FILES.map((file) => [file, FULL]),
         ...SCRUM486_FILES.map((file) => [file, FULL]),
         ...SCRUM487_FILES.map((file) => [file, FULL]),
+        ...SCRUM284_FILES.map((file) => [file, FULL]),
         ...SCRUM258_FILES.map((file) => [file, FULL]),
+        ...SCRUM266_FILES.map((file) => [file, FULL]),
         ...SCRUM495_FILES.map((file) => [file, FULL]),
         ...SCRUM36_FILES.map((file) => [file, FULL]),
         ...SCRUM43_FILES.map((file) => [file, FULL]),
         ...SCRUM489_FILES.map((file) => [file, FULL]),
         ...SCRUM363_FILES.map((file) => [file, FULL]),
+        ...SCRUM492_FILES.map((file) => [file, FULL]),
+        ...SCRUM172_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

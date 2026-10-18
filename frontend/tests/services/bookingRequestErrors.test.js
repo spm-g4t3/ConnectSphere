@@ -9,6 +9,7 @@ import {
   fieldErrorsFrom,
   isSuitabilityConfirmationRequired,
   isVenueAlreadyRequested,
+  isReplacementRefused,
   periodConflicts,
   unmetCriteria,
   isStaleWithdrawError,
@@ -148,6 +149,24 @@ describe("isVenueAlreadyRequested", () => {
     "SCRUM254_is_false_for_%s",
     (err) => {
       expect(isVenueAlreadyRequested(err)).toBe(false);
+    },
+  );
+});
+
+// SCRUM-266: a replacement whose flagged booking can no longer be replaced.
+describe("replacement refusals (SCRUM-266)", () => {
+  it.each([
+    ["REPLACED_BOOKING_NOT_FLAGGED", /no longer flagged for review.*Nothing was requested/],
+    ["REPLACED_BOOKING_NOT_ON_EVENT", /does not belong to this event/],
+  ])("SCRUM266_W7_explains_the_409_%s_and_marks_it_a_replacement_refusal", (code, pattern) => {
+    expect(bookingRequestErrorMessage(conflict(code))).toMatch(pattern);
+    expect(isReplacementRefused(conflict(code))).toBe(true);
+  });
+
+  it.each([conflict("BOOKING_REQUEST_EXISTS"), http(400, { code: "REPLACED_BOOKING_NOT_FLAGGED" }), undefined])(
+    "SCRUM266_W7_is_not_a_replacement_refusal_for_%s",
+    (err) => {
+      expect(isReplacementRefused(err)).toBe(false);
     },
   );
 });

@@ -41,6 +41,7 @@ import {
   takeOverEquipmentReview,
 } from "../services/equipmentReviewService";
 import { isStaleRefusal, reviewErrorMessage } from "../services/equipmentReviewErrors";
+import { equipmentStatusClass } from "../services/equipmentRequestStatus";
 import { formatTimestamp } from "../services/displayFormat";
 import { formatEventPeriod } from "../services/eventPeriodFormat";
 import "./EquipmentReview.css";
@@ -52,14 +53,6 @@ const RESULT_CLASS = {
   "Fully available": "fully",
   "Partially available": "partially",
   Unavailable: "unavailable",
-};
-
-const STATUS_CLASS = {
-  pending_review: "pending",
-  under_review: "under",
-  arranged: "arranged",
-  cannot_be_fully_arranged: "cannot",
-  cancelled: "cancelled",
 };
 
 /**
@@ -502,7 +495,7 @@ export default function EquipmentReview() {
       <section className="equipment-review__event">
         <div className="er-event-head">
           <h2>{event?.name ?? "Event"}</h2>
-          <span className={`equipment-review__status equipment-review__status--${STATUS_CLASS[status] ?? "pending"}`}>
+          <span className={`equipment-review__status equipment-review__status--${equipmentStatusClass(status)}`}>
             {request.statusLabel}
           </span>
         </div>

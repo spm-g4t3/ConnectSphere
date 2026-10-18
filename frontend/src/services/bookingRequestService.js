@@ -46,6 +46,11 @@ import { apiClient } from "./apiClient";
  *   the unmet criteria the coordinator confirmed; sent with confirmUnsuitable.
  *   The server accepts the override only when they cover every criterion it
  *   finds unmet, otherwise it answers SUITABILITY_CONFIRMATION_REQUIRED again.
+ * @param {string} [input.replacesBookingId]  SCRUM-266, the event's flagged
+ *   booking this request replaces; left out of an ordinary request. Approving
+ *   the replacement closes that booking. Adds the 409 codes
+ *   REPLACED_BOOKING_NOT_FLAGGED (it was resolved meanwhile) and
+ *   REPLACED_BOOKING_NOT_ON_EVENT.
  * @returns {Promise<Object>} the new request, always status "pending", with
  *   the expectedAttendance it was stored with
  */
@@ -88,6 +93,23 @@ export async function getMyBookingRequests() {
  */
 export async function withdrawBookingRequest(id) {
   const response = await apiClient.post(`/booking-requests/${id}/withdraw`);
+  return response.data;
+}
+
+/**
+ * Releases one approved venue booking (POST /booking-requests/:id/release,
+ * SCRUM-492). The reason is required.
+ *
+ * Failures: 400 (malformed id, or a missing or over-long reason), 401, 403 (not
+ * the event's assigned coordinator), 404, and 409 EVENT_NOT_APPROVED,
+ * BOOKING_NOT_APPROVED or BOOKING_CHANGED.
+ *
+ * @param {string} id      the booking's id
+ * @param {string} reason  why the venue is released
+ * @returns {Promise<{booking: Object, returnedToPending: string[]}>}
+ */
+export async function releaseVenueBooking(id, reason) {
+  const response = await apiClient.post(`/booking-requests/${id}/release`, { reason });
   return response.data;
 }
 /**

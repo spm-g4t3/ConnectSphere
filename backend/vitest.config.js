@@ -112,11 +112,19 @@ export default defineConfig({
         'src/validation/venueHoldValidation.js': FULL,
         'src/services/venueHoldService.js': FULL,
         'src/jobs/venueHoldExpiryScheduler.js': FULL,
+        // SCRUM-284 (SCRUM-285): the queue route, validation and service are new and owned outright.
+        'src/routes/equipmentQueue.js': FULL,
+        'src/validation/equipmentQueueValidation.js': FULL,
+        'src/services/equipmentQueueService.js': FULL,
         // SCRUM-495: the browse files are new and owned outright.
         'src/routes/openEvents.js': FULL,
         'src/services/openEventService.js': FULL,
         'src/domain/registrationWindow.js': FULL,
         'src/domain/registrationAvailability.js': FULL,
+        // SCRUM-266: the flagged-booking resolution files are new and owned outright.
+        'src/routes/flaggedBookings.js': FULL,
+        'src/services/flaggedBookingService.js': FULL,
+        'src/validation/flaggedBookingValidation.js': FULL,
       },
     },
   },

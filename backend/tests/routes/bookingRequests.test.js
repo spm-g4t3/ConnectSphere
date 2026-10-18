@@ -237,6 +237,7 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
       suitability: SUITABLE,
       suitabilityOverridden: false,
       requestedBy: COORDINATOR_ID,
+      replacesBookingId: null,
       createdAt: '2026-10-06T10:00:00+00:00',
     });
     expect(client.calls.map((c) => c.operation)).toEqual(['select', 'rpc']);
@@ -258,6 +259,7 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
       p_suitability: SUITABLE,
       p_confirm_unsuitable: false,
       p_expected_attendance: 150,
+      p_replaces_booking_id: null,
     });
     expect(checkSuitability).toHaveBeenCalledWith({
       eventRequestId: EVENT_ID,
@@ -289,6 +291,7 @@ describe('SCRUM-252: a coordinator requests a venue', () => {
       'p_confirm_unsuitable',
       'p_event_request_id',
       'p_expected_attendance',
+      'p_replaces_booking_id',
       'p_requested_by',
       'p_room_layout_code',
       'p_setup_notes',
@@ -537,6 +540,42 @@ describe('SCRUM-252/SCRUM-525: one live request per event per venue', () => {
     );
     expect(res.body.conflicts).toEqual([]);
   });
+});
+
+
+describe('SCRUM-266: a request can replace a flagged booking', () => {
+  it('SCRUM266_W7_sends_replaces_booking_id_and_echoes_it_on_the_new_request', async () => {
+    const client = clientFor(created({ replaces_booking_id: OTHER_BOOKING_ID }));
+
+    const res = await post(client, { ...BODY, replacesBookingId: OTHER_BOOKING_ID.toUpperCase() });
+
+    expect(res.status).toBe(201);
+    expect(res.body.replacesBookingId).toBe(OTHER_BOOKING_ID);
+    expect(rpcCall(client).args.p_replaces_booking_id).toBe(OTHER_BOOKING_ID);
+  });
+
+  it('SCRUM266_W7_a_malformed_replaces_booking_id_is_400_and_never_queries', async () => {
+    const client = clientFor();
+
+    const res = await post(client, { ...BODY, replacesBookingId: 'not-an-id' });
+
+    expect(res.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each(['REPLACED_BOOKING_NOT_ON_EVENT', 'REPLACED_BOOKING_NOT_FLAGGED'])(
+    'SCRUM266_W7_%s_is_409_with_that_code',
+    async (hint) => {
+      const res = await post(
+        clientFor(dbFailure('PT409', 'cannot replace that booking', { hint })),
+        { ...BODY, replacesBookingId: OTHER_BOOKING_ID },
+      );
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe(hint);
+      expect(res.body.conflicts).toEqual([]);
+    },
+  );
 });
 
 
@@ -931,6 +970,9 @@ describe('SCRUM-255: the coordinator lists their booking requests', () => {
         decidedAt: null,
         decisionReason: null,
         suggestedAlternative: null,
+        // SCRUM-492: the coordinator's release (089); null unless released.
+        releasedAt: null,
+        releaseReason: null,
         createdAt: '2026-10-06T10:00:00+00:00',
       },
     ]);
@@ -1150,7 +1192,7 @@ describe('SCRUM-258 AC1: Venue Staff see the pending requests', () => {
   const STAFF_ID = '99999999-9999-4999-8999-999999999999';
   const asStaff = signedInWithRole(ROLE.VENUE_STAFF, STAFF_ID);
 
-  /** One element of list_pending_booking_requests (066). */
+  /** One element of list_pending_booking_requests (078). */
   const pendingRow = (overrides = {}) => ({
     ...bookingRow(),
     event_name: 'IS212 Industry Night',
@@ -1174,6 +1216,19 @@ describe('SCRUM-258 AC1: Venue Staff see the pending requests', () => {
     expect(res.status).toBe(200);
     expect(res.body.map((r) => r.id)).toEqual([BOOKING_ID, OTHER_BOOKING_ID]);
     expect(res.body[0]).toMatchObject({ eventName: 'IS212 Industry Night', venueName: 'Hall A', status: 'pending', overlapping: [] });
+  });
+
+  it('SCRUM266_W7_the_queue_names_the_flagged_booking_a_request_replaces', async () => {
+    const replaces = { booking_id: OTHER_BOOKING_ID, venue_name: 'Hall B', starts_at: START, ends_at: END };
+    const client = createFakeClient([ok([pendingRow({ replaces }), pendingRow({ id: OTHER_BOOKING_ID, replaces: null })])]);
+
+    const res = await listPending(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((r) => r.replaces)).toEqual([
+      { bookingId: OTHER_BOOKING_ID, venueName: 'Hall B', startsAt: START, endsAt: END },
+      null,
+    ]);
   });
 
   it('SCRUM258_AC1_an_empty_queue_is_200_not_404', async () => {

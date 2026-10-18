@@ -306,9 +306,15 @@ describe('AC6: a block keeps its own period', () => {
   });
 
   it('SCRUM484_AC6_latest_block_definitions_supersede_013_to_015', () => {
-    for (const name of BLOCK_FUNCTIONS) {
+    // Changed for SCRUM-174: 084 restates 033's flag_bookings_for_block with
+    // only step 3's recipients changed (the event's coordinator, else the
+    // Leads), its overlap call unchanged, so 084 is now its latest definition.
+    for (const name of ['create_venue_block', 'update_venue_block']) {
       expect(latestDefinitionFile(name), name).toBe(FILE);
     }
+    expect(latestDefinitionFile('flag_bookings_for_block')).toBe('084_block_flag_notifies_event_coordinator.sql');
+    const overlapCalls = (sql) => functionText(sql, 'flag_bookings_for_block').match(/venue_occupancy_conflicts\([^)]*\)/g);
+    expect(overlapCalls(normalised('084_block_flag_notifies_event_coordinator.sql'))).toEqual(overlapCalls(SQL));
     // Changed for SCRUM-491: 040 redefined create_booking_request with 033's
     // body word for word except step 7, which also counts other events'
     // active holds. Changed again for SCRUM-525: 051 redefines it with 040's
@@ -316,8 +322,12 @@ describe('AC6: a block keeps its own period', () => {
     // (step 6) and the request's own expected attendance, so 051 is now its
     // latest definition. Changed for SCRUM-258: 066 restates 051's body with
     // step 3 widened to the safety statuses and step 6's live statuses to
-    // conflicting, step 7's call unchanged, so 066 is now the latest.
-    expect(latestDefinitionFile('create_booking_request')).toBe('066_venue_staff_booking_decisions.sql');
+    // conflicting, step 7's call unchanged, so 066 was the latest. Changed for
+    // SCRUM-266: 078 restates 066's body with step 3a (the booking it
+    // replaces), step 7's call unchanged, so 078 was the latest. Changed for
+    // SCRUM-174: 083 restates 078's body with step 10 (notify Venue Staff),
+    // step 7's call unchanged, so 083 is now the latest.
+    expect(latestDefinitionFile('create_booking_request')).toBe('083_notify_venue_staff_booking_request.sql');
   });
 
   it('SCRUM484_AC7_block_conflicts_carry_the_occupied_keys', () => {

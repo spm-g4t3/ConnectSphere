@@ -16,6 +16,7 @@ import {
   readBookingStatusDisplay,
 } from "../services/bookingRequestStatusDisplay";
 import { formatTimestamp } from "../services/displayFormat";
+import { replacesFlaggedBookingText } from "../services/flaggedBookingDisplay";
 import { VENUE_TIME_NOTE, formatVenuePeriod, formatVenueRange } from "../services/datetimeFormat";
 import { formatOccupiedPeriod, occupiedPeriodParts } from "../services/occupiedPeriodDisplay";
 import { labelFor } from "../services/venueSuitabilityDisplay";
@@ -151,6 +152,10 @@ export default function PendingBookingRequestCard({
               This request can't be approved because the event is {statusLabel(item.eventStatus)}. It can
               be rejected.
             </p>
+          )}
+          {/* Said before Approve, as approving also cancels the flagged booking. */}
+          {item.replaces && (
+            <p className="pending-bookings__event-status">{replacesFlaggedBookingText(item.replaces)}</p>
           )}
           {item.status === CONFLICTING && (
             <p id={conflictingNoteId} className="pending-bookings__conflicting">

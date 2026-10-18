@@ -30,6 +30,11 @@ const CODE_MESSAGES = {
   BOOKING_PERIOD_CONFLICT:
     "This venue is not available for the whole of the event. See what is in the way below, or choose another venue.",
   BOOKING_CHANGED: "This request changed while you were working on it. Please try again.",
+  // SCRUM-266: a request sent as the replacement for a flagged booking.
+  REPLACED_BOOKING_NOT_FLAGGED:
+    "The booking you were replacing is no longer flagged for review; it may already have been resolved. Nothing was requested. Check Flagged bookings above.",
+  REPLACED_BOOKING_NOT_ON_EVENT:
+    "The booking you were replacing does not belong to this event, so nothing was requested. Stop replacing and try again.",
 };
 
 const STATUS_MESSAGES = {
@@ -102,6 +107,16 @@ export function bookingRequestErrorMessage(err) {
   if (Object.hasOwn(STATUS_MESSAGES, status)) return STATUS_MESSAGES[status];
 
   return DEFAULT_MESSAGE;
+}
+
+const REPLACEMENT_CODES = new Set(["REPLACED_BOOKING_NOT_FLAGGED", "REPLACED_BOOKING_NOT_ON_EVENT"]);
+
+/**
+ * SCRUM-266: was a replacement refused because the flagged booking it named
+ * is no longer one this event can replace? The caller stops replacing it.
+ */
+export function isReplacementRefused(err) {
+  return err?.response?.status === 409 && REPLACEMENT_CODES.has(codeOf(err));
 }
 
 /** Did the server ask for an explicit confirmation of an unsuitable venue? */
@@ -192,6 +207,37 @@ export function isStaleWithdrawError(err) {
   const status = err?.response?.status;
   return status === 403 || status === 404 || status === 409;
 }
+
+// SCRUM-492: releasing an approved booking from the event screen. Every 409
+// means the list on screen is out of date, so the caller refetches.
+const RELEASE_CODE_MESSAGES = {
+  EVENT_NOT_APPROVED: "Venues can be released only while the event is Approved.",
+  BOOKING_NOT_APPROVED: "This booking is no longer approved. The list has been refreshed.",
+  BOOKING_CHANGED: "This booking changed while you were releasing it. The list has been refreshed.",
+};
+
+const RELEASE_STATUS_MESSAGES = {
+  400: "Give a reason of up to 1,000 characters.",
+  401: "Your session has expired. Please sign in again.",
+  403: "Only the coordinator assigned to this event can release its venues.",
+  404: "This booking no longer exists.",
+};
+
+const RELEASE_DEFAULT_MESSAGE = "The venue could not be released. Please try again.";
+
+/**
+ * The message for a failed release: by the 409's code, then by status.
+ *
+ * @param {unknown} err  what releaseVenueBooking threw
+ * @returns {string}
+ */
+export function releaseErrorMessage(err) {
+  const status = err?.response?.status;
+  const code = codeOf(err);
+  if (status === 409 && code && Object.hasOwn(RELEASE_CODE_MESSAGES, code)) return RELEASE_CODE_MESSAGES[code];
+  if (Object.hasOwn(RELEASE_STATUS_MESSAGES, status)) return RELEASE_STATUS_MESSAGES[status];
+  return RELEASE_DEFAULT_MESSAGE;
+}
 // SCRUM-258: Venue Staff approving or rejecting from the pending queue. The
 // server re-checks everything under its locks (AC2), so each refusal says why
 // in the reader's terms; the ones meaning the queue was out of date also say
@@ -217,12 +263,33 @@ const DECISION_STATUS_MESSAGES = {
 
 const DECISION_DEFAULT_MESSAGE = "Could not record the decision. Please try again.";
 
-/** One thing in the way of an approval, named for Venue Staff. */
-function occupantText(conflict) {
+/**
+ * One thing in the way of an approval, named for Venue Staff. The flagged
+ * screens reuse it with their own word for a booking and add the block reason.
+ *
+ * @param {Object} conflict          one entry from periodConflicts
+ * @param {string} [bookingNoun]     what a 'booking' conflict is called
+ * @returns {string}
+ */
+export function occupantText(conflict, bookingNoun = "approved booking") {
   const eventName = conflict.eventName || "another event";
   if (conflict.kind === "block") return "a venue block";
   if (conflict.kind === "hold") return `a tentative hold for ${eventName}`;
-  return `the approved booking for ${eventName}`;
+  return `the ${bookingNoun} for ${eventName}`;
+}
+
+/**
+ * The " In the way: a, b." tail of a period-conflict message, each occupant
+ * named once; empty when the answer listed none. describe gets only the
+ * conflict, so occupantText's second argument is never a map index.
+ *
+ * @param {Object[]} conflicts         from periodConflicts
+ * @param {(conflict: Object) => string} describe
+ * @returns {string}
+ */
+export function inTheWayText(conflicts, describe) {
+  const occupants = [...new Set(conflicts.map((c) => describe(c)))];
+  return occupants.length > 0 ? ` In the way: ${occupants.join(", ")}.` : "";
 }
 
 /**
@@ -235,8 +302,7 @@ function occupantText(conflict) {
 export function decisionErrorMessage(err) {
   const code = codeOf(err);
   if (code === "BOOKING_PERIOD_CONFLICT") {
-    const occupants = [...new Set(periodConflicts(err).map(occupantText))];
-    const inTheWay = occupants.length > 0 ? ` In the way: ${occupants.join(", ")}.` : "";
+    const inTheWay = inTheWayText(periodConflicts(err), occupantText);
     return `The venue is no longer free for this request's period, setup and turnaround included, so it can't be approved.${inTheWay}`;
   }
   if (code && Object.hasOwn(DECISION_CODE_MESSAGES, code)) return DECISION_CODE_MESSAGES[code];

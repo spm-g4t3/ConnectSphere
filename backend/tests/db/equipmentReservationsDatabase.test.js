@@ -2,7 +2,7 @@
  * SCRUM-303 to SCRUM-306 for SCRUM-300: reduce, release, move, keep, automatic
  * release and flagging, run against a real Postgres (PGlite).
  *
- * Applies 022, 024, 037, 038, 053 and 054, then calls reserve_equipment the way the
+ * Applies 022, 024, 037, 038, 053, 054 and 090, then calls reserve_equipment the way the
  * service will. PGlite has one connection, so the last-unit race (AC3) is tested
  * as two reservations one after the other, which is what the type row's lock
  * makes the real case look like.
@@ -24,6 +24,7 @@ const MIGRATIONS = [
   '038_equipment_review.sql',
   '053_equipment_reservations.sql',
   '054_equipment_reservation_actions.sql',
+  '090_equipment_reserve_in_safety_statuses.sql',
 ];
 
 const START = '2026-12-01T10:00:00Z';
@@ -120,7 +121,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
 
       create type event_request_status as enum (
         'draft', 'submitted', 'under_review', 'pending_clarification',
-        'approved', 'confirmed', 'completed', 'rejected', 'cancelled'
+        'approved', 'safety_review', 'safety_approved', 'confirmed', 'completed', 'rejected', 'cancelled'
       );
       create table event_requests (
         id                      uuid primary key default gen_random_uuid(),
@@ -147,6 +148,63 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
 
   it('SCRUM300_runs_a_second_time_without_error', async () => {
     await expect(db.exec(migration('054_equipment_reservation_actions.sql'))).resolves.not.toThrow();
+  });
+
+  it('SCRUM300_runs_090_a_second_time_without_error', async () => {
+    await expect(db.exec(migration('090_equipment_reserve_in_safety_statuses.sql'))).resolves.not.toThrow();
+  });
+
+  describe('AC1: the statuses that allow reserving', () => {
+    it('SCRUM300_AC1_the_list_is_approved_the_two_safety_statuses_and_confirmed', async () => {
+      const { s } = await one('select equipment_reservable_event_statuses() as s');
+      expect(s).toEqual(['approved', 'safety_review', 'safety_approved', 'confirmed']);
+    });
+
+    it('SCRUM300_AC1_the_refusal_names_the_statuses_in_the_list', async () => {
+      // Narrow the list, read the message, then put 090 back.
+      await db.exec(`create or replace function equipment_reservable_event_statuses()
+        returns text[] language sql immutable as $$ select array['approved']::text[] $$;`);
+      try {
+        const event = await newEvent({ status: 'rejected' });
+        const err = await refusal(db.query('select assert_event_allows_reservations($1)', [event]));
+        expect(err?.code).toBe('55000');
+        expect(err?.message).toBe('Equipment can only be reserved while the event is Approved. This event is Rejected.');
+      } finally {
+        await db.exec(migration('090_equipment_reserve_in_safety_statuses.sql'));
+      }
+    });
+
+    it.each(['safety_review', 'safety_approved'])(
+      'SCRUM300_AC1_reserve_reduce_and_release_work_while_the_event_is_in_%s',
+      async (eventStatus) => {
+        const { event, line } = await reviewed('Projector', 10, 4);
+        await db.query('update event_requests set status = $2::event_request_status where id = $1', [event, eventStatus]);
+
+        await reserve(event, reviewerA, line, 3);
+        const { id } = await reservation(event);
+        await reduce(event, reviewerA, id, 1, 'Only one needed');
+        expect((await reservation(event)).quantity).toBe(1);
+        await release(event, reviewerA, id);
+        expect((await reservation(event)).released_at).not.toBeNull();
+      },
+    );
+
+    it.each(['safety_review', 'safety_approved'])(
+      'SCRUM300_AC1_a_flagged_reservation_can_be_moved_while_the_event_is_in_%s',
+      async (eventStatus) => {
+        const { event, line } = await reviewed('Projector', 10, 2);
+        await reserve(event, reviewerA, line, 2);
+        await changePeriod(event);
+        await start(event, reviewerA);
+        await db.query('update event_requests set status = $2::event_request_status where id = $1', [event, eventStatus]);
+        const { id } = await reservation(event);
+
+        await move(event, reviewerA, id);
+
+        expect((await reservation(event)).flagged).toBe(false);
+        expect(await requestStatus(event)).toBe('arranged');
+      },
+    );
   });
 
   describe('AC4: reduce and release', () => {
@@ -445,7 +503,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       ]) {
         const err = await refusal(call());
         expect(err?.code).toBe('55000');
-        expect(err?.message).toMatch(/Approved or Confirmed/);
+        expect(err?.message).toMatch(/Approved, Safety review, Safety approved or Confirmed\. This event is Rejected/);
       }
     });
 

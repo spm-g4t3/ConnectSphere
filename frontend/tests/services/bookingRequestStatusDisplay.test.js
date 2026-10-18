@@ -29,6 +29,11 @@ describe("bookingStatusClassName", () => {
       expect(bookingStatusClassName(group)).toBe("status--booking-unknown");
     },
   );
+
+  it("SCRUM492_AC2_a_released_booking_has_its_own_status_class", () => {
+    // Its own class, not unknown's, though App.css gives both the same grey.
+    expect(bookingStatusClassName("RELEASED")).toBe("status--booking-released");
+  });
 });
 
 describe("readBookingStatusDisplay", () => {

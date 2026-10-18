@@ -23,6 +23,8 @@
     "venue-holds:seed": "node db/seeds/venueHolds.js",
     "booking-suitability:seed": "node db/seeds/bookingSuitability.js",
     "booking-suitability:unseed": "node db/seeds/bookingSuitabilityCleanup.js",
+    "notifications:seed": "node db/seeds/notifications.js",
+    "notifications:unseed": "node db/seeds/notificationsCleanup.js",
     "venue-blocks:check": "node scripts/check-venue-blocks.js",
     "venue-calendar:check": "node scripts/check-venue-calendar.js",
     "booking-requests:check": "node scripts/check-booking-requests.js",
