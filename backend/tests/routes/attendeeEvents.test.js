@@ -359,6 +359,24 @@ describe('SCRUM-24 protected attendee event read', () => {
     expect(client.calls[0].columns).not.toContain('venue_holds');
   });
 
+  it('SCRUM24_AC6_venue_details_come_only_from_approved_bookings_and_venue_name_location', async () => {
+    const event = confirmedEvent({ venue_requirements: 'PRIVATE_REQUIREMENTS' });
+    event.bookings[0].room_layout_code = 'PRIVATE_LAYOUT_CODE';
+    Object.assign(event.bookings[0].venues, {
+      room_name: 'UNSUPPORTED_ROOM_NAME', hall_name: 'UNSUPPORTED_HALL_NAME',
+      address: 'UNSUPPORTED_ADDRESS', venue_room_layouts: [{ room_layout_code: 'PRIVATE_LAYOUT_CODE' }],
+    });
+    event.bookings.push({ id: 'pending', status: BOOKING_STATUS.PENDING,
+      venues: { name: 'PRIVATE_PENDING_HALL', location: 'PRIVATE_PENDING_LOCATION' } });
+    const client = database([registration({ event_requests: event })]);
+    const response = await read(application(client));
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(confirmed);
+    expect(Object.keys(response.body.venues[0]).sort()).toEqual(['bookingId', 'location', 'name']);
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].columns).not.toMatch(/layout|room_name|hall_name|address|requirements/);
+  });
+
   it.each([...Object.values(STATUS).filter(status => status !== STATUS.CONFIRMED),
     'Confirmed', 'planning', null, undefined, 'future-status'])(
     'SCRUM24_AC2_AC3_non_confirmed_state_never_discloses_arrangements_%s', async status => {

@@ -40,11 +40,11 @@ function EventInformation({ eventId }) {
               <div><dt>Start time</dt><dd>{formatEventStartTime(data.startsAt)}</dd></div>
               <div><dt>End time</dt><dd>{formatEventEndTime(data.startsAt, data.endsAt)}</dd></div>
             </dl>
-            <h2>Venues</h2>
-            {data.venues.length ? <ul>{data.venues.map(venue => (
+            <h2 id="attendee-confirmed-venues-heading">Venues</h2>
+            {data.venues.length ? <ul aria-labelledby="attendee-confirmed-venues-heading">{data.venues.map(venue => (
               <li key={venue.bookingId}>
-                <strong>{venue.name || "Venue name unavailable"}</strong>
-                <p>{venue.location || "Location unavailable"}</p>
+                <strong>{venue.name?.trim() || "Venue name unavailable"}</strong>
+                <p className="attendee-event-information__location">{venue.location?.trim() || "Location unavailable"}</p>
               </li>
             ))}</ul> : <p>No confirmed venue information is available.</p>}
           </>)}

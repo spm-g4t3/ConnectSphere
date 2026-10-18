@@ -278,6 +278,93 @@ describe("SCRUM-24 reachable attendee information", () => {
     expect(screen.getByText("Location unavailable")).toBeInTheDocument();
   });
 
+  it("SCRUM24_AC6_every_confirmed_venue_shows_its_stored_name_and_multiline_location", async () => {
+    const venues = [
+      { bookingId: "hall", name: "Main Hall", location: "12 Orchard Road\nBlock A, Level 1" },
+      { bookingId: "room", name: "Seminar Room 02-01", location: "Building B\nLevel 2, Room 02-01" },
+      { bookingId: "venue", name: "Courtyard", location: "North entrance" },
+    ];
+    vi.mocked(getAttendeeEvent).mockResolvedValue(confirmed("e1", { venues }));
+    renderAt("/registered-events/e1");
+    const list = await screen.findByRole("list", { name: "Venues" });
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(3);
+    venues.forEach((venue, index) => {
+      expect(within(items[index]).getByText(venue.name)).toBeInTheDocument();
+      const location = items[index].querySelector("p");
+      expect(location.textContent).toBe(venue.location);
+      expect(location).toHaveClass("attendee-event-information__location");
+    });
+    expect(getAttendeeEvent).toHaveBeenCalledExactlyOnceWith("e1");
+    expect(getOpenEvent).not.toHaveBeenCalled();
+    expect(getOpenEvents).not.toHaveBeenCalled();
+  });
+
+  it.each([null, undefined, "", " \t\n "])(
+    "SCRUM24_AC6_missing_or_blank_venue_name_and_location_are_explicit_%j", async missing => {
+      vi.mocked(getAttendeeEvent).mockResolvedValue(confirmed("e1", {
+        venues: [{ bookingId: "missing", name: missing, location: missing }],
+      }));
+      renderAt("/registered-events/e1");
+      const list = await screen.findByRole("list", { name: "Venues" });
+      expect(within(list).getByText("Venue name unavailable")).toBeInTheDocument();
+      expect(within(list).getByText("Location unavailable")).toBeInTheDocument();
+    },
+  );
+
+  it("SCRUM24_AC6_unsupported_room_fields_layouts_and_requirements_never_fill_missing_details", async () => {
+    vi.mocked(getAttendeeEvent).mockResolvedValue(confirmed("e1", {
+      venue_requirements: "PRIVATE_ORIGINAL_REQUIREMENTS",
+      venues: [{ bookingId: "venue", name: "Venue A", location: null,
+        roomName: "UNSUPPORTED_ROOM_NAME", hallName: "UNSUPPORTED_HALL_NAME",
+        room_layout_code: "PRIVATE_LAYOUT_CODE", room_layouts: [{ label: "PRIVATE_LAYOUT_LABEL" }],
+        address: "UNSUPPORTED_ADDRESS" }],
+      bookings: [{ status: "pending", name: "PRIVATE_PENDING_VENUE" }],
+    }));
+    renderAt("/registered-events/e1");
+    const list = await screen.findByRole("list", { name: "Venues" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(list).getByText("Venue A")).toBeInTheDocument();
+    expect(within(list).getByText("Location unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Registered event information" }))
+      .not.toHaveTextContent(/PRIVATE_|UNSUPPORTED_/);
+  });
+
+  it("SCRUM24_AC6_AC8_venue_names_and_locations_render_as_safe_text", async () => {
+    const name = '<img src=x onerror="window.__venuePwned=true">';
+    const location = '<script>window.__venuePwned=true</script>\nHall <strong>2</strong>';
+    vi.mocked(getAttendeeEvent).mockResolvedValue(confirmed("e1", {
+      venues: [{ bookingId: "markup", name, location }],
+    }));
+    renderAt("/registered-events/e1");
+    const list = await screen.findByRole("list", { name: "Venues" });
+    expect(within(list).getByText(name)).toBeInTheDocument();
+    expect(list.querySelector("p").textContent).toBe(location);
+    expect(list.querySelector("img, script, svg")).toBeNull();
+    expect(window.__venuePwned).toBeUndefined();
+  });
+
+  it("SCRUM24_AC6_AC7_mocked_refresh_replaces_changed_and_removed_venue_arrangements", async () => {
+    renderAt("/registered-events/e1");
+    await screen.findByText("Hall e1");
+    const refresh = deferred();
+    vi.mocked(getAttendeeEvent).mockReturnValueOnce(refresh.promise);
+    fireEvent.focus(window);
+    expect(screen.queryByRole("list", { name: "Venues" })).not.toBeInTheDocument();
+    await act(async () => refresh.resolve(confirmed("e1", { venues: [
+      { bookingId: "e1-a", name: "Hall A", location: "New building\nLevel 3" },
+      { bookingId: "new", name: "Room C3", location: "Block C" },
+    ] })));
+    const list = screen.getByRole("list", { name: "Venues" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(list).getByText("Hall A")).toBeInTheDocument();
+    expect(within(list).getByText("Room C3")).toBeInTheDocument();
+    expect(list.querySelector("p").textContent).toBe("New building\nLevel 3");
+    expect(screen.queryByText("Seminar room")).not.toBeInTheDocument();
+    expect(screen.queryByText("Building B")).not.toBeInTheDocument();
+    expect(getAttendeeEvent).toHaveBeenCalledTimes(2);
+  });
+
   it("SCRUM24_AC7_registered_list_refresh_failures_are_labelled_and_retryable", async () => {
     renderAt("/registered-events");
     await screen.findByText("Registered event");
