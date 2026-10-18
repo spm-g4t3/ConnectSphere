@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const registrationMigration = readFileSync(
-  resolve(here, '../../db/migrations/095_event_registration_hardening.sql.sql'),
+  resolve(here, '../../db/migrations/095_event_registration_hardening.sql'),
   'utf8',
 );
 const migration = readFileSync(

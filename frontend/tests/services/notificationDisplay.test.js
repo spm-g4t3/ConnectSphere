@@ -1084,3 +1084,36 @@ describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", (
     expect(generic).toEqual([]);
   });
 });
+
+describe("describeNotification: fallbacks for sparse payloads", () => {
+  const d = (type, payload) => describeNotification({ id: "n20", type, payload });
+
+  it("SCRUM395_booking_released_falls_back_to_the_coordinator_and_no_reason", () => {
+    const out = d("booking_released", {});
+    expect(out.detail).toContain("released by the event's coordinator");
+  });
+
+  it("SCRUM395_conflict_cleared_names_another_event_when_none_is_given", () => {
+    expect(d("booking_request_conflict_cleared", {}).detail).toContain("Another event");
+  });
+
+  it("SCRUM395_safety_submission_defaults_the_coordinator_and_omits_a_bad_start", () => {
+    const out = d("event_submitted_for_safety_review", {});
+    expect(out.detail).toContain("its coordinator");
+    expect(out.detail).not.toContain("It starts");
+  });
+
+  it("SCRUM395_significant_change_types_fall_back_when_fields_are_missing", () => {
+    expect(d("event_significant_change", {}).detail).toContain("Reason:");
+    expect(d("event_significant_change_attendee", { startsAt: PAYLOAD.startsAt }).detail).not.toContain("now runs");
+    expect(d("event_significant_change_attendee", { reason: "Moved", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt }).detail)
+      .toContain("now runs");
+    expect(d("booking_flagged_event_change", {}).detail).toContain("Coordinator's reason:");
+    expect(d("booking_flagged_event_change", { reason: "Moved" }).detail).toContain("Moved");
+  });
+
+  it("SCRUM395_equipment_reservation_count_is_pluralised_and_defaults_to_zero", () => {
+    expect(d("equipment_reservation_flagged_event_change", {}).detail).toContain("0 reservations");
+    expect(d("equipment_reservation_flagged_event_change", { reservationCount: 1, reason: "x" }).detail).toContain("1 reservation flagged");
+  });
+});
