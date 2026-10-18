@@ -405,7 +405,7 @@ button { cursor: pointer; }
 .dashboard--coordinator .status--booking-approved { background: #e8f7f1; color: #17684f; }
 .dashboard--coordinator .status--booking-flagged { background: #fff0ee; color: #a43c32; }
 .dashboard--coordinator .status--booking-rejected { background: #fff0ee; color: #a43c32; }
-.dashboard--coordinator .status--booking-withdrawn, .dashboard--coordinator .status--booking-cancelled, .dashboard--coordinator .status--booking-unknown { background: #eef2f1; color: var(--muted); }
+.dashboard--coordinator .status--booking-withdrawn, .dashboard--coordinator .status--booking-cancelled, .dashboard--coordinator .status--booking-released, .dashboard--coordinator .status--booking-unknown { background: #eef2f1; color: var(--muted); }
 .clarification-overdue { color: #a43c32; font-weight: 700; }
 .my-assigned-events__needs-attention { background: #fff6e5; border-left: 3px solid #bb7a12; margin-top: 16px; padding: 12px; }
 .clarification-history { display: grid; gap: 10px; margin: 12px 0 0; }

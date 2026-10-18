@@ -49,6 +49,7 @@ import AssignmentHistory from "./AssignmentHistory";
 import EventVenueFinder from "./EventVenueFinder";
 import EventVenueSuitability from "./EventVenueSuitability";
 import EventFlaggedBookings from "./EventFlaggedBookings";
+import EventVenueBookings from "./EventVenueBookings";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
 import DecisionOutcome from "./DecisionOutcome";
 import ReassignEventPanel from "./ReassignEventPanel";
@@ -982,6 +983,20 @@ export default function CoordinatorRequestDetail({
           }}
           // A booking resolved elsewhere is no longer one to replace.
           onLoaded={(items) => setReplacing((cur) => (cur && !items.some((i) => i.id === cur.id) ? null : cur))}
+        />
+      )}
+      {/* SCRUM-492: the holder releases one approved venue while the event is
+          Approved. Not keyed on venueVersion, which a release bumps, so the
+          section keeps its own "was released" notice. */}
+      {isAssignedCoordinator && current.status === "approved" && (
+        <EventVenueBookings
+          key={`${current.id}|${current.proposedStart}|${current.proposedEnd}`}
+          eventRequestId={current.id}
+          onReleased={() => {
+            setVenueVersion((n) => n + 1);
+            onChangeRequestProcessed?.();
+          }}
+          onStale={() => onChangeRequestProcessed?.()}
         />
       )}
       {isAssignedCoordinator && (

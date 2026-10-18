@@ -992,6 +992,9 @@ const FIXTURES = {
   flagged_booking_resolved: RESOLVED_PAYLOAD,
   booking_request_venue_unavailable: UNAVAILABLE_PAYLOAD,
   booking_flagged_venue_retired: RETIRED_PAYLOAD,
+  // SCRUM-492 (089).
+  booking_released: { eventName: "Tech Talk", venueName: "Hall A", releasedByName: "Priya Nair", reason: "Moved" },
+  booking_request_conflict_cleared: { eventName: "Tech Talk", venueName: "Hall A", releasedEventName: "Gala Dinner" },
 };
 
 describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", () => {

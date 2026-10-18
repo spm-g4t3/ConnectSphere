@@ -18,6 +18,7 @@ const CLASS_BY_GROUP = {
   REJECTED: "status--booking-rejected",
   WITHDRAWN: "status--booking-withdrawn",
   CANCELLED: "status--booking-cancelled",
+  RELEASED: "status--booking-released",
   UNKNOWN: "status--booking-unknown",
   UNAVAILABLE: "status--booking-unknown",
 };
