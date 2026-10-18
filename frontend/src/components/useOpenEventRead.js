@@ -1,5 +1,5 @@
 // The read the browse list and details share: a spinner on first load, then
-// background refreshes that keep what is on screen. `fetcher` must be stable;
+// background refreshes that keep what is on screen by default. `fetcher` must be stable;
 // a new one is a new subject and starts from scratch. load() resolves to
 // { kind: "ok", data } | "not-found" | "error" | "superseded".
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -13,8 +13,11 @@ const REFUSALS = [401, 403];
  * @param {Record<number, string>} options.messages  load-error text by status; a stable object
  * @param {string} options.fallback  load-error text for any other status
  * @param {boolean} [options.notFoundIsAnswer]  a 404 means "no longer open", not a failure
+ * @param {boolean} [options.retainDataOnRefresh=true] false clears protected data until revalidated
  */
-export default function useOpenEventRead(fetcher, { messages, fallback, notFoundIsAnswer = false }) {
+export default function useOpenEventRead(fetcher, {
+  messages, fallback, notFoundIsAnswer = false, retainDataOnRefresh = true,
+}) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -25,7 +28,7 @@ export default function useOpenEventRead(fetcher, { messages, fallback, notFound
 
   const load = useCallback(async () => {
     const mine = ++latest.current;
-    const background = loaded.current;
+    const background = loaded.current && retainDataOnRefresh;
     if (!background) {
       setLoading(true);
       setError(null);
@@ -71,7 +74,7 @@ export default function useOpenEventRead(fetcher, { messages, fallback, notFound
     } finally {
       if (mine === latest.current) setLoading(false);
     }
-  }, [fetcher, messages, fallback, notFoundIsAnswer]);
+  }, [fetcher, messages, fallback, notFoundIsAnswer, retainDataOnRefresh]);
 
   useEffect(() => {
     loaded.current = false;

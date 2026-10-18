@@ -14,8 +14,8 @@ const FALLBACK = "Event information could not be loaded. Please try again.";
 
 function EventInformation({ eventId }) {
   const fetchEvent = useCallback(() => getAttendeeEvent(eventId), [eventId]);
-  const { data, loading, notFound, error, refreshFailed, load } = useOpenEventRead(fetchEvent, {
-    messages: MESSAGES, fallback: FALLBACK, notFoundIsAnswer: true,
+  const { data, loading, notFound, error, load } = useOpenEventRead(fetchEvent, {
+    messages: MESSAGES, fallback: FALLBACK, notFoundIsAnswer: true, retainDataOnRefresh: false,
   });
   useRefreshOnReturn(load);
   return (
@@ -24,14 +24,14 @@ function EventInformation({ eventId }) {
       <section aria-label="Registered event information">
         {loading && <p role="status">Loading...</p>}
         {notFound && <p role="alert">Event information is unavailable. An active registration is required.</p>}
-        {(error || refreshFailed) && (
+        {error && (
           <div className="browse-open-events__error" role="alert">
-            <p>{error || "Could not refresh this information. Showing details as last loaded."}</p>
+            <p>{error}</p>
             <button type="button" onClick={load}>Try again</button>
           </div>
         )}
         {!loading && !error && data && (data.eventRequestId !== eventId.trim().toLowerCase() || data.state !== "confirmed"
-          ? <p role="status">Confirmed event information is not available yet.</p>
+          ? <p role="status">Confirmed event details are currently unavailable.</p>
           : <>
             <h2>Confirmed arrangements</h2>
             <p>{EVENT_TIME_NOTE}</p>

@@ -25,6 +25,121 @@ const confirmed = (id = "e1", overrides = {}) => ({
     { bookingId: `${id}-b`, name: "Seminar room", location: "Building B" }],
   ...overrides,
 });
+
+describe("SCRUM-51 mocked API response sequences (not lifecycle RPC integration)", () => {
+  const unavailable = { eventRequestId: "e1", state: "unavailable" };
+  const latest = () => confirmed("e1", {
+    startsAt: "2030-05-06T01:00:00Z", endsAt: "2030-05-06T03:00:00Z",
+    venues: [{ bookingId: "latest", name: "Latest confirmed hall", location: "Latest location" }],
+  });
+  function expectArrangementsHidden() {
+    expect(screen.queryByRole("heading", { name: "Confirmed arrangements" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Venues" })).not.toBeInTheDocument();
+    expect(document.querySelector(".browse-event-details__facts")).toBeNull();
+    expect(screen.queryByText("Hall e1")).not.toBeInTheDocument();
+    expect(screen.queryByText("2026-10-25")).not.toBeInTheDocument();
+  }
+
+  it("SCRUM24_AC2_AC3_unavailable_contract_does_not_describe_cancelled_events_as_awaiting_confirmation", async () => {
+    // Approved and Cancelled share this privacy-preserving response. No raw status is supplied to the UI.
+    vi.mocked(getAttendeeEvent).mockResolvedValue(unavailable);
+    renderAt("/registered-events/e1");
+    const message = await screen.findByText("Confirmed event details are currently unavailable.");
+    expect(message).toHaveAttribute("role", "status");
+    expect(message).not.toHaveTextContent(/awaiting|yet|will be confirmed/i);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expectArrangementsHidden();
+  });
+
+  it("SCRUM24_AC2_AC3_AC7_mocked_confirmed_approved_reconfirmed_responses_replace_arrangements_authoritatively", async () => {
+    const approvedRead = deferred();
+    const reconfirmedRead = deferred();
+    vi.mocked(getAttendeeEvent).mockResolvedValueOnce(confirmed())
+      .mockReturnValueOnce(approvedRead.promise).mockReturnValueOnce(reconfirmedRead.promise);
+    renderAt("/registered-events/e1");
+    await screen.findByText("Hall e1");
+
+    fireEvent.focus(window);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading...");
+    expectArrangementsHidden();
+    // This represents the API response after Approved, not execution of a significant-change workflow.
+    await act(async () => approvedRead.resolve(unavailable));
+    expect(screen.getByRole("status")).toHaveTextContent("Confirmed event details are currently unavailable.");
+    expectArrangementsHidden();
+
+    fireEvent(document, new Event("visibilitychange"));
+    expect(screen.getByRole("status")).toHaveTextContent("Loading...");
+    expectArrangementsHidden();
+    await act(async () => reconfirmedRead.resolve(latest()));
+    expect(screen.getByText("Latest confirmed hall")).toBeInTheDocument();
+    expect(screen.getByText("Latest location")).toBeInTheDocument();
+    expect(screen.getByText("2030-05-06")).toBeInTheDocument();
+    expect(screen.queryByText("Hall e1")).not.toBeInTheDocument();
+    expect(getAttendeeEvent).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(getAttendeeEvent).mock.calls).toEqual([["e1"], ["e1"], ["e1"]]);
+  });
+
+  it.each([
+    [401, "Your session has expired. Please sign in again."],
+    [403, "Only Attendees can view this event information."],
+    [404, "Event information is unavailable. An active registration is required."],
+    [500, "Event information could not be loaded. Please try again."],
+    [503, "Event information could not be loaded. Please try again."],
+    [undefined, "Event information could not be loaded. Please try again."],
+  ])("SCRUM24_AC2_AC3_AC7_failed_refresh_keeps_old_arrangements_hidden_and_distinguishes_failure_%s", async (status, message) => {
+    renderAt("/registered-events/e1");
+    await screen.findByText("Hall e1");
+    const refresh = deferred();
+    vi.mocked(getAttendeeEvent).mockReturnValueOnce(refresh.promise);
+    fireEvent.focus(window);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading...");
+    expectArrangementsHidden();
+    await act(async () => refresh.reject(status === undefined ? new Error("PRIVATE_NETWORK_ERROR") : failure(status)));
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/PRIVATE_|as last loaded/);
+    expect(screen.queryByText("Confirmed event details are currently unavailable.")).not.toBeInTheDocument();
+    expectArrangementsHidden();
+
+    if (status !== 404) {
+      const retry = deferred();
+      vi.mocked(getAttendeeEvent).mockReturnValueOnce(retry.promise);
+      await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+      expect(screen.getByRole("status")).toHaveTextContent("Loading...");
+      expectArrangementsHidden();
+      await act(async () => retry.resolve(latest()));
+      expect(screen.getByText("Latest confirmed hall")).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.queryByText("Hall e1")).not.toBeInTheDocument();
+    }
+  });
+
+  it.each(["confirmed", "unavailable", "error"])(
+    "SCRUM24_AC7_mocked_overlapping_refresh_ignores_late_response_%s", async staleOutcome => {
+      renderAt("/registered-events/e1");
+      await screen.findByText("Hall e1");
+      const oldRead = deferred();
+      const newRead = deferred();
+      vi.mocked(getAttendeeEvent).mockReturnValueOnce(oldRead.promise).mockReturnValueOnce(newRead.promise);
+      fireEvent.focus(window);
+      fireEvent(document, new Event("visibilitychange"));
+      expectArrangementsHidden();
+      await act(async () => newRead.resolve(staleOutcome === "unavailable" ? latest() : unavailable));
+      await act(async () => {
+        if (staleOutcome === "error") oldRead.reject(failure(500));
+        else oldRead.resolve(staleOutcome === "confirmed" ? confirmed() : unavailable);
+      });
+      if (staleOutcome === "unavailable") {
+        expect(screen.getByText("Latest confirmed hall")).toBeInTheDocument();
+      } else {
+        expect(screen.getByRole("status")).toHaveTextContent("Confirmed event details are currently unavailable.");
+        expectArrangementsHidden();
+      }
+      expect(screen.queryByText("Hall e1")).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    },
+  );
+});
 function renderAt(path) {
   window.history.replaceState({}, "", path);
   return render(<App />);
@@ -148,7 +263,7 @@ describe("SCRUM-24 reachable attendee information", () => {
     "SCRUM24_AC2_AC3_unconfirmed_or_mismatched_records_never_render_arrangements_%j", async data => {
       vi.mocked(getAttendeeEvent).mockResolvedValue(data);
       renderAt("/registered-events/e1");
-      expect(await screen.findByText("Confirmed event information is not available yet.")).toBeInTheDocument();
+      expect(await screen.findByText("Confirmed event details are currently unavailable.")).toHaveAttribute("role", "status");
       expect(screen.queryByRole("heading", { name: "Confirmed arrangements" })).not.toBeInTheDocument();
     },
   );
@@ -163,18 +278,15 @@ describe("SCRUM-24 reachable attendee information", () => {
     expect(screen.getByText("Location unavailable")).toBeInTheDocument();
   });
 
-  it.each(["/registered-events", "/registered-events/e1"])(
-    "SCRUM24_AC7_refresh_failures_are_labelled_and_retryable_%s", async path => {
-      renderAt(path);
-      await screen.findByText(path.endsWith("e1") ? "Hall e1" : "Registered event");
-      const reader = path.endsWith("e1") ? getAttendeeEvent : getRegisteredEvents;
-      vi.mocked(reader).mockRejectedValueOnce(failure(500));
-      fireEvent.focus(window);
-      expect(await screen.findByRole("alert")).toHaveTextContent(/as last loaded/);
-      await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-      await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
-    },
-  );
+  it("SCRUM24_AC7_registered_list_refresh_failures_are_labelled_and_retryable", async () => {
+    renderAt("/registered-events");
+    await screen.findByText("Registered event");
+    vi.mocked(getRegisteredEvents).mockRejectedValueOnce(failure(500));
+    fireEvent.focus(window);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/as last loaded/);
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
 
   it("SCRUM24_AC7_event_route_changes_clear_old_data_before_the_next_reply", async () => {
     renderAt("/registered-events/e1");
