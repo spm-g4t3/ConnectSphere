@@ -3,6 +3,7 @@
 **Story:** Release One Venue from a Multi-Venue Event — Event Coordinator
 **Subtask:** SCRUM-563 (this document)
 **Schema:** `088_booking_released_status.sql` and `089_release_venue_booking.sql` (SCRUM-564 to SCRUM-566), after SCRUM-266's 076 to 078.
+**Status:** complete as of 18 October 2026 (SCRUM-569's sweep): **51 of 51 cases proved**, 0 not yet implemented, 0 that cannot be written. The review is `docs/SCRUM-492.md`.
 **Written:** 18 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; each **Implemented by** says so, and the subtask that writes its tests fills it in.
 **Marked:** 18 October 2026, SCRUM-564 to SCRUM-566: every case their tests prove names them. The cases themselves are unchanged.
 **Marked:** 18 October 2026, the trigger fix-up: AC6-02 widened to a release from any status but approved; D6 says so.
