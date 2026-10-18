@@ -95,7 +95,7 @@ export default function BlockConflictList({
 
         {confirming && (
           <>
-            <span>Flag these bookings for review and notify Event Coordinators?</span>
+            <span>Flag these bookings for review and notify each event's coordinator?</span>
             <button
               type="button"
               onClick={() => onConfirmOverride?.(conflicts.map((c) => c.bookingId))}

@@ -10,6 +10,15 @@
 //     blockStartsAt, blockEndsAt }
 //   booking_request_withdrawn (031): { eventRequestId, eventName, venueId,
 //     venueName, startsAt, endsAt }
+//   booking_request_submitted (083, SCRUM-174): { eventRequestId, eventName,
+//     venueId, venueName, startsAt, endsAt }
+//   booking_request_venue_unavailable (084, SCRUM-174): { cause,
+//     eventRequestId, eventName, venueId, venueName, startsAt, endsAt,
+//     reason, blockStartsAt, blockEndsAt, retiredAt }; cause is block or
+//     retired, the block* fields and reason are set for a block, retiredAt
+//     for a retirement
+//   booking_flagged_venue_retired (085, SCRUM-174): { eventRequestId,
+//     eventName, venueId, venueName, startsAt, endsAt, retiredAt }
 //   booking_flagged_setup_change (034, SCRUM-484): { venueName, eventName,
 //     startsAt, endsAt, occupiedStartsAt, occupiedEndsAt, setupMinutes,
 //     turnaroundMinutes, reason }
@@ -63,6 +72,7 @@ const NO_REASON = "No reason recorded";
 const PREVIOUS_COORDINATOR = "the previous coordinator";
 // Week 7: a flagged booking tells its coordinator another plan is needed.
 const ALTERNATIVE_ARRANGEMENTS = " Alternative arrangements are required.";
+const VENUE_RETIRED = "The venue has been retired.";
 
 /** True when `value` is a time that will parse. */
 function isInstant(value) {
@@ -113,6 +123,12 @@ function bookedFor(payload) {
   return `Booked ${formatRange(payload.startsAt, payload.endsAt)}. `;
 }
 
+/** "The venue is blocked for <reason>, <range>.", from a block's payload. */
+function blockedFor(payload) {
+  const reason = payload.reason ? reasonLabel(payload.reason) : "unspecified reason";
+  return `The venue is blocked for ${reason}, ${formatRange(payload.blockStartsAt, payload.blockEndsAt)}.`;
+}
+
 /**
  * The clarification types share a describer. Their fallback is "the event
  * request", not "Unnamed event": the sentence still reads with no name.
@@ -138,14 +154,35 @@ function describeClarification(payload, _names, type) {
 // generic result.
 const DESCRIBERS = {
   booking_flagged(payload, { eventName, venueName }) {
-    const reason = payload.reason ? reasonLabel(payload.reason) : "unspecified reason";
-
     return {
       headline: needsReview(eventName, venueName),
+      detail: bookedFor(payload) + blockedFor(payload) + ALTERNATIVE_ARRANGEMENTS,
+    };
+  },
+
+  // 085 (SCRUM-174 AC6). Retiring a venue flags its confirmed bookings; to
+  // the reader it is the same thing as a block flag, so the same headline.
+  booking_flagged_venue_retired(payload, { eventName, venueName }) {
+    return {
+      headline: needsReview(eventName, venueName),
+      detail: bookedFor(payload) + VENUE_RETIRED + ALTERNATIVE_ARRANGEMENTS,
+    };
+  },
+
+  // 084/085 (SCRUM-174 AC5). A block or retirement over a pending request
+  // leaves it pending (changes never un-book), so the coordinator is told it
+  // is still open and the next step is theirs. An unknown cause reads as the
+  // generic notification.
+  booking_request_venue_unavailable(payload, { eventName, venueName }) {
+    const causes = { block: blockedFor, retired: () => VENUE_RETIRED };
+    if (!Object.hasOwn(causes, payload.cause)) return undefined;
+
+    return {
+      headline: `${venueName} is unavailable for your request for ${eventName}`,
       detail:
-        bookedFor(payload) +
-        `The venue is blocked for ${reason}, ${formatRange(payload.blockStartsAt, payload.blockEndsAt)}.` +
-        ALTERNATIVE_ARRANGEMENTS,
+        `Requested ${formatRange(payload.startsAt, payload.endsAt)}. ` +
+        causes[payload.cause](payload) +
+        " The request is still open; you may want to request another venue.",
     };
   },
 
@@ -180,6 +217,17 @@ const DESCRIBERS = {
       detail:
         `It was for ${formatRange(payload.startsAt, payload.endsAt)}. ` +
         "It no longer needs a decision.",
+    };
+  },
+
+  // 083 (SCRUM-174 AC1). Sent to every Venue Staff user when a coordinator
+  // submits a booking request, so it reaches the queue's deciders. The
+  // reader is who must act next, so the inbox marks it as needing action.
+  booking_request_submitted(payload, { eventName, venueName }) {
+    return {
+      headline: `New request: ${eventName} at ${venueName}`,
+      detail: `It is for ${formatRange(payload.startsAt, payload.endsAt)}. It needs a decision.`,
+      needsAction: true,
     };
   },
 
@@ -436,7 +484,7 @@ const DESCRIBERS = {
  * A notification as a headline and a detail line.
  *
  * @param {Object} notification  as returned by GET /api/notifications
- * @returns {{headline: string, detail: string}}
+ * @returns {{headline: string, detail: string, needsAction?: true}}
  */
 export function describeNotification(notification) {
   const payload = notification?.payload ?? {};

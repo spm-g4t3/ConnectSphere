@@ -56,7 +56,7 @@ function renderList(props = {}) {
   return { onChangePeriod, onConfirmOverride, user, ...utils };
 }
 
-const CONFIRM_TEXT = "Flag these bookings for review and notify Event Coordinators?";
+const CONFIRM_TEXT = "Flag these bookings for review and notify each event's coordinator?";
 
 let confirmSpy;
 

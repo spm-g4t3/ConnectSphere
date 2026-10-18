@@ -503,7 +503,7 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     await user.click(screen.getByRole("button", { name: "Override and flag 2 bookings" }));
     expect(createVenueBlock).toHaveBeenCalledTimes(1);
     expect(
-      screen.getByText("Flag these bookings for review and notify Event Coordinators?"),
+      screen.getByText("Flag these bookings for review and notify each event's coordinator?"),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Yes, override" }));
 

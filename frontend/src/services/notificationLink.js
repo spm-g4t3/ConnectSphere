@@ -7,6 +7,11 @@ import { normaliseRole } from "../auth/normaliseRole";
 
 const eventRequestPage = (id) => ({ to: `/event-requests/${id}` });
 
+const VENUE_STAFF_PAGES = {
+  booking_request_submitted: { to: "/booking-requests" },
+  safety_booking_flagged: { to: "/flagged-bookings" },
+};
+
 // One entry per role, so a later story adds a line rather than a branch.
 const LINKS_BY_ROLE = {
   // The review page lets any coordinator or Lead read any submitted event;
@@ -25,10 +30,9 @@ const LINKS_BY_ROLE = {
   TECHNICAL_SUPPORT_STAFF: (type, id) =>
     type === "safety_equipment_review" ? { to: `/equipment-review/${id}` } : null,
 
-  // A safety flag is resolved on their flagged bookings list. Their other
-  // types are not about a pending request; SCRUM-174's "new request" notice
-  // will link to the queue.
-  VENUE_STAFF: (type) => (type === "safety_booking_flagged" ? { to: "/flagged-bookings" } : null),
+  // A new request is decided in their queue and a safety flag on their flagged
+  // bookings list. A withdrawn request has nothing left to decide, so no link.
+  VENUE_STAFF: (type) => VENUE_STAFF_PAGES[type] ?? null,
   // No safety review page yet (SCRUM-490).
   SAFETY_OFFICER: () => null,
   // No attendee event page yet (SCRUM-495).

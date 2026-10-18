@@ -524,6 +524,38 @@ describe("SCRUM172 notification inbox flow", () => {
     expect(within(inbox).queryAllByRole("link")).toHaveLength(0);
   });
 
+  it("SCRUM174_AC1_venue_staff_opens_a_new_request_from_the_inbox", async () => {
+    const startsAt = iso(BASE + 10 * DAY);
+    const endsAt = iso(BASE + 10 * DAY + 3 * HOUR);
+    const slot = { venueId: VENUE_ID, venueName: "Hall A", startsAt, endsAt };
+    useInbox([
+      notification(1, "booking_request_submitted", { eventName: "Career Fair", ...slot }),
+      notification(2, "booking_request_withdrawn", { eventName: "Launch Night", ...slot }),
+    ]);
+    const user = renderAs(USERS.venueStaff);
+
+    const inbox = await openInbox("New request: Career Fair at Hall A");
+    const request = rowOf("New request: Career Fair at Hall A");
+    expect(within(request).getByText("Needs your action")).toBeInTheDocument();
+    expect(within(request).getByRole("link", { name: "New request: Career Fair at Hall A" })).toHaveAttribute(
+      "href",
+      "/booking-requests",
+    );
+
+    // Venue Staff have nothing to do about a withdrawal.
+    const withdrawn = rowOf("The request for Launch Night at Hall A was withdrawn");
+    expect(within(withdrawn).queryByRole("link")).not.toBeInTheDocument();
+    expect(within(withdrawn).queryByText("Needs your action")).not.toBeInTheDocument();
+    expect(within(inbox).getAllByText("Needs your action")).toHaveLength(1);
+
+    // Once read, it no longer asks for action.
+    await user.click(within(request).getByRole("button", { name: "Mark as read" }));
+    await waitFor(() => expect(badge()).toHaveAccessibleName("Notifications, 1 unread"));
+    const readRow = rowOf("New request: Career Fair at Hall A");
+    expect(readRow).toHaveClass("notification-inbox__item--read");
+    expect(within(readRow).queryByText("Needs your action")).not.toBeInTheDocument();
+  });
+
   it("SCRUM172_AC1_AC8_the_inbox_never_asks_for_another_users_notifications", async () => {
     useInbox([assigned(1, "Launch Night"), assigned(2, "Career Fair")]);
     const user = renderAs(USERS.coordinator);
