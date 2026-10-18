@@ -58,6 +58,9 @@
 //     venueName, startsAt, endsAt, releasedBy, releasedByName, reason }
 //   booking_request_conflict_cleared (089): { eventRequestId, eventName,
 //     venueId, venueName, startsAt, endsAt, releasedBookingId, releasedEventName }
+//   equipment_* (097, SCRUM-176): { audience, eventRequestId, eventName,
+//     lines: [{ equipmentType, quantity, reserved, outcome }], ... }; see
+//     describeEquipmentNotification for what each type adds.
 // Every field is read defensively -- a notification outlives the build that
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
@@ -111,6 +114,113 @@ function setupChangePeriod(payload) {
 /** The headline every flagged-booking type opens with. */
 function needsReview(eventName, venueName) {
   return `${eventName} at ${venueName} needs review`;
+}
+
+const EQUIPMENT_TYPES = [
+  "equipment_requested",
+  "equipment_request_changed",
+  "equipment_request_cancelled",
+  "equipment_arranged",
+  "equipment_not_fully_arranged",
+  "equipment_flagged",
+];
+
+/** "2 x Projector, 1 x Speaker" for the lines a payload carries, or "". */
+function equipmentLines(lines) {
+  return lines
+    .map((line) => `${line?.quantity ?? "?"} x ${line?.equipmentType || "Unknown equipment"}`)
+    .join(", ");
+}
+
+/** The headline and detail of one equipment_* notification (097, SCRUM-176). */
+function describeEquipmentNotification(notification) {
+  const payload = notification.payload ?? {};
+  const eventName = payload.eventName || "Unnamed event";
+  const lines = Array.isArray(payload.lines) ? payload.lines : [];
+  const listed = equipmentLines(lines);
+
+  switch (notification.type) {
+    case "equipment_requested":
+      return {
+        headline: `Equipment requested for ${eventName}`,
+        detail: listed ? `Requested: ${listed}.` : "Open the request to see what was asked for.",
+      };
+
+    case "equipment_request_cancelled":
+      return {
+        headline: `The equipment request for ${eventName} was cancelled`,
+        detail:
+          `${payload.reason || "The request was cancelled"}. ` +
+          "Any equipment held for it was released.",
+      };
+
+    case "equipment_arranged":
+      return {
+        headline: `Equipment for ${eventName} is arranged`,
+        detail: listed ? `Every line is fully reserved: ${listed}.` : "Every line is fully reserved.",
+      };
+
+    case "equipment_not_fully_arranged": {
+      const short = lines.filter((line) => (line?.reserved ?? 0) < (line?.quantity ?? 0));
+      const shortText = short
+        .map(
+          (line) =>
+            `${line.equipmentType || "Unknown equipment"} (${line.reserved ?? 0} of ${line.quantity} reserved)`,
+        )
+        .join(", ");
+      return {
+        headline: `Equipment for ${eventName} cannot be fully arranged`,
+        detail: shortText ? `Short: ${shortText}.` : "Some equipment could not be provided.",
+      };
+    }
+
+    case "equipment_flagged":
+      return {
+        headline: `Reserved equipment for ${eventName} was flagged`,
+        detail:
+          `${payload.equipmentType ? `${payload.equipmentType}: ` : ""}` +
+          `${payload.reason || "The equipment is no longer available"}. ` +
+          "The reservation is flagged for review.",
+      };
+
+    default: {
+      // equipment_request_changed: what changed is in payload.change.
+      if (payload.change === "added") {
+        return {
+          headline: `Equipment added for ${eventName}`,
+          detail: listed ? `Added: ${listed}.` : "A line was added to the request.",
+        };
+      }
+      if (payload.change === "removed") {
+        return {
+          headline: `Equipment removed for ${eventName}`,
+          detail: listed ? `Removed: ${listed}.` : "A line was removed from the request.",
+        };
+      }
+      if (payload.change === "event_period") {
+        const period =
+          isInstant(payload.startsAt) && isInstant(payload.endsAt)
+            ? ` The event is now ${formatRange(payload.startsAt, payload.endsAt)}.`
+            : "";
+        return {
+          headline: `The date or time of ${eventName} changed`,
+          detail: `Reserved equipment was flagged for review.${period}`,
+        };
+      }
+      const [line] = lines;
+      const parts = [];
+      if (line && payload.previousQuantity !== undefined && payload.previousQuantity !== line.quantity) {
+        parts.push(`${line.equipmentType}: quantity was ${payload.previousQuantity}, now ${line.quantity}.`);
+      }
+      if (payload.notesChanged) {
+        parts.push(`Technical notes were updated${line ? ` for ${line.equipmentType}` : ""}.`);
+      }
+      return {
+        headline: `Equipment changed for ${eventName}`,
+        detail: parts.length > 0 ? parts.join(" ") : "A line on the request was changed.",
+      };
+    }
+  }
 }
 
 /** Free text ended with a full stop, unless it already ends a sentence. */
@@ -501,6 +611,10 @@ export function describeNotification(notification) {
     type,
   );
   if (described) return described;
+
+  if (EQUIPMENT_TYPES.includes(notification?.type)) {
+    return describeEquipmentNotification(notification);
+  }
 
   // A type this build does not know (the backend added one). Shown, not
   // hidden: an unread notification that renders as nothing would sit in the
