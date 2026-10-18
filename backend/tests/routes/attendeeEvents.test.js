@@ -23,6 +23,16 @@ const confirmed = {
   startsAt: '2030-01-01T01:00:00+00:00', endsAt: '2030-01-01T03:00:00+00:00',
   venues: [{ bookingId: 'booking-a', name: 'Hall A', location: 'Building A' }],
 };
+const secrets = {
+  notes: 'PRIVATE_STAFF_NOTES_SENTINEL',
+  discussion: 'PRIVATE_DISCUSSION_SENTINEL',
+  schedule: 'PRIVATE_DRAFT_SCHEDULE_SENTINEL',
+  supplier: 'PRIVATE_SUPPLIER_SENTINEL',
+  equipment: 'PRIVATE_EQUIPMENT_PLAN_SENTINEL',
+  attendee: 'PRIVATE_OTHER_ATTENDEE_SENTINEL@example.com',
+  venue: 'PRIVATE_UNCONFIRMED_VENUE_SENTINEL',
+  hold: 'PRIVATE_HELD_VENUE_SENTINEL',
+};
 
 function confirmedEvent(overrides = {}) {
   return {
@@ -43,8 +53,38 @@ function registration(overrides = {}) {
   };
 }
 
+function sensitiveRegistration(status = STATUS.CONFIRMED) {
+  const privateFields = {
+    staff_notes: secrets.notes, discussions: [{ body: secrets.discussion }],
+    draft_schedule: secrets.schedule, supplier_information: { contact: secrets.supplier },
+    equipment_requests: [{ planning_notes: secrets.equipment }],
+    event_registrations: [{ attendee_id: OTHER_ATTENDEE, email: secrets.attendee }],
+    venue_holds: [{ venues: { name: secrets.hold, location: secrets.hold } }],
+  };
+  const event = confirmedEvent({ ...privateFields, status });
+  event.bookings[0] = {
+    ...event.bookings[0], ...privateFields,
+    venues: { ...event.bookings[0].venues, ...privateFields },
+  };
+  event.bookings.push(...Object.values(BOOKING_STATUS)
+    .filter(bookingStatus => bookingStatus !== BOOKING_STATUS.APPROVED)
+    .map(bookingStatus => ({
+      id: `private-${bookingStatus}`, status: bookingStatus,
+      venues: { name: secrets.venue, location: secrets.venue },
+    })));
+  return registration({ ...privateFields, event_requests: event });
+}
+
+function expectPrivateValuesExcluded(body) {
+  const text = JSON.stringify(body);
+  for (const secret of [...Object.values(secrets), ATTENDEE, OTHER_ATTENDEE]) {
+    expect(text).not.toContain(secret);
+  }
+}
+
 // Execute the actual query filters over records, so unrelated and inactive
 // registrations cannot pass just because a mock always returns its first row.
+// Retain unselected fields to catch accidental record spreads in the response.
 function database(rows = [], { error = null, ignoreFilters = false } = {}) {
   const calls = [];
   return {
@@ -86,11 +126,14 @@ afterEach(() => vi.restoreAllMocks());
 describe('SCRUM-24 protected attendee event read', () => {
   it.each([undefined, 'Basic valid', 'Bearer ', 'Bearer expired'])(
     'SCRUM24_AC1_rejects_unauthenticated_access_%s', async authorization => {
-      const client = database([registration()]);
+      const client = database([sensitiveRegistration()]);
       let req = request(application(client)).get(`/api/attendee-events/${EVENT}`);
       if (authorization !== undefined) req = req.set('Authorization', authorization);
       const response = await req;
       expect(response.status).toBe(401);
+      expect(response.body).toEqual({ error: authorization === 'Bearer expired'
+        ? 'Your session is no longer valid' : 'Authentication required' });
+      expectPrivateValuesExcluded(response.body);
       expect(response.headers['cache-control']).toBe('no-store');
       expect(client.calls).toEqual([]);
     },
@@ -98,10 +141,11 @@ describe('SCRUM-24 protected attendee event read', () => {
 
   it.each(Object.values(ROLE).filter(role => role !== ROLE.ATTENDEE))(
     'SCRUM24_AC1_rejects_wrong_role_even_with_attendee_token_metadata_%s', async role => {
-      const client = database([registration()]);
+      const client = database([sensitiveRegistration()]);
       const response = await read(application(client, { role }));
       expect(response.status).toBe(403);
       expect(response.body).toEqual({ error: 'This action is restricted to Attendees' });
+      expectPrivateValuesExcluded(response.body);
       expect(client.calls).toEqual([]);
     },
   );
@@ -134,7 +178,7 @@ describe('SCRUM-24 protected attendee event read', () => {
   );
 
   it('SCRUM24_AC1_unknown_and_inaccessible_events_have_the_same_safe_response', async () => {
-    const client = database([registration({ attendee_id: OTHER_ATTENDEE })]);
+    const client = database([{ ...sensitiveRegistration(), attendee_id: OTHER_ATTENDEE }]);
     const app = application(client);
     const inaccessible = await read(app);
     const unknown = await read(app, OTHER_EVENT);
@@ -142,6 +186,8 @@ describe('SCRUM-24 protected attendee event read', () => {
     expect(unknown.status).toBe(404);
     expect(inaccessible.body).toEqual(notFound);
     expect(unknown.body).toEqual(inaccessible.body);
+    expectPrivateValuesExcluded(inaccessible.body);
+    expectPrivateValuesExcluded(unknown.body);
   });
 
   it('SCRUM24_AC1_ignores_forged_attendee_identity_and_role_in_query_and_body', async () => {
@@ -169,6 +215,9 @@ describe('SCRUM-24 protected attendee event read', () => {
       const response = await read(application(client), encodeURIComponent(id));
       expect(response.status).toBe(400);
       expect(response.body.details).toEqual([{ field: 'eventRequestId', message: 'must be a valid UUID' }]);
+      expect(Object.keys(response.body).sort()).toEqual(['details', 'error']);
+      expect(response.body.error).toBe('Invalid attendee event request');
+      expectPrivateValuesExcluded(response.body);
       expect(client.calls).toEqual([]);
     },
   );
@@ -199,34 +248,55 @@ describe('SCRUM-24 protected attendee event read', () => {
     expect(client.calls).toHaveLength(2);
   });
 
-  it('SCRUM24_AC8_returns_no_planning_information_or_placeholder_arrangements', async () => {
-    const client = database([registration({
-      staff: 'private', supplier: 'private',
-      event_requests: { id: EVENT, coordinator_id: OTHER_ATTENDEE, description: 'private', venues: ['unconfirmed'] },
-    })]);
-    expect((await read(application(client))).body).toEqual(unavailable);
-    expect(client.calls[0].columns).not.toMatch(/\*|description|coordinator|equipment|supplier/);
-  });
+  it.each([STATUS.APPROVED, STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED, STATUS.CANCELLED])(
+    'SCRUM24_AC8_unconfirmed_response_excludes_every_sensitive_category_%s', async status => {
+      const row = sensitiveRegistration(status);
+      row.event_requests.proposed_start = secrets.schedule;
+      row.event_requests.proposed_end = secrets.schedule;
+      const response = await read(application(database([row])));
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(unavailable);
+      expect(Object.keys(response.body).sort()).toEqual(['eventRequestId', 'state']);
+      expectPrivateValuesExcluded(response.body);
+    },
+  );
 
   it.each(['42P01', '42703', 'PGRST200', 'PGRST202', 'PGRST204', 'PGRST205'])(
     'SCRUM24_AC1_missing_dependency_schema_fails_closed_%s', async code => {
-      const client = database([], { error: { code, message: 'private database details' } });
+      const client = database([sensitiveRegistration()], {
+        error: { code, message: secrets.notes, details: secrets.discussion, hint: secrets.supplier },
+      });
       const response = await read(application(client));
       expect(response.status).toBe(503);
       expect(response.body).toEqual({ error: 'Event information is temporarily unavailable. Please try again later.' });
+      expectPrivateValuesExcluded(response.body);
     },
   );
 
   it.each(['42501', '22023', '55000', '40001', '40P01', 'XX000'])(
     'SCRUM24_AC1_unexpected_database_failure_is_logged_and_not_disclosed_%s', async code => {
-      const error = { code, message: 'private database details' };
+      const error = { code, message: secrets.notes, details: secrets.attendee, hint: secrets.equipment };
       const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const response = await read(application(database([], { error })));
+      const response = await read(application(database([sensitiveRegistration()], { error })));
       expect(response.status).toBe(500);
       expect(response.body).toEqual({ error: 'Unexpected server error' });
+      expectPrivateValuesExcluded(response.body);
       expect(log).toHaveBeenCalledWith('Unexpected error in attendee events route:', error);
     },
   );
+
+  it('SCRUM24_AC8_thrown_database_errors_never_expose_sensitive_properties', async () => {
+    const error = Object.assign(new Error(secrets.notes), {
+      details: secrets.attendee, hint: secrets.supplier, record: sensitiveRegistration(),
+    });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const client = { from() { throw error; } };
+    const response = await read(application(client));
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: 'Unexpected server error' });
+    expectPrivateValuesExcluded(response.body);
+    expect(log).toHaveBeenCalledWith('Unexpected error in attendee events route:', error);
+  });
 
   it.each([
     { attendee_id: OTHER_ATTENDEE }, { event_request_id: OTHER_EVENT },
@@ -314,11 +384,23 @@ describe('SCRUM-24 protected attendee event read', () => {
   });
 
   it('SCRUM24_AC8_confirmed_response_uses_an_allowlist_including_nested_venues', async () => {
-    const event = confirmedEvent({ organiser_id: OTHER_ATTENDEE, description: 'secret planning', equipment_requests: ['secret'] });
-    event.bookings[0].notes = 'private booking notes';
-    event.bookings[0].venues.staff_id = OTHER_ATTENDEE;
-    const response = await read(application(database([registration({ event_requests: event })])));
+    const response = await read(application(database([sensitiveRegistration()])));
+    expect(response.status).toBe(200);
     expect(response.body).toEqual(confirmed);
+    expect(Object.keys(response.body).sort()).toEqual(['endsAt', 'eventRequestId', 'startsAt', 'state', 'venues']);
+    expect(Object.keys(response.body.venues[0]).sort()).toEqual(['bookingId', 'location', 'name']);
+    expectPrivateValuesExcluded(response.body);
+  });
+
+  it('SCRUM24_AC8_query_selects_exactly_the_columns_required_by_the_protected_read', async () => {
+    const client = database([sensitiveRegistration()]);
+    await read(application(client));
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0].table).toBe('event_registrations');
+    expect(client.calls[0].columns.replace(/\s+/g, '')).toBe(
+      'event_request_id,attendee_id,status,event_requests!inner(id,status,proposed_start,proposed_end,'
+      + 'bookings(id,status,venues(name,location)))',
+    );
   });
 
   it('SCRUM24_AC4_AC5_AC6_missing_arrangement_data_is_not_fabricated', async () => {

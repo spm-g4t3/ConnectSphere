@@ -1063,6 +1063,53 @@ describe('SCRUM495_AC3_AC6 availability and registration state on one event', ()
 });
 
 describe('SCRUM495_AC8 one event carries no internal planning information', () => {
+  it.each([false, true])(
+    'SCRUM24_AC8_browse_list_and_preview_never_expose_protected_venues_registered_%s', async isRegistered => {
+      const secrets = [
+        'PRIVATE_CONFIRMED_VENUE_NAME', 'PRIVATE_CONFIRMED_VENUE_LOCATION',
+        'PRIVATE_UNCONFIRMED_VENUE', 'PRIVATE_HELD_VENUE', 'PRIVATE_STAFF_NOTES',
+        'PRIVATE_DISCUSSION', 'PRIVATE_DRAFT_SCHEDULE', 'PRIVATE_SUPPLIER',
+        'PRIVATE_EQUIPMENT_PLANNING', 'PRIVATE_ATTENDEE@example.com',
+      ];
+      const row = eventRow({
+        venues: [{ name: secrets[0], location: secrets[1] }],
+        bookings: [
+          { status: 'approved', venues: { name: secrets[0], location: secrets[1] } },
+          { status: 'pending', venues: { name: secrets[2], location: secrets[2] } },
+        ],
+        venue_holds: [{ venues: { name: secrets[3] } }],
+        staff_notes: secrets[4], discussions: [{ body: secrets[5] }],
+        draft_schedule: secrets[6], supplier_information: { contact: secrets[7] },
+        equipment_requests: [{ notes: secrets[8] }],
+        event_registrations: [{ attendee_id: OTHER_ATTENDEE_ID, email: secrets[9] }],
+      });
+      const registrations = [registration(row.id, OTHER_ATTENDEE_ID)];
+      if (isRegistered) registrations.push(registration(row.id, ATTENDEE_ID));
+      const client = createFakeClient([row], { registrations });
+
+      const list = await get(client).query({ select: '*', include: 'bookings,venues,event_registrations' });
+      const preview = await getOne(client, row.id).query({ select: '*', include: 'bookings,venues' });
+      expect(list.status).toBe(200);
+      expect(preview.status).toBe(200);
+      expect(list.body).toHaveLength(1);
+      for (const event of [list.body[0], preview.body]) {
+        expect(Object.keys(event).sort()).toEqual(ALLOWED_KEYS);
+        expect(event.isRegistered).toBe(isRegistered);
+        for (const secret of [...secrets, OTHER_ATTENDEE_ID, ATTENDEE_ID]) {
+          expect(JSON.stringify(event)).not.toContain(secret);
+        }
+      }
+      const reads = client.calls.filter(call => call.table === 'event_requests');
+      expect(reads).toHaveLength(2);
+      for (const call of reads) {
+        expect(call.selected.replace(/\s+/g, '')).toBe('id,event_name,description,proposed_start,proposed_end,status,'
+          + 'registration_enabled,registration_opens_at,registration_closes_at,registration_capacity');
+      }
+      expect(client.calls.every(call => ['event_requests', 'rpc:open_event_registration_state'].includes(call.table)))
+        .toBe(true);
+    },
+  );
+
   it('SCRUM495_AC8_returns_exactly_the_allowlisted_fields_and_no_venue_coordinator_or_other_attendee', async () => {
     const row = eventRow();
     const registrations = [registration(row.id, OTHER_ATTENDEE_ID), registration(row.id, ATTENDEE_ID)];
