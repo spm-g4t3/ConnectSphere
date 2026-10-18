@@ -50,8 +50,8 @@ const ARRANGEMENTS = [
   '038_equipment_review.sql',
 ];
 const MIGRATION = '064_safety_review_submission.sql';
-const READINESS_MIGRATION = '085_event_readiness_details.sql';
-const CONFIRM_MIGRATION = '087_confirmation_revision.sql';
+const READINESS_MIGRATION = '098_event_readiness_details.sql';
+const CONFIRM_MIGRATION = '099_confirmation_revision.sql';
 const LATE_SAFETY_MIGRATIONS = [
   '071_safety_review.sql',
   '072_safety_review_history.sql',
@@ -245,7 +245,7 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     await db.exec(migration('065_booking_decision_statuses.sql'));
     await db.exec(migration('075_booking_decisions_after_safety_review.sql'));
     await db.exec(migration(READINESS_MIGRATION));
-    await db.exec(migration('086_confirm_event_request.sql'));
+    await db.exec(migration('../migration-history/scrum363/086_confirm_event_request.sql'));
     await db.exec(migration(CONFIRM_MIGRATION));
     await db.exec(migration('079_registrations.sql'));
     // Settings belong to SCRUM-494; confirmation must leave its contract untouched.

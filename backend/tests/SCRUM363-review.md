@@ -1,6 +1,6 @@
 # SCRUM-369: SCRUM-363 acceptance review
 
-Reviewed 17 October 2026 against Jira SCRUM-363 AC1–9 and its Week 7 overrides.
+Reviewed 18 October 2026 against Jira SCRUM-363 AC1–9 and its Week 7 overrides.
 Scope: SCRUM-364–368 and their readiness, safety, lifecycle, arrangement,
 authentication and registration dependencies. Overall: **FAIL / incomplete**.
 
@@ -18,7 +18,7 @@ Supabase or browser end-to-end sign-off. Real overlapping connections remain unt
 | 5 | PASS locally | Non-whitespace equipment requirements without an active request require explicit acknowledgement, recorded in history. Missing or obsolete event revision cannot replay it. |
 | 6 | PASS locally | One RPC locks event, bookings by ID FOR SHARE, equipment requests by ID FOR SHARE, then rechecks readiness and uses the existing transition/history function. Correct actor/time and one history row. |
 | 7 | PASS locally | Owner-scoped read returns authoritative confirmed dates, all approved venues and arranged equipment quantities, formatted in Singapore time. Non-confirmed arrangements are hidden. |
-| 8 | FAIL — dependency | Field locks now include legacy change acceptance. Actual significant-change → Approved → new safety review → re-confirmation is absent: SCRUM-395/402 are To Do. Direct reverts used in tests do not prove this workflow. |
+| 8 | FAIL — dependency | Field locks include legacy change acceptance. Actual significant-change → Approved → new safety review → re-confirmation is absent here: SCRUM-395 is In Review (#74), SCRUM-402 is To Do. Direct reverts used in tests do not prove this workflow. |
 | 9 | FAIL — dependency | SCRUM-175 is To Do. Neither confirmation RPC contains organiser/active-attendee confirmation notification delivery. Existing safety notices do not satisfy this AC. |
 
 ## Exact supporting test IDs
@@ -72,7 +72,17 @@ unless a different file is named. Parameterized IDs below show an executed case.
 
 ## Changes and security findings
 
-- New `db/migrations/087_confirmation_revision.sql` retains the existing atomic
+- The coordinator confirmation test now stubs both unrelated booking panels,
+  matching its existing component-isolation pattern. This removes real booking
+  reads and the unrelated session-error alert without weakening refusal assertions.
+- The organiser notification-navigation test waits for the scroll effect before
+  checking its call count. It retains the exact once-only and target-row assertions.
+- Active migrations are now `098_event_readiness_details.sql` followed by
+  `099_confirmation_revision.sql`, above dev's latest 097. Original 085, 086 and
+  087 SQL is preserved unchanged under `db/migration-history/scrum363/` and must
+  not be deployed again. SQL tests cover an old three-argument RPC upgrade and
+  fresh installation without that obsolete signature.
+- New `db/migrations/099_confirmation_revision.sql` retains the existing atomic
   confirmation implementation, removes the old three-argument overload and adds
   `p_expected_updated_at`. Acknowledgements require the reviewed event revision;
   supplied stale revisions are refused under the event lock. No existing migration changed.
@@ -98,25 +108,27 @@ unless a different file is named. Parameterized IDs below show an executed case.
 
 ## Executed local verification
 
-- Backend: **377 passed, 4 TODO**, 12 focused suites (337 + 40 middleware tests).
-- Frontend: **235 passed**, 9 focused suites. After the final parent-state adjustment,
-  its five affected component suites were rerun: **145 passed**.
-- Targeted frontend ESLint: **0 errors**, one existing `MyAssignedEvents` initial-fetch
-  effect warning. `git diff --check` clean.
+- Backend: **631 passed, 4 TODO**, 12 focused suites after migration relocation
+  (309 confirmation/dependency tests and 322 status/role-domain regressions).
+- Frontend: **259 passed**, 9 focused suites. All three SCRUM-363 component coverage
+  gates pass at **100% lines, branches, functions and statements**.
+- The two previously failing frontend suites also pass together: **72 passed**.
+- Full frontend lint: **0 errors, 24 existing warnings**. Production build passed
+  with the existing bundle-size warning. `git diff --check` clean.
 - Regression tests first reproduced replay, stale parent state and the legacy
   confirmed-field bypass, then passed with the fixes.
 
 Backend command (inside `backend/`):
 
 ```powershell
-npx.cmd vitest run tests/db/scrum489SafetyReviewSubmissionDatabase.test.js tests/db/scrum489EquipmentArrangedDatabase.test.js tests/db/scrum489EquipmentLockDatabase.test.js tests/db/bookingDecisionsAfterSafetyReviewDatabase.test.js tests/db/registrationEligibilityDatabase.test.js tests/db/eventRegistrationDatabase.test.js tests/routes/scrum489SafetyReviewRoutes.test.js tests/routes/confirmedArrangements.test.js tests/services/confirmEventRequest.test.js tests/services/scrum489SafetyReviewSubmission.test.js --reporter=dot
-npx.cmd vitest run tests/middleware/requireAuth.test.js tests/middleware/requireRole.test.js --reporter=dot
+npx.cmd vitest run tests/db/scrum489SafetyReviewSubmissionDatabase.test.js tests/db/scrum489EquipmentArrangedDatabase.test.js tests/db/scrum489EquipmentLockDatabase.test.js tests/db/bookingDecisionsAfterSafetyReviewDatabase.test.js tests/routes/scrum489SafetyReviewRoutes.test.js tests/routes/confirmedArrangements.test.js tests/services/confirmEventRequest.test.js tests/services/scrum489SafetyReviewSubmission.test.js tests/middleware/requireAuth.test.js tests/middleware/requireRole.test.js --maxWorkers=2 --reporter=dot
+npx.cmd vitest run tests/domain/eventRequestStatus.test.js tests/domain/userRole.test.js --maxWorkers=2 --reporter=dot
 ```
 
 Frontend command (inside `frontend/`):
 
 ```powershell
-npx.cmd vitest run tests/components/EventConfirmationPanel.test.jsx tests/components/scrum489CoordinatorSafetyCheck.test.jsx tests/components/scrum489SafetyCheckSubmissionPanel.test.jsx tests/components/ConfirmedArrangements.test.jsx tests/components/MyEventRequests.test.jsx tests/services/scrum489EventRequestService.test.js tests/components/CoordinatorRequestDetail.test.jsx tests/components/CoordinatorRequestDetailEquipment.test.jsx tests/components/MyAssignedEvents.test.jsx --reporter=dot
+npx.cmd vitest run tests/components/EventConfirmationPanel.test.jsx tests/components/scrum489CoordinatorSafetyCheck.test.jsx tests/components/scrum489SafetyCheckSubmissionPanel.test.jsx tests/components/ConfirmedArrangements.test.jsx tests/components/MyEventRequests.test.jsx tests/services/scrum489EventRequestService.test.js tests/components/CoordinatorRequestDetail.test.jsx tests/components/CoordinatorRequestDetailEquipment.test.jsx tests/components/MyAssignedEvents.test.jsx --coverage --coverage.include=src/components/EventConfirmationPanel.jsx --coverage.include=src/components/ReadinessChecklist.jsx --coverage.include=src/components/ConfirmedArrangements.jsx --coverage.reportsDirectory=coverage/scrum363 --maxWorkers=2 --reporter=dot
 ```
 
 PGlite executes real SQL with local fixtures. The main suite constructs its
@@ -127,17 +139,20 @@ PostgREST relationship discovery. Queued PGlite promises are not concurrent conn
 
 ## Manual deployment and end-to-end checks — NOT executed
 
-1. `git fetch origin dev` was executed before allocating 087 (origin/dev highest
-   migration was 078; local highest was 086). Recheck numbering if dev advances.
+1. `git fetch origin dev` was executed before allocating 098 and 099; origin/dev
+   is `cd0ee4b`, highest migration 097. Pending #68 uses 091; #74 uses 095/096.
+   Recheck numbering if dev advances.
    Verify the deployment's migration ledger and existing SCRUM-489/318/safety and
-   arrangement prerequisites, including shared readiness 085 and confirmation 086.
-   Apply only pending migrations; never rewrite/reapply older definitions over newer ones.
-2. Apply 087 manually in one transaction through the project's migration process
-   or paste the file into the Supabase SQL editor. For a configured disposable
+   arrangement prerequisites. Apply only pending migrations; never rewrite/reapply
+   older definitions over newer ones or deploy `db/migration-history/` snapshots.
+2. Apply 098 then 099 manually in one transaction through the project's migration
+   process or paste both complete files between BEGIN and COMMIT in the Supabase
+   SQL editor. Fresh installations do not need archived 085-087; existing installs
+   keep their data and history. For a configured disposable
    PostgreSQL connection, from repository root:
 
    ```powershell
-   psql -X -v ON_ERROR_STOP=1 --single-transaction -f backend/db/migrations/087_confirmation_revision.sql
+   psql -X -v ON_ERROR_STOP=1 --single-transaction -f backend/db/migrations/098_event_readiness_details.sql -f backend/db/migrations/099_confirmation_revision.sql
    ```
 
    The file notifies PostgREST to reload its schema. Verify one four-argument
@@ -171,6 +186,11 @@ PostgREST relationship discovery. Queued PGlite promises are not concurrent conn
    verify all affected arrangements flagged, no releases/deletions, Approved status,
    stale safety review closed, fresh safety approval, new acknowledgement and re-confirm.
    Do not substitute direct status SQL for this check.
+   Pending #74 (`a7c2e8a`) currently saves fields before calling the transition to
+   Approved; SCRUM-363's confirmed-field trigger refuses that intermediate write.
+   Coordinate the transaction ordering/field-lock contract when integrating #74,
+   retain protection against legacy direct edits, and test the actual workflow.
+   Do not bypass the trigger or treat the presence of a transition as AC8 evidence.
 8. After SCRUM-175 exists, verify transactional organiser notification and, on
    re-confirmation, only active registered attendees; repeat/failure must not duplicate
    notifications or deliver any partial success. AC9 remains failed until then.

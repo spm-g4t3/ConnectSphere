@@ -14,7 +14,7 @@
 // mock, because a vi.mock factory is strict.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, within, fireEvent } from "@testing-library/react";
+import { render, screen, within, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 
@@ -435,7 +435,7 @@ describe("SCRUM172_AC7 a notification opens the Organiser's list on its event", 
 
     expect(rowOf("Tech Talk")).toHaveClass("my-event-requests__item--focused");
     expect(rowOf("Career Fair")).not.toHaveClass("my-event-requests__item--focused");
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
     expect(scrollIntoView.mock.contexts[0]).toBe(rowOf("Tech Talk"));
     expect(screen.queryByText("That event is no longer in your list.")).not.toBeInTheDocument();
   });

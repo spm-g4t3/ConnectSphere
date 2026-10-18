@@ -41,6 +41,8 @@ const stub = vi.hoisted(() => (name) => ({ default: () => <div data-testid={name
 vi.mock("../../src/components/AssignmentHistory", () => stub("assignment-history"));
 vi.mock("../../src/components/EventVenueFinder", () => stub("venue-finder"));
 vi.mock("../../src/components/EventVenueSuitability", () => stub("venue-suitability"));
+vi.mock("../../src/components/EventFlaggedBookings", () => stub("flagged-bookings"));
+vi.mock("../../src/components/EventVenueBookings", () => stub("venue-bookings"));
 vi.mock("../../src/components/DecisionOutcome", () => stub("decision-outcome"));
 vi.mock("../../src/components/ReassignEventPanel", () => stub("reassign"));
 vi.mock("../../src/components/ClarificationHistoryDialog", () => stub("clarification-history"));
