@@ -29,7 +29,7 @@ beforeEach(() => {
 });
 
 describe("SCRUM-363 organiser registration controls", () => {
-  it("shows the current configuration and saves organiser changes", async () => {
+  it("SCRUM494_AC6_shows_current_configuration_and_saves_organiser_changes", async () => {
     vi.mocked(getRegistrationSettings).mockResolvedValue({
       eventName: "Industry Night",
       status: "approved",
