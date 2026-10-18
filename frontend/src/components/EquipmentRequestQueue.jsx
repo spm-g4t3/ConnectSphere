@@ -90,8 +90,7 @@ export default function EquipmentRequestQueue() {
   // Requests depend on both filters, so they are cleared when a read fails and
   // rows from another filter never stay.
   const [requestList, setRequestList] = useState(null);
-  // Needs action ignores the status filter, so it is kept through a failed
-  // reload unless the past-events choice it was read under has changed.
+  // Needs action ignores both filters, so a failed reload keeps it.
   const [needsList, setNeedsList] = useState(null);
   // The filter's choices, kept from the last good read so the filter survives a failure.
   const [statuses, setStatuses] = useState(null);
@@ -112,13 +111,11 @@ export default function EquipmentRequestQueue() {
         rows: data.needsAction,
         total: data.needsActionTotal,
         truncated: data.needsActionTruncated,
-        includePast,
       });
       setStatuses(data.statuses);
     } catch (err) {
       if (ticket !== latest.current) return;
       setRequestList(null);
-      setNeedsList((current) => (current?.includePast === includePast ? current : null));
       setError(loadErrorMessage(err));
     } finally {
       if (ticket === latest.current) setLoading(false);

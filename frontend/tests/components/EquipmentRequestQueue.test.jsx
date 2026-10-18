@@ -434,7 +434,7 @@ describe("AC2: the filters", () => {
     expect(screen.getByLabelText("Status")).toHaveValue("arranged");
   });
 
-  it("SCRUM287_AC2_a_failed_past_events_change_clears_needs_action_too", async () => {
+  it("SCRUM287_AC4_a_failed_past_events_change_keeps_needs_action", async () => {
     vi.mocked(getEquipmentQueue)
       .mockResolvedValueOnce(answer([row({ eventName: "Old Needs" })], [row({ eventName: "Old Row" })]))
       .mockRejectedValueOnce({ response: { status: 500 } });
@@ -444,9 +444,10 @@ describe("AC2: the filters", () => {
     await userEvent.click(screen.getByLabelText("Include past events"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/);
-    expect(screen.queryByText("Old Needs")).not.toBeInTheDocument();
     expect(screen.queryByText("Old Row")).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: /Needs action/ })).not.toBeInTheDocument();
+    // Needs action ignores the past-events option, so it is still true.
+    expect(within(needsActionSection()).getByText("Old Needs", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Needs action (1)" })).toBeInTheDocument();
   });
 
   it("SCRUM287_AC2_Try_again_after_a_failed_filter_change_reads_with_that_filter", async () => {
