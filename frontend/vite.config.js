@@ -131,6 +131,17 @@ const SCRUM487_FILES = [
   'src/components/AssignedEventsFilters.jsx',
 ]
 
+// SCRUM-284 (SCRUM-287) owns the equipment request queue and the dashboard that
+// mounts it, gated at 100%.
+const SCRUM284_FILES = [
+  'src/components/EquipmentRequestQueue.jsx',
+  'src/components/TechnicalSupportDashboard.jsx',
+  'src/services/equipmentQueueService.js',
+  'src/services/equipmentRequestStatus.js',
+  'src/services/eventPeriodFormat.js',
+  'src/services/supportService.js',
+]
+
 // SCRUM-258 owns the Venue Staff queue and its decision card outright.
 // VenueStaffDashboard.jsx, which mounts the queue, and the shared services
 // it calls (bookingRequestService.js, already gated under SCRUM-254) are not
@@ -238,6 +249,7 @@ export default defineConfig({
         ...SCRUM491_FILES.map((file) => [file, FULL]),
         ...SCRUM486_FILES.map((file) => [file, FULL]),
         ...SCRUM487_FILES.map((file) => [file, FULL]),
+        ...SCRUM284_FILES.map((file) => [file, FULL]),
         ...SCRUM258_FILES.map((file) => [file, FULL]),
         ...SCRUM266_FILES.map((file) => [file, FULL]),
         ...SCRUM495_FILES.map((file) => [file, FULL]),
