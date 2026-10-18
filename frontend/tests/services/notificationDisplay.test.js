@@ -991,6 +991,13 @@ const FIXTURES = {
   // SCRUM-492 (089).
   booking_released: { eventName: "Tech Talk", venueName: "Hall A", releasedByName: "Priya Nair", reason: "Moved" },
   booking_request_conflict_cleared: { eventName: "Tech Talk", venueName: "Hall A", releasedEventName: "Gala Dinner" },
+  // SCRUM-176 (097).
+  equipment_requested: { eventName: "Tech Talk", lines: [] },
+  equipment_request_changed: { eventName: "Tech Talk", lines: [] },
+  equipment_request_cancelled: { eventName: "Tech Talk", reason: "Removed" },
+  equipment_arranged: { eventName: "Tech Talk", lines: [] },
+  equipment_not_fully_arranged: { eventName: "Tech Talk", lines: [] },
+  equipment_flagged: { eventName: "Tech Talk", reason: "Retired" },
 };
 
 describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", () => {
