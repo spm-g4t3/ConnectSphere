@@ -1,6 +1,6 @@
 -- SCRUM39_AC4 / AC5: real two-connection lock and rollback checks (not PGlite).
 -- Run manually against a disposable PostgreSQL/Supabase test database, after
--- SCRUM-494 and migrations 079-081. This writes registrations; do not use a real event.
+-- the registration migrations through 094. This writes registrations; do not use a real event.
 -- Use two separate psql sessions as service_role (or a role with equivalent rights).
 -- Copy each session's block separately; do not run this file as one script.
 -- Set these variables IN BOTH sessions to a dedicated, confirmed, enabled event
@@ -16,13 +16,13 @@ select register_for_event(:'event_id'::uuid, :'attendee_a'::uuid);
 select pg_sleep(15);
 commit;
 
--- Session B: must wait until A commits, then fail with "Event is full".
+-- Session B: must wait until A commits, then return outcome "capacity_reached".
 begin;
 select register_for_event(:'event_id'::uuid, :'attendee_b'::uuid);
 rollback;
 
 -- Either session: expect exactly one registered row, belonging to A.
-select attendee_id, status from registrations
+select attendee_id, status from event_registrations
  where event_request_id = :'event_id'::uuid and status = 'registered';
 
 -- SCRUM46_AC2 / AC5: the authoritative browse count must also report one place
@@ -31,7 +31,7 @@ select * from open_event_registration_state(array[:'event_id'::uuid], :'attendee
 select * from open_event_registration_state(array[:'event_id'::uuid], :'attendee_b'::uuid);
 
 -- Duplicate race: repeat on a fresh empty test event, using attendee_a in BOTH
--- sessions. B must wait, then fail with "Already registered"; one row remains.
+-- sessions. B must wait, then return outcome "already_registered"; one row remains.
 
 -- Rollback race: repeat on another fresh empty test event, using different
 -- attendees, replacing A's COMMIT with ROLLBACK. B must wait, then succeed.

@@ -10,7 +10,7 @@ import { dirname, resolve } from 'node:path';
 import { ACTIVE_REGISTRATION_STATUS } from '../../src/domain/registrationAvailability.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const MIGRATION = resolve(here, '../../db/migrations/068_open_event_registration_state.sql');
+const MIGRATION = resolve(here, '../../db/migrations/091_event_registration_hardening.sql');
 
 const EVENT_A = '00000000-0000-4000-8000-00000000000a';
 const EVENT_B = '00000000-0000-4000-8000-00000000000b';
@@ -38,7 +38,7 @@ beforeAll(async () => {
     create role authenticated;
     create role service_role bypassrls;
   `);
-  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '079_registrations.sql']) {
+  for (const name of ['001_event_requests.sql', '007_user_roles.sql']) {
     await db.exec(readFileSync(resolve(here, '../../db/migrations', name), 'utf8'));
   }
   await db.exec(readFileSync(MIGRATION, 'utf8'));
@@ -59,16 +59,16 @@ beforeAll(async () => {
        insert into auth.users (id) select gen_random_uuid() from generate_series(1, 1200)
        returning id
      )
-     insert into registrations (event_request_id, attendee_id, status)
+     insert into event_registrations (event_request_id, attendee_id, status)
      select $1::uuid, id, 'registered' from attendees`,
     [EVENT_A],
   );
   await db.query(
-    `insert into registrations (event_request_id, attendee_id, status) values
+    `insert into event_registrations (event_request_id, attendee_id, status) values
        ($1, $3, 'registered'), ($1, $4, 'withdrawn'), ($2, $4, 'withdrawn')`,
     [EVENT_B, EVENT_C, ME, OTHER],
   );
-  await db.query(`insert into registrations (event_request_id, attendee_id, status) values ($1, $2, 'registered')`, [
+  await db.query(`insert into event_registrations (event_request_id, attendee_id, status) values ($1, $2, 'registered')`, [
     EVENT_A,
     ME,
   ]);

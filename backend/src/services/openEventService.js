@@ -7,6 +7,7 @@
 import { STATUS } from '../domain/eventRequestStatus.js';
 import { isOpenForRegistration } from '../domain/registrationWindow.js';
 import { availability } from '../domain/registrationAvailability.js';
+import { translateRegistrationEligibilityError } from './registrationEligibilityService.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../errors.js';
 // The repository's one uuid check, a pure module, so this service stays loadable
 // without credentials.
@@ -33,7 +34,7 @@ function translateStateError(error) {
       [{ field: 'attendeeId', message: 'is required' }],
     );
   }
-  return error;
+  return translateRegistrationEligibilityError(error);
 }
 
 async function resolveClient(client) {
@@ -63,13 +64,33 @@ function toOpenEvent(row, activeCount, isRegistered) {
     description: row.description,
     startsAt: row.proposed_start,
     endsAt: row.proposed_end,
+    registrationOpensAt: row.registration_opens_at,
+    registrationClosesAt: row.registration_closes_at,
     capacity: row.registration_capacity,
+    registeredCount: activeCount,
     placesLeft,
     isFull,
     isRegistered,
     canRegister: !isFull && !isRegistered,
     canJoinWaitlist: false,
     waitlistCount: null,
+  };
+}
+
+function toBrowseEvent(event) {
+  return {
+    id: event.id,
+    eventName: event.eventName,
+    description: event.description,
+    startsAt: event.startsAt,
+    endsAt: event.endsAt,
+    capacity: event.capacity,
+    placesLeft: event.placesLeft,
+    isFull: event.isFull,
+    isRegistered: event.isRegistered,
+    canRegister: event.canRegister,
+    canJoinWaitlist: event.canJoinWaitlist,
+    waitlistCount: event.waitlistCount,
   };
 }
 
@@ -141,11 +162,12 @@ async function withRegistrationState(db, rows, attendeeId) {
  * @param {object} [options.client]
  * @param {Date} [options.now]  the instant to judge by; tests pass one
  * @returns {Promise<object[]>} possibly empty, each with only id, eventName,
- *   description, startsAt, endsAt, capacity, placesLeft, isFull, isRegistered,
- *   canRegister, canJoinWaitlist and waitlistCount
+ *   description, startsAt, endsAt, registrationOpensAt, registrationClosesAt,
+ *   capacity, registeredCount, placesLeft, isFull, isRegistered, canRegister,
+ *   canJoinWaitlist and waitlistCount
  * @throws {ValidationError} when no attendee was supplied, before any read
  */
-export async function listOpenEvents({ attendeeId, client, now = new Date() } = {}) {
+async function listOpenEventsWithRegistrationDetails({ attendeeId, client, now = new Date() } = {}) {
   assertAttendee(attendeeId);
 
   const db = await resolveClient(client);
@@ -163,7 +185,7 @@ export async function listOpenEvents({ attendeeId, client, now = new Date() } = 
 
     // Untyped on purpose: the route logs it and answers a generic 500, so a
     // driver message never reaches the caller.
-    if (error) throw error;
+    if (error) throw translateStateError(error);
 
     const page = data ?? [];
     rows.push(...page);
@@ -173,6 +195,19 @@ export async function listOpenEvents({ attendeeId, client, now = new Date() } = 
   const events = rows.filter((row) => isOpenForRegistration(toSettings(row), now));
 
   return withRegistrationState(db, events, attendeeId);
+}
+
+/**
+ * Same eligibility and database state as Browse Open Events, with registration
+ * window and active-count fields for the Attendee dashboard.
+ */
+export async function listOpenEventsForRegistration(options = {}) {
+  return listOpenEventsWithRegistrationDetails(options);
+}
+
+export async function listOpenEvents(options = {}) {
+  const events = await listOpenEventsWithRegistrationDetails(options);
+  return events.map(toBrowseEvent);
 }
 
 /**
@@ -209,7 +244,7 @@ export async function getOpenEvent({ attendeeId, eventId, client, now = new Date
 
   const { data, error } = await openEventsQuery(db, now.toISOString()).eq('id', wanted);
 
-  if (error) throw error;
+  if (error) throw translateStateError(error);
 
   const rows = (data ?? []).filter(
     (row) => row.id === wanted && isOpenForRegistration(toSettings(row), now),
@@ -217,5 +252,5 @@ export async function getOpenEvent({ attendeeId, eventId, client, now = new Date
   if (rows.length === 0) throw notOpen();
 
   const [event] = await withRegistrationState(db, rows, attendeeId);
-  return event;
+  return toBrowseEvent(event);
 }

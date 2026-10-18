@@ -847,25 +847,25 @@ describe('SCRUM495 freshness and failures', () => {
     expect(client.calls.filter((c) => c.table === 'rpc:open_event_registration_state')).toHaveLength(3);
   });
 
-  it('SCRUM495_AC2_answers_a_generic_500_when_the_registrations_read_fails', async () => {
+  it('SCRUM495_AC2_answers_a_safe_503_when_the_registrations_read_fails', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const client = createFakeClient([eventRow()], { registrationError: { code: '42P01', message: 'relation "registrations" does not exist' } });
 
     const res = await get(client);
 
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: 'Event registration is temporarily unavailable. Please try again later.' });
     spy.mockRestore();
   });
 
-  it('SCRUM495_AC2_answers_a_generic_500_without_the_driver_message_when_the_read_fails', async () => {
+  it('SCRUM495_AC2_answers_a_safe_503_without_the_driver_message_when_the_read_fails', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const client = createFakeClient([], { error: { code: '42703', message: 'column registration_enabled does not exist' } });
 
     const res = await get(client);
 
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: 'Event registration is temporarily unavailable. Please try again later.' });
     expect(JSON.stringify(res.body)).not.toContain('registration_enabled');
     spy.mockRestore();
   });
@@ -1076,14 +1076,14 @@ describe('SCRUM495_AC8 one event carries no internal planning information', () =
     }
   });
 
-  it('SCRUM495_AC8_answers_a_generic_500_without_the_driver_message_when_a_read_fails', async () => {
+  it('SCRUM495_AC8_answers_a_safe_503_without_the_driver_message_when_a_read_fails', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const row = eventRow();
 
     const res = await getOne(createFakeClient([row], { error: { code: '42703', message: 'column registration_enabled does not exist' } }), row.id);
 
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: 'Event registration is temporarily unavailable. Please try again later.' });
     spy.mockRestore();
   });
 });
