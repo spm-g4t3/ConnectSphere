@@ -1,4 +1,6 @@
 import { ROLE } from '../domain/userRole.js';
+import { STATUS } from '../domain/eventRequestStatus.js';
+import { BOOKING_STATUS } from '../domain/bookingStatus.js';
 import { UnauthorizedError, ForbiddenError, ValidationError, NotFoundError, ServiceUnavailableError } from '../errors.js';
 import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
 
@@ -18,10 +20,12 @@ export async function getAttendeeEvent({ user, eventRequestId, client } = {}) {
   const attendeeId = user.id.trim().toLowerCase();
   const eventId = eventRequestId.trim().toLowerCase();
   const db = client ?? (await import('../config/supabaseClient.js')).supabase;
-  // Keep the active registration and its event in one authorised read. The
-  // unique attendee/event row also exists for inactive and waitlisted entries.
+  // Registration, event state and arrangements share one database snapshot;
+  // a separate status check could disclose arrangements after a planning change.
   const { data, error } = await db.from('event_registrations')
-    .select('event_request_id, attendee_id, status, event_requests!inner(id)')
+    .select(`event_request_id, attendee_id, status,
+      event_requests!inner(id, status, proposed_start, proposed_end,
+        bookings(id, status, venues(name, location)))`)
     .eq('attendee_id', attendeeId)
     .eq('event_request_id', eventId)
     .eq('status', REGISTERED)
@@ -38,6 +42,23 @@ export async function getAttendeeEvent({ user, eventRequestId, client } = {}) {
     throw new NotFoundError('Event information not found');
   }
 
-  // This is the access-only projection; arrangement retrieval extends this read.
-  return { eventRequestId: data.event_request_id };
+  const event = data.event_requests;
+  if (event.status !== STATUS.CONFIRMED) {
+    return { eventRequestId: data.event_request_id, state: 'unavailable' };
+  }
+
+  // Explicit projections keep internal status, planning and staffing data private.
+  return {
+    eventRequestId: data.event_request_id,
+    state: 'confirmed',
+    startsAt: event.proposed_start ?? null,
+    endsAt: event.proposed_end ?? null,
+    venues: (event.bookings ?? [])
+      .filter(booking => booking.status === BOOKING_STATUS.APPROVED)
+      .map(booking => ({
+        bookingId: booking.id,
+        name: booking.venues?.name ?? null,
+        location: booking.venues?.location ?? null,
+      })),
+  };
 }
