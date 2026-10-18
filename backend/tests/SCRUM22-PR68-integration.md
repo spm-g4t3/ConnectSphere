@@ -1,12 +1,12 @@
 # SCRUM-22 / PR #68 integration
 
-Dependency snapshot: PR #68 (commit `05f418f`), checked against dev `d0c824e`
-on 18 October 2026. PR #68's schema migrations are 050, 082 and 085; its 085 is
-renumbered here to 091 with unchanged SQL. **Merge and apply #68 first.** This is
-the chosen release strategy; feature flags remain removed.
+Dependency snapshot: PR #68 (commit `fb11b2d`), checked against dev `eb739a3`
+on 18 October 2026. **#68 is still open and #70 is blocked on it.** Its schema
+migrations 050, 082 and 091 and `backend/src/routes/eventRegistration.js` match
+this branch. Feature flags remain removed; merge and apply #68 first.
 
 The active SCRUM-22 sequence is **092 persistence -> 093 eligibility -> 094 atomic
-registration**, after dev's highest migration 089 and PR #68's schema. Previous
+registration**, after dev's highest migration 090 and PR #68's schema. Previous
 079-081 and the earlier registration 088 are retained unchanged under
 `backend/db/migration-history/`, outside the deployable migration directory.
 Do not replay those snapshots or change their applied SQL.
@@ -36,8 +36,8 @@ Do not replay those snapshots or change their applied SQL.
 
 - Non-confirmed, disabled, missing, not-yet-open, closed and started events produce
   the same attendee-facing 404, without private status or eligibility codes.
-- Serialization failures (40001) and deadlocks (40P01) produce safe retryable 409s
-  through either endpoint. Failed SQL writes roll back.
+- Serialization failures (40001) and deadlocks (40P01) during registration produce
+  safe retryable 409s through either submission endpoint. Failed SQL writes roll back.
 - A submission refusal suppresses the redundant generic “not open” banner.
   `EVENT_FULL` uses the race-specific message, including actual typed API failures.
 - Real schema migrations replace test-only registration columns. Missing tables,
@@ -45,18 +45,52 @@ Do not replay those snapshots or change their applied SQL.
 - PR #68's existing backend settings/listing services, route, registration-schedule
   conflict mapping and status vocabulary are reused. Its registration method
   delegates to the shared SCRUM-22 service.
+- Direct `event_requests` read errors map only missing-schema codes to 503.
+  Other failures remain unchanged for logging and a generic 500; they do not
+  become attendee-role, identity or registration-status refusals. The separate
+  registration-state RPC retains its existing refusal mapping.
+
+## Required merge order and re-review
+
+1. Merge #68 into dev first. Do not merge #70 first or treat these dependency
+   copies as delivery of #68: this branch does not contain its organiser settings UI.
+2. Fetch dev and merge that updated dev into #70. Resolve against #68's delivered
+   settings API/UI and retain SCRUM-22's atomic writer, privacy and browse behavior.
+3. Re-review and test the combined result before #70 is approved or merged.
+
+A `git merge-tree` simulation against the snapshots above confirmed seven
+conflicting files, without changing the branch or working tree:
+
+- `backend/src/services/eventRegistrationService.js`: preserve #68's organiser
+  settings/read/listing contract and delegate registration to the shared writer.
+- `backend/src/services/openEventService.js`: preserve #68's extended listing
+  fields and SCRUM-22's browse allowlist and separate table/RPC error mappings.
+- `frontend/src/App.jsx`: preserve #68's organiser settings route and screen,
+  plus the attendee browse/detail routes and real registration service.
+- `frontend/src/components/AttendeeDashboard.jsx`: retain notifications and the
+  normal browse link; avoid restoring a second registration submission flow.
+- `backend/tests/db/eventRegistrationDatabase.test.js`: retain both #68's
+  settings assertions and SCRUM-22's atomic persistence/capacity/rollback coverage.
+- `backend/tests/db/openEventRegistrationStateDatabase.test.js`: preserve
+  canonical registered-row counts and backend-only access assertions.
+- `backend/tests/services/openEventServiceClient.test.js`: retain both stories'
+  listing contracts and missing-attendee/default-client coverage.
+
+After integration, run both stories' backend suites and organiser settings UI,
+attendee navigation/submission and browse regression suites, then CI checks.
+Verify through normal navigation that the organiser can edit settings and an
+Attendee can browse/register with the resulting authoritative availability.
+These conflict resolutions and combined UI checks remain pending until #68 lands.
 
 ## Deployment — manual only
 
-First stack/retarget PR #70 on PR #68 (or rebase after #68 reaches dev) during the
-normal review workflow. No commits, rebase, merge or push were performed by this
-fix. The dependency files are present locally so this branch can also
-exercise and deploy its actual schema, rather than assuming another PR supplied it.
+Complete the required merge order and re-review above. No commits, rebase, merge
+or push were performed by this fix. Local schema fixtures do not establish that
+#68's complete organiser workflow has been merged or deployed.
 
 Review the target database's applied-migration history. The required order is:
 
-1. Merge and apply PR #68, including any pending 050, 082 and hardening migration
-   (091 here, originally 085), on top of the
+1. Merge and apply PR #68, including any pending 050, 082 and 091, on top of the
    existing lifecycle/profile/browse prerequisites (including 068).
 2. Apply 092, then 093, then 094 inside one transaction before releasing #70's API/UI.
 3. Never execute `backend/db/migration-history/`; existing 079-081 or the old
@@ -104,9 +138,15 @@ After deploying the matching backend/frontend and restarting/rebuilding:
 
 ## Local evidence and limits
 
-Focused results: **325 backend tests passed** across 13 suites; **210 frontend
-tests passed** across five suites. Targeted frontend ESLint: zero errors, one
-pre-existing effect-state warning in `BrowseEventDetails.jsx`.
+Latest review fix: **227 backend tests passed** across five focused suites,
+including every missing-schema code on list/details, unchanged driver errors,
+generic logged 500s and preserved registration-state RPC refusals.
+`openEventService.js` has **100% lines, branches, functions and statements**.
+The preceding full backend coverage run passed 7,216 tests across 165 suites
+with two workers; it has not been repeated for this table-read fix.
+Earlier frontend evidence: 210 tests passed across five suites; this fix changes
+no frontend code. Targeted ESLint had zero errors and one pre-existing
+effect-state warning in `BrowseEventDetails.jsx`.
 
 `registrationSchemaIntegrationDatabase.test.js` executes the combined historical
 migrations and 092-094 on PGlite with pre-existing rows in both tables. It covers

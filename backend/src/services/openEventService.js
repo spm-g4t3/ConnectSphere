@@ -37,6 +37,13 @@ function translateStateError(error) {
   return translateRegistrationEligibilityError(error);
 }
 
+/** Table failures describe database state, not attendee eligibility. */
+function translateEventReadError(error) {
+  return ['42P01', '42703', 'PGRST202', 'PGRST204', 'PGRST205'].includes(error.code)
+    ? translateRegistrationEligibilityError(error)
+    : error;
+}
+
 async function resolveClient(client) {
   if (client) return client;
 
@@ -183,9 +190,9 @@ async function listOpenEventsWithRegistrationDetails({ attendeeId, client, now =
       .order('id', { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
 
-    // Untyped on purpose: the route logs it and answers a generic 500, so a
-    // driver message never reaches the caller.
-    if (error) throw translateStateError(error);
+    // Missing schema is a deployment issue; other driver failures stay untyped
+    // so the route logs them and answers a generic 500.
+    if (error) throw translateEventReadError(error);
 
     const page = data ?? [];
     rows.push(...page);
@@ -244,7 +251,7 @@ export async function getOpenEvent({ attendeeId, eventId, client, now = new Date
 
   const { data, error } = await openEventsQuery(db, now.toISOString()).eq('id', wanted);
 
-  if (error) throw translateStateError(error);
+  if (error) throw translateEventReadError(error);
 
   const rows = (data ?? []).filter(
     (row) => row.id === wanted && isOpenForRegistration(toSettings(row), now),

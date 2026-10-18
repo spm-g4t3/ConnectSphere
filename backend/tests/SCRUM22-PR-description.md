@@ -7,12 +7,13 @@ against repeated submissions.
 
 ## Dependency and deployment order
 
-**Depends on #68 (SCRUM-494): merge and apply #68 first. Feature flags remain
-removed; do not deploy this API/UI before its database prerequisites.**
+**BLOCKED on #68 (SCRUM-494). Merge #68 into dev first, then merge that updated
+dev into #70, resolve against #68's versions and re-review the combined result.
+Do not merge #70 first.** Feature flags remain removed; apply #68's database
+prerequisites before deploying this API/UI.
 
-- Checked against dev `d0c824e` (highest migration 089) and #68 `05f418f`.
-- Apply #68's pending schema migrations, including 050, 082 and hardening
-  (renumbered here from 085 to 091, with unchanged SQL), with the
+- Checked against dev `eb739a3` (highest migration 090) and #68 `fb11b2d`.
+- Apply #68's pending schema migrations, including 050, 082 and 091, with the
   existing lifecycle/profile/browse prerequisites (including 068).
 - Then apply **092_event_registration_persistence.sql ->
   093_registration_eligibility.sql -> 094_register_for_event.sql**, in one
@@ -30,8 +31,12 @@ After #68 is deployed, apply only pending SQL from repository root:
 psql -X -v ON_ERROR_STOP=1 --single-transaction -f backend/db/migrations/092_event_registration_persistence.sql -f backend/db/migrations/093_registration_eligibility.sql -f backend/db/migrations/094_register_for_event.sql
 ```
 
-The normal review workflow must stack this branch on #68, or rebase it after #68
-lands in dev. No branch merge/rebase or remote database changes were performed.
+The dependency migrations and registration route match #68, but this branch
+does not deliver #68's organiser settings screen. A Git merge simulation confirms
+seven conflicts in shared services, routing/dashboard and tests. Preserve the
+organiser workflow and SCRUM-22's shared writer/browse contracts during resolution;
+the merge and combined-result re-review remain outstanding until #68 lands.
+No branch merge/rebase or remote database changes were performed.
 See `backend/tests/SCRUM22-PR68-integration.md` for rollout and end-to-end checks.
 
 ## Eligibility and review fixes
@@ -47,16 +52,24 @@ See `backend/tests/SCRUM22-PR68-integration.md` for rollout and end-to-end check
 - Serialization/deadlock failures map to retryable 409 responses. Failed writes
   roll back. Closed registration shows one refusal; full-event races show their
   specific message.
+- Direct event-table reads translate only missing-schema codes to 503. Other
+  database errors remain unchanged and return a logged, generic 500, without
+  leaking driver messages or misreporting attendee eligibility. Registration-state
+  RPC role/identity refusals retain their existing mapping.
 - Active SQL headers describe the implemented transaction. Frontend coverage
   gates use parent story `SCRUM22_FILES` with unchanged thresholds.
 
 ## Validation
 
-- Backend: **325 tests passed, 13 focused suites**. SQL executes in PGlite using
-  #68's actual migrations, without adding settings columns by hand. Coverage
-  includes legacy upgrades, canonical counts, privacy, permissions, uniqueness,
-  rollback and both HTTP registration contracts.
-- Frontend: **210 tests passed, 5 focused suites** covering submissions, feedback,
+- Latest review fix: **227 backend tests passed, 5 focused suites**. Direct table
+  errors stay unchanged and produce generic logged 500s; all five missing-schema
+  codes produce safe 503s on both browse reads. State RPC refusal tests still pass.
+  `openEventService.js` coverage is **100% in all categories**, with unchanged gates.
+- Previous full backend coverage baseline: 7,216 tests passed across 165 suites
+  with two workers. Full CI and the integrated #68 result must be checked again
+  after conflict resolution. SQL suites use actual migrations in PGlite, covering
+  upgrades, canonical counts, privacy, permissions, uniqueness and rollback.
+- Earlier frontend evidence: **210 tests passed, 5 focused suites** covering submissions, feedback,
   repeated clicks, failures and refreshed availability.
 - `frontend/vite.config.js` ESLint passed; `git diff --check` passed.
 - Real PostgreSQL concurrent-connection checks, remote migrations and deployed
