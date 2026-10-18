@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getOpenEvent } from "../services/openEventService";
-import { registrationErrorMessage } from "../services/registrationErrors";
+import { registrationErrorMessage, EVENT_FULL_MESSAGE, REGISTRATION_UNAVAILABLE_MESSAGE } from "../services/registrationErrors";
 import useRefreshOnReturn from "./useRefreshOnReturn";
 import useOpenEventRead from "./useOpenEventRead";
 import OpenEventAvailability, { RegisteredBadge } from "./OpenEventAvailability";
@@ -21,6 +21,7 @@ const LOAD_ERROR_MESSAGES = {
   401: "Your session has expired. Please sign in again.",
   403: "Only Attendees can browse open events.",
   500: "This event could not be loaded. Please try again.",
+  503: REGISTRATION_UNAVAILABLE_MESSAGE,
 };
 
 const NOT_OPEN_MESSAGE = "This event is not open for registration.";
@@ -66,7 +67,6 @@ function RegisterAction({ event, isRegistered, onRegister, registering, stale, o
   );
 }
 
-const FILLED_MESSAGE = "Sorry, this event filled up before your registration went through. It is now full.";
 const ALREADY_MESSAGE = "You are already registered for this event.";
 const GENERIC_REGISTER_MESSAGE = "Registration could not be completed. Please try again.";
 
@@ -177,7 +177,7 @@ export default function BrowseEventDetails({ onRegister }) {
     if (fresh.kind === "ok" && fresh.data.isRegistered) {
       setRegisterError(ALREADY_MESSAGE);
     } else if (fresh.kind === "ok" && fresh.data.isFull) {
-      setRegisterError(FILLED_MESSAGE);
+      setRegisterError(EVENT_FULL_MESSAGE);
     } else if (fresh.kind !== "not-found") {
       // When the event is no longer open, the not-open message already says so.
       setRegisterError(GENERIC_REGISTER_MESSAGE);
@@ -192,7 +192,7 @@ export default function BrowseEventDetails({ onRegister }) {
 
         {loading && <p role="status">Loading...</p>}
 
-        {!loading && notOpen && (
+        {!loading && notOpen && !registerError && (
           <div className="browse-event-details__unavailable" role="alert">
             <p>{NOT_OPEN_MESSAGE}</p>
           </div>

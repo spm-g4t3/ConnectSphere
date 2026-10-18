@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "../../src/App.jsx";
@@ -105,7 +105,7 @@ describe("SCRUM43 registration feedback", () => {
   });
 
   it.each([
-    ["EVENT_FULL", "This event is full."],
+    ["EVENT_FULL", "Sorry, this event filled up before your registration went through. It is now full."],
     ["REGISTRATION_NOT_OPEN", "Registration has not opened yet."],
     ["REGISTRATION_CLOSED", "Registration has closed for this event."],
     ["EVENT_NOT_CONFIRMED", "Registration is only available for Confirmed events."],
@@ -121,13 +121,28 @@ describe("SCRUM43 registration feedback", () => {
     expect(screen.queryByText("Registered")).not.toBeInTheDocument();
   });
 
-  it("SCRUM43_AC4_preserves_the_specific_refusal_when_the_event_is_no_longer_browsable", async () => {
+  it.each([
+    ['REGISTRATION_DISABLED', 'Registration is disabled for this event.'],
+    ['REGISTRATION_CLOSED', 'Registration has closed for this event.'],
+  ])("SCRUM43_AC4_shows_only_the_specific_%s_refusal_when_refresh_finds_the_event_unavailable", async (code, message) => {
     vi.mocked(getOpenEvent).mockResolvedValueOnce(event()).mockRejectedValueOnce({ response: { status: 404 } });
-    vi.mocked(registerForEvent).mockRejectedValue({ response: { status: 409, data: { code: "REGISTRATION_DISABLED" } } });
+    vi.mocked(registerForEvent).mockRejectedValue({ response: { status: 409, data: { code } } });
     render(<App />);
     await userEvent.click(await screen.findByRole("button", { name: "Register" }));
-    await screen.findByText("This event is not open for registration.");
-    expect(screen.getByText("Registration is disabled for this event.").closest('[role="alert"]')).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.queryByText("This event is not open for registration.")).not.toBeInTheDocument();
+    expect(successNotice()).toBeNull();
+  });
+
+  it("SCRUM43_AC4_the_real_EVENT_FULL_code_shows_the_race_message_and_refreshes_full_availability", async () => {
+    vi.mocked(registerForEvent).mockRejectedValue({ response: { status: 409, data: { code: 'EVENT_FULL' } } });
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event())
+      .mockResolvedValue(event({ placesLeft: 0, isFull: true, canRegister: false }));
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Register' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('filled up before your registration went through');
+    expect(screen.getByRole('button', { name: 'Register' })).toBeDisabled();
     expect(successNotice()).toBeNull();
   });
 
@@ -174,12 +189,10 @@ const auth = (user = { id: "a1", role: "attendee" }, loading = false) => {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "true");
   window.history.replaceState({}, "", "/open-events/e1");
   auth();
   vi.mocked(getOpenEvent).mockResolvedValue(event());
 });
-afterEach(() => { vi.unstubAllEnvs(); });
 
 describe("SCRUM36 attendee registration through the real App route", () => {
   it("SCRUM36_AC1_AC2_AC7_submits_the_selected_event_and_shows_server_confirmed_success", async () => {

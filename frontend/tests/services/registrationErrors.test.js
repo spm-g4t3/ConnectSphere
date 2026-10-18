@@ -4,7 +4,7 @@ import { registrationErrorMessage } from "../../src/services/registrationErrors"
 describe("SCRUM43 registration failure messages", () => {
   it.each([
     ["ALREADY_REGISTERED", "You are already registered for this event."],
-    ["EVENT_FULL", "This event is full."],
+    ["EVENT_FULL", "Sorry, this event filled up before your registration went through. It is now full."],
     ["REGISTRATION_NOT_OPEN", "Registration has not opened yet."],
     ["REGISTRATION_CLOSED", "Registration has closed for this event."],
     ["EVENT_NOT_CONFIRMED", "Registration is only available for Confirmed events."],
@@ -18,6 +18,7 @@ describe("SCRUM43 registration failure messages", () => {
   it.each([
     [401, "Your session has expired. Please sign in again."],
     [403, "Only Attendees can register for events."],
+    [503, "Event registration is temporarily unavailable. Please try again later."],
   ])("SCRUM43_AC4_explains_authorisation_failure_%s", (status, message) => {
     expect(registrationErrorMessage({ response: { status } })).toBe(message);
   });

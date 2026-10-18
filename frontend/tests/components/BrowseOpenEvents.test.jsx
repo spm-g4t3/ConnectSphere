@@ -232,6 +232,7 @@ describe("SCRUM495 errors and retry", () => {
     [401, "Your session has expired. Please sign in again."],
     [403, "Only Attendees can browse open events."],
     [500, "Open events could not be loaded. Please try again."],
+    [503, "Event registration is temporarily unavailable. Please try again later."],
   ])("SCRUM495_AC2_explains_a_%i", async (status, message) => {
     vi.mocked(getOpenEvents).mockRejectedValue({ response: { status } });
 

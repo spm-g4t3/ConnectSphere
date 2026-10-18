@@ -1,6 +1,9 @@
+export const EVENT_FULL_MESSAGE = "Sorry, this event filled up before your registration went through. It is now full.";
+export const REGISTRATION_UNAVAILABLE_MESSAGE = "Event registration is temporarily unavailable. Please try again later.";
+
 const CONFLICT_MESSAGES = {
   ALREADY_REGISTERED: "You are already registered for this event.",
-  EVENT_FULL: "This event is full.",
+  EVENT_FULL: EVENT_FULL_MESSAGE,
   REGISTRATION_NOT_OPEN: "Registration has not opened yet.",
   REGISTRATION_CLOSED: "Registration has closed for this event.",
   EVENT_NOT_CONFIRMED: "Registration is only available for Confirmed events.",
@@ -15,6 +18,7 @@ export function registrationErrorMessage(error) {
   const status = response?.status;
   if (status === 401) return "Your session has expired. Please sign in again.";
   if (status === 403) return "Only Attendees can register for events.";
+  if (status === 503) return REGISTRATION_UNAVAILABLE_MESSAGE;
   if (status === 409 && Object.hasOwn(CONFLICT_MESSAGES, response.data?.code)) {
     return CONFLICT_MESSAGES[response.data.code];
   }

@@ -1,13 +1,22 @@
 import {
-  ValidationError, NotFoundError, ConflictError, ForbiddenError, UnauthorizedError,
+  ValidationError, NotFoundError, ConflictError, ForbiddenError, UnauthorizedError, ServiceUnavailableError,
 } from '../errors.js';
 import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
 
 /** Shared by the eligibility preflight and registration writer. */
 export function translateRegistrationEligibilityError(error) {
+  if (['42703', '42P01', 'PGRST202', 'PGRST204', 'PGRST205'].includes(error.code)) {
+    return new ServiceUnavailableError('Event registration is temporarily unavailable. Please try again later.');
+  }
   if (error.code === '42501') return new ForbiddenError(error.message);
-  if (error.code === 'P0002') return new NotFoundError('Event not found');
+  if (error.code === 'P0002' || (error.code === '55000' && [
+    'EVENT_NOT_CONFIRMED', 'REGISTRATION_DISABLED', 'REGISTRATION_DATES_MISSING',
+    'REGISTRATION_NOT_OPEN', 'REGISTRATION_CLOSED', 'EVENT_STARTED',
+  ].includes(error.hint))) return new NotFoundError('This event is not open for registration');
   if (error.code === '22023') return new ValidationError(error.message);
+  if (error.code === '40001' || error.code === '40P01') {
+    return new ConflictError('Registration changed while you were registering. Please try again.', { code: 'REGISTRATION_CHANGED' });
+  }
   if (error.code === '55000') return new ConflictError(error.message, { code: error.hint });
   return error;
 }

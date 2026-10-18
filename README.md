@@ -62,7 +62,9 @@ npm run install:all      # installs root, backend and frontend
 
 Copy `backend/.env.example` to `backend/.env` and fill in the real values. Real `.env` files are gitignored and must never be committed. The frontend needs no `.env`: it defaults to `http://localhost:5000/api`, and `VITE_API_BASE_URL` overrides that if you need it to.
 
-Browse Open Events (SCRUM-495) is off by default, because it needs the registration settings (SCRUM-494), the `registrations` table (SCRUM-22) and migration 068. Once those are in the database, set `OPEN_EVENTS_ENABLED=true` for the backend and `VITE_OPEN_EVENTS_ENABLED=true` for the frontend build; until then the route answers 404 and the nav and dashboard links are hidden.
+Browse Open Events (SCRUM-495) is available to authenticated Attendees through the navigation, dashboard and `/open-events` routes. Settings, registration writes and browse counts all use `event_registrations`. Events must be Confirmed with registration enabled and within their registration window to appear.
+
+Merge PR #68 (SCRUM-494) into dev first, then merge the updated dev into #70, resolve against #68's settings API/UI and re-review the combined result. #70 must not merge first. Apply #68's pending schema migrations 050, 082 and 091, then this story's 092, 093 and 094 before deploying its backend/frontend; these numbers follow dev's current highest migration, 090. Migration 092 preserves legacy registrations and replaces `registrations` with a read-only compatibility view. Feature flags remain removed, so this dependency and database-first release order are mandatory. Historical 079–081 and the earlier registration 088 are archived outside the active migrations directory and must not be replayed. See [registration integration and deployment](backend/tests/SCRUM22-PR68-integration.md).
 
 Then, from the repository root:
 

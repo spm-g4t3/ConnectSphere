@@ -29,7 +29,7 @@ beforeAll(async () => {
     create role authenticated;
     create role service_role bypassrls;
   `);
-  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '068_open_event_registration_state.sql', '079_registrations.sql']) {
+  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '068_open_event_registration_state.sql', '../migration-history/079_registrations.sql']) {
     await db.exec(migration(name));
   }
   await db.query('insert into auth.users (id) values ($1), ($2)', [ME, OTHER]);
@@ -45,7 +45,7 @@ afterAll(async () => { await db.close(); });
 beforeEach(async () => { await db.exec('begin'); });
 afterEach(async () => { await db.exec('rollback'); });
 
-describe('SCRUM41 registration persistence', () => {
+describe('SCRUM41 historical persistence upgrade input', () => {
   it('SCRUM41_AC1_persists_the_account_event_and_database_defaults', async () => {
     await db.exec('set local role service_role');
     const { rows: [saved] } = await db.query(
@@ -125,7 +125,7 @@ describe('SCRUM41 registration persistence', () => {
 
   it('SCRUM41_AC1_reruns_the_migration_without_losing_records', async () => {
     const { rows: [saved] } = await register();
-    await db.exec(migration('079_registrations.sql'));
+    await db.exec(migration('../migration-history/079_registrations.sql'));
     expect((await db.query('select * from registrations where id = $1', [saved.id])).rows).toEqual([saved]);
     await expect(register()).rejects.toMatchObject({ code: '23505' });
   });

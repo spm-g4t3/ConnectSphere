@@ -265,6 +265,7 @@ describe("SCRUM495_AC2 an event that is not open, and errors", () => {
     [401, "Your session has expired. Please sign in again."],
     [403, "Only Attendees can browse open events."],
     [500, "This event could not be loaded. Please try again."],
+    [503, "Event registration is temporarily unavailable. Please try again later."],
   ])("SCRUM495_AC2_explains_a_%i_with_a_way_back_to_the_list", async (status, message) => {
     vi.mocked(getOpenEvent).mockRejectedValue({ response: { status } });
 

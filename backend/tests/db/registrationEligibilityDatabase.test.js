@@ -26,16 +26,10 @@ beforeAll(async () => {
     create role authenticated;
     create role service_role bypassrls;
   `);
-  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '080_registration_eligibility.sql']) {
+  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '091_event_registration_hardening.sql', '093_registration_eligibility.sql']) {
     await db.exec(migration(name));
   }
-  // SCRUM-494's column contract, already used by openEventService; its migration
-  // is not present yet. These test columns do not implement settings management.
   await db.exec(`
-    alter table event_requests
-      add column registration_enabled boolean default false,
-      add column registration_opens_at timestamptz,
-      add column registration_closes_at timestamptz;
     alter type event_request_status add value 'safety_review';
     alter type event_request_status add value 'safety_approved';
     grant select on profiles to service_role;
@@ -99,7 +93,7 @@ describe('SCRUM38 registration eligibility in PostgreSQL', () => {
       await expect(check()).rejects.toMatchObject({ code: '55000', hint: 'EVENT_NOT_CONFIRMED' });
     });
 
-  it.each([false, null])('SCRUM38_AC3_refuses_registration_enabled_%s', async (enabled) => {
+  it.each([false])('SCRUM38_AC3_refuses_registration_enabled_%s', async (enabled) => {
     await db.query('update event_requests set registration_enabled = $1 where id = $2', [enabled, EVENT]);
     await expect(check()).rejects.toMatchObject({ code: '55000', hint: 'REGISTRATION_DISABLED' });
   });
@@ -123,16 +117,18 @@ describe('SCRUM38 registration eligibility in PostgreSQL', () => {
     else await expect(check()).resolves.toBeDefined();
   });
 
-  it('SCRUM38_AC4_allows_a_null_close_time_until_the_event_starts', async () => {
+  it('SCRUM22_AC2_open_ended_registration_closes_at_event_start_and_matches_browse', async () => {
     await db.query('update event_requests set registration_closes_at = null where id = $1', [EVENT]);
     await expect(check()).resolves.toBeDefined();
+    const settings = { status: 'confirmed', registrationEnabled: true, registrationOpensAt: '2026-10-15T10:00:00Z', registrationClosesAt: null, startsAt: '2026-10-20T10:00:00Z' };
+    expect(isOpenForRegistration(settings, new Date(NOW))).toBe(true);
     await db.query("select set_config('test.registration_time', '2026-10-20T10:00:00Z', true)");
     await expect(check()).rejects.toMatchObject({ code: '55000', hint: 'EVENT_STARTED' });
+    expect(isOpenForRegistration(settings, new Date(settings.startsAt))).toBe(false);
   });
 
-  it.each(['registration_opens_at', 'proposed_start'])('SCRUM38_AC4_refuses_a_missing_%s', async (column) => {
-    await db.query(`update event_requests set ${column} = null where id = $1`, [EVENT]);
-    await expect(check()).rejects.toMatchObject({ code: '55000', hint: 'REGISTRATION_DATES_MISSING' });
+  it.each(['registration_opens_at', 'proposed_start'])('SCRUM38_AC4_shared_schema_refuses_a_missing_%s', async (column) => {
+    await expect(db.query(`update event_requests set ${column} = null where id = $1`, [EVENT])).rejects.toMatchObject({ code: '23514' });
   });
 
   it('SCRUM38_AC5_requires_no_additional_eligibility_information', async () => {
