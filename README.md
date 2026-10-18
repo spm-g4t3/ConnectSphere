@@ -64,6 +64,8 @@ Copy `backend/.env.example` to `backend/.env` and fill in the real values. Real 
 
 Browse Open Events (SCRUM-495) is off by default, because it needs the registration settings (SCRUM-494), the `registrations` table (SCRUM-22) and migration 068. Once those are in the database, set `OPEN_EVENTS_ENABLED=true` for the backend and `VITE_OPEN_EVENTS_ENABLED=true` for the frontend build; until then the route answers 404 and the nav and dashboard links are hidden.
 
+The protected attendee read, `GET /api/attendee-events/:id` (SCRUM-49), requires SCRUM-494 and SCRUM-22's canonical `event_registrations` schema. Merge and deploy PR #68 before PR #70, then integrate this branch with dev; this change does not supply their migrations. Missing schema returns 503. Only the verified Attendee's own `registered` row grants access; withdrawn, cancelled and waitlisted entries do not. This access-only response contains `eventRequestId`; confirmed arrangement retrieval remains SCRUM-52. Registration windows and capacity do not control this read.
+
 Then, from the repository root:
 
 ```bash
