@@ -24,6 +24,7 @@ import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck"
 import EquipmentReview from "./components/EquipmentReview";
 import EventRegistrationSettings from "./components/EventRegistrationSettings";
 import RegistrationEventsList from "./components/RegistrationEventsList";
+import EquipmentRequestQueue from "./components/EquipmentRequestQueue";
 import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
 import SafetyReviewHistory from "./components/SafetyReviewHistory";
 import BrowseOpenEvents from "./components/BrowseOpenEvents";
@@ -377,7 +378,19 @@ function AppRoutes() {
             explanation. An honest "being built" page is truthful today and becomes
             the real page later. Do not "tidy" these away. */}
         <Route path="/tickets" element={<ProtectedRoute><PagePlaceholder title="Support tickets" description="Support tickets are still being built. Technical support staff will raise, triage and close event support tickets here in a future release. Nothing is waiting for you behind this page yet." /></ProtectedRoute>} />
-        <Route path="/equipment" element={<ProtectedRoute><PagePlaceholder title="Equipment requests" description="Equipment requests are still being built. Technical support staff will track equipment allocated to each event here in a future release. Nothing is waiting for you behind this page yet." /></ProtectedRoute>} />
+        {/* Technical support staff only. The queue renders <section>s and no dashboard
+            wrapper, so the wrapper is supplied here, as /review-queue does. */}
+        <Route
+          path="/equipment"
+          element={
+            <ProtectedRoute allowedRoles={["technical_support_staff"]}>
+              <div className="dashboard dashboard--tech-support">
+                <h1>Equipment request queue</h1>
+                <EquipmentRequestQueue />
+              </div>
+            </ProtectedRoute>
+          }
+        />
         {/* Catch-all stays last: React Router picks the best match rather than the
             first, but keeping `*` at the bottom is what a reader expects. */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

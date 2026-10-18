@@ -33,7 +33,7 @@ import { MemoryRouter } from "react-router-dom";
 import Dashboard from "../../src/components/Dashboard.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
 import { apiClient } from "../../src/services/apiClient";
-import { getOpenTickets, getEquipmentRequests } from "../../src/services/supportService";
+import { getOpenTickets } from "../../src/services/supportService";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -51,7 +51,6 @@ vi.mock("../../src/services/apiClient", () => ({
 
 vi.mock("../../src/services/supportService", () => ({
   getOpenTickets: vi.fn(),
-  getEquipmentRequests: vi.fn(),
 }));
 
 vi.mock("../../src/components/EventOrganiserDashboard", () => ({
@@ -162,7 +161,6 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
       expect(apiClient[method]).not.toHaveBeenCalled();
     }
     expect(getOpenTickets).not.toHaveBeenCalled();
-    expect(getEquipmentRequests).not.toHaveBeenCalled();
   });
 
   it("SCRUM489_AC8_the_safety_officer_dashboard_reads_its_review_queue_and_notifications", () => {
@@ -178,7 +176,6 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
       expect(apiClient[method]).not.toHaveBeenCalled();
     }
     expect(getOpenTickets).not.toHaveBeenCalled();
-    expect(getEquipmentRequests).not.toHaveBeenCalled();
   });
 
   it("SCRUM489_AC8_a_safety_officer_reads_a_submission_notice_on_the_dashboard_in_words", async () => {

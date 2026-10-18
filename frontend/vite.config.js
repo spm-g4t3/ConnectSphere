@@ -131,6 +131,17 @@ const SCRUM487_FILES = [
   'src/components/AssignedEventsFilters.jsx',
 ]
 
+// SCRUM-284 (SCRUM-287) owns the equipment request queue and the dashboard that
+// mounts it, gated at 100%.
+const SCRUM284_FILES = [
+  'src/components/EquipmentRequestQueue.jsx',
+  'src/components/TechnicalSupportDashboard.jsx',
+  'src/services/equipmentQueueService.js',
+  'src/services/equipmentRequestStatus.js',
+  'src/services/eventPeriodFormat.js',
+  'src/services/supportService.js',
+]
+
 // SCRUM-258 owns the Venue Staff queue and its decision card outright.
 // VenueStaffDashboard.jsx, which mounts the queue, and the shared services
 // it calls (bookingRequestService.js, already gated under SCRUM-254) are not
@@ -177,6 +188,14 @@ const SCRUM495_FILES = [
 const SCRUM489_FILES = [
   // SCRUM-557 (AC3 to AC6): the checklist, the confirmation, the note and Submit.
   'src/components/SafetyCheckSubmissionPanel.jsx',
+]
+
+// SCRUM-492: the event screen's Venue bookings section, gated outright. Its
+// error messages join bookingRequestErrors.js, already gated in SCRUM254_FILES;
+// bookingRequestService.js and CoordinatorRequestDetail.jsx stay as they were.
+const SCRUM492_FILES = [
+  // SCRUM-567 (AC1, AC2, AC4, AC6): the list and the Release action.
+  'src/components/EventVenueBookings.jsx',
 ]
 
 // SCRUM-172: the shared unread count behind the nav badge and the inbox
@@ -230,10 +249,12 @@ export default defineConfig({
         ...SCRUM491_FILES.map((file) => [file, FULL]),
         ...SCRUM486_FILES.map((file) => [file, FULL]),
         ...SCRUM487_FILES.map((file) => [file, FULL]),
+        ...SCRUM284_FILES.map((file) => [file, FULL]),
         ...SCRUM258_FILES.map((file) => [file, FULL]),
         ...SCRUM266_FILES.map((file) => [file, FULL]),
         ...SCRUM495_FILES.map((file) => [file, FULL]),
         ...SCRUM489_FILES.map((file) => [file, FULL]),
+        ...SCRUM492_FILES.map((file) => [file, FULL]),
         ...SCRUM172_FILES.map((file) => [file, FULL]),
       ]),
     },

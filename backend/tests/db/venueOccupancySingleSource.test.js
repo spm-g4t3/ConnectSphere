@@ -124,6 +124,23 @@ const BLOCK_VS_BLOCK = {
  */
 const NOT_STARTED = {
   update_venue: { text: 'b.starts_at > now()', count: 2 },
+  // Changed for SCRUM-174: retire_venue (085) flags approved bookings and
+  // tells open requests only while they have not ended. A clock comparison,
+  // not an overlap: once for the bookings it flags, once for the requests.
+  retire_venue: { text: 'b.ends_at > now()', count: 2 },
+};
+
+/**
+ * SCRUM-174 AC5: a new or extended block tells the coordinators of the open
+ * requests it covers. Neither shared function answers that: the occupancy one
+ * skips open requests, and pending_request_overlaps pads the period it is
+ * given, which would pad the block (AC6). So 084 pairs venue_occupied_period
+ * twice, request padded and block raw. Pinned to once.
+ */
+const BLOCK_VS_OPEN_REQUEST = {
+  flag_bookings_for_block:
+    'venue_occupied_period(b.starts_at, b.ends_at, v.setup_minutes::integer, v.turnaround_minutes::integer) ' +
+    '&& venue_occupied_period(v_block.starts_at, v_block.ends_at, 0, 0)',
 };
 
 
@@ -171,6 +188,11 @@ describe('SCRUM484_AC4 no copy of the overlap rule in SQL', () => {
       if (BLOCK_VS_BLOCK[name]) {
         expect(rest, `${file} ${name}: block-vs-block`).toContain(BLOCK_VS_BLOCK[name]);
         rest = rest.split(BLOCK_VS_BLOCK[name]).join(' ');
+      }
+      if (BLOCK_VS_OPEN_REQUEST[name]) {
+        const parts = rest.split(BLOCK_VS_OPEN_REQUEST[name]);
+        expect(parts.length - 1, `${file} ${name}: block-vs-open-request, exactly 1x`).toBe(1);
+        rest = parts.join(' ');
       }
       if (NOT_STARTED[name]) {
         const { text, count } = NOT_STARTED[name];

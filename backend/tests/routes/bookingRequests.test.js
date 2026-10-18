@@ -970,6 +970,9 @@ describe('SCRUM-255: the coordinator lists their booking requests', () => {
         decidedAt: null,
         decisionReason: null,
         suggestedAlternative: null,
+        // SCRUM-492: the coordinator's release (089); null unless released.
+        releasedAt: null,
+        releaseReason: null,
         createdAt: '2026-10-06T10:00:00+00:00',
       },
     ]);

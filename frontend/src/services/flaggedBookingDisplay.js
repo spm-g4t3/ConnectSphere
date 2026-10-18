@@ -12,7 +12,8 @@ import { reasonLabel } from "./venueBlockReasons";
 
 // Keyed by the review_reason code the backend stores on a flagged booking.
 // A booking flagged for any other cause (a venue block, 014) has no code.
-// The last two are allowed by 078 before anything sets them.
+// event_changed is allowed by 078 before anything sets it; retiring a venue
+// (085) sets venue_details_changed.
 export const REVIEW_REASON_LABELS = Object.freeze({
   setup_or_turnaround_changed: "Setup or turnaround time changed",
   safety_review: "Safety review",
