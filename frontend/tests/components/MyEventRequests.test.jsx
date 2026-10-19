@@ -136,6 +136,14 @@ describe("SCRUM363 confirmed arrangements on the organiser request screen", () =
 });
 
 describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
+  it("SCRUM494_AC6_links_an_event_to_its_registration_settings_page", async () => {
+    renderList([eventRequest({ status: "approved" })]);
+
+    const record = (await screen.findByText("IS212 Industry Night")).closest("li");
+    expect(within(record).getByRole("link", { name: "Registration settings" }))
+      .toHaveAttribute("href", "/events/22222222-2222-4222-8222-222222222222/registration");
+  });
+
   it("shows the cancellation reason and recorded date without offering further changes", async () => {
     renderList([
       eventRequest({

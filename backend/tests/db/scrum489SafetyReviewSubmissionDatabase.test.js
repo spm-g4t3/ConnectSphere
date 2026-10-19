@@ -1368,7 +1368,7 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
   // -------------------------------------------------------------------------
   describe('064 itself', () => {
     it('SCRUM489_AC8_the_latest_type_list_preserves_064s_complete_list', async () => {
-      // 071 retains every existing type, including the submission notice from 064.
+      // The merged registration migration preserves the submission notice and later types.
       const { def } = await one("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'notifications_type_known'");
       expect([...def.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1])).toEqual([
         'booking_flagged', 'booking_request_withdrawn', 'clarification_requested', 'clarification_replied',
@@ -1377,6 +1377,11 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
         'safety_review_response', 'safety_booking_flagged', 'safety_equipment_review',
         'event_submitted_for_safety_review',
         'booking_request_approved', 'booking_request_rejected', 'booking_request_conflicting',
+        'flagged_booking_resolved', 'booking_request_submitted', 'booking_request_venue_unavailable',
+        'booking_flagged_venue_retired', 'booking_released', 'booking_request_conflict_cleared',
+        'equipment_requested', 'equipment_request_changed', 'equipment_request_cancelled',
+        'equipment_arranged', 'equipment_not_fully_arranged', 'equipment_flagged',
+        'registration_schedule_conflict',
       ]);
     });
 

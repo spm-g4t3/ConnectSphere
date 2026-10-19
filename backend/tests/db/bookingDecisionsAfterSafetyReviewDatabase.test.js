@@ -356,10 +356,19 @@ describe('SCRUM-258: booking decisions restated after the safety review migratio
     it('SCRUM258_AC6_the_latest_migration_setting_notifications_type_known_keeps_every_075_type', () => {
       const types = (sql) => [...sql.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
       const ours = types(migration(MIGRATION).match(/type in \(([\s\S]*?)\)/)[1]);
-      const latest = migration(latestFileWith('add constraint notifications_type_known'));
+      // A live-list migration (v_ours) keeps the existing constraint, so the
+      // effective list also includes everything set before it.
+      const setters = SQL_FILES.filter((name) => migration(name).includes('add constraint notifications_type_known'));
+      const effective = [];
+      for (const name of [...setters].reverse()) {
+        const sql = migration(name);
+        const live = sql.includes('v_ours');
+        effective.push(...types(live ? sql.slice(sql.indexOf('v_ours'), sql.indexOf('];', sql.indexOf('v_ours'))) : sql));
+        if (!live) break;
+      }
 
       expect(ours).toContain('booking_request_conflicting');
-      expect(types(latest)).toEqual(expect.arrayContaining(ours));
+      expect(effective).toEqual(expect.arrayContaining(ours));
     });
   });
 });

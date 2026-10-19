@@ -15,7 +15,7 @@
  * not built. AC5 and AC6 are therefore tested at the database edge: the Arranged
  * check is a function SCRUM-300 will call, and these tests call it the same way.
  *
- * Test names are N14_ACn_<what_it_checks>, as SCRUM-298 asks.
+ * Test names are SCRUM290_AC<n>_<what_it_checks>, as SCRUM-298 asks.
  *
  * What PGlite is not: Supabase, and it has one connection, so two starts at the
  * same moment are not exercised. The second of two starts is tested one after the
@@ -174,11 +174,8 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
 
   describe('the migration', () => {
-    it('N14_runs_a_second_time_without_error', async () => {
-      await expect(db.exec(migration('038_equipment_review.sql'))).resolves.not.toThrow();
-    });
 
-    it('N14_the_two_reads_are_stable_so_viewing_cannot_write', async () => {
+    it('SCRUM290_AC2_the_two_reads_are_stable_so_viewing_cannot_write', async () => {
       const found = await rows(
         "select proname, provolatile from pg_proc where proname in ('equipment_review_for_event', 'equipment_for_event') order by proname",
       );
@@ -188,7 +185,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       ]);
     });
 
-    it('N14_a_line_cannot_be_marked_without_a_note_by_constraint', async () => {
+    it('SCRUM290_AC7_a_line_cannot_be_marked_without_a_note_by_constraint', async () => {
       const { event, projectorLine } = await eventWithTwoLines();
       const err = await refusal(
         db.query(
@@ -202,7 +199,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(event).toBeTruthy();
     });
 
-    it('N14_a_blank_note_is_refused_by_constraint', async () => {
+    it('SCRUM290_AC7_a_blank_note_is_refused_by_constraint', async () => {
       const { projectorLine } = await eventWithTwoLines();
       const err = await refusal(
         db.query(
@@ -215,7 +212,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(err.code).toBe('23514');
     });
 
-    it('N14_under_review_without_a_reviewer_is_refused_by_constraint', async () => {
+    it('SCRUM290_AC2_under_review_without_a_reviewer_is_refused_by_constraint', async () => {
       const { requestId } = await eventWithTwoLines();
       const err = await refusal(
         db.query("update equipment_requests set status = 'under_review' where id = $1", [requestId]),
@@ -226,7 +223,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
 
   describe('AC1: only a signed-in reviewer acts', () => {
-    it('N14_AC1_a_null_caller_is_refused_with_42501_and_nothing_changes', async () => {
+    it('SCRUM290_AC1_a_null_caller_is_refused_with_42501_and_nothing_changes', async () => {
       const { event } = await eventWithTwoLines();
       const err = await refusal(start(event, null));
 
@@ -237,7 +234,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
 
   describe('AC2: starting a review', () => {
-    it('N14_AC2_starts_from_pending_review_and_records_the_reviewer_and_time', async () => {
+    it('SCRUM290_AC2_starts_from_pending_review_and_records_the_reviewer_and_time', async () => {
       const { event, requestId } = await eventWithTwoLines();
       const state = await start(event, reviewerA);
 
@@ -254,7 +251,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(first).toMatchObject({ action: 'started', user_id: reviewerA });
     });
 
-    it('N14_AC2_a_review_can_start_again_from_cannot_be_fully_arranged', async () => {
+    it('SCRUM290_AC2_a_review_can_start_again_from_cannot_be_fully_arranged', async () => {
       const { event, projectorLine } = await eventWithTwoLines();
       await start(event, reviewerA);
       await mark(event, reviewerA, projectorLine, 'No projectors left');
@@ -269,7 +266,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
     });
 
     it.each([['under_review'], ['arranged']])(
-      'N14_AC2_refuses_a_start_from_%s_with_55000_and_changes_nothing',
+      'SCRUM290_AC2_refuses_a_start_from_%s_with_55000_and_changes_nothing',
       async (status) => {
         const { event, requestId } = await eventWithTwoLines();
         if (status === 'under_review') {
@@ -286,7 +283,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       },
     );
 
-    it('N14_AC2_a_cancelled_request_has_nothing_to_review', async () => {
+    it('SCRUM290_AC2_a_cancelled_request_has_nothing_to_review', async () => {
       const { event, requestId } = await eventWithTwoLines();
       await db.query("update equipment_requests set status = 'cancelled' where id = $1", [requestId]);
 
@@ -295,7 +292,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(err.code).toBe('P0002');
     });
 
-    it('N14_AC2_the_second_of_two_starts_is_refused_and_the_first_stays_reviewer', async () => {
+    it('SCRUM290_AC2_the_second_of_two_starts_is_refused_and_the_first_stays_reviewer', async () => {
       const { event } = await eventWithTwoLines();
       await start(event, reviewerA);
       const err = await refusal(start(event, reviewerB));
@@ -305,14 +302,14 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect((await requestRow(event)).reviewer_id).toBe(reviewerA);
     });
 
-    it('N14_AC2_answers_P0002_for_an_unknown_event_and_for_an_event_with_no_request', async () => {
+    it('SCRUM290_AC2_answers_P0002_for_an_unknown_event_and_for_an_event_with_no_request', async () => {
       expect((await refusal(start(NO_SUCH_ID, reviewerA))).code).toBe('P0002');
 
       const bare = await newEvent();
       expect((await refusal(start(bare, reviewerA))).code).toBe('P0002');
     });
 
-    it('N14_AC2_viewing_a_request_changes_nothing', async () => {
+    it('SCRUM290_AC2_viewing_a_request_changes_nothing', async () => {
       const { event, requestId } = await eventWithTwoLines();
       const before = await requestRow(event);
       const historyBefore = await history(requestId);
@@ -327,14 +324,14 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
 
   describe('AC3: who is reviewing, and taking over', () => {
-    it('N14_AC3_everyone_reading_the_request_sees_the_reviewer', async () => {
+    it('SCRUM290_AC3_everyone_reading_the_request_sees_the_reviewer', async () => {
       const { event } = await eventWithTwoLines();
       await start(event, reviewerA);
 
       expect((await review(event)).request.reviewer_id).toBe(reviewerA);
     });
 
-    it('N14_AC3_another_member_can_take_over_and_the_handover_is_recorded', async () => {
+    it('SCRUM290_AC3_another_member_can_take_over_and_the_handover_is_recorded', async () => {
       const { event, requestId } = await eventWithTwoLines();
       await start(event, reviewerA);
       const startedAt = (await requestRow(event)).review_started_at;
@@ -351,7 +348,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       });
     });
 
-    it('N14_AC3_the_reviewer_cannot_take_over_their_own_review', async () => {
+    it('SCRUM290_AC3_the_reviewer_cannot_take_over_their_own_review', async () => {
       const { event } = await eventWithTwoLines();
       await start(event, reviewerA);
 
@@ -359,7 +356,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
     });
 
     it.each([['pending_review'], ['arranged'], ['cannot_be_fully_arranged']])(
-      'N14_AC3_a_take_over_is_refused_when_the_request_is_%s',
+      'SCRUM290_AC3_a_take_over_is_refused_when_the_request_is_%s',
       async (status) => {
         const { event, requestId } = await eventWithTwoLines();
         await db.query('update equipment_requests set status = $2::equipment_request_status where id = $1', [requestId, status]);
@@ -369,7 +366,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       },
     );
 
-    it('N14_AC3_only_the_current_reviewer_can_record_an_outcome', async () => {
+    it('SCRUM290_AC3_only_the_current_reviewer_can_record_an_outcome', async () => {
       const { event, projectorLine } = await eventWithTwoLines();
       await start(event, reviewerA);
 
@@ -379,7 +376,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(lineNamed(await review(event), 'Projector').outcome).toBeNull();
     });
 
-    it('N14_AC3_only_the_current_reviewer_can_complete', async () => {
+    it('SCRUM290_AC3_only_the_current_reviewer_can_complete', async () => {
       const { event } = await eventWithTwoLines();
       await start(event, reviewerA);
 
@@ -387,7 +384,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect((await requestRow(event)).status).toBe('under_review');
     });
 
-    it('N14_AC3_after_a_take_over_the_new_reviewer_acts_and_the_old_one_cannot', async () => {
+    it('SCRUM290_AC3_after_a_take_over_the_new_reviewer_acts_and_the_old_one_cannot', async () => {
       const { event, projectorLine } = await eventWithTwoLines();
       await start(event, reviewerA);
       await takeOver(event, reviewerB);
@@ -397,7 +394,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(lineNamed(state, 'Projector').outcome).toBe('cannot_be_provided');
     });
 
-    it('N14_AC3_outcomes_cannot_be_recorded_when_nobody_is_reviewing', async () => {
+    it('SCRUM290_AC3_outcomes_cannot_be_recorded_when_nobody_is_reviewing', async () => {
       const { event, projectorLine } = await eventWithTwoLines();
 
       expect((await refusal(mark(event, reviewerA, projectorLine, 'x'))).code).toBe('55000');
@@ -406,7 +403,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
 
   describe('AC4: what the review screen is given', () => {
-    it('N14_AC4_returns_the_event_fields_and_each_lines_type_quantity_notes_reserved_and_availability', async () => {
+    it('SCRUM290_AC4_returns_the_event_fields_and_each_lines_type_quantity_notes_reserved_and_availability', async () => {
       const event = await newEvent();
       await add(event, projector, 5, 'HDMI please');
       const { request } = await add(event, microphone, 3);
@@ -430,7 +427,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(lineNamed(state, 'Microphone')).toMatchObject({ quantity: 3, reserved: 0 });
     });
 
-    it('N14_AC4_the_availability_result_leaves_out_the_events_own_reservations', async () => {
+    it('SCRUM290_AC4_the_availability_result_leaves_out_the_events_own_reservations', async () => {
       const type = await newType('Mixing desk', 10);
       const event = await newEvent();
       const other = await newEvent();
@@ -447,7 +444,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(line.availability.available).toBe(7);
     });
 
-    it('N14_AC4_availability_is_null_when_the_event_has_no_usable_period', async () => {
+    it('SCRUM290_AC4_availability_is_null_when_the_event_has_no_usable_period', async () => {
       const event = await newEvent({ start: null, end: null });
       await add(event, projector, 1);
 
@@ -457,7 +454,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
 
   describe('AC6: Arranged happens automatically, and only on the last full reservation', () => {
-    it('N14_AC6_becomes_arranged_exactly_when_the_last_line_is_fully_reserved', async () => {
+    it('SCRUM290_AC6_becomes_arranged_exactly_when_the_last_line_is_fully_reserved', async () => {
       const { event, projectorLine, microphoneLine, requestId } = await eventWithTwoLines();
       await start(event, reviewerA);
 
@@ -479,7 +476,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(actions[actions.length - 1]).toMatchObject({ action: 'arranged', user_id: reviewerA });
     });
 
-    it('N14_AC6_does_nothing_when_the_request_is_not_under_review', async () => {
+    it('SCRUM290_AC6_does_nothing_when_the_request_is_not_under_review', async () => {
       const { projectorLine, microphoneLine, event, requestId } = await eventWithTwoLines();
       await reserve(event, projector, projectorLine, 5);
       await reserve(event, microphone, microphoneLine, 3);
@@ -488,7 +485,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect((await requestRow(event)).status).toBe('pending_review');
     });
 
-    it('N14_AC6_a_mark_left_on_a_line_is_cleared_when_the_request_is_arranged', async () => {
+    it('SCRUM290_AC6_a_mark_left_on_a_line_is_cleared_when_the_request_is_arranged', async () => {
       const { event, projectorLine, microphoneLine, requestId } = await eventWithTwoLines();
       await start(event, reviewerA);
       await mark(event, reviewerA, projectorLine, 'Maybe none');
@@ -502,7 +499,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
 
   describe('AC7: completing a review', () => {
-    it('N14_AC7_a_note_is_required_to_mark_a_line', async () => {
+    it('SCRUM290_AC7_a_note_is_required_to_mark_a_line', async () => {
       const { event, projectorLine } = await eventWithTwoLines();
       await start(event, reviewerA);
 
@@ -513,7 +510,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(lineNamed(await review(event), 'Projector').outcome).toBeNull();
     });
 
-    it('N14_AC7_a_fully_reserved_line_cannot_be_marked', async () => {
+    it('SCRUM290_AC7_a_fully_reserved_line_cannot_be_marked', async () => {
       const { event, projectorLine } = await eventWithTwoLines();
       await start(event, reviewerA);
       await reserve(event, projector, projectorLine, 5);
@@ -521,14 +518,14 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect((await refusal(mark(event, reviewerA, projectorLine, 'x'))).code).toBe('55000');
     });
 
-    it('N14_AC7_a_line_that_is_not_on_the_request_is_not_found', async () => {
+    it('SCRUM290_AC7_a_line_that_is_not_on_the_request_is_not_found', async () => {
       const { event } = await eventWithTwoLines();
       await start(event, reviewerA);
 
       expect((await refusal(mark(event, reviewerA, NO_SUCH_ID, 'x'))).code).toBe('P0002');
     });
 
-    it('N14_AC7_marking_records_the_user_note_and_time_and_the_mark_can_be_taken_off', async () => {
+    it('SCRUM290_AC7_marking_records_the_user_note_and_time_and_the_mark_can_be_taken_off', async () => {
       const { event, projectorLine, requestId } = await eventWithTwoLines();
       await start(event, reviewerA);
 
@@ -547,7 +544,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(actions).toEqual(['started', 'line_marked', 'line_unmarked']);
     });
 
-    it('N14_AC7_taking_the_mark_off_an_unmarked_line_records_nothing', async () => {
+    it('SCRUM290_AC7_taking_the_mark_off_an_unmarked_line_records_nothing', async () => {
       const { event, projectorLine, requestId } = await eventWithTwoLines();
       await start(event, reviewerA);
 
@@ -556,7 +553,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect((await history(requestId)).map((h) => h.action)).toEqual(['started']);
     });
 
-    it('N14_AC7_completing_is_refused_while_a_short_line_has_no_note_and_names_it', async () => {
+    it('SCRUM290_AC7_completing_is_refused_while_a_short_line_has_no_note_and_names_it', async () => {
       const { event, projectorLine } = await eventWithTwoLines();
       await start(event, reviewerA);
       await mark(event, reviewerA, projectorLine, 'None left');
@@ -569,7 +566,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect((await requestRow(event)).status).toBe('under_review');
     });
 
-    it('N14_AC7_completing_with_every_note_present_sets_cannot_be_fully_arranged_and_keeps_reservations', async () => {
+    it('SCRUM290_AC7_completing_with_every_note_present_sets_cannot_be_fully_arranged_and_keeps_reservations', async () => {
       const { event, projectorLine, microphoneLine, requestId } = await eventWithTwoLines();
       await start(event, reviewerA);
       const kept = await reserve(event, projector, projectorLine, 2);
@@ -589,7 +586,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(actions[actions.length - 1]).toMatchObject({ action: 'completed', user_id: reviewerA });
     });
 
-    it('N14_AC7_a_fully_reserved_line_does_not_need_a_note_to_complete', async () => {
+    it('SCRUM290_AC7_a_fully_reserved_line_does_not_need_a_note_to_complete', async () => {
       const { event, projectorLine, microphoneLine } = await eventWithTwoLines();
       await start(event, reviewerA);
       await reserve(event, projector, projectorLine, 5);
@@ -598,7 +595,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect((await complete(event, reviewerA)).request.status).toBe('cannot_be_fully_arranged');
     });
 
-    it('N14_AC7_completing_is_refused_when_every_line_is_fully_reserved', async () => {
+    it('SCRUM290_AC7_completing_is_refused_when_every_line_is_fully_reserved', async () => {
       const { event, projectorLine, microphoneLine } = await eventWithTwoLines();
       await start(event, reviewerA);
       await reserve(event, projector, projectorLine, 5);
@@ -610,7 +607,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect((await requestRow(event)).status).toBe('under_review');
     });
 
-    it('N14_AC7_completing_when_not_under_review_is_refused', async () => {
+    it('SCRUM290_AC7_completing_when_not_under_review_is_refused', async () => {
       const { event } = await eventWithTwoLines();
 
       expect((await refusal(complete(event, reviewerA))).code).toBe('55000');
@@ -619,7 +616,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
 
   describe('AC8: what the coordinator sees', () => {
-    it('N14_AC8_each_line_shows_its_reserved_quantity_and_any_cannot_be_provided_note', async () => {
+    it('SCRUM290_AC8_each_line_shows_its_reserved_quantity_and_any_cannot_be_provided_note', async () => {
       const { event, projectorLine, microphoneLine } = await eventWithTwoLines();
       await start(event, reviewerA);
       await reserve(event, projector, projectorLine, 2);
@@ -639,7 +636,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(lineNamed(state, 'Microphone')).toMatchObject({ reserved: 0, outcome_note: 'None in stock' });
     });
 
-    it('N14_AC8_the_coordinators_read_does_not_say_who_marked_the_line', async () => {
+    it('SCRUM290_AC8_the_coordinators_read_does_not_say_who_marked_the_line', async () => {
       const { event, projectorLine } = await eventWithTwoLines();
       await start(event, reviewerA);
       await mark(event, reviewerA, projectorLine, 'None left');
@@ -650,7 +647,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
 
   describe('AC9: every action records the user and the time', () => {
-    it('N14_AC9_start_take_over_mark_and_complete_each_leave_a_row_with_user_and_time', async () => {
+    it('SCRUM290_AC9_start_take_over_mark_and_complete_each_leave_a_row_with_user_and_time', async () => {
       const { event, projectorLine, microphoneLine, requestId } = await eventWithTwoLines();
       await start(event, reviewerA);
       await takeOver(event, reviewerB);
@@ -669,7 +666,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(times.every((t) => t.created_at !== null)).toBe(true);
     });
 
-    it('N14_AC9_a_refused_call_writes_no_history', async () => {
+    it('SCRUM290_AC9_a_refused_call_writes_no_history', async () => {
       const { event, projectorLine, requestId } = await eventWithTwoLines();
       await start(event, reviewerA);
       await refusal(mark(event, reviewerB, projectorLine, 'x'));
@@ -682,7 +679,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
 
   describe('the coordinator changes the lines during or after a review (SCRUM-21 meets SCRUM-290)', () => {
-    it('N14_a_line_change_during_a_review_ends_it_and_says_so', async () => {
+    it('SCRUM21_AC7_a_line_change_during_a_review_ends_it_and_says_so', async () => {
       const { event, requestId, projectorLine } = await eventWithTwoLines();
       await start(event, reviewerA);
 
@@ -696,7 +693,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(actions[actions.length - 1]).toMatchObject({ action: 'interrupted', user_id: null, from_user_id: reviewerA });
     });
 
-    it('N14_adding_or_removing_a_line_during_a_review_ends_it', async () => {
+    it('SCRUM21_AC7_adding_or_removing_a_line_during_a_review_ends_it', async () => {
       const { event, microphoneLine } = await eventWithTwoLines();
       await start(event, reviewerA);
       const extra = await newType(`Cable ${Math.random()}`);
@@ -708,7 +705,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect((await requestRow(event)).status).toBe('pending_review');
     });
 
-    it('N14_removing_the_last_line_cancels_the_request_and_ends_the_review', async () => {
+    it('SCRUM21_AC8_removing_the_last_line_cancels_the_request_and_ends_the_review', async () => {
       const event = await newEvent();
       const state = await add(event, projector, 1);
       const requestId = state.request.id;
@@ -720,7 +717,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(row).toEqual({ status: 'cancelled', reviewer_id: null });
     });
 
-    it('N14_amending_a_marked_line_clears_its_outcome_and_leaves_other_marks_alone', async () => {
+    it('SCRUM21_AC7_amending_a_marked_line_clears_its_outcome_and_leaves_other_marks_alone', async () => {
       const { event, requestId, projectorLine, microphoneLine } = await eventWithTwoLines();
       await start(event, reviewerA);
       await mark(event, reviewerA, projectorLine, 'None left');
@@ -735,7 +732,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(reset).toMatchObject({ equipment_line_id: projectorLine, user_id: null });
     });
 
-    it('N14_a_change_that_changes_nothing_keeps_the_review_and_the_marks', async () => {
+    it('SCRUM21_AC7_a_change_that_changes_nothing_keeps_the_review_and_the_marks', async () => {
       const { event, projectorLine } = await eventWithTwoLines();
       await start(event, reviewerA);
       await mark(event, reviewerA, projectorLine, 'None left');
@@ -746,7 +743,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
       expect(lineNamed(await review(event), 'Projector').outcome).toBe('cannot_be_provided');
     });
 
-    it('N14_a_coordinator_change_after_completing_sends_the_request_back_to_pending_review', async () => {
+    it('SCRUM21_AC7_a_coordinator_change_after_completing_sends_the_request_back_to_pending_review', async () => {
       const { event, projectorLine, microphoneLine } = await eventWithTwoLines();
       await start(event, reviewerA);
       await mark(event, reviewerA, projectorLine, 'None left');

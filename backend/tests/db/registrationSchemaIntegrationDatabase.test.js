@@ -1,6 +1,7 @@
 import { beforeAll, afterAll, beforeEach, afterEach, describe, it, expect } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
+import { addRegistrationNotificationPrerequisites } from '../fixtures/registrationDatabase.js';
 
 const migration = (name) => readFileSync(new URL(`../../db/migrations/${name}`, import.meta.url), 'utf8');
 const applyRegistrationMigrations = async () => {
@@ -30,7 +31,10 @@ beforeAll(async () => {
     '068_open_event_registration_state.sql', '../migration-history/079_registrations.sql',
     '../migration-history/080_registration_eligibility.sql', '../migration-history/081_register_for_event.sql',
     '082_event_registration_state.sql', '091_event_registration_hardening.sql',
-  ]) await db.exec(migration(name));
+  ]) {
+    if (name === '091_event_registration_hardening.sql') await addRegistrationNotificationPrerequisites(db);
+    await db.exec(migration(name));
+  }
   await db.query('insert into auth.users values ($1), ($2), ($3), ($4)', [ORGANISER, ME, OTHER, THIRD]);
   await db.query(`insert into profiles (id, role) values
     ($1, 'event_organiser'), ($2, 'attendee'), ($3, 'attendee'), ($4, 'attendee')`, [ORGANISER, ME, OTHER, THIRD]);

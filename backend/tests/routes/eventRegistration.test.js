@@ -28,9 +28,9 @@ function app(db, role = ROLE.ATTENDEE) {
 }
 
 describe('SCRUM36 registration submission endpoint', () => {
-  const endpoints = [`/api/open-events/${EVENT}/registrations`, `/api/registration/events/${EVENT}/register`];
+  const endpoints = [`/api/open-events/${EVENT}/registrations`];
 
-  it.each(endpoints)('SCRUM22_AC4_both_endpoints_share_PR68_success_duplicate_and_capacity_outcomes_at_%s', async (path) => {
+  it.each(endpoints)('SCRUM22_AC4_registration_returns_success_duplicate_and_capacity_outcomes_at_%s', async (path) => {
     const db = client();
     const registration = { id: saved.id, eventRequestId: EVENT, attendeeId: ME, registeredAt: saved.created_at };
     db.rpc.mockResolvedValueOnce({ data: { outcome: 'registered', registration, registeredCount: 1 }, error: null })
@@ -46,6 +46,14 @@ describe('SCRUM36 registration submission endpoint', () => {
     const full = await request(server).post(path).set('Authorization', 'Bearer valid-token');
     expect(full.status).toBe(409);
     expect(full.body.code).toBe('EVENT_FULL');
+  });
+
+  it('SCRUM22_AC4_does_not_restore_the_retired_registration_submission_route', async () => {
+    const db = client();
+    const response = await request(app(db)).post(`/api/registration/events/${EVENT}/register`)
+      .set('Authorization', 'Bearer valid-token');
+    expect(response.status).toBe(404);
+    expect(db.rpc).not.toHaveBeenCalled();
   });
 
   it.each(endpoints)('SCRUM22_AC1_missing_deployment_dependencies_return_503_at_%s', async (path) => {

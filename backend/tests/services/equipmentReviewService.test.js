@@ -1,7 +1,7 @@
 /**
  * Tests for the equipment review service.
  *
- * SCRUM-290, subtasks SCRUM-292, 293 and 294. Named N14_ACn_<what_it_checks>.
+ * SCRUM-290, subtasks SCRUM-292, 293 and 294. Named SCRUM290_AC<n>_<what_it_checks>.
  *
  *   AC1  -- the caller is always the signed-in user, never read from input
  *   AC2  -- starting; each refusal from the database becomes the right typed error
@@ -146,7 +146,7 @@ const failure = async (promise) => {
 
 
 describe('AC4: the review data', () => {
-  it('N14_AC4_calls_equipment_review_for_event_and_names_the_event_fields', async () => {
+  it('SCRUM290_AC4_calls_equipment_review_for_event_and_names_the_event_fields', async () => {
     const client = fakeClient();
 
     const state = await getEquipmentReview(EVENT_ID, { client });
@@ -163,7 +163,7 @@ describe('AC4: the review data', () => {
     });
   });
 
-  it('N14_AC3_names_the_status_and_who_is_reviewing', async () => {
+  it('SCRUM290_AC3_names_the_status_and_who_is_reviewing', async () => {
     const state = await getEquipmentReview(EVENT_ID, { client: fakeClient() });
 
     expect(state.request).toMatchObject({
@@ -175,7 +175,7 @@ describe('AC4: the review data', () => {
     });
   });
 
-  it('N14_AC4_each_line_shows_type_quantity_notes_reserved_and_how_much_is_short', async () => {
+  it('SCRUM290_AC4_each_line_shows_type_quantity_notes_reserved_and_how_much_is_short', async () => {
     const state = await getEquipmentReview(EVENT_ID, { client: fakeClient() });
 
     expect(state.request.lines[0]).toMatchObject({
@@ -191,7 +191,7 @@ describe('AC4: the review data', () => {
     });
   });
 
-  it('N14_AC4_the_availability_result_uses_scrum_23s_labels_and_breakdown', async () => {
+  it('SCRUM290_AC4_the_availability_result_uses_scrum_23s_labels_and_breakdown', async () => {
     const client = fakeClient({
       equipment_review_for_event: ok(
         reviewRow({
@@ -214,7 +214,7 @@ describe('AC4: the review data', () => {
     expect(fully.breakdown).toMatchObject({ total: 10, damagedOrUnderMaintenance: 2, reserved: 3 });
   });
 
-  it('N14_AC4_a_line_with_no_period_has_no_availability_result_rather_than_unavailable', async () => {
+  it('SCRUM290_AC4_a_line_with_no_period_has_no_availability_result_rather_than_unavailable', async () => {
     const client = fakeClient({
       equipment_review_for_event: ok(reviewRow({ lines: [lineRow({ availability: null })] })),
     });
@@ -224,13 +224,13 @@ describe('AC4: the review data', () => {
     expect(request.lines[0].availability).toBeNull();
   });
 
-  it('N14_AC4_an_event_with_no_equipment_request_gives_empty_state', async () => {
+  it('SCRUM290_AC4_an_event_with_no_equipment_request_gives_empty_state', async () => {
     const client = fakeClient({ equipment_review_for_event: ok({ request: null }) });
 
     expect(await getEquipmentReview(EVENT_ID, { client })).toEqual({ event: null, request: null });
   });
 
-  it('N14_AC4_shows_a_marked_line_with_its_note_and_marker', async () => {
+  it('SCRUM290_AC4_shows_a_marked_line_with_its_note_and_marker', async () => {
     const state = toReviewState(
       reviewRow({
         lines: [
@@ -252,7 +252,7 @@ describe('AC4: the review data', () => {
     });
   });
 
-  it('N14_AC4_answers_not_found_for_an_event_that_does_not_exist', async () => {
+  it('SCRUM290_AC4_answers_not_found_for_an_event_that_does_not_exist', async () => {
     const client = fakeClient({ equipment_review_for_event: dbError('P0002', 'Event request not found') });
 
     const err = await failure(getEquipmentReview(EVENT_ID, { client }));
@@ -260,7 +260,7 @@ describe('AC4: the review data', () => {
     expect(err).toBeInstanceOf(NotFoundError);
   });
 
-  it('N14_AC4_refuses_an_id_that_is_not_a_uuid_before_any_call', async () => {
+  it('SCRUM290_AC4_refuses_an_id_that_is_not_a_uuid_before_any_call', async () => {
     const client = fakeClient();
 
     const err = await failure(getEquipmentReview('not-a-uuid', { client }));
@@ -269,7 +269,7 @@ describe('AC4: the review data', () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  it('N14_AC4_never_returns_a_snake_case_key', async () => {
+  it('SCRUM290_AC4_never_returns_a_snake_case_key', async () => {
     const state = await getEquipmentReview(EVENT_ID, { client: fakeClient() });
 
     expect(JSON.stringify(state)).not.toMatch(/"[a-z]+_[a-z_]+":/);
@@ -278,7 +278,7 @@ describe('AC4: the review data', () => {
 
 
 describe('AC2 and AC3: starting and taking over', () => {
-  it('N14_AC2_start_calls_the_function_with_the_signed_in_user', async () => {
+  it('SCRUM290_AC2_start_calls_the_function_with_the_signed_in_user', async () => {
     const client = fakeClient();
 
     const state = await startEquipmentReview(EVENT_ID, REVIEWER_ID, { client });
@@ -289,7 +289,7 @@ describe('AC2 and AC3: starting and taking over', () => {
     expect(state.request.reviewerId).toBe(REVIEWER_ID);
   });
 
-  it('N14_AC3_take_over_calls_the_function_with_the_signed_in_user', async () => {
+  it('SCRUM290_AC3_take_over_calls_the_function_with_the_signed_in_user', async () => {
     const client = fakeClient();
 
     await takeOverEquipmentReview(EVENT_ID, REVIEWER_ID, { client });
@@ -305,7 +305,7 @@ describe('AC2 and AC3: starting and taking over', () => {
     ['complete', (client, userId) => completeEquipmentReview(EVENT_ID, userId, { client })],
     ['clear', (client, userId) => clearEquipmentLineOutcome(EVENT_ID, LINE_ID, userId, { client })],
     ['mark', (client, userId) => markEquipmentLineUnavailable(EVENT_ID, LINE_ID, { note: 'x' }, userId, { client })],
-  ])('N14_AC1_%s_refuses_a_missing_caller_before_any_call', async (_what, call) => {
+  ])('SCRUM290_AC1_%s_refuses_a_missing_caller_before_any_call', async (_what, call) => {
     for (const userId of [undefined, null, '', '   ']) {
       const client = fakeClient();
 
@@ -316,7 +316,7 @@ describe('AC2 and AC3: starting and taking over', () => {
     }
   });
 
-  it('N14_AC2_a_status_that_does_not_allow_it_becomes_a_409_with_a_code_and_the_message', async () => {
+  it('SCRUM290_AC2_a_status_that_does_not_allow_it_becomes_a_409_with_a_code_and_the_message', async () => {
     const message = 'This equipment request is already Under review. Take over the review instead.';
     const client = fakeClient({ start_equipment_review: dbError('55000', message) });
 
@@ -328,7 +328,7 @@ describe('AC2 and AC3: starting and taking over', () => {
     expect(err.message).toBe(message);
   });
 
-  it('N14_AC2_a_request_that_changed_during_the_call_is_also_a_409', async () => {
+  it('SCRUM290_AC2_a_request_that_changed_during_the_call_is_also_a_409', async () => {
     const client = fakeClient({
       start_equipment_review: dbError('40001', 'The equipment request changed while the review was being started'),
     });
@@ -352,7 +352,7 @@ describe('AC2 and AC3: starting and taking over', () => {
     expect(err.message).toBe('Someone changed this equipment at the same moment. Please try again.');
   });
 
-  it('N14_AC2_an_event_with_no_equipment_request_is_a_404', async () => {
+  it('SCRUM290_AC2_an_event_with_no_equipment_request_is_a_404', async () => {
     const client = fakeClient({
       start_equipment_review: dbError('P0002', 'This event has no equipment request to review'),
     });
@@ -362,7 +362,7 @@ describe('AC2 and AC3: starting and taking over', () => {
     expect(err).toBeInstanceOf(NotFoundError);
   });
 
-  it('N14_AC1_a_missing_privilege_becomes_a_403', async () => {
+  it('SCRUM290_AC1_a_missing_privilege_becomes_a_403', async () => {
     const client = fakeClient({
       start_equipment_review: dbError('42501', 'Only Technical Support Staff can review equipment requests'),
     });
@@ -373,7 +373,7 @@ describe('AC2 and AC3: starting and taking over', () => {
     expect(err.status).toBe(403);
   });
 
-  it('N14_an_unrecognised_database_error_is_left_untyped_and_does_not_reach_the_caller_as_a_4xx', async () => {
+  it('SCRUM290_AC1_an_unrecognised_database_error_is_left_untyped_and_does_not_reach_the_caller_as_a_4xx', async () => {
     const client = fakeClient({ start_equipment_review: dbError('XX000', 'relation "x" is broken') });
 
     const err = await failure(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
@@ -385,7 +385,7 @@ describe('AC2 and AC3: starting and taking over', () => {
 
 
 describe('AC7: marking a line and completing', () => {
-  it('N14_AC7_mark_sends_the_trimmed_note_the_line_and_the_signed_in_user', async () => {
+  it('SCRUM290_AC7_mark_sends_the_trimmed_note_the_line_and_the_signed_in_user', async () => {
     const client = fakeClient();
 
     await markEquipmentLineUnavailable(EVENT_ID, LINE_ID, { note: '  Only two in stock ' }, REVIEWER_ID, { client });
@@ -403,7 +403,7 @@ describe('AC7: marking a line and completing', () => {
     ]);
   });
 
-  it('N14_AC7_mark_refuses_a_missing_note_before_any_call_and_names_the_field', async () => {
+  it('SCRUM290_AC7_mark_refuses_a_missing_note_before_any_call_and_names_the_field', async () => {
     const client = fakeClient();
 
     const err = await failure(markEquipmentLineUnavailable(EVENT_ID, LINE_ID, { note: '  ' }, REVIEWER_ID, { client }));
@@ -413,7 +413,7 @@ describe('AC7: marking a line and completing', () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  it('N14_AC7_mark_refuses_ids_that_are_not_uuids_before_any_call', async () => {
+  it('SCRUM290_AC7_mark_refuses_ids_that_are_not_uuids_before_any_call', async () => {
     const client = fakeClient();
 
     expect(await failure(markEquipmentLineUnavailable('x', LINE_ID, { note: 'a' }, REVIEWER_ID, { client })))
@@ -423,7 +423,7 @@ describe('AC7: marking a line and completing', () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  it('N14_AC3_a_caller_who_is_not_the_reviewer_gets_a_403', async () => {
+  it('SCRUM290_AC3_a_caller_who_is_not_the_reviewer_gets_a_403', async () => {
     const client = fakeClient({
       mark_equipment_line_unavailable: dbError('42501', 'Only the current reviewer can do this'),
     });
@@ -433,7 +433,7 @@ describe('AC7: marking a line and completing', () => {
     expect(err).toBeInstanceOf(ForbiddenError);
   });
 
-  it('N14_AC7_a_fully_reserved_line_cannot_be_marked_and_that_is_a_409', async () => {
+  it('SCRUM290_AC7_a_fully_reserved_line_cannot_be_marked_and_that_is_a_409', async () => {
     const client = fakeClient({
       mark_equipment_line_unavailable: dbError('55000', 'This line is already fully reserved, so it can be provided'),
     });
@@ -444,7 +444,7 @@ describe('AC7: marking a line and completing', () => {
     expect(err.message).toMatch(/fully reserved/);
   });
 
-  it('N14_AC7_clear_calls_the_function_for_that_line', async () => {
+  it('SCRUM290_AC7_clear_calls_the_function_for_that_line', async () => {
     const client = fakeClient();
 
     await clearEquipmentLineOutcome(EVENT_ID, LINE_ID, REVIEWER_ID, { client });
@@ -457,7 +457,7 @@ describe('AC7: marking a line and completing', () => {
     ]);
   });
 
-  it('N14_AC7_complete_calls_the_function_and_returns_the_new_state', async () => {
+  it('SCRUM290_AC7_complete_calls_the_function_and_returns_the_new_state', async () => {
     const client = fakeClient({
       complete_equipment_review: ok(
         reviewRow({ status: 'cannot_be_fully_arranged', reviewer_id: null, review_started_at: null }),
@@ -477,7 +477,7 @@ describe('AC7: marking a line and completing', () => {
     });
   });
 
-  it('N14_AC7_complete_with_lines_missing_notes_is_a_400_listing_each_line', async () => {
+  it('SCRUM290_AC7_complete_with_lines_missing_notes_is_a_400_listing_each_line', async () => {
     const client = fakeClient({
       complete_equipment_review: dbError(
         '22023',
@@ -495,7 +495,7 @@ describe('AC7: marking a line and completing', () => {
     expect(err.message).toMatch(/Microphone, Projector/);
   });
 
-  it('N14_AC7_complete_when_every_line_is_reserved_is_a_409', async () => {
+  it('SCRUM290_AC7_complete_when_every_line_is_reserved_is_a_409', async () => {
     const client = fakeClient({
       complete_equipment_review: dbError('55000', 'Every line is fully reserved, so there is nothing to complete.'),
     });
@@ -505,7 +505,7 @@ describe('AC7: marking a line and completing', () => {
     expect(err).toBeInstanceOf(ConflictError);
   });
 
-  it('N14_AC7_a_check_constraint_is_wrapped_so_the_drivers_words_are_marked_as_such', async () => {
+  it('SCRUM290_AC7_a_check_constraint_is_wrapped_so_the_drivers_words_are_marked_as_such', async () => {
     const client = fakeClient({
       mark_equipment_line_unavailable: dbError('23514', 'new row violates check constraint'),
     });
@@ -519,20 +519,20 @@ describe('AC7: marking a line and completing', () => {
 
 
 describe('AC3 and AC4: the names on the screen', () => {
-  it('N14_AC3_names_the_reviewer_and_the_assigned_coordinator', async () => {
+  it('SCRUM290_AC3_names_the_reviewer_and_the_assigned_coordinator', async () => {
     const state = await getEquipmentReview(EVENT_ID, { client: fakeClient() });
 
     expect(state.request.reviewerName).toBe('Riley Reviewer');
     expect(state.event.assignedCoordinatorName).toBe('Casey Coordinator');
   });
 
-  it('N14_AC4_names_the_booked_venue', async () => {
+  it('SCRUM290_AC4_names_the_booked_venue', async () => {
     const state = await getEquipmentReview(EVENT_ID, { client: fakeClient() });
 
     expect(state.event.venue).toEqual({ id: VENUE_ID, name: 'Hall A' });
   });
 
-  it('N14_AC4_only_approved_or_flagged_bookings_count_as_the_booked_venue', async () => {
+  it('SCRUM290_AC4_only_approved_or_flagged_bookings_count_as_the_booked_venue', async () => {
     const client = fakeClient();
     const queries = [];
     client.from.mockImplementation((table) => {
@@ -548,7 +548,7 @@ describe('AC3 and AC4: the names on the screen', () => {
     expect(bookings.in).toHaveBeenCalledWith('status', ['approved', 'flagged_for_review']);
   });
 
-  it('N14_AC4_an_event_with_no_booking_has_no_venue', async () => {
+  it('SCRUM290_AC4_an_event_with_no_booking_has_no_venue', async () => {
     const client = fakeClient({}, { bookings: ok([]) });
 
     const state = await getEquipmentReview(EVENT_ID, { client });
@@ -557,7 +557,7 @@ describe('AC3 and AC4: the names on the screen', () => {
     expect(client.fromCalls).not.toContain('venues');
   });
 
-  it('N14_AC3_nobody_reviewing_means_no_reviewer_name', async () => {
+  it('SCRUM290_AC3_nobody_reviewing_means_no_reviewer_name', async () => {
     const client = fakeClient({
       equipment_review_for_event: ok(reviewRow({ status: 'pending_review', reviewer_id: null, review_started_at: null })),
     });
@@ -567,7 +567,7 @@ describe('AC3 and AC4: the names on the screen', () => {
     expect(state.request.reviewerName).toBeNull();
   });
 
-  it('N14_AC3_a_person_without_a_name_comes_back_as_null_not_undefined', async () => {
+  it('SCRUM290_AC3_a_person_without_a_name_comes_back_as_null_not_undefined', async () => {
     const client = fakeClient({}, { profiles: ok([{ id: REVIEWER_ID, full_name: null }]) });
 
     const state = await getEquipmentReview(EVENT_ID, { client });
@@ -576,14 +576,14 @@ describe('AC3 and AC4: the names on the screen', () => {
     expect(state.event.assignedCoordinatorName).toBeNull();
   });
 
-  it('N14_AC3_the_names_are_added_to_every_write_too', async () => {
+  it('SCRUM290_AC3_the_names_are_added_to_every_write_too', async () => {
     const state = await takeOverEquipmentReview(EVENT_ID, REVIEWER_ID, { client: fakeClient() });
 
     expect(state.request.reviewerName).toBe('Riley Reviewer');
     expect(state.event.venue.name).toBe('Hall A');
   });
 
-  it('N14_an_event_with_no_equipment_request_reads_no_names_at_all', async () => {
+  it('SCRUM290_AC3_an_event_with_no_equipment_request_reads_no_names_at_all', async () => {
     const client = fakeClient({ equipment_review_for_event: ok({ request: null }) });
 
     await getEquipmentReview(EVENT_ID, { client });
@@ -591,7 +591,7 @@ describe('AC3 and AC4: the names on the screen', () => {
     expect(client.from).not.toHaveBeenCalled();
   });
 
-  it('N14_a_failed_name_lookup_is_a_500_not_a_blank_screen', async () => {
+  it('SCRUM290_AC3_a_failed_name_lookup_is_a_500_not_a_blank_screen', async () => {
     const client = fakeClient({}, { profiles: dbError('XX000', 'profiles is broken') });
 
     const err = await failure(getEquipmentReview(EVENT_ID, { client }));

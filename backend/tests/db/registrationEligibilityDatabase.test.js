@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { isOpenForRegistration } from '../../src/domain/registrationWindow.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
+import { addRegistrationNotificationPrerequisites } from '../fixtures/registrationDatabase.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
@@ -27,6 +28,7 @@ beforeAll(async () => {
     create role service_role bypassrls;
   `);
   for (const name of ['001_event_requests.sql', '007_user_roles.sql', '091_event_registration_hardening.sql', '093_registration_eligibility.sql']) {
+    if (name === '091_event_registration_hardening.sql') await addRegistrationNotificationPrerequisites(db);
     await db.exec(migration(name));
   }
   await db.exec(`
@@ -127,8 +129,14 @@ describe('SCRUM38 registration eligibility in PostgreSQL', () => {
     expect(isOpenForRegistration(settings, new Date(settings.startsAt))).toBe(false);
   });
 
-  it.each(['registration_opens_at', 'proposed_start'])('SCRUM38_AC4_shared_schema_refuses_a_missing_%s', async (column) => {
-    await expect(db.query(`update event_requests set ${column} = null where id = $1`, [EVENT])).rejects.toMatchObject({ code: '23514' });
+  it('SCRUM38_AC4_shared_schema_refuses_a_missing_registration_opening', async () => {
+    await expect(db.query('update event_requests set registration_opens_at = null where id = $1', [EVENT]))
+      .rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('SCRUM22_AC2_refuses_registration_after_a_start_change_clears_the_event_start', async () => {
+    await db.query('update event_requests set proposed_start = null where id = $1', [EVENT]);
+    await expect(check()).rejects.toMatchObject({ code: '55000', hint: 'REGISTRATION_DATES_MISSING' });
   });
 
   it('SCRUM38_AC5_requires_no_additional_eligibility_information', async () => {

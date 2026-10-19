@@ -1,3 +1,5 @@
+> Integration update: PR #68 is now included through origin/dev. Its organiser-only settings route/service are retained, and attendee submission uses only `/api/open-events/:id/registrations`. The dependency/conflict snapshot below is historical. See [the current SCRUM-363 merge notes](SCRUM363-dev-merge.md).
+
 # SCRUM-22 / PR #68 integration
 
 Dependency snapshot: PR #68 (commit `fb11b2d`), checked against dev `eb739a3`

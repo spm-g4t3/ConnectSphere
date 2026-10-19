@@ -1,3 +1,5 @@
+> This dated review predates the integration of origin/dev `7c2dd16`. SCRUM-395 is now included, and migration 100 resolves its interaction with confirmed-field protection. See [current merge evidence and deployment steps](SCRUM363-dev-merge.md). Notification AC9 remains a separate dependency.
+
 # SCRUM-369: SCRUM-363 acceptance review
 
 Reviewed 18 October 2026 against Jira SCRUM-363 AC1–9 and its Week 7 overrides.
@@ -195,11 +197,8 @@ PostgREST relationship discovery. Queued PGlite promises are not concurrent conn
    verify all affected arrangements flagged, no releases/deletions, Approved status,
    stale safety review closed, fresh safety approval, new acknowledgement and re-confirm.
    Do not substitute direct status SQL for this check.
-   Pending #74 (`a7c2e8a`) currently saves fields before calling the transition to
-   Approved; SCRUM-363's confirmed-field trigger refuses that intermediate write.
-   Coordinate the transaction ordering/field-lock contract when integrating #74,
-   retain protection against legacy direct edits, and test the actual workflow.
-   Do not bypass the trigger or treat the presence of a transition as AC8 evidence.
+   Migration 100 now moves to Approved before editing locked fields in the same
+   transaction. Apply it after 096 and 099, preserving the direct-edit guard.
 8. After SCRUM-175 exists, verify transactional organiser notification and, on
    re-confirmation, only active registered attendees; repeat/failure must not duplicate
    notifications or deliver any partial success. AC9 remains failed until then.
@@ -207,8 +206,7 @@ PostgREST relationship discovery. Queued PGlite promises are not concurrent conn
    RPCs, plus `open_event_registration_state` (068) for browsing. No enabling occurs
    during confirmation. Once those dependencies are deployed, independently enable
    registration within its window and verify SCRUM-22 availability/registration.
-   Browse additionally requires backend `OPEN_EVENTS_ENABLED=true` and frontend
-   build-time `VITE_OPEN_EVENTS_ENABLED=true` (README line 65); restart/rebuild.
+   Browse has no feature flag; deploy its SQL prerequisites before the API/UI.
 
 Remaining external dependencies: SCRUM-395, SCRUM-402, SCRUM-175 and deployment of
 SCRUM-494. No remote database, live script, environment file, commit, push, merge

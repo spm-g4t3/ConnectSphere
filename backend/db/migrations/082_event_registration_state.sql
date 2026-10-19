@@ -1,6 +1,5 @@
--- SCRUM-494/SCRUM-495: use the registration table created by migration 050.
--- The browse-state function from migration 068 was written for a separate
--- `registrations` table that this repository does not create.
+-- 068's version read a `registrations` table that is never created; this one
+-- reads event_registrations from 050.
 
 create or replace function open_event_registration_state(
   p_event_ids   uuid[],

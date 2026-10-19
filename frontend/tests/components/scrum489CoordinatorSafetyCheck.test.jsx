@@ -18,6 +18,8 @@ import {
   submitForSafetyReview,
   confirmEventRequest,
   getMyAssignedEvents,
+  previewSignificantEventChange,
+  applySignificantEventChange,
 } from "../../src/services/eventRequestService";
 import MyAssignedEvents from "../../src/components/MyAssignedEvents";
 
@@ -34,6 +36,8 @@ vi.mock("../../src/services/eventRequestService", () => ({
   submitForSafetyReview: vi.fn(),
   confirmEventRequest: vi.fn(),
   getMyAssignedEvents: vi.fn(),
+  previewSignificantEventChange: vi.fn(),
+  applySignificantEventChange: vi.fn(),
 }));
 
 // vi.mock is hoisted above every const, so the stub maker is hoisted with it.
@@ -121,6 +125,35 @@ const confirmedEvent = () => safetyApproved({
 const confirmPanel = () => screen.queryByRole("region", { name: "Confirm event" });
 
 describe("SCRUM363 coordinator confirmation", () => {
+  it("SCRUM363_AC8_confirmation_and_significant_change_actions_remain_reachable_without_stale_success", async () => {
+    signIn(ASSIGNED, "event_coordinator");
+    vi.mocked(confirmEventRequest).mockResolvedValue(confirmedEvent());
+    const impact = { venueBookings: [], equipmentReservations: [], registeredAttendeesToNotify: 0,
+      statusBefore: "confirmed", statusAfter: "approved", equipmentChangeRecorded: false };
+    vi.mocked(previewSignificantEventChange).mockResolvedValue(impact);
+    vi.mocked(applySignificantEventChange).mockResolvedValue(eventRequest({ expectedAttendance: 130 }));
+    const refresh = vi.fn();
+    const { user } = renderPage(safetyApproved(), { onChangeRequestProcessed: refresh });
+    const confirm = await screen.findByRole("button", { name: "Confirm Event" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    expect(screen.getByRole("button", { name: "Revise event details" })).toBeInTheDocument();
+    await user.click(confirm);
+    await screen.findByText("Event confirmed successfully.");
+    await user.click(screen.getByRole("button", { name: "Revise event details" }));
+    fireEvent.change(screen.getByLabelText("Expected attendance"), { target: { value: "130" } });
+    await user.type(screen.getByLabelText("Reason for this change"), "Attendance revised");
+    await user.click(screen.getByRole("button", { name: "Preview significant change" }));
+    await user.click(await screen.findByLabelText("I have reviewed this impact and confirm applying the significant change."));
+    await user.click(screen.getByRole("button", { name: "Confirm significant change" }));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Planning"));
+    expect(screen.queryByText("Event confirmed successfully.")).not.toBeInTheDocument();
+    expect(confirmPanel()).not.toBeInTheDocument();
+    expect(applySignificantEventChange).toHaveBeenCalledExactlyOnceWith(EVENT_ID, {
+      changes: { expectedAttendance: 130 }, reason: "Attendance revised", expectedImpact: impact,
+    });
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     [ASSIGNED, "event_coordinator_lead"], [OTHER, "event_coordinator"],
     [ASSIGNED, "event_organiser"], [ASSIGNED, "attendee"], [ASSIGNED, "venue_staff"],

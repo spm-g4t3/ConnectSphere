@@ -1,398 +1,498 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { registerForEvent } from '../../src/services/registrationService.js';
-import { availability } from '../../src/domain/registrationAvailability.js';
-import express from 'express';
-import request from 'supertest';
-import { createOpenEventRouter } from '../../src/routes/openEvents.js';
-import { createRequireAuth } from '../../src/middleware/requireAuth.js';
+import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const ME = '44444444-4444-4444-8444-444444444444';
-const OTHER = '55555555-5555-4555-8555-555555555555';
-const THIRD = '77777777-7777-4777-8777-777777777777';
-const ORGANISER = '66666666-6666-4666-8666-666666666666';
-let db;
-let event;
-const register = (attendee = ME, eventId = event) => db.query(
-  'select register_for_event($1::uuid, $2::uuid) as result', [eventId, attendee],
-);
-const records = async () => (await db.query(
-  'select * from event_registrations where event_request_id = $1 order by created_at, id', [event],
-)).rows;
-const seed = (attendee, status = 'registered') => db.query(
-  'insert into event_registrations (event_request_id, attendee_id, status) values ($1, $2, $3)',
-  [event, attendee, status],
-);
-const readAvailability = async (attendee = ME) => {
-  const { rows: [row] } = await db.query(`
-    select e.registration_capacity, coalesce(s.active_count, 0)::int as active_count,
-           coalesce(s.is_registered, false) as is_registered
-      from event_requests e
-      left join lateral open_event_registration_state(array[e.id], $2::uuid) s on true
-     where e.id = $1
-  `, [event, attendee]);
-  return {
-    ...availability(row.registration_capacity, row.active_count),
-    activeCount: row.active_count, isRegistered: row.is_registered,
-  };
-};
+const START = '2030-01-01T12:00:00Z';
 
-beforeAll(async () => {
-  db = new PGlite();
-  await db.exec(`
-    create schema auth;
-    create table auth.users (id uuid primary key);
-    create role anon;
-    create role authenticated;
-    create role service_role bypassrls;
-  `);
-  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '050_event_registration.sql', '068_open_event_registration_state.sql', '082_event_registration_state.sql',
-    '091_event_registration_hardening.sql', '092_event_registration_persistence.sql',
-    '093_registration_eligibility.sql', '094_register_for_event.sql']) {
-    await db.exec(migration(name));
-  }
-  await db.exec(`
-    grant select on profiles to service_role;
-    grant select, update on event_requests to service_role;
-    grant execute on function open_event_registration_state(uuid[], uuid) to service_role;
-    create function fail_test_registration() returns trigger language plpgsql as $$
-    begin
-      if new.event_request_id::text = current_setting('test.fail_event', true) then
-        raise exception 'Injected post-insert failure' using
-          errcode = coalesce(nullif(current_setting('test.fail_code', true), ''), 'P0001');
-      end if;
-      return new;
-    end;
-    $$;
-    create trigger fail_test_registration after insert on event_registrations
-      for each row execute function fail_test_registration();
-  `);
-  await db.query('insert into auth.users (id) values ($1), ($2), ($3), ($4)', [ME, OTHER, ORGANISER, THIRD]);
-  await db.query("insert into profiles (id, role) values ($1, 'attendee'), ($2, 'attendee'), ($3, 'event_organiser'), ($4, 'attendee')", [ME, OTHER, ORGANISER, THIRD]);
-});
+describe('SCRUM-363: event registration in Postgres', () => {
+  let db;
+  let organiser;
+  let attendee;
+  let secondAttendee;
+  let coordinator;
+  let eventId;
 
-describe('SCRUM46 authoritative registration availability', () => {
-  it('SCRUM46_AC1_AC2_decreases_places_from_the_persisted_count_and_preserves_existing_records', async () => {
-    await db.query('update event_requests set registration_capacity = 3 where id = $1', [event]);
-    await seed(OTHER);
-    const existing = await records();
-    expect(await readAvailability()).toMatchObject({ placesLeft: 2, activeCount: 1, isRegistered: false });
-    await register();
-    expect(await readAvailability()).toEqual({ placesLeft: 1, activeCount: 2, isFull: false, isRegistered: true });
-    expect(await records()).toEqual(expect.arrayContaining(existing));
+  const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
+
+  beforeAll(async () => {
+    db = new PGlite();
+    await db.exec(`
+      create schema auth;
+      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
+      create role anon;
+      create role authenticated;
+      create role service_role;
+    `);
+    await db.exec(migration('001_event_requests.sql'));
+    await db.exec(`
+      create table profiles (
+        id uuid primary key references auth.users(id),
+        role text not null
+      );
+      -- As 014 leaves them: the coordinator column and the notifications table
+      -- the start-change trigger writes to.
+      alter table event_requests add column assigned_coordinator_id uuid;
+      create table notifications (
+        id               uuid primary key default gen_random_uuid(),
+        recipient_id     uuid not null references auth.users (id) on delete cascade,
+        type             text not null,
+        event_request_id uuid references event_requests (id) on delete cascade,
+        payload          jsonb not null default '{}',
+        created_at       timestamptz not null default now(),
+        constraint notifications_type_known check (type in ('booking_flagged'))
+      );
+    `);
+    await db.exec(migration('050_event_registration.sql'));
+    await db.exec(migration('091_event_registration_hardening.sql'));
+
+    organiser = (await one("insert into auth.users (email) values ('organiser@test') returning id")).id;
+    attendee = (await one("insert into auth.users (email) values ('attendee@test') returning id")).id;
+    secondAttendee = (await one("insert into auth.users (email) values ('second-attendee@test') returning id")).id;
+    coordinator = (await one("insert into auth.users (email) values ('coordinator@test') returning id")).id;
+    await db.query(
+      `insert into profiles (id, role) values
+         ($1, 'event_organiser'), ($2, 'attendee'), ($3, 'attendee'), ($4, 'event_coordinator')`,
+      [organiser, attendee, secondAttendee, coordinator],
+    );
+    eventId = (await one(
+      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
+       values ($1, 'Registration test', 'approved', $2, '2030-01-01T14:00:00Z') returning id`,
+      [organiser, START],
+    )).id;
   });
 
-  it('SCRUM46_AC3_the_last_place_becomes_full_for_every_attendee_and_rejects_further_registration', async () => {
-    await register();
-    expect(await readAvailability()).toEqual({ placesLeft: 0, activeCount: 1, isFull: true, isRegistered: true });
-    expect(await readAvailability(OTHER)).toEqual({ placesLeft: 0, activeCount: 1, isFull: true, isRegistered: false });
-    const before = await records();
-    expect((await register(OTHER)).rows[0].result).toEqual({ outcome: 'capacity_reached' });
-    expect(await readAvailability(OTHER)).toMatchObject({ placesLeft: 0, activeCount: 1, isFull: true });
-    expect(await records()).toEqual(before);
+  afterAll(async () => {
+    await db?.close();
   });
 
-  it('SCRUM46_AC4_unlimited_events_keep_null_places_left_as_registrations_increase', async () => {
-    await db.query('update event_requests set registration_capacity = null where id = $1', [event]);
-    await register();
-    await register(OTHER);
-    await register(THIRD);
-    expect(await readAvailability()).toEqual({ placesLeft: null, activeCount: 3, isFull: false, isRegistered: true });
+  it('SCRUM494_AC1_collects_all_related_date_and_capacity_faults', async () => {
+    await db.query("update event_requests set status = 'approved' where id = $1", [eventId]);
+    const result = await one(
+      `select setup_event_registration($1, $2, true, $3, $4, 0, $5) as result`,
+      [
+        eventId,
+        organiser,
+        '2030-01-01T13:00:00Z',
+        '2030-01-01T13:00:00Z',
+        '2030-01-01T13:00:00Z',
+      ],
+    );
+    expect(result.result.outcome).toBe('invalid');
+    expect(result.result.details.map((item) => item.field)).toEqual([
+      'registrationOpensAt',
+      'registrationClosesAt',
+      'registrationWithdrawalDeadline',
+      'registrationCapacity',
+    ]);
+    const unchanged = await one('select registration_enabled from event_requests where id = $1', [eventId]);
+    expect(unchanged.registration_enabled).toBe(false);
   });
 
-  it('SCRUM46_AC5_queued_last_place_requests_produce_one_winner_and_one_authoritative_full_count', async () => {
-    // PGlite serialises calls; the existing two-session SQL check verifies real lock contention.
-    await db.query('update event_requests set registration_capacity = 2 where id = $1', [event]);
-    await seed(THIRD);
-    const outcomes = await Promise.all([register(), register(OTHER)]);
-    expect(outcomes.map((outcome) => outcome.rows[0].result.outcome)).toEqual(['registered', 'capacity_reached']);
-    expect(await readAvailability(THIRD)).toEqual({ placesLeft: 0, activeCount: 2, isFull: true, isRegistered: true });
+  it('SCRUM494_AC2_persists_settings_and_allows_only_confirmed_active_registrations', async () => {
+    const saved = await one(
+      `select setup_event_registration($1, $2, true, $3, $4, 2, $5) as result`,
+      [
+        eventId,
+        organiser,
+        new Date(Date.now() - 60_000).toISOString(),
+        '2030-01-01T12:00:00Z',
+        '2030-01-01T11:00:00Z',
+      ],
+    );
+    expect(saved.result.outcome).toBe('saved');
+    expect(saved.result.registeredCount).toBe(0);
+
+    const history = await one(
+      'select changed_by, old_values, new_values from event_registration_settings_history where event_request_id = $1',
+      [eventId],
+    );
+    expect(history.changed_by).toBe(organiser);
+    expect(history.old_values.enabled).toBe(false);
+    expect(history.new_values.enabled).toBe(true);
+
+    const notConfirmed = await one(
+      'select register_for_event($1, $2) as result',
+      [eventId, attendee],
+    );
+    expect(notConfirmed.result.outcome).toBe('event_not_confirmed');
+
+    await db.query("update event_requests set status = 'confirmed' where id = $1", [eventId]);
+    const registered = await one(
+      'select register_for_event($1, $2) as result',
+      [eventId, attendee],
+    );
+    expect(registered.result.outcome).toBe('registered');
+    expect(registered.result.registeredCount).toBe(1);
+
+    await db.query("update event_requests set status = 'approved' where id = $1", [eventId]);
+    const blockedDuringReview = await one(
+      'select register_for_event($1, $2) as result',
+      [eventId, secondAttendee],
+    );
+    expect(blockedDuringReview.result.outcome).toBe('event_not_confirmed');
+    const retained = await one(
+      `select registration_enabled, registration_capacity,
+              (select count(*) from event_registrations where event_request_id = $1) as registered_count
+         from event_requests where id = $1`,
+      [eventId],
+    );
+    expect(retained.registration_enabled).toBe(true);
+    expect(retained.registration_capacity).toBe(2);
+    expect(Number(retained.registered_count)).toBe(1);
+
+    await db.query("update event_requests set status = 'confirmed' where id = $1", [eventId]);
+    const secondRegistration = await one(
+      'select register_for_event($1, $2) as result',
+      [eventId, secondAttendee],
+    );
+    expect(secondRegistration.result.outcome).toBe('registered');
+    expect(secondRegistration.result.registeredCount).toBe(2);
+
+    const belowCurrentCount = await one(
+      `select setup_event_registration($1, $2, true, $3, $4, 1, $5) as result`,
+      [
+        eventId,
+        organiser,
+        new Date(Date.now() - 60_000).toISOString(),
+        '2030-01-01T12:00:00Z',
+        '2030-01-01T11:00:00Z',
+      ],
+    );
+    expect(belowCurrentCount.result.outcome).toBe('invalid');
+    expect(belowCurrentCount.result.details).toContainEqual(expect.objectContaining({
+      field: 'registrationCapacity',
+    }));
+
+    const duplicate = await one(
+      'select register_for_event($1, $2) as result',
+      [eventId, attendee],
+    );
+    expect(duplicate.result.outcome).toBe('already_registered');
+
   });
 
-  it('SCRUM46_AC7_duplicate_attempts_do_not_double_count_or_change_existing_registrations', async () => {
-    await db.query('update event_requests set registration_capacity = 2 where id = $1', [event]);
-    await register();
-    const before = await records();
-    const beforeAvailability = await readAvailability();
-    expect((await register()).rows[0].result).toEqual({ outcome: 'already_registered' });
-    expect(await readAvailability()).toEqual(beforeAvailability);
-    expect(await records()).toEqual(before);
-  });
+  it('SCRUM494_AC3_requires_the_organiser_role_and_preserves_capacity_locks', async () => {
+    const refused = await one(
+      `select setup_event_registration($1, $2, false, $3, $4, 1, null) as result`,
+      [
+        eventId,
+        attendee,
+        '2029-12-01T00:00:00Z',
+        '2030-01-01T12:00:00Z',
+      ],
+    );
+    expect(refused.result.outcome).toBe('forbidden');
 
-  it('SCRUM46_AC7_a_failed_insert_does_not_consume_availability', async () => {
-    const before = await readAvailability();
-    await db.query("select set_config('test.fail_event', $1, false)", [event]);
-    await expect(register()).rejects.toThrow('Injected post-insert failure');
-    await db.query("select set_config('test.fail_event', '', false)");
-    expect(await readAvailability()).toEqual(before);
-    expect(await records()).toEqual([]);
-  });
+    const wrongRole = await one(
+      'select setup_event_registration($1, $2, false, $3, $4, 1, null) as result',
+      [
+        eventId,
+        secondAttendee,
+        '2029-12-01T00:00:00Z',
+        '2030-01-01T12:00:00Z',
+      ],
+    );
+    expect(wrongRole.result.outcome).toBe('forbidden');
 
-  it.each(['withdrawn', 'cancelled'])('SCRUM46_AC7_%s_rows_release_places_and_remain_as_history', async (status) => {
-    await seed(OTHER);
-    const before = await records();
-    expect(await readAvailability()).toMatchObject({ placesLeft: 0, isFull: true });
-    await db.query('update event_registrations set status = $1 where id = $2', [status, before[0].id]);
-    expect(await readAvailability()).toMatchObject({ placesLeft: 1, activeCount: 0, isFull: false });
-    await register();
-    expect(await readAvailability()).toMatchObject({ placesLeft: 0, activeCount: 1, isFull: true });
-    expect((await records()).find((row) => row.id === before[0].id)).toMatchObject({ status, attendee_id: OTHER });
-  });
-});
-afterAll(async () => { await db.close(); });
-beforeEach(async () => {
-  event = randomUUID();
-  await db.query(`
-    insert into event_requests (id, organiser_id, event_name, status, proposed_start,
-      registration_enabled, registration_opens_at, registration_closes_at, registration_capacity)
-    values ($1, $2, 'Registration test', 'confirmed', clock_timestamp() + interval '2 days',
-      true, clock_timestamp() - interval '1 day', clock_timestamp() + interval '1 day', 1)
-  `, [event, ORGANISER]);
-});
+    const nullCaller = await one(
+      'select setup_event_registration($1, null, false, $2, $3, 1, null) as result',
+      [eventId, '2029-12-01T00:00:00Z', '2030-01-01T12:00:00Z'],
+    );
+    expect(nullCaller.result.outcome).toBe('forbidden');
 
-describe('SCRUM39 atomic event registration', () => {
-  it('SCRUM39_AC1_takes_the_last_place_and_returns_the_persisted_registration', async () => {
-    await db.query('update event_requests set registration_capacity = 2 where id = $1', [event]);
-    await seed(OTHER);
-    const { rows: [{ result }] } = await register();
-    expect(result).toMatchObject({ outcome: 'registered', registration: {
-      eventRequestId: event, attendeeId: ME, status: 'registered',
-    } });
-    const saved = await records();
-    expect(saved).toHaveLength(2);
-    expect(result.registration.id).toBe(saved.find((row) => row.attendee_id === ME).id);
-  });
+    const nullRegistration = await one(
+      'select register_for_event($1, null) as result',
+      [eventId],
+    );
+    expect(nullRegistration.result.outcome).toBe('forbidden');
 
-  it('SCRUM39_AC1_refuses_a_full_event_without_changing_records', async () => {
-    await seed(OTHER);
-    const before = await records();
-    expect((await register()).rows[0].result).toEqual({ outcome: 'capacity_reached' });
-    expect(await records()).toEqual(before);
-  });
+    const wrongRoleRegistration = await one(
+      'select register_for_event($1, $2) as result',
+      [eventId, organiser],
+    );
+    expect(wrongRoleRegistration.result.outcome).toBe('forbidden');
 
-  it('SCRUM39_AC1_refuses_an_event_already_over_its_lowered_capacity', async () => {
-    await seed(ME);
-    await seed(OTHER);
-    expect((await register(THIRD)).rows[0].result).toEqual({ outcome: 'capacity_reached' });
-    expect(await records()).toHaveLength(2);
-  });
 
-  it('SCRUM39_AC1_rejects_zero_capacity_in_the_shared_settings_schema', async () => {
-    await expect(db.query('update event_requests set registration_capacity = 0 where id = $1', [event])).rejects.toMatchObject({ code: '23514' });
-    expect(await records()).toEqual([]);
-  });
-
-  it('SCRUM39_AC2_returns_already_registered_before_full_for_a_repeat_attempt', async () => {
-    await register();
-    const before = await records();
-    expect((await register()).rows[0].result).toEqual({ outcome: 'already_registered' });
-    expect(await records()).toEqual(before);
-  });
-
-  it.each(['withdrawn', 'cancelled'])('SCRUM39_AC2_does_not_count_%s_records_as_active', async (status) => {
-    await seed(ME, status);
-    await seed(OTHER, status);
-    await register();
-    const saved = await records();
-    expect(saved).toHaveLength(2);
-    expect(saved.filter((row) => row.status === 'registered')).toHaveLength(1);
-  });
-
-  it('SCRUM39_AC3_allows_null_capacity_without_a_venue_capacity_check', async () => {
-    await db.query('update event_requests set registration_capacity = null where id = $1', [event]);
-    await register();
-    await register(OTHER);
-    expect(await records()).toHaveLength(2);
-    expect((await register()).rows[0].result).toEqual({ outcome: 'already_registered' });
-  });
-
-  it('SCRUM39_AC4_allows_only_one_queued_request_for_the_last_place', async () => {
-    // PGlite queues these calls on one connection. Real overlapping transactions
-    // and lock waiting must also be checked with registrationConcurrency.manual.sql.
-    const outcomes = await Promise.all([register(), register(OTHER)]);
-    expect(outcomes.map((result) => result.rows[0].result.outcome)).toEqual(['registered', 'capacity_reached']);
-    expect(await records()).toHaveLength(1);
-  });
-
-  it('SCRUM39_AC4_allows_only_one_of_two_queued_requests_from_the_same_attendee', async () => {
-    const outcomes = await Promise.all([register(), register()]);
-    expect(outcomes.map((result) => result.rows[0].result.outcome)).toEqual(['registered', 'already_registered']);
-    expect(await records()).toHaveLength(1);
-  });
-
-  it('SCRUM39_AC5_rolls_back_a_failure_after_the_insert_and_leaves_the_place_available', async () => {
-    await db.query("select set_config('test.fail_event', $1, false)", [event]);
-    await expect(register()).rejects.toThrow('Injected post-insert failure');
-    expect(await records()).toEqual([]);
-    await db.query("select set_config('test.fail_event', '', false)");
-    await register(OTHER);
-    expect((await records()).map((row) => row.attendee_id)).toEqual([OTHER]);
-  });
-
-  it('SCRUM39_AC5_can_roll_back_the_whole_registration_transaction', async () => {
-    await db.exec('begin');
-    await register();
-    await db.exec('rollback');
-    expect(await records()).toEqual([]);
-    await register(OTHER);
-    expect(await records()).toHaveLength(1);
-  });
-
-  it.each([
-    ['status', 'approved', 'EVENT_NOT_CONFIRMED'],
-    ['registration_enabled', false, 'REGISTRATION_DISABLED'],
-    ['registration_opens_at', '9999-01-01T00:00:00Z', 'REGISTRATION_NOT_OPEN'],
-    ['registration_closes_at', '2000-01-01T00:00:00Z', 'REGISTRATION_CLOSED'],
-    ['proposed_start', '2000-01-01T00:00:00Z', 'EVENT_STARTED'],
-  ])('SCRUM39_AC5_revalidates_current_%s_in_the_write_transaction', async (column, value) => {
-    await db.query('update event_requests set registration_closes_at = null where id = $1', [event]);
-    if (column === 'registration_closes_at') await db.query("update event_requests set registration_opens_at = '1999-01-01' where id = $1", [event]);
-    await db.query(`update event_requests set ${column} = $1 where id = $2`, [value, event]);
-    expect((await register()).rows[0].result).toEqual({ outcome: 'not_found' });
-    expect(await records()).toEqual([]);
-  });
-
-  it.each([
-    ['null attendee', null, null, '22023'],
-    ['wrong role', ORGANISER, null, '42501'],
-    ['unknown attendee', '99999999-9999-4999-8999-999999999999', null, '42501'],
-    ['unknown event', ME, '99999999-9999-4999-8999-999999999999', 'P0002'],
-  ])('SCRUM39_AC5_refuses_%s_without_inserting', async (_label, attendee, target, code) => {
-    if (code === 'P0002' || code === '42501') {
-      expect((await register(attendee, target ?? event)).rows[0].result).toEqual({ outcome: code === 'P0002' ? 'not_found' : 'forbidden' });
-    } else await expect(register(attendee, target ?? event)).rejects.toMatchObject({ code });
-    expect(await records()).toEqual([]);
-  });
-
-  it.each(['anon', 'authenticated'])('SCRUM39_AC5_denies_direct_RPC_execution_by_%s', async (role) => {
-    await db.exec(`set role ${role}`);
-    try {
-      await expect(register()).rejects.toMatchObject({ code: '42501', message: 'permission denied for function register_for_event' });
-    } finally { await db.exec('reset role'); }
-    expect(await records()).toEqual([]);
-  });
-
-  it('SCRUM39_AC5_runs_the_service_with_the_API_role_against_real_SQL', async () => {
-    const client = { rpc: async (name, args) => {
-      expect(name).toBe('register_for_event');
-      try {
-        const { rows } = await register(args.p_attendee_id, args.p_event_request_id);
-        return { data: rows[0].result, error: null };
-      } catch (error) { return { data: null, error }; }
-    } };
-    await db.exec('set role service_role');
-    try {
-      const saved = await registerForEvent({ attendeeId: ME, eventId: event, client });
-      expect(saved).toMatchObject({ eventRequestId: event, attendeeId: ME, status: 'registered' });
-      await expect(registerForEvent({ attendeeId: OTHER, eventId: event, client })).rejects.toMatchObject({ status: 409, code: 'EVENT_FULL' });
-      await expect(registerForEvent({ attendeeId: ME, eventId: event, client })).rejects.toMatchObject({ status: 409, code: 'ALREADY_REGISTERED' });
-    } finally { await db.exec('reset role'); }
-    expect(await records()).toHaveLength(1);
-  });
-
-  it.each(['40001', '40P01'])('SCRUM22_AC4_database_%s_after_insert_rolls_back_and_returns_a_retryable_conflict', async (code) => {
-    await db.query("select set_config('test.fail_event', $1, false), set_config('test.fail_code', $2, false)", [event, code]);
-    const client = { rpc: async () => {
-      try { return { data: (await register()).rows[0].result, error: null }; }
-      catch (error) { return { data: null, error }; }
-    } };
-    try {
-      await expect(registerForEvent({ attendeeId: ME, eventId: event, client }))
-        .rejects.toMatchObject({ status: 409, code: 'REGISTRATION_CHANGED' });
-      expect(await records()).toEqual([]);
-      expect(await readAvailability()).toMatchObject({ placesLeft: 1, activeCount: 0 });
-    } finally {
-      await db.query("select set_config('test.fail_event', '', false), set_config('test.fail_code', '', false)");
+    const source = migration('091_event_registration_hardening.sql').toLowerCase();
+    for (const functionName of ['setup_event_registration', 'register_for_event']) {
+      const bodyStart = source.indexOf(`create or replace function ${functionName}`);
+      const bodyEnd = source.indexOf('$$;', source.indexOf('$$', bodyStart) + 2);
+      expect(source.slice(bodyStart, bodyEnd)).toMatch(/for update/);
     }
   });
 
-  it('SCRUM22_AC4_AC5_AC6_AC7_HTTP_registration_and_browsing_share_authoritative_SQL_state', async () => {
-    const client = {
-      async rpc(name, args) {
-        try {
-          if (name === 'register_for_event') {
-            const { rows } = await register(args.p_attendee_id, args.p_event_request_id);
-            return { data: rows[0].result, error: null };
-          }
-          expect(name).toBe('open_event_registration_state');
-          const { rows } = await db.query(
-            'select * from open_event_registration_state($1::uuid[], $2::uuid)',
-            [args.p_event_ids, args.p_attendee_id],
-          );
-          return { data: rows, error: null };
-        } catch (error) { return { error }; }
-      },
-      from(table) {
-        expect(table).toBe('event_requests');
-        const clauses = [];
-        const params = [];
-        const filter = (column, operator, value) => {
-          params.push(value);
-          clauses.push(`${column} ${operator} $${params.length}`);
-          return chain;
-        };
-        // Translate only this detail query's Supabase interface to real SQL.
-        const chain = {
-          select: () => chain,
-          eq: (column, value) => filter(column, '=', value),
-          lte: (column, value) => filter(column, '<=', value),
-          gt: (column, value) => filter(column, '>', value),
-          or: (expression) => {
-            const prefix = 'registration_closes_at.is.null,registration_closes_at.gt.';
-            expect(expression.startsWith(prefix)).toBe(true);
-            params.push(expression.slice(prefix.length));
-            clauses.push(`(registration_closes_at is null or registration_closes_at > $${params.length})`);
-            return chain;
-          },
-          then: (resolve, reject) => db.query(
-            `select * from event_requests where ${clauses.join(' and ')}`, params,
-          ).then(({ rows }) => ({ data: rows, error: null })).then(resolve, reject),
-        };
-        return chain;
-      },
-    };
-    const requireAuth = createRequireAuth({
-      verifyToken: async (token) => {
-        if (token === 'attendee-token') return { id: ME };
-        if (token === 'other-token') return { id: OTHER };
-        return null;
-      },
-      loadRole: async (id) => (await db.query('select role from profiles where id = $1', [id])).rows[0]?.role,
+  it('SCRUM494_AC4_refuses_registration_when_disabled_or_not_yet_open', async () => {
+    const disabledEvent = (await one(
+      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
+       values ($1, 'Disabled registration', 'confirmed', $2, '2030-01-01T14:00:00Z')
+       returning id`,
+      [organiser, START],
+    )).id;
+    const disabledResult = await one(
+      'select register_for_event($1, $2) as result',
+      [disabledEvent, secondAttendee],
+    );
+    expect(disabledResult.result.outcome).toBe('registration_closed');
+
+    const futureEvent = (await one(
+      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
+       values ($1, 'Future registration window', 'confirmed', $2, '2030-01-01T14:00:00Z')
+       returning id`,
+      [organiser, START],
+    )).id;
+    const futureSettings = await one(
+      `select setup_event_registration($1, $2, true, $3, $4, null, null) as result`,
+      [
+        futureEvent,
+        organiser,
+        '2029-12-01T00:00:00Z',
+        '2030-01-01T12:00:00Z',
+      ],
+    );
+    expect(futureSettings.result.outcome).toBe('saved');
+
+    const beforeOpening = await one(
+      'select register_for_event($1, $2) as result',
+      [futureEvent, secondAttendee],
+    );
+    expect(beforeOpening.result.outcome).toBe('registration_closed');
+  });
+
+  it('SCRUM494_AC5_does_not_count_withdrawn_registrations_toward_capacity', async () => {
+    await db.query(
+      `update event_registrations set status = 'withdrawn'
+        where event_request_id = $1 and attendee_id = $2`,
+      [eventId, attendee],
+    );
+    const settings = await one(
+      `select setup_event_registration($1, $2, true, $3, $4, 1, $5) as result`,
+      [
+        eventId,
+        organiser,
+        new Date(Date.now() - 60_000).toISOString(),
+        '2030-01-01T12:00:00Z',
+        '2030-01-01T11:00:00Z',
+      ],
+    );
+    expect(settings.result.outcome).toBe('saved');
+    expect(settings.result.registeredCount).toBe(1);
+  });
+
+  const scheduleConflictNotes = async (event) => (await db.query(
+    `select recipient_id, payload from notifications
+      where event_request_id = $1 and type = 'registration_schedule_conflict'
+      order by recipient_id`,
+    [event],
+  )).rows;
+
+  it('SCRUM494_AC7_lets_an_earlier_start_through_and_tells_the_organiser_and_coordinator_which_dates_clash', async () => {
+    const scheduleEvent = (await one(
+      `insert into event_requests (organiser_id, assigned_coordinator_id, event_name, status, proposed_start, proposed_end)
+       values ($1, $2, 'Schedule conflict', 'confirmed', $3, '2030-01-01T14:00:00Z')
+       returning id`,
+      [organiser, coordinator, START],
+    )).id;
+    const saved = await one(
+      'select setup_event_registration($1, $2, true, $3, $4, null, $5) as result',
+      [scheduleEvent, organiser, '2030-01-01T09:00:00Z', START, '2030-01-01T11:00:00Z'],
+    );
+    expect(saved.result.outcome).toBe('saved');
+
+    await db.query(
+      "update event_requests set proposed_start = '2030-01-01T09:00:00Z' where id = $1",
+      [scheduleEvent],
+    );
+
+    const moved = await one('select proposed_start, registration_closes_at from event_requests where id = $1', [scheduleEvent]);
+    expect(moved.proposed_start.toISOString()).toBe('2030-01-01T09:00:00.000Z');
+    expect(moved.registration_closes_at.toISOString()).toBe('2030-01-01T12:00:00.000Z');
+
+    const notes = await scheduleConflictNotes(scheduleEvent);
+    expect(notes.map((note) => note.recipient_id).sort()).toEqual([organiser, coordinator].sort());
+    for (const note of notes) {
+      expect(note.payload).toMatchObject({
+        eventName: 'Schedule conflict',
+        fields: ['registrationOpensAt', 'registrationClosesAt', 'registrationWithdrawalDeadline'],
+      });
+      expect(new Date(note.payload.newStart).toISOString()).toBe('2030-01-01T09:00:00.000Z');
+    }
+  });
+
+  it('SCRUM494_AC7_names_only_the_dates_the_new_start_clashes_with', async () => {
+    const scheduleEvent = (await one(
+      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
+       values ($1, 'Withdrawal clash', 'confirmed', $2, '2030-01-01T14:00:00Z')
+       returning id`,
+      [organiser, START],
+    )).id;
+    await one(
+      'select setup_event_registration($1, $2, true, $3, $4, null, $5) as result',
+      [scheduleEvent, organiser, '2029-12-01T00:00:00Z', '2030-01-01T10:00:00Z', '2030-01-01T11:30:00Z'],
+    );
+
+    await db.query(
+      "update event_requests set proposed_start = '2030-01-01T11:00:00Z' where id = $1",
+      [scheduleEvent],
+    );
+
+    const notes = await scheduleConflictNotes(scheduleEvent);
+    expect(notes.map((note) => note.recipient_id)).toEqual([organiser]);
+    expect(notes[0].payload.fields).toEqual(['registrationWithdrawalDeadline']);
+  });
+
+  it('SCRUM494_AC7_writes_no_notification_when_the_new_start_leaves_the_dates_valid', async () => {
+    const scheduleEvent = (await one(
+      `insert into event_requests (organiser_id, assigned_coordinator_id, event_name, status, proposed_start, proposed_end)
+       values ($1, $2, 'No clash', 'confirmed', $3, '2030-01-01T14:00:00Z')
+       returning id`,
+      [organiser, coordinator, START],
+    )).id;
+    await one(
+      'select setup_event_registration($1, $2, true, $3, $4, null, $5) as result',
+      [scheduleEvent, organiser, '2029-12-01T00:00:00Z', '2030-01-01T10:00:00Z', '2030-01-01T10:00:00Z'],
+    );
+
+    await db.query(
+      "update event_requests set proposed_start = '2030-01-01T11:00:00Z' where id = $1",
+      [scheduleEvent],
+    );
+
+    expect(await scheduleConflictNotes(scheduleEvent)).toEqual([]);
+  });
+
+  it('SCRUM494_AC8_refuses_an_opening_time_at_or_after_the_event_start_when_no_closing_time_is_set', async () => {
+    const openEnded = (await one(
+      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
+       values ($1, 'Opens too late', 'confirmed', $2, '2030-01-01T14:00:00Z')
+       returning id`,
+      [organiser, START],
+    )).id;
+    for (const opensAt of [START, '2030-01-01T13:00:00Z']) {
+      const refused = await one(
+        'select setup_event_registration($1, $2, true, $3, null, null, null) as result',
+        [openEnded, organiser, opensAt],
+      );
+      expect(refused.result).toEqual({
+        outcome: 'invalid',
+        details: [{ field: 'registrationOpensAt', message: 'Must be before the event start.' }],
+      });
+    }
+
+    await db.query('update event_requests set proposed_start = null where id = $1', [openEnded]);
+    const noStart = await one(
+      'select setup_event_registration($1, $2, true, $3, null, null, null) as result',
+      [openEnded, organiser, '2029-12-01T00:00:00Z'],
+    );
+    expect(noStart.result.details).toEqual([
+      { field: 'proposedStart', message: 'Set the event start before setting the registration opening time.' },
+    ]);
+  });
+
+  it('SCRUM494_AC8_allows_registration_with_no_closing_time_until_the_organiser_closes_it', async () => {
+    const openEnded = (await one(
+      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
+       values ($1, 'Open ended', 'confirmed', $2, '2030-01-01T14:00:00Z')
+       returning id`,
+      [organiser, START],
+    )).id;
+    const opened = new Date(Date.now() - 3_600_000).toISOString();
+    const saved = await one(
+      'select setup_event_registration($1, $2, true, $3, null, null, null) as result',
+      [openEnded, organiser, opened],
+    );
+    expect(saved.result.outcome).toBe('saved');
+    const registered = await one('select register_for_event($1, $2) as result', [openEnded, attendee]);
+    expect(registered.result.outcome).toBe('registered');
+    const closed = await one(
+      'select setup_event_registration($1, $2, false, $3, null, null, null) as result',
+      [openEnded, organiser, opened],
+    );
+    expect(closed.result.outcome).toBe('saved');
+    const refused = await one('select register_for_event($1, $2) as result', [openEnded, secondAttendee]);
+    expect(refused.result.outcome).toBe('registration_closed');
+  });
+
+  it('SCRUM494_AC9_allows_switching_registration_off_with_the_window_cleared', async () => {
+    const offEvent = (await one(
+      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
+       values ($1, 'Switch off', 'approved', $2, '2030-01-01T14:00:00Z')
+       returning id`,
+      [organiser, START],
+    )).id;
+    const on = await one(
+      `select setup_event_registration($1, $2, true, $3, $4, null, null) as result`,
+      [offEvent, organiser, '2029-12-01T00:00:00Z', '2030-01-01T10:00:00Z'],
+    );
+    expect(on.result.outcome).toBe('saved');
+
+    const off = await one(
+      'select setup_event_registration($1, $2, false, null, null, null, null) as result',
+      [offEvent, organiser],
+    );
+    expect(off.result.outcome).toBe('saved');
+
+    const enabledWithoutDates = await one(
+      'select setup_event_registration($1, $2, true, null, null, null, null) as result',
+      [offEvent, organiser],
+    );
+    expect(enabledWithoutDates.result.outcome).toBe('invalid');
+
+    const closingWithoutOpening = await one(
+      'select setup_event_registration($1, $2, false, null, $3, null, null) as result',
+      [offEvent, organiser, '2030-01-01T10:00:00Z'],
+    );
+    expect(closingWithoutOpening.result.outcome).toBe('invalid');
+  });
+
+  const CLASHING_DATES = ['2029-12-01T00:00:00Z', START, '2030-01-01T11:00:00Z'];
+
+  // Registration saved against the original start, then the start moved earlier
+  // than the closing time and withdrawal deadline.
+  const eventWithClashingDates = async (name) => {
+    const clashing = (await one(
+      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
+       values ($1, $2, 'confirmed', $3, '2030-01-01T14:00:00Z')
+       returning id`,
+      [organiser, name, START],
+    )).id;
+    const saved = await one(
+      'select setup_event_registration($1, $2, true, $3, $4, null, $5) as result',
+      [clashing, organiser, ...CLASHING_DATES],
+    );
+    expect(saved.result.outcome).toBe('saved');
+    await db.query(
+      "update event_requests set proposed_start = '2030-01-01T09:00:00Z' where id = $1",
+      [clashing],
+    );
+    return clashing;
+  };
+
+  it('SCRUM494_AC9_switches_registration_off_after_a_start_change_left_the_dates_clashing', async () => {
+    const clashing = await eventWithClashingDates('Off after clash');
+
+    const off = await one(
+      'select setup_event_registration($1, $2, false, $3, $4, null, $5) as result',
+      [clashing, organiser, ...CLASHING_DATES],
+    );
+    expect(off.result.outcome).toBe('saved');
+    const row = await one('select registration_enabled from event_requests where id = $1', [clashing]);
+    expect(row.registration_enabled).toBe(false);
+  });
+
+  it('SCRUM494_AC7_refuses_switching_back_on_while_the_dates_still_clash', async () => {
+    const clashing = await eventWithClashingDates('On after clash');
+
+    const on = await one(
+      'select setup_event_registration($1, $2, true, $3, $4, null, $5) as result',
+      [clashing, organiser, ...CLASHING_DATES],
+    );
+    expect(on.result.outcome).toBe('invalid');
+    expect(on.result.details).toContainEqual({
+      field: 'registrationClosesAt', message: 'Must be no later than the event start.',
     });
-    const app = express().use('/api/open-events', createOpenEventRouter({ client, requireAuth }));
-    await db.exec('set role service_role');
-    try {
-      const before = await request(app).get(`/api/open-events/${event}`)
-        .set('Authorization', 'Bearer attendee-token');
-      expect(before.status).toBe(200);
-      expect(before.body).toMatchObject({ placesLeft: 1, isRegistered: false, isFull: false, canRegister: true });
-      const success = await request(app).post(`/api/open-events/${event}/registrations`)
-        .set('Authorization', 'Bearer attendee-token');
-      expect(success.status).toBe(201);
-      expect(success.body).toMatchObject({ attendeeId: ME, eventRequestId: event, status: 'registered' });
-      expect((await records()).map((row) => row.id)).toEqual([success.body.id]);
-      for (const token of ['attendee-token', 'other-token']) {
-        const fresh = await request(app).get(`/api/open-events/${event}`)
-          .set('Authorization', `Bearer ${token}`);
-        expect(fresh.status).toBe(200);
-        expect(fresh.headers['cache-control']).toBe('no-store');
-        expect(fresh.body).toMatchObject({ placesLeft: 0, isFull: true, canRegister: false, isRegistered: token === 'attendee-token' });
-      }
-      const full = await request(app).post(`/api/open-events/${event}/registrations`)
-        .set('Authorization', 'Bearer other-token');
-      expect(full.status).toBe(409);
-      expect(full.body).toMatchObject({ code: 'EVENT_FULL', error: 'Event is full' });
-      const repeated = await request(app).post(`/api/open-events/${event}/registrations`)
-        .set('Authorization', 'Bearer attendee-token');
-      expect(repeated.status).toBe(409);
-      expect(repeated.body).toMatchObject({ code: 'ALREADY_REGISTERED', error: 'Already registered' });
-      expect(await records()).toHaveLength(1);
-    } finally { await db.exec('reset role'); }
   });
 });

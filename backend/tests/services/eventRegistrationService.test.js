@@ -2,19 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   getRegistrationSettings,
-  listOpenRegistrationEvents,
   updateRegistrationSettings,
 } from '../../src/services/eventRegistrationService.js';
-import { listOpenEventsForRegistration } from '../../src/services/openEventService.js';
-import { ConflictError, ForbiddenError, ValidationError } from '../../src/errors.js';
-
-vi.mock('../../src/services/openEventService.js', () => ({
-  listOpenEventsForRegistration: vi.fn(),
-}));
+import { ForbiddenError, ValidationError } from '../../src/errors.js';
 
 const EVENT_ID = '22222222-2222-4222-8222-222222222222';
 const ORGANISER_ID = '11111111-1111-4111-8111-111111111111';
-const ATTENDEE_ID = '33333333-3333-4333-8333-333333333333';
 
 const validSettings = {
   enabled: true,
@@ -133,40 +126,6 @@ describe('SCRUM-494 registration settings and attendee listings', () => {
     expect(client.countFilters).toHaveBeenLastCalledWith('status', 'registered');
   });
 
-  it('SCRUM494_AC4_uses_the_shared_open_event_eligibility_and_registration_state', async () => {
-    const now = new Date('2030-01-01T10:00:00.000Z');
-    const events = [{
-      id: EVENT_ID,
-      eventName: 'Industry Night',
-      startsAt: '2030-01-01T12:00:00.000Z',
-      registrationOpensAt: '2030-01-01T09:00:00.000Z',
-      registrationClosesAt: '2030-01-01T11:00:00.000Z',
-      capacity: 10,
-      registeredCount: 10,
-      isRegistered: true,
-      isFull: true,
-    }];
-    listOpenEventsForRegistration.mockResolvedValue(events);
-
-    await expect(listOpenRegistrationEvents(ATTENDEE_ID, { now })).resolves.toEqual([{
-      id: EVENT_ID,
-      eventName: 'Industry Night',
-      description: undefined,
-      startsAt: '2030-01-01T12:00:00.000Z',
-      registrationOpensAt: '2030-01-01T09:00:00.000Z',
-      registrationClosesAt: '2030-01-01T11:00:00.000Z',
-      capacity: 10,
-      registeredCount: 10,
-      isRegistered: true,
-      isFull: true,
-    }]);
-    expect(listOpenEventsForRegistration).toHaveBeenCalledWith({
-      attendeeId: ATTENDEE_ID,
-      client: undefined,
-      now,
-    });
-  });
-
   it('SCRUM494_AC2_rejects_malformed_settings_before_the_database_call', async () => {
     const client = saveClient({ outcome: 'saved' });
     const error = await updateRegistrationSettings(
@@ -180,4 +139,24 @@ describe('SCRUM-494 registration settings and attendee listings', () => {
     expect(error.details).toContainEqual(expect.objectContaining({ field: 'registrationOpensAt' }));
     expect(client.rpc).not.toHaveBeenCalled();
   });
+
+  it.each([true, [5], '1e2', '  ', 3000000000])(
+    'SCRUM494_AC3_rejects_capacity_that_is_not_a_whole_number_in_range (%j)',
+    async (capacity) => {
+      const client = saveClient({ outcome: 'saved' });
+      const error = await updateRegistrationSettings(
+        EVENT_ID,
+        { ...validSettings, capacity },
+        ORGANISER_ID,
+        { client },
+      ).catch((caught) => caught);
+
+      expect(error).toBeInstanceOf(ValidationError);
+      expect(error.details).toEqual([{
+        field: 'registrationCapacity',
+        message: capacity === 3000000000 ? 'Must be 2147483647 or fewer.' : 'Must be a whole number.',
+      }]);
+      expect(client.rpc).not.toHaveBeenCalled();
+    },
+  );
 });

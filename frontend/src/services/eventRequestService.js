@@ -207,6 +207,22 @@ export async function getEventCancellationImpact(id) {
   return response.data;
 }
 
+export async function previewSignificantEventChange(id, changes) {
+  const response = await apiClient.post(
+    `/event-requests/${id}/significant-change-impact`,
+    { changes },
+  );
+  return response.data;
+}
+
+export async function applySignificantEventChange(id, { changes, reason, expectedImpact }) {
+  const response = await apiClient.post(
+    `/event-requests/${id}/significant-change`,
+    { changes, reason, expectedImpact },
+  );
+  return response.data;
+}
+
 export async function cancelEventRequest(
   id,
   { reason, initiator, attendeeMessage },

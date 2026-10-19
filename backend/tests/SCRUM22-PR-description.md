@@ -1,3 +1,5 @@
+> Integration update: PR #68 is now included through origin/dev. Its organiser-only settings route/service are retained, and attendee submission uses only `/api/open-events/:id/registrations`. The dependency/conflict snapshot below is historical. See [the current SCRUM-363 merge notes](SCRUM363-dev-merge.md).
+
 Persist attendee event registration through one atomic PostgreSQL RPC. The event
 row stays locked while current eligibility, duplicate status and capacity are
 checked and the registration is saved. Submission, registration settings and

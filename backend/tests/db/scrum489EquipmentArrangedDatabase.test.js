@@ -254,4 +254,83 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
     await db.query("select change_event_request_status($1, 'confirmed', 'approved', $2, 'Visibility check', $2)", [id, coordinator]);
     expect(await getConfirmedArrangementsForOrganiser(id, organiser, { client })).toMatchObject({ status: 'approved', startsAt: null, endsAt: null, venues: [], equipment: [] });
   });
+  describe('SCRUM363 confirmation with dev significant changes', () => {
+    beforeAll(async () => {
+      for (const name of ['017_venue_turnaround.sql', '023_venue_setup_time.sql', '032_venue_occupancy.sql']) {
+        await db.exec(migration(name));
+      }
+      await db.exec(`alter table bookings
+        add column if not exists review_block_id uuid,
+        add column if not exists flagged_at timestamptz,
+        add column if not exists flagged_by uuid references auth.users(id);`);
+      for (const name of ['050_event_registration.sql', '091_event_registration_hardening.sql',
+        '092_event_registration_persistence.sql', '096_significant_event_change.sql',
+        '100_significant_change_confirmation_compatibility.sql']) {
+        await db.exec(migration(name));
+      }
+    });
+
+    async function confirmedEvent() {
+      const { id } = await readyEventArrangedBySCRUM300();
+      await db.query("update event_requests set purpose = 'Community talk', expected_attendance = 50 where id = $1", [id]);
+      await db.query('select submit_event_for_safety_review($1, $2)', [id, coordinator]);
+      await db.query("select respond_to_safety_review($1, $2, 'approved', null, '{}', false)", [id, safetyOfficer]);
+      await db.query('select confirm_event_request($1, $2)', [id, coordinator]);
+      return id;
+    }
+
+    it('SCRUM363_AC8_actual_significant_change_preserves_field_locks_and_reconfirms_after_fresh_safety_review', async () => {
+      const id = await confirmedEvent();
+      await expect(db.query('update event_requests set expected_attendance = 60 where id = $1', [id]))
+        .rejects.toMatchObject({ code: '55000' });
+      const attendee = (await one("insert into auth.users (email) values ('cycle-attendee@test') returning id")).id;
+      await db.query("insert into profiles(id, role) values ($1, 'attendee')", [attendee]);
+      const registration = await one('insert into event_registrations(event_request_id, attendee_id) values ($1, $2) returning *', [id, attendee]);
+      const changed = await one("select apply_significant_event_change($1, '{\"expectedAttendance\":60}', 'Attendance revised', $2) as result", [id, coordinator]);
+      expect(changed.result.event).toMatchObject({ status: 'approved', expected_attendance: 60, registration_enabled: false });
+      expect((await db.query('select * from event_registrations where event_request_id = $1', [id])).rows).toEqual([registration]);
+      await expect(db.query('select confirm_event_request($1, $2)', [id, coordinator])).rejects.toMatchObject({ code: '55000' });
+      await db.query('select submit_event_for_safety_review($1, $2)', [id, coordinator]);
+      await db.query("select respond_to_safety_review($1, $2, 'approved', null, '{}', false)", [id, safetyOfficer]);
+      await db.query('select confirm_event_request($1, $2)', [id, coordinator]);
+      expect(await one('select status::text as status, registration_enabled from event_requests where id = $1', [id]))
+        .toEqual({ status: 'confirmed', registration_enabled: false });
+      const history = (await db.query("select changed_by from event_request_status_history where event_request_id = $1 and new_status = 'confirmed'", [id])).rows;
+      expect(history).toEqual([{ changed_by: coordinator }, { changed_by: coordinator }]);
+      expect(Number((await one('select count(*) from safety_review_submissions where event_request_id = $1', [id])).count)).toBe(2);
+      expect((await db.query('select * from event_registrations where event_request_id = $1', [id])).rows).toEqual([registration]);
+    });
+
+    it('SCRUM363_AC8_compatibility_migration_is_rerunnable_invoker_security_and_backend_only', async () => {
+      await db.exec(migration('100_significant_change_confirmation_compatibility.sql'));
+      const fn = await one("select count(*)::int as count, bool_or(prosecdef) as definer from pg_proc where proname = 'apply_significant_event_change'");
+      expect(fn).toEqual({ count: 1, definer: false });
+      for (const role of ['anon', 'authenticated', 'service_role']) {
+        const { allowed } = await one("select has_function_privilege($1, 'apply_significant_event_change(uuid,jsonb,text,uuid,jsonb)', 'execute') as allowed", [role]);
+        expect(allowed).toBe(role === 'service_role');
+      }
+    });
+
+    it('SCRUM363_AC8_a_failed_significant_change_rolls_back_the_early_transition_and_all_history', async () => {
+      const id = await confirmedEvent();
+      const snapshot = async () => ({
+        event: await one('select * from event_requests where id = $1', [id]),
+        statusHistory: (await db.query('select * from event_request_status_history where event_request_id = $1 order by id', [id])).rows,
+        changes: (await db.query('select * from event_change_history where event_request_id = $1 order by id', [id])).rows,
+        notifications: (await db.query('select * from notifications where event_request_id = $1 order by id', [id])).rows,
+      });
+      const before = await snapshot();
+      await db.exec(`create function fail_test_significant_change() returns trigger language plpgsql as $$
+        begin raise exception 'Injected change history failure'; end $$;
+        create trigger fail_test_significant_change before insert on event_change_history
+          for each row execute function fail_test_significant_change();`);
+      try {
+        await expect(db.query("select apply_significant_event_change($1, '{\"expectedAttendance\":60}', 'Attendance revised', $2)", [id, coordinator]))
+          .rejects.toThrow('Injected change history failure');
+        expect(await snapshot()).toEqual(before);
+      } finally {
+        await db.exec('drop trigger fail_test_significant_change on event_change_history; drop function fail_test_significant_change()');
+      }
+    });
+  });
 });
