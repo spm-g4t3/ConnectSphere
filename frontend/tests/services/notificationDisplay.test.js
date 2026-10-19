@@ -942,6 +942,51 @@ const FALLBACKS = [
   ),
 ];
 
+describe("describeNotification: registration_schedule_conflict (SCRUM-494 AC7)", () => {
+  const NEW_START = "2030-01-01T09:00:00.000Z";
+
+  it("SCRUM494_AC7_names_the_event_and_every_clashing_registration_date_in_words", () => {
+    const described = describeNotification({
+      id: "n1",
+      type: "registration_schedule_conflict",
+      payload: {
+        eventName: "Industry Night",
+        newStart: NEW_START,
+        fields: ["registrationClosesAt", "registrationWithdrawalDeadline"],
+      },
+    });
+
+    expect(described).toEqual({
+      headline: "Registration dates for Industry Night need updating",
+      detail: `The new start (${formatTimestamp(NEW_START)}) is earlier than the closing time and withdrawal deadline.`,
+    });
+    expect(described.detail).not.toMatch(/registration[A-Z]/);
+  });
+
+  it("SCRUM494_AC7_lists_three_clashing_dates_and_skips_unknown_field_keys", () => {
+    const { detail } = describeNotification({
+      id: "n1",
+      type: "registration_schedule_conflict",
+      payload: {
+        eventName: "Industry Night",
+        newStart: NEW_START,
+        fields: ["registrationOpensAt", "somethingNew", "registrationClosesAt", "registrationWithdrawalDeadline"],
+      },
+    });
+
+    expect(detail).toBe(
+      `The new start (${formatTimestamp(NEW_START)}) is earlier than the opening time, closing time and withdrawal deadline.`,
+    );
+  });
+
+  it("SCRUM494_AC7_still_reads_as_a_clash_when_the_payload_is_missing_its_fields", () => {
+    expect(describeNotification({ id: "n1", type: "registration_schedule_conflict", payload: {} })).toEqual({
+      headline: "Registration dates for Unnamed event need updating",
+      detail: "The new start clashes with the registration dates.",
+    });
+  });
+});
+
 describe("describeNotification: missing names and payloads", () => {
   it.each(FALLBACKS)("%s", (_title, type, payload, expected) => {
     expect(describeNotification({ id: "n1", type, payload })).toEqual(expected);
@@ -998,6 +1043,8 @@ const FIXTURES = {
   equipment_arranged: { eventName: "Tech Talk", lines: [] },
   equipment_not_fully_arranged: { eventName: "Tech Talk", lines: [] },
   equipment_flagged: { eventName: "Tech Talk", reason: "Retired" },
+  // SCRUM-494 (091).
+  registration_schedule_conflict: { eventName: "Tech Talk", fields: ["registrationClosesAt"] },
 };
 
 describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", () => {

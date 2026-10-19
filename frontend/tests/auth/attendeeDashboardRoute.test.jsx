@@ -338,7 +338,7 @@ describe("SCRUM453_AC3 other roles, unknown roles and signed-out visitors", () =
 
 describe("SCRUM453 existing roles keep their navigation", () => {
   it.each([
-    ["event_organiser", ["/dashboard", "/events"]],
+    ["event_organiser", ["/dashboard", "/events", "/registration"]],
     ["event_coordinator", ["/dashboard", "/my-events", "/my-venue-requests", "/review-queue", "/venue-search"]],
     ["venue_staff", ["/dashboard", "/venue-catalogue", "/booking-requests", "/flagged-bookings"]],
     [

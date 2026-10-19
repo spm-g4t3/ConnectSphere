@@ -50,7 +50,8 @@ describe("Navigation links by role", () => {
     expect(screen.getByRole("link", { name: "My Events" })).toHaveAttribute("href", "/events");
     expect(screen.queryByRole("link", { name: "Find a Venue" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /venue/i })).not.toBeInTheDocument();
-    expect(within(screen.getByRole("list")).getAllByRole("link")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "Registration" })).toHaveAttribute("href", "/registration");
+    expect(within(screen.getByRole("list")).getAllByRole("link")).toHaveLength(3);
   });
 
   it("treats the American spelling of organiser the same way", () => {
@@ -263,6 +264,7 @@ describe("SCRUM485_AC6 the existing roles keep exactly their links", () => {
     ["event_organiser", [
       ["Dashboard", "/dashboard"],
       ["My Events", "/events"],
+      ["Registration", "/registration"],
     ]],
     ["event_coordinator", [
       ["Dashboard", "/dashboard"],

@@ -1,0 +1,8 @@
+import { STATUS } from './eventRequestStatus.js';
+
+export const REGISTRATION_CONFIGURABLE_STATUSES = Object.freeze([
+  STATUS.APPROVED,
+  STATUS.SAFETY_REVIEW,
+  STATUS.SAFETY_APPROVED,
+  STATUS.CONFIRMED,
+]);

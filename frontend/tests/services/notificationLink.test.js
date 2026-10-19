@@ -95,3 +95,18 @@ describe("SCRUM174_AC1 Venue Staff's new request notice", () => {
     expect(notificationLink(note("booking_request_submitted"), "venue_staff")).toEqual({ to: "/booking-requests" });
   });
 });
+
+describe("SCRUM494_AC7 a start that moved before the registration dates", () => {
+  it("SCRUM494_AC7_organiser_opens_the_event_registration_settings_page", () => {
+    expect(notificationLink(note("registration_schedule_conflict"), "event_organiser")).toEqual({
+      to: `/events/${EVENT}/registration`,
+    });
+  });
+
+  it("SCRUM494_AC7_coordinator_opens_the_event_review_page", () => {
+    // The settings page is organiser-only; the coordinator reads the event instead.
+    expect(notificationLink(note("registration_schedule_conflict"), "event_coordinator")).toEqual({
+      to: `/event-requests/${EVENT}`,
+    });
+  });
+});

@@ -30,10 +30,14 @@ const LINKS_BY_ROLE = {
 
   // The organiser's only event page is their own list; router state picks
   // the row, as the dashboard's clarification shortcut already does.
-  EVENT_ORGANISER: (type, id) =>
-    type === "clarification_requested"
-      ? { to: "/events", state: { openClarificationRequestId: id } }
-      : { to: "/events", state: { focusEventRequestId: id } },
+  EVENT_ORGANISER: (type, id) => {
+    if (type === "clarification_requested") {
+      return { to: "/events", state: { openClarificationRequestId: id } };
+    }
+    // The clashing dates are fixed on the event's registration settings page.
+    if (type === "registration_schedule_conflict") return { to: `/events/${id}/registration` };
+    return { to: "/events", state: { focusEventRequestId: id } };
+  },
 
   // A cancelled event's review has nothing left to act on, and neither has a
   // cancelled equipment request.

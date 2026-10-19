@@ -58,6 +58,8 @@
 //     venueName, startsAt, endsAt, releasedBy, releasedByName, reason }
 //   booking_request_conflict_cleared (089): { eventRequestId, eventName,
 //     venueId, venueName, startsAt, endsAt, releasedBookingId, releasedEventName }
+//   registration_schedule_conflict (091, SCRUM-494): { eventName, newStart,
+//     fields }; fields lists the registration dates the new start now precedes
 //   equipment_* (097, SCRUM-176): { audience, eventRequestId, eventName,
 //     lines: [{ equipmentType, quantity, reserved, outcome }], ... }; see
 //     describeEquipmentNotification for what each type adds.
@@ -244,6 +246,18 @@ function blockedFor(payload) {
  * The clarification types share a describer. Their fallback is "the event
  * request", not "Unnamed event": the sentence still reads with no name.
  */
+// The same words the registration settings form uses for these fields.
+const REGISTRATION_DATE_LABELS = {
+  registrationOpensAt: "opening time",
+  registrationClosesAt: "closing time",
+  registrationWithdrawalDeadline: "withdrawal deadline",
+};
+
+/** "a", "a and b", "a, b and c". */
+function joinWords(words) {
+  return words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${words.at(-1)}` : words[0];
+}
+
 function describeClarification(payload, _names, type) {
   const eventName = payload.eventName || "the event request";
   const headlineByType = {
@@ -579,6 +593,22 @@ const DESCRIBERS = {
     return {
       headline: `${needsReview(eventName, venueName)} after the safety check`,
       detail: bookedFor(payload) + "The Safety Officer flagged this booking.",
+    };
+  },
+
+  // SCRUM-494 (AC7). Sent to the Organiser and coordinator when the start
+  // moves before registration dates; the dates are left for them to fix.
+  registration_schedule_conflict(payload, { eventName }) {
+    const fields = Array.isArray(payload.fields) ? payload.fields : [];
+    const labels = fields.map((field) => REGISTRATION_DATE_LABELS[field]).filter(Boolean);
+    const newStart = isInstant(payload.newStart) ? ` (${formatTimestamp(payload.newStart)})` : "";
+    const clash = labels.length
+      ? `is earlier than the ${joinWords(labels)}`
+      : "clashes with the registration dates";
+
+    return {
+      headline: `Registration dates for ${eventName} need updating`,
+      detail: `The new start${newStart} ${clash}.`,
     };
   },
 
