@@ -263,23 +263,6 @@ describe("SCRUM495 the browse details route", () => {
     expect(window.location.pathname).toBe(`/open-events/${EVENT_ID}`);
   });
 
-  it("an_attendee_can_register_from_event_details", async () => {
-    vi.mocked(apiClient.get).mockResolvedValue({
-      data: {
-        id: EVENT_ID, eventName: "Open Day", description: "Come along.", startsAt: "2026-10-25T01:00:00.000Z",
-        endsAt: "2026-10-25T03:00:00.000Z", capacity: null, placesLeft: null, isFull: false, isRegistered: false, canRegister: true,
-      },
-    });
-    vi.mocked(apiClient.post).mockResolvedValue({ data: { success: true } });
-    restoreSession("attendee");
-    renderAppAt(`/open-events/${EVENT_ID}`);
-
-    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
-
-    expect(apiClient.post).toHaveBeenCalledWith(`/registration/events/${EVENT_ID}/register`);
-    expect(await screen.findByText("You are registered for Open Day.")).toBeInTheDocument();
-  });
-
   it("SCRUM495_AC5_a_direct_url_for_an_event_that_is_not_open_says_so_and_links_back", async () => {
     vi.mocked(apiClient.get).mockRejectedValue({ response: { status: 404 } });
     restoreSession("attendee");

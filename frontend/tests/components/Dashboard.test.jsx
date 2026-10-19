@@ -13,9 +13,8 @@
 // them, at the end. Both stories created a Dashboard.test.jsx; one file holds
 // both. This story's helper is renderDashboardAs, so his renderAs is unchanged.
 //
-// The two new dashboards render for real, and so does AttendeeDashboard: with
-// Browse Open Events enabled it links to that page; otherwise it uses the
-// registration service. SCRUM-453's tests below assert its real content. The
+// The two new dashboards render for real, and so does AttendeeDashboard: it
+// fetches nothing, and SCRUM-453's tests below assert its real content. The
 // four dashboards that predate both stories are stubs:
 // what is under test is Dashboard.jsx's choice of page, and the real pages
 // fetch on mount (TechnicalSupportDashboard calls supportService, the
@@ -318,20 +317,8 @@ describe("Dashboard role map", () => {
     expect(screen.getByRole("heading", { name: "Welcome, user@example.com" })).toBeInTheDocument();
   });
 
-  it("shows only events returned by the registration service when browse is disabled", async () => {
-    vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "false");
-    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
-    renderAs("attendee");
-
-    expect(screen.getByRole("heading", { name: "Open for registration" })).toBeInTheDocument();
-    expect(await screen.findByRole("status")).toHaveTextContent("no events open for registration");
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Confirmed, registration is on, its opening time has passed",
-    );
-    expect(apiClient.get).toHaveBeenCalledWith("/registration/open");
-  });
-
   it("SCRUM495_AC5_shows_the_browse_open_events_entry_as_a_link_to_the_browse_page_with_no_invented_event_data", () => {
+    // The entry is a router Link, which is why renderAs wraps in a MemoryRouter.
     renderAs("attendee");
 
     expect(screen.getByRole("heading", { name: "Browse Open Events" })).toBeInTheDocument();
@@ -339,7 +326,6 @@ describe("Dashboard role map", () => {
     // Scoped to the browse section: the notifications inbox below it has a list of its own.
     const browse = screen.getByRole("region", { name: "Browse Open Events" });
     expect(within(browse).queryByRole("list")).not.toBeInTheDocument();
-    expect(apiClient.get).not.toHaveBeenCalledWith("/registration/open");
   });
 
   it("SCRUM172_AC1_attendee_dashboard_shows_the_inbox", async () => {

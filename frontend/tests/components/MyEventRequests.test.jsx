@@ -84,7 +84,7 @@ beforeEach(() => {
 
 
 describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
-  it("links an event to its separate registration settings page", async () => {
+  it("SCRUM494_AC6_links_an_event_to_its_registration_settings_page", async () => {
     renderList([eventRequest({ status: "approved" })]);
 
     const record = (await screen.findByText("IS212 Industry Night")).closest("li");

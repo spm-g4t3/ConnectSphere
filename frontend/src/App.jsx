@@ -30,7 +30,6 @@ import SafetyReviewHistory from "./components/SafetyReviewHistory";
 import BrowseOpenEvents from "./components/BrowseOpenEvents";
 import BrowseEventDetails from "./components/BrowseEventDetails";
 import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE, isOpenEventsEnabled } from "./services/openEventRoutes";
-import { registerForEvent } from "./services/eventRegistrationService";
 import "./App.css";
 
 function LoadingScreen() {
@@ -290,7 +289,7 @@ function AppRoutes() {
               element={
                 <ProtectedRoute allowedRoles={["attendee"]}>
                   <div className="dashboard dashboard--attendee">
-                    <BrowseEventDetails onRegister={registerForEvent} />
+                    <BrowseEventDetails />
                   </div>
                 </ProtectedRoute>
               }

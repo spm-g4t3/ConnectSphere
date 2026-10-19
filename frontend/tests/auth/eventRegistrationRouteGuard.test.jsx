@@ -29,8 +29,8 @@ beforeEach(() => {
   vi.mocked(useAuth).mockReset();
 });
 
-describe("event registration settings route", () => {
-  it("allows an Event Organiser to open a separate event settings page", () => {
+describe("SCRUM494 event registration settings route", () => {
+  it("SCRUM494_AC1_allows_an_event_organiser_to_open_the_event_settings_page", () => {
     renderRegistrationPage("event_organiser");
 
     expect(screen.getByTestId("registration-settings"))
@@ -39,7 +39,7 @@ describe("event registration settings route", () => {
   });
 
   it.each(["event_coordinator", "attendee", "venue_staff"])(
-    "refuses %s from the settings page",
+    "SCRUM494_AC1_refuses_%s_from_the_settings_page",
     (role) => {
       renderRegistrationPage(role);
 
@@ -49,7 +49,7 @@ describe("event registration settings route", () => {
     },
   );
 
-  it("sends a signed-out visitor to login", () => {
+  it("SCRUM494_AC1_sends_a_signed_out_visitor_to_login", () => {
     renderRegistrationPage(null);
 
     expect(screen.queryByTestId("registration-settings")).not.toBeInTheDocument();

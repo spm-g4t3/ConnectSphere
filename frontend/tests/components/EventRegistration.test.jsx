@@ -2,24 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
-import AttendeeDashboard from "../../src/components/AttendeeDashboard.jsx";
 import EventRegistrationSettings from "../../src/components/EventRegistrationSettings.jsx";
 import {
-  getOpenRegistrationEvents,
   getRegistrationSettings,
-  registerForEvent,
   saveRegistrationSettings,
 } from "../../src/services/eventRegistrationService";
 
 vi.mock("../../src/services/eventRegistrationService", () => ({
-  getOpenRegistrationEvents: vi.fn(),
   getRegistrationSettings: vi.fn(),
-  registerForEvent: vi.fn(),
   saveRegistrationSettings: vi.fn(),
-}));
-
-vi.mock("../../src/components/NotificationInbox", () => ({
-  default: () => null,
 }));
 
 const EVENT_ID = "22222222-2222-4222-8222-222222222222";
@@ -28,7 +19,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("SCRUM-363 organiser registration controls", () => {
+describe("SCRUM494 organiser registration controls", () => {
   it("SCRUM494_AC6_shows_current_configuration_and_saves_organiser_changes", async () => {
     vi.mocked(getRegistrationSettings).mockResolvedValue({
       eventName: "Industry Night",
@@ -80,78 +71,46 @@ describe("SCRUM-363 organiser registration controls", () => {
     ));
     expect(await screen.findByText("Registration settings saved.")).toBeInTheDocument();
   });
-});
 
-describe("SCRUM-22 attendee registration", () => {
-  it("SCRUM494_AC5_keeps_the_attendee_registered_when_registration_reaches_capacity", async () => {
-    vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "false");
-    const openEvent = {
-      id: EVENT_ID,
+  it("SCRUM494_AC1_shows_field_names_not_api_keys_in_validation_errors", async () => {
+    vi.mocked(getRegistrationSettings).mockResolvedValue({
       eventName: "Industry Night",
-      description: "Meet employers.",
-      startsAt: "2030-01-01T12:00:00.000Z",
-      registrationClosesAt: "2030-01-01T12:00:00.000Z",
-      capacity: 1,
-      registeredCount: 0,
-    };
-    vi.mocked(getOpenRegistrationEvents)
-      .mockResolvedValueOnce([openEvent])
-      .mockResolvedValue([{ ...openEvent, registeredCount: 1, isRegistered: true, isFull: true }]);
-    vi.mocked(registerForEvent).mockResolvedValue({ id: "registration-1" });
+      status: "approved",
+      proposedStart: "2030-01-01T12:00:00.000Z",
+      settings: {
+        enabled: false,
+        opensAt: null,
+        closesAt: null,
+        capacity: null,
+        withdrawalDeadline: null,
+        registeredCount: 0,
+      },
+    });
+    vi.mocked(saveRegistrationSettings).mockRejectedValue({
+      response: {
+        data: {
+          error: "Registration settings are invalid.",
+          details: [
+            { field: "registrationClosesAt", message: "Must be before the event starts." },
+            { field: "registrationCapacity", message: "Must be a whole number above zero." },
+            { field: "somethingNew", message: "Check this value." },
+          ],
+        },
+      },
+    });
 
-    render(<AttendeeDashboard user={{ name: "Ari" }} />);
-    expect(await screen.findByRole("heading", { name: "Industry Night" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Register" }));
-    expect(screen.getByText("Event starts")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm registration" }));
+    render(
+      <MemoryRouter>
+        <EventRegistrationSettings eventId={EVENT_ID} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Configure registration" }));
+    fireEvent.click(within(await screen.findByRole("form")).getByRole("button", { name: "Save registration settings" }));
 
-    await waitFor(() => expect(registerForEvent).toHaveBeenCalledWith(EVENT_ID));
-    expect(await screen.findByText("Registered")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Industry Night" })).toBeInTheDocument();
-  });
-
-  it("SCRUM494_AC5_rereads_the_list_after_a_failed_registration", async () => {
-    vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "false");
-    const openEvent = {
-      id: EVENT_ID,
-      eventName: "Industry Night",
-      description: "",
-      startsAt: "2030-01-01T12:00:00.000Z",
-      registrationClosesAt: null,
-      capacity: 1,
-      registeredCount: 0,
-    };
-    vi.mocked(getOpenRegistrationEvents)
-      .mockResolvedValueOnce([openEvent])
-      .mockResolvedValue([{ ...openEvent, registeredCount: 1, isFull: true }]);
-    vi.mocked(registerForEvent).mockRejectedValue({ response: { data: { error: "This event is full." } } });
-
-    render(<AttendeeDashboard user={{ name: "Ari" }} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Register" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm registration" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("This event is full.");
-    expect(await screen.findByText("Full")).toBeInTheDocument();
-    expect(getOpenRegistrationEvents).toHaveBeenCalledTimes(2);
-  });
-
-  it("SCRUM494_AC5_shows_a_full_event_to_an_attendee_who_already_registered", async () => {
-    vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "false");
-    vi.mocked(getOpenRegistrationEvents).mockResolvedValue([{
-      id: EVENT_ID,
-      eventName: "Industry Night",
-      startsAt: "2030-01-01T12:00:00.000Z",
-      registrationClosesAt: "2030-01-01T12:00:00.000Z",
-      capacity: 1,
-      registeredCount: 1,
-      isRegistered: true,
-      isFull: true,
-    }]);
-
-    render(<AttendeeDashboard user={{ name: "Ari" }} />);
-
-    expect(await screen.findByRole("heading", { name: "Industry Night" })).toBeInTheDocument();
-    expect(screen.getByText("Registered")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Register" })).not.toBeInTheDocument();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Closing time: Must be before the event starts. Capacity: Must be a whole number above zero. Check this value.",
+    );
+    expect(alert).not.toHaveTextContent(/registrationClosesAt|registrationCapacity|somethingNew/);
   });
 });

@@ -6,6 +6,17 @@ import {
 } from "../services/eventRegistrationService";
 import { isRegistrationConfigurable } from "../services/registrationStatuses";
 import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
+import { toDatetimeLocalValue, toOffsetIsoString } from "../services/datetimeFormat";
+import { formatTimestamp } from "../services/displayFormat";
+
+const FIELD_LABELS = {
+  registrationEnabled: "Registration",
+  registrationOpensAt: "Opening time",
+  registrationClosesAt: "Closing time",
+  registrationWithdrawalDeadline: "Withdrawal deadline",
+  registrationCapacity: "Capacity",
+  proposedStart: "Event start",
+};
 
 function loadErrorMessage(error) {
   const message = apiError(error);
@@ -14,22 +25,9 @@ function loadErrorMessage(error) {
     : message;
 }
 
-function toLocalInput(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-  return date.toISOString().slice(0, 16);
-}
-
 function toIso(value) {
-  return value ? new Date(value).toISOString() : null;
-}
-
-function displayDate(value) {
-  if (!value) return "Not set";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  // The API reads null as "cleared"; toOffsetIsoString gives undefined for an empty input.
+  return toOffsetIsoString(value) ?? null;
 }
 
 function displayStatus(event) {
@@ -39,7 +37,9 @@ function displayStatus(event) {
 function apiError(error) {
   const body = error?.response?.data;
   if (body?.details?.length) {
-    return body.details.map(({ field, message }) => `${field}: ${message}`).join(" ");
+    return body.details
+      .map(({ field, message }) => (FIELD_LABELS[field] ? `${FIELD_LABELS[field]}: ${message}` : message))
+      .join(" ");
   }
   return body?.error || "Could not save registration settings.";
 }
@@ -61,10 +61,10 @@ export default function EventRegistrationSettings({ eventId }) {
     setSettings(data.settings);
     setForm({
       enabled: data.settings.enabled,
-      opensAt: toLocalInput(data.settings.opensAt),
-      closesAt: toLocalInput(data.settings.closesAt),
+      opensAt: toDatetimeLocalValue(data.settings.opensAt),
+      closesAt: toDatetimeLocalValue(data.settings.closesAt),
       capacity: data.settings.capacity ?? "",
-      withdrawalDeadline: toLocalInput(data.settings.withdrawalDeadline),
+      withdrawalDeadline: toDatetimeLocalValue(data.settings.withdrawalDeadline),
     });
     setLoaded(true);
   }
@@ -110,7 +110,7 @@ export default function EventRegistrationSettings({ eventId }) {
         opensAt: toIso(form.opensAt),
         closesAt: toIso(form.closesAt),
         capacity: form.capacity === "" ? null : Number(form.capacity),
-        withdrawalDeadline: toIso(form.withdrawalDeadline) || null,
+        withdrawalDeadline: toIso(form.withdrawalDeadline),
       });
       setSettings(updated);
       setEvent((current) => ({ ...current, settings: updated }));
@@ -154,21 +154,21 @@ export default function EventRegistrationSettings({ eventId }) {
             <p className="eyebrow">Event registration</p>
             <h1>{event.eventName}</h1>
             <p>Event status: <strong>{displayStatus(event)}</strong></p>
-            <p>Event starts: {displayDate(event.proposedStart)}</p>
+            <p>Event starts: {formatTimestamp(event.proposedStart, "Not set")}</p>
           </header>
           {settings && !editing && (
             <section className="event-registration-page__summary" aria-labelledby="registration-summary-heading">
               <h2 id="registration-summary-heading">Current registration</h2>
               <dl>
                 <div><dt>Status</dt><dd>{settings.enabled ? "On" : "Off"}</dd></div>
-                <div><dt>Opens</dt><dd>{displayDate(settings.opensAt)}</dd></div>
-                <div><dt>Closes</dt><dd>{displayDate(settings.closesAt)}</dd></div>
+                <div><dt>Opens</dt><dd>{formatTimestamp(settings.opensAt, "Not set")}</dd></div>
+                <div><dt>Closes</dt><dd>{formatTimestamp(settings.closesAt, "Not set")}</dd></div>
                 <div><dt>Capacity</dt><dd>{settings.capacity ?? "Unlimited"}</dd></div>
                 <div>
                   <dt>Registered</dt>
                   <dd>{settings.registeredCount}{settings.capacity ? ` / ${settings.capacity}` : ""}</dd>
                 </div>
-                <div><dt>Withdrawal deadline</dt><dd>{displayDate(settings.withdrawalDeadline)}</dd></div>
+                <div><dt>Withdrawal deadline</dt><dd>{formatTimestamp(settings.withdrawalDeadline, "Not set")}</dd></div>
               </dl>
               {saved && <p role="status">Registration settings saved.</p>}
               {canEdit && loaded && form && (

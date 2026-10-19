@@ -16,8 +16,8 @@ function renderList() {
   );
 }
 
-describe("RegistrationEventsList", () => {
-  it("lists only events registration can be set up for, each linking to its own page", async () => {
+describe("SCRUM494 RegistrationEventsList", () => {
+  it("SCRUM494_AC2_lists_only_events_registration_can_be_set_up_for_each_linking_to_its_own_page", async () => {
     vi.mocked(getMyEventRequests).mockResolvedValue([
       { id: "a", eventName: "Approved Fair", status: "approved", proposedStart: "2030-01-01T10:00:00Z" },
       { id: "b", eventName: "Confirmed Gala", status: "confirmed", proposedStart: "2030-02-01T10:00:00Z" },
@@ -36,7 +36,7 @@ describe("RegistrationEventsList", () => {
     expect(screen.queryByText("Submitted Talk")).not.toBeInTheDocument();
   });
 
-  it("explains when no event is eligible", async () => {
+  it("SCRUM494_AC2_explains_when_no_event_is_eligible", async () => {
     vi.mocked(getMyEventRequests).mockResolvedValue([]);
 
     renderList();
@@ -44,7 +44,7 @@ describe("RegistrationEventsList", () => {
     expect(await screen.findByText(/None of your events can have registration set up yet/)).toBeInTheDocument();
   });
 
-  it("shows an error when events cannot be loaded", async () => {
+  it("SCRUM494_AC2_shows_an_error_when_events_cannot_be_loaded", async () => {
     vi.mocked(getMyEventRequests).mockRejectedValue(new Error("boom"));
 
     renderList();
