@@ -12,6 +12,7 @@ import cors from 'cors';
 
 import authRoutes from './routes/auth.js';
 import eventRequestRoutes from './routes/eventRequests.js';
+import eventRegistrationRoutes from './routes/eventRegistration.js';
 import venueRoutes from './routes/venues.js';
 import notificationRoutes from './routes/notifications.js';
 import bookingRequestRoutes from './routes/bookingRequests.js';
@@ -21,6 +22,7 @@ import equipmentRoutes from './routes/equipment.js';
 import eventEquipmentRoutes from './routes/eventEquipment.js';
 import venueSuitabilityRoutes from './routes/venueSuitability.js';
 import equipmentReviewRoutes from './routes/equipmentReview.js';
+import equipmentQueueRoutes from './routes/equipmentQueue.js';
 import safetyReviewRoutes from './routes/safetyReviews.js';
 import openEventRoutes from './routes/openEvents.js';
 import { isOpenEventsEnabled } from './config/featureFlags.js';
@@ -42,6 +44,7 @@ app.use('/api/safety-reviews', safetyReviewRoutes);
 app.use('/api/event-requests/:id/venue-suitability', venueSuitabilityRoutes);
 
 app.use('/api/event-requests', eventRequestRoutes);
+app.use('/api/registration', eventRegistrationRoutes);
 
 // Mounted by SCRUM-15. It was withheld until it stopped taking the acting user
 // from req.body.userId -- a client asserting its own identity against a table
@@ -61,6 +64,10 @@ app.use('/api/notifications', notificationRoutes);
 // SCRUM-23: the equipment availability check. Mounted BEFORE /api/equipment so a
 // later GET /api/equipment/:id can never answer "availability" as an id.
 app.use('/api/equipment/availability', equipmentAvailabilityRoutes);
+
+// SCRUM-285 (SCRUM-284): the Technical Support dashboard's equipment request queue.
+// Technical Support Staff only, behind requireAuth; see the route file.
+app.use('/api/equipment-requests', equipmentQueueRoutes);
 
 // SCRUM-252: an Event Coordinator requests a venue for an approved event.
 app.use('/api/booking-requests', bookingRequestRoutes);

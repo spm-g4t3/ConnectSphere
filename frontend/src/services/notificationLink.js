@@ -13,6 +13,16 @@ const VENUE_STAFF_PAGES = {
   booking_flagged_event_change: { to: "/flagged-bookings" },
 };
 
+// What opens the equipment review: the safety flag (SCRUM-172), the equipment
+// notifications (SCRUM-176) and the significant-change flag (SCRUM-395)
+// Technical Support is sent about a live request. A cancelled one is left out.
+const TECH_SUPPORT_REVIEW_TYPES = new Set([
+  "safety_equipment_review",
+  "equipment_requested",
+  "equipment_request_changed",
+  "equipment_reservation_flagged_event_change",
+]);
+
 // One entry per role, so a later story adds a line rather than a branch.
 const LINKS_BY_ROLE = {
   // The review page lets any coordinator or Lead read any submitted event;
@@ -22,17 +32,19 @@ const LINKS_BY_ROLE = {
 
   // The organiser's only event page is their own list; router state picks
   // the row, as the dashboard's clarification shortcut already does.
-  EVENT_ORGANISER: (type, id) =>
-    type === "clarification_requested"
-      ? { to: "/events", state: { openClarificationRequestId: id } }
-      : { to: "/events", state: { focusEventRequestId: id } },
+  EVENT_ORGANISER: (type, id) => {
+    if (type === "clarification_requested") {
+      return { to: "/events", state: { openClarificationRequestId: id } };
+    }
+    // The clashing dates are fixed on the event's registration settings page.
+    if (type === "registration_schedule_conflict") return { to: `/events/${id}/registration` };
+    return { to: "/events", state: { focusEventRequestId: id } };
+  },
 
-  // A cancelled event's review has nothing left to act on.
+  // A cancelled event's review has nothing left to act on, and neither has a
+  // cancelled equipment request.
   TECHNICAL_SUPPORT_STAFF: (type, id) =>
-    type === "safety_equipment_review" ||
-    type === "equipment_reservation_flagged_event_change"
-      ? { to: `/equipment-review/${id}` }
-      : null,
+    TECH_SUPPORT_REVIEW_TYPES.has(type) ? { to: `/equipment-review/${id}` } : null,
 
   // A new request is decided in their queue and a safety flag on their flagged
   // bookings list. A withdrawn request has nothing left to decide, so no link.

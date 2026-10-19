@@ -591,7 +591,7 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request (066)', () => {
       });
     });
 
-    // A later migration (069) adds its types to the live list; re-running 066
+    // A later migration (097) adds its types to the live list; re-running 066
     // must keep them as well as its own.
     it('SCRUM258_AC6_rerunning_066_keeps_notification_types_added_after_it', async () => {
       const liveTypes = async () => {

@@ -1,0 +1,25 @@
+/* SCRUM-287: the equipment request lists on the Technical Support dashboard.
+   Selectors start from .equipment-queue so they outrank the app's
+   `.dashboard li` (flex, space-between), `.dashboard p` (muted grey) and
+   `.dashboard section` rules without !important. A status is always written as
+   well as coloured. */
+.equipment-queue ul { list-style: none; margin: 0; padding: 0; }
+.equipment-queue .equipment-queue__row { align-items: flex-start; border-top: 1px solid var(--line, #d9e4e0); display: flex; gap: 12px; justify-content: space-between; padding: 14px 0; }
+.equipment-queue .equipment-queue__row:first-child { border-top: 0; }
+.equipment-queue .equipment-queue__main { display: grid; gap: 2px; min-width: 0; }
+.equipment-queue .equipment-queue__title { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.equipment-queue .equipment-queue__detail { margin: 2px 0 0; }
+.equipment-queue .equipment-queue__flag { color: #8a4a00; font-weight: 600; margin: 4px 0 0; }
+.equipment-queue .equipment-queue__status { background: #eef3f1; border-radius: 999px; color: #34484d; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; padding: 3px 10px; text-transform: uppercase; }
+.equipment-queue .equipment-queue__status--pending { background: #fff3e6; color: #8a4a00; }
+.equipment-queue .equipment-queue__status--under { background: #e3eefb; color: #1d4f91; }
+.equipment-queue .equipment-queue__status--arranged { background: #eef7f1; color: #2e7d4f; }
+.equipment-queue .equipment-queue__status--cannot { background: #fdecea; color: #a8271d; }
+.equipment-queue .equipment-queue__status--cancelled { background: #eef2f1; color: #64757a; }
+.equipment-queue .equipment-queue__open { border: 1px solid var(--teal-dark, #0b6b63); border-radius: 8px; color: var(--teal-dark, #0b6b63); flex: 0 0 auto; font-size: 0.84rem; font-weight: 600; padding: 7px 14px; text-decoration: none; }
+.equipment-queue .equipment-queue__open:hover { background: #eef7f5; }
+.equipment-queue .equipment-queue__filters { align-items: flex-end; display: flex; flex-wrap: wrap; gap: 12px 24px; margin-bottom: 8px; }
+.equipment-queue .equipment-queue__filters label { display: grid; gap: 4px; }
+.equipment-queue .equipment-queue__filters .equipment-queue__check { align-items: center; display: flex; gap: 8px; }
+.equipment-queue .equipment-queue__filters select { border: 1px solid var(--line, #c3d3cf); border-radius: 6px; font: inherit; padding: 6px 8px; }
+.equipment-queue .equipment-queue__error { background: #fff0ee; border-radius: 6px; color: #a12a2a; font-weight: 600; margin: 6px 0; padding: 8px 12px; }

@@ -117,3 +117,18 @@ describe("SCRUM395 significant change notification destinations", () => {
     });
   });
 });
+
+describe("SCRUM494_AC7 a start that moved before the registration dates", () => {
+  it("SCRUM494_AC7_organiser_opens_the_event_registration_settings_page", () => {
+    expect(notificationLink(note("registration_schedule_conflict"), "event_organiser")).toEqual({
+      to: `/events/${EVENT}/registration`,
+    });
+  });
+
+  it("SCRUM494_AC7_coordinator_opens_the_event_review_page", () => {
+    // The settings page is organiser-only; the coordinator reads the event instead.
+    expect(notificationLink(note("registration_schedule_conflict"), "event_coordinator")).toEqual({
+      to: `/event-requests/${EVENT}`,
+    });
+  });
+});
