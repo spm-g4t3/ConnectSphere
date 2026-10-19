@@ -2626,6 +2626,13 @@ describe("SCRUM-327 AC7: deciding a change request is refused to anyone but the 
       Err: ValidationError,
       status: 400,
     },
+    {
+      name: 'SCRUM22_AC8_change_request_check_constraints_remain_validation_errors',
+      code: '23514',
+      message: 'new row violates check constraint "event_requests_dates_ordered"',
+      Err: ValidationError,
+      status: 400,
+    },
   ])('$name', async ({ code, message, Err, status }) => {
     const client = createFakeClient([dbError(code, message)]);
 

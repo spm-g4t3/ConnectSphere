@@ -43,13 +43,13 @@ psql -X -v ON_ERROR_STOP=1 --single-transaction -f backend/db/migrations/092_eve
 Migration 092 preserves legacy rows in `registrations_legacy_archive`, makes
 `registrations` a read-only compatibility view and retains one canonical
 `event_registrations` row per attendee/event. Only registered rows count toward
-capacity; withdrawn/cancelled rows can reactivate without duplication. Waitlisted
-rows are not silently promoted. Re-running the batch does not replay withdrawals
+capacity; only withdrawn rows can reactivate without duplication after migration 101.
+Cancelled and waitlisted rows remain unchanged. Re-running the batch does not replay withdrawals
 from the archive. Invalid data fails the batch without partial writes.
 
-The final RPC locks the event before checking eligibility, duplicates and active
+The latest writer in 101 locks the event before checking eligibility, duplicates and active
 counts, then inserts in the same transaction. It reads database time after the
-lock wait. No other current migration overwrites this writer. A null closing
+lock wait. Apply 101 after the base 092-094 sequence. A null closing
 time intentionally leaves registration open until disabled or the event starts.
 All authenticated Attendees currently qualify for additional eligibility; this
 remains the team decision to confirm, with no speculative rules added.
@@ -60,6 +60,22 @@ events share 404. SQL 40001/40P01 become safe retryable 409s. Neither failed nor
 duplicate attempts consume capacity.
 
 ## Manual end-to-end checks
+
+For the registration-status follow-up, after pending prerequisites through 094,
+drain the old API and apply 101 in one transaction before deploying the matching
+backend. The private browse RPC adds the caller's registration status; the public
+HTTP allowlist stays unchanged, and the existing UI uses its `canRegister` flag.
+
+```powershell
+psql -X -v ON_ERROR_STOP=1 --single-transaction -f backend/db/migrations/101_registration_status_guards.sql
+```
+
+Only pending SQL should be applied. Migration 101 preserves cancelled/waitlisted
+rows, returns specific 409 refusals and disables Register for those callers.
+Withdrawn callers may re-register using the same record. The obsolete RS409
+handler/test was removed; schedule changes continue through flag-and-notify.
+Follow-up checks: backend coverage passed 7,482 tests/175 suites with two workers;
+71 targeted frontend tests and targeted ESLint passed. No coverage gates changed.
 
 - Configure a future Confirmed event through the organiser settings screen, with
   registration enabled now and capacity one.

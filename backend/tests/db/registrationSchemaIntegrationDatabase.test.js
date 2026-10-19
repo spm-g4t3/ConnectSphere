@@ -5,7 +5,7 @@ import { addRegistrationNotificationPrerequisites } from '../fixtures/registrati
 
 const migration = (name) => readFileSync(new URL(`../../db/migrations/${name}`, import.meta.url), 'utf8');
 const applyRegistrationMigrations = async () => {
-  for (const name of ['092_event_registration_persistence.sql', '093_registration_eligibility.sql', '094_register_for_event.sql']) {
+  for (const name of ['092_event_registration_persistence.sql', '093_registration_eligibility.sql', '094_register_for_event.sql', '101_registration_status_guards.sql']) {
     await db.exec(migration(name));
   }
 };
@@ -80,6 +80,7 @@ describe('SCRUM22 shared schema with PR 68', () => {
   });
 
   it('SCRUM22_AC4_AC5_AC7_setup_writer_and_browse_share_the_same_active_count_and_last_place', async () => {
+    await db.query("update event_registrations set status = 'withdrawn' where attendee_id = $1", [OTHER]);
     await db.exec('set local role service_role');
     expect(await setup()).toMatchObject({ outcome: 'saved', registeredCount: 2 });
     const saved = await register(OTHER);
@@ -98,7 +99,7 @@ describe('SCRUM22 shared schema with PR 68', () => {
     expect((await register()).registration).toMatchObject({ id: previous.id });
     expect(await one('select id, created_at from event_registrations where attendee_id = $1', [ME])).toEqual(previous);
     await db.query("update event_registrations set status = 'waitlisted' where attendee_id = $1", [THIRD]);
-    expect(await register(THIRD)).toEqual({ outcome: 'already_registered' });
+    expect(await register(THIRD)).toEqual({ outcome: 'already_waitlisted' });
     expect(await state(THIRD)).toEqual({ active_count: 1, is_registered: false });
   });
 

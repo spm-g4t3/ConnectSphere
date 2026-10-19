@@ -68,6 +68,15 @@ describe('SCRUM39 registration service', () => {
       await expect(registerForEvent({ ...options, client: { rpc } })).rejects.toThrow('Unexpected outcome from register_for_event');
     });
 
+  it.each([
+    ['already_waitlisted', 'ALREADY_WAITLISTED', 'Already on the waiting list'],
+    ['registration_cancelled', 'REGISTRATION_CANCELLED', 'This registration was cancelled and cannot be reactivated.'],
+  ])('SCRUM22_AC6_returns_a_clear_%s_refusal_without_claiming_success', async (outcome, code, message) => {
+    rpc.mockResolvedValue({ data: { outcome }, error: null });
+    await expect(registerForEvent({ ...options, client: { rpc } }))
+      .rejects.toMatchObject({ status: 409, code, message });
+  });
+
   it('SCRUM39_AC5_preserves_unexpected_database_failures_for_the_standard_handler', async () => {
     const error = { code: '23503', message: 'foreign key failure' };
     rpc.mockResolvedValue({ error });
