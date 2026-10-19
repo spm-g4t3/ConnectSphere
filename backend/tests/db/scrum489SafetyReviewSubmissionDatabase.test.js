@@ -916,19 +916,6 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
       expect((await one('select status from event_change_requests where id = $1', [changeId])).status).toBe('processed');
     });
 
-    it('SCRUM363_AC8_legacy_change_acceptance_cannot_edit_confirmed_significant_fields_and_rolls_back_the_decision', async () => {
-      const id = await readyToConfirm();
-      await confirm(id);
-      const before = await written(id);
-      const start = (await one('select proposed_start from event_requests where id = $1', [id])).proposed_start;
-      const { changeId, response } = await approveChange(id, 'proposed_start', new Date(start.getTime() + 3600000).toISOString());
-      expect(response.status).toBe(409);
-      expect(response.body.error).toMatch(/confirmed event details are locked/i);
-      expect(await written(id)).toEqual(before);
-      expect(await one('select status, decision, processed_by from event_change_requests where id = $1', [changeId]))
-        .toEqual({ status: 'outstanding', decision: null, processed_by: null });
-    });
-
     it.each([
       ['proposed_start', "proposed_start + interval '1 hour'"],
       ['expected_attendance', 'coalesce(expected_attendance, 1) + 1'],

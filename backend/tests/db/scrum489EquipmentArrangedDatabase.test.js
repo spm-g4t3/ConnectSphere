@@ -305,6 +305,50 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
       expect((await db.query('select * from event_registrations where event_request_id = $1', [id])).rows).toEqual([registration]);
     });
 
+    async function approveChange(id, field, value) {
+      const { id: changeId } = await one(`insert into event_change_requests
+        (event_request_id, requested_by, change_field, requested_change)
+        values ($1, $2, $3, $4) returning id`, [id, organiser, field, value]);
+      await db.query("select process_change_request($1, 'approved', 'Organiser asked to move it', $2)", [changeId, coordinator]);
+      return changeId;
+    }
+
+    it('SCRUM363_AC8_an_approved_date_change_request_on_a_confirmed_event_returns_it_to_approved_and_flags_its_booking', async () => {
+      const id = await confirmedEvent();
+      const { proposed_start: start } = await one('select proposed_start from event_requests where id = $1', [id]);
+      const moved = new Date(start.getTime() - 30 * 60000);
+      const changeId = await approveChange(id, 'proposed_start', moved.toISOString());
+      expect(await one('select status::text as status, proposed_start from event_requests where id = $1', [id]))
+        .toEqual({ status: 'approved', proposed_start: moved });
+      expect(await one('select status::text as status from bookings where event_request_id = $1', [id]))
+        .toEqual({ status: 'flagged_for_review' });
+      expect(await one('select status, decision from event_change_requests where id = $1', [changeId]))
+        .toEqual({ status: 'processed', decision: 'approved' });
+      expect(await one("select reason from event_change_history where event_request_id = $1 and field_name = 'proposedStart'", [id]))
+        .toEqual({ reason: 'Organiser asked to move it' });
+    });
+
+    it('SCRUM363_AC8_an_approved_attendance_change_request_on_a_confirmed_event_goes_through_the_significant_change', async () => {
+      const id = await confirmedEvent();
+      await approveChange(id, 'expected_attendance', '75');
+      expect(await one('select status::text as status, expected_attendance from event_requests where id = $1', [id]))
+        .toEqual({ status: 'approved', expected_attendance: 75 });
+      expect(Number((await one("select count(*) from notifications where event_request_id = $1 and type = 'event_significant_change'", [id])).count)).toBe(1);
+    });
+
+    it('SCRUM363_AC8_an_unusable_change_request_value_rolls_back_the_decision_on_a_confirmed_event', async () => {
+      const id = await confirmedEvent();
+      const { id: changeId } = await one(`insert into event_change_requests
+        (event_request_id, requested_by, change_field, requested_change)
+        values ($1, $2, 'expected_attendance', '0') returning id`, [id, organiser]);
+      await expect(db.query("select process_change_request($1, 'approved', null, $2)", [changeId, coordinator]))
+        .rejects.toMatchObject({ code: '22023' });
+      expect(await one('select status::text as status, expected_attendance from event_requests where id = $1', [id]))
+        .toEqual({ status: 'confirmed', expected_attendance: 50 });
+      expect(await one('select status, decision from event_change_requests where id = $1', [changeId]))
+        .toEqual({ status: 'outstanding', decision: null });
+    });
+
     it('SCRUM363_AC8_flagged_arrangements_require_real_resolution_and_fresh_safety_approval_before_reconfirmation', async () => {
       const venue = await one("insert into venues (name, location, max_capacity) values ('Review hall', 'SMU', 200) returning id");
       const id = await confirmedEvent(venue.id);

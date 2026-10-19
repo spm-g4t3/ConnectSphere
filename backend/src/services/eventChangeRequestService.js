@@ -141,8 +141,16 @@ function translateError(error) {
     return new ForbiddenError(detail);
   }
 
-  if (code === '55000') {
+  // 55000: a locked field; PT409 and 40001: the significant-change path (102)
+  // found its arrangements moved under it. All are retryable after a refresh.
+  if (code === '55000' || code === 'PT409' || code === '40001') {
     return new ConflictError(detail);
+  }
+
+  // raised by the significant-change path (102) for a value it cannot apply,
+  // such as an attendance of zero
+  if (code === '22023') {
+    return new ValidationError(detail);
   }
 
   // raised by process_change_request when the id matches nothing

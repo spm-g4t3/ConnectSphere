@@ -4803,3 +4803,18 @@ describe('SCRUM-266: event reads say whether the event needs attention', () => {
     for (const call of client.calls) expect(call.select).toMatch(/bookings\(status\)/);
   });
 });
+
+describe('SCRUM-363: change-request approval through the significant-change path', () => {
+  it.each([
+    ['PT409', ConflictError],
+    ['40001', ConflictError],
+    ['22023', ValidationError],
+  ])('SCRUM363_AC8_process_change_request_%s_reaches_the_caller_as_a_typed_error', async (code, Err) => {
+    const client = { rpc: async () => dbError(code, 'expectedAttendance must be a positive whole number') };
+    const err = await eventChangeRequestService
+      .processChangeRequest(REQUEST_ID, { decision: 'approved' }, COORDINATOR_ID, { client })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(Err);
+    expect(err.message).toBe('expectedAttendance must be a positive whole number');
+  });
+});
