@@ -48,7 +48,7 @@ export default function useOpenEventRead(fetcher, {
       return { kind: "ok", data: fresh };
     } catch (err) {
       if (mine !== latest.current) return { kind: "superseded" };
-      const status = err.response?.status;
+      const status = err?.response?.status;
 
       if (notFoundIsAnswer && status === 404) {
         // No longer open, for whatever reason: nothing may still offer to register.

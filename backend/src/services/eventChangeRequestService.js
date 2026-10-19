@@ -52,7 +52,12 @@
  * typed error, the same division venueService.js uses.
  */
 
-import { ValidationError, NotFoundError, ForbiddenError } from '../errors.js';
+import {
+  ValidationError,
+  NotFoundError,
+  ForbiddenError,
+  ConflictError,
+} from '../errors.js';
 import {
   validateCreateChangeRequest,
   validateProcessChangeRequest,
@@ -105,6 +110,13 @@ function translateError(error) {
 
   const code = error.code;
   const detail = error.message ?? '';
+
+  if (code === 'RS409') {
+    return new ConflictError(
+      'The new event start conflicts with registration closing or withdrawal settings. Ask the organiser to adjust those settings before approving this change.',
+      { code: 'REGISTRATION_SCHEDULE_CONFLICT' },
+    );
+  }
 
   // check constraint: blank requested_change slipping past validation, or an
   // approved change process_change_request could not apply (e.g. a new

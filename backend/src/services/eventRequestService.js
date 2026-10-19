@@ -65,6 +65,7 @@ import {
   validateCreateEventRequest,
   validateUpdateEventRequest,
   validateSubmitEventRequest,
+  validateSignificantEventChange,
 } from '../validation/eventRequestValidation.js';
 // The repository's one uuid check, exported from there precisely so it is not
 // copied (see its docstring). A pure module, so importing it keeps this
@@ -179,6 +180,12 @@ async function resolveClient(client) {
   const { supabase } = await import('../config/supabaseClient.js');
   return supabase;
 }
+
+// The PT409 hints 096 raises, passed to the client as the error code.
+const SIGNIFICANT_CHANGE_CONFLICTS = new Set([
+  'EVENT_STATUS_NOT_ALLOWED',
+  'SIGNIFICANT_CHANGE_IMPACT_CHANGED',
+]);
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -295,6 +302,11 @@ function translateError(error) {
   // ready with every outstanding checklist line as JSON in DETAIL.
   if (code === 'PT409' && error.hint === 'EVENT_NOT_READY') {
     return new ConflictError(detail, { code: 'EVENT_NOT_READY', conflicts: parseOutstanding(error.details) });
+  }
+  // SCRUM-395 (096): the significant-change refusals the panel acts on. Any
+  // other PT409 is not one this module raises, so it stays untyped below.
+  if (code === 'PT409' && SIGNIFICANT_CHANGE_CONFLICTS.has(error.hint)) {
+    return new ConflictError(detail, { code: error.hint });
   }
 
   // Left untyped on purpose. An unrecognised code is not the caller's fault and
@@ -1315,6 +1327,84 @@ export async function cancelEventRequest(
 
   if (error) throw translateError(error);
   return toEventRequest(data);
+}
+
+/**
+ * Preview a significant change. The database repeats ownership and lifecycle
+ * checks, while this service applies SCRUM-10 validation before the RPC.
+ */
+export async function getSignificantEventChangeImpact(
+  id,
+  changes,
+  coordinatorId,
+  { client } = {},
+) {
+  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
+    throw new ValidationError('coordinatorId is required');
+  }
+
+  const db = await resolveClient(client);
+  const current = await getEventRequestForCoordinator(id, { client: db });
+  if (current.assignedCoordinatorId !== coordinatorId) {
+    throw new ForbiddenError('Only the coordinator assigned to this event can preview its significant change.');
+  }
+  const normalised = validateSignificantEventChange(changes, current);
+  const { data, error } = await db.rpc('preview_significant_event_change', {
+    p_event_request_id: id,
+    p_changes: normalised,
+    p_user_id: coordinatorId,
+  });
+
+  if (error) throw translateError(error);
+  return data;
+}
+
+/**
+ * Apply a significant change and its impacts in one Postgres transaction.
+ */
+export async function applySignificantEventChange(
+  id,
+  { changes, reason, expectedImpact } = {},
+  coordinatorId,
+  { client } = {},
+) {
+  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
+    throw new ValidationError('coordinatorId is required');
+  }
+  if (typeof reason !== 'string' || reason.trim() === '' || reason.trim().length > 4000) {
+    throw new ValidationError('A reason of 1 to 4,000 characters is required');
+  }
+  if (
+    expectedImpact === null ||
+    typeof expectedImpact !== 'object' ||
+    Array.isArray(expectedImpact) ||
+    !Array.isArray(expectedImpact.venueBookings) ||
+    !Array.isArray(expectedImpact.equipmentReservations)
+  ) {
+    throw new ValidationError('Preview the significant change before applying it');
+  }
+
+  const db = await resolveClient(client);
+  const current = await getEventRequestForCoordinator(id, { client: db });
+  if (current.assignedCoordinatorId !== coordinatorId) {
+    throw new ForbiddenError('Only the coordinator assigned to this event can apply its significant change.');
+  }
+  const normalised = validateSignificantEventChange(changes, current);
+  const { data, error } = await db.rpc('apply_significant_event_change', {
+    p_event_request_id: id,
+    p_changes: normalised,
+    p_reason: reason.trim(),
+    p_user_id: coordinatorId,
+    p_expected_impact: expectedImpact,
+  });
+
+  if (error) throw translateError(error);
+  return {
+    event: toEventRequest(data.event),
+    impact: data.impact,
+    flaggedBookingIds: data.flaggedBookingIds,
+    flaggedReservationCount: data.flaggedReservationCount,
+  };
 }
 
 

@@ -82,7 +82,6 @@ function expectNoOtherDashboard() {
 }
 
 beforeEach(() => {
-  vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "true");
   sessionStorage.clear();
   vi.mocked(apiClient.post).mockReset();
   vi.mocked(apiClient.get).mockReset();
@@ -220,17 +219,6 @@ describe("SCRUM453_AC3 the browse page is refused to every other role", () => {
 
 const EVENT_ID = "9c1d1f0e-5a0e-4c3e-8d3a-1f5f6a7b8c9d";
 
-describe("SCRUM495 the browse routes while the feature is off", () => {
-  it.each(["/open-events", `/open-events/${EVENT_ID}`])("SCRUM495_AC2_an_attendee_at_%s_never_reaches_the_page_or_the_api", async (path) => {
-    vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "false");
-    restoreSession("attendee");
-    renderAppAt(path);
-
-    await waitFor(() => expect(window.location.pathname).not.toBe(path));
-    expect(screen.queryByRole("heading", { name: "Events open for registration" })).not.toBeInTheDocument();
-    expect(apiClient.get).not.toHaveBeenCalledWith(expect.stringContaining("/open-events"));
-  });
-});
 describe("SCRUM495 the browse details route", () => {
   it.each(OTHER_ROLES)("SCRUM495_AC5_%s_at_an_event_s_details_url_is_sent_to_unauthorized_and_nothing_is_fetched", async (role) => {
     restoreSession(role);
@@ -338,7 +326,7 @@ describe("SCRUM453_AC3 other roles, unknown roles and signed-out visitors", () =
 
 describe("SCRUM453 existing roles keep their navigation", () => {
   it.each([
-    ["event_organiser", ["/dashboard", "/events"]],
+    ["event_organiser", ["/dashboard", "/events", "/registration"]],
     ["event_coordinator", ["/dashboard", "/my-events", "/my-venue-requests", "/review-queue", "/venue-search"]],
     ["venue_staff", ["/dashboard", "/venue-catalogue", "/booking-requests", "/flagged-bookings"]],
     [

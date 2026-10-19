@@ -6,13 +6,14 @@ import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { useUnreadCount } from "../notifications/UnreadCountContext";
 import { normaliseRole } from "../auth/normaliseRole";
-import { BROWSE_OPEN_EVENTS_PATH, isOpenEventsEnabled } from "../services/openEventRoutes";
+import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
 
 const NAV_LINKS_BY_ROLE = {
   EVENT_ORGANISER: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/events", label: "My Events" },
+    { to: "/registration", label: "Registration" },
     // No "Find a Venue": an Organiser states venue needs on the request
     // (SCRUM-10); Coordinators search and book venues (SCRUM-20, SCRUM-243).
   ],
@@ -104,9 +105,7 @@ export default function Navigation() {
 
   if (!user) return null;
 
-  const links = (NAV_LINKS_BY_ROLE[normaliseRole(user.role)] || []).filter(
-    (link) => link.to !== BROWSE_OPEN_EVENTS_PATH || isOpenEventsEnabled(),
-  );
+  const links = NAV_LINKS_BY_ROLE[normaliseRole(user.role)] || [];
   const hasUnread = unreadCount > 0;
 
   async function handleLogout() {

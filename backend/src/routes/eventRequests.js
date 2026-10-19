@@ -98,6 +98,8 @@ import {
   decideEventRequest,
   getEventCancellationImpact,
   cancelEventRequest,
+  getSignificantEventChangeImpact,
+  applySignificantEventChange,
   getEventReadiness,
   submitForSafetyReview,
 } from '../services/eventRequestService.js';
@@ -672,6 +674,20 @@ export function createEventRequestRouter({
     }
   });
 
+  router.post('/:id/significant-change-impact', coordinatorOnly, async (req, res) => {
+    try {
+      const impact = await getSignificantEventChangeImpact(
+        req.params.id,
+        req.body?.changes,
+        req.user.id,
+        { client },
+      );
+      res.status(200).json(impact);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
   /**
    * SCRUM-334 (SCRUM-327 AC9, AC10): an event's assignment history, in two
    * routes. This one is the Organiser's; GET /:id/assignments/review below is
@@ -1075,6 +1091,25 @@ export function createEventRequestRouter({
         { client },
       );
       res.status(200).json(withStatusDisplay(updated));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  router.post('/:id/significant-change', coordinatorOnly, async (req, res) => {
+    try {
+      const result = await applySignificantEventChange(
+        req.params.id,
+        req.body,
+        req.user.id,
+        { client },
+      );
+      res.status(200).json({
+        ...withStatusDisplay(result.event),
+        impact: result.impact,
+        flaggedBookingIds: result.flaggedBookingIds,
+        flaggedReservationCount: result.flaggedReservationCount,
+      });
     } catch (err) {
       handleError(err, res);
     }

@@ -10,6 +10,8 @@ const eventRequestPage = (id) => ({ to: `/event-requests/${id}` });
 const VENUE_STAFF_PAGES = {
   booking_request_submitted: { to: "/booking-requests" },
   safety_booking_flagged: { to: "/flagged-bookings" },
+  booking_flagged_event_change: { to: "/flagged-bookings" },
+  booking_request_event_change: { to: "/booking-requests" },
 };
 
 // What opens the equipment review: the safety flag (SCRUM-172) and the
@@ -30,10 +32,14 @@ const LINKS_BY_ROLE = {
 
   // The organiser's only event page is their own list; router state picks
   // the row, as the dashboard's clarification shortcut already does.
-  EVENT_ORGANISER: (type, id) =>
-    type === "clarification_requested"
-      ? { to: "/events", state: { openClarificationRequestId: id } }
-      : { to: "/events", state: { focusEventRequestId: id } },
+  EVENT_ORGANISER: (type, id) => {
+    if (type === "clarification_requested") {
+      return { to: "/events", state: { openClarificationRequestId: id } };
+    }
+    // The clashing dates are fixed on the event's registration settings page.
+    if (type === "registration_schedule_conflict") return { to: `/events/${id}/registration` };
+    return { to: "/events", state: { focusEventRequestId: id } };
+  },
 
   // A cancelled event's review has nothing left to act on, and neither has a
   // cancelled equipment request.

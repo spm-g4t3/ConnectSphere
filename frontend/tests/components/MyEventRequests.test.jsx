@@ -14,7 +14,7 @@
 // mock, because a vi.mock factory is strict.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 
 import MyEventRequests from "../../src/components/MyEventRequests.jsx";
@@ -84,6 +84,14 @@ beforeEach(() => {
 
 
 describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
+  it("SCRUM494_AC6_links_an_event_to_its_registration_settings_page", async () => {
+    renderList([eventRequest({ status: "approved" })]);
+
+    const record = (await screen.findByText("IS212 Industry Night")).closest("li");
+    expect(within(record).getByRole("link", { name: "Registration settings" }))
+      .toHaveAttribute("href", "/events/22222222-2222-4222-8222-222222222222/registration");
+  });
+
   it("shows the cancellation reason and recorded date without offering further changes", async () => {
     renderList([
       eventRequest({
@@ -383,7 +391,8 @@ describe("SCRUM172_AC7 a notification opens the Organiser's list on its event", 
 
     expect(rowOf("Tech Talk")).toHaveClass("my-event-requests__item--focused");
     expect(rowOf("Career Fair")).not.toHaveClass("my-event-requests__item--focused");
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    // Scrolling runs in an effect after the matching row has rendered.
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
     expect(scrollIntoView.mock.contexts[0]).toBe(rowOf("Tech Talk"));
     expect(screen.queryByText("That event is no longer in your list.")).not.toBeInTheDocument();
   });

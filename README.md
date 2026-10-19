@@ -62,7 +62,9 @@ npm run install:all      # installs root, backend and frontend
 
 Copy `backend/.env.example` to `backend/.env` and fill in the real values. Real `.env` files are gitignored and must never be committed. The frontend needs no `.env`: it defaults to `http://localhost:5000/api`, and `VITE_API_BASE_URL` overrides that if you need it to.
 
-Browse Open Events (SCRUM-495) is off by default, because it needs the registration settings (SCRUM-494), the `registrations` table (SCRUM-22) and migration 068. Once those are in the database, set `OPEN_EVENTS_ENABLED=true` for the backend and `VITE_OPEN_EVENTS_ENABLED=true` for the frontend build; until then the route answers 404 and the nav and dashboard links are hidden.
+Browse Open Events (SCRUM-495) is available to authenticated Attendees through the navigation, dashboard and `/open-events` routes. Settings, registration writes and browse counts all use `event_registrations`. Events must be Confirmed with registration enabled and within their registration window to appear.
+
+PR #68 (SCRUM-494) is merged into dev and included here with its organiser settings API/UI. Apply any pending dev prerequisites, including registration migrations 050, 082 and 091, before this story's 092, 093 and 094, in that order, and before deploying its backend/frontend. These registration migrations follow their SCRUM-494 dependency, 091. Migration 092 preserves legacy registrations and replaces `registrations` with a read-only compatibility view. Feature flags remain removed, so database-first deployment is required. Historical 079-081 and the earlier registration 088 are archived outside the active migrations directory and must not be replayed. See [registration integration and deployment](backend/tests/SCRUM22-PR68-integration.md).
 
 The protected attendee read, `GET /api/attendee-events/:id` (SCRUM-49/52), requires SCRUM-494 and SCRUM-22's canonical `event_registrations` schema. Merge and deploy PR #68 before PR #70, then integrate this branch with dev; this change does not supply their migrations. Missing schema returns 503. Only the verified Attendee's own `registered` row grants access; withdrawn, cancelled and waitlisted entries do not. Registration windows and capacity do not control this read.
 
@@ -205,6 +207,15 @@ They are different facts and the code never uses one for the other.
 - Migration `062` adds `safety_review` and `safety_approved` to the enum and to the three constraints that list the statuses (`event_requests_status_in_lifecycle`, the two decided-status constraints from `025`, and the status history's). It is one file because it compares `status::text`: Postgres will not accept a new enum value as an enum literal in the transaction that adds it. It moves no event into a new status, and the legal transitions into and out of them are not in it.
 - No endpoint deletes a draft yet.
 - Moving a request to Approved, Rejected or Confirmed needs the decision columns from SCRUM-19. `change_event_request_status` does not write them, so those transitions will need that story to extend it.
+
+## Event registration
+
+Event Organisers configure registration for their own events from **My Events** while the event is Approved, Safety review, Safety approved or Confirmed (`backend/src/domain/registrationStatuses.js`). Registration is off by default; settings include the opening and closing times, an optional positive capacity, and an optional withdrawal deadline. Registration needs an opening time while it is on; the closing time is optional, and without one registration stays open until the Organiser switches it off. Switching registration off is always allowed, even when the saved dates no longer fit the event start.
+
+Migrations `050` and `091` in `backend/db/migrations/` add the settings, the settings audit history and the transactional functions; the attendee registrations table (`status` registered, withdrawn or waitlisted) is read here only to stop the capacity dropping below the registered count. Settings changes are limited to the event's Organiser, checked in SQL as well as by the route; the assigned Coordinator cannot change them. Each changed settings snapshot records the acting user and timestamp. Returning a Confirmed event to Approved preserves its settings. A change to the event start that clashes with the registration dates still goes through; the Organiser and the assigned Coordinator get a `registration_schedule_conflict` notification naming the dates to adjust. Apply `050`, then `082`, then `091` in order: `091` replaces the function versions in `050` and `082`.
+
+Run `npm --prefix backend test -- tests/db/eventRegistrationDatabase.test.js` to exercise the migrations and registration functions against PGlite.
+
 ## Development workflow
 
 ### Branches

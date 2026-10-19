@@ -22,6 +22,8 @@ import VenueCalendar from "./components/VenueCalendar";
 import { parseCalendarDate } from "./services/calendarRange";
 import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck";
 import EquipmentReview from "./components/EquipmentReview";
+import EventRegistrationSettings from "./components/EventRegistrationSettings";
+import RegistrationEventsList from "./components/RegistrationEventsList";
 import EquipmentRequestQueue from "./components/EquipmentRequestQueue";
 import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
 import SafetyReviewHistory from "./components/SafetyReviewHistory";
@@ -30,7 +32,8 @@ import BrowseEventDetails from "./components/BrowseEventDetails";
 import RegisteredEvents from "./components/RegisteredEvents";
 import AttendeeEventInformation from "./components/AttendeeEventInformation";
 import { REGISTERED_EVENTS_PATH, ATTENDEE_EVENT_ROUTE } from "./services/attendeeEventRoutes";
-import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE, isOpenEventsEnabled } from "./services/openEventRoutes";
+import { registerForEvent } from "./services/registrationService";
+import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE } from "./services/openEventRoutes";
 import "./App.css";
 
 function LoadingScreen() {
@@ -69,6 +72,11 @@ function VenueCalendarRoute() {
       />
     </main>
   );
+}
+
+function EventRegistrationSettingsRoute() {
+  const { eventId } = useParams();
+  return <EventRegistrationSettings key={eventId} eventId={eventId} />;
 }
 
 function AppRoutes() {
@@ -117,6 +125,22 @@ function AppRoutes() {
             <div className="dashboard dashboard--attendee"><AttendeeEventInformation /></div>
           </ProtectedRoute>
         } />
+        <Route
+          path="/registration"
+          element={
+            <ProtectedRoute allowedRoles={["event_organiser"]}>
+              <RegistrationEventsList />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/events/:eventId/registration"
+          element={
+            <ProtectedRoute allowedRoles={["event_organiser"]}>
+              <EventRegistrationSettingsRoute />
+            </ProtectedRoute>
+          }
+        />
         {/* VenueSearch was written, correct, and imported by nothing — the route
             rendered a placeholder over a working component. Swapped for the real one. */}
         {/* Internal roles only. Venue search is the Coordinator's planning tool
@@ -262,30 +286,26 @@ function AppRoutes() {
         {/* Attendees only, like the API, so a direct URL from another role lands
             on /unauthorized, not on a page that is only an error. The
             .dashboard wrapper gives the pages their card styling. */}
-        {isOpenEventsEnabled() && (
-          <>
-            <Route
-              path={BROWSE_OPEN_EVENTS_PATH}
-              element={
-                <ProtectedRoute allowedRoles={["attendee"]}>
-                  <div className="dashboard dashboard--attendee">
-                    <BrowseOpenEvents />
-                  </div>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path={OPEN_EVENT_DETAILS_ROUTE}
-              element={
-                <ProtectedRoute allowedRoles={["attendee"]}>
-                  <div className="dashboard dashboard--attendee">
-                    <BrowseEventDetails />
-                  </div>
-                </ProtectedRoute>
-              }
-            />
-          </>
-        )}
+        <Route
+          path={BROWSE_OPEN_EVENTS_PATH}
+          element={
+            <ProtectedRoute allowedRoles={["attendee"]}>
+              <div className="dashboard dashboard--attendee">
+                <BrowseOpenEvents />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path={OPEN_EVENT_DETAILS_ROUTE}
+          element={
+            <ProtectedRoute allowedRoles={["attendee"]}>
+              <div className="dashboard dashboard--attendee">
+                <BrowseEventDetails onRegister={registerForEvent} />
+              </div>
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/equipment-catalogue"
           element={
