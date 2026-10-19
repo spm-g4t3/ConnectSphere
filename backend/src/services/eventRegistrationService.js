@@ -8,6 +8,9 @@ import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
 import { getStatusDisplay } from '../domain/eventRequestStatus.js';
 import { REGISTRATION_CONFIGURABLE_STATUSES } from '../domain/registrationStatuses.js';
 
+// registration_capacity is a Postgres integer.
+const MAX_CAPACITY = 2147483647;
+
 function displayStatus(status) {
   return getStatusDisplay(status).label;
 }
@@ -57,13 +60,18 @@ function normalizeSettings(input) {
 
   let capacity = null;
   if (input.capacity !== null && input.capacity !== undefined && input.capacity !== '') {
-    capacity = Number(input.capacity);
-    if (!Number.isInteger(capacity)) {
-      details.push({
-        field: 'registrationCapacity',
-        message: 'Must be a whole number.',
-      });
-    }
+    // Number() would turn true, [5], '1e2' and '  ' into numbers, so only a
+    // number or a string of digits counts.
+    const raw = input.capacity;
+    if (typeof raw === 'number') capacity = raw;
+    else if (typeof raw === 'string' && /^-?\d+$/.test(raw)) capacity = Number(raw);
+    else capacity = Number.NaN;
+
+    let message = null;
+    if (!Number.isInteger(capacity)) message = 'Must be a whole number.';
+    else if (capacity < 1) message = 'Must be a whole number above zero.';
+    else if (capacity > MAX_CAPACITY) message = `Must be ${MAX_CAPACITY} or fewer.`;
+    if (message) details.push({ field: 'registrationCapacity', message });
   }
 
   if (details.length) {

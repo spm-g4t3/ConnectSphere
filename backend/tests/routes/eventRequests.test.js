@@ -1149,26 +1149,6 @@ describe('SCRUM-47: Coordinators decide organiser change requests', () => {
     });
   });
 
-  it('SCRUM494_AC1_returns_a_clear_conflict_when_the_new_start_violates_registration_dates', async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: null,
-      error: {
-        code: 'RS409',
-        message: 'The new event start is earlier than the registration closing time.',
-      },
-    });
-    const res = await request(appWith({ client: { rpc }, requireAuth: coordinatorAuth }))
-      .post('/api/event-requests/change-requests/44444444-4444-4444-8444-444444444444/decision')
-      .send({ decision: 'approved' });
-
-    expect(res.status).toBe(409);
-    expect(res.body).toMatchObject({
-      code: 'REGISTRATION_SCHEDULE_CONFLICT',
-      error: 'The new event start conflicts with registration closing or withdrawal settings. Ask the organiser to adjust those settings before approving this change.',
-      conflicts: [],
-    });
-  });
-
   it('requires a rejection reason before reaching the database', async () => {
     const rpc = vi.fn();
     const res = await request(appWith({ client: { rpc }, requireAuth: coordinatorAuth }))

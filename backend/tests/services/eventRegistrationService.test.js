@@ -139,4 +139,24 @@ describe('SCRUM-494 registration settings and attendee listings', () => {
     expect(error.details).toContainEqual(expect.objectContaining({ field: 'registrationOpensAt' }));
     expect(client.rpc).not.toHaveBeenCalled();
   });
+
+  it.each([true, [5], '1e2', '  ', 3000000000])(
+    'SCRUM494_AC3_rejects_capacity_that_is_not_a_whole_number_in_range (%j)',
+    async (capacity) => {
+      const client = saveClient({ outcome: 'saved' });
+      const error = await updateRegistrationSettings(
+        EVENT_ID,
+        { ...validSettings, capacity },
+        ORGANISER_ID,
+        { client },
+      ).catch((caught) => caught);
+
+      expect(error).toBeInstanceOf(ValidationError);
+      expect(error.details).toEqual([{
+        field: 'registrationCapacity',
+        message: capacity === 3000000000 ? 'Must be 2147483647 or fewer.' : 'Must be a whole number.',
+      }]);
+      expect(client.rpc).not.toHaveBeenCalled();
+    },
+  );
 });

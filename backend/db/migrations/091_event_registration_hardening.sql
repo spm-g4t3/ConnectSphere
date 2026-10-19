@@ -31,31 +31,10 @@ begin
     add constraint event_requests_enabled_registration_has_window
     check (not registration_enabled or registration_opens_at is not null);
 
-  if not exists (
-    select 1 from pg_constraint
-     where conname = 'event_requests_registration_closes_before_start'
-       and conrelid = 'public.event_requests'::regclass
-  ) then
-    alter table event_requests
-      add constraint event_requests_registration_closes_before_start
-      check (
-        registration_closes_at is null
-        or (proposed_start is not null and registration_closes_at <= proposed_start)
-      );
-  end if;
-
-  if not exists (
-    select 1 from pg_constraint
-     where conname = 'event_requests_withdrawal_before_start'
-       and conrelid = 'public.event_requests'::regclass
-  ) then
-    alter table event_requests
-      add constraint event_requests_withdrawal_before_start
-      check (
-        registration_withdrawal_deadline is null
-        or (proposed_start is not null and registration_withdrawal_deadline <= proposed_start)
-      );
-  end if;
+  -- A start change must go through and notify (see the trigger at the end), so
+  -- the dates are checked against the start when saved, not by these constraints.
+  alter table event_requests drop constraint if exists event_requests_registration_closes_before_start;
+  alter table event_requests drop constraint if exists event_requests_withdrawal_before_start;
 end
 $$;
 
@@ -163,6 +142,17 @@ begin
   if p_opens_at is not null and p_closes_at is not null and p_opens_at >= p_closes_at then
     v_details := v_details || jsonb_build_array(jsonb_build_object(
       'field', 'registrationOpensAt', 'message', 'Must be before the closing date and time.'
+    ));
+  end if;
+  -- With a closing time, opening before closing before the start already holds;
+  -- an open-ended window still has to open before the event starts.
+  if p_opens_at is not null and p_closes_at is null and v_event.proposed_start is null then
+    v_details := v_details || jsonb_build_array(jsonb_build_object(
+      'field', 'proposedStart', 'message', 'Set the event start before setting the registration opening time.'
+    ));
+  elsif p_opens_at is not null and p_closes_at is null and p_opens_at >= v_event.proposed_start then
+    v_details := v_details || jsonb_build_array(jsonb_build_object(
+      'field', 'registrationOpensAt', 'message', 'Must be before the event start.'
     ));
   end if;
   if p_closes_at is not null and v_event.proposed_start is null then
@@ -379,39 +369,133 @@ revoke execute on function open_event_registration_state(uuid[], uuid)
   from public, anon, authenticated;
 grant execute on function open_event_registration_state(uuid[], uuid) to service_role;
 
--- RS409 is a dedicated SQLSTATE so the API can tell this conflict from other
--- check failures (PostgREST does not pass the constraint name through).
-create or replace function guard_registration_schedule_on_start_change()
+-- An earlier version refused a clashing start change; changes flag and notify
+-- instead, so a database that ran it is cleaned up here.
+drop trigger if exists event_requests_guard_registration_schedule on event_requests;
+drop function if exists guard_registration_schedule_on_start_change();
+
+-- The full list from 097 plus registration_schedule_conflict, merged with the
+-- live constraint so a migration applied out of order keeps its types.
+do $$
+declare
+  v_def   text;
+  v_known text[] := '{}';
+  v_ours  text[] := array[
+    'booking_flagged',
+    'booking_request_withdrawn',
+    'clarification_requested',
+    'clarification_replied',
+    'clarification_closed',
+    'booking_flagged_setup_change',
+    'venue_hold_expired',
+    'event_cancelled',
+    'event_request_awaiting_assignment',
+    'event_request_assigned',
+    'event_request_coordinator_assigned',
+    'safety_review_response',
+    'safety_booking_flagged',
+    'safety_equipment_review',
+    'event_submitted_for_safety_review',
+    'booking_request_approved',
+    'booking_request_rejected',
+    'booking_request_conflicting',
+    'flagged_booking_resolved',
+    'booking_request_submitted',
+    'booking_request_venue_unavailable',
+    'booking_flagged_venue_retired',
+    'booking_released',
+    'booking_request_conflict_cleared',
+    'equipment_requested',
+    'equipment_request_changed',
+    'equipment_request_cancelled',
+    'equipment_arranged',
+    'equipment_not_fully_arranged',
+    'equipment_flagged',
+    'registration_schedule_conflict'
+  ];
+  v_item  text;
+begin
+  select pg_get_constraintdef(c.oid)
+    into v_def
+    from pg_constraint c
+   where c.conrelid = 'notifications'::regclass
+     and c.conname = 'notifications_type_known';
+
+  if v_def is not null then
+    select coalesce(array_agg(t.m[1] order by t.ord), '{}')
+      into v_known
+      from regexp_matches(v_def, '''([a-z_]+)''', 'g') with ordinality as t(m, ord);
+  end if;
+
+  foreach v_item in array v_ours loop
+    if not v_item = any (v_known) then
+      v_known := v_known || v_item;
+    end if;
+  end loop;
+
+  alter table notifications drop constraint if exists notifications_type_known;
+
+  execute format(
+    'alter table notifications add constraint notifications_type_known check (type in (%s))',
+    (select string_agg(quote_literal(x.item), ', ' order by x.ord)
+       from unnest(v_known) with ordinality as x(item, ord))
+  );
+end;
+$$;
+
+-- A start that moves before the registration dates goes through; the Organiser
+-- and the coordinator are told which dates now clash so they can adjust them.
+create or replace function notify_registration_schedule_conflict()
 returns trigger
 language plpgsql
 set search_path = public
 as $fn$
+declare
+  v_fields  jsonb := '[]'::jsonb;
+  v_payload jsonb;
 begin
-  if new.proposed_start is not distinct from old.proposed_start
-     or new.proposed_start is null then
-    return new;
+  if not new.registration_enabled or new.proposed_start is null then
+    return null;
   end if;
 
-  if new.registration_closes_at is not null
-     and new.registration_closes_at > new.proposed_start then
-    raise exception 'The new event start is earlier than the registration closing time. Adjust the registration settings before changing the start.'
-      using errcode = 'RS409';
+  if new.registration_opens_at >= new.proposed_start then
+    v_fields := v_fields || to_jsonb('registrationOpensAt'::text);
+  end if;
+  if new.registration_closes_at > new.proposed_start then
+    v_fields := v_fields || to_jsonb('registrationClosesAt'::text);
+  end if;
+  if new.registration_withdrawal_deadline > new.proposed_start then
+    v_fields := v_fields || to_jsonb('registrationWithdrawalDeadline'::text);
   end if;
 
-  if new.registration_withdrawal_deadline is not null
-     and new.registration_withdrawal_deadline > new.proposed_start then
-    raise exception 'The new event start is earlier than the registration withdrawal deadline. Adjust the registration settings before changing the start.'
-      using errcode = 'RS409';
+  if jsonb_array_length(v_fields) = 0 then
+    return null;
   end if;
 
-  return new;
+  v_payload := jsonb_build_object(
+    'eventName', new.event_name,
+    'newStart', new.proposed_start,
+    'fields', v_fields
+  );
+
+  insert into notifications (recipient_id, type, event_request_id, payload)
+  values (new.organiser_id, 'registration_schedule_conflict', new.id, v_payload);
+
+  if new.assigned_coordinator_id is not null
+     and new.assigned_coordinator_id is distinct from new.organiser_id then
+    insert into notifications (recipient_id, type, event_request_id, payload)
+    values (new.assigned_coordinator_id, 'registration_schedule_conflict', new.id, v_payload);
+  end if;
+
+  return null;
 end;
 $fn$;
 
-drop trigger if exists event_requests_guard_registration_schedule on event_requests;
-create trigger event_requests_guard_registration_schedule
-  before update of proposed_start on event_requests
+drop trigger if exists event_requests_notify_registration_schedule_conflict on event_requests;
+create trigger event_requests_notify_registration_schedule_conflict
+  after update of proposed_start on event_requests
   for each row
-  execute function guard_registration_schedule_on_start_change();
+  when (new.proposed_start is distinct from old.proposed_start)
+  execute function notify_registration_schedule_conflict();
 
 notify pgrst, 'reload schema';

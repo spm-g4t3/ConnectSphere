@@ -38,6 +38,17 @@ beforeAll(async () => {
     create table profiles (id uuid primary key references auth.users(id), role text not null);
   `  );
   await db.exec(migration('001_event_requests.sql'));
+  // 091 adds a notification type, so the table 014 creates has to exist.
+  await db.exec(`
+    create table notifications (
+      id uuid primary key default gen_random_uuid(),
+      recipient_id uuid not null,
+      type text not null,
+      event_request_id uuid,
+      payload jsonb not null default '{}',
+      constraint notifications_type_known check (type in ('booking_flagged'))
+    );
+  `);
   await db.exec(migration('068_open_event_registration_state.sql'));
   await db.exec(migration('050_event_registration.sql'));
   await db.exec(migration('082_event_registration_state.sql'));
@@ -95,7 +106,7 @@ describe('SCRUM495 open_event_registration_state', () => {
     expect(a.is_registered).toBe(true);
   });
 
-  it('counts rows from the event_registrations table used by registration setup', async () => {
+  it('SCRUM494_AC5_counts_only_registered_places_for_each_event', async () => {
     const rows = await state([EVENT_B, EVENT_C], OTHER);
 
     expect(rows).toEqual([{ event_request_id: EVENT_B, active_count: 1, is_registered: false }]);
@@ -133,12 +144,5 @@ describe('SCRUM495 open_event_registration_state', () => {
       );
       expect(rows[0].allowed).toBe(false);
     }
-  });
-
-  it('reads the shared settings table rather than a separate registrations table', () => {
-    const sql = readFileSync(resolve(MIGRATIONS_DIR, '082_event_registration_state.sql'), 'utf8').replace(/--[^\n]*/g, '');
-
-    expect(sql).toContain('from event_registrations r');
-    expect(sql).not.toMatch(/from registrations r/);
   });
 });
