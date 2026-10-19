@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { getAttendeeEvent, listAttendeeEvents } from '../../src/services/attendeeEventService.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
 import { BOOKING_STATUS } from '../../src/domain/bookingStatus.js';
+import { createAttendeeEventSqlClient } from '../fixtures/attendeeEventSqlClient.js';
 
 const migrationsDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../db/migrations');
 const prerequisites = ['050_event_registration.sql', '082_event_registration_state.sql',
@@ -39,62 +40,9 @@ describe('SCRUM-52 SQL read using repository migrations', () => {
   let queries;
   const one = async (sql, params) => (await db.query(sql, params)).rows[0];
 
-  // PostgREST is not part of PGlite. Execute its nested-read equivalent as one
-  // SQL statement against real tables; hosted relationship resolution needs E2E verification.
-  const client = {
-    from(table) {
-      expect(table).toBe('event_registrations');
-      const filters = [];
-      let isList = false;
-      const query = {
-        select(columns) {
-          isList = columns === 'event_request_id, attendee_id, status, event_requests!inner(id, event_name)';
-          if (isList) return query;
-          expect(columns.replace(/\s+/g, '')).toBe('event_request_id,attendee_id,status,'
-            + 'event_requests!inner(id,status,proposed_start,proposed_end,bookings(id,status,venues(name,location)))');
-          return query;
-        },
-        eq(field, value) { filters.push([field, value]); return query; },
-        order() { return query; },
-        async range(first, last) {
-          expect(isList).toBe(true);
-          expect(filters.map(([field]) => field)).toEqual(['attendee_id', 'status']);
-          queries += 1;
-          const { rows } = await db.query(`
-            select r.attendee_id, r.event_request_id, r.status,
-              jsonb_build_object('id', e.id, 'event_name', e.event_name) as event_requests
-            from event_registrations r join event_requests e on e.id = r.event_request_id
-            where r.attendee_id = $1 and r.status = $2
-            order by r.registered_at desc, r.id asc limit $3 offset $4
-          `, [...filters.map(([, value]) => value), last - first + 1, first]);
-          return { data: rows, error: null };
-        },
-        async maybeSingle() {
-          expect(filters.map(([field]) => field)).toEqual(['attendee_id', 'event_request_id', 'status']);
-          queries += 1;
-          try {
-            const data = await one(`
-              select r.attendee_id, r.event_request_id, r.status,
-                jsonb_build_object('id', e.id, 'status', e.status,
-                  'proposed_start', e.proposed_start, 'proposed_end', e.proposed_end,
-                  'bookings', coalesce((
-                    select jsonb_agg(jsonb_build_object('id', b.id, 'status', b.status,
-                      'venues', jsonb_build_object('name', v.name, 'location', v.location)) order by b.id)
-                    from bookings b join venues v on v.id = b.venue_id
-                    where b.event_request_id = e.id
-                  ), '[]'::jsonb)) as event_requests
-              from event_registrations r join event_requests e on e.id = r.event_request_id
-              where r.attendee_id = $1 and r.event_request_id = $2 and r.status = $3
-            `, filters.map(([, value]) => value));
-            return { data, error: null };
-          } catch (error) {
-            return { data: null, error };
-          }
-        },
-      };
-      return query;
-    },
-  };
+  const client = createAttendeeEventSqlClient({ query: (...args) => db.query(...args) }, {
+    onQuery: () => { queries += 1; },
+  });
   const read = () => getAttendeeEvent({ user, eventRequestId: eventId, client });
   const book = async (name, status = 'approved') => {
     const venue = await one(`insert into venues (name, location, max_capacity)

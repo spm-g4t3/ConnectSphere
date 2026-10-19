@@ -18,6 +18,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { getConfirmedArrangementsForOrganiser } from '../../src/services/eventRequestService.js';
+import { createAttendeeEventSqlClient } from '../fixtures/attendeeEventSqlClient.js';
+import { getAttendeeEvent } from '../../src/services/attendeeEventService.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
@@ -347,6 +349,46 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
         .toEqual({ status: 'confirmed', expected_attendance: 50 });
       expect(await one('select status, decision from event_change_requests where id = $1', [changeId]))
         .toEqual({ status: 'outstanding', decision: null });
+    });
+
+    // SCRUM-24 AC7 through the real lifecycle functions, not status fixtures.
+    it('SCRUM24_AC7_attendee_read_follows_change_request_safety_review_and_reconfirmation', async () => {
+      const venue = await one("insert into venues (name, location, max_capacity) values ('Lifecycle hall', 'SMU Level 2', 200) returning id");
+      const id = await confirmedEvent(venue.id);
+      const booking = await one('select id from bookings where event_request_id = $1', [id]);
+      const reservation = await one('select id from equipment_reservations where event_request_id = $1', [id]);
+      const attendee = (await one("insert into auth.users (email) values ('scrum24-attendee@test') returning id")).id;
+      await db.query("insert into profiles(id, role) values ($1, 'attendee')", [attendee]);
+      const venueStaff = (await one("insert into auth.users (email) values ('scrum24-venue@test') returning id")).id;
+      await db.query("insert into profiles(id, role) values ($1, 'venue_staff')", [venueStaff]);
+      await db.query('insert into event_registrations(event_request_id, attendee_id) values ($1, $2)', [id, attendee]);
+      const read = () => getAttendeeEvent({
+        user: { id: attendee, role: 'attendee' }, eventRequestId: id, client: createAttendeeEventSqlClient(db),
+      });
+      const venueSeen = [{ bookingId: booking.id, name: 'Lifecycle hall', location: 'SMU Level 2' }];
+
+      const { proposed_start: start } = await one('select proposed_start from event_requests where id = $1', [id]);
+      expect(await read()).toMatchObject({ state: 'confirmed', venues: venueSeen });
+      expect(new Date((await read()).startsAt)).toEqual(start);
+
+      // A later start stays inside the booking, so the hall can be reinstated.
+      const moved = new Date(start.getTime() + 30 * 60000);
+      await approveChange(id, 'proposed_start', moved.toISOString());
+      expect(await read()).toEqual({ eventRequestId: id, state: 'unavailable' });
+
+      await db.query('select reinstate_flagged_booking($1, $2, $3)', [booking.id, venueStaff, 'Hall still free']);
+      await db.query('select start_equipment_review($1, $2)', [id, technician]);
+      await db.query('select move_equipment_reservation($1, $2, $3, $4)',
+        [id, technician, reservation.id, 'Moved to the new start']);
+      await db.query('select submit_event_for_safety_review($1, $2)', [id, coordinator]);
+      expect(await read()).toEqual({ eventRequestId: id, state: 'unavailable' });
+      await db.query("select respond_to_safety_review($1, $2, 'approved', null, '{}', false)", [id, safetyOfficer]);
+      expect(await read()).toEqual({ eventRequestId: id, state: 'unavailable' });
+      await db.query('select confirm_event_request($1, $2)', [id, coordinator]);
+
+      const reconfirmed = await read();
+      expect(reconfirmed).toMatchObject({ state: 'confirmed', venues: venueSeen });
+      expect(new Date(reconfirmed.startsAt)).toEqual(moved);
     });
 
     it('SCRUM363_AC8_flagged_arrangements_require_real_resolution_and_fresh_safety_approval_before_reconfirmation', async () => {
