@@ -25,6 +25,7 @@ import DecisionOutcome from "./DecisionOutcome";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import ClarificationReplyForm from "./ClarificationReplyForm";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
+import ConfirmedArrangements from "./ConfirmedArrangements";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
 
 function formatEventDate(value) {
@@ -310,6 +311,7 @@ export default function MyEventRequests() {
                 {display.description}
               </p>
               <SafetyApprovalNotice status={req.status} />
+              {req.status === "confirmed" && <ConfirmedArrangements eventRequestId={req.id} />}
               {assignment && (
                 <p className="my-event-requests__assignment">{assignment}</p>
               )}

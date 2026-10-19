@@ -50,6 +50,16 @@ beforeEach(() => {
 });
 
 describe('SCRUM495 the shared client and empty answers', () => {
+  it.each([
+    ['withdrawn', true], ['waitlisted', false], ['cancelled', false],
+  ])('SCRUM22_AC6_browse_respects_the_callers_%s_registration_status', async (status, canRegister) => {
+    answers.event_requests = { data: [openRow], error: null };
+    answers.rpc = { data: [{ event_request_id: EVENT_ID, active_count: 0, is_registered: false, registration_status: status }], error: null };
+    const [event] = await listOpenEvents({ attendeeId: ATTENDEE_ID, now: NOW });
+    expect(event).toMatchObject({ canRegister, isRegistered: false, isFull: false, placesLeft: null });
+    expect(event).not.toHaveProperty('registration_status');
+  });
+
   it('SCRUM495_AC7_reads_through_the_shared_supabase_client_when_none_is_passed', async () => {
     answers.event_requests = { data: [openRow], error: null };
     answers.rpc = { data: [], error: null };

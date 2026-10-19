@@ -9,6 +9,8 @@ import { apiClient } from "../../src/services/apiClient";
 import {
   getEventReadiness,
   submitForSafetyReview,
+  confirmEventRequest,
+  getConfirmedArrangements,
 } from "../../src/services/eventRequestService.js";
 
 vi.mock("../../src/services/apiClient", () => ({
@@ -21,6 +23,37 @@ const CHECKLIST = { eventRequestId: EVENT_ID, ready: false, items: [{ key: "venu
 beforeEach(() => {
   vi.mocked(apiClient.get).mockReset().mockResolvedValue({ data: CHECKLIST });
   vi.mocked(apiClient.post).mockReset().mockResolvedValue({ data: { id: EVENT_ID, status: "safety_review" } });
+});
+
+describe("SCRUM363 confirmation service", () => {
+  it("SCRUM363_AC7_reads_organiser_arrangements_through_the_narrow_endpoint", async () => {
+    const data = { eventRequestId: EVENT_ID, status: "confirmed", venues: [], equipment: [] };
+    vi.mocked(apiClient.get).mockResolvedValue({ data });
+    await expect(getConfirmedArrangements(EVENT_ID)).resolves.toBe(data);
+    expect(apiClient.get).toHaveBeenCalledExactlyOnceWith(`/event-requests/${EVENT_ID}/confirmed-arrangements`);
+  });
+
+  it.each([undefined, { noEquipmentConfirmed: true }])("SCRUM363_AC5_posts_%j_to_the_actual_confirmation_endpoint", async (options) => {
+    const confirmed = { id: EVENT_ID, status: "confirmed" };
+    vi.mocked(apiClient.post).mockResolvedValue({ data: confirmed });
+    await expect(confirmEventRequest(EVENT_ID, options)).resolves.toBe(confirmed);
+    expect(apiClient.post).toHaveBeenCalledExactlyOnceWith(`/event-requests/${EVENT_ID}/confirm`, {
+      noEquipmentConfirmed: options?.noEquipmentConfirmed ?? false,
+    });
+  });
+
+  it("SCRUM363_AC5_posts_the_observed_revision_with_the_explicit_acknowledgement", async () => {
+    apiClient.post.mockResolvedValue({ data: { id: EVENT_ID, status: "confirmed" } });
+    const options = { noEquipmentConfirmed: true, expectedUpdatedAt: "2026-06-01T09:00:00.123456Z" };
+    await confirmEventRequest(EVENT_ID, options);
+    expect(apiClient.post).toHaveBeenCalledWith(`/event-requests/${EVENT_ID}/confirm`, options);
+  });
+
+  it("SCRUM363_AC3_passes_backend_refusals_through_unchanged", async () => {
+    const error = { response: { status: 409, data: { code: "EVENT_NOT_READY", conflicts: CHECKLIST.items } } };
+    vi.mocked(apiClient.post).mockRejectedValue(error);
+    await expect(confirmEventRequest(EVENT_ID)).rejects.toBe(error);
+  });
 });
 
 describe("SCRUM489 the panel's calls", () => {

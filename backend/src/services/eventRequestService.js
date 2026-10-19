@@ -55,6 +55,7 @@
  *    reinterpret a value the timestamptz column already understands.
  */
 
+import { checkTimestamp } from '../validation/timestampValidation.js';
 import {
   ValidationError,
   NotFoundError,
@@ -81,6 +82,7 @@ import {
 // Imports nothing itself, so this service stays loadable without credentials.
 import { ROLE } from '../domain/userRole.js';
 import { BOOKING_STATUS } from '../domain/bookingStatus.js';
+import { EQUIPMENT_REQUEST_STATUS } from '../domain/equipmentRequestStatus.js';
 
 
 /**
@@ -1508,6 +1510,40 @@ export async function getEventRequestForOrganiser(id, organiserId, { client } = 
   return request;
 }
 
+/** One owner-scoped query keeps the event status and its arrangements in the same snapshot. */
+export async function getConfirmedArrangementsForOrganiser(id, organiserId, { client } = {}) {
+  assertOrganiser(organiserId);
+  if (!isPlausibleId(id)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+  const db = await resolveClient(client);
+  const { data, error } = await db.from('event_requests').select(`
+    id, organiser_id, status, proposed_start, proposed_end,
+    bookings(id, status, venues(name, location)),
+    equipment_requests(id, status, equipment_lines(id, quantity, removed_at, equipment_types(name)))
+  `).eq('id', id).eq('organiser_id', organiserId).maybeSingle();
+  if (error) throw translateError(error);
+  if (!data || data.organiser_id !== organiserId) throw new NotFoundError(`Event request ${id} not found`);
+
+  const confirmed = data.status === STATUS.CONFIRMED;
+  return {
+    eventRequestId: data.id,
+    status: data.status,
+    startsAt: confirmed ? data.proposed_start : null,
+    endsAt: confirmed ? data.proposed_end : null,
+    venues: confirmed ? (data.bookings ?? [])
+      .filter((booking) => booking.status === BOOKING_STATUS.APPROVED)
+      .map((booking) => ({
+        bookingId: booking.id, name: booking.venues?.name ?? null, location: booking.venues?.location ?? null,
+      })) : [],
+    equipment: confirmed ? (data.equipment_requests ?? [])
+      .filter((request) => request.status === EQUIPMENT_REQUEST_STATUS.ARRANGED)
+      .flatMap((request) => (request.equipment_lines ?? [])
+        .filter((line) => line.removed_at == null)
+        .map((line) => ({ lineId: line.id, name: line.equipment_types?.name ?? null, quantity: line.quantity }))) : [],
+  };
+}
+
 
 /**
  * One event request, for any Event Coordinator.
@@ -2660,6 +2696,40 @@ export async function getEventReadiness({ client, eventRequestId, noEquipmentCon
   });
   if (error) throw translateError(error);
   return data;
+}
+
+/** Confirm through one RPC; assignment, status and readiness are checked under its locks. */
+export async function confirmEventRequest({
+  client, eventRequestId, coordinatorId, noEquipmentConfirmed = false, expectedUpdatedAt = null,
+} = {}) {
+  if (!isPlausibleId(eventRequestId)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+  if (!isPlausibleId(coordinatorId)) {
+    throw new ValidationError('Invalid coordinator id', [{ field: 'coordinatorId', message: 'must be a valid id' }]);
+  }
+  if (typeof noEquipmentConfirmed !== 'boolean') {
+    throw new ValidationError(
+      'Invalid noEquipmentConfirmed -- must be true or false',
+      [{ field: 'noEquipmentConfirmed', message: 'must be true or false' }],
+    );
+  }
+
+  if (expectedUpdatedAt !== null) {
+    const details = [];
+    checkTimestamp({ add: (field, message) => details.push({ field, message }) }, 'expectedUpdatedAt', expectedUpdatedAt);
+    if (details.length) throw new ValidationError('Invalid event revision', details);
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('confirm_event_request', {
+    p_event_request_id: eventRequestId,
+    p_coordinator_id: coordinatorId,
+    p_no_equipment_confirmed: noEquipmentConfirmed,
+    p_expected_updated_at: expectedUpdatedAt,
+  });
+  if (error) throw translateError(error);
+  return toEventRequest(data);
 }
 
 /**
