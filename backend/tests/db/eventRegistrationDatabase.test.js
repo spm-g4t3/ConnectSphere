@@ -447,4 +447,52 @@ describe('SCRUM-363: event registration in Postgres', () => {
     );
     expect(closingWithoutOpening.result.outcome).toBe('invalid');
   });
+
+  const CLASHING_DATES = ['2029-12-01T00:00:00Z', START, '2030-01-01T11:00:00Z'];
+
+  // Registration saved against the original start, then the start moved earlier
+  // than the closing time and withdrawal deadline.
+  const eventWithClashingDates = async (name) => {
+    const clashing = (await one(
+      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
+       values ($1, $2, 'confirmed', $3, '2030-01-01T14:00:00Z')
+       returning id`,
+      [organiser, name, START],
+    )).id;
+    const saved = await one(
+      'select setup_event_registration($1, $2, true, $3, $4, null, $5) as result',
+      [clashing, organiser, ...CLASHING_DATES],
+    );
+    expect(saved.result.outcome).toBe('saved');
+    await db.query(
+      "update event_requests set proposed_start = '2030-01-01T09:00:00Z' where id = $1",
+      [clashing],
+    );
+    return clashing;
+  };
+
+  it('SCRUM494_AC9_switches_registration_off_after_a_start_change_left_the_dates_clashing', async () => {
+    const clashing = await eventWithClashingDates('Off after clash');
+
+    const off = await one(
+      'select setup_event_registration($1, $2, false, $3, $4, null, $5) as result',
+      [clashing, organiser, ...CLASHING_DATES],
+    );
+    expect(off.result.outcome).toBe('saved');
+    const row = await one('select registration_enabled from event_requests where id = $1', [clashing]);
+    expect(row.registration_enabled).toBe(false);
+  });
+
+  it('SCRUM494_AC7_refuses_switching_back_on_while_the_dates_still_clash', async () => {
+    const clashing = await eventWithClashingDates('On after clash');
+
+    const on = await one(
+      'select setup_event_registration($1, $2, true, $3, $4, null, $5) as result',
+      [clashing, organiser, ...CLASHING_DATES],
+    );
+    expect(on.result.outcome).toBe('invalid');
+    expect(on.result.details).toContainEqual({
+      field: 'registrationClosesAt', message: 'Must be no later than the event start.',
+    });
+  });
 });

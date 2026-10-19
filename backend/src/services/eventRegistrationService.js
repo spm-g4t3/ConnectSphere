@@ -162,11 +162,6 @@ export async function updateRegistrationSettings(eventRequestId, input, userId, 
     p_capacity: settings.capacity,
     p_withdrawal_deadline: settings.withdrawalDeadline,
   });
-  if (rpcError) {
-    if (rpcError.code === '42501') {
-      throw new ForbiddenError('Only the Event Organiser who created this event can set up its registration.');
-    }
-    throw rpcError;
-  }
+  if (rpcError) throw rpcError;
   return mapSetupOutcome(data);
 }

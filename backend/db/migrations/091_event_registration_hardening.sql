@@ -144,34 +144,38 @@ begin
       'field', 'registrationOpensAt', 'message', 'Must be before the closing date and time.'
     ));
   end if;
-  -- With a closing time, opening before closing before the start already holds;
-  -- an open-ended window still has to open before the event starts.
-  if p_opens_at is not null and p_closes_at is null and v_event.proposed_start is null then
-    v_details := v_details || jsonb_build_array(jsonb_build_object(
-      'field', 'proposedStart', 'message', 'Set the event start before setting the registration opening time.'
-    ));
-  elsif p_opens_at is not null and p_closes_at is null and p_opens_at >= v_event.proposed_start then
-    v_details := v_details || jsonb_build_array(jsonb_build_object(
-      'field', 'registrationOpensAt', 'message', 'Must be before the event start.'
-    ));
-  end if;
-  if p_closes_at is not null and v_event.proposed_start is null then
-    v_details := v_details || jsonb_build_array(jsonb_build_object(
-      'field', 'proposedStart', 'message', 'Set the event start before setting the registration closing time.'
-    ));
-  elsif p_closes_at is not null and p_closes_at > v_event.proposed_start then
-    v_details := v_details || jsonb_build_array(jsonb_build_object(
-      'field', 'registrationClosesAt', 'message', 'Must be no later than the event start.'
-    ));
-  end if;
-  if p_withdrawal_deadline is not null and v_event.proposed_start is null then
-    v_details := v_details || jsonb_build_array(jsonb_build_object(
-      'field', 'proposedStart', 'message', 'Set the event start before setting the withdrawal deadline.'
-    ));
-  elsif p_withdrawal_deadline is not null and p_withdrawal_deadline > v_event.proposed_start then
-    v_details := v_details || jsonb_build_array(jsonb_build_object(
-      'field', 'registrationWithdrawalDeadline', 'message', 'Must be no later than the event start.'
-    ));
+  -- Checked only while registration is on: a start change can leave the dates
+  -- clashing, and switching registration off must still be allowed then.
+  if p_enabled then
+    -- With a closing time, opening before closing before the start already holds;
+    -- an open-ended window still has to open before the event starts.
+    if p_opens_at is not null and p_closes_at is null and v_event.proposed_start is null then
+      v_details := v_details || jsonb_build_array(jsonb_build_object(
+        'field', 'proposedStart', 'message', 'Set the event start before setting the registration opening time.'
+      ));
+    elsif p_opens_at is not null and p_closes_at is null and p_opens_at >= v_event.proposed_start then
+      v_details := v_details || jsonb_build_array(jsonb_build_object(
+        'field', 'registrationOpensAt', 'message', 'Must be before the event start.'
+      ));
+    end if;
+    if p_closes_at is not null and v_event.proposed_start is null then
+      v_details := v_details || jsonb_build_array(jsonb_build_object(
+        'field', 'proposedStart', 'message', 'Set the event start before setting the registration closing time.'
+      ));
+    elsif p_closes_at is not null and p_closes_at > v_event.proposed_start then
+      v_details := v_details || jsonb_build_array(jsonb_build_object(
+        'field', 'registrationClosesAt', 'message', 'Must be no later than the event start.'
+      ));
+    end if;
+    if p_withdrawal_deadline is not null and v_event.proposed_start is null then
+      v_details := v_details || jsonb_build_array(jsonb_build_object(
+        'field', 'proposedStart', 'message', 'Set the event start before setting the withdrawal deadline.'
+      ));
+    elsif p_withdrawal_deadline is not null and p_withdrawal_deadline > v_event.proposed_start then
+      v_details := v_details || jsonb_build_array(jsonb_build_object(
+        'field', 'registrationWithdrawalDeadline', 'message', 'Must be no later than the event start.'
+      ));
+    end if;
   end if;
 
   select count(*)::integer into v_registered

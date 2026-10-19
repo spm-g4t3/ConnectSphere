@@ -122,7 +122,6 @@ create or replace function setup_event_registration(
 )
 returns jsonb
 language plpgsql
-security definer
 set search_path = public
 as $$
 declare
@@ -252,7 +251,6 @@ create or replace function register_for_event(
 )
 returns jsonb
 language plpgsql
-security definer
 set search_path = public
 as $$
 declare
@@ -326,7 +324,6 @@ returns table (
 )
 language sql
 stable
-security definer
 set search_path = public
 as $$
   select
