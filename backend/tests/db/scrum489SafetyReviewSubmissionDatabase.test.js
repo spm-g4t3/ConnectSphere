@@ -933,7 +933,6 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
       expect(result).toMatchObject({ outcome: 'registered', registration: { eventRequestId: id, attendeeId: attendee } });
     });
 
-    it.todo('SCRUM363_AC8_actual_significant_change_to_Approved_safety_review_and_reconfirmation_requires_SCRUM395_and_SCRUM402');
     it.todo('SCRUM363_AC9_organiser_confirmation_notification_requires_SCRUM175');
     it.todo('SCRUM363_AC9_reconfirmation_notifies_only_active_registered_attendees_requires_SCRUM175');
     it('SCRUM363_AC2_actual_registration_settings_workflow_is_independent_of_confirmation', async () => {

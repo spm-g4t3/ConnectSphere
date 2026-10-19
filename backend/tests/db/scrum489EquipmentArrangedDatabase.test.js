@@ -89,7 +89,7 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
    * covering booking, a future start), with one line of two projectors that
    * Technical Support has reserved in full through SCRUM-300's own path.
    */
-  async function readyEventArrangedBySCRUM300() {
+  async function readyEventArrangedBySCRUM300(venueId = hall) {
     const id = (await one(
       `insert into event_requests
          (organiser_id, event_name, status, submitted_at, assigned_coordinator_id, reviewing_coordinator_id,
@@ -100,7 +100,7 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
     await db.query(
       `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
        select $1, id, proposed_start, proposed_end, 'approved' from event_requests where id = $2`,
-      [hall, id],
+      [venueId, id],
     );
     const projector = (await one(
       'insert into equipment_types (name, total_quantity) values ($1, 10) returning id', [`Projector ${Math.random()}`],
@@ -144,6 +144,10 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
     `);
     await db.exec('alter table event_requests add column clarification_reply_by_date date');
     for (const name of ARRANGEMENTS) await db.exec(migration(name));
+    for (const name of ['017_venue_turnaround.sql', '023_venue_setup_time.sql',
+      '032_venue_occupancy.sql', '040_venue_holds.sql']) {
+      await db.exec(migration(name));
+    }
     await db.exec(migration('052_lead_assignment.sql'));
     await db.exec(migration('042_event_cancellation_fields.sql'));
     for (const name of RESERVATIONS) await db.exec(migration(name));
@@ -256,22 +260,21 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
   });
   describe('SCRUM363 confirmation with dev significant changes', () => {
     beforeAll(async () => {
-      for (const name of ['017_venue_turnaround.sql', '023_venue_setup_time.sql', '032_venue_occupancy.sql']) {
-        await db.exec(migration(name));
-      }
       await db.exec(`alter table bookings
         add column if not exists review_block_id uuid,
         add column if not exists flagged_at timestamptz,
         add column if not exists flagged_by uuid references auth.users(id);`);
-      for (const name of ['050_event_registration.sql', '091_event_registration_hardening.sql',
+      for (const name of ['065_booking_decision_statuses.sql', '066_venue_staff_booking_decisions.sql',
+        '076_reinstate_flagged_booking.sql', '078_list_flagged_bookings.sql',
+        '050_event_registration.sql', '091_event_registration_hardening.sql',
         '092_event_registration_persistence.sql', '096_significant_event_change.sql',
         '100_significant_change_confirmation_compatibility.sql']) {
         await db.exec(migration(name));
       }
     });
 
-    async function confirmedEvent() {
-      const { id } = await readyEventArrangedBySCRUM300();
+    async function confirmedEvent(venueId = hall) {
+      const { id } = await readyEventArrangedBySCRUM300(venueId);
       await db.query("update event_requests set purpose = 'Community talk', expected_attendance = 50 where id = $1", [id]);
       await db.query('select submit_event_for_safety_review($1, $2)', [id, coordinator]);
       await db.query("select respond_to_safety_review($1, $2, 'approved', null, '{}', false)", [id, safetyOfficer]);
@@ -299,6 +302,47 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
       expect(history).toEqual([{ changed_by: coordinator }, { changed_by: coordinator }]);
       expect(Number((await one('select count(*) from safety_review_submissions where event_request_id = $1', [id])).count)).toBe(2);
       expect((await db.query('select * from event_registrations where event_request_id = $1', [id])).rows).toEqual([registration]);
+    });
+
+    it('SCRUM363_AC8_flagged_arrangements_require_real_resolution_and_fresh_safety_approval_before_reconfirmation', async () => {
+      const venue = await one("insert into venues (name, location, max_capacity) values ('Review hall', 'SMU', 200) returning id");
+      const id = await confirmedEvent(venue.id);
+      const booking = await one('select id from bookings where event_request_id = $1', [id]);
+      const reservation = await one('select * from equipment_reservations where event_request_id = $1', [id]);
+      const venueStaff = (await one("insert into auth.users (email) values ('cycle-venue@test') returning id")).id;
+      await db.query("insert into profiles(id, role) values ($1, 'venue_staff')", [venueStaff]);
+
+      await db.query(`select apply_significant_event_change($1,
+        '{"venueRequirements":"Review the existing hall", "equipmentChange":true}', 'Review arrangements', $2)`, [id, coordinator]);
+      await db.query('select flag_equipment_reservations($1::uuid[], $2)',
+        [[reservation.id], 'Equipment requires review after the planning change']);
+      expect(await one('select status::text as status from event_requests where id = $1', [id]))
+        .toEqual({ status: 'approved' });
+      expect((await readiness(id)).items.filter((item) => !item.met).map((item) => item.key))
+        .toEqual(['venue', 'equipment']);
+      await expect(db.query('select submit_event_for_safety_review($1, $2)', [id, coordinator]))
+        .rejects.toMatchObject({ code: 'PT409' });
+
+      const resolved = await one('select reinstate_flagged_booking($1, $2, $3) as result',
+        [booking.id, venueStaff, 'Hall remains suitable']);
+      expect(resolved.result.outcome).toBe('reinstated');
+      expect((await readiness(id)).ready).toBe(false);
+      await db.query('select start_equipment_review($1, $2)', [id, technician]);
+      await db.query('select keep_equipment_reservation($1, $2, $3, $4)',
+        [id, technician, reservation.id, 'Existing equipment still meets the requirements']);
+      expect((await readiness(id)).ready).toBe(true);
+      await expect(db.query('select confirm_event_request($1, $2)', [id, coordinator]))
+        .rejects.toMatchObject({ code: '55000' });
+
+      await db.query('select submit_event_for_safety_review($1, $2)', [id, coordinator]);
+      await db.query("select respond_to_safety_review($1, $2, 'approved', null, '{}', false)", [id, safetyOfficer]);
+      await db.query('select confirm_event_request($1, $2)', [id, coordinator]);
+      expect(await one('select status::text as status from event_requests where id = $1', [id]))
+        .toEqual({ status: 'confirmed' });
+      expect(await one('select id, quantity, released_at, flagged from equipment_reservations where id = $1', [reservation.id]))
+        .toEqual({ id: reservation.id, quantity: reservation.quantity, released_at: null, flagged: false });
+      expect(Number((await one("select count(*) from event_request_status_history where event_request_id = $1 and new_status = 'confirmed'", [id])).count)).toBe(2);
+      expect(Number((await one('select count(*) from booking_resolutions where booking_id = $1', [booking.id])).count)).toBe(1);
     });
 
     it('SCRUM363_AC8_compatibility_migration_is_rerunnable_invoker_security_and_backend_only', async () => {
