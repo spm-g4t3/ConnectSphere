@@ -11,16 +11,16 @@ const VENUE_STAFF_PAGES = {
   booking_request_submitted: { to: "/booking-requests" },
   safety_booking_flagged: { to: "/flagged-bookings" },
   booking_flagged_event_change: { to: "/flagged-bookings" },
+  booking_request_event_change: { to: "/booking-requests" },
 };
 
-// What opens the equipment review: the safety flag (SCRUM-172), the equipment
-// notifications (SCRUM-176) and the significant-change flag (SCRUM-395)
-// Technical Support is sent about a live request. A cancelled one is left out.
+// What opens the equipment review: the safety flag (SCRUM-172) and the
+// equipment notifications (SCRUM-176) Technical Support is sent about a live
+// request. A cancelled one is left out.
 const TECH_SUPPORT_REVIEW_TYPES = new Set([
   "safety_equipment_review",
   "equipment_requested",
   "equipment_request_changed",
-  "equipment_reservation_flagged_event_change",
 ]);
 
 // One entry per role, so a later story adds a line rather than a branch.

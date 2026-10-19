@@ -212,14 +212,14 @@ describe("SCRUM395 significant change flow", () => {
     expect(vi.mocked(applySignificantEventChange).mock.calls[1][1].expectedImpact.venueBookings).toEqual([]);
   });
 
-  it("SCRUM395_AC5_equipment_change_is_recorded_with_a_reason_and_points_to_scrum_21", async () => {
+  it("SCRUM395_AC8_equipment_change_is_recorded_with_a_reason_and_points_to_the_equipment_section", async () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByLabelText(/Record an equipment change/));
     await user.type(screen.getByLabelText("Reason for this change"), "Projector swapped");
     await user.click(screen.getByRole("button", { name: "Preview significant change" }));
 
-    expect(await screen.findByText(/make those changes through SCRUM-21/)).toBeInTheDocument();
+    expect(await screen.findByText(/edit them on the event's Equipment section/)).toBeInTheDocument();
     expect(previewSignificantEventChange).toHaveBeenCalledWith("event-1", { equipmentChange: true });
 
     await user.click(confirmBox());

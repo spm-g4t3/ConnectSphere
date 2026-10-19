@@ -54,7 +54,7 @@ describe("SignificantEventChangePanel", () => {
     });
   });
 
-  it("previews impacts and applies only after explicit confirmation", async () => {
+  it("SCRUM395_AC3_AC4_previews_impacts_and_applies_only_after_explicit_confirmation", async () => {
     const user = userEvent.setup();
     const onApplied = vi.fn();
     render(<SignificantEventChangePanel eventRequest={EVENT} onApplied={onApplied} />);
@@ -89,7 +89,7 @@ describe("SignificantEventChangePanel", () => {
     expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({ status: "approved" }));
   });
 
-  it("requires a reason before requesting the preview", async () => {
+  it("SCRUM395_AC2_requires_a_reason_before_requesting_the_preview", async () => {
     render(<SignificantEventChangePanel eventRequest={EVENT} />);
     fireEvent.change(screen.getByLabelText("Expected attendance"), {
       target: { value: "90" },
@@ -100,7 +100,7 @@ describe("SignificantEventChangePanel", () => {
     expect(previewSignificantEventChange).not.toHaveBeenCalled();
   });
 
-  it("requires a fresh confirmation when the impact changed since preview", async () => {
+  it("SCRUM395_AC5_requires_a_fresh_confirmation_when_the_impact_changed_since_preview", async () => {
     const user = userEvent.setup();
     render(<SignificantEventChangePanel eventRequest={EVENT} />);
     fireEvent.change(screen.getByLabelText("Expected attendance"), {
@@ -127,5 +127,42 @@ describe("SignificantEventChangePanel", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The impact changed");
     expect(screen.queryByText("What this change will affect")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preview significant change" })).toBeInTheDocument();
+  });
+
+  it("SCRUM395_AC3_lists_pending_venue_requests_still_for_the_old_time", async () => {
+    const user = userEvent.setup();
+    vi.mocked(previewSignificantEventChange).mockResolvedValueOnce({
+      ...IMPACT,
+      pendingBookingRequests: [{
+        id: "request-1",
+        venueName: "Lecture Theatre",
+        startsAt: "2040-12-01T10:00:00+08:00",
+        endsAt: "2040-12-01T12:00:00+08:00",
+      }],
+    });
+    render(<SignificantEventChangePanel eventRequest={EVENT} />);
+    fireEvent.change(screen.getByLabelText("Event start"), {
+      target: { value: "2040-12-02T10:00" },
+    });
+    await user.type(screen.getByLabelText("Reason for this change"), "Speaker moved");
+    await user.click(screen.getByRole("button", { name: "Preview significant change" }));
+
+    const list = await screen.findByRole("heading", { name: "Pending venue requests still for the old time" });
+    expect(list.closest("section")).toHaveTextContent("Lecture Theatre");
+    expect(screen.getByText("Venue Staff will be told. Withdraw or re-request them if needed.")).toBeInTheDocument();
+  });
+
+  it("SCRUM395_AC3_omits_the_pending_requests_list_when_there_are_none", async () => {
+    const user = userEvent.setup();
+    render(<SignificantEventChangePanel eventRequest={EVENT} />);
+    fireEvent.change(screen.getByLabelText("Expected attendance"), {
+      target: { value: "90" },
+    });
+    await user.type(screen.getByLabelText("Reason for this change"), "More attendees expected");
+    await user.click(screen.getByRole("button", { name: "Preview significant change" }));
+
+    expect(await screen.findByText("What this change will affect")).toBeInTheDocument();
+    expect(screen.queryByText("Pending venue requests still for the old time")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Venue Staff will be told/)).not.toBeInTheDocument();
   });
 });

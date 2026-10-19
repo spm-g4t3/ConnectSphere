@@ -1487,7 +1487,7 @@ describe("SCRUM266 flagged bookings on the event view", () => {
 });
 
 describe("SCRUM395 significant event change entry point", () => {
-  it("opens the change preview only for the assigned coordinator", async () => {
+  it("SCRUM395_AC1_opens_the_change_preview_only_for_the_assigned_coordinator", async () => {
     const user = userEvent.setup();
     const { unmount } = renderAs(ASSIGNED, eventRequest({ status: "confirmed" }));
 

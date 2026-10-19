@@ -243,7 +243,7 @@ export default function SignificantEventChangePanel({
               checked={equipmentChange}
               onChange={(event) => invalidatePreview(() => setEquipmentChange(event.target.checked))}
             />
-            Record an equipment change. Equipment lines can be edited after the event returns to Approved through SCRUM-21.
+            Record an equipment change. Equipment lines can be edited on the event's Equipment section once it is back in Approved.
           </label>
           <label>
             Reason for this change
@@ -284,9 +284,21 @@ export default function SignificantEventChangePanel({
                 items={impact.equipmentReservations ?? []}
                 name={(item) => `${item.equipmentName || "Equipment"} (quantity ${item.quantity})`}
               />
+              {(impact.pendingBookingRequests ?? []).length > 0 && (
+                <>
+                  <ImpactList
+                    title="Pending venue requests still for the old time"
+                    items={impact.pendingBookingRequests}
+                    name={(item) => item.venueName || "Venue"}
+                  />
+                  <p className="event-significant-change__footnote">
+                    Venue Staff will be told. Withdraw or re-request them if needed.
+                  </p>
+                </>
+              )}
               {impact.equipmentChangeRecorded && (
                 <p className="event-significant-change__footnote">
-                  Equipment lines will not be edited here; make those changes through SCRUM-21 after the revert.
+                  Equipment lines will not be edited here; edit them on the event's Equipment section once it is back in Approved.
                 </p>
               )}
               <p className="event-significant-change__footnote">
