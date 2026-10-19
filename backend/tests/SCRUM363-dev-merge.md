@@ -1,5 +1,16 @@
 # SCRUM-363 integration with dev
 
+Current refresh: origin/dev `0fef506` includes merged PR #70 (SCRUM-22).
+Five documentation/test conflicts were resolved, retaining the registration
+deployment guide, all organiser-arrangement tests and one retired-route test.
+The schedule-change SQL regression from dev is retained. No application code,
+SQL migration or coverage threshold changed in this refresh.
+Validation for this refresh: 36 backend tests and 92 frontend tests passed across
+six focused suites. The resolved frontend test file passed ESLint; Git conflict
+and whitespace checks passed. Full CI was not repeated for documentation/test-only changes.
+
+The integration and full CI evidence below describe the preceding dev merge.
+
 Source: origin/dev `7c2dd16`, including merged PR #68 registration settings and
 PR #74 significant changes. Nine merge conflicts were resolved; the merge is
 left uncommitted. The reviewed dev registration migrations 050/082/091 and its

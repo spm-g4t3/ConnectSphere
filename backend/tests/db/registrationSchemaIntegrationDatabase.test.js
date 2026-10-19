@@ -53,6 +53,21 @@ beforeEach(async () => {
 afterEach(async () => { await db.exec('rollback'); });
 
 describe('SCRUM22 shared schema with PR 68', () => {
+  it('SCRUM22_AC2_AC6_start_changes_notify_and_preserve_registrations_while_the_atomic_writer_refuses_a_started_event', async () => {
+    await setup();
+    const before = (await db.query('select * from event_registrations order by id')).rows;
+    await db.query("update event_requests set proposed_start = clock_timestamp() - interval '2 hours' where id = $1", [EVENT]);
+    expect(await one('select registration_enabled, registration_capacity from event_requests where id = $1', [EVENT]))
+      .toEqual({ registration_enabled: true, registration_capacity: 3 });
+    expect(await one('select recipient_id, type, payload from notifications where event_request_id = $1', [EVENT]))
+      .toMatchObject({ recipient_id: ORGANISER, type: 'registration_schedule_conflict', payload: { fields: ['registrationOpensAt'] } });
+    expect(await register(OTHER)).toEqual({ outcome: 'not_found' });
+    expect((await db.query('select * from event_registrations order by id')).rows).toEqual(before);
+    const disabled = await one('select setup_event_registration($1, $2, false, null, null, 3, null) as result', [EVENT, ORGANISER]);
+    expect(disabled.result).toMatchObject({ outcome: 'saved', registeredCount: 2, settings: { enabled: false } });
+    expect(await state()).toEqual({ active_count: 2, is_registered: true });
+  });
+
   it('SCRUM22_AC4_AC6_reconciles_legacy_records_without_two_writable_registration_tables', async () => {
     expect(await one("select relkind from pg_class where oid = 'registrations'::regclass")).toEqual({ relkind: 'v' });
     expect(await one('select count(*)::int as count from registrations_legacy_archive')).toEqual({ count: 3 });
