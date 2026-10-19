@@ -2,6 +2,7 @@
 // nothing here does.
 import { Link } from "react-router-dom";
 import { getOpenEvents } from "../services/openEventService";
+import { REGISTRATION_UNAVAILABLE_MESSAGE } from "../services/registrationErrors";
 import useRefreshOnReturn from "./useRefreshOnReturn";
 import useOpenEventRead from "./useOpenEventRead";
 import OpenEventAvailability, { RegisteredBadge } from "./OpenEventAvailability";
@@ -17,6 +18,7 @@ const LIST_ERROR_MESSAGES = {
   401: "Your session has expired. Please sign in again.",
   403: "Only Attendees can browse open events.",
   500: "Open events could not be loaded. Please try again.",
+  503: REGISTRATION_UNAVAILABLE_MESSAGE,
 };
 
 function EventRow({ event }) {

@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getOpenEvent } from "../services/openEventService";
+import { registrationErrorMessage, EVENT_FULL_MESSAGE, REGISTRATION_UNAVAILABLE_MESSAGE } from "../services/registrationErrors";
 import useRefreshOnReturn from "./useRefreshOnReturn";
 import useOpenEventRead from "./useOpenEventRead";
 import OpenEventAvailability, { RegisteredBadge } from "./OpenEventAvailability";
@@ -20,6 +21,7 @@ const LOAD_ERROR_MESSAGES = {
   401: "Your session has expired. Please sign in again.",
   403: "Only Attendees can browse open events.",
   500: "This event could not be loaded. Please try again.",
+  503: REGISTRATION_UNAVAILABLE_MESSAGE,
 };
 
 const NOT_OPEN_MESSAGE = "This event is not open for registration.";
@@ -32,14 +34,13 @@ function BackLink() {
   );
 }
 
-function RegisterAction({ event, onRegister, registering, stale, onClick }) {
-  if (event.isRegistered) {
+function RegisterAction({ event, isRegistered, onRegister, registering, stale, onClick }) {
+  if (isRegistered) {
     return (
       <div className="browse-event-details__register">
         <button type="button" disabled>
           Already registered
         </button>
-        <p>You are registered for this event.</p>
       </div>
     );
   }
@@ -66,7 +67,6 @@ function RegisterAction({ event, onRegister, registering, stale, onClick }) {
   );
 }
 
-const FILLED_MESSAGE = "Sorry, this event filled up before your registration went through. It is now full.";
 const ALREADY_MESSAGE = "You are already registered for this event.";
 const GENERIC_REGISTER_MESSAGE = "Registration could not be completed. Please try again.";
 
@@ -90,6 +90,9 @@ export default function BrowseEventDetails({ onRegister }) {
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [registeredEventId, setRegisteredEventId] = useState(null);
+  const [availabilityInvalidated, setAvailabilityInvalidated] = useState(false);
+  const isRegistered = event?.isRegistered || registeredEventId === eventId;
   const sending = useRef(false);
   const currentEventId = useRef(eventId);
 
@@ -98,16 +101,31 @@ export default function BrowseEventDetails({ onRegister }) {
     // Banners belong to the event they were raised on.
     setNotice(null);
     setRegisterError(null);
+    setRegisteredEventId(null);
+    setAvailabilityInvalidated(false);
   }, [eventId]);
+
+  const refreshEvent = useCallback(async () => {
+    const fresh = await load();
+    if (fresh.kind === "ok" || fresh.kind === "not-found") setAvailabilityInvalidated(false);
+    return fresh;
+  }, [load]);
 
   // Not while a registration is in flight: that attempt refreshes when it ends,
   // and a read started now would supersede that one and hide what happened.
-  const refreshUnlessRegistering = useCallback(() => {
-    if (!sending.current) load();
-  }, [load]);
+  const refreshUnlessRegistering = useCallback(async () => {
+    if (sending.current) return;
+    const fresh = await refreshEvent();
+    if (fresh.kind === "ok") {
+      // A later authoritative read supersedes the immediate submission feedback.
+      setRegisteredEventId(null);
+      setRegisterError(null);
+      if (!fresh.data.isRegistered) setNotice(null);
+    }
+  }, [refreshEvent]);
   useRefreshOnReturn(refreshUnlessRegistering);
   async function handleRegister() {
-    if (!onRegister || sending.current || !event) return;
+    if (!onRegister || sending.current || !event || isRegistered) return;
     sending.current = true;
     setRegistering(true);
     setRegisterError(null);
@@ -116,11 +134,13 @@ export default function BrowseEventDetails({ onRegister }) {
     const name = event.eventName || "this event";
     const startedOn = eventId;
     let registered;
+    let failure;
     try {
       await onRegister(event.id);
       registered = true;
-    } catch {
+    } catch (err) {
       registered = false;
+      failure = err;
     }
 
     // The reader moved to another event meanwhile: nothing about this attempt
@@ -131,9 +151,21 @@ export default function BrowseEventDetails({ onRegister }) {
       return;
     }
 
+    const failureMessage = registered ? null : registrationErrorMessage(failure);
+    if (registered) {
+      setRegisteredEventId(startedOn);
+      setNotice(`You are registered for ${name}.`);
+    } else {
+      if (failure?.response?.status === 409 && failure.response.data?.code === "ALREADY_REGISTERED") {
+        setRegisteredEventId(startedOn);
+      }
+      if (failureMessage) setRegisterError(failureMessage);
+    }
+
     // Success or not, what is on offer may have changed, and the server's
     // answer, not this page's copy, says what happened.
-    const fresh = await load();
+    setAvailabilityInvalidated(true);
+    const fresh = await refreshEvent();
     sending.current = false;
     setRegistering(false);
 
@@ -141,12 +173,11 @@ export default function BrowseEventDetails({ onRegister }) {
     // belongs to a page that is no longer shown.
     if (fresh.kind === "superseded") return;
 
-    if (registered) {
-      setNotice(`You are registered for ${name}.`);
-    } else if (fresh.kind === "ok" && fresh.data.isRegistered) {
+    if (registered || failureMessage) return;
+    if (fresh.kind === "ok" && fresh.data.isRegistered) {
       setRegisterError(ALREADY_MESSAGE);
     } else if (fresh.kind === "ok" && fresh.data.isFull) {
-      setRegisterError(FILLED_MESSAGE);
+      setRegisterError(EVENT_FULL_MESSAGE);
     } else if (fresh.kind !== "not-found") {
       // When the event is no longer open, the not-open message already says so.
       setRegisterError(GENERIC_REGISTER_MESSAGE);
@@ -161,7 +192,7 @@ export default function BrowseEventDetails({ onRegister }) {
 
         {loading && <p role="status">Loading...</p>}
 
-        {!loading && notOpen && (
+        {!loading && notOpen && !registerError && (
           <div className="browse-event-details__unavailable" role="alert">
             <p>{NOT_OPEN_MESSAGE}</p>
           </div>
@@ -178,7 +209,7 @@ export default function BrowseEventDetails({ onRegister }) {
         {!loading && error && (
           <div className="browse-event-details__error" role="alert">
             <p>{error}</p>
-            <button type="button" onClick={load}>
+            <button type="button" onClick={refreshUnlessRegistering}>
               Try again
             </button>
           </div>
@@ -215,8 +246,12 @@ export default function BrowseEventDetails({ onRegister }) {
               <div>
                 <dt>Availability</dt>
                 <dd>
-                  <OpenEventAvailability event={event} />
-                  {event.isRegistered && <RegisteredBadge />}
+                  {availabilityInvalidated ? (
+                    <span role="status">
+                      {registering ? "Updating availability..." : "Availability could not be refreshed."}
+                    </span>
+                  ) : <OpenEventAvailability event={event} />}
+                  {isRegistered && <RegisteredBadge />}
                 </dd>
               </div>
             </dl>
@@ -228,17 +263,19 @@ export default function BrowseEventDetails({ onRegister }) {
 
             <RegisterAction
               event={event}
+              isRegistered={isRegistered}
               onRegister={onRegister}
               registering={registering}
               stale={refreshFailed}
               onClick={handleRegister}
             />
-            {registerError && (
-              <div className="browse-event-details__error" role="alert">
-                <p>{registerError}</p>
-              </div>
-            )}
           </>
+        )}
+
+        {registerError && registerError !== error && (
+          <div className="browse-event-details__error" role="alert">
+            <p>{registerError}</p>
+          </div>
         )}
 
         <BackLink />

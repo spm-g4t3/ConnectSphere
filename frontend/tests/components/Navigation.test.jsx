@@ -37,7 +37,6 @@ function renderAs(role) {
 }
 
 beforeEach(() => {
-  vi.stubEnv("VITE_OPEN_EVENTS_ENABLED", "true");
   vi.mocked(useAuth).mockReset();
   vi.mocked(useUnreadCount).mockReturnValue({ unreadCount: null, refreshUnreadCount: vi.fn() });
 });

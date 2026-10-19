@@ -25,7 +25,6 @@ import equipmentReviewRoutes from './routes/equipmentReview.js';
 import equipmentQueueRoutes from './routes/equipmentQueue.js';
 import safetyReviewRoutes from './routes/safetyReviews.js';
 import openEventRoutes from './routes/openEvents.js';
-import { isOpenEventsEnabled } from './config/featureFlags.js';
 import { startVenueHoldExpiryScheduler } from './jobs/venueHoldExpiryScheduler.js';
 
 const app = express();
@@ -75,11 +74,8 @@ app.use('/api/booking-requests', bookingRequestRoutes);
 // SCRUM-266: Venue Staff resolve a booking flagged for review.
 app.use('/api/flagged-bookings', flaggedBookingRoutes);
 
-// SCRUM-495: the events an Attendee can register for. Attendee only. Off until
-// the registration tables exist; see config/featureFlags.js.
-if (isOpenEventsEnabled()) {
-  app.use('/api/open-events', openEventRoutes);
-}
+// SCRUM-495: the events an authenticated Attendee can register for.
+app.use('/api/open-events', openEventRoutes);
 
 // SCRUM-491 (AC7, AC8): mark lapsed venue holds expired and notify their
 // coordinators, once a minute. A lapsed hold already occupies nothing without

@@ -29,7 +29,8 @@ import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
 import SafetyReviewHistory from "./components/SafetyReviewHistory";
 import BrowseOpenEvents from "./components/BrowseOpenEvents";
 import BrowseEventDetails from "./components/BrowseEventDetails";
-import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE, isOpenEventsEnabled } from "./services/openEventRoutes";
+import { registerForEvent } from "./services/registrationService";
+import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE } from "./services/openEventRoutes";
 import "./App.css";
 
 function LoadingScreen() {
@@ -272,30 +273,26 @@ function AppRoutes() {
         {/* Attendees only, like the API, so a direct URL from another role lands
             on /unauthorized, not on a page that is only an error. The
             .dashboard wrapper gives the pages their card styling. */}
-        {isOpenEventsEnabled() && (
-          <>
-            <Route
-              path={BROWSE_OPEN_EVENTS_PATH}
-              element={
-                <ProtectedRoute allowedRoles={["attendee"]}>
-                  <div className="dashboard dashboard--attendee">
-                    <BrowseOpenEvents />
-                  </div>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path={OPEN_EVENT_DETAILS_ROUTE}
-              element={
-                <ProtectedRoute allowedRoles={["attendee"]}>
-                  <div className="dashboard dashboard--attendee">
-                    <BrowseEventDetails />
-                  </div>
-                </ProtectedRoute>
-              }
-            />
-          </>
-        )}
+        <Route
+          path={BROWSE_OPEN_EVENTS_PATH}
+          element={
+            <ProtectedRoute allowedRoles={["attendee"]}>
+              <div className="dashboard dashboard--attendee">
+                <BrowseOpenEvents />
+              </div>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path={OPEN_EVENT_DETAILS_ROUTE}
+          element={
+            <ProtectedRoute allowedRoles={["attendee"]}>
+              <div className="dashboard dashboard--attendee">
+                <BrowseEventDetails onRegister={registerForEvent} />
+              </div>
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/equipment-catalogue"
           element={

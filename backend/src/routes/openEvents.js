@@ -1,5 +1,5 @@
 /**
- * GET / lists the events an Attendee can register for; GET /:id opens one.
+ * GET / and /:id browse events; POST /:id/registrations uses the atomic RPC.
  * Attendee only: the role comes from profiles via requireAuth, never the request.
  * A factory over an injected client and clock so tests need no credentials.
  */
@@ -10,6 +10,7 @@ import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorHandler } from '../http/handleError.js';
 import { listOpenEvents, getOpenEvent } from '../services/openEventService.js';
+import { registerForEvent } from '../services/registrationService.js';
 
 const handleError = createErrorHandler('open events route');
 
@@ -32,6 +33,20 @@ export function createOpenEventRouter({
   router.use(requireAuth);
 
   const attendeeOnly = requireRole(ROLE.ATTENDEE);
+
+  router.post('/:id/registrations', attendeeOnly, async (req, res) => {
+    try {
+      const registration = await registerForEvent({
+        attendeeId: req.user.id,
+        eventId: req.params.id,
+        client,
+      });
+      res.set('Cache-Control', 'no-store');
+      res.status(201).json(registration);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
 
   // The caller is always req.user.id. No-store: eligibility changes with the
   // clock, so a stored copy would keep listing an event that has closed.

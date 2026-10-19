@@ -14,7 +14,7 @@
 // mock, because a vi.mock factory is strict.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 
 import MyEventRequests from "../../src/components/MyEventRequests.jsx";
@@ -391,7 +391,8 @@ describe("SCRUM172_AC7 a notification opens the Organiser's list on its event", 
 
     expect(rowOf("Tech Talk")).toHaveClass("my-event-requests__item--focused");
     expect(rowOf("Career Fair")).not.toHaveClass("my-event-requests__item--focused");
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    // Scrolling runs in an effect after the matching row has rendered.
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
     expect(scrollIntoView.mock.contexts[0]).toBe(rowOf("Tech Talk"));
     expect(screen.queryByText("That event is no longer in your list.")).not.toBeInTheDocument();
   });

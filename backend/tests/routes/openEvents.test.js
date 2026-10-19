@@ -10,7 +10,7 @@ import express from 'express';
 import request from 'supertest';
 
 import { createOpenEventRouter } from '../../src/routes/openEvents.js';
-import { listOpenEvents } from '../../src/services/openEventService.js';
+import { listOpenEvents, getOpenEvent } from '../../src/services/openEventService.js';
 import { ROLE } from '../../src/domain/userRole.js';
 
 const NOW = new Date('2026-10-12T10:00:00.000Z');
@@ -847,25 +847,25 @@ describe('SCRUM495 freshness and failures', () => {
     expect(client.calls.filter((c) => c.table === 'rpc:open_event_registration_state')).toHaveLength(3);
   });
 
-  it('SCRUM495_AC2_answers_a_generic_500_when_the_registrations_read_fails', async () => {
+  it('SCRUM495_AC2_answers_a_safe_503_when_the_registrations_read_fails', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const client = createFakeClient([eventRow()], { registrationError: { code: '42P01', message: 'relation "registrations" does not exist' } });
 
     const res = await get(client);
 
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: 'Event registration is temporarily unavailable. Please try again later.' });
     spy.mockRestore();
   });
 
-  it('SCRUM495_AC2_answers_a_generic_500_without_the_driver_message_when_the_read_fails', async () => {
+  it.each(['42P01', '42703', 'PGRST202', 'PGRST204', 'PGRST205'])('SCRUM22_AC8_list_maps_missing_schema_%s_to_a_safe_503', async (code) => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const client = createFakeClient([], { error: { code: '42703', message: 'column registration_enabled does not exist' } });
+    const client = createFakeClient([], { error: { code, message: 'column registration_enabled does not exist' } });
 
     const res = await get(client);
 
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: 'Event registration is temporarily unavailable. Please try again later.' });
     expect(JSON.stringify(res.body)).not.toContain('registration_enabled');
     spy.mockRestore();
   });
@@ -1076,17 +1076,45 @@ describe('SCRUM495_AC8 one event carries no internal planning information', () =
     }
   });
 
-  it('SCRUM495_AC8_answers_a_generic_500_without_the_driver_message_when_a_read_fails', async () => {
+  it.each(['42P01', '42703', 'PGRST202', 'PGRST204', 'PGRST205'])('SCRUM22_AC8_details_map_missing_schema_%s_to_a_safe_503', async (code) => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const row = eventRow();
 
-    const res = await getOne(createFakeClient([row], { error: { code: '42703', message: 'column registration_enabled does not exist' } }), row.id);
+    const res = await getOne(createFakeClient([row], { error: { code, message: 'column registration_enabled does not exist' } }), row.id);
 
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: 'Event registration is temporarily unavailable. Please try again later.' });
     spy.mockRestore();
   });
 });
+describe.each([
+  ['list', (client) => get(client), (client) => listOpenEvents({ attendeeId: ATTENDEE_ID, client, now: NOW })],
+  ['details', (client, row) => getOne(client, row.id), (client, row) => getOpenEvent({ attendeeId: ATTENDEE_ID, eventId: row.id, client, now: NOW })],
+])('SCRUM22 %s table read failures', (_name, readRoute, readService) => {
+  it.each([
+    ['42501'], ['22023'], ['55000'], ['55000', 'EVENT_NOT_CONFIRMED'],
+    ['40001'], ['40P01'], ['P0002'], ['XX000'],
+  ])('SCRUM22_AC8_preserves_table_error_%s_%s_and_returns_a_logged_generic_500', async (code, hint) => {
+    const row = eventRow();
+    const error = { code, hint, message: 'Private event_requests database failure' };
+    const client = createFakeClient([row], { error });
+
+    await expect(readService(client, row)).rejects.toBe(error);
+
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await readRoute(client, row);
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: 'Unexpected server error' });
+      expect(spy).toHaveBeenCalledWith('Unexpected error in open events route:', error);
+      expect(client.calls.some((call) => call.table.startsWith('rpc:'))).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Refresh: the same event read at successive moments
 // ---------------------------------------------------------------------------
