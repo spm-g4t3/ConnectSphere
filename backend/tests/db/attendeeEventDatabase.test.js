@@ -83,8 +83,8 @@ describe('SCRUM-52 SQL read using repository migrations', () => {
     expect(new Date(result.endsAt).toISOString()).toBe('2030-05-06T03:00:00.000Z');
     expect(result.venues).toHaveLength(2);
     expect(result.venues).toEqual(expect.arrayContaining([
-      { bookingId: a.id, name: 'Hall A', location: 'Hall A location' },
-      { bookingId: b.id, name: 'Hall B', location: 'Hall B location' },
+      { bookingId: a.id, name: 'Hall A', location: 'Hall A location', underReview: false },
+      { bookingId: b.id, name: 'Hall B', location: 'Hall B location', underReview: false },
     ]));
     expect(queries).toBe(1);
   });
@@ -99,13 +99,14 @@ describe('SCRUM-52 SQL read using repository migrations', () => {
         decision_note = 'Fixture review', decided_by = $3,
         decided_at = case when $3::uuid is null then null else now() end where id = $4`,
       [status, decision, decision ? COORDINATOR : null, eventId]);
-      expect(await read()).toEqual({ eventRequestId: eventId, state: 'unavailable' });
+      expect(await read()).toEqual({ eventRequestId: eventId, state: 'unavailable', eventName: 'Registered event' });
       expect(queries).toBe(1);
     },
   );
 
   it('SCRUM24_AC6_SQL_holds_and_every_unconfirmed_booking_are_excluded', async () => {
-    for (const status of Object.values(BOOKING_STATUS).filter(status => status !== BOOKING_STATUS.APPROVED)) {
+    for (const status of Object.values(BOOKING_STATUS)
+      .filter(status => ![BOOKING_STATUS.APPROVED, BOOKING_STATUS.FLAGGED_FOR_REVIEW].includes(status))) {
       await book(status, status);
     }
     const heldVenue = await one(`insert into venues (name, location, max_capacity)
@@ -113,6 +114,18 @@ describe('SCRUM-52 SQL read using repository migrations', () => {
     await db.query(`insert into venue_holds (event_request_id, venue_id, placed_by, expires_at)
       values ($1, $2, $3, now() + interval '1 day')`, [eventId, heldVenue.id, ORGANISER]);
     expect((await read()).venues).toEqual([]);
+  });
+
+  it('SCRUM24_AC6_SQL_a_flagged_booking_on_a_confirmed_event_is_listed_as_under_review', async () => {
+    const approved = await book('Hall A');
+    const flagged = await book('Hall B', BOOKING_STATUS.FLAGGED_FOR_REVIEW);
+    const result = await read();
+    expect(result.eventName).toBe('Registered event');
+    expect(result.venues).toEqual(expect.arrayContaining([
+      { bookingId: approved.id, name: 'Hall A', location: 'Hall A location', underReview: false },
+      { bookingId: flagged.id, name: 'Hall B', location: 'Hall B location', underReview: true },
+    ]));
+    expect(result.venues).toHaveLength(2);
   });
 
   it('SCRUM24_AC1_SQL_closed_disabled_full_and_past_events_remain_readable', async () => {
@@ -132,13 +145,13 @@ describe('SCRUM-52 SQL read using repository migrations', () => {
     const old = await book('Old hall');
     expect((await read()).venues[0].bookingId).toBe(old.id);
     await db.query("update event_requests set status = 'approved' where id = $1", [eventId]);
-    expect(await read()).toEqual({ eventRequestId: eventId, state: 'unavailable' });
+    expect(await read()).toEqual({ eventRequestId: eventId, state: 'unavailable', eventName: 'Registered event' });
     await db.query("update bookings set status = 'cancelled' where id = $1", [old.id]);
     const latest = await book('Latest hall');
     await db.query(`update event_requests set status = 'confirmed', proposed_start = $1, proposed_end = $2
       where id = $3`, ['2031-05-06T09:00:00+08:00', '2031-05-06T11:00:00+08:00', eventId]);
     const result = await read();
-    expect(result.venues).toEqual([{ bookingId: latest.id, name: 'Latest hall', location: 'Latest hall location' }]);
+    expect(result.venues).toEqual([{ bookingId: latest.id, name: 'Latest hall', location: 'Latest hall location', underReview: false }]);
     expect(new Date(result.startsAt).getUTCFullYear()).toBe(2031);
   });
 
@@ -160,8 +173,8 @@ describe('SCRUM-52 SQL read using repository migrations', () => {
     await db.query("update event_requests set description = 'private planning', purpose = 'private' where id = $1", [eventId]);
     await book('Hall');
     const result = await read();
-    expect(Object.keys(result).sort()).toEqual(['endsAt', 'eventRequestId', 'startsAt', 'state', 'venues']);
-    expect(Object.keys(result.venues[0]).sort()).toEqual(['bookingId', 'location', 'name']);
+    expect(Object.keys(result).sort()).toEqual(['endsAt', 'eventName', 'eventRequestId', 'startsAt', 'state', 'venues']);
+    expect(Object.keys(result.venues[0]).sort()).toEqual(['bookingId', 'location', 'name', 'underReview']);
     expect(JSON.stringify(result)).not.toContain('private');
   });
 

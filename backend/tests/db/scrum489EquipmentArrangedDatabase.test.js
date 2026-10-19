@@ -365,7 +365,8 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
       const read = () => getAttendeeEvent({
         user: { id: attendee, role: 'attendee' }, eventRequestId: id, client: createAttendeeEventSqlClient(db),
       });
-      const venueSeen = [{ bookingId: booking.id, name: 'Lifecycle hall', location: 'SMU Level 2' }];
+      const venueSeen = [{ bookingId: booking.id, name: 'Lifecycle hall', location: 'SMU Level 2', underReview: false }];
+      const unavailable = { eventRequestId: id, state: 'unavailable', eventName: 'IS212 Industry Night' };
 
       const { proposed_start: start } = await one('select proposed_start from event_requests where id = $1', [id]);
       expect(await read()).toMatchObject({ state: 'confirmed', venues: venueSeen });
@@ -374,16 +375,16 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
       // A later start stays inside the booking, so the hall can be reinstated.
       const moved = new Date(start.getTime() + 30 * 60000);
       await approveChange(id, 'proposed_start', moved.toISOString());
-      expect(await read()).toEqual({ eventRequestId: id, state: 'unavailable' });
+      expect(await read()).toEqual(unavailable);
 
       await db.query('select reinstate_flagged_booking($1, $2, $3)', [booking.id, venueStaff, 'Hall still free']);
       await db.query('select start_equipment_review($1, $2)', [id, technician]);
       await db.query('select move_equipment_reservation($1, $2, $3, $4)',
         [id, technician, reservation.id, 'Moved to the new start']);
       await db.query('select submit_event_for_safety_review($1, $2)', [id, coordinator]);
-      expect(await read()).toEqual({ eventRequestId: id, state: 'unavailable' });
+      expect(await read()).toEqual(unavailable);
       await db.query("select respond_to_safety_review($1, $2, 'approved', null, '{}', false)", [id, safetyOfficer]);
-      expect(await read()).toEqual({ eventRequestId: id, state: 'unavailable' });
+      expect(await read()).toEqual(unavailable);
       await db.query('select confirm_event_request($1, $2)', [id, coordinator]);
 
       const reconfirmed = await read();

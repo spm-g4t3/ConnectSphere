@@ -17,12 +17,15 @@ const EVENT = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const OTHER_EVENT = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const user = { id: ATTENDEE, role: ROLE.ATTENDEE };
 const notFound = { error: 'Event information not found' };
-const unavailable = { eventRequestId: EVENT, state: 'unavailable' };
+const unavailable = { eventRequestId: EVENT, state: 'unavailable', eventName: 'Registered event' };
 const confirmed = {
-  eventRequestId: EVENT, state: 'confirmed',
+  eventRequestId: EVENT, state: 'confirmed', eventName: 'Registered event',
   startsAt: '2030-01-01T01:00:00+00:00', endsAt: '2030-01-01T03:00:00+00:00',
-  venues: [{ bookingId: 'booking-a', name: 'Hall A', location: 'Building A' }],
+  venues: [{ bookingId: 'booking-a', name: 'Hall A', location: 'Building A', underReview: false }],
 };
+// Flagged bookings stay visible as under review, so only these are hidden.
+const HIDDEN_BOOKING_STATUSES = Object.values(BOOKING_STATUS)
+  .filter(status => ![BOOKING_STATUS.APPROVED, BOOKING_STATUS.FLAGGED_FOR_REVIEW].includes(status));
 const secrets = {
   notes: 'PRIVATE_STAFF_NOTES_SENTINEL',
   discussion: 'PRIVATE_DISCUSSION_SENTINEL',
@@ -36,7 +39,7 @@ const secrets = {
 
 function confirmedEvent(overrides = {}) {
   return {
-    id: EVENT, status: STATUS.CONFIRMED,
+    id: EVENT, event_name: 'Registered event', status: STATUS.CONFIRMED,
     proposed_start: confirmed.startsAt, proposed_end: confirmed.endsAt,
     bookings: [{ id: 'booking-a', status: BOOKING_STATUS.APPROVED, venues: { name: 'Hall A', location: 'Building A' } }],
     ...overrides,
@@ -48,7 +51,7 @@ function registration(overrides = {}) {
     attendee_id: ATTENDEE,
     event_request_id: EVENT,
     status: 'registered',
-    event_requests: { id: EVENT },
+    event_requests: { id: EVENT, event_name: 'Registered event' },
     ...overrides,
   };
 }
@@ -66,8 +69,7 @@ function sensitiveRegistration(status = STATUS.CONFIRMED) {
     ...event.bookings[0], ...privateFields,
     venues: { ...event.bookings[0].venues, ...privateFields },
   };
-  event.bookings.push(...Object.values(BOOKING_STATUS)
-    .filter(bookingStatus => bookingStatus !== BOOKING_STATUS.APPROVED)
+  event.bookings.push(...HIDDEN_BOOKING_STATUSES
     .map(bookingStatus => ({
       id: `private-${bookingStatus}`, status: bookingStatus,
       venues: { name: secrets.venue, location: secrets.venue },
@@ -169,7 +171,7 @@ describe('SCRUM-24 protected attendee event read', () => {
     expect(response.headers['cache-control']).toBe('no-store');
     expect(client.calls).toEqual([{
       table: 'event_registrations',
-      columns: expect.stringMatching(/event_requests!inner\(id, status, proposed_start, proposed_end,\s*bookings\(id, status, venues\(name, location\)\)\)/),
+      columns: expect.stringMatching(/event_requests!inner\(id, event_name, status, proposed_start, proposed_end,\s*bookings\(id, status, venues\(name, location\)\)\)/),
       filters: [['attendee_id', ATTENDEE], ['event_request_id', EVENT], ['status', 'registered']],
     }]);
   });
@@ -229,7 +231,7 @@ describe('SCRUM-24 protected attendee event read', () => {
 
   it('SCRUM24_AC1_access_does_not_depend_on_registration_availability', async () => {
     const client = database([registration({ event_requests: {
-      id: EVENT, status: 'approved', proposed_start: '2000-01-01T00:00:00Z',
+      id: EVENT, event_name: 'Registered event', status: 'approved', proposed_start: '2000-01-01T00:00:00Z',
       registration_enabled: false, registration_capacity: 0,
       registration_opens_at: '2100-01-01T00:00:00Z',
       registration_closes_at: '2000-01-01T00:00:00Z',
@@ -261,7 +263,7 @@ describe('SCRUM-24 protected attendee event read', () => {
       const response = await read(application(database([row])));
       expect(response.status).toBe(200);
       expect(response.body).toEqual(unavailable);
-      expect(Object.keys(response.body).sort()).toEqual(['eventRequestId', 'state']);
+      expect(Object.keys(response.body).sort()).toEqual(['eventName', 'eventRequestId', 'state']);
       expectPrivateValuesExcluded(response.body);
     },
   );
@@ -346,17 +348,35 @@ describe('SCRUM-24 protected attendee event read', () => {
     const event = confirmedEvent();
     event.bookings.push(
       { id: 'booking-b', status: BOOKING_STATUS.APPROVED, venues: { name: 'Hall B', location: 'Building B' } },
-      ...Object.values(BOOKING_STATUS).filter(status => status !== BOOKING_STATUS.APPROVED)
-        .map(status => ({ id: status, status, venues: { name: 'Hidden venue', location: 'Hidden' } })),
+      ...HIDDEN_BOOKING_STATUSES.map(status => ({ id: status, status, venues: { name: 'Hidden venue', location: 'Hidden' } })),
     );
     const client = database([registration({ event_requests: event })]);
     const response = await read(application(client));
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ ...confirmed, venues: [...confirmed.venues,
-      { bookingId: 'booking-b', name: 'Hall B', location: 'Building B' },
+      { bookingId: 'booking-b', name: 'Hall B', location: 'Building B', underReview: false },
     ] });
     expect(client.calls).toHaveLength(1);
     expect(client.calls[0].columns).not.toContain('venue_holds');
+  });
+
+  it('SCRUM24_AC6_a_flagged_venue_stays_listed_as_under_review_without_its_reason', async () => {
+    const event = confirmedEvent();
+    event.bookings.push({ id: 'flagged', status: BOOKING_STATUS.FLAGGED_FOR_REVIEW,
+      flag_reason: secrets.notes, review_reason: secrets.discussion,
+      venues: { name: 'Hall B', location: 'Building B' } });
+    const response = await read(application(database([registration({ event_requests: event })])));
+    expect(response.status).toBe(200);
+    expect(response.body.venues).toEqual([...confirmed.venues,
+      { bookingId: 'flagged', name: 'Hall B', location: 'Building B', underReview: true }]);
+    expectPrivateValuesExcluded(response.body);
+  });
+
+  it('SCRUM24_AC2_AC3_unavailable_response_names_the_event_and_nothing_else', async () => {
+    const row = sensitiveRegistration(STATUS.APPROVED);
+    const response = await read(application(database([row])));
+    expect(response.body).toEqual(unavailable);
+    expectPrivateValuesExcluded(response.body);
   });
 
   it('SCRUM24_AC6_venue_details_come_only_from_approved_bookings_and_venue_name_location', async () => {
@@ -372,7 +392,7 @@ describe('SCRUM-24 protected attendee event read', () => {
     const response = await read(application(client));
     expect(response.status).toBe(200);
     expect(response.body).toEqual(confirmed);
-    expect(Object.keys(response.body.venues[0]).sort()).toEqual(['bookingId', 'location', 'name']);
+    expect(Object.keys(response.body.venues[0]).sort()).toEqual(['bookingId', 'location', 'name', 'underReview']);
     expect(client.calls).toHaveLength(1);
     expect(client.calls[0].columns).not.toMatch(/layout|room_name|hall_name|address|requirements/);
   });
@@ -401,7 +421,7 @@ describe('SCRUM-24 protected attendee event read', () => {
     });
     expect((await read(app)).body).toEqual({ ...confirmed,
       startsAt: row.event_requests.proposed_start, endsAt: row.event_requests.proposed_end,
-      venues: [{ bookingId: 'new-booking', name: 'New hall', location: 'New building' }],
+      venues: [{ bookingId: 'new-booking', name: 'New hall', location: 'New building', underReview: false }],
     });
     expect(client.calls).toHaveLength(3);
   });
@@ -410,8 +430,8 @@ describe('SCRUM-24 protected attendee event read', () => {
     const response = await read(application(database([sensitiveRegistration()])));
     expect(response.status).toBe(200);
     expect(response.body).toEqual(confirmed);
-    expect(Object.keys(response.body).sort()).toEqual(['endsAt', 'eventRequestId', 'startsAt', 'state', 'venues']);
-    expect(Object.keys(response.body.venues[0]).sort()).toEqual(['bookingId', 'location', 'name']);
+    expect(Object.keys(response.body).sort()).toEqual(['endsAt', 'eventName', 'eventRequestId', 'startsAt', 'state', 'venues']);
+    expect(Object.keys(response.body.venues[0]).sort()).toEqual(['bookingId', 'location', 'name', 'underReview']);
     expectPrivateValuesExcluded(response.body);
   });
 
@@ -421,25 +441,25 @@ describe('SCRUM-24 protected attendee event read', () => {
     expect(client.calls).toHaveLength(1);
     expect(client.calls[0].table).toBe('event_registrations');
     expect(client.calls[0].columns.replace(/\s+/g, '')).toBe(
-      'event_request_id,attendee_id,status,event_requests!inner(id,status,proposed_start,proposed_end,'
+      'event_request_id,attendee_id,status,event_requests!inner(id,event_name,status,proposed_start,proposed_end,'
       + 'bookings(id,status,venues(name,location)))',
     );
   });
 
   it('SCRUM24_AC4_AC5_AC6_missing_arrangement_data_is_not_fabricated', async () => {
     const client = database([registration({ event_requests: confirmedEvent({
-      proposed_start: null, proposed_end: undefined, bookings: undefined,
+      event_name: undefined, proposed_start: null, proposed_end: undefined, bookings: undefined,
     }) })]);
     expect((await read(application(client))).body).toEqual({
-      eventRequestId: EVENT, state: 'confirmed', startsAt: null, endsAt: null, venues: [],
+      eventRequestId: EVENT, state: 'confirmed', eventName: null, startsAt: null, endsAt: null, venues: [],
     });
     const missingVenue = database([registration({ event_requests: confirmedEvent({
       bookings: [{ id: 'missing', status: BOOKING_STATUS.APPROVED, venues: null },
         { id: 'partial', status: BOOKING_STATUS.APPROVED, venues: { name: 'Hall' } }],
     }) })]);
     expect((await read(application(missingVenue))).body.venues).toEqual([
-      { bookingId: 'missing', name: null, location: null },
-      { bookingId: 'partial', name: 'Hall', location: null },
+      { bookingId: 'missing', name: null, location: null, underReview: false },
+      { bookingId: 'partial', name: 'Hall', location: null, underReview: false },
     ]);
   });
 });
@@ -502,7 +522,7 @@ describe('SCRUM-24 registered event entry points', () => {
     const client = database([row, { ...row, attendee_id: OTHER_ATTENDEE },
       { ...row, status: 'waitlisted' }, { ...row, event_request_id: null },
       { ...row, event_requests: undefined }, { ...row, event_requests: { id: OTHER_EVENT } }], { ignoreFilters: true });
-    expect((await list(application(client))).body).toEqual([{ eventRequestId: EVENT }]);
+    expect((await list(application(client))).body).toEqual([{ eventRequestId: EVENT, eventName: 'Registered event' }]);
   });
 
   it.each(['42703', 'XX000'])(

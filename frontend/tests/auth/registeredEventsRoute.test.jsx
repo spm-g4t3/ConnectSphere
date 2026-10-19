@@ -268,6 +268,40 @@ describe("SCRUM-24 reachable attendee information", () => {
     },
   );
 
+  it.each([
+    ["confirmed", confirmed("e1", { eventName: "Industry Night" })],
+    ["unavailable", { eventRequestId: "e1", state: "unavailable", eventName: "Industry Night" }],
+  ])("SCRUM24_AC4_the_page_is_headed_by_the_event_name_when_%s", async (_state, data) => {
+    vi.mocked(getAttendeeEvent).mockResolvedValue(data);
+    renderAt("/registered-events/e1");
+    expect(await screen.findByRole("heading", { level: 1, name: "Industry Night" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["another event's reply", confirmed("e2", { eventName: "Someone else's event" })],
+    ["a blank name", confirmed("e1", { eventName: "  " })],
+    ["no name", confirmed("e1")],
+  ])("SCRUM24_AC8_the_heading_falls_back_for_%s", async (_case, data) => {
+    vi.mocked(getAttendeeEvent).mockResolvedValue(data);
+    renderAt("/registered-events/e1");
+    await screen.findByText(/Event details are not currently confirmed|Hall e1/);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Event information");
+    expect(screen.queryByText("Someone else's event")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM24_AC6_a_venue_under_review_stays_listed_with_a_neutral_note", async () => {
+    vi.mocked(getAttendeeEvent).mockResolvedValue(confirmed("e1", { venues: [
+      { bookingId: "kept", name: "Main Hall", location: "Building A", underReview: false },
+      { bookingId: "flagged", name: "Seminar room", location: "Building B", underReview: true },
+    ] }));
+    renderAt("/registered-events/e1");
+    const list = await screen.findByRole("list", { name: "Venues" });
+    const [kept, flagged] = within(list).getAllByRole("listitem");
+    expect(flagged).toHaveTextContent("Seminar room");
+    expect(flagged).toHaveTextContent("This venue is being reviewed and may change.");
+    expect(kept).not.toHaveTextContent("being reviewed");
+  });
+
   it("SCRUM24_AC6_missing_venue_details_are_handled_without_inventing_arrangements", async () => {
     vi.mocked(getAttendeeEvent).mockResolvedValue(confirmed("e1", { venues: [] }));
     renderAt("/registered-events/e1");

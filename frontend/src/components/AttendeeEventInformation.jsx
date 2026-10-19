@@ -18,9 +18,11 @@ function EventInformation({ eventId }) {
     messages: MESSAGES, fallback: FALLBACK, notFoundIsAnswer: true, retainDataOnRefresh: false,
   });
   useRefreshOnReturn(load);
+  // Only a reply for this route's event may name it.
+  const current = data?.eventRequestId === eventId.trim().toLowerCase() ? data : null;
   return (
     <>
-      <h1>Event information</h1>
+      <h1>{current?.eventName?.trim() || "Event information"}</h1>
       <section aria-label="Registered event information">
         {loading && <p role="status">Loading...</p>}
         {notFound && <p role="alert">Event information is unavailable. An active registration is required.</p>}
@@ -30,7 +32,7 @@ function EventInformation({ eventId }) {
             <button type="button" onClick={load}>Try again</button>
           </div>
         )}
-        {!loading && !error && data && (data.eventRequestId !== eventId.trim().toLowerCase() || data.state !== "confirmed"
+        {!loading && !error && data && (!current || current.state !== "confirmed"
           ? <p role="status">Event details are not currently confirmed.</p>
           : <>
             <h2>Confirmed arrangements</h2>
@@ -45,6 +47,7 @@ function EventInformation({ eventId }) {
               <li key={venue.bookingId}>
                 <strong>{venue.name?.trim() || "Venue name unavailable"}</strong>
                 <p className="attendee-event-information__location">{venue.location?.trim() || "Location unavailable"}</p>
+                {venue.underReview === true && <p>This venue is being reviewed and may change.</p>}
               </li>
             ))}</ul> : <p>No confirmed venue information is available.</p>}
           </>)}
