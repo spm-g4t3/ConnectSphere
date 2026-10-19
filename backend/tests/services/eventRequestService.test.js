@@ -2633,6 +2633,13 @@ describe("SCRUM-327 AC7: deciding a change request is refused to anyone but the 
       Err: ValidationError,
       status: 400,
     },
+    {
+      name: 'SCRUM363_AC8_confirmed_field_lock_refusals_remain_conflicts',
+      code: '55000',
+      message: 'Confirmed event details are locked. Apply a significant change and complete safety review before confirming again.',
+      Err: ConflictError,
+      status: 409,
+    },
   ])('$name', async ({ code, message, Err, status }) => {
     const client = createFakeClient([dbError(code, message)]);
 
