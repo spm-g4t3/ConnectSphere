@@ -55,7 +55,7 @@ beforeAll(async () => {
   `);
   for (const name of ['001_event_requests.sql', '007_user_roles.sql', '050_event_registration.sql', '068_open_event_registration_state.sql', '082_event_registration_state.sql',
     '091_event_registration_hardening.sql', '092_event_registration_persistence.sql',
-    '093_registration_eligibility.sql', '094_register_for_event.sql']) {
+    '093_registration_eligibility.sql', '094_register_for_event.sql', '101_registration_status_guards.sql']) {
     if (name === '091_event_registration_hardening.sql') await addRegistrationNotificationPrerequisites(db);
     await db.exec(migration(name));
   }
@@ -198,12 +198,35 @@ describe('SCRUM39 atomic event registration', () => {
   });
 
   it.each(['withdrawn', 'cancelled'])('SCRUM39_AC2_does_not_count_%s_records_as_active', async (status) => {
-    await seed(ME, status);
     await seed(OTHER, status);
+    await seed(THIRD, status);
     await register();
     const saved = await records();
-    expect(saved).toHaveLength(2);
+    expect(saved).toHaveLength(3);
     expect(saved.filter((row) => row.status === 'registered')).toHaveLength(1);
+  });
+
+  it('SCRUM22_AC6_only_withdrawn_registrations_can_be_reactivated', async () => {
+    await seed(ME, 'cancelled');
+    const before = await records();
+    expect((await register()).rows[0].result).toEqual({ outcome: 'registration_cancelled' });
+    expect(await records()).toEqual(before);
+    await db.query("update event_registrations set status = 'withdrawn' where attendee_id = $1", [ME]);
+    const withdrawn = await records();
+    expect((await register()).rows[0].result).toMatchObject({ outcome: 'registered', registration: { id: withdrawn[0].id } });
+    expect(await records()).toHaveLength(1);
+  });
+
+  it('SCRUM22_AC6_status_guard_migration_is_rerunnable_invoker_security_and_backend_only', async () => {
+    await db.exec(migration('101_registration_status_guards.sql'));
+    for (const fn of ['register_for_event(uuid,uuid)', 'open_event_registration_state(uuid[],uuid)']) {
+      const { rows: [security] } = await db.query('select prosecdef from pg_proc where oid = $1::regprocedure', [fn]);
+      expect(security.prosecdef).toBe(false);
+      for (const role of ['anon', 'authenticated', 'service_role']) {
+        const { rows: [privilege] } = await db.query("select has_function_privilege($1, $2, 'execute') as allowed", [role, fn]);
+        expect(privilege.allowed).toBe(role === 'service_role');
+      }
+    }
   });
 
   it('SCRUM39_AC3_allows_null_capacity_without_a_venue_capacity_check', async () => {
@@ -314,7 +337,7 @@ describe('SCRUM39 atomic event registration', () => {
     }
   });
 
-  it('SCRUM22_AC4_AC5_AC6_AC7_HTTP_registration_and_browsing_share_authoritative_SQL_state', async () => {
+  it.each([null, 'waitlisted', 'cancelled'])('SCRUM22_AC4_AC5_AC6_AC7_HTTP_registration_and_browsing_share_authoritative_SQL_state_%s', async (status) => {
     const client = {
       async rpc(name, args) {
         try {
@@ -370,6 +393,21 @@ describe('SCRUM39 atomic event registration', () => {
     const app = express().use('/api/open-events', createOpenEventRouter({ client, requireAuth }));
     await db.exec('set role service_role');
     try {
+      if (status) {
+        await seed(ME, status);
+        const before = await records();
+        const preview = await request(app).get(`/api/open-events/${event}`)
+          .set('Authorization', 'Bearer attendee-token');
+        expect(preview.status).toBe(200);
+        expect(preview.body).toMatchObject({ placesLeft: 1, isRegistered: false, isFull: false, canRegister: false });
+        expect(preview.body).not.toHaveProperty('registration_status');
+        const response = await request(app).post(`/api/open-events/${event}/registrations`)
+          .set('Authorization', 'Bearer attendee-token');
+        expect(response.status).toBe(409);
+        expect(response.body.code).toBe(status === 'waitlisted' ? 'ALREADY_WAITLISTED' : 'REGISTRATION_CANCELLED');
+        expect(await records()).toEqual(before);
+        return;
+      }
       const before = await request(app).get(`/api/open-events/${event}`)
         .set('Authorization', 'Bearer attendee-token');
       expect(before.status).toBe(200);

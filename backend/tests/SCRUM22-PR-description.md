@@ -23,10 +23,19 @@ psql -X -v ON_ERROR_STOP=1 --single-transaction -f backend/db/migrations/092_eve
 
 ## Validation and limits
 
+Follow-up: remove the unused RS409 schedule-conflict handler and its misleading
+blocking-change test. Migration 101 allows reactivation only from withdrawn;
+cancelled/waitlisted registrations remain unchanged and receive clear refusals.
+Browse uses the caller's database status to disable Register through the existing
+HTTP contract. Apply 101 after 094, in one transaction, before the matching API.
+Follow-up validation: backend coverage passed 7,482 tests across 175 suites with
+two workers; 71 targeted frontend tests and targeted ESLint passed. The initial
+backend run was stopped after unrelated worker timeouts; no thresholds changed.
+
 Retained both the organiser-settings SQL suite and the atomic registration SQL
 suite. Focused coverage checks persistence, capacity, duplicates, authorisation,
 privacy, rollback, availability and compatibility with schedule-change notices.
-Local CI passed: backend 7,474 tests/176 suites with two workers; frontend 3,486
+Original PR CI passed: backend 7,474 tests/176 suites with two workers; frontend 3,486
 tests/151 suites; lint (23 existing warnings) and production build. Coverage gates
 remain unchanged. Remote SQL, deployed browser/PostgREST checks and real two-session
 PostgreSQL races were not run. See `SCRUM22-PR68-integration.md` for manual checks.
