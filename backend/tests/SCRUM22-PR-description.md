@@ -9,16 +9,16 @@ success, understandable failure feedback and refreshed availability.
 - Integrated origin/dev `7c2dd16`, including merged #68's organiser settings API/UI
   and #74's significant-change fixes. Preserve dev's reviewed 050/082/091 SQL and
   organiser-only route/service; no duplicate attendee submission route is added.
-- Unapplied SCRUM-22 migrations were renumbered above dev's 097:
-  **098_event_registration_persistence.sql -> 099_registration_eligibility.sql ->
-  100_register_for_event.sql**. Apply pending dev dependencies first, then this
+- SCRUM-22 uses its requested registration migration sequence:
+  **092_event_registration_persistence.sql -> 093_registration_eligibility.sql ->
+  094_register_for_event.sql**. Apply pending dev dependencies first, then this
   batch in one transaction before deploying the matching API/UI.
 - Feature flags stay removed. Drain the old API for the database-first rollout.
   Do not replay applied migrations or archived registration SQL. Existing legacy
   registrations are reconciled without dropping history or restoring withdrawals.
 
 ```powershell
-psql -X -v ON_ERROR_STOP=1 --single-transaction -f backend/db/migrations/098_event_registration_persistence.sql -f backend/db/migrations/099_registration_eligibility.sql -f backend/db/migrations/100_register_for_event.sql
+psql -X -v ON_ERROR_STOP=1 --single-transaction -f backend/db/migrations/092_event_registration_persistence.sql -f backend/db/migrations/093_registration_eligibility.sql -f backend/db/migrations/094_register_for_event.sql
 ```
 
 ## Validation and limits

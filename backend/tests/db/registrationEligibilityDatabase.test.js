@@ -27,7 +27,7 @@ beforeAll(async () => {
     create role authenticated;
     create role service_role bypassrls;
   `);
-  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '091_event_registration_hardening.sql', '099_registration_eligibility.sql']) {
+  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '091_event_registration_hardening.sql', '093_registration_eligibility.sql']) {
     if (name === '091_event_registration_hardening.sql') await addRegistrationNotificationPrerequisites(db);
     await db.exec(migration(name));
   }

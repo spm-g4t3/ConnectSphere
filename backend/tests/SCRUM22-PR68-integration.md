@@ -24,9 +24,9 @@ registration submits only through `POST /api/open-events/:id/registrations`.
 
 ## Database and deployment order - manual only
 
-The developer confirmed that SCRUM-22's former 092-094 have never been applied.
-They are now **098 persistence -> 099 eligibility -> 100 atomic registration**,
-after dev's highest migration 097, with no duplicate migration numbers added.
+The requested SCRUM-22 sequence is **092 persistence -> 093 eligibility ->
+094 atomic registration**, after its SCRUM-494 dependency 091. These numbers
+are unused on dev; dev's 096/097 do not redefine the registration writer.
 Do not replay applied dev migrations or any SQL under `db/migration-history/`.
 
 1. Apply pending dev prerequisites, including 050, 082 and 091 and their
@@ -37,10 +37,10 @@ Do not replay applied dev migrations or any SQL under `db/migration-history/`.
    response contract; avoid a mixed-version rolling release.
 
 ```powershell
-psql -X -v ON_ERROR_STOP=1 --single-transaction -f backend/db/migrations/098_event_registration_persistence.sql -f backend/db/migrations/099_registration_eligibility.sql -f backend/db/migrations/100_register_for_event.sql
+psql -X -v ON_ERROR_STOP=1 --single-transaction -f backend/db/migrations/092_event_registration_persistence.sql -f backend/db/migrations/093_registration_eligibility.sql -f backend/db/migrations/094_register_for_event.sql
 ```
 
-Migration 098 preserves legacy rows in `registrations_legacy_archive`, makes
+Migration 092 preserves legacy rows in `registrations_legacy_archive`, makes
 `registrations` a read-only compatibility view and retains one canonical
 `event_registrations` row per attendee/event. Only registered rows count toward
 capacity; withdrawn/cancelled rows can reactivate without duplication. Waitlisted

@@ -9,7 +9,6 @@ that revision. Original SQL contents are unchanged; upgrade tests use these
 snapshots to verify existing registration data is preserved.
 
 For fresh and existing deployments, apply SCRUM-494 / PR #68 first, then the
-active `098_event_registration_persistence.sql`, `099_registration_eligibility.sql`
-and `100_register_for_event.sql`. The unapplied 092-094 were renumbered after dev
-advanced to 097. Consult the applied-migration ledger and the
+active `092_event_registration_persistence.sql`, `093_registration_eligibility.sql`
+and `094_register_for_event.sql`. Consult the applied-migration ledger and the
 registration deployment guide; do not execute this directory recursively.

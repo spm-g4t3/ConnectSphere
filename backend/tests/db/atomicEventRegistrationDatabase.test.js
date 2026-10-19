@@ -54,8 +54,8 @@ beforeAll(async () => {
     create role service_role bypassrls;
   `);
   for (const name of ['001_event_requests.sql', '007_user_roles.sql', '050_event_registration.sql', '068_open_event_registration_state.sql', '082_event_registration_state.sql',
-    '091_event_registration_hardening.sql', '098_event_registration_persistence.sql',
-    '099_registration_eligibility.sql', '100_register_for_event.sql']) {
+    '091_event_registration_hardening.sql', '092_event_registration_persistence.sql',
+    '093_registration_eligibility.sql', '094_register_for_event.sql']) {
     if (name === '091_event_registration_hardening.sql') await addRegistrationNotificationPrerequisites(db);
     await db.exec(migration(name));
   }

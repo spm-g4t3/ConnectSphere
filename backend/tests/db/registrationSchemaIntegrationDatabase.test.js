@@ -5,7 +5,7 @@ import { addRegistrationNotificationPrerequisites } from '../fixtures/registrati
 
 const migration = (name) => readFileSync(new URL(`../../db/migrations/${name}`, import.meta.url), 'utf8');
 const applyRegistrationMigrations = async () => {
-  for (const name of ['098_event_registration_persistence.sql', '099_registration_eligibility.sql', '100_register_for_event.sql']) {
+  for (const name of ['092_event_registration_persistence.sql', '093_registration_eligibility.sql', '094_register_for_event.sql']) {
     await db.exec(migration(name));
   }
 };
