@@ -59,6 +59,7 @@ import EventCancellationPanel from "./EventCancellationPanel";
 import SignificantEventChangePanel from "./SignificantEventChangePanel";
 import SafetyCheckSubmissionPanel from "./SafetyCheckSubmissionPanel";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
+import EventConfirmationPanel from "./EventConfirmationPanel";
 import {
   decideEventRequest,
   getCoordinatorChangeRequests,
@@ -203,14 +204,14 @@ export default function CoordinatorRequestDetail({
   onReviewDecisionProcessed,
   onChangeRequestProcessed,
 }) {
-  // SCRUM-19. The request as this panel last saw it change. Starting a review
-  // or deciding returns the updated request, and the panel stays open on it,
-  // showing the next step or the recorded decision, rather than closing and
-  // leaving the coordinator to find the request again. The `request` prop is
-  // the row the parent loaded; this overrides it once this panel has changed
-  // the request itself.
-  const [updatedRequest, setUpdatedRequest] = useState(null);
-  const current = updatedRequest ?? request;
+  // A mutation response belongs to the parent record it started from.
+  const [localUpdate, setLocalUpdate] = useState(null);
+  const [confirmationFeedback, setConfirmationFeedback] = useState(null);
+  const current = localUpdate?.source === request ? localUpdate.record : request;
+
+  function setUpdatedRequest(record) {
+    setLocalUpdate(record ? { source: request, record } : null);
+  }
 
   const display = readStatusDisplay(current);
   const capacity = seedableCapacity(request.expectedAttendance);
@@ -281,6 +282,8 @@ export default function CoordinatorRequestDetail({
   // (052's status list leaves cancelled out). Both conditions kept from the
   // merge of dev, neither dropped.
   const isLead = normaliseRole(user?.role) === "EVENT_COORDINATOR_LEAD";
+  const canConfirm = normaliseRole(user?.role) === "EVENT_COORDINATOR"
+    && isAssignedCoordinator && current.status === "safety_approved";
   const canReassign = assignedCoordinatorId != null
     && current.status !== "cancelled"
     && (isAssignedCoordinator || isLead);
@@ -545,6 +548,29 @@ export default function CoordinatorRequestDetail({
       </h2>
       <p>{display.description}</p>
       <SafetyApprovalNotice status={current.status} />
+      {/* The panel shows a refusal only for the revision it refused; once a
+          refetch moves the event on, or unmounts the panel, show it here. */}
+      {confirmationFeedback?.eventId === current.id && (confirmationFeedback.success
+        ? current.status === "confirmed"
+        : !canConfirm || confirmationFeedback.updatedAt !== current.updatedAt) && (
+        <p role={confirmationFeedback.success ? "status" : "alert"}>{confirmationFeedback.message}</p>
+      )}
+      {canConfirm && (
+        <EventConfirmationPanel
+          key={current.id}
+          eventRequest={current}
+          onConfirmed={(updated) => {
+            setUpdatedRequest(updated);
+            setConfirmationFeedback({ eventId: updated.id, success: true, message: "Event confirmed successfully." });
+            onChangeRequestProcessed?.();
+          }}
+          onStale={(message) => {
+            setUpdatedRequest(null);
+            setConfirmationFeedback({ eventId: current.id, updatedAt: current.updatedAt, success: false, message });
+            return onChangeRequestProcessed?.();
+          }}
+        />
+      )}
       {isAssignedCoordinator && [
         "approved",
         "confirmed",

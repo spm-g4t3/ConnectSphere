@@ -330,6 +330,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
     );
 
     await db.exec(migration);
+    await db.exec(readFileSync(resolve(here, '../../db/migrations/100_significant_change_confirmation_compatibility.sql'), 'utf8'));
     await db.exec(equipmentNotificationsMigration);
     await db.exec(`
       create function event_request_status_allows(

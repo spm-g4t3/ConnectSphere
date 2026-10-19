@@ -14,7 +14,8 @@
 // mock, because a vi.mock factory is strict.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, within, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 
 import MyEventRequests from "../../src/components/MyEventRequests.jsx";
@@ -23,6 +24,7 @@ import {
   getAssignmentHistory,
   getEventClarificationHistory,
   getMyEventRequests,
+  getConfirmedArrangements,
 } from "../../src/services/eventRequestService";
 
 vi.mock("../../src/auth/AuthContext", () => ({
@@ -34,6 +36,7 @@ vi.mock("../../src/services/eventRequestService", () => ({
   getAssignmentHistory: vi.fn(),
   getAssignmentHistoryForReview: vi.fn(),
   getMyEventRequests: vi.fn(),
+  getConfirmedArrangements: vi.fn(),
   getEventClarificationHistory: vi.fn(),
   getEventCancellationImpact: vi.fn(),
   cancelEventRequest: vi.fn(),
@@ -76,12 +79,61 @@ beforeEach(() => {
   vi.mocked(useAuth).mockReset();
   vi.mocked(useAuth).mockReturnValue({ user: { id: ORGANISER, role: "event_organiser" } });
   vi.mocked(getMyEventRequests).mockReset();
+  vi.mocked(getConfirmedArrangements).mockReset();
   vi.mocked(getAssignmentHistory).mockReset();
   vi.mocked(getAssignmentHistory).mockResolvedValue([
     { id: "h1", previousCoordinatorId: null, newCoordinatorId: COORDINATOR, newCoordinatorName: "Priya Nair", automatic: true },
   ]);
 });
 
+
+describe("SCRUM363 confirmed arrangements on the organiser request screen", () => {
+  it.each(["draft", "approved", "safety_review", "safety_approved", "cancelled"])(
+    "SCRUM363_AC7_status_%s_does_not_present_previous_arrangements_as_confirmed", async (status) => {
+      renderList([eventRequest({ status })]);
+      await screen.findByText("IS212 Industry Night");
+      expect(screen.queryByText("Confirmed arrangements")).not.toBeInTheDocument();
+      expect(getConfirmedArrangements).not.toHaveBeenCalled();
+    },
+  );
+
+  it("SCRUM363_AC7_normal_request_navigation_hides_planning_arrangements_and_loads_the_reconfirmed_records", async () => {
+    const record = eventRequest({ status: "confirmed", statusDisplay: { label: "Confirmed", group: "CONFIRMED", description: "Going ahead." } });
+    let current = record;
+    let detail = {
+      eventRequestId: record.id, status: "confirmed", statusDisplay: record.statusDisplay,
+      startsAt: "2026-11-01T16:00:00Z", endsAt: "2026-11-01T18:00:00Z",
+      venues: [{ bookingId: "b1", name: "Original venue", location: "Level 1" }],
+      equipment: [{ lineId: "l1", name: "Microphone", quantity: 2 }],
+    };
+    vi.mocked(getMyEventRequests).mockImplementation(async () => [current]);
+    vi.mocked(getConfirmedArrangements).mockImplementation(async () => detail);
+    render(<MemoryRouter><MyEventRequests /></MemoryRouter>);
+    await userEvent.click(await screen.findByText("Confirmed arrangements"));
+    expect(await screen.findByText("Original venue — Level 1")).toBeInTheDocument();
+    expect(screen.getByText("Microphone: 2")).toBeInTheDocument();
+
+    current = { ...record, status: "approved", statusDisplay: { label: "Planning", group: "APPROVED", description: "Planning again." } };
+    detail = { ...detail, status: "approved", statusDisplay: current.statusDisplay, venues: [], equipment: [] };
+    fireEvent.focus(window);
+    expect(await screen.findByText("Planning again.")).toBeInTheDocument();
+    expect(screen.queryByText("Confirmed arrangements")).not.toBeInTheDocument();
+    expect(screen.queryByText("Original venue — Level 1")).not.toBeInTheDocument();
+
+    current = { ...record };
+    detail = { ...detail, status: "confirmed", statusDisplay: record.statusDisplay,
+      startsAt: "2026-12-01T01:00:00Z", endsAt: "2026-12-01T03:00:00Z",
+      venues: [{ bookingId: "b2", name: "Replacement venue", location: "Level 2" }],
+      equipment: [{ lineId: "l2", name: "Microphone", quantity: 5 }],
+    };
+    fireEvent.focus(window);
+    await userEvent.click(await screen.findByText("Confirmed arrangements"));
+    expect(await screen.findByText("Replacement venue — Level 2")).toBeInTheDocument();
+    expect(screen.getByText("Microphone: 5")).toBeInTheDocument();
+    expect(screen.getByText("2026-12-01 09:00 – 11:00 (Singapore time)")).toBeInTheDocument();
+    expect(screen.queryByText("Original venue — Level 1")).not.toBeInTheDocument();
+  });
+});
 
 describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
   it("SCRUM494_AC6_links_an_event_to_its_registration_settings_page", async () => {

@@ -261,6 +261,19 @@ export async function submitForSafetyReview(id, { note, noEquipmentConfirmed = f
   return response.data;
 }
 
+export async function confirmEventRequest(id, { noEquipmentConfirmed = false, expectedUpdatedAt } = {}) {
+  const response = await apiClient.post(`/event-requests/${id}/confirm`, {
+    noEquipmentConfirmed,
+    ...(expectedUpdatedAt != null ? { expectedUpdatedAt } : {}),
+  });
+  return response.data;
+}
+
+export async function getConfirmedArrangements(id) {
+  const response = await apiClient.get(`/event-requests/${id}/confirmed-arrangements`);
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // SCRUM-327: coordinator assignment
 // ---------------------------------------------------------------------------

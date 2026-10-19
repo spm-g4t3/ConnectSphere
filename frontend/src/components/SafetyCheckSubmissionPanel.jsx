@@ -6,6 +6,7 @@
 // enabled is a convenience and the server checks again under its locks.
 
 import { useEffect, useState } from "react";
+import ChecklistTable from "./ReadinessChecklist";
 import {
   getEventReadiness,
   submitForSafetyReview,
@@ -13,13 +14,6 @@ import {
 
 // The server's limit, counted as the server counts it: after trimming.
 const SAFETY_NOTE_MAX = 2000;
-
-const KEY_LABEL = {
-  venue: "Venue",
-  equipment: "Equipment",
-  no_equipment_confirmation: "No equipment needed",
-  date: "Date",
-};
 
 const NOT_APPROVED_MESSAGE =
   "This event is no longer Approved, so it cannot be submitted for the safety check. The page has been refreshed to show where it stands.";
@@ -44,40 +38,6 @@ function formatCount(value) {
 
 function isAboutTheNote(data) {
   return Array.isArray(data?.details) && data.details.some((entry) => entry?.field === "note");
-}
-
-function itemLabel(item) {
-  const label = KEY_LABEL[item.key] ?? "Other";
-  return item.key === "venue" && item.venueName ? `${label}: ${item.venueName}` : label;
-}
-
-/** The server's lines, in its order. The status is a word; colour only adds to it. */
-function ChecklistTable({ caption, items }) {
-  return (
-    <table className="safety-check-submission__checklist">
-      <caption>{caption}</caption>
-      <thead>
-        <tr>
-          <th scope="col">Item</th>
-          <th scope="col">Status</th>
-          <th scope="col">Detail</th>
-        </tr>
-      </thead>
-      <tbody>
-        {items.map((item, index) => (
-          <tr key={`${item.key}-${item.bookingId ?? item.equipmentRequestId ?? index}`}>
-            <td>{itemLabel(item)}</td>
-            <td>
-              <span className={`safety-check-submission__badge safety-check-submission__badge--${item.met ? "met" : "outstanding"}`}>
-                {item.met ? "Met" : "Outstanding"}
-              </span>
-            </td>
-            <td>{item.detail}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
 }
 
 export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, onStale }) {

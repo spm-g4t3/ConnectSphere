@@ -102,6 +102,8 @@ import {
   applySignificantEventChange,
   getEventReadiness,
   submitForSafetyReview,
+  confirmEventRequest,
+  getConfirmedArrangementsForOrganiser,
 } from '../services/eventRequestService.js';
 import {
   createChangeRequestFromClient,
@@ -184,6 +186,7 @@ export function createEventRequestRouter({
   // build time is safe: createRequireRole only throws when handed zero roles,
   // and with one it just closes over the list.
   const coordinatorOnly = requireRole(ROLE.EVENT_COORDINATOR);
+  const organiserOnly = requireRole(ROLE.EVENT_ORGANISER);
   // SCRUM-491: the hold form's event picker is Venue Staff's alone.
   const venueStaffOnly = requireRole(ROLE.VENUE_STAFF);
   // SCRUM-486 (SCRUM-519): the unassigned queue, the picker's workload and the
@@ -791,6 +794,16 @@ export function createEventRequestRouter({
     }
   });
 
+  router.get('/:id/confirmed-arrangements', organiserOnly, async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store');
+      const arrangements = await getConfirmedArrangementsForOrganiser(req.params.id, req.user.id, { client });
+      res.status(200).json(withStatusDisplay(arrangements));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
   /** AC1: one request in full, with its status. */
   router.get('/:id', async (req, res) => {
     try {
@@ -897,6 +910,21 @@ export function createEventRequestRouter({
         coordinatorId: req.user.id,
         note: req.body?.note,
         noEquipmentConfirmed: req.body?.noEquipmentConfirmed ?? false,
+      });
+      res.status(200).json(withStatusDisplay(updated));
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  router.post('/:id/confirm', coordinatorOnly, async (req, res) => {
+    try {
+      const updated = await confirmEventRequest({
+        client,
+        eventRequestId: req.params.id,
+        coordinatorId: req.user.id,
+        noEquipmentConfirmed: req.body?.noEquipmentConfirmed,
+        expectedUpdatedAt: req.body?.expectedUpdatedAt,
       });
       res.status(200).json(withStatusDisplay(updated));
     } catch (err) {

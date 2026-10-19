@@ -62,7 +62,7 @@ async function resolveClient(client) {
  * waiting list without changing this shape: there is none yet, so never
  * joinable and no count.
  */
-function toOpenEvent(row, activeCount, isRegistered) {
+function toOpenEvent(row, activeCount, isRegistered, registrationStatus) {
   const { placesLeft, isFull } = availability(row.registration_capacity, activeCount);
 
   return {
@@ -78,7 +78,7 @@ function toOpenEvent(row, activeCount, isRegistered) {
     placesLeft,
     isFull,
     isRegistered,
-    canRegister: !isFull && !isRegistered,
+    canRegister: !isFull && !isRegistered && (registrationStatus == null || registrationStatus === 'withdrawn'),
     canJoinWaitlist: false,
     waitlistCount: null,
   };
@@ -157,7 +157,7 @@ async function withRegistrationState(db, rows, attendeeId) {
 
   return rows.map((row) => {
     const state = states.get(row.id);
-    return toOpenEvent(row, Number(state?.active_count ?? 0), state?.is_registered === true);
+    return toOpenEvent(row, Number(state?.active_count ?? 0), state?.is_registered === true, state?.registration_status);
   });
 }
 

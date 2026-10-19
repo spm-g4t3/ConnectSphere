@@ -22,6 +22,8 @@ export async function registerForEvent({ attendeeId, eventId, client } = {}) {
     forbidden: { code: '42501', message: 'This action is restricted to Attendees' },
     capacity_reached: { code: '55000', hint: 'EVENT_FULL', message: 'Event is full' },
     already_registered: { code: '55000', hint: 'ALREADY_REGISTERED', message: 'Already registered' },
+    already_waitlisted: { code: '55000', hint: 'ALREADY_WAITLISTED', message: 'Already on the waiting list' },
+    registration_cancelled: { code: '55000', hint: 'REGISTRATION_CANCELLED', message: 'This registration was cancelled and cannot be reactivated.' },
   };
   if (Object.hasOwn(refusal, data?.outcome)) throw translateRegistrationEligibilityError(refusal[data.outcome]);
   if (data?.outcome !== 'registered' || !data.registration?.id) {

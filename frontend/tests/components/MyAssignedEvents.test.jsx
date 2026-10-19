@@ -16,11 +16,16 @@
 // every function it reaches is on the mock, as in EventCoordinatorDashboard.test.jsx.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import MyAssignedEvents from "../../src/components/MyAssignedEvents.jsx";
 import { getMyAssignedEvents } from "../../src/services/eventRequestService";
+
+// The panel is stubbed: these tests cover which request My events keeps open.
+vi.mock("../../src/components/CoordinatorRequestDetail", () => ({
+  default: ({ request }) => <h2>{request.eventName}</h2>,
+}));
 
 vi.mock("../../src/services/eventRequestService", () => ({
   getMyAssignedEvents: vi.fn(),
@@ -148,5 +153,21 @@ describe("SCRUM-266 AC4: Needs attention on My events", () => {
     );
     expect(within(row("Fine event")).queryByText("Needs attention")).not.toBeInTheDocument();
     expect(within(row("Older payload")).queryByText("Needs attention")).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM-334: the detail panel survives the event leaving My events", () => {
+  it("SCRUM334_AC_keeps_the_panel_open_when_a_refetch_no_longer_lists_the_event", async () => {
+    renderList([event("e1", "approved", "Handed over event")]);
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    expect(screen.getByRole("button", { name: /Back to my events/ })).toBeInTheDocument();
+
+    // After a handover the next read no longer includes the event.
+    vi.mocked(getMyAssignedEvents).mockResolvedValue([]);
+    fireEvent.focus(window);
+    await waitFor(() => expect(getMyAssignedEvents).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByRole("button", { name: /Back to my events/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Handed over event" })).toBeInTheDocument();
   });
 });

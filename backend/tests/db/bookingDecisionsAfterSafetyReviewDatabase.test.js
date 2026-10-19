@@ -346,9 +346,9 @@ describe('SCRUM-258: booking decisions restated after the safety review migratio
   });
 
   describe('075 itself', () => {
-    it('SCRUM258_AC3_075_is_the_latest_definition_of_cancel_event_request_and_event_readiness', () => {
+    it('SCRUM258_AC3_latest_definitions_preserve_cancellation_and_shared_readiness', () => {
       expect(latestFileWith('create or replace function cancel_event_request(')).toBe(MIGRATION);
-      expect(latestFileWith('create or replace function event_readiness(')).toBe(MIGRATION);
+      expect(latestFileWith('create or replace function event_readiness(')).toBe('098_event_readiness_details.sql');
     });
 
     // Later migrations may restate the list (076 adds flagged_booking_resolved);

@@ -9,7 +9,7 @@
  * is SCRUM-486's leadAssignmentRoutes.test.js's, copied.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
@@ -89,6 +89,96 @@ const CHECKLIST = {
 
 const OTHER_ROLES = [ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.ATTENDEE, ROLE.SAFETY_OFFICER, null];
 
+describe('SCRUM-363: POST /:id/confirm', () => {
+  const confirm = (client, body = {}, requireAuth) =>
+    request(appWith({ client, requireAuth })).post(`/api/event-requests/${EVENT_ID}/confirm`).send(body);
+
+  it('SCRUM363_AC6_confirmation_returns_the_confirmed_event_and_uses_only_the_token_caller', async () => {
+    const client = createFakeClient([ok(eventRow({ status: 'confirmed' }))]);
+    const res = await confirm(client, { coordinatorId: COORDINATOR_B, noEquipmentConfirmed: true, status: 'confirmed' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: EVENT_ID, status: 'confirmed', statusDisplay: { label: 'Confirmed' } });
+    expect(client.calls).toEqual([expect.objectContaining({ fn: 'confirm_event_request', args: {
+      p_event_request_id: EVENT_ID, p_coordinator_id: COORDINATOR_A, p_no_equipment_confirmed: true, p_expected_updated_at: null,
+    } })]);
+  });
+
+  it('SCRUM363_AC5_absent_acknowledgement_defaults_to_false', async () => {
+    const client = createFakeClient([ok(eventRow({ status: 'confirmed' }))]);
+    await confirm(client);
+    expect(client.calls[0].args.p_no_equipment_confirmed).toBe(false);
+  });
+
+  it('SCRUM363_AC5_the_endpoint_passes_the_observed_revision_to_the_atomic_rpc', async () => {
+    const client = createFakeClient([ok(eventRow({ status: 'confirmed' }))]);
+    const expectedUpdatedAt = '2026-06-01T09:00:00.123456+00:00';
+    expect((await confirm(client, { noEquipmentConfirmed: true, expectedUpdatedAt })).status).toBe(200);
+    expect(client.calls[0].args.p_expected_updated_at).toBe(expectedUpdatedAt);
+  });
+
+  it.each([[ROLE.EVENT_COORDINATOR_LEAD], ...OTHER_ROLES.map((role) => [role])])(
+    'SCRUM363_AC1_role_%s_is_forbidden_without_database_access', async (role) => {
+      const client = createFakeClient([]);
+      const res = await confirm(client, {}, signedInWithRole(role));
+      expect(res.status).toBe(403);
+      expect(client.calls).toHaveLength(0);
+    },
+  );
+
+  it('SCRUM363_AC1_authentication_is_required_before_database_access', async () => {
+    const client = createFakeClient([]);
+    expect((await confirm(client, {}, signedOut)).status).toBe(401);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([null, 'true', 1])('SCRUM363_AC5_invalid_acknowledgement_%j_is_400_before_rpc', async (noEquipmentConfirmed) => {
+    const client = createFakeClient([]);
+    expect((await confirm(client, { noEquipmentConfirmed })).status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM363_AC1_invalid_event_id_is_400_before_rpc', async () => {
+    const client = createFakeClient([]);
+    const res = await request(appWith({ client })).post('/api/event-requests/invalid/confirm').send({});
+    expect(res.status).toBe(400);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([['42501', 403], ['55000', 409], ['P0002', 404]])(
+    'SCRUM363_AC1_database_%s_is_returned_as_%s', async (code, status) => {
+      const client = createFakeClient([dbError(code, 'Its current status is approved.')]);
+      const res = await confirm(client);
+      expect(res.status).toBe(status);
+      expect(res.body.error).toBe('Its current status is approved.');
+    },
+  );
+
+  it('SCRUM363_AC3_returns_every_outstanding_item_in_the_existing_conflict_format', async () => {
+    const conflicts = [
+      { key: 'venue', met: false, detail: 'Flagged for review' },
+      { key: 'equipment', met: false, detail: 'Pending review' },
+    ];
+    const client = createFakeClient([dbError('PT409', 'This event is not ready for confirmation.', {
+      hint: 'EVENT_NOT_READY', details: JSON.stringify(conflicts),
+    })]);
+    const res = await confirm(client);
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'This event is not ready for confirmation.', code: 'EVENT_NOT_READY', conflicts });
+  });
+
+  it('SCRUM363_AC6_unexpected_database_errors_are_safe_500_responses', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await confirm(createFakeClient([dbError('XX000', 'private database detail')]));
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: 'Unexpected server error' });
+    } finally {
+      log.mockRestore();
+    }
+  });
+});
+
 
 // ---------------------------------------------------------------------------
 // GET /:id/readiness
@@ -96,6 +186,29 @@ const OTHER_ROLES = [ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.TECHNICAL_SUPP
 describe('SCRUM-489 AC3: GET /:id/readiness', () => {
   const readiness = (client, query = '', requireAuth) =>
     request(appWith({ client, requireAuth })).get(`/api/event-requests/${EVENT_ID}/readiness${query}`);
+
+  it('SCRUM363_AC4_returns_every_database_condition_and_booking_period_without_a_second_checker', async () => {
+    const checklist = {
+      ...CHECKLIST,
+      items: [
+        {
+          key: 'venue', met: false, detail: 'Flagged for review',
+          bookingId: '33333333-3333-4333-8333-333333333333', venueName: 'Hall A',
+          startsAt: '2026-11-01T01:00:00+00:00', endsAt: '2026-11-01T03:00:00+00:00',
+        },
+        { key: 'no_equipment_confirmation', met: false, detail: 'Confirm that this event needs no equipment', organiserRequirements: 'Projectors' },
+        { key: 'date', met: true, detail: 'Starts in the future' },
+      ],
+    };
+    const client = createFakeClient([ok(eventRow({ status: 'safety_approved' })), ok(checklist)]);
+
+    const res = await readiness(client);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(checklist);
+    expect(client.calls.map((call) => call.fn ?? call.table)).toEqual(['event_requests', 'event_readiness']);
+    expect(client.calls[1].args).toEqual({ p_event_request_id: EVENT_ID, p_no_equipment_confirmed: false });
+  });
 
   it.each([
     ['a coordinator', ROLE.EVENT_COORDINATOR, COORDINATOR_A],

@@ -187,6 +187,7 @@ const SCRUM22_FILES = [
   'src/services/registrationService.js',
   'src/services/registrationErrors.js',
 ]
+const SCRUM363_FILES = ['src/components/EventConfirmationPanel.jsx', 'src/components/ReadinessChecklist.jsx', 'src/components/ConfirmedArrangements.jsx']
 
 // SCRUM-489: the coordinator's safety check submission. Its one new file is
 // gated outright; the shared files it touches stay ungated.
@@ -260,6 +261,7 @@ export default defineConfig({
         ...SCRUM495_FILES.map((file) => [file, FULL]),
         ...SCRUM22_FILES.map((file) => [file, FULL]),
         ...SCRUM489_FILES.map((file) => [file, FULL]),
+        ...SCRUM363_FILES.map((file) => [file, FULL]),
         ...SCRUM492_FILES.map((file) => [file, FULL]),
         ...SCRUM172_FILES.map((file) => [file, FULL]),
       ]),

@@ -111,13 +111,6 @@ function translateError(error) {
   const code = error.code;
   const detail = error.message ?? '';
 
-  if (code === 'RS409') {
-    return new ConflictError(
-      'The new event start conflicts with registration closing or withdrawal settings. Ask the organiser to adjust those settings before approving this change.',
-      { code: 'REGISTRATION_SCHEDULE_CONFLICT' },
-    );
-  }
-
   // check constraint: blank requested_change slipping past validation, or an
   // approved change process_change_request could not apply (e.g. a new
   // proposed_start that would now fall after proposed_end)
@@ -146,6 +139,18 @@ function translateError(error) {
   // message patterns below; 019 words its message so it matches neither.
   if (code === '42501') {
     return new ForbiddenError(detail);
+  }
+
+  // 55000: a locked field; PT409 and 40001: the significant-change path (102)
+  // found its arrangements moved under it. All are retryable after a refresh.
+  if (code === '55000' || code === 'PT409' || code === '40001') {
+    return new ConflictError(detail);
+  }
+
+  // raised by the significant-change path (102) for a value it cannot apply,
+  // such as an attendance of zero
+  if (code === '22023') {
+    return new ValidationError(detail);
   }
 
   // raised by process_change_request when the id matches nothing

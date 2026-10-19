@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "../../src/App.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
@@ -259,6 +259,7 @@ describe("SCRUM36 attendee registration through the real App route", () => {
   it.each([
     [{ isFull: true, canRegister: false, placesLeft: 0 }, "Register"],
     [{ isRegistered: true, canRegister: false }, "Already registered"],
+    [{ isFull: false, isRegistered: false, canRegister: false }, "Register"],
   ])("SCRUM36_AC5_respects_known_availability_%j", async (availability, label) => {
     vi.mocked(getOpenEvent).mockResolvedValue(event(availability));
     render(<App />);
@@ -266,6 +267,21 @@ describe("SCRUM36 attendee registration through the real App route", () => {
     expect(button).toBeDisabled();
     await userEvent.click(button);
     expect(registerForEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ALREADY_WAITLISTED', 'Already on the waiting list'],
+    ['REGISTRATION_CANCELLED', 'This registration was cancelled and cannot be reactivated.'],
+  ])('SCRUM22_AC6_the_%s_refusal_never_marks_the_attendee_registered', async (code, message) => {
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(event()).mockResolvedValue(event({ canRegister: false }));
+    vi.mocked(registerForEvent).mockRejectedValue({ response: { status: 409, data: { code, error: message } } });
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Register' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Register' })).toBeDisabled());
+    expect(screen.queryByText('Registered')).not.toBeInTheDocument();
+    expect(screen.queryByText('You are registered for Open Day.')).not.toBeInTheDocument();
+    expect(registerForEvent).toHaveBeenCalledTimes(1);
   });
 
   it("SCRUM36_AC4_redirects_an_unauthenticated_visitor_without_loading_the_event", async () => {

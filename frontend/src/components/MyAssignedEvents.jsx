@@ -202,6 +202,13 @@ export default function MyAssignedEvents() {
     try {
       const data = await getMyAssignedEvents();
       setEvents(data);
+      // An event handed over leaves this list; keep its panel open (SCRUM-334)
+      // so the coordinator sees the handover rather than losing the page.
+      setActivePanel((current) => {
+        if (!current) return current;
+        const refreshed = data.find((event) => event.id === current.request.id);
+        return refreshed ? { ...current, request: refreshed } : current;
+      });
       setError(null);
       return data;
     } catch (err) {
@@ -253,17 +260,7 @@ export default function MyAssignedEvents() {
             setActivePanel(null);
             fetchEvents();
           }}
-          onChangeRequestProcessed={async () => {
-            const refreshed = await fetchEvents();
-            const refreshedRequest = refreshed?.find(
-              (item) => item.id === activePanel.request.id,
-            );
-            if (refreshedRequest) {
-              setActivePanel((current) =>
-                current ? { ...current, request: refreshedRequest } : current,
-              );
-            }
-          }}
+          onChangeRequestProcessed={fetchEvents}
         />
       </section>
     );
