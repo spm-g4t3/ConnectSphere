@@ -80,6 +80,8 @@ vi.mock("../../src/services/eventRequestService", () => ({
   // SCRUM-521: the handover panel reads this one when the caller is a Lead.
   listCoordinatorWorkload: vi.fn(),
   processCoordinatorChangeRequest: vi.fn(),
+  previewSignificantEventChange: vi.fn(),
+  applySignificantEventChange: vi.fn(),
   reassignEventRequest: vi.fn(),
   requestEventClarification: vi.fn(),
   startEventReview: vi.fn(),
@@ -1241,6 +1243,7 @@ describe("SCRUM266 flagged bookings on the event view", () => {
       statusDisplay: { status: "confirmed", label: "Confirmed", group: "CONFIRMED", description: "" },
       ...overrides,
     });
+
   const flaggedSection = () => screen.queryByRole("heading", { name: "Flagged bookings" })?.closest("section") ?? null;
   const finder = () => screen.getByRole("heading", { name: "Find a venue" }).closest("section");
   const header = () => screen.getByRole("heading", { level: 2 });
@@ -1480,5 +1483,21 @@ describe("SCRUM266 flagged bookings on the event view", () => {
     expect(within(finder()).getByRole("status")).toHaveTextContent(
       `Requesting a replacement for Unknown venue, ${formatVenuePeriod(START_ISO, END_ISO)}`,
     );
+  });
+});
+
+describe("SCRUM395 significant event change entry point", () => {
+  it("SCRUM395_AC1_opens_the_change_preview_only_for_the_assigned_coordinator", async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderAs(ASSIGNED, eventRequest({ status: "confirmed" }));
+
+    await user.click(screen.getByRole("button", { name: "Revise event details" }));
+    expect(screen.getByRole("heading", {
+      name: "Significant change: IS212 Industry Night",
+    })).toBeInTheDocument();
+
+    unmount();
+    renderAs(OTHER, eventRequest({ status: "approved" }));
+    expect(screen.queryByRole("button", { name: "Revise event details" })).not.toBeInTheDocument();
   });
 });

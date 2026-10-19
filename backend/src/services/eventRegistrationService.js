@@ -7,9 +7,9 @@ import {
 import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
 import { getStatusDisplay } from '../domain/eventRequestStatus.js';
 import { REGISTRATION_CONFIGURABLE_STATUSES } from '../domain/registrationStatuses.js';
-import { listOpenEventsForRegistration } from './openEventService.js';
-import { registerForEvent as registerAttendee } from './registrationService.js';
-import { translateRegistrationEligibilityError } from './registrationEligibilityService.js';
+
+// registration_capacity is a Postgres integer.
+const MAX_CAPACITY = 2147483647;
 
 function displayStatus(status) {
   return getStatusDisplay(status).label;
@@ -60,13 +60,18 @@ function normalizeSettings(input) {
 
   let capacity = null;
   if (input.capacity !== null && input.capacity !== undefined && input.capacity !== '') {
-    capacity = Number(input.capacity);
-    if (!Number.isInteger(capacity)) {
-      details.push({
-        field: 'registrationCapacity',
-        message: 'Must be a whole number.',
-      });
-    }
+    // Number() would turn true, [5], '1e2' and '  ' into numbers, so only a
+    // number or a string of digits counts.
+    const raw = input.capacity;
+    if (typeof raw === 'number') capacity = raw;
+    else if (typeof raw === 'string' && /^-?\d+$/.test(raw)) capacity = Number(raw);
+    else capacity = Number.NaN;
+
+    let message = null;
+    if (!Number.isInteger(capacity)) message = 'Must be a whole number.';
+    else if (capacity < 1) message = 'Must be a whole number above zero.';
+    else if (capacity > MAX_CAPACITY) message = `Must be ${MAX_CAPACITY} or fewer.`;
+    if (message) details.push({ field: 'registrationCapacity', message });
   }
 
   if (details.length) {
@@ -102,16 +107,6 @@ function mapSetupOutcome(result) {
     throw new Error(`Unexpected setup_event_registration outcome: ${result.outcome}`);
   }
   return toSettings(result.settings, result.registeredCount);
-}
-
-function translateRegistrationError(error, forbiddenMessage) {
-  if (error.code === '42501') return new ForbiddenError(forbiddenMessage);
-  if (error.code === '22023') {
-    return new ValidationError('An attendee is required.', [
-      { field: 'attendeeId', message: 'An attendee is required.' },
-    ]);
-  }
-  return translateRegistrationEligibilityError(error);
 }
 
 export async function getRegistrationSettings(eventRequestId, userId, { client } = {}) {
@@ -167,38 +162,6 @@ export async function updateRegistrationSettings(eventRequestId, input, userId, 
     p_capacity: settings.capacity,
     p_withdrawal_deadline: settings.withdrawalDeadline,
   });
-  if (rpcError) {
-    throw translateRegistrationError(
-      rpcError,
-      'Only the Event Organiser who created this event can set up its registration.',
-    );
-  }
+  if (rpcError) throw rpcError;
   return mapSetupOutcome(data);
-}
-
-export async function listOpenRegistrationEvents(attendeeId, { client, now } = {}) {
-  const events = await listOpenEventsForRegistration({ attendeeId, client, now });
-  return events.map((event) => ({
-    id: event.id,
-    eventName: event.eventName,
-    description: event.description,
-    startsAt: event.startsAt,
-    registrationOpensAt: event.registrationOpensAt,
-    registrationClosesAt: event.registrationClosesAt,
-    capacity: event.capacity,
-    registeredCount: event.registeredCount,
-    isRegistered: event.isRegistered,
-    isFull: event.isFull,
-  }));
-}
-
-/** Compatibility endpoint: both attendee routes use the same writer and errors. */
-export async function registerForEvent(eventRequestId, attendeeId, { client } = {}) {
-  const row = await registerAttendee({ eventId: eventRequestId, attendeeId, client });
-  return {
-    id: row.id,
-    eventRequestId: row.eventRequestId,
-    attendeeId: row.attendeeId,
-    registeredAt: row.registeredAt ?? row.createdAt,
-  };
 }

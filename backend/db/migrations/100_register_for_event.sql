@@ -1,5 +1,5 @@
 -- Registration locks the event, revalidates eligibility and inserts within one transaction.
--- Requires 092 shared persistence and 093 eligibility, after SCRUM-494.
+-- Requires 098 shared persistence and 099 eligibility, after SCRUM-494.
 
 create or replace function register_for_event(p_event_request_id uuid, p_attendee_id uuid)
 returns jsonb

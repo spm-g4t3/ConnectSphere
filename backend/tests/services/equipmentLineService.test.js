@@ -158,7 +158,7 @@ describe('AC2 to AC5: adding a line', () => {
     expect(JSON.stringify(state)).not.toMatch(/equipment_type_id|technical_notes|type_retired|outcome_note/);
   });
 
-  it('SCRUM290_AC10_carries_reserved_and_the_reviewers_outcome_to_the_coordinator', async () => {
+  it('SCRUM290_AC8_carries_reserved_and_the_reviewers_outcome_to_the_coordinator', async () => {
     client = fakeClient({
       rpc: {
         equipment_for_event: ok(

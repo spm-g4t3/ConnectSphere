@@ -10,6 +10,15 @@
 //     blockStartsAt, blockEndsAt }
 //   booking_request_withdrawn (031): { eventRequestId, eventName, venueId,
 //     venueName, startsAt, endsAt }
+//   booking_request_submitted (083, SCRUM-174): { eventRequestId, eventName,
+//     venueId, venueName, startsAt, endsAt }
+//   booking_request_venue_unavailable (084, SCRUM-174): { cause,
+//     eventRequestId, eventName, venueId, venueName, startsAt, endsAt,
+//     reason, blockStartsAt, blockEndsAt, retiredAt }; cause is block or
+//     retired, the block* fields and reason are set for a block, retiredAt
+//     for a retirement
+//   booking_flagged_venue_retired (085, SCRUM-174): { eventRequestId,
+//     eventName, venueId, venueName, startsAt, endsAt, retiredAt }
 //   booking_flagged_setup_change (034, SCRUM-484): { venueName, eventName,
 //     startsAt, endsAt, occupiedStartsAt, occupiedEndsAt, setupMinutes,
 //     turnaroundMinutes, reason }
@@ -49,6 +58,20 @@
 //     venueName, startsAt, endsAt, releasedBy, releasedByName, reason }
 //   booking_request_conflict_cleared (089): { eventRequestId, eventName,
 //     venueId, venueName, startsAt, endsAt, releasedBookingId, releasedEventName }
+//   event_significant_change (096): { eventRequestId, eventName, reason,
+//     changedFields, statusBefore, statusAfter }
+//   event_significant_change_attendee (096): { eventRequestId, eventName,
+//     startsAt, endsAt, reason }
+//   booking_flagged_event_change (096): { eventName, venueName, startsAt,
+//     endsAt, reason }
+//   booking_request_event_change (096): { eventRequestId, eventName,
+//     venueName, startsAt, endsAt, newStartsAt, newEndsAt, reason }; startsAt
+//     and endsAt are the pending request's own (old) times
+//   registration_schedule_conflict (091, SCRUM-494): { eventName, newStart,
+//     fields }; fields lists the registration dates the new start now precedes
+//   equipment_* (097, SCRUM-176): { audience, eventRequestId, eventName,
+//     lines: [{ equipmentType, quantity, reserved, outcome }], ... }; see
+//     describeEquipmentNotification for what each type adds.
 // Every field is read defensively -- a notification outlives the build that
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
@@ -63,6 +86,7 @@ const NO_REASON = "No reason recorded";
 const PREVIOUS_COORDINATOR = "the previous coordinator";
 // Week 7: a flagged booking tells its coordinator another plan is needed.
 const ALTERNATIVE_ARRANGEMENTS = " Alternative arrangements are required.";
+const VENUE_RETIRED = "The venue has been retired.";
 
 /** True when `value` is a time that will parse. */
 function isInstant(value) {
@@ -103,6 +127,114 @@ function needsReview(eventName, venueName) {
   return `${eventName} at ${venueName} needs review`;
 }
 
+const EQUIPMENT_TYPES = [
+  "equipment_requested",
+  "equipment_request_changed",
+  "equipment_request_cancelled",
+  "equipment_arranged",
+  "equipment_not_fully_arranged",
+  "equipment_flagged",
+];
+
+/** "2 x Projector, 1 x Speaker" for the lines a payload carries, or "". */
+function equipmentLines(lines) {
+  return lines
+    .map((line) => `${line?.quantity ?? "?"} x ${line?.equipmentType || "Unknown equipment"}`)
+    .join(", ");
+}
+
+/** The headline and detail of one equipment_* notification (097, SCRUM-176). */
+function describeEquipmentNotification(notification) {
+  const payload = notification.payload ?? {};
+  const eventName = payload.eventName || "Unnamed event";
+  const lines = Array.isArray(payload.lines) ? payload.lines : [];
+  const listed = equipmentLines(lines);
+
+  switch (notification.type) {
+    case "equipment_requested":
+      return {
+        headline: `Equipment requested for ${eventName}`,
+        detail: listed ? `Requested: ${listed}.` : "Open the request to see what was asked for.",
+      };
+
+    case "equipment_request_cancelled":
+      return {
+        headline: `The equipment request for ${eventName} was cancelled`,
+        detail:
+          `${payload.reason || "The request was cancelled"}. ` +
+          "Any equipment held for it was released.",
+      };
+
+    case "equipment_arranged":
+      return {
+        headline: `Equipment for ${eventName} is arranged`,
+        detail: listed ? `Every line is fully reserved: ${listed}.` : "Every line is fully reserved.",
+      };
+
+    case "equipment_not_fully_arranged": {
+      const short = lines.filter((line) => (line?.reserved ?? 0) < (line?.quantity ?? 0));
+      const shortText = short
+        .map(
+          (line) =>
+            `${line.equipmentType || "Unknown equipment"} (${line.reserved ?? 0} of ${line.quantity} reserved)`,
+        )
+        .join(", ");
+      return {
+        headline: `Equipment for ${eventName} cannot be fully arranged`,
+        detail: shortText ? `Short: ${shortText}.` : "Some equipment could not be provided.",
+      };
+    }
+
+    case "equipment_flagged":
+      return {
+        headline: `Reserved equipment for ${eventName} was flagged`,
+        detail:
+          `${payload.equipmentType ? `${payload.equipmentType}: ` : ""}` +
+          `${payload.reason || "The equipment is no longer available"}. ` +
+          "The reservation is flagged for review.",
+      };
+
+    default: {
+      // equipment_request_changed: what changed is in payload.change.
+      if (payload.change === "added") {
+        return {
+          headline: `Equipment added for ${eventName}`,
+          detail: listed ? `Added: ${listed}.` : "A line was added to the request.",
+        };
+      }
+      if (payload.change === "removed") {
+        return {
+          headline: `Equipment removed for ${eventName}`,
+          detail: listed ? `Removed: ${listed}.` : "A line was removed from the request.",
+        };
+      }
+      if (payload.change === "event_period") {
+        const period =
+          isInstant(payload.startsAt) && isInstant(payload.endsAt)
+            ? `The event is now ${formatRange(payload.startsAt, payload.endsAt)}. `
+            : "";
+        return {
+          headline: `The date or time of ${eventName} changed`,
+          // Sent even when nothing is reserved yet, so the flag is conditional.
+          detail: `${period}Any reserved equipment is flagged for review.`,
+        };
+      }
+      const [line] = lines;
+      const parts = [];
+      if (line && payload.previousQuantity !== undefined && payload.previousQuantity !== line.quantity) {
+        parts.push(`${line.equipmentType}: quantity was ${payload.previousQuantity}, now ${line.quantity}.`);
+      }
+      if (payload.notesChanged) {
+        parts.push(`Technical notes were updated${line ? ` for ${line.equipmentType}` : ""}.`);
+      }
+      return {
+        headline: `Equipment changed for ${eventName}`,
+        detail: parts.length > 0 ? parts.join(" ") : "A line on the request was changed.",
+      };
+    }
+  }
+}
+
 /** Free text ended with a full stop, unless it already ends a sentence. */
 function asSentence(text) {
   return /[.!?]$/.test(text) ? text : `${text}.`;
@@ -113,10 +245,28 @@ function bookedFor(payload) {
   return `Booked ${formatRange(payload.startsAt, payload.endsAt)}. `;
 }
 
+/** "The venue is blocked for <reason>, <range>.", from a block's payload. */
+function blockedFor(payload) {
+  const reason = payload.reason ? reasonLabel(payload.reason) : "unspecified reason";
+  return `The venue is blocked for ${reason}, ${formatRange(payload.blockStartsAt, payload.blockEndsAt)}.`;
+}
+
 /**
  * The clarification types share a describer. Their fallback is "the event
  * request", not "Unnamed event": the sentence still reads with no name.
  */
+// The same words the registration settings form uses for these fields.
+const REGISTRATION_DATE_LABELS = {
+  registrationOpensAt: "opening time",
+  registrationClosesAt: "closing time",
+  registrationWithdrawalDeadline: "withdrawal deadline",
+};
+
+/** "a", "a and b", "a, b and c". */
+function joinWords(words) {
+  return words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${words.at(-1)}` : words[0];
+}
+
 function describeClarification(payload, _names, type) {
   const eventName = payload.eventName || "the event request";
   const headlineByType = {
@@ -138,14 +288,35 @@ function describeClarification(payload, _names, type) {
 // generic result.
 const DESCRIBERS = {
   booking_flagged(payload, { eventName, venueName }) {
-    const reason = payload.reason ? reasonLabel(payload.reason) : "unspecified reason";
-
     return {
       headline: needsReview(eventName, venueName),
+      detail: bookedFor(payload) + blockedFor(payload) + ALTERNATIVE_ARRANGEMENTS,
+    };
+  },
+
+  // 085 (SCRUM-174 AC6). Retiring a venue flags its confirmed bookings; to
+  // the reader it is the same thing as a block flag, so the same headline.
+  booking_flagged_venue_retired(payload, { eventName, venueName }) {
+    return {
+      headline: needsReview(eventName, venueName),
+      detail: bookedFor(payload) + VENUE_RETIRED + ALTERNATIVE_ARRANGEMENTS,
+    };
+  },
+
+  // 084/085 (SCRUM-174 AC5). A block or retirement over a pending request
+  // leaves it pending (changes never un-book), so the coordinator is told it
+  // is still open and the next step is theirs. An unknown cause reads as the
+  // generic notification.
+  booking_request_venue_unavailable(payload, { eventName, venueName }) {
+    const causes = { block: blockedFor, retired: () => VENUE_RETIRED };
+    if (!Object.hasOwn(causes, payload.cause)) return undefined;
+
+    return {
+      headline: `${venueName} is unavailable for your request for ${eventName}`,
       detail:
-        bookedFor(payload) +
-        `The venue is blocked for ${reason}, ${formatRange(payload.blockStartsAt, payload.blockEndsAt)}.` +
-        ALTERNATIVE_ARRANGEMENTS,
+        `Requested ${formatRange(payload.startsAt, payload.endsAt)}. ` +
+        causes[payload.cause](payload) +
+        " The request is still open; you may want to request another venue.",
     };
   },
 
@@ -180,6 +351,17 @@ const DESCRIBERS = {
       detail:
         `It was for ${formatRange(payload.startsAt, payload.endsAt)}. ` +
         "It no longer needs a decision.",
+    };
+  },
+
+  // 083 (SCRUM-174 AC1). Sent to every Venue Staff user when a coordinator
+  // submits a booking request, so it reaches the queue's deciders. The
+  // reader is who must act next, so the inbox marks it as needing action.
+  booking_request_submitted(payload, { eventName, venueName }) {
+    return {
+      headline: `New request: ${eventName} at ${venueName}`,
+      detail: `It is for ${formatRange(payload.startsAt, payload.endsAt)}. It needs a decision.`,
+      needsAction: true,
     };
   },
 
@@ -423,11 +605,62 @@ const DESCRIBERS = {
     };
   },
 
+  // SCRUM-494 (AC7). Sent to the Organiser and coordinator when the start
+  // moves before registration dates; the dates are left for them to fix.
+  registration_schedule_conflict(payload, { eventName }) {
+    const fields = Array.isArray(payload.fields) ? payload.fields : [];
+    const labels = fields.map((field) => REGISTRATION_DATE_LABELS[field]).filter(Boolean);
+    const newStart = isInstant(payload.newStart) ? ` (${formatTimestamp(payload.newStart)})` : "";
+    const clash = labels.length
+      ? `is earlier than the ${joinWords(labels)}`
+      : "clashes with the registration dates";
+
+    return {
+      headline: `Registration dates for ${eventName} need updating`,
+      detail: `The new start${newStart} ${clash}.`,
+    };
+  },
+
   // SCRUM-172 (AC6). Sent to Tech Support for the same safety outcomes.
   safety_equipment_review(payload, { eventName }) {
     return {
       headline: `Equipment for ${eventName} needs review after the safety check`,
       detail: "The Safety Officer flagged the equipment arrangements.",
+    };
+  },
+
+  event_significant_change(payload, { eventName }) {
+    return {
+      headline: `${eventName} has a significant change`,
+      detail: `The event was updated by its Coordinator. Reason: ${payload.reason || NO_REASON}.`,
+    };
+  },
+
+  event_significant_change_attendee(payload, { eventName }) {
+    const period = payload.startsAt && payload.endsAt
+      ? ` The event now runs ${formatRange(payload.startsAt, payload.endsAt)}.`
+      : "";
+    return {
+      headline: `An event you registered for has changed: ${eventName}`,
+      detail: `Reason: ${payload.reason || NO_REASON}.${period}`,
+    };
+  },
+
+  booking_flagged_event_change(payload, { eventName, venueName }) {
+    return {
+      headline: `${needsReview(eventName, venueName)} after a significant event change`,
+      detail: bookedFor(payload) + `Coordinator's reason: ${payload.reason || NO_REASON}.`,
+    };
+  },
+
+  // The request is not flagged, so Venue Staff see both periods before deciding it.
+  booking_request_event_change(payload, { eventName, venueName }) {
+    return {
+      headline: `${eventName} moved; a pending request is for the old time`,
+      detail:
+        `The request for ${venueName} is for ${formatRange(payload.startsAt, payload.endsAt)}. ` +
+        `The event now runs ${formatRange(payload.newStartsAt, payload.newEndsAt)}. ` +
+        `Coordinator's reason: ${payload.reason || NO_REASON}.`,
     };
   },
 };
@@ -436,7 +669,7 @@ const DESCRIBERS = {
  * A notification as a headline and a detail line.
  *
  * @param {Object} notification  as returned by GET /api/notifications
- * @returns {{headline: string, detail: string}}
+ * @returns {{headline: string, detail: string, needsAction?: true}}
  */
 export function describeNotification(notification) {
   const payload = notification?.payload ?? {};
@@ -453,6 +686,10 @@ export function describeNotification(notification) {
     type,
   );
   if (described) return described;
+
+  if (EQUIPMENT_TYPES.includes(notification?.type)) {
+    return describeEquipmentNotification(notification);
+  }
 
   // A type this build does not know (the backend added one). Shown, not
   // hidden: an unread notification that renders as nothing would sit in the

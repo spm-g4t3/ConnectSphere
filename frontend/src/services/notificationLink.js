@@ -7,6 +7,22 @@ import { normaliseRole } from "../auth/normaliseRole";
 
 const eventRequestPage = (id) => ({ to: `/event-requests/${id}` });
 
+const VENUE_STAFF_PAGES = {
+  booking_request_submitted: { to: "/booking-requests" },
+  safety_booking_flagged: { to: "/flagged-bookings" },
+  booking_flagged_event_change: { to: "/flagged-bookings" },
+  booking_request_event_change: { to: "/booking-requests" },
+};
+
+// What opens the equipment review: the safety flag (SCRUM-172) and the
+// equipment notifications (SCRUM-176) Technical Support is sent about a live
+// request. A cancelled one is left out.
+const TECH_SUPPORT_REVIEW_TYPES = new Set([
+  "safety_equipment_review",
+  "equipment_requested",
+  "equipment_request_changed",
+]);
+
 // One entry per role, so a later story adds a line rather than a branch.
 const LINKS_BY_ROLE = {
   // The review page lets any coordinator or Lead read any submitted event;
@@ -16,19 +32,23 @@ const LINKS_BY_ROLE = {
 
   // The organiser's only event page is their own list; router state picks
   // the row, as the dashboard's clarification shortcut already does.
-  EVENT_ORGANISER: (type, id) =>
-    type === "clarification_requested"
-      ? { to: "/events", state: { openClarificationRequestId: id } }
-      : { to: "/events", state: { focusEventRequestId: id } },
+  EVENT_ORGANISER: (type, id) => {
+    if (type === "clarification_requested") {
+      return { to: "/events", state: { openClarificationRequestId: id } };
+    }
+    // The clashing dates are fixed on the event's registration settings page.
+    if (type === "registration_schedule_conflict") return { to: `/events/${id}/registration` };
+    return { to: "/events", state: { focusEventRequestId: id } };
+  },
 
-  // A cancelled event's review has nothing left to act on.
+  // A cancelled event's review has nothing left to act on, and neither has a
+  // cancelled equipment request.
   TECHNICAL_SUPPORT_STAFF: (type, id) =>
-    type === "safety_equipment_review" ? { to: `/equipment-review/${id}` } : null,
+    TECH_SUPPORT_REVIEW_TYPES.has(type) ? { to: `/equipment-review/${id}` } : null,
 
-  // A safety flag is resolved on their flagged bookings list. Their other
-  // types are not about a pending request; SCRUM-174's "new request" notice
-  // will link to the queue.
-  VENUE_STAFF: (type) => (type === "safety_booking_flagged" ? { to: "/flagged-bookings" } : null),
+  // A new request is decided in their queue and a safety flag on their flagged
+  // bookings list. A withdrawn request has nothing left to decide, so no link.
+  VENUE_STAFF: (type) => VENUE_STAFF_PAGES[type] ?? null,
   // No safety review page yet (SCRUM-490).
   SAFETY_OFFICER: () => null,
   // No attendee event page yet (SCRUM-495).

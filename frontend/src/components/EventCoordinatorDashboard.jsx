@@ -16,7 +16,8 @@
 // called a venueService stub that console.warn'd and returned [] with no
 // endpoint behind it, and that stub is now deleted. Its seat now holds NotificationInbox: when a
 // Venue Staff member blocks a venue over an approved booking, the booking is
-// flagged for review and every Coordinator is notified there (SCRUM-17 AC3).
+// flagged for review and the event's coordinator (or, with none assigned,
+// every Lead) is notified there.
 // Both sections are components of their own, so this file is only the page
 // around them.
 

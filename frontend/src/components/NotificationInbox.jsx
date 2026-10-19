@@ -151,7 +151,7 @@ export default function NotificationInbox() {
           the reason ReviewQueue gives. */}
       <ul>
         {notifications.map((notification) => {
-          const { headline, detail } = describeNotification(notification);
+          const { headline, detail, needsAction } = describeNotification(notification);
           const unread = !notification.readAt;
           const rowError = rowErrors[notification.id];
           const link = user ? notificationLink(notification, user.role) : null;
@@ -178,6 +178,11 @@ export default function NotificationInbox() {
                     </Link>
                   ) : (
                     <strong>{headline}</strong>
+                  )}
+                  {unread && needsAction && (
+                    <span className="notification-inbox__action">
+                      Needs your action <span aria-hidden="true">→</span>
+                    </span>
                   )}
                   {unread && <span className="notification-inbox__new">New</span>}
                 </p>

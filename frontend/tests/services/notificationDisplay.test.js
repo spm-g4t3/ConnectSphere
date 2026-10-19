@@ -101,6 +101,77 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
     expect(headline).not.toBe("New notification");
   });
 
+  describe("describeNotification: significant event changes (SCRUM-395)", () => {
+    it("SCRUM395_AC9_explains_the_change_to_the_organiser", () => {
+      const notification = {
+        id: "n395-1",
+        type: "event_significant_change",
+        payload: { eventName: "Tech Talk", reason: "Updated schedule" },
+      };
+      expect(describeNotification(notification)).toEqual({
+        headline: "Tech Talk has a significant change",
+        detail: "The event was updated by its Coordinator. Reason: Updated schedule.",
+      });
+    });
+
+    it("SCRUM395_AC9_shows_the_changed_period_to_registered_attendees", () => {
+      const notification = {
+        id: "n395-2",
+        type: "event_significant_change_attendee",
+        payload: {
+          eventName: "Tech Talk",
+          reason: "Updated schedule",
+          startsAt: PAYLOAD.startsAt,
+          endsAt: PAYLOAD.endsAt,
+        },
+      };
+      const { headline, detail } = describeNotification(notification);
+      expect(headline).toBe("An event you registered for has changed: Tech Talk");
+      expect(detail).toContain("Reason: Updated schedule.");
+      expect(detail).toContain(formatRange(PAYLOAD.startsAt, PAYLOAD.endsAt));
+    });
+
+    it("SCRUM395_AC9_explains_a_venue_booking_flag", () => {
+      const notification = {
+        id: "n395-3",
+        type: "booking_flagged_event_change",
+        payload: {
+          eventName: "Tech Talk",
+          venueName: "Hall A",
+          startsAt: PAYLOAD.startsAt,
+          endsAt: PAYLOAD.endsAt,
+          reason: "Updated schedule",
+        },
+      };
+      const { headline, detail } = describeNotification(notification);
+      expect(headline).toBe("Tech Talk at Hall A needs review after a significant event change");
+      expect(detail).toContain("Coordinator's reason: Updated schedule.");
+    });
+
+    it("SCRUM395_AC9_gives_venue_staff_both_periods_for_a_pending_request", () => {
+      const notification = {
+        id: "n395-4",
+        type: "booking_request_event_change",
+        payload: {
+          eventName: "Tech Talk",
+          venueName: "Hall A",
+          startsAt: PAYLOAD.startsAt,
+          endsAt: PAYLOAD.endsAt,
+          newStartsAt: "2040-12-02T10:00:00+08:00",
+          newEndsAt: "2040-12-02T12:00:00+08:00",
+          reason: "Updated schedule",
+        },
+      };
+      expect(describeNotification(notification)).toEqual({
+        headline: "Tech Talk moved; a pending request is for the old time",
+        detail:
+          `The request for Hall A is for ${formatRange(PAYLOAD.startsAt, PAYLOAD.endsAt)}. ` +
+          `The event now runs ${formatRange("2040-12-02T10:00:00+08:00", "2040-12-02T12:00:00+08:00")}. ` +
+          "Coordinator's reason: Updated schedule.",
+      });
+    });
+  });
+
   it("SCRUM484_AC8_setup_change_detail_does_not_repeat_the_backend_reason", () => {
     expect(describeNotification(setupChange()).detail).not.toContain(SETUP_PAYLOAD.reason);
   });
@@ -175,6 +246,20 @@ describe("describeNotification: booking_request_withdrawn", () => {
       detail:
         `It was for ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
         "It no longer needs a decision.",
+    });
+  });
+});
+
+// 083. Sent to every Venue Staff user when a coordinator submits a request.
+describe("describeNotification: booking_request_submitted", () => {
+  it("SCRUM174_AC1_submitted_request_headline_and_detail", () => {
+    const submitted = { id: "n12", type: "booking_request_submitted", payload: WITHDRAWN_PAYLOAD };
+    expect(describeNotification(submitted)).toEqual({
+      headline: "New request: Tech Talk at Hall A",
+      detail:
+        `It is for ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
+        "It needs a decision.",
+      needsAction: true,
     });
   });
 });
@@ -396,6 +481,11 @@ describe("describeNotification: Venue Staff decisions (SCRUM-258 AC6)", () => {
     expect(detail).toBe("Reason: Under renovation");
   });
 
+  it("SCRUM174_AC4_rejected_with_alternative_but_no_reason", () => {
+    const { detail } = of("booking_request_rejected", { ...DECISION, suggestedAlternative: "Hall B" });
+    expect(detail).toBe("Reason: No reason recorded. Suggested alternative: Hall B");
+  });
+
   it("SCRUM258_AC3_conflicting_names_the_approved_event_and_says_the_request_is_still_open", () => {
     const { headline, detail } = of("booking_request_conflicting", {
       ...DECISION,
@@ -597,9 +687,71 @@ describe("describeNotification: flagged bookings need alternative arrangements (
   it.each([
     ["booking_flagged", PAYLOAD],
     ["booking_flagged_setup_change", SETUP_PAYLOAD],
+    ["booking_flagged_venue_retired", RETIRED_PAYLOAD],
   ])("SCRUM266_W7_%s_says_alternative_arrangements_are_required", (type, payload) => {
     const { detail } = describeNotification({ id: "n1", type, payload });
     expect(detail).toMatch(/\. Alternative arrangements are required\.$/);
+  });
+});
+
+// SCRUM-174. A block or retirement reaches the coordinator of each affected
+// booking or request; the payloads 084 and 085 write.
+const UNAVAILABLE_PAYLOAD = {
+  ...WITHDRAWN_PAYLOAD,
+  cause: "block",
+  reason: "maintenance",
+  blockStartsAt: PAYLOAD.blockStartsAt,
+  blockEndsAt: PAYLOAD.blockEndsAt,
+};
+const RETIRED_PAYLOAD = { ...WITHDRAWN_PAYLOAD, retiredAt: "2026-09-20T09:00:00+08:00" };
+const REQUESTED = `Requested ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}.`;
+const STILL_OPEN = "The request is still open; you may want to request another venue.";
+const unavailable = (overrides = {}) => describeNotification({
+  id: "n13",
+  type: "booking_request_venue_unavailable",
+  payload: { ...UNAVAILABLE_PAYLOAD, ...overrides },
+});
+
+describe("describeNotification: booking_request_venue_unavailable (SCRUM-174 AC5)", () => {
+  it("SCRUM174_AC5_block_names_the_reason_and_block_period_and_says_the_request_is_open", () => {
+    expect(unavailable()).toEqual({
+      headline: "Hall A is unavailable for your request for Tech Talk",
+      detail: `${REQUESTED} The venue is blocked for Maintenance, ${BLOCKED}. ${STILL_OPEN}`,
+    });
+  });
+
+  it("SCRUM174_AC5_block_without_a_reason_reads_as_unspecified", () => {
+    expect(unavailable({ reason: null }).detail).toBe(
+      `${REQUESTED} The venue is blocked for unspecified reason, ${BLOCKED}. ${STILL_OPEN}`,
+    );
+  });
+
+  it("SCRUM174_AC5_retired_says_the_venue_was_retired_not_blocked", () => {
+    expect(unavailable({ cause: "retired", reason: undefined, blockStartsAt: undefined, blockEndsAt: undefined })).toEqual({
+      headline: "Hall A is unavailable for your request for Tech Talk",
+      detail: `${REQUESTED} The venue has been retired. ${STILL_OPEN}`,
+    });
+  });
+
+  it.each([
+    ["an unknown cause", { cause: "demolished" }],
+    ["a missing cause", { cause: undefined }],
+  ])("SCRUM174_AC5_%s_reads_as_the_generic_notification", (_label, overrides) => {
+    expect(unavailable(overrides)).toEqual({
+      headline: "New notification",
+      detail: "This notification type cannot be displayed yet.",
+    });
+  });
+});
+
+describe("describeNotification: booking_flagged_venue_retired (SCRUM-174 AC6)", () => {
+  it("SCRUM174_AC6_retired_flag_gives_the_booked_period_and_asks_for_alternatives", () => {
+    expect(describeNotification({ id: "n14", type: "booking_flagged_venue_retired", payload: RETIRED_PAYLOAD })).toEqual({
+      headline: "Tech Talk at Hall A needs review",
+      detail:
+        `Booked ${formatRange(RETIRED_PAYLOAD.startsAt, RETIRED_PAYLOAD.endsAt)}. ` +
+        "The venue has been retired. Alternative arrangements are required.",
+    });
   });
 });
 
@@ -808,6 +960,24 @@ const FALLBACKS = [
         "Your request is still open; you can withdraw it or wait for Venue Staff.",
     }],
   ].map(([type, expected]) => [`SCRUM258_AC6_${type}_tolerates_an_empty_payload`, type, null, expected]),
+  ...NO_PAYLOAD.map(([label, payload]) => [
+    `SCRUM174_AC6_venue_retired_flag_tolerates_${label}_payload`,
+    "booking_flagged_venue_retired",
+    payload,
+    {
+      headline: "Unnamed event at Unknown venue needs review",
+      detail: "Booked unknown – unknown. The venue has been retired. Alternative arrangements are required.",
+    },
+  ]),
+  ...NAMELESS.map(([label, value]) => [
+    `SCRUM174_AC5_venue_unavailable_falls_back_for_a_${label}_event_and_venue_name`,
+    "booking_request_venue_unavailable",
+    { cause: "retired", eventName: value, venueName: value },
+    {
+      headline: "Unknown venue is unavailable for your request for Unnamed event",
+      detail: `Requested unknown – unknown. The venue has been retired. ${STILL_OPEN}`,
+    },
+  ]),
   ...[
     ["awaiting_assignment", "event_request_awaiting_assignment", {
       headline: "Unnamed event is waiting for a coordinator",
@@ -843,36 +1013,85 @@ const FALLBACKS = [
   ),
 ];
 
+describe("describeNotification: registration_schedule_conflict (SCRUM-494 AC7)", () => {
+  const NEW_START = "2030-01-01T09:00:00.000Z";
+
+  it("SCRUM494_AC7_names_the_event_and_every_clashing_registration_date_in_words", () => {
+    const described = describeNotification({
+      id: "n1",
+      type: "registration_schedule_conflict",
+      payload: {
+        eventName: "Industry Night",
+        newStart: NEW_START,
+        fields: ["registrationClosesAt", "registrationWithdrawalDeadline"],
+      },
+    });
+
+    expect(described).toEqual({
+      headline: "Registration dates for Industry Night need updating",
+      detail: `The new start (${formatTimestamp(NEW_START)}) is earlier than the closing time and withdrawal deadline.`,
+    });
+    expect(described.detail).not.toMatch(/registration[A-Z]/);
+  });
+
+  it("SCRUM494_AC7_lists_three_clashing_dates_and_skips_unknown_field_keys", () => {
+    const { detail } = describeNotification({
+      id: "n1",
+      type: "registration_schedule_conflict",
+      payload: {
+        eventName: "Industry Night",
+        newStart: NEW_START,
+        fields: ["registrationOpensAt", "somethingNew", "registrationClosesAt", "registrationWithdrawalDeadline"],
+      },
+    });
+
+    expect(detail).toBe(
+      `The new start (${formatTimestamp(NEW_START)}) is earlier than the opening time, closing time and withdrawal deadline.`,
+    );
+  });
+
+  it("SCRUM494_AC7_still_reads_as_a_clash_when_the_payload_is_missing_its_fields", () => {
+    expect(describeNotification({ id: "n1", type: "registration_schedule_conflict", payload: {} })).toEqual({
+      headline: "Registration dates for Unnamed event need updating",
+      detail: "The new start clashes with the registration dates.",
+    });
+  });
+});
+
 describe("describeNotification: missing names and payloads", () => {
   it.each(FALLBACKS)("%s", (_title, type, payload, expected) => {
     expect(describeNotification({ id: "n1", type, payload })).toEqual(expected);
   });
 });
 
-// The latest migration that restates notifications_type_known is the list of
-// types the backend can send; a type there with no wording here would show
-// as "New notification".
+// Each migration that sets notifications_type_known adds its list to the live
+// constraint and none removes a type, so the union of every list is what the
+// backend can send; a type there with no wording here would show as "New notification".
 const MIGRATIONS = resolve(dirname(fileURLToPath(import.meta.url)), "../../../backend/db/migrations");
 // Migrations write the list either as a plain check or as 066's v_ours array.
-// Filenames sort as the backend migration tests sort them, so a tied number
-// resolves the same way.
 const TYPE_LIST =
   /add constraint notifications_type_known\s+check\s*\(\s*type\s+in\s*\(([^)]*)\)|v_ours\s+text\[\]\s*:=\s*array\[([^\]]*)\]/;
 
 function knownNotificationTypes() {
-  const latest = readdirSync(MIGRATIONS)
+  const types = readdirSync(MIGRATIONS)
     .filter((name) => /^\d+_.*\.sql$/.test(name))
-    .sort()
-    .map((name) => readFileSync(join(MIGRATIONS, name), "utf8"))
-    .filter((sql) => TYPE_LIST.test(sql))
-    .pop();
-  const [, plain, ours] = latest.match(TYPE_LIST);
-  return [...(plain ?? ours).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+    .map((name) => readFileSync(join(MIGRATIONS, name), "utf8").match(TYPE_LIST))
+    .filter(Boolean)
+    .flatMap(([, plain, ours]) => [...(plain ?? ours).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]));
+  return [...new Set(types)];
 }
 
 const FIXTURES = {
   booking_flagged: PAYLOAD,
+  booking_flagged_event_change: {
+    eventName: "Tech Talk",
+    venueName: "Hall A",
+    startsAt: PAYLOAD.startsAt,
+    endsAt: PAYLOAD.endsAt,
+    reason: "Updated schedule",
+  },
   booking_request_withdrawn: WITHDRAWN_PAYLOAD,
+  booking_request_submitted: WITHDRAWN_PAYLOAD,
   clarification_requested: { eventName: "Tech Talk", message: "Please confirm." },
   clarification_replied: { eventName: "Tech Talk", message: "Confirmed." },
   clarification_closed: { eventName: "Tech Talk" },
@@ -885,14 +1104,41 @@ const FIXTURES = {
   safety_review_response: { eventName: "Tech Talk", outcome: "approved" },
   safety_booking_flagged: { eventName: "Tech Talk", venueName: "Hall A", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt },
   safety_equipment_review: { eventName: "Tech Talk" },
+  booking_request_event_change: {
+    eventName: "Tech Talk",
+    venueName: "Hall A",
+    startsAt: PAYLOAD.startsAt,
+    endsAt: PAYLOAD.endsAt,
+    newStartsAt: PAYLOAD.startsAt,
+    newEndsAt: PAYLOAD.endsAt,
+    reason: "Updated schedule",
+  },
+  event_significant_change: { eventName: "Tech Talk", reason: "Updated schedule" },
+  event_significant_change_attendee: {
+    eventName: "Tech Talk",
+    startsAt: PAYLOAD.startsAt,
+    endsAt: PAYLOAD.endsAt,
+    reason: "Updated schedule",
+  },
   event_submitted_for_safety_review: { eventName: "Tech Talk", coordinatorName: "Nia New", startsAt: PAYLOAD.startsAt },
   booking_request_approved: { eventName: "Tech Talk", venueName: "Hall A", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt },
   booking_request_rejected: { eventName: "Tech Talk", venueName: "Hall A", reason: "Under renovation" },
   booking_request_conflicting: { eventName: "Tech Talk", venueName: "Hall A", approvedEventName: "Gala Dinner" },
   flagged_booking_resolved: RESOLVED_PAYLOAD,
+  booking_request_venue_unavailable: UNAVAILABLE_PAYLOAD,
+  booking_flagged_venue_retired: RETIRED_PAYLOAD,
   // SCRUM-492 (089).
   booking_released: { eventName: "Tech Talk", venueName: "Hall A", releasedByName: "Priya Nair", reason: "Moved" },
   booking_request_conflict_cleared: { eventName: "Tech Talk", venueName: "Hall A", releasedEventName: "Gala Dinner" },
+  // SCRUM-176 (097).
+  equipment_requested: { eventName: "Tech Talk", lines: [] },
+  equipment_request_changed: { eventName: "Tech Talk", lines: [] },
+  equipment_request_cancelled: { eventName: "Tech Talk", reason: "Removed" },
+  equipment_arranged: { eventName: "Tech Talk", lines: [] },
+  equipment_not_fully_arranged: { eventName: "Tech Talk", lines: [] },
+  equipment_flagged: { eventName: "Tech Talk", reason: "Retired" },
+  // SCRUM-494 (091).
+  registration_schedule_conflict: { eventName: "Tech Talk", fields: ["registrationClosesAt"] },
 };
 
 describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", () => {
@@ -905,5 +1151,41 @@ describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", (
       (type) => describeNotification({ id: "n11", type, payload: FIXTURES[type] }).headline === "New notification",
     );
     expect(generic).toEqual([]);
+  });
+});
+
+describe("describeNotification: fallbacks for sparse payloads", () => {
+  const d = (type, payload) => describeNotification({ id: "n20", type, payload });
+
+  it("SCRUM395_AC9_booking_released_falls_back_to_the_coordinator_and_no_reason", () => {
+    const out = d("booking_released", {});
+    expect(out.detail).toContain("released by the event's coordinator");
+  });
+
+  it("SCRUM395_AC9_conflict_cleared_names_another_event_when_none_is_given", () => {
+    expect(d("booking_request_conflict_cleared", {}).detail).toContain("Another event");
+  });
+
+  it("SCRUM395_AC9_safety_submission_defaults_the_coordinator_and_omits_a_bad_start", () => {
+    const out = d("event_submitted_for_safety_review", {});
+    expect(out.detail).toContain("its coordinator");
+    expect(out.detail).not.toContain("It starts");
+  });
+
+  it("SCRUM395_AC9_significant_change_types_fall_back_when_fields_are_missing", () => {
+    expect(d("event_significant_change", {}).detail).toContain("Reason:");
+    expect(d("event_significant_change_attendee", { startsAt: PAYLOAD.startsAt }).detail).not.toContain("now runs");
+    expect(d("event_significant_change_attendee", { reason: "Moved", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt }).detail)
+      .toContain("now runs");
+    expect(d("booking_flagged_event_change", {}).detail).toContain("Coordinator's reason:");
+    expect(d("booking_flagged_event_change", { reason: "Moved" }).detail).toContain("Moved");
+  });
+
+  it("SCRUM395_AC9_pending_request_notice_falls_back_when_fields_are_missing", () => {
+    const { headline, detail } = d("booking_request_event_change", {});
+    expect(headline).toBe("Unnamed event moved; a pending request is for the old time");
+    expect(detail).toContain("The request for Unknown venue");
+    expect(detail).toContain("Coordinator's reason: No reason recorded.");
+    expect(`${headline} ${detail}`).not.toContain("undefined");
   });
 });

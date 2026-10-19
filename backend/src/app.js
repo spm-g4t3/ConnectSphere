@@ -22,6 +22,7 @@ import equipmentRoutes from './routes/equipment.js';
 import eventEquipmentRoutes from './routes/eventEquipment.js';
 import venueSuitabilityRoutes from './routes/venueSuitability.js';
 import equipmentReviewRoutes from './routes/equipmentReview.js';
+import equipmentQueueRoutes from './routes/equipmentQueue.js';
 import safetyReviewRoutes from './routes/safetyReviews.js';
 import openEventRoutes from './routes/openEvents.js';
 import { startVenueHoldExpiryScheduler } from './jobs/venueHoldExpiryScheduler.js';
@@ -62,6 +63,10 @@ app.use('/api/notifications', notificationRoutes);
 // SCRUM-23: the equipment availability check. Mounted BEFORE /api/equipment so a
 // later GET /api/equipment/:id can never answer "availability" as an id.
 app.use('/api/equipment/availability', equipmentAvailabilityRoutes);
+
+// SCRUM-285 (SCRUM-284): the Technical Support dashboard's equipment request queue.
+// Technical Support Staff only, behind requireAuth; see the route file.
+app.use('/api/equipment-requests', equipmentQueueRoutes);
 
 // SCRUM-252: an Event Coordinator requests a venue for an approved event.
 app.use('/api/booking-requests', bookingRequestRoutes);
