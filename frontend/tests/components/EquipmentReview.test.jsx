@@ -121,7 +121,7 @@ beforeEach(() => {
 });
 
 describe("EquipmentReview: what is shown", () => {
-  it("SCRUM290_shows_event_venue_coordinator_and_status", async () => {
+  it("SCRUM290_AC4_shows_event_venue_coordinator_and_status", async () => {
     await open(state());
     expect(getEquipmentReview).toHaveBeenCalledWith(EVENT_ID);
     expect(screen.getByText("Hall A")).toBeInTheDocument();
@@ -129,14 +129,14 @@ describe("EquipmentReview: what is shown", () => {
     expect(screen.getByText("Pending review")).toBeInTheDocument();
   });
 
-  it("SCRUM290_says_when_no_venue_is_booked", async () => {
+  it("SCRUM290_AC4_says_when_no_venue_is_booked", async () => {
     const s = state();
     s.event.venue = null;
     await open(s);
     expect(screen.getByText("No venue booked.")).toBeInTheDocument();
   });
 
-  it("SCRUM290_shows_each_line_with_requested_reserved_and_availability", async () => {
+  it("SCRUM290_AC4_shows_each_line_with_requested_reserved_and_availability", async () => {
     await open(state({ lines: [line(), line({ id: MIC, name: "Microphone", quantity: 1, reserved: 1, shortBy: 0, availability: availability("Fully available", 1, 5) })] }));
     await userEvent.click(screen.getByRole("tab", { name: /^All/ }));
     expect(screen.getByText("1 of 3 reserved")).toBeInTheDocument();
@@ -148,7 +148,7 @@ describe("EquipmentReview: what is shown", () => {
     expect(screen.getByText("Enough in stock: 5 available.")).toBeInTheDocument();
   });
 
-  it("SCRUM290_lists_overlapping_reservations", async () => {
+  it("SCRUM290_AC4_lists_overlapping_reservations", async () => {
     const a = availability("Partially available", 3, 2);
     a.reservations = [{ id: "x", eventName: "Gala", quantity: 8, startAt: "2026-11-01T09:00:00Z", endAt: "2026-11-01T13:00:00Z", flagged: true }];
     await open(state({ lines: [line({ availability: a })] }));
@@ -156,7 +156,7 @@ describe("EquipmentReview: what is shown", () => {
     expect(screen.getByText(/Gala: 8/)).toHaveTextContent("(flagged for review)");
   });
 
-  it("SCRUM290_a_missing_request_is_said_plainly", async () => {
+  it("SCRUM290_AC4_a_missing_request_is_said_plainly", async () => {
     getEquipmentReview.mockResolvedValue({ event: null, request: null });
     render(
       <MemoryRouter initialEntries={[`/equipment-review/${EVENT_ID}`]}>
@@ -168,7 +168,7 @@ describe("EquipmentReview: what is shown", () => {
     expect(await screen.findByText("This event has no equipment request to review.")).toBeInTheDocument();
   });
 
-  it("SCRUM290_a_load_failure_offers_try_again", async () => {
+  it("SCRUM290_AC4_a_load_failure_offers_try_again", async () => {
     getEquipmentReview.mockRejectedValueOnce(fail(500, {}));
     render(
       <MemoryRouter initialEntries={[`/equipment-review/${EVENT_ID}`]}>
@@ -185,7 +185,7 @@ describe("EquipmentReview: what is shown", () => {
 });
 
 describe("EquipmentReview: starting and taking over", () => {
-  it("SCRUM290_start_review_replaces_the_state", async () => {
+  it("SCRUM290_AC2_start_review_replaces_the_state", async () => {
     await open(state());
     startEquipmentReview.mockResolvedValue(underReview());
     await userEvent.click(screen.getByRole("button", { name: "Start review" }));
@@ -194,18 +194,18 @@ describe("EquipmentReview: starting and taking over", () => {
     expect(screen.queryByRole("button", { name: "Start review" })).not.toBeInTheDocument();
   });
 
-  it("SCRUM290_cannot_be_fully_arranged_offers_review_again", async () => {
+  it("SCRUM290_AC2_cannot_be_fully_arranged_offers_review_again", async () => {
     await open(state({ status: "cannot_be_fully_arranged", statusLabel: "Cannot be fully arranged" }));
     expect(screen.getByRole("button", { name: "Review again" })).toBeInTheDocument();
   });
 
-  it("SCRUM290_the_reviewer_is_told_they_own_the_review_and_since_when", async () => {
+  it("SCRUM290_AC3_the_reviewer_is_told_they_own_the_review_and_since_when", async () => {
     await open(underReview());
     expect(screen.getByText(/You are reviewing this request \(since /)).toBeInTheDocument();
     expect(screen.queryByText(/Being reviewed by/)).not.toBeInTheDocument();
   });
 
-  it("SCRUM290_someone_elses_review_shows_their_name_and_take_over_only", async () => {
+  it("SCRUM290_AC3_someone_elses_review_shows_their_name_and_take_over_only", async () => {
     await open(state({ status: "under_review", statusLabel: "Under review", reviewerId: OTHER }));
     expect(screen.getByText(/Being reviewed by Sam Lee/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Take over review" })).toBeInTheDocument();
@@ -214,7 +214,7 @@ describe("EquipmentReview: starting and taking over", () => {
     expect(screen.queryByRole("button", { name: "Start review" })).not.toBeInTheDocument();
   });
 
-  it("SCRUM290_take_over_makes_the_user_the_reviewer", async () => {
+  it("SCRUM290_AC3_take_over_makes_the_user_the_reviewer", async () => {
     await open(state({ status: "under_review", statusLabel: "Under review", reviewerId: OTHER }));
     takeOverEquipmentReview.mockResolvedValue(underReview());
     await userEvent.click(screen.getByRole("button", { name: "Take over review" }));
@@ -222,7 +222,7 @@ describe("EquipmentReview: starting and taking over", () => {
     expect(await screen.findByRole("button", { name: "Complete review" })).toBeInTheDocument();
   });
 
-  it("SCRUM290_a_refused_start_says_why_and_reads_again", async () => {
+  it("SCRUM290_AC2_a_refused_start_says_why_and_reads_again", async () => {
     await open(state());
     startEquipmentReview.mockRejectedValue(fail(409, { error: "Sam Lee is already reviewing this request." }));
     getEquipmentReview.mockResolvedValue(state({ status: "under_review", statusLabel: "Under review", reviewerId: OTHER }));
@@ -231,7 +231,7 @@ describe("EquipmentReview: starting and taking over", () => {
     expect(await screen.findByRole("button", { name: "Take over review" })).toBeInTheDocument();
   });
 
-  it("SCRUM290_refresh_reads_the_state_again", async () => {
+  it("SCRUM290_AC3_refresh_reads_the_state_again", async () => {
     await open(state());
     getEquipmentReview.mockClear();
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
@@ -240,13 +240,13 @@ describe("EquipmentReview: starting and taking over", () => {
 });
 
 describe("EquipmentReview: marking lines", () => {
-  it("SCRUM290_pending_review_offers_no_line_actions", async () => {
+  it("SCRUM290_AC3_pending_review_offers_no_line_actions", async () => {
     await open(state());
     expect(screen.queryByRole("button", { name: /Cannot be provided/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Reserve/ })).not.toBeInTheDocument();
   });
 
-  it("SCRUM290_reviewer_sees_a_reserve_and_a_mark_button_on_short_lines_only", async () => {
+  it("SCRUM290_AC5_reviewer_sees_a_reserve_and_a_mark_button_on_short_lines_only", async () => {
     await open(underReview({ lines: [line(), line({ id: MIC, name: "Microphone", quantity: 1, reserved: 1, shortBy: 0 })] }));
     expect(screen.getAllByRole("button", { name: /^Reserve/ })).toHaveLength(1);
     expect(screen.getByRole("button", { name: /^Reserve( \d+)?( more)?: Projector$/ })).toBeEnabled();
@@ -254,7 +254,7 @@ describe("EquipmentReview: marking lines", () => {
     expect(screen.queryByRole("button", { name: /Microphone/ })).not.toBeInTheDocument();
   });
 
-  it("SCRUM290_a_blank_note_is_refused_before_any_call", async () => {
+  it("SCRUM290_AC7_a_blank_note_is_refused_before_any_call", async () => {
     await open(underReview());
     await userEvent.click(screen.getByRole("button", { name: "Mark as cannot be provided: Projector" }));
     await userEvent.type(screen.getByLabelText(/Why can Projector not be provided/), "   ");
@@ -263,7 +263,7 @@ describe("EquipmentReview: marking lines", () => {
     expect(markEquipmentLineUnavailable).not.toHaveBeenCalled();
   });
 
-  it("SCRUM290_saving_a_note_sends_it_trimmed_and_shows_the_mark", async () => {
+  it("SCRUM290_AC7_saving_a_note_sends_it_trimmed_and_shows_the_mark", async () => {
     await open(underReview());
     markEquipmentLineUnavailable.mockResolvedValue(
       underReview({ lines: [line({ outcome: "cannot_be_provided", outcomeNote: "None in stock" })] }),
@@ -277,7 +277,7 @@ describe("EquipmentReview: marking lines", () => {
     expect(screen.getByRole("button", { name: "Remove mark on Projector" })).toBeInTheDocument();
   });
 
-  it("SCRUM290_a_refused_note_stays_in_the_form_with_the_server_reason", async () => {
+  it("SCRUM290_AC7_a_refused_note_stays_in_the_form_with_the_server_reason", async () => {
     await open(underReview());
     markEquipmentLineUnavailable.mockRejectedValue(fail(400, { details: [{ field: "note", message: "must be 1000 characters or fewer" }] }));
     await userEvent.click(screen.getByRole("button", { name: "Mark as cannot be provided: Projector" }));
@@ -287,7 +287,7 @@ describe("EquipmentReview: marking lines", () => {
     expect(screen.getByLabelText(/Why can Projector not be provided/)).toBeInTheDocument();
   });
 
-  it("SCRUM290_remove_mark_clears_the_outcome", async () => {
+  it("SCRUM290_AC7_remove_mark_clears_the_outcome", async () => {
     await open(underReview({ lines: [line({ outcome: "cannot_be_provided", outcomeNote: "None in stock" })] }));
     clearEquipmentLineOutcome.mockResolvedValue(underReview());
     await userEvent.click(screen.getByRole("button", { name: "Remove mark on Projector" }));
@@ -296,7 +296,7 @@ describe("EquipmentReview: marking lines", () => {
     expect(screen.queryByText("None in stock")).not.toBeInTheDocument();
   });
 
-  it("SCRUM290_cancel_closes_the_form_without_a_call", async () => {
+  it("SCRUM290_AC7_cancel_closes_the_form_without_a_call", async () => {
     await open(underReview());
     await userEvent.click(screen.getByRole("button", { name: "Mark as cannot be provided: Projector" }));
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -306,14 +306,14 @@ describe("EquipmentReview: marking lines", () => {
 });
 
 describe("EquipmentReview: completing", () => {
-  it("SCRUM290_complete_asks_first_and_says_what_will_happen_when_lines_are_short", async () => {
+  it("SCRUM290_AC7_complete_asks_first_and_says_what_will_happen_when_lines_are_short", async () => {
     await open(underReview());
     await userEvent.click(screen.getByRole("button", { name: "Complete review" }));
     expect(screen.getByText(/1 item is not fully reserved/)).toBeInTheDocument();
     expect(completeEquipmentReview).not.toHaveBeenCalled();
   });
 
-  it("SCRUM290_complete_counts_the_short_lines_in_words", async () => {
+  it("SCRUM290_AC7_complete_counts_the_short_lines_in_words", async () => {
     await open(underReview({ lines: [line(), line({ id: "line-2", name: "Microphone" })] }));
     await userEvent.click(screen.getByRole("button", { name: "Complete review" }));
     expect(screen.getByText(/2 items are not fully reserved/)).toBeInTheDocument();
@@ -325,7 +325,7 @@ describe("EquipmentReview: completing", () => {
     expect(screen.getByText(/so there is nothing to complete/)).toBeInTheDocument();
   });
 
-  it("SCRUM290_confirming_completes_and_shows_the_new_status", async () => {
+  it("SCRUM290_AC7_confirming_completes_and_shows_the_new_status", async () => {
     await open(underReview());
     completeEquipmentReview.mockResolvedValue(
       state({ status: "cannot_be_fully_arranged", statusLabel: "Cannot be fully arranged", lines: [line({ outcome: "cannot_be_provided", outcomeNote: "None" })] }),
@@ -338,7 +338,7 @@ describe("EquipmentReview: completing", () => {
     expect(screen.queryByRole("button", { name: "Complete review" })).not.toBeInTheDocument();
   });
 
-  it("SCRUM290_missing_notes_are_named_when_completion_is_refused", async () => {
+  it("SCRUM290_AC7_missing_notes_are_named_when_completion_is_refused", async () => {
     await open(underReview());
     completeEquipmentReview.mockRejectedValue(fail(400, { details: [{ field: "lines", message: "Projector needs a note" }] }));
     await userEvent.click(screen.getByRole("button", { name: "Complete review" }));
@@ -347,7 +347,7 @@ describe("EquipmentReview: completing", () => {
     expect(screen.getByRole("button", { name: "Yes, complete review" })).toBeInTheDocument();
   });
 
-  it("SCRUM290_a_stale_completion_is_explained_and_the_state_read_again", async () => {
+  it("SCRUM290_AC7_a_stale_completion_is_explained_and_the_state_read_again", async () => {
     await open(underReview());
     completeEquipmentReview.mockRejectedValue(fail(403, {}));
     getEquipmentReview.mockResolvedValue(state({ status: "under_review", statusLabel: "Under review", reviewerId: OTHER }));
@@ -358,7 +358,7 @@ describe("EquipmentReview: completing", () => {
     expect(within(alert.parentElement).getByRole("alert")).toHaveTextContent("Only the staff member reviewing");
   });
 
-  it("SCRUM290_arranged_requests_offer_no_actions", async () => {
+  it("SCRUM290_AC6_arranged_requests_offer_no_actions", async () => {
     await open(state({ status: "arranged", statusLabel: "Arranged", lines: [line({ reserved: 3, shortBy: 0 })] }));
     expect(screen.queryByRole("button", { name: "Start review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Complete review" })).not.toBeInTheDocument();

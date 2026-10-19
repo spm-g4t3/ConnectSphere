@@ -650,7 +650,7 @@ describe("AC6 and AC8: removing a line", () => {
 
 
 describe("SCRUM-297: what technical support decided", () => {
-  it("SCRUM290_AC10_shows_reserved_against_requested_on_each_line", async () => {
+  it("SCRUM290_AC8_shows_reserved_against_requested_on_each_line", async () => {
     getEventEquipment.mockResolvedValue(state({ lines: [line({ quantity: 3, reserved: 1 })] }));
 
     renderSection();
@@ -658,7 +658,7 @@ describe("SCRUM-297: what technical support decided", () => {
     expect(await screen.findByText("Reserved: 1 of 3")).toBeInTheDocument();
   });
 
-  it("SCRUM290_AC10_shows_the_reason_a_line_cannot_be_provided_and_the_outcome_above_the_lines", async () => {
+  it("SCRUM290_AC8_shows_the_reason_a_line_cannot_be_provided_and_the_outcome_above_the_lines", async () => {
     getEventEquipment.mockResolvedValue(state({
       status: "cannot_be_fully_arranged",
       lines: [line({ quantity: 3, reserved: 1, outcome: "cannot_be_provided", outcomeNote: "Only one in stock that week" })],
@@ -671,7 +671,7 @@ describe("SCRUM-297: what technical support decided", () => {
     expect(screen.getByText(/could not arrange all of this equipment/)).toBeInTheDocument();
   });
 
-  it("SCRUM290_AC10_says_so_when_everything_is_arranged", async () => {
+  it("SCRUM290_AC8_says_so_when_everything_is_arranged", async () => {
     getEventEquipment.mockResolvedValue(state({ status: "arranged", lines: [line({ quantity: 2, reserved: 2 })] }));
 
     renderSection();
@@ -680,7 +680,7 @@ describe("SCRUM-297: what technical support decided", () => {
     expect(screen.queryByText("Cannot be provided")).not.toBeInTheDocument();
   });
 
-  it("SCRUM290_AC10_a_line_with_no_mark_shows_no_outcome", async () => {
+  it("SCRUM290_AC8_a_line_with_no_mark_shows_no_outcome", async () => {
     renderSection();
 
     await screen.findByText("Projector");
