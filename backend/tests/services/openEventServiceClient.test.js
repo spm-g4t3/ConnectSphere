@@ -25,11 +25,7 @@ vi.mock('../../src/config/supabaseClient.js', () => {
   return { supabase: { from, rpc: () => Promise.resolve(answers.rpc) }, supabaseAdmin: {}, default: {} };
 });
 
-import {
-  listOpenEvents,
-  listOpenEventsForRegistration,
-  getOpenEvent,
-} from '../../src/services/openEventService.js';
+import { listOpenEvents, getOpenEvent } from '../../src/services/openEventService.js';
 import { NotFoundError } from '../../src/errors.js';
 
 const ATTENDEE_ID = '44444444-4444-4444-8444-444444444444';
@@ -61,23 +57,6 @@ describe('SCRUM495 the shared client and empty answers', () => {
     const events = await listOpenEvents({ attendeeId: ATTENDEE_ID, now: NOW });
 
     expect(events.map((event) => event.id)).toEqual([EVENT_ID]);
-  });
-
-  it('SCRUM494_AC4_shares_open_event_eligibility_and_includes_registration_display_fields', async () => {
-    answers.event_requests = { data: [openRow], error: null };
-    answers.rpc = { data: [], error: null };
-
-    const [event] = await listOpenEventsForRegistration({
-      attendeeId: ATTENDEE_ID,
-      now: NOW,
-    });
-
-    expect(event).toMatchObject({
-      id: EVENT_ID,
-      registrationOpensAt: openRow.registration_opens_at,
-      registrationClosesAt: openRow.registration_closes_at,
-      registeredCount: 0,
-    });
   });
 
   it('SCRUM495_AC7_lists_nothing_when_the_read_returns_no_rows_and_no_error', async () => {

@@ -6,8 +6,6 @@ import { ROLE } from '../domain/userRole.js';
 import { createErrorHandler } from '../http/handleError.js';
 import {
   getRegistrationSettings,
-  listOpenRegistrationEvents,
-  registerForEvent,
   updateRegistrationSettings,
 } from '../services/eventRegistrationService.js';
 
@@ -20,17 +18,8 @@ export function createEventRegistrationRouter({
 } = {}) {
   const router = express.Router();
   const organiserOnly = requireRole(ROLE.EVENT_ORGANISER);
-  const attendeeOnly = requireRole(ROLE.ATTENDEE);
 
   router.use(requireAuth);
-
-  router.get('/open', attendeeOnly, async (req, res) => {
-    try {
-      res.status(200).json(await listOpenRegistrationEvents(req.user.id, { client }));
-    } catch (err) {
-      handleError(err, res);
-    }
-  });
 
   router.get('/events/:id/settings', organiserOnly, async (req, res) => {
     try {
@@ -45,14 +34,6 @@ export function createEventRegistrationRouter({
       res.status(200).json(
         await updateRegistrationSettings(req.params.id, req.body, req.user.id, { client }),
       );
-    } catch (err) {
-      handleError(err, res);
-    }
-  });
-
-  router.post('/events/:id/register', attendeeOnly, async (req, res) => {
-    try {
-      res.status(201).json(await registerForEvent(req.params.id, req.user.id, { client }));
     } catch (err) {
       handleError(err, res);
     }

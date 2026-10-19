@@ -7,7 +7,6 @@ import {
 import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
 import { getStatusDisplay } from '../domain/eventRequestStatus.js';
 import { REGISTRATION_CONFIGURABLE_STATUSES } from '../domain/registrationStatuses.js';
-import { listOpenEventsForRegistration } from './openEventService.js';
 
 function displayStatus(status) {
   return getStatusDisplay(status).label;
@@ -102,16 +101,6 @@ function mapSetupOutcome(result) {
   return toSettings(result.settings, result.registeredCount);
 }
 
-function translateRegistrationError(error, forbiddenMessage) {
-  if (error.code === '42501') return new ForbiddenError(forbiddenMessage);
-  if (error.code === '22023') {
-    return new ValidationError('An attendee is required.', [
-      { field: 'attendeeId', message: 'An attendee is required.' },
-    ]);
-  }
-  return error;
-}
-
 export async function getRegistrationSettings(eventRequestId, userId, { client } = {}) {
   requireId(eventRequestId);
   const db = await resolveClient(client);
@@ -166,54 +155,10 @@ export async function updateRegistrationSettings(eventRequestId, input, userId, 
     p_withdrawal_deadline: settings.withdrawalDeadline,
   });
   if (rpcError) {
-    throw translateRegistrationError(
-      rpcError,
-      'Only the Event Organiser who created this event can set up its registration.',
-    );
+    if (rpcError.code === '42501') {
+      throw new ForbiddenError('Only the Event Organiser who created this event can set up its registration.');
+    }
+    throw rpcError;
   }
   return mapSetupOutcome(data);
-}
-
-export async function listOpenRegistrationEvents(attendeeId, { client, now } = {}) {
-  const events = await listOpenEventsForRegistration({ attendeeId, client, now });
-  return events.map((event) => ({
-    id: event.id,
-    eventName: event.eventName,
-    description: event.description,
-    startsAt: event.startsAt,
-    registrationOpensAt: event.registrationOpensAt,
-    registrationClosesAt: event.registrationClosesAt,
-    capacity: event.capacity,
-    registeredCount: event.registeredCount,
-    isRegistered: event.isRegistered,
-    isFull: event.isFull,
-  }));
-}
-
-export async function registerForEvent(eventRequestId, attendeeId, { client } = {}) {
-  requireId(eventRequestId);
-  const db = await resolveClient(client);
-  const { data, error } = await db.rpc('register_for_event', {
-    p_event_request_id: eventRequestId,
-    p_attendee_id: attendeeId,
-  });
-  if (error) throw translateRegistrationError(error, 'Only an Attendee may register for this event.');
-  switch (data?.outcome) {
-    case 'registered':
-      return data.registration;
-    case 'not_found':
-      throw new NotFoundError('Event not found.');
-    case 'event_not_confirmed':
-      throw new ConflictError(`Attendees can only register for a Confirmed event. Current status: ${data.status}.`);
-    case 'registration_closed':
-      throw new ConflictError('Registration is off or outside its registration window.');
-    case 'capacity_reached':
-      throw new ConflictError('Registration is full.');
-    case 'already_registered':
-      throw new ConflictError('You are already registered for this event.');
-    case 'forbidden':
-      throw new ForbiddenError('Only an Attendee may register for this event.');
-    default:
-      throw new Error(`Unexpected register_for_event outcome: ${data?.outcome}`);
-  }
 }
