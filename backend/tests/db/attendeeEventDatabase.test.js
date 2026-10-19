@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -12,14 +12,7 @@ import { BOOKING_STATUS } from '../../src/domain/bookingStatus.js';
 const migrationsDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../db/migrations');
 const prerequisites = ['050_event_registration.sql', '082_event_registration_state.sql',
   '091_event_registration_hardening.sql', '092_event_registration_persistence.sql'];
-// Until the dependency PRs merge, local verification may supply their actual
-// migration files. Never substitute fixture columns or a second registration table.
-const migrationPath = name => {
-  const local = resolve(migrationsDir, name);
-  return existsSync(local) || !process.env.SCRUM24_PREREQUISITE_MIGRATIONS
-    ? local : resolve(process.env.SCRUM24_PREREQUISITE_MIGRATIONS, name);
-};
-const missing = prerequisites.filter(name => !existsSync(migrationPath(name)));
+const migrationPath = name => resolve(migrationsDir, name);
 const migrations = [
   '001_event_requests.sql', '002_venues.sql', '003_venue_audit.sql',
   '004_venue_functions.sql', '005_venue_retirement.sql', '007_user_roles.sql',
@@ -40,7 +33,7 @@ const user = { id: ATTENDEE, role: 'attendee' };
 const start = '2030-05-06T09:00:00+08:00';
 const end = '2030-05-06T11:00:00+08:00';
 
-describe.skipIf(missing.length > 0)(`SCRUM-52 SQL read${missing.length ? ` BLOCKED: missing ${missing.join(', ')}` : ''}`, () => {
+describe('SCRUM-52 SQL read using repository migrations', () => {
   let db;
   let eventId;
   let queries;
