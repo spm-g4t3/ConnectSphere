@@ -13,6 +13,10 @@ const migration = readFileSync(
   resolve(here, '../../db/migrations/096_significant_event_change.sql'),
   'utf8',
 );
+const equipmentNotificationsMigration = readFileSync(
+  resolve(here, '../../db/migrations/097_equipment_notifications.sql'),
+  'utf8',
+);
 const START = '2040-12-01T10:00:00Z';
 const END = '2040-12-01T12:00:00Z';
 
@@ -61,6 +65,25 @@ describe('SCRUM-395 significant event change database transaction', () => {
     )).id;
   }
 
+  // Confirmed and safety-stage events cannot be inserted through the lifecycle
+  // trigger, so seed them with it switched off.
+  async function makeEventOutsideLifecycle(status = 'confirmed') {
+    await db.exec('alter table event_requests disable trigger test_event_safety_transitions');
+    try {
+      return await makeEvent(status);
+    } finally {
+      await db.exec('alter table event_requests enable trigger test_event_safety_transitions');
+    }
+  }
+
+  async function applyChange(forEvent, changes, reason, expectedImpact = null) {
+    return (await one(
+      `select apply_significant_event_change($1, $2::jsonb, $3, $4, $5::jsonb) as result`,
+      [forEvent, JSON.stringify(changes), reason, coordinator,
+        expectedImpact && JSON.stringify(expectedImpact)],
+    )).result;
+  }
+
   beforeAll(async () => {
     db = new PGlite();
     await db.exec(`
@@ -74,7 +97,9 @@ describe('SCRUM-395 significant event change database transaction', () => {
         'draft', 'submitted', 'under_review', 'pending_clarification', 'approved',
         'confirmed', 'completed', 'rejected', 'cancelled', 'safety_review', 'safety_approved'
       );
-      create type booking_status as enum ('approved', 'flagged_for_review', 'cancelled');
+      create type booking_status as enum (
+        'approved', 'flagged_for_review', 'cancelled', 'pending', 'conflicting'
+      );
       create table profiles (id uuid primary key, role text not null);
       create table event_requests (
         id uuid primary key default gen_random_uuid(),
@@ -159,7 +184,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
         flagged_at timestamptz,
         flagged_by uuid,
         constraint bookings_review_reason_known
-          check (review_reason in ('setup_or_turnaround_changed', 'event_changed')),
+          check (review_reason in ('setup_or_turnaround_changed', 'safety_review', 'event_changed')),
         constraint bookings_review_flag_paired
           check ((flagged_at is null) = (review_block_id is null and review_reason is null))
       );
@@ -176,6 +201,32 @@ describe('SCRUM-395 significant event change database transaction', () => {
         flag_reason text
       );
       create table equipment_reservation_flag_calls (reason text not null, count integer not null);
+      -- Just enough of the equipment schema for 097's triggers; the stub below
+      -- writes the 'flagged' history row the way 061 does, which 097 watches.
+      create table equipment_requests (
+        id uuid primary key default gen_random_uuid(),
+        event_request_id uuid not null,
+        status text not null default 'pending_review'
+      );
+      create table equipment_lines (
+        id uuid primary key default gen_random_uuid(),
+        equipment_request_id uuid not null,
+        equipment_type_id uuid not null,
+        quantity integer not null,
+        technical_notes text,
+        outcome text,
+        removed_at timestamptz
+      );
+      create table equipment_reservation_events (
+        id bigint generated always as identity primary key,
+        equipment_reservation_id uuid not null,
+        event_request_id uuid not null,
+        equipment_line_id uuid,
+        action text not null,
+        reason text
+      );
+      create function equipment_line_reserved(p_line_id uuid)
+      returns integer language sql stable as $$ select 0 $$;
       create function flag_equipment_reservations(p_reservation_ids uuid[], p_reason text)
       returns integer
       language plpgsql
@@ -183,10 +234,18 @@ describe('SCRUM-395 significant event change database transaction', () => {
       declare
         v_count integer;
       begin
-        update equipment_reservations
-           set flagged = true, flag_reason = p_reason
-         where id = any(p_reservation_ids) and released_at is null and not flagged;
-        get diagnostics v_count = row_count;
+        with flagged as (
+          update equipment_reservations
+             set flagged = true, flag_reason = p_reason
+           where id = any(p_reservation_ids) and released_at is null and not flagged
+          returning id, event_request_id
+        ), written as (
+          insert into equipment_reservation_events
+            (equipment_reservation_id, event_request_id, action, reason)
+          select id, event_request_id, 'flagged', p_reason from flagged
+          returning 1
+        )
+        select count(*) into v_count from flagged;
         insert into equipment_reservation_flag_calls(reason, count) values (p_reason, v_count);
         return v_count;
       end;
@@ -209,6 +268,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
         booking_id uuid,
         event_request_id uuid,
         payload jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now(),
         constraint notifications_type_known check (type in ('legacy_notification'))
       );
     `);
@@ -261,8 +321,16 @@ describe('SCRUM-395 significant event change database transaction', () => {
        returning id`,
       [eventId, largeVenueId, START, END],
     );
+    const legacySafetyBooking = await one(
+      `insert into bookings
+         (event_request_id, venue_id, status, starts_at, ends_at, review_reason, flagged_at)
+       values ($1, $2, 'flagged_for_review', $3, $4, 'safety_review', now())
+       returning id`,
+      [eventId, largeVenueId, START, END],
+    );
 
     await db.exec(migration);
+    await db.exec(equipmentNotificationsMigration);
     await db.exec(`
       create function event_request_status_allows(
         p_from event_request_status, p_to event_request_status
@@ -281,14 +349,15 @@ describe('SCRUM-395 significant event change database transaction', () => {
 
     expect(await rows(
       'select id, flag_reason from bookings where id = any($1)',
-      [[legacyBlockBooking.id, legacyEditBooking.id]],
+      [[legacyBlockBooking.id, legacyEditBooking.id, legacySafetyBooking.id]],
     )).toEqual(expect.arrayContaining([
       { id: legacyBlockBooking.id, flag_reason: 'venue_block' },
       { id: legacyEditBooking.id, flag_reason: 'venue_edit' },
+      { id: legacySafetyBooking.id, flag_reason: 'safety_review' },
     ]));
 
     await db.query('delete from bookings where id = any($1)', [
-      [legacyBlockBooking.id, legacyEditBooking.id],
+      [legacyBlockBooking.id, legacyEditBooking.id, legacySafetyBooking.id],
     ]);
     expect(await rows(
       'select id from bookings where id = any($1)',
@@ -300,7 +369,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
     await db?.close();
   });
 
-  it('previews each booking independently using venue-specific occupied periods', async () => {
+  it('SCRUM395_AC3_previews_each_booking_with_its_own_venue_occupied_period', async () => {
     const overCapacity = await one(
       `select significant_event_change_impact($1, $2::jsonb) as impact`,
       [eventId, JSON.stringify({ expectedAttendance: 120 })],
@@ -344,7 +413,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
     expect(accessibilityOnly.impact.registeredAttendeesToNotify).toBe(0);
   });
 
-  it('requires the assigned coordinator and an allowed event status', async () => {
+  it('SCRUM395_AC1_requires_the_assigned_coordinator_and_an_allowed_status', async () => {
     await expect(db.query(
       `select preview_significant_event_change($1, $2::jsonb, $3)`,
       [eventId, JSON.stringify({ expectedAttendance: 90 }), otherCoordinator],
@@ -365,7 +434,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
     )).rejects.toThrow(/does not allow a significant change/i);
   });
 
-  it('rejects timestamps that do not follow SCRUM-10 offset rules', async () => {
+  it('SCRUM395_AC2_rejects_timestamps_without_a_utc_offset', async () => {
     await expect(db.query(
       `select significant_event_change_impact($1, $2::jsonb)`,
       [
@@ -375,7 +444,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
     )).rejects.toThrow(/ISO timestamp/i);
   });
 
-  it('applies the previewed fields, flags arrangements, records history and notifies audiences', async () => {
+  it('SCRUM395_AC4_applies_the_previewed_fields_flags_arrangements_and_records_history', async () => {
     const changes = {
       proposedStart: '2040-12-02T10:00:00Z',
       proposedEnd: '2040-12-02T12:00:00Z',
@@ -410,7 +479,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
     expect(await one(
       'select flagged, flag_reason from equipment_reservations where id = $1',
       [reservationId],
-    )).toEqual({ flagged: true, flag_reason: 'event_change' });
+    )).toEqual({ flagged: true, flag_reason: 'The event date or time changed' });
     expect(await one(
       'select count(*)::int as count from notifications where event_request_id = $1 and type = $2',
       [eventId, 'event_significant_change_attendee'],
@@ -423,26 +492,17 @@ describe('SCRUM-395 significant event change database transaction', () => {
       'select count(*)::int as count from notifications where event_request_id = $1 and type = $2',
       [eventId, 'booking_flagged_event_change'],
     )).toEqual({ count: 2 });
-    expect(await one(
-      'select count(*)::int as count from notifications where event_request_id = $1 and type = $2',
-      [eventId, 'equipment_reservation_flagged_event_change'],
-    )).toEqual({ count: 1 });
     expect((await rows(
       `select recipient_id from notifications
         where event_request_id = $1 and type = 'booking_flagged_event_change'`,
       [eventId],
     )).every((notice) => notice.recipient_id === venueStaff)).toBe(true);
     expect(await one(
-      `select recipient_id from notifications
-        where event_request_id = $1 and type = 'equipment_reservation_flagged_event_change'`,
-      [eventId],
-    )).toEqual({ recipient_id: technicalStaff });
-    expect(await one(
       'select reason from equipment_reservation_flag_calls order by ctid desc limit 1',
-    )).toEqual({ reason: 'event_change' });
+    )).toEqual({ reason: 'The event date or time changed' });
   });
 
-  it('refuses to apply if the impact changed after the coordinator reviewed it', async () => {
+  it('SCRUM395_AC5_refuses_to_apply_when_the_impact_changed_after_preview', async () => {
     await db.exec('alter table event_requests disable trigger test_event_safety_transitions');
     let staleEventId;
     try {
@@ -483,7 +543,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
     )).toEqual({ count: 0 });
   });
 
-  it('keeps N24 reinstatement compatible with the new booking flag reason', async () => {
+  it('SCRUM395_AC6_reinstating_a_flagged_booking_clears_its_flag_reason', async () => {
     const flagged = await one(
       `select id from bookings
         where event_request_id = $1 and status = 'flagged_for_review'
@@ -507,7 +567,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
     )).toEqual({ status: 'approved', flag_reason: null });
   });
 
-  it('closes a pending safety review when applying a change', async () => {
+  it('SCRUM395_AC4_closes_a_pending_safety_review_and_returns_safety_stages_to_approved', async () => {
     await db.exec('alter table event_requests disable trigger test_event_safety_transitions');
     try {
       safetyReviewEventId = await makeEvent('safety_review');
@@ -562,7 +622,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
     )).toEqual({ status: 'approved' });
   });
 
-  it('records an equipment change without editing equipment lines', async () => {
+  it('SCRUM395_AC8_records_an_equipment_change_without_editing_equipment_lines', async () => {
     await db.exec('alter table event_requests disable trigger test_event_safety_transitions');
     let equipmentChangeEventId;
     try {
@@ -592,7 +652,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
     )).toEqual(original);
   });
 
-  it('rolls all changes back if reservation flagging fails', async () => {
+  it('SCRUM395_AC5_rolls_everything_back_if_reservation_flagging_fails', async () => {
     await db.exec('alter table event_requests disable trigger test_event_safety_transitions');
     let rollbackEvent;
     try {
@@ -651,10 +711,18 @@ describe('SCRUM-395 significant event change database transaction', () => {
       returns integer language plpgsql as $$
       declare v_count integer;
       begin
-        update equipment_reservations
-           set flagged = true, flag_reason = p_reason
-         where id = any(p_reservation_ids) and released_at is null and not flagged;
-        get diagnostics v_count = row_count;
+        with flagged as (
+          update equipment_reservations
+             set flagged = true, flag_reason = p_reason
+           where id = any(p_reservation_ids) and released_at is null and not flagged
+          returning id, event_request_id
+        ), written as (
+          insert into equipment_reservation_events
+            (equipment_reservation_id, event_request_id, action, reason)
+          select id, event_request_id, 'flagged', p_reason from flagged
+          returning 1
+        )
+        select count(*) into v_count from flagged;
         insert into equipment_reservation_flag_calls(reason, count) values (p_reason, v_count);
         return v_count;
       end;
@@ -662,12 +730,157 @@ describe('SCRUM-395 significant event change database transaction', () => {
     `);
   });
 
-  it('rejects a missing reason without saving fields', async () => {
+  it('SCRUM395_AC2_rejects_a_blank_reason_without_saving_fields', async () => {
     const before = await one('select * from event_requests where id = $1', [eventId]);
     await expect(db.query(
       `select apply_significant_event_change($1, $2::jsonb, $3, $4)`,
       [eventId, JSON.stringify({ expectedAttendance: 121 }), '  ', coordinator],
     )).rejects.toThrow(/reason/i);
     expect(await one('select * from event_requests where id = $1', [eventId])).toEqual(before);
+  });
+
+  it('SCRUM395_AC4_keeps_a_venue_block_as_the_flag_reason_when_the_event_also_changes', async () => {
+    const blockedEvent = await makeEventOutsideLifecycle();
+    const bookingId = await makeBooking(blockedEvent, smallVenueId);
+    const blockId = '22222222-2222-4222-8222-222222222222';
+    await db.query(
+      `update bookings
+          set status = 'flagged_for_review', review_block_id = $2, flagged_at = now()
+        where id = $1`,
+      [bookingId, blockId],
+    );
+
+    await applyChange(blockedEvent, {
+      proposedStart: '2040-12-04T10:00:00Z',
+      proposedEnd: '2040-12-04T12:00:00Z',
+    }, 'Moved by a day');
+
+    expect(await one(
+      'select status, flag_reason, review_block_id from bookings where id = $1',
+      [bookingId],
+    )).toEqual({ status: 'flagged_for_review', flag_reason: 'venue_block', review_block_id: blockId });
+  });
+
+  it('SCRUM395_AC4_labels_a_safety_review_flag_as_safety_review_and_keeps_it', async () => {
+    const safetyFlaggedEvent = await makeEventOutsideLifecycle();
+    const bookingId = await makeBooking(safetyFlaggedEvent, smallVenueId);
+    await db.query(
+      `update bookings
+          set status = 'flagged_for_review', review_reason = 'safety_review', flagged_at = now()
+        where id = $1`,
+      [bookingId],
+    );
+    expect(await one('select flag_reason from bookings where id = $1', [bookingId]))
+      .toEqual({ flag_reason: 'safety_review' });
+
+    await applyChange(safetyFlaggedEvent, { expectedAttendance: 120 }, 'More attendees');
+
+    expect(await one(
+      'select status, review_reason, flag_reason from bookings where id = $1',
+      [bookingId],
+    )).toEqual({
+      status: 'flagged_for_review',
+      review_reason: 'safety_review',
+      flag_reason: 'safety_review',
+    });
+  });
+
+  it('SCRUM395_AC9_lists_pending_venue_requests_leaves_them_open_and_tells_venue_staff', async () => {
+    const movedEvent = await makeEventOutsideLifecycle();
+    const request = async (venueId, status) => (await one(
+      `insert into bookings(event_request_id, venue_id, status, starts_at, ends_at)
+       values ($1, $2, $3, $4, $5) returning id`,
+      [movedEvent, venueId, status, START, END],
+    )).id;
+    const pendingId = await request(smallVenueId, 'pending');
+    const conflictingId = await request(largeVenueId, 'conflicting');
+
+    const attendanceOnly = await one(
+      `select preview_significant_event_change($1, $2::jsonb, $3) as impact`,
+      [movedEvent, JSON.stringify({ expectedAttendance: 90 }), coordinator],
+    );
+    expect(attendanceOnly.impact.pendingBookingRequests).toEqual([]);
+
+    const changes = { proposedStart: '2040-12-05T10:00:00Z', proposedEnd: '2040-12-05T12:00:00Z' };
+    const preview = await one(
+      `select preview_significant_event_change($1, $2::jsonb, $3) as impact`,
+      [movedEvent, JSON.stringify(changes), coordinator],
+    );
+    expect(preview.impact.pendingBookingRequests).toEqual(expect.arrayContaining([
+      {
+        id: pendingId,
+        venueName: 'Small Hall',
+        startsAt: '2040-12-01T10:00:00+00:00',
+        endsAt: '2040-12-01T12:00:00+00:00',
+      },
+      expect.objectContaining({ id: conflictingId, venueName: 'Large Hall' }),
+    ]));
+    expect(preview.impact.pendingBookingRequests).toHaveLength(2);
+    expect(preview.impact.venueBookings).toEqual([]);
+
+    const applied = await applyChange(movedEvent, changes, 'Speaker moved', preview.impact);
+
+    expect(applied.impact).toEqual(preview.impact);
+    expect(await rows(
+      'select id, status, flagged_at from bookings where event_request_id = $1 order by status',
+      [movedEvent],
+    )).toEqual([
+      { id: pendingId, status: 'pending', flagged_at: null },
+      { id: conflictingId, status: 'conflicting', flagged_at: null },
+    ]);
+    const notices = await rows(
+      `select recipient_id, booking_id, payload from notifications
+        where event_request_id = $1 and type = 'booking_request_event_change'
+        order by booking_id = $2 desc`,
+      [movedEvent, pendingId],
+    );
+    expect(notices).toHaveLength(2);
+    expect(notices.every((notice) => notice.recipient_id === venueStaff)).toBe(true);
+    expect(notices.map((notice) => notice.booking_id)).toEqual([pendingId, conflictingId]);
+    expect(notices[0].payload).toEqual({
+      eventRequestId: movedEvent,
+      eventName: 'Tech Talk',
+      venueName: 'Small Hall',
+      startsAt: '2040-12-01T10:00:00+00:00',
+      endsAt: '2040-12-01T12:00:00+00:00',
+      newStartsAt: '2040-12-05T10:00:00+00:00',
+      newEndsAt: '2040-12-05T12:00:00+00:00',
+      reason: 'Speaker moved',
+    });
+  });
+
+  it('SCRUM395_AC9_tells_technical_support_once_and_sends_the_coordinator_no_equipment_flag', async () => {
+    const movedEvent = await makeEventOutsideLifecycle();
+    const equipmentTypeId = (await one(
+      `insert into equipment_types(name) values ('Microphone') returning id`,
+    )).id;
+    await db.query('insert into equipment_requests(event_request_id) values ($1)', [movedEvent]);
+    const movedReservationId = (await one(
+      `insert into equipment_reservations
+         (event_request_id, equipment_type_id, quantity, start_at, end_at)
+       values ($1, $2, 1, $3, $4) returning id`,
+      [movedEvent, equipmentTypeId, START, END],
+    )).id;
+
+    await applyChange(movedEvent, {
+      proposedStart: '2040-12-06T10:00:00Z',
+      proposedEnd: '2040-12-06T12:00:00Z',
+    }, 'Hall closed that day');
+
+    const equipmentNotices = await rows(
+      `select recipient_id, type, payload ->> 'change' as change from notifications
+        where event_request_id = $1 and type like 'equipment%'`,
+      [movedEvent],
+    );
+    expect(equipmentNotices.filter((notice) => notice.recipient_id === technicalStaff)).toEqual([
+      { recipient_id: technicalStaff, type: 'equipment_request_changed', change: 'event_period' },
+    ]);
+    expect(equipmentNotices.filter((notice) => notice.recipient_id === coordinator)).toEqual([
+      { recipient_id: coordinator, type: 'equipment_request_changed', change: 'event_period' },
+    ]);
+    expect(await one(
+      'select flagged, flag_reason from equipment_reservations where id = $1',
+      [movedReservationId],
+    )).toEqual({ flagged: true, flag_reason: 'The event date or time changed' });
   });
 });

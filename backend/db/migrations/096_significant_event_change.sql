@@ -8,6 +8,7 @@ update bookings
      when review_block_id is not null then 'venue_block'
      when review_reason in ('setup_or_turnaround_changed', 'venue_details_changed')
        then 'venue_edit'
+     when review_reason = 'safety_review' then 'safety_review'
      else 'event_change'
    end
  where flag_reason is null
@@ -16,7 +17,7 @@ update bookings
 alter table bookings drop constraint if exists bookings_flag_reason_known;
 alter table bookings
   add constraint bookings_flag_reason_known
-  check (flag_reason in ('venue_block', 'venue_edit', 'event_change'));
+  check (flag_reason in ('venue_block', 'venue_edit', 'safety_review', 'event_change'));
 
 alter table bookings drop constraint if exists bookings_review_flag_paired;
 alter table bookings
@@ -42,6 +43,7 @@ begin
       when new.review_block_id is not null then 'venue_block'
       when new.review_reason in ('setup_or_turnaround_changed', 'venue_details_changed')
         then 'venue_edit'
+      when new.review_reason = 'safety_review' then 'safety_review'
       else 'event_change'
     end;
   end if;
@@ -95,8 +97,8 @@ create table if not exists safety_review_closures (
 
 alter table safety_review_closures enable row level security;
 
--- The standard trigger must yield to this transaction so N15 receives the
--- story-specific reason exactly once.
+-- The standard trigger yields to this transaction, which flags the same
+-- reservations itself so a failed flag rolls the whole change back.
 create or replace function equipment_flag_on_event_period_change()
 returns trigger
 language plpgsql
@@ -151,6 +153,7 @@ declare
   v_changed_fields jsonb;
   v_bookings jsonb;
   v_reservations jsonb;
+  v_pending_requests jsonb;
   v_attendee_count integer;
 begin
   if p_changes is null or jsonb_typeof(p_changes) <> 'object' then
@@ -338,6 +341,23 @@ begin
      and reservation.released_at is null
      and not reservation.flagged;
 
+  -- Open requests are listed, never flagged: only a confirmed booking blocks a
+  -- venue, so Venue Staff are told and the coordinator decides what to do.
+  select coalesce(jsonb_agg(
+           jsonb_build_object(
+             'id', b.id,
+             'venueName', v.name,
+             'startsAt', b.starts_at,
+             'endsAt', b.ends_at
+           ) order by b.starts_at, b.id
+         ), '[]'::jsonb)
+    into v_pending_requests
+    from bookings b
+    join venues v on v.id = b.venue_id
+   where b.event_request_id = p_event_request_id
+     and b.status::text in ('pending', 'conflicting')
+     and (v_start_changed or v_end_changed);
+
   if v_start_changed or v_end_changed then
     select count(*)::integer
       into v_attendee_count
@@ -374,6 +394,7 @@ begin
     'changedFields', v_changed_fields,
     'venueBookings', v_bookings,
     'equipmentReservations', v_reservations,
+    'pendingBookingRequests', v_pending_requests,
     'registeredAttendeesToNotify', v_attendee_count,
     'equipmentChangeRecorded', v_equipment_change
   );
@@ -412,7 +433,8 @@ begin
   end if;
   if v_event.status::text not in ('approved', 'confirmed', 'safety_review', 'safety_approved') then
     raise exception 'Event status % does not allow a significant change', v_event.status
-      using errcode = 'PT409';
+      using errcode = 'PT409',
+            hint = 'EVENT_STATUS_NOT_ALLOWED';
   end if;
 
   return significant_event_change_impact(p_event_request_id, p_changes);
@@ -465,7 +487,8 @@ begin
   end if;
   if v_event.status::text not in ('approved', 'confirmed', 'safety_review', 'safety_approved') then
     raise exception 'Event status % does not allow a significant change', v_event.status
-      using errcode = 'PT409';
+      using errcode = 'PT409',
+            hint = 'EVENT_STATUS_NOT_ALLOWED';
   end if;
   if v_reason is null or length(v_reason) > 4000 then
     raise exception 'A reason of 1 to 4,000 characters is required'
@@ -571,7 +594,7 @@ begin
     ) values (
       p_event_request_id, p_user_id, 'equipment',
       '{"changeRequested":false}'::jsonb,
-      '{"changeRequested":true,"editThrough":"SCRUM-21"}'::jsonb,
+      '{"changeRequested":true}'::jsonb,
       v_reason
     );
   end if;
@@ -581,8 +604,8 @@ begin
   with flagged as (
     update bookings b
        set status = 'flagged_for_review',
-           flag_reason = 'event_change',
-             review_reason = coalesce(b.review_reason, 'event_changed'),
+           flag_reason = coalesce(b.flag_reason, 'event_change'),
+           review_reason = coalesce(b.review_reason, 'event_changed'),
            flagged_at = coalesce(b.flagged_at, now()),
            flagged_by = coalesce(b.flagged_by, p_user_id)
      where b.id = any(v_booking_ids)
@@ -613,24 +636,29 @@ begin
    where flagged.id = any(v_flagged_booking_ids)
      and staff.role = 'venue_staff';
 
-  -- 5. N15 owns reservation history and equipment-request review state.
-  v_reservation_count := flag_equipment_reservations(v_reservation_ids, 'event_change');
+  -- Pending requests keep their status; Venue Staff deciding them need the new time.
+  insert into notifications (recipient_id, type, booking_id, event_request_id, payload)
+  select staff.id, 'booking_request_event_change', (item ->> 'id')::uuid, p_event_request_id,
+         jsonb_build_object(
+           'eventRequestId', p_event_request_id,
+           'eventName', v_updated.event_name,
+           'venueName', item ->> 'venueName',
+           'startsAt', item -> 'startsAt',
+           'endsAt', item -> 'endsAt',
+           'newStartsAt', v_updated.proposed_start,
+           'newEndsAt', v_updated.proposed_end,
+           'reason', v_reason
+         )
+    from jsonb_array_elements(v_impact -> 'pendingBookingRequests') item
+    cross join profiles staff
+   where staff.role = 'venue_staff';
+
+  -- 5. N15 owns reservation history and equipment-request review state. 054's
+  -- own reason, so 097 tells Technical Support and the coordinator once per move.
+  v_reservation_count := flag_equipment_reservations(v_reservation_ids, 'The event date or time changed');
   if v_reservation_count <> cardinality(v_reservation_ids) then
     raise exception 'An equipment reservation changed while applying the event change'
       using errcode = '40001';
-  end if;
-
-  if v_reservation_count > 0 then
-    insert into notifications (recipient_id, type, event_request_id, payload)
-    select staff.id, 'equipment_reservation_flagged_event_change', p_event_request_id,
-           jsonb_build_object(
-             'eventName', v_updated.event_name,
-             'reservationIds', to_jsonb(v_reservation_ids),
-             'reservationCount', v_reservation_count,
-             'reason', v_reason
-           )
-      from profiles staff
-     where staff.role = 'technical_support_staff';
   end if;
 
   -- Close this pending submission explicitly; the immutable submission and
@@ -849,7 +877,7 @@ declare
     'event_significant_change',
     'event_significant_change_attendee',
     'booking_flagged_event_change',
-    'equipment_reservation_flagged_event_change'
+    'booking_request_event_change'
   ];
   v_item text;
 begin

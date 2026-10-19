@@ -181,6 +181,12 @@ async function resolveClient(client) {
   return supabase;
 }
 
+// The PT409 hints 096 raises, passed to the client as the error code.
+const SIGNIFICANT_CHANGE_CONFLICTS = new Set([
+  'EVENT_STATUS_NOT_ALLOWED',
+  'SIGNIFICANT_CHANGE_IMPACT_CHANGED',
+]);
+
 /**
  * Turn a raw Postgres error into a typed one.
  *
@@ -279,9 +285,6 @@ function translateError(error) {
   if (code === '22023') {
     return new ValidationError(detail);
   }
-  if (code === '22P02' || code === '22007') {
-    return new ValidationError(`A value was rejected by the database: ${detail}`);
-  }
 
   // serialization_failure: 018's guarded update matched no row, meaning the
   // event changed hands under it. 018 explains why this cannot happen while
@@ -300,8 +303,10 @@ function translateError(error) {
   if (code === 'PT409' && error.hint === 'EVENT_NOT_READY') {
     return new ConflictError(detail, { code: 'EVENT_NOT_READY', conflicts: parseOutstanding(error.details) });
   }
-  if (code === 'PT409') {
-    return new ConflictError(detail, { code: error.hint ?? 'EVENT_STATUS_NOT_ALLOWED' });
+  // SCRUM-395 (096): the significant-change refusals the panel acts on. Any
+  // other PT409 is not one this module raises, so it stays untyped below.
+  if (code === 'PT409' && SIGNIFICANT_CHANGE_CONFLICTS.has(error.hint)) {
+    return new ConflictError(detail, { code: error.hint });
   }
 
   // Left untyped on purpose. An unrecognised code is not the caller's fault and

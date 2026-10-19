@@ -4125,7 +4125,7 @@ describe('SCRUM-325 AC4: nothing leaves a final status', () => {
     });
     const changes = { proposedStart: '2027-04-01T10:00:00+08:00' };
 
-    it('previews the validated merged event through the shared database calculation', async () => {
+    it('SCRUM395_AC3_previews_the_validated_change_through_the_shared_database_calculation', async () => {
       const impact = { venueBookings: [], equipmentReservations: [], registeredAttendeesToNotify: 0 };
       const client = createFakeClient([ok(current), ok(impact)]);
 
@@ -4147,7 +4147,7 @@ describe('SCRUM-325 AC4: nothing leaves a final status', () => {
       })]);
     });
 
-    it('applies changes through the atomic database function and maps its event', async () => {
+    it('SCRUM395_AC4_applies_the_change_through_the_atomic_database_function', async () => {
       const impact = { venueBookings: [], equipmentReservations: [], registeredAttendeesToNotify: 0 };
       const updated = storedRow({
         ...current,
@@ -4187,7 +4187,7 @@ describe('SCRUM-325 AC4: nothing leaves a final status', () => {
       })]);
     });
 
-    it('refuses a missing reason and a different coordinator before the write RPC', async () => {
+    it('SCRUM395_AC1_refuses_a_blank_reason_or_another_coordinator_before_the_write_rpc', async () => {
       const wrongAssignment = storedRow({
         ...current,
         assigned_coordinator_id: '66666666-6666-4666-8666-666666666666',
@@ -4213,7 +4213,7 @@ describe('SCRUM-325 AC4: nothing leaves a final status', () => {
       expect(rpcCallsOf(client)).toHaveLength(0);
     });
 
-    it('requires a preview impact before the apply RPC', async () => {
+    it('SCRUM395_AC3_requires_a_preview_impact_before_the_apply_rpc', async () => {
       const client = createFakeClient([]);
       await expect(applySignificantEventChange(
         REQUEST_ID,
@@ -4222,6 +4222,37 @@ describe('SCRUM-325 AC4: nothing leaves a final status', () => {
         { client },
       )).rejects.toBeInstanceOf(ValidationError);
       expect(client.calls).toHaveLength(0);
+    });
+
+    const applyRefusedWith = (hint) => {
+      const client = createFakeClient([
+        ok(current),
+        { data: null, error: { code: 'PT409', message: 'Refused by the database', hint } },
+      ]);
+      return errorFrom(applySignificantEventChange(
+        REQUEST_ID,
+        { changes, reason: 'Updated schedule', expectedImpact: { venueBookings: [], equipmentReservations: [] } },
+        COORDINATOR_ID,
+        { client },
+      ));
+    };
+
+    it.each([
+      ['SCRUM395_AC1', 'EVENT_STATUS_NOT_ALLOWED'],
+      ['SCRUM395_AC5', 'SIGNIFICANT_CHANGE_IMPACT_CHANGED'],
+    ])('%s_passes_the_%s_refusal_on_as_a_typed_conflict', async (_ac, hint) => {
+      // The panel reads the code to offer a fresh preview instead of an error.
+      const err = await applyRefusedWith(hint);
+
+      expect(err).toBeInstanceOf(ConflictError);
+      expect(err.code).toBe(hint);
+    });
+
+    it('SCRUM395_AC1_leaves_a_pt409_this_story_does_not_raise_untyped', async () => {
+      const err = await applyRefusedWith('BOOKING_NOT_PENDING');
+
+      expect(err).not.toBeInstanceOf(ConflictError);
+      expect(err.status).toBeUndefined();
     });
   });
 
