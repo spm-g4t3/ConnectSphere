@@ -52,6 +52,7 @@ const ARRANGEMENTS = [
 const MIGRATION = '064_safety_review_submission.sql';
 const READINESS_MIGRATION = '098_event_readiness_details.sql';
 const CONFIRM_MIGRATION = '099_confirmation_revision.sql';
+const FIELD_LOCK_MIGRATION = '102_confirmed_significant_field_lock.sql';
 const LATE_SAFETY_MIGRATIONS = [
   '071_safety_review.sql',
   '072_safety_review_history.sql',
@@ -247,6 +248,7 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     await db.exec(migration(READINESS_MIGRATION));
     await db.exec(migration('../migration-history/scrum363/086_confirm_event_request.sql'));
     await db.exec(migration(CONFIRM_MIGRATION));
+    await db.exec(migration(FIELD_LOCK_MIGRATION));
     // Use the merged registration schema and writer, including settings constraints.
     for (const name of ['050_event_registration.sql', '068_open_event_registration_state.sql',
       '082_event_registration_state.sql', '091_event_registration_hardening.sql',
@@ -873,13 +875,7 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
       expect((await refusal(db.query('select assert_equipment_editable($1, $2)', [id, coordinatorA])))?.code).toBe('55000');
     });
 
-    it('SCRUM363_AC8_legacy_change_acceptance_cannot_edit_confirmed_fields_and_rolls_back_the_decision', async () => {
-      const id = await readyToConfirm();
-      await confirm(id);
-      const { id: changeId } = await one(`insert into event_change_requests
-        (event_request_id, requested_by, change_field, requested_change)
-        values ($1, $2, 'event_name', 'Changed without review') returning id`, [id, organiser]);
-      const before = await written(id);
+    function changeRequestApp() {
       const client = { async rpc(fn, args) {
         expect(fn).toBe('process_change_request');
         try {
@@ -891,10 +887,41 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
           return { data: null, error: { code: error.code, message: error.message } };
         }
       } };
-      const app = express().use(express.json()).use('/api/event-requests', createEventRequestRouter({
+      return express().use(express.json()).use('/api/event-requests', createEventRequestRouter({
         client, requireAuth: (req, _res, next) => { req.user = { id: coordinatorA, role: 'event_coordinator' }; next(); },
       }));
-      const response = await request(app).post(`/api/event-requests/change-requests/${changeId}/decision`).send({ decision: 'approved' });
+    }
+
+    async function approveChange(id, field, value) {
+      const { id: changeId } = await one(`insert into event_change_requests
+        (event_request_id, requested_by, change_field, requested_change)
+        values ($1, $2, $3, $4) returning id`, [id, organiser, field, value]);
+      const response = await request(changeRequestApp())
+        .post(`/api/event-requests/change-requests/${changeId}/decision`).send({ decision: 'approved' });
+      return { changeId, response };
+    }
+
+    it.each([
+      ['event_name', 'Renamed after confirmation'],
+      ['description', 'Updated description'],
+      ['purpose', 'Updated purpose'],
+    ])('SCRUM363_AC8_approved_change_request_applies_ordinary_%s_to_a_confirmed_event', async (field, value) => {
+      const id = await readyToConfirm();
+      await confirm(id);
+      const before = await written(id);
+      const { changeId, response } = await approveChange(id, field, value);
+      expect(response.status).toBe(200);
+      expect((await one(`select ${field} as value from event_requests where id = $1`, [id])).value).toBe(value);
+      expect(await written(id)).toEqual(before);
+      expect((await one('select status from event_change_requests where id = $1', [changeId])).status).toBe('processed');
+    });
+
+    it('SCRUM363_AC8_legacy_change_acceptance_cannot_edit_confirmed_significant_fields_and_rolls_back_the_decision', async () => {
+      const id = await readyToConfirm();
+      await confirm(id);
+      const before = await written(id);
+      const start = (await one('select proposed_start from event_requests where id = $1', [id])).proposed_start;
+      const { changeId, response } = await approveChange(id, 'proposed_start', new Date(start.getTime() + 3600000).toISOString());
       expect(response.status).toBe(409);
       expect(response.body.error).toMatch(/confirmed event details are locked/i);
       expect(await written(id)).toEqual(before);
@@ -905,7 +932,8 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
     it.each([
       ['proposed_start', "proposed_start + interval '1 hour'"],
       ['expected_attendance', 'coalesce(expected_attendance, 1) + 1'],
-      ['equipment_requirements', "'Additional microphones'"],
+      ['venue_requirements', "'A larger hall'"],
+      ['accessibility_requirements', "'Step-free access'"],
     ])('SCRUM363_AC8_confirmed_%s_is_locked_even_for_a_trusted_table_writer', async (field, value) => {
       const id = await readyToConfirm();
       await confirm(id);
@@ -1016,6 +1044,7 @@ describe('SCRUM-489: migration 064, readiness and submission for the safety chec
 
     it('SCRUM363_AC6_confirm_rpc_is_rerunnable_invoker_security_and_backend_only', async () => {
       await db.exec(migration(CONFIRM_MIGRATION));
+      await db.exec(migration(FIELD_LOCK_MIGRATION));
       const { prosecdef, count } = await one("select bool_or(prosecdef) as prosecdef, count(*) as count from pg_proc where proname = 'confirm_event_request'");
       expect(prosecdef).toBe(false);
       expect(Number(count)).toBe(1);

@@ -202,10 +202,12 @@ export default function MyAssignedEvents() {
     try {
       const data = await getMyAssignedEvents();
       setEvents(data);
+      // An event handed over leaves this list; keep its panel open (SCRUM-334)
+      // so the coordinator sees the handover rather than losing the page.
       setActivePanel((current) => {
         if (!current) return current;
         const refreshed = data.find((event) => event.id === current.request.id);
-        return refreshed ? { ...current, request: refreshed } : null;
+        return refreshed ? { ...current, request: refreshed } : current;
       });
       setError(null);
       return data;

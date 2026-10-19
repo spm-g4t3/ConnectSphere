@@ -242,6 +242,22 @@ describe("SCRUM363 coordinator confirmation", () => {
     expect(screen.queryByText("Event confirmed successfully.")).not.toBeInTheDocument();
   });
 
+  it("SCRUM363_AC3_a_stale_refusal_stays_visible_after_the_refetch_loads_a_newer_revision", async () => {
+    signIn(ASSIGNED, "event_coordinator");
+    const stale = "This event has changed. Refresh its checklist before confirming.";
+    vi.mocked(confirmEventRequest).mockRejectedValue({ response: { status: 409, data: { error: stale } } });
+    const refresh = vi.fn();
+    const { user, rerender } = renderPage(safetyApproved({ updatedAt: "2026-10-01T00:00:00Z" }), { onChangeRequestProcessed: refresh });
+    const confirm = await screen.findByRole("button", { name: "Confirm Event" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    await user.click(confirm);
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    // Still Safety approved, so the panel stays and reloads for the new revision.
+    rerender(<MemoryRouter><CoordinatorRequestDetail request={safetyApproved({ updatedAt: "2026-10-02T00:00:00Z" })} onChangeRequestProcessed={refresh} /></MemoryRouter>);
+    expect(confirmPanel()).toBeInTheDocument();
+    expect(screen.getAllByRole("alert").filter((el) => el.textContent === stale)).toHaveLength(1);
+  });
+
   it("SCRUM363_AC6_my_events_open_confirmation_and_back_navigation_show_the_server_updated_status", async () => {
     signIn(ASSIGNED, "event_coordinator");
     vi.mocked(getMyAssignedEvents).mockResolvedValueOnce([safetyApproved()]).mockResolvedValue([confirmedEvent()]);

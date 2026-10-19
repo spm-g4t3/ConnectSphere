@@ -548,7 +548,11 @@ export default function CoordinatorRequestDetail({
       </h2>
       <p>{display.description}</p>
       <SafetyApprovalNotice status={current.status} />
-      {confirmationFeedback?.eventId === current.id && (confirmationFeedback.success ? current.status === "confirmed" : !canConfirm) && (
+      {/* The panel shows a refusal only for the revision it refused; once a
+          refetch moves the event on, or unmounts the panel, show it here. */}
+      {confirmationFeedback?.eventId === current.id && (confirmationFeedback.success
+        ? current.status === "confirmed"
+        : !canConfirm || confirmationFeedback.updatedAt !== current.updatedAt) && (
         <p role={confirmationFeedback.success ? "status" : "alert"}>{confirmationFeedback.message}</p>
       )}
       {canConfirm && (
@@ -562,7 +566,7 @@ export default function CoordinatorRequestDetail({
           }}
           onStale={(message) => {
             setUpdatedRequest(null);
-            setConfirmationFeedback({ eventId: current.id, success: false, message });
+            setConfirmationFeedback({ eventId: current.id, updatedAt: current.updatedAt, success: false, message });
             return onChangeRequestProcessed?.();
           }}
         />
