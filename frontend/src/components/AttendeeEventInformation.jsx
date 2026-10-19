@@ -31,7 +31,7 @@ function EventInformation({ eventId }) {
           </div>
         )}
         {!loading && !error && data && (data.eventRequestId !== eventId.trim().toLowerCase() || data.state !== "confirmed"
-          ? <p role="status">Confirmed event details are currently unavailable.</p>
+          ? <p role="status">Event details are not currently confirmed.</p>
           : <>
             <h2>Confirmed arrangements</h2>
             <p>{EVENT_TIME_NOTE}</p>

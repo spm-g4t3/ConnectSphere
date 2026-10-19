@@ -44,7 +44,7 @@ describe("SCRUM-51 mocked API response sequences (not lifecycle RPC integration)
     // Approved and Cancelled share this privacy-preserving response. No raw status is supplied to the UI.
     vi.mocked(getAttendeeEvent).mockResolvedValue(unavailable);
     renderAt("/registered-events/e1");
-    const message = await screen.findByText("Confirmed event details are currently unavailable.");
+    const message = await screen.findByText("Event details are not currently confirmed.");
     expect(message).toHaveAttribute("role", "status");
     expect(message).not.toHaveTextContent(/awaiting|yet|will be confirmed/i);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -65,7 +65,7 @@ describe("SCRUM-51 mocked API response sequences (not lifecycle RPC integration)
     expectArrangementsHidden();
     // This represents the API response after Approved, not execution of a significant-change workflow.
     await act(async () => approvedRead.resolve(unavailable));
-    expect(screen.getByRole("status")).toHaveTextContent("Confirmed event details are currently unavailable.");
+    expect(screen.getByRole("status")).toHaveTextContent("Event details are not currently confirmed.");
     expectArrangementsHidden();
 
     fireEvent(document, new Event("visibilitychange"));
@@ -98,7 +98,7 @@ describe("SCRUM-51 mocked API response sequences (not lifecycle RPC integration)
     await act(async () => refresh.reject(status === undefined ? new Error("PRIVATE_NETWORK_ERROR") : failure(status)));
     expect(screen.getByRole("alert")).toHaveTextContent(message);
     expect(screen.getByRole("alert")).not.toHaveTextContent(/PRIVATE_|as last loaded/);
-    expect(screen.queryByText("Confirmed event details are currently unavailable.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Event details are not currently confirmed.")).not.toBeInTheDocument();
     expectArrangementsHidden();
 
     if (status !== 404) {
@@ -132,7 +132,7 @@ describe("SCRUM-51 mocked API response sequences (not lifecycle RPC integration)
       if (staleOutcome === "unavailable") {
         expect(screen.getByText("Latest confirmed hall")).toBeInTheDocument();
       } else {
-        expect(screen.getByRole("status")).toHaveTextContent("Confirmed event details are currently unavailable.");
+        expect(screen.getByRole("status")).toHaveTextContent("Event details are not currently confirmed.");
         expectArrangementsHidden();
       }
       expect(screen.queryByText("Hall e1")).not.toBeInTheDocument();
@@ -263,7 +263,7 @@ describe("SCRUM-24 reachable attendee information", () => {
     "SCRUM24_AC2_AC3_unconfirmed_or_mismatched_records_never_render_arrangements_%j", async data => {
       vi.mocked(getAttendeeEvent).mockResolvedValue(data);
       renderAt("/registered-events/e1");
-      expect(await screen.findByText("Confirmed event details are currently unavailable.")).toHaveAttribute("role", "status");
+      expect(await screen.findByText("Event details are not currently confirmed.")).toHaveAttribute("role", "status");
       expect(screen.queryByRole("heading", { name: "Confirmed arrangements" })).not.toBeInTheDocument();
     },
   );
