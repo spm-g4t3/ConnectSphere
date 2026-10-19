@@ -506,7 +506,14 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting (065, 066)', ()
         .filter((name) => name.endsWith('.sql'))
         .sort()
         .filter((name) => migration(name).includes('add constraint notifications_type_known'));
-      const latest = notificationTypes(migration(setters.at(-1)));
+      // A live-list migration (v_ours) keeps the existing constraint, so the
+      // effective list also includes everything set before it.
+      const latest = [];
+      for (const name of [...setters].reverse()) {
+        const sql = migration(name);
+        latest.push(...notificationTypes(sql));
+        if (!sql.includes('v_ours')) break;
+      }
 
       expect(setters).toContain(MIGRATION_066);
       expect(latest).toEqual(

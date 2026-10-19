@@ -56,6 +56,7 @@ import ReassignEventPanel from "./ReassignEventPanel";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import EventEquipmentSection from "./EventEquipmentSection";
 import EventCancellationPanel from "./EventCancellationPanel";
+import SignificantEventChangePanel from "./SignificantEventChangePanel";
 import SafetyCheckSubmissionPanel from "./SafetyCheckSubmissionPanel";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import {
@@ -240,6 +241,7 @@ export default function CoordinatorRequestDetail({
   const { user } = useAuth();
   const [reassigning, setReassigning] = useState(false);
   const [cancellationPage, setCancellationPage] = useState(false);
+  const [significantChangePage, setSignificantChangePage] = useState(false);
   const [handedOverTo, setHandedOverTo] = useState(null);
   const [historyVersion, setHistoryVersion] = useState(0);
   // SCRUM-192. Bumped when a booking request is sent from "Find a venue", so
@@ -516,6 +518,22 @@ export default function CoordinatorRequestDetail({
     );
   }
 
+  if (significantChangePage) {
+    return (
+      <SignificantEventChangePanel
+        eventRequest={current}
+        onBack={() => setSignificantChangePage(false)}
+        onApplied={(updated) => {
+          setUpdatedRequest(updated);
+          setSignificantChangePage(false);
+          setFlaggedVersion((version) => version + 1);
+          setVenueVersion((version) => version + 1);
+          onChangeRequestProcessed?.();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="coordinator-request-detail">
       <h2>
@@ -527,6 +545,20 @@ export default function CoordinatorRequestDetail({
       </h2>
       <p>{display.description}</p>
       <SafetyApprovalNotice status={current.status} />
+      {isAssignedCoordinator && [
+        "approved",
+        "confirmed",
+        "safety_review",
+        "safety_approved",
+      ].includes(current.status) && (
+        <button
+          className="coordinator-request-detail__significant-change"
+          type="button"
+          onClick={() => setSignificantChangePage(true)}
+        >
+          Revise event details
+        </button>
+      )}
       {isAssignedCoordinator && CANCELLABLE_STATUSES.has(current.status) && (
         <button
           className="coordinator-request-detail__cancel"

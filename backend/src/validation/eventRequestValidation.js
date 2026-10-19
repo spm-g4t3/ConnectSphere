@@ -424,3 +424,82 @@ export function validateSubmitEventRequest(input, { now = new Date() } = {}) {
   throwIfInvalid(errors);
   return normalised;
 }
+
+/**
+ * Validate a coordinator's significant event change with the same field rules
+ * as SCRUM-10, then validate the complete resulting event as submit-ready.
+ *
+ * `equipmentChange` records the reasoned handoff to SCRUM-21; equipment lines
+ * are deliberately not edited through this event-field change.
+ *
+ * @param {object} changes
+ * @param {object} current  camelCase event request
+ * @param {object} [options]
+ * @param {Date} [options.now]
+ * @returns {object} normalised changed fields
+ */
+export function validateSignificantEventChange(changes, current, { now = new Date() } = {}) {
+  assertObject(changes);
+  assertObject(current);
+
+  const allowed = new Set([
+    'proposedStart',
+    'proposedEnd',
+    'expectedAttendance',
+    'venueRequirements',
+    'accessibilityRequirements',
+    'equipmentChange',
+  ]);
+  const unknown = Object.keys(changes).filter((field) => !allowed.has(field));
+  if (unknown.length > 0) {
+    throw new ValidationError(
+      `Invalid significant event change -- unsupported field${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}`,
+    );
+  }
+
+  const eventFields = {};
+  for (const field of allowed) {
+    if (field === 'equipmentChange' || !Object.prototype.hasOwnProperty.call(changes, field)) continue;
+    if (
+      changes[field] === null &&
+      !['venueRequirements', 'accessibilityRequirements'].includes(field)
+    ) {
+      throw new ValidationError(`Invalid significant event change -- ${field} cannot be null`);
+    }
+    // Null is the wire representation for clearing optional prose. The shared
+    // SCRUM-10 validator interprets a blank optional string as stored null.
+    eventFields[field] = changes[field] === null ? '' : changes[field];
+  }
+
+  const normalised = Object.keys(eventFields).length > 0
+    ? validateUpdateEventRequest(eventFields)
+    : {};
+
+  if (
+    Object.prototype.hasOwnProperty.call(changes, 'equipmentChange') &&
+    typeof changes.equipmentChange !== 'boolean'
+  ) {
+    throw new ValidationError('Invalid significant event change -- equipmentChange must be true or false');
+  }
+  if (changes.equipmentChange === true) normalised.equipmentChange = true;
+
+  if (Object.keys(normalised).length === 0) {
+    throw new ValidationError('Invalid significant event change -- no changes supplied');
+  }
+
+  const merged = {
+    eventName: current.eventName,
+    purpose: current.purpose,
+    description: current.description,
+    proposedStart: current.proposedStart,
+    proposedEnd: current.proposedEnd,
+    expectedAttendance: current.expectedAttendance,
+    venueRequirements: current.venueRequirements,
+    accessibilityRequirements: current.accessibilityRequirements,
+    equipmentRequirements: current.equipmentRequirements,
+    ...normalised,
+  };
+  validateSubmitEventRequest(merged, { now });
+
+  return normalised;
+}

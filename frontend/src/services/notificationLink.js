@@ -10,6 +10,8 @@ const eventRequestPage = (id) => ({ to: `/event-requests/${id}` });
 const VENUE_STAFF_PAGES = {
   booking_request_submitted: { to: "/booking-requests" },
   safety_booking_flagged: { to: "/flagged-bookings" },
+  booking_flagged_event_change: { to: "/flagged-bookings" },
+  booking_request_event_change: { to: "/booking-requests" },
 };
 
 // What opens the equipment review: the safety flag (SCRUM-172) and the

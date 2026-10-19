@@ -96,6 +96,27 @@ describe("SCRUM174_AC1 Venue Staff's new request notice", () => {
   });
 });
 
+describe("SCRUM395 significant change notification destinations", () => {
+  it("SCRUM395_AC9_sends_venue_staff_to_the_flagged_booking_list", () => {
+    expect(notificationLink(note("booking_flagged_event_change"), "venue_staff")).toEqual({
+      to: "/flagged-bookings",
+    });
+  });
+
+  it("SCRUM395_AC9_sends_venue_staff_to_the_request_queue_for_a_pending_request_on_the_old_time", () => {
+    expect(notificationLink(note("booking_request_event_change"), "venue_staff")).toEqual({
+      to: "/booking-requests",
+    });
+  });
+
+  it("SCRUM395_AC9_focuses_the_changed_event_for_its_organiser", () => {
+    expect(notificationLink(note("event_significant_change"), "event_organiser")).toEqual({
+      to: "/events",
+      state: { focusEventRequestId: EVENT },
+    });
+  });
+});
+
 describe("SCRUM494_AC7 a start that moved before the registration dates", () => {
   it("SCRUM494_AC7_organiser_opens_the_event_registration_settings_page", () => {
     expect(notificationLink(note("registration_schedule_conflict"), "event_organiser")).toEqual({

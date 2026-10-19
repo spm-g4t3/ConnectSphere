@@ -101,6 +101,77 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
     expect(headline).not.toBe("New notification");
   });
 
+  describe("describeNotification: significant event changes (SCRUM-395)", () => {
+    it("SCRUM395_AC9_explains_the_change_to_the_organiser", () => {
+      const notification = {
+        id: "n395-1",
+        type: "event_significant_change",
+        payload: { eventName: "Tech Talk", reason: "Updated schedule" },
+      };
+      expect(describeNotification(notification)).toEqual({
+        headline: "Tech Talk has a significant change",
+        detail: "The event was updated by its Coordinator. Reason: Updated schedule.",
+      });
+    });
+
+    it("SCRUM395_AC9_shows_the_changed_period_to_registered_attendees", () => {
+      const notification = {
+        id: "n395-2",
+        type: "event_significant_change_attendee",
+        payload: {
+          eventName: "Tech Talk",
+          reason: "Updated schedule",
+          startsAt: PAYLOAD.startsAt,
+          endsAt: PAYLOAD.endsAt,
+        },
+      };
+      const { headline, detail } = describeNotification(notification);
+      expect(headline).toBe("An event you registered for has changed: Tech Talk");
+      expect(detail).toContain("Reason: Updated schedule.");
+      expect(detail).toContain(formatRange(PAYLOAD.startsAt, PAYLOAD.endsAt));
+    });
+
+    it("SCRUM395_AC9_explains_a_venue_booking_flag", () => {
+      const notification = {
+        id: "n395-3",
+        type: "booking_flagged_event_change",
+        payload: {
+          eventName: "Tech Talk",
+          venueName: "Hall A",
+          startsAt: PAYLOAD.startsAt,
+          endsAt: PAYLOAD.endsAt,
+          reason: "Updated schedule",
+        },
+      };
+      const { headline, detail } = describeNotification(notification);
+      expect(headline).toBe("Tech Talk at Hall A needs review after a significant event change");
+      expect(detail).toContain("Coordinator's reason: Updated schedule.");
+    });
+
+    it("SCRUM395_AC9_gives_venue_staff_both_periods_for_a_pending_request", () => {
+      const notification = {
+        id: "n395-4",
+        type: "booking_request_event_change",
+        payload: {
+          eventName: "Tech Talk",
+          venueName: "Hall A",
+          startsAt: PAYLOAD.startsAt,
+          endsAt: PAYLOAD.endsAt,
+          newStartsAt: "2040-12-02T10:00:00+08:00",
+          newEndsAt: "2040-12-02T12:00:00+08:00",
+          reason: "Updated schedule",
+        },
+      };
+      expect(describeNotification(notification)).toEqual({
+        headline: "Tech Talk moved; a pending request is for the old time",
+        detail:
+          `The request for Hall A is for ${formatRange(PAYLOAD.startsAt, PAYLOAD.endsAt)}. ` +
+          `The event now runs ${formatRange("2040-12-02T10:00:00+08:00", "2040-12-02T12:00:00+08:00")}. ` +
+          "Coordinator's reason: Updated schedule.",
+      });
+    });
+  });
+
   it("SCRUM484_AC8_setup_change_detail_does_not_repeat_the_backend_reason", () => {
     expect(describeNotification(setupChange()).detail).not.toContain(SETUP_PAYLOAD.reason);
   });
@@ -1012,6 +1083,13 @@ function knownNotificationTypes() {
 
 const FIXTURES = {
   booking_flagged: PAYLOAD,
+  booking_flagged_event_change: {
+    eventName: "Tech Talk",
+    venueName: "Hall A",
+    startsAt: PAYLOAD.startsAt,
+    endsAt: PAYLOAD.endsAt,
+    reason: "Updated schedule",
+  },
   booking_request_withdrawn: WITHDRAWN_PAYLOAD,
   booking_request_submitted: WITHDRAWN_PAYLOAD,
   clarification_requested: { eventName: "Tech Talk", message: "Please confirm." },
@@ -1026,6 +1104,22 @@ const FIXTURES = {
   safety_review_response: { eventName: "Tech Talk", outcome: "approved" },
   safety_booking_flagged: { eventName: "Tech Talk", venueName: "Hall A", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt },
   safety_equipment_review: { eventName: "Tech Talk" },
+  booking_request_event_change: {
+    eventName: "Tech Talk",
+    venueName: "Hall A",
+    startsAt: PAYLOAD.startsAt,
+    endsAt: PAYLOAD.endsAt,
+    newStartsAt: PAYLOAD.startsAt,
+    newEndsAt: PAYLOAD.endsAt,
+    reason: "Updated schedule",
+  },
+  event_significant_change: { eventName: "Tech Talk", reason: "Updated schedule" },
+  event_significant_change_attendee: {
+    eventName: "Tech Talk",
+    startsAt: PAYLOAD.startsAt,
+    endsAt: PAYLOAD.endsAt,
+    reason: "Updated schedule",
+  },
   event_submitted_for_safety_review: { eventName: "Tech Talk", coordinatorName: "Nia New", startsAt: PAYLOAD.startsAt },
   booking_request_approved: { eventName: "Tech Talk", venueName: "Hall A", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt },
   booking_request_rejected: { eventName: "Tech Talk", venueName: "Hall A", reason: "Under renovation" },
@@ -1057,5 +1151,41 @@ describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", (
       (type) => describeNotification({ id: "n11", type, payload: FIXTURES[type] }).headline === "New notification",
     );
     expect(generic).toEqual([]);
+  });
+});
+
+describe("describeNotification: fallbacks for sparse payloads", () => {
+  const d = (type, payload) => describeNotification({ id: "n20", type, payload });
+
+  it("SCRUM395_AC9_booking_released_falls_back_to_the_coordinator_and_no_reason", () => {
+    const out = d("booking_released", {});
+    expect(out.detail).toContain("released by the event's coordinator");
+  });
+
+  it("SCRUM395_AC9_conflict_cleared_names_another_event_when_none_is_given", () => {
+    expect(d("booking_request_conflict_cleared", {}).detail).toContain("Another event");
+  });
+
+  it("SCRUM395_AC9_safety_submission_defaults_the_coordinator_and_omits_a_bad_start", () => {
+    const out = d("event_submitted_for_safety_review", {});
+    expect(out.detail).toContain("its coordinator");
+    expect(out.detail).not.toContain("It starts");
+  });
+
+  it("SCRUM395_AC9_significant_change_types_fall_back_when_fields_are_missing", () => {
+    expect(d("event_significant_change", {}).detail).toContain("Reason:");
+    expect(d("event_significant_change_attendee", { startsAt: PAYLOAD.startsAt }).detail).not.toContain("now runs");
+    expect(d("event_significant_change_attendee", { reason: "Moved", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt }).detail)
+      .toContain("now runs");
+    expect(d("booking_flagged_event_change", {}).detail).toContain("Coordinator's reason:");
+    expect(d("booking_flagged_event_change", { reason: "Moved" }).detail).toContain("Moved");
+  });
+
+  it("SCRUM395_AC9_pending_request_notice_falls_back_when_fields_are_missing", () => {
+    const { headline, detail } = d("booking_request_event_change", {});
+    expect(headline).toBe("Unnamed event moved; a pending request is for the old time");
+    expect(detail).toContain("The request for Unknown venue");
+    expect(detail).toContain("Coordinator's reason: No reason recorded.");
+    expect(`${headline} ${detail}`).not.toContain("undefined");
   });
 });
