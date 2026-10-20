@@ -183,6 +183,13 @@ const SCRUM495_FILES = [
   'src/services/openEventService.js',
 ]
 
+const SCRUM24_FILES = [
+  'src/components/RegisteredEvents.jsx',
+  'src/components/AttendeeEventInformation.jsx',
+  'src/services/attendeeEventService.js',
+  'src/services/attendeeEventRoutes.js',
+]
+
 const SCRUM22_FILES = [
   'src/services/registrationService.js',
   'src/services/registrationErrors.js',
@@ -259,6 +266,7 @@ export default defineConfig({
         ...SCRUM258_FILES.map((file) => [file, FULL]),
         ...SCRUM266_FILES.map((file) => [file, FULL]),
         ...SCRUM495_FILES.map((file) => [file, FULL]),
+        ...SCRUM24_FILES.map((file) => [file, FULL]),
         ...SCRUM22_FILES.map((file) => [file, FULL]),
         ...SCRUM489_FILES.map((file) => [file, FULL]),
         ...SCRUM363_FILES.map((file) => [file, FULL]),

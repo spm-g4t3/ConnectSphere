@@ -29,6 +29,9 @@ import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
 import SafetyReviewHistory from "./components/SafetyReviewHistory";
 import BrowseOpenEvents from "./components/BrowseOpenEvents";
 import BrowseEventDetails from "./components/BrowseEventDetails";
+import RegisteredEvents from "./components/RegisteredEvents";
+import AttendeeEventInformation from "./components/AttendeeEventInformation";
+import { REGISTERED_EVENTS_PATH, ATTENDEE_EVENT_ROUTE } from "./services/attendeeEventRoutes";
 import { registerForEvent } from "./services/registrationService";
 import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE } from "./services/openEventRoutes";
 import "./App.css";
@@ -112,6 +115,16 @@ function AppRoutes() {
           }
         />
         <Route path="/events" element={<ProtectedRoute><MyEventRequests /></ProtectedRoute>} />
+        <Route path={REGISTERED_EVENTS_PATH} element={
+          <ProtectedRoute allowedRoles={["attendee"]}>
+            <div className="dashboard dashboard--attendee"><RegisteredEvents /></div>
+          </ProtectedRoute>
+        } />
+        <Route path={ATTENDEE_EVENT_ROUTE} element={
+          <ProtectedRoute allowedRoles={["attendee"]}>
+            <div className="dashboard dashboard--attendee"><AttendeeEventInformation /></div>
+          </ProtectedRoute>
+        } />
         <Route
           path="/registration"
           element={

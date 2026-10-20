@@ -25,6 +25,7 @@ import equipmentReviewRoutes from './routes/equipmentReview.js';
 import equipmentQueueRoutes from './routes/equipmentQueue.js';
 import safetyReviewRoutes from './routes/safetyReviews.js';
 import openEventRoutes from './routes/openEvents.js';
+import attendeeEventRoutes from './routes/attendeeEvents.js';
 import { startVenueHoldExpiryScheduler } from './jobs/venueHoldExpiryScheduler.js';
 
 const app = express();
@@ -43,6 +44,7 @@ app.use('/api/safety-reviews', safetyReviewRoutes);
 app.use('/api/event-requests/:id/venue-suitability', venueSuitabilityRoutes);
 
 app.use('/api/event-requests', eventRequestRoutes);
+app.use('/api/attendee-events', attendeeEventRoutes);
 app.use('/api/registration', eventRegistrationRoutes);
 
 // Mounted by SCRUM-15. It was withheld until it stopped taking the acting user

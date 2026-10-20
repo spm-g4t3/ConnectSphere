@@ -142,7 +142,7 @@ describe("SCRUM453_AC2 the Attendee dashboard and nav", () => {
 
     const nav = await screen.findByRole("navigation");
     const links = within(within(nav).getByRole("list")).getAllByRole("link");
-    expect(links.map((link) => link.getAttribute("href"))).toEqual(["/dashboard", "/open-events"]);
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(["/dashboard", "/registered-events", "/open-events"]);
     expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveClass("app-nav__link--active");
   });
 
@@ -154,7 +154,7 @@ describe("SCRUM453_AC2 the Attendee dashboard and nav", () => {
     // Nothing on the page may lead an Attendee to a staff-facing screen.
     const main = document.querySelector(".dashboard--attendee");
     const hrefs = within(main).getAllByRole("link").map((link) => link.getAttribute("href"));
-    expect(hrefs).toEqual(["/open-events"]);
+    expect(hrefs).toEqual(["/registered-events", "/open-events"]);
   });
 
   it("SCRUM453_AC2_Browse_Open_Events_is_not_offered_to_the_other_roles", async () => {
