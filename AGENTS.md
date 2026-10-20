@@ -21,8 +21,8 @@ Read only the section for the area you are working on, not the whole file.
 - Venue suitability is advisory only. A user may hold several roles. No admin role, no self-registration.
 
 ## Where the truth lives
-- SQL functions: the highest-numbered migration that defines one wins.
-  `git grep -n "function <name>" backend/db/migrations`, then read the latest file.
+- SQL functions: the highest-numbered migration that defines one wins, else `backend/db/baseline/` (the schema as of 102).
+  `git grep -n "function <name>" backend/db`, then read the latest file. Migration rules: `backend/db/migrations/AGENTS.md`.
 - Status and role vocabularies: `backend/src/domain/*.js`. They must match the SQL enums (tests in `backend/tests/domain/` check this).
 - Role gates exist twice, and both must agree: `requireRole` in `backend/src/routes/*.js` and the caller checks inside the SQL functions.
 - Per-story coverage thresholds: `frontend/vite.config.js`, `backend/vitest.config.js`.
@@ -39,9 +39,9 @@ Read only the section for the area you are working on, not the whole file.
 - Keep one sub-task per session. Show only the summary and the failures from test output.
 
 ## Shared surfaces (several stories touch these)
-- `notifications_type_known`: a new type means restating the whole list from the latest migration that sets it (`git grep -l notifications_type_known backend/db/migrations | tail -1`), never an older one.
+- `notifications_type_known`: a new type means restating the whole list from the latest migration that sets it (`git grep -l notifications_type_known backend/db/migrations | tail -1`), else `backend/db/baseline/05_notifications.sql`, never an older one.
 - New event statuses (the Week 7 safety statuses) also need `ACTIVE_EVENT_STATUSES` (`backend/src/services/eventRequestService.js`) and the status list in `reassign_event_request`.
-- Migration numbers: `git fetch origin dev`, then take a number above the highest there. Renumber yours if dev moves first.
+- Migration numbers: start at 103. `git fetch origin dev`, then take a number above the highest there. Renumber yours if dev moves first.
 
 ## Writing code
 - Comments say why, in 1-3 lines. Story history and ticket narrative go in the PR, not in file headers.

@@ -1,8 +1,8 @@
 // Builds and compares catalog fingerprints (scripts/schema-fingerprint.sql), to
-// show that the migration baseline, the old migration chain and the live
-// database define the same schema.
+// show that the baseline plus later migrations and the live database define
+// the same schema.
 //
-//   node scripts/schema-fingerprint.js build <old-chain|baseline> <out.csv>
+//   node scripts/schema-fingerprint.js build baseline <out.csv>
 //   node scripts/schema-fingerprint.js diff <a.csv> <b.csv> [--ignore kind,kind]
 //
 // Both run in memory (PGlite); neither touches the live database. The live CSV
@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { baselineFiles, createDatabase, oldChainFiles } from '../db/loadSchema.js';
+import { baselineFiles, createDatabase } from '../db/loadSchema.js';
 
 const FINGERPRINT_SQL = join(dirname(fileURLToPath(import.meta.url)), 'schema-fingerprint.sql');
 const COLUMNS = ['kind', 'name', 'detail'];
@@ -108,7 +108,7 @@ function printDiff({ onlyA, onlyB, changed }, aName, bName) {
   show('Changed', changed, (r) => `  ${r.kind}  ${r.name}\n    a: ${r.a}\n    b: ${r.b}`);
 }
 
-const SOURCES = { 'old-chain': oldChainFiles, baseline: baselineFiles };
+const SOURCES = { baseline: baselineFiles };
 
 async function main([command, ...args]) {
   if (command === 'build' && SOURCES[args[0]] && args[1]) {
@@ -133,7 +133,7 @@ async function main([command, ...args]) {
     return result.onlyA.length + result.onlyB.length + result.changed.length > 0 ? 1 : 0;
   }
   console.error(
-    'Usage:\n  node scripts/schema-fingerprint.js build <old-chain|baseline> <out.csv>\n' +
+    'Usage:\n  node scripts/schema-fingerprint.js build baseline <out.csv>\n' +
       '  node scripts/schema-fingerprint.js diff <a.csv> <b.csv> [--ignore kind,kind]',
   );
   return 2;

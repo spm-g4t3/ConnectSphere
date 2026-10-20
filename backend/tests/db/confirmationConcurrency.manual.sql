@@ -1,5 +1,6 @@
 -- SCRUM363_AC2 / AC3 / AC6: manual, real PostgreSQL two-connection races.
--- Use a disposable test database with the active readiness/confirmation migrations 098 and 099.
+-- Use a disposable test database built from backend/db/baseline/ (event_readiness in
+-- 07_safety_review.sql, confirm_event_request in 09_event_workflows.sql) plus any later migrations.
 -- These checks write data. Do not run against a real event or as one script.
 -- Run each labelled block separately in two psql sessions, using service_role
 -- or equivalent trusted permissions, at the default READ COMMITTED isolation.

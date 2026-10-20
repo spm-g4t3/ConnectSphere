@@ -29,25 +29,6 @@ function sqlFiles(dir) {
     .sort();
 }
 
-function moveBefore(names, moved, anchor) {
-  const rest = names.filter((name) => name !== moved);
-  const at = rest.indexOf(anchor);
-  if (at === -1 || rest.length === names.length) {
-    throw new Error(`Cannot place ${moved} before ${anchor}: file missing`);
-  }
-  rest.splice(at, 0, moved);
-  return rest;
-}
-
-export function oldChainFiles() {
-  let names = sqlFiles(MIGRATIONS_DIR);
-  // Filename order does not apply on an empty database: 014 reads a column
-  // that 025 adds, and 026 alters the table that 030 creates.
-  names = moveBefore(names, '025_event_request_decisions.sql', '014_booking_review_notifications.sql');
-  names = moveBefore(names, '030_event_clarification_reply_by.sql', '026_clarification_amendment_fields.sql');
-  return names.map((name) => join(MIGRATIONS_DIR, name));
-}
-
 export function baselineFiles() {
   const baseline = sqlFiles(BASELINE_DIR).map((name) => join(BASELINE_DIR, name));
   // Migrations from 103 on are written after the squash and apply on top of it.

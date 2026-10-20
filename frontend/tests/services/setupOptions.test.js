@@ -6,7 +6,7 @@
 // The minutes are asserted against a literal, as turnaroundOptions.test.js
 // does, and also against the backend's SETUP_MINUTES_OPTIONS read as text from
 // backend/src/domain/setupOptions.js (which a backend test in turn pins to the
-// CHECK `venues_setup_minutes_allowed` in 023_venue_setup_time.sql). Read as
+// CHECK `venues_setup_minutes_allowed` in db/baseline/03_venues.sql). Read as
 // text, not imported, so the frontend bundle never pulls in backend code.
 
 import { describe, it, expect } from "vitest";

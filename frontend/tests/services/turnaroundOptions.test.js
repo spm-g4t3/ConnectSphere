@@ -8,7 +8,7 @@
 // the same order, as TURNAROUND_MINUTES_OPTIONS in
 // backend/src/domain/turnaroundOptions.js and the CHECK
 // `venues_turnaround_minutes_allowed` in
-// backend/db/migrations/017_venue_turnaround.sql. If one of those changes,
+// backend/db/baseline/03_venues.sql. If one of those changes,
 // this literal must change with it.
 
 import { describe, it, expect } from "vitest";

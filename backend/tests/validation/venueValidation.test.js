@@ -1300,7 +1300,7 @@ describe('SCRUM493 emergency access and known restrictions', () => {
   const CASES = MODES.flatMap(([mode, run]) => SAFETY_FIELDS.map((field) => [mode, field, run]));
 
   it('SCRUM493_AC1_the_limit_is_2000_characters', () => {
-    // Mirrors the CHECKs in 036_venue_safety_facts.sql.
+    // Mirrors the venues CHECKs in db/baseline/03_venues.sql.
     expect(SAFETY_TEXT_MAX_LENGTH).toBe(2000);
   });
 
