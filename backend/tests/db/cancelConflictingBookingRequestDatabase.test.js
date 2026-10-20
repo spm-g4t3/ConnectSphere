@@ -1,50 +1,15 @@
 /**
  * Cancelling an event treats its conflicting booking requests as its pending
- * ones (067): the preview lists them, cancelling withdraws them, and Venue
- * Staff are told.
+ * ones: the preview lists them, cancelling withdraws them, and Venue Staff are
+ * told. Run against the final schema.
  *
  * SCRUM-258 AC3 with the Week 7 rule that conflicting is a flag on an open
- * request, not an end state. Uses cancelEventReleasesReservationsDatabase's
- * stack (through 054), then 049 (the preview 067 restates), 065, 066 (for the
- * converted-hold columns) and 067. 017, 023 and 032 are added because 066's
- * pending_request_overlaps is language sql, so its body is checked on creation.
+ * request, not an end state.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const BASE = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  '006_event_change_requests.sql',
-];
-const ASSIGNMENT = [
-  '014_coordinator_assignment.sql',
-  '015_assignment_function.sql',
-  '016_submit_event_request.sql',
-  '017_require_assigned_coordinator.sql',
-];
-const LIFECYCLE = [
-  '020_event_status_lifecycle.sql',
-  '021_event_status_history.sql',
-  '022_event_status_transitions.sql',
-];
-const EQUIPMENT = [
-  '024_equipment_availability.sql',
-  '037_equipment_request_lines.sql',
-  '038_equipment_review.sql',
-  '053_equipment_reservations.sql',
-  '054_equipment_reservation_actions.sql',
-];
-
-describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests (067)', () => {
+describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests', () => {
   let db;
   let organiser;
   let coordinator;
@@ -56,17 +21,13 @@ describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests 
   const bookingStatus = async (id) =>
     (await one('select status::text as status from bookings where id = $1', [id])).status;
 
-  async function makeApprovedEvent() {
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, assigned_coordinator_id, submitted_at,
-            reviewing_coordinator_id, decision, decided_by, decided_at)
-         values ($1, 'Conflicting cancellation', 'approved', $2, now(), $2, 'approved', $2, now())
-         returning id`,
-        [organiser, coordinator],
-      )
-    ).id;
+  function makeApprovedEvent() {
+    return seedEvent(db, {
+      status: 'approved',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: 'Conflicting cancellation',
+    });
   }
 
   async function makeBooking(eventId, venue, status) {
@@ -87,70 +48,7 @@ describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests 
     );
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-      create role service_role;
-    `);
-    for (const name of BASE) await db.exec(migration(name));
-    await db.exec(migration('025_event_request_decisions.sql'));
-    for (const name of ASSIGNMENT) await db.exec(migration(name));
-    for (const name of LIFECYCLE) await db.exec(migration(name));
-    await db.exec(migration('019_change_request_decision_coordinator.sql'));
-
-    await db.exec(`
-      create table notifications (
-        id uuid primary key default gen_random_uuid(),
-        recipient_id uuid not null references auth.users(id) on delete cascade,
-        type text not null,
-        booking_id uuid,
-        block_id uuid,
-        payload jsonb not null default '{}',
-        read_at timestamptz,
-        created_at timestamptz not null default now(),
-        constraint notifications_type_known check (type in ('booking_flagged'))
-      );
-      create function reply_to_event_clarification(uuid, uuid, text)
-      returns event_requests language sql as $$ select null::event_requests $$;
-    `);
-    await db.exec(migration('030_event_clarification_reply_by.sql'));
-    await db.exec(migration('026_clarification_amendment_fields.sql'));
-    await db.exec(migration('002_venues.sql'));
-    await db.exec(migration('009_bookings.sql'));
-    await db.exec(migration('011_venue_blocks.sql'));
-    await db.exec(migration('017_venue_turnaround.sql'));
-    await db.exec(migration('023_venue_setup_time.sql'));
-    await db.exec(migration('027_booking_request_statuses.sql'));
-    await db.exec(migration('032_venue_occupancy.sql'));
-    await db.exec(migration('022_equipment_schema.sql'));
-    await db.exec(migration('042_event_cancellation_fields.sql'));
-    await db.exec('alter table equipment_lines add column removed_at timestamptz');
-    await db.exec(migration('043_release_event_arrangements.sql'));
-    await db.exec(migration('045_cancel_event_request.sql'));
-    await db.exec(`
-      create type venue_hold_status as enum ('active', 'expired');
-      create table venue_holds (
-        id uuid primary key default gen_random_uuid(),
-        event_request_id uuid not null references event_requests(id),
-        venue_id uuid not null references venues(id),
-        placed_by uuid not null references auth.users(id),
-        placed_at timestamptz not null default now(),
-        expires_at timestamptz not null,
-        status venue_hold_status not null default 'active',
-        expired_at timestamptz
-      );
-    `);
-    await db.exec(migration('047_add_released_venue_hold_status.sql'));
-    await db.exec(migration('048_complete_event_cancellation_existing_arrangements.sql'));
-    for (const name of EQUIPMENT) await db.exec(migration(name));
-    await db.exec(migration('049_filter_cancelled_equipment_from_cancellation_preview.sql'));
-    // 065's enum values must commit before 066 and 067 use them, so each is its own exec.
-    await db.exec(migration('065_booking_decision_statuses.sql'));
-    await db.exec(migration('066_venue_staff_booking_decisions.sql'));
-    await db.exec(migration('067_withdraw_conflicting_on_cancellation.sql'));
+    db = await createSchemaDb();
 
     organiser = (await one("insert into auth.users (email) values ('organiser@test') returning id")).id;
     coordinator = (await one("insert into auth.users (email) values ('coordinator@test') returning id")).id;
@@ -207,8 +105,7 @@ describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests 
   it('SCRUM258_Week7_cancelling_cancels_the_approved_booking_and_leaves_its_converted_hold_converted', async () => {
     const eventId = await makeApprovedEvent();
     const approved = await makeBooking(eventId, venueId, 'approved');
-    // The hold 066 converts on approval, written directly: decide's re-check needs
-    // occupancy functions this stack does not build.
+    // The hold an approval converts, written directly.
     const holdId = (
       await one(
         `insert into venue_holds

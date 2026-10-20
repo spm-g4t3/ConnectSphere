@@ -1,54 +1,20 @@
 /**
  * SCRUM-253: withdraw_booking_request, run against a real Postgres.
  *
- * Applies the real migrations to an in-process Postgres (PGlite), so the
- * guarded status change, the refusals and the notifications are exercised, not
- * read as text. No server or credentials are needed, so this runs in CI.
- *
- * Applied in order: 001, 005, 007, 010, a stand-in for SCRUM-19's decision
- * column (014 reads it and it is not on this branch), 014, then 002, 009, 011,
- * 013, 014 (booking review and notifications), 027, 028, 030 and 031.
+ * Builds the final schema in an in-process Postgres (PGlite), so the guarded
+ * status change, the refusals and the notifications are exercised, not read as
+ * text. No server or credentials are needed, so this runs in CI.
  *
  * What PGlite is not: a second connection. It cannot show a withdrawal and an
  * approval blocking each other. A change that committed first is simulated by
  * setting the status before the call, which is exactly what the second
  * transaction sees after waiting on the row lock; the lock order and the guard
- * on the UPDATE are pinned from the function text. True parallel coverage is
+ * on the UPDATE are pinned from the function's source as Postgres holds it. True parallel coverage is
  * SCRUM-256's.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-];
-
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
 const START = '2026-12-01T09:00:00+00:00';
 const END = '2026-12-01T17:00:00+00:00';
@@ -97,25 +63,18 @@ describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
     ).id;
   }
 
-  async function makeEvent(extra = {}) {
+  function makeEvent(extra = {}) {
     counter += 1;
-    const cols = {
+    return seedEvent(db, {
+      status: 'approved',
       organiser_id: organiser,
       event_name: `Event ${counter}`,
-      status: 'approved',
       proposed_start: START,
       proposed_end: END,
-      submitted_at: new Date().toISOString(),
+      expected_attendance: 150,
       assigned_coordinator_id: coordinator,
       ...extra,
-    };
-    const keys = Object.keys(cols);
-    return (
-      await one(
-        `insert into event_requests (${keys.join(',')}) values (${keys.map((_, i) => `$${i + 1}`).join(',')}) returning id`,
-        Object.values(cols),
-      )
-    ).id;
+    });
   }
 
   /** A booking placed at `status`, for an event and venue made here unless given. */
@@ -139,16 +98,7 @@ describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
     (await one('select withdraw_booking_request($1, $2) as result', [bookingId, by])).result;
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      await db.exec(name === 'STAND_IN' ? DECISION_STAND_IN : migration(name));
-    }
+    db = await createSchemaDb();
     organiser = await makeUser('o@x', 'event_organiser');
     coordinator = await makeUser('c1@x', 'event_coordinator');
     otherCoordinator = await makeUser('c2@x', 'event_coordinator');
@@ -194,7 +144,7 @@ describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
 
       const result = (
         await one(
-          `select create_booking_request($1, $2, $3, null, null, '{"suitable": true, "criteria": []}'::jsonb, false) as result`,
+          `select create_booking_request($1, $2, $3, null, null, '{"suitable": true, "criteria": []}'::jsonb, false, 150, null) as result`,
           [first.eventId, await makeVenue(), coordinator],
         )
       ).result;
@@ -377,10 +327,12 @@ describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
   });
 
   describe('the locking protocol and who may call', () => {
-    const sql = readFileSync(resolve(here, '../../db/migrations/031_withdraw_booking_request.sql'), 'utf8')
-      .replace(/--[^\n]*/g, '')
-      .replace(/\s+/g, ' ')
-      .toLowerCase();
+    // The function's source as Postgres holds it, comments dropped and spaces folded.
+    let sql;
+    beforeAll(async () => {
+      const { prosrc } = await one("select prosrc from pg_proc where proname = 'withdraw_booking_request'");
+      sql = prosrc.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').toLowerCase();
+    });
 
     it('SCRUM253_locks_the_event_then_the_booking_for_update', () => {
       const event = sql.indexOf('from event_requests where id = v_event_id for update');
@@ -390,14 +342,15 @@ describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
     });
 
     it('SCRUM253_the_update_can_only_move_a_pending_request', () => {
+      // An open request: pending, or conflicting since SCRUM-492's decisions.
       expect(sql).toContain(
-        "update bookings set status = 'withdrawn' where id = p_booking_id and status = 'pending' returning * into v_booking",
+        "update bookings set status = 'withdrawn' where id = p_booking_id and status in ('pending', 'conflicting') returning * into v_booking",
       );
     });
 
     it('SCRUM253_checks_the_caller_before_reading_the_status', () => {
       expect(sql.indexOf('insufficient_privilege')).toBeGreaterThan(-1);
-      expect(sql.indexOf('insufficient_privilege')).toBeLessThan(sql.indexOf("v_booking.status <> 'pending'"));
+      expect(sql.indexOf('insufficient_privilege')).toBeLessThan(sql.indexOf("v_booking.status not in ('pending', 'conflicting')"));
     });
 
     it('SCRUM253_writes_the_notifications_after_the_status_change_in_the_same_function', () => {
@@ -413,12 +366,6 @@ describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
         ]);
         expect(row.allowed).toBe(false);
       }
-    });
-
-    it('SCRUM253_can_be_applied_again_without_error', async () => {
-      await db.exec(migration('031_withdraw_booking_request.sql'));
-      const { id } = await makeBooking('pending');
-      expect((await withdraw(id)).booking.status).toBe('withdrawn');
     });
   });
 });

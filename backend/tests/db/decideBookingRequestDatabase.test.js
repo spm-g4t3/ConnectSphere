@@ -1,6 +1,6 @@
 /**
- * Venue Staff approve or reject a pending booking request (066), against a
- * real Postgres.
+ * Venue Staff approve or reject a pending booking request, against the final
+ * schema in a real Postgres.
  *
  * SCRUM-258 AC2-AC6 at the SQL level: the approval re-check of the padded
  * period under lock, the event-status gate (safety statuses allowed), the
@@ -8,15 +8,9 @@
  * its check constraints, and the coordinator's notice. Week 7: each request is
  * decided on its own, and the event's own hold never blocks its approval.
  *
- * Migrations: pendingBookingRequestsDatabase.test.js's list through 051, then
- * 065, then 062's two enum values (the rest of 062 rewrites constraints from
- * 020-025, which this stack does not build, and 066 compares statuses as
- * text), then 066, each in its own exec. 052 is not applied: it needs the
- * assignment stack; its notification list is compared with 066's as text
- * instead.
- *
  * PGlite is one connection, so two approvals can never meet on a lock here.
- * The race is covered by a sequential test plus a check of the lock 066 takes;
+ * The race is covered by a sequential test plus a check of the lock the
+ * function takes;
  * a true simultaneous run needs a live database (SCRUM-264).
  *
  * Dates: D is the Singapore date 10 days from now, never hard-coded, because
@@ -24,56 +18,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const MIGRATION_066 = '066_venue_staff_booking_decisions.sql';
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '040_venue_holds.sql',
-  '051_multi_venue_booking_requests.sql',
-  '065_booking_decision_statuses.sql',
-  'SAFETY_ENUM',
-  MIGRATION_066,
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
-
-/** 062's `alter type ... add value` lines, read from the file, not retyped. */
-const SAFETY_ENUM = migration('062_safety_statuses.sql')
-  .split('\n')
-  .filter((line) => line.startsWith('alter type event_request_status add value'))
-  .join('\n');
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
 /** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
 const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
@@ -92,18 +37,7 @@ const refusal = async (promise) => {
   }
 };
 
-/**
- * The quoted words of the notifications_type_known list a migration sets: a
- * fixed check (052), or the v_ours array a live-list migration adds (066).
- */
-const notificationTypes = (sql) => {
-  const ours = sql.indexOf('v_ours');
-  const start = ours >= 0 ? ours : sql.indexOf('add constraint notifications_type_known');
-  const list = sql.slice(start, sql.indexOf(ours >= 0 ? '];' : ');', start));
-  return [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-};
-
-describe('SCRUM-258 AC2-AC6: deciding a booking request (066)', () => {
+describe('SCRUM-258 AC2-AC6: deciding a booking request', () => {
   let db;
   let organiser;
   let coordinator;
@@ -131,22 +65,22 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request (066)', () => {
     ).id;
   }
 
-  async function makeEvent({
+  function makeEvent({
     status = 'approved',
     start = at('14:00'),
     end = at('16:00'),
     assignedTo = coordinator,
   } = {}) {
     counter += 1;
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, proposed_start, proposed_end,
-            expected_attendance, submitted_at, assigned_coordinator_id)
-         values ($1, $2, $3, $4, $5, 150, now(), $6) returning id`,
-        [organiser, `Event ${counter}`, status, start, end, assignedTo],
-      )
-    ).id;
+    return seedEvent(db, {
+      status,
+      organiser_id: organiser,
+      assigned_coordinator_id: assignedTo,
+      event_name: `Event ${counter}`,
+      proposed_start: start,
+      proposed_end: end,
+      expected_attendance: 150,
+    });
   }
 
   /** A booking written directly, for the event's own period unless one is given. */
@@ -192,18 +126,7 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request (066)', () => {
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      if (name === 'STAND_IN') await db.exec(DECISION_STAND_IN);
-      else if (name === 'SAFETY_ENUM') await db.exec(SAFETY_ENUM);
-      else await db.exec(migration(name));
-    }
+    db = await createSchemaDb();
     organiser = await makeUser('o@x', 'event_organiser');
     coordinator = await makeUser('c@x', 'event_coordinator');
     staff = await makeUser('s@x', 'venue_staff');
@@ -324,10 +247,8 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request (066)', () => {
     // PGlite cannot run two transactions at once, so the race is pinned by the
     // lock: `for no key update` on the venue conflicts with itself, so a second
     // approval waits and then sees the first one's approval; `for share` would not.
-    it('SCRUM258_AC2_approval_locks_the_venue_for_no_key_update_before_the_recheck', () => {
-      const sql = migration(MIGRATION_066);
-      const start = sql.indexOf('create or replace function decide_booking_request');
-      const body = sql.slice(start, sql.indexOf('$$;', start));
+    it('SCRUM258_AC2_approval_locks_the_venue_for_no_key_update_before_the_recheck', async () => {
+      const { prosrc: body } = await one("select prosrc from pg_proc where proname = 'decide_booking_request'");
 
       const venueLock = body.search(/from\s+venues\s+where\s+id\s*=\s*v_venue_id\s+for no key update/);
       const bookingLock = body.search(/from\s+bookings\s+where\s+id\s*=\s*p_booking_id\s+for update/);
@@ -527,7 +448,9 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request (066)', () => {
     });
 
     it('SCRUM258_AC6_an_event_with_no_coordinator_is_still_decided_with_no_notice', async () => {
-      const { id } = await pending(await makeVenue(), undefined, undefined, { assignedTo: null });
+      // Rejected, reopened and resubmitted, the event keeps its request while
+      // it waits in the Lead's queue with no coordinator.
+      const { id } = await pending(await makeVenue(), undefined, undefined, { status: 'submitted', assignedTo: null });
 
       expect((await decide(id, 'reject', { reason: 'No' })).outcome).toBe('rejected');
       expect(await noticesFor(id)).toEqual([]);
@@ -589,51 +512,6 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request (066)', () => {
         decision_reason: null,
         suggested_alternative: null,
       });
-    });
-
-    // A later migration (097) adds its types to the live list; re-running 066
-    // must keep them as well as its own.
-    it('SCRUM258_AC6_rerunning_066_keeps_notification_types_added_after_it', async () => {
-      const liveTypes = async () => {
-        const { def } = await one(
-          `select pg_get_constraintdef(oid) as def from pg_constraint
-            where conrelid = 'notifications'::regclass and conname = 'notifications_type_known'`,
-        );
-        return [...def.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-      };
-      const later = [...(await liveTypes()), 'equipment_requested'];
-      await db.exec(`
-        alter table notifications drop constraint notifications_type_known;
-        alter table notifications add constraint notifications_type_known
-          check (type in (${later.map((t) => `'${t}'`).join(', ')}));
-      `);
-
-      await db.exec(migration(MIGRATION_066));
-
-      const after = await liveTypes();
-      expect(after).toContain('equipment_requested');
-      expect(after).toEqual(expect.arrayContaining(notificationTypes(migration(MIGRATION_066))));
-    });
-
-    // Shared surface: a restatement from an older list would drop 052's types.
-    it('SCRUM258_AC6_the_notification_list_keeps_every_052_type_and_adds_the_decision_types', () => {
-      const from052 = notificationTypes(migration('052_lead_assignment.sql'));
-      const from066 = notificationTypes(migration(MIGRATION_066));
-
-      expect(from052.length).toBeGreaterThan(0);
-      // SCRUM-490's 058 is applied live but not on dev; its three types must
-      // survive, or 066 fails on existing rows and breaks that story's notices.
-      // 064 runs before 066, so 066 must also keep SCRUM-489's type.
-      expect(from066).toEqual([
-        ...from052,
-        'safety_review_response',
-        'safety_booking_flagged',
-        'safety_equipment_review',
-        'event_submitted_for_safety_review',
-        'booking_request_approved',
-        'booking_request_rejected',
-        'booking_request_conflicting',
-      ]);
     });
   });
 

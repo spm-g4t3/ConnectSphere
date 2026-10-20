@@ -1,67 +1,13 @@
 /**
- * Migration 075 on PGlite: 071 and 074 restated notifications_type_known and
- * cancel_event_request after 066 and 067, so 075 puts the booking-decision
- * changes back and teaches 064's event_readiness about 'conflicting'.
- *
- * Stack: cancelConflictingBookingRequestDatabase's (through 067), plus 029, 039
- * and 052 for the safety lifecycle as scrum561SafetyCancelNotificationDatabase
- * applies it, then 062-064 and 071-075 in filename order.
+ * Booking decisions alongside the safety review, against the final schema:
+ * the decision notices are known types, cancellation still withdraws a
+ * conflicting request and tells Venue Staff and Safety Officers, and
+ * event_readiness treats a conflicting booking as an unmet venue line.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync, readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = resolve(here, '../../db/migrations');
-const migration = (name) => readFileSync(resolve(MIGRATIONS_DIR, name), 'utf8');
-const MIGRATION = '075_booking_decisions_after_safety_review.sql';
-
-const BASE = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  '006_event_change_requests.sql',
-];
-const ASSIGNMENT = [
-  '014_coordinator_assignment.sql',
-  '015_assignment_function.sql',
-  '016_submit_event_request.sql',
-  '017_require_assigned_coordinator.sql',
-];
-const LIFECYCLE = [
-  '020_event_status_lifecycle.sql',
-  '021_event_status_history.sql',
-  '022_event_status_transitions.sql',
-  '029_event_request_decisions_functions.sql',
-];
-const EQUIPMENT = [
-  '024_equipment_availability.sql',
-  '037_equipment_request_lines.sql',
-  '038_equipment_review.sql',
-  '053_equipment_reservations.sql',
-  '054_equipment_reservation_actions.sql',
-];
-const SAFETY = [
-  '062_safety_statuses.sql',
-  '063_safety_transitions.sql',
-  '064_safety_review_submission.sql',
-  '071_safety_review.sql',
-  '072_safety_review_history.sql',
-  '073_safety_review_gates.sql',
-  '074_cancel_event_in_safety_status.sql',
-];
-
-const SQL_FILES = readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith('.sql')).sort();
-const normalised = (file) => migration(file).replace(/--[^\n]*/g, '').toLowerCase().replace(/\s+/g, ' ');
-
-/** The last migration, in filename order, whose text (comments stripped) includes `needle`. */
-const latestFileWith = (needle) => SQL_FILES.filter((file) => normalised(file).includes(needle)).at(-1);
-
-describe('SCRUM-258: booking decisions restated after the safety review migrations (075)', () => {
+describe('SCRUM-258: booking decisions alongside the safety review', () => {
   let db;
   let organiser;
   let coordinator;
@@ -83,18 +29,16 @@ describe('SCRUM-258: booking decisions restated after the safety review migratio
     (await one('select status::text as status from bookings where id = $1', [id])).status;
 
   /** An Approved event held by the coordinator, starting in 10 days for 6 hours. */
-  async function approvedEvent(name = 'Booking decisions') {
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, submitted_at, assigned_coordinator_id, reviewing_coordinator_id,
-            decision, decided_by, decided_at, proposed_start, proposed_end)
-         values ($1, $2, 'approved', now(), $3, $3, 'approved', $3, now(),
-                 now() + interval '10 days', now() + interval '10 days 6 hours')
-         returning id`,
-        [organiser, name, coordinator],
-      )
-    ).id;
+  function approvedEvent(name = 'Booking decisions') {
+    const start = Date.now() + 10 * 86_400_000;
+    return seedEvent(db, {
+      status: 'approved',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: name,
+      proposed_start: new Date(start),
+      proposed_end: new Date(start + 6 * 3_600_000),
+    });
   }
 
   /** A booking covering the event's proposed start to end. */
@@ -128,75 +72,7 @@ describe('SCRUM-258: booking decisions restated after the safety review migratio
   const readiness = async (id) => (await one('select event_readiness($1, false) as r', [id])).r;
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-      create role service_role;
-    `);
-    for (const name of BASE) await db.exec(migration(name));
-    await db.exec(migration('025_event_request_decisions.sql'));
-    for (const name of ASSIGNMENT) await db.exec(migration(name));
-    for (const name of LIFECYCLE) await db.exec(migration(name));
-    await db.exec(migration('019_change_request_decision_coordinator.sql'));
-    await db.exec(migration('039_coordinator_lead_and_safety_officer_roles.sql'));
-
-    await db.exec(`
-      create table notifications (
-        id uuid primary key default gen_random_uuid(),
-        recipient_id uuid not null references auth.users(id) on delete cascade,
-        type text not null,
-        booking_id uuid,
-        block_id uuid,
-        venue_hold_id uuid,
-        payload jsonb not null default '{}',
-        read_at timestamptz,
-        created_at timestamptz not null default now(),
-        constraint notifications_type_known check (type in ('booking_flagged'))
-      );
-      create function reply_to_event_clarification(uuid, uuid, text)
-      returns event_requests language sql as $$ select null::event_requests $$;
-    `);
-    await db.exec(migration('030_event_clarification_reply_by.sql'));
-    await db.exec(migration('026_clarification_amendment_fields.sql'));
-    await db.exec(migration('052_lead_assignment.sql'));
-    await db.exec(migration('002_venues.sql'));
-    await db.exec(migration('009_bookings.sql'));
-    await db.exec(migration('011_venue_blocks.sql'));
-    await db.exec(migration('017_venue_turnaround.sql'));
-    await db.exec(migration('023_venue_setup_time.sql'));
-    await db.exec(migration('027_booking_request_statuses.sql'));
-    await db.exec(migration('032_venue_occupancy.sql'));
-    await db.exec(migration('022_equipment_schema.sql'));
-    await db.exec(migration('042_event_cancellation_fields.sql'));
-    await db.exec('alter table equipment_lines add column removed_at timestamptz');
-    await db.exec(migration('043_release_event_arrangements.sql'));
-    await db.exec(migration('045_cancel_event_request.sql'));
-    await db.exec(`
-      create type venue_hold_status as enum ('active', 'expired');
-      create table venue_holds (
-        id uuid primary key default gen_random_uuid(),
-        event_request_id uuid not null references event_requests(id),
-        venue_id uuid not null references venues(id),
-        placed_by uuid not null references auth.users(id),
-        placed_at timestamptz not null default now(),
-        expires_at timestamptz not null,
-        status venue_hold_status not null default 'active',
-        expired_at timestamptz
-      );
-    `);
-    await db.exec(migration('047_add_released_venue_hold_status.sql'));
-    await db.exec(migration('048_complete_event_cancellation_existing_arrangements.sql'));
-    for (const name of EQUIPMENT) await db.exec(migration(name));
-    await db.exec(migration('049_filter_cancelled_equipment_from_cancellation_preview.sql'));
-    // 065's enum values must commit before 066 and 067 use them, so each is its own exec.
-    await db.exec(migration('065_booking_decision_statuses.sql'));
-    await db.exec(migration('066_venue_staff_booking_decisions.sql'));
-    await db.exec(migration('067_withdraw_conflicting_on_cancellation.sql'));
-    for (const name of SAFETY) await db.exec(migration(name));
-    await db.exec(migration(MIGRATION));
+    db = await createSchemaDb();
 
     const user = async (email, role) => {
       const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
@@ -247,21 +123,6 @@ describe('SCRUM-258: booking decisions restated after the safety review migratio
         );
         expect(err, type).toBeNull();
       }
-    });
-
-    it('SCRUM258_AC6_the_list_is_071s_plus_the_three_decision_types', async () => {
-      const { def } = await one(
-        "select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'notifications_type_known'",
-      );
-
-      expect([...def.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1])).toEqual([
-        'booking_flagged', 'booking_request_withdrawn', 'clarification_requested', 'clarification_replied',
-        'clarification_closed', 'booking_flagged_setup_change', 'venue_hold_expired', 'event_cancelled',
-        'event_request_awaiting_assignment', 'event_request_assigned', 'event_request_coordinator_assigned',
-        'safety_review_response', 'safety_booking_flagged', 'safety_equipment_review',
-        'event_submitted_for_safety_review',
-        'booking_request_approved', 'booking_request_rejected', 'booking_request_conflicting',
-      ]);
     });
 
     it('SCRUM258_AC6_an_unknown_type_is_still_refused', async () => {
@@ -315,8 +176,10 @@ describe('SCRUM-258: booking decisions restated after the safety review migratio
       const r = await readiness(eventId);
 
       expect(r.ready).toBe(false);
+      // Each venue line also carries its booking's period.
+      const period = { startsAt: expect.any(String), endsAt: expect.any(String) };
       expect(r.items.filter((i) => i.key === 'venue')).toEqual([
-        { key: 'venue', met: false, detail: 'Conflicting, awaiting a decision', bookingId, venueName: 'Hall' },
+        { key: 'venue', met: false, detail: 'Conflicting, awaiting a decision', bookingId, venueName: 'Hall', ...period },
       ]);
     });
 
@@ -324,6 +187,7 @@ describe('SCRUM-258: booking decisions restated after the safety review migratio
       const eventId = await approvedEvent();
       const approved = await booking(eventId, hall, 'approved');
       const conflicting = await booking(eventId, annex, 'conflicting');
+      const period = { startsAt: expect.any(String), endsAt: expect.any(String) };
 
       const r = await readiness(eventId);
 
@@ -332,43 +196,17 @@ describe('SCRUM-258: booking decisions restated after the safety review migratio
       expect(venueLines).toHaveLength(2);
       expect(venueLines).toEqual(
         expect.arrayContaining([
-          { key: 'venue', met: true, detail: 'Approved', bookingId: approved, venueName: 'Hall' },
+          { key: 'venue', met: true, detail: 'Approved', bookingId: approved, venueName: 'Hall', ...period },
           {
             key: 'venue',
             met: false,
             detail: 'Conflicting, awaiting a decision',
             bookingId: conflicting,
             venueName: 'Annex',
+            ...period,
           },
         ]),
       );
-    });
-  });
-
-  describe('075 itself', () => {
-    it('SCRUM258_AC3_latest_definitions_preserve_cancellation_and_shared_readiness', () => {
-      expect(latestFileWith('create or replace function cancel_event_request(')).toBe(MIGRATION);
-      expect(latestFileWith('create or replace function event_readiness(')).toBe('098_event_readiness_details.sql');
-    });
-
-    // Later migrations may restate the list (076 adds flagged_booking_resolved);
-    // what matters is that none drops a type 075 lists.
-    it('SCRUM258_AC6_the_latest_migration_setting_notifications_type_known_keeps_every_075_type', () => {
-      const types = (sql) => [...sql.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-      const ours = types(migration(MIGRATION).match(/type in \(([\s\S]*?)\)/)[1]);
-      // A live-list migration (v_ours) keeps the existing constraint, so the
-      // effective list also includes everything set before it.
-      const setters = SQL_FILES.filter((name) => migration(name).includes('add constraint notifications_type_known'));
-      const effective = [];
-      for (const name of [...setters].reverse()) {
-        const sql = migration(name);
-        const live = sql.includes('v_ours');
-        effective.push(...types(live ? sql.slice(sql.indexOf('v_ours'), sql.indexOf('];', sql.indexOf('v_ours'))) : sql));
-        if (!live) break;
-      }
-
-      expect(ours).toContain('booking_request_conflicting');
-      expect(effective).toEqual(expect.arrayContaining(ours));
     });
   });
 });

@@ -1,6 +1,7 @@
 /**
  * Approving a request marks the other events' overlapping pending requests
- * conflicting and tells their coordinators (065, 066), against a real Postgres.
+ * conflicting and tells their coordinators, against the final schema in a real
+ * Postgres.
  *
  * SCRUM-258 AC3 at the SQL level, with the Week 7 rules: overlap is of the
  * padded occupied periods, each request is decided on its own, and a change
@@ -9,66 +10,13 @@
  * rejected, withdrawn, or approved once its clash is gone, still counts as the
  * event's live request at that venue, and never occupies the venue.
  *
- * Migrations: decideBookingRequestDatabase.test.js's stack (065's enum value
- * must commit before 066 uses it, so each is its own exec).
- *
- * PGlite is one connection, so the lock order 066 takes is not raced here.
+ * PGlite is one connection, so the function's lock order is not raced here.
  *
  * Dates: D is the Singapore date 10 days from now, never hard-coded.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync, readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = resolve(here, '../../db/migrations');
-const migration = (name) => readFileSync(resolve(MIGRATIONS_DIR, name), 'utf8');
-const MIGRATION_066 = '066_venue_staff_booking_decisions.sql';
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '040_venue_holds.sql',
-  '051_multi_venue_booking_requests.sql',
-  '065_booking_decision_statuses.sql',
-  'SAFETY_ENUM',
-  MIGRATION_066,
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
-
-/** 062's `alter type ... add value` lines, read from the file, not retyped. */
-const SAFETY_ENUM = migration('062_safety_statuses.sql')
-  .split('\n')
-  .filter((line) => line.startsWith('alter type event_request_status add value'))
-  .join('\n');
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
 /** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
 const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
@@ -87,25 +35,7 @@ const refusal = async (promise) => {
   }
 };
 
-/**
- * The quoted words of the notifications_type_known list a migration sets: a
- * fixed check, or the v_ours array a live-list migration adds (066).
- */
-const notificationTypes = (sql) => {
-  const ours = sql.indexOf('v_ours');
-  const start = ours >= 0 ? ours : sql.indexOf('add constraint notifications_type_known');
-  const list = sql.slice(start, sql.indexOf(ours >= 0 ? '];' : ');', start));
-  return [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-};
-
-/** A function's body as a migration defines it, comments stripped. */
-const functionBody = (file, name) => {
-  const sql = migration(file).replace(/--[^\n]*/g, '');
-  const start = sql.indexOf(`create or replace function ${name}(`);
-  return sql.slice(start, sql.indexOf('$$;', start));
-};
-
-describe('SCRUM-258 AC3: overlapping requests become conflicting (065, 066)', () => {
+describe('SCRUM-258 AC3: overlapping requests become conflicting', () => {
   let db;
   let organiser;
   let coordinator;
@@ -134,17 +64,17 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting (065, 066)', ()
     ).id;
   }
 
-  async function makeEvent({ start = at('14:00'), end = at('16:00'), assignedTo = coordinator } = {}) {
+  function makeEvent({ status = 'approved', start = at('14:00'), end = at('16:00'), assignedTo = coordinator } = {}) {
     counter += 1;
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, proposed_start, proposed_end,
-            expected_attendance, submitted_at, assigned_coordinator_id)
-         values ($1, $2, 'approved', $3, $4, 150, now(), $5) returning id`,
-        [organiser, `Event ${counter}`, start, end, assignedTo],
-      )
-    ).id;
+    return seedEvent(db, {
+      status,
+      organiser_id: organiser,
+      assigned_coordinator_id: assignedTo,
+      event_name: `Event ${counter}`,
+      proposed_start: start,
+      proposed_end: end,
+      expected_attendance: 150,
+    });
   }
 
   /** A booking written directly, for the event's own period. */
@@ -190,18 +120,7 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting (065, 066)', ()
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      if (name === 'STAND_IN') await db.exec(DECISION_STAND_IN);
-      else if (name === 'SAFETY_ENUM') await db.exec(SAFETY_ENUM);
-      else await db.exec(migration(name));
-    }
+    db = await createSchemaDb();
     organiser = await makeUser('o@x', 'event_organiser');
     coordinator = await makeUser('c@x', 'event_coordinator');
     otherCoordinator = await makeUser('c2@x', 'event_coordinator');
@@ -285,7 +204,9 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting (065, 066)', ()
     it('SCRUM258_AC3_a_request_whose_event_has_no_coordinator_is_still_marked_with_no_notice', async () => {
       const venue = await makeVenue();
       const approving = await pending(venue);
-      const orphan = await pending(venue, at('15:00'), at('17:00'), { assignedTo: null });
+      // Rejected, reopened and resubmitted, the event keeps its request while
+      // it waits in the Lead's queue with no coordinator.
+      const orphan = await pending(venue, at('15:00'), at('17:00'), { status: 'submitted', assignedTo: null });
 
       expect((await decide(approving.id, 'approve')).marked_conflicting).toEqual([orphan.id]);
       expect(await statusOf(orphan.id)).toBe('conflicting');
@@ -498,25 +419,17 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting (065, 066)', ()
     });
   });
 
-  describe('the shared surfaces 066 sets', () => {
-    // A later story restating the list from an older migration would drop the
-    // decision types; the list that wins is the highest-numbered one.
-    it('SCRUM258_AC3_the_latest_notification_list_keeps_the_decision_types', () => {
-      const setters = readdirSync(MIGRATIONS_DIR)
-        .filter((name) => name.endsWith('.sql'))
-        .sort()
-        .filter((name) => migration(name).includes('add constraint notifications_type_known'));
-      // A live-list migration (v_ours) keeps the existing constraint, so the
-      // effective list also includes everything set before it.
-      const latest = [];
-      for (const name of [...setters].reverse()) {
-        const sql = migration(name);
-        latest.push(...notificationTypes(sql));
-        if (!sql.includes('v_ours')) break;
-      }
+  describe('the shared surfaces the decisions set', () => {
+    // A later story restating the list from an older one would drop the
+    // decision types; the list in force must still hold them.
+    it('SCRUM258_AC3_the_latest_notification_list_keeps_the_decision_types', async () => {
+      const { def } = await one(
+        `select pg_get_constraintdef(oid) as def from pg_constraint
+          where conrelid = 'notifications'::regclass and conname = 'notifications_type_known'`,
+      );
+      const types = [...def.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 
-      expect(setters).toContain(MIGRATION_066);
-      expect(latest).toEqual(
+      expect(types).toEqual(
         expect.arrayContaining(['booking_request_approved', 'booking_request_rejected', 'booking_request_conflicting']),
       );
     });
@@ -530,8 +443,9 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting (065, 066)', ()
     });
 
     // The queue and the marking must agree on what overlaps, so both ask one function.
-    it('SCRUM258_Week7_approval_marks_through_pending_request_overlaps', () => {
-      const body = functionBody(MIGRATION_066, 'decide_booking_request');
+    it('SCRUM258_Week7_approval_marks_through_pending_request_overlaps', async () => {
+      const { prosrc } = await one("select prosrc from pg_proc where proname = 'decide_booking_request'");
+      const body = prosrc.replace(/--[^\n]*/g, '');
       const marking = body.slice(body.indexOf("set status = 'conflicting'") - 600);
 
       expect(marking).toMatch(/pending_request_overlaps\s*\(/);
