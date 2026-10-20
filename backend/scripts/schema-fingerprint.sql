@@ -134,7 +134,9 @@ function_rows as (
            || ' config=' || coalesce(p.proconfig::text, '')
            || ' args=' || pg_get_function_arguments(p.oid)
            || ' returns=' || coalesce(pg_get_function_result(p.oid), '')
-           || ' body_md5=' || md5(p.prosrc)
+           -- Bodies pasted from Windows keep CRLF line endings; hash them as LF so
+           -- only real code changes show up.
+           || ' body_md5=' || md5(replace(p.prosrc, E'\r\n', E'\n'))
   from procs p
   join pg_language l on l.oid = p.prolang
 ),
