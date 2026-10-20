@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { apiClient } from "../../src/services/apiClient";
 import { searchActiveVenues } from "../../src/services/venueService.js";
+import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/apiClient", () => ({
   apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
@@ -18,12 +19,6 @@ vi.mock("../../src/services/apiClient", () => ({
 const HALL = { id: "v1", name: "Hall A", location: "Level 2", maxCapacity: 200 };
 const STARTS_AT = "2026-11-10T10:00:00+08:00";
 const ENDS_AT = "2026-11-10T14:00:00+08:00";
-
-function httpError(status, data) {
-  return Object.assign(new Error(`Request failed with status code ${status}`), {
-    response: { status, data },
-  });
-}
 
 beforeEach(() => {
   vi.mocked(apiClient.get).mockReset();

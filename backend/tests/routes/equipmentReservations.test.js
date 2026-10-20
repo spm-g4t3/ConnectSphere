@@ -11,6 +11,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { ok, dbError, rpcByNameClient } from '../fixtures/supabaseStubs.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: {}, supabaseAdmin: {} }));
 
@@ -71,36 +73,12 @@ const reviewRow = (reservations = [reservationRow()]) => ({
   },
 });
 
-const ok = (data) => ({ data, error: null });
-const dbError = (code, message) => ({ data: null, error: { code, message } });
-
-function query(result) {
-  const chain = {};
-  for (const method of ['select', 'in', 'eq', 'order', 'limit']) chain[method] = vi.fn(() => chain);
-  chain.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
-  return chain;
-}
-
-function fakeClient(rpc = {}) {
-  const rpcCalls = [];
-  return {
-    rpcCalls,
-    rpc: vi.fn(async (name, args) => {
-      rpcCalls.push({ name, args });
-      return rpc[name] ?? ok(reviewRow());
-    }),
-    from: vi.fn(() => query(ok([]))),
-  };
-}
+const fakeClient = (rpc = {}) => rpcByNameClient({ rpc, fallback: () => ok(reviewRow()) });
 
 const SOMEONE_ELSE = '77777777-7777-4777-8777-777777777777';
 const BASE = `/api/event-requests/${EVENT_ID}/equipment-review`;
 
-const signedInAs = (role, id = REVIEWER_ID) => (req, _res, next) => {
-  req.user = { id, email: 'someone@example.com', role };
-  next();
-};
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInAs = signedInFor(REVIEWER_ID);
 
 function appWith(client, requireAuth = signedInAs(ROLE.TECHNICAL_SUPPORT_STAFF)) {
   return express()

@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { ok, errorFrom } from '../fixtures/supabaseStubs.js';
 
 const defaultClient = vi.hoisted(() => ({ rpc: vi.fn() }));
 
@@ -39,20 +40,9 @@ const row = (overrides = {}) => ({
   ...overrides,
 });
 
-const ok = (data) => ({ data, error: null });
-
 function fakeClient(answer = ok({ needs_action: [], requests: [] })) {
   return { rpc: vi.fn(async () => answer), from: vi.fn() };
 }
-
-const failure = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('what the service asks the database', () => {
   it('SCRUM284_AC2_calls_the_one_function_with_the_status_and_the_past_flag', async () => {
@@ -84,7 +74,7 @@ describe('what the service asks the database', () => {
 
   it('SCRUM284_AC2_a_bad_status_is_refused_before_the_database_is_called', async () => {
     const client = fakeClient();
-    const err = await failure(getEquipmentRequestQueue({ status: 'nope' }, { client }));
+    const err = await errorFrom(getEquipmentRequestQueue({ status: 'nope' }, { client }));
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.details[0].field).toBe('status');
     expect(client.rpc).not.toHaveBeenCalled();
@@ -92,7 +82,7 @@ describe('what the service asks the database', () => {
 
   it('SCRUM284_AC2_a_bad_includePast_is_refused_before_the_database_is_called', async () => {
     const client = fakeClient();
-    const err = await failure(getEquipmentRequestQueue({ includePast: 'maybe' }, { client }));
+    const err = await errorFrom(getEquipmentRequestQueue({ includePast: 'maybe' }, { client }));
     expect(err).toBeInstanceOf(ValidationError);
     expect(client.rpc).not.toHaveBeenCalled();
   });
@@ -254,7 +244,7 @@ describe('a row with the optional parts missing', () => {
 describe('how the database refuses', () => {
   it('SCRUM284_AC1_42501_becomes_a_ForbiddenError', async () => {
     const client = fakeClient({ data: null, error: { code: '42501', message: 'Only technical support staff can see the equipment request queue' } });
-    const err = await failure(getEquipmentRequestQueue({}, { callerId: CALLER_ID, client }));
+    const err = await errorFrom(getEquipmentRequestQueue({}, { callerId: CALLER_ID, client }));
     expect(err).toBeInstanceOf(ForbiddenError);
   });
 
@@ -266,20 +256,20 @@ describe('how the database refuses', () => {
 
   it('SCRUM284_AC2_22023_becomes_a_ValidationError', async () => {
     const client = fakeClient({ data: null, error: { code: '22023', message: 'Unknown status x' } });
-    const err = await failure(getEquipmentRequestQueue({}, { client }));
+    const err = await errorFrom(getEquipmentRequestQueue({}, { client }));
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toBe('Unknown status x');
   });
 
   it('SCRUM284_AC2_a_failure_with_no_message_still_says_what_went_wrong', async () => {
     const client = fakeClient({ data: null, error: { code: 'XX000' } });
-    const err = await failure(getEquipmentRequestQueue({}, { client }));
+    const err = await errorFrom(getEquipmentRequestQueue({}, { client }));
     expect(err.message).toBe('Unexpected database error');
   });
 
   it('SCRUM284_AC6_any_other_failure_is_left_untyped_so_it_is_a_500', async () => {
     const client = fakeClient({ data: null, error: { code: 'XX000', message: 'boom' } });
-    const err = await failure(getEquipmentRequestQueue({}, { client }));
+    const err = await errorFrom(getEquipmentRequestQueue({}, { client }));
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(ValidationError);
     expect(err.status).toBeUndefined();

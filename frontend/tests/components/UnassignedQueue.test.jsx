@@ -16,6 +16,7 @@ import {
   listUnassignedEventRequests,
 } from "../../src/services/eventRequestService";
 import { formatRange } from "../../src/services/displayFormat";
+import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
   listUnassignedEventRequests: vi.fn(),
@@ -47,12 +48,6 @@ const NEWER = {
   submittedAt: before(HOUR),
 };
 const PRIYA = { id: "66666666-6666-4666-8666-666666666666", fullName: "Priya Nair", activeEvents: 0 };
-
-function httpError(status, data) {
-  return Object.assign(new Error(`Request failed with status code ${status}`), {
-    response: { status, data },
-  });
-}
 
 const renderQueue = () => render(<UnassignedQueue now={() => NOW} />);
 const rows = () => screen.queryAllByRole("listitem");

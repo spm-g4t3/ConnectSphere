@@ -31,16 +31,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { expectSqlError, queriesFor } from './helpers/queries.js';
+import { at, sgDate } from '../fixtures/time.js';
 
-const DAY = 86_400_000;
-/** A Singapore date `days` from now, as YYYY-MM-DD. */
-const sgDate = (days) => new Date(Date.now() + 8 * 3600_000 + days * DAY).toISOString().slice(0, 10);
-/** D: at least 7 days ahead. PAST: D - 14. */
-const D = sgDate(10);
+/** PAST: D - 14. */
 const PAST = sgDate(-4);
-/** An instant on D (or another date), written at +08:00 (Singapore). */
-const at = (hhmm, date = D) => `${date}T${hhmm}:00+08:00`;
 const ms = (value) => new Date(value).getTime();
 const iso = (value) => new Date(value).toISOString();
 
@@ -56,26 +52,12 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
   let bystander;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
-  async function makeUser(role) {
-    counter += 1;
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [`u${counter}@x`])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (role) => seedUser(db, { email: `u${++counter}@x`, role });
 
-  async function makeVenue(setup = 0, turnaround = 0) {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, $2, $3) returning id`,
-        [`Harbour Room ${counter}`, setup, turnaround],
-      )
-    ).id;
-  }
+  const makeVenue = (setup = 0, turnaround = 0) =>
+    seedVenue(db, { name: `Harbour Room ${++counter}`, setup, turnaround });
 
   /**
    * An approved event has a coordinator: the one named, or a fresh one.
@@ -98,15 +80,8 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
   }
 
   /** A raw block row, inserted directly. */
-  async function insertBlock(venueId, startsAt, endsAt, removed = false) {
-    return (
-      await one(
-        `insert into venue_blocks (venue_id, starts_at, ends_at, reason, removed_at)
-         values ($1, $2, $3, 'maintenance', ${removed ? 'now()' : 'null'}) returning id`,
-        [venueId, startsAt, endsAt],
-      )
-    ).id;
-  }
+  const insertBlock = (venueId, startsAt, endsAt, removed = false) =>
+    seedBlock(db, { venueId, start: startsAt, end: endsAt, removed });
 
   /**
    * A booking, written directly. A flagged_for_review one is flagged by a
@@ -119,13 +94,7 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
     if (status === 'flagged_for_review') {
       blockId = await insertBlock(venueId, at('22:00'), at('23:00'), true);
     }
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status, review_block_id, flagged_at)
-         values ($1, $2, $3, $4, $5, $6, ${blockId ? 'now()' : 'null'}) returning id`,
-        [venueId, eventId, startsAt, endsAt, status, blockId],
-      )
-    ).id;
+    return seedBooking(db, { venueId, eventId, status, start: startsAt, end: endsAt, reviewBlockId: blockId });
   }
 
   /** The doc's fixture: V at 0/0, A, B, C, K, E and coordinators C1-C4. */
@@ -173,17 +142,6 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
   const notificationsFor = async (bookingIds) =>
     rows('select * from notifications where booking_id = any($1::uuid[]) order by created_at, id', [bookingIds]);
 
-  /** Expect a statement to be refused with this SQLSTATE (and constraint, when named). */
-  async function refused(promise, code, constraint) {
-    const error = await promise.then(
-      () => null,
-      (e) => e,
-    );
-    expect(error, 'expected the statement to be refused').not.toBeNull();
-    expect(error.code).toBe(code);
-    if (constraint) expect(error.message).toContain(constraint);
-  }
-
   beforeAll(async () => {
     db = await createSchemaDb();
     organiser = await makeUser(null);
@@ -210,13 +168,13 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
       await db.query('update bookings set flagged_at = null where id = $1', [id]);
       expect((await booking(id)).flag_reason).toBeNull();
       // (b) a reason without a flag time
-      await refused(
+      await expectSqlError(
         db.query('update bookings set review_reason = $2 where id = $1', [id, REASON_CODE]),
         '23514',
         'bookings_review_flag_paired',
       );
       // a reason that is not a known code
-      await refused(
+      await expectSqlError(
         db.query('update bookings set review_reason = $2, flagged_at = now() where id = $1', [id, 'because']),
         '23514',
         'bookings_review_reason_known',
@@ -256,7 +214,7 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
       await insert('clarification_closed', null, null);
       await insert(SETUP_TYPE, bookingId, null);
 
-      await refused(insert('nonsense', bookingId, null), '23514', 'notifications_type_known');
+      await expectSqlError(insert('nonsense', bookingId, null), '23514', 'notifications_type_known');
     });
 
     it('SCRUM484_AC8_new_type_needs_a_booking_but_not_a_block', async () => {
@@ -270,9 +228,9 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
         ]);
 
       await insert(SETUP_TYPE, bookingId);
-      await refused(insert(SETUP_TYPE, null), '23514', 'notifications_setup_change_needs_booking');
+      await expectSqlError(insert(SETUP_TYPE, null), '23514', 'notifications_setup_change_needs_booking');
       // 014's rule for booking_flagged still holds: it needs a block.
-      await refused(insert('booking_flagged', bookingId), '23514', 'notifications_booking_flagged_needs_refs');
+      await expectSqlError(insert('booking_flagged', bookingId), '23514', 'notifications_booking_flagged_needs_refs');
     });
 
   });
@@ -508,7 +466,7 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
 
     it('SCRUM484_AC8_unknown_venue_raises_no_data_found', async () => {
       const missing = (await one('select gen_random_uuid() as id')).id;
-      await refused(change(missing), 'P0002');
+      await expectSqlError(change(missing), 'P0002');
     });
   });
 

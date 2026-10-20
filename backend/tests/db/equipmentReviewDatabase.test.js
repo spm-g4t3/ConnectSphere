@@ -18,20 +18,13 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { asJson } from './helpers/equipment.js';
 
 const NO_SUCH_ID = '00000000-0000-0000-0000-000000000000';
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
   let db;
@@ -42,12 +35,9 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
   let projector;
   let microphone;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
-  const asJson = (row) => JSON.parse(row.answer);
+  const { one, rows } = queriesFor(() => db);
 
-  const newUser = async (email) =>
-    (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
+  const newUser = (email) => seedUser(db, { email });
   const newType = async (name, total = 10) =>
     (await one('insert into equipment_types (name, total_quantity) values ($1, $2) returning id', [name, total])).id;
   const newEvent = ({ start = START, end = END } = {}) =>

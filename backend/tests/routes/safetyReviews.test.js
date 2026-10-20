@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { signedOut } from '../fixtures/auth.js';
 
 vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: {}, supabaseAdmin: {} }));
 
@@ -13,7 +14,6 @@ const signedInAs = (role, id = '22222222-2222-4222-8222-222222222222') => (req, 
   req.user = { id, role };
   next();
 };
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
 
 function appWith(client, auth = signedInAs(ROLE.SAFETY_OFFICER)) {
   return express()

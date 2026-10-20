@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event";
 
 import VenueSuitabilityPanel from "../../src/components/VenueSuitabilityPanel.jsx";
 import { checkVenueSuitability } from "../../src/services/venueSuitabilityService";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/venueSuitabilityService", () => ({
   checkVenueSuitability: vi.fn(),
@@ -42,16 +43,6 @@ const RESULT = {
 
 const httpError = (status, data = {}) =>
   Object.assign(new Error(`Request failed with status code ${status}`), { response: { status, data } });
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 function renderPanel(props = {}) {
   const callbacks = { onRequest: vi.fn(), onClose: vi.fn() };

@@ -10,7 +10,10 @@ import { STATUS } from '../../src/domain/eventRequestStatus.js';
 import express from 'express';
 import request from 'supertest';
 import { createEventRequestRouter } from '../../src/routes/eventRequests.js';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { clientsCanExecute } from './helpers/grants.js';
+import { pgliteSupabaseClient } from '../fixtures/pgliteSupabaseClient.js';
 
 const DAY = 86_400_000;
 const at = (days) => new Date(Date.now() + days * DAY).toISOString();
@@ -26,15 +29,7 @@ describe('SCRUM-489: readiness and submission for the safety check', () => {
   let hallA;
   let room2;
 
-  const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
-  const refusal = async (promise) => {
-    try {
-      await promise;
-      return null;
-    } catch (err) {
-      return err;
-    }
-  };
+  const { one } = queriesFor(() => db);
 
   /** An Approved event held by A, starting in 10 days, with no arrangements. */
   async function event(overrides = {}) {
@@ -50,14 +45,8 @@ describe('SCRUM-489: readiness and submission for the safety check', () => {
     });
   }
 
-  async function booking(eventId, venueId, status = 'approved', { starts = null, ends = null } = {}) {
-    const times = await one('select proposed_start, proposed_end from event_requests where id = $1', [eventId]);
-    return (await one(
-      `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-       values ($1, $2, $3, $4, $5::booking_status) returning id`,
-      [venueId, eventId, starts ?? times.proposed_start, ends ?? times.proposed_end, status],
-    )).id;
-  }
+  const booking = (eventId, venueId, status = 'approved', { starts = null, ends = null } = {}) =>
+    seedBooking(db, { venueId, eventId, status, start: starts, end: ends });
 
   // A reviewer is required exactly when a request is under review.
   const equipment = async (eventId, status) =>
@@ -134,19 +123,15 @@ describe('SCRUM-489: readiness and submission for the safety check', () => {
   beforeAll(async () => {
     db = await createSchemaDb();
 
-    const user = async (email, role, name) => {
-      const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-      await db.query('insert into profiles (id, role, full_name) values ($1, $2, $3)', [id, role, name]);
-      return id;
-    };
+    const user = (email, role, name) => seedUser(db, { email, role, fullName: name });
     organiser = await user('o@x', 'event_organiser', 'Aisha Rahman');
     coordinatorA = await user('a@x', 'event_coordinator', 'Priya Nair');
     coordinatorB = await user('b@x', 'event_coordinator', 'Omar Okafor');
     lead = await user('lead@x', 'event_coordinator_lead', 'Lena Lead');
     attendee = await user('attendee@x', 'attendee', 'Taylor Attendee');
     safetyOfficers = [await user('so1@x', 'safety_officer', 'Sam Safe'), await user('so2@x', 'safety_officer', 'Sol Secure')];
-    hallA = (await one("insert into venues (name, location, max_capacity) values ('Hall A', 'SMU', 200) returning id")).id;
-    room2 = (await one("insert into venues (name, location, max_capacity) values ('Room 2', 'SMU', 40) returning id")).id;
+    hallA = await seedVenue(db, { name: 'Hall A', location: 'SMU', setup: 0, turnaround: 0 });
+    room2 = await seedVenue(db, { name: 'Room 2', location: 'SMU', capacity: 40, setup: 0, turnaround: 0 });
   }, 60_000);
 
   afterAll(async () => {
@@ -455,26 +440,17 @@ describe('SCRUM-489: readiness and submission for the safety check', () => {
 
     it('SCRUM363_AC4_readiness_is_defined_once_and_runs_only_on_the_trusted_backend', async () => {
       expect(Number((await one("select count(*) from pg_proc where proname = 'event_readiness'")).count)).toBe(1);
-      for (const role of ['anon', 'authenticated', 'service_role']) {
-        const { allowed } = await one("select has_function_privilege($1, 'event_readiness(uuid,boolean)', 'execute') as allowed", [role]);
-        expect(allowed).toBe(role === 'service_role');
-      }
+      expect(await clientsCanExecute(db, 'event_readiness(uuid,boolean)', ['anon', 'authenticated', 'service_role'])).toEqual(['service_role']);
     });
   });
 
   describe('SCRUM-363: atomic confirmation', () => {
     it('SCRUM363_AC6_HTTP_confirmation_uses_the_real_SQL_transaction_and_returns_safe_repeated_and_not_ready_responses', async () => {
+      const pglite = pgliteSupabaseClient(db);
       const client = {
-        async rpc(fn, args) {
+        rpc(fn, args) {
           expect(fn).toBe('confirm_event_request');
-          try {
-            const { rows: [data] } = await db.query('select * from confirm_event_request($1, $2, $3, $4)', [
-              args.p_event_request_id, args.p_coordinator_id, args.p_no_equipment_confirmed, args.p_expected_updated_at,
-            ]);
-            return { data, error: null };
-          } catch (error) {
-            return { data: null, error: { code: error.code, message: error.message, hint: error.hint, details: error.detail } };
-          }
+          return pglite.rpc(fn, args);
         },
       };
       const app = express().use(express.json()).use('/api/event-requests', createEventRequestRouter({
@@ -907,10 +883,7 @@ describe('SCRUM-489: readiness and submission for the safety check', () => {
       const { prosecdef, count } = await one("select bool_or(prosecdef) as prosecdef, count(*) as count from pg_proc where proname = 'confirm_event_request'");
       expect(prosecdef).toBe(false);
       expect(Number(count)).toBe(1);
-      for (const role of ['anon', 'authenticated', 'service_role']) {
-        const { allowed } = await one("select has_function_privilege($1, 'confirm_event_request(uuid,uuid,boolean,timestamptz)', 'execute') as allowed", [role]);
-        expect(allowed).toBe(role === 'service_role');
-      }
+      expect(await clientsCanExecute(db, 'confirm_event_request(uuid,uuid,boolean,timestamptz)', ['anon', 'authenticated', 'service_role'])).toEqual(['service_role']);
     });
 
     it.each(['anon', 'authenticated'])('SCRUM363_AC1_database_role_%s_cannot_spoof_confirmation_or_write_status_directly', async (role) => {

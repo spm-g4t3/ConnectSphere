@@ -13,6 +13,7 @@ import { createBookingRequest } from "../../src/services/bookingRequestService";
 import { checkVenueSuitability } from "../../src/services/venueSuitabilityService";
 import { formatVenuePeriod, formatVenueRange } from "../../src/services/datetimeFormat.js";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay.js";
+import { deferred } from "../helpers/async.js";
 
 // SCRUM-188 (F5): the panel reads periods on the venue's Singapore clock.
 const venueOccupied = (entry) => `${formatOccupiedPeriod(entry, formatVenueRange)} (Singapore time)`;
@@ -50,16 +51,6 @@ const httpError = (status, data = {}) =>
   Object.assign(new Error(`Request failed with status code ${status}`), { response: { status, data } });
 
 const conflict409 = (code, conflicts = []) => httpError(409, { error: "prose", code, conflicts });
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 function renderPanel(props = {}) {
   const callbacks = { onSubmitted: vi.fn(), onVenueAlreadyRequested: vi.fn(), onClose: vi.fn() };

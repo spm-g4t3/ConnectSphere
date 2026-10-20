@@ -10,31 +10,19 @@
 // API before rendering, and the redirect is read back off window.location.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 
-import App from "../../src/App.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
+import { renderAppAt as renderApp } from "../helpers/renderApp.js";
 
-vi.mock("../../src/auth/AuthContext", () => ({
-  AuthProvider: ({ children }) => children,
-  useAuth: vi.fn(),
-}));
+vi.mock("../../src/auth/AuthContext", async () => (await import("../helpers/authMock.js")).authContextMock());
 
 vi.mock("../../src/components/VenueSearch", () => ({
   default: () => <p data-testid="venue-search-stub">Venue search page</p>,
 }));
 
-function renderAppAt(path, role) {
-  vi.mocked(useAuth).mockReturnValue({
-    user: role ? { name: "Test User", role } : null,
-    loading: false,
-    logout: vi.fn().mockResolvedValue({ success: true }),
-    logoutMessage: null,
-    clearLogoutMessage: vi.fn(),
-  });
-  window.history.pushState({}, "", path);
-  return render(<App />);
-}
+// These cases sign in a user without an id.
+const renderAppAt = (path, role) => renderApp(path, role, { name: "Test User" });
 
 beforeEach(() => {
   vi.mocked(useAuth).mockReset();

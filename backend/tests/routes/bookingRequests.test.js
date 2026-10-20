@@ -21,6 +21,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { ok, dbError } from '../fixtures/supabaseStubs.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 // SCRUM-190: the default checker loads venueService.js lazily, and that module
 // imports the Supabase client statically, which throws without a .env. Every
@@ -132,9 +134,7 @@ function venueRow(overrides = {}) {
   };
 }
 
-const ok = (data) => ({ data, error: null });
 const created = (overrides) => ok({ outcome: 'created', booking: bookingRow(overrides) });
-const dbFailure = (code, message, extra = {}) => ({ data: null, error: { code, message, ...extra } });
 
 /** A queue-fed stand-in for the Supabase client, recording every call. */
 function createFakeClient(results = []) {
@@ -181,11 +181,7 @@ function createFakeClient(results = []) {
   };
 }
 
-const signedInWithRole = (role, id = COORDINATOR_ID) => (req, _res, next) => {
-  req.user = { id, email: 'user@example.com', role };
-  next();
-};
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInWithRole = signedInFor(COORDINATOR_ID, 'user@example.com');
 
 const suitableChecker = () => vi.fn(async () => SUITABLE);
 
@@ -357,7 +353,7 @@ describe('SCRUM-252: who may request', () => {
   });
 
   it('SCRUM252_refuses_when_the_function_finds_the_event_changed_hands_under_its_lock', async () => {
-    const client = clientFor(dbFailure('42501', `only the coordinator assigned to event request ${EVENT_ID} can request a venue for it`));
+    const client = clientFor(dbError('42501', `only the coordinator assigned to event request ${EVENT_ID} can request a venue for it`));
 
     const res = await post(client);
 
@@ -377,7 +373,7 @@ describe('SCRUM-252: who may request', () => {
   });
 
   it('SCRUM252_answers_404_for_a_venue_that_does_not_exist', async () => {
-    const res = await post(clientFor(dbFailure('P0002', `venue ${VENUE_ID} not found`)));
+    const res = await post(clientFor(dbError('P0002', `venue ${VENUE_ID} not found`)));
     expect(res.status).toBe(404);
   });
 });
@@ -411,7 +407,7 @@ describe('SCRUM-252: the event must be approved or confirmed', () => {
 
   it('SCRUM252_the_function_refuses_a_status_that_changed_after_the_read', async () => {
     const res = await post(
-      clientFor(dbFailure('PT409', 'event request has status cancelled', { hint: 'EVENT_NOT_BOOKABLE' })),
+      clientFor(dbError('PT409', 'event request has status cancelled', { hint: 'EVENT_NOT_BOOKABLE' })),
     );
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('EVENT_NOT_BOOKABLE');
@@ -419,7 +415,7 @@ describe('SCRUM-252: the event must be approved or confirmed', () => {
 
   it('SCRUM252_refuses_an_event_with_no_proposed_dates', async () => {
     const res = await post(
-      clientFor(dbFailure('PT409', 'no proposed start and end', { hint: 'EVENT_DATES_MISSING' })),
+      clientFor(dbError('PT409', 'no proposed start and end', { hint: 'EVENT_DATES_MISSING' })),
     );
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('EVENT_DATES_MISSING');
@@ -453,7 +449,7 @@ describe('SCRUM-252: input is validated before the database', () => {
   });
 
   it('SCRUM252_a_layout_the_database_does_not_know_is_a_400', async () => {
-    const res = await post(clientFor(dbFailure('23503', 'violates foreign key "bookings_room_layout_code_fkey"')), {
+    const res = await post(clientFor(dbError('23503', 'violates foreign key "bookings_room_layout_code_fkey"')), {
       ...BODY,
       roomLayoutCode: 'no_such_layout',
     });
@@ -465,7 +461,7 @@ describe('SCRUM-252: input is validated before the database', () => {
 describe('SCRUM-252: a retired venue and an unavailable period are refused with the conflict', () => {
   it('SCRUM252_refuses_a_retired_venue_with_409', async () => {
     const res = await post(
-      clientFor(dbFailure('PT409', `venue ${VENUE_ID} is retired and cannot be requested`, { hint: 'VENUE_RETIRED' })),
+      clientFor(dbError('PT409', `venue ${VENUE_ID} is retired and cannot be requested`, { hint: 'VENUE_RETIRED' })),
     );
 
     expect(res.status).toBe(409);
@@ -522,7 +518,7 @@ describe('SCRUM-252/SCRUM-525: one live request per event per venue', () => {
   ])('SCRUM252_refuses_an_event_with_%s_and_names_it', async (_label, hint) => {
     const res = await post(
       clientFor(
-        dbFailure('PT409', 'the event already has a live request for this venue', {
+        dbError('PT409', 'the event already has a live request for this venue', {
           hint,
           details: OTHER_BOOKING_ID,
         }),
@@ -536,7 +532,7 @@ describe('SCRUM-252/SCRUM-525: one live request per event per venue', () => {
 
   it('SCRUM252_does_not_echo_a_detail_that_is_not_an_id', async () => {
     const res = await post(
-      clientFor(dbFailure('PT409', 'exists', { hint: 'BOOKING_REQUEST_EXISTS', details: 'DROP TABLE bookings' })),
+      clientFor(dbError('PT409', 'exists', { hint: 'BOOKING_REQUEST_EXISTS', details: 'DROP TABLE bookings' })),
     );
     expect(res.body.conflicts).toEqual([]);
   });
@@ -567,7 +563,7 @@ describe('SCRUM-266: a request can replace a flagged booking', () => {
     'SCRUM266_W7_%s_is_409_with_that_code',
     async (hint) => {
       const res = await post(
-        clientFor(dbFailure('PT409', 'cannot replace that booking', { hint })),
+        clientFor(dbError('PT409', 'cannot replace that booking', { hint })),
         { ...BODY, replacesBookingId: OTHER_BOOKING_ID },
       );
 
@@ -839,7 +835,7 @@ describe('SCRUM-253: a coordinator withdraws a pending request', () => {
 
   it('SCRUM253_refuses_a_coordinator_who_is_not_assigned_with_403', async () => {
     const message = `only the coordinator assigned to event request ${EVENT_ID} can withdraw its booking requests`;
-    const res = await withdraw(createFakeClient([dbFailure('42501', message)]), BOOKING_ID, {
+    const res = await withdraw(createFakeClient([dbError('42501', message)]), BOOKING_ID, {
       requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR, OTHER_COORDINATOR_ID),
     });
     expect(res.status).toBe(403);
@@ -847,7 +843,7 @@ describe('SCRUM-253: a coordinator withdraws a pending request', () => {
   });
 
   it('SCRUM253_answers_404_for_a_request_that_does_not_exist', async () => {
-    const res = await withdraw(createFakeClient([dbFailure('P0002', `booking request ${BOOKING_ID} not found`)]));
+    const res = await withdraw(createFakeClient([dbError('P0002', `booking request ${BOOKING_ID} not found`)]));
     expect(res.status).toBe(404);
   });
 
@@ -864,7 +860,7 @@ describe('SCRUM-253: a coordinator withdraws a pending request', () => {
     async (status) => {
       const res = await withdraw(
         createFakeClient([
-          dbFailure('PT409', `booking request ${BOOKING_ID} is ${status}, and only a pending request can be withdrawn`, {
+          dbError('PT409', `booking request ${BOOKING_ID} is ${status}, and only a pending request can be withdrawn`, {
             hint: 'BOOKING_NOT_PENDING',
           }),
         ]),
@@ -878,7 +874,7 @@ describe('SCRUM-253: a coordinator withdraws a pending request', () => {
   it('SCRUM253_a_repeated_withdrawal_is_a_409_the_second_time_not_a_repeat_of_the_200', async () => {
     const client = createFakeClient([
       withdrawn(),
-      dbFailure('PT409', `booking request ${BOOKING_ID} is withdrawn, and only a pending request can be withdrawn`, {
+      dbError('PT409', `booking request ${BOOKING_ID} is withdrawn, and only a pending request can be withdrawn`, {
         hint: 'BOOKING_NOT_PENDING',
       }),
     ]);
@@ -892,7 +888,7 @@ describe('SCRUM-253: a coordinator withdraws a pending request', () => {
   });
 
   it('SCRUM253_a_request_that_changed_under_the_call_is_a_409', async () => {
-    const res = await withdraw(createFakeClient([dbFailure('40001', 'booking request changed while it was being withdrawn')]));
+    const res = await withdraw(createFakeClient([dbError('40001', 'booking request changed while it was being withdrawn')]));
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('BOOKING_CHANGED');
   });
@@ -1164,7 +1160,7 @@ describe('SCRUM-255: a coordinator sees only requests on their own events', () =
   );
 
   it('SCRUM255_a_database_failure_is_a_500_without_the_driver_message', async () => {
-    const res = await list(createFakeClient([dbFailure('XX000', 'relation secret_table exploded')]));
+    const res = await list(createFakeClient([dbError('XX000', 'relation secret_table exploded')]));
     expect(res.status).toBe(500);
     expect(JSON.stringify(res.body)).not.toContain('secret_table');
   });
@@ -1265,7 +1261,7 @@ describe('SCRUM-258 AC1: Venue Staff see the pending requests', () => {
   );
 
   it('SCRUM258_AC1_a_refusal_from_the_function_is_403', async () => {
-    const res = await listPending(createFakeClient([dbFailure('42501', 'only Venue Staff can view pending booking requests')]));
+    const res = await listPending(createFakeClient([dbError('42501', 'only Venue Staff can view pending booking requests')]));
     expect(res.status).toBe(403);
   });
 });
@@ -1375,14 +1371,14 @@ describe('SCRUM-258 AC2-AC6: Venue Staff approve or reject a request', () => {
   );
 
   it('SCRUM258_AC6_a_refusal_from_the_function_is_403', async () => {
-    const res = await decide(createFakeClient([dbFailure('42501', 'only Venue Staff can decide a booking request')]), 'approve');
+    const res = await decide(createFakeClient([dbError('42501', 'only Venue Staff can decide a booking request')]), 'approve');
     expect(res.status).toBe(403);
   });
 
   it.each(['BOOKING_NOT_PENDING', 'EVENT_NOT_BOOKABLE', 'BOOKING_PERIOD_STALE', 'VENUE_RETIRED'])(
     'SCRUM258_AC5_a_%s_refusal_is_409_with_its_code',
     async (hint) => {
-      const res = await decide(createFakeClient([dbFailure('PT409', 'refused', { hint })]), 'approve');
+      const res = await decide(createFakeClient([dbError('PT409', 'refused', { hint })]), 'approve');
       expect(res.status).toBe(409);
       expect(res.body.code).toBe(hint);
     },

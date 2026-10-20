@@ -20,6 +20,7 @@ import {
 } from "../../src/services/flaggedBookingService";
 import { formatVenuePeriod } from "../../src/services/datetimeFormat.js";
 import { formatTimestamp } from "../../src/services/displayFormat.js";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/flaggedBookingService", () => ({
   getFlaggedBookings: vi.fn(),
@@ -72,16 +73,6 @@ const SAFETY = { reviewReason: "safety_review", reinstatable: false };
 const httpError = (status, data = {}) =>
   Object.assign(new Error(`Request failed with status code ${status}`), { response: { status, data } });
 const conflict = (code, extra = {}) => httpError(409, { error: "database prose 3f2a9c1e", code, ...extra });
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 function renderList() {
   const user = userEvent.setup();

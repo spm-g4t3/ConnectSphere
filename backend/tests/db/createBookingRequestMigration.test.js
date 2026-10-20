@@ -14,7 +14,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { clientsCanExecute } from './helpers/grants.js';
 
 const START = '2026-12-01T09:00:00+00:00';
 const END = '2026-12-01T17:00:00+00:00';
@@ -25,15 +27,6 @@ const UNSUITABLE = {
   criteria: [{ criterion: 'capacity', met: false, detail: 'Capacity 80 < expected attendance 150' }],
 };
 
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
-
 describe('SCRUM-252: create_booking_request in Postgres', () => {
   let db;
   let organiser;
@@ -41,18 +34,14 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
   let otherCoordinator;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
   const bookingsFor = async (eventId) =>
     (await db.query('select * from bookings where event_request_id = $1 order by created_at, id', [eventId])).rows;
 
   async function makeVenue(extra = {}) {
-    counter += 1;
-    const row = await one(
-      `insert into venues (name, location, max_capacity) values ($1, 'Block A', 200) returning id`,
-      [`Hall ${counter}`],
-    );
-    if (extra.retired) await db.query('update venues set retired_at = now() where id = $1', [row.id]);
-    return row.id;
+    const id = await seedVenue(db, { name: `Hall ${++counter}`, setup: 0, turnaround: 0 });
+    if (extra.retired) await db.query('update venues set retired_at = now() where id = $1', [id]);
+    return id;
   }
 
   function makeEvent(extra = {}) {
@@ -71,25 +60,10 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
     });
   }
 
-  async function makeBooking(venueId, eventId, status, startsAt = START, endsAt = END) {
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, $5) returning id`,
-        [venueId, eventId, startsAt, endsAt, status],
-      )
-    ).id;
-  }
-
-  async function makeBlock(venueId, startsAt, endsAt, removed = false) {
-    return (
-      await one(
-        `insert into venue_blocks (venue_id, starts_at, ends_at, reason, removed_at)
-         values ($1, $2, $3, 'maintenance', ${removed ? 'now()' : 'null'}) returning id`,
-        [venueId, startsAt, endsAt],
-      )
-    ).id;
-  }
+  const makeBooking = (venueId, eventId, status, startsAt = START, endsAt = END) =>
+    seedBooking(db, { venueId, eventId, status, start: startsAt, end: endsAt });
+  const makeBlock = (venueId, startsAt, endsAt, removed = false) =>
+    seedBlock(db, { venueId, start: startsAt, end: endsAt, removed });
 
   /** The function's answer, as the API calls it: the request's attendance is the event's 150. */
   async function request(eventId, venueId, o = {}) {
@@ -111,9 +85,9 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
 
   beforeAll(async () => {
     db = await createSchemaDb();
-    organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
-    coordinator = (await one("insert into auth.users (email) values ('c1@x') returning id")).id;
-    otherCoordinator = (await one("insert into auth.users (email) values ('c2@x') returning id")).id;
+    organiser = await seedUser(db, { email: 'o@x' });
+    coordinator = await seedUser(db, { email: 'c1@x' });
+    otherCoordinator = await seedUser(db, { email: 'c2@x' });
   }, 60_000);
 
   afterAll(async () => {
@@ -514,10 +488,7 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
 
     it('SCRUM252_is_not_callable_by_the_publishable_roles', async () => {
       const signature = 'create_booking_request(uuid, uuid, uuid, text, text, jsonb, boolean, integer, uuid)';
-      for (const role of ['anon', 'authenticated']) {
-        const row = await one('select has_function_privilege($1, $2, $3) as allowed', [role, signature, 'execute']);
-        expect(row.allowed).toBe(false);
-      }
+      expect(await clientsCanExecute(db, signature)).toEqual([]);
     });
   });
 });

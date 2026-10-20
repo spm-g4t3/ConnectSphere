@@ -15,6 +15,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { ok, dbError, errorFrom, rpcByNameClient } from '../fixtures/supabaseStubs.js';
 
 // equipmentReviewService reuses SCRUM-23's result mapper, which sits in a file
 // that imports the real client. Nothing here calls it.
@@ -94,9 +95,6 @@ const reviewRow = ({ status = 'under_review', lines = [lineRow()], ...request } 
   },
 });
 
-const ok = (data) => ({ data, error: null });
-const dbError = (code, message) => ({ data: null, error: { code, message } });
-
 
 /** A chainable query whose awaited result is `result`, as supabase-js builds them. */
 function query(result) {
@@ -118,31 +116,9 @@ const VENUES = ok([{ id: VENUE_ID, name: 'Hall A' }]);
  * (profiles, bookings, venues), as the names the screen shows are read.
  */
 function fakeClient(rpc = {}, tables = {}) {
-  const rpcCalls = [];
-  const fromCalls = [];
   const answers = { profiles: NAMES, bookings: BOOKING, venues: VENUES, ...tables };
-  return {
-    rpcCalls,
-    fromCalls,
-    rpc: vi.fn(async (name, args) => {
-      rpcCalls.push({ name, args });
-      return rpc[name] ?? ok(reviewRow());
-    }),
-    from: vi.fn((table) => {
-      fromCalls.push(table);
-      return query(answers[table] ?? ok([]));
-    }),
-  };
+  return rpcByNameClient({ rpc, fallback: () => ok(reviewRow()), table: (name) => answers[name] ?? ok([]) });
 }
-
-const failure = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 
 describe('AC4: the review data', () => {
@@ -255,7 +231,7 @@ describe('AC4: the review data', () => {
   it('SCRUM290_AC4_answers_not_found_for_an_event_that_does_not_exist', async () => {
     const client = fakeClient({ equipment_review_for_event: dbError('P0002', 'Event request not found') });
 
-    const err = await failure(getEquipmentReview(EVENT_ID, { client }));
+    const err = await errorFrom(getEquipmentReview(EVENT_ID, { client }));
 
     expect(err).toBeInstanceOf(NotFoundError);
   });
@@ -263,7 +239,7 @@ describe('AC4: the review data', () => {
   it('SCRUM290_AC4_refuses_an_id_that_is_not_a_uuid_before_any_call', async () => {
     const client = fakeClient();
 
-    const err = await failure(getEquipmentReview('not-a-uuid', { client }));
+    const err = await errorFrom(getEquipmentReview('not-a-uuid', { client }));
 
     expect(err).toBeInstanceOf(ValidationError);
     expect(client.rpc).not.toHaveBeenCalled();
@@ -309,7 +285,7 @@ describe('AC2 and AC3: starting and taking over', () => {
     for (const userId of [undefined, null, '', '   ']) {
       const client = fakeClient();
 
-      const err = await failure(call(client, userId));
+      const err = await errorFrom(call(client, userId));
 
       expect(err).toBeInstanceOf(ValidationError);
       expect(client.rpc).not.toHaveBeenCalled();
@@ -320,7 +296,7 @@ describe('AC2 and AC3: starting and taking over', () => {
     const message = 'This equipment request is already Under review. Take over the review instead.';
     const client = fakeClient({ start_equipment_review: dbError('55000', message) });
 
-    const err = await failure(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
+    const err = await errorFrom(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
 
     expect(err).toBeInstanceOf(ConflictError);
     expect(err.status).toBe(409);
@@ -333,7 +309,7 @@ describe('AC2 and AC3: starting and taking over', () => {
       start_equipment_review: dbError('40001', 'The equipment request changed while the review was being started'),
     });
 
-    const err = await failure(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
+    const err = await errorFrom(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
 
     expect(err).toBeInstanceOf(ConflictError);
     expect(err.code).toBe(REVIEW_NOT_ALLOWED);
@@ -344,7 +320,7 @@ describe('AC2 and AC3: starting and taking over', () => {
       start_equipment_review: dbError('40P01', 'deadlock detected'),
     });
 
-    const err = await failure(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
+    const err = await errorFrom(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
 
     expect(err).toBeInstanceOf(ConflictError);
     expect(err.status).toBe(409);
@@ -357,7 +333,7 @@ describe('AC2 and AC3: starting and taking over', () => {
       start_equipment_review: dbError('P0002', 'This event has no equipment request to review'),
     });
 
-    const err = await failure(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
+    const err = await errorFrom(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
 
     expect(err).toBeInstanceOf(NotFoundError);
   });
@@ -367,7 +343,7 @@ describe('AC2 and AC3: starting and taking over', () => {
       start_equipment_review: dbError('42501', 'Only Technical Support Staff can review equipment requests'),
     });
 
-    const err = await failure(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
+    const err = await errorFrom(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
 
     expect(err).toBeInstanceOf(ForbiddenError);
     expect(err.status).toBe(403);
@@ -376,7 +352,7 @@ describe('AC2 and AC3: starting and taking over', () => {
   it('SCRUM290_AC1_an_unrecognised_database_error_is_left_untyped_and_does_not_reach_the_caller_as_a_4xx', async () => {
     const client = fakeClient({ start_equipment_review: dbError('XX000', 'relation "x" is broken') });
 
-    const err = await failure(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
+    const err = await errorFrom(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
 
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(AppError);
@@ -406,7 +382,7 @@ describe('AC7: marking a line and completing', () => {
   it('SCRUM290_AC7_mark_refuses_a_missing_note_before_any_call_and_names_the_field', async () => {
     const client = fakeClient();
 
-    const err = await failure(markEquipmentLineUnavailable(EVENT_ID, LINE_ID, { note: '  ' }, REVIEWER_ID, { client }));
+    const err = await errorFrom(markEquipmentLineUnavailable(EVENT_ID, LINE_ID, { note: '  ' }, REVIEWER_ID, { client }));
 
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.details).toEqual([{ field: 'note', message: 'is required: say what is missing' }]);
@@ -416,9 +392,9 @@ describe('AC7: marking a line and completing', () => {
   it('SCRUM290_AC7_mark_refuses_ids_that_are_not_uuids_before_any_call', async () => {
     const client = fakeClient();
 
-    expect(await failure(markEquipmentLineUnavailable('x', LINE_ID, { note: 'a' }, REVIEWER_ID, { client })))
+    expect(await errorFrom(markEquipmentLineUnavailable('x', LINE_ID, { note: 'a' }, REVIEWER_ID, { client })))
       .toBeInstanceOf(ValidationError);
-    expect(await failure(markEquipmentLineUnavailable(EVENT_ID, 'y', { note: 'a' }, REVIEWER_ID, { client })))
+    expect(await errorFrom(markEquipmentLineUnavailable(EVENT_ID, 'y', { note: 'a' }, REVIEWER_ID, { client })))
       .toBeInstanceOf(ValidationError);
     expect(client.rpc).not.toHaveBeenCalled();
   });
@@ -428,7 +404,7 @@ describe('AC7: marking a line and completing', () => {
       mark_equipment_line_unavailable: dbError('42501', 'Only the current reviewer can do this'),
     });
 
-    const err = await failure(markEquipmentLineUnavailable(EVENT_ID, LINE_ID, { note: 'a' }, COORDINATOR_ID, { client }));
+    const err = await errorFrom(markEquipmentLineUnavailable(EVENT_ID, LINE_ID, { note: 'a' }, COORDINATOR_ID, { client }));
 
     expect(err).toBeInstanceOf(ForbiddenError);
   });
@@ -438,7 +414,7 @@ describe('AC7: marking a line and completing', () => {
       mark_equipment_line_unavailable: dbError('55000', 'This line is already fully reserved, so it can be provided'),
     });
 
-    const err = await failure(markEquipmentLineUnavailable(EVENT_ID, LINE_ID, { note: 'a' }, REVIEWER_ID, { client }));
+    const err = await errorFrom(markEquipmentLineUnavailable(EVENT_ID, LINE_ID, { note: 'a' }, REVIEWER_ID, { client }));
 
     expect(err).toBeInstanceOf(ConflictError);
     expect(err.message).toMatch(/fully reserved/);
@@ -485,7 +461,7 @@ describe('AC7: marking a line and completing', () => {
       ),
     });
 
-    const err = await failure(completeEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
+    const err = await errorFrom(completeEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
 
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.details).toEqual([
@@ -500,7 +476,7 @@ describe('AC7: marking a line and completing', () => {
       complete_equipment_review: dbError('55000', 'Every line is fully reserved, so there is nothing to complete.'),
     });
 
-    const err = await failure(completeEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
+    const err = await errorFrom(completeEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
 
     expect(err).toBeInstanceOf(ConflictError);
   });
@@ -510,7 +486,7 @@ describe('AC7: marking a line and completing', () => {
       mark_equipment_line_unavailable: dbError('23514', 'new row violates check constraint'),
     });
 
-    const err = await failure(markEquipmentLineUnavailable(EVENT_ID, LINE_ID, { note: 'a' }, REVIEWER_ID, { client }));
+    const err = await errorFrom(markEquipmentLineUnavailable(EVENT_ID, LINE_ID, { note: 'a' }, REVIEWER_ID, { client }));
 
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toMatch(/^A value was rejected by the database:/);
@@ -594,7 +570,7 @@ describe('AC3 and AC4: the names on the screen', () => {
   it('SCRUM290_AC3_a_failed_name_lookup_is_a_500_not_a_blank_screen', async () => {
     const client = fakeClient({}, { profiles: dbError('XX000', 'profiles is broken') });
 
-    const err = await failure(getEquipmentReview(EVENT_ID, { client }));
+    const err = await errorFrom(getEquipmentReview(EVENT_ID, { client }));
 
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(AppError);

@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { ok, dbError, errorFrom, rpcByNameClient } from '../fixtures/supabaseStubs.js';
 
 vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: {}, supabaseAdmin: {} }));
 
@@ -77,36 +78,7 @@ const reviewRow = (reservations = [reservationRow()]) => ({
   },
 });
 
-const ok = (data) => ({ data, error: null });
-const dbError = (code, message) => ({ data: null, error: { code, message } });
-
-function query(result) {
-  const chain = {};
-  for (const method of ['select', 'in', 'eq', 'order', 'limit']) chain[method] = vi.fn(() => chain);
-  chain.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
-  return chain;
-}
-
-function fakeClient(rpc = {}) {
-  const rpcCalls = [];
-  return {
-    rpcCalls,
-    rpc: vi.fn(async (name, args) => {
-      rpcCalls.push({ name, args });
-      return rpc[name] ?? ok(reviewRow());
-    }),
-    from: vi.fn(() => query(ok([]))),
-  };
-}
-
-const failure = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
+const fakeClient = (rpc = {}) => rpcByNameClient({ rpc, fallback: () => ok(reviewRow()) });
 
 const ACTIONS = [
   ['reserve', 'reserve_equipment', (c, user = REVIEWER_ID) => reserveEquipment(EVENT_ID, LINE_ID, { quantity: 2 }, user, { client: c })],
@@ -166,14 +138,14 @@ describe('what is sent to the database', () => {
 describe('refused before the database is called', () => {
   it.each([0, -2, 1.5, '3', null, undefined])('SCRUM300_AC2_reserve_refuses_quantity_%j_with_400', async (quantity) => {
     const client = fakeClient();
-    const err = await failure(reserveEquipment(EVENT_ID, LINE_ID, { quantity }, REVIEWER_ID, { client }));
+    const err = await errorFrom(reserveEquipment(EVENT_ID, LINE_ID, { quantity }, REVIEWER_ID, { client }));
     expect(err).toBeInstanceOf(ValidationError);
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
   it('SCRUM300_AC4_reduce_without_a_reason_is_refused', async () => {
     const client = fakeClient();
-    const err = await failure(reduceEquipmentReservation(EVENT_ID, RESERVATION_ID, { quantity: 1 }, REVIEWER_ID, { client }));
+    const err = await errorFrom(reduceEquipmentReservation(EVENT_ID, RESERVATION_ID, { quantity: 1 }, REVIEWER_ID, { client }));
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.details).toEqual([expect.objectContaining({ field: 'reason' })]);
     expect(client.rpc).not.toHaveBeenCalled();
@@ -181,7 +153,7 @@ describe('refused before the database is called', () => {
 
   it('SCRUM300_AC4_release_without_a_reason_is_refused', async () => {
     const client = fakeClient();
-    const err = await failure(releaseEquipmentReservation(EVENT_ID, RESERVATION_ID, {}, REVIEWER_ID, { client }));
+    const err = await errorFrom(releaseEquipmentReservation(EVENT_ID, RESERVATION_ID, {}, REVIEWER_ID, { client }));
     expect(err).toBeInstanceOf(ValidationError);
     expect(client.rpc).not.toHaveBeenCalled();
   });
@@ -194,12 +166,12 @@ describe('refused before the database is called', () => {
     ['reservation id (move)', () => moveEquipmentReservation(EVENT_ID, 'nope', {}, REVIEWER_ID, { client: fakeClient() })],
     ['reservation id (keep)', () => keepEquipmentReservation(EVENT_ID, 'nope', {}, REVIEWER_ID, { client: fakeClient() })],
   ])('SCRUM300_a_bad_%s_is_a_400', async (_what, call) => {
-    expect(await failure(call())).toBeInstanceOf(ValidationError);
+    expect(await errorFrom(call())).toBeInstanceOf(ValidationError);
   });
 
   it.each(ACTIONS)('SCRUM300_AC1_%s_without_a_signed_in_user_is_refused', async (_what, _rpc, call) => {
     const client = fakeClient();
-    expect(await failure(call(client, ''))).toBeInstanceOf(ValidationError);
+    expect(await errorFrom(call(client, ''))).toBeInstanceOf(ValidationError);
     expect(client.rpc).not.toHaveBeenCalled();
   });
 });
@@ -207,29 +179,29 @@ describe('refused before the database is called', () => {
 describe('database refusals become typed errors', () => {
   it.each(ACTIONS)('SCRUM300_AC1_%s_not_the_reviewer_is_403', async (_what, rpcName, call) => {
     const client = fakeClient({ [rpcName]: dbError('42501', 'Only the current reviewer can do this') });
-    expect(await failure(call(client))).toBeInstanceOf(ForbiddenError);
+    expect(await errorFrom(call(client))).toBeInstanceOf(ForbiddenError);
   });
 
   it.each(ACTIONS)('SCRUM300_AC1_%s_wrong_status_is_409', async (_what, rpcName, call) => {
     const client = fakeClient({ [rpcName]: dbError('55000', 'This can only be done while the request is Under review.') });
-    const err = await failure(call(client));
+    const err = await errorFrom(call(client));
     expect(err).toBeInstanceOf(ConflictError);
     expect(err.message).toMatch(/Under review/);
   });
 
   it.each(ACTIONS)('SCRUM300_%s_a_lost_race_40001_is_409', async (_what, rpcName, call) => {
     const client = fakeClient({ [rpcName]: dbError('40001', 'changed') });
-    expect(await failure(call(client))).toBeInstanceOf(ConflictError);
+    expect(await errorFrom(call(client))).toBeInstanceOf(ConflictError);
   });
 
   it.each(ACTIONS)('SCRUM300_%s_not_found_is_404', async (_what, rpcName, call) => {
     const client = fakeClient({ [rpcName]: dbError('P0002', 'Reservation not found') });
-    expect(await failure(call(client))).toBeInstanceOf(NotFoundError);
+    expect(await errorFrom(call(client))).toBeInstanceOf(NotFoundError);
   });
 
   it('SCRUM300_AC2_more_than_available_is_a_400_on_quantity_and_keeps_the_figure', async () => {
     const client = fakeClient({ reserve_equipment: dbError('22023', 'Only 1 available for this period, so 2 cannot be reserved') });
-    const err = await failure(reserveEquipment(EVENT_ID, LINE_ID, { quantity: 2 }, REVIEWER_ID, { client }));
+    const err = await errorFrom(reserveEquipment(EVENT_ID, LINE_ID, { quantity: 2 }, REVIEWER_ID, { client }));
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toMatch(/Only 1 available/);
     expect(err.details).toEqual([expect.objectContaining({ field: 'quantity' })]);
@@ -237,31 +209,31 @@ describe('database refusals become typed errors', () => {
 
   it('SCRUM300_AC2_more_than_the_line_needs_is_a_400_on_quantity', async () => {
     const client = fakeClient({ reserve_equipment: dbError('22023', 'Only 1 more can be reserved on this line (it needs 3 and 2 is already reserved)') });
-    const err = await failure(reserveEquipment(EVENT_ID, LINE_ID, { quantity: 2 }, REVIEWER_ID, { client }));
+    const err = await errorFrom(reserveEquipment(EVENT_ID, LINE_ID, { quantity: 2 }, REVIEWER_ID, { client }));
     expect(err.details).toEqual([expect.objectContaining({ field: 'quantity' })]);
   });
 
   it('SCRUM300_AC4_a_reason_the_database_refuses_is_a_400_on_reason', async () => {
     const client = fakeClient({ release_equipment_reservation: dbError('22023', 'A reason is required') });
-    const err = await failure(releaseEquipmentReservation(EVENT_ID, RESERVATION_ID, { reason: 'x' }, REVIEWER_ID, { client }));
+    const err = await errorFrom(releaseEquipmentReservation(EVENT_ID, RESERVATION_ID, { reason: 'x' }, REVIEWER_ID, { client }));
     expect(err.details).toEqual([expect.objectContaining({ field: 'reason' })]);
   });
 
   it('SCRUM300_AC7_a_move_the_database_refuses_for_availability_is_a_400', async () => {
     const client = fakeClient({ move_equipment_reservation: dbError('22023', 'Only 0 available for the event\'s current period, so 2 cannot be moved there') });
-    expect(await failure(moveEquipmentReservation(EVENT_ID, RESERVATION_ID, {}, REVIEWER_ID, { client }))).toBeInstanceOf(ValidationError);
+    expect(await errorFrom(moveEquipmentReservation(EVENT_ID, RESERVATION_ID, {}, REVIEWER_ID, { client }))).toBeInstanceOf(ValidationError);
   });
 
   it('SCRUM300_AC7_a_keep_the_database_refuses_is_a_409_with_the_reason_in_words', async () => {
     const client = fakeClient({ keep_equipment_reservation: dbError('55000', 'This reservation cannot be kept. Its period no longer matches the event.') });
-    const err = await failure(keepEquipmentReservation(EVENT_ID, RESERVATION_ID, {}, REVIEWER_ID, { client }));
+    const err = await errorFrom(keepEquipmentReservation(EVENT_ID, RESERVATION_ID, {}, REVIEWER_ID, { client }));
     expect(err).toBeInstanceOf(ConflictError);
     expect(err.message).toMatch(/period no longer matches/);
   });
 
   it('SCRUM300_an_unexpected_database_error_is_left_untyped_so_it_becomes_a_500', async () => {
     const client = fakeClient({ reserve_equipment: dbError('XX000', 'boom') });
-    const err = await failure(reserveEquipment(EVENT_ID, LINE_ID, { quantity: 1 }, REVIEWER_ID, { client }));
+    const err = await errorFrom(reserveEquipment(EVENT_ID, LINE_ID, { quantity: 1 }, REVIEWER_ID, { client }));
     expect(err).not.toBeInstanceOf(ValidationError);
     expect(err.status).toBeUndefined();
   });

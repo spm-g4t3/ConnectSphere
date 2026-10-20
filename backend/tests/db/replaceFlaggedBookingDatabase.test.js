@@ -13,24 +13,14 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
-
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
+import { createSchemaDb, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { decideBooking } from './helpers/bookingFlow.js';
+import { flagForReason } from './helpers/flaggedBookings.js';
+import { clientsCanExecute } from './helpers/grants.js';
+import { at } from '../fixtures/time.js';
 
 const NO_SUCH_ID = '00000000-0000-4000-8000-000000000000';
-
-/** The error a promise rejected with; null if it resolved. */
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('SCRUM-266: a coordinator lists and replaces flagged bookings', () => {
   let db;
@@ -40,24 +30,11 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings', () => {
   let staff;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
-  async function makeUser(email, role) {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (email, role) => seedUser(db, { email, role });
 
-  async function makeVenue() {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, 30, 45) returning id`,
-        [`Harbour Room ${counter}`],
-      )
-    ).id;
-  }
+  const makeVenue = () => seedVenue(db, { name: `Harbour Room ${++counter}` });
 
   function makeEvent({ status = 'approved' } = {}) {
     counter += 1;
@@ -82,27 +59,15 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings', () => {
       )
     ).result;
 
-  const decide = async (bookingId, decision = 'approve', reason = null) =>
-    (
-      await one('select decide_booking_request($1, $2, $3, $4, null) as result', [
-        bookingId,
-        staff,
-        decision,
-        reason,
-      ])
-    ).result;
+  const decide = (bookingId, decision = 'approve', reason = null) =>
+    decideBooking(db, bookingId, { caller: staff, decision, reason });
 
   /** An approved booking at a fresh venue, flagged with a reason (as a venue setup change or a safety review flags them). */
   async function flagged(eventId, reviewReason = 'setup_or_turnaround_changed') {
     const venueId = await makeVenue();
     const created = await request(eventId, venueId);
     expect((await decide(created.booking.id)).outcome).toBe('approved');
-    await db.query(
-      `update bookings
-          set status = 'flagged_for_review', review_reason = $2, flagged_at = now(), flagged_by = $3
-        where id = $1`,
-      [created.booking.id, reviewReason, staff],
-    );
+    await flagForReason(db, created.booking.id, { reason: reviewReason, flaggedBy: staff });
     return created.booking.id;
   }
 
@@ -172,12 +137,7 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings', () => {
     });
 
     it('SCRUM266_AC1_the_function_is_not_granted_to_anon_or_authenticated', async () => {
-      const grants = await one(
-        `select has_function_privilege('anon', 'list_event_flagged_bookings(uuid, uuid)', 'execute') as anon,
-                has_function_privilege('authenticated', 'list_event_flagged_bookings(uuid, uuid)', 'execute')
-                  as authenticated`,
-      );
-      expect(grants).toEqual({ anon: false, authenticated: false });
+      expect(await clientsCanExecute(db, 'list_event_flagged_bookings(uuid, uuid)')).toEqual([]);
     });
   });
 
@@ -504,14 +464,13 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings', () => {
 
   describe('who can call them', () => {
     it('SCRUM266_W7_the_request_queue_and_flag_functions_are_not_granted_to_anon', async () => {
-      const grants = await one(
-        `select has_function_privilege('anon',
-                  'create_booking_request(uuid, uuid, uuid, text, text, jsonb, boolean, integer, uuid)',
-                  'execute') as anon,
-                has_function_privilege('anon', 'flagged_bookings_json(uuid)', 'execute') as helper,
-                has_function_privilege('anon', 'list_pending_booking_requests(uuid)', 'execute') as queue`,
-      );
-      expect(grants).toEqual({ anon: false, helper: false, queue: false });
+      for (const signature of [
+        'create_booking_request(uuid, uuid, uuid, text, text, jsonb, boolean, integer, uuid)',
+        'flagged_bookings_json(uuid)',
+        'list_pending_booking_requests(uuid)',
+      ]) {
+        expect(await clientsCanExecute(db, signature, ['anon']), signature).toEqual([]);
+      }
     });
   });
 });

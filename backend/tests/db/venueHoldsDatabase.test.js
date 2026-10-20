@@ -26,15 +26,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { clientsCanExecute } from './helpers/grants.js';
+import { D, at, fromNow } from '../fixtures/time.js';
 
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
 const ms = (value) => new Date(value).getTime();
-/** An instant `minutes` from now (negative: in the past). */
-const fromNow = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString();
 
 const SUITABLE = { suitable: true, criteria: [{ criterion: 'capacity', met: true }] };
 
@@ -45,26 +42,12 @@ describe('SCRUM-491: tentative venue holds', () => {
   let coordinator;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
-  async function makeUser(role) {
-    counter += 1;
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [`u${counter}@x`])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (role) => seedUser(db, { email: `u${++counter}@x`, role });
 
-  async function makeVenue(setup = 30, turnaround = 45) {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, $2, $3) returning id`,
-        [`Harbour Room ${counter}`, setup, turnaround],
-      )
-    ).id;
-  }
+  const makeVenue = (setup = 30, turnaround = 45) =>
+    seedVenue(db, { name: `Harbour Room ${++counter}`, setup, turnaround });
 
   function makeEvent(startsAt, endsAt, { status = 'approved', coordinatorId = coordinator } = {}) {
     counter += 1;
@@ -79,25 +62,11 @@ describe('SCRUM-491: tentative venue holds', () => {
     });
   }
 
-  async function makeBlock(venueId, startsAt, endsAt) {
-    return (
-      await one(
-        `insert into venue_blocks (venue_id, starts_at, ends_at, reason)
-         values ($1, $2, $3, 'maintenance') returning id`,
-        [venueId, startsAt, endsAt],
-      )
-    ).id;
-  }
+  const makeBlock = (venueId, startsAt, endsAt) => seedBlock(db, { venueId, start: startsAt, end: endsAt });
 
   async function makeBooking(venueId, startsAt, endsAt, coordinatorId = coordinator) {
     const eventId = await makeEvent(startsAt, endsAt, { coordinatorId });
-    const id = (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, 'approved') returning id`,
-        [venueId, eventId, startsAt, endsAt],
-      )
-    ).id;
+    const id = await seedBooking(db, { venueId, eventId, status: 'approved', start: startsAt, end: endsAt });
     return { id, eventId };
   }
 
@@ -541,10 +510,7 @@ describe('SCRUM-491: tentative venue holds', () => {
         'place_venue_hold(uuid, uuid, timestamptz, uuid)',
         'process_venue_hold_expiry()',
       ]) {
-        for (const role of ['anon', 'authenticated']) {
-          const { allowed } = await one(`select has_function_privilege($1, $2, 'execute') as allowed`, [role, signature]);
-          expect(allowed, `${role} ${signature}`).toBe(false);
-        }
+        expect(await clientsCanExecute(db, signature), signature).toEqual([]);
       }
     });
   });

@@ -6,23 +6,15 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { BOOKING_STATUS } from '../../src/domain/bookingStatus.js';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
+import { createSchemaDb, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
 
 describe('SCRUM-250: booking request statuses in Postgres', () => {
   let db;
   let venueId;
   let eventId;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   const enumValues = async () =>
     (
@@ -46,13 +38,9 @@ describe('SCRUM-250: booking request statuses in Postgres', () => {
 
   beforeAll(async () => {
     db = await createSchemaDb();
-    const organiser = await one(`insert into auth.users (email) values ('o@example.com') returning id`);
-    venueId = (
-      await one(
-        `insert into venues (name, location, max_capacity) values ('Hall', 'Block A', 100) returning id`,
-      )
-    ).id;
-    eventId = await seedEvent(db, { organiser_id: organiser.id, event_name: 'Gala' });
+    const organiser = await seedUser(db, { email: 'o@example.com' });
+    venueId = await seedVenue(db, { name: 'Hall', capacity: 100, setup: 0, turnaround: 0 });
+    eventId = await seedEvent(db, { organiser_id: organiser, event_name: 'Gala' });
   }, 60_000);
 
   afterAll(async () => {

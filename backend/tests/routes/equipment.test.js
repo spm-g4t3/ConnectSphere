@@ -17,6 +17,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { ok, queryStub } from '../fixtures/supabaseStubs.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 const { from } = vi.hoisted(() => ({ from: vi.fn() }));
 
@@ -50,27 +52,7 @@ function typeRow(overrides = {}) {
   };
 }
 
-/** The thenable query stub the service tests use, with the write methods too. */
-function queryStub(result) {
-  const stub = { then: (onFulfilled, onRejected) => Promise.resolve(result).then(onFulfilled, onRejected) };
-  for (const method of ['select', 'eq', 'neq', 'is', 'ilike', 'order', 'limit', 'insert', 'update']) {
-    stub[method] = () => stub;
-  }
-  stub.single = () => Promise.resolve(result);
-  stub.maybeSingle = () => Promise.resolve(result);
-  return stub;
-}
-
-const ok = (data) => ({ data, error: null });
-
-/** Stands in for a signed-in user of a given role. */
-const signedInAs = (role, id = STAFF_ID) => (req, _res, next) => {
-  req.user = { id, email: 'someone@example.com', role };
-  next();
-};
-
-/** Stands in for no session, answering as the real middleware does. */
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInAs = signedInFor(STAFF_ID);
 
 /** An app with the router mounted where app.js mounts it. */
 function appWith(requireAuth = signedInAs(ROLE.TECHNICAL_SUPPORT_STAFF)) {

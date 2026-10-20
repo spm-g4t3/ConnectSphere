@@ -1,5 +1,7 @@
 import { beforeAll, afterAll, beforeEach, afterEach, describe, it, expect } from 'vitest';
 import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { clientsCanExecute } from './helpers/grants.js';
 
 // Registration settings, the writer, the browse read and the read-only
 // registrations view, all on the one event_registrations table.
@@ -11,7 +13,7 @@ const EVENT = '55555555-5555-4555-8555-555555555555';
 const COORDINATOR = '66666666-6666-4666-8666-666666666666';
 const MISSING = '99999999-9999-4999-8999-999999999999';
 let db;
-const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
+const { one } = queriesFor(() => db);
 const register = async (attendee = ME) => (await one('select register_for_event($1, $2) as result', [EVENT, attendee])).result;
 const state = async (attendee = ME) => one('select active_count::int, is_registered from open_event_registration_state($1::uuid[], $2)', [[EVENT], attendee]);
 const setup = async (capacity = 3) => (await one(`select setup_event_registration(
@@ -96,10 +98,8 @@ describe('SCRUM22 one registration table', () => {
     expect(functions).toEqual({ count: 1, definer: false });
     expect(await one("select prosecdef from pg_proc where proname = 'setup_event_registration'"))
       .toEqual({ prosecdef: false });
-    for (const role of ['anon', 'authenticated']) {
-      expect(await one("select has_function_privilege($1, 'setup_event_registration(uuid,uuid,boolean,timestamptz,timestamptz,integer,timestamptz)', 'execute') as allowed", [role]))
-        .toEqual({ allowed: false });
-    }
+    expect(await clientsCanExecute(db, 'setup_event_registration(uuid,uuid,boolean,timestamptz,timestamptz,integer,timestamptz)'))
+      .toEqual([]);
   });
 
   it.each(['event_request_id', 'attendee_id'])('SCRUM22_AC6_shared_%s_has_a_foreign_key', async (column) => {

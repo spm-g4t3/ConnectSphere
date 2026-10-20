@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 // cancel_event_request against the final schema.
 describe('SCRUM-374: cancel_event_request in Postgres', () => {
@@ -11,7 +12,7 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
   let technicalSupport;
   let venueId;
 
-  const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
   const eventRow = (id) => one('select * from event_requests where id = $1', [id]);
   const statusHistory = async (id) =>
     (await db.query(
@@ -30,16 +31,8 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
     });
   }
 
-  async function makeBooking(eventId, status = 'approved') {
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, '2026-12-01T09:00:00Z', '2026-12-01T10:00:00Z', $3)
-         returning id`,
-        [venueId, eventId, status],
-      )
-    ).id;
-  }
+  const makeBooking = (eventId, status = 'approved') =>
+    seedBooking(db, { venueId, eventId, status, start: '2026-12-01T09:00:00Z', end: '2026-12-01T10:00:00Z' });
 
   async function makeHold(eventId) {
     return (
@@ -73,23 +66,12 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
   beforeAll(async () => {
     db = await createSchemaDb();
 
-    organiser = (await one("insert into auth.users (email) values ('organiser@test') returning id")).id;
-    coordinator = (await one("insert into auth.users (email) values ('coordinator@test') returning id")).id;
-    otherCoordinator = (await one("insert into auth.users (email) values ('other-coordinator@test') returning id")).id;
-    venueStaff = (await one("insert into auth.users (email) values ('venue-staff@test') returning id")).id;
-    technicalSupport = (await one("insert into auth.users (email) values ('technical-support@test') returning id")).id;
-    await db.query(
-      `insert into profiles (id, role) values
-         ($1, 'event_organiser'),
-         ($2, 'event_coordinator'),
-         ($3, 'event_coordinator'),
-         ($4, 'venue_staff'),
-         ($5, 'technical_support_staff')`,
-      [organiser, coordinator, otherCoordinator, venueStaff, technicalSupport],
-    );
-    venueId = (
-      await one("insert into venues (name, location, max_capacity) values ('Hall', 'Block A', 100) returning id")
-    ).id;
+    organiser = await seedUser(db, { email: 'organiser@test', role: 'event_organiser' });
+    coordinator = await seedUser(db, { email: 'coordinator@test', role: 'event_coordinator' });
+    otherCoordinator = await seedUser(db, { email: 'other-coordinator@test', role: 'event_coordinator' });
+    venueStaff = await seedUser(db, { email: 'venue-staff@test', role: 'venue_staff' });
+    technicalSupport = await seedUser(db, { email: 'technical-support@test', role: 'technical_support_staff' });
+    venueId = await seedVenue(db, { name: 'Hall', capacity: 100, setup: 0, turnaround: 0 });
   }, 30000);
 
   afterAll(async () => {

@@ -33,6 +33,7 @@ import {
 } from '../../src/services/venueService.js';
 import { ValidationError, NotFoundError, ConflictError } from '../../src/errors.js';
 import { getBookingStatusDisplay } from '../../src/domain/bookingStatus.js';
+import { queryStub } from '../fixtures/supabaseStubs.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -77,44 +78,6 @@ function retiredVenueRow(overrides = {}) {
     venue_operating_hours: [],
     ...overrides,
   };
-}
-
-/**
- * A stand-in for a supabase-js query builder.
- *
- * Every builder method records its arguments and returns the same object, so a
- * chain of any length works and a test can ask what the service requested. The
- * builder is thenable because supabase-js resolves the chain itself --
- * searchVenues awaits .order(...) rather than a terminal method.
- *
- * `result` must stay a plain object: resolving a promise with another thenable
- * re-enters unwrapping, and resolving one with itself is a chaining cycle.
- */
-function queryStub(result) {
-  const calls = [];
-
-  const stub = {
-    /** Was this builder method used at all? */
-    called: (method) => calls.some(([name]) => name === method),
-    /** The arguments the service passed to it. */
-    args: (method) => calls.find(([name]) => name === method)?.slice(1),
-    then: (onFulfilled, onRejected) =>
-      Promise.resolve(result).then(onFulfilled, onRejected),
-  };
-
-  for (const method of ['select', 'eq', 'is', 'in', 'ilike', 'gte', 'order', 'limit', 'delete', 'lt', 'gt', 'lte', 'not']) {
-    stub[method] = (...args) => {
-      calls.push([method, ...args]);
-      return stub;
-    };
-  }
-
-  stub.maybeSingle = (...args) => {
-    calls.push(['maybeSingle', ...args]);
-    return Promise.resolve(result);
-  };
-
-  return stub;
 }
 
 /**

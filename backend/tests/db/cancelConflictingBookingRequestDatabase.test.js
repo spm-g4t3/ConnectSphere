@@ -7,7 +7,8 @@
  * request, not an end state.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests', () => {
   let db;
@@ -17,7 +18,7 @@ describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests'
   let venueId;
   let otherVenueId;
 
-  const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
   const bookingStatus = async (id) =>
     (await one('select status::text as status from bookings where id = $1', [id])).status;
 
@@ -30,16 +31,8 @@ describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests'
     });
   }
 
-  async function makeBooking(eventId, venue, status) {
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, '2026-12-01T09:00:00Z', '2026-12-01T10:00:00Z', $3)
-         returning id`,
-        [venue, eventId, status],
-      )
-    ).id;
-  }
+  const makeBooking = (eventId, venue, status) =>
+    seedBooking(db, { venueId: venue, eventId, status, start: '2026-12-01T09:00:00Z', end: '2026-12-01T10:00:00Z' });
 
   const cancel = (eventId) =>
     db.query(
@@ -50,22 +43,11 @@ describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests'
   beforeAll(async () => {
     db = await createSchemaDb();
 
-    organiser = (await one("insert into auth.users (email) values ('organiser@test') returning id")).id;
-    coordinator = (await one("insert into auth.users (email) values ('coordinator@test') returning id")).id;
-    venueStaff = (await one("insert into auth.users (email) values ('venue-staff@test') returning id")).id;
-    await db.query(
-      `insert into profiles (id, role) values
-         ($1, 'event_organiser'),
-         ($2, 'event_coordinator'),
-         ($3, 'venue_staff')`,
-      [organiser, coordinator, venueStaff],
-    );
-    venueId = (
-      await one("insert into venues (name, location, max_capacity) values ('Hall', 'Block A', 100) returning id")
-    ).id;
-    otherVenueId = (
-      await one("insert into venues (name, location, max_capacity) values ('Annex', 'Block B', 100) returning id")
-    ).id;
+    organiser = await seedUser(db, { email: 'organiser@test', role: 'event_organiser' });
+    coordinator = await seedUser(db, { email: 'coordinator@test', role: 'event_coordinator' });
+    venueStaff = await seedUser(db, { email: 'venue-staff@test', role: 'venue_staff' });
+    venueId = await seedVenue(db, { name: 'Hall', capacity: 100, setup: 0, turnaround: 0 });
+    otherVenueId = await seedVenue(db, { name: 'Annex', location: 'Block B', capacity: 100, setup: 0, turnaround: 0 });
   }, 30000);
 
   afterAll(async () => {

@@ -21,6 +21,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { ok, dbError, rpcByNameClient } from '../fixtures/supabaseStubs.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 const { createEventEquipmentRouter } = await import('../../src/routes/eventEquipment.js');
 const { ROLE } = await import('../../src/domain/userRole.js');
@@ -55,35 +57,16 @@ const stateRow = (overrides = {}) => ({
   },
 });
 
-const ok = (data) => ({ data, error: null });
-const dbError = (code, message) => ({ data: null, error: { code, message } });
-
 /** A client whose rpc answers by function name. */
 function fakeClient({ rpc = {}, type = { id: TYPE_ID, retired_at: null }, event = { id: EVENT_ID } } = {}) {
-  const rpcCalls = [];
-  const client = {
-    rpcCalls,
-    rpc: vi.fn(async (name, args) => {
-      rpcCalls.push({ name, args });
-      const answer = rpc[name];
-      return answer === undefined ? ok({ request: null }) : answer;
-    }),
-    from: vi.fn((table) => {
-      const row = table === 'equipment_types' ? type : event;
-      return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(ok(row)) }) }) };
-    }),
-  };
-  return client;
+  return rpcByNameClient({
+    rpc,
+    fallback: () => ok({ request: null }),
+    table: (name) => ok(name === 'equipment_types' ? type : event),
+  });
 }
 
-/** Stands in for a signed-in user of a given role. */
-const signedInAs = (role, id = COORDINATOR_ID) => (req, _res, next) => {
-  req.user = { id, email: 'someone@example.com', role };
-  next();
-};
-
-/** Stands in for no session, answering as the real middleware does. */
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInAs = signedInFor(COORDINATOR_ID);
 
 /** An app with the router mounted where app.js mounts it. */
 function appWith(client, requireAuth = signedInAs(ROLE.EVENT_COORDINATOR)) {

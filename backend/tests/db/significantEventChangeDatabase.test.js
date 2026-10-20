@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 const START = '2040-12-01T10:00:00Z';
 const END = '2040-12-01T12:00:00Z';
@@ -20,14 +21,9 @@ describe('SCRUM-395 significant event change database transaction', () => {
   let largeVenueId;
   let reservationId;
 
-  const rows = async (sql, params = []) => (await db.query(sql, params)).rows;
-  const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
+  const { one, rows } = queriesFor(() => db);
 
-  async function user(email, role) {
-    const { id } = await one('insert into auth.users(email) values ($1) returning id', [email]);
-    await db.query('insert into profiles(id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const user = (email, role) => seedUser(db, { email, role });
 
   function makeEvent(status = 'confirmed') {
     return seedEvent(db, {
@@ -44,13 +40,8 @@ describe('SCRUM-395 significant event change database transaction', () => {
     });
   }
 
-  async function makeBooking(forEvent, venueId) {
-    return (await one(
-      `insert into bookings(event_request_id, venue_id, status, starts_at, ends_at)
-       values ($1, $2, 'approved', $3, $4) returning id`,
-      [forEvent, venueId, START, END],
-    )).id;
-  }
+  const makeBooking = (forEvent, venueId) =>
+    seedBooking(db, { venueId, eventId: forEvent, status: 'approved', start: START, end: END });
 
   // A live reservation needs the request and line it was reserved for.
   async function makeReservation(forEvent, name, quantity) {
@@ -94,14 +85,8 @@ describe('SCRUM-395 significant event change database transaction', () => {
     attendeeTwo = await user('attendee-2@test', 'attendee');
     venueStaff = await user('venue-staff@test', 'venue_staff');
     technicalStaff = await user('technical-staff@test', 'technical_support_staff');
-    smallVenueId = (await one(
-      `insert into venues(name, location, max_capacity, setup_minutes, turnaround_minutes)
-       values ('Small Hall', 'Block A', 50, 15, 30) returning id`,
-    )).id;
-    largeVenueId = (await one(
-      `insert into venues(name, location, max_capacity, setup_minutes, turnaround_minutes)
-       values ('Large Hall', 'Block B', 150, 15, 15) returning id`,
-    )).id;
+    smallVenueId = await seedVenue(db, { name: 'Small Hall', capacity: 50, setup: 15, turnaround: 30 });
+    largeVenueId = await seedVenue(db, { name: 'Large Hall', location: 'Block B', capacity: 150, setup: 15, turnaround: 15 });
 
     eventId = await makeEvent();
     await makeBooking(eventId, smallVenueId);
@@ -444,11 +429,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
     const blockedEvent = await makeEvent();
     const bookingId = await makeBooking(blockedEvent, smallVenueId);
     // A real block row for the flag to point at, clear of every booking here.
-    const blockId = (await one(
-      `insert into venue_blocks(venue_id, starts_at, ends_at, reason)
-       values ($1, '2039-01-01T00:00:00Z', '2039-01-02T00:00:00Z', 'maintenance') returning id`,
-      [smallVenueId],
-    )).id;
+    const blockId = await seedBlock(db, { venueId: smallVenueId, start: '2039-01-01T00:00:00Z', end: '2039-01-02T00:00:00Z' });
     await db.query(
       `update bookings
           set status = 'flagged_for_review', review_block_id = $2, flagged_at = now()
@@ -493,11 +474,7 @@ describe('SCRUM-395 significant event change database transaction', () => {
 
   it('SCRUM395_AC9_lists_pending_venue_requests_leaves_them_open_and_tells_venue_staff', async () => {
     const movedEvent = await makeEvent();
-    const request = async (venueId, status) => (await one(
-      `insert into bookings(event_request_id, venue_id, status, starts_at, ends_at)
-       values ($1, $2, $3, $4, $5) returning id`,
-      [movedEvent, venueId, status, START, END],
-    )).id;
+    const request = (venueId, status) => seedBooking(db, { venueId, eventId: movedEvent, status, start: START, end: END });
     const pendingId = await request(smallVenueId, 'pending');
     const conflictingId = await request(largeVenueId, 'conflicting');
 

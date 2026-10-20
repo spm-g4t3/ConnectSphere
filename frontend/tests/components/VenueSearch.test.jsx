@@ -28,6 +28,7 @@ import { searchActiveVenues } from "../../src/services/venueService";
 import { deviceTimeZoneLabel, toDatetimeLocalValue } from "../../src/services/datetimeFormat.js";
 import { formatRange } from "../../src/services/displayFormat.js";
 import { toCalendarDateParam } from "../../src/services/calendarRange.js";
+import { deferred, httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/venueService", () => ({
   searchActiveVenues: vi.fn(),
@@ -53,22 +54,6 @@ function noteFor(startIso, endIso) {
   // SCRUM-484 (AC7): the note now names bookings and the venues' setup and
   // turnaround, which search counts too.
   return `Venues booked or blocked between ${formatRange(startIso, endIso)} are not shown, including each venue's setup and turnaround.`;
-}
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-function httpError(status, data) {
-  return Object.assign(new Error(`Request failed with status code ${status}`), {
-    response: { status, data },
-  });
 }
 
 function ReviewQueueProbe() {

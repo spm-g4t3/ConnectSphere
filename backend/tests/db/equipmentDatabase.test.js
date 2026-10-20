@@ -21,24 +21,16 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
 
 const at = (time) => `2026-12-01T${time}:00Z`;
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('SCRUM-72: the equipment schema and availability function in Postgres', () => {
   let db;
   let organiser;
   let base; // a type, an event, a request and a line the bad writes hang off
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   const newType = async ({ name, total = 10, damaged = 0, maintenance = 0, retired = false } = {}) =>
     (await one(

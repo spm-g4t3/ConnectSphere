@@ -30,7 +30,8 @@ import {
   listAssignedEventsForLead,
   listCoordinatorOverview,
 } from '../../src/services/eventRequestService.js';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 /** The list reads these two services make, over PGlite. */
 function pgliteListClient(db) {
@@ -77,18 +78,14 @@ describe('SCRUM-487 AC2, AC3, AC6: the overview over a real database, before and
   let lead;
   let eventId;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
   const future = (days) => new Date(Date.now() + days * 86_400_000).toISOString();
   const countsOf = (overview, id) => overview.coordinators.find((row) => row.id === id);
 
   beforeAll(async () => {
     db = await createSchemaDb();
 
-    const user = async (email, role, name) => {
-      const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-      await db.query('insert into profiles (id, role, full_name) values ($1, $2, $3)', [id, role, name]);
-      return id;
-    };
+    const user = (email, role, name) => seedUser(db, { email, role, fullName: name });
     organiser = await user('o@x', 'event_organiser', 'Aisha Rahman');
     coordinatorA = await user('a@x', 'event_coordinator', 'Priya Nair');
     coordinatorB = await user('b@x', 'event_coordinator', 'Omar Okafor');

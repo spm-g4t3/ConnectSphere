@@ -26,6 +26,7 @@ import {
   FACILITIES,
   ROOM_LAYOUTS,
 } from "../../src/services/venueLookups.js";
+import { deferred, httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/venueService", () => ({
   findVenuesForEvent: vi.fn(),
@@ -83,22 +84,6 @@ const ANNEX = {
   setupMinutes: 0,
   turnaroundMinutes: 0,
 };
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-function httpError(status, data) {
-  return Object.assign(new Error(`Request failed with status code ${status}`), {
-    response: { status, data },
-  });
-}
 
 function renderFinder(request = EVENT, props = {}) {
   const user = userEvent.setup();

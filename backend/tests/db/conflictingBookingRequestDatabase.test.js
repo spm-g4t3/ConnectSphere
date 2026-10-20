@@ -16,24 +16,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
-
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { decideBooking } from './helpers/bookingFlow.js';
+import { at } from '../fixtures/time.js';
 
 const SUITABLE = { suitable: true, criteria: [{ criterion: 'Capacity', met: true }] };
-
-/** The error a promise rejected with; null if it resolved. */
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('SCRUM-258 AC3: overlapping requests become conflicting', () => {
   let db;
@@ -43,26 +31,12 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting', () => {
   let staff;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
-  async function makeUser(email, role) {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (email, role) => seedUser(db, { email, role });
 
   /** A venue with 30 minutes' setup and 45 minutes' turnaround. */
-  async function makeVenue() {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, 30, 45) returning id`,
-        [`Harbour Room ${counter}`],
-      )
-    ).id;
-  }
+  const makeVenue = () => seedVenue(db, { name: `Harbour Room ${++counter}` });
 
   function makeEvent({ status = 'approved', start = at('14:00'), end = at('16:00'), assignedTo = coordinator } = {}) {
     counter += 1;
@@ -78,16 +52,7 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting', () => {
   }
 
   /** A booking written directly, for the event's own period. */
-  async function insertBooking(eventId, venueId, status = 'pending') {
-    const event = await one('select proposed_start, proposed_end from event_requests where id = $1', [eventId]);
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, $5) returning id`,
-        [venueId, eventId, event.proposed_start, event.proposed_end, status],
-      )
-    ).id;
-  }
+  const insertBooking = (eventId, venueId, status = 'pending') => seedBooking(db, { venueId, eventId, status });
 
   /** A pending request at venueId for a new event on start-end. */
   async function pending(venueId, start = at('14:00'), end = at('16:00'), eventOptions = {}) {
@@ -95,15 +60,7 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting', () => {
     return { id: await insertBooking(eventId, venueId), eventId };
   }
 
-  const decide = async (bookingId, decision, reason = null) =>
-    (
-      await one('select decide_booking_request($1, $2, $3, $4, null) as result', [
-        bookingId,
-        staff,
-        decision,
-        reason,
-      ])
-    ).result;
+  const decide = (bookingId, decision, reason = null) => decideBooking(db, bookingId, { caller: staff, decision, reason });
 
   const statusOf = async (id) => (await one('select status::text as status from bookings where id = $1', [id])).status;
   const noticesFor = (bookingId, type) =>

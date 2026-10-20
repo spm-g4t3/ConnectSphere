@@ -19,6 +19,7 @@ import {
 } from "../../src/services/bookingRequestService";
 import { formatVenuePeriod, formatVenueRange } from "../../src/services/datetimeFormat.js";
 import { BOOKABLE_EVENT_STATUSES } from "../../src/services/bookingRequestEligibility.js";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/bookingRequestService", () => ({
   getPendingBookingRequests: vi.fn(),
@@ -111,16 +112,6 @@ function clash(bookingId, eventName) {
 const httpError = (status, data = {}) =>
   Object.assign(new Error(`Request failed with status code ${status}`), { response: { status, data } });
 const conflict = (code, extra = {}) => httpError(409, { error: "database prose", code, ...extra });
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 function renderQueue() {
   const user = userEvent.setup();

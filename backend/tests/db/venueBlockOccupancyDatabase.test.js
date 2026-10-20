@@ -20,12 +20,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { at } from '../fixtures/time.js';
 
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
 const ms = (value) => new Date(value).getTime();
 
 describe('SCRUM-484: venue block writers use the occupied period', () => {
@@ -35,18 +33,10 @@ describe('SCRUM-484: venue block writers use the occupied period', () => {
   let coordinator;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
-  async function makeVenue(setup = 30, turnaround = 45) {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, $2, $3) returning id`,
-        [`Harbour Room ${counter}`, setup, turnaround],
-      )
-    ).id;
-  }
+  const makeVenue = (setup = 30, turnaround = 45) =>
+    seedVenue(db, { name: `Harbour Room ${++counter}`, setup, turnaround });
 
   function makeEvent() {
     counter += 1;
@@ -62,15 +52,8 @@ describe('SCRUM-484: venue block writers use the occupied period', () => {
   }
 
   /** A raw block row, inserted directly (not through create_venue_block). */
-  async function insertBlock(venueId, startsAt, endsAt, removed = false) {
-    return (
-      await one(
-        `insert into venue_blocks (venue_id, starts_at, ends_at, reason, removed_at)
-         values ($1, $2, $3, 'maintenance', ${removed ? 'now()' : 'null'}) returning id`,
-        [venueId, startsAt, endsAt],
-      )
-    ).id;
-  }
+  const insertBlock = (venueId, startsAt, endsAt, removed = false) =>
+    seedBlock(db, { venueId, start: startsAt, end: endsAt, removed });
 
   /**
    * A booking. A flagged_for_review one needs a block and a flag time
@@ -83,13 +66,7 @@ describe('SCRUM-484: venue block writers use the occupied period', () => {
     if (status === 'flagged_for_review') {
       reviewBlockId = await insertBlock(venueId, at('22:00'), at('23:00'), true);
     }
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status, review_block_id, flagged_at)
-         values ($1, $2, $3, $4, $5, $6, ${reviewBlockId ? 'now()' : 'null'}) returning id`,
-        [venueId, eventId, startsAt, endsAt, status, reviewBlockId],
-      )
-    ).id;
+    return seedBooking(db, { venueId, eventId, status, start: startsAt, end: endsAt, reviewBlockId });
   }
 
   async function fixtureA(setup = 30, turnaround = 45) {
@@ -124,13 +101,9 @@ describe('SCRUM-484: venue block writers use the occupied period', () => {
 
   beforeAll(async () => {
     db = await createSchemaDb();
-    organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
-    staff = (await one("insert into auth.users (email) values ('s@x') returning id")).id;
-    coordinator = (await one("insert into auth.users (email) values ('c1@x') returning id")).id;
-    await db.query("insert into profiles (id, role) values ($1, 'venue_staff'), ($2, 'event_coordinator')", [
-      staff,
-      coordinator,
-    ]);
+    organiser = await seedUser(db, { email: 'o@x' });
+    staff = await seedUser(db, { email: 's@x', role: 'venue_staff' });
+    coordinator = await seedUser(db, { email: 'c1@x', role: 'event_coordinator' });
   }, 60_000);
 
   afterAll(async () => {

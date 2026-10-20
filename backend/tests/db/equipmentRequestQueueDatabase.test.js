@@ -7,16 +7,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { asJson } from './helpers/equipment.js';
+import { clientsCanExecute } from './helpers/grants.js';
 
 const day = (n, hour = 10) => {
   const d = new Date(Date.UTC(2030, 0, n, hour));
@@ -33,14 +27,9 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
   let alex;
   let hall;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const asJson = (row) => JSON.parse(row.answer);
+  const { one } = queriesFor(() => db);
 
-  const newUser = async (email, name, role = 'event_coordinator') => {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    await db.query('insert into profiles (id, full_name, role) values ($1, $2, $3)', [id, name, role]);
-    return id;
-  };
+  const newUser = (email, name, role = 'event_coordinator') => seedUser(db, { email, role, fullName: name });
   const newType = async (name, total = 10) =>
     (await one('insert into equipment_types (name, total_quantity) values ($1, $2) returning id', [name, total])).id;
 
@@ -108,11 +97,7 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
   });
 
   it('SCRUM284_AC1_the_function_is_not_granted_to_anon_or_authenticated', async () => {
-    const grants = await one(
-      `select has_function_privilege('anon', 'equipment_request_queue(uuid, text, boolean, integer)', 'execute') as anon,
-              has_function_privilege('authenticated', 'equipment_request_queue(uuid, text, boolean, integer)', 'execute') as authenticated`,
-    );
-    expect(grants).toEqual({ anon: false, authenticated: false });
+    expect(await clientsCanExecute(db, 'equipment_request_queue(uuid, text, boolean, integer)')).toEqual([]);
   });
 
   describe('AC1: only Technical Support Staff can read it', () => {

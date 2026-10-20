@@ -12,13 +12,14 @@
  * together. Here the real router runs over a real database, so every refusal
  * below comes from where it would in production, not from a queued answer.
  *
- * The adapter. The services talk to supabase-js; this hands them an object
- * with the two shapes they use on this path, rpc(fn, args) and
- * from(table).select(cols).eq(col, value).maybeSingle(), each turned into one
- * SQL statement. It answers { data, error } with the Postgres code, as
- * supabase-js does, and throws on anything else so a new call on this path
- * fails by name rather than being answered wrongly. It is not a PostgREST: it
- * does what these five calls need and nothing more.
+ * The adapter. The services talk to supabase-js; the shared
+ * pgliteSupabaseClient hands them an object with the two shapes they use on
+ * this path, rpc(fn, args) and from(table).select(cols).eq(col, value)
+ * .maybeSingle(), each turned into one SQL statement. It answers
+ * { data, error } with the Postgres code, as supabase-js does, and throws on
+ * a list read so a new call on this path fails by name rather than being
+ * answered wrongly. It is not a PostgREST: it does what these five calls need
+ * and nothing more.
  *
  * The database is the final schema.
  */
@@ -29,43 +30,14 @@ import request from 'supertest';
 
 import { createEventRequestRouter } from '../../src/routes/eventRequests.js';
 import { ROLE } from '../../src/domain/userRole.js';
-import { createSchemaDb } from './helpers/schemaDb.js';
+import { createSchemaDb, seedUser } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { pgliteSupabaseClient } from '../fixtures/pgliteSupabaseClient.js';
 
-/** The two supabase-js shapes this path uses, over PGlite. */
-function pgliteClient(db) {
-  const answer = async (run) => {
-    try {
-      return { data: await run(), error: null };
-    } catch (err) {
-      return { data: null, error: { code: err.code, message: err.message } };
-    }
-  };
-
-  return {
-    rpc(fn, args) {
-      const names = Object.keys(args);
-      const sql = `select * from ${fn}(${names.map((name, i) => `${name} => $${i + 1}`).join(', ')})`;
-      return answer(async () => (await db.query(sql, names.map((name) => args[name]))).rows[0] ?? null);
-    },
-    from(table) {
-      let columns = '*';
-      const where = [];
-      const chain = {
-        // A PostgREST embed such as SCRUM-266's bookings(status) is not SQL.
-        // This path does not read the embed, so it is dropped.
-        select(cols = '*') { columns = cols.replace(/,\s*\w+\([^)]*\)/g, ''); return chain; },
-        eq(column, value) { where.push([column, value]); return chain; },
-        maybeSingle() {
-          const clause = where.map(([column], i) => `${column} = $${i + 1}`).join(' and ');
-          const sql = `select ${columns} from ${table}${clause ? ` where ${clause}` : ''}`;
-          return answer(async () => (await db.query(sql, where.map(([, value]) => value))).rows[0] ?? null);
-        },
-        then() { throw new Error(`pgliteClient: a list read on ${table} is not on this path`); },
-      };
-      return chain;
-    },
-  };
-}
+// A PostgREST embed such as SCRUM-266's bookings(status) is not SQL. This
+// path does not read the embed, so it is dropped.
+const pgliteClient = (db) =>
+  pgliteSupabaseClient(db, { columns: (cols) => cols.replace(/,\s*\w+\([^)]*\)/g, '') });
 
 describe('SCRUM-486 AC6, AC7: a Lead hands A\'s event to B, over HTTP, on a real database', () => {
   let db;
@@ -76,7 +48,7 @@ describe('SCRUM-486 AC6, AC7: a Lead hands A\'s event to B, over HTTP, on a real
   let lead;
   let eventId;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
   const as = (role, id) => (req, _res, next) => {
     req.user = { id, email: 'someone@example.com', role };
     next();
@@ -92,11 +64,7 @@ describe('SCRUM-486 AC6, AC7: a Lead hands A\'s event to B, over HTTP, on a real
   beforeAll(async () => {
     db = await createSchemaDb();
 
-    const user = async (email, role, name) => {
-      const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-      await db.query('insert into profiles (id, role, full_name) values ($1, $2, $3)', [id, role, name]);
-      return id;
-    };
+    const user = (email, role, name) => seedUser(db, { email, role, fullName: name });
     organiser = await user('o@x', 'event_organiser', 'Aisha Rahman');
     coordinatorA = await user('a@x', 'event_coordinator', 'Priya Nair');
     coordinatorB = await user('b@x', 'event_coordinator', 'Omar Okafor');

@@ -17,6 +17,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import VenueSearch from "../../src/components/VenueSearch.jsx";
 import { searchActiveVenues } from "../../src/services/venueService";
 import { createBookingRequest } from "../../src/services/bookingRequestService";
+import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/venueService", () => ({
   searchActiveVenues: vi.fn(),
@@ -42,9 +43,6 @@ const EVENT = {
   eventName: "Industry Night",
   venueRequirements: "Tiered seating",
 };
-
-const httpError = (status, data = {}) =>
-  Object.assign(new Error(`Request failed with status code ${status}`), { response: { status, data } });
 
 function renderSearch({ eventContext, userId = USER_ID, role = "event_coordinator", onRequestSubmitted } = {}) {
   const user = userEvent.setup();

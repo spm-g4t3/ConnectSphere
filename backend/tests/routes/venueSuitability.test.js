@@ -19,6 +19,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 // The real check loads venueService.js, which imports the Supabase client
 // statically and throws without a .env. Every query goes to the injected
@@ -49,11 +50,7 @@ const NOT_SUITABLE = {
   checked: SUITABLE.checked,
 };
 
-const signedInAs = (role, id = COORDINATOR) => (req, _res, next) => {
-  req.user = { id, email: 'someone@example.com', role };
-  next();
-};
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInAs = signedInFor(COORDINATOR);
 
 /** An app with the router mounted where app.js mounts it. */
 function appWith({

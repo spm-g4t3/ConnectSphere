@@ -13,6 +13,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import EventRequestReviewPage from "../../src/components/EventRequestReviewPage.jsx";
 import { getEventRequestForReview } from "../../src/services/eventRequestService";
+import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
   getEventRequestForReview: vi.fn(),
@@ -33,9 +34,6 @@ vi.mock("../../src/components/CoordinatorRequestDetail", () => ({
 
 const ID = "22222222-2222-4222-8222-222222222222";
 const EVENT = { id: ID, eventName: "IS212 Industry Night", assignedCoordinatorId: "A" };
-
-const httpError = (status) =>
-  Object.assign(new Error(`Request failed with status code ${status}`), { response: { status } });
 
 function renderAt(path) {
   return render(

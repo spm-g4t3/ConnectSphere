@@ -9,7 +9,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { BOOKING_STATUS } from '../../src/domain/bookingStatus.js';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 describe('SCRUM-251: the booking status default in Postgres', () => {
   let db;
@@ -18,7 +19,7 @@ describe('SCRUM-251: the booking status default in Postgres', () => {
   let organiserId;
   let hour = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   /** A booking over its own one-hour slot, so none overlap; status only if given. */
   async function insertBooking(status) {
@@ -49,14 +50,9 @@ describe('SCRUM-251: the booking status default in Postgres', () => {
 
   beforeAll(async () => {
     db = await createSchemaDb();
-    const organiser = await one(`insert into auth.users (email) values ('o@example.com') returning id`);
-    venueId = (
-      await one(
-        `insert into venues (name, location, max_capacity) values ('Hall', 'Block A', 100) returning id`,
-      )
-    ).id;
-    organiserId = organiser.id;
-    eventId = await seedEvent(db, { organiser_id: organiser.id, event_name: 'Gala' });
+    organiserId = await seedUser(db, { email: 'o@example.com' });
+    venueId = await seedVenue(db, { name: 'Hall', capacity: 100, setup: 0, turnaround: 0 });
+    eventId = await seedEvent(db, { organiser_id: organiserId, event_name: 'Gala' });
   }, 60_000);
 
   afterAll(async () => {

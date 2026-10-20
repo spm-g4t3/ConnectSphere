@@ -8,19 +8,14 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedUser } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { reservationSteps } from './helpers/equipment.js';
 
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
+const NEW_START = '2026-12-05T10:00:00Z';
+const NEW_END = '2026-12-05T12:00:00Z';
 
 describe('SCRUM-300: AC5 and AC8 guards in Postgres', () => {
   let db;
@@ -29,82 +24,21 @@ describe('SCRUM-300: AC5 and AC8 guards in Postgres', () => {
   let reviewerA;
   let reviewerB;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
-  const asJson = (row) => JSON.parse(row.answer);
-
-  const newUser = async (email, role) => {
-    const { id } = await one('insert into auth.users (email) values ($1) returning id', [email]);
-    await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  };
-  const newType = async (name, total = 10) =>
-    (await one('insert into equipment_types (name, total_quantity) values ($1, $2) returning id', [name, total])).id;
-  const newEvent = ({ status = 'approved', start = START, end = END } = {}) =>
-    seedEvent(db, {
-      status,
-      organiser_id: organiser,
-      assigned_coordinator_id: coordinator,
-      event_name: `Event ${Math.random()}`,
-      proposed_start: start,
-      proposed_end: end,
-    });
-
-  const add = async (event, type, quantity) =>
-    asJson(await one('select add_equipment_line($1, $2, $3, $4, null)::text as answer', [event, coordinator, type, quantity]));
-  const start = async (event, who) =>
-    asJson(await one('select start_equipment_review($1, $2)::text as answer', [event, who]));
-  const reserve = async (event, who, line, quantity) =>
-    asJson(await one('select reserve_equipment($1, $2, $3, $4)::text as answer', [event, who, line, quantity]));
-
-  const reduce = async (event, who, id, quantity, reason = 'Not needed') =>
-    asJson(await one('select reduce_equipment_reservation($1, $2, $3, $4, $5)::text as answer', [event, who, id, quantity, reason]));
-  const release = async (event, who, id, reason = 'Returned') =>
-    asJson(await one('select release_equipment_reservation($1, $2, $3, $4)::text as answer', [event, who, id, reason]));
-  const move = async (event, who, id, reason = null) =>
-    asJson(await one('select move_equipment_reservation($1, $2, $3, $4)::text as answer', [event, who, id, reason]));
-  const keep = async (event, who, id, reason = null) =>
-    asJson(await one('select keep_equipment_reservation($1, $2, $3, $4)::text as answer', [event, who, id, reason]));
-  const reservation = (event) =>
-    one(
-      `select id, quantity, start_at, end_at, flagged, flag_reason, released_at, release_reason
-         from equipment_reservations where event_request_id = $1 order by created_at, id limit 1`,
-      [event],
-    );
-  const NEW_START = '2026-12-05T10:00:00Z';
-  const NEW_END = '2026-12-05T12:00:00Z';
-  const changePeriod = (event, s = NEW_START, e = NEW_END) =>
-    db.query('update event_requests set proposed_start = $2, proposed_end = $3 where id = $1', [event, s, e]);
-  const lineId = (state, name) => state.request.lines.find((l) => l.name === name).id;
-  const live = (event) =>
-    rows(
-      'select quantity, start_at, end_at from equipment_reservations where event_request_id = $1 and released_at is null',
-      [event],
-    );
-  const events = (event) =>
-    rows(
-      'select action, user_id, reason, quantity_before, quantity_after, start_after, end_after from equipment_reservation_events where event_request_id = $1 order by id',
-      [event],
-    );
-  const requestStatus = async (event) =>
-    (await one("select status::text as s from equipment_requests where event_request_id = $1 and status <> 'cancelled'", [event])).s;
-
-  /** An approved event with one line, already Under review by reviewerA. */
-  const reviewed = async (typeName, total, quantity, opts) => {
-    const type = await newType(`${typeName} ${Math.random()}`, total);
-    const event = await newEvent(opts);
-    const state = await add(event, type, quantity);
-    await start(event, reviewerA);
-    return { event, type, line: state.request.lines[0].id };
-  };
+  const { one, rows } = queriesFor(() => db);
+  const {
+    newType, newEvent, add, start, reserve, reduce, release, move, keep,
+    reservation, changePeriod, lineId, live, events, requestStatus, reviewed,
+  } = reservationSteps(() => ({ db, organiser, coordinator, reviewerA }), {
+    start: START, end: END, newStart: NEW_START, newEnd: NEW_END,
+  });
 
   beforeAll(async () => {
     db = await createSchemaDb();
 
-    organiser = await newUser('organiser@example.com', 'event_organiser');
-    coordinator = await newUser('coordinator@example.com', 'event_coordinator');
-    reviewerA = await newUser('tech-a@example.com', 'technical_support_staff');
-    reviewerB = await newUser('tech-b@example.com', 'technical_support_staff');
+    organiser = await seedUser(db, { email: 'organiser@example.com', role: 'event_organiser' });
+    coordinator = await seedUser(db, { email: 'coordinator@example.com', role: 'event_coordinator' });
+    reviewerA = await seedUser(db, { email: 'tech-a@example.com', role: 'technical_support_staff' });
+    reviewerB = await seedUser(db, { email: 'tech-b@example.com', role: 'technical_support_staff' });
   }, 60000);
 
   afterAll(async () => {

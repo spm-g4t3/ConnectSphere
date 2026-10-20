@@ -14,6 +14,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import BlockHistory, { BlockActor } from "../../src/components/BlockHistory.jsx";
 import { getVenueBlockHistory } from "../../src/services/venueService";
 import { formatTimestamp } from "../../src/services/displayFormat";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/venueService", () => ({
   getVenueBlockHistory: vi.fn(),
@@ -76,17 +77,6 @@ function httpError(status) {
   return Object.assign(new Error(`Request failed with status code ${status}`), {
     response: { status, data: { error: UUID_PROSE } },
   });
-}
-
-/** A promise the test settles by hand, to hold a request in flight. */
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
 }
 
 const MSG = {

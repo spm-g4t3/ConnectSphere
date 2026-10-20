@@ -5,7 +5,8 @@
  * event_readiness treats a conflicting booking as an unmet venue line.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBooking, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
 
 describe('SCRUM-258: booking decisions alongside the safety review', () => {
   let db;
@@ -16,15 +17,7 @@ describe('SCRUM-258: booking decisions alongside the safety review', () => {
   let hall;
   let annex;
 
-  const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
-  const refusal = async (promise) => {
-    try {
-      await promise;
-      return null;
-    } catch (err) {
-      return err;
-    }
-  };
+  const { one } = queriesFor(() => db);
   const bookingStatus = async (id) =>
     (await one('select status::text as status from bookings where id = $1', [id])).status;
 
@@ -42,16 +35,7 @@ describe('SCRUM-258: booking decisions alongside the safety review', () => {
   }
 
   /** A booking covering the event's proposed start to end. */
-  async function booking(eventId, venueId, status) {
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         select $1, id, proposed_start, proposed_end, $3::booking_status from event_requests where id = $2
-         returning id`,
-        [venueId, eventId, status],
-      )
-    ).id;
-  }
+  const booking = (eventId, venueId, status) => seedBooking(db, { venueId, eventId, status });
 
   const cancel = (eventId) =>
     db.query(
@@ -74,11 +58,7 @@ describe('SCRUM-258: booking decisions alongside the safety review', () => {
   beforeAll(async () => {
     db = await createSchemaDb();
 
-    const user = async (email, role) => {
-      const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-      await db.query('insert into profiles (id, role, full_name) values ($1, $2, $3)', [id, role, email]);
-      return id;
-    };
+    const user = (email, role) => seedUser(db, { email, role, fullName: email });
     organiser = await user('o@x', 'event_organiser');
     coordinator = await user('c@x', 'event_coordinator');
     venueStaff = await user('vs@x', 'venue_staff');

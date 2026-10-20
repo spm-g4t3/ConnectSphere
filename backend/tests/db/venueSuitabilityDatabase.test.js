@@ -31,7 +31,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { D, at, fromNow } from '../fixtures/time.js';
 
 // The check loads venueService.js, which imports the Supabase client
 // statically; every read here goes to the PGlite-backed client instead.
@@ -43,12 +45,7 @@ const { checkVenueSuitability, checkEventVenues } = await import(
 const { createBookingRequest } = await import('../../src/services/bookingRequestService.js');
 const { ConflictError } = await import('../../src/errors.js');
 
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
 const ms = (value) => new Date(value).getTime();
-const fromNow = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString();
 
 /** D as the detail text names it, e.g. 'Wed 11 Nov', built from D alone. */
 const DAY = (() => {
@@ -74,8 +71,7 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
   let coordinator;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
   /**
    * A Supabase client whose reads and rpc go to PGlite: the event, the venue
@@ -190,22 +186,10 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
       [venueId, startsAt, endsAt, excludeEventId],
     );
 
-  async function makeUser(role) {
-    counter += 1;
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [`u${counter}@x`])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (role) => seedUser(db, { email: `u${++counter}@x`, role });
 
   async function makeVenue(setup = 30, turnaround = 45, capacity = 200) {
-    counter += 1;
-    const id = (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', $4, $2, $3) returning id`,
-        [`Harbour Room ${counter}`, setup, turnaround, capacity],
-      )
-    ).id;
+    const id = await seedVenue(db, { name: `Harbour Room ${++counter}`, capacity, setup, turnaround });
     await db.query(
       `insert into venue_operating_hours (venue_id, day_of_week, opens_at, closes_at)
        select $1, d, '07:00', '22:00' from generate_series(0, 6) d`,
@@ -227,25 +211,10 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
     });
   }
 
-  async function makeBooking(venueId, eventId, startsAt, endsAt, status = 'approved') {
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, $5) returning id`,
-        [venueId, eventId, startsAt, endsAt, status],
-      )
-    ).id;
-  }
+  const makeBooking = (venueId, eventId, startsAt, endsAt, status = 'approved') =>
+    seedBooking(db, { venueId, eventId, status, start: startsAt, end: endsAt });
 
-  async function makeBlock(venueId, startsAt, endsAt) {
-    return (
-      await one(
-        `insert into venue_blocks (venue_id, starts_at, ends_at, reason)
-         values ($1, $2, $3, 'maintenance') returning id`,
-        [venueId, startsAt, endsAt],
-      )
-    ).id;
-  }
+  const makeBlock = (venueId, startsAt, endsAt) => seedBlock(db, { venueId, start: startsAt, end: endsAt });
 
   async function placeHold(eventId, venueId) {
     const { result } = await one('select place_venue_hold($1, $2, $3, $4) as result', [

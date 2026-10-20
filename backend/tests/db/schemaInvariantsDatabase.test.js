@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createSchemaDb, functionSources } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { clientsCanExecute } from './helpers/grants.js';
 import {
   STATUS,
   isKnownStatus,
@@ -24,8 +26,7 @@ afterAll(async () => {
   await db?.close();
 });
 
-const rows = async (sql, params) => (await db.query(sql, params)).rows;
-const one = async (sql, params) => (await rows(sql, params))[0];
+const { one, rows } = queriesFor(() => db);
 
 // A function's code with every `--` comment stripped, so a rule that exists
 // only in a comment does not count; whitespace collapsed, lower-cased, and the
@@ -85,15 +86,6 @@ const hasPolicy = async (table) =>
 
 const rowLevelSecurity = async (table) =>
   (await one('select relrowsecurity from pg_class where oid = $1::regclass', [table])).relrowsecurity;
-
-async function clientsCanExecute(name) {
-  const { oid } = await procedure(name);
-  const checks = await rows(
-    "select role, has_function_privilege(role, $1::oid, 'execute') as allowed from unnest(array['anon', 'authenticated']) as role",
-    [oid],
-  );
-  return checks.filter((check) => check.allowed).map((check) => check.role);
-}
 
 /** Every needle is present, in the order given. */
 function expectInOrder(text, steps) {
@@ -488,7 +480,7 @@ describe('SCRUM-17: the venue block functions', () => {
       ['SCRUM17_AC4_revokes_update_venue_block_from_public_anon_and_authenticated', 'update_venue_block'],
       ['SCRUM17_AC4_revokes_remove_venue_block_from_public_anon_and_authenticated', 'remove_venue_block'],
     ])('%s', async (_name, fn) => {
-      expect(await clientsCanExecute(fn)).toEqual([]);
+      expect(await clientsCanExecute(db, (await procedure(fn)).oid)).toEqual([]);
     });
   });
 

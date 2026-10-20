@@ -13,24 +13,14 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, returnToLeadQueue, seedEvent } from './helpers/schemaDb.js';
-
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
+import { createSchemaDb, returnToLeadQueue, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { approveBooking, decideBooking } from './helpers/bookingFlow.js';
+import { flagForReason, flaggedByBlock } from './helpers/flaggedBookings.js';
+import { clientsCanExecute } from './helpers/grants.js';
+import { at } from '../fixtures/time.js';
 
 const NO_ONE = '00000000-0000-4000-8000-000000000000';
-
-/** The error a promise rejected with; null if it resolved. */
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('SCRUM-266 AC3 and AC5: cancelling a flagged booking', () => {
   let db;
@@ -40,26 +30,11 @@ describe('SCRUM-266 AC3 and AC5: cancelling a flagged booking', () => {
   let staff;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
-  async function makeUser(email, role) {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
-
+  const makeUser = (email, role) => seedUser(db, { email, role });
   /** A venue with 30 minutes' setup and 45 minutes' turnaround. */
-  async function makeVenue() {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, 30, 45) returning id`,
-        [`Harbour Room ${counter}`],
-      )
-    ).id;
-  }
+  const makeVenue = () => seedVenue(db, { name: `Harbour Room ${++counter}` });
 
   function makeEvent({ status = 'approved', start = at('14:00'), end = at('16:00') } = {}) {
     counter += 1;
@@ -75,68 +50,25 @@ describe('SCRUM-266 AC3 and AC5: cancelling a flagged booking', () => {
   }
 
   /** A pending booking for the event's own period, written directly. */
-  async function insertBooking(eventId, venueId) {
-    const event = await one('select proposed_start, proposed_end from event_requests where id = $1', [eventId]);
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, 'pending') returning id`,
-        [venueId, eventId, event.proposed_start, event.proposed_end],
-      )
-    ).id;
-  }
-
-  const decide = async (bookingId, decision = 'approve', reason = null) =>
-    (
-      await one('select decide_booking_request($1, $2, $3, $4, null) as result', [
-        bookingId,
-        staff,
-        decision,
-        reason,
-      ])
-    ).result;
-
+  const insertBooking = (eventId, venueId) => seedBooking(db, { venueId, eventId });
+  const decide = (bookingId, decision = 'approve', reason = null) =>
+    decideBooking(db, bookingId, { caller: staff, decision, reason });
   /** A booking approved by Venue Staff, so its decision is recorded. */
-  async function approved(venueId, eventId) {
-    const id = await insertBooking(eventId, venueId);
-    expect((await decide(id)).outcome).toBe('approved');
-    return id;
-  }
-
-  /** A block over start-end, created with the override that flags bookingIds. */
-  async function blockFlagging(venueId, start, end, bookingIds) {
-    const { result } = await one(
-      `select create_venue_block($1, $2, $3, 'maintenance', null, $4, true, $5::uuid[]) as result`,
-      [venueId, start, end, staff, bookingIds],
-    );
-    expect(result.outcome).toBe('created');
-    return result.block.id;
-  }
+  const approved = (venueId, eventId) => approveBooking(db, { venueId, eventId, caller: staff });
 
   /**
    * An approved booking flagged by a block over 15:00-17:00 on its venue: an
    * event 14:00-16:00 at a fresh venue unless one is given.
    */
-  async function flagged({ venueId, eventId } = {}) {
-    const venue = venueId ?? (await makeVenue());
-    const event = eventId ?? (await makeEvent());
-    const id = await approved(venue, event);
-    const blockId = await blockFlagging(venue, at('15:00'), at('17:00'), [id]);
-    expect((await bookingRow(id)).status).toBe('flagged_for_review');
-    return { id, venueId: venue, eventId: event, blockId };
-  }
+  const flagged = async ({ venueId, eventId } = {}) =>
+    flaggedByBlock(db, { venueId: venueId ?? (await makeVenue()), eventId: eventId ?? (await makeEvent()), caller: staff });
 
   /** An approved booking flagged by a reason rather than a block, as a venue setup change or a safety review flags them. */
   async function flaggedFor(reviewReason, { eventId } = {}) {
     const venueId = await makeVenue();
     const event = eventId ?? (await makeEvent());
     const id = await approved(venueId, event);
-    await db.query(
-      `update bookings
-          set status = 'flagged_for_review', review_reason = $2, flagged_at = now(), flagged_by = $3
-        where id = $1`,
-      [id, reviewReason, staff],
-    );
+    await flagForReason(db, id, { reason: reviewReason, flaggedBy: staff });
     return { id, venueId, eventId: event };
   }
 
@@ -467,11 +399,7 @@ describe('SCRUM-266 AC3 and AC5: cancelling a flagged booking', () => {
     });
 
     it('SCRUM266_AC5_the_function_is_not_granted_to_anon_or_authenticated', async () => {
-      const grants = await one(
-        `select has_function_privilege('anon', 'cancel_flagged_booking(uuid, uuid, text)', 'execute') as anon,
-                has_function_privilege('authenticated', 'cancel_flagged_booking(uuid, uuid, text)', 'execute') as authenticated`,
-      );
-      expect(grants).toEqual({ anon: false, authenticated: false });
+      expect(await clientsCanExecute(db, 'cancel_flagged_booking(uuid, uuid, text)')).toEqual([]);
     });
   });
 

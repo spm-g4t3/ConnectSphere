@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
 const START = '2030-01-01T12:00:00Z';
@@ -13,7 +14,7 @@ describe('SCRUM-363: event registration in Postgres', () => {
   let coordinator;
   let eventId;
 
-  const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   const event = (name, status = 'confirmed', overrides = {}) => seedEvent(db, {
     status,
@@ -41,15 +42,10 @@ describe('SCRUM-363: event registration in Postgres', () => {
   beforeAll(async () => {
     db = await createSchemaDb();
 
-    organiser = (await one("insert into auth.users (email) values ('organiser@test') returning id")).id;
-    attendee = (await one("insert into auth.users (email) values ('attendee@test') returning id")).id;
-    secondAttendee = (await one("insert into auth.users (email) values ('second-attendee@test') returning id")).id;
-    coordinator = (await one("insert into auth.users (email) values ('coordinator@test') returning id")).id;
-    await db.query(
-      `insert into profiles (id, role) values
-         ($1, 'event_organiser'), ($2, 'attendee'), ($3, 'attendee'), ($4, 'event_coordinator')`,
-      [organiser, attendee, secondAttendee, coordinator],
-    );
+    organiser = await seedUser(db, { email: 'organiser@test', role: 'event_organiser' });
+    attendee = await seedUser(db, { email: 'attendee@test', role: 'attendee' });
+    secondAttendee = await seedUser(db, { email: 'second-attendee@test', role: 'attendee' });
+    coordinator = await seedUser(db, { email: 'coordinator@test', role: 'event_coordinator' });
     eventId = await event('Registration test', 'approved');
   });
 

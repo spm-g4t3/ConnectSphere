@@ -26,56 +26,12 @@ import {
 } from '../../src/services/eventRequestService.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
 import { ValidationError } from '../../src/errors.js';
+import { ok, dbError, errorFrom, createReadQueueClient } from '../fixtures/supabaseStubs.js';
 
 
 // ---------------------------------------------------------------------------
 // The fake client
 // ---------------------------------------------------------------------------
-/**
- * Records one entry per .from(), each filter kind in its own list, and hands
- * back queued { data, error } pairs in call order. Running out throws, so an
- * unexpected extra round trip fails by name; an empty queue proves "no query".
- */
-function createFakeClient(results = []) {
-  const queue = [...results];
-  const calls = [];
-
-  function settle(call) {
-    if (queue.length === 0) {
-      throw new Error(`fake client: no result queued for ${call.operation} on ${call.table}`);
-    }
-    return Promise.resolve(queue.shift());
-  }
-
-  return {
-    calls,
-    from(table) {
-      const call = { table, operation: 'select', select: null, filters: [], inFilters: [], notFilters: [], order: [] };
-      calls.push(call);
-      const chain = {
-        select(columns = '*') { call.select = columns; return chain; },
-        eq(column, value) { call.filters.push([column, value]); return chain; },
-        in(column, values) { call.inFilters.push([column, [...values]]); return chain; },
-        not(column, operator, value) { call.notFilters.push([column, operator, value]); return chain; },
-        order(column, options) { call.order.push([column, options]); return chain; },
-        then: (resolve, reject) => settle(call).then(resolve, reject),
-      };
-      return chain;
-    },
-  };
-}
-
-const ok = (data) => ({ data, error: null });
-const dbError = (code, message) => ({ data: null, error: { code, message } });
-
-async function errorFrom(promise) {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-}
 
 const trail = (client) => client.calls.map((call) => call.table);
 
@@ -125,7 +81,7 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
   it('SCRUM487_AC2_lists_every_coordinator_with_a_count_for_every_active_status', async () => {
     // AC2-01, AC2-02, AC2-03. Every key of ACTIVE_EVENT_STATUSES on every row;
     // a coordinator with nothing is listed with zeros, not left out.
-    const client = createFakeClient([ok(COORDINATORS), ok(EVENTS)]);
+    const client = createReadQueueClient([ok(COORDINATORS), ok(EVENTS)]);
 
     const { coordinators: overview } = await listCoordinatorOverview({ client });
 
@@ -151,8 +107,8 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
   it('SCRUM487_AC2_active_events_is_the_sum_of_by_status_and_the_pickers_count', async () => {
     // AC2-04, AC2-05 (SCRUM-487 D3). The same coordinators and events through
     // both reads: one count, so the picker and the overview cannot disagree.
-    const { coordinators: overview } = await listCoordinatorOverview({ client: createFakeClient([ok(COORDINATORS), ok(EVENTS)]) });
-    const picker = await listCoordinatorWorkload({ client: createFakeClient([ok(COORDINATORS), ok(EVENTS)]) });
+    const { coordinators: overview } = await listCoordinatorOverview({ client: createReadQueueClient([ok(COORDINATORS), ok(EVENTS)]) });
+    const picker = await listCoordinatorWorkload({ client: createReadQueueClient([ok(COORDINATORS), ok(EVENTS)]) });
 
     for (const row of overview) {
       expect(row.activeEvents).toBe(Object.values(row.byStatus).reduce((sum, n) => sum + n, 0));
@@ -165,7 +121,7 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
     // AC2-01, AC2-06, AC2-11. The same two reads as the picker's: role
     // event_coordinator only (no Lead), by name then id, never by workload;
     // then their events in the active statuses, now with status to count by.
-    const client = createFakeClient([ok(COORDINATORS), ok([])]);
+    const client = createReadQueueClient([ok(COORDINATORS), ok([])]);
 
     await listCoordinatorOverview({ client });
 
@@ -190,7 +146,7 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
   it('SCRUM487_AC2_the_order_is_the_reads_never_the_workload', async () => {
     // Omar holds eight and Priya none; a list sorted by workload would move
     // Priya. The service keeps the read's order.
-    const client = createFakeClient([ok(COORDINATORS), ok(EVENTS)]);
+    const client = createReadQueueClient([ok(COORDINATORS), ok(EVENTS)]);
 
     const { coordinators: overview } = await listCoordinatorOverview({ client });
 
@@ -203,14 +159,14 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
     // { statuses, coordinators }, and the statuses are there with nobody to
     // count (the filter still needs them).
     for (const data of [[], null]) {
-      const client = createFakeClient([ok(data)]);
+      const client = createReadQueueClient([ok(data)]);
       await expect(listCoordinatorOverview({ client })).resolves.toEqual({ statuses: STATUSES, coordinators: [] });
       expect(trail(client)).toEqual(['profiles']);
     }
   });
 
   it('SCRUM487_AC2_a_coordinator_with_no_name_keeps_their_counts', async () => {
-    const client = createFakeClient([ok([profileRow(COORDINATOR_A, null)]), ok([held(COORDINATOR_A, STATUS.CONFIRMED)])]);
+    const client = createReadQueueClient([ok([profileRow(COORDINATOR_A, null)]), ok([held(COORDINATOR_A, STATUS.CONFIRMED)])]);
 
     const { coordinators: [row] } = await listCoordinatorOverview({ client });
 
@@ -221,8 +177,8 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
     // AC2-12, open until SCRUM-488 added the statuses. One event in Safety
     // review is one under safety_review, in the total, and in the picker.
     const events = [held(COORDINATOR_A, STATUS.SAFETY_REVIEW)];
-    const { coordinators: [row] } = await listCoordinatorOverview({ client: createFakeClient([ok(COORDINATORS), ok(events)]) });
-    const [picked] = await listCoordinatorWorkload({ client: createFakeClient([ok(COORDINATORS), ok(events)]) });
+    const { coordinators: [row] } = await listCoordinatorOverview({ client: createReadQueueClient([ok(COORDINATORS), ok(events)]) });
+    const [picked] = await listCoordinatorWorkload({ client: createReadQueueClient([ok(COORDINATORS), ok(events)]) });
 
     expect(row).toEqual({
       id: COORDINATOR_A,
@@ -237,7 +193,7 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
     // AC2-02, AC3-05 (SCRUM-487 D9). Every status the overview shows, in
     // order, active then finished, each in the words its status badge uses.
     // Never draft. From the response, not collected from event rows.
-    const { statuses } = await listCoordinatorOverview({ client: createFakeClient([ok(COORDINATORS), ok(EVENTS)]) });
+    const { statuses } = await listCoordinatorOverview({ client: createReadQueueClient([ok(COORDINATORS), ok(EVENTS)]) });
 
     expect(statuses).toEqual(STATUSES);
     expect(statuses.map((entry) => entry.status)).not.toContain(STATUS.DRAFT);
@@ -250,7 +206,7 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
     // AC2-08. Through translateError: 42P01 is no known SQLSTATE, so it stays
     // untyped and handleError answers 500. Never a list of zeros, which would
     // look like coordinators with nothing to do.
-    const err = await errorFrom(listCoordinatorOverview({ client: createFakeClient(results) }));
+    const err = await errorFrom(listCoordinatorOverview({ client: createReadQueueClient(results) }));
 
     expect(err).toBeInstanceOf(Error);
     expect(err.status).toBeUndefined();
@@ -260,7 +216,7 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
     // By SQLSTATE, never by message: 42501 is translateError's ForbiddenError,
     // so the events read's error goes through it rather than being rethrown.
     const err = await errorFrom(listCoordinatorOverview({
-      client: createFakeClient([ok(COORDINATORS), dbError('42501', 'permission denied for table event_requests')]),
+      client: createReadQueueClient([ok(COORDINATORS), dbError('42501', 'permission denied for table event_requests')]),
     }));
 
     expect(err.status).toBe(403);
@@ -281,7 +237,7 @@ describe('SCRUM-487 AC3: the Lead filters the list and can include finished even
 
   /** The one read the list makes, with nothing held: no name read follows. */
   const readWith = async (options) => {
-    const client = createFakeClient([ok([])]);
+    const client = createReadQueueClient([ok([])]);
     await listAssignedEventsForLead({ client, ...options });
     return client;
   };
@@ -383,7 +339,7 @@ describe('SCRUM-487 AC3: the Lead filters the list and can include finished even
   it.each(FINISHED)('SCRUM487_AC3_asking_for_%s_while_finished_events_are_hidden_is_empty_and_makes_no_query', async (status) => {
     // AC3-07. A coherent question with an empty answer: nothing in the list
     // can match, so there is nothing to ask the database.
-    const client = createFakeClient([]);
+    const client = createReadQueueClient([]);
 
     await expect(listAssignedEventsForLead({ client, status })).resolves.toEqual([]);
     expect(client.calls).toHaveLength(0);
@@ -407,7 +363,7 @@ describe('SCRUM-487 AC3: the Lead filters the list and can include finished even
     // AC3-09 to AC3-12. Draft is a known status (isKnownStatus would admit
     // it), but never in this list. The service takes a boolean; turning the
     // query string into one is the route's job, so a string here is a caller bug.
-    const client = createFakeClient([]);
+    const client = createReadQueueClient([]);
 
     const err = await errorFrom(listAssignedEventsForLead({ client, ...options }));
 

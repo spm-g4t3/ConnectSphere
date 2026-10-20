@@ -8,7 +8,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, returnToLeadQueue, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, returnToLeadQueue, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { asJson } from './helpers/equipment.js';
 
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
@@ -33,15 +35,9 @@ describe('SCRUM-176: equipment notifications in Postgres', () => {
   let techB;
   let venueStaff;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
-  const asJson = (row) => JSON.parse(row.answer);
+  const { one, rows } = queriesFor(() => db);
 
-  const newUser = async (email, role) => {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  };
+  const newUser = (email, role) => seedUser(db, { email, role });
   const newType = async (name, total) =>
     (await one(
       'insert into equipment_types (name, total_quantity) values ($1, $2) returning id',

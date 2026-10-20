@@ -14,18 +14,11 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { asJson } from './helpers/equipment.js';
 
 const NO_SUCH_ID = '00000000-0000-0000-0000-000000000000';
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('SCRUM-21: recording equipment lines in Postgres', () => {
   let db;
@@ -37,11 +30,9 @@ describe('SCRUM-21: recording equipment lines in Postgres', () => {
   let microphone;
   let retiredType;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const asJson = (row) => JSON.parse(row.answer);
+  const { one } = queriesFor(() => db);
 
-  const newUser = async (email) =>
-    (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
+  const newUser = (email) => seedUser(db, { email });
   const newType = async (name, { retired = false } = {}) =>
     (await one(
       `insert into equipment_types (name, total_quantity, retired_at)

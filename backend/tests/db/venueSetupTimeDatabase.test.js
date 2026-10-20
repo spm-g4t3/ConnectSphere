@@ -6,7 +6,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb } from './helpers/schemaDb.js';
+import { createSchemaDb, seedUser } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 const ms = (value) => new Date(value).getTime();
 
@@ -15,17 +16,11 @@ describe('SCRUM-484 AC9: a setup change made through update_venue is audited', (
   let staff;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
   const history = (venueId) =>
     rows('select * from venue_change_history where venue_id = $1 order by changed_at, id', [venueId]);
 
-  async function makeUser(role) {
-    counter += 1;
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [`u${counter}@x`])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (role) => seedUser(db, { email: `u${++counter}@x`, role });
 
   beforeAll(async () => {
     db = await createSchemaDb();

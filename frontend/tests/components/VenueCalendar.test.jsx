@@ -28,6 +28,7 @@ import { getVenueCalendar, getVenueDetails } from "../../src/services/venueServi
 import { blockCalendarLabel } from "../../src/services/venueBlockDisplay";
 import { VENUE_BLOCK_REASONS } from "../../src/services/venueBlockReasons";
 import { formatRange } from "../../src/services/displayFormat";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/venueService", () => ({
   getVenueCalendar: vi.fn(),
@@ -102,16 +103,6 @@ function requestedWindow(index = -1) {
   expect(window.from).toMatch(OFFSET_SUFFIX);
   expect(window.to).toMatch(OFFSET_SUFFIX);
   return { venueId, from: new Date(window.from), to: new Date(window.to) };
-}
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
 }
 
 function httpError(status) {

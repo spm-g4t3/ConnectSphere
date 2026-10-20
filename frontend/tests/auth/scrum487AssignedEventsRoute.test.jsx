@@ -9,15 +9,12 @@
 // is offered the link, is read off the same rendered nav, for every role.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 
-import App from "../../src/App.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
+import { renderAppAt } from "../helpers/renderApp.js";
 
-vi.mock("../../src/auth/AuthContext", () => ({
-  AuthProvider: ({ children }) => children,
-  useAuth: vi.fn(),
-}));
+vi.mock("../../src/auth/AuthContext", async () => (await import("../helpers/authMock.js")).authContextMock());
 
 vi.mock("../../src/components/AssignedEvents", () => ({
   default: function AssignedEventsStub() {
@@ -26,18 +23,6 @@ vi.mock("../../src/components/AssignedEvents", () => ({
 }));
 
 const NOT_A_LEAD = ["event_coordinator", "event_organiser", "venue_staff", "technical_support_staff", "attendee", "safety_officer"];
-
-function renderAppAt(path, role) {
-  vi.mocked(useAuth).mockReturnValue({
-    user: role ? { id: "u1", name: "Test User", role } : null,
-    loading: false,
-    logout: vi.fn().mockResolvedValue({ success: true }),
-    logoutMessage: null,
-    clearLogoutMessage: vi.fn(),
-  });
-  window.history.pushState({}, "", path);
-  return render(<App />);
-}
 
 beforeEach(() => {
   vi.mocked(useAuth).mockReset();

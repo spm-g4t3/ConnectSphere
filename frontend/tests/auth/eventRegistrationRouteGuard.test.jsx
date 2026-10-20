@@ -1,29 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 
-import App from "../../src/App.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
+import { renderAppAt } from "../helpers/renderApp.js";
 
-vi.mock("../../src/auth/AuthContext", () => ({
-  AuthProvider: ({ children }) => children,
-  useAuth: vi.fn(),
-}));
+vi.mock("../../src/auth/AuthContext", async () => (await import("../helpers/authMock.js")).authContextMock());
 
 vi.mock("../../src/components/EventRegistrationSettings", () => ({
   default: ({ eventId }) => <p data-testid="registration-settings">Settings for {eventId}</p>,
 }));
 
-function renderRegistrationPage(role) {
-  vi.mocked(useAuth).mockReturnValue({
-    user: role ? { id: "u1", name: "Test User", role } : null,
-    loading: false,
-    logout: vi.fn().mockResolvedValue({ success: true }),
-    logoutMessage: null,
-    clearLogoutMessage: vi.fn(),
-  });
-  window.history.pushState({}, "", "/events/22222222-2222-4222-8222-222222222222/registration");
-  return render(<App />);
-}
+const renderRegistrationPage = (role) =>
+  renderAppAt("/events/22222222-2222-4222-8222-222222222222/registration", role);
 
 beforeEach(() => {
   vi.mocked(useAuth).mockReset();

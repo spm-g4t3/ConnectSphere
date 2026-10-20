@@ -11,7 +11,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { STATUS, getStatusDisplay } from '../../src/domain/eventRequestStatus.js';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
 
 const DAY = 86_400_000;
 const at = (days) => new Date(Date.now() + days * DAY).toISOString();
@@ -24,15 +25,7 @@ describe('SCRUM-489 (SCRUM-558): an event in the safety check, from a real submi
   let projector;
   let microphone;
 
-  const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
-  const refusal = async (promise) => {
-    try {
-      await promise;
-      return null;
-    } catch (err) {
-      return err;
-    }
-  };
+  const { one } = queriesFor(() => db);
 
   const add = (event, type, quantity) =>
     db.query('select add_equipment_line($1, $2, $3, $4)', [event, coordinator, type, quantity]);
@@ -67,11 +60,7 @@ describe('SCRUM-489 (SCRUM-558): an event in the safety check, from a real submi
       proposed_start: at(10),
       proposed_end: at(10.25),
     });
-    await db.query(
-      `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-       select $1, id, proposed_start, proposed_end, 'approved' from event_requests where id = $2`,
-      [hall, id],
-    );
+    await seedBooking(db, { venueId: hall, eventId: id, status: 'approved' });
     await add(id, projector, 2);
     // Technical Support's review is SCRUM-21's; its outcome is seeded here.
     await db.query("update equipment_requests set status = 'arranged' where event_request_id = $1", [id]);
@@ -87,15 +76,11 @@ describe('SCRUM-489 (SCRUM-558): an event in the safety check, from a real submi
   beforeAll(async () => {
     db = await createSchemaDb();
 
-    const user = async (email, role, name) => {
-      const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-      await db.query('insert into profiles (id, role, full_name) values ($1, $2, $3)', [id, role, name]);
-      return id;
-    };
+    const user = (email, role, name) => seedUser(db, { email, role, fullName: name });
     organiser = await user('o@x', 'event_organiser', 'Aisha Rahman');
     coordinator = await user('a@x', 'event_coordinator', 'Priya Nair');
     await user('so@x', 'safety_officer', 'Sam Safe');
-    hall = (await one("insert into venues (name, location, max_capacity) values ('Hall A', 'SMU', 200) returning id")).id;
+    hall = await seedVenue(db, { name: 'Hall A', location: 'SMU', setup: 0, turnaround: 0 });
     projector = (await one("insert into equipment_types (name, total_quantity) values ('Projector', 10) returning id")).id;
     microphone = (await one("insert into equipment_types (name, total_quantity) values ('Microphone', 10) returning id")).id;
   }, 60_000);

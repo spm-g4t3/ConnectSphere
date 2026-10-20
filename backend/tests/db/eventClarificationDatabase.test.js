@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createSchemaDb } from "./helpers/schemaDb.js";
+import { createSchemaDb, seedUser } from "./helpers/schemaDb.js";
+import { queriesFor, refusal as refused } from "./helpers/queries.js";
 
 // The clarification functions against the final schema.
 describe("SCRUM-162 clarification transactions in Postgres", () => {
@@ -9,7 +10,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
   let otherCoordinator;
   let lead;
 
-  const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
   const event = async (status = "under_review") =>
     (await one(
       `insert into event_requests
@@ -31,26 +32,14 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
       "select recipient_id, type from notifications where payload->>'eventRequestId' = $1 order by created_at, id",
       [id],
     )).rows;
-  const refused = async (promise) => {
-    try {
-      await promise;
-      return null;
-    } catch (error) {
-      return error;
-    }
-  };
 
   beforeAll(async () => {
     db = await createSchemaDb();
 
-    organiser = (await one("insert into auth.users(email) values ('organiser@example.test') returning id")).id;
-    coordinator = (await one("insert into auth.users(email) values ('coordinator@example.test') returning id")).id;
-    otherCoordinator = (await one("insert into auth.users(email) values ('other@example.test') returning id")).id;
-    lead = (await one("insert into auth.users(email) values ('lead@example.test') returning id")).id;
-    await db.query(
-      "insert into profiles (id, role) values ($1, 'event_organiser'), ($2, 'event_coordinator'), ($3, 'event_coordinator'), ($4, 'event_coordinator_lead')",
-      [organiser, coordinator, otherCoordinator, lead],
-    );
+    organiser = await seedUser(db, { email: "organiser@example.test", role: "event_organiser" });
+    coordinator = await seedUser(db, { email: "coordinator@example.test", role: "event_coordinator" });
+    otherCoordinator = await seedUser(db, { email: "other@example.test", role: "event_coordinator" });
+    lead = await seedUser(db, { email: "lead@example.test", role: "event_coordinator_lead" });
   }, 30000);
 
   afterAll(async () => {

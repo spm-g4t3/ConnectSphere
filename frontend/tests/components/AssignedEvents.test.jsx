@@ -13,6 +13,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import AssignedEvents from "../../src/components/AssignedEvents.jsx";
 import { listAssignedEventsForLead } from "../../src/services/eventRequestService";
 import { formatTimestamp } from "../../src/services/displayFormat";
+import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
   listAssignedEventsForLead: vi.fn(),
@@ -38,9 +39,6 @@ const UNNAMED_UNDATED = {
   assignedCoordinatorId: "66666666-6666-4666-8666-666666666666",
   assignedCoordinatorName: null,
 };
-
-const httpError = (status) =>
-  Object.assign(new Error(`Request failed with status code ${status}`), { response: { status } });
 
 function renderList() {
   return render(

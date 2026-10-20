@@ -1,6 +1,7 @@
 /** open_event_registration_state against the final schema. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { clientsCanExecute } from './helpers/grants.js';
 
 const EVENT_A = '00000000-0000-4000-8000-00000000000a';
 const EVENT_B = '00000000-0000-4000-8000-00000000000b';
@@ -106,12 +107,6 @@ describe('SCRUM495 open_event_registration_state', () => {
   });
 
   it('SCRUM495_AC1_is_not_executable_by_public_anon_or_authenticated', async () => {
-    for (const role of ['anon', 'authenticated']) {
-      const { rows } = await db.query(
-        `select has_function_privilege($1, 'open_event_registration_state(uuid[], uuid)', 'execute') as allowed`,
-        [role],
-      );
-      expect(rows[0].allowed).toBe(false);
-    }
+    expect(await clientsCanExecute(db, 'open_event_registration_state(uuid[], uuid)')).toEqual([]);
   });
 });

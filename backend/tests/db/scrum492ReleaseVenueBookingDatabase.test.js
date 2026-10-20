@@ -10,24 +10,13 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
-
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { approveBooking, decideBooking } from './helpers/bookingFlow.js';
+import { at } from '../fixtures/time.js';
 
 const NO_ONE = '00000000-0000-4000-8000-000000000000';
 const REASON = 'Moving the workshop to Hall B';
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('SCRUM-492: releasing one venue booking', () => {
   let db;
@@ -39,26 +28,12 @@ describe('SCRUM-492: releasing one venue booking', () => {
   let staff2;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
-  async function makeUser(email, role, fullName = null) {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    if (role) await db.query('insert into profiles (id, role, full_name) values ($1, $2, $3)', [id, role, fullName]);
-    return id;
-  }
+  const makeUser = (email, role, fullName) => seedUser(db, { email, role, fullName });
 
   /** A venue with 30 minutes' setup and 45 minutes' turnaround. */
-  async function makeVenue() {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, 30, 45) returning id`,
-        [`Harbour Room ${counter}`],
-      )
-    ).id;
-  }
+  const makeVenue = () => seedVenue(db, { name: `Harbour Room ${++counter}` });
 
   function makeEvent({ status = 'approved', start = at('13:00'), end = at('14:00'), assigned } = {}) {
     counter += 1;
@@ -77,26 +52,12 @@ describe('SCRUM-492: releasing one venue booking', () => {
    * A booking for the event's own period, written directly, as a pending
    * request unless told otherwise. Approval refuses any other period (078).
    */
-  async function insertBooking(eventId, venueId, { status = 'pending' } = {}) {
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         select $1, id, proposed_start, proposed_end, $3::booking_status
-           from event_requests where id = $2 returning id`,
-        [venueId, eventId, status],
-      )
-    ).id;
-  }
+  const insertBooking = (eventId, venueId, { status = 'pending' } = {}) => seedBooking(db, { venueId, eventId, status });
 
-  const decide = async (bookingId) =>
-    (await one("select decide_booking_request($1, $2, 'approve', null, null) as result", [bookingId, staff])).result;
+  const decide = (bookingId) => decideBooking(db, bookingId, { caller: staff, decision: 'approve' });
 
   /** A request approved by Venue Staff, so its decision is recorded. */
-  async function approved(venueId, eventId) {
-    const id = await insertBooking(eventId, venueId);
-    expect((await decide(id)).outcome).toBe('approved');
-    return id;
-  }
+  const approved = (venueId, eventId) => approveBooking(db, { venueId, eventId, caller: staff });
 
   const release = async (bookingId, { caller = coordinator, reason = REASON } = {}) =>
     (await one('select release_venue_booking($1, $2, $3) as result', [bookingId, caller, reason])).result;

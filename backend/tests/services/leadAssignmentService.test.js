@@ -45,6 +45,7 @@ import {
 } from '../../src/errors.js';
 import { STATUS, COORDINATOR_QUEUE_STATUSES } from '../../src/domain/eventRequestStatus.js';
 import { listBookingRequestsForCoordinator } from '../../src/services/bookingRequestService.js';
+import { ok, dbError, errorFrom } from '../fixtures/supabaseStubs.js';
 
 
 // ---------------------------------------------------------------------------
@@ -94,18 +95,6 @@ function createFakeClient(results = []) {
       return settle(record({ operation: 'rpc', fn, args }));
     },
   };
-}
-
-const ok = (data) => ({ data, error: null });
-const dbError = (code, message) => ({ data: null, error: { code, message } });
-
-async function errorFrom(promise) {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
 }
 
 /** What each call was, in order: 'event_requests', 'profiles', or 'rpc:<fn>'. */

@@ -11,6 +11,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: {}, supabaseAdmin: {} }));
 
@@ -41,11 +42,7 @@ const fakeClient = (answer = { data: { needs_action: [queueRow], requests: [queu
   from: vi.fn(),
 });
 
-const signedInAs = (role) => (req, _res, next) => {
-  req.user = { id: USER_ID, email: 'someone@example.com', role };
-  next();
-};
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInAs = signedInFor(USER_ID);
 
 const appWith = (client, requireAuth = signedInAs(ROLE.TECHNICAL_SUPPORT_STAFF)) =>
   express().use('/api/equipment-requests', createEquipmentQueueRouter({ requireAuth, client }));

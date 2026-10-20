@@ -10,9 +10,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
-
-const fromNow = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString();
+import { createSchemaDb, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { fromNow } from '../fixtures/time.js';
 
 describe('SCRUM-486 AC10-07: venue holds still expire', () => {
   let db;
@@ -21,23 +21,13 @@ describe('SCRUM-486 AC10-07: venue holds still expire', () => {
   let coordinator;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
-  async function makeUser(role) {
-    counter += 1;
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [`u${counter}@x`])).id;
-    await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (role) => seedUser(db, { email: `u${++counter}@x`, role });
 
   /** An approved event with its coordinator, and a hold on a venue that lapsed five minutes ago. */
   async function lapsedHold() {
-    counter += 1;
-    const venueId = (await one(
-      `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-       values ($1, 'Block A', 200, 30, 45) returning id`,
-      [`Harbour Room ${counter}`],
-    )).id;
+    const venueId = await seedVenue(db, { name: `Harbour Room ${++counter}` });
     const eventId = await seedEvent(db, {
       status: 'approved',
       organiser_id: organiser,

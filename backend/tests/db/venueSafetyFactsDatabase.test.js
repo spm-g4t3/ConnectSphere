@@ -19,12 +19,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
-
-const DAY = 86_400_000;
-const sgDate = (days) => new Date(Date.now() + 8 * 3600_000 + days * DAY).toISOString().slice(0, 10);
-const D = sgDate(10);
-const at = (hhmm, date = D) => `${date}T${hhmm}:00+08:00`;
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { expectSqlError, queriesFor } from './helpers/queries.js';
+import { at } from '../fixtures/time.js';
 
 const EXITS = 'Two exits on Level 2 (east and west stairs); assemble at the SCIS lawn.';
 const RESTRICTIONS = 'No rigging from the ceiling. Amplified sound ends at 22:00.';
@@ -37,27 +34,13 @@ describe('SCRUM-493: emergency access and known restrictions', () => {
   let otherStaff;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
-  async function makeUser(role) {
-    counter += 1;
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [`u${counter}@x`])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (role) => seedUser(db, { email: `u${++counter}@x`, role });
 
   /** A venue inserted directly, not through create_venue. */
-  async function makeVenue(setup = 0, turnaround = 0) {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, $2, $3) returning id`,
-        [`Harbour Room ${counter}`, setup, turnaround],
-      )
-    ).id;
-  }
+  const makeVenue = (setup = 0, turnaround = 0) =>
+    seedVenue(db, { name: `Harbour Room ${++counter}`, setup, turnaround });
 
   /** create_venue with named arguments; returns the new id. */
   async function createVenue(args = {}, userId = staff) {
@@ -109,24 +92,7 @@ describe('SCRUM-493: emergency access and known restrictions', () => {
 
   async function makeBooking(venueId, startsAt, endsAt, coordinatorId) {
     const eventId = await makeEvent(coordinatorId);
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, 'approved') returning id`,
-        [venueId, eventId, startsAt, endsAt],
-      )
-    ).id;
-  }
-
-  /** Expect a statement to be refused with this SQLSTATE (and constraint, when named). */
-  async function refused(promise, code, constraint) {
-    const error = await promise.then(
-      () => null,
-      (e) => e,
-    );
-    expect(error, 'expected the statement to be refused').not.toBeNull();
-    expect(error.code).toBe(code);
-    if (constraint) expect(error.message).toContain(constraint);
+    return seedBooking(db, { venueId, eventId, status: 'approved', start: startsAt, end: endsAt });
   }
 
   beforeAll(async () => {
@@ -242,13 +208,13 @@ describe('SCRUM-493: emergency access and known restrictions', () => {
       ['CJK', '安'],
     ])('SCRUM493_AC1_2001_%s_characters_are_refused', async (_label, ch) => {
       const text = ch.repeat(2001);
-      await refused(createVenue({ emergency_access: text }), '23514', 'venues_emergency_access_length');
-      await refused(createVenue({ known_restrictions: text }), '23514', 'venues_known_restrictions_length');
+      await expectSqlError(createVenue({ emergency_access: text }), '23514', 'venues_emergency_access_length');
+      await expectSqlError(createVenue({ known_restrictions: text }), '23514', 'venues_known_restrictions_length');
 
       const id = await makeVenue();
-      await refused(updateVenue(id, { emergency_access: text }), '23514', 'venues_emergency_access_length');
-      await refused(updateVenue(id, { known_restrictions: text }), '23514', 'venues_known_restrictions_length');
-      await refused(
+      await expectSqlError(updateVenue(id, { emergency_access: text }), '23514', 'venues_emergency_access_length');
+      await expectSqlError(updateVenue(id, { known_restrictions: text }), '23514', 'venues_known_restrictions_length');
+      await expectSqlError(
         db.query('update venues set emergency_access = $2 where id = $1', [id, text]),
         '23514',
         'venues_emergency_access_length',
@@ -274,17 +240,17 @@ describe('SCRUM-493: emergency access and known restrictions', () => {
       ['a mix', ' \t\r\n '],
     ])('SCRUM493_AC2_a_direct_blank_(%s)_write_is_refused', async (_label, blank) => {
       const id = await makeVenue();
-      await refused(
+      await expectSqlError(
         db.query('update venues set emergency_access = $2 where id = $1', [id, blank]),
         '23514',
         'venues_emergency_access_length',
       );
-      await refused(
+      await expectSqlError(
         db.query('update venues set known_restrictions = $2 where id = $1', [id, blank]),
         '23514',
         'venues_known_restrictions_length',
       );
-      await refused(
+      await expectSqlError(
         db.query(
           `insert into venues (name, location, max_capacity, emergency_access) values ('X', 'Y', 1, $1)`,
           [blank],
@@ -379,7 +345,7 @@ describe('SCRUM-493: emergency access and known restrictions', () => {
     });
 
     it('SCRUM493_AC4_a_missing_venue_is_still_refused', async () => {
-      await refused(
+      await expectSqlError(
         updateVenue('00000000-0000-4000-8000-000000000000', { emergency_access: EXITS }),
         'P0002',
       );

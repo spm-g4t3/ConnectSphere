@@ -14,19 +14,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { clientsCanExecute } from './helpers/grants.js';
 
 const START = '2026-12-01T09:00:00+00:00';
 const END = '2026-12-01T17:00:00+00:00';
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
   let db;
@@ -37,7 +30,7 @@ describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
   let staffB;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
   const statusOf = async (id) => (await one('select status from bookings where id = $1', [id])).status;
   const withdrawnNotifications = async (bookingId) =>
     (
@@ -48,20 +41,9 @@ describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
     ).rows;
   const notificationCount = async () => (await one('select count(*)::int as n from notifications')).n;
 
-  async function makeUser(email, role) {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (email, role) => seedUser(db, { email, role });
 
-  async function makeVenue() {
-    counter += 1;
-    return (
-      await one(`insert into venues (name, location, max_capacity) values ($1, 'Block A', 200) returning id`, [
-        `Hall ${counter}`,
-      ])
-    ).id;
-  }
+  const makeVenue = () => seedVenue(db, { name: `Hall ${++counter}`, setup: 0, turnaround: 0 });
 
   function makeEvent(extra = {}) {
     counter += 1;
@@ -82,13 +64,7 @@ describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
     const event = eventId ?? (await makeEvent());
     const venue = venueId ?? (await makeVenue());
     return {
-      id: (
-        await one(
-          `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status, requested_by)
-           values ($1, $2, $3, $4, $5, $6) returning id`,
-          [venue, event, START, END, status, coordinator],
-        )
-      ).id,
+      id: await seedBooking(db, { venueId: venue, eventId: event, status, start: START, end: END, requestedBy: coordinator }),
       eventId: event,
       venueId: venue,
     };
@@ -358,14 +334,7 @@ describe('SCRUM-253: withdraw_booking_request in Postgres', () => {
     });
 
     it('SCRUM253_is_not_callable_by_the_publishable_roles', async () => {
-      for (const role of ['anon', 'authenticated']) {
-        const row = await one('select has_function_privilege($1, $2, $3) as allowed', [
-          role,
-          'withdraw_booking_request(uuid, uuid)',
-          'execute',
-        ]);
-        expect(row.allowed).toBe(false);
-      }
+      expect(await clientsCanExecute(db, 'withdraw_booking_request(uuid, uuid)')).toEqual([]);
     });
   });
 });

@@ -10,11 +10,11 @@
  * final schema in PGlite, so each status, code and needsAttention value below
  * comes from where it would in production.
  *
- * The adapter is leadReassignmentWalkthrough.test.js's, extended only as this
- * path needs: a jsonb-returning function's value is unwrapped, as supabase-js
- * does, Postgres's hint and detail are passed on, and the bookings(status)
- * embed needsAttention reads is answered with a subquery. Anything else still
- * throws by name. The suitability check is stubbed suitable, as the route
+ * The adapter is the shared pgliteSupabaseClient (a jsonb-returning
+ * function's value unwrapped, as supabase-js does, and Postgres's hint and
+ * detail passed on), extended only as this path needs: the bookings(status)
+ * embed needsAttention reads is answered with a subquery. Any other embed
+ * still throws by name. The suitability check is stubbed suitable, as the route
  * tests stub it; it is N10's, not this story's.
  */
 
@@ -26,65 +26,28 @@ import { createFlaggedBookingRouter } from '../../src/routes/flaggedBookings.js'
 import { createBookingRequestRouter } from '../../src/routes/bookingRequests.js';
 import { createEventRequestRouter } from '../../src/routes/eventRequests.js';
 import { ROLE } from '../../src/domain/userRole.js';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
-
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { decideBooking } from './helpers/bookingFlow.js';
+import { flagForReason } from './helpers/flaggedBookings.js';
+import { at } from '../fixtures/time.js';
+import { pgliteSupabaseClient } from '../fixtures/pgliteSupabaseClient.js';
 
 /** The bookings(status) embed, as PostgREST answers it along bookings.event_request_id. */
 const BOOKING_STATUS_EMBED = (table) =>
   `(select coalesce(json_agg(json_build_object('status', b.status)), '[]'::json)
       from bookings b where b.event_request_id = ${table}.id) as bookings`;
 
-/** The supabase-js shapes this path uses, over PGlite. */
+/** The shared adapter, answering the one embed this path reads. */
 function pgliteClient(db) {
-  const answer = async (run) => {
-    try {
-      return { data: await run(), error: null };
-    } catch (err) {
-      return {
-        data: null,
-        error: { code: err.code, message: err.message, hint: err.hint, details: err.detail },
-      };
-    }
-  };
-
-  return {
-    rpc(fn, args) {
-      const names = Object.keys(args);
-      const sql = `select * from ${fn}(${names.map((name, i) => `${name} => $${i + 1}`).join(', ')})`;
-      return answer(async () => {
-        const row = (await db.query(sql, names.map((name) => args[name]))).rows[0] ?? null;
-        // A function returning jsonb comes back as one column named after it;
-        // supabase-js hands over the value itself.
-        const keys = row ? Object.keys(row) : [];
-        return keys.length === 1 && keys[0] === fn ? row[fn] : row;
-      });
+  return pgliteSupabaseClient(db, {
+    columns(cols, table) {
+      if (/\w+\(/.test(cols.replace(/\bbookings\(status\)/, ''))) {
+        throw new Error(`pgliteClient: an embed in "${cols}" is not on this path`);
+      }
+      return cols.replace(/\bbookings\(status\)/, BOOKING_STATUS_EMBED(table));
     },
-    from(table) {
-      let columns = '*';
-      const where = [];
-      const chain = {
-        select(cols = '*') {
-          if (/\w+\(/.test(cols.replace(/\bbookings\(status\)/, ''))) {
-            throw new Error(`pgliteClient: an embed in "${cols}" is not on this path`);
-          }
-          columns = cols.replace(/\bbookings\(status\)/, BOOKING_STATUS_EMBED(table));
-          return chain;
-        },
-        eq(column, value) { where.push([column, value]); return chain; },
-        maybeSingle() {
-          const clause = where.map(([column], i) => `${column} = $${i + 1}`).join(' and ');
-          const sql = `select ${columns} from ${table}${clause ? ` where ${clause}` : ''}`;
-          return answer(async () => (await db.query(sql, where.map(([, value]) => value))).rows[0] ?? null);
-        },
-        then() { throw new Error(`pgliteClient: a list read on ${table} is not on this path`); },
-      };
-      return chain;
-    },
-  };
+  });
 }
 
 describe('SCRUM-266: resolving a flagged booking, over HTTP, on a real database', () => {
@@ -95,8 +58,7 @@ describe('SCRUM-266: resolving a flagged booking, over HTTP, on a real database'
   let staff;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
   const as = (role, id) => (req, _res, next) => {
     req.user = { id, email: 'someone@example.com', role };
@@ -126,16 +88,7 @@ describe('SCRUM-266: resolving a flagged booking, over HTTP, on a real database'
     return res.body.needsAttention;
   };
 
-  async function makeVenue() {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, 30, 45) returning id`,
-        [`Harbour Room ${counter}`],
-      )
-    ).id;
-  }
+  const makeVenue = () => seedVenue(db, { name: `Harbour Room ${++counter}` });
 
   /** A confirmed 14:00-16:00 event the coordinator holds and approved. */
   function makeConfirmedEvent() {
@@ -153,40 +106,21 @@ describe('SCRUM-266: resolving a flagged booking, over HTTP, on a real database'
 
   /** A booking for the event's period, approved by Venue Staff, as a seed. */
   async function approvedBooking(eventId, venueId) {
-    const { id } = await one(
-      `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-       values ($1, $2, $3, $4, 'pending') returning id`,
-      [venueId, eventId, at('14:00'), at('16:00')],
-    );
-    const { result } = await one('select decide_booking_request($1, $2, $3, null, null) as result', [
-      id,
-      staff,
-      'approve',
-    ]);
-    expect(result.outcome).toBe('approved');
+    const id = await seedBooking(db, { venueId, eventId, start: at('14:00'), end: at('16:00') });
+    expect((await decideBooking(db, id, { caller: staff, decision: 'approve' })).outcome).toBe('approved');
     return id;
   }
 
   /** Flagged by a venue setup change, as update_venue flags it: no block stands on the venue. */
   async function flaggedBySetupChange(eventId, venueId) {
     const id = await approvedBooking(eventId, venueId);
-    await db.query(
-      `update bookings
-          set status = 'flagged_for_review', review_reason = 'setup_or_turnaround_changed',
-              flagged_at = now(), flagged_by = $2
-        where id = $1`,
-      [id, staff],
-    );
+    await flagForReason(db, id, { reason: 'setup_or_turnaround_changed', flaggedBy: staff });
     return id;
   }
 
   beforeAll(async () => {
     db = await createSchemaDb();
-    const user = async (email, role) => {
-      const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-      await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-      return id;
-    };
+    const user = (email, role) => seedUser(db, { email, role });
     organiser = await user('o@x', 'event_organiser');
     coordinator = await user('c@x', 'event_coordinator');
     staff = await user('s@x', 'venue_staff');

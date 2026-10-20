@@ -5,6 +5,7 @@ import { STATUS } from '../../src/domain/eventRequestStatus.js';
 import { BOOKING_STATUS } from '../../src/domain/bookingStatus.js';
 import { createAttendeeEventSqlClient } from '../fixtures/attendeeEventSqlClient.js';
 import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
 const ATTENDEE = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -20,7 +21,7 @@ describe('SCRUM-52 SQL read against the final schema', () => {
   let db;
   let eventId;
   let queries;
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   const client = createAttendeeEventSqlClient({ query: (...args) => db.query(...args) }, {
     onQuery: () => { queries += 1; },

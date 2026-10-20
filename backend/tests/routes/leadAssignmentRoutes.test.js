@@ -27,6 +27,8 @@ import request from 'supertest';
 import { createEventRequestRouter } from '../../src/routes/eventRequests.js';
 import { ROLE } from '../../src/domain/userRole.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
+import { ok, dbError } from '../fixtures/supabaseStubs.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 
 function createFakeClient(results = []) {
@@ -69,20 +71,13 @@ function createFakeClient(results = []) {
   };
 }
 
-const ok = (data) => ({ data, error: null });
-const dbFailure = (code, message) => ({ data: null, error: { code, message } });
-
 const REQUEST_ID = '22222222-2222-4222-8222-222222222222';
 const ORGANISER_ID = '11111111-1111-4111-8111-111111111111';
 const LEAD_ID = '77777777-7777-4777-8777-777777777777';
 const COORDINATOR_A = '44444444-4444-4444-8444-444444444444';
 const COORDINATOR_B = '66666666-6666-4666-8666-666666666666';
 
-const signedInWithRole = (role, id = LEAD_ID) => (req, _res, next) => {
-  req.user = { id, email: 'someone@example.com', role };
-  next();
-};
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInWithRole = signedInFor(LEAD_ID);
 
 function appWith({ client, requireAuth = signedInWithRole(ROLE.EVENT_COORDINATOR_LEAD) } = {}) {
   return express()
@@ -332,7 +327,7 @@ describe('SCRUM-486 AC3, AC4: POST /:id/assign', () => {
     // AC4-03/04. code and conflicts are what the screen reads to say "already
     // assigned to Priya Nair"; it never parses the message.
     const client = createFakeClient([
-      dbFailure('55000', `event request ${REQUEST_ID} is already assigned to Priya Nair`),
+      dbError('55000', `event request ${REQUEST_ID} is already assigned to Priya Nair`),
       ok({ assigned_coordinator_id: COORDINATOR_B }),
       ok([{ id: COORDINATOR_B, full_name: 'Priya Nair' }]),
     ]);
@@ -352,7 +347,7 @@ describe('SCRUM-486 AC3, AC4: POST /:id/assign', () => {
     ['22023', 'is not an Event Coordinator', 400],
     ['P0002', 'event request not found', 404],
   ])('SCRUM486_AC3_the_functions_%s_arrives_as_its_status', async (code, message, status) => {
-    const client = createFakeClient([dbFailure(code, message)]);
+    const client = createFakeClient([dbError(code, message)]);
 
     const res = await assign(client, { coordinatorId: COORDINATOR_A });
 

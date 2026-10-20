@@ -8,6 +8,7 @@ import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 
 import BrowseEventDetails from "../../src/components/BrowseEventDetails.jsx";
 import { getOpenEvent } from "../../src/services/openEventService";
+import { deferred as pending } from "../helpers/async.js";
 
 vi.mock("../../src/services/openEventService", () => ({
   getOpenEvent: vi.fn(),
@@ -308,17 +309,6 @@ describe("SCRUM495_AC2 an event that is not open, and errors", () => {
 
 /** Comes back to the tab, as a reader does. */
 const returnToTab = () => fireEvent(window, new Event("focus"));
-
-/** A read that stays pending until the test settles it. */
-function pending() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 describe("SCRUM495_AC4 stale availability is refreshed", () => {
   it("SCRUM495_AC4_shows_an_event_that_has_since_filled_as_full_and_no_longer_offers_register", async () => {

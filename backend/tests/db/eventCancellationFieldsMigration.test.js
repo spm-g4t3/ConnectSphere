@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 // SCRUM-371's cancellation fields, against the final schema.
 describe('SCRUM-371: cancellation fields', () => {
@@ -7,12 +8,12 @@ describe('SCRUM-371: cancellation fields', () => {
   let organiser;
   let coordinator;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   beforeAll(async () => {
     db = await createSchemaDb();
-    organiser = (await one('insert into auth.users (email) values ($1) returning id', ['organiser@test'])).id;
-    coordinator = (await one('insert into auth.users (email) values ($1) returning id', ['coordinator@test'])).id;
+    organiser = await seedUser(db, { email: 'organiser@test' });
+    coordinator = await seedUser(db, { email: 'coordinator@test' });
   });
 
   afterAll(async () => {

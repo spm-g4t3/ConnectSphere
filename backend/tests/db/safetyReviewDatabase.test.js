@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
@@ -17,15 +18,10 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
   let technicalStaff;
   let venueId;
 
-  const rows = async (sql, params = []) => (await db.query(sql, params)).rows;
-  const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
+  const { one, rows } = queriesFor(() => db);
   const json = async (sql, params = []) => JSON.parse((await one(sql, params)).answer);
 
-  async function user(email, role, name) {
-    const row = await one('insert into auth.users(email) values ($1) returning id', [email]);
-    await db.query('insert into profiles(id, role, full_name) values ($1, $2, $3)', [row.id, role, name]);
-    return row.id;
-  }
+  const user = (email, role, name) => seedUser(db, { email, role, fullName: name });
 
   async function event(eventName, enteredAt = '2026-10-10T09:00:00Z') {
     const id = await seedEvent(db, {

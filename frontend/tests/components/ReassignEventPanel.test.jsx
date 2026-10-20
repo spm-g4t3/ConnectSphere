@@ -23,6 +23,7 @@ import {
   listCoordinators,
   reassignEventRequest,
 } from "../../src/services/eventRequestService";
+import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({ useAuth: vi.fn() }));
 vi.mock("../../src/services/eventRequestService", () => ({
@@ -52,9 +53,6 @@ const WORKLOAD = [
   { id: OTHER, fullName: "Omar Okafor", activeEvents: 1 },
   { id: THIRD, fullName: "Mei Tan", activeEvents: 0 },
 ];
-
-const httpError = (status) =>
-  Object.assign(new Error(`Request failed with status code ${status}`), { response: { status } });
 
 function renderAs(userId, role, props = {}) {
   vi.mocked(useAuth).mockReturnValue({ user: { id: userId, role } });

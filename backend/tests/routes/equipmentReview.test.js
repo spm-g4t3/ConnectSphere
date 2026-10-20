@@ -20,6 +20,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { ok, dbError, rpcByNameClient } from '../fixtures/supabaseStubs.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 // The service reuses SCRUM-23's result mapper, whose file imports the real client.
 vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: {}, supabaseAdmin: {} }));
@@ -70,17 +72,6 @@ const reviewRow = (status = 'under_review') => ({
   },
 });
 
-const ok = (data) => ({ data, error: null });
-const dbError = (code, message) => ({ data: null, error: { code, message } });
-
-
-/** A chainable query whose awaited result is `result`, as supabase-js builds them. */
-function query(result) {
-  const chain = {};
-  for (const method of ['select', 'in', 'eq', 'order', 'limit']) chain[method] = vi.fn(() => chain);
-  chain.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
-  return chain;
-}
 
 const NAMES = ok([
   { id: SOMEONE_ELSE, full_name: 'Casey Coordinator' },
@@ -91,23 +82,11 @@ const VENUES = ok([{ id: VENUE_ID, name: 'Hall A' }]);
 
 /** A client whose rpc answers by function name and whose from answers the name lookups. */
 function fakeClient(rpc = {}) {
-  const rpcCalls = [];
   const answers = { profiles: NAMES, bookings: BOOKING, venues: VENUES };
-  return {
-    rpcCalls,
-    rpc: vi.fn(async (name, args) => {
-      rpcCalls.push({ name, args });
-      return rpc[name] ?? ok(reviewRow());
-    }),
-    from: vi.fn((table) => query(answers[table] ?? ok([]))),
-  };
+  return rpcByNameClient({ rpc, fallback: () => ok(reviewRow()), table: (name) => answers[name] ?? ok([]) });
 }
 
-const signedInAs = (role, id = REVIEWER_ID) => (req, _res, next) => {
-  req.user = { id, email: 'someone@example.com', role };
-  next();
-};
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInAs = signedInFor(REVIEWER_ID);
 
 function appWith(client, requireAuth = signedInAs(ROLE.TECHNICAL_SUPPORT_STAFF)) {
   return express()

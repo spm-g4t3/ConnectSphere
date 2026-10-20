@@ -14,6 +14,7 @@ import { MemoryRouter } from "react-router-dom";
 
 import Dashboard from "../../src/components/Dashboard.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
+import { ALL_ROLES } from "../helpers/authMock.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -40,15 +41,7 @@ beforeEach(() => {
 });
 
 describe("SCRUM172_AC1 every role's dashboard has the inbox", () => {
-  it.each([
-    "event_organiser",
-    "event_coordinator",
-    "venue_staff",
-    "technical_support_staff",
-    "attendee",
-    "event_coordinator_lead",
-    "safety_officer",
-  ])("SCRUM172_AC1_every_role_dashboard_has_the_inbox (%s)", async (role) => {
+  it.each(ALL_ROLES)("SCRUM172_AC1_every_role_dashboard_has_the_inbox (%s)", async (role) => {
     vi.mocked(useAuth).mockReturnValue({ user: { id: "u1", email: "user@example.com", role } });
 
     const { container } = render(

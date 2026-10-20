@@ -22,12 +22,11 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBlock, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { clientsCanExecute } from './helpers/grants.js';
+import { at } from '../fixtures/time.js';
 
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
 const START = at('14:00');
 const END = at('16:00');
 
@@ -52,24 +51,11 @@ describe('SCRUM-525: several venue requests per event', () => {
   let staff;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
-  async function makeUser(email, role) {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (email, role) => seedUser(db, { email, role });
 
-  async function makeVenue() {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, 30, 45) returning id`,
-        [`Harbour Room ${counter}`],
-      )
-    ).id;
-  }
+  const makeVenue = () => seedVenue(db, { name: `Harbour Room ${++counter}` });
 
   function makeEvent({ status = 'approved', attendance = 150, coordinatorId = coordinator } = {}) {
     counter += 1;
@@ -93,13 +79,7 @@ describe('SCRUM-525: several venue requests per event', () => {
   async function insertBooking(eventId, venueId, status) {
     let reviewBlockId = null;
     if (status === 'flagged_for_review') {
-      reviewBlockId = (
-        await one(
-          `insert into venue_blocks (venue_id, starts_at, ends_at, reason, removed_at)
-           values ($1, $2, $3, 'maintenance', now()) returning id`,
-          [venueId, at('22:00'), at('23:00')],
-        )
-      ).id;
+      reviewBlockId = await seedBlock(db, { venueId, start: at('22:00'), end: at('23:00'), removed: true });
     }
     const flagged = reviewBlockId !== null;
     return (
@@ -282,13 +262,9 @@ describe('SCRUM-525: several venue requests per event', () => {
       );
       expect(old.oid).toBeNull();
 
-      for (const role of ['anon', 'authenticated']) {
-        const { allowed } = await one(
-          `select has_function_privilege($1, 'create_booking_request(uuid, uuid, uuid, text, text, jsonb, boolean, integer, uuid)', 'execute') as allowed`,
-          [role],
-        );
-        expect(allowed, role).toBe(false);
-      }
+      expect(
+        await clientsCanExecute(db, 'create_booking_request(uuid, uuid, uuid, text, text, jsonb, boolean, integer, uuid)'),
+      ).toEqual([]);
 
       // A caller still on the 7-argument call resolves, through the default,
       // and is refused for the missing attendance; nothing is written.
@@ -323,14 +299,7 @@ describe('SCRUM-525: several venue requests per event', () => {
     it.each([
       [
         'a_block',
-        async (venueB) =>
-          (
-            await one(
-              `insert into venue_blocks (venue_id, starts_at, ends_at, reason)
-               values ($1, $2, $3, 'maintenance') returning id`,
-              [venueB, START, END],
-            )
-          ).id,
+        (venueB) => seedBlock(db, { venueId: venueB, start: START, end: END }),
         'block',
         'block_id',
       ],

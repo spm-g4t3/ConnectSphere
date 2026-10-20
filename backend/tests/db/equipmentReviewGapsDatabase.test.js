@@ -13,21 +13,14 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedUser } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { singleReviewerSteps } from './helpers/equipment.js';
 
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
 const NEW_START = '2026-12-05T14:00:00Z';
 const NEW_END = '2026-12-05T16:00:00Z';
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('SCRUM-300: closing the review gaps in Postgres', () => {
   let db;
@@ -35,67 +28,20 @@ describe('SCRUM-300: closing the review gaps in Postgres', () => {
   let coordinator;
   let reviewerA;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
-  const asJson = (row) => JSON.parse(row.answer);
-
-  const newUser = async (email) =>
-    (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-  const newType = async (name, total) =>
-    (await one('insert into equipment_types (name, total_quantity) values ($1, $2) returning id', [`${name} ${Math.random()}`, total])).id;
-  const newEvent = () =>
-    seedEvent(db, {
-      status: 'approved',
-      organiser_id: organiser,
-      event_name: `Event ${Math.random()}`,
-      assigned_coordinator_id: coordinator,
-      proposed_start: START,
-      proposed_end: END,
-    });
-
-  const add = async (event, type, quantity) =>
-    asJson(await one('select add_equipment_line($1, $2, $3, $4, null)::text as answer', [event, coordinator, type, quantity]));
-  const removeLine = async (event, line) =>
-    asJson(await one('select remove_equipment_line($1, $2, $3)::text as answer', [event, coordinator, line]));
-  const start = async (event) =>
-    asJson(await one('select start_equipment_review($1, $2)::text as answer', [event, reviewerA]));
-  const reserve = async (event, line, quantity) =>
-    asJson(await one('select reserve_equipment($1, $2, $3, $4)::text as answer', [event, reviewerA, line, quantity]));
-  const move = async (event, id) =>
-    asJson(await one('select move_equipment_reservation($1, $2, $3, null)::text as answer', [event, reviewerA, id]));
-  const keep = async (event, id) =>
-    asJson(await one('select keep_equipment_reservation($1, $2, $3, null)::text as answer', [event, reviewerA, id]));
-  const markUnavailable = async (event, line, note) =>
-    asJson(await one('select mark_equipment_line_unavailable($1, $2, $3, $4)::text as answer', [event, reviewerA, line, note]));
-  const complete = async (event) =>
-    asJson(await one('select complete_equipment_review($1, $2)::text as answer', [event, reviewerA]));
-  const review = async (event) =>
-    asJson(await one('select equipment_review_for_event($1)::text as answer', [event]));
-
-  const changePeriod = (event) =>
-    db.query('update event_requests set proposed_start = $2, proposed_end = $3 where id = $1', [event, NEW_START, NEW_END]);
-  const lineNamed = (state, name) => state.request.lines.find((l) => l.name === name);
-  const status = async (event) =>
-    (await one("select status::text as s from equipment_requests where event_request_id = $1 and status <> 'cancelled'", [event])).s;
-  const history = async (event) =>
-    (await rows(
-      `select h.action from equipment_review_history h
-         join equipment_requests r on r.id = h.equipment_request_id
-        where r.event_request_id = $1 order by h.id`,
-      [event],
-    )).map((row) => row.action);
-  const liveReservations = (event) =>
-    rows(
-      'select id, flagged from equipment_reservations where event_request_id = $1 and released_at is null order by created_at, id',
-      [event],
-    );
+  const { one, rows } = queriesFor(() => db);
+  const {
+    newType, newEvent, add, removeLine, start, reserve, move, keep,
+    markUnavailable, complete, review, changePeriod, lineNamed, status, history, liveReservations,
+  } = singleReviewerSteps(() => ({ db, organiser, coordinator, reviewerA }), {
+    start: START, end: END, newStart: NEW_START, newEnd: NEW_END,
+  });
 
   beforeAll(async () => {
     db = await createSchemaDb();
 
-    organiser = await newUser('organiser@example.com');
-    coordinator = await newUser('coordinator@example.com');
-    reviewerA = await newUser('tech-a@example.com');
+    organiser = await seedUser(db, { email: 'organiser@example.com' });
+    coordinator = await seedUser(db, { email: 'coordinator@example.com' });
+    reviewerA = await seedUser(db, { email: 'tech-a@example.com' });
   }, 60000);
 
   describe('AC7: a review cannot be completed over a flagged reservation', () => {

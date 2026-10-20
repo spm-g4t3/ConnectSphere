@@ -23,6 +23,7 @@ import {
 import { ValidationError, NotFoundError, ConflictError } from '../../src/errors.js';
 // SCRUM-127: a separate import so the existing one is left as it was.
 import { updateVenueBlock, removeVenueBlock } from '../../src/services/venueBlockService.js';
+import { queryStub } from '../fixtures/supabaseStubs.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -92,37 +93,6 @@ const CAMEL_BLOCK = {
   removedAt: null,
   removedBy: null,
 };
-
-/**
- * A stand-in for a supabase-js query builder, copied from venueService.test.js.
- * `calls` is exposed too, so a test can assert the order of a chain.
- */
-function queryStub(result) {
-  const calls = [];
-
-  const stub = {
-    calls,
-    called: (method) => calls.some(([name]) => name === method),
-    args: (method) => calls.find(([name]) => name === method)?.slice(1),
-    allArgs: (method) => calls.filter(([name]) => name === method).map((c) => c.slice(1)),
-    then: (onFulfilled, onRejected) =>
-      Promise.resolve(result).then(onFulfilled, onRejected),
-  };
-
-  for (const method of ['select', 'eq', 'is', 'ilike', 'gte', 'order', 'limit', 'delete', 'lt', 'gt', 'lte', 'not']) {
-    stub[method] = (...args) => {
-      calls.push([method, ...args]);
-      return stub;
-    };
-  }
-
-  stub.maybeSingle = (...args) => {
-    calls.push(['maybeSingle', ...args]);
-    return Promise.resolve(result);
-  };
-
-  return stub;
-}
 
 beforeEach(() => {
   rpc.mockReset();

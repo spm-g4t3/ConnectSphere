@@ -7,6 +7,7 @@ import request from 'supertest';
 import { createOpenEventRouter } from '../../src/routes/openEvents.js';
 import { createRequireAuth } from '../../src/middleware/requireAuth.js';
 import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { clientsCanExecute } from './helpers/grants.js';
 
 // register_for_event and the availability it reads, against the final schema.
 const ME = '44444444-4444-4444-8444-444444444444';
@@ -212,10 +213,7 @@ describe('SCRUM39 atomic event registration', () => {
     for (const fn of ['register_for_event(uuid,uuid)', 'open_event_registration_state(uuid[],uuid)']) {
       const { rows: [security] } = await db.query('select prosecdef from pg_proc where oid = $1::regprocedure', [fn]);
       expect(security.prosecdef).toBe(false);
-      for (const role of ['anon', 'authenticated', 'service_role']) {
-        const { rows: [privilege] } = await db.query("select has_function_privilege($1, $2, 'execute') as allowed", [role, fn]);
-        expect(privilege.allowed).toBe(role === 'service_role');
-      }
+      expect(await clientsCanExecute(db, fn, ['anon', 'authenticated', 'service_role']), fn).toEqual(['service_role']);
     }
   });
 

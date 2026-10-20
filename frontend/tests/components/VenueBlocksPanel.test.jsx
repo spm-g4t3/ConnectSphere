@@ -26,6 +26,7 @@ import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay";
 import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
 import { getVenueBlockHistory } from "../../src/services/venueService";
 import { formatTimestamp } from "../../src/services/displayFormat";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/venueService", () => ({
   listVenueBlocks: vi.fn(),
@@ -104,17 +105,6 @@ function httpError(status, data = {}) {
 
 function bookingConflict(conflicts) {
   return httpError(409, { code: "BLOCK_BOOKING_CONFLICT", conflicts });
-}
-
-/** A promise the test settles by hand, to hold a request in flight. */
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
 }
 
 const MSG = {

@@ -30,7 +30,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 /** A Singapore-local instant, on D = 2026-11-11 unless another date is given. */
 const sgt = (hhmm, date = '2026-11-11') => `${date}T${hhmm}:00+08:00`;
@@ -62,18 +63,10 @@ describe('SCRUM-484: venue search availability through available_venue_ids', () 
   let coordinator;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
-  async function makeVenue(setup = 0, turnaround = 0) {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, $2, $3) returning id`,
-        [`Search Hall ${counter}`, setup, turnaround],
-      )
-    ).id;
-  }
+  const makeVenue = (setup = 0, turnaround = 0) =>
+    seedVenue(db, { name: `Search Hall ${++counter}`, setup, turnaround });
 
   function makeEvent() {
     counter += 1;
@@ -89,25 +82,11 @@ describe('SCRUM-484: venue search availability through available_venue_ids', () 
   }
 
   async function makeBooking(venueId, startsAt, endsAt, status = 'approved') {
-    const eventId = await makeEvent();
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, $5) returning id`,
-        [venueId, eventId, startsAt, endsAt, status],
-      )
-    ).id;
+    return seedBooking(db, { venueId, eventId: await makeEvent(), status, start: startsAt, end: endsAt });
   }
 
-  async function makeBlock(venueId, startsAt, endsAt, { removed = false } = {}) {
-    return (
-      await one(
-        `insert into venue_blocks (venue_id, starts_at, ends_at, reason, removed_at)
-         values ($1, $2, $3, 'maintenance', ${removed ? 'now()' : 'null'}) returning id`,
-        [venueId, startsAt, endsAt],
-      )
-    ).id;
-  }
+  const makeBlock = (venueId, startsAt, endsAt, { removed = false } = {}) =>
+    seedBlock(db, { venueId, start: startsAt, end: endsAt, removed });
 
   /** available_venue_ids' rows, raw. */
   async function availableRows(venueIds, startsAt, endsAt) {
@@ -140,8 +119,8 @@ describe('SCRUM-484: venue search availability through available_venue_ids', () 
 
   beforeAll(async () => {
     db = await createSchemaDb();
-    organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
-    coordinator = (await one("insert into auth.users (email) values ('c@x') returning id")).id;
+    organiser = await seedUser(db, { email: 'o@x' });
+    coordinator = await seedUser(db, { email: 'c@x' });
   }, 60_000);
 
   afterAll(async () => {

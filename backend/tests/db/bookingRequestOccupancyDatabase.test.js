@@ -22,13 +22,11 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { at } from '../fixtures/time.js';
 import { toSuitabilityRecord } from '../../src/domain/suitabilityRecord.js';
 
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
 const ms = (value) => new Date(value).getTime();
 
 const SUITABLE = { suitable: true, criteria: [{ criterion: 'capacity', met: true }] };
@@ -40,18 +38,9 @@ describe('SCRUM-484: create_booking_request uses the occupied period', () => {
   let coordinator;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
-  async function makeVenue(setup = 30, turnaround = 45) {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, $2, $3) returning id`,
-        [`Harbour Room ${counter}`, setup, turnaround],
-      )
-    ).id;
-  }
+  const makeVenue = (setup = 30, turnaround = 45) => seedVenue(db, { name: `Harbour Room ${++counter}`, setup, turnaround });
 
   function makeEvent(startsAt, endsAt) {
     counter += 1;
@@ -66,15 +55,8 @@ describe('SCRUM-484: create_booking_request uses the occupied period', () => {
     });
   }
 
-  async function makeBlock(venueId, startsAt, endsAt, removed = false) {
-    return (
-      await one(
-        `insert into venue_blocks (venue_id, starts_at, ends_at, reason, removed_at)
-         values ($1, $2, $3, 'maintenance', ${removed ? 'now()' : 'null'}) returning id`,
-        [venueId, startsAt, endsAt],
-      )
-    ).id;
-  }
+  const makeBlock = (venueId, startsAt, endsAt, removed = false) =>
+    seedBlock(db, { venueId, start: startsAt, end: endsAt, removed });
 
   /**
    * A booking on its own event. A flagged_for_review one needs a block and a
@@ -83,17 +65,8 @@ describe('SCRUM-484: create_booking_request uses the occupied period', () => {
    */
   async function makeBooking(venueId, status, startsAt, endsAt) {
     const eventId = await makeEvent(startsAt, endsAt);
-    let reviewBlockId = null;
-    if (status === 'flagged_for_review') {
-      reviewBlockId = await makeBlock(venueId, at('22:00'), at('23:00'), true);
-    }
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status, review_block_id, flagged_at)
-         values ($1, $2, $3, $4, $5, $6, ${reviewBlockId ? 'now()' : 'null'}) returning id`,
-        [venueId, eventId, startsAt, endsAt, status, reviewBlockId],
-      )
-    ).id;
+    const reviewBlockId = status === 'flagged_for_review' ? await makeBlock(venueId, at('22:00'), at('23:00'), true) : null;
+    return seedBooking(db, { venueId, eventId, status, start: startsAt, end: endsAt, reviewBlockId });
   }
 
   /** create_booking_request for a new event on startsAt-endsAt at venueId. */
@@ -116,8 +89,8 @@ describe('SCRUM-484: create_booking_request uses the occupied period', () => {
 
   beforeAll(async () => {
     db = await createSchemaDb();
-    organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
-    coordinator = (await one("insert into auth.users (email) values ('c1@x') returning id")).id;
+    organiser = await seedUser(db, { email: 'o@x' });
+    coordinator = await seedUser(db, { email: 'c1@x' });
   }, 60_000);
 
   afterAll(async () => {

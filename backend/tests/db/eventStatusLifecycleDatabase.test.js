@@ -26,16 +26,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { STATUS, canTransition } from '../../src/domain/eventRequestStatus.js';
 import { ELEVEN_STATUSES, EVERY_PAIR } from '../fixtures/expectedTransitionMatrix.js';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
 
 // Hand-written from SCRUM-318 AC2, not read from the domain module, so a
 // transition added or dropped there cannot quietly change what is tested here.
@@ -88,7 +80,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
   let lead2;
   let safety;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   /**
    * A draft, or a row placed at `status` as a fixture.
@@ -178,12 +170,12 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
 
   beforeAll(async () => {
     db = await createSchemaDb();
-    organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
-    coordinator = (await one("insert into auth.users (email) values ('c1@x') returning id")).id;
-    otherCoordinator = (await one("insert into auth.users (email) values ('c2@x') returning id")).id;
-    lead = (await one("insert into auth.users (email) values ('lead@x') returning id")).id;
-    lead2 = (await one("insert into auth.users (email) values ('lead2@x') returning id")).id;
-    safety = (await one("insert into auth.users (email) values ('safety@x') returning id")).id;
+    organiser = await seedUser(db, { email: 'o@x' });
+    coordinator = await seedUser(db, { email: 'c1@x' });
+    otherCoordinator = await seedUser(db, { email: 'c2@x' });
+    lead = await seedUser(db, { email: 'lead@x' });
+    lead2 = await seedUser(db, { email: 'lead2@x' });
+    safety = await seedUser(db, { email: 'safety@x' });
     await db.query("insert into profiles (id, role) values ($1, 'event_organiser')", [organiser]);
   }, 60_000);
 
@@ -1969,10 +1961,9 @@ describe('SCRUM-318: a rejected request reopens on a database that has SCRUM-19\
     try {
       // A rejected request has a decision and a draft may not, so the reopen
       // has to clear it in the same statement.
-      const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-      const organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
-      const coordinator = (await one("insert into auth.users (email) values ('c@x') returning id")).id;
-      await db.query("insert into profiles (id, role) values ($1, 'event_organiser'), ($2, 'event_coordinator')", [organiser, coordinator]);
+      const { one } = queriesFor(() => db);
+      const organiser = await seedUser(db, { email: 'o@x', role: 'event_organiser' });
+      const coordinator = await seedUser(db, { email: 'c@x', role: 'event_coordinator' });
       const id = await seedEvent(db, {
         status: STATUS.REJECTED,
         organiser_id: organiser,

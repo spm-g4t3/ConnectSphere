@@ -62,6 +62,7 @@ import { findVenuesForEvent } from "../../src/services/venueService";
 import { createBookingRequest } from "../../src/services/bookingRequestService";
 import { getEventVenueSuitability } from "../../src/services/venueSuitabilityService";
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../../src/services/flaggedBookingService";
+import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -210,12 +211,6 @@ function eventRequest(overrides = {}) {
     statusDisplay: { status: "submitted", label: "Submitted", group: "AWAITING_REVIEW", description: "" },
     ...overrides,
   };
-}
-
-function httpError(status) {
-  return Object.assign(new Error(`Request failed with status code ${status}`), {
-    response: { status },
-  });
 }
 
 function renderAs(userId, request) {

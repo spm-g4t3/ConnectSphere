@@ -16,6 +16,8 @@ import { MemoryRouter } from "react-router-dom";
 import MyBookingRequests from "../../src/components/MyBookingRequests.jsx";
 import { getMyBookingRequests, withdrawBookingRequest } from "../../src/services/bookingRequestService";
 import { formatRange, formatTimestamp } from "../../src/services/displayFormat.js";
+import { deferred } from "../helpers/async.js";
+import { setVisibility } from "../helpers/visibility.js";
 
 vi.mock("../../src/services/bookingRequestService", () => ({
   getMyBookingRequests: vi.fn(),
@@ -59,16 +61,6 @@ function item(id, status, overrides = {}) {
 
 const httpError = (status, data = {}) =>
   Object.assign(new Error(`Request failed with status code ${status}`), { response: { status, data } });
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 function renderList() {
   const user = userEvent.setup();
@@ -149,11 +141,9 @@ describe("loading, empty and error states", () => {
     renderList();
     await screen.findByText("Event 1");
 
-    const original = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState");
-    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    setVisibility("hidden");
     fireEvent(document, new Event("visibilitychange"));
     delete document.visibilityState;
-    if (original) Object.defineProperty(Document.prototype, "visibilityState", original);
 
     expect(getMyBookingRequests).toHaveBeenCalledTimes(1);
   });

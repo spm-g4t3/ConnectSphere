@@ -39,6 +39,7 @@ import {
 } from '../../src/services/venueCalendarService.js';
 import { ValidationError, NotFoundError, AppError } from '../../src/errors.js';
 import { BOOKING_STATUS } from '../../src/domain/bookingStatus.js';
+import { ok, fail, queryStub } from '../fixtures/supabaseStubs.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -152,40 +153,6 @@ function blockRow(overrides = {}) {
     ...overrides,
   };
 }
-
-/**
- * A stand-in for a supabase-js query builder, copied from
- * venueBlockService.test.js, with `in` added for the bookings status filter.
- */
-function queryStub(result) {
-  const calls = [];
-
-  const stub = {
-    calls,
-    called: (method) => calls.some(([name]) => name === method),
-    args: (method) => calls.find(([name]) => name === method)?.slice(1),
-    allArgs: (method) => calls.filter(([name]) => name === method).map((c) => c.slice(1)),
-    then: (onFulfilled, onRejected) =>
-      Promise.resolve(result).then(onFulfilled, onRejected),
-  };
-
-  for (const method of ['select', 'eq', 'is', 'in', 'ilike', 'gte', 'order', 'limit', 'delete', 'lt', 'gt', 'lte', 'not']) {
-    stub[method] = (...args) => {
-      calls.push([method, ...args]);
-      return stub;
-    };
-  }
-
-  stub.maybeSingle = (...args) => {
-    calls.push(['maybeSingle', ...args]);
-    return Promise.resolve(result);
-  };
-
-  return stub;
-}
-
-const ok = (data) => ({ data, error: null });
-const fail = (error) => ({ data: null, error });
 
 /**
  * Route from() by table name; any other table is a test failure. `bookings`

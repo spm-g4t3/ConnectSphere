@@ -11,7 +11,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
 
 // Written out, not read from the domain module: the test states what the
 // database must hold.
@@ -22,15 +23,6 @@ const NINE = [
 const SAFETY = ['safety_review', 'safety_approved'];
 const ELEVEN = [...NINE, ...SAFETY].sort();
 
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
-
 /** The distinct quoted words in a constraint's definition, sorted. */
 const quotedWords = (definition) => [...new Set([...definition.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]))].sort();
 
@@ -40,7 +32,7 @@ describe('SCRUM-488 AC1, AC4: the safety statuses and their constraints', () => 
   let coordinator;
   let safetyOfficer;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
   const definitionOf = async (table, name) => (await one(
     'select pg_get_constraintdef(oid) as definition from pg_constraint where conname = $1 and conrelid = $2::regclass',
     [name, table],
@@ -79,15 +71,8 @@ describe('SCRUM-488 AC1, AC4: the safety statuses and their constraints', () => 
         where id = $1`,
       [id],
     );
-    const venue = await one(
-      "insert into venues (name, location, max_capacity) values ($1, 'Block A', 100) returning id",
-      [`Hall for ${id}`],
-    );
-    await db.query(
-      `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-       select $1, id, proposed_start, proposed_end, 'approved' from event_requests where id = $2`,
-      [venue.id, id],
-    );
+    const venueId = await seedVenue(db, { name: `Hall for ${id}`, capacity: 100, setup: 0, turnaround: 0 });
+    await seedBooking(db, { venueId: venueId, eventId: id, status: 'approved' });
     await db.query('insert into safety_review_submissions (event_request_id, submitted_by) values ($1, $2)', [id, coordinator]);
   }
   const approveSafetyCheck = (id) => db.query(
@@ -97,9 +82,9 @@ describe('SCRUM-488 AC1, AC4: the safety statuses and their constraints', () => 
 
   beforeAll(async () => {
     db = await createSchemaDb();
-    organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
-    coordinator = (await one("insert into auth.users (email) values ('c@x') returning id")).id;
-    safetyOfficer = (await one("insert into auth.users (email) values ('s@x') returning id")).id;
+    organiser = await seedUser(db, { email: 'o@x' });
+    coordinator = await seedUser(db, { email: 'c@x' });
+    safetyOfficer = await seedUser(db, { email: 's@x' });
   }, 60_000);
 
   afterAll(async () => {

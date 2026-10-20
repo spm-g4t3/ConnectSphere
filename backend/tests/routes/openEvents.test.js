@@ -12,6 +12,7 @@ import request from 'supertest';
 import { createOpenEventRouter } from '../../src/routes/openEvents.js';
 import { listOpenEvents, getOpenEvent } from '../../src/services/openEventService.js';
 import { ROLE } from '../../src/domain/userRole.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 const NOW = new Date('2026-10-12T10:00:00.000Z');
 const ATTENDEE_ID = '44444444-4444-4444-8444-444444444444';
@@ -162,11 +163,7 @@ function createFakeClient(
   };
 }
 
-const signedInWithRole = (role) => (req, _res, next) => {
-  req.user = { id: ATTENDEE_ID, email: 'a@example.com', role };
-  next();
-};
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInWithRole = signedInFor(ATTENDEE_ID, 'a@example.com');
 
 function get(client, { requireAuth = signedInWithRole(ROLE.ATTENDEE), now = () => NOW } = {}) {
   const app = express().use('/api/open-events', createOpenEventRouter({ client, requireAuth, now }));

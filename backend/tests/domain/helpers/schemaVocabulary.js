@@ -1,19 +1,5 @@
-import { beforeAll, afterAll } from 'vitest';
-
-import { createSchemaDb } from '../../db/helpers/schemaDb.js';
-
-// One built schema per test file, opened before its tests and closed after.
-// Returns a getter, because the database only exists once beforeAll has run.
-export function useSchemaDb() {
-  let db;
-  beforeAll(async () => {
-    db = await createSchemaDb();
-  }, 60_000);
-  afterAll(async () => {
-    await db?.close();
-  });
-  return () => db;
-}
+// Shared with the db tests; re-exported so the domain tests import from one place.
+export { useSchemaDb } from '../../db/helpers/schemaDb.js';
 
 /** An enum's labels in the order Postgres holds them. */
 export async function enumLabels(db, typeName) {

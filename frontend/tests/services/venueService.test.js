@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { apiClient } from "../../src/services/apiClient";
 import { findVenuesForEvent } from "../../src/services/venueService.js";
+import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/apiClient", () => ({
   apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
@@ -20,12 +21,6 @@ const REQUIRED = {
   endsAt: "2026-11-11T12:00:00+08:00",
   expectedAttendance: 80,
 };
-
-function httpError(status, data) {
-  return Object.assign(new Error(`Request failed with status code ${status}`), {
-    response: { status, data },
-  });
-}
 
 const paramsSent = () => apiClient.get.mock.calls[0][1].params;
 

@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }));
 
@@ -22,11 +23,7 @@ const { ROLE } = await import('../../src/domain/userRole.js');
 const TYPE_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
 const EVENT_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
 
-const signedInAs = (role) => (req, _res, next) => {
-  req.user = { id: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d', email: 'someone@example.com', role };
-  next();
-};
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInAs = signedInFor('9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d');
 
 const appWith = (requireAuth = signedInAs(ROLE.TECHNICAL_SUPPORT_STAFF)) =>
   express().use('/api/equipment/availability', createEquipmentAvailabilityRouter({ requireAuth }));

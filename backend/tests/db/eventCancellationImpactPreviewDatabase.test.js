@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { createSchemaDb } from './helpers/schemaDb.js';
+import { createSchemaDb, seedBooking, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 // The cancellation impact preview against the final schema.
 describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
@@ -11,7 +12,7 @@ describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
   let venueIds;
   let equipmentTypeId;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   async function makeEvent(name) {
     return (
@@ -22,29 +23,17 @@ describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
     ).id;
   }
 
-  async function makeBooking(forEvent, venueId, status) {
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, '2026-12-01T09:00:00Z', '2026-12-01T10:00:00Z', $3)
-         returning id`,
-        [venueId, forEvent, status],
-      )
-    ).id;
-  }
+  const makeBooking = (forEvent, venueId, status) =>
+    seedBooking(db, { venueId, eventId: forEvent, status, start: '2026-12-01T09:00:00Z', end: '2026-12-01T10:00:00Z' });
 
   beforeAll(async () => {
     db = await createSchemaDb();
 
-    organiser = (await one('insert into auth.users (email) values ($1) returning id', ['organiser@test'])).id;
+    organiser = await seedUser(db, { email: 'organiser@test' });
     eventId = await makeEvent('Preview event');
     otherEventId = await makeEvent('Other event');
     venueIds = await Promise.all(
-      ['Hall A', 'Hall B', 'Hall C'].map(async (name) =>
-        (await one(
-          'insert into venues (name, location, max_capacity) values ($1, $2, 100) returning id',
-          [name, 'Block A'],
-        )).id),
+      ['Hall A', 'Hall B', 'Hall C'].map((name) => seedVenue(db, { name, capacity: 100, setup: 0, turnaround: 0 })),
     );
     equipmentTypeId = (
       await one("insert into equipment_types (name, total_quantity) values ('Projector', 10) returning id")

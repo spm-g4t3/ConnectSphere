@@ -14,6 +14,7 @@ import {
   getEventReadiness,
   submitForSafetyReview,
 } from "../../src/services/eventRequestService";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
   getEventReadiness: vi.fn(),
@@ -40,16 +41,6 @@ const READY = checklist([VENUE_MET, EQUIPMENT_MET, DATE_MET]);
 
 function httpError(status, data = {}) {
   return Object.assign(new Error(`HTTP ${status}`), { response: { status, data } });
-}
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
 }
 
 function renderPanel(props = {}) {

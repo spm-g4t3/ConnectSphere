@@ -20,6 +20,7 @@ import { getHoldCandidates, listVenueHolds, placeVenueHold } from "../../src/ser
 import { formatRange, formatTimestamp } from "../../src/services/displayFormat";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay";
 import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/venueService", () => ({
   listVenueHolds: vi.fn(),
@@ -81,15 +82,6 @@ function httpError(status, data = {}) {
   return Object.assign(new Error(`Request failed with status code ${status}`), {
     response: { status, data: { error: UUID_PROSE, ...data } },
   });
-}
-
-/** A promise the test settles by hand, to hold a request in flight. */
-function deferred() {
-  let resolve;
-  const promise = new Promise((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
 }
 
 beforeEach(() => {

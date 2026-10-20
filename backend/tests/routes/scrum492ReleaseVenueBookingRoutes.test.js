@@ -10,6 +10,8 @@ import request from 'supertest';
 
 import { createBookingRequestRouter } from '../../src/routes/bookingRequests.js';
 import { ROLE } from '../../src/domain/userRole.js';
+import { ok, dbError, createRpcQueueClient } from '../fixtures/supabaseStubs.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 const COORDINATOR_ID = '55555555-5555-4555-8555-555555555555';
 const OTHER_ID = '66666666-6666-4666-8666-666666666666';
@@ -17,22 +19,6 @@ const EVENT_ID = '22222222-2222-4222-8222-222222222222';
 const VENUE_ID = '33333333-3333-4333-8333-333333333333';
 const BOOKING_ID = '44444444-4444-4444-8444-444444444444';
 const FREED_ID = '77777777-7777-4777-8777-777777777777';
-
-function createFakeClient(results = []) {
-  const queue = [...results];
-  const calls = [];
-  return {
-    calls,
-    rpc(fn, args) {
-      calls.push({ fn, args });
-      if (queue.length === 0) throw new Error(`fake client: no result queued for ${fn}`);
-      return Promise.resolve(queue.shift());
-    },
-  };
-}
-
-const ok = (data) => ({ data, error: null });
-const dbFailure = (code, message, extra = {}) => ({ data: null, error: { code, message, ...extra } });
 
 const released = ok({
   outcome: 'released',
@@ -51,11 +37,7 @@ const released = ok({
   returned_to_pending: [FREED_ID],
 });
 
-const signedInWithRole = (role, id = COORDINATOR_ID) => (req, _res, next) => {
-  req.user = { id, email: 'user@example.com', role };
-  next();
-};
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInWithRole = signedInFor(COORDINATOR_ID, 'user@example.com');
 
 const releaseCall = (client, { id = BOOKING_ID, body = { reason: 'Moving to Hall B' }, requireAuth } = {}) =>
   request(
@@ -71,7 +53,7 @@ const releaseCall = (client, { id = BOOKING_ID, body = { reason: 'Moving to Hall
 describe('SCRUM-492: POST /api/booking-requests/:id/release', () => {
   it('SCRUM492_AC2_the_holder_releases_and_gets_the_booking_and_the_requests_returned_to_pending', async () => {
     // AC2-06.
-    const client = createFakeClient([released]);
+    const client = createRpcQueueClient([released]);
 
     const res = await releaseCall(client);
 
@@ -88,7 +70,7 @@ describe('SCRUM-492: POST /api/booking-requests/:id/release', () => {
 
   it('SCRUM492_AC1_the_caller_is_the_tokens_user_and_the_bodys_ids_are_ignored', async () => {
     // AC1-12.
-    const client = createFakeClient([released]);
+    const client = createRpcQueueClient([released]);
 
     await releaseCall(client, { body: { reason: 'Moving', coordinatorId: OTHER_ID, releasedBy: OTHER_ID } });
 
@@ -105,7 +87,7 @@ describe('SCRUM-492: POST /api/booking-requests/:id/release', () => {
     'SCRUM492_AC1_%s_is_refused_with_403_by_the_gate_and_queries_nothing',
     async (_label, role) => {
       // AC1-11: coordinatorOnly. A Lead and Venue Staff too (D1).
-      const client = createFakeClient([]);
+      const client = createRpcQueueClient([]);
 
       const res = await releaseCall(client, { requireAuth: signedInWithRole(role, OTHER_ID) });
 
@@ -115,7 +97,7 @@ describe('SCRUM-492: POST /api/booking-requests/:id/release', () => {
   );
 
   it('SCRUM492_AC1_the_release_answers_401_without_a_token', async () => {
-    const client = createFakeClient([]);
+    const client = createRpcQueueClient([]);
 
     expect((await releaseCall(client, { requireAuth: signedOut })).status).toBe(401);
     expect(client.calls).toHaveLength(0);
@@ -128,7 +110,7 @@ describe('SCRUM-492: POST /api/booking-requests/:id/release', () => {
     ['a_malformed_id', { reason: 'Moving' }, 'not-a-uuid'],
   ])('SCRUM492_AC1_%s_is_400_and_queries_nothing', async (_label, body, id) => {
     // AC1-13.
-    const client = createFakeClient([]);
+    const client = createRpcQueueClient([]);
 
     const res = await releaseCall(client, { id, body });
 
@@ -137,12 +119,12 @@ describe('SCRUM-492: POST /api/booking-requests/:id/release', () => {
   });
 
   it.each([
-    ['EVENT_NOT_APPROVED', dbFailure('PT409', 'words', { hint: 'EVENT_NOT_APPROVED' }), 409],
-    ['BOOKING_NOT_APPROVED', dbFailure('PT409', 'words', { hint: 'BOOKING_NOT_APPROVED' }), 409],
-    ['BOOKING_CHANGED', dbFailure('40001', 'words'), 409],
+    ['EVENT_NOT_APPROVED', dbError('PT409', 'words', { hint: 'EVENT_NOT_APPROVED' }), 409],
+    ['BOOKING_NOT_APPROVED', dbError('PT409', 'words', { hint: 'BOOKING_NOT_APPROVED' }), 409],
+    ['BOOKING_CHANGED', dbError('40001', 'words'), 409],
   ])('SCRUM492_AC1_a_%s_refusal_is_a_409_with_its_code', async (code, answer, status) => {
     // AC1-14.
-    const client = createFakeClient([answer]);
+    const client = createRpcQueueClient([answer]);
 
     const res = await releaseCall(client);
 
@@ -154,7 +136,7 @@ describe('SCRUM-492: POST /api/booking-requests/:id/release', () => {
     ['42501', 403],
     ['P0002', 404],
   ])('SCRUM492_AC1_the_functions_%s_is_a_%s', async (code, status) => {
-    const client = createFakeClient([dbFailure(code, 'words')]);
+    const client = createRpcQueueClient([dbError(code, 'words')]);
 
     expect((await releaseCall(client)).status).toBe(status);
   });
