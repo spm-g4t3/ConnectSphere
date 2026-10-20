@@ -11,6 +11,7 @@ import {
   toDatetimeLocalValue,
   toOffsetIsoString,
   deviceTimeZoneLabel,
+  isReplyOverdue,
   toVenueOffsetIsoString,
   toVenueWallClock,
   VENUE_TIME_ZONE,
@@ -143,4 +144,16 @@ describe("venue time", () => {
         .toBe(new Date(iso).getTime());
     },
   );
+});
+
+// Pins today's behaviour: the reply-by date is compared with the UTC date.
+// Which zone it should use is an open question; change this test with it.
+describe("isReplyOverdue", () => {
+  const now = new Date("2026-10-20T20:00:00Z"); // 04:00 on 21 Oct in Singapore
+
+  it("is overdue only once the UTC date is past the reply-by date", () => {
+    expect(isReplyOverdue("2026-10-19", now)).toBe(true);
+    expect(isReplyOverdue("2026-10-20", now)).toBe(false);
+    expect(isReplyOverdue("2026-10-21", now)).toBe(false);
+  });
 });

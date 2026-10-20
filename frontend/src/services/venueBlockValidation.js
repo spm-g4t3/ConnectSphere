@@ -27,6 +27,7 @@
 
 import { toDatetimeLocalValue, toOffsetIsoString } from "./datetimeFormat";
 import { VENUE_BLOCK_REASONS } from "./venueBlockReasons";
+import { codePointLength } from "./venueSafetyFacts";
 
 /** Mirrors venue_blocks_notes_length in 011 and NOTES_MAX_LENGTH in the backend. */
 export const NOTES_MAX_LENGTH = 1000;
@@ -64,11 +65,6 @@ export function parseDateTime(text) {
 
   const instant = new Date(text);
   return Number.isNaN(instant.getTime()) ? null : instant;
-}
-
-/** Code points, not UTF-16 units, to match Postgres length(). */
-function codePointLength(text) {
-  return Array.from(text).length;
 }
 
 /**

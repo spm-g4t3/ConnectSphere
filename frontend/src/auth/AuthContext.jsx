@@ -12,10 +12,10 @@
 
 import { createContext, useContext, useState, useEffect } from "react";
 import { apiClient } from "../services/apiClient";
+import { AUTH_STORAGE_KEY as STORAGE_KEY } from "./authStorageKey";
 
 const AuthContext = createContext(null);
 
-const STORAGE_KEY = "connectsphere_auth"; // stores { user, session }
 const LOGIN_ERROR_MESSAGES = {
   400: "Email and password are required",
   401: "Invalid email or password",

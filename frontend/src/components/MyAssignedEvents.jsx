@@ -23,16 +23,20 @@ import {
   readStatusDisplay,
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
+import { formatEventDate } from "../services/displayFormat";
+import { isReplyOverdue } from "../services/datetimeFormat";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
 import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES.
 // GET /mine is gated on the coordinator role, so a 403 means the account's
 // role is wrong, an administration problem rather than a breakage, and the
 // message says so instead of "could not load".
 const MY_EVENTS_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Event Coordinators have a My events list.",
   500: "Your events could not be loaded. Please try again.",
 };
@@ -125,21 +129,6 @@ function groupByStatus(events) {
 }
 
 /**
- * The event's date, or an honest statement that it has none.
- *
- * services/datetimeFormat.js has no read-only formatter: it converts to and
- * from the datetime-local input format, for forms. So this follows
- * EventOrganiserDashboard's formatEventDate, word for word, so the two lists
- * show a date the same way.
- */
-function formatEventDate(value) {
-  if (!value) return "Date not set";
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
-
-/**
  * Who organised the event, never the word "null".
  *
  * organiserName is null when the Organiser has no name on record. The id is
@@ -161,7 +150,7 @@ function EventRow({ event, onOpen }) {
   const display = readStatusDisplay(event);
   const overdue = event.status === "pending_clarification" &&
     event.clarificationReplyByDate &&
-    event.clarificationReplyByDate < new Date().toISOString().slice(0, 10);
+    isReplyOverdue(event.clarificationReplyByDate);
 
   return (
     <li className="my-assigned-events__row">
@@ -231,19 +220,7 @@ export default function MyAssignedEvents() {
   // Organiser answers a clarification, a colleague hands an event over, and
   // the list should show it the moment the coordinator looks again. One
   // request per visit, not one every few seconds per open tab.
-  useEffect(() => {
-    function refetchIfVisible() {
-      if (document.visibilityState === "visible") fetchEvents();
-    }
-
-    window.addEventListener("focus", refetchIfVisible);
-    document.addEventListener("visibilitychange", refetchIfVisible);
-
-    return () => {
-      window.removeEventListener("focus", refetchIfVisible);
-      document.removeEventListener("visibilitychange", refetchIfVisible);
-    };
-  }, [fetchEvents]);
+  useRefetchOnReturn(fetchEvents);
 
   // The row from this list is a complete event request (the backend selects
   // the same columns as every other read), so the detail panel renders from it
@@ -268,12 +245,12 @@ export default function MyAssignedEvents() {
 
   const groups = groupByStatus(events);
   const openEvent = (request) => setActivePanel({ mode: "detail", request });
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
   const overdueClarifications = events
     .filter((event) =>
       event.status === "pending_clarification" &&
       event.clarificationReplyByDate &&
-      event.clarificationReplyByDate < today)
+      isReplyOverdue(event.clarificationReplyByDate, now))
     .sort((first, second) =>
       first.clarificationReplyByDate.localeCompare(second.clarificationReplyByDate));
 

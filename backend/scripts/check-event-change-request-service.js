@@ -22,6 +22,7 @@ import {
   getChangeRequestById,
   processChangeRequest,
 } from '../src/services/eventChangeRequestService.js';
+import { createHarness, countUsersLeft } from './lib/harness.js';
 
 const STAMP = Date.now();
 
@@ -29,16 +30,11 @@ let organiserId = null;
 let otherOrganiserId = null;
 let coordinatorId = null;
 let eventId = null;
-let failures = 0;
 
-// Errors from cleanup's own deletes, which supabase-js returns rather than
-// throws -- so a delete a foreign key refuses is silent unless kept.
-const cleanupErrors = [];
-
-function check(label, passed, detail = '') {
-  console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
-  if (!passed) failures += 1;
-}
+// remove() keeps errors from cleanup's own deletes, which supabase-js returns
+// rather than throws -- so a delete a foreign key refuses is silent unless kept.
+const harness = createHarness();
+const { check, remove } = harness;
 
 /** A throwaway confirmed user, created with the admin API the secret key unlocks. */
 async function createTestUser(label) {
@@ -48,12 +44,6 @@ async function createTestUser(label) {
   });
   if (error) throw new Error(`could not create test user (${label}): ${error.message}`);
   return data.user.id;
-}
-
-/** Run one cleanup step, keeping its error rather than dropping it. */
-async function remove(label, query) {
-  const { error } = await query;
-  if (error) cleanupErrors.push(`${label}: ${error.message}`);
 }
 
 async function cleanup() {
@@ -84,19 +74,14 @@ async function cleanup() {
 
 /** Prove the cleanup after it has run, rather than assuming it worked. */
 async function verifyCleanup() {
-  check('cleanup ran without errors', cleanupErrors.length === 0, cleanupErrors.join('; '));
+  harness.checkCleanupErrors();
 
   const { count: eventsLeft } = await supabase
     .from('event_requests')
     .select('id', { count: 'exact', head: true })
     .like('event_name', `__check_event_${STAMP}`);
 
-  let usersLeft = 0;
-  for (const id of [organiserId, otherOrganiserId, coordinatorId]) {
-    if (!id) continue;
-    const { data } = await supabase.auth.admin.getUserById(id);
-    if (data?.user) usersLeft += 1;
-  }
+  const usersLeft = await countUsersLeft([organiserId, otherOrganiserId, coordinatorId]);
 
   // Change requests cascade from the event, so no event means none of those;
   // history is restricted, so the event delete succeeding means none of that.
@@ -490,13 +475,13 @@ async function main() {
 main()
   .catch((err) => {
     console.error(`\nFailed: ${err.message}`);
-    failures += 1;
+    harness.failures += 1;
   })
   .finally(async () => {
     await cleanup();
     await verifyCleanup();
-    if (failures > 0) {
-      console.error(`\n${failures} check(s) failed.\n`);
+    if (harness.failures > 0) {
+      console.error(`\n${harness.failures} check(s) failed.\n`);
       process.exit(1);
     }
     console.log('\nAll checks passed. Created, requested, verified, rejected, cleaned up.\n');

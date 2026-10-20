@@ -26,15 +26,10 @@
  * Takes an optional client, resolved lazily, so tests never need credentials.
  */
 
+import { resolveClient } from '../config/resolveClient.js';
+
 /** Once a minute: the job is cheap, and the notice is not urgent to the second. */
 export const DEFAULT_INTERVAL_MS = 60_000;
-
-async function resolveClient(client) {
-  if (client) return client;
-
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
-}
 
 /**
  * Run process_venue_hold_expiry() once.

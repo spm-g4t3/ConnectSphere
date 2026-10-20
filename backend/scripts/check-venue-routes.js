@@ -18,16 +18,18 @@
 
 import express from 'express';
 
-// supabaseAuth for the sign-in, supabaseAdmin for every query. Using one client
-// for both is the hazard src/config/supabaseClient.js warns about:
+// supabaseAuth for the sign-in (tokenFor, in lib/harness.js), supabaseAdmin for
+// every query. Using one client for both is the hazard
+// src/config/supabaseClient.js warns about:
 // signInWithPassword sets that client's in-memory auth state to the signed-in
 // user for the rest of the process, overriding its API key, so every later
 // query runs as that user -- subject to the row level security the secret key
 // exists to bypass -- and silently returns nothing. An earlier draft of
 // check-event-request-routes.js signed in on the admin client and every check
 // after that point failed, including its own cleanup.
-import { supabase, supabaseAdmin, supabaseAuth } from '../src/config/supabaseClient.js';
+import { supabase, supabaseAdmin } from '../src/config/supabaseClient.js';
 import { createVenueRouter } from '../src/routes/venues.js';
+import { createHarness, createUserWithProfile, tokenFor, countUsersLeft } from './lib/harness.js';
 
 const STAMP = Date.now();
 const PASSWORD = `Check-${STAMP}-Aa1!`;
@@ -42,50 +44,18 @@ let venueId = null;
 let eventId = null;
 let bookingId = null;
 let server = null;
-let failures = 0;
 
-// Errors from cleanup's own deletes, which supabase-js returns rather than
-// throws -- so a delete a foreign key refuses is silent unless kept.
-const cleanupErrors = [];
-
-function check(label, passed, detail = '') {
-  console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
-  if (!passed) failures += 1;
-}
+// remove() keeps errors from cleanup's own deletes, which supabase-js returns
+// rather than throws -- so a delete a foreign key refuses is silent unless kept.
+const harness = createHarness();
+const { check, remove } = harness;
 
 /** A throwaway confirmed user with a password, and the profile row its role lives in. */
 async function createTestUser(label, role) {
-  const { data, error } = await supabase.auth.admin.createUser({
+  return createUserWithProfile({
     email: `__check_venue_${label}_${STAMP}@example.invalid`,
-    password: PASSWORD,
-    email_confirm: true,
+    password: PASSWORD, label, role,
   });
-  if (error) throw new Error(`could not create test user (${label}): ${error.message}`);
-
-  // requireAuth reads the role from here and answers 403 without it.
-  const { error: profileError } = await supabaseAdmin
-    .from('profiles')
-    .insert({ id: data.user.id, role, full_name: `Check ${label}` });
-  if (profileError) {
-    throw new Error(`could not create profile (${label}): ${profileError.message}`);
-  }
-
-  return data.user;
-}
-
-async function tokenFor(user) {
-  const { data, error } = await supabaseAuth.auth.signInWithPassword({
-    email: user.email,
-    password: PASSWORD,
-  });
-  if (error) throw new Error(`could not sign in as ${user.email}: ${error.message}`);
-  return data.session.access_token;
-}
-
-/** Run one cleanup step, keeping its error rather than dropping it. */
-async function remove(label, query) {
-  const { error } = await query;
-  if (error) cleanupErrors.push(`${label}: ${error.message}`);
 }
 
 async function cleanup() {
@@ -121,7 +91,7 @@ async function cleanup() {
 
 /** Prove the cleanup after it has run, rather than assuming it worked. */
 async function verifyCleanup() {
-  check('cleanup ran without errors', cleanupErrors.length === 0, cleanupErrors.join('; '));
+  harness.checkCleanupErrors();
 
   const { count: eventsLeft } = await supabaseAdmin
     .from('event_requests')
@@ -141,11 +111,7 @@ async function verifyCleanup() {
       .select('id', { count: 'exact', head: true })
       .in('id', userIds);
 
-  let usersLeft = 0;
-  for (const id of userIds) {
-    const { data } = await supabase.auth.admin.getUserById(id);
-    if (data?.user) usersLeft += 1;
-  }
+  const usersLeft = await countUsersLeft(userIds);
 
   check(
     'nothing left behind after cleanup',
@@ -163,8 +129,8 @@ async function main() {
   const organiser = await createTestUser('organiser', 'event_organiser');
   organiserId = organiser.id;
 
-  const staffToken = await tokenFor(staff);
-  const organiserToken = await tokenFor(organiser);
+  const staffToken = await tokenFor(staff, PASSWORD);
+  const organiserToken = await tokenFor(organiser, PASSWORD);
 
   // The real router with the real middleware -- nothing injected. Production
   // wiring; only the port differs.
@@ -419,13 +385,13 @@ async function main() {
 main()
   .catch((err) => {
     console.error(`\nFailed: ${err.message}`);
-    failures += 1;
+    harness.failures += 1;
   })
   .finally(async () => {
     await cleanup();
     await verifyCleanup();
-    if (failures > 0) {
-      console.error(`\n${failures} check(s) failed.\n`);
+    if (harness.failures > 0) {
+      console.error(`\n${harness.failures} check(s) failed.\n`);
       process.exit(1);
     }
     console.log('\nAll checks passed. Created, changed, searched, retired, still listed, audited, cleaned up.\n');

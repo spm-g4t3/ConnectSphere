@@ -1,6 +1,6 @@
 // The Attendee's calls to the open-events API; components never build a URL.
 
-import { apiClient } from "./apiClient";
+import { getData } from "./apiData";
 
 /**
  * The events the signed-in Attendee can currently register for
@@ -18,8 +18,7 @@ import { apiClient } from "./apiClient";
  * @returns {Promise<Object[]>} possibly empty
  */
 export async function getOpenEvents() {
-  const response = await apiClient.get("/open-events");
-  return response.data;
+  return getData("/open-events");
 }
 
 /**
@@ -34,6 +33,5 @@ export async function getOpenEvents() {
  * @returns {Promise<Object>}
  */
 export async function getOpenEvent(eventId) {
-  const response = await apiClient.get(`/open-events/${encodeURIComponent(eventId)}`);
-  return response.data;
+  return getData(`/open-events/${encodeURIComponent(eventId)}`);
 }

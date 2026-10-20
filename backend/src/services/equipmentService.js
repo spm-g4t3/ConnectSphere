@@ -24,6 +24,7 @@
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
+import { createPgTranslator, rejected } from '../http/pgErrors.js';
 import {
   checkCreateEquipmentType,
   checkUpdateEquipmentType,
@@ -59,36 +60,27 @@ const NAME_TAKEN = 'is already used by another equipment type';
  * on this table besides its primary key. 23514 is a check constraint, such as
  * damaged plus under maintenance exceeding the total.
  */
-function translateError(error) {
-  if (!error) return null;
+const translateError = createPgTranslator({
+  codes: {
+    '23514': rejected,
+    // last_modified_by names a user who does not exist
+    '23503': (detail) => new ValidationError(`The editing user does not exist: ${detail}`),
+    '23505': (detail) =>
+      new ConflictError(`An equipment type with that name already exists: ${detail}`, {
+        code: 'EQUIPMENT_NAME_TAKEN',
+      }),
+    // 061 makes these lock in one order, so this should not happen. If Postgres
+    // still undoes one of two changes, nothing was saved: try again.
+    '40P01': () =>
+      new ConflictError('Someone changed this equipment at the same moment. Please try again.', {
+        code: 'EQUIPMENT_CHANGED_AT_THE_SAME_TIME',
+      }),
+  },
+});
 
-  const code = error.code;
-  const detail = error.message ?? '';
-
-  if (code === '23514') {
-    return new ValidationError(`A value was rejected by the database: ${detail}`);
-  }
-
-  // last_modified_by names a user who does not exist
-  if (code === '23503') {
-    return new ValidationError(`The editing user does not exist: ${detail}`);
-  }
-
-  if (code === '23505') {
-    return new ConflictError(`An equipment type with that name already exists: ${detail}`, {
-      code: 'EQUIPMENT_NAME_TAKEN',
-    });
-  }
-
-  // 061 makes these lock in one order, so this should not happen. If Postgres
-  // still undoes one of two changes, nothing was saved: try again.
-  if (code === '40P01') {
-    return new ConflictError('Someone changed this equipment at the same moment. Please try again.', {
-      code: 'EQUIPMENT_CHANGED_AT_THE_SAME_TIME',
-    });
-  }
-
-  return new Error(detail || 'Unexpected database error');
+/** Units that can be lent out: the total less the damaged and under-maintenance ones. */
+function usableQuantity(total, damaged, underMaintenance) {
+  return total - damaged - underMaintenance;
 }
 
 /** The full record, as Technical Support Staff see it. */
@@ -102,7 +94,7 @@ function toEquipmentType(row) {
     totalQuantity: row.total_quantity,
     damagedQuantity: row.damaged_quantity,
     underMaintenanceQuantity: row.under_maintenance_quantity,
-    usableQuantity: row.total_quantity - row.damaged_quantity - row.under_maintenance_quantity,
+    usableQuantity: usableQuantity(row.total_quantity, row.damaged_quantity, row.under_maintenance_quantity),
     retiredAt: row.retired_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -263,9 +255,12 @@ export async function updateEquipmentType(id, changes, userId = null) {
 
   // AC7: a smaller total can leave fewer usable units than are reserved.
   if (value.totalQuantity !== undefined) {
-    const unusable = current.damaged_quantity + current.under_maintenance_quantity;
-    const usableBefore = current.total_quantity - unusable;
-    const usableAfter = value.totalQuantity - unusable;
+    const usableBefore = usableQuantity(
+      current.total_quantity, current.damaged_quantity, current.under_maintenance_quantity,
+    );
+    const usableAfter = usableQuantity(
+      value.totalQuantity, current.damaged_quantity, current.under_maintenance_quantity,
+    );
     if (usableAfter < usableBefore) {
       await assertNoOverCommitment({ equipmentTypeId: id, usableAfter });
     }
@@ -347,9 +342,10 @@ export async function recordEquipmentCondition(id, input, userId = null) {
   }
   throwIfInvalid(details);
 
-  const usableBefore =
-    current.total_quantity - current.damaged_quantity - current.under_maintenance_quantity;
-  const usableAfter = current.total_quantity - damaged - underMaintenance;
+  const usableBefore = usableQuantity(
+    current.total_quantity, current.damaged_quantity, current.under_maintenance_quantity,
+  );
+  const usableAfter = usableQuantity(current.total_quantity, damaged, underMaintenance);
   if (usableAfter < usableBefore) {
     await assertNoOverCommitment({ equipmentTypeId: id, usableAfter });
   }
@@ -402,8 +398,9 @@ export async function retireEquipmentType(id, userId = null) {
   if (!current) throw new NotFoundError(`Equipment type ${id} not found`);
   if (current.retired_at) throw alreadyRetired();
 
-  const usableBefore =
-    current.total_quantity - current.damaged_quantity - current.under_maintenance_quantity;
+  const usableBefore = usableQuantity(
+    current.total_quantity, current.damaged_quantity, current.under_maintenance_quantity,
+  );
   if (usableBefore > 0) {
     await assertNoOverCommitment({ equipmentTypeId: id, usableAfter: 0 });
   }

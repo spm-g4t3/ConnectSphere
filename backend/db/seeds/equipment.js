@@ -23,6 +23,7 @@
  */
 
 import { supabase } from '../../src/config/supabaseClient.js';
+import { escapeLike } from './lib.js';
 
 const DEMO_EQUIPMENT = [
   { name: 'Projector (HD)', description: '4000 lumens, HDMI and VGA', category: 'Display', location: 'Store room 1', total: 8, damaged: 1, maintenance: 1 },
@@ -32,9 +33,6 @@ const DEMO_EQUIPMENT = [
   { name: 'Presentation laptop', description: 'Preloaded with slide software', category: 'Computing', location: 'Tech office', total: 10, damaged: 0, maintenance: 0 },
   { name: 'Overhead projector (legacy)', description: 'Retired, kept for past events', category: 'Display', location: 'Store room 2', total: 2, damaged: 0, maintenance: 0, retired: true },
 ];
-
-/** ilike treats % and _ as wildcards; escape them so a name is matched literally. */
-const escapeLike = (text) => text.replace(/[\\%_]/g, (character) => `\\${character}`);
 
 async function main() {
   console.log('\nSeeding demo equipment\n');

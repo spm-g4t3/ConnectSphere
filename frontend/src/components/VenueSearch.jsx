@@ -71,11 +71,13 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import { deviceTimeZoneLabel } from "../services/datetimeFormat";
 import { toCalendarDateParam } from "../services/calendarRange";
 import { formatRange } from "../services/displayFormat";
+import { fieldErrorsFrom } from "../services/apiErrors";
 import { normaliseRole } from "../auth/normaliseRole";
 import { searchActiveVenues } from "../services/venueService";
 import { toSearchWindow, validateSearchWindow } from "../services/venueSearchValidation";
 import { bookingRequestEligibility } from "../services/bookingRequestEligibility";
 import BookingRequestPanel from "./BookingRequestPanel";
+import { fieldErrorWiring } from "./fieldErrors";
 
 /** The window's fields. A 400 naming anything else gets the generic message. */
 const DATE_FIELDS = ["startsAt", "endsAt"];
@@ -189,10 +191,7 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
       setAppliedWindow(searchWindow.startsAt ? searchWindow : null);
       setAppliedIncludeRetired(includeRetired);
     } catch (err) {
-      const details = err?.response?.status === 400 ? err.response.data?.details : null;
-      const dateDetails = Array.isArray(details)
-        ? details.filter((d) => SERVER_FIELDS.includes(d?.field))
-        : [];
+      const dateDetails = fieldErrorsFrom(err, SERVER_FIELDS);
       if (dateDetails.length > 0) {
         setServerFieldErrors(dateDetails);
       } else {
@@ -221,24 +220,10 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
     setServerFieldErrors([]);
   }
 
-  function messagesFor(field) {
-    return [...fieldErrors, ...serverFieldErrors]
-      .filter((err) => err.field === field)
-      .map((err) => err.message);
-  }
-
-  function errorId(field) {
-    return `${idPrefix}-${field}-error`;
-  }
-
-  /** aria wiring for one control, the same way VenueBlockForm does it. */
-  function ariaFor(field) {
-    const hasErrors = messagesFor(field).length > 0;
-    return {
-      "aria-invalid": hasErrors ? "true" : undefined,
-      "aria-describedby": hasErrors ? errorId(field) : undefined,
-    };
-  }
+  const { messagesFor, errorId, ariaFor } = fieldErrorWiring(idPrefix, [
+    ...fieldErrors,
+    ...serverFieldErrors,
+  ]);
 
   function renderFieldErrors(field) {
     const messages = messagesFor(field);

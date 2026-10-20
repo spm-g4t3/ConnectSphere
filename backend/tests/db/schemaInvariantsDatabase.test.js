@@ -1,8 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createSchemaDb, functionSources } from './helpers/schemaDb.js';
-import { STATUS, isKnownStatus } from '../../src/domain/eventRequestStatus.js';
-import { ACTIVE_EVENT_STATUSES, FINISHED_EVENT_STATUSES } from '../../src/services/eventRequestService.js';
+import {
+  STATUS,
+  isKnownStatus,
+  ACTIVE_EVENT_STATUSES,
+  FINISHED_EVENT_STATUSES,
+} from '../../src/domain/eventRequestStatus.js';
 
 // Rules of the final schema that no single behaviour test can show: what is
 // absent everywhere, who may call what, lock order, and the shape the API and
@@ -297,7 +301,7 @@ describe('SCRUM-487: every event status is classified for the overview', () => {
     const missing = values.filter((value) => !CLASSIFIED.includes(value));
     const message = missing.map((value) => (
       `"${value}" is in the event_request_status enum but in no bucket. If it is an active status, `
-        + 'add it to ACTIVE_EVENT_STATUSES (backend/src/services/eventRequestService.js), or the Lead\'s '
+        + 'add it to ACTIVE_EVENT_STATUSES (backend/src/domain/eventRequestStatus.js), or the Lead\'s '
         + 'coordinator overview (SCRUM-487) silently leaves its events out; if it is a finished one, to '
         + 'FINISHED_EVENT_STATUSES. Give it a STATUS_DISPLAY entry too (backend/src/domain/eventRequestStatus.js).'
     )).join('\n');

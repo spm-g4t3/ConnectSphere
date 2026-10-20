@@ -30,6 +30,29 @@ export const BOOKING_STATUS = Object.freeze({
   RELEASED: 'released',
 });
 
+/**
+ * The statuses under which an event counts as booked into a venue: approved,
+ * and approved then flagged by a venue change. For showing the booking only;
+ * whether a venue is free is decided in SQL (venue_occupancy), never from this.
+ */
+export const BOOKED_STATUSES = Object.freeze([
+  BOOKING_STATUS.APPROVED,
+  BOOKING_STATUS.FLAGGED_FOR_REVIEW,
+]);
+
+/**
+ * The booking statuses that still hold, or may yet hold, a venue for the
+ * event: a request awaiting Venue Staff (pending or conflicting), an approved
+ * booking, and one a venue change has flagged. Rejected, withdrawn and
+ * cancelled ones no longer claim the venue, so there is nothing to recheck.
+ */
+export const LIVE_BOOKING_STATUSES = Object.freeze([
+  BOOKING_STATUS.PENDING,
+  BOOKING_STATUS.CONFLICTING,
+  BOOKING_STATUS.APPROVED,
+  BOOKING_STATUS.FLAGGED_FOR_REVIEW,
+]);
+
 // Keyed by value, so the membership check below is a single own-property test.
 const BY_VALUE = Object.freeze(
   Object.fromEntries(Object.values(BOOKING_STATUS).map((value) => [value, true])),

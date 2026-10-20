@@ -23,10 +23,7 @@
 import { supabase } from '../../src/config/supabaseClient.js';
 import { withdrawBookingRequest } from '../../src/services/bookingRequestService.js';
 import { ConflictError } from '../../src/errors.js';
-
-/** The marker bookingSuitability.js writes into setup_notes; change both together. */
-const SEED_NOTE_PREFIX = 'Seeded demo (SCRUM-188 AC7)';
-const LIVE_STATUSES = ['pending', 'approved', 'flagged_for_review'];
+import { LIVE_STATUSES, SEED_NOTE_PREFIX } from './lib.js';
 
 async function seededRequests() {
   const { data, error } = await supabase

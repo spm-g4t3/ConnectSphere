@@ -23,19 +23,20 @@ import { notificationLink } from "../services/notificationLink";
 import { useUnreadCount } from "../notifications/UnreadCountContext";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { useAuth } from "../auth/AuthContext";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES. No
 // 403: the route has no role gate, so a 403 cannot happen. A 500 reads the
 // same as any other failure, so it takes the fallback below.
 const LIST_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
 };
 
 // The same idea for a single row. 404 gets its own words because it is the
 // one failure with a known cause -- the notification is gone or is not this
 // account's -- and retrying the button will never fix it.
 const MARK_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   404: "This notification is no longer available.",
 };
 

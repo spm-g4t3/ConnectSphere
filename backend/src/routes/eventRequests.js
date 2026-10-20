@@ -118,7 +118,7 @@ import { getStatusDisplay } from '../domain/eventRequestStatus.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 // Both of these are credential-free on purpose, and that is worth knowing
 // before adding a third: this router's tests do not mock config/
-// supabaseClient.js -- they rely on the service's lazy resolveClient -- so any
+// supabaseClient.js -- they rely on config/resolveClient.js being lazy -- so any
 // import that reaches that module would throw at collection time and take the
 // whole test file down with it. middleware/requireRole.js imports only
 // domain/userRole.js, which imports nothing at all. services/venueService.js,
@@ -129,11 +129,22 @@ import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
 import { ForbiddenError, ValidationError } from '../errors.js';
 // Pure, like the two above: the repository's one uuid check (SCRUM-489's readiness read).
-import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
+import { isPlausibleId } from '../validation/ids.js';
 
 
 /** Answers whatever a handler throws or rejects with; see src/http/handleError.js (SCRUM-127). */
 const errorMiddleware = createErrorMiddleware('event requests route');
+
+/**
+ * A boolean query parameter is a string on the wire: 'true' is true, 'false'
+ * or absent is false, and anything else is a 400 rather than a quiet false.
+ */
+function parseBooleanQuery(raw, field, message) {
+  if (raw !== undefined && raw !== 'true' && raw !== 'false') {
+    throw new ValidationError(message, [{ field, message: 'must be true or false' }]);
+  }
+  return raw === 'true';
+}
 
 
 /**
@@ -429,18 +440,17 @@ export function createEventRequestRouter({
    * 403 unless a Lead, 500.
    */
   router.get('/assigned', leadOnly, async (req, res) => {
-    const { coordinatorId, status, includeFinished: rawIncludeFinished } = req.query;
-    if (rawIncludeFinished !== undefined && rawIncludeFinished !== 'true' && rawIncludeFinished !== 'false') {
-      throw new ValidationError(
-        'Invalid filter -- includeFinished: must be true or false',
-        [{ field: 'includeFinished', message: 'must be true or false' }],
-      );
-    }
+    const { coordinatorId, status } = req.query;
+    const includeFinished = parseBooleanQuery(
+      req.query.includeFinished,
+      'includeFinished',
+      'Invalid filter -- includeFinished: must be true or false',
+    );
     const events = await listAssignedEventsForLead({
       client,
       coordinatorId,
       status,
-      includeFinished: rawIncludeFinished === 'true',
+      includeFinished,
     });
     res.status(200).json(events.map(withStatusDisplay));
   });
@@ -700,17 +710,15 @@ export function createEventRequestRouter({
     if (!isPlausibleId(req.params.id)) {
       throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
     }
-    const raw = req.query.noEquipmentConfirmed;
-    if (raw !== undefined && raw !== 'true' && raw !== 'false') {
-      throw new ValidationError(
-        'Invalid noEquipmentConfirmed -- must be true or false',
-        [{ field: 'noEquipmentConfirmed', message: 'must be true or false' }],
-      );
-    }
+    const noEquipmentConfirmed = parseBooleanQuery(
+      req.query.noEquipmentConfirmed,
+      'noEquipmentConfirmed',
+      'Invalid noEquipmentConfirmed -- must be true or false',
+    );
     await getEventRequestForCoordinator(req.params.id, { client });
 
     res.status(200).json(await getEventReadiness({
-      client, eventRequestId: req.params.id, noEquipmentConfirmed: raw === 'true',
+      client, eventRequestId: req.params.id, noEquipmentConfirmed,
     }));
   });
 

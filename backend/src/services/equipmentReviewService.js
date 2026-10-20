@@ -31,12 +31,16 @@
  * Anything else is left untyped, so it reaches the API as a 500.
  */
 
+import { ValidationError, ConflictError } from '../errors.js';
+import { resolveClient } from '../config/resolveClient.js';
 import {
-  ValidationError,
-  NotFoundError,
-  ConflictError,
-  ForbiddenError,
-} from '../errors.js';
+  createPgTranslator,
+  forCodes,
+  forbidden,
+  conflict,
+  rejected,
+  notFound,
+} from '../http/pgErrors.js';
 import {
   checkOutcomeNote,
   checkReserveInput,
@@ -48,8 +52,11 @@ import {
   validateEquipmentLineId,
   validateReservationId,
 } from '../validation/equipmentReviewValidation.js';
+import { requireCallerId } from '../validation/ids.js';
 import { equipmentRequestStatusLabel } from '../domain/equipmentRequestStatus.js';
+import { BOOKED_STATUSES } from '../domain/bookingStatus.js';
 import { toAvailabilityResult } from './equipmentAvailabilityService.js';
+import { readNames } from './rows.js';
 
 
 /** The code a client can match on when the request is not in a state for this. */
@@ -59,23 +66,9 @@ const MISSING_NOTES_PREFIX = 'Add a note to each line that cannot be provided.';
 const MISSING_NOTES_LIST = /Missing a note: (.*)$/;
 
 
-/**
- * The client to use. Imported only when none was supplied, so a test that passes
- * its own never reads credentials. Same as equipmentLineService.
- */
-async function resolveClient(client) {
-  if (client) return client;
-
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
-}
-
 /** A blank caller would never reach the function as a uuid. */
 function requireUser(userId) {
-  if (typeof userId !== 'string' || userId.trim() === '') {
-    throw new ValidationError('userId is required');
-  }
-  return userId;
+  return requireCallerId(userId, 'userId');
 }
 
 /** Lines still missing a note, as [{ field: 'lines', message }] plus the names. */
@@ -103,43 +96,26 @@ function detailsFor(detail) {
  * Turn a raw Postgres error into a typed one. The messages from 038 are written
  * to be read by Technical Support Staff, so they pass through unchanged.
  */
-function translateError(error) {
-  if (!error) return null;
-
-  const code = error.code;
-  const detail = error.message ?? '';
-
-  if (code === '42501') return new ForbiddenError(detail);
-
-  if (code === '55000' || code === '40001') {
-    return new ConflictError(detail, { code: REVIEW_NOT_ALLOWED });
-  }
-
-  // 061 makes these lock in one order, so this should not happen. If Postgres
-  // still undoes one of two changes, nothing was saved: try again.
-  if (code === '40P01') {
-    return new ConflictError('Someone changed this equipment at the same moment. Please try again.', {
-      code: REVIEW_NOT_ALLOWED,
-    });
-  }
-
-  if (code === '22023') {
-    if (detail.startsWith(MISSING_NOTES_PREFIX)) {
-      return new ValidationError(detail, missingNoteDetails(detail));
-    }
-    return new ValidationError(detail, detailsFor(detail));
-  }
-
-  // A check constraint backing the functions up. The message is the driver's, so
-  // it is wrapped, as the other services do.
-  if (code === '23514') {
-    return new ValidationError(`A value was rejected by the database: ${detail}`);
-  }
-
-  if (code === 'P0002') return new NotFoundError(detail || 'Not found');
-
-  return new Error(detail || 'Unexpected database error');
-}
+const translateError = createPgTranslator({
+  codes: {
+    '42501': forbidden,
+    ...forCodes(['55000', '40001'], conflict(REVIEW_NOT_ALLOWED)),
+    // 061 makes these lock in one order, so this should not happen. If Postgres
+    // still undoes one of two changes, nothing was saved: try again.
+    '40P01': () =>
+      new ConflictError('Someone changed this equipment at the same moment. Please try again.', {
+        code: REVIEW_NOT_ALLOWED,
+      }),
+    '22023': (detail) =>
+      detail.startsWith(MISSING_NOTES_PREFIX)
+        ? new ValidationError(detail, missingNoteDetails(detail))
+        : new ValidationError(detail, detailsFor(detail)),
+    // A check constraint backing the functions up. The message is the driver's, so
+    // it is wrapped, as the other services do.
+    '23514': rejected,
+    P0002: notFound('Not found'),
+  },
+});
 
 
 /** One live reservation, in camelCase. */
@@ -215,20 +191,6 @@ export function toReviewState(data) {
 }
 
 
-/** Names for the people on the screen, by id. A person with no name gets null. */
-async function readNames(db, ids) {
-  const unique = [...new Set(ids.filter(Boolean))];
-  if (unique.length === 0) return new Map();
-
-  const { data, error } = await db.from('profiles').select('id, full_name').in('id', unique);
-  if (error) throw translateError(error);
-
-  return new Map((data ?? []).map((row) => [row.id, row.full_name ?? null]));
-}
-
-/** The statuses under which a booking holds the venue (as venue_occupancy reads them). */
-const BOOKED_STATUSES = ['approved', 'flagged_for_review'];
-
 /**
  * The venue the event is booked into, or null. If it somehow holds more than
  * one, the earliest booking's venue is the one shown.
@@ -260,7 +222,7 @@ async function readBookedVenue(db, eventRequestId) {
 async function addNames(db, state) {
   if (!state.request) return state;
 
-  const names = await readNames(db, [state.event.assignedCoordinatorId, state.request.reviewerId]);
+  const names = await readNames(db, [state.event.assignedCoordinatorId, state.request.reviewerId], translateError);
   const venue = await readBookedVenue(db, state.event.id);
 
   return {

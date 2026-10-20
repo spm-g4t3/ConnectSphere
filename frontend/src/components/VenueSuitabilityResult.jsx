@@ -20,7 +20,7 @@
 //     it against venue hours kept in Singapore time (datetimeFormat.js).
 //   - Codes show as venueLookups labels. That copy is known to be stale, so a
 //     code it has not heard of shows as itself, the same fallback
-//     EventVenueFinder's codesText uses, rather than vanishing.
+//     venueSuitabilityDisplay's codesText uses, rather than vanishing.
 //
 // SCRUM-188 AC7: an optional `overridden` list of criterion names. An unmet
 // criterion the coordinator chose to override reads "Not met — overridden by
@@ -42,14 +42,9 @@ import {
   FACILITIES,
   ROOM_LAYOUTS,
 } from "../services/venueLookups";
-import { criterionDetailText, labelFor } from "../services/venueSuitabilityDisplay";
+import { codesText, criterionDetailText, labelFor } from "../services/venueSuitabilityDisplay";
 
 const NONE_REQUESTED = "None requested";
-
-function codesText(codes, options) {
-  if (!Array.isArray(codes) || codes.length === 0) return NONE_REQUESTED;
-  return codes.map((code) => labelFor(code, options)).join(", ");
-}
 
 /** An unmet criterion the coordinator chose to go ahead without. */
 function isOverridden(criterion, overriddenNames) {
@@ -78,8 +73,8 @@ export default function VenueSuitabilityResult({ result, overridden, subject }) 
       term: "Layout",
       value: checked.layout ? labelFor(checked.layout, ROOM_LAYOUTS) : NONE_REQUESTED,
     },
-    { term: "Accessibility features", value: codesText(checked.accessibility, ACCESSIBILITY_FEATURES) },
-    { term: "Facilities", value: codesText(checked.facilities, FACILITIES) },
+    { term: "Accessibility features", value: codesText(checked.accessibility, ACCESSIBILITY_FEATURES, NONE_REQUESTED) },
+    { term: "Facilities", value: codesText(checked.facilities, FACILITIES, NONE_REQUESTED) },
   ];
 
   return (

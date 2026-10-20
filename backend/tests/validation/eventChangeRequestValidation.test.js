@@ -16,8 +16,8 @@ import { describe, it, expect } from 'vitest';
 import {
   validateCreateChangeRequest,
   validateProcessChangeRequest,
-  isPlausibleId,
 } from '../../src/validation/eventChangeRequestValidation.js';
+import { isPlausibleId } from '../../src/validation/ids.js';
 import { CHANGE_FIELD, CHANGE_FIELDS } from '../../src/domain/eventChangeField.js';
 import { CHANGE_REQUEST_DECISION } from '../../src/domain/changeRequestStatus.js';
 import { ValidationError } from '../../src/errors.js';

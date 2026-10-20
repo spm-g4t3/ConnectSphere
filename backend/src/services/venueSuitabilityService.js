@@ -75,20 +75,23 @@
  * no .env. bookingRequestService.js imports this module, and its tests and
  * every router built on it run without credentials, so a static import here
  * would take them all down at collection time. Nothing is imported from
- * bookingRequestService.js either: it imports this module, so its
- * toPeriodConflict cannot be borrowed without a circular import, and the
- * occupancy rows are mapped locally by toOccupancyConflict.
+ * bookingRequestService.js either: it imports this module, so the occupied
+ * part both mappers share lives in the pure domain/occupancy.js, and the rest
+ * of each occupancy row is mapped locally by toOccupancyConflict.
  */
 
 import { AppError, ConflictError, ForbiddenError, ValidationError } from '../errors.js';
+import { resolveClient } from '../config/resolveClient.js';
 import {
   AVAILABILITY_CRITERION,
   SUITABILITY_CHECK_CRITERIA,
   evaluateCriteria,
   toVenueLocal,
 } from '../domain/venueMatching.js';
-import { BOOKING_STATUS, getBookingStatusDisplay } from '../domain/bookingStatus.js';
+import { LIVE_BOOKING_STATUSES, getBookingStatusDisplay } from '../domain/bookingStatus.js';
 import { getEventRequestForCoordinator } from './eventRequestService.js';
+import { toOccupiedPeriod } from '../domain/occupancy.js';
+import { one } from './rows.js';
 
 /**
  * SCRUM-188 AC2: the sixth criterion's label, and every criterion the check
@@ -101,18 +104,12 @@ import { getEventRequestForCoordinator } from './eventRequestService.js';
  */
 export { AVAILABILITY_CRITERION, SUITABILITY_CHECK_CRITERIA };
 
-async function resolveClient(client) {
-  if (client) return client;
-
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
-}
-
 /**
  * One row of venue_occupancy_conflicts(), in camelCase.
  *
- * The same idea as bookingRequestService's toPeriodConflict, kept separate
- * because that module imports this one (see the header). occupiedStartsAt and
+ * The same idea as bookingRequestService's toPeriodConflict, in this check's
+ * own shape (one id for every kind); the occupied part comes from the pure
+ * domain/occupancy.js, which both use. occupiedStartsAt and
  * occupiedEndsAt are read from the row, never recomputed, so the padding
  * formula stays in SQL. For a booking or a hold they are its period padded by
  * the venue's setup and turnaround; for a block they equal its own period,
@@ -132,10 +129,7 @@ export function toOccupancyConflict(row) {
     reason: row.reason ?? null,
     startsAt: row.starts_at,
     endsAt: row.ends_at,
-    occupiedStartsAt: row.occupied_starts_at,
-    occupiedEndsAt: row.occupied_ends_at,
-    setupMinutes: row.setup_minutes,
-    turnaroundMinutes: row.turnaround_minutes,
+    ...toOccupiedPeriod(row),
   };
 }
 
@@ -550,31 +544,10 @@ async function judgeVenue(
 }
 
 
-/**
- * The booking statuses that still hold, or may yet hold, a venue for the
- * event: a request awaiting Venue Staff (pending or conflicting), an approved
- * booking, and one a venue change has flagged. Rejected, withdrawn and
- * cancelled ones no longer claim the venue, so there is nothing to recheck.
- */
-export const LIVE_BOOKING_STATUSES = Object.freeze([
-  BOOKING_STATUS.PENDING,
-  BOOKING_STATUS.CONFLICTING,
-  BOOKING_STATUS.APPROVED,
-  BOOKING_STATUS.FLAGGED_FOR_REVIEW,
-]);
-
 /** What checkEventVenues reads of each booking, with its venue embedded. */
 const EVENT_BOOKING_COLUMNS =
   'id, venue_id, status, starts_at, ends_at, room_layout_code, expected_attendance, ' +
   'suitability_result, suitability_overridden, created_at, venues(name, location)';
-
-/**
- * PostgREST embeds a many-to-one as an object, but an array if it were ever
- * read as one-to-many. Read defensively, as bookingRequestService does.
- */
-function one(embedded) {
-  return Array.isArray(embedded) ? embedded[0] : embedded;
-}
 
 /** The names of the criteria a result did not meet, in the order it gave them. */
 function unmetOf(criteria) {

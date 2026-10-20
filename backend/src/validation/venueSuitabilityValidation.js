@@ -26,19 +26,9 @@
 
 import { ValidationError } from '../errors.js';
 import { MAX_ATTENDANCE } from './eventRequestValidation.js';
-import { isPlausibleId } from './eventChangeRequestValidation.js';
+import { isPlausibleId } from './ids.js';
+import { createErrorCollector } from './collector.js';
 import { LAYOUT_CODE_PATTERN, checkOptionalCodeLists } from './bookingRequestValidation.js';
-
-function createErrorCollector() {
-  const details = [];
-  return {
-    add: (field, message) => details.push({ field, message }),
-    details,
-    get hasErrors() {
-      return details.length > 0;
-    },
-  };
-}
 
 function checkId(errors, field, label, value) {
   if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {

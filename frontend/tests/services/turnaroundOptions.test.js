@@ -18,6 +18,7 @@ import {
   TURNAROUND_MINUTES,
   TURNAROUND_OPTIONS,
   formatTurnaround,
+  makeMinuteOptions,
   turnaroundOptionsWith,
 } from "../../src/services/turnaroundOptions.js";
 
@@ -114,5 +115,26 @@ describe("SCRUM186 turnaroundOptionsWith", () => {
     });
     // The shared list is untouched.
     expect(TURNAROUND_OPTIONS).toHaveLength(7);
+  });
+});
+
+describe("makeMinuteOptions", () => {
+  it("labels each listed minute and returns the list itself for a listed or missing value", () => {
+    const { options, optionsWith } = makeMinuteOptions([0, 90]);
+    expect(options).toEqual([
+      { minutes: 0, label: "None" },
+      { minutes: 90, label: "1 hour 30 minutes" },
+    ]);
+    expect(Object.isFrozen(options)).toBe(true);
+    expect(optionsWith(90)).toBe(options);
+    expect(optionsWith(null)).toBe(options);
+  });
+
+  it("appends a saved value the list does not have, marked unknown", () => {
+    const { options, optionsWith } = makeMinuteOptions([0, 90]);
+    expect(optionsWith(20)).toEqual([
+      ...options,
+      { minutes: 20, label: "20 minutes (not in this form's list)", unknown: true },
+    ]);
   });
 });

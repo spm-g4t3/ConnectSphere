@@ -6,6 +6,7 @@
 
 import { inTheWayText, occupantText, periodConflicts } from "./bookingRequestErrors";
 import { reasonLabel } from "./venueBlockReasons";
+import { codeOf, SESSION_EXPIRED } from "./apiErrors";
 
 const CODE_MESSAGES = {
   BOOKING_NOT_FLAGGED:
@@ -23,7 +24,7 @@ const CODE_MESSAGES = {
 
 const STATUS_MESSAGES = {
   400: "The reason was not accepted. A reason is required, and it must be at most 1000 characters.",
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Venue Staff can resolve flagged bookings.",
   404: "That booking no longer exists. The list has been refreshed.",
 };
@@ -31,10 +32,6 @@ const STATUS_MESSAGES = {
 const DEFAULT_MESSAGE = "Could not resolve the flagged booking. Please try again.";
 
 const CONFLICT_CODE = "BOOKING_PERIOD_CONFLICT";
-
-function codeOf(err) {
-  return err?.response?.data?.code ?? null;
-}
 
 /**
  * What now occupies the venue, from a BOOKING_PERIOD_CONFLICT answer: venue

@@ -31,6 +31,7 @@ import express from 'express';
 // prevents, and the check below is what proves it stayed prevented.
 import { supabase, supabaseAdmin, supabaseAuth } from '../src/config/supabaseClient.js';
 import { createEventRequestRouter } from '../src/routes/eventRequests.js';
+import { createHarness, createUserWithProfile, countUsersLeft } from './lib/harness.js';
 
 const STAMP = Date.now();
 const PASSWORD = `Check-${STAMP}-Aa1!`;
@@ -54,17 +55,12 @@ let otherEventId = null;
 let draftEventId = null;
 
 let server = null;
-let failures = 0;
 
-// Errors from cleanup's own deletes, which supabase-js returns rather than
-// throws, so a delete a foreign key refuses is silent unless kept. See
-// cleanup() and the post-cleanup checks at the bottom of the file.
-const cleanupErrors = [];
-
-function check(label, passed, detail = '') {
-  console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
-  if (!passed) failures += 1;
-}
+// remove() keeps errors from cleanup's own deletes, which supabase-js returns
+// rather than throws, so a delete a foreign key refuses is silent unless kept.
+// See cleanup() and the post-cleanup checks at the bottom of the file.
+const harness = createHarness();
+const { check, remove } = harness;
 
 /**
  * A throwaway confirmed user, with a password.
@@ -81,24 +77,10 @@ function check(label, passed, detail = '') {
  * would show up as a 403 on a route that has nothing to do with roles.
  */
 async function createTestUser(label, role = 'event_organiser') {
-  const { data, error } = await supabase.auth.admin.createUser({
+  return createUserWithProfile({
     email: `__check_routes_${label}_${STAMP}@example.invalid`,
-    password: PASSWORD,
-    email_confirm: true,
+    password: PASSWORD, label, role,
   });
-  if (error) throw new Error(`could not create test user (${label}): ${error.message}`);
-
-  // requireAuth now resolves the caller's role from profiles (007_user_roles.sql)
-  // and answers 403 when there is no row, so a throwaway user needs one or every
-  // authenticated check below fails for the wrong reason.
-  const { error: profileError } = await supabaseAdmin
-    .from('profiles')
-    .insert({ id: data.user.id, role, full_name: `Check ${label}` });
-  if (profileError) {
-    throw new Error(`could not create profile (${label}): ${profileError.message}`);
-  }
-
-  return data.user;
 }
 
 /**
@@ -131,12 +113,6 @@ async function createEventRequest(ownerId, name, status, assignedCoordinatorId) 
     .single();
   if (error) throw new Error(`could not create test event request: ${error.message}`);
   return data.id;
-}
-
-/** Run one cleanup step, keeping its error rather than dropping it. */
-async function remove(label, query) {
-  const { error } = await query;
-  if (error) cleanupErrors.push(`${label}: ${error.message}`);
 }
 
 async function cleanup() {
@@ -201,7 +177,7 @@ async function cleanup() {
  * message is chosen.
  */
 async function verifyCleanup() {
-  check('cleanup ran without errors', cleanupErrors.length === 0, cleanupErrors.join('; '));
+  harness.checkCleanupErrors();
 
   const { count: eventsLeft } = await supabase
     .from('event_requests')
@@ -232,11 +208,7 @@ async function verifyCleanup() {
       .select('id', { count: 'exact', head: true })
       .in('id', userIds);
 
-  let usersLeft = 0;
-  for (const id of userIds) {
-    const { data } = await supabase.auth.admin.getUserById(id);
-    if (data?.user) usersLeft += 1;
-  }
+  const usersLeft = await countUsersLeft(userIds);
 
   check(
     'nothing left behind after cleanup',
@@ -974,13 +946,13 @@ async function main() {
 main()
   .catch((err) => {
     console.error(`\nFailed: ${err.message}`);
-    failures += 1;
+    harness.failures += 1;
   })
   .finally(async () => {
     await cleanup();
     await verifyCleanup();
-    if (failures > 0) {
-      console.error(`\n${failures} check(s) failed.\n`);
+    if (harness.failures > 0) {
+      console.error(`\n${harness.failures} check(s) failed.\n`);
       process.exit(1);
     }
     console.log('\nAll checks passed. Signed in, scoped, tracked a status change, cleaned up.\n');

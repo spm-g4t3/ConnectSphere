@@ -2,10 +2,11 @@ import { Link } from "react-router-dom";
 import { getRegisteredEvents } from "../services/attendeeEventService";
 import { attendeeEventPath } from "../services/attendeeEventRoutes";
 import useOpenEventRead from "./useOpenEventRead";
-import useRefreshOnReturn from "./useRefreshOnReturn";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Attendees can view registered events.",
 };
 const FALLBACK = "Registered events could not be loaded. Please try again.";
@@ -15,7 +16,7 @@ export default function RegisteredEvents() {
     messages: MESSAGES, fallback: FALLBACK,
   });
   const events = data ?? [];
-  useRefreshOnReturn(load);
+  useRefetchOnReturn(load);
   return (
     <>
       <h1>Registered events</h1>

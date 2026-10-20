@@ -15,7 +15,7 @@
 // asked for. Each list is cut at a limit, and *Total is the count before the cut. statuses is the filter's choices, so labels are not kept here.
 // A 400 is a filter the server does not know, a 403 is not Technical Support.
 
-import { apiClient } from "./apiClient";
+import { getData } from "./apiData";
 
 /**
  * @param {object} [filters]
@@ -27,6 +27,5 @@ export async function getEquipmentQueue({ status = "", includePast = false } = {
   if (status) params.status = status;
   if (includePast) params.includePast = "true";
 
-  const response = await apiClient.get("/equipment-requests", { params });
-  return response.data;
+  return getData("/equipment-requests", { params });
 }

@@ -38,6 +38,8 @@
  */
 
 import { ValidationError } from '../errors.js';
+import { UUID_PATTERN } from './ids.js';
+import { createErrorCollector, throwIfInvalid } from './collector.js';
 import { checkTimeWindow, checkTimestamp } from './timestampValidation.js';
 import {
   TURNAROUND_MINUTES_OPTIONS,
@@ -47,10 +49,6 @@ import { SETUP_MINUTES_OPTIONS, isSetupOption } from '../domain/setupOptions.js'
 
 /** HH:MM or HH:MM:SS, with real hour and minute ranges. */
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)(:([0-5]\d))?$/;
-
-/** The shape gen_random_uuid() produces, which is what venues.id holds. */
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ATTRIBUTE_FIELDS = ['layouts', 'accessibility', 'facilities'];
 
@@ -95,35 +93,6 @@ function withSeconds(time) {
   return time.length === 5 ? `${time}:00` : time;
 }
 
-
-/** Collects problems so every fault in a form is reported at once. */
-function createErrorCollector() {
-  const details = [];
-  return {
-    add: (field, message) => details.push({ field, message }),
-    details,
-    get hasErrors() {
-      return details.length > 0;
-    },
-  };
-}
-
-/**
- * Throw one ValidationError carrying every collected problem, if there are any.
- *
- * The label opens the message. It defaults to the venue form's, which every
- * caller used until SCRUM-140; a search passes its own so a refused search is
- * not reported as bad venue details (the wrong prefix SCRUM-138 noted).
- */
-function throwIfInvalid(errors, label = 'Invalid venue details') {
-  if (!errors.hasErrors) return;
-
-  const summary = errors.details
-    .map(({ field, message }) => `${field}: ${message}`)
-    .join('; ');
-
-  throw new ValidationError(`${label} -- ${summary}`, errors.details);
-}
 
 /** Required text: must be a string with something in it once trimmed. */
 function checkRequiredText(errors, field, value) {
@@ -386,7 +355,7 @@ export function validateCreateVenue(input) {
     }
   }
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid venue details');
   return normalised;
 }
 
@@ -463,7 +432,7 @@ export function validateUpdateVenue(changes) {
     }
   }
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid venue details');
   return normalised;
 }
 
@@ -485,7 +454,7 @@ export function validateVenueId(id) {
     errors.add('id', 'must be a venue id');
   }
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid venue details');
   return id;
 }
 
@@ -574,7 +543,7 @@ export function validateSearchFilters(filters = {}) {
     }
   }
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid venue details');
   return normalised;
 }
 

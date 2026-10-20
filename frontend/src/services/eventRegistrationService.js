@@ -1,11 +1,9 @@
-import { apiClient } from "./apiClient";
+import { getData, putData } from "./apiData";
 
 export async function getRegistrationSettings(eventId) {
-  const response = await apiClient.get(`/registration/events/${eventId}/settings`);
-  return response.data;
+  return getData(`/registration/events/${eventId}/settings`);
 }
 
 export async function saveRegistrationSettings(eventId, settings) {
-  const response = await apiClient.put(`/registration/events/${eventId}/settings`, settings);
-  return response.data;
+  return putData(`/registration/events/${eventId}/settings`, settings);
 }

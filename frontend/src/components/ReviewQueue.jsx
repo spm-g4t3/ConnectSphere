@@ -23,7 +23,7 @@
 // deliberately (blast-radius control — see its own comment), so without one
 // every badge here renders as bare text.
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { useLocation } from "react-router-dom";
 import { getEventRequestQueue } from "../services/eventRequestService";
 import {
@@ -31,6 +31,9 @@ import {
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
 import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
+import useListRead from "./useListRead";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // Keyed by status, the same shape as VenueCatalogue's RETIRE_ERROR_MESSAGES
 // and AuthContext's LOGIN_ERROR_MESSAGES.
@@ -40,17 +43,13 @@ import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
 // role is not event_coordinator — an administration problem, not a breakage.
 // "Could not load the queue" would send the wrong person looking.
 const QUEUE_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Event Coordinators can see the review queue.",
   500: "The review queue could not be loaded. Please try again.",
 };
 
 export default function ReviewQueue() {
   const location = useLocation();
-  const [queue, setQueue] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
   // Which panel is open, if any: { mode: "detail", request } | null. The same
   // full-page-panel-with-a-back-button pattern MyEventRequests and
   // VenueCatalogue use — there is not one modal, <dialog> or window.confirm
@@ -62,27 +61,15 @@ export default function ReviewQueue() {
       : null,
   );
 
-  const fetchQueue = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getEventRequestQueue();
-      setQueue(data);
-      setError(null);
-      return data;
-    } catch (err) {
-      setError(
-        QUEUE_ERROR_MESSAGES[err.response?.status] ||
-          "The review queue could not be loaded. Please try again.",
-      );
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchQueue();
-  }, [fetchQueue]);
+  const {
+    data: queue,
+    loading,
+    error,
+    load: fetchQueue,
+  } = useListRead(getEventRequestQueue, {
+    messages: QUEUE_ERROR_MESSAGES,
+    fallback: "The review queue could not be loaded. Please try again.",
+  });
 
   // Refetch when the Coordinator comes back to the tab — the same mechanism
   // MyEventRequests uses, and here for a stronger reason. There, an Organiser
@@ -92,19 +79,7 @@ export default function ReviewQueue() {
   // this page exists to answer, so the moment worth re-reading on is the
   // moment they look at it. One request per visit, not one every few seconds
   // per open tab.
-  useEffect(() => {
-    function refetchIfVisible() {
-      if (document.visibilityState === "visible") fetchQueue();
-    }
-
-    window.addEventListener("focus", refetchIfVisible);
-    document.addEventListener("visibilitychange", refetchIfVisible);
-
-    return () => {
-      window.removeEventListener("focus", refetchIfVisible);
-      document.removeEventListener("visibilitychange", refetchIfVisible);
-    };
-  }, [fetchQueue]);
+  useRefetchOnReturn(fetchQueue);
 
   if (activePanel?.mode === "detail") {
     return (

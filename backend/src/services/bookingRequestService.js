@@ -42,16 +42,22 @@
  * Not here: notifying Venue Staff. SCRUM-174 owns the types and recipients and
  * it is not built; 030 marks where its insert goes.
  *
- * The service takes an optional client for the reason eventRequestService.js
- * gives, so it can be tested without credentials.
+ * The service takes an optional client, resolved lazily by
+ * config/resolveClient.js, so it can be tested without credentials.
  */
 
+import { ValidationError, ConflictError, ForbiddenError } from '../errors.js';
+import { resolveClient } from '../config/resolveClient.js';
 import {
-  ValidationError,
-  NotFoundError,
-  ConflictError,
-  ForbiddenError,
-} from '../errors.js';
+  createPgTranslator,
+  forCodes,
+  rejected,
+  missingReference,
+  notFound,
+  forbidden,
+  conflict,
+  hintConflict,
+} from '../http/pgErrors.js';
 import {
   validateCreateBookingRequest,
   validateBookingRequestId,
@@ -63,6 +69,8 @@ import { checkVenueSuitability } from './venueSuitabilityService.js';
 import { STATUS } from '../domain/eventRequestStatus.js';
 import { BOOKING_STATUS, getBookingStatusDisplay } from '../domain/bookingStatus.js';
 import { toSuitabilityRecord } from '../domain/suitabilityRecord.js';
+import { toOccupiedPeriod } from '../domain/occupancy.js';
+import { one } from './rows.js';
 
 /**
  * The event statuses a venue can be requested for (SCRUM-243 AC1), and since
@@ -75,10 +83,6 @@ const BOOKABLE_EVENT_STATUSES = Object.freeze([
   STATUS.SAFETY_APPROVED,
   STATUS.CONFIRMED,
 ]);
-
-/** The shape gen_random_uuid() produces; what a clashing booking's id looks like. */
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Postgres codes that mean "the input was wrong", whoever caught it. */
 const VALIDATION_CODES = new Set([
@@ -95,64 +99,32 @@ const VALIDATION_CODES = new Set([
   '22P02', // invalid text representation
 ]);
 
-async function resolveClient(client) {
-  if (client) return client;
-
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
-}
+const toBookingConflict = (bookingId) => ({ kind: 'booking_request', bookingId });
 
 /**
- * Turn a raw Postgres error into a typed one.
- *
  * PT409 carries the reason in its hint, so a client can tell the refusals apart
  * without reading prose. BOOKING_REQUEST_EXISTS and BOOKING_FLAGGED_FOR_REVIEW
- * carry the existing booking's id in DETAIL, which becomes the conflict list;
- * only a uuid is trusted there.
+ * carry the existing booking's id in DETAIL, which becomes the conflict list.
  */
-function translateError(error) {
-  const code = error.code;
-  const detail = error.message ?? '';
-
-  if (VALIDATION_CODES.has(code)) {
-    return new ValidationError(`A value was rejected by the database: ${detail}`);
-  }
-
-  // Reached only for the layout: the venue and event rows were locked, and the
-  // requester is the authenticated user.
-  if (code === '23503') {
-    return new ValidationError(`A referenced record does not exist: ${detail}`);
-  }
-
-  if (code === 'P0002') {
-    return new NotFoundError(detail || 'Event request or venue not found');
-  }
-
-  if (code === '42501') {
-    return new ForbiddenError(detail);
-  }
-
-  // serialization_failure: withdraw_booking_request's or decide_booking_request's
-  // guarded update matched no row, meaning the request changed under it. 031
-  // explains why that cannot happen while the locks hold; if it does, the
-  // caller reloads.
-  if (code === '40001') {
-    return new ConflictError(detail, { code: 'BOOKING_CHANGED' });
-  }
-
-  if (code === 'PT409') {
-    const hint = error.hint ?? null;
-    const bookingId = typeof error.details === 'string' ? error.details.trim() : '';
-    const conflicts =
-      (hint === 'BOOKING_REQUEST_EXISTS' || hint === 'BOOKING_FLAGGED_FOR_REVIEW') &&
-      UUID_PATTERN.test(bookingId)
-        ? [{ kind: 'booking_request', bookingId }]
-        : [];
-    return new ConflictError(detail, { code: hint, conflicts });
-  }
-
-  return new Error(detail || 'Unexpected database error');
-}
+const translateError = createPgTranslator({
+  codes: {
+    ...forCodes(VALIDATION_CODES, rejected),
+    // Reached only for the layout: the venue and event rows were locked, and the
+    // requester is the authenticated user.
+    '23503': missingReference,
+    P0002: notFound('Event request or venue not found'),
+    '42501': forbidden,
+    // serialization_failure: withdraw_booking_request's or decide_booking_request's
+    // guarded update matched no row, meaning the request changed under it. 031
+    // explains why that cannot happen while the locks hold; if it does, the
+    // caller reloads.
+    '40001': conflict('BOOKING_CHANGED'),
+    PT409: hintConflict({
+      BOOKING_REQUEST_EXISTS: toBookingConflict,
+      BOOKING_FLAGGED_FOR_REVIEW: toBookingConflict,
+    }),
+  },
+});
 
 /**
  * One thing in the way of the period, in camelCase: a venue block, an
@@ -177,12 +149,7 @@ function translateError(error) {
  *                        conflicts list
  */
 export function toPeriodConflict(entry) {
-  const occupied = {
-    occupiedStartsAt: entry.occupied_starts_at,
-    occupiedEndsAt: entry.occupied_ends_at,
-    setupMinutes: entry.setup_minutes,
-    turnaroundMinutes: entry.turnaround_minutes,
-  };
+  const occupied = toOccupiedPeriod(entry);
   if (entry.kind === 'block') {
     return {
       kind: 'block',
@@ -213,14 +180,6 @@ export function toPeriodConflict(entry) {
     endsAt: entry.ends_at,
     ...occupied,
   };
-}
-
-/**
- * PostgREST embeds a many-to-one as an object, but an array if it were ever
- * read as one-to-many. Read defensively, as venueCalendarService does.
- */
-function one(embedded) {
-  return Array.isArray(embedded) ? embedded[0] : embedded;
 }
 
 /** What the list reads: the booking, with its event and its venue embedded. */

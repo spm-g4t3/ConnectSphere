@@ -39,25 +39,12 @@ import {
   retireEquipmentType,
   reinstateEquipmentType,
 } from '../src/services/equipmentService.js';
+import { createHarness, failureOf } from './lib/harness.js';
 
 const PREFIX = `__check_equipment_${Date.now()}`;
 const createdIds = [];
-let failures = 0;
-
-function check(label, passed, detail = '') {
-  console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
-  if (!passed) failures += 1;
-}
-
-/** Resolve to the error a promise rejects with, or null if it resolves. */
-async function failureOf(promise) {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-}
+const harness = createHarness();
+const { check } = harness;
 
 async function cleanup() {
   if (createdIds.length === 0) return;
@@ -317,16 +304,16 @@ async function main() {
 
   check('an unknown type has an empty history', (await getEquipmentTypeHistory(randomUUID())).length === 0);
 
-  console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} check(s) FAILED.\n`);
+  console.log(harness.failures === 0 ? '\nAll checks passed.\n' : `\n${harness.failures} check(s) FAILED.\n`);
 }
 
 try {
   await main();
 } catch (err) {
   console.error('\nCheck aborted:', err);
-  failures += 1;
+  harness.failures += 1;
 } finally {
   await cleanup();
 }
 
-process.exit(failures === 0 ? 0 : 1);
+process.exit(harness.failures === 0 ? 0 : 1);

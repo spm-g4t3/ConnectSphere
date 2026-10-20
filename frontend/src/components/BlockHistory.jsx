@@ -28,11 +28,12 @@ import {
   blockHistoryChanges,
   isCurrentUser,
 } from "../services/venueBlockHistoryDisplay";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // Keyed by status. The server's `error` is never shown: it is database prose
 // that can carry raw uuids.
 const HISTORY_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Venue Staff can see a block's history.",
   404: "That block no longer exists.",
 };

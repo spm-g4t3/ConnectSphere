@@ -19,16 +19,14 @@
 // reserved, available }; and each reservation is { id, eventRequestId,
 // eventName, quantity, startAt, endAt, flagged }.
 
-import { apiClient } from "./apiClient";
+import { getData } from "./apiData";
 
 export async function listActiveEquipmentTypes() {
-  const response = await apiClient.get("/equipment/active");
-  return response.data;
+  return getData("/equipment/active");
 }
 
 export async function checkEquipmentAvailability({ equipmentTypeId, quantity, startAt, endAt }) {
-  const response = await apiClient.get("/equipment/availability", {
+  return getData("/equipment/availability", {
     params: { equipmentTypeId, quantity, startAt, endAt },
   });
-  return response.data;
 }

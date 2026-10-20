@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getOpenEvent } from "../services/openEventService";
 import { registrationErrorMessage, EVENT_FULL_MESSAGE, REGISTRATION_UNAVAILABLE_MESSAGE } from "../services/registrationErrors";
-import useRefreshOnReturn from "./useRefreshOnReturn";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import useOpenEventRead from "./useOpenEventRead";
 import OpenEventAvailability, { RegisteredBadge } from "./OpenEventAvailability";
 import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
@@ -16,9 +16,10 @@ import {
   formatEventEndTime,
   formatEventStartTime,
 } from "../services/openEventDisplay";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const LOAD_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Attendees can browse open events.",
   500: "This event could not be loaded. Please try again.",
   503: REGISTRATION_UNAVAILABLE_MESSAGE,
@@ -123,7 +124,7 @@ export default function BrowseEventDetails({ onRegister }) {
       if (!fresh.data.isRegistered) setNotice(null);
     }
   }, [refreshEvent]);
-  useRefreshOnReturn(refreshUnlessRegistering);
+  useRefetchOnReturn(refreshUnlessRegistering);
   async function handleRegister() {
     if (!onRegister || sending.current || !event || isRegistered) return;
     sending.current = true;

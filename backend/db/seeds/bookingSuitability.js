@@ -79,16 +79,11 @@ import { supabase } from '../../src/config/supabaseClient.js';
 import { createBookingRequest } from '../../src/services/bookingRequestService.js';
 import { checkVenueSuitability } from '../../src/services/venueSuitabilityService.js';
 import { ConflictError } from '../../src/errors.js';
+import { LIVE_STATUSES, SEED_NOTE_PREFIX } from './lib.js';
 
-/**
- * What marks a seeded request. bookingSuitabilityCleanup.js finds them by the
- * same text; change both together.
- */
-const SEED_NOTE_PREFIX = 'Seeded demo (SCRUM-188 AC7)';
 const SUITABLE_NOTE = `${SEED_NOTE_PREFIX}: suitable request`;
 const OVERRIDDEN_NOTE = `${SEED_NOTE_PREFIX}: overridden request`;
 const SECOND_VENUE_NOTE = `${SEED_NOTE_PREFIX}: second venue request`;
-const LIVE_STATUSES = ['pending', 'approved', 'flagged_for_review'];
 const EVENT_LIMIT = 20;
 
 /** A ConflictError the next venue might not hit; anything else is a fault. */

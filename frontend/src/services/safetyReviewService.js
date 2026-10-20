@@ -1,24 +1,20 @@
-import { apiClient } from "./apiClient";
+import { getData, postData } from "./apiData";
 
 export async function getSafetyReviewQueue() {
-  const response = await apiClient.get("/safety-reviews");
-  return response.data;
+  return getData("/safety-reviews");
 }
 
 export async function getSafetyReviewHistory() {
-  const response = await apiClient.get("/safety-reviews/history");
-  return response.data;
+  return getData("/safety-reviews/history");
 }
 
 export async function getSafetyReview(eventRequestId) {
-  const response = await apiClient.get(`/safety-reviews/${eventRequestId}`);
-  return response.data;
+  return getData(`/safety-reviews/${eventRequestId}`);
 }
 
 export async function submitSafetyReviewResponse(eventRequestId, input) {
-  const response = await apiClient.post(
+  return postData(
     `/safety-reviews/${eventRequestId}/responses`,
     input,
   );
-  return response.data;
 }

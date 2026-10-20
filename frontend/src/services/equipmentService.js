@@ -19,39 +19,32 @@
 // damagedQuantity, underMaintenanceQuantity, usableQuantity, retiredAt,
 // createdAt, updatedAt }.
 
-import { apiClient } from "./apiClient";
+import { getData, patchData, postData } from "./apiData";
 
 export async function listEquipment() {
-  const response = await apiClient.get("/equipment");
-  return response.data;
+  return getData("/equipment");
 }
 
 export async function createEquipment(body) {
-  const response = await apiClient.post("/equipment", body);
-  return response.data;
+  return postData("/equipment", body);
 }
 
 export async function updateEquipment(id, changes) {
-  const response = await apiClient.patch(`/equipment/${id}`, changes);
-  return response.data;
+  return patchData(`/equipment/${id}`, changes);
 }
 
 export async function recordEquipmentCondition(id, body) {
-  const response = await apiClient.patch(`/equipment/${id}/condition`, body);
-  return response.data;
+  return patchData(`/equipment/${id}/condition`, body);
 }
 
 export async function retireEquipment(id) {
-  const response = await apiClient.post(`/equipment/${id}/retire`);
-  return response.data;
+  return postData(`/equipment/${id}/retire`);
 }
 
 export async function reinstateEquipment(id) {
-  const response = await apiClient.post(`/equipment/${id}/reinstate`);
-  return response.data;
+  return postData(`/equipment/${id}/reinstate`);
 }
 
 export async function getEquipmentHistory(id) {
-  const response = await apiClient.get(`/equipment/${id}/history`);
-  return response.data;
+  return getData(`/equipment/${id}/history`);
 }

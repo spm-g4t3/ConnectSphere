@@ -22,20 +22,14 @@ import {
   rejectBookingRequest,
 } from "../services/bookingRequestService";
 import { decisionErrorMessage, isStaleDecisionError } from "../services/bookingRequestErrors";
+import { SESSION_EXPIRED, statusMessageOf } from "../services/apiErrors";
+import { asList } from "../services/displayFormat";
 
 const LIST_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Venue Staff can see pending booking requests.",
 };
 const LIST_DEFAULT_ERROR = "Pending booking requests could not be loaded. Please try again.";
-
-function listErrorMessage(err) {
-  return LIST_ERROR_MESSAGES[err?.response?.status] || LIST_DEFAULT_ERROR;
-}
-
-function asList(data) {
-  return Array.isArray(data) ? data : [];
-}
 
 /** The notice after an approval: what else it changed (AC3, and the event's own hold). */
 function approvedNotice(item, result) {
@@ -85,7 +79,7 @@ export default function PendingBookingRequests({ onDecided }) {
       setRequests(asList(await getPendingBookingRequests()));
       setError(null);
     } catch (err) {
-      setError(listErrorMessage(err));
+      setError(statusMessageOf(err, LIST_ERROR_MESSAGES, LIST_DEFAULT_ERROR));
     }
   }, []);
 
@@ -101,7 +95,7 @@ export default function PendingBookingRequests({ onDecided }) {
           setError(null);
         }
       } catch (err) {
-        if (!cancelled) setError(listErrorMessage(err));
+        if (!cancelled) setError(statusMessageOf(err, LIST_ERROR_MESSAGES, LIST_DEFAULT_ERROR));
       } finally {
         if (!cancelled) setLoading(false);
       }

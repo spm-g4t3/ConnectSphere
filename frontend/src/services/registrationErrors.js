@@ -1,3 +1,5 @@
+import { SESSION_EXPIRED } from "./apiErrors";
+
 export const EVENT_FULL_MESSAGE = "Sorry, this event filled up before your registration went through. It is now full.";
 export const REGISTRATION_UNAVAILABLE_MESSAGE = "Event registration is temporarily unavailable. Please try again later.";
 
@@ -16,7 +18,7 @@ const CONFLICT_MESSAGES = {
 export function registrationErrorMessage(error) {
   const response = error?.response;
   const status = response?.status;
-  if (status === 401) return "Your session has expired. Please sign in again.";
+  if (status === 401) return SESSION_EXPIRED;
   if (status === 403) return "Only Attendees can register for events.";
   if (status === 503) return REGISTRATION_UNAVAILABLE_MESSAGE;
   if (status === 409 && Object.hasOwn(CONFLICT_MESSAGES, response.data?.code)) {

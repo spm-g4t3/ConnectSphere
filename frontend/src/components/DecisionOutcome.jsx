@@ -36,6 +36,7 @@ import {
   getAssignmentHistory,
   getAssignmentHistoryForReview,
 } from "../services/eventRequestService";
+import { formatTimestamp } from "../services/displayFormat";
 
 const FETCH_BY_VIEW = {
   coordinator: getAssignmentHistoryForReview,
@@ -50,13 +51,6 @@ const DECISION_LABEL = {
   approved: "Approved",
   rejected: "Rejected",
 };
-
-/** The same formatter CoordinatorRequestDetail and AssignmentHistory use. */
-function formatTimestamp(value) {
-  if (!value) return "Not recorded";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
-}
 
 /**
  * @param {object} props
@@ -122,7 +116,7 @@ export default function DecisionOutcome({ request, view }) {
       <dd>{decider}</dd>
 
       <dt>Decided</dt>
-      <dd>{formatTimestamp(request.decidedAt)}</dd>
+      <dd>{formatTimestamp(request.decidedAt, "Not recorded")}</dd>
     </dl>
   );
 }

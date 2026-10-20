@@ -1,11 +1,9 @@
-import { apiClient } from "./apiClient";
+import { getData } from "./apiData";
 
 export async function getRegisteredEvents() {
-  const response = await apiClient.get("/attendee-events");
-  return response.data;
+  return getData("/attendee-events");
 }
 
 export async function getAttendeeEvent(eventId) {
-  const response = await apiClient.get(`/attendee-events/${encodeURIComponent(eventId)}`);
-  return response.data;
+  return getData(`/attendee-events/${encodeURIComponent(eventId)}`);
 }

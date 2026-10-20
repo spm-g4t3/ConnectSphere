@@ -7,16 +7,12 @@ import {
   readStatusDisplay,
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
+import { formatEventDate } from "../services/displayFormat";
+import { isReplyOverdue } from "../services/datetimeFormat";
 import NotificationInbox from "./NotificationInbox";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
-
-function formatEventDate(value) {
-  if (!value) return "Date not set";
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 export default function EventOrganiserDashboard({ user }) {
   const [events, setEvents] = useState([]);
@@ -39,17 +35,7 @@ export default function EventOrganiserDashboard({ user }) {
     fetchEvents();
   }, [fetchEvents, user.id]);
 
-  useEffect(() => {
-    function refetchIfVisible() {
-      if (document.visibilityState === "visible") fetchEvents();
-    }
-    window.addEventListener("focus", refetchIfVisible);
-    document.addEventListener("visibilitychange", refetchIfVisible);
-    return () => {
-      window.removeEventListener("focus", refetchIfVisible);
-      document.removeEventListener("visibilitychange", refetchIfVisible);
-    };
-  }, [fetchEvents]);
+  useRefetchOnReturn(fetchEvents);
 
   const deadlines = events
     .filter((event) => event.status === "pending_clarification")
@@ -116,7 +102,7 @@ export default function EventOrganiserDashboard({ user }) {
                   {event.clarificationReplyByDate && (
                     <p className="dashboard--organiser__clarification">
                       Reply by {event.clarificationReplyByDate}
-                      {event.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
+                      {isReplyOverdue(event.clarificationReplyByDate) && (
                         <strong className="clarification-overdue"> — Overdue</strong>
                       )}
                     </p>
@@ -156,7 +142,7 @@ export default function EventOrganiserDashboard({ user }) {
                 <div className="dashboard--organiser__deadline-meta">
                   <span className="deadline-tag">
                     {event.clarificationReplyByDate
-                      ? event.clarificationReplyByDate < new Date().toISOString().slice(0, 10)
+                      ? isReplyOverdue(event.clarificationReplyByDate)
                         ? "Overdue since"
                         : "Reply by"
                       : "Amend before event starts"}

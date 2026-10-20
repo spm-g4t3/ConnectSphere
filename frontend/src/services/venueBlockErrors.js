@@ -12,6 +12,8 @@
 // in front of a user. The only server text the UI shows is details[].message
 // from a 400, and that goes to the form, not through here.
 
+import { codeOf, makeErrorMapper, SESSION_EXPIRED } from "./apiErrors";
+
 const CODE_MESSAGES = {
   VENUE_RETIRED: "This venue has been retired, so it can no longer be blocked.",
   BLOCK_OVERLAPS_BLOCK:
@@ -26,7 +28,7 @@ const CODE_MESSAGES = {
 
 const STATUS_MESSAGES = {
   400: "Some details were not accepted. Please check the form.",
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Venue Staff can manage venue blocks.",
 };
 
@@ -52,10 +54,6 @@ const UNKNOWN_CONFLICT_MESSAGE =
 // The codes that mean our copy of the block is out of date.
 const STALE_CODES = new Set(["BLOCK_REMOVED", "BLOCK_ENDED"]);
 
-function codeOf(err) {
-  return err?.response?.data?.code ?? null;
-}
-
 /**
  * The message for a failed block request.
  *
@@ -63,19 +61,13 @@ function codeOf(err) {
  * @param {"list"|"create"|"update"|"remove"} action
  * @returns {string}
  */
-export function blockErrorMessage(err, action) {
-  const code = codeOf(err);
-  if (code && Object.hasOwn(CODE_MESSAGES, code)) return CODE_MESSAGES[code];
-
-  const status = err?.response?.status;
-  // An action with no 404 wording falls through to the generic message below,
-  // rather than returning undefined and leaving the alert blank.
-  if (status === 404 && Object.hasOwn(NOT_FOUND_MESSAGES, action)) return NOT_FOUND_MESSAGES[action];
-  if (status === 409) return UNKNOWN_CONFLICT_MESSAGE;
-  if (Object.hasOwn(STATUS_MESSAGES, status)) return STATUS_MESSAGES[status];
-
-  return DEFAULT_MESSAGES[action] ?? "Something went wrong. Please try again.";
-}
+export const blockErrorMessage = makeErrorMapper({
+  codeMessages: CODE_MESSAGES,
+  statusMessages: STATUS_MESSAGES,
+  notFoundMessages: NOT_FOUND_MESSAGES,
+  defaultMessages: DEFAULT_MESSAGES,
+  unknownConflictMessage: UNKNOWN_CONFLICT_MESSAGE,
+});
 
 /**
  * Whether the failure means the block list on screen is out of date, so the

@@ -3,7 +3,7 @@
 import { Link } from "react-router-dom";
 import { getOpenEvents } from "../services/openEventService";
 import { REGISTRATION_UNAVAILABLE_MESSAGE } from "../services/registrationErrors";
-import useRefreshOnReturn from "./useRefreshOnReturn";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import useOpenEventRead from "./useOpenEventRead";
 import OpenEventAvailability, { RegisteredBadge } from "./OpenEventAvailability";
 import { openEventDetailsPath } from "../services/openEventRoutes";
@@ -13,9 +13,10 @@ import {
   formatEventEndTime,
   formatEventStartTime,
 } from "../services/openEventDisplay";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const LIST_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Attendees can browse open events.",
   500: "Open events could not be loaded. Please try again.",
   503: REGISTRATION_UNAVAILABLE_MESSAGE,
@@ -51,7 +52,7 @@ export default function BrowseOpenEvents() {
     fallback: LIST_FALLBACK,
   });
   const events = data ?? [];
-  useRefreshOnReturn(fetchEvents);
+  useRefetchOnReturn(fetchEvents);
   return (
     <>
       <h1>Browse Open Events</h1>

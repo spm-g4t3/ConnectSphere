@@ -20,16 +20,19 @@
 // Since SCRUM-486 AC6 the dashboard's overview card holds a router Link to
 // Assigned Events, so the dashboard needs a router of its own regardless.)
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { listUnassignedEventRequests } from "../services/eventRequestService";
 import { formatRange } from "../services/displayFormat";
 import { describeWaiting } from "../services/waitingTime";
 import AssignCoordinatorPanel from "./AssignCoordinatorPanel";
+import useListRead from "./useListRead";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // 403 has its own words, as in ReviewQueue: it means the account is not a
 // Lead, an administration problem, not a breakage.
 const QUEUE_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only the Event Coordinator Lead can see the unassigned queue.",
   500: "The unassigned queue could not be loaded. Please try again.",
 };
@@ -40,48 +43,24 @@ const QUEUE_ERROR_MESSAGES = {
  *                                injected by tests, the reader's otherwise
  */
 export default function UnassignedQueue({ now = () => new Date() }) {
-  const [queue, setQueue] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   // The row being assigned, or null for the list.
   const [assigning, setAssigning] = useState(null);
   // What the last assignment did, said once back on the list.
   const [confirmation, setConfirmation] = useState(null);
 
-  const fetchQueue = useCallback(async () => {
-    setLoading(true);
-    try {
-      setQueue(await listUnassignedEventRequests());
-      setError(null);
-    } catch (err) {
-      setError(
-        QUEUE_ERROR_MESSAGES[err.response?.status] ||
-          "The unassigned queue could not be loaded. Please try again.",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchQueue();
-  }, [fetchQueue]);
+  const {
+    data: queue,
+    loading,
+    error,
+    load: fetchQueue,
+  } = useListRead(listUnassignedEventRequests, {
+    messages: QUEUE_ERROR_MESSAGES,
+    fallback: "The unassigned queue could not be loaded. Please try again.",
+  });
 
   // Refetch when the Lead comes back to the tab, as ReviewQueue does: new
   // requests arrive, and other Leads assign them, while nobody is looking.
-  useEffect(() => {
-    function refetchIfVisible() {
-      if (document.visibilityState === "visible") fetchQueue();
-    }
-
-    window.addEventListener("focus", refetchIfVisible);
-    document.addEventListener("visibilitychange", refetchIfVisible);
-
-    return () => {
-      window.removeEventListener("focus", refetchIfVisible);
-      document.removeEventListener("visibilitychange", refetchIfVisible);
-    };
-  }, [fetchQueue]);
+  useRefetchOnReturn(fetchQueue);
 
   // Back to the list, re-read either way. After an assignment the row has
   // gone; after a cancel the list may still be stale, and after a lost race

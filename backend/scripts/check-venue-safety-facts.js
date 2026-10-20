@@ -52,6 +52,7 @@ import {
   getVenueHistory,
   retireVenue,
 } from '../src/services/venueService.js';
+import { createHarness, createUserWithProfile } from './lib/harness.js';
 
 const STAMP = Date.now();
 const NAME = `__check_safety_facts_${STAMP}`;
@@ -82,12 +83,8 @@ const venueIds = [];
 const eventIds = [];
 const bookingIds = new Set();
 
-let failures = 0;
-
-function check(label, passed, detail = '') {
-  console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
-  if (!passed) failures += 1;
-}
+const harness = createHarness();
+const { check, step } = harness;
 
 /** JSON for readable output, including undefined. */
 const show = (value) => (value === undefined ? 'undefined' : JSON.stringify(value));
@@ -131,22 +128,11 @@ async function preflight() {
 
 /** A throwaway confirmed user, with the profiles row requireAuth reads. */
 async function createTestUser(label, role) {
-  const { data, error } = await supabase.auth.admin.createUser({
+  const user = await createUserWithProfile({
     email: `__check_safety_facts_${label}_${STAMP}@example.invalid`,
-    email_confirm: true,
+    label, role, users,
   });
-  if (error) throw new Error(`could not create test user (${label}): ${error.message}`);
-
-  // Tracked before the profile insert, so cleanup removes the user even if
-  // that insert fails.
-  users[label] = data.user.id;
-
-  const { error: profileError } = await supabase
-    .from('profiles')
-    .insert({ id: data.user.id, role, full_name: `Check ${label}` });
-  if (profileError) throw new Error(`could not create profile (${label}): ${profileError.message}`);
-
-  return data.user.id;
+  return user.id;
 }
 
 /** createVenue, tracking the id for cleanup. */
@@ -212,20 +198,6 @@ async function readBooking(id) {
 // Cleanup
 // ---------------------------------------------------------------------------
 
-/** Run one cleanup step, logging its own failure so the rest still run. */
-async function step(label, fn) {
-  try {
-    const result = await fn();
-    if (result?.error) {
-      console.error(`  cleanup: ${label} failed: ${result.error.message}`);
-      failures += 1;
-    }
-  } catch (err) {
-    console.error(`  cleanup: ${label} failed: ${err.message}`);
-    failures += 1;
-  }
-}
-
 async function cleanup() {
   // Every booking on the throwaway venues or events, including any a failed
   // run left half-way.
@@ -233,7 +205,7 @@ async function cleanup() {
     const { data, error } = await supabase.from('bookings').select('id').in('event_request_id', eventIds);
     if (error) {
       console.error(`  cleanup: reading event bookings failed: ${error.message}`);
-      failures += 1;
+      harness.failures += 1;
     }
     for (const row of data ?? []) bookingIds.add(row.id);
   }
@@ -241,7 +213,7 @@ async function cleanup() {
     const { data, error } = await supabase.from('bookings').select('id').in('venue_id', venueIds);
     if (error) {
       console.error(`  cleanup: reading venue bookings failed: ${error.message}`);
-      failures += 1;
+      harness.failures += 1;
     }
     for (const row of data ?? []) bookingIds.add(row.id);
   }
@@ -254,7 +226,7 @@ async function cleanup() {
     const { data, error } = await supabase.from('venue_blocks').select('id').in('venue_id', venueIds);
     if (error) {
       console.error(`  cleanup: reading blocks failed: ${error.message}`);
-      failures += 1;
+      harness.failures += 1;
     }
     blockIds = (data ?? []).map((row) => row.id);
   }
@@ -291,13 +263,8 @@ async function cleanup() {
     await step('venues', () => supabase.from('venues').delete().in('id', venueIds));
   }
 
-  // 6. Profiles cascade from auth.users, but are deleted explicitly so a
-  //    failure surfaces as its own error.
-  for (const [label, id] of Object.entries(users)) {
-    if (!id) continue;
-    await step(`profile (${label})`, () => supabase.from('profiles').delete().eq('id', id));
-    await step(`auth user (${label})`, () => supabase.auth.admin.deleteUser(id));
-  }
+  // 6. Profiles, then their auth users.
+  await harness.deleteTestUsers(users);
 }
 
 // ---------------------------------------------------------------------------
@@ -308,16 +275,7 @@ async function main() {
   console.log(`\nVenue safety facts check (D = ${D}, +08:00)\n`);
 
   // --- preflight: nothing is written unless 036 is there -------------------
-  const missing = await preflight();
-  if (missing.length > 0) {
-    for (const line of missing) console.error(`  missing: ${line}`);
-    console.error('\nThe database is missing part of the schema. Apply backend/db/baseline/01-09 (a fresh');
-    console.error('project only), then each file in backend/db/migrations/ in order, in the Supabase SQL');
-    console.error('Editor, then run this again.');
-    failures += 1;
-    return;
-  }
-  check('the schema this check needs is applied', true);
+  if (!harness.schemaApplied(await preflight())) return;
 
   // --- setup ---------------------------------------------------------------
   const staff = await createTestUser('staff', 'venue_staff');
@@ -458,12 +416,12 @@ async function main() {
 main()
   .catch((err) => {
     console.error(`\nFailed: ${err.message}`);
-    failures += 1;
+    harness.failures += 1;
   })
   .finally(async () => {
     await cleanup();
-    if (failures > 0) {
-      console.error(`\n${failures} check(s) failed.\n`);
+    if (harness.failures > 0) {
+      console.error(`\n${harness.failures} check(s) failed.\n`);
       process.exit(1);
     }
     console.log('\nAll checks passed. Trimmed, audited, cleared, left unflagged, retired, cleaned up.\n');

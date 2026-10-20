@@ -32,6 +32,8 @@ import {
   buildBlockChanges,
   validateBlockInput,
 } from "../services/venueBlockValidation";
+import { codePointLength } from "../services/venueSafetyFacts";
+import { fieldErrorWiring } from "./fieldErrors";
 
 /** The fields that render their own errors. Anything else goes in the alert. */
 const FIELDS = ["startsAt", "endsAt", "reason", "notes"];
@@ -45,11 +47,6 @@ function initialForm(block) {
     reason: block?.reason ?? "",
     notes: block?.notes ?? "",
   };
-}
-
-/** Code points, to agree with the validator and Postgres length(). */
-function codePointLength(text) {
-  return Array.from(text).length;
 }
 
 export default function VenueBlockForm({
@@ -72,22 +69,7 @@ export default function VenueBlockForm({
   const allErrors = [...clientErrors, ...serverErrors];
   const unmatchedServerErrors = serverErrors.filter((err) => !FIELDS.includes(err.field));
 
-  function messagesFor(field) {
-    return allErrors.filter((err) => err.field === field).map((err) => err.message);
-  }
-
-  function errorId(field) {
-    return `${idPrefix}-${field}-error`;
-  }
-
-  /** aria wiring for one control: invalid and described by its errors, or neither. */
-  function ariaFor(field) {
-    const hasErrors = messagesFor(field).length > 0;
-    return {
-      "aria-invalid": hasErrors ? "true" : undefined,
-      "aria-describedby": hasErrors ? errorId(field) : undefined,
-    };
-  }
+  const { messagesFor, errorId, ariaFor } = fieldErrorWiring(idPrefix, allErrors);
 
   function updateField(field, value) {
     const next = { ...form, [field]: value };

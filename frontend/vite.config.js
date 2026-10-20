@@ -22,7 +22,7 @@ const PANEL = { lines: 100, branches: 97.56, functions: 100, statements: 97.81 }
 // in MyBookingRequests.jsx's handleWithdraw is unreachable, because every
 // Withdraw button is disabled while one is being sent and React does not
 // dispatch clicks to disabled buttons. The ref is cheap defence behind them.
-const MY_BOOKING_REQUESTS = { lines: 100, branches: 98.07, functions: 100, statements: 98.24 }
+const MY_BOOKING_REQUESTS = { lines: 100, branches: 98.07, functions: 100, statements: 98.07 }
 
 // SCRUM-525's one exception, measured the same way: if (checking) return in
 // BookingRequestPanel.jsx's handleSubmit is unreachable, because the send
@@ -174,7 +174,6 @@ const SCRUM266_FILES = [
 const SCRUM495_FILES = [
   'src/components/BrowseOpenEvents.jsx',
   'src/components/BrowseEventDetails.jsx',
-  'src/components/useRefreshOnReturn.js',
   'src/components/useOpenEventRead.js',
   'src/components/OpenEventAvailability.jsx',
   'src/services/openEventDisplay.js',

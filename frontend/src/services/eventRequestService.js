@@ -37,6 +37,7 @@
 // introduced there.
 
 import { apiClient } from "./apiClient";
+import { getData, patchData, postData } from "./apiData";
 
 /**
  * Creates a new event request as a draft (SCRUM-29).
@@ -54,8 +55,7 @@ import { apiClient } from "./apiClient";
  * @returns {Promise<Object>} the created request, status 'draft'
  */
 export async function createEventRequest(input) {
-  const response = await apiClient.post("/event-requests", input);
-  return response.data;
+  return postData("/event-requests", input);
 }
 
 /**
@@ -67,8 +67,7 @@ export async function createEventRequest(input) {
  * @param {Object} input  same shape as createEventRequest's input
  */
 export async function updateEventRequest(id, input) {
-  const response = await apiClient.patch(`/event-requests/${id}`, input);
-  return response.data;
+  return patchData(`/event-requests/${id}`, input);
 }
 
 /**
@@ -82,8 +81,7 @@ export async function updateEventRequest(id, input) {
  * @returns {Promise<Object>} the request, now status 'submitted'
  */
 export async function submitEventRequest(id) {
-  const response = await apiClient.post(`/event-requests/${id}/submit`);
-  return response.data;
+  return postData(`/event-requests/${id}/submit`);
 }
 
 export async function requestEventClarification(
@@ -92,57 +90,50 @@ export async function requestEventClarification(
   replyByDate = null,
   requestedFields = [],
 ) {
-  const response = await apiClient.post(`/event-requests/${id}/clarification`, {
+  return postData(`/event-requests/${id}/clarification`, {
     note,
     replyByDate,
     requestedFields,
   });
-  return response.data;
 }
 
 export async function respondToEventClarification(id, message, amendments = {}) {
-  const response = await apiClient.patch(
+  return patchData(
     `/event-requests/${id}/clarification-response`,
     { message, amendments },
   );
-  return response.data;
 }
 
 export async function closeEventClarification(id, note) {
-  const response = await apiClient.post(
+  return postData(
     `/event-requests/${id}/clarification/close`,
     { note },
   );
-  return response.data;
 }
 
 export async function getEventClarificationHistory(id) {
-  const response = await apiClient.get(`/event-requests/${id}/clarification-history`);
-  return response.data;
+  return getData(`/event-requests/${id}/clarification-history`);
 }
 
 
 export async function getCoordinatorChangeRequests(eventRequestId) {
-  const response = await apiClient.get(
+  return getData(
     `/event-requests/${eventRequestId}/change-requests/review`,
   );
-  return response.data;
 }
 
 export async function processCoordinatorChangeRequest(changeRequestId, decision) {
-  const response = await apiClient.post(
+  return postData(
     `/event-requests/change-requests/${changeRequestId}/decision`,
     decision,
   );
-  return response.data;
 }
 
 /**
  * Fetches one event request by id.
  */
 export async function getEventRequestById(id) {
-  const response = await apiClient.get(`/event-requests/${id}`);
-  return response.data;
+  return getData(`/event-requests/${id}`);
 }
 
 /**
@@ -153,8 +144,7 @@ export async function getEventRequestById(id) {
  * @returns {Promise<Array>}
  */
 export async function getMyEventRequests() {
-  const response = await apiClient.get("/event-requests");
-  return response.data;
+  return getData("/event-requests");
 }
 
 /**
@@ -179,43 +169,38 @@ export async function getMyEventRequests() {
  * @returns {Promise<Array>} possibly empty; an empty queue is the good state
  */
 export async function getEventRequestQueue() {
-  const response = await apiClient.get("/event-requests/queue");
-  return response.data;
+  return getData("/event-requests/queue");
 }
 
 export async function getEventCancellationImpact(id) {
-  const response = await apiClient.get(
+  return getData(
     `/event-requests/${id}/cancellation-impact`,
   );
-  return response.data;
 }
 
 export async function previewSignificantEventChange(id, changes) {
-  const response = await apiClient.post(
+  return postData(
     `/event-requests/${id}/significant-change-impact`,
     { changes },
   );
-  return response.data;
 }
 
 export async function applySignificantEventChange(id, { changes, reason, expectedImpact }) {
-  const response = await apiClient.post(
+  return postData(
     `/event-requests/${id}/significant-change`,
     { changes, reason, expectedImpact },
   );
-  return response.data;
 }
 
 export async function cancelEventRequest(
   id,
   { reason, initiator, attendeeMessage },
 ) {
-  const response = await apiClient.post(`/event-requests/${id}/cancel`, {
+  return postData(`/event-requests/${id}/cancel`, {
     reason,
     initiator,
     attendeeMessage,
   });
-  return response.data;
 }
 
 /**
@@ -237,24 +222,21 @@ export async function getEventReadiness(id, { noEquipmentConfirmed } = {}) {
  * outstanding lines as `conflicts`.
  */
 export async function submitForSafetyReview(id, { note, noEquipmentConfirmed = false } = {}) {
-  const response = await apiClient.post(`/event-requests/${id}/safety-review`, {
+  return postData(`/event-requests/${id}/safety-review`, {
     note,
     noEquipmentConfirmed,
   });
-  return response.data;
 }
 
 export async function confirmEventRequest(id, { noEquipmentConfirmed = false, expectedUpdatedAt } = {}) {
-  const response = await apiClient.post(`/event-requests/${id}/confirm`, {
+  return postData(`/event-requests/${id}/confirm`, {
     noEquipmentConfirmed,
     ...(expectedUpdatedAt != null ? { expectedUpdatedAt } : {}),
   });
-  return response.data;
 }
 
 export async function getConfirmedArrangements(id) {
-  const response = await apiClient.get(`/event-requests/${id}/confirmed-arrangements`);
-  return response.data;
+  return getData(`/event-requests/${id}/confirmed-arrangements`);
 }
 
 // ---------------------------------------------------------------------------
@@ -295,8 +277,7 @@ export async function getConfirmedArrangements(id) {
  * @returns {Promise<Array>} possibly empty; nothing assigned is the good state
  */
 export async function getMyAssignedEvents() {
-  const response = await apiClient.get("/event-requests/mine");
-  return response.data;
+  return getData("/event-requests/mine");
 }
 
 /**
@@ -324,8 +305,7 @@ export async function getMyAssignedEvents() {
  * @returns {Promise<Object>}
  */
 export async function getEventRequestForReview(id) {
-  const response = await apiClient.get(`/event-requests/${id}/review`);
-  return response.data;
+  return getData(`/event-requests/${id}/review`);
 }
 
 /**
@@ -347,8 +327,7 @@ export async function getEventRequestForReview(id) {
  * @returns {Promise<Array<{id: string, fullName: string|null}>>} possibly empty
  */
 export async function listCoordinators() {
-  const response = await apiClient.get("/event-requests/coordinators");
-  return response.data;
+  return getData("/event-requests/coordinators");
 }
 
 /**
@@ -395,8 +374,7 @@ export async function listCoordinators() {
  * @returns {Promise<Array>} possibly empty: a draft has no history yet
  */
 export async function getAssignmentHistory(id) {
-  const response = await apiClient.get(`/event-requests/${id}/assignments`);
-  return response.data;
+  return getData(`/event-requests/${id}/assignments`);
 }
 
 /**
@@ -422,8 +400,7 @@ export async function getAssignmentHistory(id) {
  * @returns {Promise<Array>} possibly empty
  */
 export async function getAssignmentHistoryForReview(id) {
-  const response = await apiClient.get(`/event-requests/${id}/assignments/review`);
-  return response.data;
+  return getData(`/event-requests/${id}/assignments/review`);
 }
 
 /**
@@ -464,11 +441,10 @@ export async function getAssignmentHistoryForReview(id) {
  * @returns {Promise<Object>} the event after the handover
  */
 export async function reassignEventRequest(id, { newCoordinatorId, handoverNote }) {
-  const response = await apiClient.post(`/event-requests/${id}/reassign`, {
+  return postData(`/event-requests/${id}/reassign`, {
     newCoordinatorId,
     handoverNote,
   });
-  return response.data;
 }
 
 // ---------------------------------------------------------------------------
@@ -484,8 +460,7 @@ export async function reassignEventRequest(id, { newCoordinatorId, handoverNote 
  * @returns {Promise<Object[]>}
  */
 export async function listUnassignedEventRequests() {
-  const response = await apiClient.get("/event-requests/unassigned");
-  return response.data;
+  return getData("/event-requests/unassigned");
 }
 
 /**
@@ -496,8 +471,7 @@ export async function listUnassignedEventRequests() {
  * @returns {Promise<Array<{id: string, fullName: string|null, activeEvents: number}>>}
  */
 export async function listCoordinatorWorkload() {
-  const response = await apiClient.get("/event-requests/coordinator-workload");
-  return response.data;
+  return getData("/event-requests/coordinator-workload");
 }
 
 /**
@@ -544,8 +518,7 @@ export async function listAssignedEventsForLead(filters = {}) {
  *   coordinators: Array<{id: string, fullName: string|null, activeEvents: number, byStatus: Object<string, number>}>}>}
  */
 export async function listCoordinatorOverview() {
-  const response = await apiClient.get("/event-requests/coordinator-overview");
-  return response.data;
+  return getData("/event-requests/coordinator-overview");
 }
 
 /**
@@ -564,11 +537,10 @@ export async function listCoordinatorOverview() {
  * @returns {Promise<Object>} the request, now assigned
  */
 export async function assignEventRequest(id, { coordinatorId, note }) {
-  const response = await apiClient.post(`/event-requests/${id}/assign`, {
+  return postData(`/event-requests/${id}/assign`, {
     coordinatorId,
     note,
   });
-  return response.data;
 }
 
 // ---------------------------------------------------------------------------
@@ -604,8 +576,7 @@ export async function assignEventRequest(id, { coordinatorId, note }) {
  * @returns {Promise<Object>} the request, now under review
  */
 export async function startEventReview(id) {
-  const response = await apiClient.post(`/event-requests/${id}/start-review`);
-  return response.data;
+  return postData(`/event-requests/${id}/start-review`);
 }
 
 /**
@@ -645,9 +616,8 @@ export async function startEventReview(id) {
  * @returns {Promise<Object>} the request after the decision
  */
 export async function decideEventRequest(id, { decision, decisionNote }) {
-  const response = await apiClient.post(`/event-requests/${id}/decision`, {
+  return postData(`/event-requests/${id}/decision`, {
     decision,
     decisionNote,
   });
-  return response.data;
 }

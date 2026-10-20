@@ -33,6 +33,12 @@ function labelsText(codes, options) {
   return codes.map((code) => labelFor(code, options)).join(", ");
 }
 
+/** A code list as labels, or `emptyText` when there is no list or it is empty. */
+export function codesText(codes, options, emptyText) {
+  if (!Array.isArray(codes) || codes.length === 0) return emptyText;
+  return labelsText(codes, options);
+}
+
 const CODE_LIST_OPTIONS = {
   Accessibility: ACCESSIBILITY_FEATURES,
   Facilities: FACILITIES,

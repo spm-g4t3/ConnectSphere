@@ -30,6 +30,7 @@
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError, NotFoundError } from '../errors.js';
+import { createPgTranslator, rejected } from '../http/pgErrors.js';
 import { validateNotificationId } from '../validation/notificationValidation.js';
 
 /** Every column toNotification reads, so each read selects the same shape. */
@@ -50,12 +51,7 @@ const DEFAULT_LIMIT = 50;
  * reaching the cast. Anything else is unexpected and stays a plain Error, so
  * the route answers 500 and logs it.
  */
-function translateError(error) {
-  if (error.code === '22P02') {
-    return new ValidationError(`A value was rejected by the database: ${error.message ?? ''}`);
-  }
-  return new Error(error.message || 'Unexpected database error');
-}
+const translateError = createPgTranslator({ codes: { '22P02': rejected } });
 
 /**
  * Refuse a missing recipient before any query runs.

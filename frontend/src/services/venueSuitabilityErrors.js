@@ -8,6 +8,8 @@
 // are not for a user. A venue that is not suitable is not an error at all; it
 // comes back as a 200 and VenueSuitabilityResult shows it.
 
+import { SESSION_EXPIRED } from "./apiErrors";
+
 const CODE_MESSAGES = {
   EVENT_DATES_MISSING:
     "This event has no proposed start and end, so no venue can be checked against it yet.",
@@ -22,7 +24,7 @@ const CODE_MESSAGES = {
 
 const STATUS_MESSAGES = {
   400: "This venue could not be checked with these requirements. Check the layout, accessibility features and facilities, then try again.",
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only the coordinator assigned to this event can check a venue for it.",
   404: "That event or venue no longer exists.",
 };

@@ -8,6 +8,7 @@ import {
   toDatetimeLocalValue,
   toOffsetIsoString,
 } from "../services/datetimeFormat";
+import { formatMediumDateTime } from "../services/displayFormat";
 
 const FIELD_LABELS = {
   eventName: "Event name",
@@ -57,12 +58,7 @@ function readOnlyValue(field, request) {
   if (value === null || value === undefined || value === "") return "Not provided";
   if (field === "proposedStart" || field === "proposedEnd") {
     const date = new Date(value);
-    return Number.isNaN(date.getTime())
-      ? String(value)
-      : new Intl.DateTimeFormat(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(date);
+    return Number.isNaN(date.getTime()) ? String(value) : formatMediumDateTime(date);
   }
   return String(value);
 }

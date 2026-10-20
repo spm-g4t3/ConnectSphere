@@ -27,44 +27,38 @@
 //   409  the request is not in a state that allows this (code
 //        EQUIPMENT_REVIEW_NOT_ALLOWED).
 
-import { apiClient } from "./apiClient";
+import { deleteData, getData, patchData, postData, putData } from "./apiData";
 
 const base = (eventRequestId) => `/event-requests/${eventRequestId}/equipment-review`;
 
 /** The event's current equipment request, its lines and each line's availability. */
 export async function getEquipmentReview(eventRequestId) {
-  const response = await apiClient.get(base(eventRequestId));
-  return response.data;
+  return getData(base(eventRequestId));
 }
 
 /** Start reviewing, or start again after a "Cannot be fully arranged" outcome. */
 export async function startEquipmentReview(eventRequestId) {
-  const response = await apiClient.post(`${base(eventRequestId)}/start`);
-  return response.data;
+  return postData(`${base(eventRequestId)}/start`);
 }
 
 /** Take the review over from the staff member currently holding it. */
 export async function takeOverEquipmentReview(eventRequestId) {
-  const response = await apiClient.post(`${base(eventRequestId)}/take-over`);
-  return response.data;
+  return postData(`${base(eventRequestId)}/take-over`);
 }
 
 /** Mark a line as one that cannot be provided, with the reason (a note). */
 export async function markEquipmentLineUnavailable(eventRequestId, lineId, note) {
-  const response = await apiClient.put(`${base(eventRequestId)}/lines/${lineId}/outcome`, { note });
-  return response.data;
+  return putData(`${base(eventRequestId)}/lines/${lineId}/outcome`, { note });
 }
 
 /** Remove that mark from a line. */
 export async function clearEquipmentLineOutcome(eventRequestId, lineId) {
-  const response = await apiClient.delete(`${base(eventRequestId)}/lines/${lineId}/outcome`);
-  return response.data;
+  return deleteData(`${base(eventRequestId)}/lines/${lineId}/outcome`);
 }
 
 /** Finish the review: Cannot be fully arranged unless every line is reserved. */
 export async function completeEquipmentReview(eventRequestId) {
-  const response = await apiClient.post(`${base(eventRequestId)}/complete`);
-  return response.data;
+  return postData(`${base(eventRequestId)}/complete`);
 }
 
 // SCRUM-300: the reservation actions. Same state back from each, same refusals
@@ -72,30 +66,25 @@ export async function completeEquipmentReview(eventRequestId) {
 
 /** Reserve `quantity` units for a line, covering the event's current start to end. */
 export async function reserveEquipment(eventRequestId, lineId, quantity) {
-  const response = await apiClient.post(`${base(eventRequestId)}/lines/${lineId}/reservations`, { quantity });
-  return response.data;
+  return postData(`${base(eventRequestId)}/lines/${lineId}/reservations`, { quantity });
 }
 
 /** Reduce a reservation to a smaller quantity, with a reason. */
 export async function reduceEquipmentReservation(eventRequestId, reservationId, quantity, reason) {
-  const response = await apiClient.patch(`${base(eventRequestId)}/reservations/${reservationId}`, { quantity, reason });
-  return response.data;
+  return patchData(`${base(eventRequestId)}/reservations/${reservationId}`, { quantity, reason });
 }
 
 /** Release a reservation, with a reason. It stays in the history. */
 export async function releaseEquipmentReservation(eventRequestId, reservationId, reason) {
-  const response = await apiClient.post(`${base(eventRequestId)}/reservations/${reservationId}/release`, { reason });
-  return response.data;
+  return postData(`${base(eventRequestId)}/reservations/${reservationId}/release`, { reason });
 }
 
 /** Move a flagged reservation to the event's current date and time. */
 export async function moveEquipmentReservation(eventRequestId, reservationId) {
-  const response = await apiClient.post(`${base(eventRequestId)}/reservations/${reservationId}/move`, {});
-  return response.data;
+  return postData(`${base(eventRequestId)}/reservations/${reservationId}/move`, {});
 }
 
 /** Keep a flagged reservation as it is, when it still fits. */
 export async function keepEquipmentReservation(eventRequestId, reservationId) {
-  const response = await apiClient.post(`${base(eventRequestId)}/reservations/${reservationId}/keep`, {});
-  return response.data;
+  return postData(`${base(eventRequestId)}/reservations/${reservationId}/keep`, {});
 }

@@ -37,19 +37,12 @@ import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js'
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
+import { actingUser } from '../http/actingUser.js';
 
 
 /** Answers whatever a handler throws or rejects with; see src/http/handleError.js. */
 const errorMiddleware = createErrorMiddleware('equipment route');
 
-
-/**
- * The acting user is the signed-in one, and the request body never gets a say.
- * It is recorded in the change history.
- */
-function actingUser(req) {
-  return req.user.id;
-}
 
 
 /**

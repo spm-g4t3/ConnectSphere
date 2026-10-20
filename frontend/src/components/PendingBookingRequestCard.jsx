@@ -16,16 +16,17 @@ import {
   readBookingStatusDisplay,
 } from "../services/bookingRequestStatusDisplay";
 import { formatTimestamp } from "../services/displayFormat";
-import { replacesFlaggedBookingText } from "../services/flaggedBookingDisplay";
+import { capitalise, replacesFlaggedBookingText } from "../services/flaggedBookingDisplay";
 import { VENUE_TIME_NOTE, formatVenuePeriod, formatVenueRange } from "../services/datetimeFormat";
 import { formatOccupiedPeriod, occupiedPeriodParts } from "../services/occupiedPeriodDisplay";
 import { labelFor } from "../services/venueSuitabilityDisplay";
 import { ROOM_LAYOUTS } from "../services/venueLookups";
+import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
 
-// The server's limit on both texts (reject_booking_request, 066).
-const MAX_TEXT = 1000;
 const CONFLICTING = "conflicting";
 
+// Untrimmed, unlike displayFormat's orNotSpecified: these rows have always
+// shown the text exactly as stored.
 function orNotSpecified(value) {
   return value || "Not specified";
 }
@@ -45,10 +46,6 @@ function occupiedText(item) {
 
 function plural(count, one, many) {
   return count === 1 ? one : many;
-}
-
-function capitalise(text) {
-  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /**
@@ -246,7 +243,7 @@ export default function PendingBookingRequestCard({
             <textarea
               id={reasonId}
               value={reason}
-              maxLength={MAX_TEXT}
+              maxLength={SERVER_TEXT_MAX_LENGTH}
               required
               aria-invalid={reasonError ? "true" : undefined}
               aria-describedby={reasonError ? reasonErrorId : undefined}
@@ -263,7 +260,7 @@ export default function PendingBookingRequestCard({
             <textarea
               id={`${regionId}-alternative`}
               value={alternative}
-              maxLength={MAX_TEXT}
+              maxLength={SERVER_TEXT_MAX_LENGTH}
               onChange={(e) => setAlternative(e.target.value)}
             />
             <button type="submit" disabled={busy}>

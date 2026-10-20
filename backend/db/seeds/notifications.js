@@ -44,9 +44,7 @@
  */
 
 import { supabase } from '../../src/config/supabaseClient.js';
-
-/** What marks a seeded row. notificationsCleanup.js finds them by the same text; change both together. */
-const SEED_MARKER = 'SCRUM-172 demo';
+import { SEED_MARKER } from './lib.js';
 
 const ROLES = [
   'event_coordinator',

@@ -93,6 +93,7 @@ import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js'
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
+import { actingUser } from '../http/actingUser.js';
 import { parseCodeList } from '../http/parseCodeList.js';
 
 
@@ -207,20 +208,6 @@ function parseEventSearch(query) {
   return criteria;
 }
 
-
-/**
- * The acting user is the signed-in one, and the request body never gets a say.
- *
- * This replaces `req.body.userId ?? null`, which let a client name whoever it
- * liked as the editor of a venue -- against a table whose row level security
- * is deny-all precisely because the API is supposed to be the gate. It is also
- * the single change that finally populates venue_change_history.changed_by,
- * which had been NULL on every row ever written, leaving AC4's "records the
- * editing user" unmet however many rows the trigger produced.
- */
-function actingUser(req) {
-  return req.user.id;
-}
 
 
 /**

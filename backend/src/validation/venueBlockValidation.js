@@ -52,12 +52,10 @@
  */
 
 import { ValidationError } from '../errors.js';
+import { UUID_PATTERN } from './ids.js';
+import { createErrorCollector, throwIfInvalid } from './collector.js';
 import { BLOCK_REASON, isBlockReason } from '../domain/venueBlockReason.js';
 import { checkTimestamp, checkTimeWindow } from './timestampValidation.js';
-
-/** The shape gen_random_uuid() produces, which is what venue_blocks.id holds. */
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const TIMESTAMP_FIELDS = ['startsAt', 'endsAt'];
 
@@ -84,33 +82,6 @@ const ACKNOWLEDGED_MAX = 500;
 const REASON_MESSAGE = `must be one of: ${Object.values(BLOCK_REASON).join(', ')}`;
 
 
-/**
- * Collects problems so every fault in a form is reported at once.
- *
- * A copy of the collector in venueValidation.js and eventRequestValidation.js,
- * for the reason eventRequestValidation.js gives: extracting a shared helper
- * is a separate refactor, not something to fold into a feature story.
- */
-function createErrorCollector() {
-  const details = [];
-  return {
-    add: (field, message) => details.push({ field, message }),
-    details,
-    get hasErrors() {
-      return details.length > 0;
-    },
-  };
-}
-
-function throwIfInvalid(errors) {
-  if (!errors.hasErrors) return;
-
-  const summary = errors.details
-    .map(({ field, message }) => `${field}: ${message}`)
-    .join('; ');
-
-  throw new ValidationError(`Invalid venue block details -- ${summary}`, errors.details);
-}
 
 
 /**
@@ -314,7 +285,7 @@ export function validateCreateBlock(input, { now = new Date() } = {}) {
   // SCRUM-125.
   Object.assign(normalised, checkOverride(errors, input));
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid venue block details');
   return normalised;
 }
 
@@ -334,7 +305,7 @@ export function validateBlockId(id) {
     errors.add('blockId', 'must be a block id');
   }
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid venue block details');
   return id;
 }
 
@@ -456,7 +427,7 @@ export function validateUpdateBlock(input, { now = new Date() } = {}) {
   // the period over approved bookings faces the same gate (015).
   Object.assign(normalised, checkOverride(errors, input));
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid venue block details');
   return normalised;
 }
 
@@ -481,7 +452,7 @@ export function validateBlockWindow({ from, to } = {}) {
     maxDays: BLOCK_WINDOW_MAX_DAYS,
   });
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid venue block details');
   return window === null ? null : { from: window.start, to: window.end };
 }
 
@@ -511,6 +482,6 @@ export function validatePeriod({ startsAt, endsAt } = {}) {
     errors.add('endsAt', 'is required');
   }
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid venue block details');
   return { startsAt: window.start, endsAt: window.end };
 }

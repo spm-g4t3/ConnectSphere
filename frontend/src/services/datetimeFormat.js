@@ -239,3 +239,17 @@ export function formatVenuePeriod(startsAt, endsAt, fallback = "Not set") {
   if (!toVenueWallClock(startsAt) || !toVenueWallClock(endsAt)) return fallback;
   return `${formatVenueRange(startsAt, endsAt)} ${VENUE_TIME_NOTE}`;
 }
+
+/**
+ * Whether a clarification's "YYYY-MM-DD" reply-by date has passed.
+ *
+ * Compares against today's UTC date, not the device's or Singapore's; which
+ * zone it should use is an open question, so this keeps what the screens did.
+ *
+ * @param {string} replyByDate  "YYYY-MM-DD"
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
+export function isReplyOverdue(replyByDate, now = new Date()) {
+  return replyByDate < now.toISOString().slice(0, 10);
+}

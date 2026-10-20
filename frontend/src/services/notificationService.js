@@ -10,6 +10,7 @@
 // means to the reader, and it can only do that with err.response intact.
 
 import { apiClient } from "./apiClient";
+import { getData, patchData } from "./apiData";
 
 /**
  * The caller's notifications, newest first, read and unread together (the
@@ -19,8 +20,7 @@ import { apiClient } from "./apiClient";
  *          eventRequestId, payload, readAt, createdAt}>>}
  */
 export async function listNotifications() {
-  const response = await apiClient.get("/notifications");
-  return response.data;
+  return getData("/notifications");
 }
 
 /**
@@ -31,8 +31,7 @@ export async function listNotifications() {
  * @returns {Promise<Object>} the notification, readAt set
  */
 export async function markNotificationRead(id) {
-  const response = await apiClient.patch(`/notifications/${id}/read`);
-  return response.data;
+  return patchData(`/notifications/${id}/read`);
 }
 
 /**

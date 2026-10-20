@@ -21,20 +21,14 @@ import {
   resolutionConflicts,
   resolutionErrorMessage,
 } from "../services/flaggedBookingErrors";
+import { SESSION_EXPIRED, statusMessageOf } from "../services/apiErrors";
+import { asList } from "../services/displayFormat";
 
 const LIST_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Venue Staff can see flagged bookings.",
 };
 const LIST_DEFAULT_ERROR = "Flagged bookings could not be loaded. Please try again.";
-
-function listErrorMessage(err) {
-  return LIST_ERROR_MESSAGES[err?.response?.status] || LIST_DEFAULT_ERROR;
-}
-
-function asList(data) {
-  return Array.isArray(data) ? data : [];
-}
 
 function resolvedNotice(item, action) {
   const venue = item.venueName || "the venue";
@@ -65,7 +59,7 @@ export default function FlaggedBookings() {
       setBookings(asList(await getFlaggedBookings()));
       setError(null);
     } catch (err) {
-      setError(listErrorMessage(err));
+      setError(statusMessageOf(err, LIST_ERROR_MESSAGES, LIST_DEFAULT_ERROR));
     }
   }, []);
 
@@ -81,7 +75,7 @@ export default function FlaggedBookings() {
           setError(null);
         }
       } catch (err) {
-        if (!cancelled) setError(listErrorMessage(err));
+        if (!cancelled) setError(statusMessageOf(err, LIST_ERROR_MESSAGES, LIST_DEFAULT_ERROR));
       } finally {
         if (!cancelled) setLoading(false);
       }

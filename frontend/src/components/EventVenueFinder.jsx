@@ -152,8 +152,10 @@ import {
   FACILITIES,
   ROOM_LAYOUTS,
 } from "../services/venueLookups";
+import { codesText } from "../services/venueSuitabilityDisplay";
 import BookingRequestPanel from "./BookingRequestPanel";
 import VenueSuitabilityPanel from "./VenueSuitabilityPanel";
+import { fieldErrorWiring } from "./fieldErrors";
 
 /** The default for `liveRequests`: one shared empty Map, so it is stable. */
 const NO_LIVE_REQUESTS = new Map();
@@ -176,19 +178,6 @@ const RESULT_CODE_LISTS = [
 ];
 
 /**
- * A code list as readable text. A code venueLookups does not know shows as
- * the raw code -- the same fallback VenueDetail's fieldLabel uses -- because
- * the lookup copy is stale by design and hiding a code would misreport the
- * venue.
- */
-function codesText(codes, options) {
-  if (!Array.isArray(codes) || codes.length === 0) return "None listed";
-  return codes
-    .map((code) => options.find((option) => option.code === code)?.label ?? code)
-    .join(", ");
-}
-
-/**
  * One matching venue: its name as the heading, the rest as a <dl>, then the
  * SCRUM-191 check and SCRUM-254 request buttons.
  */
@@ -200,7 +189,9 @@ function VenueResult({ venue, headingId, checkDisabled, onCheck, requestDisabled
     { term: "Maximum capacity", value: venue.maxCapacity },
     ...RESULT_CODE_LISTS.map(({ field, term, options }) => ({
       term,
-      value: codesText(venue[field], options),
+      // An unknown code shows as itself: the lookup copy is stale by design,
+      // and hiding a code would misreport the venue.
+      value: codesText(venue[field], options, "None listed"),
     })),
   ];
   return (
@@ -400,7 +391,6 @@ export default function EventVenueFinder({
 
   const idPrefix = useId();
   const idFor = (field) => `${idPrefix}-${field}`;
-  const errorId = (field) => `${idPrefix}-${field}-error`;
   const hintId = (field) => `${idPrefix}-${field}-hint`;
 
   /** Editing a field retires that field's errors, client and server alike. */
@@ -492,25 +482,11 @@ export default function EventVenueFinder({
     setRequesting({ venue, suitability: result, requirements });
   }
 
-  function messagesFor(field) {
-    return [...fieldErrors, ...serverFieldErrors]
-      .filter((err) => err.field === field)
-      .map((err) => err.message);
-  }
-
-  /**
-   * aria wiring for one control, the same way VenueSearch does it, plus the
-   * ids of any hints that describe it. Errors come first, so they are read
-   * before the standing hint.
-   */
-  function ariaFor(field, hintIds = []) {
-    const hasErrors = messagesFor(field).length > 0;
-    const describedBy = [...(hasErrors ? [errorId(field)] : []), ...hintIds];
-    return {
-      "aria-invalid": hasErrors ? "true" : undefined,
-      "aria-describedby": describedBy.length > 0 ? describedBy.join(" ") : undefined,
-    };
-  }
+  // ariaFor also takes the ids of any hints that describe the control.
+  const { messagesFor, errorId, ariaFor } = fieldErrorWiring(idPrefix, [
+    ...fieldErrors,
+    ...serverFieldErrors,
+  ]);
 
   function renderFieldErrors(field) {
     const messages = messagesFor(field);

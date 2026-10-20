@@ -28,6 +28,7 @@
 
 import { supabase } from '../../src/config/supabaseClient.js';
 import { createVenue, retireVenue } from '../../src/services/venueService.js';
+import { escapeLike } from './lib.js';
 
 const WEEKDAYS = [1, 2, 3, 4, 5];
 const WEEKEND = [0, 6];
@@ -176,9 +177,6 @@ const DEMO_VENUES = [
     retire: true,
   },
 ];
-
-/** ilike treats % and _ as wildcards; escape them so a name is matched literally. */
-const escapeLike = (text) => text.replace(/[\\%_]/g, (character) => `\\${character}`);
 
 async function main() {
   console.log('\nSeeding demo venues\n');

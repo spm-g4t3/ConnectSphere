@@ -3,7 +3,7 @@
 // The frontend's calls to the flagged booking API, kept beside the other
 // service files so components never build a URL themselves.
 
-import { apiClient } from "./apiClient";
+import { getData, postData } from "./apiData";
 
 /**
  * Every booking flagged for review (GET /flagged-bookings), oldest flag first,
@@ -17,8 +17,7 @@ import { apiClient } from "./apiClient";
  * @returns {Promise<Array>} possibly empty
  */
 export async function getFlaggedBookings() {
-  const response = await apiClient.get("/flagged-bookings");
-  return response.data;
+  return getData("/flagged-bookings");
 }
 
 /**
@@ -34,8 +33,7 @@ export async function getFlaggedBookings() {
  * @returns {Promise<Array>} possibly empty
  */
 export async function getEventFlaggedBookings(eventRequestId) {
-  const response = await apiClient.get(`/flagged-bookings/events/${eventRequestId}`);
-  return response.data;
+  return getData(`/flagged-bookings/events/${eventRequestId}`);
 }
 
 /**
@@ -52,8 +50,7 @@ export async function getEventFlaggedBookings(eventRequestId) {
  * @returns {Promise<Object>} the booking, now approved, with `resolution`
  */
 export async function reinstateFlaggedBooking(id, reason) {
-  const response = await apiClient.post(`/flagged-bookings/${id}/reinstate`, { reason });
-  return response.data;
+  return postData(`/flagged-bookings/${id}/reinstate`, { reason });
 }
 
 /**
@@ -66,6 +63,5 @@ export async function reinstateFlaggedBooking(id, reason) {
  * @returns {Promise<Object>} the booking, now cancelled, with `resolution`
  */
 export async function cancelFlaggedBooking(id, reason) {
-  const response = await apiClient.post(`/flagged-bookings/${id}/cancel`, { reason });
-  return response.data;
+  return postData(`/flagged-bookings/${id}/cancel`, { reason });
 }

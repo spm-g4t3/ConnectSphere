@@ -30,27 +30,15 @@ import { randomUUID } from 'node:crypto';
 
 import { supabase } from '../src/config/supabaseClient.js';
 import { checkEquipmentAvailability } from '../src/services/equipmentAvailabilityService.js';
+import { createHarness, failureOf } from './lib/harness.js';
 
 const PREFIX = `__check_availability_${Date.now()}`;
 const PERIOD = { startAt: '2026-12-01T10:00:00Z', endAt: '2026-12-01T12:00:00Z' };
 const at = (time) => `2026-12-01T${time}:00Z`;
 
 const created = { typeId: null, eventIds: [] };
-let failures = 0;
-
-function check(label, passed, detail = '') {
-  console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
-  if (!passed) failures += 1;
-}
-
-async function failureOf(promise) {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-}
+const harness = createHarness();
+const { check } = harness;
 
 async function insertRow(table, row) {
   const { data, error } = await supabase.from(table).insert(row).select('id').single();
@@ -197,16 +185,16 @@ async function main() {
   const type = await supabase.from('equipment_types').select('total_quantity, damaged_quantity, under_maintenance_quantity, retired_at').eq('id', typeId).single();
   check('the type is untouched', type.data.total_quantity === 10 && type.data.damaged_quantity === 1 && type.data.under_maintenance_quantity === 1 && type.data.retired_at === null);
 
-  console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} check(s) FAILED.\n`);
+  console.log(harness.failures === 0 ? '\nAll checks passed.\n' : `\n${harness.failures} check(s) FAILED.\n`);
 }
 
 try {
   await main();
 } catch (err) {
   console.error('\nCheck aborted:', err.message ?? err);
-  failures += 1;
+  harness.failures += 1;
 } finally {
   await cleanup();
 }
 
-process.exit(failures === 0 ? 0 : 1);
+process.exit(harness.failures === 0 ? 0 : 1);

@@ -11,12 +11,16 @@
  * credentials.
  */
 
+import { ConflictError, NotFoundError, ValidationError } from '../errors.js';
+import { resolveClient } from '../config/resolveClient.js';
 import {
-  ConflictError,
-  ForbiddenError,
-  NotFoundError,
-  ValidationError,
-} from '../errors.js';
+  createPgTranslator,
+  forCodes,
+  forbidden,
+  hintConflict,
+  conflict,
+  invalid,
+} from '../http/pgErrors.js';
 import { BOOKING_STATUS, getBookingStatusDisplay } from '../domain/bookingStatus.js';
 import { toBookingRequest, toPeriodConflict } from './bookingRequestService.js';
 import {
@@ -25,27 +29,19 @@ import {
   validateResolution,
 } from '../validation/flaggedBookingValidation.js';
 
-async function resolveClient(client) {
-  if (client) return client;
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
-}
-
 /** PT409 carries the refusal in its hint, so a client can tell them apart. */
-function translateError(error) {
-  const code = error.code;
-  const message = error.message ?? 'Unexpected database error';
-
-  if (code === '42501') return new ForbiddenError(message);
-  if (code === 'P0002') return new NotFoundError(message);
-  if (code === 'PT409') return new ConflictError(message, { code: error.hint ?? null });
-  // The guarded update matched no row: the booking changed under the call.
-  if (code === '40001') return new ConflictError(message, { code: 'BOOKING_CHANGED' });
-  if (code === '22023' || code === '23514' || code === '22P02') {
-    return new ValidationError(message);
-  }
-  return new Error(message);
-}
+const translateError = createPgTranslator({
+  missingMessage: 'Unexpected database error',
+  codes: {
+    '42501': forbidden,
+    P0002: (message) => new NotFoundError(message),
+    PT409: hintConflict(),
+    // The guarded update matched no row: the booking changed under the call.
+    '40001': conflict('BOOKING_CHANGED'),
+    ...forCodes(['22023', '23514', '22P02'], invalid),
+  },
+  fallback: (message) => new Error(message),
+});
 
 function checkCaller(callerId) {
   if (typeof callerId !== 'string' || callerId.trim() === '') {

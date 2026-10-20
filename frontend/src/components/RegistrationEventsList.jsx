@@ -3,11 +3,12 @@ import { Link } from "react-router-dom";
 import { getMyEventRequests } from "../services/eventRequestService";
 import { isRegistrationConfigurable } from "../services/registrationStatuses";
 import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
+import { formatMediumDateTime } from "../services/displayFormat";
 
 function formatStart(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return "Start not set";
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return formatMediumDateTime(date);
 }
 
 export default function RegistrationEventsList() {

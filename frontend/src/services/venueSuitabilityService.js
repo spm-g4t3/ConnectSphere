@@ -4,7 +4,7 @@
 // check, kept beside the other service files so components never build a URL
 // themselves.
 
-import { apiClient } from "./apiClient";
+import { getData } from "./apiData";
 
 /**
  * Checks one venue against one event
@@ -62,10 +62,9 @@ export async function checkVenueSuitability(eventRequestId, venueId, requirement
   const attendance = options?.attendance;
   if (attendance !== undefined && attendance !== null) params.attendance = attendance;
 
-  const response = await apiClient.get(`/event-requests/${eventRequestId}/venue-suitability`, {
+  return getData(`/event-requests/${eventRequestId}/venue-suitability`, {
     params,
   });
-  return response.data;
 }
 
 /**
@@ -109,6 +108,5 @@ export async function checkVenueSuitability(eventRequestId, venueId, requirement
  *   newlyUnmet: string[], error?: {code: string, message: string}}>>}
  */
 export async function getEventVenueSuitability(eventRequestId) {
-  const response = await apiClient.get(`/event-requests/${eventRequestId}/venue-suitability/bookings`);
-  return response.data;
+  return getData(`/event-requests/${eventRequestId}/venue-suitability/bookings`);
 }

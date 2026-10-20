@@ -47,15 +47,17 @@ import { randomUUID } from 'node:crypto';
 
 import express from 'express';
 
-// supabaseAuth for sign-in, supabaseAdmin (aliased `supabase`) for every query.
+// supabaseAuth for sign-in (tokenFor, in lib/harness.js), supabaseAdmin (aliased
+// `supabase`) for every query.
 // One client for both is the hazard src/config/supabaseClient.js warns about:
 // signInWithPassword sets that client's auth state to the signed-in user for
 // the rest of the process, so every later query would run as that user under
 // row level security and silently return nothing -- cleanup included. See
 // check-venue-routes.js.
-import { supabase, supabaseAuth } from '../src/config/supabaseClient.js';
+import { supabase } from '../src/config/supabaseClient.js';
 import { createVenueRouter } from '../src/routes/venues.js';
 import { createVenue } from '../src/services/venueService.js';
+import { createHarness, createUserWithProfile, tokenFor, countUsersLeft, sameInstant } from './lib/harness.js';
 
 const STAMP = Date.now();
 const NAME = `__check_calendar_${STAMP}`;
@@ -80,17 +82,8 @@ const eventIds = [];
 const bookingIds = [];
 
 let server = null;
-let failures = 0;
-
-function check(label, passed, detail = '') {
-  console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
-  if (!passed) failures += 1;
-}
-
-/** Two timestamps name the same instant, whatever offset each is written in. */
-function sameInstant(a, b) {
-  return a != null && b != null && new Date(a).getTime() === new Date(b).getTime();
-}
+const harness = createHarness();
+const { check, step } = harness;
 
 // ---------------------------------------------------------------------------
 // Preflight
@@ -140,34 +133,10 @@ async function preflight() {
 
 /** A throwaway confirmed user with a password, and the profile requireAuth reads. */
 async function createTestUser(label, role) {
-  const { data, error } = await supabase.auth.admin.createUser({
+  return createUserWithProfile({
     email: `__check_calendar_${label}_${STAMP}@example.invalid`,
-    password: PASSWORD,
-    email_confirm: true,
+    password: PASSWORD, label, role, users,
   });
-  if (error) throw new Error(`could not create test user (${label}): ${error.message}`);
-
-  // Tracked before the profile insert, so cleanup removes the user even if
-  // that insert fails.
-  users[label] = data.user.id;
-
-  const { error: profileError } = await supabase
-    .from('profiles')
-    .insert({ id: data.user.id, role, full_name: `Check ${label}` });
-  if (profileError) {
-    throw new Error(`could not create profile (${label}): ${profileError.message}`);
-  }
-
-  return data.user;
-}
-
-async function tokenFor(user) {
-  const { data, error } = await supabaseAuth.auth.signInWithPassword({
-    email: user.email,
-    password: PASSWORD,
-  });
-  if (error) throw new Error(`could not sign in as ${user.email}: ${error.message}`);
-  return data.session.access_token;
 }
 
 async function insertEvent(label, extra = {}) {
@@ -206,27 +175,13 @@ async function readBooking(id) {
 // Cleanup
 // ---------------------------------------------------------------------------
 
-/** Run one cleanup step, logging its own failure so the rest still run. */
-async function step(label, fn) {
-  try {
-    const result = await fn();
-    if (result?.error) {
-      console.error(`  cleanup: ${label} failed: ${result.error.message}`);
-      failures += 1;
-    }
-  } catch (err) {
-    console.error(`  cleanup: ${label} failed: ${err.message}`);
-    failures += 1;
-  }
-}
-
 /** Every block ever made on this script's venues, removed or not. */
 async function blockIdsOnVenues() {
   if (venueIds.length === 0) return [];
   const { data, error } = await supabase.from('venue_blocks').select('id').in('venue_id', venueIds);
   if (error) {
     console.error(`  cleanup: reading blocks failed: ${error.message}`);
-    failures += 1;
+    harness.failures += 1;
   }
   return (data ?? []).map((row) => row.id);
 }
@@ -288,13 +243,8 @@ async function cleanup() {
     await step('venues', () => supabase.from('venues').delete().in('id', venueIds));
   }
 
-  // 7. Profiles cascade from auth.users, but are deleted explicitly so a
-  //    failure surfaces as its own error.
-  for (const [label, id] of Object.entries(users)) {
-    if (!id) continue;
-    await step(`profile (${label})`, () => supabase.from('profiles').delete().eq('id', id));
-    await step(`auth user (${label})`, () => supabase.auth.admin.deleteUser(id));
-  }
+  // 7. Profiles, then their auth users.
+  await harness.deleteTestUsers(users);
 }
 
 /** Prove the cleanup after it has run, rather than assuming it worked. */
@@ -316,12 +266,8 @@ async function verifyCleanup() {
     events: await count('event_requests', 'id', eventIds),
     venues: await count('venues', 'id', venueIds),
     profiles: await count('profiles', 'id', userIds),
-    users: 0,
+    users: await countUsersLeft(userIds),
   };
-  for (const id of userIds) {
-    const { data } = await supabase.auth.admin.getUserById(id);
-    if (data?.user) left.users += 1;
-  }
 
   check('nothing left behind after cleanup',
     Object.values(left).every((n) => n === 0), JSON.stringify(left));
@@ -335,16 +281,7 @@ async function main() {
   console.log('\nVenue calendar check\n');
 
   // --- preflight -------------------------------------------------------------
-  const missing = await preflight();
-  if (missing.length > 0) {
-    for (const line of missing) console.error(`  missing: ${line}`);
-    console.error('\nThe database is missing part of the schema. Apply backend/db/baseline/01-09 (a fresh');
-    console.error('project only), then each file in backend/db/migrations/ in order, in the Supabase SQL');
-    console.error('Editor, then run this again.');
-    failures += 1;
-    return;
-  }
-  check('the schema this check needs is applied', true);
+  if (!harness.schemaApplied(await preflight())) return;
 
   // --- users -----------------------------------------------------------------
   const staff = await createTestUser('staff', 'venue_staff');
@@ -353,10 +290,10 @@ async function main() {
   const attendee = await createTestUser('attendee', 'attendee');
 
   const tokens = {
-    staff: await tokenFor(staff),
-    coordinator: await tokenFor(coordinator),
-    organiser: await tokenFor(organiser),
-    attendee: await tokenFor(attendee),
+    staff: await tokenFor(staff, PASSWORD),
+    coordinator: await tokenFor(coordinator, PASSWORD),
+    organiser: await tokenFor(organiser, PASSWORD),
+    attendee: await tokenFor(attendee, PASSWORD),
   };
 
   // --- the real router on an ephemeral port ----------------------------------
@@ -617,7 +554,7 @@ async function main() {
 main()
   .catch((err) => {
     console.error(`\nFailed: ${err.message}`);
-    failures += 1;
+    harness.failures += 1;
   })
   .finally(async () => {
     await cleanup();
@@ -625,10 +562,10 @@ main()
       await verifyCleanup();
     } catch (err) {
       console.error(`  cleanup: verification failed: ${err.message}`);
-      failures += 1;
+      harness.failures += 1;
     }
-    if (failures > 0) {
-      console.error(`\n${failures} check(s) failed.\n`);
+    if (harness.failures > 0) {
+      console.error(`\n${harness.failures} check(s) failed.\n`);
       process.exit(1);
     }
     console.log('\nAll checks passed. Seeded, read through HTTP, refused, cleaned up.\n');

@@ -27,12 +27,13 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { getEventRequestForReview } from "../services/eventRequestService";
 import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // Keyed by status, as every load in this frontend is. 404 covers a draft as
 // well as a missing id: GET /:id/review answers both the same, so a draft is
 // not revealed to exist.
 const LOAD_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Event Coordinators and the Event Coordinator Lead can open an event here.",
   404: "There is no submitted event request at this address.",
   500: "This event request could not be loaded. Please try again.",

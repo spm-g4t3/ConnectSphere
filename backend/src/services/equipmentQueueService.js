@@ -17,6 +17,8 @@
  */
 
 import { ForbiddenError, ValidationError } from '../errors.js';
+import { resolveClient } from '../config/resolveClient.js';
+import { createPgTranslator } from '../http/pgErrors.js';
 import {
   EQUIPMENT_REQUEST_STATUS,
   equipmentRequestStatusLabel,
@@ -29,13 +31,13 @@ const STATUS_CHOICES = Object.values(EQUIPMENT_REQUEST_STATUS).map((value) => ({
   label: equipmentRequestStatusLabel(value),
 }));
 
-/** The client to use. Imported only when none was supplied, as the other services do. */
-async function resolveClient(client) {
-  if (client) return client;
-
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
-}
+const translateError = createPgTranslator({
+  codes: {
+    '42501': (_, error) => new ForbiddenError(error.message),
+    '22023': (_, error) =>
+      new ValidationError(error.message, [{ field: 'status', message: error.message }]),
+  },
+});
 
 /** A person with an id and maybe no name, or null when there is no id. */
 function person(id, name) {
@@ -92,11 +94,7 @@ export async function getEquipmentRequestQueue(query, { callerId, client } = {})
     p_include_past: value.includePast,
   });
 
-  if (error) {
-    if (error.code === '42501') throw new ForbiddenError(error.message);
-    if (error.code === '22023') throw new ValidationError(error.message, [{ field: 'status', message: error.message }]);
-    throw new Error(error.message || 'Unexpected database error');
-  }
+  if (error) throw translateError(error);
 
   return toQueue(data);
 }

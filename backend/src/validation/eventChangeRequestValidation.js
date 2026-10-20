@@ -8,7 +8,8 @@
  * the request is associated with the correct event.
  *
  * Pure and synchronous, the same posture as venueValidation.js: no database,
- * no imports beyond the error type and the change-field vocabulary. That
+ * no imports beyond the error type, the shared validation helpers and the
+ * change-field vocabulary. That
  * keeps it unit-testable without credentials -- the database
  * (006_event_change_requests.sql) is the backstop for anything this does not
  * check, and this layer exists to say what went wrong in words an Organiser
@@ -42,11 +43,10 @@
  */
 
 import { ValidationError } from '../errors.js';
+import { UUID_PATTERN, isPlausibleId } from './ids.js';
+import { createErrorCollector, throwIfInvalid } from './collector.js';
 import { CHANGE_FIELD, CHANGE_FIELDS } from '../domain/eventChangeField.js';
 import { CHANGE_REQUEST_DECISION, CHANGE_REQUEST_DECISIONS } from '../domain/changeRequestStatus.js';
-
-/** Loose enough to accept any real UUID (v1-v5) without pinning to Postgres's v4 default. */
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * ISO 8601 date, optionally with a time component. Deliberately stricter than
@@ -60,28 +60,6 @@ const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|
 
 /** changeField values whose requestedChange must parse as a date/time. */
 const DATE_CHANGE_FIELDS = [CHANGE_FIELD.PROPOSED_START, CHANGE_FIELD.PROPOSED_END];
-
-/** Collects problems so every fault in a request is reported at once. */
-function createErrorCollector() {
-  const details = [];
-  return {
-    add: (field, message) => details.push({ field, message }),
-    details,
-    get hasErrors() {
-      return details.length > 0;
-    },
-  };
-}
-
-function throwIfInvalid(errors) {
-  if (!errors.hasErrors) return;
-
-  const summary = errors.details
-    .map(({ field, message }) => `${field}: ${message}`)
-    .join('; ');
-
-  throw new ValidationError(`Invalid change request -- ${summary}`, errors.details);
-}
 
 /** Required text: must be a string with something in it once trimmed. */
 function checkRequiredText(errors, field, value) {
@@ -137,22 +115,6 @@ function checkEventRequestId(errors, value) {
 }
 
 /**
- * SCRUM-35: is this value at least shaped like an id?
- *
- * Exported so eventChangeRequestService.js can apply the same "not
- * id-shaped at all" rejection to a changeRequestId before spending a network
- * round trip on it, the same reasoning checkEventRequestId already applies
- * to eventRequestId -- without a second copy of the pattern it checks
- * against.
- *
- * @param {*} value
- * @returns {boolean}
- */
-export function isPlausibleId(value) {
-  return typeof value === 'string' && UUID_PATTERN.test(value.trim());
-}
-
-/**
  * SCRUM-33: requestedChange must be usable for the changeField it is paired
  * with, not merely present.
  *
@@ -205,7 +167,7 @@ export function validateCreateChangeRequest(input) {
   normalised.changeField = checkChangeField(errors, input.changeField);
   normalised.requestedChange = checkRequestedChange(errors, normalised.changeField, input.requestedChange);
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid change request');
   return normalised;
 }
 
@@ -291,6 +253,6 @@ export function validateProcessChangeRequest(input) {
   normalised.decision = checkDecision(errors, input.decision);
   normalised.decisionNotes = checkDecisionNotes(errors, normalised.decision, input.decisionNotes);
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid change request');
   return normalised;
 }

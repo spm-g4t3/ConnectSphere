@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getConfirmedArrangements } from "../services/eventRequestService";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
-import useRefreshOnReturn from "./useRefreshOnReturn";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const READ_ERRORS = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only the event's organiser can view these arrangements.",
   404: "This event request is no longer available.",
 };
@@ -33,7 +34,7 @@ function ArrangementDetails({ eventRequestId }) {
     load();
     return () => { version.current += 1; };
   }, [load]);
-  useRefreshOnReturn(load);
+  useRefetchOnReturn(load);
 
   if (state.loading) return <p role="status">Loading confirmed arrangements...</p>;
   if (state.error) return (
