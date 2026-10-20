@@ -619,7 +619,7 @@ export function createEventRequestRouter({
     if (event.assignedCoordinatorId !== req.user.id) {
       throw new ForbiddenError('Only the coordinator assigned to this event can preview its cancellation.');
     }
-    const impact = await getEventCancellationImpact(req.params.id, { client });
+    const impact = await getEventCancellationImpact(req.params.id, req.user.id, { client });
     res.status(200).json(impact);
   });
 

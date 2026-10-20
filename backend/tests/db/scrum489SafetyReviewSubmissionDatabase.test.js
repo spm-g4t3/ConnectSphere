@@ -899,8 +899,9 @@ describe('SCRUM-489: readiness and submission for the safety check', () => {
         expect(rpc?.code).toBe('42501');
         const direct = await db.query("update event_requests set status = 'confirmed' where id = $1 returning id", [id]);
         expect(direct.rows).toEqual([]);
+        // Since 011 a client role may not call it at all; before, RLS hid the row (P0002).
         const transition = await refusal(db.query("select change_event_request_status($1, 'safety_approved', 'confirmed', $2)", [id, coordinatorA]));
-        expect(transition?.code).toBe('P0002');
+        expect(transition?.code).toBe('42501');
       } finally {
         await db.exec('reset role');
       }

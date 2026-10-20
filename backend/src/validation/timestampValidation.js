@@ -26,6 +26,25 @@
  */
 
 
+/** Every user is in Singapore, so "today" is the Singapore calendar day. */
+const SINGAPORE_DATE = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Singapore',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/**
+ * Today's date in Singapore as YYYY-MM-DD ('en-CA' formats it that way). The
+ * UTC date is a day behind from 00:00 to 08:00 Singapore time.
+ *
+ * @param {Date} [now]
+ * @returns {string}
+ */
+export function singaporeToday(now = new Date()) {
+  return SINGAPORE_DATE.format(now);
+}
+
 /** A date with no time of day at all. Checked first so it can be named. */
 export const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 

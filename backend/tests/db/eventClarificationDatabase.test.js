@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createSchemaDb, seedUser } from "./helpers/schemaDb.js";
 import { queriesFor, refusal as refused } from "./helpers/queries.js";
+import { sgDate } from "../fixtures/time.js";
 
 // The clarification functions against the final schema.
 describe("SCRUM-162 clarification transactions in Postgres", () => {
@@ -100,7 +101,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
 
   it("refuses wrong actors, wrong statuses, blank messages and expired dates without recording them", async () => {
     const id = await event();
-    const due = new Date().toISOString().slice(0, 10);
+    const due = sgDate(0);
     const wrongStatusId = await event("submitted");
     const wrongStatus = await refused(db.query(
       "select * from request_event_clarification_with_fields($1, $2, $2, 'Question', null, '{}'::text[])",
@@ -141,6 +142,42 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     expect(wrongReplier?.code).toBe("P0002");
     expect(await history(id)).toHaveLength(1);
     expect(await notifications(id))    .toHaveLength(1);
+  });
+
+  it("SCRUM162_AC1_the_reply_by_date_must_be_after_today_in_singapore", async () => {
+    // 07:30 on 21 October in Singapore is still 20 October in UTC. A public
+    // now() ahead of pg_catalog stands in for the clock, inside a rolled-back
+    // transaction, so the function under test reads the fixed instant.
+    const refusedId = await event();
+    const acceptedId = await event();
+    await db.exec("begin");
+    try {
+      await db.exec(`
+        create function public.now() returns timestamptz language sql stable
+          as $$ select timestamptz '2026-10-20T23:30:00Z' $$;
+        set local search_path = public, pg_catalog;
+      `);
+      expect(await one(
+        "select (now() at time zone 'UTC')::date::text as utc, (now() at time zone 'Asia/Singapore')::date::text as sg",
+      )).toEqual({ utc: "2026-10-20", sg: "2026-10-21" });
+
+      await db.exec("savepoint singapore_today");
+      const today = await refused(db.query(
+        "select * from request_event_clarification_with_fields($1, $2, $2, 'Question', '2026-10-21', '{}'::text[])",
+        [refusedId, coordinator],
+      ));
+      await db.exec("rollback to savepoint singapore_today");
+      const tomorrow = await one(
+        "select * from request_event_clarification_with_fields($1, $2, $2, 'Question', '2026-10-22', '{}'::text[])",
+        [acceptedId, coordinator],
+      );
+
+      expect(today?.code).toBe("22023");
+      expect(today?.message).toBe("reply-by date must be in the future");
+      expect(tomorrow.status).toBe("pending_clarification");
+    } finally {
+      await db.exec("rollback");
+    }
   });
 
   it("limits organiser amendments to fields requested by the coordinator", async () => {

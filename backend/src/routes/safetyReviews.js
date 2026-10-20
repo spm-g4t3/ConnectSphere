@@ -23,16 +23,16 @@ export function createSafetyReviewRouter({
 
   router.use(requireAuth, safetyOfficerOnly);
 
-  router.get('/', async (_req, res) => {
-    res.status(200).json(await listSafetyReviews({ client }));
+  router.get('/', async (req, res) => {
+    res.status(200).json(await listSafetyReviews(req.user.id, { client }));
   });
 
-  router.get('/history', async (_req, res) => {
-    res.status(200).json(await listSafetyReviewHistory({ client }));
+  router.get('/history', async (req, res) => {
+    res.status(200).json(await listSafetyReviewHistory(req.user.id, { client }));
   });
 
   router.get('/:eventRequestId', async (req, res) => {
-    res.status(200).json(await getSafetyReview(req.params.eventRequestId, { client }));
+    res.status(200).json(await getSafetyReview(req.params.eventRequestId, req.user.id, { client }));
   });
 
   router.post('/:eventRequestId/responses', async (req, res) => {

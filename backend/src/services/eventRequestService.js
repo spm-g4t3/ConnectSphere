@@ -55,7 +55,7 @@
  *    reinterpret a value the timestamptz column already understands.
  */
 
-import { checkTimestamp, DATE_ONLY_PATTERN } from '../validation/timestampValidation.js';
+import { checkTimestamp, DATE_ONLY_PATTERN, singaporeToday } from '../validation/timestampValidation.js';
 import {
   ValidationError,
   NotFoundError,
@@ -842,7 +842,7 @@ export async function requestEventClarification(
       !DATE_ONLY_PATTERN.test(replyByDate) ||
       Number.isNaN(Date.parse(`${replyByDate}T00:00:00.000Z`)) ||
       new Date(`${replyByDate}T00:00:00.000Z`).toISOString().slice(0, 10) !== replyByDate ||
-      replyByDate <= new Date().toISOString().slice(0, 10)
+      replyByDate <= singaporeToday()
     ) {
       throw new ValidationError('replyByDate must be a valid date in the future');
     }
@@ -1234,12 +1234,15 @@ const CANCELLATION_INITIATORS = Object.freeze([
 
 /**
  * Read the current cancellation impact. This is a preview only; its Postgres
- * function is stable and does not write.
+ * function is stable and does not write. The function also checks that the
+ * caller is the event's assigned coordinator.
  */
-export async function getEventCancellationImpact(id, { client } = {}) {
+export async function getEventCancellationImpact(id, coordinatorId, { client } = {}) {
+  requireCallerId(coordinatorId, 'coordinatorId');
   const db = await resolveClient(client);
   const { data, error } = await db.rpc('event_cancellation_impact_preview', {
     p_event_request_id: id,
+    p_caller: coordinatorId,
   });
 
   if (error) throw translateError(error);

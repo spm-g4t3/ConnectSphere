@@ -153,7 +153,7 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
     await bookedVenue(earlier);
     const equipmentRequestId = await equipment(earlier);
 
-    const queue = await json('select safety_review_queue()::text as answer');
+    const queue = await json('select safety_review_queue($1)::text as answer', [safetyOfficer]);
     const targetEvents = queue.filter((item) => [earlier, later].includes(item.id));
     expect(targetEvents.map((item) => item.id)).toEqual([earlier, later]);
     expect(targetEvents[0]).toMatchObject({
@@ -164,7 +164,7 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
     expect(targetEvents[1].coordinatorName).toBe('Casey Coordinator');
     expect(targetEvents[0].waitingSeconds).toBeGreaterThan(targetEvents[1].waitingSeconds);
 
-    const detail = await json('select safety_review_detail($1)::text as answer', [earlier]);
+    const detail = await json('select safety_review_detail($1, $2)::text as answer', [earlier, safetyOfficer]);
     expect(detail.event).toMatchObject({
       eventName: 'Earlier Event',
       expectedAttendance: 120,
@@ -199,7 +199,7 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
       [eventId, otherUser],
     );
 
-    const queue = await json('select safety_review_queue()::text as answer');
+    const queue = await json('select safety_review_queue($1)::text as answer', [safetyOfficer]);
     expect(queue.find((item) => item.id === eventId).coordinatorName).toBe('Other User');
   });
 
@@ -325,6 +325,35 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
     expect(refused.code).toBe('55000');
     expect((await one('select status::text as status from event_requests where id = $1', [unsafeEvent])).status)
       .toBe('safety_review');
+  });
+
+  // The route admits only Safety Officers; the reads now check the caller too,
+  // so the function cannot be called as anyone else.
+  const reads = [
+    ['SCRUM490_AC1_the_queue', (caller) => one('select safety_review_queue($1)::text as answer', [caller])],
+    ['SCRUM490_AC13_the_history', (caller) => one('select safety_review_history($1)::text as answer', [caller])],
+    ['SCRUM490_AC3_the_detail', async (caller) => one('select safety_review_detail($1, $2)::text as answer', [await event(`Detail ${Math.random()}`), caller])],
+  ];
+
+  it.each(reads)('%s_refuses_a_null_caller_and_non_officers_with_42501', async (_name, read) => {
+    for (const caller of [null, coordinator, technicalStaff]) {
+      await expect(read(caller), String(caller)).rejects.toMatchObject({
+        code: '42501',
+        message: 'Only Safety Officers can view safety reviews',
+      });
+    }
+  });
+
+  it('SCRUM490_AC13_a_safety_officer_reads_the_history_of_responses', async () => {
+    const eventId = await event('History Event');
+    await respond(eventId, 'approved');
+
+    const history = await json('select safety_review_history($1)::text as answer', [safetyOfficer]);
+
+    expect(history.find((item) => item.id === eventId)).toMatchObject({
+      outcome: 'approved',
+      safetyOfficerName: 'Riley Safety Officer',
+    });
   });
 
   it('requires required notes, rejects non-officers, and refuses repeat responses with current status', async () => {

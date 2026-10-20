@@ -113,8 +113,9 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
     organiser = await newUser('organiser@example.com');
     coordinator = await newUser('coordinator@example.com');
-    reviewerA = await newUser('tech-a@example.com');
-    reviewerB = await newUser('tech-b@example.com');
+    // Starting and taking over a review need the Technical Support role (011).
+    reviewerA = await seedUser(db, { email: 'tech-a@example.com', role: 'technical_support_staff' });
+    reviewerB = await seedUser(db, { email: 'tech-b@example.com', role: 'technical_support_staff' });
 
     projector = await newType('Projector');
     microphone = await newType('Microphone');
@@ -181,6 +182,40 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
       expect(err.code).toBe('42501');
       expect((await requestRow(event)).status).toBe('pending_review');
+    });
+
+    it('SCRUM290_AC1_a_caller_without_the_technical_support_role_cannot_start_a_review', async () => {
+      // The route admits only Technical Support; the function now agrees, so a
+      // direct call as a coordinator cannot become the reviewer.
+      const { event, requestId } = await eventWithTwoLines();
+      const other = await seedUser(db, { email: `coord-${Math.random()}@example.com`, role: 'event_coordinator' });
+
+      const err = await refusal(start(event, other));
+
+      expect(err.code).toBe('42501');
+      expect(err.message).toBe('Only Technical Support Staff can review equipment requests');
+      expect(await requestRow(event)).toMatchObject({ status: 'pending_review', reviewer_id: null });
+      expect(await history(requestId)).toEqual([]);
+    });
+
+    it('SCRUM290_AC1_a_caller_without_the_technical_support_role_cannot_take_over_a_review', async () => {
+      const { event, requestId } = await eventWithTwoLines();
+      await start(event, reviewerA);
+      const other = await seedUser(db, { email: `coord-${Math.random()}@example.com`, role: 'event_coordinator' });
+
+      const err = await refusal(takeOver(event, other));
+
+      expect(err.code).toBe('42501');
+      expect(err.message).toBe('Only Technical Support Staff can review equipment requests');
+      expect((await requestRow(event)).reviewer_id).toBe(reviewerA);
+      expect((await history(requestId)).map((row) => row.action)).toEqual(['started']);
+    });
+
+    it('SCRUM290_AC1_a_technical_support_caller_can_start_and_take_over_a_review', async () => {
+      const { event } = await eventWithTwoLines();
+
+      expect((await start(event, reviewerA)).request.reviewer_id).toBe(reviewerA);
+      expect((await takeOver(event, reviewerB)).request.reviewer_id).toBe(reviewerB);
     });
   });
 

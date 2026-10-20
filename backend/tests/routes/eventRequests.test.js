@@ -3496,3 +3496,41 @@ describe('SCRUM-488 AC5, AC6: the safety statuses over HTTP', () => {
     expect(client.calls[1].order).toEqual([['created_at', { ascending: true }]]);
   });
 });
+
+describe('SCRUM-370: the cancellation impact preview over HTTP', () => {
+  const coordinatorAuth = (req, _res, next) => {
+    req.user = { id: OTHER_ORGANISER_ID, role: 'event_coordinator' };
+    next();
+  };
+
+  it('SCRUM370_AC1_passes_the_signed_in_coordinator_to_the_preview_function', async () => {
+    // The function checks the caller too (011), so it must be the session's user.
+    const impact = { venueBookings: { count: 0, details: [] } };
+    const client = createEventRequestClient([
+      ok(storedRow({ status: STATUS.APPROVED, assigned_coordinator_id: OTHER_ORGANISER_ID })),
+      ok(impact),
+    ]);
+
+    const res = await request(appWith({ client, requireAuth: coordinatorAuth }))
+      .get(`/api/event-requests/${REQUEST_ID}/cancellation-impact`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(impact);
+    expect(client.calls[1]).toMatchObject({
+      fn: 'event_cancellation_impact_preview',
+      args: { p_event_request_id: REQUEST_ID, p_caller: OTHER_ORGANISER_ID },
+    });
+  });
+
+  it('SCRUM370_AC1_answers_403_when_the_function_refuses_the_caller', async () => {
+    const client = createEventRequestClient([
+      ok(storedRow({ status: STATUS.APPROVED, assigned_coordinator_id: OTHER_ORGANISER_ID })),
+      dbError('42501', 'Only the coordinator assigned to this event can preview its cancellation'),
+    ]);
+
+    const res = await request(appWith({ client, requireAuth: coordinatorAuth }))
+      .get(`/api/event-requests/${REQUEST_ID}/cancellation-impact`);
+
+    expect(res.status).toBe(403);
+  });
+});

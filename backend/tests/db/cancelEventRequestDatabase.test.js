@@ -100,8 +100,8 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
     );
 
     const { preview } = await one(
-      'select event_cancellation_impact_preview($1) as preview',
-      [eventId],
+      'select event_cancellation_impact_preview($1, $2) as preview',
+      [eventId, coordinator],
     );
     expect(preview.venueHolds).toMatchObject({
       count: 1,
@@ -290,8 +290,8 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
       const changeRequestId = await makeChangeRequest(eventId);
 
       const { preview } = await one(
-        'select event_cancellation_impact_preview($1) as preview',
-        [eventId],
+        'select event_cancellation_impact_preview($1, $2) as preview',
+        [eventId, coordinator],
       );
       expect(preview.venueBookings.count).toBe(1);
       expect(preview.venueHolds.details).toEqual([expect.objectContaining({ id: holdId })]);

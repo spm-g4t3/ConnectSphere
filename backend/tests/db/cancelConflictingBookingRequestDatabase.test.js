@@ -59,7 +59,7 @@ describe('SCRUM-258 AC3: cancelling an event withdraws its conflicting requests'
     const conflicting = await makeBooking(eventId, venueId, 'conflicting');
     const pending = await makeBooking(eventId, otherVenueId, 'pending');
 
-    const { preview } = await one('select event_cancellation_impact_preview($1) as preview', [eventId]);
+    const { preview } = await one('select event_cancellation_impact_preview($1, $2) as preview', [eventId, coordinator]);
 
     expect(preview.bookingRequests.count).toBe(2);
     expect(preview.bookingRequests.details.map((d) => [d.id, d.status]).sort()).toEqual(

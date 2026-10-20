@@ -7,7 +7,7 @@ import {
   conflict,
   invalid,
 } from '../http/pgErrors.js';
-import { UUID_PATTERN } from '../validation/ids.js';
+import { UUID_PATTERN, requireCallerId } from '../validation/ids.js';
 
 const OUTCOMES = new Set(['approved', 'changes_requested', 'rejected']);
 export const SAFETY_REVIEW_NOT_ALLOWED = 'SAFETY_REVIEW_NOT_ALLOWED';
@@ -71,22 +71,26 @@ async function callRpc(db, name, args) {
   return data;
 }
 
-export async function listSafetyReviews({ client } = {}) {
+// The reads take the caller because the functions check it is a Safety Officer.
+export async function listSafetyReviews(callerId, { client } = {}) {
+  requireCallerId(callerId, 'callerId');
   const db = await resolveClient(client);
-  const rows = await callRpc(db, 'safety_review_queue');
+  const rows = await callRpc(db, 'safety_review_queue', { p_caller: callerId });
   return Array.isArray(rows) ? rows : [];
 }
 
-export async function listSafetyReviewHistory({ client } = {}) {
+export async function listSafetyReviewHistory(callerId, { client } = {}) {
+  requireCallerId(callerId, 'callerId');
   const db = await resolveClient(client);
-  const rows = await callRpc(db, 'safety_review_history');
+  const rows = await callRpc(db, 'safety_review_history', { p_caller: callerId });
   return Array.isArray(rows) ? rows : [];
 }
 
-export async function getSafetyReview(eventRequestId, { client } = {}) {
+export async function getSafetyReview(eventRequestId, callerId, { client } = {}) {
   validateEventId(eventRequestId);
+  requireCallerId(callerId, 'callerId');
   const db = await resolveClient(client);
-  return callRpc(db, 'safety_review_detail', { p_event_request_id: eventRequestId });
+  return callRpc(db, 'safety_review_detail', { p_event_request_id: eventRequestId, p_caller: callerId });
 }
 
 export async function respondToSafetyReview(eventRequestId, input, safetyOfficerId, { client } = {}) {

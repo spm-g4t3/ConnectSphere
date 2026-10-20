@@ -74,7 +74,7 @@ import {
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
 import { formatTimestamp, orNotSpecified } from "../services/displayFormat";
-import { isReplyOverdue } from "../services/datetimeFormat";
+import { isReplyOverdue, venueTomorrow } from "../services/datetimeFormat";
 
 const CLARIFICATION_FIELDS = [
   ["eventName", "Event name"],
@@ -189,9 +189,8 @@ export default function CoordinatorRequestDetail({
 
   const display = readStatusDisplay(current);
   const capacity = seedableCapacity(request.expectedAttendance);
-  const earliestReplyDate = new Date();
-  earliestReplyDate.setUTCDate(earliestReplyDate.getUTCDate() + 1);
-  const minReplyByDate = earliestReplyDate.toISOString().slice(0, 10);
+  // The reply-by date is a Singapore calendar day, so tomorrow is Singapore's.
+  const minReplyByDate = venueTomorrow();
   const [reviewNote, setReviewNote] = useState("");
   const [replyByDate, setReplyByDate] = useState("");
   const [requestedFields, setRequestedFields] = useState([]);

@@ -136,6 +136,53 @@ describe('SCRUM-172 / SCRUM-17: client roles are kept out by row level security'
 });
 
 
+describe('SCRUM-172 / SCRUM-572: only the API may call a function', () => {
+  // Every check trusts its p_caller argument, so a client allowed EXECUTE could
+  // call as anyone. btree_gist's functions come from the extension and read no rows.
+  const ourFunctions = () => rows(
+    `select p.oid, p.oid::regprocedure::text as signature
+       from pg_proc p
+      where p.pronamespace = 'public'::regnamespace
+        and not exists (
+          select 1 from pg_depend d
+           where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e'
+        )`,
+  );
+
+  it('SCRUM172_AC8_no_function_in_the_schema_is_executable_by_a_client_role', async () => {
+    const functions = await ourFunctions();
+    const callable = [];
+    for (const { oid, signature } of functions) {
+      if ((await clientsCanExecute(db, oid)).length > 0) callable.push(signature);
+    }
+
+    expect(functions.length).toBeGreaterThan(100);
+    expect(callable).toEqual([]);
+  });
+
+  it('SCRUM172_AC8_service_role_can_execute_every_function', async () => {
+    const missing = [];
+    for (const { oid, signature } of await ourFunctions()) {
+      if ((await clientsCanExecute(db, oid, ['service_role'])).length === 0) missing.push(signature);
+    }
+
+    expect(missing).toEqual([]);
+  });
+
+  it('SCRUM172_AC8_a_function_created_later_starts_revoked_from_the_client_roles', async () => {
+    // The default privileges, so a later migration cannot forget its revoke.
+    await db.exec('begin');
+    try {
+      await db.exec('create function zz_later_function() returns int language sql as $$ select 1 $$');
+      expect(await clientsCanExecute(db, 'zz_later_function()', ['anon', 'authenticated', 'service_role']))
+        .toEqual(['service_role']);
+    } finally {
+      await db.exec('rollback');
+    }
+  });
+});
+
+
 describe('no function runs with definer rights', () => {
   it('SCRUM17_AC4_is_not_security_definer', async () => {
     const definers = await rows(

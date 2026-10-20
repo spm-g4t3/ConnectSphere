@@ -73,7 +73,7 @@
  * that organiser -- that is authorisation, and it belongs in middleware.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 
 import {
   createEventRequest,
@@ -100,6 +100,7 @@ import {
 import { ROLE } from '../../src/domain/userRole.js';
 import { STATUS, canTransition } from '../../src/domain/eventRequestStatus.js';
 import { ok, dbError, errorFrom, createEventRequestClient } from '../fixtures/supabaseStubs.js';
+import { sgDate } from '../fixtures/time.js';
 
 
 // ---------------------------------------------------------------------------
@@ -1612,7 +1613,7 @@ describe('SCRUM-162: assigned Coordinator requests clarification', () => {
   it.each([
     ['malformed', 'not-a-date'],
     ['impossible', '2026-02-30'],
-    ['today', new Date().toISOString().slice(0, 10)],
+    ['today', sgDate(0)],
   ])('rejects a %s reply-by date before querying', async (_label, replyByDate) => {
     const client = createEventRequestClient([]);
     const err = await errorFrom(
@@ -1625,6 +1626,40 @@ describe('SCRUM-162: assigned Coordinator requests clarification', () => {
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toMatch(/replyByDate.*future/i);
     expect(client.calls).toHaveLength(0);
+  });
+
+  describe('the reply-by date is checked against the Singapore calendar', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    // 07:30 on 21 October in Singapore, still 20 October in UTC.
+    const SINGAPORE_MORNING = new Date('2026-10-20T23:30:00Z');
+
+    it('SCRUM162_AC1_refuses_the_singapore_today_while_utc_is_still_yesterday', async () => {
+      vi.useFakeTimers({ now: SINGAPORE_MORNING, toFake: ['Date'] });
+      const client = createEventRequestClient([]);
+
+      const err = await errorFrom(
+        requestEventClarification(REQUEST_ID, 'Please clarify.', COORDINATOR_ID, { replyByDate: '2026-10-21', client }),
+      );
+
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.message).toMatch(/replyByDate.*future/i);
+      expect(client.calls).toHaveLength(0);
+    });
+
+    it('SCRUM162_AC1_accepts_the_next_singapore_day', async () => {
+      vi.useFakeTimers({ now: SINGAPORE_MORNING, toFake: ['Date'] });
+      const client = createEventRequestClient([
+        ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: COORDINATOR_ID })),
+        ok(storedRow({ status: STATUS.PENDING_CLARIFICATION, assigned_coordinator_id: COORDINATOR_ID })),
+      ]);
+
+      await requestEventClarification(REQUEST_ID, 'Please clarify.', COORDINATOR_ID, { replyByDate: '2026-10-22', client });
+
+      expect(client.calls[1].args.p_reply_by_date).toBe('2026-10-22');
+    });
   });
 
   it('records an organiser reply and scoped amendments, returning the request to review', async () => {

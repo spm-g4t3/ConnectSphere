@@ -6,6 +6,7 @@ import {
   listSafetyReviews,
   respondToSafetyReview,
 } from '../../src/services/safetyReviewService.js';
+import { ForbiddenError, ValidationError } from '../../src/errors.js';
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const OFFICER_ID = '22222222-2222-4222-8222-222222222222';
@@ -20,23 +21,48 @@ describe('Safety review service', () => {
     const rows = [{ id: EVENT_ID, eventName: 'Annual Dinner' }];
     const db = client({ data: rows, error: null });
 
-    await expect(listSafetyReviews({ client: db })).resolves.toEqual(rows);
-    expect(db.rpc).toHaveBeenCalledWith('safety_review_queue', undefined);
+    await expect(listSafetyReviews(OFFICER_ID, { client: db })).resolves.toEqual(rows);
+    expect(db.rpc).toHaveBeenCalledWith('safety_review_queue', { p_caller: OFFICER_ID });
   });
 
   it('reads past responses through the history function', async () => {
     const rows = [{ id: EVENT_ID, outcome: 'approved' }];
     const db = client({ data: rows, error: null });
 
-    await expect(listSafetyReviewHistory({ client: db })).resolves.toEqual(rows);
-    expect(db.rpc).toHaveBeenCalledWith('safety_review_history', undefined);
+    await expect(listSafetyReviewHistory(OFFICER_ID, { client: db })).resolves.toEqual(rows);
+    expect(db.rpc).toHaveBeenCalledWith('safety_review_history', { p_caller: OFFICER_ID });
   });
 
   it('validates event ids before reading review details', async () => {
     const db = client();
 
-    await expect(getSafetyReview('not-an-id', { client: db })).rejects.toThrow(/valid event request id/);
+    await expect(getSafetyReview('not-an-id', OFFICER_ID, { client: db })).rejects.toThrow(/valid event request id/);
     expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM490_AC3_reads_the_detail_as_the_signed_in_officer', async () => {
+    const db = client({ data: { event: { id: EVENT_ID } }, error: null });
+
+    await getSafetyReview(EVENT_ID, OFFICER_ID, { client: db });
+
+    expect(db.rpc).toHaveBeenCalledWith('safety_review_detail', { p_event_request_id: EVENT_ID, p_caller: OFFICER_ID });
+  });
+
+  it.each([
+    ['SCRUM490_AC1_the_queue', (db) => listSafetyReviews(undefined, { client: db })],
+    ['SCRUM490_AC13_the_history', (db) => listSafetyReviewHistory(undefined, { client: db })],
+    ['SCRUM490_AC3_the_detail', (db) => getSafetyReview(EVENT_ID, undefined, { client: db })],
+  ])('%s_is_not_read_without_a_caller', async (_name, read) => {
+    const db = client();
+
+    await expect(read(db)).rejects.toBeInstanceOf(ValidationError);
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM490_AC1_maps_the_functions_role_refusal_to_forbidden', async () => {
+    const db = client({ data: null, error: { code: '42501', message: 'Only Safety Officers can view safety reviews' } });
+
+    await expect(listSafetyReviews(OFFICER_ID, { client: db })).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it('passes only the signed-in officer and the selected response to the transaction', async () => {

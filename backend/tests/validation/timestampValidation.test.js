@@ -17,7 +17,7 @@ import {
   checkTimestamp,
 } from '../../src/validation/timestampValidation.js';
 // SCRUM-130: a separate import so the existing one is left as it was.
-import { checkTimeWindow } from '../../src/validation/timestampValidation.js';
+import { checkTimeWindow, singaporeToday } from '../../src/validation/timestampValidation.js';
 
 /** The smallest thing checkTimestamp accepts: any object with add(). */
 function collector() {
@@ -371,5 +371,16 @@ describe('checkTimestamp coverage gaps (SCRUM-132)', () => {
 
     expect(errors.details).toEqual([]);
     expect(instant.toISOString()).toBe('2026-06-01T01:00:00.000Z');
+  });
+});
+
+
+describe('singaporeToday', () => {
+  it.each([
+    ['SCRUM162_AC1_23_30_utc_is_already_the_next_singapore_day', '2026-10-20T23:30:00Z', '2026-10-21'],
+    ['SCRUM162_AC1_15_59_utc_is_still_the_same_singapore_day', '2026-10-20T15:59:59Z', '2026-10-20'],
+    ['SCRUM162_AC1_16_00_utc_is_singapore_midnight_of_the_next_day', '2026-10-20T16:00:00Z', '2026-10-21'],
+  ])('%s', (_name, instant, expected) => {
+    expect(singaporeToday(new Date(instant))).toBe(expected);
   });
 });

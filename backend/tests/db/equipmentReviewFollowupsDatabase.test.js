@@ -40,7 +40,8 @@ describe('SCRUM-300: review follow-ups in Postgres', () => {
 
     organiser = await seedUser(db, { email: 'organiser@example.com' });
     coordinator = await seedUser(db, { email: 'coordinator@example.com' });
-    reviewerA = await seedUser(db, { email: 'tech-a@example.com' });
+    // Starting a review needs the Technical Support role (011).
+    reviewerA = await seedUser(db, { email: 'tech-a@example.com', role: 'technical_support_staff' });
   }, 60000);
 
   const amend = async (event, line, quantity) =>

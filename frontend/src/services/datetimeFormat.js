@@ -180,6 +180,29 @@ export function toVenueWallClock(isoString) {
 }
 
 /**
+ * Today's date in Singapore, "YYYY-MM-DD", whatever the device's zone.
+ *
+ * Same fixed-offset shift as toVenueWallClock, so it needs no Intl zone data.
+ *
+ * @param {Date} [now]
+ * @returns {string}
+ */
+export function venueToday(now = new Date()) {
+  return new Date(now.getTime() + VENUE_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * Tomorrow's date in Singapore, "YYYY-MM-DD". Adding 24 hours is exact
+ * because Singapore has no daylight saving.
+ *
+ * @param {Date} [now]
+ * @returns {string}
+ */
+export function venueTomorrow(now = new Date()) {
+  return venueToday(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+}
+
+/**
  * Stamp Singapore's offset onto a Singapore wall-clock value, for the wire.
  *
  * The venue-time counterpart of toOffsetIsoString, with the same rules: the
@@ -257,13 +280,13 @@ export function formatVenueTimestamp(isoString, fallback = "Not set") {
 /**
  * Whether a clarification's "YYYY-MM-DD" reply-by date has passed.
  *
- * Compares against today's UTC date, not the device's or Singapore's; which
- * zone it should use is an open question, so this keeps what the screens did.
+ * Compares against today's Singapore date, the calendar the venues and the
+ * reply-by deadline are kept in, so every device agrees when it lapses.
  *
  * @param {string} replyByDate  "YYYY-MM-DD"
  * @param {Date} [now]
  * @returns {boolean}
  */
 export function isReplyOverdue(replyByDate, now = new Date()) {
-  return replyByDate < now.toISOString().slice(0, 10);
+  return replyByDate < venueToday(now);
 }

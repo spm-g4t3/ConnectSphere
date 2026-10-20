@@ -38,7 +38,7 @@
 // the wrong status. The screen's checks are a convenience; the backend tests
 // and the live checks against migration 029 prove the gate.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -631,6 +631,21 @@ describe("SCRUM19 deciding a request under review", () => {
     // so they go as the defaults: no date, no fields.
     await waitFor(() => expect(requestEventClarification).toHaveBeenCalledWith(REQUEST_ID, "Please confirm numbers.", null, []));
     expect(decideEventRequest).not.toHaveBeenCalled();
+  });
+
+  describe("the reply-by date picker", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("SCRUM162_AC1_the_earliest_reply_by_date_is_tomorrow_in_singapore", async () => {
+      // 23:30 UTC on 20 Oct is 07:30 on 21 Oct in Singapore, so tomorrow is the 22nd.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-20T23:30:00Z"));
+      renderAs(ASSIGNED, underReview());
+
+      expect(await screen.findByLabelText("Optional reply-by date")).toHaveAttribute("min", "2026-10-22");
+    });
   });
 
   // The refusals carry the server's own message, which names the event's id,

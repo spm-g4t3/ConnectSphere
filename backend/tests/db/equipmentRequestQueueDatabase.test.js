@@ -80,7 +80,8 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
 
     organiser = await newUser('organiser@example.com', 'Olive Organiser');
     coordinator = await newUser('coordinator@example.com', 'Rae Tan');
-    sam = await newUser('sam@example.com', 'Sam Lee');
+    // Sam reviews, so holds the Technical Support role starting a review needs (011).
+    sam = await newUser('sam@example.com', 'Sam Lee', 'technical_support_staff');
     alex = await newUser('alex@example.com', 'Alex Koh');
     tech = await newUser('tech@example.com', 'Tessa Support', 'technical_support_staff');
     hall = (await one("insert into venues (name, location, max_capacity) values ('Hall A', 'Block A', 100) returning id")).id;

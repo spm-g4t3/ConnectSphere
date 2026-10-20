@@ -73,7 +73,7 @@ describe('Safety Officer route authorization', () => {
     const response = await request(appWith(db)).get('/api/safety-reviews/history');
 
     expect(response.status).toBe(200);
-    expect(db.rpc.mock.calls.map(([name]) => name)).toEqual(['safety_review_history']);
+    expect(db.rpc.mock.calls).toEqual([['safety_review_history', { p_caller: '22222222-2222-4222-8222-222222222222' }]]);
   });
 
   it('lets a Safety Officer read the queue and focused detail', async () => {
@@ -82,9 +82,10 @@ describe('Safety Officer route authorization', () => {
 
     expect((await request(app).get('/api/safety-reviews')).status).toBe(200);
     expect((await request(app).get(`/api/safety-reviews/${EVENT_ID}`)).status).toBe(200);
-    expect(db.rpc.mock.calls.map(([name]) => name)).toEqual([
-      'safety_review_queue',
-      'safety_review_detail',
+    // The functions check the caller too (011), so each read names the session's officer.
+    expect(db.rpc.mock.calls).toEqual([
+      ['safety_review_queue', { p_caller: '22222222-2222-4222-8222-222222222222' }],
+      ['safety_review_detail', { p_event_request_id: EVENT_ID, p_caller: '22222222-2222-4222-8222-222222222222' }],
     ]);
   });
 
