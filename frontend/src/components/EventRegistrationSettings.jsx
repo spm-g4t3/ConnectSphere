@@ -6,8 +6,12 @@ import {
 } from "../services/eventRegistrationService";
 import { isRegistrationConfigurable } from "../services/registrationStatuses";
 import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
-import { toDatetimeLocalValue, toOffsetIsoString } from "../services/datetimeFormat";
-import { formatTimestamp } from "../services/displayFormat";
+import {
+  deviceTimeZoneLabel,
+  formatVenueTimestamp,
+  toDatetimeLocalValue,
+  toOffsetIsoString,
+} from "../services/datetimeFormat";
 
 const FIELD_LABELS = {
   registrationEnabled: "Registration",
@@ -154,21 +158,21 @@ export default function EventRegistrationSettings({ eventId }) {
             <p className="eyebrow">Event registration</p>
             <h1>{event.eventName}</h1>
             <p>Event status: <strong>{displayStatus(event)}</strong></p>
-            <p>Event starts: {formatTimestamp(event.proposedStart, "Not set")}</p>
+            <p>Event starts: {formatVenueTimestamp(event.proposedStart)}</p>
           </header>
           {settings && !editing && (
             <section className="event-registration-page__summary" aria-labelledby="registration-summary-heading">
               <h2 id="registration-summary-heading">Current registration</h2>
               <dl>
                 <div><dt>Status</dt><dd>{settings.enabled ? "On" : "Off"}</dd></div>
-                <div><dt>Opens</dt><dd>{formatTimestamp(settings.opensAt, "Not set")}</dd></div>
-                <div><dt>Closes</dt><dd>{formatTimestamp(settings.closesAt, "Not set")}</dd></div>
+                <div><dt>Opens</dt><dd>{formatVenueTimestamp(settings.opensAt)}</dd></div>
+                <div><dt>Closes</dt><dd>{formatVenueTimestamp(settings.closesAt)}</dd></div>
                 <div><dt>Capacity</dt><dd>{settings.capacity ?? "Unlimited"}</dd></div>
                 <div>
                   <dt>Registered</dt>
                   <dd>{settings.registeredCount}{settings.capacity ? ` / ${settings.capacity}` : ""}</dd>
                 </div>
-                <div><dt>Withdrawal deadline</dt><dd>{formatTimestamp(settings.withdrawalDeadline, "Not set")}</dd></div>
+                <div><dt>Withdrawal deadline</dt><dd>{formatVenueTimestamp(settings.withdrawalDeadline)}</dd></div>
               </dl>
               {saved && <p role="status">Registration settings saved.</p>}
               {canEdit && loaded && form && (
@@ -247,6 +251,10 @@ export default function EventRegistrationSettings({ eventId }) {
                   />
                 </label>
               </div>
+              {/* Typed in device time like the other forms; the summary reads Singapore time. */}
+              <p className="event-registration-page__hint">
+                Times are in your device's time zone ({deviceTimeZoneLabel()}).
+              </p>
               <div className="event-registration-page__actions">
                 <button type="submit" disabled={saving}>
                   {saving ? "Saving..." : "Save registration settings"}

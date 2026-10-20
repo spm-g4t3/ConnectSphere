@@ -8,7 +8,8 @@ export const escapeLike = (text) => text.replace(/[\\%_]/g, (character) => `\\${
 
 /** What marks a request bookingSuitability.js seeds; its cleanup finds them by it. */
 export const SEED_NOTE_PREFIX = 'Seeded demo (SCRUM-188 AC7)';
-export const LIVE_STATUSES = ['pending', 'approved', 'flagged_for_review'];
+// The API's list, so a conflicting request also counts as live and the two cannot drift.
+export { LIVE_BOOKING_STATUSES as LIVE_STATUSES } from '../../src/domain/bookingStatus.js';
 
 /** What marks a row notifications.js seeds, in payload.seeded; its cleanup finds them by it. */
 export const SEED_MARKER = 'SCRUM-172 demo';

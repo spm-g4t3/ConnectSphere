@@ -241,6 +241,20 @@ export function formatVenuePeriod(startsAt, endsAt, fallback = "Not set") {
 }
 
 /**
+ * One instant as Singapore wall clock plus the note, or the fallback alone
+ * when unreadable: "2026-11-01 10:00 (Singapore time)".
+ *
+ * @param {string} [isoString]  an instant from the API, with an offset
+ * @param {string} [fallback="Not set"]
+ * @returns {string}
+ */
+export function formatVenueTimestamp(isoString, fallback = "Not set") {
+  const wallClock = toVenueWallClock(isoString);
+  if (!wallClock) return fallback;
+  return `${wallClock.replace("T", " ")} ${VENUE_TIME_NOTE}`;
+}
+
+/**
  * Whether a clarification's "YYYY-MM-DD" reply-by date has passed.
  *
  * Compares against today's UTC date, not the device's or Singapore's; which

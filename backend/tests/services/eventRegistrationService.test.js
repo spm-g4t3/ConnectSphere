@@ -140,6 +140,50 @@ describe('SCRUM-494 registration settings and attendee listings', () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
+  it('SCRUM494_AC2_rejects_times_without_an_offset_on_each_field', async () => {
+    const client = saveClient({ outcome: 'saved' });
+    const error = await updateRegistrationSettings(
+      EVENT_ID,
+      {
+        ...validSettings,
+        opensAt: '2029-12-01T09:00:00',
+        closesAt: '2030-01-01T12:00',
+        withdrawalDeadline: '2030-01-01 11:00:00',
+      },
+      ORGANISER_ID,
+      { client },
+    ).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ValidationError);
+    expect(error.status).toBe(400);
+    expect(error.details).toEqual([
+      { field: 'registrationOpensAt', message: 'Enter a valid date and time.' },
+      { field: 'registrationClosesAt', message: 'Enter a valid date and time.' },
+      { field: 'registrationWithdrawalDeadline', message: 'Enter a valid date and time.' },
+    ]);
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['+08:00', '2026-11-01T10:00:00+08:00', '2026-11-01T02:00:00.000Z'],
+    ['Z', '2026-11-01T10:00:00Z', '2026-11-01T10:00:00.000Z'],
+  ])('SCRUM494_AC2_accepts_an_explicit_%s_offset_and_sends_the_UTC_instant', async (_label, sent, stored) => {
+    const client = saveClient({ outcome: 'saved', settings: {}, registeredCount: 0 });
+
+    await updateRegistrationSettings(
+      EVENT_ID,
+      { ...validSettings, opensAt: sent, closesAt: sent, withdrawalDeadline: sent },
+      ORGANISER_ID,
+      { client },
+    );
+
+    expect(client.rpc).toHaveBeenCalledWith('setup_event_registration', expect.objectContaining({
+      p_opens_at: stored,
+      p_closes_at: stored,
+      p_withdrawal_deadline: stored,
+    }));
+  });
+
   it.each([true, [5], '1e2', '  ', 3000000000])(
     'SCRUM494_AC3_rejects_capacity_that_is_not_a_whole_number_in_range (%j)',
     async (capacity) => {

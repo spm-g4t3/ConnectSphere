@@ -68,7 +68,8 @@ function readNotes(details, value) {
     return undefined;
   }
   const notes = value.trim();
-  if (notes.length > MAX_NOTES_LENGTH) {
+  // Code points, as Postgres char_length counts them: an emoji is one character, not two.
+  if (Array.from(notes).length > MAX_NOTES_LENGTH) {
     details.push({
       field: 'technicalNotes',
       message: `must be ${MAX_NOTES_LENGTH} characters or fewer`,

@@ -11,6 +11,7 @@ import {
   toDatetimeLocalValue,
   toOffsetIsoString,
   deviceTimeZoneLabel,
+  formatVenueTimestamp,
   isReplyOverdue,
   toVenueOffsetIsoString,
   toVenueWallClock,
@@ -144,6 +145,21 @@ describe("venue time", () => {
         .toBe(new Date(iso).getTime());
     },
   );
+});
+
+describe("formatVenueTimestamp", () => {
+  // Venue time on every device, like formatVenuePeriod (see the note above "venue time").
+  it.each([
+    ["a UTC instant", "2026-11-01T02:00:00.000Z", "2026-11-01 10:00 (Singapore time)"],
+    ["a New York evening, already the next Singapore day", "2026-10-31T21:00:00-05:00", "2026-11-01 10:00 (Singapore time)"],
+  ])("SCRUM494_AC6_formatVenueTimestamp_reads_%s_in_singapore", (_label, iso, expected) => {
+    expect(formatVenueTimestamp(iso)).toBe(expected);
+  });
+
+  it.each([null, undefined, "", "not a date"])("SCRUM494_AC6_formatVenueTimestamp_falls_back_for_%s", (value) => {
+    expect(formatVenueTimestamp(value)).toBe("Not set");
+    expect(formatVenueTimestamp(value, "Unknown")).toBe("Unknown");
+  });
 });
 
 // Pins today's behaviour: the reply-by date is compared with the UTC date.

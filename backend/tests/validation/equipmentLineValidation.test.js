@@ -91,6 +91,15 @@ describe('AC2: checking a new line', () => {
       fields(checkAddEquipmentLine({ equipmentTypeId: TYPE_ID, quantity: 1, technicalNotes: `${atLimit}x` }).details),
     ).toEqual(['technicalNotes']);
   });
+
+  it('SCRUM21_AC2_counts_notes_in_characters_so_an_emoji_counts_once', () => {
+    const atLimit = `${'a'.repeat(MAX_NOTES_LENGTH - 1)}😀`;
+
+    expect(checkAddEquipmentLine({ equipmentTypeId: TYPE_ID, quantity: 1, technicalNotes: atLimit }).details).toEqual([]);
+    expect(
+      fields(checkAddEquipmentLine({ equipmentTypeId: TYPE_ID, quantity: 1, technicalNotes: `${atLimit}😀` }).details),
+    ).toEqual(['technicalNotes']);
+  });
 });
 
 

@@ -66,6 +66,13 @@ describe('AC4: reduce and release need a reason', () => {
     expect(checkReleaseInput({ reason: 'x'.repeat(MAX_REASON_LENGTH) }).details).toEqual([]);
   });
 
+  it('SCRUM300_AC4_release_counts_the_reason_in_characters_so_an_emoji_counts_once', () => {
+    const atLimit = `${'x'.repeat(MAX_REASON_LENGTH - 1)}😀`;
+
+    expect(checkReleaseInput({ reason: atLimit }).details).toEqual([]);
+    expect(checkReleaseInput({ reason: `${atLimit}😀` }).details).toEqual([expect.objectContaining({ field: 'reason' })]);
+  });
+
   it('SCRUM300_AC4_release_refuses_no_body', () => {
     expect(checkReleaseInput(undefined).details).toHaveLength(1);
   });

@@ -57,6 +57,15 @@ describe('AC7: the note on a "Cannot be provided" mark', () => {
     ]);
   });
 
+  it('SCRUM290_AC7_counts_the_note_in_characters_so_an_emoji_counts_once', () => {
+    const atLimit = `${'a'.repeat(MAX_OUTCOME_NOTE_LENGTH - 1)}😀`;
+
+    expect(checkOutcomeNote({ note: atLimit }).details).toEqual([]);
+    expect(checkOutcomeNote({ note: `${atLimit}😀` }).details).toEqual([
+      { field: 'note', message: `must be ${MAX_OUTCOME_NOTE_LENGTH} characters or fewer` },
+    ]);
+  });
+
   it.each([[null], [undefined], ['text'], [[]], [42]])(
     'SCRUM290_AC7_refuses_a_body_that_is_not_an_object_%j',
     (body) => {

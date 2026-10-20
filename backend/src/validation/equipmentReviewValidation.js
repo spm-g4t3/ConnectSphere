@@ -53,7 +53,8 @@ export function checkOutcomeNote(input) {
   if (trimmed === '') {
     return { value: null, details: [{ field: 'note', message: 'is required: say what is missing' }] };
   }
-  if (trimmed.length > MAX_OUTCOME_NOTE_LENGTH) {
+  // Code points, as Postgres char_length counts them: an emoji is one character, not two.
+  if (Array.from(trimmed).length > MAX_OUTCOME_NOTE_LENGTH) {
     return {
       value: null,
       details: [{ field: 'note', message: `must be ${MAX_OUTCOME_NOTE_LENGTH} characters or fewer` }],
@@ -93,7 +94,7 @@ function readReason(details, value, { required }) {
     return null;
   }
   const trimmed = value.trim();
-  if (trimmed.length > MAX_REASON_LENGTH) {
+  if (Array.from(trimmed).length > MAX_REASON_LENGTH) {
     details.push({ field: 'reason', message: `must be ${MAX_REASON_LENGTH} characters or fewer` });
     return null;
   }
