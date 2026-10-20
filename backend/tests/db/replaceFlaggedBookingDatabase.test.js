@@ -1,82 +1,19 @@
 /**
  * A coordinator lists their event's flagged bookings and requests a venue to
- * replace one; approving that request resolves the flag (078), against a real
- * Postgres.
+ * replace one; approving that request resolves the flag, against the final
+ * schema in a real Postgres.
  *
  * SCRUM-266 AC1 for the coordinator's list (list_event_flagged_bookings), and
  * Week 7 for replacing (create_booking_request's p_replaces_booking_id,
- * decide_booking_request's step 14 and the 'replaced' resolution it records).
- *
- * Migrations: listFlaggedBookingsDatabase.test.js's stack, the same stand-ins.
+ * decide_booking_request's replacement step and the 'replaced' resolution it
+ * records).
  *
  * Dates: D is the Singapore date 10 days from now, never hard-coded, because
  * a block or hold counts only while it has not ended.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const MIGRATION_078 = '078_list_flagged_bookings.sql';
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '034_setup_change_recheck.sql',
-  '040_venue_holds.sql',
-  '051_multi_venue_booking_requests.sql',
-  '065_booking_decision_statuses.sql',
-  'SAFETY_ENUM',
-  '066_venue_staff_booking_decisions.sql',
-  'SAFETY_REASON',
-  '076_reinstate_flagged_booking.sql',
-  '077_cancel_flagged_booking.sql',
-  MIGRATION_078,
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
-
-/** 062's `alter type ... add value` lines, read from the file, not retyped. */
-const SAFETY_ENUM = migration('062_safety_statuses.sql')
-  .split('\n')
-  .filter((line) => line.startsWith('alter type event_request_status add value'))
-  .join('\n');
-
-/** 071's review-reason list, which adds 'safety_review' to 034's. */
-const SAFETY_REASON = `
-  alter table bookings drop constraint if exists bookings_review_reason_known;
-  alter table bookings
-    add constraint bookings_review_reason_known
-    check (review_reason in ('setup_or_turnaround_changed', 'safety_review'));
-`;
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
 /** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
 const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
@@ -95,7 +32,7 @@ const refusal = async (promise) => {
   }
 };
 
-describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', () => {
+describe('SCRUM-266: a coordinator lists and replaces flagged bookings', () => {
   let db;
   let organiser;
   let coordinator;
@@ -122,17 +59,17 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
     ).id;
   }
 
-  async function makeEvent({ assigned } = {}) {
+  function makeEvent({ status = 'approved' } = {}) {
     counter += 1;
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, proposed_start, proposed_end,
-            expected_attendance, submitted_at, assigned_coordinator_id)
-         values ($1, $2, 'approved', $3, $4, 150, now(), $5) returning id`,
-        [organiser, `Event ${counter}`, at('14:00'), at('16:00'), assigned ?? coordinator],
-      )
-    ).id;
+    return seedEvent(db, {
+      status,
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: `Event ${counter}`,
+      proposed_start: at('14:00'),
+      proposed_end: at('16:00'),
+      expected_attendance: 150,
+    });
   }
 
   /** create_booking_request as the API calls it, optionally naming a booking it replaces. */
@@ -155,7 +92,7 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
       ])
     ).result;
 
-  /** An approved booking at a fresh venue, flagged with a reason (as 034 and 071 flag them). */
+  /** An approved booking at a fresh venue, flagged with a reason (as a venue setup change or a safety review flags them). */
   async function flagged(eventId, reviewReason = 'setup_or_turnaround_changed') {
     const venueId = await makeVenue();
     const created = await request(eventId, venueId);
@@ -186,19 +123,7 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
     (await db.query('select * from booking_resolutions where booking_id = $1 order by created_at', [id])).rows;
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      if (name === 'STAND_IN') await db.exec(DECISION_STAND_IN);
-      else if (name === 'SAFETY_ENUM') await db.exec(SAFETY_ENUM);
-      else if (name === 'SAFETY_REASON') await db.exec(SAFETY_REASON);
-      else await db.exec(migration(name));
-    }
+    db = await createSchemaDb();
     organiser = await makeUser('o@x', 'event_organiser');
     coordinator = await makeUser('c@x', 'event_coordinator');
     otherCoordinator = await makeUser('c2@x', 'event_coordinator');
@@ -417,7 +342,7 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
       expect((await bookingRow(replacement)).status).toBe('approved');
       const after = await bookingRow(isFlagged);
       expect(after.status).toBe('cancelled');
-      // The flag stays on the cancelled booking, as 077 leaves it.
+      // The flag stays on the cancelled booking, as cancel_flagged_booking leaves it.
       expect(after.review_reason).toBe(before.review_reason);
       const resolutions = await resolutionsOf(isFlagged);
       expect(resolutions).toHaveLength(1);
@@ -476,10 +401,9 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
     });
 
     it('SCRUM266_W7_a_confirmed_events_organiser_is_told_of_the_replacement_too', async () => {
-      const event = await makeEvent();
+      const event = await makeEvent({ status: 'confirmed' });
       const isFlagged = await flagged(event);
       const replacement = (await request(event, await makeVenue(), isFlagged)).booking.id;
-      await db.query(`update event_requests set status = 'confirmed' where id = $1`, [event]);
 
       await decide(replacement);
 
@@ -578,22 +502,8 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings (078)', (
     });
   });
 
-  describe('the migration is re-runnable', () => {
-    it('SCRUM266_W7_running_078_again_keeps_one_of_each_function_and_the_column', async () => {
-      const event = await makeEvent();
-      const isFlagged = await flagged(event);
-      const replacement = (await request(event, await makeVenue(), isFlagged)).booking.id;
-
-      await db.exec(migration(MIGRATION_078));
-      await db.exec(migration(MIGRATION_078));
-
-      const fns = await one(
-        `select count(*) filter (where proname = 'create_booking_request')::int as create,
-                count(*) filter (where proname = 'list_pending_booking_requests')::int as queue
-           from pg_proc`,
-      );
-      expect(fns).toEqual({ create: 1, queue: 1 });
-      expect((await bookingRow(replacement)).replaces_booking_id).toBe(isFlagged);
+  describe('who can call them', () => {
+    it('SCRUM266_W7_the_request_queue_and_flag_functions_are_not_granted_to_anon', async () => {
       const grants = await one(
         `select has_function_privilege('anon',
                   'create_booking_request(uuid, uuid, uuid, text, text, jsonb, boolean, integer, uuid)',

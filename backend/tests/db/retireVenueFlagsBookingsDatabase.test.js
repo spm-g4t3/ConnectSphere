@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, returnToLeadQueue, seedEvent } from './helpers/schemaDb.js';
 
 /** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
 const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
@@ -158,11 +158,7 @@ describe('SCRUM-174: retiring a venue flags its bookings and tells the coordinat
     const event = await makeEvent();
     const id = await request(event, venue);
     await approve(id);
-    // Rejected, reopened and resubmitted, the event keeps its booking and
-    // waits in the Lead's queue with no coordinator.
-    await db.query("select change_event_request_status($1, 'approved', 'rejected', $2)", [event, coordinator]);
-    await db.query("select change_event_request_status($1, 'rejected', 'draft', $2)", [event, organiser]);
-    await db.query('select submit_event_request($1, now(), $2)', [event, organiser]);
+    await returnToLeadQueue(db, event, { coordinator, organiser });
 
     await retire(venue);
 

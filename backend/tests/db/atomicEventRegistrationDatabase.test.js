@@ -1,8 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { registerForEvent } from '../../src/services/registrationService.js';
 import { availability } from '../../src/domain/registrationAvailability.js';
@@ -10,14 +6,15 @@ import express from 'express';
 import request from 'supertest';
 import { createOpenEventRouter } from '../../src/routes/openEvents.js';
 import { createRequireAuth } from '../../src/middleware/requireAuth.js';
-import { addRegistrationNotificationPrerequisites } from '../fixtures/registrationDatabase.js';
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
+// register_for_event and the availability it reads, against the final schema.
 const ME = '44444444-4444-4444-8444-444444444444';
 const OTHER = '55555555-5555-4555-8555-555555555555';
 const THIRD = '77777777-7777-4777-8777-777777777777';
 const ORGANISER = '66666666-6666-4666-8666-666666666666';
+const COORDINATOR = '88888888-8888-4888-8888-888888888888';
+const DAY = 86_400_000;
 let db;
 let event;
 const register = (attendee = ME, eventId = event) => db.query(
@@ -45,24 +42,9 @@ const readAvailability = async (attendee = ME) => {
 };
 
 beforeAll(async () => {
-  db = new PGlite();
+  db = await createSchemaDb();
+  // Fails an insert after it is written, to prove the whole registration rolls back.
   await db.exec(`
-    create schema auth;
-    create table auth.users (id uuid primary key);
-    create role anon;
-    create role authenticated;
-    create role service_role bypassrls;
-  `);
-  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '050_event_registration.sql', '068_open_event_registration_state.sql', '082_event_registration_state.sql',
-    '091_event_registration_hardening.sql', '092_event_registration_persistence.sql',
-    '093_registration_eligibility.sql', '094_register_for_event.sql', '101_registration_status_guards.sql']) {
-    if (name === '091_event_registration_hardening.sql') await addRegistrationNotificationPrerequisites(db);
-    await db.exec(migration(name));
-  }
-  await db.exec(`
-    grant select on profiles to service_role;
-    grant select, update on event_requests to service_role;
-    grant execute on function open_event_registration_state(uuid[], uuid) to service_role;
     create function fail_test_registration() returns trigger language plpgsql as $$
     begin
       if new.event_request_id::text = current_setting('test.fail_event', true) then
@@ -75,8 +57,9 @@ beforeAll(async () => {
     create trigger fail_test_registration after insert on event_registrations
       for each row execute function fail_test_registration();
   `);
-  await db.query('insert into auth.users (id) values ($1), ($2), ($3), ($4)', [ME, OTHER, ORGANISER, THIRD]);
-  await db.query("insert into profiles (id, role) values ($1, 'attendee'), ($2, 'attendee'), ($3, 'event_organiser'), ($4, 'attendee')", [ME, OTHER, ORGANISER, THIRD]);
+  await db.query('insert into auth.users (id) values ($1), ($2), ($3), ($4), ($5)', [ME, OTHER, ORGANISER, THIRD, COORDINATOR]);
+  await db.query(`insert into profiles (id, role) values ($1, 'attendee'), ($2, 'attendee'), ($3, 'event_organiser'),
+    ($4, 'attendee'), ($5, 'event_coordinator')`, [ME, OTHER, ORGANISER, THIRD, COORDINATOR]);
 });
 
 describe('SCRUM46 authoritative registration availability', () => {
@@ -148,14 +131,22 @@ describe('SCRUM46 authoritative registration availability', () => {
   });
 });
 afterAll(async () => { await db.close(); });
+// A confirmed event open for registration since yesterday, with one place.
+const registrationEvent = (overrides = {}) => seedEvent(db, {
+  id: randomUUID(),
+  status: 'confirmed',
+  organiser_id: ORGANISER,
+  reviewing_coordinator_id: COORDINATOR,
+  event_name: 'Registration test',
+  proposed_start: new Date(Date.now() + 2 * DAY),
+  registration_enabled: true,
+  registration_opens_at: new Date(Date.now() - DAY),
+  registration_closes_at: new Date(Date.now() + DAY),
+  registration_capacity: 1,
+  ...overrides,
+});
 beforeEach(async () => {
-  event = randomUUID();
-  await db.query(`
-    insert into event_requests (id, organiser_id, event_name, status, proposed_start,
-      registration_enabled, registration_opens_at, registration_closes_at, registration_capacity)
-    values ($1, $2, 'Registration test', 'confirmed', clock_timestamp() + interval '2 days',
-      true, clock_timestamp() - interval '1 day', clock_timestamp() + interval '1 day', 1)
-  `, [event, ORGANISER]);
+  event = await registrationEvent();
 });
 
 describe('SCRUM39 atomic event registration', () => {
@@ -217,8 +208,7 @@ describe('SCRUM39 atomic event registration', () => {
     expect(await records()).toHaveLength(1);
   });
 
-  it('SCRUM22_AC6_status_guard_migration_is_rerunnable_invoker_security_and_backend_only', async () => {
-    await db.exec(migration('101_registration_status_guards.sql'));
+  it('SCRUM22_AC6_registration_functions_are_invoker_security_and_backend_only', async () => {
     for (const fn of ['register_for_event(uuid,uuid)', 'open_event_registration_state(uuid[],uuid)']) {
       const { rows: [security] } = await db.query('select prosecdef from pg_proc where oid = $1::regprocedure', [fn]);
       expect(security.prosecdef).toBe(false);
@@ -274,11 +264,19 @@ describe('SCRUM39 atomic event registration', () => {
     ['registration_enabled', false, 'REGISTRATION_DISABLED'],
     ['registration_opens_at', '9999-01-01T00:00:00Z', 'REGISTRATION_NOT_OPEN'],
     ['registration_closes_at', '2000-01-01T00:00:00Z', 'REGISTRATION_CLOSED'],
-    ['proposed_start', '2000-01-01T00:00:00Z', 'EVENT_STARTED'],
   ])('SCRUM39_AC5_revalidates_current_%s_in_the_write_transaction', async (column, value) => {
     await db.query('update event_requests set registration_closes_at = null where id = $1', [event]);
     if (column === 'registration_closes_at') await db.query("update event_requests set registration_opens_at = '1999-01-01' where id = $1", [event]);
     await db.query(`update event_requests set ${column} = $1 where id = $2`, [value, event]);
+    expect((await register()).rows[0].result).toEqual({ outcome: 'not_found' });
+    expect(await records()).toEqual([]);
+  });
+
+  it('SCRUM39_AC5_revalidates_the_event_start_in_the_write_transaction', async () => {
+    // A confirmed event's start is locked, so the started event is seeded past.
+    event = await registrationEvent({
+      proposed_start: '2000-01-01T00:00:00Z', registration_opens_at: '1999-01-01', registration_closes_at: null,
+    });
     expect((await register()).rows[0].result).toEqual({ outcome: 'not_found' });
     expect(await records()).toEqual([]);
   });

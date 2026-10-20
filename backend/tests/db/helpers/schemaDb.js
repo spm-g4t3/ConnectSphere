@@ -47,3 +47,12 @@ export async function seedEvent(db, { status = 'draft', ...overrides } = {}) {
     : await insert();
   return rows[0].id;
 }
+
+// Rejects, reopens and resubmits an approved event through the real functions.
+// It keeps its bookings and holds and waits in the Lead's queue with no
+// coordinator: the only way an event with bookings has none.
+export async function returnToLeadQueue(db, eventId, { coordinator, organiser }) {
+  await db.query("select change_event_request_status($1, 'approved', 'rejected', $2)", [eventId, coordinator]);
+  await db.query("select change_event_request_status($1, 'rejected', 'draft', $2)", [eventId, organiser]);
+  await db.query('select submit_event_request($1, now(), $2)', [eventId, organiser]);
+}

@@ -1,19 +1,14 @@
 import { beforeAll, afterAll, beforeEach, afterEach, describe, it, expect } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { addRegistrationNotificationPrerequisites } from '../fixtures/registrationDatabase.js';
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
-const migration = (name) => readFileSync(new URL(`../../db/migrations/${name}`, import.meta.url), 'utf8');
-const applyRegistrationMigrations = async () => {
-  for (const name of ['092_event_registration_persistence.sql', '093_registration_eligibility.sql', '094_register_for_event.sql', '101_registration_status_guards.sql']) {
-    await db.exec(migration(name));
-  }
-};
+// Registration settings, the writer, the browse read and the read-only
+// registrations view, all on the one event_registrations table.
 const ORGANISER = '11111111-1111-4111-8111-111111111111';
 const ME = '22222222-2222-4222-8222-222222222222';
 const OTHER = '33333333-3333-4333-8333-333333333333';
 const THIRD = '44444444-4444-4444-8444-444444444444';
 const EVENT = '55555555-5555-4555-8555-555555555555';
+const COORDINATOR = '66666666-6666-4666-8666-666666666666';
 const MISSING = '99999999-9999-4999-8999-999999999999';
 let db;
 const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
@@ -23,44 +18,41 @@ const setup = async (capacity = 3) => (await one(`select setup_event_registratio
   $1, $2, true, clock_timestamp() - interval '1 hour', null, $3, null) as result`, [EVENT, ORGANISER, capacity])).result;
 
 beforeAll(async () => {
-  db = new PGlite();
-  await db.exec(`create schema auth; create table auth.users(id uuid primary key);
-    create role anon; create role authenticated; create role service_role bypassrls;`);
-  for (const name of [
-    '001_event_requests.sql', '007_user_roles.sql', '050_event_registration.sql',
-    '068_open_event_registration_state.sql', '../migration-history/079_registrations.sql',
-    '../migration-history/080_registration_eligibility.sql', '../migration-history/081_register_for_event.sql',
-    '082_event_registration_state.sql', '091_event_registration_hardening.sql',
-  ]) {
-    if (name === '091_event_registration_hardening.sql') await addRegistrationNotificationPrerequisites(db);
-    await db.exec(migration(name));
-  }
-  await db.query('insert into auth.users values ($1), ($2), ($3), ($4)', [ORGANISER, ME, OTHER, THIRD]);
+  db = await createSchemaDb();
+  await db.query('insert into auth.users (id) values ($1), ($2), ($3), ($4), ($5)', [ORGANISER, ME, OTHER, THIRD, COORDINATOR]);
   await db.query(`insert into profiles (id, role) values
-    ($1, 'event_organiser'), ($2, 'attendee'), ($3, 'attendee'), ($4, 'attendee')`, [ORGANISER, ME, OTHER, THIRD]);
-  await db.query(`insert into event_requests(id, organiser_id, event_name, status, proposed_start)
-    values ($1, $2, 'Shared schema', 'confirmed', '2030-01-01')`, [EVENT, ORGANISER]);
-  await db.exec('grant select on profiles to service_role; grant select, update on event_requests to service_role;');
+    ($1, 'event_organiser'), ($2, 'attendee'), ($3, 'attendee'), ($4, 'attendee'), ($5, 'event_coordinator')`,
+  [ORGANISER, ME, OTHER, THIRD, COORDINATOR]);
+  await seedEvent(db, {
+    id: EVENT, status: 'confirmed', organiser_id: ORGANISER, reviewing_coordinator_id: COORDINATOR,
+    event_name: 'Shared schema', purpose: 'Registration', expected_attendance: 50,
+    proposed_start: '2030-01-01', proposed_end: '2030-01-02',
+  });
 });
 afterAll(async () => { await db?.close(); });
 beforeEach(async () => {
   await db.exec('begin');
-  await db.query(`insert into registrations(event_request_id, attendee_id, status) values
-    ($1, $2, 'registered'), ($1, $2, 'withdrawn'), ($1, $3, 'cancelled')`, [EVENT, ME, OTHER]);
-  await db.query('insert into event_registrations(event_request_id, attendee_id) values ($1, $2), ($1, $3)', [EVENT, THIRD, ME]);
-  await applyRegistrationMigrations();
+  // Two places taken and one cancelled registration.
+  await db.query(`insert into event_registrations(event_request_id, attendee_id, status) values
+    ($1, $2, 'registered'), ($1, $3, 'registered'), ($1, $4, 'cancelled')`, [EVENT, THIRD, ME, OTHER]);
 });
 afterEach(async () => { await db.exec('rollback'); });
 
-describe('SCRUM22 shared schema with PR 68', () => {
-  it('SCRUM22_AC2_AC6_start_changes_notify_and_preserve_registrations_while_the_atomic_writer_refuses_a_started_event', async () => {
-    await setup();
+describe('SCRUM22 one registration table', () => {
+  it('SCRUM22_AC2_AC6_start_changes_notify_and_preserve_registrations_while_the_writer_refuses_the_moved_event', async () => {
+    await one(`select setup_event_registration(
+      $1, $2, true, clock_timestamp() + interval '1 day', null, 3, null) as result`, [EVENT, ORGANISER]);
     const before = (await db.query('select * from event_registrations order by id')).rows;
-    await db.query("update event_requests set proposed_start = clock_timestamp() - interval '2 hours' where id = $1", [EVENT]);
+    // A confirmed event's start moves only through a significant change, which
+    // returns it to Approved; here it moves before the registration opening.
+    await db.query(
+      "select apply_significant_event_change($1, jsonb_build_object('proposedStart', clock_timestamp() + interval '1 hour'), 'Start moved.', $2)",
+      [EVENT, COORDINATOR],
+    );
     expect(await one('select registration_enabled, registration_capacity from event_requests where id = $1', [EVENT]))
       .toEqual({ registration_enabled: true, registration_capacity: 3 });
-    expect(await one('select recipient_id, type, payload from notifications where event_request_id = $1', [EVENT]))
-      .toMatchObject({ recipient_id: ORGANISER, type: 'registration_schedule_conflict', payload: { fields: ['registrationOpensAt'] } });
+    expect(await one('select type, payload from notifications where event_request_id = $1 and recipient_id = $2', [EVENT, ORGANISER]))
+      .toMatchObject({ type: 'registration_schedule_conflict', payload: { fields: ['registrationOpensAt'] } });
     expect(await register(OTHER)).toEqual({ outcome: 'not_found' });
     expect((await db.query('select * from event_registrations order by id')).rows).toEqual(before);
     const disabled = await one('select setup_event_registration($1, $2, false, null, null, 3, null) as result', [EVENT, ORGANISER]);
@@ -68,15 +60,11 @@ describe('SCRUM22 shared schema with PR 68', () => {
     expect(await state()).toEqual({ active_count: 2, is_registered: true });
   });
 
-  it('SCRUM22_AC4_AC6_reconciles_legacy_records_without_two_writable_registration_tables', async () => {
+  it('SCRUM22_AC4_the_registrations_view_reads_the_one_table_and_is_not_writable', async () => {
     expect(await one("select relkind from pg_class where oid = 'registrations'::regclass")).toEqual({ relkind: 'v' });
-    expect(await one('select count(*)::int as count from registrations_legacy_archive')).toEqual({ count: 3 });
-    expect(await one('select count(*)::int as count from event_registrations')).toEqual({ count: 3 });
     expect(await state()).toEqual({ active_count: 2, is_registered: true });
     expect(await one("select count(*)::int as count from registrations where status = 'registered'")).toEqual({ count: 2 });
-    for (const table of ['registrations', 'registrations_legacy_archive']) {
-      expect(await one("select has_table_privilege('service_role', $1, 'update') as allowed", [table])).toEqual({ allowed: false });
-    }
+    expect(await one("select has_table_privilege('service_role', 'registrations', 'update') as allowed")).toEqual({ allowed: false });
   });
 
   it('SCRUM22_AC4_AC5_AC7_setup_writer_and_browse_share_the_same_active_count_and_last_place', async () => {
@@ -103,12 +91,7 @@ describe('SCRUM22 shared schema with PR 68', () => {
     expect(await state(THIRD)).toEqual({ active_count: 1, is_registered: false });
   });
 
-  it('SCRUM22_AC6_rerunning_reconciliation_never_replays_archived_registration_state', async () => {
-    await db.query("update event_registrations set status = 'withdrawn' where attendee_id = $1", [ME]);
-    const before = (await db.query('select * from event_registrations order by id')).rows;
-    await applyRegistrationMigrations();
-    expect((await db.query('select * from event_registrations order by id')).rows).toEqual(before);
-    expect(await state()).toEqual({ active_count: 1, is_registered: false });
+  it('SCRUM22_AC6_registration_writers_are_defined_once_invoker_security_and_backend_only', async () => {
     const functions = await one("select count(*)::int as count, bool_or(prosecdef) as definer from pg_proc where proname = 'register_for_event'");
     expect(functions).toEqual({ count: 1, definer: false });
     expect(await one("select prosecdef from pg_proc where proname = 'setup_event_registration'"))
@@ -119,24 +102,37 @@ describe('SCRUM22 shared schema with PR 68', () => {
     }
   });
 
-  it('SCRUM22_AC6_already_applied_088_is_upgraded_without_replaying_history', async () => {
-    // Restore the pre-upgrade fixture, then simulate the earlier deployed revision.
-    await db.exec('rollback; begin');
-    await db.query('insert into registrations(event_request_id, attendee_id) values ($1, $2)', [EVENT, ME]);
-    await db.exec(migration('../migration-history/088_unify_event_registrations.sql'));
-    await db.query("update event_registrations set status = 'withdrawn' where attendee_id = $1", [ME]);
-    const before = (await db.query('select * from event_registrations order by id')).rows;
-    await applyRegistrationMigrations();
-    expect((await db.query('select * from event_registrations order by id')).rows).toEqual(before);
-    expect(await one('select count(*)::int as count from registrations_legacy_archive')).toEqual({ count: 1 });
-    await setup();
-    expect((await register()).registration.id).toBe(before[0].id);
-  });
-
   it.each(['event_request_id', 'attendee_id'])('SCRUM22_AC6_shared_%s_has_a_foreign_key', async (column) => {
     await expect(db.query(`insert into event_registrations(event_request_id, attendee_id)
       values ($1, $2)`, [column === 'event_request_id' ? MISSING : EVENT, column === 'attendee_id' ? MISSING : OTHER]))
       .rejects.toMatchObject({ code: '23503' });
+  });
+
+  it('SCRUM41_AC1_preserves_registrations_when_the_event_is_deleted', async () => {
+    await expect(db.query('delete from event_requests where id = $1', [EVENT]))
+      .rejects.toMatchObject({ code: '23001', constraint: 'event_registrations_event_request_id_fkey' });
+  });
+
+  it('SCRUM41_AC1_preserves_registrations_when_the_account_is_deleted', async () => {
+    // An account with no profile, so only its registration holds it.
+    const { id } = await one('insert into auth.users default values returning id');
+    await db.query('insert into event_registrations(event_request_id, attendee_id) values ($1, $2)', [EVENT, id]);
+    await expect(db.query('delete from auth.users where id = $1', [id]))
+      .rejects.toMatchObject({ code: '23001', constraint: 'event_registrations_attendee_id_fkey' });
+  });
+
+  it.each([['unknown', '23514'], [null, '23502']])('SCRUM41_AC1_rejects_status_%s', async (status, code) => {
+    await expect(db.query('insert into event_registrations(event_request_id, attendee_id, status) values ($1, $2, $3)',
+      [EVENT, ORGANISER, status])).rejects.toMatchObject({ code });
+  });
+
+  it.each(['anon', 'authenticated'])('SCRUM41_AC1_denies_direct_table_privileges_to_%s', async (role) => {
+    for (const table of ['event_registrations', 'registrations']) {
+      for (const privilege of ['select', 'insert', 'update', 'delete']) {
+        expect(await one('select has_table_privilege($1, $2, $3) as allowed', [role, table, privilege]), `${table} ${privilege}`)
+          .toEqual({ allowed: false });
+      }
+    }
   });
 
   it('SCRUM22_AC4_database_uniqueness_protects_the_shared_table', async () => {

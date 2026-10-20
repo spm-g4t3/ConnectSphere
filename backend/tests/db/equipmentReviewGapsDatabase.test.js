@@ -1,37 +1,19 @@
 /**
- * SCRUM-300: the gaps found reviewing 053 and 054, closed by 061, run against a
- * real Postgres (PGlite).
+ * SCRUM-300: gaps found in the reservation review, run against the final schema
+ * in a real Postgres (PGlite).
  *
- *   1. A review could be completed while a reservation was still flagged (AC7).
- *   2. A fully reserved request could stick in Under review, because starting
- *      a review never ran the Arranged check.
- *   3. Keep was offered, and always refused, for a reservation flagged by a
- *      date change. The review read now says per reservation whether it can work.
+ *   1. A review cannot be completed while a reservation is still flagged (AC7).
+ *   2. A fully reserved request does not stick in Under review: starting a
+ *      review runs the Arranged check.
+ *   3. Keep is offered only where it can work: the review read says per
+ *      reservation whether it can be kept.
  *
- * The lock order between an inventory change and a reservation is part of 061, and is
- * pinned in equipmentReviewFollowupsDatabase.test.js.
+ * The lock order between an inventory change and a reservation is pinned in
+ * equipmentReviewFollowupsDatabase.test.js.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '022_equipment_schema.sql',
-  '024_equipment_availability.sql',
-  '037_equipment_request_lines.sql',
-  '038_equipment_review.sql',
-  '053_equipment_reservations.sql',
-  '054_equipment_reservation_actions.sql',
-  '055_equipment_reservation_guards.sql',
-  '060_equipment_reservation_topup.sql',
-  '061_equipment_review_gaps.sql',
-];
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
@@ -61,13 +43,15 @@ describe('SCRUM-300: closing the review gaps in Postgres', () => {
     (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
   const newType = async (name, total) =>
     (await one('insert into equipment_types (name, total_quantity) values ($1, $2) returning id', [`${name} ${Math.random()}`, total])).id;
-  const newEvent = async () =>
-    (await one(
-      `insert into event_requests
-         (organiser_id, event_name, status, assigned_coordinator_id, proposed_start, proposed_end)
-       values ($1, $2, 'approved', $3, $4, $5) returning id`,
-      [organiser, `Event ${Math.random()}`, coordinator, START, END],
-    )).id;
+  const newEvent = () =>
+    seedEvent(db, {
+      status: 'approved',
+      organiser_id: organiser,
+      event_name: `Event ${Math.random()}`,
+      assigned_coordinator_id: coordinator,
+      proposed_start: START,
+      proposed_end: END,
+    });
 
   const add = async (event, type, quantity) =>
     asJson(await one('select add_equipment_line($1, $2, $3, $4, null)::text as answer', [event, coordinator, type, quantity]));
@@ -107,38 +91,12 @@ describe('SCRUM-300: closing the review gaps in Postgres', () => {
     );
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-
-      create function set_updated_at() returns trigger language plpgsql as $$
-      begin new.updated_at = now(); return new; end $$;
-
-      create type event_request_status as enum (
-        'draft', 'submitted', 'under_review', 'pending_clarification',
-        'approved', 'confirmed', 'completed', 'rejected', 'cancelled'
-      );
-      create table event_requests (
-        id                      uuid primary key default gen_random_uuid(),
-        organiser_id            uuid not null,
-        event_name              text not null,
-        status                  event_request_status not null default 'draft',
-        assigned_coordinator_id uuid,
-        proposed_start          timestamptz,
-        proposed_end            timestamptz
-      );
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
+    db = await createSchemaDb();
 
     organiser = await newUser('organiser@example.com');
     coordinator = await newUser('coordinator@example.com');
     reviewerA = await newUser('tech-a@example.com');
   }, 60000);
-
-  it('SCRUM300_runs_a_second_time_without_error', async () => {
-    await expect(db.exec(migration('061_equipment_review_gaps.sql'))).resolves.not.toThrow();
-  });
 
   describe('AC7: a review cannot be completed over a flagged reservation', () => {
     /** Line A fully reserved, line B short by four, both flagged by a date change, review restarted. */

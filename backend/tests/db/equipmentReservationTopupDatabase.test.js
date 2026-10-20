@@ -1,30 +1,12 @@
 /**
- * SCRUM-300: reserving more of an item adds to its existing reservation (migration 057),
- * run against a real Postgres (PGlite).
+ * SCRUM-300: reserving more of an item adds to its existing reservation, run
+ * against the final schema in a real Postgres (PGlite).
  *
- * Applies 022, 024, 037, 038, 053, 054, 055 and 057, then calls reserve_equipment the way
- * the service will.
+ * Calls reserve_equipment the way the service does.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '022_equipment_schema.sql',
-  '024_equipment_availability.sql',
-  '037_equipment_request_lines.sql',
-  '038_equipment_review.sql',
-  '053_equipment_reservations.sql',
-  '054_equipment_reservation_actions.sql',
-  '055_equipment_reservation_guards.sql',
-  '060_equipment_reservation_topup.sql',
-];
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
@@ -49,17 +31,22 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
   const rows = async (sql, params) => (await db.query(sql, params)).rows;
   const asJson = (row) => JSON.parse(row.answer);
 
-  const newUser = async (email) =>
-    (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
+  const newUser = async (email, role) => {
+    const { id } = await one('insert into auth.users (email) values ($1) returning id', [email]);
+    await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
+    return id;
+  };
   const newType = async (name, total = 10) =>
     (await one('insert into equipment_types (name, total_quantity) values ($1, $2) returning id', [name, total])).id;
-  const newEvent = async ({ status = 'approved', start = START, end = END } = {}) =>
-    (await one(
-      `insert into event_requests
-         (organiser_id, event_name, status, assigned_coordinator_id, proposed_start, proposed_end)
-       values ($1, $2, $3, $4, $5, $6) returning id`,
-      [organiser, `Event ${Math.random()}`, status, coordinator, start, end],
-    )).id;
+  const newEvent = ({ status = 'approved', start = START, end = END } = {}) =>
+    seedEvent(db, {
+      status,
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: `Event ${Math.random()}`,
+      proposed_start: start,
+      proposed_end: end,
+    });
 
   const add = async (event, type, quantity) =>
     asJson(await one('select add_equipment_line($1, $2, $3, $4, null)::text as answer', [event, coordinator, type, quantity]));
@@ -110,34 +97,12 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
   };
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
+    db = await createSchemaDb();
 
-      create function set_updated_at() returns trigger language plpgsql as $$
-      begin new.updated_at = now(); return new; end $$;
-
-      create type event_request_status as enum (
-        'draft', 'submitted', 'under_review', 'pending_clarification',
-        'approved', 'confirmed', 'completed', 'rejected', 'cancelled'
-      );
-      create table event_requests (
-        id                      uuid primary key default gen_random_uuid(),
-        organiser_id            uuid not null,
-        event_name              text not null,
-        status                  event_request_status not null default 'draft',
-        assigned_coordinator_id uuid,
-        proposed_start          timestamptz,
-        proposed_end            timestamptz
-      );
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
-
-    organiser = await newUser('organiser@example.com');
-    coordinator = await newUser('coordinator@example.com');
-    reviewerA = await newUser('tech-a@example.com');
-    reviewerB = await newUser('tech-b@example.com');
+    organiser = await newUser('organiser@example.com', 'event_organiser');
+    coordinator = await newUser('coordinator@example.com', 'event_coordinator');
+    reviewerA = await newUser('tech-a@example.com', 'technical_support_staff');
+    reviewerB = await newUser('tech-b@example.com', 'technical_support_staff');
   }, 60000);
 
   afterAll(async () => {
@@ -153,10 +118,6 @@ describe('SCRUM-300: reserving more adds to the existing reservation', () => {
     );
   const allRows = (event) =>
     rows('select id from equipment_reservations where event_request_id = $1', [event]);
-
-  it('SCRUM300_AC2_runs_a_second_time_without_error', async () => {
-    await expect(db.exec(migration('060_equipment_reservation_topup.sql'))).resolves.not.toThrow();
-  });
 
   it('SCRUM300_AC2_reserving_2_and_then_2_more_leaves_one_reservation_of_4', async () => {
     const { event, line } = await reviewed('Projector', 10, 4);

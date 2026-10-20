@@ -1,22 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const SAFETY_MIGRATIONS = [
-  '022_event_status_transitions.sql',
-  '062_safety_statuses.sql',
-  '063_safety_transitions.sql',
-  '071_safety_review.sql',
-  '073_safety_review_gates.sql',
-].sort();
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
 
+// The Safety Officer's queue, detail and response against the final schema.
+// Events are seeded already in Safety review so the queue order can be set;
+// the response under test runs through respond_to_safety_review itself.
 describe('SCRUM-490: safety review transaction and lifecycle', () => {
   let db;
   let organiser;
@@ -38,23 +28,24 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
   }
 
   async function event(eventName, enteredAt = '2026-10-10T09:00:00Z') {
-    const created = await withSafetyReviewTransitionGuardDisabled(db, () => one(
-      `insert into event_requests
-         (organiser_id, assigned_coordinator_id, decision, decided_by, decided_at,
-          event_name, status, proposed_start, proposed_end,
-          expected_attendance, accessibility_requirements, submitted_at)
-       values ($1, $2, 'approved', $2, now(), $3, 'safety_review', $4, $5, 120,
-               'Step-free access and reserved seating', $6)
-       returning id`,
-      [organiser, coordinator, eventName, START, END, '2026-09-01T09:00:00Z'],
-    ));
+    const id = await seedEvent(db, {
+      status: 'safety_review',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: eventName,
+      proposed_start: START,
+      proposed_end: END,
+      expected_attendance: 120,
+      accessibility_requirements: 'Step-free access and reserved seating',
+      submitted_at: '2026-09-01T09:00:00Z',
+    });
     await db.query(
       `insert into event_request_status_history
          (event_request_id, previous_status, new_status, changed_by, reason, created_at)
        values ($1, 'approved', 'safety_review', $2, null, $3)`,
-      [created.id, coordinator, enteredAt],
+      [id, coordinator, enteredAt],
     );
-    return created.id;
+    return id;
   }
 
   async function bookedVenue(eventId) {
@@ -97,177 +88,7 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
   }
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create role anon;
-      create role authenticated;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create type event_request_status as enum (
-        'draft', 'submitted', 'under_review', 'pending_clarification', 'approved',
-        'confirmed', 'completed', 'rejected', 'cancelled'
-      );
-      create type booking_status as enum ('approved', 'flagged_for_review');
-      create type equipment_request_status as enum (
-        'pending_review', 'under_review', 'arranged', 'cannot_be_fully_arranged', 'cancelled'
-      );
-      create table profiles (id uuid primary key, role text not null, full_name text);
-      create table event_requests (
-        id uuid primary key default gen_random_uuid(),
-        organiser_id uuid not null,
-        assigned_coordinator_id uuid,
-        decision text,
-        decided_by uuid,
-        decided_at timestamptz,
-        event_name text not null,
-        status event_request_status not null,
-        proposed_start timestamptz,
-        proposed_end timestamptz,
-        expected_attendance integer,
-        accessibility_requirements text,
-        submitted_at timestamptz,
-        created_at timestamptz not null default now(),
-        clarification_note text
-      );
-      create table event_request_status_history (
-        id uuid primary key default gen_random_uuid(),
-        event_request_id uuid not null,
-        previous_status event_request_status not null,
-        new_status event_request_status not null,
-        changed_by uuid not null,
-        reason text,
-        created_at timestamptz not null default now()
-      );
-      create table venues (
-        id uuid primary key default gen_random_uuid(),
-        name text not null,
-        location text not null,
-        max_capacity integer not null,
-        emergency_access text,
-        known_restrictions text
-      );
-      create table room_layouts (code text primary key, label text not null);
-      create table bookings (
-        id uuid primary key default gen_random_uuid(),
-        event_request_id uuid not null,
-        venue_id uuid not null,
-        status booking_status not null,
-        starts_at timestamptz not null,
-        ends_at timestamptz not null,
-        room_layout_code text,
-        review_block_id uuid,
-        review_reason text,
-        flagged_at timestamptz,
-        flagged_by uuid references auth.users(id),
-        constraint bookings_review_reason_known
-          check (review_reason in ('setup_or_turnaround_changed')),
-        constraint bookings_review_flag_paired
-          check ((flagged_at is null) = (review_block_id is null and review_reason is null))
-      );
-      create table equipment_requests (
-        id uuid primary key default gen_random_uuid(),
-        event_request_id uuid not null,
-        status equipment_request_status not null,
-        reviewer_id uuid,
-        review_started_at timestamptz,
-        created_at timestamptz not null default now()
-      );
-      create table equipment_types (id uuid primary key default gen_random_uuid(), name text not null);
-      create table equipment_lines (
-        id uuid primary key default gen_random_uuid(),
-        equipment_request_id uuid not null,
-        equipment_type_id uuid not null,
-        quantity integer not null,
-        technical_notes text,
-        removed_at timestamptz
-      );
-      create table equipment_reservations (
-        id uuid primary key default gen_random_uuid(),
-        equipment_type_id uuid not null,
-        event_request_id uuid not null,
-        equipment_line_id uuid not null,
-        quantity integer not null,
-        start_at timestamptz not null,
-        end_at timestamptz not null,
-        released_at timestamptz,
-        released_by uuid,
-        release_reason text
-      );
-      create table equipment_reservation_events (
-        id bigint generated always as identity primary key,
-        equipment_reservation_id uuid not null,
-        event_request_id uuid not null,
-        equipment_line_id uuid not null,
-        action text not null,
-        user_id uuid,
-        reason text,
-        quantity_before integer,
-        quantity_after integer,
-        start_before timestamptz,
-        end_before timestamptz
-      );
-      create function release_equipment_reservations(
-        p_event_request_id uuid,
-        p_line_id uuid,
-        p_reason text,
-        p_user_id uuid default null
-      )
-      returns integer
-      language plpgsql
-      as $$
-      declare
-        v_count integer;
-      begin
-        with released as (
-          update equipment_reservations
-             set released_at = now(), released_by = p_user_id, release_reason = p_reason
-           where event_request_id = p_event_request_id
-             and (p_line_id is null or equipment_line_id = p_line_id)
-             and released_at is null
-          returning id, event_request_id, equipment_line_id, quantity, start_at, end_at
-        ), written as (
-          insert into equipment_reservation_events
-            (equipment_reservation_id, event_request_id, equipment_line_id, action, user_id,
-             reason, quantity_before, quantity_after, start_before, end_before)
-          select id, event_request_id, equipment_line_id, 'released', p_user_id,
-                 p_reason, quantity, 0, start_at, end_at
-            from released
-          returning 1
-        )
-        select count(*) into v_count from released;
-        return v_count;
-      end;
-      $$;
-      create table equipment_review_history (
-        id bigint generated always as identity primary key,
-        equipment_request_id uuid not null,
-        action text not null,
-        user_id uuid,
-        note text
-      );
-      create table safety_review_submissions (
-        id uuid primary key default gen_random_uuid(),
-        event_request_id uuid not null references event_requests(id),
-        submitted_by uuid not null references auth.users(id),
-        note text,
-        no_equipment_confirmed boolean not null default false,
-        created_at timestamptz not null default now()
-      );
-      create table notifications (
-        id uuid primary key default gen_random_uuid(),
-        recipient_id uuid not null,
-        type text not null,
-        booking_id uuid,
-        block_id uuid,
-        event_request_id uuid,
-        venue_hold_id uuid,
-        payload jsonb not null default '{}',
-        read_at timestamptz,
-        created_at timestamptz not null default now()
-      );
-    `);
-    for (const name of SAFETY_MIGRATIONS) await db.exec(migration(name));
-
+    db = await createSchemaDb();
     organiser = await user('organiser@example.com', 'event_organiser', 'Alex Organiser');
     coordinator = await user('coordinator@example.com', 'event_coordinator', 'Casey Coordinator');
     safetyOfficer = await user('safety@example.com', 'safety_officer', 'Riley Safety Officer');
@@ -280,7 +101,6 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
          values ('Hall A', 'Level 2', 250, 'Two east exits', null) returning id`,
       )
     ).id;
-    await db.query("insert into room_layouts(code, label) values ('theatre', 'Theatre')");
   });
 
   afterAll(async () => {
@@ -313,14 +133,6 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
         [organiser, coordinator, START, END],
       ),
     ).rejects.toMatchObject({ code: '55000' });
-  });
-
-  it('reapplies the safety gate migration without duplicating its trigger', async () => {
-    await db.exec(migration('073_safety_review_gates.sql'));
-
-    expect((await one(
-      "select count(*)::integer as count from pg_trigger where tgname = 'event_requests_safety_transitions'",
-    )).count).toBe(1);
   });
 
   it('lists oldest safety-stage entry first and returns only the arrangements in the review', async () => {
@@ -399,6 +211,8 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
     const eventId = await event('Change Event');
     const bookingId = await bookedVenue(eventId);
     const equipmentRequestId = await equipment(eventId);
+    // Requesting the equipment already told Technical Support; count only the response's notices.
+    const earlier = (await rows('select id from notifications where event_request_id = $1', [eventId])).map(({ id }) => id);
 
     const response = await respond(
       eventId,
@@ -442,8 +256,10 @@ describe('SCRUM-490: safety review transaction and lifecycle', () => {
       quantity_before: 2,
       quantity_after: 0,
     }]);
-    expect((await rows('select type, recipient_id from notifications where event_request_id = $1', [eventId])))
-      .toHaveLength(4);
+    expect((await rows(
+      'select type, recipient_id from notifications where event_request_id = $1 and id <> all($2::uuid[])',
+      [eventId, earlier],
+    ))).toHaveLength(4);
     expect((await rows(
       'select recipient_id from notifications where event_request_id = $1 and type = $2',
       [eventId, 'safety_review_response'],

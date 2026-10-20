@@ -1,13 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
 const START = '2030-01-01T12:00:00Z';
 
+// Registration settings and register_for_event against the final schema.
 describe('SCRUM-363: event registration in Postgres', () => {
   let db;
   let organiser;
@@ -18,36 +15,31 @@ describe('SCRUM-363: event registration in Postgres', () => {
 
   const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
 
+  const event = (name, status = 'confirmed', overrides = {}) => seedEvent(db, {
+    status,
+    organiser_id: organiser,
+    reviewing_coordinator_id: coordinator,
+    event_name: name,
+    // What a significant change checks a real event has.
+    purpose: 'Registration test',
+    expected_attendance: 50,
+    proposed_start: START,
+    proposed_end: '2030-01-01T14:00:00Z',
+    ...overrides,
+  });
+  // Confirming takes the safety review workflow, which these tests skip.
+  const confirm = (id) => withSafetyReviewTransitionGuardDisabled(db, () => db.query(
+    "update event_requests set status = 'confirmed' where id = $1", [id],
+  ));
+  // A confirmed event's start is locked: it moves through a significant change,
+  // which returns the event to Approved for a fresh safety review.
+  const moveStart = (id, start) => db.query(
+    "select apply_significant_event_change($1, jsonb_build_object('proposedStart', $2::text), 'Start moved.', $3)",
+    [id, start, coordinator],
+  );
+
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-      create role service_role;
-    `);
-    await db.exec(migration('001_event_requests.sql'));
-    await db.exec(`
-      create table profiles (
-        id uuid primary key references auth.users(id),
-        role text not null
-      );
-      -- As 014 leaves them: the coordinator column and the notifications table
-      -- the start-change trigger writes to.
-      alter table event_requests add column assigned_coordinator_id uuid;
-      create table notifications (
-        id               uuid primary key default gen_random_uuid(),
-        recipient_id     uuid not null references auth.users (id) on delete cascade,
-        type             text not null,
-        event_request_id uuid references event_requests (id) on delete cascade,
-        payload          jsonb not null default '{}',
-        created_at       timestamptz not null default now(),
-        constraint notifications_type_known check (type in ('booking_flagged'))
-      );
-    `);
-    await db.exec(migration('050_event_registration.sql'));
-    await db.exec(migration('091_event_registration_hardening.sql'));
+    db = await createSchemaDb();
 
     organiser = (await one("insert into auth.users (email) values ('organiser@test') returning id")).id;
     attendee = (await one("insert into auth.users (email) values ('attendee@test') returning id")).id;
@@ -58,11 +50,7 @@ describe('SCRUM-363: event registration in Postgres', () => {
          ($1, 'event_organiser'), ($2, 'attendee'), ($3, 'attendee'), ($4, 'event_coordinator')`,
       [organiser, attendee, secondAttendee, coordinator],
     );
-    eventId = (await one(
-      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
-       values ($1, 'Registration test', 'approved', $2, '2030-01-01T14:00:00Z') returning id`,
-      [organiser, START],
-    )).id;
+    eventId = await event('Registration test', 'approved');
   });
 
   afterAll(async () => {
@@ -118,9 +106,9 @@ describe('SCRUM-363: event registration in Postgres', () => {
       'select register_for_event($1, $2) as result',
       [eventId, attendee],
     );
-    expect(notConfirmed.result.outcome).toBe('event_not_confirmed');
+    expect(notConfirmed.result.outcome).toBe('not_found');
 
-    await db.query("update event_requests set status = 'confirmed' where id = $1", [eventId]);
+    await confirm(eventId);
     const registered = await one(
       'select register_for_event($1, $2) as result',
       [eventId, attendee],
@@ -133,7 +121,7 @@ describe('SCRUM-363: event registration in Postgres', () => {
       'select register_for_event($1, $2) as result',
       [eventId, secondAttendee],
     );
-    expect(blockedDuringReview.result.outcome).toBe('event_not_confirmed');
+    expect(blockedDuringReview.result.outcome).toBe('not_found');
     const retained = await one(
       `select registration_enabled, registration_capacity,
               (select count(*) from event_registrations where event_request_id = $1) as registered_count
@@ -144,7 +132,7 @@ describe('SCRUM-363: event registration in Postgres', () => {
     expect(retained.registration_capacity).toBe(2);
     expect(Number(retained.registered_count)).toBe(1);
 
-    await db.query("update event_requests set status = 'confirmed' where id = $1", [eventId]);
+    await confirm(eventId);
     const secondRegistration = await one(
       'select register_for_event($1, $2) as result',
       [eventId, secondAttendee],
@@ -204,11 +192,8 @@ describe('SCRUM-363: event registration in Postgres', () => {
     );
     expect(nullCaller.result.outcome).toBe('forbidden');
 
-    const nullRegistration = await one(
-      'select register_for_event($1, null) as result',
-      [eventId],
-    );
-    expect(nullRegistration.result.outcome).toBe('forbidden');
+    await expect(db.query('select register_for_event($1, null) as result', [eventId]))
+      .rejects.toMatchObject({ code: '22023' });
 
     const wrongRoleRegistration = await one(
       'select register_for_event($1, $2) as result',
@@ -216,34 +201,21 @@ describe('SCRUM-363: event registration in Postgres', () => {
     );
     expect(wrongRoleRegistration.result.outcome).toBe('forbidden');
 
-
-    const source = migration('091_event_registration_hardening.sql').toLowerCase();
     for (const functionName of ['setup_event_registration', 'register_for_event']) {
-      const bodyStart = source.indexOf(`create or replace function ${functionName}`);
-      const bodyEnd = source.indexOf('$$;', source.indexOf('$$', bodyStart) + 2);
-      expect(source.slice(bodyStart, bodyEnd)).toMatch(/for update/);
+      const { prosrc } = await one('select prosrc from pg_proc where proname = $1', [functionName]);
+      expect(prosrc.toLowerCase()).toMatch(/for update/);
     }
   });
 
   it('SCRUM494_AC4_refuses_registration_when_disabled_or_not_yet_open', async () => {
-    const disabledEvent = (await one(
-      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
-       values ($1, 'Disabled registration', 'confirmed', $2, '2030-01-01T14:00:00Z')
-       returning id`,
-      [organiser, START],
-    )).id;
+    const disabledEvent = await event('Disabled registration');
     const disabledResult = await one(
       'select register_for_event($1, $2) as result',
       [disabledEvent, secondAttendee],
     );
-    expect(disabledResult.result.outcome).toBe('registration_closed');
+    expect(disabledResult.result.outcome).toBe('not_found');
 
-    const futureEvent = (await one(
-      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
-       values ($1, 'Future registration window', 'confirmed', $2, '2030-01-01T14:00:00Z')
-       returning id`,
-      [organiser, START],
-    )).id;
+    const futureEvent = await event('Future registration window');
     const futureSettings = await one(
       `select setup_event_registration($1, $2, true, $3, $4, null, null) as result`,
       [
@@ -259,7 +231,7 @@ describe('SCRUM-363: event registration in Postgres', () => {
       'select register_for_event($1, $2) as result',
       [futureEvent, secondAttendee],
     );
-    expect(beforeOpening.result.outcome).toBe('registration_closed');
+    expect(beforeOpening.result.outcome).toBe('not_found');
   });
 
   it('SCRUM494_AC5_does_not_count_withdrawn_registrations_toward_capacity', async () => {
@@ -290,22 +262,14 @@ describe('SCRUM-363: event registration in Postgres', () => {
   )).rows;
 
   it('SCRUM494_AC7_lets_an_earlier_start_through_and_tells_the_organiser_and_coordinator_which_dates_clash', async () => {
-    const scheduleEvent = (await one(
-      `insert into event_requests (organiser_id, assigned_coordinator_id, event_name, status, proposed_start, proposed_end)
-       values ($1, $2, 'Schedule conflict', 'confirmed', $3, '2030-01-01T14:00:00Z')
-       returning id`,
-      [organiser, coordinator, START],
-    )).id;
+    const scheduleEvent = await event('Schedule conflict');
     const saved = await one(
       'select setup_event_registration($1, $2, true, $3, $4, null, $5) as result',
       [scheduleEvent, organiser, '2030-01-01T09:00:00Z', START, '2030-01-01T11:00:00Z'],
     );
     expect(saved.result.outcome).toBe('saved');
 
-    await db.query(
-      "update event_requests set proposed_start = '2030-01-01T09:00:00Z' where id = $1",
-      [scheduleEvent],
-    );
+    await moveStart(scheduleEvent, '2030-01-01T09:00:00Z');
 
     const moved = await one('select proposed_start, registration_closes_at from event_requests where id = $1', [scheduleEvent]);
     expect(moved.proposed_start.toISOString()).toBe('2030-01-01T09:00:00.000Z');
@@ -323,54 +287,34 @@ describe('SCRUM-363: event registration in Postgres', () => {
   });
 
   it('SCRUM494_AC7_names_only_the_dates_the_new_start_clashes_with', async () => {
-    const scheduleEvent = (await one(
-      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
-       values ($1, 'Withdrawal clash', 'confirmed', $2, '2030-01-01T14:00:00Z')
-       returning id`,
-      [organiser, START],
-    )).id;
+    const scheduleEvent = await event('Withdrawal clash');
     await one(
       'select setup_event_registration($1, $2, true, $3, $4, null, $5) as result',
       [scheduleEvent, organiser, '2029-12-01T00:00:00Z', '2030-01-01T10:00:00Z', '2030-01-01T11:30:00Z'],
     );
 
-    await db.query(
-      "update event_requests set proposed_start = '2030-01-01T11:00:00Z' where id = $1",
-      [scheduleEvent],
-    );
+    await moveStart(scheduleEvent, '2030-01-01T11:00:00Z');
 
     const notes = await scheduleConflictNotes(scheduleEvent);
-    expect(notes.map((note) => note.recipient_id)).toEqual([organiser]);
-    expect(notes[0].payload.fields).toEqual(['registrationWithdrawalDeadline']);
+    // An event with registration settings is past review, so it always has a coordinator.
+    expect(notes.map((note) => note.recipient_id).sort()).toEqual([organiser, coordinator].sort());
+    for (const note of notes) expect(note.payload.fields).toEqual(['registrationWithdrawalDeadline']);
   });
 
   it('SCRUM494_AC7_writes_no_notification_when_the_new_start_leaves_the_dates_valid', async () => {
-    const scheduleEvent = (await one(
-      `insert into event_requests (organiser_id, assigned_coordinator_id, event_name, status, proposed_start, proposed_end)
-       values ($1, $2, 'No clash', 'confirmed', $3, '2030-01-01T14:00:00Z')
-       returning id`,
-      [organiser, coordinator, START],
-    )).id;
+    const scheduleEvent = await event('No clash');
     await one(
       'select setup_event_registration($1, $2, true, $3, $4, null, $5) as result',
       [scheduleEvent, organiser, '2029-12-01T00:00:00Z', '2030-01-01T10:00:00Z', '2030-01-01T10:00:00Z'],
     );
 
-    await db.query(
-      "update event_requests set proposed_start = '2030-01-01T11:00:00Z' where id = $1",
-      [scheduleEvent],
-    );
+    await moveStart(scheduleEvent, '2030-01-01T11:00:00Z');
 
     expect(await scheduleConflictNotes(scheduleEvent)).toEqual([]);
   });
 
   it('SCRUM494_AC8_refuses_an_opening_time_at_or_after_the_event_start_when_no_closing_time_is_set', async () => {
-    const openEnded = (await one(
-      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
-       values ($1, 'Opens too late', 'confirmed', $2, '2030-01-01T14:00:00Z')
-       returning id`,
-      [organiser, START],
-    )).id;
+    const openEnded = await event('Opens too late');
     for (const opensAt of [START, '2030-01-01T13:00:00Z']) {
       const refused = await one(
         'select setup_event_registration($1, $2, true, $3, null, null, null) as result',
@@ -382,10 +326,10 @@ describe('SCRUM-363: event registration in Postgres', () => {
       });
     }
 
-    await db.query('update event_requests set proposed_start = null where id = $1', [openEnded]);
+    const noStartEvent = await event('No start yet', 'approved', { proposed_start: null, proposed_end: null });
     const noStart = await one(
       'select setup_event_registration($1, $2, true, $3, null, null, null) as result',
-      [openEnded, organiser, '2029-12-01T00:00:00Z'],
+      [noStartEvent, organiser, '2029-12-01T00:00:00Z'],
     );
     expect(noStart.result.details).toEqual([
       { field: 'proposedStart', message: 'Set the event start before setting the registration opening time.' },
@@ -393,12 +337,7 @@ describe('SCRUM-363: event registration in Postgres', () => {
   });
 
   it('SCRUM494_AC8_allows_registration_with_no_closing_time_until_the_organiser_closes_it', async () => {
-    const openEnded = (await one(
-      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
-       values ($1, 'Open ended', 'confirmed', $2, '2030-01-01T14:00:00Z')
-       returning id`,
-      [organiser, START],
-    )).id;
+    const openEnded = await event('Open ended');
     const opened = new Date(Date.now() - 3_600_000).toISOString();
     const saved = await one(
       'select setup_event_registration($1, $2, true, $3, null, null, null) as result',
@@ -413,16 +352,11 @@ describe('SCRUM-363: event registration in Postgres', () => {
     );
     expect(closed.result.outcome).toBe('saved');
     const refused = await one('select register_for_event($1, $2) as result', [openEnded, secondAttendee]);
-    expect(refused.result.outcome).toBe('registration_closed');
+    expect(refused.result.outcome).toBe('not_found');
   });
 
   it('SCRUM494_AC9_allows_switching_registration_off_with_the_window_cleared', async () => {
-    const offEvent = (await one(
-      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
-       values ($1, 'Switch off', 'approved', $2, '2030-01-01T14:00:00Z')
-       returning id`,
-      [organiser, START],
-    )).id;
+    const offEvent = await event('Switch off', 'approved');
     const on = await one(
       `select setup_event_registration($1, $2, true, $3, $4, null, null) as result`,
       [offEvent, organiser, '2029-12-01T00:00:00Z', '2030-01-01T10:00:00Z'],
@@ -453,21 +387,13 @@ describe('SCRUM-363: event registration in Postgres', () => {
   // Registration saved against the original start, then the start moved earlier
   // than the closing time and withdrawal deadline.
   const eventWithClashingDates = async (name) => {
-    const clashing = (await one(
-      `insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end)
-       values ($1, $2, 'confirmed', $3, '2030-01-01T14:00:00Z')
-       returning id`,
-      [organiser, name, START],
-    )).id;
+    const clashing = await event(name);
     const saved = await one(
       'select setup_event_registration($1, $2, true, $3, $4, null, $5) as result',
       [clashing, organiser, ...CLASHING_DATES],
     );
     expect(saved.result.outcome).toBe('saved');
-    await db.query(
-      "update event_requests set proposed_start = '2030-01-01T09:00:00Z' where id = $1",
-      [clashing],
-    );
+    await moveStart(clashing, '2030-01-01T09:00:00Z');
     return clashing;
   };
 

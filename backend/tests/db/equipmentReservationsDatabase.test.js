@@ -1,31 +1,15 @@
 /**
  * SCRUM-303 to SCRUM-306 for SCRUM-300: reduce, release, move, keep, automatic
- * release and flagging, run against a real Postgres (PGlite).
+ * release and flagging, run against the final schema in a real Postgres (PGlite).
  *
- * Applies 022, 024, 037, 038, 053, 054 and 090, then calls reserve_equipment the way the
- * service will. PGlite has one connection, so the last-unit race (AC3) is tested
- * as two reservations one after the other, which is what the type row's lock
- * makes the real case look like.
+ * Calls reserve_equipment the way the service does. PGlite has one connection,
+ * so the last-unit race (AC3) is tested as two reservations one after the
+ * other, which is what the type row's lock makes the real case look like.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '022_equipment_schema.sql',
-  '024_equipment_availability.sql',
-  '037_equipment_request_lines.sql',
-  '038_equipment_review.sql',
-  '053_equipment_reservations.sql',
-  '054_equipment_reservation_actions.sql',
-  '090_equipment_reserve_in_safety_statuses.sql',
-];
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
@@ -50,17 +34,22 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
   const rows = async (sql, params) => (await db.query(sql, params)).rows;
   const asJson = (row) => JSON.parse(row.answer);
 
-  const newUser = async (email) =>
-    (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
+  const newUser = async (email, role) => {
+    const { id } = await one('insert into auth.users (email) values ($1) returning id', [email]);
+    await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
+    return id;
+  };
   const newType = async (name, total = 10) =>
     (await one('insert into equipment_types (name, total_quantity) values ($1, $2) returning id', [name, total])).id;
-  const newEvent = async ({ status = 'approved', start = START, end = END } = {}) =>
-    (await one(
-      `insert into event_requests
-         (organiser_id, event_name, status, assigned_coordinator_id, proposed_start, proposed_end)
-       values ($1, $2, $3, $4, $5, $6) returning id`,
-      [organiser, `Event ${Math.random()}`, status, coordinator, start, end],
-    )).id;
+  const newEvent = ({ status = 'approved', start = START, end = END } = {}) =>
+    seedEvent(db, {
+      status,
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: `Event ${Math.random()}`,
+      proposed_start: start,
+      proposed_end: end,
+    });
 
   const add = async (event, type, quantity) =>
     asJson(await one('select add_equipment_line($1, $2, $3, $4, null)::text as answer', [event, coordinator, type, quantity]));
@@ -87,6 +76,11 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
   const NEW_END = '2026-12-05T12:00:00Z';
   const changePeriod = (event, s = NEW_START, e = NEW_END) =>
     db.query('update event_requests set proposed_start = $2, proposed_end = $3 where id = $1', [event, s, e]);
+  // Jumps the event to a status without the safety workflow's submission and
+  // response rows, which these equipment tests do not need.
+  const setStatus = (event, status) =>
+    withSafetyReviewTransitionGuardDisabled(db, () =>
+      db.query('update event_requests set status = $2::event_request_status where id = $1', [event, status]));
   const lineId = (state, name) => state.request.lines.find((l) => l.name === name).id;
   const live = (event) =>
     rows(
@@ -111,48 +105,18 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
   };
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
+    db = await createSchemaDb();
 
-      create function set_updated_at() returns trigger language plpgsql as $$
-      begin new.updated_at = now(); return new; end $$;
-
-      create type event_request_status as enum (
-        'draft', 'submitted', 'under_review', 'pending_clarification',
-        'approved', 'safety_review', 'safety_approved', 'confirmed', 'completed', 'rejected', 'cancelled'
-      );
-      create table event_requests (
-        id                      uuid primary key default gen_random_uuid(),
-        organiser_id            uuid not null,
-        event_name              text not null,
-        status                  event_request_status not null default 'draft',
-        assigned_coordinator_id uuid,
-        proposed_start          timestamptz,
-        proposed_end            timestamptz
-      );
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
-
-    organiser = await newUser('organiser@example.com');
-    coordinator = await newUser('coordinator@example.com');
-    reviewerA = await newUser('tech-a@example.com');
-    reviewerB = await newUser('tech-b@example.com');
+    organiser = await newUser('organiser@example.com', 'event_organiser');
+    coordinator = await newUser('coordinator@example.com', 'event_coordinator');
+    reviewerA = await newUser('tech-a@example.com', 'technical_support_staff');
+    reviewerB = await newUser('tech-b@example.com', 'technical_support_staff');
   }, 60000);
 
   afterAll(async () => {
     await db?.close();
   });
 
-
-  it('SCRUM300_runs_a_second_time_without_error', async () => {
-    await expect(db.exec(migration('054_equipment_reservation_actions.sql'))).resolves.not.toThrow();
-  });
-
-  it('SCRUM300_runs_090_a_second_time_without_error', async () => {
-    await expect(db.exec(migration('090_equipment_reserve_in_safety_statuses.sql'))).resolves.not.toThrow();
-  });
 
   describe('AC1: the statuses that allow reserving', () => {
     it('SCRUM300_AC1_the_list_is_approved_the_two_safety_statuses_and_confirmed', async () => {
@@ -161,7 +125,8 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
     });
 
     it('SCRUM300_AC1_the_refusal_names_the_statuses_in_the_list', async () => {
-      // Narrow the list, read the message, then put 090 back.
+      // Narrow the list, read the message, then put the real definition back.
+      const { def } = await one("select pg_get_functiondef('equipment_reservable_event_statuses'::regproc) as def");
       await db.exec(`create or replace function equipment_reservable_event_statuses()
         returns text[] language sql immutable as $$ select array['approved']::text[] $$;`);
       try {
@@ -170,7 +135,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
         expect(err?.code).toBe('55000');
         expect(err?.message).toBe('Equipment can only be reserved while the event is Approved. This event is Rejected.');
       } finally {
-        await db.exec(migration('090_equipment_reserve_in_safety_statuses.sql'));
+        await db.exec(def);
       }
     });
 
@@ -178,7 +143,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       'SCRUM300_AC1_reserve_reduce_and_release_work_while_the_event_is_in_%s',
       async (eventStatus) => {
         const { event, line } = await reviewed('Projector', 10, 4);
-        await db.query('update event_requests set status = $2::event_request_status where id = $1', [event, eventStatus]);
+        await setStatus(event, eventStatus);
 
         await reserve(event, reviewerA, line, 3);
         const { id } = await reservation(event);
@@ -196,7 +161,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
         await reserve(event, reviewerA, line, 2);
         await changePeriod(event);
         await start(event, reviewerA);
-        await db.query('update event_requests set status = $2::event_request_status where id = $1', [event, eventStatus]);
+        await setStatus(event, eventStatus);
         const { id } = await reservation(event);
 
         await move(event, reviewerA, id);
@@ -284,6 +249,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
     it('SCRUM300_AC5_an_event_that_is_completed_releases_everything_with_a_reason', async () => {
       const { event, line } = await reviewed('Projector', 10, 4);
       await reserve(event, reviewerA, line, 2);
+      await setStatus(event, 'confirmed');
       await db.query("update event_requests set status = 'completed' where id = $1", [event]);
       const row = await reservation(event);
       expect(row.release_reason).toBe('event completed');

@@ -1,31 +1,13 @@
 /**
- * SCRUM-284: the equipment request queue (056), against a real Postgres (PGlite).
+ * SCRUM-284: the equipment request queue, against the final schema in a real
+ * Postgres (PGlite).
  *
- * Named SCRUM284_AC<n>_<what_it_checks>, the ACs being SCRUM-284's. Applies 022, 024, 037,
- * 038, 053, 054, 055, 056 and 060 and calls equipment_request_queue the way the
- * service does, as a Technical Support user.
+ * Named SCRUM284_AC<n>_<what_it_checks>, the ACs being SCRUM-284's. Calls
+ * equipment_request_queue the way the service does, as a Technical Support user.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '022_equipment_schema.sql',
-  '024_equipment_availability.sql',
-  '037_equipment_request_lines.sql',
-  '038_equipment_review.sql',
-  '053_equipment_reservations.sql',
-  '054_equipment_reservation_actions.sql',
-  '055_equipment_reservation_guards.sql',
-  '056_equipment_request_queue.sql',
-  '060_equipment_reservation_topup.sql',
-];
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
 const refusal = async (promise) => {
   try {
@@ -64,19 +46,33 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
 
   /** An approved event with a period, one request and `lines` lines. */
   const makeEvent = async ({ name, start = day(10), end = plus(day(10), 2), lines = 1, status = 'approved' } = {}) => {
-    const event = (await one(
-      `insert into event_requests
-         (organiser_id, event_name, status, assigned_coordinator_id, proposed_start, proposed_end)
-       values ($1, $2, $3, $4, $5, $6) returning id`,
-      [organiser, name ?? `Event ${Math.random()}`, status, coordinator, start, end],
-    )).id;
+    const event = await seedEvent(db, {
+      status,
+      organiser_id: organiser,
+      event_name: name ?? `Event ${Math.random()}`,
+      assigned_coordinator_id: coordinator,
+      proposed_start: start,
+      proposed_end: end,
+    });
     let lineIds = [];
+    // add_equipment_line takes lines only while the event is Approved, so an
+    // event seeded in another status gets its request written directly.
+    const request = status === 'approved' || lines === 0
+      ? null
+      : (await one('insert into equipment_requests (event_request_id) values ($1) returning id', [event])).id;
     for (let i = 0; i < lines; i += 1) {
       const type = await newType(`Type ${Math.random()}`, 10);
-      const state = asJson(
-        await one('select add_equipment_line($1, $2, $3, $4, null)::text as answer', [event, coordinator, type, 2]),
-      );
-      lineIds = state.request.lines.map((l) => l.id);
+      if (request) {
+        lineIds.push((await one(
+          'insert into equipment_lines (equipment_request_id, equipment_type_id, quantity) values ($1, $2, 2) returning id',
+          [request, type],
+        )).id);
+      } else {
+        const state = asJson(
+          await one('select add_equipment_line($1, $2, $3, $4, null)::text as answer', [event, coordinator, type, 2]),
+        );
+        lineIds = state.request.lines.map((l) => l.id);
+      }
     }
     return { event, lineIds };
   };
@@ -91,49 +87,14 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
   const names = (list) => list.map((r) => r.event_name);
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create role anon;
-      create role authenticated;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create table profiles (id uuid primary key references auth.users(id), full_name text, role text);
-
-      create function set_updated_at() returns trigger language plpgsql as $$
-      begin new.updated_at = now(); return new; end $$;
-
-      create type event_request_status as enum (
-        'draft', 'submitted', 'under_review', 'pending_clarification',
-        'approved', 'safety_review', 'safety_approved', 'confirmed', 'completed', 'rejected', 'cancelled'
-      );
-      create table event_requests (
-        id                      uuid primary key default gen_random_uuid(),
-        organiser_id            uuid not null,
-        event_name              text not null,
-        status                  event_request_status not null default 'draft',
-        assigned_coordinator_id uuid,
-        proposed_start          timestamptz,
-        proposed_end            timestamptz
-      );
-      create table venues (id uuid primary key default gen_random_uuid(), name text not null);
-      create type booking_status as enum ('approved', 'flagged_for_review', 'cancelled');
-      create table bookings (
-        id               uuid primary key default gen_random_uuid(),
-        venue_id         uuid not null references venues(id),
-        event_request_id uuid not null references event_requests(id) on delete cascade,
-        starts_at        timestamptz not null,
-        ends_at          timestamptz not null,
-        status           booking_status not null default 'approved'
-      );
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
+    db = await createSchemaDb();
 
     organiser = await newUser('organiser@example.com', 'Olive Organiser');
     coordinator = await newUser('coordinator@example.com', 'Rae Tan');
     sam = await newUser('sam@example.com', 'Sam Lee');
     alex = await newUser('alex@example.com', 'Alex Koh');
     tech = await newUser('tech@example.com', 'Tessa Support', 'technical_support_staff');
-    hall = (await one("insert into venues (name) values ('Hall A') returning id")).id;
+    hall = (await one("insert into venues (name, location, max_capacity) values ('Hall A', 'Block A', 100) returning id")).id;
   }, 60000);
 
   afterAll(async () => {
@@ -231,7 +192,7 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
 
     it('SCRUM284_AC3_the_booked_venue_is_shown_when_there_is_one', async () => {
       const { event } = await makeEvent({ name: 'Has Venue' });
-      await db.query('insert into bookings (venue_id, event_request_id, starts_at, ends_at) values ($1, $2, $3, $4)', [
+      await db.query("insert into bookings (venue_id, event_request_id, starts_at, ends_at, status) values ($1, $2, $3, $4, 'approved')", [
         hall, event, day(10), plus(day(10), 2),
       ]);
       expect(rowFor((await queue()).requests, event)).toMatchObject({ venues: [{ id: hall, name: 'Hall A' }] });
@@ -255,11 +216,11 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
 
     it('SCRUM284_AC3_an_event_with_two_venues_shows_one_row_naming_both_earliest_first', async () => {
       const { event } = await makeEvent({ name: 'Two Bookings' });
-      const other = (await one("insert into venues (name) values ('Hall B') returning id")).id;
-      await db.query('insert into bookings (venue_id, event_request_id, starts_at, ends_at) values ($1, $2, $3, $4)', [
+      const other = (await one("insert into venues (name, location, max_capacity) values ('Hall B', 'Block A', 100) returning id")).id;
+      await db.query("insert into bookings (venue_id, event_request_id, starts_at, ends_at, status) values ($1, $2, $3, $4, 'approved')", [
         other, event, day(11), plus(day(11), 2),
       ]);
-      await db.query('insert into bookings (venue_id, event_request_id, starts_at, ends_at) values ($1, $2, $3, $4)', [
+      await db.query("insert into bookings (venue_id, event_request_id, starts_at, ends_at, status) values ($1, $2, $3, $4, 'approved')", [
         hall, event, day(10), plus(day(10), 2),
       ]);
       const list = (await queue()).requests.filter((r) => r.event_request_id === event);
@@ -273,7 +234,7 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
     it('SCRUM284_AC3_two_bookings_at_the_same_venue_name_it_once', async () => {
       const { event } = await makeEvent({ name: 'Same Venue Twice' });
       for (const d of [10, 11]) {
-        await db.query('insert into bookings (venue_id, event_request_id, starts_at, ends_at) values ($1, $2, $3, $4)', [
+        await db.query("insert into bookings (venue_id, event_request_id, starts_at, ends_at, status) values ($1, $2, $3, $4, 'approved')", [
           hall, event, day(d), plus(day(d), 2),
         ]);
       }
@@ -372,10 +333,14 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
     });
 
     it('SCRUM284_AC2_an_event_with_no_equipment_request_is_not_listed', async () => {
-      const event = (await one(
-        "insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end) values ($1, 'No Equipment', 'approved', $2, $3) returning id",
-        [organiser, day(10), plus(day(10), 2)],
-      )).id;
+      const event = await seedEvent(db, {
+        status: 'approved',
+        organiser_id: organiser,
+        event_name: 'No Equipment',
+        assigned_coordinator_id: coordinator,
+        proposed_start: day(10),
+        proposed_end: plus(day(10), 2),
+      });
       expect(rowFor((await queue(null, true)).requests, event)).toBeUndefined();
     });
 
@@ -431,9 +396,7 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
     it.each(['rejected', 'draft', 'submitted', 'under_review', 'pending_clarification', 'completed'])(
       'SCRUM284_AC4_a_pending_request_on_a_%s_event_is_not_offered_for_action',
       async (eventStatus) => {
-        // Lines can only be added while the event is Approved; the status moves on afterwards.
-        const { event } = await makeEvent({ name: `Not reservable ${eventStatus}` });
-        await db.query('update event_requests set status = $2::event_request_status where id = $1', [event, eventStatus]);
+        const { event } = await makeEvent({ name: `Not reservable ${eventStatus}`, status: eventStatus });
         const result = await queue();
         expect(rowFor(result.needs_action, event)).toBeUndefined();
         // It is still listed with every request, so it can be opened.
@@ -458,17 +421,17 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
     it.each(['safety_review', 'safety_approved'])(
       'SCRUM284_AC4_a_pending_request_on_a_%s_event_needs_action',
       async (eventStatus) => {
-        const { event } = await makeEvent({ name: `Safety pending ${eventStatus}` });
-        await db.query('update event_requests set status = $2::event_request_status where id = $1', [event, eventStatus]);
+        const { event } = await makeEvent({ name: `Safety pending ${eventStatus}`, status: eventStatus });
         expect(rowFor((await queue()).needs_action, event)).toBeDefined();
       },
     );
 
     it('SCRUM284_AC4_a_flagged_reservation_on_a_safety_review_event_needs_action', async () => {
-      const { event, lineIds } = await makeEvent({ name: 'Flagged in safety review', start: day(15), end: plus(day(15), 2) });
+      const { event, lineIds } = await makeEvent({
+        name: 'Flagged in safety review', status: 'safety_review', start: day(15), end: plus(day(15), 2),
+      });
       await startReview(event, sam);
       await db.query('select reserve_equipment($1, $2, $3, 2)', [event, sam, lineIds[0]]);
-      await db.query("update event_requests set status = 'safety_review' where id = $1", [event]);
       await db.query('update event_requests set proposed_start = $2, proposed_end = $3 where id = $1', [event, day(16), plus(day(16), 2)]);
 
       const row = rowFor((await queue()).needs_action, event);
@@ -495,8 +458,7 @@ describe('SCRUM-284: the equipment request queue in Postgres', () => {
     });
 
     it('SCRUM284_AC4_a_confirmed_event_still_needs_action', async () => {
-      const { event } = await makeEvent({ name: 'Confirmed and pending' });
-      await db.query("update event_requests set status = 'confirmed' where id = $1", [event]);
+      const { event } = await makeEvent({ name: 'Confirmed and pending', status: 'confirmed' });
       expect(rowFor((await queue()).needs_action, event)).toBeDefined();
     });
 
