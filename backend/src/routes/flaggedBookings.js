@@ -18,7 +18,7 @@ import express from 'express';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
-import { createErrorHandler } from '../http/handleError.js';
+import { createErrorMiddleware } from '../http/handleError.js';
 import {
   cancelFlaggedBooking,
   listEventFlaggedBookings,
@@ -26,7 +26,7 @@ import {
   reinstateFlaggedBooking,
 } from '../services/flaggedBookingService.js';
 
-const handleError = createErrorHandler('flagged bookings route');
+const errorMiddleware = createErrorMiddleware('flagged bookings route');
 
 /**
  * @param {object} [options]
@@ -57,11 +57,7 @@ export function createFlaggedBookingRouter({
    * Statuses: 401; 403 wrong role or no role.
    */
   router.get('/', venueStaffOnly, async (req, res) => {
-    try {
-      res.status(200).json(await listFlaggedBookings(req.user.id, { client }));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await listFlaggedBookings(req.user.id, { client }));
   });
 
   /**
@@ -72,13 +68,9 @@ export function createFlaggedBookingRouter({
    * coordinator not assigned to the event; 404 no such event.
    */
   router.get('/events/:eventRequestId', coordinatorOnly, async (req, res) => {
-    try {
-      res.status(200).json(
-        await listEventFlaggedBookings(req.params.eventRequestId, req.user.id, { client }),
-      );
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(
+      await listEventFlaggedBookings(req.params.eventRequestId, req.user.id, { client }),
+    );
   });
 
   /**
@@ -92,13 +84,9 @@ export function createFlaggedBookingRouter({
    * `conflicts`) or BOOKING_CHANGED.
    */
   router.post('/:id/reinstate', venueStaffOnly, async (req, res) => {
-    try {
-      res.status(200).json(
-        await reinstateFlaggedBooking(req.params.id, req.user.id, req.body, { client }),
-      );
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(
+      await reinstateFlaggedBooking(req.params.id, req.user.id, req.body, { client }),
+    );
   });
 
   /**
@@ -111,15 +99,12 @@ export function createFlaggedBookingRouter({
    * BOOKING_CHANGED.
    */
   router.post('/:id/cancel', coordinatorOrVenueStaff, async (req, res) => {
-    try {
-      res.status(200).json(
-        await cancelFlaggedBooking(req.params.id, req.user.id, req.body, { client }),
-      );
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(
+      await cancelFlaggedBooking(req.params.id, req.user.id, req.body, { client }),
+    );
   });
 
+  router.use(errorMiddleware);
   return router;
 }
 

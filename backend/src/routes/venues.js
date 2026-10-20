@@ -92,12 +92,12 @@ import {
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
-import { createErrorHandler } from '../http/handleError.js';
+import { createErrorMiddleware } from '../http/handleError.js';
 import { parseCodeList } from '../http/parseCodeList.js';
 
 
-/** Map an error to a response; see src/http/handleError.js (SCRUM-127). */
-const handleError = createErrorHandler('venues route');
+/** Answers whatever a handler throws or rejects with; see src/http/handleError.js (SCRUM-127). */
+const errorMiddleware = createErrorMiddleware('venues route');
 
 
 /**
@@ -280,7 +280,7 @@ export function createVenueRouter({
     try {
       filters = validateSearchFilters(parseSearchFilters(req.query));
     } catch (err) {
-      return handleError(err, res);
+      return next(err);
     }
     if (filters.includeRetired) return internalReaders(req, res, next);
     return next();
@@ -316,11 +316,7 @@ export function createVenueRouter({
    * string -- so there is nothing here to validate or sanitise.
    */
   router.get('/', venueStaffOnly, async (req, res) => {
-    try {
-      res.status(200).json(await listVenues());
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await listVenues());
   });
 
   /**
@@ -350,12 +346,8 @@ export function createVenueRouter({
    * Staff or an Event Coordinator; 500.
    */
   router.get('/search', gateRetiredSearch, async (req, res) => {
-    try {
-      const venues = await searchVenues(parseSearchFilters(req.query));
-      res.status(200).json(venues);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const venues = await searchVenues(parseSearchFilters(req.query));
+    res.status(200).json(venues);
   });
 
   /**
@@ -402,14 +394,10 @@ export function createVenueRouter({
    * a non-text location or an unknown code; 401; 403 for any role but Event Coordinator; 500.
    */
   router.get('/event-search', coordinatorsOnly, async (req, res) => {
-    try {
-      // SCRUM-491: the caller, so an optional ?eventRequestId= leaves out
-      // that event's own holds only when they are its assigned coordinator.
-      const criteria = parseEventSearch(req.query);
-      res.status(200).json(await findVenuesForEvent(criteria, { userId: req.user.id }));
-    } catch (err) {
-      handleError(err, res);
-    }
+    // SCRUM-491: the caller, so an optional ?eventRequestId= leaves out
+    // that event's own holds only when they are its assigned coordinator.
+    const criteria = parseEventSearch(req.query);
+    res.status(200).json(await findVenuesForEvent(criteria, { userId: req.user.id }));
   });
 
   /**
@@ -421,12 +409,8 @@ export function createVenueRouter({
    * the caller gets a 500 for what is plainly a bad request.
    */
   router.get('/:id', async (req, res) => {
-    try {
-      validateVenueId(req.params.id);
-      res.status(200).json(await getVenueById(req.params.id));
-    } catch (err) {
-      handleError(err, res);
-    }
+    validateVenueId(req.params.id);
+    res.status(200).json(await getVenueById(req.params.id));
   });
 
   /**
@@ -455,21 +439,13 @@ export function createVenueRouter({
    * 403 unless Venue Staff or an Event Coordinator; 500.
    */
   router.get('/:id/bookings', internalReaders, async (req, res) => {
-    try {
-      const includeSuitability = req.user.role === ROLE.VENUE_STAFF;
-      res.status(200).json(await getBookingsForVenue(req.params.id, { includeSuitability }));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const includeSuitability = req.user.role === ROLE.VENUE_STAFF;
+    res.status(200).json(await getBookingsForVenue(req.params.id, { includeSuitability }));
   });
 
   /** AC4: the previous values, readable at last. */
   router.get('/:id/history', venueStaffOnly, async (req, res) => {
-    try {
-      res.status(200).json(await getVenueHistory(req.params.id));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await getVenueHistory(req.params.id));
   });
 
   /**
@@ -486,12 +462,8 @@ export function createVenueRouter({
    * Event Coordinator; 500.
    */
   router.get('/:id/blocks', internalReaders, async (req, res) => {
-    try {
-      const window = { from: req.query.from, to: req.query.to };
-      res.status(200).json(await listVenueBlocks(req.params.id, window));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const window = { from: req.query.from, to: req.query.to };
+    res.status(200).json(await listVenueBlocks(req.params.id, window));
   });
 
   /**
@@ -510,12 +482,8 @@ export function createVenueRouter({
    * Staff or an Event Coordinator; 404 for an unknown venue; 500.
    */
   router.get('/:id/calendar', internalReaders, async (req, res) => {
-    try {
-      const window = { from: req.query.from, to: req.query.to };
-      res.status(200).json(await getVenueCalendar(req.params.id, window));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const window = { from: req.query.from, to: req.query.to };
+    res.status(200).json(await getVenueCalendar(req.params.id, window));
   });
 
   /**
@@ -528,11 +496,7 @@ export function createVenueRouter({
    * for an unknown venue; 500.
    */
   router.get('/:id/holds', venueStaffOnly, async (req, res) => {
-    try {
-      res.status(200).json(await listActiveVenueHolds(req.params.id));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await listActiveVenueHolds(req.params.id));
   });
 
   /**
@@ -551,12 +515,8 @@ export function createVenueRouter({
    * occupied period); 500.
    */
   router.post('/:id/holds', venueStaffOnly, async (req, res) => {
-    try {
-      const hold = await placeVenueHold(req.params.id, req.body, actingUser(req));
-      res.status(201).json({ hold });
-    } catch (err) {
-      handleError(err, res);
-    }
+    const hold = await placeVenueHold(req.params.id, req.body, actingUser(req));
+    res.status(201).json({ hold });
   });
 
   /**
@@ -568,11 +528,7 @@ export function createVenueRouter({
    * for a missing venue or a block not on it; 500.
    */
   router.get('/:id/blocks/:blockId/history', venueStaffOnly, async (req, res) => {
-    try {
-      res.status(200).json(await getVenueBlockHistory(req.params.id, req.params.blockId));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await getVenueBlockHistory(req.params.id, req.params.blockId));
   });
 
   /**
@@ -589,12 +545,8 @@ export function createVenueRouter({
    * booking ids to override); 500.
    */
   router.post('/:id/blocks', venueStaffOnly, async (req, res) => {
-    try {
-      const result = await createVenueBlock(req.params.id, req.body, actingUser(req));
-      res.status(201).json(result);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const result = await createVenueBlock(req.params.id, req.body, actingUser(req));
+    res.status(201).json(result);
   });
 
   /**
@@ -607,17 +559,13 @@ export function createVenueRouter({
    * VENUE_RETIRED, BLOCK_OVERLAPS_BLOCK or BLOCK_BOOKING_CONFLICT; 500.
    */
   router.patch('/:id/blocks/:blockId', venueStaffOnly, async (req, res) => {
-    try {
-      const result = await updateVenueBlock(
-        req.params.id,
-        req.params.blockId,
-        req.body,
-        actingUser(req),
-      );
-      res.status(200).json(result);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const result = await updateVenueBlock(
+      req.params.id,
+      req.params.blockId,
+      req.body,
+      actingUser(req),
+    );
+    res.status(200).json(result);
   });
 
   /**
@@ -633,22 +581,14 @@ export function createVenueRouter({
    * BLOCK_ENDED; 500.
    */
   router.delete('/:id/blocks/:blockId', venueStaffOnly, async (req, res) => {
-    try {
-      await removeVenueBlock(req.params.id, req.params.blockId, actingUser(req));
-      res.status(204).end();
-    } catch (err) {
-      handleError(err, res);
-    }
+    await removeVenueBlock(req.params.id, req.params.blockId, actingUser(req));
+    res.status(204).end();
   });
 
   /** AC1: create a venue with every field the criterion names. */
   router.post('/', venueStaffOnly, async (req, res) => {
-    try {
-      const venue = await createVenue(changeSet(req.body), actingUser(req));
-      res.status(201).json(venue);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const venue = await createVenue(changeSet(req.body), actingUser(req));
+    res.status(201).json(venue);
   });
 
   /**
@@ -658,13 +598,9 @@ export function createVenueRouter({
    * bookings a setup or turnaround change flagged for review ([] when none).
    */
   router.patch('/:id', venueStaffOnly, async (req, res) => {
-    try {
-      validateVenueId(req.params.id);
-      const venue = await updateVenue(req.params.id, changeSet(req.body), actingUser(req));
-      res.status(200).json(venue);
-    } catch (err) {
-      handleError(err, res);
-    }
+    validateVenueId(req.params.id);
+    const venue = await updateVenue(req.params.id, changeSet(req.body), actingUser(req));
+    res.status(200).json(venue);
   });
 
   /**
@@ -676,13 +612,10 @@ export function createVenueRouter({
    * ever hard-deletes a venue, and 003's on-delete-restrict enforces that.
    */
   router.post('/:id/retire', venueStaffOnly, async (req, res) => {
-    try {
-      res.status(200).json(await retireVenue(req.params.id, actingUser(req)));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await retireVenue(req.params.id, actingUser(req)));
   });
 
+  router.use(errorMiddleware);
   return router;
 }
 

@@ -31,9 +31,9 @@ import { checkEquipmentAvailability } from '../services/equipmentAvailabilitySer
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
-import { createErrorHandler } from '../http/handleError.js';
+import { createErrorMiddleware } from '../http/handleError.js';
 
-const handleError = createErrorHandler('equipment availability route');
+const errorMiddleware = createErrorMiddleware('equipment availability route');
 
 /**
  * Query-string values are always strings, and the validator wants a real
@@ -73,13 +73,10 @@ export function createEquipmentAvailabilityRouter({
   router.use(requireAuth);
 
   router.get('/', technicalSupportOnly, async (req, res) => {
-    try {
-      res.status(200).json(await checkEquipmentAvailability(parseAvailabilityQuery(req.query)));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await checkEquipmentAvailability(parseAvailabilityQuery(req.query)));
   });
 
+  router.use(errorMiddleware);
   return router;
 }
 

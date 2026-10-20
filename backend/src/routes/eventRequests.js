@@ -126,14 +126,14 @@ import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js'
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 // Credential-free too: http/handleError.js imports only errors.js.
-import { createErrorHandler } from '../http/handleError.js';
+import { createErrorMiddleware } from '../http/handleError.js';
 import { ForbiddenError, ValidationError } from '../errors.js';
 // Pure, like the two above: the repository's one uuid check (SCRUM-489's readiness read).
 import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
 
 
-/** Map an error to a response; see src/http/handleError.js (SCRUM-127). */
-const handleError = createErrorHandler('event requests route');
+/** Answers whatever a handler throws or rejects with; see src/http/handleError.js (SCRUM-127). */
+const errorMiddleware = createErrorMiddleware('event requests route');
 
 
 /**
@@ -216,12 +216,8 @@ export function createEventRequestRouter({
    * frontend change and buy nothing.
    */
   router.get('/', async (req, res) => {
-    try {
-      const requests = await listEventRequestsForOrganiser(req.user.id, { client });
-      res.status(200).json(requests.map(withStatusDisplay));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const requests = await listEventRequestsForOrganiser(req.user.id, { client });
+    res.status(200).json(requests.map(withStatusDisplay));
   });
 
   /**
@@ -259,12 +255,8 @@ export function createEventRequestRouter({
    * to validate, the same stance routes/venues.js takes on GET /.
    */
   router.get('/queue', coordinatorOnly, async (req, res) => {
-    try {
-      const requests = await listEventRequestsForReview({ client });
-      res.status(200).json(requests.map(withStatusDisplay));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const requests = await listEventRequestsForReview({ client });
+    res.status(200).json(requests.map(withStatusDisplay));
   });
 
   /**
@@ -294,12 +286,8 @@ export function createEventRequestRouter({
    * 500 for anything untyped.
    */
   router.get('/mine', coordinatorOnly, async (req, res) => {
-    try {
-      const requests = await listEventRequestsForCoordinator(req.user.id, { client });
-      res.status(200).json(requests.map(withStatusDisplay));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const requests = await listEventRequestsForCoordinator(req.user.id, { client });
+    res.status(200).json(requests.map(withStatusDisplay));
   });
 
   /**
@@ -320,11 +308,7 @@ export function createEventRequestRouter({
    * presentation.
    */
   router.get('/coordinators', coordinatorOnly, async (req, res) => {
-    try {
-      res.status(200).json(await listCoordinators({ client }));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await listCoordinators({ client }));
   });
 
   /**
@@ -345,11 +329,7 @@ export function createEventRequestRouter({
    * Staff, 500.
    */
   router.get('/hold-candidates', venueStaffOnly, async (req, res) => {
-    try {
-      res.status(200).json(await listHoldCandidates({ client }));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await listHoldCandidates({ client }));
   });
 
   /**
@@ -369,12 +349,8 @@ export function createEventRequestRouter({
    * 401, 403 unless a Lead, 500.
    */
   router.get('/unassigned', leadOnly, async (req, res) => {
-    try {
-      const requests = await listUnassignedEventRequests({ client });
-      res.status(200).json(requests.map(withStatusDisplay));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const requests = await listUnassignedEventRequests({ client });
+    res.status(200).json(requests.map(withStatusDisplay));
   });
 
   /**
@@ -392,11 +368,7 @@ export function createEventRequestRouter({
    * never by workload. Statuses: 200, 401, 403 unless a Lead, 500.
    */
   router.get('/coordinator-workload', leadOnly, async (req, res) => {
-    try {
-      res.status(200).json(await listCoordinatorWorkload({ client }));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await listCoordinatorWorkload({ client }));
   });
 
   /**
@@ -426,11 +398,7 @@ export function createEventRequestRouter({
    * Lead, 500.
    */
   router.get('/coordinator-overview', leadOnly, async (req, res) => {
-    try {
-      res.status(200).json(await listCoordinatorOverview({ client }));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await listCoordinatorOverview({ client }));
   });
 
   /**
@@ -461,24 +429,20 @@ export function createEventRequestRouter({
    * 403 unless a Lead, 500.
    */
   router.get('/assigned', leadOnly, async (req, res) => {
-    try {
-      const { coordinatorId, status, includeFinished: rawIncludeFinished } = req.query;
-      if (rawIncludeFinished !== undefined && rawIncludeFinished !== 'true' && rawIncludeFinished !== 'false') {
-        throw new ValidationError(
-          'Invalid filter -- includeFinished: must be true or false',
-          [{ field: 'includeFinished', message: 'must be true or false' }],
-        );
-      }
-      const events = await listAssignedEventsForLead({
-        client,
-        coordinatorId,
-        status,
-        includeFinished: rawIncludeFinished === 'true',
-      });
-      res.status(200).json(events.map(withStatusDisplay));
-    } catch (err) {
-      handleError(err, res);
+    const { coordinatorId, status, includeFinished: rawIncludeFinished } = req.query;
+    if (rawIncludeFinished !== undefined && rawIncludeFinished !== 'true' && rawIncludeFinished !== 'false') {
+      throw new ValidationError(
+        'Invalid filter -- includeFinished: must be true or false',
+        [{ field: 'includeFinished', message: 'must be true or false' }],
+      );
     }
+    const events = await listAssignedEventsForLead({
+      client,
+      coordinatorId,
+      status,
+      includeFinished: rawIncludeFinished === 'true',
+    });
+    res.status(200).json(events.map(withStatusDisplay));
   });
 
   /**
@@ -494,22 +458,18 @@ export function createEventRequestRouter({
    * two -- but the ordering is what someone adding a route later will copy.
    */
   router.get('/:id/status', async (req, res) => {
-    try {
-      const request = await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
-      const display = getStatusDisplay(request.status);
+    const request = await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+    const display = getStatusDisplay(request.status);
 
-      res.status(200).json({
-        id: request.id,
-        status: display.status,
-        label: display.label,
-        group: display.group,
-        description: display.description,
-        updatedAt: request.updatedAt,
-        submittedAt: request.submittedAt,
-      });
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json({
+      id: request.id,
+      status: display.status,
+      label: display.label,
+      group: display.group,
+      description: display.description,
+      updatedAt: request.updatedAt,
+      submittedAt: request.submittedAt,
+    });
   });
 
   /**
@@ -534,26 +494,18 @@ export function createEventRequestRouter({
    * Organiser-facing label for each (SCRUM-323), and no more.
    */
   router.get('/:id/status-history', async (req, res) => {
-    try {
-      const history = await getEventRequestStatusHistory(req.params.id, req.user.id, { client });
-      res.status(200).json(history);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const history = await getEventRequestStatusHistory(req.params.id, req.user.id, { client });
+    res.status(200).json(history);
   });
 
   router.get('/:id/clarification-history', async (req, res) => {
-    try {
-      const history = await getEventClarificationHistory(
-        req.params.id,
-        req.user.id,
-        req.user.role,
-        { client },
-      );
-      res.status(200).json(history);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const history = await getEventClarificationHistory(
+      req.params.id,
+      req.user.id,
+      req.user.role,
+      { client },
+    );
+    res.status(200).json(history);
   });
 
   /**
@@ -583,19 +535,15 @@ export function createEventRequestRouter({
    * two, but the ordering is what someone adding a route later will copy.
    */
   router.get('/:id/change-requests', async (req, res) => {
-    try {
-      await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+    await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
-      const changeRequests = await getChangeRequestsForEvent(
-        req.params.id,
-        req.user.id,
-        { client },
-      );
+    const changeRequests = await getChangeRequestsForEvent(
+      req.params.id,
+      req.user.id,
+      { client },
+    );
 
-      res.status(200).json(changeRequests);
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(changeRequests);
   });
 
   // SCRUM-486 (SCRUM-521): coordinatorOrLead, for the reason GET /:id/review
@@ -603,12 +551,8 @@ export function createEventRequestRouter({
   // (POST /change-requests/:id/decision) stays coordinatorOnly, and 019 still
   // checks the caller holds the event.
   router.get('/:id/change-requests/review', coordinatorOrLead, async (req, res) => {
-    try {
-      const changeRequests = await getChangeRequestsForCoordinator(req.params.id, { client });
-      res.status(200).json(changeRequests);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const changeRequests = await getChangeRequestsForCoordinator(req.params.id, { client });
+    res.status(200).json(changeRequests);
   });
 
   /**
@@ -656,39 +600,27 @@ export function createEventRequestRouter({
    * decides who may act.
    */
   router.get('/:id/review', coordinatorOrLead, async (req, res) => {
-    try {
-      const request = await getEventRequestForCoordinator(req.params.id, { client });
-      res.status(200).json(withStatusDisplay(request));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const request = await getEventRequestForCoordinator(req.params.id, { client });
+    res.status(200).json(withStatusDisplay(request));
   });
 
   router.get('/:id/cancellation-impact', coordinatorOnly, async (req, res) => {
-    try {
-      const event = await getEventRequestForCoordinator(req.params.id, { client });
-      if (event.assignedCoordinatorId !== req.user.id) {
-        throw new ForbiddenError('Only the coordinator assigned to this event can preview its cancellation.');
-      }
-      const impact = await getEventCancellationImpact(req.params.id, { client });
-      res.status(200).json(impact);
-    } catch (err) {
-      handleError(err, res);
+    const event = await getEventRequestForCoordinator(req.params.id, { client });
+    if (event.assignedCoordinatorId !== req.user.id) {
+      throw new ForbiddenError('Only the coordinator assigned to this event can preview its cancellation.');
     }
+    const impact = await getEventCancellationImpact(req.params.id, { client });
+    res.status(200).json(impact);
   });
 
   router.post('/:id/significant-change-impact', coordinatorOnly, async (req, res) => {
-    try {
-      const impact = await getSignificantEventChangeImpact(
-        req.params.id,
-        req.body?.changes,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(impact);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const impact = await getSignificantEventChangeImpact(
+      req.params.id,
+      req.body?.changes,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(impact);
   });
 
   /**
@@ -720,14 +652,10 @@ export function createEventRequestRouter({
    * /mine and /queue included, do not carry a growing array nothing displays.
    */
   router.get('/:id/assignments', async (req, res) => {
-    try {
-      await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+    await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
-      const history = await listAssignmentHistory(req.params.id, { includeNotes: false }, { client });
-      res.status(200).json(history);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const history = await listAssignmentHistory(req.params.id, { includeNotes: false }, { client });
+    res.status(200).json(history);
   });
 
   /**
@@ -757,14 +685,10 @@ export function createEventRequestRouter({
    * Organiser, whom this gate still refuses.
    */
   router.get('/:id/assignments/review', coordinatorOrLead, async (req, res) => {
-    try {
-      await getEventRequestForCoordinator(req.params.id, { client });
+    await getEventRequestForCoordinator(req.params.id, { client });
 
-      const history = await listAssignmentHistory(req.params.id, { includeNotes: true }, { client });
-      res.status(200).json(history);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const history = await listAssignmentHistory(req.params.id, { includeNotes: true }, { client });
+    res.status(200).json(history);
   });
 
   /**
@@ -773,45 +697,33 @@ export function createEventRequestRouter({
    * 404 like a missing id. ?noEquipmentConfirmed= is 'true', 'false' or absent.
    */
   router.get('/:id/readiness', coordinatorOrLead, async (req, res) => {
-    try {
-      if (!isPlausibleId(req.params.id)) {
-        throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
-      }
-      const raw = req.query.noEquipmentConfirmed;
-      if (raw !== undefined && raw !== 'true' && raw !== 'false') {
-        throw new ValidationError(
-          'Invalid noEquipmentConfirmed -- must be true or false',
-          [{ field: 'noEquipmentConfirmed', message: 'must be true or false' }],
-        );
-      }
-      await getEventRequestForCoordinator(req.params.id, { client });
-
-      res.status(200).json(await getEventReadiness({
-        client, eventRequestId: req.params.id, noEquipmentConfirmed: raw === 'true',
-      }));
-    } catch (err) {
-      handleError(err, res);
+    if (!isPlausibleId(req.params.id)) {
+      throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
     }
+    const raw = req.query.noEquipmentConfirmed;
+    if (raw !== undefined && raw !== 'true' && raw !== 'false') {
+      throw new ValidationError(
+        'Invalid noEquipmentConfirmed -- must be true or false',
+        [{ field: 'noEquipmentConfirmed', message: 'must be true or false' }],
+      );
+    }
+    await getEventRequestForCoordinator(req.params.id, { client });
+
+    res.status(200).json(await getEventReadiness({
+      client, eventRequestId: req.params.id, noEquipmentConfirmed: raw === 'true',
+    }));
   });
 
   router.get('/:id/confirmed-arrangements', organiserOnly, async (req, res) => {
-    try {
-      res.set('Cache-Control', 'no-store');
-      const arrangements = await getConfirmedArrangementsForOrganiser(req.params.id, req.user.id, { client });
-      res.status(200).json(withStatusDisplay(arrangements));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.set('Cache-Control', 'no-store');
+    const arrangements = await getConfirmedArrangementsForOrganiser(req.params.id, req.user.id, { client });
+    res.status(200).json(withStatusDisplay(arrangements));
   });
 
   /** AC1: one request in full, with its status. */
   router.get('/:id', async (req, res) => {
-    try {
-      const request = await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
-      res.status(200).json(withStatusDisplay(request));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const request = await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+    res.status(200).json(withStatusDisplay(request));
   });
 
   // Writes below the reads, mirroring routes/venues.js. Declaration order is
@@ -837,12 +749,8 @@ export function createEventRequestRouter({
    * The organiser is stamped from the token, never from the body.
    */
   router.post('/', async (req, res) => {
-    try {
-      const created = await createEventRequest(req.body, req.user.id, { client });
-      res.status(201).json(withStatusDisplay(created));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const created = await createEventRequest(req.body, req.user.id, { client });
+    res.status(201).json(withStatusDisplay(created));
   });
 
   /**
@@ -859,18 +767,14 @@ export function createEventRequestRouter({
    * between the service's read and its write.
    */
   router.patch('/:id', async (req, res) => {
-    try {
-      const saved = await updateEventRequest(
-        req.params.id,
-        req.body,
-        req.user.id,
-        { client },
-      );
+    const saved = await updateEventRequest(
+      req.params.id,
+      req.body,
+      req.user.id,
+      { client },
+    );
 
-      res.status(200).json(withStatusDisplay(saved));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(withStatusDisplay(saved));
   });
 
   /**
@@ -888,14 +792,10 @@ export function createEventRequestRouter({
    * whole of AC4; the form renders them as a list.
    */
   router.post('/:id/submit', async (req, res) => {
-    try {
-      await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+    await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
-      const submitted = await submitEventRequest(req.params.id, { client, changedBy: req.user.id });
-      res.status(200).json(withStatusDisplay(submitted));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const submitted = await submitEventRequest(req.params.id, { client, changedBy: req.user.id });
+    res.status(200).json(withStatusDisplay(submitted));
   });
 
   /**
@@ -903,65 +803,49 @@ export function createEventRequestRouter({
    * the Safety Officers. The caller is the token's user, never the body's.
    */
   router.post('/:id/safety-review', coordinatorOnly, async (req, res) => {
-    try {
-      const updated = await submitForSafetyReview({
-        client,
-        eventRequestId: req.params.id,
-        coordinatorId: req.user.id,
-        note: req.body?.note,
-        noEquipmentConfirmed: req.body?.noEquipmentConfirmed ?? false,
-      });
-      res.status(200).json(withStatusDisplay(updated));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const updated = await submitForSafetyReview({
+      client,
+      eventRequestId: req.params.id,
+      coordinatorId: req.user.id,
+      note: req.body?.note,
+      noEquipmentConfirmed: req.body?.noEquipmentConfirmed ?? false,
+    });
+    res.status(200).json(withStatusDisplay(updated));
   });
 
   router.post('/:id/confirm', coordinatorOnly, async (req, res) => {
-    try {
-      const updated = await confirmEventRequest({
-        client,
-        eventRequestId: req.params.id,
-        coordinatorId: req.user.id,
-        noEquipmentConfirmed: req.body?.noEquipmentConfirmed,
-        expectedUpdatedAt: req.body?.expectedUpdatedAt,
-      });
-      res.status(200).json(withStatusDisplay(updated));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const updated = await confirmEventRequest({
+      client,
+      eventRequestId: req.params.id,
+      coordinatorId: req.user.id,
+      noEquipmentConfirmed: req.body?.noEquipmentConfirmed,
+      expectedUpdatedAt: req.body?.expectedUpdatedAt,
+    });
+    res.status(200).json(withStatusDisplay(updated));
   });
 
   router.post('/:id/clarification', coordinatorOnly, async (req, res) => {
-    try {
-      const updated = await requestEventClarification(
-        req.params.id,
-        req.body?.note,
-        req.user.id,
-        {
-          replyByDate: req.body?.replyByDate,
-          requestedFields: req.body?.requestedFields,
-          client,
-        },
-      );
-      res.status(200).json(withStatusDisplay(updated));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const updated = await requestEventClarification(
+      req.params.id,
+      req.body?.note,
+      req.user.id,
+      {
+        replyByDate: req.body?.replyByDate,
+        requestedFields: req.body?.requestedFields,
+        client,
+      },
+    );
+    res.status(200).json(withStatusDisplay(updated));
   });
 
   router.post('/:id/clarification/close', coordinatorOnly, async (req, res) => {
-    try {
-      const updated = await closeEventClarification(
-        req.params.id,
-        req.body?.note,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(withStatusDisplay(updated));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const updated = await closeEventClarification(
+      req.params.id,
+      req.body?.note,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(withStatusDisplay(updated));
   });
 
   /**
@@ -1003,17 +887,13 @@ export function createEventRequestRouter({
    * not hold it is still its 403.
    */
   router.post('/:id/reassign', coordinatorOrLead, async (req, res) => {
-    try {
-      const updated = await reassignEventRequest(
-        req.params.id,
-        req.body,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(withStatusDisplay(updated));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const updated = await reassignEventRequest(
+      req.params.id,
+      req.body,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(withStatusDisplay(updated));
   });
 
   /**
@@ -1032,17 +912,13 @@ export function createEventRequestRouter({
    * in `conflicts`, so the screen can name them; or no longer submitted).
    */
   router.post('/:id/assign', leadOnly, async (req, res) => {
-    try {
-      const updated = await assignEventRequest(
-        req.params.id,
-        { coordinatorId: req.body?.coordinatorId, note: req.body?.note },
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(withStatusDisplay(updated));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const updated = await assignEventRequest(
+      req.params.id,
+      { coordinatorId: req.body?.coordinatorId, note: req.body?.note },
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(withStatusDisplay(updated));
   });
 
   /**
@@ -1066,12 +942,8 @@ export function createEventRequestRouter({
    * assigned coordinator), 409 (not submitted), 404 (no such event).
    */
   router.post('/:id/start-review', coordinatorOnly, async (req, res) => {
-    try {
-      const updated = await startEventReview(req.params.id, req.user.id, { client });
-      res.status(200).json(withStatusDisplay(updated));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const updated = await startEventReview(req.params.id, req.user.id, { client });
+    res.status(200).json(withStatusDisplay(updated));
   });
 
   /**
@@ -1093,69 +965,53 @@ export function createEventRequestRouter({
    * review, or an approval whose start date has passed), 404 (no such event).
    */
   router.post('/:id/decision', coordinatorOnly, async (req, res) => {
-    try {
-      const updated = await decideEventRequest(
-        req.params.id,
-        { decision: req.body?.decision, decisionNote: req.body?.decisionNote },
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(withStatusDisplay(updated));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const updated = await decideEventRequest(
+      req.params.id,
+      { decision: req.body?.decision, decisionNote: req.body?.decisionNote },
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(withStatusDisplay(updated));
   });
 
   router.post('/:id/cancel', coordinatorOnly, async (req, res) => {
-    try {
-      const updated = await cancelEventRequest(
-        req.params.id,
-        {
-          reason: req.body?.reason,
-          initiator: req.body?.initiator,
-          attendeeMessage: req.body?.attendeeMessage,
-        },
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(withStatusDisplay(updated));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const updated = await cancelEventRequest(
+      req.params.id,
+      {
+        reason: req.body?.reason,
+        initiator: req.body?.initiator,
+        attendeeMessage: req.body?.attendeeMessage,
+      },
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(withStatusDisplay(updated));
   });
 
   router.post('/:id/significant-change', coordinatorOnly, async (req, res) => {
-    try {
-      const result = await applySignificantEventChange(
-        req.params.id,
-        req.body,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json({
-        ...withStatusDisplay(result.event),
-        impact: result.impact,
-        flaggedBookingIds: result.flaggedBookingIds,
-        flaggedReservationCount: result.flaggedReservationCount,
-      });
-    } catch (err) {
-      handleError(err, res);
-    }
+    const result = await applySignificantEventChange(
+      req.params.id,
+      req.body,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json({
+      ...withStatusDisplay(result.event),
+      impact: result.impact,
+      flaggedBookingIds: result.flaggedBookingIds,
+      flaggedReservationCount: result.flaggedReservationCount,
+    });
   });
 
   router.patch('/:id/clarification-response', async (req, res) => {
-    try {
-      const updated = await respondToEventClarification(
-        req.params.id,
-        req.body?.message,
-        req.user.id,
-        req.body?.amendments,
-        { client },
-      );
-      res.status(200).json(withStatusDisplay(updated));
-    } catch (err) {
-      handleError(err, res);
-    }
+    const updated = await respondToEventClarification(
+      req.params.id,
+      req.body?.message,
+      req.user.id,
+      req.body?.amendments,
+      { client },
+    );
+    res.status(200).json(withStatusDisplay(updated));
   });
 
   /**
@@ -1172,36 +1028,29 @@ export function createEventRequestRouter({
    * the list rather than splicing this into it.
    */
   router.post('/:id/change-requests', async (req, res) => {
-    try {
-      await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+    await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
-      const created = await createChangeRequestFromClient(
-        req.params.id,
-        req.body,
-        req.user.id,
-        { client },
-      );
+    const created = await createChangeRequestFromClient(
+      req.params.id,
+      req.body,
+      req.user.id,
+      { client },
+    );
 
-      res.status(201).json(created);
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(201).json(created);
   });
 
   router.post('/change-requests/:changeRequestId/decision', coordinatorOnly, async (req, res) => {
-    try {
-      const processed = await processChangeRequest(
-        req.params.changeRequestId,
-        req.body,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(processed);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const processed = await processChangeRequest(
+      req.params.changeRequestId,
+      req.body,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(processed);
   });
 
+  router.use(errorMiddleware);
   return router;
 }
 

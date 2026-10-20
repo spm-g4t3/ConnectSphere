@@ -89,12 +89,12 @@ import {
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
-import { createErrorHandler } from '../http/handleError.js';
+import { createErrorMiddleware } from '../http/handleError.js';
 import { parseCodeList } from '../http/parseCodeList.js';
 
 
-/** Map an error to a response; see src/http/handleError.js. */
-const handleError = createErrorHandler('venue suitability route');
+/** Answers whatever a handler throws or rejects with; see src/http/handleError.js. */
+const errorMiddleware = createErrorMiddleware('venue suitability route');
 
 
 /**
@@ -150,25 +150,18 @@ export function createVenueSuitabilityRouter({
   router.use(requireAuth);
 
   router.get('/', coordinatorOnly, async (req, res) => {
-    try {
-      const input = validateSuitabilityQuery(parseSuitabilityQuery(req.params.id, req.query));
-      const result = await checkSuitability({ ...input, userId: req.user.id, client });
-      res.status(200).json(result);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const input = validateSuitabilityQuery(parseSuitabilityQuery(req.params.id, req.query));
+    const result = await checkSuitability({ ...input, userId: req.user.id, client });
+    res.status(200).json(result);
   });
 
   router.get('/bookings', coordinatorOnly, async (req, res) => {
-    try {
-      const { eventRequestId } = validateEventVenuesQuery({ eventRequestId: req.params.id });
-      const result = await checkEventVenues(eventRequestId, { userId: req.user.id, client });
-      res.status(200).json(result);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const { eventRequestId } = validateEventVenuesQuery({ eventRequestId: req.params.id });
+    const result = await checkEventVenues(eventRequestId, { userId: req.user.id, client });
+    res.status(200).json(result);
   });
 
+  router.use(errorMiddleware);
   return router;
 }
 
