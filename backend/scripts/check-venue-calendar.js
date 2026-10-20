@@ -338,11 +338,13 @@ async function main() {
   const missing = await preflight();
   if (missing.length > 0) {
     for (const line of missing) console.error(`  missing: ${line}`);
-    console.error('\nApply migrations 009-016 in the Supabase SQL Editor, then run this again.');
+    console.error('\nThe database is missing part of the schema. Apply backend/db/baseline/01-09 (a fresh');
+    console.error('project only), then each file in backend/db/migrations/ in order, in the Supabase SQL');
+    console.error('Editor, then run this again.');
     failures += 1;
     return;
   }
-  check('migrations 009-016 are applied', true);
+  check('the schema this check needs is applied', true);
 
   // --- users -----------------------------------------------------------------
   const staff = await createTestUser('staff', 'venue_staff');

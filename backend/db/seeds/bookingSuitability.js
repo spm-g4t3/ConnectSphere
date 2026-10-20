@@ -3,8 +3,9 @@
  *
  * Run with: npm run booking-suitability:seed
  *
- * Run 051_multi_venue_booking_requests.sql first: every request now carries
- * its own expected attendance, and the function this calls takes it. Requests
+ * Needs the full schema (backend/db/baseline/ plus backend/db/migrations/):
+ * every request carries its own expected attendance, and the function this
+ * calls takes it. Requests
  * three venues on existing data, so
  * AC7 -- "the suitability result, including any criterion the coordinator
  * chose to override, is attached to the booking request so that Venue Staff

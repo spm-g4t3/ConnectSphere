@@ -29,7 +29,7 @@ export function labelFor(code, options) {
 }
 
 /** Codes as labels, comma-joined. */
-export function labelsText(codes, options) {
+function labelsText(codes, options) {
   return codes.map((code) => labelFor(code, options)).join(", ");
 }
 

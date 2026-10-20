@@ -139,7 +139,6 @@ const SCRUM284_FILES = [
   'src/services/equipmentQueueService.js',
   'src/services/equipmentRequestStatus.js',
   'src/services/eventPeriodFormat.js',
-  'src/services/supportService.js',
 ]
 
 // SCRUM-258 owns the Venue Staff queue and its decision card outright.

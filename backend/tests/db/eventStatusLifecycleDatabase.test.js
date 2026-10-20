@@ -896,7 +896,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
   // Postgres, because each is about what the database accepts or what a
   // function does with a null, which a fake client cannot show.
 
-  describe('SCRUM-486: 052 relaxes the assignment constraint for submitted only', () => {
+  describe('SCRUM-486: the assignment constraint is relaxed for submitted only', () => {
     // Each row is written straight to the table, bypassing every function, so
     // only the constraint can refuse it. `extra` overrides the fixture's
     // coordinator with null.
@@ -1666,7 +1666,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     );
   }
 
-  describe("SCRUM-19: 025's five constraints, written to directly", () => {
+  describe('SCRUM-19: the five lifecycle constraints, written to directly', () => {
     // Each write below breaks exactly one constraint and satisfies the other
     // four, so the constraint named in the error is the only one that could
     // have fired. Written straight to the table, as check-event-request-

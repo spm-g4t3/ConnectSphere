@@ -11,7 +11,7 @@
 // make sure Dashboard.jsx / Navigation.jsx key off the same values.
 
 import { createContext, useContext, useState, useEffect } from "react";
-import { apiClient } from "../services/apiClient"; // <-- replace with your actual API client
+import { apiClient } from "../services/apiClient";
 
 const AuthContext = createContext(null);
 

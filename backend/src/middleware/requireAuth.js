@@ -181,5 +181,3 @@ export function createRequireAuth({
  * and src/errors.js already carries that type.
  */
 export const requireAuth = createRequireAuth();
-
-export default requireAuth;

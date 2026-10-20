@@ -64,4 +64,3 @@ export const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
 // check-*.js scripts) — aliased to supabaseAdmin since those all do
 // privileged queries, never sign-in/sign-out.
 export const supabase = supabaseAdmin;
-export default supabase;

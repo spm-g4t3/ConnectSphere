@@ -276,7 +276,7 @@ describe('SCRUM-266 AC1: listing flagged bookings', () => {
       expect(await listedOnly([id])).toEqual([]);
     });
 
-    it('SCRUM266_AC1_oldest_flag_first_with_a_pre_014_flag_first_then_created_at_then_id', async () => {
+    it('SCRUM266_AC1_oldest_flag_first_with_an_untimed_flag_first_then_created_at_then_id', async () => {
       const early = '2026-01-01T00:00:00+00:00';
       const late = '2026-02-01T00:00:00+00:00';
       const newest = (await flagged()).id;

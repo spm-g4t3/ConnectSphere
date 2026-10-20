@@ -204,14 +204,6 @@ async function listOpenEventsWithRegistrationDetails({ attendeeId, client, now =
   return withRegistrationState(db, events, attendeeId);
 }
 
-/**
- * Same eligibility and database state as Browse Open Events, with registration
- * window and active-count fields for the Attendee dashboard.
- */
-export async function listOpenEventsForRegistration(options = {}) {
-  return listOpenEventsWithRegistrationDetails(options);
-}
-
 export async function listOpenEvents(options = {}) {
   const events = await listOpenEventsWithRegistrationDetails(options);
   return events.map(toBrowseEvent);

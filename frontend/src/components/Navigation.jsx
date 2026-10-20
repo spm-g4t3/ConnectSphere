@@ -55,7 +55,6 @@ const NAV_LINKS_BY_ROLE = {
   // whole block never rendered — a Technical Support user saw no nav at all.
   TECHNICAL_SUPPORT_STAFF: [
     { to: "/dashboard", label: "Dashboard" },
-    { to: "/tickets", label: "Support Tickets" },
     { to: "/equipment", label: "Equipment Requests" },
     { to: "/equipment-catalogue", label: "Equipment Catalogue" },
     { to: "/equipment-availability", label: "Check Availability" },

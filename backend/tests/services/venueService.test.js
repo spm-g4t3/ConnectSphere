@@ -236,7 +236,7 @@ describe('AC3: a venue can be retired', () => {
     expect(rpc.mock.calls[0][1].p_user_id).toBe(STAFF_ID);
   });
 
-  it('passes a null user when none is supplied', async () => {
+  it('retirement passes a null user when none is supplied', async () => {
     givenRetirementSucceeds();
 
     await retireVenue(VENUE_ID);
@@ -285,7 +285,7 @@ describe('AC3: a venue can be retired', () => {
 // SCRUM-110: what retirement refuses, and how it says so
 // ---------------------------------------------------------------------------
 describe('retirement refuses what it cannot do', () => {
-  it('reports a venue that does not exist as not found', async () => {
+  it('retirement reports a venue that does not exist as not found', async () => {
     rpc.mockResolvedValue({
       data: null,
       error: { code: 'P0002', message: `venue ${VENUE_ID} not found` },
@@ -399,7 +399,7 @@ describe('AC3: searches return only active venues', () => {
     expect(query.args('is')).toEqual(['retired_at', null]);
   });
 
-  it('orders results by name', async () => {
+  it('orders search results by name', async () => {
     const query = givenSearchReturns([]);
 
     await searchVenues();
@@ -529,7 +529,7 @@ describe('AC3: the staff catalogue lists retired venues too', () => {
     expect(query.args('select')[0]).toMatch(/retired_at/);
   });
 
-  it('orders results by name', async () => {
+  it('orders the catalogue by name', async () => {
     const query = givenCatalogueReturns([]);
 
     await listVenues();
@@ -596,7 +596,7 @@ describe('AC3: the staff catalogue lists retired venues too', () => {
     await expect(listVenues()).resolves.toEqual([]);
   });
 
-  it('translates a database error rather than leaking the driver message', async () => {
+  it('translates a catalogue read error rather than leaking the driver message', async () => {
     const query = queryStub({
       data: null,
       error: { code: '42P01', message: 'relation "venues" does not exist' },
@@ -683,7 +683,7 @@ describe('AC1: a venue is created with its details and attributes', () => {
     expect(rpcArgs().p_user_id).toBe(STAFF_ID);
   });
 
-  it('passes a null user when none is supplied', async () => {
+  it('creation passes a null user when none is supplied', async () => {
     givenWriteSucceeds(populatedVenueRow(), NEW_ID);
 
     await createVenue(MINIMAL);
@@ -839,7 +839,7 @@ describe('AC2: an authorised change is saved', () => {
     expect(venue.maxCapacity).toBe(80);
   });
 
-  it('reports a venue that does not exist as not found', async () => {
+  it('an update reports a venue that does not exist as not found', async () => {
     rpc.mockResolvedValue({
       data: null,
       error: { code: 'P0002', message: `venue ${VENUE_ID} not found` },
@@ -952,7 +952,7 @@ describe('reading one venue', () => {
     expect(err.status).toBe(404);
   });
 
-  it('translates a database error rather than leaking the driver message', async () => {
+  it('translates a single-venue read error rather than leaking the driver message', async () => {
     from.mockReturnValue(queryStub({
       data: null,
       error: { code: '23514', message: 'new row violates check constraint "x"' },

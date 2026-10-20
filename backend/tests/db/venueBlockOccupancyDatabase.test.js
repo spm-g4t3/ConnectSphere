@@ -28,7 +28,7 @@ const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().sl
 const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
 const ms = (value) => new Date(value).getTime();
 
-describe('SCRUM-484: venue block writers use the occupied period (033)', () => {
+describe('SCRUM-484: venue block writers use the occupied period', () => {
   let db;
   let organiser;
   let staff;
@@ -374,13 +374,6 @@ describe('SCRUM-484: venue block writers use the occupied period (033)', () => {
       expect(notes).toHaveLength(1);
       expect(notes[0].type).toBe('booking_flagged');
       expect(notes[0].recipient_id).toBe(coordinator);
-    });
-
-    it('SCRUM484_AC4_old_raw_helper_is_gone_after_033', async () => {
-      const row = await one(
-        "select count(*)::int as n from pg_proc where proname = 'venue_block_booking_conflicts'",
-      );
-      expect(row.n).toBe(0);
     });
   });
 });

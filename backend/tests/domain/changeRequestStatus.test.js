@@ -30,7 +30,7 @@ const SYSTEM_ONLY_SQL_DECISIONS = ['event_cancelled'];
 
 
 describe('CHANGE_REQUEST_STATUS mirrors the database enum', () => {
-  it('declares exactly the same values as the SQL migration', async () => {
+  it('declares exactly the values of the change_request_status enum in the schema', async () => {
     expect([...CHANGE_REQUEST_STATUSES]).toEqual(await enumLabels(schemaDb(), 'change_request_status'));
   });
 });
@@ -60,14 +60,14 @@ describe('AC4: an Organiser can tell outstanding, in progress and processed apar
     ['null', null],
     ['undefined', undefined],
     ['a number', 1],
-  ])('rejects %s', (_label, value) => {
+  ])('rejects %s as a status', (_label, value) => {
     expect(isValidChangeRequestStatus(value)).toBe(false);
   });
 });
 
 
 describe('CHANGE_REQUEST_DECISION mirrors the database enum', () => {
-  it('declares exactly the same values as the SQL migration', async () => {
+  it('declares the change_request_decision enum values a reviewer can choose', async () => {
     const reviewerDecisions = (await enumLabels(schemaDb(), 'change_request_decision'))
       .filter((decision) => !SYSTEM_ONLY_SQL_DECISIONS.includes(decision));
     expect([...CHANGE_REQUEST_DECISIONS]).toEqual(reviewerDecisions);
@@ -97,7 +97,7 @@ describe('SCRUM-37: a processed change request can be told approved from rejecte
     ['null', null],
     ['undefined', undefined],
     ['a number', 1],
-  ])('rejects %s', (_label, value) => {
+  ])('rejects %s as a decision', (_label, value) => {
     expect(isValidChangeRequestDecision(value)).toBe(false);
   });
 });

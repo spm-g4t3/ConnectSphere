@@ -883,7 +883,7 @@ function getOne(client, eventId, { requireAuth = signedInWithRole(ROLE.ATTENDEE)
 const NOT_OPEN = { error: 'This event is not open for registration' };
 
 describe('SCRUM495_AC1 only Attendees can open one event', () => {
-  it('SCRUM495_AC1_lets_an_attendee_in', async () => {
+  it('SCRUM495_AC1_lets_an_attendee_open_one_event', async () => {
     const row = eventRow();
 
     const res = await getOne(createFakeClient([row]), row.id);
@@ -901,7 +901,7 @@ describe('SCRUM495_AC1 only Attendees can open one event', () => {
     ROLE.SAFETY_OFFICER,
     'something_unknown',
     null,
-  ])('SCRUM495_AC1_refuses_role_%s_with_403_before_reading_anything', async (role) => {
+  ])('SCRUM495_AC1_refuses_role_%s_one_event_with_403_before_reading_anything', async (role) => {
     const row = eventRow();
     const client = createFakeClient([row]);
 
@@ -911,7 +911,7 @@ describe('SCRUM495_AC1 only Attendees can open one event', () => {
     expect(client.calls).toHaveLength(0);
   });
 
-  it('SCRUM495_AC1_refuses_an_unauthenticated_caller_with_401_before_reading_anything', async () => {
+  it('SCRUM495_AC1_refuses_an_unauthenticated_caller_one_event_with_401_before_reading_anything', async () => {
     const row = eventRow();
     const client = createFakeClient([row]);
 

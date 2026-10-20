@@ -4,8 +4,8 @@
 
 export const COORDINATOR_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
 export const NOTIFICATION_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
-export const BOOKING_ID = 'a1b2c3d4-0000-4000-8000-000000000001';
-export const BLOCK_ID = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
+const BOOKING_ID = 'a1b2c3d4-0000-4000-8000-000000000001';
+const BLOCK_ID = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
 export const FIRST_READ = '2026-09-27T01:00:00+00:00';
 
 export const PAYLOAD = Object.freeze({

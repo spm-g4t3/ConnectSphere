@@ -111,7 +111,7 @@ describe('SCRUM-258: booking decisions alongside the safety review', () => {
       },
     );
 
-    it('SCRUM258_AC6_071s_types_are_still_accepted_after_075', async () => {
+    it('SCRUM258_AC6_the_safety_and_cancellation_types_are_still_accepted', async () => {
       const eventId = await approvedEvent();
       for (const type of ['safety_review_response', 'event_submitted_for_safety_review', 'event_cancelled']) {
         const err = await refusal(

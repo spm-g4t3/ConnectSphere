@@ -158,23 +158,6 @@ export async function getMyEventRequests() {
 }
 
 /**
- * Fetches just the status of one request (SCRUM-42).
- *
- * Deliberately narrower than getEventRequestById: it returns the status
- * display and the timestamps and nothing else, so a view that only wants to
- * know whether anything moved does not re-download the whole request. Used by
- * the single-request view in SCRUM-40; the list refetches through
- * getMyEventRequests instead, which already carries every row's status.
- *
- * @param {string} id
- * @returns {Promise<{id, status, label, group, description, updatedAt, submittedAt}>}
- */
-export async function getEventRequestStatus(id) {
-  const response = await apiClient.get(`/event-requests/${id}/status`);
-  return response.data;
-}
-
-/**
  * Every event request awaiting a decision, oldest waiting first (SCRUM-45).
  *
  * The Event Coordinator's review queue, and the only read in this file that

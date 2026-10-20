@@ -4,13 +4,11 @@
  *
  * Run with: npm run venue-safety-facts:check
  *
- * Requires migrations 032 to 036 (032_venue_occupancy.sql,
- * 033_venue_occupancy_callers.sql, 034_setup_change_recheck.sql,
- * 035_setup_change_recheck_refine.sql, 036_venue_safety_facts.sql) applied in
- * the Supabase SQL Editor. 036 replaces 035's update_venue, so 032-035 must be
- * in place first. The preflight checks that 036 is there -- both columns, and
- * update_venue taking p_emergency_access -- and nothing is written until it
- * passes. Exits non-zero on any failure.
+ * Requires the full schema: backend/db/baseline/ plus every file in
+ * backend/db/migrations/ (see the repo README). The preflight checks that the
+ * safety facts are there -- both columns, and update_venue taking
+ * p_emergency_access -- and nothing is written until it passes. Exits non-zero
+ * on any failure.
  *
  * Drives the real venueService -- createVenue, updateVenue, getVenueById,
  * getVenueHistory and retireVenue -- against the live database, then removes
@@ -313,11 +311,13 @@ async function main() {
   const missing = await preflight();
   if (missing.length > 0) {
     for (const line of missing) console.error(`  missing: ${line}`);
-    console.error('\nApply migrations 032-036 in the Supabase SQL Editor, then run this again.');
+    console.error('\nThe database is missing part of the schema. Apply backend/db/baseline/01-09 (a fresh');
+    console.error('project only), then each file in backend/db/migrations/ in order, in the Supabase SQL');
+    console.error('Editor, then run this again.');
     failures += 1;
     return;
   }
-  check('migration 036 is applied', true);
+  check('the schema this check needs is applied', true);
 
   // --- setup ---------------------------------------------------------------
   const staff = await createTestUser('staff', 'venue_staff');

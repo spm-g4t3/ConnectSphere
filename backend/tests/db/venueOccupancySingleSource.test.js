@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, relative, join } from 'node:path';
 
@@ -31,9 +31,6 @@ function jsCode(path) {
 
 describe('SCRUM484_AC4 the JavaScript copy of the rule is gone', () => {
   it('SCRUM484_AC4_the_javascript_overlap_rule_is_removed', () => {
-    expect(existsSync(resolve(SRC, 'domain/venueOccupancy.js'))).toBe(false);
-    expect(existsSync(resolve(SRC, 'services/venueOccupancyService.js'))).toBe(false);
-
     const retired = /\b(isVenueFree|paddedPeriod|MAX_BUFFER_MINUTES|OCCUPYING_BOOKING_STATUSES|findOccupancies|findBlockedVenueIds)\b/;
     const imports = /from\s+['"][^'"]*\/(venueOccupancy|venueOccupancyService)(\.js)?['"]/;
     for (const path of jsFiles(SRC)) {

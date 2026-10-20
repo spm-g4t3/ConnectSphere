@@ -1,6 +1,5 @@
 // Dashboard.jsx
 // Renders a different dashboard view depending on the logged-in user's role.
-// Adapt useAuth()/user shape to match your actual auth context.
 
 import { useAuth } from "../auth/AuthContext";
 import { normaliseRole } from "../auth/normaliseRole";

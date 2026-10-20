@@ -236,7 +236,7 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
       expect((await booking(other)).review_reason).toBe(REASON_CODE);
     });
 
-    it('SCRUM484_AC8_clarification_types_are_accepted_again', async () => {
+    it('SCRUM484_AC8_clarification_types_are_accepted_by_the_type_list', async () => {
       const V = await makeVenue();
       const blockId = await insertBlock(V, at('22:00'), at('23:00'), true);
       const bookingId = await makeBooking(V, 'approved', at('10:00'), at('12:00'));
@@ -513,7 +513,7 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
   });
 
 
-  describe('behaviour (035): only clashes the change created are flagged', () => {
+  describe('behaviour: only clashes the change created are flagged', () => {
     // The user's 2026-10-08 AC review decision: a booking already clashing
     // under the OLD minutes was not put there by this change, so it is left
     // alone; reducing the minutes therefore never flags anything.

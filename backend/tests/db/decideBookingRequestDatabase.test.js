@@ -532,7 +532,7 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request', () => {
     });
   });
 
-  describe('create_booking_request: the widened event-status gate (066)', () => {
+  describe('create_booking_request: the widened event-status gate', () => {
     const request = async (eventId) =>
       (
         await one(

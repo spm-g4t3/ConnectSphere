@@ -30,7 +30,7 @@
 //     Venue Staff only, and GET /event-requests/hold-candidates is the hold
 //     form's event picker. See the hold section below.
 
-import { apiClient } from "./apiClient"; // <-- replace with your actual API client
+import { apiClient } from "./apiClient";
 
 /**
  * Searches active venues. Retired venues are left out by the backend, so

@@ -331,7 +331,7 @@ describe('venue ids', () => {
     expect(fieldsIn(err)).toContain('id');
   });
 
-  it('reports a 400 status for Express to use', () => {
+  it('reports a 400 status for a malformed venue id', () => {
     const err = errorFrom(() => validateVenueId('nonsense'));
     expect(err.status).toBe(400);
   });

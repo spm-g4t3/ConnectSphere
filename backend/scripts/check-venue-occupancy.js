@@ -3,12 +3,10 @@
  *
  * Run with: npm run venue-occupancy:check
  *
- * Requires migrations 032 to 035 (032_venue_occupancy.sql,
- * 033_venue_occupancy_callers.sql, 034_setup_change_recheck.sql,
- * 035_setup_change_recheck_refine.sql) applied in the Supabase SQL Editor.
- * The preflight says what is missing for 032-034, and nothing is written until
- * it passes. 035 keeps update_venue's signature, so it cannot be detected from
- * here: apply it before running. Exits non-zero on any failure.
+ * Requires the full schema: backend/db/baseline/ plus every file in
+ * backend/db/migrations/ (see the repo README). The preflight says what is
+ * missing, and nothing is written until it passes. Exits non-zero on any
+ * failure.
  *
  * Drives the real services -- venueService, venueBlockService,
  * bookingRequestService, venueCalendarService and notificationService --
@@ -407,11 +405,13 @@ async function main() {
   const missing = await preflight();
   if (missing.length > 0) {
     for (const line of missing) console.error(`  missing: ${line}`);
-    console.error('\nApply migrations 032-034 in the Supabase SQL Editor, then run this again.');
+    console.error('\nThe database is missing part of the schema. Apply backend/db/baseline/01-09 (a fresh');
+    console.error('project only), then each file in backend/db/migrations/ in order, in the Supabase SQL');
+    console.error('Editor, then run this again.');
     failures += 1;
     return;
   }
-  check('migrations 032-034 are applied', true);
+  check('the schema this check needs is applied', true);
 
   // --- setup ---------------------------------------------------------------
   const staff = await createTestUser('staff', 'venue_staff');

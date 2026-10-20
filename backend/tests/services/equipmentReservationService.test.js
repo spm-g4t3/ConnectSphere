@@ -5,8 +5,7 @@
  * these are about what the service sends, what it refuses before the database
  * is called, and how each database refusal becomes a typed error. What the
  * database does is tested against Postgres in
- * tests/db/equipmentReservationsDatabase.test.js and
- * tests/db/equipmentReservationActionsDatabase.test.js.
+ * tests/db/equipmentReservationsDatabase.test.js.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -303,7 +302,7 @@ describe('the review state carries the reservations', () => {
     expect(state.request.lines[0]).toMatchObject({ reservations: [], flaggedCount: 0 });
   });
 
-  it('SCRUM300_a_read_from_before_054_with_no_reservations_key_still_works', () => {
+  it('SCRUM300_a_review_row_with_no_reservations_key_maps_to_an_empty_list', () => {
     const row = reviewRow();
     delete row.request.lines[0].reservations;
     expect(toReviewState(row).request.lines[0]).toMatchObject({ reservations: [], flaggedCount: 0 });

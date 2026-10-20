@@ -609,7 +609,7 @@ describe('SCRUM17_AC1 BLOCK_OVERLAPS_BLOCK names the clashing block', () => {
 
 
 describe('toBookingConflict', () => {
-  it('maps every column to camelCase', () => {
+  it('maps every booking conflict column to camelCase', () => {
     expect(
       toBookingConflict({
         booking_id: 'b',
@@ -665,7 +665,7 @@ describe('listVenueBlocks', () => {
     await expect(listVenueBlocks(VENUE_ID)).resolves.toEqual([]);
   });
 
-  it('refuses a malformed venue id before any query', async () => {
+  it('refuses a malformed venue id before listing any block', async () => {
     const err = await errorFromAsync(() => listVenueBlocks('nope'));
     expect(err).toBeInstanceOf(ValidationError);
     expect(from).not.toHaveBeenCalled();
@@ -709,7 +709,7 @@ describe('getVenueBlock', () => {
     expect(from).not.toHaveBeenCalled();
   });
 
-  it('refuses a malformed venue id before any query', async () => {
+  it('refuses a malformed venue id before reading the block', async () => {
     const err = await errorFromAsync(() => getVenueBlock('nope', BLOCK_ID));
     expect(err).toBeInstanceOf(ValidationError);
     expect(from).not.toHaveBeenCalled();
@@ -718,7 +718,7 @@ describe('getVenueBlock', () => {
 
 
 describe('toBlock', () => {
-  it('maps every column to camelCase', () => {
+  it('maps every block column to camelCase', () => {
     expect(
       toBlock(blockRow({ notes: 'n', removed_at: '2026-10-02T00:00:00+00:00', removed_by: STAFF_ID })),
     ).toEqual({
@@ -897,7 +897,7 @@ describe('SCRUM17_AC4 updateVenueBlock', () => {
   describe('database errors', () => {
     const fail = (error) => rpc.mockResolvedValueOnce({ data: null, error });
 
-    it('SCRUM17_AC4_P0002_becomes_not_found', async () => {
+    it('SCRUM17_AC4_update_P0002_becomes_not_found', async () => {
       fail({ code: 'P0002', message: 'venue block x not found on venue y' });
       const err = await errorFromAsync(() => run({ reason: 'safety' }));
       expect(err).toBeInstanceOf(NotFoundError);
@@ -975,7 +975,7 @@ describe('SCRUM17_AC4 removeVenueBlock', () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  it('SCRUM17_AC4_P0002_becomes_not_found', async () => {
+  it('SCRUM17_AC4_remove_P0002_becomes_not_found', async () => {
     rpc.mockResolvedValueOnce({ data: null, error: { code: 'P0002', message: 'not found' } });
     const err = await errorFromAsync(() => removeVenueBlock(VENUE_ID, BLOCK_ID, STAFF_ID));
     expect(err).toBeInstanceOf(NotFoundError);

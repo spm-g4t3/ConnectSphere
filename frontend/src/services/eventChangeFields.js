@@ -34,7 +34,7 @@
  * backend/src/domain/eventChangeField.js -- the backend validator checks the
  * value against that vocabulary and a 400 is the only thing a mismatch buys.
  */
-export const CHANGE_FIELD_BY_OPTION = Object.freeze({
+const CHANGE_FIELD_BY_OPTION = Object.freeze({
   eventName: "event_name",
   purpose: "purpose",
   description: "description",

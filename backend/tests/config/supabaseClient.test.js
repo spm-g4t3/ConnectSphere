@@ -116,7 +116,6 @@ describe('the configured client', () => {
 
     // What "exactly once" was really guarding: importing the module twice does
     // not build a second pair, and the `supabase` alias is not a third client.
-    expect(module.supabase).toBe(module.default);
     expect(module.supabase).toBe(module.supabaseAdmin);
     expect(module.supabaseAdmin).not.toBe(module.supabaseAuth);
   });

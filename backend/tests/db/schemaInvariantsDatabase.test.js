@@ -118,7 +118,7 @@ describe('SCRUM-172 / SCRUM-17: client roles are kept out by row level security'
     expect(open).toEqual([]);
   });
 
-  it('SCRUM172_AC8_no_migration_adds_a_policy_on_notifications', async () => {
+  it('SCRUM172_AC8_no_table_in_the_schema_has_a_policy', async () => {
     const policies = await rows(
       `select polrelid::regclass::text as tablename, polname
          from pg_policy p join pg_class c on c.oid = p.polrelid
@@ -206,7 +206,7 @@ describe('SCRUM-321: the status history', () => {
     expect(await indexDef('idx_event_request_status_history_event')).toMatch(/\(event_request_id, created_at\)$/);
   });
 
-  it('has no other writer in any migration', () => {
+  it('has no other writer among the schema functions', () => {
     // Each writer records the row in the statement block that changes the
     // status, so the two stand or fall together.
     const writers = Object.fromEntries(
@@ -249,7 +249,7 @@ describe('SCRUM-318: change_event_request_status', () => {
     expect((await procedure('event_request_status_allows')).volatility).toBe('i');
   });
 
-  it("replaces 022's function with the same signature, so no overload is left behind", async () => {
+  it('has one signature, so no overload is left behind', async () => {
     const fn = await procedure('event_request_status_allows');
 
     expect(fn.args).toBe('p_from event_request_status, p_to event_request_status');
@@ -681,7 +681,7 @@ describe('SCRUM-17: the venue block functions', () => {
       );
     });
 
-    it("SCRUM17_AC3_gate_is_identical_to_014s_create_venue_block_gate", () => {
+    it('SCRUM17_AC3_gate_is_identical_to_create_venue_block_gate', () => {
       const createGate = gateOf(body('create_venue_block'));
 
       expect(createGate).not.toBeNull();
@@ -1007,7 +1007,7 @@ describe('SCRUM-17 AC4: nothing writes a booking period', () => {
     }
   });
 
-  it('SCRUM17_AC4_no_migration_inserts_bookings', () => {
+  it('SCRUM17_AC4_only_create_booking_request_inserts_bookings', () => {
     // The one insert is the booking request itself: a new row with the event's own period.
     const inserters = Object.keys(sources).filter((name) => /\binsert into (?:public\.)?bookings\b/.test(body(name)));
 

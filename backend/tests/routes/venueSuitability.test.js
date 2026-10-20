@@ -705,7 +705,7 @@ describe('SCRUM188_AC6 GET /bookings', () => {
       });
     });
 
-    it('SCRUM192_no_live_bookings_is_200_with_an_empty_list', async () => {
+    it('SCRUM192_no_live_bookings_is_200_with_an_empty_list_over_the_real_recheck', async () => {
       const res = await realGet(fakeClient({ bookings: [] }));
       expect(res.status).toBe(200);
       expect(res.body).toEqual([]);

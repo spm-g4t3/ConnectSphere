@@ -55,5 +55,3 @@ export function createRequireRole(...allowed) {
     });
   };
 }
-
-export default createRequireRole;

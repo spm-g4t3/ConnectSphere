@@ -310,7 +310,7 @@ describe('SCRUM-484: create_booking_request uses the occupied period', () => {
   // definition of create_booking_request (051, which keeps 040's storing of
   // it), which createBookingRequestMigration (stopping at 030) does not reach,
   // with a full result as the service builds it -- six criteria and `checked`.
-  describe('SCRUM-188 AC7: the suitability result is stored with the request (051)', () => {
+  describe('SCRUM-188 AC7: the suitability result is stored with the request', () => {
     const CHECKED = {
       startsAt: at('10:00'),
       endsAt: at('12:00'),

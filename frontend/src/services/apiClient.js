@@ -4,8 +4,6 @@
 // Every service file (AuthContext, venueService, eventRequestService, etc.)
 // imports this rather than constructing its own axios instance.
 //
-// Requires axios: npm install axios
-//
 // Base URL comes from an env var so it's different in dev vs. production
 // without editing code. Uses Vite's import.meta.env convention — if your
 // project uses Create React App instead, swap this for
@@ -44,10 +42,5 @@ apiClient.interceptors.request.use((config) => {
   }
   return config;
 });
-
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => Promise.reject(error),
-);
 
 export default apiClient;

@@ -475,7 +475,7 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
       expect((await bookingRow(id)).review_reason).toBeNull();
     });
 
-    it('SCRUM266_AC5_a_booking_flagged_before_014_with_no_flag_time_can_be_reinstated', async () => {
+    it('SCRUM266_AC5_a_booking_flagged_with_no_flag_time_can_be_reinstated', async () => {
       const id = await approved(await makeVenue(), await makeEvent());
       // Early flags were set by status alone, and flagged_at was never backfilled.
       await db.query(`update bookings set status = 'flagged_for_review' where id = $1`, [id]);

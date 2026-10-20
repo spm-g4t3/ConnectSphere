@@ -1254,7 +1254,7 @@ describe('SCRUM-489: readiness and submission for the safety check', () => {
   // AC8-03: the notice type
   // -------------------------------------------------------------------------
   describe('the submission notice', () => {
-    it('SCRUM489_AC8_the_latest_type_list_preserves_064s_complete_list', async () => {
+    it('SCRUM489_AC8_the_type_list_keeps_every_earlier_type_and_the_submission_notice', async () => {
       // A later list that restated an older one would drop the submission notice.
       const { def } = await one("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'notifications_type_known'");
       expect([...def.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1])).toEqual(expect.arrayContaining([

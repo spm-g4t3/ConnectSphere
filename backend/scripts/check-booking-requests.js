@@ -49,10 +49,10 @@
  * refused" from "request first, block over a pending request": both are legal,
  * and both are accepted.
  *
- * Requires migrations 027 to 031, 051, and 065 to 067 (run 065, then 066, then
- * 067, each as a separate execution). The preflight probes for 065 and 066 and
- * says what is missing; nothing is written until it passes. 067 changes only
- * event cancellation, which this script does not drive, so it is not probed.
+ * Requires the full schema: backend/db/baseline/ plus every file in
+ * backend/db/migrations/ (see the repo README). The preflight probes the
+ * request columns, functions and statuses it uses and says what is missing;
+ * nothing is written until it passes.
  * Exits non-zero on any failure.
  *
  * It creates throwaway auth users: two Venue Staff, two Event Coordinators and
@@ -440,14 +440,13 @@ async function main() {
   const missing = await preflight();
   if (missing.length > 0) {
     for (const line of missing) console.error(`  missing: ${line}`);
-    console.error('\nApply migrations 027-031 and 051, then 065, 066 and 067 in that order, each as a separate');
-    console.error('execution in the Supabase SQL Editor (065_booking_decision_statuses.sql,');
-    console.error('066_venue_staff_booking_decisions.sql, 067_withdraw_conflicting_on_cancellation.sql),');
-    console.error('then run this again.');
+    console.error('\nThe database is missing part of the schema. Apply backend/db/baseline/01-09 (a fresh');
+    console.error('project only), then each file in backend/db/migrations/ in order, in the Supabase SQL');
+    console.error('Editor, then run this again.');
     failures += 1;
     return;
   }
-  check('migrations 027-031, 051, 065 and 066 are applied', true);
+  check('the schema this check needs is applied', true);
 
   // --- setup ---------------------------------------------------------------
   await createTestUser('staff1', 'venue_staff');

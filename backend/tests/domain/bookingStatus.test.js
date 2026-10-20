@@ -68,7 +68,7 @@ describe('isBookingStatus', () => {
 
 
 describe('venue_blocks schema', () => {
-  it('SCRUM17_AC1_migration_declares_the_active_block_exclusion_constraint', async () => {
+  it('SCRUM17_AC1_schema_declares_the_active_block_exclusion_constraint', async () => {
     expect(await constraintDef(schemaDb(), 'venue_blocks_no_overlap')).toBe(
       "EXCLUDE USING gist (venue_id WITH =, tstzrange(starts_at, ends_at, '[)'::text) WITH &&) WHERE ((removed_at IS NULL))",
     );

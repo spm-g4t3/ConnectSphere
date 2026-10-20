@@ -1,11 +1,9 @@
 // changeRequestService.js
 //
-// Same caveat as before: I don't see an Express route for this yet, only
-// the pattern to follow. Confirm with your backend teammate that something
-// like POST /event-requests/:id/change-requests exists or gets built,
-// and what shape it expects/returns.
+// An Organiser's change requests on an event, under
+// /event-requests/:id/change-requests.
 
-import { apiClient } from "./apiClient"; // <-- replace with your actual API client
+import { apiClient } from "./apiClient";
 
 /**
  * Submits a request to change something about an already-submitted event.

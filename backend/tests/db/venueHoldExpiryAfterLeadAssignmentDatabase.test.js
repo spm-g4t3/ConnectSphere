@@ -68,7 +68,7 @@ describe('SCRUM-486 AC10-07: venue holds still expire', () => {
     await db?.close();
   });
 
-  it('SCRUM486_AC10_a_lapsed_hold_still_expires_and_is_notified_after_052', async () => {
+  it('SCRUM486_AC10_a_lapsed_hold_still_expires_and_is_notified_under_lead_assignment', async () => {
     // AC10-07: process_venue_hold_expiry marks the hold expired and writes its
     // venue_hold_expired notice.
     const holdId = await lapsedHold();

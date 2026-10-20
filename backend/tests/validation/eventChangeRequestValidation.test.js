@@ -352,12 +352,12 @@ describe('SCRUM-37: validateProcessChangeRequest', () => {
     expect(fieldsIn(err)).toContain('changeRequestId');
   });
 
-  it('reports every problem at once, not just the first', () => {
+  it('reports every problem with a decision at once, not just the first', () => {
     const err = errorFrom(() => validateProcessChangeRequest({ decision: 'rejected' }));
     expect(fieldsIn(err).sort()).toEqual(['changeRequestId', 'decisionNotes'].sort());
   });
 
-  it('reports a 400 status for Express to use', () => {
+  it('reports a 400 status for an invalid decision', () => {
     const err = errorFrom(() => validateProcessChangeRequest({}));
     expect(err.status).toBe(400);
   });
@@ -366,7 +366,7 @@ describe('SCRUM-37: validateProcessChangeRequest', () => {
     ['null', null],
     ['an array', []],
     ['a string', 'not an object'],
-  ])('rejects input that is %s', (_label, value) => {
+  ])('rejects decision input that is %s', (_label, value) => {
     expect(() => validateProcessChangeRequest(value)).toThrow(ValidationError);
   });
 });

@@ -331,7 +331,7 @@ describe("SCRUM453 existing roles keep their navigation", () => {
     ["venue_staff", ["/dashboard", "/venue-catalogue", "/booking-requests", "/flagged-bookings"]],
     [
       "technical_support_staff",
-      ["/dashboard", "/tickets", "/equipment", "/equipment-catalogue", "/equipment-availability"],
+      ["/dashboard", "/equipment", "/equipment-catalogue", "/equipment-availability"],
     ],
   ])("SCRUM453_%s_nav_is_unchanged", async (role, hrefs) => {
     restoreSession(role);

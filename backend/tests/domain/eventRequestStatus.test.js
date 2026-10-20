@@ -56,7 +56,7 @@ describe('STATUS mirrors the database enum', () => {
   // cancelled), and no code orders or compares by enum position.
   const statusesDeclaredInSql = () => enumLabels(schemaDb(), 'event_request_status');
 
-  it('only uses values the SQL migration declares', async () => {
+  it('only uses values the event_request_status enum in the schema declares', async () => {
     // The database is the source of truth for what is storable. If this fails,
     // a status was added here without a migration and writes will be rejected
     // at runtime.

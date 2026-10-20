@@ -23,7 +23,7 @@ const schemaDb = useSchemaDb();
 
 
 describe('CHANGE_FIELD mirrors the database enum', () => {
-  it('declares exactly the same values as the SQL migrations', async () => {
+  it('declares exactly the values of the event_change_field enum in the schema', async () => {
     // The database is the source of truth. If this fails, one of the two was
     // edited without the other and writes will be rejected at runtime.
     expect([...CHANGE_FIELDS].sort()).toEqual((await enumLabels(schemaDb(), 'event_change_field')).sort());

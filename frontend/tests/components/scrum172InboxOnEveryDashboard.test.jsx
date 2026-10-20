@@ -35,11 +35,6 @@ vi.mock("../../src/services/eventRequestService", () => ({
   getMyEventRequests: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock("../../src/services/supportService", () => ({
-  getOpenTickets: vi.fn().mockResolvedValue([]),
-  getEquipmentRequests: vi.fn().mockResolvedValue([]),
-}));
-
 beforeEach(() => {
   vi.mocked(useAuth).mockReset();
 });
