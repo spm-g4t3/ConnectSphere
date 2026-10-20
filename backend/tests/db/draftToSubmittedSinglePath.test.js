@@ -1,18 +1,7 @@
 /**
- * SCRUM-318 / SCRUM-327: there is one production path from draft to submitted.
- *
- * That path is submit_event_request (migration 016), called through rpc by
- * submitEventRequest. It is the only thing that sets status = 'submitted', and
- * it sets submitted_at, assigned_coordinator_id and the assignment history row
- * in the same statement block, so a request cannot become submitted without a
- * coordinator. SCRUM-318's status model says which moves are legal;
- * this function is how the draft -> submitted one is carried out.
- *
- * CI has no database, so this reads the source and the migrations as text, with
- * every `--` and `//` comment stripped so that a rule that exists only in a
- * comment does not count. What it cannot see -- that a refused submission
- * leaves the row a draft -- is proved by `npm run request:check` and by running
- * the function against a real Postgres.
+ * SCRUM-318 / SCRUM-327: the application moves a draft to submitted only
+ * through submit_event_request. Read from the API's source with comments
+ * stripped; the database side is in schemaInvariantsDatabase.test.js.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -24,7 +13,6 @@ import { STATUS, canTransition } from '../../src/domain/eventRequestStatus.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(here, '../../src');
-const MIGRATIONS = resolve(here, '../../db/migrations');
 
 /** Every .js file under dir. */
 function sourceFiles(dir) {
@@ -41,14 +29,6 @@ function code(path) {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/gm, '')
     .replace(/[^:]\/\/.*$/gm, '');
-}
-
-/** A migration with every `--` comment stripped, whitespace collapsed, lower-cased. */
-function sql(name) {
-  return readFileSync(resolve(MIGRATIONS, name), 'utf8')
-    .replace(/--[^\n]*/g, '')
-    .replace(/\s+/g, ' ')
-    .toLowerCase();
 }
 
 const SOURCES = sourceFiles(SRC).map((path) => ({ path, text: code(path) }));
@@ -122,78 +102,6 @@ describe('SCRUM-327 / SCRUM-318: the application has one draft -> submitted path
       expect(chain).toMatch(/\.select\(/);
       expect(chain).not.toMatch(/\.(insert|update|delete|upsert)\(/);
     }
-  });
-});
-
-
-describe('SCRUM-327 / SCRUM-318: the database has one draft -> submitted path', () => {
-  const migrations = readdirSync(MIGRATIONS).filter((name) => name.endsWith('.sql'));
-
-  it("sets status = 'submitted' only in the two definitions of submit_event_request", () => {
-    const setters = migrations.filter((name) => /set status = 'submitted'/.test(sql(name)));
-
-    // 016 created it and 021 replaced it with the version that also records
-    // the status history. 052 (SCRUM-486) replaced it again, without the
-    // coordinator: a new request now waits for the Event Coordinator Lead.
-    // Each is the one definition in force at its time, and all three are
-    // submit_event_request: this test failing when 052 arrived was it doing its
-    // job, noticing a new writer of 'submitted', and the fix is to name 052
-    // here, not to loosen the check. Any other file setting the status would
-    // still fail it.
-    expect(setters).toEqual([
-      '016_submit_event_request.sql',
-      '021_event_status_history.sql',
-      '052_lead_assignment.sql',
-    ]);
-  });
-
-  const fn = sql('021_event_status_history.sql');
-  const start = fn.indexOf('create or replace function submit_event_request');
-  // The current definition: 021 replaced 016's with one that also records the
-  // status history. Only the function, not the rest of the file.
-  const body = fn.slice(start, fn.indexOf('$$;', fn.indexOf('$$', start) + 2));
-
-  it('refuses anything but a draft before it writes', () => {
-    const guard = body.indexOf("status <> 'draft'");
-    expect(guard).toBeGreaterThan(-1);
-    expect(guard).toBeLessThan(body.indexOf('update event_requests'));
-  });
-
-  it('chooses the coordinator once, with the one selection rule', () => {
-    expect(body.match(/pick_event_coordinator\(/g)).toHaveLength(1);
-    expect(body).not.toMatch(/count\(/);
-  });
-
-  it('sets status, submitted_at and the coordinator in one statement', () => {
-    const update = body.match(/update event_requests set ([^;]*?) where id = p_event_request_id/);
-
-    expect(update).not.toBeNull();
-    expect(update[1]).toMatch(/status = 'submitted'/);
-    expect(update[1]).toMatch(/submitted_at = p_submitted_at/);
-    expect(update[1]).toMatch(/assigned_coordinator_id = v_coordinator/);
-  });
-
-  it('writes the assignment history once, after the update, in the same function', () => {
-    const history = [...body.matchAll(/insert into event_request_assignment_history/g)];
-
-    expect(history).toHaveLength(1);
-    expect(history[0].index).toBeGreaterThan(body.indexOf('update event_requests'));
-  });
-
-  it('stops before writing when no coordinator is available', () => {
-    const none = body.indexOf('if v_coordinator is null then');
-
-    expect(none).toBeGreaterThan(-1);
-    expect(body.slice(none, body.indexOf('end if', none))).toMatch(/raise exception/);
-    expect(none).toBeLessThan(body.indexOf('update event_requests'));
-  });
-
-  it('is backed by the constraint that refuses a submitted request with no coordinator', () => {
-    const constraint = sql('017_require_assigned_coordinator.sql');
-
-    expect(constraint).toMatch(
-      /add constraint event_requests_assigned_when_submitted check \( status in \('draft', 'cancelled'\) or assigned_coordinator_id is not null \)/,
-    );
   });
 });
 

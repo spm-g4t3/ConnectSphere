@@ -8,7 +8,26 @@ export function createSchemaDb() {
   return createDatabase(baselineFiles());
 }
 
-const DECIDED_STATUSES = ['approved', 'safety_review', 'safety_approved', 'confirmed', 'completed', 'rejected'];
+// Every SQL and PL/pgSQL function in public, by name, with its source as
+// written (comments included). An overload would make a name ambiguous here,
+// as it does for PostgREST (PGRST203), so one is refused.
+export async function functionSources(db) {
+  const { rows } = await db.query(
+    `select p.proname as name, p.prosrc as source
+       from pg_proc p
+       join pg_language l on l.oid = p.prolang
+      where p.pronamespace = 'public'::regnamespace
+        and l.lanname in ('sql', 'plpgsql')`,
+  );
+  const sources = {};
+  for (const { name, source } of rows) {
+    if (name in sources) throw new Error(`${name} is overloaded`);
+    sources[name] = source;
+  }
+  return sources;
+}
+
+const DECIDED_STATUSES =['approved', 'safety_review', 'safety_approved', 'confirmed', 'completed', 'rejected'];
 const UNASSIGNED_STATUSES = ['draft', 'submitted', 'cancelled'];
 const INSERT_REFUSED_STATUSES = ['safety_review', 'safety_approved', 'confirmed'];
 

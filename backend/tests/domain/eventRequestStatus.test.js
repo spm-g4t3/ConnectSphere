@@ -9,10 +9,6 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
 import { ELEVEN_STATUSES, EXPECTED_TRANSITIONS, EVERY_PAIR } from '../fixtures/expectedTransitionMatrix.js';
 
 import {
@@ -25,7 +21,9 @@ import {
   getStatusDisplay,
   isKnownStatus,
 } from '../../src/domain/eventRequestStatus.js';
+import { useSchemaDb, enumLabels, checkListValues } from './helpers/schemaVocabulary.js';
 
+const schemaDb = useSchemaDb();
 
 const ALL_STATUSES = Object.values(STATUS);
 
@@ -43,7 +41,10 @@ const CANCELLABLE = [
   STATUS.CONFIRMED,
 ];
 
-/** Removed by SCRUM-318. Still in the database enum, which cannot drop a value; 020 refuses it. */
+/**
+ * Removed by SCRUM-318. Still in the database enum, which cannot drop a value;
+ * the CHECK event_requests_status_in_lifecycle refuses it.
+ */
 const OBSOLETE_STATUSES = ['planning'];
 
 
@@ -51,46 +52,24 @@ const OBSOLETE_STATUSES = ['planning'];
 // The JS list and the database enum must not drift apart
 // ---------------------------------------------------------------------------
 describe('STATUS mirrors the database enum', () => {
-  /**
-   * The enum's values: 001's create type, comments stripped, then every
-   * `alter type event_request_status add value` in the later migrations.
-   */
-  function statusesDeclaredInSql() {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const migrations = resolve(here, '../../db/migrations');
-    const sql = readFileSync(resolve(migrations, '001_event_requests.sql'), 'utf8');
-    const block = sql.match(
-      /create type event_request_status as enum \(([\s\S]*?)\);/i,
-    );
-    if (!block) throw new Error('could not find the enum in the migration');
+  // Compared as sets: the enum appends values (the safety statuses sit after
+  // cancelled), and no code orders or compares by enum position.
+  const statusesDeclaredInSql = () => enumLabels(schemaDb(), 'event_request_status');
 
-    const values = [...block[1].replace(/--[^\n]*/g, '').matchAll(/'([a-z_]+)'/g)]
-      .map((m) => m[1]);
-
-    for (const file of readdirSync(migrations).filter((name) => /^\d{3}_.*\.sql$/.test(name)).sort()) {
-      const text = readFileSync(resolve(migrations, file), 'utf8').replace(/--[^\n]*/g, '');
-      for (const [, value] of text.matchAll(
-        /alter type (?:public\.)?event_request_status\s+add value (?:if not exists )?'([a-z_]+)'/gi,
-      )) {
-        if (!values.includes(value)) values.push(value);
-      }
-    }
-    return values;
-  }
-
-  it('only uses values the SQL migration declares', () => {
+  it('only uses values the SQL migration declares', async () => {
     // The database is the source of truth for what is storable. If this fails,
     // a status was added here without a migration and writes will be rejected
     // at runtime.
-    expect(statusesDeclaredInSql()).toEqual(expect.arrayContaining(ALL_STATUSES));
+    expect(await statusesDeclaredInSql()).toEqual(expect.arrayContaining(ALL_STATUSES));
   });
 
-  it('leaves out only the statuses SCRUM-318 removed', () => {
-    // 001 is append-only, so 'planning' stays in its enum: Postgres cannot
-    // drop a value, and 020 refuses it with a constraint. Anything else
-    // missing from STATUS is drift, not removal.
-    const missing = statusesDeclaredInSql().filter((s) => !ALL_STATUSES.includes(s));
+  it('leaves out only the statuses SCRUM-318 removed', async () => {
+    // 'planning' stays in the enum because Postgres cannot drop a value, and
+    // the lifecycle CHECK refuses it. Anything else missing from STATUS is
+    // drift, not removal.
+    const missing = (await statusesDeclaredInSql()).filter((s) => !ALL_STATUSES.includes(s));
     expect(missing.sort()).toEqual([...OBSOLETE_STATUSES].sort());
+    expect((await checkListValues(schemaDb(), 'event_requests_status_in_lifecycle')).sort()).toEqual([...ALL_STATUSES].sort());
   });
 
   it('has the nine statuses of SCRUM-318 and the two safety statuses of SCRUM-488', () => {

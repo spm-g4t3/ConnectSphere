@@ -4,13 +4,10 @@
  * SCRUM-11: what an Organiser may say a change request is about (AC2).
  *
  * Mirrors the structure of eventRequestStatus.test.js: the JS list and the
- * database enum must not drift apart.
+ * database enum, read from the built schema, must not drift apart.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
 import {
   CHANGE_FIELD,
@@ -20,30 +17,16 @@ import {
   EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD,
   hasEventRequestColumn,
 } from '../../src/domain/eventChangeField.js';
+import { useSchemaDb, enumLabels, functionSource } from './helpers/schemaVocabulary.js';
+
+const schemaDb = useSchemaDb();
 
 
 describe('CHANGE_FIELD mirrors the database enum', () => {
-  /** Pull every enum value straight out of the migration, comments stripped. */
-  function changeFieldsDeclaredInSql() {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const migrationsDir = resolve(here, '../../db/migrations');
-    const strip = (sql) => sql.replace(/--[^\n]*/g, '');
-
-    const sql = strip(
-      readFileSync(resolve(migrationsDir, '006_event_change_requests.sql'), 'utf8'),
-    );
-    const block = sql.match(
-      /create type event_change_field as enum \(([\s\S]*?)\);/i,
-    );
-    if (!block) throw new Error('could not find the enum in 006_event_change_requests.sql');
-
-    return [...block[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-  }
-
-  it('declares exactly the same values as the SQL migrations', () => {
-    // The database is the source of truth. If this fails, one of the files
-    // was edited without the other and writes will be rejected at runtime.
-    expect([...CHANGE_FIELDS].sort()).toEqual(changeFieldsDeclaredInSql().sort());
+  it('declares exactly the same values as the SQL migrations', async () => {
+    // The database is the source of truth. If this fails, one of the two was
+    // edited without the other and writes will be rejected at runtime.
+    expect([...CHANGE_FIELDS].sort()).toEqual((await enumLabels(schemaDb(), 'event_change_field')).sort());
   });
 });
 
@@ -98,32 +81,26 @@ describe('SCRUM-34: every change field has a label an Organiser can read', () =>
 
 describe('SCRUM-37: EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD mirrors process_change_request', () => {
   /**
-   * Pull the changeField -> column pairs straight out of
-   * process_change_request's branches: each is written as one line of the
-   * form `... change_field = 'x' then update event_requests set y = ...`
-   * specifically so this test can parse it without re-implementing a SQL
-   * parser.
+   * Pull the changeField -> column pairs straight out of the built
+   * process_change_request: each branch is one line of the form
+   * `... change_field = 'x' then update event_requests set y = ...`
+   * specifically so this test can parse it without a SQL parser.
    */
-  function columnsAppliedInSql() {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const sql = readFileSync(
-      resolve(here, '../../db/migrations/006_event_change_requests.sql'),
-      'utf8',
-    );
-
+  async function columnsAppliedInSql() {
+    const sql = await functionSource(schemaDb(), 'process_change_request');
     const pairs = [...sql.matchAll(
       /change_field = '([a-z_]+)'\s+then\s+update\s+event_requests\s+set\s+([a-z_]+)\s*=/g,
     )];
-    if (pairs.length === 0) throw new Error('could not find any change_field branches in the migration');
+    if (pairs.length === 0) throw new Error('could not find any change_field branches in process_change_request');
 
     return Object.fromEntries(pairs.map((m) => [m[1], m[2]]));
   }
 
-  it('applies every structured field to exactly the column the SQL function applies it to', () => {
+  it('applies every structured field to exactly the column the SQL function applies it to', async () => {
     // If this fails, EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD and
     // process_change_request's branches have drifted apart -- one names a
     // field or column the other does not.
-    expect(EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD).toEqual(columnsAppliedInSql());
+    expect(EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD).toEqual(await columnsAppliedInSql());
   });
 
   it('has no entry for fields with no column on event_requests', () => {

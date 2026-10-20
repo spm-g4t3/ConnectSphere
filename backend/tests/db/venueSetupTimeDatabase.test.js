@@ -59,4 +59,18 @@ describe('SCRUM-484 AC9: a setup change made through update_venue is audited', (
     expect(ms(row.changed_at)).toBeGreaterThanOrEqual(startedAt - 1000);
     expect(ms(row.changed_at)).toBeLessThanOrEqual(finishedAt + 1000);
   });
+
+  it('SCRUM20_SCRUM137_update_venue_never_treats_0_as_missing', async () => {
+    // 0 is "no setup time", a real value: only null means "leave it as it is".
+    const V = (
+      await one(
+        `insert into venues (name, location, max_capacity, setup_minutes)
+         values ('Quay Room', 'Block B', 80, 30) returning id`,
+      )
+    ).id;
+
+    await db.query('select update_venue(p_id => $1, p_setup_minutes => 0, p_user_id => $2)', [V, staff]);
+
+    expect((await one('select setup_minutes from venues where id = $1', [V])).setup_minutes).toBe(0);
+  });
 });
