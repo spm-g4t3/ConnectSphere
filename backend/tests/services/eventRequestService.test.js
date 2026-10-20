@@ -619,15 +619,14 @@ describe('AC4: an incomplete or missing request is not submitted', () => {
 // The new shape of submitEventRequest: resolve the client, read the row, run
 // validateSubmitEventRequest against it, then call submit_event_request
 // (migration 016) through rpc. The function locks the row, checks it is still
-// a draft, picks a coordinator with pick_event_coordinator (015), writes
-// status, submitted_at and assigned_coordinator_id, and inserts the history
-// row, all in one transaction.
+// a draft, writes status and submitted_at, and inserts the history row, all in
+// one transaction. Since 052 it assigns no coordinator; the Lead does.
 //
 // What these tests deliberately do not cover, and where it is covered instead:
-//   - which coordinator is chosen: that is pick_event_coordinator's rule, and
-//     SCRUM-335 tests it against a real database. A fake can only return
-//     whatever id it is given, so a test here would prove nothing about the
-//     rule.
+//   - which coordinator is chosen: the Lead chooses, through
+//     assign_event_request, which the database suites test. A fake can only
+//     return whatever id it is given, so a test here would prove nothing about
+//     the choice.
 //   - the history row's contents: it is written inside the function and never
 //     reaches the client, so there is nothing for the fake to observe.
 //   - reassignment: a separate subtask.
@@ -896,7 +895,7 @@ describe("SCRUM-330: the function's refusals become typed errors", () => {
 //     belongs to the function (018). A fake returns whatever row it is given,
 //     so a test here could only check the fixture against itself.
 //   - the history row's contents: written inside the function, never returned.
-//   - how a coordinator is chosen on submission: pick_event_coordinator (015).
+//   - how a coordinator is chosen: by the Lead, through assign_event_request.
 
 /** The coordinator the event is handed to. COORDINATOR_ID is the one handing over. */
 const NEW_COORDINATOR_ID = '66666666-6666-4666-8666-666666666666';

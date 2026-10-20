@@ -259,6 +259,22 @@ describe('SCRUM-318: change_event_request_status', () => {
 });
 
 
+describe('SCRUM-572: functions nothing calls are dropped', () => {
+  it('has no auto-assignment helper and no clarification functions without fields', async () => {
+    // A leftover would still be callable and could bypass the Lead's queue or
+    // the requested-fields rule.
+    const left = await rows(
+      `select proname from pg_proc
+        where pronamespace = 'public'::regnamespace
+          and proname = any($1)`,
+      [['pick_event_coordinator', 'request_event_clarification', 'reply_to_event_clarification']],
+    );
+
+    expect(left).toEqual([]);
+  });
+});
+
+
 describe('SCRUM-487: every event status is classified for the overview', () => {
   // The four buckets. Every enum value is in exactly one.
   const BUCKETS = {

@@ -2,7 +2,7 @@
 
 ## How the schema is built
 - `backend/db/baseline/01..09` is the schema as of migration 102. Never edit it and never paste it into live; live already has it.
-- Every change is a new file here, numbered from 103 upward. `git fetch origin dev` and take a number above the highest there.
+- Every change is a new file here, numbered from 010 upward. `git fetch origin dev` and take a number above the highest there.
 - A fresh database is the baseline files in order, then these files in order. Live gets each new file pasted into the Supabase SQL editor.
 - A migration must apply cleanly both on live and on top of the baseline.
 - A function's truth is the latest migration that defines it, else the baseline: `git grep -n "function <name>" backend/db`.

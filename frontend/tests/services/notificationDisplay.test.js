@@ -1065,7 +1065,7 @@ describe("describeNotification: missing names and payloads", () => {
 });
 
 // Every change to notifications_type_known restates the whole list, so the
-// latest file that sets it (the baseline, or a migration from 103 on) is what
+// latest file that sets it (the baseline, or a migration from 010 on) is what
 // the backend can send; a type there with no wording here would show as "New notification".
 const DB = resolve(dirname(fileURLToPath(import.meta.url)), "../../../backend/db");
 const TYPE_LIST =
@@ -1073,7 +1073,7 @@ const TYPE_LIST =
 
 function knownNotificationTypes() {
   const later = readdirSync(join(DB, "migrations"))
-    .filter((name) => /^\d+_.*\.sql$/.test(name) && Number.parseInt(name, 10) >= 103)
+    .filter((name) => /^\d+_.*\.sql$/.test(name))
     .sort()
     .map((name) => join(DB, "migrations", name));
   const lists = [join(DB, "baseline", "05_notifications.sql"), ...later]

@@ -276,9 +276,9 @@ async function main() {
   // coordinator rather than going through submit_event_request.
   //
   // The coordinator is a throwaway auth user created only to be named here,
-  // with no profiles row, as change-request:check does. That keeps it out of
-  // pick_event_coordinator's candidates, so it cannot be handed a real
-  // Organiser's submission while this runs. The other options were worse: a
+  // with no profiles row, as change-request:check does. The Lead can only
+  // assign a profile with the event_coordinator role, so it cannot be handed a
+  // real Organiser's submission while this runs. The other options were worse: a
   // test user with the event_coordinator role would be a live candidate, and
   // the real coordinator would tie a venue check to the assignment data and
   // block deleting that person until cleanup.

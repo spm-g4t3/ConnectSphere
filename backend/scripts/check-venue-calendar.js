@@ -35,8 +35,8 @@
  * It creates four throwaway auth users with passwords and profiles: Venue
  * Staff, an Event Coordinator, an Event Organiser (event_requests.organiser_id
  * is NOT NULL) and an Attendee. Like venue-blocks:check, the coordinator is a
- * real event_coordinator for the few seconds the script runs, so it is briefly
- * a candidate for pick_event_coordinator, and the override notifies every
+ * real event_coordinator for the few seconds the script runs, so a Lead could
+ * briefly assign it an event, and the override notifies every
  * Event Coordinator on the project; cleanup deletes those notifications.
  *
  * Exits non-zero on any failure, including a failed cleanup step or a row left

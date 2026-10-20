@@ -31,9 +31,9 @@ function sqlFiles(dir) {
 
 export function baselineFiles() {
   const baseline = sqlFiles(BASELINE_DIR).map((name) => join(BASELINE_DIR, name));
-  // Migrations from 103 on are written after the squash and apply on top of it.
+  // Every numbered migration here is written after the squash and applies on top of it.
   const later = sqlFiles(MIGRATIONS_DIR)
-    .filter((name) => Number.parseInt(name, 10) >= 103)
+    .filter((name) => /^\d+_.*\.sql$/.test(name))
     .map((name) => join(MIGRATIONS_DIR, name));
   return [...baseline, ...later];
 }

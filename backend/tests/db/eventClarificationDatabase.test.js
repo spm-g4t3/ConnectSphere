@@ -62,7 +62,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     const due = new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10);
 
     await db.query(
-      "select * from request_event_clarification($1, $2, $2, $3, $4)",
+      "select * from request_event_clarification_with_fields($1, $2, $2, $3, $4, '{}'::text[])",
       [id, coordinator, "Please confirm the attendee count.", due],
     );
     const pending = await one(
@@ -73,21 +73,21 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     expect(pending.clarification_reply_by_date.toISOString().slice(0, 10)).toBe(due);
 
     const secondOpen = await refused(db.query(
-      "select * from request_event_clarification($1, $2, $2, 'Another question', null)",
+      "select * from request_event_clarification_with_fields($1, $2, $2, 'Another question', null, '{}'::text[])",
       [id, coordinator],
     ));
     expect(secondOpen?.code).toBe("55000");
     expect(await history(id)).toHaveLength(1);
     expect(await notifications(id)).toHaveLength(1);
 
-    await db.query("select * from reply_to_event_clarification($1, $2, $3)", [
+    await db.query("select * from reply_to_event_clarification_with_amendments($1, $2, $3, '{}'::jsonb)", [
       id, organiser, "The event expects 120 attendees.",
     ]);
     expect((await one("select status, clarification_reply_by_date from event_requests where id = $1", [id])))
       .toMatchObject({ status: "under_review", clarification_reply_by_date: null });
 
     await db.query(
-      "select * from request_event_clarification($1, $2, $2, 'Please confirm the setup.', null)",
+      "select * from request_event_clarification_with_fields($1, $2, $2, 'Please confirm the setup.', null, '{}'::text[])",
       [id, coordinator],
     );
     await db.query(
@@ -114,30 +114,30 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     const due = new Date().toISOString().slice(0, 10);
     const wrongStatusId = await event("submitted");
     const wrongStatus = await refused(db.query(
-      "select * from request_event_clarification($1, $2, $2, 'Question', null)",
+      "select * from request_event_clarification_with_fields($1, $2, $2, 'Question', null, '{}'::text[])",
       [wrongStatusId, coordinator],
     ));
     expect(wrongStatus?.code).toBe("55000");
     const wrongActor = await refused(db.query(
-      "select * from request_event_clarification($1, $2, $3, 'Question', null)",
+      "select * from request_event_clarification_with_fields($1, $2, $3, 'Question', null, '{}'::text[])",
       [id, otherCoordinator, otherCoordinator],
     ));
     expect(wrongActor?.code).toBe("40001");
 
     const blank = await refused(db.query(
-      "select * from request_event_clarification($1, $2, $2, '  ', null)",
+      "select * from request_event_clarification_with_fields($1, $2, $2, '  ', null, '{}'::text[])",
       [id, coordinator],
     ));
     expect(blank?.code).toBe("22023");
 
     const expired = await refused(db.query(
-      "select * from request_event_clarification($1, $2, $2, 'Question', $3)",
+      "select * from request_event_clarification_with_fields($1, $2, $2, 'Question', $3, '{}'::text[])",
       [id, coordinator, due],
     ));
     expect(expired?.code).toBe("22023");
 
     await db.query(
-      "select * from request_event_clarification($1, $2, $2, 'Question', null)",
+      "select * from request_event_clarification_with_fields($1, $2, $2, 'Question', null, '{}'::text[])",
       [id, coordinator],
     );
     const wrongCloser = await refused(db.query(
@@ -146,7 +146,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     ));
     expect(wrongCloser?.code).toBe("42501");
     const wrongReplier = await refused(db.query(
-      "select * from reply_to_event_clarification($1, $2, 'Reply.')",
+      "select * from reply_to_event_clarification_with_amendments($1, $2, 'Reply.', '{}'::jsonb)",
       [id, otherCoordinator],
     ));
     expect(wrongReplier?.code).toBe("P0002");
@@ -199,7 +199,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
   it("makes history immutable and allows cancellation while a clarification is open", async () => {
     const id = await event();
     await db.query(
-      "select * from request_event_clarification($1, $2, $2, 'Question', null)",
+      "select * from request_event_clarification_with_fields($1, $2, $2, 'Question', null, '{}'::text[])",
       [id, coordinator],
     );
     const entry = (await history(id))[0];
@@ -246,7 +246,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     // previous one cannot. Nothing in 052 does this; it is proved, not built.
     const id = await event();
     await db.query(
-      "select * from request_event_clarification($1, $2, $2, 'Please confirm the attendee count.', null)",
+      "select * from request_event_clarification_with_fields($1, $2, $2, 'Please confirm the attendee count.', null, '{}'::text[])",
       [id, coordinator],
     );
     await db.query("select * from reassign_event_request($1, $2, $3, null)", [id, otherCoordinator, lead]);
@@ -272,7 +272,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     // check-coordinator-assignment.js was the only place a coordinator the
     // Lead handed the event to asked; it could not stay there (030's history
     // cannot be deleted, so the live run could not clean up). Nothing in 052
-    // does this: request_event_clarification passes the caller to 022's
+    // does this: request_event_clarification_with_fields passes the caller to 022's
     // change_event_request_status as the expected coordinator, which compares
     // it with assigned_coordinator_id when it runs, and reassignment changes
     // that column.
@@ -288,7 +288,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     const handoverNotices = await notifications(id);
 
     const previous = await refused(db.query(
-      "select * from request_event_clarification($1, $2, $2, 'Please confirm the attendee count.', null)",
+      "select * from request_event_clarification_with_fields($1, $2, $2, 'Please confirm the attendee count.', null, '{}'::text[])",
       [id, coordinator],
     ));
     expect(previous?.code).toBe("40001");
@@ -297,7 +297,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     expect(await notifications(id)).toEqual(handoverNotices);
 
     const asked = await one(
-      "select * from request_event_clarification($1, $2, $2, 'Please confirm the attendee count.', null)",
+      "select * from request_event_clarification_with_fields($1, $2, $2, 'Please confirm the attendee count.', null, '{}'::text[])",
       [id, otherCoordinator],
     );
     expect(asked.status).toBe("pending_clarification");

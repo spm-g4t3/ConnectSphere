@@ -827,10 +827,11 @@ export async function changeEventRequestStatus(
  *     and gives the true reason. It comes before the status check, as in 018:
  *     whether the event could be sent for clarification is a question only
  *     its coordinator has any reason to ask.
- *  3. request_event_clarification changes under_review to
- *     pending_clarification and saves the note and optional reply-by date in
- *     one transaction. The caller is passed as the expected coordinator, so
- *     an event handed to someone else between the read and write is a 409.
+ *  3. request_event_clarification_with_fields changes under_review to
+ *     pending_clarification and saves the note, the requested fields and the
+ *     optional reply-by date in one transaction. The caller is passed as the
+ *     expected coordinator, so an event handed to someone else between the
+ *     read and write is a 409.
  * 
  *     A submitted request has to be started first, through the Start review
  *     action (startEventReview, SCRUM-19 AC1), which also makes the caller its

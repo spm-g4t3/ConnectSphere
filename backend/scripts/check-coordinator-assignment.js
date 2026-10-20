@@ -11,9 +11,9 @@
  * proves now:
  *
  *   1. Was: the selection rule (015) -- fewest active events, then longest
- *      without an assignment. 052 leaves pick_event_coordinator in the
- *      database, but nothing calls it any more, so testing it would prove a
- *      rule the system no longer uses. Now: submission assigns nobody. The
+ *      without an assignment. Nothing has called pick_event_coordinator since
+ *      052, and migration 010 dropped it, so there is no rule left to test.
+ *      Now: submission assigns nobody. The
  *      request is submitted with no coordinator and no assignment-history row,
  *      every Lead is told it is waiting, it is in the Lead's queue, and it is
  *      not in the coordinators' shared queue.
@@ -56,7 +56,8 @@
  *    is the state it was in before the Lead chose; 052's constraint allows it
  *    only at submitted. Anything further along is reported as a cleanup
  *    failure naming the event, for a Lead to hand over by hand. Before
- *    SCRUM-486 this re-homed the event with pick_event_coordinator; there is no
+ *    SCRUM-486 this re-homed the event with pick_event_coordinator (since
+ *    dropped); the coordinator is assigned by the Lead, so there is no
  *    automatic choice to fall back on now, and inventing one would undo the
  *    change the customer asked for.
  *  - Delete order. event_request_assignment_history and (since SCRUM-321)

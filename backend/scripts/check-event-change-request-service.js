@@ -121,8 +121,8 @@ async function main() {
   // submit_event_request, and a fixed coordinator keeps it deterministic.
   //
   // The coordinator is this script's own throwaway user, which deliberately
-  // has no profiles row. pick_event_coordinator only considers profiles with
-  // the event_coordinator role, so this user can never be handed a real
+  // has no profiles row. The Lead can only assign a profile with the
+  // event_coordinator role, so this user can never be handed a real
   // Organiser's submission while the script is running. The foreign key only
   // needs a real auth.users row, which it is. The status flips further down
   // (to draft and back to submitted) keep the coordinator throughout, so they
