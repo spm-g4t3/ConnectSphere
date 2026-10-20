@@ -2,14 +2,13 @@
  * SCRUM-484 AC8: changing a venue's setup or turnaround re-checks its
  * approved, not-yet-started bookings -- run against a real Postgres.
  *
- * 034_setup_change_recheck.sql redefines update_venue so that, when either
- * minute really changes, it flags (in the same transaction) every approved
+ * When either minute really changes, update_venue flags (in the same transaction) every approved
  * booking whose event has not started and whose occupied period, padded with
  * the NEW minutes, now overlaps another approved booking or an active block.
  * The reason is stored as the code 'setup_or_turnaround_changed', each
  * flagged event's assigned coordinator is notified, and the flagged bookings
- * come back as {flagged_bookings}. These tests call the real function; the
- * text is pinned in setupChangeRecheckMigration.test.js.
+ * come back as {flagged_bookings}. These tests call the real function on the
+ * final schema.
  *
  * Fixture (the test-case doc's): V at 0/0. On future day D: A approved
  * 10:00-12:00 (event EA, coordinator C1), B approved 12:30-14:00 (EB, C2),
@@ -20,17 +19,11 @@
  * [15:30, 17:45) is clear; E [18:45, 20:45) overlaps K. Every test builds its
  * own venue and coordinators, so no test sees another's rows.
  *
- * 035_setup_change_recheck_refine.sql replaces 034's update_venue with the
- * two decisions of the 2026-10-08 AC review: a flagged_for_review booking
+ * Two decisions of the 2026-10-08 AC review hold: a flagged_for_review booking
  * counts as the other booking (it still occupies the room), and only clashes
  * the change CREATED are flagged -- a candidate already clashing under the old
- * minutes is left alone, so reducing the minutes never flags anything. These
- * tests run against 035's definition; the ones that depend on the two
- * decisions say so.
- *
- * Applied in order: the migrations venueBlockOccupancyDatabase.test.js
- * applies, plus 003, 004, 005_venue_retirement and 008 (the venue audit that
- * update_venue writes, AC9), then 034 and 035.
+ * minutes is left alone, so reducing the minutes never flags anything. The
+ * tests that depend on the two decisions say so.
  *
  * Dates: update_venue uses now() for "not started", so D is the Singapore
  * date 10 days from when the test runs (at least 7, per the doc's Rules), and
@@ -38,50 +31,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '003_venue_audit.sql',
-  '004_venue_functions.sql',
-  '005_venue_retirement.sql',
-  '008_venue_audit_completion.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '034_setup_change_recheck.sql',
-  '035_setup_change_recheck_refine.sql',
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
 const DAY = 86_400_000;
 /** A Singapore date `days` from now, as YYYY-MM-DD. */
@@ -97,8 +47,9 @@ const iso = (value) => new Date(value).toISOString();
 const REASON_CODE = 'setup_or_turnaround_changed';
 const REASON_TEXT = 'Setup or turnaround time changed';
 const SETUP_TYPE = 'booking_flagged_setup_change';
+const UNASSIGNED = 'unassigned';
 
-describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaround change (034, refined by 035)', () => {
+describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaround change', () => {
   let db;
   let organiser;
   let staff;
@@ -126,17 +77,24 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
     ).id;
   }
 
+  /**
+   * An approved event has a coordinator: the one named, or a fresh one.
+   * UNASSIGNED is a rejected event reopened and resubmitted, which keeps its
+   * bookings while it waits in the Lead's queue with no coordinator.
+   */
   async function makeEvent(coordinatorId) {
+    const unassigned = coordinatorId === UNASSIGNED;
+    const assigned = unassigned ? null : coordinatorId ?? await makeUser('event_coordinator');
     counter += 1;
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, proposed_start, proposed_end,
-            expected_attendance, submitted_at, assigned_coordinator_id)
-         values ($1, $2, 'approved', $3, $4, 150, now(), $5) returning id`,
-        [organiser, `Event ${counter}`, at('10:00'), at('12:00'), coordinatorId],
-      )
-    ).id;
+    return seedEvent(db, {
+      status: unassigned ? 'submitted' : 'approved',
+      organiser_id: organiser,
+      assigned_coordinator_id: assigned,
+      event_name: `Event ${counter}`,
+      proposed_start: at('10:00'),
+      proposed_end: at('12:00'),
+      expected_attendance: 150,
+    });
   }
 
   /** A raw block row, inserted directly. */
@@ -182,7 +140,7 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
       ids.A = await makeBooking(V, 'approved', at('10:00'), at('12:00'), C1);
     };
     const makeB = async () => {
-      ids.B = await makeBooking(V, 'approved', at('12:30'), at('14:00'), ebCoordinator ? C2 : null);
+      ids.B = await makeBooking(V, 'approved', at('12:30'), at('14:00'), ebCoordinator ? C2 : UNASSIGNED);
     };
     if (order === 'AB') {
       await makeA();
@@ -227,16 +185,7 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      await db.exec(name === 'STAND_IN' ? DECISION_STAND_IN : migration(name));
-    }
+    db = await createSchemaDb();
     organiser = await makeUser(null);
     staff = await makeUser('venue_staff');
     // An event coordinator no event is assigned to, in every test.
@@ -254,12 +203,12 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
       const blockId = await insertBlock(V, at('22:00'), at('23:00'), true);
       const id = await makeBooking(V, 'approved', at('10:00'), at('12:00'));
 
-      // (a) a flag time with neither a block nor a reason
-      await refused(
-        db.query('update bookings set flagged_at = now() where id = $1', [id]),
-        '23514',
-        'bookings_review_flag_paired',
-      );
+      // (a) a flag time with neither a block nor a review reason still carries
+      // a reason: the flag-reason trigger files it under the event-change category.
+      await db.query('update bookings set flagged_at = now() where id = $1', [id]);
+      expect((await booking(id)).flag_reason).toBe('event_change');
+      await db.query('update bookings set flagged_at = null where id = $1', [id]);
+      expect((await booking(id)).flag_reason).toBeNull();
       // (b) a reason without a flag time
       await refused(
         db.query('update bookings set review_reason = $2 where id = $1', [id, REASON_CODE]),
@@ -326,38 +275,6 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
       await refused(insert('booking_flagged', bookingId), '23514', 'notifications_booking_flagged_needs_refs');
     });
 
-    it('SCRUM484_AC8_flag_schema_migration_is_rerunnable', async () => {
-      const constraints = () =>
-        rows(
-          `select conrelid::regclass::text as tbl, conname, pg_get_constraintdef(oid) as def
-             from pg_constraint
-            where conrelid in ('bookings'::regclass, 'notifications'::regclass)
-            order by 1, 2`,
-        );
-      const columns = () =>
-        rows(
-          `select column_name, data_type from information_schema.columns
-            where table_name = 'bookings' order by column_name`,
-        );
-      const before = { constraints: await constraints(), columns: await columns() };
-
-      await db.exec(migration('034_setup_change_recheck.sql'));
-      // Re-running 034 also puts 034's update_venue back. 035 is re-run
-      // straight after, as the chain would, so every later test in this file
-      // still runs 035's re-check -- and 035 is shown to be re-runnable too.
-      await db.exec(migration('035_setup_change_recheck_refine.sql'));
-
-      expect(await constraints()).toEqual(before.constraints);
-      expect(await columns()).toEqual(before.columns);
-      expect(before.constraints.map((c) => c.conname)).toEqual(
-        expect.arrayContaining([
-          'bookings_review_reason_known',
-          'bookings_review_flag_paired',
-          'notifications_type_known',
-          'notifications_setup_change_needs_booking',
-        ]),
-      );
-    });
   });
 
 
@@ -723,7 +640,7 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
       // Observed by wrapping venue_occupancy_conflicts, inside a transaction
       // that is rolled back, with a stand-in that logs the venue's minutes at
       // the moment it is asked and then calls the real function. A call made
-      // with the OLD minutes can only be 035's old-set check (step 0b, before
+      // with the OLD minutes can only be the old-set check (before
       // the venues row is updated); one with the new minutes is the re-check.
       const V = await makeVenue(0, 0);
       const A = await makeBooking(V, 'approved', at('10:00'), at('12:00'));
@@ -733,10 +650,11 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
       try {
         await db.exec(`
           create temp table occupancy_calls (n serial, setup integer, turnaround integer);
-          alter function venue_occupancy_conflicts(uuid, timestamptz, timestamptz, boolean)
+          alter function venue_occupancy_conflicts(uuid, timestamptz, timestamptz, boolean, uuid)
             rename to venue_occupancy_conflicts_real;
           create function venue_occupancy_conflicts(
-            p_venue_id uuid, p_starts_at timestamptz, p_ends_at timestamptz, p_pad_requested boolean
+            p_venue_id uuid, p_starts_at timestamptz, p_ends_at timestamptz, p_pad_requested boolean,
+            p_exclude_hold_event_id uuid default null
           )
           returns table (
             kind text, id uuid, status booking_status, event_request_id uuid, event_name text,
@@ -748,7 +666,8 @@ describe('SCRUM-484 AC8: update_venue re-checks bookings on a setup or turnaroun
           begin
             insert into occupancy_calls (setup, turnaround)
             select v.setup_minutes, v.turnaround_minutes from venues v where v.id = p_venue_id;
-            return query select * from venue_occupancy_conflicts_real(p_venue_id, p_starts_at, p_ends_at, p_pad_requested);
+            return query select * from venue_occupancy_conflicts_real(
+              p_venue_id, p_starts_at, p_ends_at, p_pad_requested, p_exclude_hold_event_id);
           end;
           $w$;
         `);

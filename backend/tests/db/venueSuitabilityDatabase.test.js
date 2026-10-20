@@ -31,11 +31,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
 // The check loads venueService.js, which imports the Supabase client
 // statically; every read here goes to the PGlite-backed client instead.
@@ -46,49 +42,6 @@ const { checkVenueSuitability, checkEventVenues } = await import(
 );
 const { createBookingRequest } = await import('../../src/services/bookingRequestService.js');
 const { ConflictError } = await import('../../src/errors.js');
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-/** venueHoldsDatabase.test.js's list: through 036, then 040 and 051. */
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '003_venue_audit.sql',
-  '004_venue_functions.sql',
-  '005_venue_retirement.sql',
-  '008_venue_audit_completion.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '034_setup_change_recheck.sql',
-  '035_setup_change_recheck_refine.sql',
-  '036_venue_safety_facts.sql',
-  '040_venue_holds.sql',
-  '051_multi_venue_booking_requests.sql',
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
 
 /** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
 const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
@@ -261,17 +214,17 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
     return id;
   }
 
-  async function makeEvent(startsAt, endsAt, name = null) {
+  function makeEvent(startsAt, endsAt, name = null) {
     counter += 1;
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, proposed_start, proposed_end,
-            expected_attendance, submitted_at, assigned_coordinator_id)
-         values ($1, $2, 'approved', $3, $4, 150, now(), $5) returning id`,
-        [organiser, name ?? `Event ${counter}`, startsAt, endsAt, coordinator],
-      )
-    ).id;
+    return seedEvent(db, {
+      status: 'approved',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: name ?? `Event ${counter}`,
+      proposed_start: startsAt,
+      proposed_end: endsAt,
+      expected_attendance: 150,
+    });
   }
 
   async function makeBooking(venueId, eventId, startsAt, endsAt, status = 'approved') {
@@ -341,16 +294,7 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      await db.exec(name === 'STAND_IN' ? DECISION_STAND_IN : migration(name));
-    }
+    db = await createSchemaDb();
     organiser = await makeUser('event_organiser');
     staff = await makeUser('venue_staff');
     coordinator = await makeUser('event_coordinator');
