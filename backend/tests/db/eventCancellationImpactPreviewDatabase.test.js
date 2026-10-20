@@ -1,24 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createSchemaDb } from './helpers/schemaDb.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '022_equipment_schema.sql',
-  '027_booking_request_statuses.sql',
-  '043_release_event_arrangements.sql',
-  '044_event_cancellation_impact_preview.sql',
-];
-
+// The cancellation impact preview against the final schema.
 describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
   let db;
   let organiser;
@@ -50,30 +34,7 @@ describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (
-        id uuid primary key default gen_random_uuid(),
-        email text
-      );
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
-    await db.exec('alter table equipment_lines add column removed_at timestamptz');
-    await db.exec(`
-      create type venue_hold_status as enum ('active', 'expired', 'released');
-      create table venue_holds (
-        id uuid primary key default gen_random_uuid(),
-        event_request_id uuid not null references event_requests(id),
-        venue_id uuid not null references venues(id),
-        placed_at timestamptz not null default now(),
-        expires_at timestamptz not null,
-        status venue_hold_status not null default 'active'
-      );
-    `);
-    await db.exec(migration('049_filter_cancelled_equipment_from_cancellation_preview.sql'));
+    db = await createSchemaDb();
 
     organiser = (await one('insert into auth.users (email) values ($1) returning id', ['organiser@test'])).id;
     eventId = await makeEvent('Preview event');

@@ -1,38 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PGlite } from "@electric-sql/pglite";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { createSchemaDb } from "./helpers/schemaDb.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) =>
-  readFileSync(resolve(here, "../../db/migrations", name), "utf8");
-
-const BASE = [
-  "001_event_requests.sql",
-  "005_event_request_details.sql",
-  "007_user_roles.sql",
-  "010_event_request_clarifications.sql",
-];
-const ASSIGNMENT = [
-  "014_coordinator_assignment.sql",
-  "015_assignment_function.sql",
-  "016_submit_event_request.sql",
-  "017_require_assigned_coordinator.sql",
-];
-// SCRUM-19's decision columns, applied for real (025) rather than the
-// stand-in this suite used to add by hand, which created only
-// reviewing_coordinator_id. SCRUM-486's reassignment (052, from 018) reads
-// `decision` to decide whether the reviewer follows a handover, so the stand-in
-// no longer described the table. Before 014, whose prerequisite guard needs
-// reviewing_coordinator_id, as in eventStatusLifecycleDatabase.test.js.
-const DECISIONS = "025_event_request_decisions.sql";
-const STATUS_LIFECYCLE = [
-  "020_event_status_lifecycle.sql",
-  "021_event_status_history.sql",
-  "022_event_status_transitions.sql",
-];
-
+// The clarification functions against the final schema.
 describe("SCRUM-162 clarification transactions in Postgres", () => {
   let db;
   let organiser;
@@ -72,52 +41,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
   };
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create table auth.users (
-        id uuid primary key default gen_random_uuid(),
-        email text
-      );
-    `);
-    for (const name of BASE) await db.exec(migration(name));
-    await db.exec(migration(DECISIONS));
-    for (const name of ASSIGNMENT) await db.exec(migration(name));
-    for (const name of STATUS_LIFECYCLE) await db.exec(migration(name));
-    await db.exec(`
-      create table notifications (
-        id uuid primary key default gen_random_uuid(),
-        recipient_id uuid not null references auth.users(id) on delete cascade,
-        type text not null,
-        booking_id uuid,
-        block_id uuid,
-        payload jsonb not null default '{}',
-        read_at timestamptz,
-        created_at timestamptz not null default now(),
-        constraint notifications_type_known check (type in ('booking_flagged')),
-        constraint notifications_booking_flagged_needs_refs check (
-          type <> 'booking_flagged' or (booking_id is not null and block_id is not null)
-        )
-      );
-    `);
-    await db.exec(`
-      create function reply_to_event_clarification(
-        p_event_request_id uuid,
-        p_organiser_id uuid,
-        p_reply text
-      )
-      returns event_requests
-      language sql
-      as $$ select null::event_requests $$;
-    `);
-    await db.exec(migration("030_event_clarification_reply_by.sql"));
-    await db.exec(migration("026_clarification_amendment_fields.sql"));
-    // SCRUM-486's migration, last: it redefines close_event_clarification with
-    // a null-caller guard (SCRUM-515), so the version tested here is the one
-    // production will have. 039 first, for the Lead's role, which 052's
-    // reassignment names (SCRUM-516).
-    await db.exec(migration("039_coordinator_lead_and_safety_officer_roles.sql"));
-    await db.exec(migration("052_lead_assignment.sql"));
+    db = await createSchemaDb();
 
     organiser = (await one("insert into auth.users(email) values ('organiser@example.test') returning id")).id;
     coordinator = (await one("insert into auth.users(email) values ('coordinator@example.test') returning id")).id;

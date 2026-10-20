@@ -20,41 +20,16 @@
  * fails by name rather than being answered wrongly. It is not a PostgREST: it
  * does what these five calls need and nothing more.
  *
- * The migrations are eventStatusLifecycleDatabase's, in its order.
+ * The database is the final schema.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
 import { createEventRequestRouter } from '../../src/routes/eventRequests.js';
 import { ROLE } from '../../src/domain/userRole.js';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  '025_event_request_decisions.sql',
-  '014_coordinator_assignment.sql',
-  '015_assignment_function.sql',
-  '016_submit_event_request.sql',
-  '017_require_assigned_coordinator.sql',
-  '020_event_status_lifecycle.sql',
-  '021_event_status_history.sql',
-  '022_event_status_transitions.sql',
-  '029_event_request_decisions_functions.sql',
-  '006_event_change_requests.sql',
-  '019_change_request_decision_coordinator.sql',
-  '039_coordinator_lead_and_safety_officer_roles.sql',
-];
+import { createSchemaDb } from './helpers/schemaDb.js';
 
 /** The two supabase-js shapes this path uses, over PGlite. */
 function pgliteClient(db) {
@@ -77,7 +52,7 @@ function pgliteClient(db) {
       const where = [];
       const chain = {
         // A PostgREST embed such as SCRUM-266's bookings(status) is not SQL.
-        // This path's migrations have no bookings, so the embed is dropped.
+        // This path does not read the embed, so it is dropped.
         select(cols = '*') { columns = cols.replace(/,\s*\w+\([^)]*\)/g, ''); return chain; },
         eq(column, value) { where.push([column, value]); return chain; },
         maybeSingle() {
@@ -115,40 +90,7 @@ describe('SCRUM-486 AC6, AC7: a Lead hands A\'s event to B, over HTTP, on a real
   const future = (days) => new Date(Date.now() + days * 86_400_000).toISOString();
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
-    // The notifications table 052 writes to, in the shape
-    // eventStatusLifecycleDatabase.test.js builds it, for the same reason.
-    await db.exec(`
-      create table notifications (
-        id uuid primary key default gen_random_uuid(),
-        recipient_id uuid not null references auth.users (id) on delete cascade,
-        type text not null,
-        booking_id uuid,
-        block_id uuid,
-        venue_hold_id uuid,
-        payload jsonb not null default '{}',
-        read_at timestamptz,
-        created_at timestamptz not null default now(),
-        constraint notifications_type_known check (type in ('booking_flagged'))
-      );
-    `);
-    // The one column the services' COLUMNS reads that these migrations do not
-    // add. 030 adds it, alongside a clarification workflow this walkthrough
-    // never uses and whose functions need stand-ins
-    // (eventClarificationDatabase.test.js builds them); the column alone is
-    // what this path needs, so it is added as 030 declares it.
-    await db.exec('alter table event_requests add column clarification_reply_by_date date');
-    await db.exec(migration('052_lead_assignment.sql'));
-    // SCRUM-370's cancellation columns. Since the merge of dev the services'
-    // COLUMNS reads them (cancellation_reason, cancellation_initiator,
-    // cancelled_by, cancelled_at), so every read on this path needs them.
-    // 042 only adds a type and columns; nothing on this path uses them.
-    await db.exec(migration('042_event_cancellation_fields.sql'));
+    db = await createSchemaDb();
 
     const user = async (email, role, name) => {
       const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;

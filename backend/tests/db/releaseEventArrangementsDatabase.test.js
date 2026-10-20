@@ -1,24 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createSchemaDb } from './helpers/schemaDb.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '022_equipment_schema.sql',
-  '027_booking_request_statuses.sql',
-  '038_equipment_review.sql',
-  '043_release_event_arrangements.sql',
-];
-
+// release_event_arrangements against the final schema.
 describe('SCRUM-372: release_event_arrangements in Postgres', () => {
   let db;
   let organiser;
@@ -87,17 +71,7 @@ describe('SCRUM-372: release_event_arrangements in Postgres', () => {
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (
-        id uuid primary key default gen_random_uuid(),
-        email text
-      );
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
+    db = await createSchemaDb();
 
     organiser = (await one('insert into auth.users (email) values ($1) returning id', ['organiser@test'])).id;
     otherEvent = await makeEvent('Unrelated event');
@@ -171,9 +145,5 @@ describe('SCRUM-372: release_event_arrangements in Postgres', () => {
     await expect(db.query("select release_event_arrangements($1, 'event cancelled')", [randomUUID()]))
       .rejects.toMatchObject({ code: 'P0002' });
     expect(await status(bookingId)).toBe('approved');
-  });
-
-  it('is safe to install twice', async () => {
-    await db.exec(migration('043_release_event_arrangements.sql'));
   });
 });

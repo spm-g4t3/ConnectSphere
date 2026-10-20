@@ -1,31 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const BASE = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  '006_event_change_requests.sql',
-];
-const ASSIGNMENT = [
-  '014_coordinator_assignment.sql',
-  '015_assignment_function.sql',
-  '016_submit_event_request.sql',
-  '017_require_assigned_coordinator.sql',
-];
-const LIFECYCLE = [
-  '020_event_status_lifecycle.sql',
-  '021_event_status_history.sql',
-  '022_event_status_transitions.sql',
-];
-
+// cancel_event_request against the final schema.
 describe('SCRUM-374: cancel_event_request in Postgres', () => {
   let db;
   let organiser;
@@ -45,31 +21,13 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
   const bookingStatus = async (id) =>
     (await one('select status::text as status from bookings where id = $1', [id])).status;
 
-  async function makeEvent(status = 'submitted') {
-    const cols = {
+  function makeEvent(status = 'submitted') {
+    return seedEvent(db, {
+      status,
       organiser_id: organiser,
       event_name: `Cancellation test ${status}`,
-      status,
       assigned_coordinator_id: coordinator,
-    };
-    if (status !== 'draft') cols.submitted_at = new Date().toISOString();
-    if (status === 'approved' || status === 'confirmed') {
-      Object.assign(cols, {
-        reviewing_coordinator_id: coordinator,
-        decision: 'approved',
-        decided_by: coordinator,
-        decided_at: new Date().toISOString(),
-      });
-    }
-    const keys = Object.keys(cols);
-    return (
-      await one(
-        `insert into event_requests (${keys.join(',')})
-         values (${keys.map((_, index) => `$${index + 1}`).join(',')})
-         returning id`,
-        Object.values(cols),
-      )
-    ).id;
+    });
   }
 
   async function makeBooking(eventId, status = 'approved') {
@@ -113,61 +71,7 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
     );
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-      create role service_role;
-    `);
-    for (const name of BASE) await db.exec(migration(name));
-    await db.exec(migration('025_event_request_decisions.sql'));
-    for (const name of ASSIGNMENT) await db.exec(migration(name));
-    for (const name of LIFECYCLE) await db.exec(migration(name));
-    await db.exec(migration('019_change_request_decision_coordinator.sql'));
-
-    await db.exec(`
-      create table notifications (
-        id uuid primary key default gen_random_uuid(),
-        recipient_id uuid not null references auth.users(id) on delete cascade,
-        type text not null,
-        booking_id uuid,
-        block_id uuid,
-        payload jsonb not null default '{}',
-        read_at timestamptz,
-        created_at timestamptz not null default now(),
-        constraint notifications_type_known check (type in ('booking_flagged'))
-      );
-      create function reply_to_event_clarification(uuid, uuid, text)
-      returns event_requests language sql as $$ select null::event_requests $$;
-    `);
-    await db.exec(migration('030_event_clarification_reply_by.sql'));
-    await db.exec(migration('026_clarification_amendment_fields.sql'));
-    await db.exec(migration('002_venues.sql'));
-    await db.exec(migration('009_bookings.sql'));
-    await db.exec(migration('011_venue_blocks.sql'));
-    await db.exec(migration('027_booking_request_statuses.sql'));
-    await db.exec(migration('022_equipment_schema.sql'));
-    await db.exec(migration('042_event_cancellation_fields.sql'));
-    await db.exec('alter table equipment_lines add column removed_at timestamptz');
-    await db.exec(migration('043_release_event_arrangements.sql'));
-    await db.exec(migration('045_cancel_event_request.sql'));
-    await db.exec(`
-      create type venue_hold_status as enum ('active', 'expired');
-      create table venue_holds (
-        id uuid primary key default gen_random_uuid(),
-        event_request_id uuid not null references event_requests(id),
-        venue_id uuid not null references venues(id),
-        placed_by uuid not null references auth.users(id),
-        placed_at timestamptz not null default now(),
-        expires_at timestamptz not null,
-        status venue_hold_status not null default 'active',
-        expired_at timestamptz
-      );
-    `);
-    await db.exec(migration('047_add_released_venue_hold_status.sql'));
-    await db.exec(migration('048_complete_event_cancellation_existing_arrangements.sql'));
+    db = await createSchemaDb();
 
     organiser = (await one("insert into auth.users (email) values ('organiser@test') returning id")).id;
     coordinator = (await one("insert into auth.users (email) values ('coordinator@test') returning id")).id;
@@ -358,28 +262,10 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
   });
 
   describe.each(['safety_review', 'safety_approved'])('SCRUM561: from %s', (status) => {
-    beforeAll(async () => {
-      if (!(await one("select 1 as ok from pg_enum where enumlabel = 'safety_officer'"))) {
-        await db.exec(migration('039_coordinator_lead_and_safety_officer_roles.sql'));
-      }
-      if (!(await one("select 1 as ok from pg_enum where enumlabel = 'safety_review'"))) {
-        await db.exec(migration('062_safety_statuses.sql'));
-        await db.exec(migration('063_safety_transitions.sql'));
-      }
-      await db.exec(migration('074_cancel_event_in_safety_status.sql'));
-    });
-
-    async function makeSafetyEvent() {
-      return (
-        await one(
-          `insert into event_requests
-             (organiser_id, event_name, status, submitted_at, assigned_coordinator_id,
-              reviewing_coordinator_id, decision, decided_by, decided_at)
-           values ($1, 'Safety cancel', $2::event_request_status, now(), $3, $3, 'approved', $3, now())
-           returning id`,
-          [organiser, status, coordinator],
-        )
-      ).id;
+    function makeSafetyEvent() {
+      return seedEvent(db, {
+        status, organiser_id: organiser, event_name: 'Safety cancel', assigned_coordinator_id: coordinator,
+      });
     }
 
     it(`SCRUM561_AC1_AC2_assigned_coordinator_cancels_from_${status}_and_releases_arrangements`, async () => {
