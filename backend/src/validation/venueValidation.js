@@ -168,7 +168,7 @@ export function checkCodeArray(errors, field, value) {
 /**
  * Opening hours, one entry per day.
  *
- * The ordering and duplicate-day rules mirror constraints the database already
+ * The non-empty and duplicate-day rules mirror constraints the database already
  * has. That duplication is intentional -- the database is the guarantee, this
  * is the readable message.
  */
@@ -211,11 +211,14 @@ function checkHours(errors, value) {
       valid = false;
     }
 
-    // Compare in a single format. Zero-padded 24-hour times sort
-    // chronologically as strings, but only if both have the same shape --
-    // '09:00:00' sorts after '09:00' despite being the same instant.
-    if (valid && withSeconds(closes) <= withSeconds(opens)) {
-      errors.add('hours', `${label}.closes_at must be after opens_at`);
+    // An earlier closing time is the next day (overnight hours), so only an
+    // empty window is refused. Compared in one format: '09:00' and '09:00:00'
+    // are the same time.
+    if (valid && withSeconds(closes) === withSeconds(opens)) {
+      errors.add(
+        'hours',
+        `${label}.closes_at must differ from opens_at (an earlier closing time means the next day)`,
+      );
       valid = false;
     }
 

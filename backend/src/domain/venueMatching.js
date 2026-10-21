@@ -148,25 +148,57 @@ export function meetsCapacity(venue, attendance) {
   return venue.maxCapacity >= attendance;
 }
 
+const MINUTES_PER_DAY = 24 * 60;
+
+/** Whole calendar days from one 'YYYY-MM-DD' to another. */
+function daysBetween(fromDate, toDate) {
+  // Both are dates on the venue's clock, read at UTC midnight so no zone shifts them.
+  const millisPerDay = MINUTES_PER_DAY * 60 * 1000;
+  return Math.round((Date.parse(`${toDate}T00:00:00Z`) - Date.parse(`${fromDate}T00:00:00Z`)) / millisPerDay);
+}
+
+/** A row closing at or before it opens closes the next day (00:00 is midnight). */
+function isOvernight(row) {
+  return timeToMinutes(row.closes_at) <= timeToMinutes(row.opens_at);
+}
+
+/**
+ * A row's window in minutes from the midnight that begins the day it opens,
+ * shifted by offset minutes so it can be laid against another day's clock.
+ */
+function windowOf(row, offset) {
+  const opens = timeToMinutes(row.opens_at);
+  const closes = timeToMinutes(row.closes_at);
+  return {
+    opens: opens + offset,
+    closes: (isOvernight(row) ? closes + MINUTES_PER_DAY : closes) + offset,
+  };
+}
+
 /**
  * AC3: whether the venue's operating hours cover the whole requested period,
  * and why -- the one home of the hours rule, read by coversPeriod (search) and
  * evaluateCriteria (SCRUM-188 AC2 suitability).
  *
- * Three conditions, each a reason a venue cannot host the event, checked in
- * this order so the reason given is the first one that applies:
+ * A row's hours belong to the day the venue opens, and a closing time at or
+ * before the opening time is the next day, so Friday 18:00-02:00 runs into
+ * Saturday. One day's window must hold the whole event: the event's own
+ * period, measured from the start's Singapore midnight, is laid against
  *
- *  1. Start and end on the same Singapore date ('spans_midnight'). Hours
- *     cannot run past midnight (closes_at > opens_at, 002/017), so no venue
- *     can be open across one and an overnight event can never fit. This is a
- *     verdict rather than a throw; whether validation should refuse such a
- *     request outright is SCRUM-20 open point 7, still undecided.
- *  2. A row for that weekday ('closed_that_day'). A weekday with no row is
- *     closed (017's known limit), not open all day.
- *  3. opens_at <= start and closes_at >= end ('outside_hours', else
- *     'within_hours'). Both edges inclusive: an event 09:00-18:00 fits hours
- *     09:00-18:00 exactly (B-AC3-04), while 08:59 or 18:01 does not
- *     (B-AC3-05/06).
+ *  - the start weekday's row, and
+ *  - the previous weekday's row when it is overnight, which is what covers an
+ *    early-hours event such as Saturday 00:30-01:30 under Friday's hours.
+ *
+ * Both edges are inclusive: an event 09:00-18:00 fits hours 09:00-18:00
+ * exactly (B-AC3-04), while 08:59 or 18:01 does not (B-AC3-05/06). A weekday
+ * with no row is closed (017's known limit), not open all day. Windows last
+ * under 48 hours, so an event ending two dates after it starts never fits.
+ *
+ * When neither window fits, the verdict reports the row the start falls in:
+ * the previous day's when the start is in its early hours, else the start
+ * weekday's. Reasons: 'within_hours'; 'closed_that_day' when no row applies;
+ * 'spans_midnight' when the event crosses a date but the reported row closes
+ * before midnight; otherwise 'outside_hours'.
  *
  * start and end are toVenueLocal's readings, returned so a caller describing
  * the verdict shows the same Singapore wall clock the rule judged, rather than
@@ -183,32 +215,47 @@ export function meetsCapacity(venue, attendance) {
  *   closesAt?: string,
  *   start: {date: string, dayOfWeek: number, minutes: number},
  *   end: {date: string, dayOfWeek: number, minutes: number},
- * }}  dayOfWeek is the start's; opensAt/closesAt only when a row was found
+ * }}  dayOfWeek, opensAt and closesAt are the reported row's; with no row,
+ *     dayOfWeek is the start's and the times are absent
  */
 export function hoursVerdict(hours, startsAt, endsAt) {
   const start = toVenueLocal(startsAt);
   const end = toVenueLocal(endsAt);
-  const dayOfWeek = start.dayOfWeek;
+  const startMinutes = start.minutes;
+  const endMinutes = end.minutes + MINUTES_PER_DAY * daysBetween(start.date, end.date);
 
-  if (start.date !== end.date) {
-    return { met: false, reason: 'spans_midnight', dayOfWeek, start, end };
+  const sameDayRow = hours.find((entry) => entry.day_of_week === start.dayOfWeek);
+  const previousDay = (start.dayOfWeek + 6) % 7;
+  const previousRow = hours.find((entry) => entry.day_of_week === previousDay && isOvernight(entry));
+
+  const candidates = [];
+  if (sameDayRow !== undefined) candidates.push({ row: sameDayRow, window: windowOf(sameDayRow, 0) });
+  if (previousRow !== undefined) {
+    candidates.push({ row: previousRow, window: windowOf(previousRow, -MINUTES_PER_DAY) });
   }
 
-  const row = hours.find((entry) => entry.day_of_week === dayOfWeek);
-  if (row === undefined) {
-    return { met: false, reason: 'closed_that_day', dayOfWeek, start, end };
+  const fits = ({ window }) => window.opens <= startMinutes && window.closes >= endMinutes;
+  const inEarlyHours = ({ row, window }) => row === previousRow && startMinutes < window.closes;
+  const reported =
+    candidates.find(fits) ??
+    candidates.find(inEarlyHours) ??
+    candidates.find(({ row }) => row === sameDayRow);
+
+  if (reported === undefined) {
+    return { met: false, reason: 'closed_that_day', dayOfWeek: start.dayOfWeek, start, end };
   }
 
-  const met =
-    timeToMinutes(row.opens_at) <= start.minutes &&
-    timeToMinutes(row.closes_at) >= end.minutes;
+  const met = fits(reported);
+  let reason = 'outside_hours';
+  if (met) reason = 'within_hours';
+  else if (start.date !== end.date && !isOvernight(reported.row)) reason = 'spans_midnight';
 
   return {
     met,
-    reason: met ? 'within_hours' : 'outside_hours',
-    dayOfWeek,
-    opensAt: row.opens_at,
-    closesAt: row.closes_at,
+    reason,
+    dayOfWeek: reported.row.day_of_week,
+    opensAt: reported.row.opens_at,
+    closesAt: reported.row.closes_at,
     start,
     end,
   };
@@ -377,30 +424,51 @@ function timeToClock(time) {
   return time.slice(0, 5);
 }
 
+/** A weekday as its first three letters, 'Fri'. */
+function shortDay(dayOfWeek) {
+  return DAY_NAMES[dayOfWeek].slice(0, 3);
+}
+
 /**
  * The words for an hours verdict.
  *
- * A midnight span names both days, short ('Fri 22:00 – Sat 01:00'), because
- * the two times alone would read as an event running backwards; the other
- * cases name one day in full, since the whole event falls on it.
+ * Anything crossing midnight -- the event or the venue's window -- names both
+ * days, short ('Fri 22:00 – Sat 01:00'), because the two times alone would
+ * read as running backwards; otherwise one day is named in full, since the
+ * whole event falls on it. A 00:00 close reads 'midnight', not the next day's
+ * 00:00, so it is not mistaken for an early-morning time.
  */
 function describeHours(verdict) {
   const { start, end } = verdict;
+  const at = (local) => `${shortDay(local.dayOfWeek)} ${minutesToClock(local.minutes)}`;
 
   if (verdict.reason === 'spans_midnight') {
-    const day = (local) => DAY_NAMES[local.dayOfWeek].slice(0, 3);
-    return (
-      `Event spans midnight (${day(start)} ${minutesToClock(start.minutes)} – ` +
-      `${day(end)} ${minutesToClock(end.minutes)})`
-    );
+    return `Event spans midnight (${at(start)} – ${at(end)})`;
   }
 
   const dayName = DAY_NAMES[verdict.dayOfWeek];
   if (verdict.reason === 'closed_that_day') return `Venue closed on ${dayName}`;
 
+  const opens = timeToClock(verdict.opensAt);
+  const closes = timeToClock(verdict.closesAt);
+  const overnight = timeToMinutes(verdict.closesAt) <= timeToMinutes(verdict.opensAt);
+
+  if (start.date === end.date && !overnight) {
+    return (
+      `Event runs ${minutesToClock(start.minutes)}–${minutesToClock(end.minutes)} ` +
+      `on ${dayName}; venue open ${opens}–${closes}`
+    );
+  }
+
+  let closing = `${shortDay(verdict.dayOfWeek)} ${closes}`;
+  if (overnight) {
+    closing = timeToMinutes(verdict.closesAt) === 0
+      ? 'midnight'
+      : `${shortDay((verdict.dayOfWeek + 1) % 7)} ${closes}`;
+  }
   return (
-    `Event runs ${minutesToClock(start.minutes)}–${minutesToClock(end.minutes)} ` +
-    `on ${dayName}; venue open ${timeToClock(verdict.opensAt)}–${timeToClock(verdict.closesAt)}`
+    `Event runs ${at(start)} – ${at(end)}; ` +
+    `venue open ${shortDay(verdict.dayOfWeek)} ${opens} – ${closing}`
   );
 }
 

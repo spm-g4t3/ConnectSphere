@@ -1368,8 +1368,9 @@ describe('SCRUM-15 / SCRUM-186 / SCRUM-20 / SCRUM-493: the venue fields', () => 
       );
     });
 
-    it('SCRUM186_closing_must_be_after_opening_so_no_overnight_hours', async () => {
-      expect(await constraintDef('venue_operating_hours', 'venue_operating_hours_ordered')).toBe('CHECK ((closes_at > opens_at))');
+    it('SCRUM575_AC3_closing_may_be_earlier_than_opening_but_never_equal', async () => {
+      expect(await constraintDef('venue_operating_hours', 'venue_operating_hours_ordered')).toBeUndefined();
+      expect(await constraintDef('venue_operating_hours', 'venue_operating_hours_not_empty')).toBe('CHECK ((closes_at <> opens_at))');
     });
 
     it('SCRUM186_opens_and_closes_are_time_of_day_not_null', async () => {
