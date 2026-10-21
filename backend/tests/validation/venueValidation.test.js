@@ -1587,3 +1587,37 @@ describe('SCRUM493 invisible-only text and unsupported characters', () => {
     );
   });
 });
+
+
+describe('SCRUM575_AC7 confirming the bookings shortened hours leave out', () => {
+  const HOURS = [{ day_of_week: 3, opens_at: '09:00', closes_at: '17:00' }];
+  const A = 'B0000000-0000-4000-8000-00000000000A';
+  const B = 'b0000000-0000-4000-8000-00000000000b';
+
+  it('SCRUM575_AC7_confirmHoursChange_is_kept_lowercased_and_de_duplicated', () => {
+    // The service compares it with the ids Postgres prints, in lower case.
+    expect(validateUpdateVenue({ hours: HOURS, confirmHoursChange: [A, B, A.toLowerCase()] }).confirmHoursChange)
+      .toEqual([A.toLowerCase(), B]);
+  });
+
+  it('SCRUM575_AC7_confirmHoursChange_alone_is_no_change', () => {
+    const err = errorFrom(() => validateUpdateVenue({ confirmHoursChange: [B] }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toMatch(/no changes/i);
+  });
+
+  it.each([
+    ['not a list', B],
+    ['null', null],
+    ['a non-id entry', [B, 'not-an-id']],
+    ['a number entry', [42]],
+  ])('SCRUM575_AC7_confirmHoursChange_refuses_%s', (_label, value) => {
+    const err = errorFrom(() => validateUpdateVenue({ hours: HOURS, confirmHoursChange: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toEqual(['confirmHoursChange']);
+  });
+
+  it('SCRUM575_AC7_an_edit_without_it_has_no_confirmHoursChange_key', () => {
+    expect(validateUpdateVenue({ hours: HOURS })).not.toHaveProperty('confirmHoursChange');
+  });
+});

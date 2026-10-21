@@ -52,6 +52,9 @@ export class NotFoundError extends AppError {
  *    overlaps, as [{ bookingId, eventRequestId, eventName, startsAt, endsAt }].
  *    The caller may resend with confirmOverride and those booking ids to
  *    override them.
+ *  - VENUE_HOURS_BOOKING_CONFLICT: the approved bookings new operating hours
+ *    leave out, in the same shape. The caller may resend with
+ *    confirmHoursChange set to those booking ids to flag them.
  *
  * Every other code carries [].
  *

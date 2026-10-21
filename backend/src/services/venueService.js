@@ -64,7 +64,7 @@ import {
 } from '../validation/venueValidation.js';
 import { DEFAULT_TURNAROUND_MINUTES } from '../domain/turnaroundOptions.js';
 import { DEFAULT_SETUP_MINUTES } from '../domain/setupOptions.js';
-import { matchesAllCriteria } from '../domain/venueMatching.js';
+import { matchesAllCriteria, coversPeriod } from '../domain/venueMatching.js';
 import { getBookingStatusDisplay } from '../domain/bookingStatus.js';
 import { toSuitabilityRecord } from '../domain/suitabilityRecord.js';
 import { toBookingConflict } from './venueBlockService.js';
@@ -196,6 +196,53 @@ function toSafetyTextParam(update, field) {
 }
 
 /**
+ * The approved, not-yet-started bookings that fit the venue's current hours
+ * but would not fit `newHours`, in toBookingConflict's shape, soonest first.
+ * A booking that already fell outside the old hours is not this edit's doing.
+ *
+ * @param {string} id  the venue
+ * @param {Array<{day_of_week: number, opens_at: string, closes_at: string}>} newHours
+ * @returns {Promise<object[]>}
+ */
+async function bookingsOutsideNewHours(id, newHours) {
+  const [hoursRead, bookingsRead] = await Promise.all([
+    supabase
+      .from('venue_operating_hours')
+      .select('day_of_week, opens_at, closes_at')
+      .eq('venue_id', id),
+    supabase
+      .from('bookings')
+      .select('id, event_request_id, starts_at, ends_at, event_requests(event_name)')
+      .eq('venue_id', id)
+      .eq('status', 'approved')
+      .gt('starts_at', new Date().toISOString())
+      .order('starts_at', { ascending: true }),
+  ]);
+  if (hoursRead.error) throw translateError(hoursRead.error);
+  if (bookingsRead.error) throw translateError(bookingsRead.error);
+
+  const oldHours = hoursRead.data ?? [];
+  return (bookingsRead.data ?? [])
+    .filter((b) => coversPeriod(oldHours, b.starts_at, b.ends_at)
+      && !coversPeriod(newHours, b.starts_at, b.ends_at))
+    .map((b) => toBookingConflict({
+      booking_id: b.id,
+      event_request_id: b.event_request_id,
+      event_name: one(b.event_requests)?.event_name ?? null,
+      starts_at: b.starts_at,
+      ends_at: b.ends_at,
+    }));
+}
+
+/** Whether the caller confirmed exactly these bookings, in any order. */
+function confirmsExactly(confirmed, bookings) {
+  const ids = new Set(bookings.map((b) => b.bookingId.toLowerCase()));
+  return confirmed !== undefined
+    && confirmed.length === ids.size
+    && confirmed.every((bookingId) => ids.has(bookingId));
+}
+
+/**
  * Update a venue.
  *
  * Omitting a field leaves it unchanged. Supplying an array REPLACES that
@@ -219,13 +266,40 @@ function toSafetyTextParam(update, field) {
  * like the block-override lists; [] when nothing was flagged (including
  * every edit that leaves both minutes alone).
  *
+ * New hours that leave out approved, not-yet-started bookings which fitted the
+ * old hours are refused with VENUE_HOURS_BOOKING_CONFLICT until
+ * confirmHoursChange lists exactly those bookings; update_venue then flags
+ * them in the same transaction, and they come back in flaggedBookings too.
+ *
  * @param {string} id
- * @param {object} changes  same shape as createVenue input, all optional
+ * @param {object} changes  same shape as createVenue input, all optional,
+ *                          plus confirmHoursChange (booking ids)
  * @param {string|null} userId
  * @returns {Promise<object>} the updated venue, plus flaggedBookings
+ * @throws {ConflictError} VENUE_HOURS_BOOKING_CONFLICT, conflicts shaped by
+ *         toBookingConflict, when the confirmation is missing or stale
  */
 export async function updateVenue(id, changes, userId = null) {
   const update = validateUpdateVenue(changes);
+
+  // Shortened hours never cancel a booking: Venue Staff confirm the list, and
+  // update_venue flags it. A booking approved between this read and the save
+  // is not flagged; that needs two staff acting at once.
+  let hoursFlagIds = null;
+  if (update.hours !== undefined) {
+    const outside = await bookingsOutsideNewHours(id, update.hours);
+    if (outside.length > 0) {
+      if (!confirmsExactly(update.confirmHoursChange, outside)) {
+        throw new ConflictError(
+          update.confirmHoursChange === undefined
+            ? 'The new operating hours leave out approved bookings; confirm to flag them for review'
+            : 'The bookings outside the new hours have changed since you confirmed; review them again',
+          { code: 'VENUE_HOURS_BOOKING_CONFLICT', conflicts: outside },
+        );
+      }
+      hoursFlagIds = outside.map((b) => b.bookingId);
+    }
+  }
 
   const { data, error } = await supabase.rpc('update_venue', {
     p_id: id,
@@ -246,6 +320,7 @@ export async function updateVenue(id, changes, userId = null) {
     p_emergency_access: toSafetyTextParam(update, 'emergencyAccess'),
     p_known_restrictions: toSafetyTextParam(update, 'knownRestrictions'),
     p_user_id: userId,
+    p_hours_flag_booking_ids: hoursFlagIds,
   });
 
   if (error) throw translateError(error);

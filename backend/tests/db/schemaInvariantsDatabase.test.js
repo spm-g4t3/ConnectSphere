@@ -1155,7 +1155,8 @@ describe('SCRUM-484 AC3 and AC4: one occupied-period rule', () => {
     };
     // A start or end compared with the clock, not two periods, an exact number of times.
     const NOT_STARTED = {
-      update_venue: { text: 'b.starts_at > now()', count: 2 },
+      // The two clash sets, and the re-check of bookings shortened hours leave out.
+      update_venue: { text: 'b.starts_at > now()', count: 3 },
       retire_venue: { text: 'b.ends_at > now()', count: 2 },
     };
 
@@ -1325,7 +1326,7 @@ describe('SCRUM-15 / SCRUM-186 / SCRUM-20 / SCRUM-493: the venue fields', () => 
     expect(update.args).toBe(
       'p_id uuid, p_name text DEFAULT NULL::text, p_location text DEFAULT NULL::text, p_max_capacity integer DEFAULT NULL::integer, ' +
       'p_layouts text[] DEFAULT NULL::text[], p_accessibility text[] DEFAULT NULL::text[], p_facilities text[] DEFAULT NULL::text[], ' +
-      `p_hours jsonb DEFAULT NULL::jsonb, ${tail}`,
+      `p_hours jsonb DEFAULT NULL::jsonb, ${tail}, p_hours_flag_booking_ids uuid[] DEFAULT NULL::uuid[]`,
     );
     expect(update.result).toBe('jsonb');
   });

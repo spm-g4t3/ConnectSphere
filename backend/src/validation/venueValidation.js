@@ -362,6 +362,32 @@ export function validateCreateVenue(input) {
   return normalised;
 }
 
+/** More bookings than any venue holds; caps the work one request can ask for. */
+const CONFIRM_HOURS_CHANGE_MAX = 500;
+
+/**
+ * Optional confirmHoursChange: the booking ids the user saw listed and agreed
+ * to flag. Lowercased and de-duplicated, because the service compares it with
+ * the ids Postgres prints.
+ *
+ * @returns {string[]|undefined} undefined when refused
+ */
+function checkConfirmHoursChange(errors, value) {
+  if (!Array.isArray(value)) {
+    errors.add('confirmHoursChange', 'must be a list of booking ids');
+    return undefined;
+  }
+  if (value.some((id) => typeof id !== 'string' || !UUID_PATTERN.test(id))) {
+    errors.add('confirmHoursChange', 'must contain only booking ids');
+    return undefined;
+  }
+  if (value.length > CONFIRM_HOURS_CHANGE_MAX) {
+    errors.add('confirmHoursChange', `must list ${CONFIRM_HOURS_CHANGE_MAX} bookings or fewer`);
+    return undefined;
+  }
+  return [...new Set(value.map((id) => id.toLowerCase()))];
+}
+
 /**
  * Validate input for updating a venue. Every field is optional.
  *
@@ -381,7 +407,9 @@ export function validateUpdateVenue(changes) {
     throw new ValidationError('Invalid venue details -- expected an object');
   }
 
-  const supplied = Object.keys(changes).filter((key) => changes[key] !== undefined);
+  // confirmHoursChange only confirms a change, so on its own it changes nothing.
+  const supplied = Object.keys(changes)
+    .filter((key) => key !== 'confirmHoursChange' && changes[key] !== undefined);
   if (supplied.length === 0) {
     throw new ValidationError('Invalid venue details -- no changes supplied');
   }
@@ -433,6 +461,10 @@ export function validateUpdateVenue(changes) {
     if (changes[field] !== undefined) {
       normalised[field] = checkSafetyText(errors, field, changes[field]);
     }
+  }
+
+  if (changes.confirmHoursChange !== undefined) {
+    normalised.confirmHoursChange = checkConfirmHoursChange(errors, changes.confirmHoursChange);
   }
 
   throwIfInvalid(errors, 'Invalid venue details');
