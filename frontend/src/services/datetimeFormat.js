@@ -142,9 +142,8 @@ export function deviceTimeZoneLabel() {
 //
 // The helpers above speak the DEVICE's wall clock, which suits a form about
 // the Organiser's own day. A venue search does not: the backend reads a
-// period against each venue's opening hours on the Singapore wall clock, and
-// needs start and end on one Singapore date (venueMatching.coversPeriod). A
-// coordinator in New York reading 20:00-00:00 for a 09:00-13:00 event could
+// period against each venue's opening hours on the Singapore wall clock, by
+// Singapore date (venueMatching.hoursVerdict). A coordinator in New York reading 20:00-00:00 for a 09:00-13:00 event could
 // neither recognise the period nor type it back. So a form about venue time
 // reads and writes it here, whatever the device is set to.
 //
@@ -369,4 +368,50 @@ export function formatHoursEntry({ day_of_week: day, opens_at: opens, closes_at:
   if (timeWithSeconds(closes) === "00:00:00") return `${name} ${open} – midnight`;
   const next = SHORT_DAY_NAMES[day] ? SHORT_DAY_NAMES[nextDay(day)] : "next day";
   return `${name} ${open} – ${next} ${close}`;
+}
+
+/**
+ * The Singapore date after a "YYYY-MM-DD" date, across month and year ends.
+ * Counted on the calendar date itself (read as UTC), so the device's zone
+ * and its daylight saving never move it.
+ *
+ * @param {string} date  "YYYY-MM-DD"
+ * @returns {string} the next "YYYY-MM-DD", or "" when the date is unreadable
+ */
+export function nextVenueDate(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date ?? ""))) return "";
+  const day = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(day.getTime())) return "";
+  return new Date(day.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * Whether an event entered as one date and two times ends on the next day:
+ * the opening-hours rule, an end before the start. Equal times are not
+ * counted, because an event of no length is refused rather than read as 24h.
+ *
+ * @param {string} startTime  "HH:MM"
+ * @param {string} endTime
+ * @returns {boolean}
+ */
+export function endsNextDay(startTime, endTime) {
+  return closesNextDay(startTime, endTime)
+    && timeWithSeconds(endTime) !== timeWithSeconds(startTime);
+}
+
+/**
+ * The note under an event's end time when it ends on the next day, or null.
+ *
+ * @param {string} date       "YYYY-MM-DD", the event's start date
+ * @param {string} startTime  "HH:MM"
+ * @param {string} endTime
+ * @returns {string|null}  "Ends at midnight" or "Ends Saturday 2026-11-12 02:00 (next day)"
+ */
+export function describeEventEnd(date, startTime, endTime) {
+  if (!endsNextDay(startTime, endTime)) return null;
+  if (timeWithSeconds(endTime) === "00:00:00") return "Ends at midnight";
+  const next = nextVenueDate(date);
+  if (next === "") return null;
+  const day = LONG_DAY_NAMES[new Date(`${next}T00:00:00Z`).getUTCDay()];
+  return `Ends ${day} ${next} ${String(endTime).slice(0, 5)} (next day)`;
 }

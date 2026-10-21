@@ -128,7 +128,7 @@ function describedErrors(control) {
 
 const LOCATION_HINT = "Matches part of the venue's location (building or area), not its name.";
 const multiDayHint = (date) =>
-  `This event runs over more than one day. Venue search checks one day at a time — set the end time for ${date}.`;
+  `This event runs longer than a day. Venue search checks one day's hours, which can run into the next day — set an end time on ${date} or the next day.`;
 
 beforeEach(() => {
   vi.mocked(findVenuesForEvent).mockReset();
@@ -193,18 +193,6 @@ describe("SCRUM20_AC2 pre-filled from the event", () => {
     expect(field.end()).toHaveValue("13:00");
   });
 
-  it("SCRUM20_AC2_event_crossing_singapore_midnight_leaves_the_end_blank", () => {
-    renderFinder({
-      ...EVENT,
-      proposedStart: "2026-11-11T22:00:00+08:00",
-      proposedEnd: "2026-11-12T01:00:00+08:00",
-    });
-
-    expect(field.date()).toHaveValue("2026-11-11");
-    expect(field.start()).toHaveValue("22:00");
-    expect(field.end()).toHaveValue("");
-  });
-
   it("SCRUM20_AC2_event_on_two_dates_leaves_the_end_for_the_coordinator", () => {
     renderFinder({ ...EVENT, proposedEnd: "2026-11-13T12:00:00+08:00" });
 
@@ -236,7 +224,9 @@ describe("SCRUM20_AC2 pre-filled from the event", () => {
 
   it("SCRUM20_AC1_the_time_zone_is_disclosed_as_singapore_time", () => {
     renderFinder();
-    expect(screen.getByText("Times are Singapore time (Asia/Singapore), the venues' local time."))
+    expect(screen.getByText(
+      "Times are Singapore time (Asia/Singapore), the venues' local time. An end time earlier than the start means the next day.",
+    ))
       .toBeInTheDocument();
     expect(screen.queryByText(/device/)).not.toBeInTheDocument();
   });
@@ -290,7 +280,7 @@ describe("SCRUM20 hints that explain the form", () => {
   it("SCRUM20_AC3_single_day_event_has_no_multi_day_hint", () => {
     renderFinder();
 
-    expect(screen.queryByText(/more than one day/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/longer than a day/)).not.toBeInTheDocument();
     expect(field.end()).not.toHaveAttribute("aria-describedby");
   });
 });
@@ -312,6 +302,38 @@ describe("SCRUM20_AC1 the optional pickers", () => {
     for (const { label } of [...ACCESSIBILITY_FEATURES, ...FACILITIES]) {
       expect(screen.getByLabelText(label)).toBeInTheDocument();
     }
+  });
+});
+
+describe("SCRUM575_AC5 an event that ends the next day", () => {
+  const OVERNIGHT = {
+    ...EVENT,
+    proposedStart: "2026-11-13T22:00:00+08:00",
+    proposedEnd: "2026-11-14T02:00:00+08:00",
+  };
+
+  it("SCRUM575_AC5_note_under_end_names_the_next_day_and_the_search_sends_it", async () => {
+    const { user } = renderFinder(OVERNIGHT);
+
+    expect(field.end()).toHaveValue("02:00");
+    const note = screen.getByText("Ends Saturday 2026-11-14 02:00 (next day)");
+    expect(note).toHaveAttribute("aria-live", "polite");
+    expect(describedBy(field.end())).toEqual([note]);
+
+    await user.click(searchButton());
+
+    const criteria = await sentCriteria();
+    expect(criteria.startsAt).toBe(OVERNIGHT.proposedStart);
+    expect(criteria.endsAt).toBe(OVERNIGHT.proposedEnd);
+  });
+
+  it("SCRUM575_AC5_note_appears_when_end_is_edited_before_the_start", () => {
+    renderFinder();
+    expect(screen.queryByText(/\(next day\)/)).not.toBeInTheDocument();
+
+    fireEvent.change(field.end(), { target: { value: "09:00" } });
+
+    expect(screen.getByText("Ends Thursday 2026-11-12 09:00 (next day)")).toBeInTheDocument();
   });
 });
 
@@ -538,7 +560,7 @@ describe("SCRUM20_AC1 client errors", () => {
     await user.click(searchButton());
 
     expect(findVenuesForEvent).not.toHaveBeenCalled();
-    expect(describedErrors(field.end())).toEqual(["must be later than the start"]);
+    expect(describedErrors(field.end())).toEqual(["must differ from the start"]);
     expect(field.start()).not.toHaveAttribute("aria-invalid");
   });
 

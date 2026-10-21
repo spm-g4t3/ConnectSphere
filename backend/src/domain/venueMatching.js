@@ -460,12 +460,11 @@ function describeHours(verdict) {
     );
   }
 
-  let closing = `${shortDay(verdict.dayOfWeek)} ${closes}`;
-  if (overnight) {
-    closing = timeToMinutes(verdict.closesAt) === 0
-      ? 'midnight'
-      : `${shortDay((verdict.dayOfWeek + 1) % 7)} ${closes}`;
-  }
+  // Only overnight windows reach here: an event crossing midnight under
+  // same-day hours was reported as 'spans_midnight' above.
+  const closing = timeToMinutes(verdict.closesAt) === 0
+    ? 'midnight'
+    : `${shortDay((verdict.dayOfWeek + 1) % 7)} ${closes}`;
   return (
     `Event runs ${at(start)} – ${at(end)}; ` +
     `venue open ${shortDay(verdict.dayOfWeek)} ${opens} – ${closing}`

@@ -416,3 +416,35 @@ describe('SCRUM20 availability edges and retired venues through the HTTP layer',
     expect(res.body.map((v) => v.name)).toEqual(['Atrium Hall']);
   });
 });
+
+
+describe('SCRUM575 overnight operating hours through the HTTP layer', () => {
+  const FRIDAY = 5;
+
+  it('SCRUM575_AC5_event_crossing_midnight_matches_only_hours_that_run_past_it', async () => {
+    // Friday 13 November 22:00 to Saturday 01:00, Singapore time. Atrium Hall
+    // opens Friday 18:00-02:00, which holds the whole event; Boardroom 3
+    // closes Friday at 23:00, so the event runs past its hours.
+    const overnight = {
+      startsAt: '2026-11-13T22:00:00+08:00',
+      endsAt: '2026-11-14T01:00:00+08:00',
+      expectedAttendance: '80',
+    };
+    script(
+      venuesStep([
+        venueRow(ATRIUM, 'Atrium Hall', {
+          venue_operating_hours: [{ day_of_week: FRIDAY, opens_at: '18:00:00', closes_at: '02:00:00' }],
+        }),
+        venueRow(BOARDROOM, 'Boardroom 3', {
+          venue_operating_hours: [{ day_of_week: FRIDAY, opens_at: '08:00:00', closes_at: '23:00:00' }],
+        }),
+      ]),
+      availabilityStep([ATRIUM], [ATRIUM], overnight),
+    );
+
+    const res = await asCoordinator(searchUrl(overnight));
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((v) => v.name)).toEqual(['Atrium Hall']);
+  });
+});

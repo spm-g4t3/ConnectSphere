@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest";
 import {
   closesNextDay,
   describeClosing,
+  describeEventEnd,
   formatHoursEntry,
   toDatetimeLocalValue,
   toOffsetIsoString,
@@ -238,5 +239,17 @@ describe("opening hours past midnight", () => {
       .toBe("Mon 09:00–18:00");
     expect(formatHoursEntry({ day_of_week: 9, opens_at: "09:00", closes_at: "18:00" }))
       .toBe("Day 9 09:00–18:00");
+  });
+
+  it("SCRUM575_AC5_describeEventEnd_names_the_next_date", () => {
+    // 31 December 2026 is a Thursday, so the event ends on Friday 1 January.
+    expect(describeEventEnd("2026-12-31", "22:00", "01:00"))
+      .toBe("Ends Friday 2027-01-01 01:00 (next day)");
+    expect(describeEventEnd("2026-11-11", "22:00", "00:00")).toBe("Ends at midnight");
+  });
+
+  it("SCRUM575_AC5_describeEventEnd_is_null_for_same_day_or_equal_times", () => {
+    expect(describeEventEnd("2026-11-11", "10:00", "12:00")).toBeNull();
+    expect(describeEventEnd("2026-11-11", "10:00", "10:00:00")).toBeNull();
   });
 });

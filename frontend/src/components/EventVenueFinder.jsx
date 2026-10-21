@@ -40,7 +40,9 @@
 //
 // SCRUM-20 AC1/AC2: the date and times are Singapore wall clock, not the
 // device's, because the backend checks them against venue hours in Singapore
-// (eventVenueSearchForm.js explains). The hint under them says so.
+// (eventVenueSearchForm.js explains). The hint under them says so. An end
+// time before the start is the next day, as in the opening-hours grid; a
+// note under End names that day so the reading is never silent.
 //
 // Two more hints answer what would otherwise look like a fault:
 //
@@ -48,9 +50,9 @@
 //     matchesLocation), not its name, so "room" does not find "Meeting room"
 //     in Singapore. The hint under the input says so, and the input's
 //     aria-describedby names it alongside any errors.
-//   - An event whose start and end fall on different Singapore dates seeds
-//     with End blank (seedFromEvent's spansDays), because the search checks
-//     one date at a time. A hint by the times says so and names the seeded
+//   - An event too long for one date and two times seeds with End blank
+//     (seedFromEvent's spansDays), because one day's hours can run at most
+//     into the next day. A hint by the times says so and names the seeded
 //     date, so the "is required" beside End has a reason. It is read from the
 //     seed, stored once, and stays even if the coordinator changes the date:
 //     it describes the event, not the form.
@@ -137,7 +139,11 @@
 // booking the server says can no longer be replaced.
 
 import { useEffect, useId, useRef, useState } from "react";
-import { VENUE_TIME_ZONE, formatVenuePeriod } from "../services/datetimeFormat";
+import {
+  VENUE_TIME_ZONE,
+  describeEventEnd,
+  formatVenuePeriod,
+} from "../services/datetimeFormat";
 import { bookingRequestEligibility } from "../services/bookingRequestEligibility";
 import {
   mapServerDetails,
@@ -392,6 +398,7 @@ export default function EventVenueFinder({
   const idPrefix = useId();
   const idFor = (field) => `${idPrefix}-${field}`;
   const hintId = (field) => `${idPrefix}-${field}-hint`;
+  const endNote = describeEventEnd(values.date, values.startTime, values.endTime);
 
   /** Editing a field retires that field's errors, client and server alike. */
   function clearErrorsFor(field) {
@@ -549,21 +556,30 @@ export default function EventVenueFinder({
               value={values.endTime}
               onChange={(e) => update("endTime", e.target.value)}
               disabled={loading}
-              {...ariaFor("endTime", seed.spansDays ? [hintId("spansDays")] : [])}
+              {...ariaFor("endTime", [
+                ...(endNote ? [hintId("endsNextDay")] : []),
+                ...(seed.spansDays ? [hintId("spansDays")] : []),
+              ])}
             />
+            {/* Always rendered so the live region exists before its text changes. */}
+            <p className="event-venue-finder__ends" id={hintId("endsNextDay")} aria-live="polite">
+              {endNote}
+            </p>
             {renderFieldErrors("endTime")}
           </div>
         </div>
 
         {/* Disclosure, not a picker: venue time on every device (see the header). */}
         <p className="event-venue-finder__hint">
-          Times are Singapore time ({VENUE_TIME_ZONE}), the venues' local time.
+          Times are Singapore time ({VENUE_TIME_ZONE}), the venues' local time. An
+          end time earlier than the start means the next day.
         </p>
         {/* A plain hint, not a status: it describes the event (see the header). */}
         {seed.spansDays && (
           <p className="event-venue-finder__hint" id={hintId("spansDays")}>
-            This event runs over more than one day. Venue search checks one day at a
-            time — set the end time for {seed.date}.
+            This event runs longer than a day. Venue search checks one day's hours,
+            which can run into the next day — set an end time on {seed.date} or the
+            next day.
           </p>
         )}
 
