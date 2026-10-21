@@ -290,3 +290,83 @@ export function formatVenueTimestamp(isoString, fallback = "Not set") {
 export function isReplyOverdue(replyByDate, now = new Date()) {
   return replyByDate < venueToday(now);
 }
+
+// ---------------------------------------------------------------------------
+// Opening hours
+//
+// A venue's hours are one row per day it opens: { day_of_week, opens_at,
+// closes_at }, day 0 = Sunday, times "HH:MM" or "HH:MM:SS" on the Singapore
+// wall clock. A closing time at or before the opening time means the next
+// day, as the server reads it, so 18:00-02:00 on Friday runs into Saturday
+// and a 00:00 close is midnight.
+
+const SHORT_DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const LONG_DAY_NAMES = [
+  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+];
+
+/** "HH:MM" or "HH:MM:SS" as "HH:MM:SS", or null when it is not a time. */
+function timeWithSeconds(time) {
+  const match = /^(\d{2}):(\d{2})(:\d{2})?$/.exec(String(time ?? ""));
+  if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return null;
+  return `${match[1]}:${match[2]}${match[3] ?? ":00"}`;
+}
+
+/** The day after `day`, 0-6, wrapping Saturday to Sunday. */
+function nextDay(day) {
+  return (Number(day) + 1) % 7;
+}
+
+/**
+ * Whether a day's hours close on the next day: both times readable and the
+ * closing time at or before the opening time. Compared as "HH:MM:SS", so
+ * "02:00" and "18:00:00" are read alike.
+ *
+ * @param {string} opens   "HH:MM" or "HH:MM:SS"
+ * @param {string} closes
+ * @returns {boolean}
+ */
+export function closesNextDay(opens, closes) {
+  const open = timeWithSeconds(opens);
+  const close = timeWithSeconds(closes);
+  return Boolean(open && close) && close <= open;
+}
+
+/**
+ * The note under a day's times in the venue form, or null when the day
+ * closes the same day. Equal times are null too: the server refuses them
+ * and its message says why.
+ *
+ * @param {number} dayOfWeek  0 = Sunday
+ * @param {string} opens
+ * @param {string} closes
+ * @returns {string|null}  "Closes at midnight" or "Closes Saturday 02:00 (next day)"
+ */
+export function describeClosing(dayOfWeek, opens, closes) {
+  if (!closesNextDay(opens, closes)) return null;
+  const close = timeWithSeconds(closes);
+  if (close === timeWithSeconds(opens)) return null;
+  if (close === "00:00:00") return "Closes at midnight";
+  const day = LONG_DAY_NAMES[nextDay(dayOfWeek)];
+  if (!day) return null;
+  return `Closes ${day} ${close.slice(0, 5)} (next day)`;
+}
+
+/**
+ * One day's hours as a short line: "Mon 09:00–18:00" the same day,
+ * "Fri 18:00 – Sat 02:00" overnight, "Thu 18:00 – midnight" for a 00:00
+ * close. An unknown day reads "Day 9"; unreadable times keep the same-day
+ * shape, so this never throws on an odd history row.
+ *
+ * @param {{day_of_week: number, opens_at: string, closes_at: string}} entry
+ * @returns {string}
+ */
+export function formatHoursEntry({ day_of_week: day, opens_at: opens, closes_at: closes }) {
+  const name = SHORT_DAY_NAMES[day] ?? `Day ${day}`;
+  const open = String(opens).slice(0, 5);
+  const close = String(closes).slice(0, 5);
+  if (!closesNextDay(opens, closes)) return `${name} ${open}–${close}`;
+  if (timeWithSeconds(closes) === "00:00:00") return `${name} ${open} – midnight`;
+  const next = SHORT_DAY_NAMES[day] ? SHORT_DAY_NAMES[nextDay(day)] : "next day";
+  return `${name} ${open} – ${next} ${close}`;
+}

@@ -22,6 +22,8 @@
 //   booking_flagged_setup_change (034, SCRUM-484): { venueName, eventName,
 //     startsAt, endsAt, occupiedStartsAt, occupiedEndsAt, setupMinutes,
 //     turnaroundMinutes, reason }
+//   booking_flagged_hours_change (012, SCRUM-575): { venueName, eventName,
+//     startsAt, endsAt, reason }
 //   venue_hold_expired (040, SCRUM-491): { eventRequestId, eventName,
 //     venueId, venueName, expiresAt }
 //   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
@@ -79,6 +81,7 @@
 import { formatRange, formatTimestamp } from "./displayFormat";
 import { reasonLabel } from "./venueBlockReasons";
 import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
+import { formatVenuePeriod } from "./datetimeFormat";
 
 const UNNAMED_EVENT = "Unnamed event";
 const UNKNOWN_VENUE = "Unknown venue";
@@ -329,6 +332,20 @@ const DESCRIBERS = {
     return {
       headline: needsReview(eventName, venueName),
       detail: `Setup or turnaround time changed.${setupChangePeriod(payload)}${ALTERNATIVE_ARRANGEMENTS}`,
+    };
+  },
+
+  // New opening hours no longer cover the booking. Its period is given on
+  // the Singapore wall clock, the clock the hours are kept in, so an
+  // overnight booking reads against them; a missing time leaves it out.
+  booking_flagged_hours_change(payload, { eventName, venueName }) {
+    const period = formatVenuePeriod(payload.startsAt, payload.endsAt, "");
+    return {
+      headline: needsReview(eventName, venueName),
+      detail:
+        "Operating hours changed." +
+        (period ? ` The booking for ${period} is outside the new hours.` : "") +
+        ALTERNATIVE_ARRANGEMENTS,
     };
   },
 

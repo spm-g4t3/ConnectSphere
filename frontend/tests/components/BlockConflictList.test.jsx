@@ -352,3 +352,34 @@ describe("SCRUM484_AC7 the conflict list shows setup and turnaround", () => {
     expect(row).not.toHaveTextContent(/Setup|Turnaround/);
   });
 });
+
+// SCRUM-575 AC7: VenueForm reuses the list for bookings new opening hours
+// leave out, with its own words and Singapore-time periods.
+describe("SCRUM575_AC7 custom wording", () => {
+  it("SCRUM575_AC7_wording_props_replace_the_block_text", async () => {
+    const { user, onChangePeriod, onConfirmOverride } = renderList({
+      heading: "2 approved bookings fall outside the new opening hours",
+      intro: "They will not be cancelled.",
+      changeLabel: "Change hours",
+      overrideLabel: "Confirm new hours",
+      confirmText: "Save the new hours?",
+      confirmLabel: "Yes, save and flag",
+      formatPart: (startsAt) => `from ${startsAt}`,
+    });
+
+    expect(
+      screen.getByRole("heading", { level: 3, name: "2 approved bookings fall outside the new opening hours" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("They will not be cancelled.")).toBeInTheDocument();
+    expect(screen.getByText(`from ${CONFLICT_A.startsAt}`)).toBeInTheDocument();
+    expect(screen.queryByText(/This period overlaps/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Change hours" }));
+    expect(onChangePeriod).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Confirm new hours" }));
+    expect(screen.getByText("Save the new hours?")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Yes, save and flag" }));
+    expect(onConfirmOverride).toHaveBeenCalledWith([CONFLICT_A.bookingId, CONFLICT_B.bookingId]);
+  });
+});

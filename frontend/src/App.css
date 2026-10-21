@@ -193,6 +193,10 @@ button { cursor: pointer; }
 .dashboard--venue-staff .venue-form textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; resize: vertical; }
 .dashboard--venue-staff .venue-form__counter { white-space: nowrap; }
 .dashboard--venue-staff .venue-form__counter--over { color: #a43c32; font-weight: 700; }
+/* The next-day note under an overnight day's times, in the accent so it
+   reads as information about the entry rather than as an error. */
+.dashboard--venue-staff .venue-form__closing { color: var(--teal); font-size: 0.84rem; margin: 4px 0 0; }
+.dashboard--venue-staff .venue-form__closing:empty { margin: 0; }
 /* SCRUM-493. VenueSafetyFacts: label then value, the .decision-outcome shape.
    Values keep the line breaks staff typed (a list of exits reads as a list)
    and wrap rather than overflowing the card. "Not recorded" is muted and

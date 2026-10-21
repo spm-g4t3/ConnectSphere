@@ -8,6 +8,9 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  closesNextDay,
+  describeClosing,
+  formatHoursEntry,
   toDatetimeLocalValue,
   toOffsetIsoString,
   deviceTimeZoneLabel,
@@ -190,5 +193,50 @@ describe("venueToday and venueTomorrow", () => {
     expect(venueTomorrow(new Date("2026-10-20T15:59:59Z"))).toBe("2026-10-21");
     expect(venueTomorrow(new Date("2026-10-20T16:00:00Z"))).toBe("2026-10-22");
     expect(venueTomorrow(new Date("2026-10-31T16:00:00Z"))).toBe("2026-11-02");
+  });
+});
+
+describe("opening hours past midnight", () => {
+  it("SCRUM575_AC1_closesNextDay_when_closing_is_at_or_before_opening", () => {
+    expect(closesNextDay("18:00", "02:00")).toBe(true);
+    // Compared in one format: the server's "HH:MM:SS" against the input's "HH:MM".
+    expect(closesNextDay("18:00:00", "02:00")).toBe(true);
+    expect(closesNextDay("09:00", "18:00:00")).toBe(false);
+    expect(closesNextDay("18:00", "")).toBe(false);
+  });
+
+  it("SCRUM575_AC1_describeClosing_names_the_next_day", () => {
+    expect(describeClosing(5, "18:00", "02:00")).toBe("Closes Saturday 02:00 (next day)");
+    // Saturday wraps to Sunday.
+    expect(describeClosing(6, "20:00:00", "01:30:00")).toBe("Closes Sunday 01:30 (next day)");
+  });
+
+  it("SCRUM575_AC2_describeClosing_reads_00_00_as_midnight", () => {
+    expect(describeClosing(4, "18:00", "00:00")).toBe("Closes at midnight");
+  });
+
+  it("SCRUM575_AC1_describeClosing_is_null_for_same_day_equal_or_unreadable_times", () => {
+    expect(describeClosing(1, "09:00", "18:00")).toBeNull();
+    expect(describeClosing(1, "09:00", "09:00:00")).toBeNull();
+    expect(describeClosing(1, "", "02:00")).toBeNull();
+  });
+
+  it("SCRUM575_AC4_formatHoursEntry_shows_both_days_overnight", () => {
+    expect(formatHoursEntry({ day_of_week: 5, opens_at: "18:00:00", closes_at: "02:00:00" }))
+      .toBe("Fri 18:00 – Sat 02:00");
+    expect(formatHoursEntry({ day_of_week: 6, opens_at: "22:00", closes_at: "03:00" }))
+      .toBe("Sat 22:00 – Sun 03:00");
+  });
+
+  it("SCRUM575_AC2_formatHoursEntry_shows_a_00_00_close_as_midnight", () => {
+    expect(formatHoursEntry({ day_of_week: 4, opens_at: "18:00:00", closes_at: "00:00:00" }))
+      .toBe("Thu 18:00 – midnight");
+  });
+
+  it("SCRUM575_AC4_formatHoursEntry_keeps_the_same_day_format", () => {
+    expect(formatHoursEntry({ day_of_week: 1, opens_at: "09:00:00", closes_at: "18:00:00" }))
+      .toBe("Mon 09:00–18:00");
+    expect(formatHoursEntry({ day_of_week: 9, opens_at: "09:00", closes_at: "18:00" }))
+      .toBe("Day 9 09:00–18:00");
   });
 });

@@ -19,6 +19,10 @@
 // The ids handed to onConfirmOverride are the ones on screen -- the list the
 // Venue Staff member actually saw -- so the backend can refuse an override
 // over a booking that arrived after they looked.
+//
+// The wording props let VenueForm reuse it for bookings that new opening hours
+// leave out; each defaults to the block wording, and formatPart writes each
+// period (formatOccupiedPeriod's own default when absent).
 
 import { useState } from "react";
 import { shortId } from "../services/displayFormat";
@@ -50,6 +54,13 @@ export default function BlockConflictList({
   onChangePeriod,
   onConfirmOverride,
   submitting = false,
+  heading,
+  intro,
+  changeLabel = "Choose a different period",
+  overrideLabel,
+  confirmText = "Flag these bookings for review and notify each event's coordinator?",
+  confirmLabel = "Yes, override",
+  formatPart,
 }) {
   // The signature the confirm was opened for, or null when it is closed.
   const [confirmingFor, setConfirmingFor] = useState(null);
@@ -63,14 +74,15 @@ export default function BlockConflictList({
   return (
     <section className="block-conflicts">
       <div role="status">
-        <h3>This period overlaps {countLabel(count, "approved booking")}</h3>
+        <h3>{heading ?? `This period overlaps ${countLabel(count, "approved booking")}`}</h3>
+        {intro && <p>{intro}</p>}
       </div>
 
       <ul className="block-conflicts__list">
         {conflicts.map((conflict, i) => (
           <li key={conflict.bookingId ?? i}>
             <strong>{conflict.eventName || "Unnamed event"}</strong>
-            <span>{formatOccupiedPeriod(conflict)}</span>
+            <span>{formatOccupiedPeriod(conflict, formatPart)}</span>
             <code title={conflict.eventRequestId ?? undefined}>
               {conflict.eventRequestId ? shortId(conflict.eventRequestId) : "no event"}
             </code>
@@ -80,7 +92,7 @@ export default function BlockConflictList({
 
       <div className="block-conflicts__actions">
         <button type="button" onClick={() => onChangePeriod?.()} disabled={submitting}>
-          Choose a different period
+          {changeLabel}
         </button>
 
         {!confirming && (
@@ -89,19 +101,19 @@ export default function BlockConflictList({
             onClick={() => setConfirmingFor(signature)}
             disabled={submitting}
           >
-            Override and flag {countLabel(count, "booking")}
+            {overrideLabel ?? `Override and flag ${countLabel(count, "booking")}`}
           </button>
         )}
 
         {confirming && (
           <>
-            <span>Flag these bookings for review and notify each event's coordinator?</span>
+            <span>{confirmText}</span>
             <button
               type="button"
               onClick={() => onConfirmOverride?.(conflicts.map((c) => c.bookingId))}
               disabled={submitting}
             >
-              {submitting ? "Flagging..." : "Yes, override"}
+              {submitting ? "Flagging..." : confirmLabel}
             </button>
             <button type="button" onClick={() => setConfirmingFor(null)} disabled={submitting}>
               Cancel

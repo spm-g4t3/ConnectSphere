@@ -24,8 +24,10 @@
 // the details screen and the Safety Officer's view use the same words. Like
 // every other field, an edit sends them only when they changed.
 
-import { Fragment, useCallback, useEffect, useId, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import { createVenue, getVenueDetails, updateVenue } from "../services/venueService";
+import { describeClosing, formatVenuePeriod } from "../services/datetimeFormat";
+import BlockConflictList from "./BlockConflictList";
 import {
   ACCESSIBILITY_FEATURES,
   FACILITIES,
@@ -139,8 +141,9 @@ function normaliseHours(hours) {
  *
  * Seven fixed rows rather than an add-a-row list makes two of the validator's
  * rules unreachable by construction: no day can repeat, and no day can be
- * missing-but-meant. What is left -- closes_at must be after opens_at -- is
- * left to the validator, which already words it well.
+ * missing-but-meant. What is left -- closes_at must differ from opens_at, an
+ * earlier closing time meaning the next day -- is left to the validator,
+ * which already words it well.
  */
 function toHourRows(hours) {
   const byDay = new Map((hours ?? []).map((entry) => [entry.day_of_week, entry]));
@@ -231,6 +234,9 @@ export default function VenueForm({ venueId = null, onSaved }) {
   const setupHelpId = useId();
   // One base id for both safety boxes; each field's key is appended.
   const safetyHelpId = useId();
+  // One base id for the seven next-day notes; the day number is appended.
+  const closingNoteId = useId();
+  const hoursRef = useRef(null);
 
   const [form, setForm] = useState(EMPTY_FORM);
 
@@ -249,6 +255,10 @@ export default function VenueForm({ venueId = null, onSaved }) {
   // validators report every fault at once rather than stopping at the first --
   // the same shape, and the same renderer, as EventRequestForm's submit errors.
   const [saveDetails, setSaveDetails] = useState([]);
+  // Approved bookings the new hours leave out (a VENUE_HOURS_BOOKING_CONFLICT
+  // 409). The form keeps its edits while they are listed; saving again with
+  // their ids confirms the change and has them flagged.
+  const [hoursConflicts, setHoursConflicts] = useState([]);
 
   const fetchVenue = useCallback(async () => {
     if (!venueId) return;
@@ -304,6 +314,9 @@ export default function VenueForm({ venueId = null, onSaved }) {
   }
 
   function updateHourRow(day, patch) {
+    // The listed bookings were judged against the hours as sent; new hours
+    // need a fresh check, so confirming the old list must not be possible.
+    setHoursConflicts([]);
     setForm((prev) => ({
       ...prev,
       hours: prev.hours.map((row, i) => (i === day ? { ...row, ...patch } : row)),
@@ -415,8 +428,23 @@ export default function VenueForm({ venueId = null, onSaved }) {
     return changes;
   }
 
-  async function handleSubmit(e) {
+  function handleSubmit(e) {
     e.preventDefault();
+    save();
+  }
+
+  // Back to the hours with the edits kept, so staff can change them instead.
+  function handleChangeHours() {
+    setHoursConflicts([]);
+    hoursRef.current?.focus();
+  }
+
+  /**
+   * Create or update. `confirmIds` are the bookings the listed hours conflict
+   * showed, sent as confirmHoursChange; the server refuses them again with a
+   * new list if that list has changed since.
+   */
+  async function save(confirmIds) {
     if (saving) return; // closes the double-click window before it opens
 
     let payload;
@@ -428,6 +456,7 @@ export default function VenueForm({ venueId = null, onSaved }) {
         setSaveDetails([]);
         return;
       }
+      if (confirmIds) payload.confirmHoursChange = confirmIds;
     } else {
       payload = buildCreatePayload();
     }
@@ -437,16 +466,25 @@ export default function VenueForm({ venueId = null, onSaved }) {
     setSaveDetails([]);
 
     try {
-      const saved = isEdit
-        ? await updateVenue(venueId, payload)
-        : await createVenue(payload);
-      onSaved?.(saved);
+      if (isEdit) {
+        const saved = await updateVenue(venueId, payload);
+        setHoursConflicts([]);
+        // Which flagged bookings were the confirmed hours conflicts, so the
+        // catalogue can say why each was flagged.
+        onSaved?.(saved, { confirmedHoursChange: confirmIds ?? [] });
+      } else {
+        const saved = await createVenue(payload);
+        onSaved?.(saved);
+      }
     } catch (err) {
       // The ladder, most specific rung first.
       const status = err.response?.status;
-      const details = err.response?.data?.details;
+      const data = err.response?.data;
+      const details = data?.details;
 
-      if (Array.isArray(details) && details.length > 0) {
+      if (status === 409 && data?.code === "VENUE_HOURS_BOOKING_CONFLICT") {
+        setHoursConflicts(Array.isArray(data.conflicts) ? data.conflicts : []);
+      } else if (Array.isArray(details) && details.length > 0) {
         setSaveDetails(details);
       } else if (VENUE_SAVE_ERROR_MESSAGES[status]) {
         setSaveError(VENUE_SAVE_ERROR_MESSAGES[status]);
@@ -548,41 +586,74 @@ export default function VenueForm({ venueId = null, onSaved }) {
         disabled={saving}
       />
 
-      <fieldset>
+      {/* tabIndex -1 so "Change hours" can move focus back here. */}
+      <fieldset ref={hoursRef} tabIndex={-1}>
         <legend>Opening hours</legend>
         <ul>
-          {form.hours.map((row, day) => (
-            <li key={DAY_NAMES[day]}>
-              <label>
+          {form.hours.map((row, day) => {
+            const closing = row.open ? describeClosing(day, row.opensAt, row.closesAt) : null;
+            const noteId = `${closingNoteId}-${day}`;
+            return (
+              <li key={DAY_NAMES[day]}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={row.open}
+                    onChange={() => updateHourRow(day, { open: !row.open })}
+                    disabled={saving}
+                  />
+                  {DAY_NAMES[day]}
+                </label>
                 <input
-                  type="checkbox"
-                  checked={row.open}
-                  onChange={() => updateHourRow(day, { open: !row.open })}
-                  disabled={saving}
+                  type="time"
+                  value={row.opensAt}
+                  onChange={(e) => updateHourRow(day, { opensAt: e.target.value })}
+                  disabled={saving || !row.open}
+                  aria-label={`${DAY_NAMES[day]} opens at`}
                 />
-                {DAY_NAMES[day]}
-              </label>
-              <input
-                type="time"
-                value={row.opensAt}
-                onChange={(e) => updateHourRow(day, { opensAt: e.target.value })}
-                disabled={saving || !row.open}
-                aria-label={`${DAY_NAMES[day]} opens at`}
-              />
-              <input
-                type="time"
-                value={row.closesAt}
-                onChange={(e) => updateHourRow(day, { closesAt: e.target.value })}
-                disabled={saving || !row.open}
-                aria-label={`${DAY_NAMES[day]} closes at`}
-              />
-            </li>
-          ))}
+                <input
+                  type="time"
+                  value={row.closesAt}
+                  onChange={(e) => updateHourRow(day, { closesAt: e.target.value })}
+                  disabled={saving || !row.open}
+                  aria-label={`${DAY_NAMES[day]} closes at`}
+                  aria-describedby={closing ? noteId : undefined}
+                />
+                {/* Rendered for every open day so the live region exists before
+                    its text changes; empty for same-day hours. */}
+                {row.open && (
+                  <p className="venue-form__closing" id={noteId} aria-live="polite">
+                    {closing}
+                  </p>
+                )}
+              </li>
+            );
+          })}
         </ul>
         <p className="venue-form__help">
-          Leave a day unticked to record the venue as closed that day.
+          Leave a day unticked to record the venue as closed that day. To stay
+          open past midnight, enter a closing time earlier than the opening
+          time (e.g. 18:00 to 02:00). Use 00:00 to close at midnight.
         </p>
       </fieldset>
+
+      <BlockConflictList
+        conflicts={hoursConflicts}
+        heading={
+          hoursConflicts.length === 1
+            ? "1 approved booking falls outside the new opening hours"
+            : `${hoursConflicts.length} approved bookings fall outside the new opening hours`
+        }
+        intro="Change the hours, or confirm to flag these bookings for review. They will not be cancelled."
+        changeLabel="Change hours"
+        overrideLabel="Confirm new hours"
+        confirmText="Save the new hours, flag these bookings for review and notify each event's coordinator?"
+        confirmLabel="Yes, save and flag"
+        formatPart={formatVenuePeriod}
+        onChangePeriod={handleChangeHours}
+        onConfirmOverride={(ids) => save(ids)}
+        submitting={saving}
+      />
 
       <label>
         Setup before events
