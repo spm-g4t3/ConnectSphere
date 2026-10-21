@@ -36,20 +36,13 @@ import {
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
-import { createErrorHandler } from '../http/handleError.js';
+import { createErrorMiddleware } from '../http/handleError.js';
+import { actingUser } from '../http/actingUser.js';
 
 
-/** Map an error to a response; see src/http/handleError.js. */
-const handleError = createErrorHandler('equipment route');
+/** Answers whatever a handler throws or rejects with; see src/http/handleError.js. */
+const errorMiddleware = createErrorMiddleware('equipment route');
 
-
-/**
- * The acting user is the signed-in one, and the request body never gets a say.
- * It is recorded in the change history.
- */
-function actingUser(req) {
-  return req.user.id;
-}
 
 
 /**
@@ -80,11 +73,7 @@ export function createEquipmentRouter({
    * Statuses: 200; 401; 403 unless Technical Support Staff; 500.
    */
   router.get('/', technicalSupportOnly, async (req, res) => {
-    try {
-      res.status(200).json(await listEquipmentTypes());
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await listEquipmentTypes());
   });
 
   /**
@@ -94,11 +83,7 @@ export function createEquipmentRouter({
    * Coordinator; 500.
    */
   router.get('/active', activeReaders, async (req, res) => {
-    try {
-      res.status(200).json(await listActiveEquipmentTypes());
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await listActiveEquipmentTypes());
   });
 
   /**
@@ -110,11 +95,7 @@ export function createEquipmentRouter({
    * EQUIPMENT_NAME_TAKEN when two writers race to the same name; 500.
    */
   router.post('/', technicalSupportOnly, async (req, res) => {
-    try {
-      res.status(201).json(await createEquipmentType(req.body, actingUser(req)));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(201).json(await createEquipmentType(req.body, actingUser(req)));
   });
 
   /**
@@ -125,11 +106,7 @@ export function createEquipmentRouter({
    * Staff; 500.
    */
   router.get('/:id/history', technicalSupportOnly, async (req, res) => {
-    try {
-      res.status(200).json(await getEquipmentTypeHistory(req.params.id));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await getEquipmentTypeHistory(req.params.id));
   });
 
   /**
@@ -144,11 +121,7 @@ export function createEquipmentRouter({
    * over-commitment check refuses with (SCRUM-310); 500.
    */
   router.post('/:id/retire', technicalSupportOnly, async (req, res) => {
-    try {
-      res.status(200).json(await retireEquipmentType(req.params.id, actingUser(req)));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await retireEquipmentType(req.params.id, actingUser(req)));
   });
 
   /**
@@ -158,11 +131,7 @@ export function createEquipmentRouter({
    * EQUIPMENT_NOT_RETIRED; 500.
    */
   router.post('/:id/reinstate', technicalSupportOnly, async (req, res) => {
-    try {
-      res.status(200).json(await reinstateEquipmentType(req.params.id, actingUser(req)));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await reinstateEquipmentType(req.params.id, actingUser(req)));
   });
 
   /**
@@ -177,11 +146,7 @@ export function createEquipmentRouter({
    * 500.
    */
   router.patch('/:id/condition', technicalSupportOnly, async (req, res) => {
-    try {
-      res.status(200).json(await recordEquipmentCondition(req.params.id, req.body, actingUser(req)));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await recordEquipmentCondition(req.params.id, req.body, actingUser(req)));
   });
 
   /**
@@ -191,13 +156,10 @@ export function createEquipmentRouter({
    * field; 401; 403; 404 when no type has that id; 500.
    */
   router.patch('/:id', technicalSupportOnly, async (req, res) => {
-    try {
-      res.status(200).json(await updateEquipmentType(req.params.id, req.body, actingUser(req)));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await updateEquipmentType(req.params.id, req.body, actingUser(req)));
   });
 
+  router.use(errorMiddleware);
   return router;
 }
 

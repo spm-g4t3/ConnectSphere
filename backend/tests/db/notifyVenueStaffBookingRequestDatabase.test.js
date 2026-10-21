@@ -1,88 +1,20 @@
 /**
  * Every Venue Staff user is notified when a coordinator submits a venue
- * booking request (083), against a real Postgres.
+ * booking request, against the final schema in a real Postgres.
  *
  * SCRUM-174 AC1 (who is told, and only for a request that was created) and
  * AC6 (the notice names the event and the venue).
- *
- * Migrations: replaceFlaggedBookingDatabase.test.js's stack, the same
- * stand-ins, then 083.
  *
  * Dates: D is the Singapore date 10 days from now, never hard-coded, because
  * a booking counts only while it has not ended.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { createSchemaDb, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { at } from '../fixtures/time.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '034_setup_change_recheck.sql',
-  '040_venue_holds.sql',
-  '051_multi_venue_booking_requests.sql',
-  '065_booking_decision_statuses.sql',
-  'SAFETY_ENUM',
-  '066_venue_staff_booking_decisions.sql',
-  'SAFETY_REASON',
-  '076_reinstate_flagged_booking.sql',
-  '077_cancel_flagged_booking.sql',
-  '078_list_flagged_bookings.sql',
-  '083_notify_venue_staff_booking_request.sql',
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
-
-/** 062's `alter type ... add value` lines, read from the file, not retyped. */
-const SAFETY_ENUM = migration('062_safety_statuses.sql')
-  .split('\n')
-  .filter((line) => line.startsWith('alter type event_request_status add value'))
-  .join('\n');
-
-/** 071's review-reason list, which adds 'safety_review' to 034's. */
-const SAFETY_REASON = `
-  alter table bookings drop constraint if exists bookings_review_reason_known;
-  alter table bookings
-    add constraint bookings_review_reason_known
-    check (review_reason in ('setup_or_turnaround_changed', 'safety_review'));
-`;
-
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
-
-describe('SCRUM-174: Venue Staff are told of a new booking request (083)', () => {
+describe('SCRUM-174: Venue Staff are told of a new booking request', () => {
   let db;
   let organiser;
   let coordinator;
@@ -90,36 +22,23 @@ describe('SCRUM-174: Venue Staff are told of a new booking request (083)', () =>
   let otherStaff;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
-  async function makeUser(email, role) {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (email, role) => seedUser(db, { email, role });
 
-  async function makeVenue() {
+  const makeVenue = () => seedVenue(db, { name: `Harbour Room ${++counter}` });
+
+  function makeEvent() {
     counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, 30, 45) returning id`,
-        [`Harbour Room ${counter}`],
-      )
-    ).id;
-  }
-
-  async function makeEvent() {
-    counter += 1;
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, proposed_start, proposed_end,
-            expected_attendance, submitted_at, assigned_coordinator_id)
-         values ($1, $2, 'approved', $3, $4, 150, now(), $5) returning id`,
-        [organiser, `Event ${counter}`, at('14:00'), at('16:00'), coordinator],
-      )
-    ).id;
+    return seedEvent(db, {
+      status: 'approved',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: `Event ${counter}`,
+      proposed_start: at('14:00'),
+      proposed_end: at('16:00'),
+      expected_attendance: 150,
+    });
   }
 
   /** create_booking_request as the API calls it. */
@@ -141,19 +60,7 @@ describe('SCRUM-174: Venue Staff are told of a new booking request (083)', () =>
     ).rows;
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      if (name === 'STAND_IN') await db.exec(DECISION_STAND_IN);
-      else if (name === 'SAFETY_ENUM') await db.exec(SAFETY_ENUM);
-      else if (name === 'SAFETY_REASON') await db.exec(SAFETY_REASON);
-      else await db.exec(migration(name));
-    }
+    db = await createSchemaDb();
     organiser = await makeUser('o@x', 'event_organiser');
     coordinator = await makeUser('c@x', 'event_coordinator');
     staff = await makeUser('s@x', 'venue_staff');

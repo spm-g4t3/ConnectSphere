@@ -826,7 +826,7 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
   });
 });
 
-describe('SCRUM258 approving and rejecting a booking request (066)', () => {
+describe('SCRUM258 approving and rejecting a booking request', () => {
   const STAFF = '88888888-8888-4888-8888-888888888888';
   const HOLD = '99999999-9999-4999-8999-999999999999';
   const OTHER_EVENT = '66666666-6666-4666-8666-666666666666';

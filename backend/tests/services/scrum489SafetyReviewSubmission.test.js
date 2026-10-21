@@ -9,32 +9,7 @@ import { describe, it, expect } from 'vitest';
 
 import { getEventReadiness, submitForSafetyReview } from '../../src/services/eventRequestService.js';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../src/errors.js';
-
-/** Records each rpc and answers queued { data, error } pairs in order. */
-function createFakeClient(results = []) {
-  const queue = [...results];
-  const calls = [];
-  return {
-    calls,
-    rpc(fn, args) {
-      calls.push({ fn, args });
-      if (queue.length === 0) throw new Error(`fake client: no result queued for rpc ${fn}`);
-      return Promise.resolve(queue.shift());
-    },
-  };
-}
-
-const ok = (data) => ({ data, error: null });
-const dbError = (code, message, extra = {}) => ({ data: null, error: { code, message, ...extra } });
-
-async function errorFrom(promise) {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-}
+import { ok, dbError, errorFrom, createRpcQueueClient } from '../fixtures/supabaseStubs.js';
 
 const EVENT_ID = '22222222-2222-4222-8222-222222222222';
 const COORDINATOR_ID = '44444444-4444-4444-8444-444444444444';
@@ -63,7 +38,7 @@ const submit = (client, overrides = {}) =>
 describe('SCRUM-489 AC3: the readiness read', () => {
   it('SCRUM489_AC3_the_checklist_is_one_rpc_of_event_readiness', async () => {
     const checklist = { eventRequestId: EVENT_ID, ready: false, items: OUTSTANDING };
-    const client = createFakeClient([ok(checklist)]);
+    const client = createRpcQueueClient([ok(checklist)]);
 
     await expect(getEventReadiness({ client, eventRequestId: EVENT_ID, noEquipmentConfirmed: true })).resolves.toEqual(checklist);
 
@@ -78,7 +53,7 @@ describe('SCRUM-489 AC3: the readiness read', () => {
     ['a noEquipmentConfirmed that is not a boolean', { eventRequestId: EVENT_ID, noEquipmentConfirmed: 'yes' }, 'noEquipmentConfirmed'],
   ])('SCRUM489_AC3_%s_is_refused_with_400_before_any_rpc', async (_label, options, field) => {
     // AC3-07, AC4-06.
-    const client = createFakeClient([]);
+    const client = createRpcQueueClient([]);
 
     const err = await errorFrom(getEventReadiness({ client, ...options }));
 
@@ -88,7 +63,7 @@ describe('SCRUM-489 AC3: the readiness read', () => {
   });
 
   it('SCRUM489_AC2_an_unknown_event_is_a_404', async () => {
-    const client = createFakeClient([dbError('P0002', `event request ${EVENT_ID} not found`)]);
+    const client = createRpcQueueClient([dbError('P0002', `event request ${EVENT_ID} not found`)]);
 
     expect(await errorFrom(getEventReadiness({ client, eventRequestId: EVENT_ID }))).toBeInstanceOf(NotFoundError);
   });
@@ -98,7 +73,7 @@ describe('SCRUM-489 AC3: the readiness read', () => {
 describe('SCRUM-489: submitting for the safety check', () => {
   it('SCRUM489_AC6_a_submission_is_one_rpc_with_the_caller_the_trimmed_note_and_the_confirmation', async () => {
     // AC5-04, AC6-04: the event comes back in camelCase, in Safety review.
-    const client = createFakeClient([ok(row())]);
+    const client = createRpcQueueClient([ok(row())]);
 
     const updated = await submit(client, { note: '  East doors.  ', noEquipmentConfirmed: true });
 
@@ -120,7 +95,7 @@ describe('SCRUM-489: submitting for the safety check', () => {
     ['only whitespace', '   '],
   ])('SCRUM489_AC5_a_note_that_is_%s_is_sent_as_null', async (_label, note) => {
     // AC5-03.
-    const client = createFakeClient([ok(row())]);
+    const client = createRpcQueueClient([ok(row())]);
 
     await submit(client, { note });
 
@@ -129,7 +104,7 @@ describe('SCRUM-489: submitting for the safety check', () => {
 
   it('SCRUM489_AC5_a_note_of_exactly_2000_characters_is_sent', async () => {
     // AC5-01.
-    const client = createFakeClient([ok(row())]);
+    const client = createRpcQueueClient([ok(row())]);
 
     await submit(client, { note: 'x'.repeat(2000) });
 
@@ -143,7 +118,7 @@ describe('SCRUM-489: submitting for the safety check', () => {
     ['a noEquipmentConfirmed that is not a boolean', { noEquipmentConfirmed: 'true' }, 'noEquipmentConfirmed'],
   ])('SCRUM489_AC5_%s_is_refused_with_400_before_any_rpc', async (_label, overrides, field) => {
     // AC1-09, AC4-06, AC5-02, AC5-05: the database's own rules, applied first.
-    const client = createFakeClient([]);
+    const client = createRpcQueueClient([]);
 
     const err = await errorFrom(submit(client, overrides));
 
@@ -155,7 +130,7 @@ describe('SCRUM-489: submitting for the safety check', () => {
 
   it('SCRUM489_AC3_not_ready_is_a_409_with_every_outstanding_line', async () => {
     // AC3-02: by the code and the hint, never the message.
-    const client = createFakeClient([dbError('PT409', 'This event is not ready for the safety check.', {
+    const client = createRpcQueueClient([dbError('PT409', 'This event is not ready for the safety check.', {
       hint: 'EVENT_NOT_READY', details: JSON.stringify(OUTSTANDING),
     })]);
 
@@ -173,7 +148,7 @@ describe('SCRUM-489: submitting for the safety check', () => {
     ['missing', undefined],
   ])('SCRUM489_AC3_a_detail_that_is_%s_is_still_a_409_with_no_conflicts', async (_label, details) => {
     // AC3-03: never a 500.
-    const client = createFakeClient([dbError('PT409', 'This event is not ready for the safety check.', { hint: 'EVENT_NOT_READY', details })]);
+    const client = createRpcQueueClient([dbError('PT409', 'This event is not ready for the safety check.', { hint: 'EVENT_NOT_READY', details })]);
 
     const err = await errorFrom(submit(client));
 
@@ -190,7 +165,7 @@ describe('SCRUM-489: submitting for the safety check', () => {
     ['40001', ConflictError, 409],
   ])('SCRUM489_AC1_the_functions_%s_arrives_as_its_status', async (code, type, status) => {
     // AC1-02, AC1-04: the function's own message passes through.
-    const client = createFakeClient([dbError(code, 'This event can be submitted for the safety check only while it is Approved. It is Safety review.')]);
+    const client = createRpcQueueClient([dbError(code, 'This event can be submitted for the safety check only while it is Approved. It is Safety review.')]);
 
     const err = await errorFrom(submit(client));
 

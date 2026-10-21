@@ -8,6 +8,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 import BrowseOpenEvents from "../../src/components/BrowseOpenEvents.jsx";
 import { getOpenEvents } from "../../src/services/openEventService";
+import { deferred as pending } from "../helpers/async.js";
 
 vi.mock("../../src/services/openEventService", () => ({
   getOpenEvents: vi.fn(),
@@ -270,16 +271,6 @@ describe("SCRUM495 errors and retry", () => {
 // ---------------------------------------------------------------------------
 
 const returnToTab = () => fireEvent(window, new Event("focus"));
-
-function pending() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 describe("SCRUM495_AC6_AC7_AC8 the list is refreshed from the server", () => {
   it("SCRUM495_AC6_AC7_AC8_drops_an_event_that_is_no_longer_open_and_keeps_the_rest_when_the_reader_returns", async () => {

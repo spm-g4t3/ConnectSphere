@@ -11,7 +11,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
-import { createErrorHandler } from '../../src/http/handleError.js';
+import { createErrorHandler, createErrorMiddleware } from '../../src/http/handleError.js';
 import {
   ValidationError,
   NotFoundError,
@@ -149,5 +149,44 @@ describe('ConflictError fallbacks (SCRUM-132)', () => {
     const { res } = respond(new ConflictError('Venue is already retired', { code: 'X', conflicts: null }));
     expect(res.statusCode).toBe(409);
     expect(res.body).toEqual({ error: 'Venue is already retired', code: 'X', conflicts: [] });
+  });
+});
+
+
+describe('createErrorMiddleware', () => {
+  const errorMiddleware = createErrorMiddleware('test route');
+
+  it('has four parameters, so Express runs it as an error handler', () => {
+    expect(errorMiddleware.length).toBe(4);
+  });
+
+  it('answers a typed error with its status and body', () => {
+    const res = fakeRes();
+    const next = vi.fn();
+    errorMiddleware(new ConflictError('Venue is already retired', { code: 'VENUE_RETIRED' }), {}, res, next);
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'Venue is already retired', code: 'VENUE_RETIRED', conflicts: [] });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('answers an untyped error with a 500 that names nothing, and logs its own label', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = fakeRes();
+    const err = new Error('relation "venues" does not exist');
+    errorMiddleware(err, {}, res, vi.fn());
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual({ error: 'Unexpected server error' });
+    expect(consoleError).toHaveBeenCalledWith('Unexpected error in test route:', err);
+  });
+
+  it('passes the error on, and writes nothing, once headers have been sent', () => {
+    const res = fakeRes();
+    res.headersSent = true;
+    const next = vi.fn();
+    const err = new NotFoundError('gone');
+    errorMiddleware(err, {}, res, next);
+    expect(next).toHaveBeenCalledWith(err);
+    expect(res.status).not.toHaveBeenCalled();
+    expect(res.json).not.toHaveBeenCalled();
   });
 });

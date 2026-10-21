@@ -1,32 +1,19 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-describe('SCRUM-371: cancellation fields migration', () => {
+// SCRUM-371's cancellation fields, against the final schema.
+describe('SCRUM-371: cancellation fields', () => {
   let db;
   let organiser;
   let coordinator;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create table auth.users (
-        id uuid primary key default gen_random_uuid(),
-        email text
-      );
-    `);
-    await db.exec(migration('001_event_requests.sql'));
-    await db.exec(migration('006_event_change_requests.sql'));
-    organiser = (await one('insert into auth.users (email) values ($1) returning id', ['organiser@test'])).id;
-    coordinator = (await one('insert into auth.users (email) values ($1) returning id', ['coordinator@test'])).id;
+    db = await createSchemaDb();
+    organiser = await seedUser(db, { email: 'organiser@test' });
+    coordinator = await seedUser(db, { email: 'coordinator@test' });
   });
 
   afterAll(async () => {
@@ -45,8 +32,6 @@ describe('SCRUM-371: cancellation fields migration', () => {
   }
 
   it('adds cancellation fields without changing event status', async () => {
-    await db.exec(migration('042_event_cancellation_fields.sql'));
-
     const eventId = await makeEvent();
     const cancelledAt = '2026-10-10T07:00:00Z';
     const result = await one(
@@ -73,7 +58,6 @@ describe('SCRUM-371: cancellation fields migration', () => {
   });
 
   it('rejects a blank cancellation reason', async () => {
-    await db.exec(migration('042_event_cancellation_fields.sql'));
     const eventId = await makeEvent();
 
     await expect(
@@ -87,8 +71,10 @@ describe('SCRUM-371: cancellation fields migration', () => {
   });
 
   it('allows change requests to be closed with the event-cancelled outcome', async () => {
-    await db.exec(migration('042_event_cancellation_fields.sql'));
-    const eventId = await makeEvent();
+    // Only the assigned coordinator may decide a confirmed event's change requests.
+    const eventId = await seedEvent(db, {
+      status: 'confirmed', organiser_id: organiser, assigned_coordinator_id: coordinator,
+    });
     const requestId = (
       await one(
         `insert into event_change_requests
@@ -108,15 +94,5 @@ describe('SCRUM-371: cancellation fields migration', () => {
     expect(processed.decision).toBe('event_cancelled');
     expect(processed.processed_by).toBe(coordinator);
     expect(processed.processed_at).not.toBeNull();
-  });
-
-  it('is safe to apply twice and does not redefine or write event status', async () => {
-    const sql = migration('042_event_cancellation_fields.sql');
-    await db.exec(sql);
-    await db.exec(sql);
-
-    const normalized = sql.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').toLowerCase();
-    expect(normalized).not.toMatch(/update event_requests set status|status\s*=/);
-    expect(normalized).not.toMatch(/create or replace function/);
   });
 });

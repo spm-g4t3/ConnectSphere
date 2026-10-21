@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ConfirmedArrangements from "../../src/components/ConfirmedArrangements";
 import { getConfirmedArrangements } from "../../src/services/eventRequestService";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({ getConfirmedArrangements: vi.fn() }));
 const ID = "event-1";
@@ -13,11 +14,6 @@ const arrangements = (changes = {}) => ({
   equipment: [{ lineId: "l1", name: "Microphone", quantity: 3 }, { lineId: "l2", name: "Projector", quantity: 2 }],
   ...changes,
 });
-function deferred() {
-  let resolve, reject;
-  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
-  return { promise, resolve, reject };
-}
 async function open() {
   const view = render(<ConfirmedArrangements eventRequestId={ID} />);
   await userEvent.click(screen.getByText("Confirmed arrangements"));

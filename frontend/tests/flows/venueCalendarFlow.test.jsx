@@ -37,11 +37,9 @@ import App from "../../src/App.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
 import * as venueService from "../../src/services/venueService";
 import { formatRange } from "../../src/services/displayFormat";
+import { mockAuthUser } from "../helpers/renderApp.js";
 
-vi.mock("../../src/auth/AuthContext", () => ({
-  AuthProvider: ({ children }) => children,
-  useAuth: vi.fn(),
-}));
+vi.mock("../../src/auth/AuthContext", async () => (await import("../helpers/authMock.js")).authContextMock());
 
 vi.mock("../../src/services/venueService", () => ({
   searchActiveVenues: vi.fn(),
@@ -155,13 +153,7 @@ let entries;
 let retiredMonday;
 
 function signIn(role) {
-  vi.mocked(useAuth).mockReturnValue({
-    user: { id: "d1000000-0000-4000-8000-000000000001", name: "Test User", role },
-    loading: false,
-    logout: vi.fn().mockResolvedValue({ success: true }),
-    logoutMessage: null,
-    clearLogoutMessage: vi.fn(),
-  });
+  mockAuthUser(role, { id: "d1000000-0000-4000-8000-000000000001", name: "Test User" });
 }
 
 function renderAppAt(path) {

@@ -54,6 +54,7 @@
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
+import { createPgTranslator, rejected, conflict, notFound } from '../http/pgErrors.js';
 import {
   validateCreateVenue,
   validateUpdateVenue,
@@ -67,6 +68,7 @@ import { matchesAllCriteria } from '../domain/venueMatching.js';
 import { getBookingStatusDisplay } from '../domain/bookingStatus.js';
 import { toSuitabilityRecord } from '../domain/suitabilityRecord.js';
 import { toBookingConflict } from './venueBlockService.js';
+import { one } from './rows.js';
 
 /**
  * The venue columns with every attribute joined: four join tables, flattened
@@ -92,50 +94,36 @@ const VENUE_WITH_ATTRIBUTES_SELECT = `
  * 'new row violates check constraint "venues_max_capacity_check"',
  * which says nothing useful to whoever submitted the form.
  */
-function translateError(error) {
-  if (!error) return null;
+const notFoundVenue = notFound('Venue not found');
 
-  const code = error.code;
-  const detail = error.message ?? '';
+const translateError = createPgTranslator({
+  codes: {
+    // check constraint: capacity <= 0, closes_at <= opens_at, blank name, a
+    // turnaround outside the allowed list (017), a setup time outside its own
+    // list (023)
+    '23514': rejected,
 
-  // check constraint: capacity <= 0, closes_at <= opens_at, blank name, a
-  // turnaround outside the allowed list (017), a setup time outside its own
-  // list (023)
-  if (code === '23514') {
-    return new ValidationError(`A value was rejected by the database: ${detail}`);
-  }
+    // foreign key. Two very different causes, so read the constraint name out of
+    // the message rather than blaming the lookup tables for both.
+    '23503': (detail) =>
+      /last_modified_by/.test(detail)
+        ? new ValidationError(`The editing user does not exist: ${detail}`)
+        : new ValidationError(
+          `Unknown code referenced. Check the value exists in room_layouts, ` +
+          `accessibility_features or facilities: ${detail}`,
+        ),
 
-  // foreign key. Two very different causes, so read the constraint name out of
-  // the message rather than blaming the lookup tables for both.
-  if (code === '23503') {
-    if (/last_modified_by/.test(detail)) {
-      return new ValidationError(
-        `The editing user does not exist: ${detail}`,
-      );
-    }
-    return new ValidationError(
-      `Unknown code referenced. Check the value exists in room_layouts, ` +
-      `accessibility_features or facilities: ${detail}`,
-    );
-  }
+    // unique violation: two sets of opening hours for the same day
+    '23505': (detail) => new ConflictError(`That record already exists: ${detail}`),
 
-  // unique violation: two sets of opening hours for the same day
-  if (code === '23505') {
-    return new ConflictError(`That record already exists: ${detail}`);
-  }
+    // raised by retire_venue when the venue has already been retired (005)
+    PT409: conflict(),
 
-  // raised by retire_venue when the venue has already been retired (005)
-  if (code === 'PT409') {
-    return new ConflictError(detail);
-  }
-
-  // raised by update_venue and retire_venue when the id matches nothing
-  if (code === 'P0002' || /not found/i.test(detail)) {
-    return new NotFoundError(detail || 'Venue not found');
-  }
-
-  return new Error(detail || 'Unexpected database error');
-}
+    // raised by update_venue and retire_venue when the id matches nothing
+    P0002: notFoundVenue,
+  },
+  messages: [[/not found/i, notFoundVenue]],
+});
 
 /**
  * Create a venue and everything attached to it, in one transaction.
@@ -896,7 +884,7 @@ export async function getBookingsForVenue(venueId, { includeSuitability = false 
     };
     if (!includeSuitability) return booking;
 
-    const event = Array.isArray(row.event_requests) ? row.event_requests[0] : row.event_requests;
+    const event = one(row.event_requests);
     return {
       ...booking,
       roomLayoutCode: row.room_layout_code ?? null,

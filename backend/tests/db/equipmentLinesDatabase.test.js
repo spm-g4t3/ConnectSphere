@@ -1,19 +1,9 @@
 /**
- * SCRUM-248 for SCRUM-21: the equipment line functions, run against a real
- * Postgres.
+ * SCRUM-248 for SCRUM-21: the equipment line functions, run against the final
+ * schema in a real Postgres (PGlite).
  *
- * Applies the real migrations 022 (the equipment tables), 024 (availability)
- * and 037 (the line functions) to an in-process Postgres (PGlite), then calls
- * the functions the way the service does and checks what is left in the tables.
- * It reuses the approach of equipmentDatabase.test.js and needs no server and
- * no credentials, so it runs in CI.
- *
- * One stand-in: event_requests. 037 reads only three things from it, its id, its
- * status and its assigned_coordinator_id, so this file creates a table with
- * exactly those, plus the columns 022 and 024 touch. That keeps this test from
- * depending on the ten migrations that build the real table. What it does not
- * cover is those migrations' own constraints on a real event row. The status
- * names come from domain/eventRequestStatus.js.
+ * Calls the functions the way the service does and checks what is left in the
+ * tables. Events are seeded straight into the status under test.
  *
  * Test names are SCRUM21_ACn_<what_it_checks>, matching the SCRUM-19 test
  * document, so each test traces back to its criterion.
@@ -24,30 +14,11 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '022_equipment_schema.sql',
-  '024_equipment_availability.sql',
-  '037_equipment_request_lines.sql',
-];
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { asJson } from './helpers/equipment.js';
 
 const NO_SUCH_ID = '00000000-0000-0000-0000-000000000000';
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('SCRUM-21: recording equipment lines in Postgres', () => {
   let db;
@@ -59,23 +30,17 @@ describe('SCRUM-21: recording equipment lines in Postgres', () => {
   let microphone;
   let retiredType;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const asJson = (row) => JSON.parse(row.answer);
+  const { one } = queriesFor(() => db);
 
-  const newUser = async (email) =>
-    (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
+  const newUser = (email) => seedUser(db, { email });
   const newType = async (name, { retired = false } = {}) =>
     (await one(
       `insert into equipment_types (name, total_quantity, retired_at)
        values ($1, 10, ${retired ? 'now()' : 'null'}) returning id`,
       [name],
     )).id;
-  const newEvent = async (status = 'approved', assigned = coordinator) =>
-    (await one(
-      `insert into event_requests (organiser_id, event_name, status, assigned_coordinator_id)
-       values ($1, $2, $3, $4) returning id`,
-      [organiser, `Event ${Math.random()}`, status, assigned],
-    )).id;
+  const newEvent = (status = 'approved', assigned = coordinator) =>
+    seedEvent(db, { status, organiser_id: organiser, event_name: `Event ${Math.random()}`, assigned_coordinator_id: assigned });
 
   const add = async (event, who, type, quantity, notes = null) =>
     asJson(await one('select add_equipment_line($1, $2, $3, $4, $5)::text as answer', [event, who, type, quantity, notes]));
@@ -89,8 +54,16 @@ describe('SCRUM-21: recording equipment lines in Postgres', () => {
   const read = async (event) =>
     asJson(await one('select equipment_for_event($1)::text as answer', [event]));
 
+  // Under review needs a reviewer and a start time; every other status needs neither.
   const setRequestStatus = (event, status) =>
-    db.query('update equipment_requests set status = $2::equipment_request_status where event_request_id = $1', [event, status]);
+    db.query(
+      `update equipment_requests
+          set status = $2::equipment_request_status,
+              reviewer_id = case when $2 = 'under_review' then $3::uuid end,
+              review_started_at = case when $2 = 'under_review' then now() end
+        where event_request_id = $1`,
+      [event, status, techSupport],
+    );
   const reserve = async (event, type, line) =>
     (await one(
       `insert into equipment_reservations
@@ -102,27 +75,7 @@ describe('SCRUM-21: recording equipment lines in Postgres', () => {
   const lineByName = (state, name) => state.request.lines.find((line) => line.name === name);
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-
-      create function set_updated_at() returns trigger language plpgsql as $$
-      begin new.updated_at = now(); return new; end $$;
-
-      create type event_request_status as enum (
-        'draft', 'submitted', 'under_review', 'pending_clarification',
-        'approved', 'confirmed', 'completed', 'rejected', 'cancelled'
-      );
-      create table event_requests (
-        id                      uuid primary key default gen_random_uuid(),
-        organiser_id            uuid not null,
-        event_name              text not null,
-        status                  event_request_status not null default 'draft',
-        assigned_coordinator_id uuid
-      );
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
+    db = await createSchemaDb();
 
     organiser = await newUser('organiser@example.com');
     coordinator = await newUser('coordinator@example.com');
@@ -139,11 +92,7 @@ describe('SCRUM-21: recording equipment lines in Postgres', () => {
   });
 
 
-  describe('the migration', () => {
-    it('SCRUM21_runs_a_second_time_without_error', async () => {
-      await expect(db.exec(migration('037_equipment_request_lines.sql'))).resolves.not.toThrow();
-    });
-
+  describe('the read function', () => {
     it('SCRUM21_equipment_for_event_is_stable_so_a_read_cannot_write', async () => {
       const row = await one("select provolatile from pg_proc where proname = 'equipment_for_event'");
       expect(row.provolatile).toBe('s');
@@ -349,7 +298,8 @@ describe('SCRUM-21: recording equipment lines in Postgres', () => {
       expect(after.request.lines).toHaveLength(1);
       const released = await reservation(projectorReservation);
       expect(released.released_at).not.toBeNull();
-      expect(released.released_by).toBe(coordinator);
+      // A release the system makes for a removed line records no person.
+      expect(released.released_by).toBeNull();
       expect(released.release_reason).toBe('line removed');
       expect((await reservation(microphoneReservation)).released_at).toBeNull();
     });

@@ -27,7 +27,7 @@ import express from 'express';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
-import { createErrorHandler } from '../http/handleError.js';
+import { createErrorMiddleware } from '../http/handleError.js';
 import {
   approveBookingRequest,
   createBookingRequest,
@@ -38,7 +38,7 @@ import {
   withdrawBookingRequest,
 } from '../services/bookingRequestService.js';
 
-const handleError = createErrorHandler('booking requests route');
+const errorMiddleware = createErrorMiddleware('booking requests route');
 
 /**
  * @param {object} [options]
@@ -76,12 +76,8 @@ export function createBookingRequestRouter({
    * untyped.
    */
   router.get('/mine', coordinatorOnly, async (req, res) => {
-    try {
-      const requests = await listBookingRequestsForCoordinator(req.user.id, { client });
-      res.status(200).json(requests);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const requests = await listBookingRequestsForCoordinator(req.user.id, { client });
+    res.status(200).json(requests);
   });
 
   /**
@@ -100,12 +96,8 @@ export function createBookingRequestRouter({
    * untyped.
    */
   router.get('/pending', venueStaffOnly, async (req, res) => {
-    try {
-      const requests = await listPendingBookingRequests(req.user.id, { client });
-      res.status(200).json(requests);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const requests = await listPendingBookingRequests(req.user.id, { client });
+    res.status(200).json(requests);
   });
 
   /**
@@ -132,15 +124,11 @@ export function createBookingRequestRouter({
    * event's flagged booking.
    */
   router.post('/', coordinatorOnly, async (req, res) => {
-    try {
-      const booking = await createBookingRequest(req.body, req.user.id, {
-        client,
-        checkSuitability,
-      });
-      res.status(201).json(booking);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const booking = await createBookingRequest(req.body, req.user.id, {
+      client,
+      checkSuitability,
+    });
+    res.status(201).json(booking);
   });
 
   /**
@@ -157,12 +145,8 @@ export function createBookingRequestRouter({
    * answered as a success.
    */
   router.post('/:id/withdraw', coordinatorOnly, async (req, res) => {
-    try {
-      const booking = await withdrawBookingRequest(req.params.id, req.user.id, { client });
-      res.status(200).json(booking);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const booking = await withdrawBookingRequest(req.params.id, req.user.id, { client });
+    res.status(200).json(booking);
   });
 
   /**
@@ -182,12 +166,8 @@ export function createBookingRequestRouter({
    * one already released or ended), BOOKING_CHANGED.
    */
   router.post('/:id/release', coordinatorOnly, async (req, res) => {
-    try {
-      const result = await releaseVenueBooking(req.params.id, req.user.id, req.body ?? {}, { client });
-      res.status(200).json(result);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const result = await releaseVenueBooking(req.params.id, req.user.id, req.body ?? {}, { client });
+    res.status(200).json(result);
   });
 
   /**
@@ -208,12 +188,8 @@ export function createBookingRequestRouter({
    * `conflicts` (see approveBookingRequest).
    */
   router.post('/:id/approve', venueStaffOnly, async (req, res) => {
-    try {
-      const booking = await approveBookingRequest(req.params.id, req.user.id, { client });
-      res.status(200).json(booking);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const booking = await approveBookingRequest(req.params.id, req.user.id, { client });
+    res.status(200).json(booking);
   });
 
   /**
@@ -230,14 +206,11 @@ export function createBookingRequestRouter({
    * BOOKING_NOT_PENDING.
    */
   router.post('/:id/reject', venueStaffOnly, async (req, res) => {
-    try {
-      const booking = await rejectBookingRequest(req.params.id, req.user.id, req.body, { client });
-      res.status(200).json(booking);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const booking = await rejectBookingRequest(req.params.id, req.user.id, req.body, { client });
+    res.status(200).json(booking);
   });
 
+  router.use(errorMiddleware);
   return router;
 }
 

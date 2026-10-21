@@ -158,3 +158,15 @@ describe('SCRUM36 registration submission endpoint', () => {
     } finally { log.mockRestore(); }
   });
 });
+
+describe('SCRUM494 registration settings endpoint', () => {
+  it('SCRUM494_AC2_answers_400_for_a_time_without_an_offset', async () => {
+    const db = client();
+    const res = await request(app(db, ROLE.EVENT_ORGANISER)).put(`/api/registration/events/${EVENT}/settings`)
+      .set('Authorization', 'Bearer valid-token')
+      .send({ enabled: true, opensAt: '2026-11-01T10:00:00', closesAt: '2026-11-02T10:00:00Z' });
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'registrationOpensAt', message: 'Enter a valid date and time.' }]);
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+});

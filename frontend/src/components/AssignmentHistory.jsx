@@ -45,6 +45,8 @@ import {
   getAssignmentHistory,
   getAssignmentHistoryForReview,
 } from "../services/eventRequestService";
+import { formatTimestamp } from "../services/displayFormat";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const FETCH_BY_VIEW = {
   coordinator: getAssignmentHistoryForReview,
@@ -55,21 +57,11 @@ const FETCH_BY_VIEW = {
 // event and, for an Organiser, someone else's event; the server answers the
 // two identically on purpose, so this does too.
 const HISTORY_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Event Coordinators can see this event's full history.",
   404: "This event's coordinator history is not available.",
   500: "The coordinator history could not be loaded. Please try again.",
 };
-
-/**
- * A timestamp in the reader's locale, or the raw string if it will not parse.
- * The same four lines as CoordinatorRequestDetail's formatTimestamp.
- */
-function formatTimestamp(value) {
-  if (!value) return "Not recorded";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
-}
 
 /**
  * A coordinator, never "null".
@@ -131,7 +123,7 @@ function HistoryEntry({ entry, currentUserId }) {
     <li className="assignment-history__entry">
       <div className="assignment-history__movement">{movement}</div>
       <div className="assignment-history__meta">
-        {formatTimestamp(entry.createdAt)} &middot; by {madeBy}
+        {formatTimestamp(entry.createdAt, "Not recorded")} &middot; by {madeBy}
       </div>
       {noteWasSent && entry.handoverNote && (
         <blockquote className="assignment-history__note">{entry.handoverNote}</blockquote>

@@ -14,7 +14,7 @@
  * against a real Postgres in tests/db/equipmentLinesDatabase.test.js.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
   listEventEquipment,
@@ -29,6 +29,7 @@ import {
   ForbiddenError,
   AppError,
 } from '../../src/errors.js';
+import { ok, dbError, errorFrom, rpcByNameClient } from '../fixtures/supabaseStubs.js';
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const LINE_ID = '22222222-2222-4222-8222-222222222222';
@@ -59,48 +60,21 @@ const stateRow = ({ status = 'pending_review', lines = [lineRow()] } = {}) => ({
   },
 });
 
-const dbError = (code, message) => ({ data: null, error: { code, message } });
-const ok = (data) => ({ data, error: null });
-
 
 /**
  * A client whose `rpc` answers by function name and whose `from` answers the
  * single-row read of equipment_types and the existence read of event_requests.
  */
 function fakeClient({ rpc = {}, type = { id: TYPE_ID, retired_at: null }, event = { id: EVENT_ID } } = {}) {
-  const rpcCalls = [];
-  const fromCalls = [];
-
-  return {
-    rpcCalls,
-    fromCalls,
-    rpc: vi.fn(async (name, args) => {
-      rpcCalls.push({ name, args });
-      const answer = rpc[name];
-      if (answer === undefined) return ok({ request: null });
-      return typeof answer === 'function' ? answer(args) : answer;
-    }),
-    from: vi.fn((table) => {
-      fromCalls.push(table);
-      const row = table === 'equipment_types' ? type : event;
-      return {
-        select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(ok(row)) }) }),
-      };
-    }),
-  };
+  return rpcByNameClient({
+    rpc,
+    fallback: () => ok({ request: null }),
+    table: (name) => ok(name === 'equipment_types' ? type : event),
+  });
 }
 
 const writes = (client) =>
   client.rpcCalls.filter(({ name }) => /^(add|amend|remove)_equipment_line$/.test(name));
-
-const failure = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 let client;
 beforeEach(() => {
@@ -180,7 +154,7 @@ describe('AC2 to AC5: adding a line', () => {
   });
 
   it('SCRUM21_AC3_refuses_a_bad_quantity_before_any_write', async () => {
-    const err = await failure(
+    const err = await errorFrom(
       addEquipmentLine(EVENT_ID, { equipmentTypeId: TYPE_ID, quantity: 0 }, COORDINATOR_ID, { client }),
     );
 
@@ -192,7 +166,7 @@ describe('AC2 to AC5: adding a line', () => {
   it('SCRUM21_AC2_refuses_an_unknown_type_and_says_so_without_writing', async () => {
     client = fakeClient({ type: null });
 
-    const err = await failure(
+    const err = await errorFrom(
       addEquipmentLine(EVENT_ID, { equipmentTypeId: TYPE_ID, quantity: 1 }, COORDINATOR_ID, { client }),
     );
 
@@ -204,7 +178,7 @@ describe('AC2 to AC5: adding a line', () => {
   it('SCRUM21_AC2_refuses_a_retired_type_and_says_so_without_writing', async () => {
     client = fakeClient({ type: { id: TYPE_ID, retired_at: '2026-09-01T00:00:00Z' } });
 
-    const err = await failure(
+    const err = await errorFrom(
       addEquipmentLine(EVENT_ID, { equipmentTypeId: TYPE_ID, quantity: 1 }, COORDINATOR_ID, { client }),
     );
 
@@ -215,7 +189,7 @@ describe('AC2 to AC5: adding a line', () => {
   it('SCRUM21_AC4_refuses_a_type_already_on_the_event_without_writing', async () => {
     client = fakeClient({ rpc: { equipment_for_event: ok(stateRow()) } });
 
-    const err = await failure(
+    const err = await errorFrom(
       addEquipmentLine(EVENT_ID, { equipmentTypeId: TYPE_ID, quantity: 1 }, COORDINATOR_ID, { client }),
     );
 
@@ -237,7 +211,7 @@ describe('AC2 to AC5: adding a line', () => {
   it('SCRUM21_AC3_reports_a_bad_quantity_and_a_retired_type_together', async () => {
     client = fakeClient({ type: { id: TYPE_ID, retired_at: '2026-09-01T00:00:00Z' } });
 
-    const err = await failure(
+    const err = await errorFrom(
       addEquipmentLine(EVENT_ID, { equipmentTypeId: TYPE_ID, quantity: -1 }, COORDINATOR_ID, { client }),
     );
 
@@ -246,7 +220,7 @@ describe('AC2 to AC5: adding a line', () => {
   });
 
   it('SCRUM21_AC2_asks_the_database_nothing_when_the_type_id_is_not_readable', async () => {
-    const err = await failure(
+    const err = await errorFrom(
       addEquipmentLine(EVENT_ID, { equipmentTypeId: 'nope', quantity: 1 }, COORDINATOR_ID, { client }),
     );
 
@@ -256,7 +230,7 @@ describe('AC2 to AC5: adding a line', () => {
   });
 
   it('SCRUM21_AC1_refuses_a_blank_caller_before_any_call', async () => {
-    const err = await failure(
+    const err = await errorFrom(
       addEquipmentLine(EVENT_ID, { equipmentTypeId: TYPE_ID, quantity: 1 }, '  ', { client }),
     );
 
@@ -266,7 +240,7 @@ describe('AC2 to AC5: adding a line', () => {
   });
 
   it('SCRUM21_AC1_refuses_an_event_id_that_is_not_a_uuid_before_any_call', async () => {
-    const err = await failure(
+    const err = await errorFrom(
       addEquipmentLine('abc', { equipmentTypeId: TYPE_ID, quantity: 1 }, COORDINATOR_ID, { client }),
     );
 
@@ -283,7 +257,7 @@ describe('AC1: what the database refuses becomes a typed error', () => {
 
   const callAdd = (rpcError) => {
     client = fakeClient({ rpc: { add_equipment_line: rpcError } });
-    return failure(addEquipmentLine(EVENT_ID, { equipmentTypeId: TYPE_ID, quantity: 1 }, COORDINATOR_ID, { client }));
+    return errorFrom(addEquipmentLine(EVENT_ID, { equipmentTypeId: TYPE_ID, quantity: 1 }, COORDINATOR_ID, { client }));
   };
 
   it('SCRUM21_AC1_42501_is_a_ForbiddenError_with_the_functions_own_words', async () => {
@@ -373,7 +347,7 @@ describe('AC6 and AC7: amending a line', () => {
   });
 
   it('SCRUM21_AC6_changing_the_type_is_refused_before_any_call', async () => {
-    const err = await failure(
+    const err = await errorFrom(
       amendEquipmentLine(EVENT_ID, LINE_ID, { equipmentTypeId: OTHER_TYPE_ID }, COORDINATOR_ID, { client }),
     );
 
@@ -383,14 +357,14 @@ describe('AC6 and AC7: amending a line', () => {
   });
 
   it('SCRUM21_AC6_an_empty_amendment_is_refused_before_any_call', async () => {
-    const err = await failure(amendEquipmentLine(EVENT_ID, LINE_ID, {}, COORDINATOR_ID, { client }));
+    const err = await errorFrom(amendEquipmentLine(EVENT_ID, LINE_ID, {}, COORDINATOR_ID, { client }));
 
     expect(err.details[0].field).toBe('changes');
     expect(client.rpcCalls).toEqual([]);
   });
 
   it('SCRUM21_AC6_a_line_id_that_is_not_a_uuid_is_refused_before_any_call', async () => {
-    const err = await failure(amendEquipmentLine(EVENT_ID, 'abc', { quantity: 2 }, COORDINATOR_ID, { client }));
+    const err = await errorFrom(amendEquipmentLine(EVENT_ID, 'abc', { quantity: 2 }, COORDINATOR_ID, { client }));
 
     expect(err.details).toEqual([{ field: 'lineId', message: 'must be a UUID' }]);
     expect(client.rpcCalls).toEqual([]);
@@ -399,14 +373,14 @@ describe('AC6 and AC7: amending a line', () => {
   it('SCRUM21_AC6_a_line_that_is_not_on_the_event_is_a_404', async () => {
     client = fakeClient({ rpc: { amend_equipment_line: dbError('P0002', 'Equipment line not found') } });
 
-    const err = await failure(amendEquipmentLine(EVENT_ID, LINE_ID, { quantity: 2 }, COORDINATOR_ID, { client }));
+    const err = await errorFrom(amendEquipmentLine(EVENT_ID, LINE_ID, { quantity: 2 }, COORDINATOR_ID, { client }));
     expect(err).toBeInstanceOf(NotFoundError);
   });
 
   it('SCRUM21_AC1_an_amendment_by_someone_else_is_a_403', async () => {
     client = fakeClient({ rpc: { amend_equipment_line: dbError('42501', 'Only the assigned coordinator') } });
 
-    const err = await failure(amendEquipmentLine(EVENT_ID, LINE_ID, { quantity: 2 }, COORDINATOR_ID, { client }));
+    const err = await errorFrom(amendEquipmentLine(EVENT_ID, LINE_ID, { quantity: 2 }, COORDINATOR_ID, { client }));
     expect(err).toBeInstanceOf(ForbiddenError);
   });
 });
@@ -439,12 +413,12 @@ describe('AC6 to AC8: removing a line', () => {
   it('SCRUM21_AC1_removal_in_the_wrong_status_is_a_409', async () => {
     client = fakeClient({ rpc: { remove_equipment_line: dbError('55000', 'Equipment can only be changed while the event is Approved. This event is Submitted.') } });
 
-    const err = await failure(removeEquipmentLine(EVENT_ID, LINE_ID, COORDINATOR_ID, { client }));
+    const err = await errorFrom(removeEquipmentLine(EVENT_ID, LINE_ID, COORDINATOR_ID, { client }));
     expect(err).toBeInstanceOf(ConflictError);
   });
 
   it('SCRUM21_AC6_a_blank_caller_is_refused_before_any_call', async () => {
-    const err = await failure(removeEquipmentLine(EVENT_ID, LINE_ID, '', { client }));
+    const err = await errorFrom(removeEquipmentLine(EVENT_ID, LINE_ID, '', { client }));
 
     expect(err).toBeInstanceOf(ValidationError);
     expect(client.rpcCalls).toEqual([]);
@@ -472,14 +446,14 @@ describe('AC11: reading an event equipment', () => {
   it('SCRUM21_AC11_an_event_that_does_not_exist_is_a_404_not_an_empty_answer', async () => {
     client = fakeClient({ event: null });
 
-    const err = await failure(listEventEquipment(EVENT_ID, { client }));
+    const err = await errorFrom(listEventEquipment(EVENT_ID, { client }));
 
     expect(err).toBeInstanceOf(NotFoundError);
     expect(client.rpcCalls).toEqual([]);
   });
 
   it('SCRUM21_AC11_an_id_that_is_not_a_uuid_is_refused_before_any_call', async () => {
-    const err = await failure(listEventEquipment('abc', { client }));
+    const err = await errorFrom(listEventEquipment('abc', { client }));
 
     expect(err).toBeInstanceOf(ValidationError);
     expect(client.fromCalls).toEqual([]);

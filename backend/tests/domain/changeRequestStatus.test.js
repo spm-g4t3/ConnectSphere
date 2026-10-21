@@ -5,13 +5,10 @@
  * progress, or processed.
  *
  * Mirrors the structure of eventRequestStatus.test.js: the JS list and the
- * database enum must not drift apart.
+ * database enum, read from the built schema, must not drift apart.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
 import {
   CHANGE_REQUEST_STATUS,
@@ -23,28 +20,18 @@ import {
   CHANGE_REQUEST_DECISION_LABEL,
   isValidChangeRequestDecision,
 } from '../../src/domain/changeRequestStatus.js';
+import { useSchemaDb, enumLabels } from './helpers/schemaVocabulary.js';
+
+const schemaDb = useSchemaDb();
+
+// Written only by cancel_event_request when the whole event is cancelled; a
+// reviewer never chooses it, so the decision endpoint must not accept it.
+const SYSTEM_ONLY_SQL_DECISIONS = ['event_cancelled'];
 
 
 describe('CHANGE_REQUEST_STATUS mirrors the database enum', () => {
-  /** Pull the enum values straight out of the migration, comments stripped. */
-  function statusesDeclaredInSql() {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const sql = readFileSync(
-      resolve(here, '../../db/migrations/006_event_change_requests.sql'),
-      'utf8',
-    );
-
-    const block = sql.match(
-      /create type change_request_status as enum \(([\s\S]*?)\);/i,
-    );
-    if (!block) throw new Error('could not find the enum in the migration');
-
-    return [...block[1].replace(/--[^\n]*/g, '').matchAll(/'([a-z_]+)'/g)]
-      .map((m) => m[1]);
-  }
-
-  it('declares exactly the same values as the SQL migration', () => {
-    expect([...CHANGE_REQUEST_STATUSES].sort()).toEqual(statusesDeclaredInSql().sort());
+  it('declares exactly the values of the change_request_status enum in the schema', async () => {
+    expect([...CHANGE_REQUEST_STATUSES]).toEqual(await enumLabels(schemaDb(), 'change_request_status'));
   });
 });
 
@@ -73,32 +60,17 @@ describe('AC4: an Organiser can tell outstanding, in progress and processed apar
     ['null', null],
     ['undefined', undefined],
     ['a number', 1],
-  ])('rejects %s', (_label, value) => {
+  ])('rejects %s as a status', (_label, value) => {
     expect(isValidChangeRequestStatus(value)).toBe(false);
   });
 });
 
 
 describe('CHANGE_REQUEST_DECISION mirrors the database enum', () => {
-  /** Pull the enum values straight out of the migration, comments stripped. */
-  function decisionsDeclaredInSql() {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const sql = readFileSync(
-      resolve(here, '../../db/migrations/006_event_change_requests.sql'),
-      'utf8',
-    );
-
-    const block = sql.match(
-      /create type change_request_decision as enum \(([\s\S]*?)\);/i,
-    );
-    if (!block) throw new Error('could not find the enum in the migration');
-
-    return [...block[1].replace(/--[^\n]*/g, '').matchAll(/'([a-z_]+)'/g)]
-      .map((m) => m[1]);
-  }
-
-  it('declares exactly the same values as the SQL migration', () => {
-    expect([...CHANGE_REQUEST_DECISIONS].sort()).toEqual(decisionsDeclaredInSql().sort());
+  it('declares the change_request_decision enum values a reviewer can choose', async () => {
+    const reviewerDecisions = (await enumLabels(schemaDb(), 'change_request_decision'))
+      .filter((decision) => !SYSTEM_ONLY_SQL_DECISIONS.includes(decision));
+    expect([...CHANGE_REQUEST_DECISIONS]).toEqual(reviewerDecisions);
   });
 });
 
@@ -125,7 +97,7 @@ describe('SCRUM-37: a processed change request can be told approved from rejecte
     ['null', null],
     ['undefined', undefined],
     ['a number', 1],
-  ])('rejects %s', (_label, value) => {
+  ])('rejects %s as a decision', (_label, value) => {
     expect(isValidChangeRequestDecision(value)).toBe(false);
   });
 });

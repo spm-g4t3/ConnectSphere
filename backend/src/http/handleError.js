@@ -54,3 +54,26 @@ export function createErrorHandler(context) {
     return res.status(500).json({ error: 'Unexpected server error' });
   };
 }
+
+
+/**
+ * Build the error-handling middleware for one router.
+ *
+ * Express 5 forwards a throw or a rejected promise from a handler to next(err),
+ * so a router registers this last and its handlers need no try/catch of their own.
+ *
+ * @param {string} context  named in the log line, e.g. 'venues route'
+ * @returns {import('express').ErrorRequestHandler}
+ */
+export function createErrorMiddleware(context) {
+  const handleError = createErrorHandler(context);
+
+  // Four parameters: Express recognises an error handler by its arity, and
+  // would run a three-parameter one as ordinary middleware.
+  return function errorMiddleware(err, req, res, next) {
+    // A response already under way cannot take a new status; Express's default
+    // handler knows how to abort it.
+    if (res.headersSent) return next(err);
+    return handleError(err, res);
+  };
+}

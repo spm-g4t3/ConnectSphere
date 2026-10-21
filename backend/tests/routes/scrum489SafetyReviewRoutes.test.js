@@ -15,6 +15,8 @@ import request from 'supertest';
 
 import { createEventRequestRouter } from '../../src/routes/eventRequests.js';
 import { ROLE } from '../../src/domain/userRole.js';
+import { ok, dbError } from '../fixtures/supabaseStubs.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 function createFakeClient(results = []) {
   const queue = [...results];
@@ -49,19 +51,12 @@ function createFakeClient(results = []) {
   };
 }
 
-const ok = (data) => ({ data, error: null });
-const dbError = (code, message, extra = {}) => ({ data: null, error: { code, message, ...extra } });
-
 const EVENT_ID = '22222222-2222-4222-8222-222222222222';
 const COORDINATOR_A = '44444444-4444-4444-8444-444444444444';
 const COORDINATOR_B = '66666666-6666-4666-8666-666666666666';
 const LEAD_ID = '77777777-7777-4777-8777-777777777777';
 
-const signedInWithRole = (role, id = COORDINATOR_A) => (req, _res, next) => {
-  req.user = { id, email: 'someone@example.com', role };
-  next();
-};
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInWithRole = signedInFor(COORDINATOR_A);
 
 function appWith({ client, requireAuth = signedInWithRole(ROLE.EVENT_COORDINATOR) } = {}) {
   return express()

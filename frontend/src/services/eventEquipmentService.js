@@ -24,7 +24,7 @@
 //   404  no such event, or no such line on it.
 //   409  the event is not Approved (code EVENT_NOT_APPROVED).
 
-import { apiClient } from "./apiClient";
+import { deleteData, getData, patchData, postData } from "./apiData";
 
 /**
  * The event's current equipment request and its lines.
@@ -33,8 +33,7 @@ import { apiClient } from "./apiClient";
  * @returns {Promise<{request: Object|null}>}
  */
 export async function getEventEquipment(eventRequestId) {
-  const response = await apiClient.get(`/event-requests/${eventRequestId}/equipment`);
-  return response.data;
+  return getData(`/event-requests/${eventRequestId}/equipment`);
 }
 
 /**
@@ -49,12 +48,11 @@ export async function getEventEquipment(eventRequestId) {
  * @returns {Promise<{request: Object}>}
  */
 export async function addEquipmentLine(eventRequestId, { equipmentTypeId, quantity, technicalNotes }) {
-  const response = await apiClient.post(`/event-requests/${eventRequestId}/equipment/lines`, {
+  return postData(`/event-requests/${eventRequestId}/equipment/lines`, {
     equipmentTypeId,
     quantity,
     technicalNotes,
   });
-  return response.data;
 }
 
 /**
@@ -70,11 +68,10 @@ export async function addEquipmentLine(eventRequestId, { equipmentTypeId, quanti
  * @returns {Promise<{request: Object}>}
  */
 export async function amendEquipmentLine(eventRequestId, lineId, changes) {
-  const response = await apiClient.patch(
+  return patchData(
     `/event-requests/${eventRequestId}/equipment/lines/${lineId}`,
     changes,
   );
-  return response.data;
 }
 
 /**
@@ -85,8 +82,7 @@ export async function amendEquipmentLine(eventRequestId, lineId, changes) {
  * @returns {Promise<{request: Object}>}
  */
 export async function removeEquipmentLine(eventRequestId, lineId) {
-  const response = await apiClient.delete(`/event-requests/${eventRequestId}/equipment/lines/${lineId}`);
-  return response.data;
+  return deleteData(`/event-requests/${eventRequestId}/equipment/lines/${lineId}`);
 }
 
 /**
@@ -97,6 +93,5 @@ export async function removeEquipmentLine(eventRequestId, lineId) {
  * @returns {Promise<Array<{id: string, name: string, description: string|null, category: string|null}>>}
  */
 export async function getActiveEquipmentTypes() {
-  const response = await apiClient.get("/equipment/active");
-  return response.data;
+  return getData("/equipment/active");
 }

@@ -49,10 +49,10 @@
  * refused" from "request first, block over a pending request": both are legal,
  * and both are accepted.
  *
- * Requires migrations 027 to 031, 051, and 065 to 067 (run 065, then 066, then
- * 067, each as a separate execution). The preflight probes for 065 and 066 and
- * says what is missing; nothing is written until it passes. 067 changes only
- * event cancellation, which this script does not drive, so it is not probed.
+ * Requires the full schema: backend/db/baseline/ plus every file in
+ * backend/db/migrations/ (see the repo README). The preflight probes the
+ * request columns, functions and statuses it uses and says what is missing;
+ * nothing is written until it passes.
  * Exits non-zero on any failure.
  *
  * It creates throwaway auth users: two Venue Staff, two Event Coordinators and
@@ -78,6 +78,7 @@ import {
   rejectBookingRequest,
 } from '../src/services/bookingRequestService.js';
 import { ConflictError, ForbiddenError } from '../src/errors.js';
+import { createHarness, createUserWithProfile, sameInstant } from './lib/harness.js';
 
 const STAMP = Date.now();
 const NAME = `__check_requests_${STAMP}`;
@@ -96,12 +97,8 @@ const venueIds = [];
 const eventIds = [];
 const bookingIds = new Set();
 
-let failures = 0;
-
-function check(label, passed, detail = '') {
-  console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
-  if (!passed) failures += 1;
-}
+const harness = createHarness();
+const { check, step } = harness;
 
 /** The suitability check is N10's and is not built; every venue here passes it. */
 const checkSuitability = async () => ({ suitable: true, criteria: [{ criterion: 'capacity', met: true }] });
@@ -211,20 +208,11 @@ async function preflight() {
 // ---------------------------------------------------------------------------
 
 async function createTestUser(label, role) {
-  const { data, error } = await supabase.auth.admin.createUser({
+  const user = await createUserWithProfile({
     email: `__check_requests_${label}_${STAMP}@example.invalid`,
-    email_confirm: true,
+    label, role, users,
   });
-  if (error) throw new Error(`could not create test user (${label}): ${error.message}`);
-
-  users[label] = data.user.id;
-
-  const { error: profileError } = await supabase
-    .from('profiles')
-    .insert({ id: data.user.id, role, full_name: `Check ${label}` });
-  if (profileError) throw new Error(`could not create profile (${label}): ${profileError.message}`);
-
-  return data.user.id;
+  return user.id;
 }
 
 async function makeVenue(label) {
@@ -336,7 +324,6 @@ async function occupyingBookingIds(venueId, startsAt, endsAt) {
   return (data ?? []).filter((row) => row.kind === 'booking').map((row) => row.id);
 }
 
-const sameInstant = (a, b) => a != null && b != null && new Date(a).getTime() === new Date(b).getTime();
 const reasonOf = (result) => result.reason?.code ?? result.reason?.message ?? '';
 
 async function venueStaffCount() {
@@ -352,19 +339,6 @@ async function venueStaffCount() {
 // Cleanup
 // ---------------------------------------------------------------------------
 
-async function step(label, fn) {
-  try {
-    const result = await fn();
-    if (result?.error) {
-      console.error(`  cleanup: ${label} failed: ${result.error.message}`);
-      failures += 1;
-    }
-  } catch (err) {
-    console.error(`  cleanup: ${label} failed: ${err.message}`);
-    failures += 1;
-  }
-}
-
 async function cleanup() {
   // Bookings a race created that no call returned (a refused call can still
   // have left nothing, but a winner whose response was lost would not be known).
@@ -373,7 +347,7 @@ async function cleanup() {
       await trackBookingsOf(eventId);
     } catch (err) {
       console.error(`  cleanup: reading bookings failed: ${err.message}`);
-      failures += 1;
+      harness.failures += 1;
     }
   }
   const bookings = [...bookingIds];
@@ -383,7 +357,7 @@ async function cleanup() {
     const { data, error } = await supabase.from('venue_blocks').select('id').in('venue_id', venueIds);
     if (error) {
       console.error(`  cleanup: reading blocks failed: ${error.message}`);
-      failures += 1;
+      harness.failures += 1;
     }
     blockIds = (data ?? []).map((row) => row.id);
   }
@@ -423,11 +397,7 @@ async function cleanup() {
     await step('venue_change_history', () => supabase.from('venue_change_history').delete().in('venue_id', venueIds));
     await step('venues', () => supabase.from('venues').delete().in('id', venueIds));
   }
-  for (const [label, id] of Object.entries(users)) {
-    if (!id) continue;
-    await step(`profile (${label})`, () => supabase.from('profiles').delete().eq('id', id));
-    await step(`auth user (${label})`, () => supabase.auth.admin.deleteUser(id));
-  }
+  await harness.deleteTestUsers(users);
 }
 
 // ---------------------------------------------------------------------------
@@ -437,17 +407,7 @@ async function cleanup() {
 async function main() {
   console.log('\nBooking requests check\n');
 
-  const missing = await preflight();
-  if (missing.length > 0) {
-    for (const line of missing) console.error(`  missing: ${line}`);
-    console.error('\nApply migrations 027-031 and 051, then 065, 066 and 067 in that order, each as a separate');
-    console.error('execution in the Supabase SQL Editor (065_booking_decision_statuses.sql,');
-    console.error('066_venue_staff_booking_decisions.sql, 067_withdraw_conflicting_on_cancellation.sql),');
-    console.error('then run this again.');
-    failures += 1;
-    return;
-  }
-  check('migrations 027-031, 051, 065 and 066 are applied', true);
+  if (!harness.schemaApplied(await preflight())) return;
 
   // --- setup ---------------------------------------------------------------
   await createTestUser('staff1', 'venue_staff');
@@ -963,12 +923,12 @@ async function main() {
 main()
   .catch((err) => {
     console.error(`\nFailed: ${err.message}`);
-    failures += 1;
+    harness.failures += 1;
   })
   .finally(async () => {
     await cleanup();
-    if (failures > 0) {
-      console.error(`\n${failures} check(s) failed.\n`);
+    if (harness.failures > 0) {
+      console.error(`\n${harness.failures} check(s) failed.\n`);
       process.exit(1);
     }
     console.log('\nAll checks passed. Requested, raced, decided, withdrawn, listed, cleaned up.\n');

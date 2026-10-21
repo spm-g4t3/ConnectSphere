@@ -8,6 +8,8 @@
 // `code` first, then by status, then a default per action. data.error is never
 // shown on its own: outside a 400 it is database or driver prose.
 
+import { SESSION_EXPIRED } from "./apiErrors";
+
 const FIELD_LABELS = {
   name: "Name",
   description: "Description",
@@ -26,7 +28,7 @@ const CODE_MESSAGES = {
 };
 
 const STATUS_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Technical Support Staff can manage the equipment catalogue.",
   404: "That equipment type no longer exists. The list has been refreshed.",
 };

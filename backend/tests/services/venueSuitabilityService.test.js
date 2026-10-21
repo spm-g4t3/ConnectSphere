@@ -30,13 +30,13 @@ vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: {}, supabaseAdm
 const {
   checkVenueSuitability,
   checkEventVenues,
-  LIVE_BOOKING_STATUSES,
   describeAvailability,
   toOccupancyConflict,
   SUITABILITY_CHECK_CRITERIA,
   AVAILABILITY_CRITERION,
 } = await import('../../src/services/venueSuitabilityService.js');
 const { SUITABILITY_CRITERIA } = await import('../../src/domain/venueMatching.js');
+const { LIVE_BOOKING_STATUSES } = await import('../../src/domain/bookingStatus.js');
 const { ValidationError, NotFoundError, ForbiddenError, ConflictError } = await import(
   '../../src/errors.js'
 );

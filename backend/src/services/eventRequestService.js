@@ -55,13 +55,23 @@
  *    reinterpret a value the timestamptz column already understands.
  */
 
-import { checkTimestamp } from '../validation/timestampValidation.js';
+import { checkTimestamp, DATE_ONLY_PATTERN, singaporeToday } from '../validation/timestampValidation.js';
 import {
   ValidationError,
   NotFoundError,
   ConflictError,
   ForbiddenError,
 } from '../errors.js';
+import { resolveClient } from '../config/resolveClient.js';
+import {
+  createPgTranslator,
+  rejected,
+  forbidden,
+  invalid,
+  conflict,
+  notFound,
+  untyped,
+} from '../http/pgErrors.js';
 import {
   validateCreateEventRequest,
   validateUpdateEventRequest,
@@ -71,11 +81,13 @@ import {
 // The repository's one uuid check, exported from there precisely so it is not
 // copied (see its docstring). A pure module, so importing it keeps this
 // service loadable without credentials.
-import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
+import { isPlausibleId, requireCallerId } from '../validation/ids.js';
 import {
   STATUS,
   canTransition,
   COORDINATOR_QUEUE_STATUSES,
+  ACTIVE_EVENT_STATUSES,
+  FINISHED_EVENT_STATUSES,
   getOrganiserStatusLabel,
   getStatusDisplay,
 } from '../domain/eventRequestStatus.js';
@@ -143,45 +155,9 @@ const COLUMN_BY_FIELD = Object.freeze({
   equipmentRequirements: 'equipment_requirements',
 });
 
-const CLARIFICATION_AMENDABLE_FIELDS = Object.freeze([
-  'eventName',
-  'purpose',
-  'description',
-  'proposedStart',
-  'proposedEnd',
-  'expectedAttendance',
-  'venueRequirements',
-  'accessibilityRequirements',
-  'equipmentRequirements',
-]);
+// A clarification may ask for any editable field, so the list is the map's keys, in its order.
+const CLARIFICATION_AMENDABLE_FIELDS = Object.freeze(Object.keys(COLUMN_BY_FIELD));
 
-
-/**
- * Resolve the Supabase client, importing the default one only if needed.
- *
- * A deliberate deviation from venueService.js, which imports the client
- * statically at the top of the file. Someone will ask why the two differ, so:
- * src/config/supabaseClient.js throws at import time when SUPABASE_URL or
- * SUPABASE_SECRET_KEY is missing -- on purpose, so a misconfigured server fails
- * at startup rather than on its first query. A static import here would drag
- * that throw into every test run of this module and force credentials on anyone
- * running the suite, CI included. Deferring it to a dynamic import, reached only
- * when no client was supplied, keeps the service unit-testable without a .env
- * while leaving production behaviour identical: ESM caches the module, so the
- * import costs one resolution on the first call and nothing afterwards.
- *
- * The seam is for testing, not for configuration. There is still exactly one
- * real client, and it is still created in exactly one place.
- *
- * @param {object} [client] a client supplied by the caller, usually a test
- * @returns {Promise<object>} that client, or the shared default one
- */
-async function resolveClient(client) {
-  if (client) return client;
-
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
-}
 
 // The PT409 hints 096 raises, passed to the client as the error code.
 const SIGNIFICANT_CHANGE_CONFLICTS = new Set([
@@ -205,117 +181,105 @@ const SIGNIFICANT_CHANGE_CONFLICTS = new Set([
  * every legitimate empty read. It is handled at the update site instead, where
  * the surrounding code knows which of the two it is looking at.
  */
-function translateError(error) {
-  if (!error) return null;
+const notFoundEventRequest = notFound('Event request not found');
 
-  const code = error.code;
-  const detail = error.message ?? '';
+const translateError = createPgTranslator({
+  codes: {
+    // check constraint: backwards dates, non-positive attendance, or a
+    // submitted_at set on a row that is still a draft (005).
+    '23514': rejected,
 
-  // check constraint: backwards dates, non-positive attendance, or a
-  // submitted_at set on a row that is still a draft (005).
-  if (code === '23514') {
-    return new ValidationError(`A value was rejected by the database: ${detail}`);
-  }
+    // foreign key: organiser_id is the only one on this table, so this means the
+    // Organiser does not exist in auth.users -- a stale token, a deleted account,
+    // or a hand-made request. The likeliest real failure of the three.
+    '23503': (detail) =>
+      new ValidationError(
+        `Unknown organiser. organiser_id must match an existing user in ` +
+        `auth.users: ${detail}`,
+      ),
 
-  // foreign key: organiser_id is the only one on this table, so this means the
-  // Organiser does not exist in auth.users -- a stale token, a deleted account,
-  // or a hand-made request. The likeliest real failure of the three.
-  if (code === '23503') {
-    return new ValidationError(
-      `Unknown organiser. organiser_id must match an existing user in ` +
-      `auth.users: ${detail}`,
-    );
-  }
+    '23505': (detail) => new ConflictError(`That record already exists: ${detail}`),
 
-  if (code === '23505') {
-    return new ConflictError(`That record already exists: ${detail}`);
-  }
+    // The next is raised by submit_event_request (016, then 021 and 052), with
+    // its own SQLSTATE so it is told apart by code rather than by matching
+    // message text.
+    //
+    // It passes the database's message through unchanged, with no prefix,
+    // unlike 23514 above. A check violation's message is written by the Postgres
+    // driver for a developer ('new row violates check constraint ...'), so it is
+    // wrapped in a sentence a caller can make sense of. This one comes from
+    // `raise exception` in our own function, and its text was written to be read
+    // by whoever made the request: it names the status the function saw while
+    // holding the row lock, which is more accurate than anything this service
+    // read a moment earlier.
 
-  // The next is raised by submit_event_request (016, then 021 and 052), with
-  // its own SQLSTATE so it is told apart by code rather than by matching
-  // message text.
-  //
-  // It passes the database's message through unchanged, with no prefix,
-  // unlike 23514 above. A check violation's message is written by the Postgres
-  // driver for a developer ('new row violates check constraint ...'), so it is
-  // wrapped in a sentence a caller can make sense of. This one comes from
-  // `raise exception` in our own function, and its text was written to be read
-  // by whoever made the request: it names the status the function saw while
-  // holding the row lock, which is more accurate than anything this service
-  // read a moment earlier.
+    // object_not_in_prerequisite_state: the request is no longer a draft. Most
+    // likely a second submit that waited on the first one's row lock.
+    '55000': conflict(),
 
-  // object_not_in_prerequisite_state: the request is no longer a draft. Most
-  // likely a second submit that waited on the first one's row lock.
-  if (code === '55000') {
-    return new ConflictError(detail);
-  }
+    // No P0001 entry, since SCRUM-486 (migration 052). P0001 was submission's
+    // "No coordinator is available" (SCRUM-327 AC5), a 503. Submission no
+    // longer looks for a coordinator, so it can no longer raise it, and nothing
+    // else this module calls raises P0001: 006's process_change_request does,
+    // for a change request already processed, but that goes through
+    // eventChangeRequestService and its own translator, not this one. A P0001
+    // reaching here now is unexpected, so it falls through to the untyped error
+    // at the end, a 500, rather than being reported as "try again later".
 
-  // No P0001 branch, since SCRUM-486 (migration 052). P0001 was submission's
-  // "No coordinator is available" (SCRUM-327 AC5), a 503. Submission no
-  // longer looks for a coordinator, so it can no longer raise it, and nothing
-  // else this module calls raises P0001: 006's process_change_request does,
-  // for a change request already processed, but that goes through
-  // eventChangeRequestService and its own translator, not this one. A P0001
-  // reaching here now is unexpected, so it falls through to the untyped error
-  // at the end, a 500, rather than being reported as "try again later".
+    // The next three are raised by reassign_event_request (migration 018), and
+    // pass the message through unchanged for the same reason as the two above:
+    // it comes from `raise exception` in our own function, written to be read.
+    //
+    // 018's fourth refusal, a handover to the coordinator who already holds the
+    // event, uses check_violation (23514) on purpose, to match the history
+    // table's own constraint for the same rule. So it arrives through the 23514
+    // entry at the top and keeps that entry's prefix. That is unavoidable:
+    // 23514 cannot be told apart from a Postgres constraint violation by code
+    // alone, and those messages do need the wrapping.
 
-  // The next three are raised by reassign_event_request (migration 018), and
-  // pass the message through unchanged for the same reason as the two above:
-  // it comes from `raise exception` in our own function, written to be read.
-  //
-  // 018's fourth refusal, a handover to the coordinator who already holds the
-  // event, uses check_violation (23514) on purpose, to match the history
-  // table's own constraint for the same rule. So it arrives through the 23514
-  // branch at the top and keeps that branch's prefix. That is unavoidable:
-  // 23514 cannot be told apart from a Postgres constraint violation by code
-  // alone, and those messages do need the wrapping.
+    // insufficient_privilege: the caller is not the event's assigned
+    // coordinator (SCRUM-327 AC6). 403 rather than this module's usual 404 for
+    // someone else's record: the caller is a coordinator who can already see
+    // this event in the shared queue, so the 403 reveals nothing (errors.js
+    // explains). Postgres also uses 42501 for its own "permission denied", but
+    // the API connects with the secret key, which is never refused on a table.
+    '42501': forbidden,
 
-  // insufficient_privilege: the caller is not the event's assigned
-  // coordinator (SCRUM-327 AC6). 403 rather than this module's usual 404 for
-  // someone else's record: the caller is a coordinator who can already see
-  // this event in the shared queue, so the 403 reveals nothing (errors.js
-  // explains). Postgres also uses 42501 for its own "permission denied", but
-  // the API connects with the secret key, which is never refused on a table.
-  if (code === '42501') {
-    return new ForbiddenError(detail);
-  }
+    // invalid_parameter_value: the person named as the new coordinator does not
+    // hold the event_coordinator role (018), or a rejection has no reason
+    // (decide_event_request, 029, the backstop behind decideEventRequest's own
+    // check). A 400 either way, because the request carried a bad value.
+    '22023': invalid,
 
-  // invalid_parameter_value: the person named as the new coordinator does not
-  // hold the event_coordinator role (018), or a rejection has no reason
-  // (decide_event_request, 029, the backstop behind decideEventRequest's own
-  // check). A 400 either way, because the request carried a bad value.
-  if (code === '22023') {
-    return new ValidationError(detail);
-  }
+    // serialization_failure: 018's guarded update matched no row, meaning the
+    // event changed hands under it. 018 explains why this cannot happen while
+    // its row lock holds. If it ever does, the caller gets a conflict to reload
+    // from, not a 500.
+    '40001': conflict(),
 
-  // serialization_failure: 018's guarded update matched no row, meaning the
-  // event changed hands under it. 018 explains why this cannot happen while
-  // its row lock holds. If it ever does, the caller gets a conflict to reload
-  // from, not a 500.
-  if (code === '40001') {
-    return new ConflictError(detail);
-  }
+    P0002: notFoundEventRequest,
+  },
+  messages: [[/not found/i, notFoundEventRequest]],
+  // PT409 is matched here, after the message test, so a PT409 whose message
+  // says "not found" stays a 404 as it always has.
+  fallback: (detail, error) => {
+    // SCRUM-489: submit_event_for_safety_review (064) refuses an event that is not
+    // ready with every outstanding checklist line as JSON in DETAIL.
+    if (error.code === 'PT409' && error.hint === 'EVENT_NOT_READY') {
+      return new ConflictError(detail, { code: 'EVENT_NOT_READY', conflicts: parseOutstanding(error.details) });
+    }
+    // SCRUM-395 (096): the significant-change refusals the panel acts on. Any
+    // other PT409 is not one this module raises, so it stays untyped below.
+    if (error.code === 'PT409' && SIGNIFICANT_CHANGE_CONFLICTS.has(error.hint)) {
+      return new ConflictError(detail, { code: error.hint });
+    }
 
-  if (code === 'P0002' || /not found/i.test(detail)) {
-    return new NotFoundError(detail || 'Event request not found');
-  }
-
-  // SCRUM-489: submit_event_for_safety_review (064) refuses an event that is not
-  // ready with every outstanding checklist line as JSON in DETAIL.
-  if (code === 'PT409' && error.hint === 'EVENT_NOT_READY') {
-    return new ConflictError(detail, { code: 'EVENT_NOT_READY', conflicts: parseOutstanding(error.details) });
-  }
-  // SCRUM-395 (096): the significant-change refusals the panel acts on. Any
-  // other PT409 is not one this module raises, so it stays untyped below.
-  if (code === 'PT409' && SIGNIFICANT_CHANGE_CONFLICTS.has(error.hint)) {
-    return new ConflictError(detail, { code: error.hint });
-  }
-
-  // Left untyped on purpose. An unrecognised code is not the caller's fault and
-  // there is nothing for them to correct, so it must not reach the API dressed
-  // as a 400 telling an Organiser to fix their form.
-  return new Error(detail || 'Unexpected database error');
-}
+    // Left untyped on purpose. An unrecognised code is not the caller's fault and
+    // there is nothing for them to correct, so it must not reach the API dressed
+    // as a 400 telling an Organiser to fix their form.
+    return untyped(detail);
+  },
+});
 
 /**
  * The camelCase view of a stored row.
@@ -764,9 +728,7 @@ export async function changeEventRequestStatus(
   { expectedStatus, newStatus, changedBy, reason, expectedCoordinatorId = null },
   { client } = {},
 ) {
-  if (typeof changedBy !== 'string' || changedBy.trim() === '') {
-    throw new ValidationError('changedBy is required');
-  }
+  requireCallerId(changedBy, 'changedBy');
 
   let storedReason = null;
   if (reason !== undefined && reason !== null) {
@@ -827,10 +789,11 @@ export async function changeEventRequestStatus(
  *     and gives the true reason. It comes before the status check, as in 018:
  *     whether the event could be sent for clarification is a question only
  *     its coordinator has any reason to ask.
- *  3. request_event_clarification changes under_review to
- *     pending_clarification and saves the note and optional reply-by date in
- *     one transaction. The caller is passed as the expected coordinator, so
- *     an event handed to someone else between the read and write is a 409.
+ *  3. request_event_clarification_with_fields changes under_review to
+ *     pending_clarification and saves the note, the requested fields and the
+ *     optional reply-by date in one transaction. The caller is passed as the
+ *     expected coordinator, so an event handed to someone else between the
+ *     read and write is a 409.
  * 
  *     A submitted request has to be started first, through the Start review
  *     action (startEventReview, SCRUM-19 AC1), which also makes the caller its
@@ -857,9 +820,7 @@ export async function requestEventClarification(
   coordinatorId,
   { replyByDate = null, requestedFields = [], client } = {},
 ) {
-  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
-    throw new ValidationError('coordinatorId is required');
-  }
+  requireCallerId(coordinatorId, 'coordinatorId');
   if (typeof note !== 'string' || note.trim() === '') {
     throw new ValidationError('clarification note is required');
   }
@@ -878,10 +839,10 @@ export async function requestEventClarification(
   if (replyByDate !== undefined && replyByDate !== null && replyByDate !== '') {
     if (
       typeof replyByDate !== 'string' ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(replyByDate) ||
+      !DATE_ONLY_PATTERN.test(replyByDate) ||
       Number.isNaN(Date.parse(`${replyByDate}T00:00:00.000Z`)) ||
       new Date(`${replyByDate}T00:00:00.000Z`).toISOString().slice(0, 10) !== replyByDate ||
-      replyByDate <= new Date().toISOString().slice(0, 10)
+      replyByDate <= singaporeToday()
     ) {
       throw new ValidationError('replyByDate must be a valid date in the future');
     }
@@ -997,9 +958,7 @@ export async function respondToEventClarification(
 }
 
 export async function closeEventClarification(id, message, coordinatorId, { client } = {}) {
-  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
-    throw new ValidationError('coordinatorId is required');
-  }
+  requireCallerId(coordinatorId, 'coordinatorId');
   if (typeof message !== 'string' || message.trim() === '') {
     throw new ValidationError('clarification closure note is required');
   }
@@ -1157,9 +1116,7 @@ export async function reassignEventRequest(id, changes, assignedBy, { client } =
  * @throws {NotFoundError}   no such request
  */
 export async function startEventReview(id, coordinatorId, { client } = {}) {
-  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
-    throw new ValidationError('coordinatorId is required');
-  }
+  requireCallerId(coordinatorId, 'coordinatorId');
 
   const db = await resolveClient(client);
 
@@ -1253,9 +1210,7 @@ export async function decideEventRequest(
     );
   }
 
-  if (typeof decidedBy !== 'string' || decidedBy.trim() === '') {
-    throw new ValidationError('decidedBy is required');
-  }
+  requireCallerId(decidedBy, 'decidedBy');
 
   const db = await resolveClient(client);
 
@@ -1279,12 +1234,15 @@ const CANCELLATION_INITIATORS = Object.freeze([
 
 /**
  * Read the current cancellation impact. This is a preview only; its Postgres
- * function is stable and does not write.
+ * function is stable and does not write. The function also checks that the
+ * caller is the event's assigned coordinator.
  */
-export async function getEventCancellationImpact(id, { client } = {}) {
+export async function getEventCancellationImpact(id, coordinatorId, { client } = {}) {
+  requireCallerId(coordinatorId, 'coordinatorId');
   const db = await resolveClient(client);
   const { data, error } = await db.rpc('event_cancellation_impact_preview', {
     p_event_request_id: id,
+    p_caller: coordinatorId,
   });
 
   if (error) throw translateError(error);
@@ -1305,9 +1263,7 @@ export async function cancelEventRequest(
   coordinatorId,
   { client } = {},
 ) {
-  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
-    throw new ValidationError('coordinatorId is required');
-  }
+  requireCallerId(coordinatorId, 'coordinatorId');
   if (typeof reason !== 'string' || reason.trim() === '') {
     throw new ValidationError('Cancellation reason is required and cannot be blank');
   }
@@ -1341,9 +1297,7 @@ export async function getSignificantEventChangeImpact(
   coordinatorId,
   { client } = {},
 ) {
-  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
-    throw new ValidationError('coordinatorId is required');
-  }
+  requireCallerId(coordinatorId, 'coordinatorId');
 
   const db = await resolveClient(client);
   const current = await getEventRequestForCoordinator(id, { client: db });
@@ -1370,9 +1324,7 @@ export async function applySignificantEventChange(
   coordinatorId,
   { client } = {},
 ) {
-  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
-    throw new ValidationError('coordinatorId is required');
-  }
+  requireCallerId(coordinatorId, 'coordinatorId');
   if (typeof reason !== 'string' || reason.trim() === '' || reason.trim().length > 4000) {
     throw new ValidationError('A reason of 1 to 4,000 characters is required');
   }
@@ -1642,9 +1594,7 @@ export async function getEventRequestForCoordinator(id, { client } = {}) {
  *                           Organiser nor its assigned coordinator
  */
 export async function getEventRequestStatusHistory(id, userId, { client } = {}) {
-  if (typeof userId !== 'string' || userId.trim() === '') {
-    throw new ValidationError('userId is required');
-  }
+  requireCallerId(userId, 'userId');
 
   const db = await resolveClient(client);
   const request = await getEventRequestById(id, { client: db });
@@ -1686,9 +1636,7 @@ export async function getEventRequestStatusHistory(id, userId, { client } = {}) 
 }
 
 export async function getEventClarificationHistory(id, userId, role, { client } = {}) {
-  if (typeof userId !== 'string' || userId.trim() === '') {
-    throw new ValidationError('userId is required');
-  }
+  requireCallerId(userId, 'userId');
   const db = await resolveClient(client);
   const request = await getEventRequestById(id, { client: db });
   const isOwner = request.organiserId === userId;
@@ -2089,48 +2037,6 @@ export async function listUnassignedEventRequests({ client } = {}) {
 }
 
 
-/**
- * The statuses in which an event is a coordinator's current work, for the
- * count beside each name in the Lead's picker (SCRUM-486 AC3).
- *
- * One definition, here, answering the test cases' open question 3. Submitted
- * (assigned, not yet reviewed) through confirmed: everything that still needs
- * the coordinator. Not draft, which nobody holds; not completed, rejected or
- * cancelled, which are finished. 015's selection rule also counted planning,
- * which 020 removed. SCRUM-488's safety_review and safety_approved are in the
- * list, between approved and confirmed, so a coordinator holding an event in
- * the safety check still counts it. The order is the lifecycle's and is the
- * order of the overview's columns and of the filter's options.
- */
-// Exported for scrum487StatusClassification.test.js, which fails if an enum value is in neither list, so a status added later cannot be left out of the overview unnoticed.
-export const ACTIVE_EVENT_STATUSES = Object.freeze([
-  STATUS.SUBMITTED,
-  STATUS.UNDER_REVIEW,
-  STATUS.PENDING_CLARIFICATION,
-  STATUS.APPROVED,
-  STATUS.SAFETY_REVIEW,
-  STATUS.SAFETY_APPROVED,
-  STATUS.CONFIRMED,
-]);
-
-/**
- * The statuses in which an event is finished, for the Lead's list when they
- * ask to include finished events (SCRUM-487 AC3: "Completed, Rejected and
- * Cancelled events are hidden unless the Lead asks to include them").
- *
- * SCRUM-542. Named beside ACTIVE_EVENT_STATUSES, and between them the two are
- * every status an event someone holds can have, except draft: a draft is the
- * Organiser's working copy, nobody's event to supervise, so it is in neither
- * and the list never shows one (a reopened draft can keep a stale
- * coordinator, 022). Not derived as "every STATUS not active", which would
- * admit draft, and would silently admit any status added later; a new
- * finished status is a decision to make here.
- */
-export const FINISHED_EVENT_STATUSES = Object.freeze([
-  STATUS.COMPLETED,
-  STATUS.REJECTED,
-  STATUS.CANCELLED,
-]);
 
 /**
  * Every Event Coordinator, with their count of active events, for the Lead's
@@ -2296,8 +2202,8 @@ export async function listCoordinatorOverview({ client } = {}) {
   }
 
   const statuses = [
-    ...ACTIVE_EVENT_STATUSES.map((status) => ({ status, label: getStatusDisplay(status).label, finished: false })),
-    ...FINISHED_EVENT_STATUSES.map((status) => ({ status, label: getStatusDisplay(status).label, finished: true })),
+    ...ACTIVE_EVENT_STATUSES.map((status) => ({ status, label: getOrganiserStatusLabel(status), finished: false })),
+    ...FINISHED_EVENT_STATUSES.map((status) => ({ status, label: getOrganiserStatusLabel(status), finished: true })),
   ];
 
   return {
@@ -2752,9 +2658,7 @@ export async function submitForSafetyReview({
   if (!isPlausibleId(eventRequestId)) {
     throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
   }
-  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
-    throw new ValidationError('coordinatorId is required');
-  }
+  requireCallerId(coordinatorId, 'coordinatorId');
   if (note !== undefined && note !== null && typeof note !== 'string') {
     throw new ValidationError('Invalid note -- must be text', [{ field: 'note', message: 'must be text' }]);
   }

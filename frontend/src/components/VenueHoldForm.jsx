@@ -17,6 +17,7 @@ import { useId, useState } from "react";
 import { deviceTimeZoneLabel } from "../services/datetimeFormat";
 import { formatRange } from "../services/displayFormat";
 import { toHoldPayload, validateHoldInput } from "../services/venueHoldValidation";
+import { fieldErrorWiring } from "./fieldErrors";
 
 /** The fields that render their own errors. Anything else goes in the alert. */
 const FIELDS = ["eventRequestId", "expiresAt"];
@@ -56,22 +57,7 @@ export default function VenueHoldForm({
   const allErrors = [...clientErrors, ...serverErrors];
   const unmatchedServerErrors = serverErrors.filter((err) => !FIELDS.includes(err.field));
 
-  function messagesFor(field) {
-    return allErrors.filter((err) => err.field === field).map((err) => err.message);
-  }
-
-  function errorId(field) {
-    return `${idPrefix}-${field}-error`;
-  }
-
-  /** aria wiring for one control: invalid and described by its errors, or neither. */
-  function ariaFor(field) {
-    const hasErrors = messagesFor(field).length > 0;
-    return {
-      "aria-invalid": hasErrors ? "true" : undefined,
-      "aria-describedby": hasErrors ? errorId(field) : undefined,
-    };
-  }
+  const { messagesFor, errorId, ariaFor } = fieldErrorWiring(idPrefix, allErrors);
 
   function updateField(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));

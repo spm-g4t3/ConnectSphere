@@ -2,13 +2,12 @@
  * SCRUM-491: tentative venue holds with an expiry, run against a real
  * Postgres.
  *
- * 040_venue_holds.sql adds venue_holds, place_venue_hold() and
- * process_venue_hold_expiry(), and makes a hold a third kind of row in the
- * shared venue_occupancy_conflicts() (032), with a fifth parameter that
- * leaves one event's holds out. create_booking_request and
+ * venue_holds, place_venue_hold() and process_venue_hold_expiry(): a hold is
+ * a third kind of row in the shared venue_occupancy_conflicts(), whose fifth
+ * parameter leaves one event's holds out. create_booking_request and
  * available_venue_ids() pass the requesting event through it, so an event's
  * own hold never blocks its own request or search. These tests call the
- * real functions.
+ * real functions on the final schema.
  *
  * Acceptance criteria carried in the test names:
  *   AC1  only Venue Staff can place a hold
@@ -24,132 +23,50 @@
  * Fixture: each test makes its own venue (30 minutes setup, 45 turnaround)
  * and events, so no test sees another's rows. D is the Singapore date 10
  * days from now; instants are compared with getTime(), never as strings.
- *
- * Migrations: setupChangeRecheckDatabase.test.js's list, plus 036 (the
- * latest update_venue, which must still ignore holds), 040, and 051
- * (SCRUM-525), which redefines create_booking_request with 040's step 7 and
- * an 8th argument, the request's expected attendance.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { clientsCanExecute } from './helpers/grants.js';
+import { D, at, fromNow } from '../fixtures/time.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '003_venue_audit.sql',
-  '004_venue_functions.sql',
-  '005_venue_retirement.sql',
-  '008_venue_audit_completion.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '034_setup_change_recheck.sql',
-  '035_setup_change_recheck_refine.sql',
-  '036_venue_safety_facts.sql',
-  '040_venue_holds.sql',
-  '051_multi_venue_booking_requests.sql',
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
-
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
 const ms = (value) => new Date(value).getTime();
-/** An instant `minutes` from now (negative: in the past). */
-const fromNow = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString();
 
 const SUITABLE = { suitable: true, criteria: [{ criterion: 'capacity', met: true }] };
 
-describe('SCRUM-491: tentative venue holds (040)', () => {
+describe('SCRUM-491: tentative venue holds', () => {
   let db;
   let organiser;
   let staff;
   let coordinator;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
-  async function makeUser(role) {
+  const makeUser = (role) => seedUser(db, { email: `u${++counter}@x`, role });
+
+  const makeVenue = (setup = 30, turnaround = 45) =>
+    seedVenue(db, { name: `Harbour Room ${++counter}`, setup, turnaround });
+
+  function makeEvent(startsAt, endsAt, { status = 'approved', coordinatorId = coordinator } = {}) {
     counter += 1;
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [`u${counter}@x`])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
+    return seedEvent(db, {
+      status,
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinatorId,
+      event_name: `Event ${counter}`,
+      proposed_start: startsAt,
+      proposed_end: endsAt,
+      expected_attendance: 150,
+    });
   }
 
-  async function makeVenue(setup = 30, turnaround = 45) {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, $2, $3) returning id`,
-        [`Harbour Room ${counter}`, setup, turnaround],
-      )
-    ).id;
-  }
-
-  async function makeEvent(startsAt, endsAt, { status = 'approved', coordinatorId = coordinator } = {}) {
-    counter += 1;
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, proposed_start, proposed_end,
-            expected_attendance, submitted_at, assigned_coordinator_id)
-         values ($1, $2, $3, $4, $5, 150, now(), $6) returning id`,
-        [organiser, `Event ${counter}`, status, startsAt, endsAt, coordinatorId],
-      )
-    ).id;
-  }
-
-  async function makeBlock(venueId, startsAt, endsAt) {
-    return (
-      await one(
-        `insert into venue_blocks (venue_id, starts_at, ends_at, reason)
-         values ($1, $2, $3, 'maintenance') returning id`,
-        [venueId, startsAt, endsAt],
-      )
-    ).id;
-  }
+  const makeBlock = (venueId, startsAt, endsAt) => seedBlock(db, { venueId, start: startsAt, end: endsAt });
 
   async function makeBooking(venueId, startsAt, endsAt, coordinatorId = coordinator) {
     const eventId = await makeEvent(startsAt, endsAt, { coordinatorId });
-    const id = (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, 'approved') returning id`,
-        [venueId, eventId, startsAt, endsAt],
-      )
-    ).id;
+    const id = await seedBooking(db, { venueId, eventId, status: 'approved', start: startsAt, end: endsAt });
     return { id, eventId };
   }
 
@@ -196,16 +113,7 @@ describe('SCRUM-491: tentative venue holds (040)', () => {
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      await db.exec(name === 'STAND_IN' ? DECISION_STAND_IN : migration(name));
-    }
+    db = await createSchemaDb();
     organiser = await makeUser('event_organiser');
     staff = await makeUser('venue_staff');
     coordinator = await makeUser('event_coordinator');
@@ -522,8 +430,10 @@ describe('SCRUM-491: tentative venue holds (040)', () => {
     });
 
     it('SCRUM491_AC8_no_coordinator_means_expired_but_no_notice', async () => {
+      // A rejected event keeps its holds; reopened and resubmitted, it waits
+      // in the Lead's queue with no coordinator while the hold runs out.
       const venueId = await makeVenue();
-      const eventId = await makeEvent(at('10:00'), at('12:00'), { coordinatorId: null });
+      const eventId = await makeEvent(at('10:00'), at('12:00'), { status: 'submitted', coordinatorId: null });
       const holdId = await insertHold(eventId, venueId);
 
       await one('select process_venue_hold_expiry() as n');
@@ -600,10 +510,7 @@ describe('SCRUM-491: tentative venue holds (040)', () => {
         'place_venue_hold(uuid, uuid, timestamptz, uuid)',
         'process_venue_hold_expiry()',
       ]) {
-        for (const role of ['anon', 'authenticated']) {
-          const { allowed } = await one(`select has_function_privilege($1, $2, 'execute') as allowed`, [role, signature]);
-          expect(allowed, `${role} ${signature}`).toBe(false);
-        }
+        expect(await clientsCanExecute(db, signature), signature).toEqual([]);
       }
     });
   });

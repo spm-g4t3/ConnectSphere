@@ -1,5 +1,6 @@
 /**
- * SCRUM-176: equipment notifications (097), run against a real Postgres (PGlite).
+ * SCRUM-176: equipment notifications, run against the final schema in a real
+ * Postgres (PGlite).
  *
  * The notifications are written by triggers on the equipment tables, so each
  * test makes the change the way the product does (the same SQL functions) and
@@ -7,25 +8,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '022_equipment_schema.sql',
-  '024_equipment_availability.sql',
-  '037_equipment_request_lines.sql',
-  '038_equipment_review.sql',
-  '053_equipment_reservations.sql',
-  '054_equipment_reservation_actions.sql',
-  '055_equipment_reservation_guards.sql',
-  '060_equipment_reservation_topup.sql',
-  '061_equipment_review_gaps.sql',
-];
+import { createSchemaDb, returnToLeadQueue, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { asJson } from './helpers/equipment.js';
 
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
@@ -50,27 +35,23 @@ describe('SCRUM-176: equipment notifications in Postgres', () => {
   let techB;
   let venueStaff;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
-  const asJson = (row) => JSON.parse(row.answer);
+  const { one, rows } = queriesFor(() => db);
 
-  const newUser = async (email, role) => {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  };
+  const newUser = (email, role) => seedUser(db, { email, role });
   const newType = async (name, total) =>
     (await one(
       'insert into equipment_types (name, total_quantity) values ($1, $2) returning id',
       [`${name} ${Math.random()}`, total],
     )).id;
-  const newEvent = async () =>
-    (await one(
-      `insert into event_requests
-         (organiser_id, event_name, status, assigned_coordinator_id, proposed_start, proposed_end)
-       values ($1, $2, 'approved', $3, $4, $5) returning id`,
-      [organiser, `Event ${Math.random()}`, coordinator, START, END],
-    )).id;
+  const newEvent = () =>
+    seedEvent(db, {
+      status: 'approved',
+      organiser_id: organiser,
+      event_name: `Event ${Math.random()}`,
+      assigned_coordinator_id: coordinator,
+      proposed_start: START,
+      proposed_end: END,
+    });
 
   const add = async (event, type, quantity, notes = null) =>
     asJson(await one(
@@ -117,46 +98,7 @@ describe('SCRUM-176: equipment notifications in Postgres', () => {
   };
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-
-      create function set_updated_at() returns trigger language plpgsql as $$
-      begin new.updated_at = now(); return new; end $$;
-
-      create type event_request_status as enum (
-        'draft', 'submitted', 'under_review', 'pending_clarification',
-        'approved', 'confirmed', 'completed', 'rejected', 'cancelled'
-      );
-      create table event_requests (
-        id                      uuid primary key default gen_random_uuid(),
-        organiser_id            uuid not null,
-        event_name              text not null,
-        status                  event_request_status not null default 'draft',
-        assigned_coordinator_id uuid,
-        proposed_start          timestamptz,
-        proposed_end            timestamptz
-      );
-      create table profiles (id uuid primary key references auth.users (id), role text not null);
-
-      -- As it stands on dev, plus one type from a migration that is not on dev
-      -- yet, to show 097 keeps what it did not write.
-      create table notifications (
-        id               uuid primary key default gen_random_uuid(),
-        recipient_id     uuid not null references auth.users (id) on delete cascade,
-        type             text not null,
-        event_request_id uuid references event_requests (id) on delete cascade,
-        payload          jsonb not null default '{}',
-        read_at          timestamptz,
-        created_at       timestamptz not null default now(),
-        constraint notifications_type_known check (
-          type in ('booking_flagged', 'event_cancelled', 'safety_review_response')
-        )
-      );
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
-    await db.exec(migration('097_equipment_notifications.sql'));
+    db = await createSchemaDb();
 
     organiser = await newUser('organiser@example.com', 'event_organiser');
     coordinator = await newUser('coordinator@example.com', 'event_coordinator');
@@ -170,16 +112,8 @@ describe('SCRUM-176: equipment notifications in Postgres', () => {
     await db?.close();
   });
 
-  describe('the migration', () => {
-    it('SCRUM176_runs_a_second_time_without_error_or_a_duplicate_trigger', async () => {
-      await expect(db.exec(migration('097_equipment_notifications.sql'))).resolves.not.toThrow();
-
-      const { event } = await eventWithLine(1);
-
-      expect(await notes(event, 'equipment_requested')).toHaveLength(2);
-    });
-
-    it('SCRUM176_keeps_the_types_it_did_not_add_and_adds_its_six', async () => {
+  describe('the notification type list', () => {
+    it('SCRUM176_notifications_accept_the_six_equipment_types_and_refuse_an_unknown_one', async () => {
       const event = await newEvent();
       const insert = (type) =>
         db.query('insert into notifications (recipient_id, type, event_request_id) values ($1, $2, $3)', [
@@ -188,7 +122,7 @@ describe('SCRUM-176: equipment notifications in Postgres', () => {
           event,
         ]);
 
-      for (const type of ['booking_flagged', 'event_cancelled', 'safety_review_response', ...OUR_TYPES]) {
+      for (const type of OUR_TYPES) {
         await expect(insert(type)).resolves.toBeDefined();
       }
       await expect(insert('not_a_type')).rejects.toThrow(/notifications_type_known/);
@@ -585,7 +519,7 @@ describe('SCRUM-176: equipment notifications in Postgres', () => {
       const { event, line } = await eventWithLine(1);
       await start(event);
       await reserve(event, line, 1);
-      await db.query('update event_requests set assigned_coordinator_id = null where id = $1', [event]);
+      await returnToLeadQueue(db, event, { coordinator, organiser });
       await clear();
 
       await changePeriod(event);

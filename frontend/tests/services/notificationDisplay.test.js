@@ -1064,21 +1064,23 @@ describe("describeNotification: missing names and payloads", () => {
   });
 });
 
-// Each migration that sets notifications_type_known adds its list to the live
-// constraint and none removes a type, so the union of every list is what the
-// backend can send; a type there with no wording here would show as "New notification".
-const MIGRATIONS = resolve(dirname(fileURLToPath(import.meta.url)), "../../../backend/db/migrations");
-// Migrations write the list either as a plain check or as 066's v_ours array.
+// Every change to notifications_type_known restates the whole list, so the
+// latest file that sets it (the baseline, or a migration from 010 on) is what
+// the backend can send; a type there with no wording here would show as "New notification".
+const DB = resolve(dirname(fileURLToPath(import.meta.url)), "../../../backend/db");
 const TYPE_LIST =
-  /add constraint notifications_type_known\s+check\s*\(\s*type\s+in\s*\(([^)]*)\)|v_ours\s+text\[\]\s*:=\s*array\[([^\]]*)\]/;
+  /notifications_type_known\s+check\s*\(\s*type\s*(?:=\s*any\s*\(\s*array\s*\[([^\]]*)\]|in\s*\(([^)]*)\))/;
 
 function knownNotificationTypes() {
-  const types = readdirSync(MIGRATIONS)
+  const later = readdirSync(join(DB, "migrations"))
     .filter((name) => /^\d+_.*\.sql$/.test(name))
-    .map((name) => readFileSync(join(MIGRATIONS, name), "utf8").match(TYPE_LIST))
-    .filter(Boolean)
-    .flatMap(([, plain, ours]) => [...(plain ?? ours).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]));
-  return [...new Set(types)];
+    .sort()
+    .map((name) => join(DB, "migrations", name));
+  const lists = [join(DB, "baseline", "05_notifications.sql"), ...later]
+    .map((file) => readFileSync(file, "utf8").match(TYPE_LIST))
+    .filter(Boolean);
+  const [, array, plain] = lists.at(-1);
+  return [...(array ?? plain).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 }
 
 const FIXTURES = {

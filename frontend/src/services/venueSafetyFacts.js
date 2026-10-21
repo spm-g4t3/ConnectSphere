@@ -23,7 +23,7 @@ export const SAFETY_TEXT_MAX_LENGTH = 2000;
  * backend's checkSafetyText. With String.length an emoji counts twice, so the
  * counter would say "over" for text the server accepts.
  *
- * The same one-liner venueBlockValidation.js keeps privately for block notes.
+ * Block notes (venueBlockValidation.js, VenueBlockForm.jsx) count with it too.
  */
 export function codePointLength(text) {
   return Array.from(text ?? "").length;

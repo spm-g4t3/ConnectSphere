@@ -1,18 +1,15 @@
 /**
- * Tests for the booking status vocabulary and the 011 venue block schema.
+ * Tests for the booking status vocabulary and the venue block schema.
  *
  * SCRUM-17 (AC1, AC3, AC4) / SCRUM-123: a block only conflicts with approved
  * bookings, active blocks on one venue may not overlap, and every block
  * records who created, amended and removed it.
  *
  * Mirrors the structure of changeRequestStatus.test.js: the JS list and the
- * database enum must not drift apart.
+ * database enum, read from the built schema, must not drift apart.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
 import {
   BOOKING_STATUS,
@@ -20,63 +17,14 @@ import {
   getBookingStatusDisplay,
   isBookingStatus,
 } from '../../src/domain/bookingStatus.js';
+import { useSchemaDb, enumLabels, constraintDef } from './helpers/schemaVocabulary.js';
 
-
-/** The 011 migration with every `--` comment stripped. */
-function migrationSql() {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const sql = readFileSync(
-    resolve(here, '../../db/migrations/011_venue_blocks.sql'),
-    'utf8',
-  );
-  return sql.replace(/--[^\n]*/g, '');
-}
-
-/**
- * The migrations that append to the enum, 027 (SCRUM-250), 065 (SCRUM-258)
- * and 088 (SCRUM-492), with every `--` comment stripped.
- */
-function requestStatusMigrationSql() {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return ['027_booking_request_statuses.sql', '065_booking_decision_statuses.sql', '088_booking_released_status.sql']
-    .map((name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8'))
-    .join('\n')
-    .replace(/--[^\n]*/g, '');
-}
-
-/**
- * The enum values as the migrations leave them, in declared order: the ones
- * 011 creates, then the ones 027, 065 and 088 append.
- */
-function statusesDeclaredInSql() {
-  const block = migrationSql().match(
-    /create type booking_status as enum \(([\s\S]*?)\);/i,
-  );
-  if (!block) throw new Error('could not find the enum in the migration');
-
-  const created = [...block[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-  const added = [
-    ...requestStatusMigrationSql().matchAll(
-      /alter\s+type\s+booking_status\s+add\s+value\s+if\s+not\s+exists\s+'([a-z_]+)'/gi,
-    ),
-  ].map((m) => m[1]);
-
-  return [...created, ...added];
-}
-
-/** The body of the venue_blocks create table statement. */
-function venueBlocksTableBody() {
-  const table = migrationSql().match(
-    /create table if not exists venue_blocks \(([\s\S]*?)\r?\n\);/i,
-  );
-  if (!table) throw new Error('could not find the venue_blocks table in the migration');
-  return table[1];
-}
+const schemaDb = useSchemaDb();
 
 
 describe('BOOKING_STATUS mirrors the database enum', () => {
-  it('SCRUM17_AC3_booking_statuses_match_the_sql_enum', () => {
-    expect(Object.values(BOOKING_STATUS)).toEqual(statusesDeclaredInSql());
+  it('SCRUM17_AC3_booking_statuses_match_the_sql_enum', async () => {
+    expect(Object.values(BOOKING_STATUS)).toEqual(await enumLabels(schemaDb(), 'booking_status'));
   });
 
   it('SCRUM250_exposes_the_three_original_statuses_then_the_request_statuses, in order', () => {
@@ -88,7 +36,7 @@ describe('BOOKING_STATUS mirrors the database enum', () => {
       'rejected',
       'withdrawn',
       'conflicting',
-      // SCRUM-492 appends released (088), as SCRUM-261 appended conflicting.
+      // SCRUM-492 appends released, as SCRUM-261 appended conflicting.
       'released',
     ]);
   });
@@ -119,28 +67,25 @@ describe('isBookingStatus', () => {
 });
 
 
-describe('011 migration schema', () => {
-  it('SCRUM17_AC3_existing_bookings_default_to_approved', () => {
-    expect(migrationSql()).toMatch(
-      /alter\s+table\s+bookings\s+add\s+column\s+if\s+not\s+exists\s+status\s+booking_status\s+not\s+null\s+default\s+'approved'/i,
-    );
-  });
-
-  it('SCRUM17_AC1_migration_declares_the_active_block_exclusion_constraint', () => {
-    // The gist index needs btree_gist to compare uuids with =.
-    expect(migrationSql()).toMatch(/create\s+extension\s+if\s+not\s+exists\s+btree_gist/i);
-    expect(venueBlocksTableBody()).toMatch(
-      /constraint\s+venue_blocks_no_overlap\s+exclude\s+using\s+gist\s*\(\s*venue_id\s+with\s+=\s*,\s*tstzrange\(\s*starts_at\s*,\s*ends_at\s*,\s*'\[\)'\s*\)\s+with\s+&&\s*\)\s*where\s*\(\s*removed_at\s+is\s+null\s*\)/i,
+describe('venue_blocks schema', () => {
+  it('SCRUM17_AC1_schema_declares_the_active_block_exclusion_constraint', async () => {
+    expect(await constraintDef(schemaDb(), 'venue_blocks_no_overlap')).toBe(
+      "EXCLUDE USING gist (venue_id WITH =, tstzrange(starts_at, ends_at, '[)'::text) WITH &&) WHERE ((removed_at IS NULL))",
     );
   });
 
   it.each([
-    ['created_by', /^\s*created_by\s+uuid\b/im],
-    ['last_modified_by', /^\s*last_modified_by\s+uuid\b/im],
-    ['removed_at', /^\s*removed_at\s+timestamptz\b/im],
-    ['removed_by', /^\s*removed_by\s+uuid\b/im],
-  ])('SCRUM17_AC4_venue_blocks_has_audit_columns: %s', (_column, pattern) => {
-    expect(venueBlocksTableBody()).toMatch(pattern);
+    ['created_by', 'uuid'],
+    ['last_modified_by', 'uuid'],
+    ['removed_at', 'timestamp with time zone'],
+    ['removed_by', 'uuid'],
+  ])('SCRUM17_AC4_venue_blocks_has_audit_columns: %s', async (column, type) => {
+    const { rows } = await schemaDb().query(
+      `select data_type from information_schema.columns
+        where table_schema = 'public' and table_name = 'venue_blocks' and column_name = $1`,
+      [column],
+    );
+    expect(rows).toEqual([{ data_type: type }]);
   });
 });
 

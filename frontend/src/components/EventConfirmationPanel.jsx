@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { confirmEventRequest, getEventReadiness } from "../services/eventRequestService";
 import ReadinessChecklist from "./ReadinessChecklist";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const ACCESS_ERRORS = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only the assigned Event Coordinator can confirm this event. Refresh the event to check its assignment.",
   404: "This event is no longer available.",
 };

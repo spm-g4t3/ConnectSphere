@@ -1,6 +1,7 @@
 -- SCRUM39_AC4 / AC5: real two-connection lock and rollback checks (not PGlite).
--- Run manually against a disposable PostgreSQL/Supabase test database, after
--- the registration migrations through 101. This writes registrations; do not use a real event.
+-- Run manually against a disposable PostgreSQL/Supabase test database built from
+-- backend/db/baseline/ (register_for_event in 08_registration.sql) plus any later
+-- migrations. This writes registrations; do not use a real event.
 -- Use two separate psql sessions as service_role (or a role with equivalent rights).
 -- Copy each session's block separately; do not run this file as one script.
 -- Set these variables IN BOTH sessions to a dedicated, confirmed, enabled event

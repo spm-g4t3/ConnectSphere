@@ -299,6 +299,49 @@ export const COORDINATOR_QUEUE_STATUSES = Object.freeze([
   STATUS.PENDING_CLARIFICATION,
 ]);
 
+/**
+ * The statuses in which an event is a coordinator's current work, for the
+ * count beside each name in the Lead's picker (SCRUM-486 AC3).
+ *
+ * One definition, here, answering the test cases' open question 3. Submitted
+ * (assigned, not yet reviewed) through confirmed: everything that still needs
+ * the coordinator. Not draft, which nobody holds; not completed, rejected or
+ * cancelled, which are finished. 015's selection rule also counted planning,
+ * which 020 removed. SCRUM-488's safety_review and safety_approved are in the
+ * list, between approved and confirmed, so a coordinator holding an event in
+ * the safety check still counts it. The order is the lifecycle's and is the
+ * order of the overview's columns and of the filter's options.
+ */
+// schemaInvariantsDatabase.test.js fails if an enum value is in neither list, so a status added later cannot be left out of the overview unnoticed.
+export const ACTIVE_EVENT_STATUSES = Object.freeze([
+  STATUS.SUBMITTED,
+  STATUS.UNDER_REVIEW,
+  STATUS.PENDING_CLARIFICATION,
+  STATUS.APPROVED,
+  STATUS.SAFETY_REVIEW,
+  STATUS.SAFETY_APPROVED,
+  STATUS.CONFIRMED,
+]);
+
+/**
+ * The statuses in which an event is finished, for the Lead's list when they
+ * ask to include finished events (SCRUM-487 AC3: "Completed, Rejected and
+ * Cancelled events are hidden unless the Lead asks to include them").
+ *
+ * SCRUM-542. Named beside ACTIVE_EVENT_STATUSES, and between them the two are
+ * every status an event someone holds can have, except draft: a draft is the
+ * Organiser's working copy, nobody's event to supervise, so it is in neither
+ * and the list never shows one (a reopened draft can keep a stale
+ * coordinator, 022). Not derived as "every STATUS not active", which would
+ * admit draft, and would silently admit any status added later; a new
+ * finished status is a decision to make here.
+ */
+export const FINISHED_EVENT_STATUSES = Object.freeze([
+  STATUS.COMPLETED,
+  STATUS.REJECTED,
+  STATUS.CANCELLED,
+]);
+
 
 /**
  * Is moving from one status to another allowed?

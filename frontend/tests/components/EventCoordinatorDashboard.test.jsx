@@ -14,6 +14,7 @@ import EventCoordinatorDashboard from "../../src/components/EventCoordinatorDash
 import { getEventRequestQueue, getMyAssignedEvents } from "../../src/services/eventRequestService";
 import { listNotifications } from "../../src/services/notificationService";
 import { getPendingBookingRequests } from "../../src/services/bookingRequestService";
+import { PAYLOAD } from "../fixtures/notifications.js";
 
 // Every export the dashboard's component tree reaches, not only the queue's.
 // A vi.mock factory is strict: reading an export it did not return throws,
@@ -59,15 +60,7 @@ const NOTIFICATION = {
   type: "booking_flagged",
   bookingId: "a1b2c3d4-0000-4000-8000-000000000001",
   blockId: "6ba7b810-9dad-41d1-80b4-00c04fd430c8",
-  payload: {
-    venueName: "Hall A",
-    eventName: "Tech Talk",
-    startsAt: "2026-10-01T10:00:00+08:00",
-    endsAt: "2026-10-01T12:00:00+08:00",
-    reason: "maintenance",
-    blockStartsAt: "2026-10-01T09:00:00+08:00",
-    blockEndsAt: "2026-10-01T17:00:00+08:00",
-  },
+  payload: PAYLOAD,
   readAt: null,
   createdAt: "2026-09-26T11:00:00+08:00",
 };

@@ -1,42 +1,36 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 import { isOpenForRegistration } from '../../src/domain/registrationWindow.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
-import { addRegistrationNotificationPrerequisites } from '../fixtures/registrationDatabase.js';
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
+// assert_event_registration_eligible against the final schema, on a stubbed clock.
 const ME = '44444444-4444-4444-8444-444444444444';
 const EVENT = '00000000-0000-4000-8000-00000000000a';
+const COORDINATOR = '66666666-6666-4666-8666-666666666666';
 const MISSING = '99999999-9999-4999-8999-999999999999';
 const NOW = '2026-10-16T10:00:00Z';
 let db;
+// An event open for registration from 15 to 17 October, starting on the 20th.
+const registrationEvent = (overrides = {}) => seedEvent(db, {
+  status: 'confirmed',
+  organiser_id: ME,
+  reviewing_coordinator_id: COORDINATOR,
+  event_name: 'Event',
+  proposed_start: '2026-10-20T10:00:00Z',
+  registration_enabled: true,
+  registration_opens_at: '2026-10-15T10:00:00Z',
+  registration_closes_at: '2026-10-17T10:00:00Z',
+  ...overrides,
+});
 const check = (event = EVENT, attendee = ME) => db.query(
   'select assert_event_registration_eligible($1::uuid, $2::uuid)', [event, attendee],
 );
 
 beforeAll(async () => {
-  db = new PGlite();
-  await db.exec(`
-    create schema auth;
-    create table auth.users (id uuid primary key);
-    create role anon;
-    create role authenticated;
-    create role service_role bypassrls;
-  `);
-  for (const name of ['001_event_requests.sql', '007_user_roles.sql', '091_event_registration_hardening.sql', '093_registration_eligibility.sql']) {
-    if (name === '091_event_registration_hardening.sql') await addRegistrationNotificationPrerequisites(db);
-    await db.exec(migration(name));
-  }
-  await db.exec(`
-    alter type event_request_status add value 'safety_review';
-    alter type event_request_status add value 'safety_approved';
-    grant select on profiles to service_role;
-    grant select, update on event_requests to service_role;
-  `);
+  db = await createSchemaDb();
+  await db.query('insert into auth.users (id) values ($1), ($2)', [ME, COORDINATOR]);
+  await db.query("insert into profiles (id, role) values ($1, 'attendee'), ($2, 'event_coordinator')", [ME, COORDINATOR]);
+  await registrationEvent({ id: EVENT });
   // Override the clock only in this test database to exercise exact boundaries
   // without adding a caller-controlled time argument to the production function.
   await db.exec(`
@@ -44,14 +38,6 @@ beforeAll(async () => {
       as $$ select current_setting('test.registration_time')::timestamptz $$;
     set search_path = public, pg_catalog;
   `);
-  await db.query('insert into auth.users (id) values ($1)', [ME]);
-  await db.query("insert into profiles (id, role) values ($1, 'attendee')", [ME]);
-  await db.query(`
-    insert into event_requests (id, organiser_id, event_name, status, proposed_start,
-      registration_enabled, registration_opens_at, registration_closes_at)
-    values ($1, $2, 'Event', 'confirmed', '2026-10-20T10:00:00Z',
-      true, '2026-10-15T10:00:00Z', '2026-10-17T10:00:00Z')
-  `, [EVENT, ME]);
 });
 afterAll(async () => { await db.close(); });
 beforeEach(async () => {
@@ -91,8 +77,8 @@ describe('SCRUM38 registration eligibility in PostgreSQL', () => {
 
   it.each(Object.values(STATUS).filter((status) => status !== STATUS.CONFIRMED))
     ('SCRUM38_AC2_refuses_event_status_%s', async (status) => {
-      await db.query('update event_requests set status = $1 where id = $2', [status, EVENT]);
-      await expect(check()).rejects.toMatchObject({ code: '55000', hint: 'EVENT_NOT_CONFIRMED' });
+      const event = await registrationEvent({ status });
+      await expect(check(event)).rejects.toMatchObject({ code: '55000', hint: 'EVENT_NOT_CONFIRMED' });
     });
 
   it.each([false])('SCRUM38_AC3_refuses_registration_enabled_%s', async (enabled) => {
@@ -134,9 +120,9 @@ describe('SCRUM38 registration eligibility in PostgreSQL', () => {
       .rejects.toMatchObject({ code: '23514' });
   });
 
-  it('SCRUM22_AC2_refuses_registration_after_a_start_change_clears_the_event_start', async () => {
-    await db.query('update event_requests set proposed_start = null where id = $1', [EVENT]);
-    await expect(check()).rejects.toMatchObject({ code: '55000', hint: 'REGISTRATION_DATES_MISSING' });
+  it('SCRUM22_AC2_refuses_registration_for_an_event_with_no_start', async () => {
+    const event = await registrationEvent({ proposed_start: null });
+    await expect(check(event)).rejects.toMatchObject({ code: '55000', hint: 'REGISTRATION_DATES_MISSING' });
   });
 
   it('SCRUM38_AC5_requires_no_additional_eligibility_information', async () => {
@@ -151,11 +137,14 @@ describe('SCRUM38 registration eligibility in PostgreSQL', () => {
   });
 
   it('SCRUM38_AC4_uses_the_database_clock_without_a_supplied_time', async () => {
+    const day = 86_400_000;
+    // A confirmed event's start is locked, so this one is seeded around the real clock.
+    const event = await registrationEvent({
+      registration_opens_at: new Date(Date.now() - day),
+      registration_closes_at: new Date(Date.now() + day),
+      proposed_start: new Date(Date.now() + 2 * day),
+    });
     await db.exec('set local search_path = pg_catalog, public');
-    await db.query(`update event_requests set
-      registration_opens_at = pg_catalog.clock_timestamp() - interval '1 day',
-      registration_closes_at = pg_catalog.clock_timestamp() + interval '1 day',
-      proposed_start = pg_catalog.clock_timestamp() + interval '2 days' where id = $1`, [EVENT]);
-    await expect(check()).resolves.toBeDefined();
+    await expect(check(event)).resolves.toBeDefined();
   });
 });

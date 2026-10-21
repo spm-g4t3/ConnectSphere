@@ -3,17 +3,12 @@
  *
  * SCRUM-137 (part of SCRUM-20, Week 7 Customer Change): a venue's setup time
  * before an event is one of a fixed list of minutes. The JS list in
- * src/domain/setupOptions.js and the CHECK venues_setup_minutes_allowed in
- * 023_venue_setup_time.sql must never drift apart, so this reads the list
- * straight out of the migration (with every `--` comment stripped -- a value
- * named only in a comment does not count). Same shape as
- * turnaroundOptions.test.js.
+ * src/domain/setupOptions.js and the CHECK venues_setup_minutes_allowed must
+ * never drift apart, so this reads the list from the built schema. Same shape
+ * as turnaroundOptions.test.js.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
 import {
   SETUP_MINUTES_OPTIONS,
@@ -21,43 +16,27 @@ import {
   isSetupOption,
 } from '../../src/domain/setupOptions.js';
 import { TURNAROUND_MINUTES_OPTIONS } from '../../src/domain/turnaroundOptions.js';
+import {
+  useSchemaDb,
+  checkListValues,
+  columnDefault,
+  functionSource,
+} from './helpers/schemaVocabulary.js';
 
 
-/** The 023 migration with every `--` comment stripped. */
-function migrationSql() {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const sql = readFileSync(
-    resolve(here, '../../db/migrations/023_venue_setup_time.sql'),
-    'utf8',
-  );
-  return sql.replace(/--[^\n]*/g, '');
-}
+const schemaDb = useSchemaDb();
 
 /** The minutes listed in the named CHECK, in declared order. */
-function optionsDeclaredInSql() {
-  const match = migrationSql().match(
-    /add\s+constraint\s+venues_setup_minutes_allowed\s+check\s*\(\s*setup_minutes\s+in\s*\(([^)]*)\)\s*\)/i,
-  );
-  if (!match) throw new Error('could not find venues_setup_minutes_allowed in 023');
-  return match[1].split(',').map((v) => Number(v.trim()));
-}
+const optionsDeclaredInSql = () => checkListValues(schemaDb(), 'venues_setup_minutes_allowed');
 
-/** The column default from 023's add column. */
-function columnDefaultInSql() {
-  const match = migrationSql().match(
-    /add\s+column\s+if\s+not\s+exists\s+setup_minutes\s+smallint\s+not\s+null\s+default\s+(-?\d+)/i,
-  );
-  if (!match) throw new Error('could not find the setup_minutes column in 023');
-  return Number(match[1]);
+/** The column default of venues.setup_minutes. */
+async function columnDefaultInSql() {
+  return Number(await columnDefault(schemaDb(), 'venues', 'setup_minutes'));
 }
 
 /** The number create_venue falls back to when p_setup_minutes is null. */
-function createVenueCoalesceInSql() {
-  const sql = migrationSql();
-  const start = sql.search(/create\s+or\s+replace\s+function\s+create_venue\s*\(/i);
-  if (start === -1) throw new Error('could not find create_venue in 023');
-  const end = sql.search(/create\s+or\s+replace\s+function\s+update_venue\s*\(/i);
-  const body = sql.slice(start, end === -1 ? undefined : end);
+async function createVenueCoalesceInSql() {
+  const body = await functionSource(schemaDb(), 'create_venue');
   const match = body.match(/coalesce\(\s*p_setup_minutes\s*,\s*(-?\d+)\s*\)/i);
   if (!match) throw new Error('could not find the coalesce in create_venue');
   return Number(match[1]);
@@ -65,8 +44,8 @@ function createVenueCoalesceInSql() {
 
 
 describe('SCRUM20_SCRUM137 SETUP_MINUTES_OPTIONS mirrors the database CHECK', () => {
-  it('SCRUM20_SCRUM137_setup_options_match_the_sql_check_list', () => {
-    expect([...SETUP_MINUTES_OPTIONS]).toEqual(optionsDeclaredInSql());
+  it('SCRUM20_SCRUM137_setup_options_match_the_sql_check_list', async () => {
+    expect([...SETUP_MINUTES_OPTIONS]).toEqual(await optionsDeclaredInSql());
   });
 
   it('SCRUM20_SCRUM137_setup_options_are_the_agreed_seven_values', () => {
@@ -99,12 +78,12 @@ describe('SCRUM20_SCRUM137 DEFAULT_SETUP_MINUTES', () => {
     expect(DEFAULT_SETUP_MINUTES).toBe(0);
   });
 
-  it('SCRUM20_SCRUM137_default_matches_the_column_default', () => {
-    expect(DEFAULT_SETUP_MINUTES).toBe(columnDefaultInSql());
+  it('SCRUM20_SCRUM137_default_matches_the_column_default', async () => {
+    expect(DEFAULT_SETUP_MINUTES).toBe(await columnDefaultInSql());
   });
 
-  it('SCRUM20_SCRUM137_default_matches_the_create_venue_coalesce', () => {
-    expect(DEFAULT_SETUP_MINUTES).toBe(createVenueCoalesceInSql());
+  it('SCRUM20_SCRUM137_default_matches_the_create_venue_coalesce', async () => {
+    expect(DEFAULT_SETUP_MINUTES).toBe(await createVenueCoalesceInSql());
   });
 
   it('SCRUM20_SCRUM137_default_is_itself_an_allowed_option', () => {

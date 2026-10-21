@@ -15,6 +15,7 @@ import EventFlaggedBookings from "../../src/components/EventFlaggedBookings.jsx"
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../../src/services/flaggedBookingService";
 import { formatVenuePeriod } from "../../src/services/datetimeFormat.js";
 import { formatTimestamp } from "../../src/services/displayFormat.js";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/flaggedBookingService", () => ({
   getEventFlaggedBookings: vi.fn(),
@@ -57,16 +58,6 @@ function item(id, overrides = {}) {
 const httpError = (status, data = {}) =>
   Object.assign(new Error(`Request failed with status code ${status}`), { response: { status, data } });
 const conflict = (code) => httpError(409, { error: PROSE, code });
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 function renderSection(props = {}) {
   const handlers = { onReplace: vi.fn(), onCancelled: vi.fn(), onLoaded: vi.fn() };

@@ -28,11 +28,11 @@ import {
   markNotificationRead,
 } from '../services/notificationService.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
-import { createErrorHandler } from '../http/handleError.js';
+import { createErrorMiddleware } from '../http/handleError.js';
 
 
-/** Map an error to a response; see src/http/handleError.js (SCRUM-127). */
-const handleError = createErrorHandler('notifications route');
+/** Answers whatever a handler throws or rejects with; see src/http/handleError.js (SCRUM-127). */
+const errorMiddleware = createErrorMiddleware('notifications route');
 
 
 /**
@@ -61,12 +61,8 @@ export function createNotificationRouter({ requireAuth = defaultRequireAuth } = 
    * Statuses: 200, 401 from requireAuth, 500 for anything untyped.
    */
   router.get('/', async (req, res) => {
-    try {
-      const notifications = await listNotifications(req.user.id);
-      res.status(200).json(notifications);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const notifications = await listNotifications(req.user.id);
+    res.status(200).json(notifications);
   });
 
   /**
@@ -78,12 +74,8 @@ export function createNotificationRouter({ requireAuth = defaultRequireAuth } = 
    * Statuses: 200, 401 from requireAuth, 500 for anything untyped.
    */
   router.get('/unread-count', async (req, res) => {
-    try {
-      const unreadCount = await countUnreadNotifications(req.user.id);
-      res.status(200).json({ unreadCount });
-    } catch (err) {
-      handleError(err, res);
-    }
+    const unreadCount = await countUnreadNotifications(req.user.id);
+    res.status(200).json({ unreadCount });
   });
 
   /**
@@ -99,14 +91,11 @@ export function createNotificationRouter({ requireAuth = defaultRequireAuth } = 
    * (the same answer for both), 500 for anything untyped.
    */
   router.patch('/:id/read', async (req, res) => {
-    try {
-      const notification = await markNotificationRead(req.params.id, req.user.id);
-      res.status(200).json(notification);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const notification = await markNotificationRead(req.params.id, req.user.id);
+    res.status(200).json(notification);
   });
 
+  router.use(errorMiddleware);
   return router;
 }
 

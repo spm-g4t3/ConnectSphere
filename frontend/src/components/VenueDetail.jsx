@@ -40,10 +40,11 @@ import { formatTurnaround } from "../services/turnaroundOptions";
 import { safetyFactText } from "../services/venueSafetyFacts";
 import VenueSafetyFacts from "./VenueSafetyFacts";
 import BookingSuitabilitySummary from "./BookingSuitabilitySummary";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const BOOKINGS_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   // SCRUM-182 gated the route. Only Venue Staff reach this panel in practice,
   // but the map names every status the API can now return.
   403: "Only Venue Staff and Event Coordinators can see a venue's bookings.",
@@ -57,14 +58,14 @@ const BOOKINGS_ERROR_MESSAGES = {
 
 const SAFETY_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   404: "That venue no longer exists. Go back and refresh the catalogue.",
   500: "The safety information could not be loaded. Please try again.",
 };
 
 const HISTORY_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Venue Staff can see a venue's change history.",
   500: "The change history could not be loaded. Please try again.",
 };

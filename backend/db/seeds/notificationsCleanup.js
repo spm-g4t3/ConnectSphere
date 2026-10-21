@@ -13,9 +13,7 @@
  */
 
 import { supabase } from '../../src/config/supabaseClient.js';
-
-/** The marker notifications.js writes into payload.seeded; change both together. */
-const SEED_MARKER = 'SCRUM-172 demo';
+import { SEED_MARKER } from './lib.js';
 
 async function main() {
   console.log('\nDeleting seeded demo notifications\n');

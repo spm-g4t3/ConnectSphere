@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 
 import EventVenueSuitability from "../../src/components/EventVenueSuitability.jsx";
 import { getEventVenueSuitability } from "../../src/services/venueSuitabilityService";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/venueSuitabilityService", () => ({
   checkVenueSuitability: vi.fn(),
@@ -65,16 +66,6 @@ function item(overrides = {}) {
 
 const httpError = (status, data = {}) =>
   Object.assign(new Error(`Request failed with status code ${status}`), { response: { status, data } });
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 function renderSection(eventRequestId = "e1") {
   const user = userEvent.setup();

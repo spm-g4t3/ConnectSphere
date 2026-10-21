@@ -37,7 +37,7 @@ const BEARER = 'Bearer ';
  * Verify a token against Supabase and return the user it names.
  *
  * The dynamic import is load-bearing, not a stylistic echo of
- * eventRequestService.resolveClient. src/config/supabaseClient.js throws at
+ * config/resolveClient.js. src/config/supabaseClient.js throws at
  * import time when SUPABASE_URL or SUPABASE_SECRET_KEY is missing, and CI runs
  * the suite with no .env on purpose. A static import here would make this
  * module -- and every route that mounts it -- fail to even collect in CI.
@@ -181,5 +181,3 @@ export function createRequireAuth({
  * and src/errors.js already carries that type.
  */
 export const requireAuth = createRequireAuth();
-
-export default requireAuth;

@@ -66,10 +66,12 @@
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError } from '../errors.js';
+import { createPgTranslator, rejected } from '../http/pgErrors.js';
 import { validateVenueId } from '../validation/venueValidation.js';
 import { validateBlockWindow } from '../validation/venueBlockValidation.js';
 import { getVenueById } from './venueService.js';
 import { listVenueBlocks } from './venueBlockService.js';
+import { toOccupiedPeriod } from '../domain/occupancy.js';
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -79,12 +81,7 @@ import { listVenueBlocks } from './venueBlockService.js';
  * query, so a 22P02 here means a value slipped past that, and it is still the
  * caller's input rather than a server fault.
  */
-function translateError(error) {
-  if (error.code === '22P02') {
-    return new ValidationError(`A value was rejected by the database: ${error.message ?? ''}`);
-  }
-  return new Error(error.message || 'Unexpected database error');
-}
+const translateError = createPgTranslator({ codes: { '22P02': rejected } });
 
 /** Is this window end missing, as checkTimeWindow decides it? */
 function isMissing(value) {
@@ -142,10 +139,7 @@ export function toBookingEntry(row) {
     status: row.status,
     eventRequestId: row.event_request_id,
     eventName: row.event_name ?? null,
-    occupiedStartsAt: row.occupied_starts_at,
-    occupiedEndsAt: row.occupied_ends_at,
-    setupMinutes: row.setup_minutes,
-    turnaroundMinutes: row.turnaround_minutes,
+    ...toOccupiedPeriod(row),
   };
 }
 
@@ -172,10 +166,7 @@ export function toHoldEntry(row) {
     endsAt: row.ends_at,
     eventRequestId: row.event_request_id,
     eventName: row.event_name ?? null,
-    occupiedStartsAt: row.occupied_starts_at,
-    occupiedEndsAt: row.occupied_ends_at,
-    setupMinutes: row.setup_minutes,
-    turnaroundMinutes: row.turnaround_minutes,
+    ...toOccupiedPeriod(row),
   };
 }
 

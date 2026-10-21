@@ -1,64 +1,20 @@
 /**
- * SCRUM-489 (SCRUM-559): the seam with SCRUM-300's reservations, on PGlite.
- * event_readiness reads the equipment request's status, so SCRUM-300's meaning
- * of Arranged should flow through unchanged:
+ * SCRUM-489 (SCRUM-559): the seam with SCRUM-300's reservations, against the
+ * final schema in PGlite. event_readiness reads the equipment request's status,
+ * so SCRUM-300's meaning of Arranged should flow through unchanged:
  *
- *   053 arranges a request only when every line is fully reserved;
- *   061's flag_equipment_reservations sends an arranged request back to
+ *   a request is arranged only when every line is fully reserved;
+ *   flag_equipment_reservations sends an arranged request back to
  *   pending_review when a reservation is flagged.
- *
- * Migrations as scrum489EquipmentLockDatabase applies them, plus SCRUM-300's
- * 053, 054, 055, 060 and 061, in number order before 062 to 064.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 import { getConfirmedArrangementsForOrganiser } from '../../src/services/eventRequestService.js';
 import { createAttendeeEventSqlClient } from '../fixtures/attendeeEventSqlClient.js';
 import { getAttendeeEvent } from '../../src/services/attendeeEventService.js';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const LIFECYCLE = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  '025_event_request_decisions.sql',
-  '014_coordinator_assignment.sql',
-  '015_assignment_function.sql',
-  '016_submit_event_request.sql',
-  '017_require_assigned_coordinator.sql',
-  '020_event_status_lifecycle.sql',
-  '021_event_status_history.sql',
-  '022_event_status_transitions.sql',
-  '029_event_request_decisions_functions.sql',
-  '006_event_change_requests.sql',
-  '019_change_request_decision_coordinator.sql',
-  '039_coordinator_lead_and_safety_officer_roles.sql',
-];
-const ARRANGEMENTS = [
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '027_booking_request_statuses.sql',
-  '022_equipment_schema.sql',
-  '024_equipment_availability.sql',
-  '037_equipment_request_lines.sql',
-  '038_equipment_review.sql',
-];
-const RESERVATIONS = [
-  '053_equipment_reservations.sql',
-  '054_equipment_reservation_actions.sql',
-  '055_equipment_reservation_guards.sql',
-  '060_equipment_reservation_topup.sql',
-  '061_equipment_review_gaps.sql',
-];
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { clientsCanExecute } from './helpers/grants.js';
 
 const DAY = 86_400_000;
 const at = (days) => new Date(Date.now() + days * DAY).toISOString();
@@ -71,15 +27,7 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
   let safetyOfficer;
   let hall;
 
-  const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
-  const refusal = async (promise) => {
-    try {
-      await promise;
-      return null;
-    } catch (err) {
-      return err;
-    }
-  };
+  const { one } = queriesFor(() => db);
 
   const readiness = async (id) => (await one('select event_readiness($1) as r', [id])).r;
   const equipmentLine = async (id) => (await readiness(id)).items.find((item) => item.key === 'equipment');
@@ -92,18 +40,15 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
    * Technical Support has reserved in full through SCRUM-300's own path.
    */
   async function readyEventArrangedBySCRUM300(venueId = hall) {
-    const id = (await one(
-      `insert into event_requests
-         (organiser_id, event_name, status, submitted_at, assigned_coordinator_id, reviewing_coordinator_id,
-          decision, decided_by, decided_at, proposed_start, proposed_end)
-       values ($1, 'IS212 Industry Night', 'approved', now(), $2, $2, 'approved', $2, now(), $3, $4) returning id`,
-      [organiser, coordinator, at(10), at(10.25)],
-    )).id;
-    await db.query(
-      `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-       select $1, id, proposed_start, proposed_end, 'approved' from event_requests where id = $2`,
-      [venueId, id],
-    );
+    const id = await seedEvent(db, {
+      status: 'approved',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: 'IS212 Industry Night',
+      proposed_start: at(10),
+      proposed_end: at(10.25),
+    });
+    await seedBooking(db, { venueId, eventId: id, status: 'approved' });
     const projector = (await one(
       'insert into equipment_types (name, total_quantity) values ($1, 10) returning id', [`Projector ${Math.random()}`],
     )).id;
@@ -121,57 +66,14 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-      create role service_role;
-    `);
-    for (const name of LIFECYCLE) await db.exec(migration(name));
-    await db.exec(`
-      create table notifications (
-        id uuid primary key default gen_random_uuid(),
-        recipient_id uuid not null references auth.users (id) on delete cascade,
-        type text not null,
-        booking_id uuid,
-        block_id uuid,
-        venue_hold_id uuid,
-        payload jsonb not null default '{}',
-        read_at timestamptz,
-        created_at timestamptz not null default now(),
-        constraint notifications_type_known check (type in ('booking_flagged'))
-      );
-    `);
-    await db.exec('alter table event_requests add column clarification_reply_by_date date');
-    for (const name of ARRANGEMENTS) await db.exec(migration(name));
-    for (const name of ['017_venue_turnaround.sql', '023_venue_setup_time.sql',
-      '032_venue_occupancy.sql', '040_venue_holds.sql']) {
-      await db.exec(migration(name));
-    }
-    await db.exec(migration('052_lead_assignment.sql'));
-    await db.exec(migration('042_event_cancellation_fields.sql'));
-    for (const name of RESERVATIONS) await db.exec(migration(name));
-    await db.exec(migration('062_safety_statuses.sql'));
-    await db.exec(migration('063_safety_transitions.sql'));
-    await db.exec(migration('064_safety_review_submission.sql'));
-    for (const name of ['071_safety_review.sql', '072_safety_review_history.sql', '073_safety_review_gates.sql',
-      '098_event_readiness_details.sql', '099_confirmation_revision.sql',
-      '102_confirmed_significant_field_lock.sql']) {
-      await db.exec(migration(name));
-    }
+    db = await createSchemaDb();
 
-    const user = async (email, role, name) => {
-      const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-      await db.query('insert into profiles (id, role, full_name) values ($1, $2, $3)', [id, role, name]);
-      return id;
-    };
+    const user = (email, role, name) => seedUser(db, { email, role, fullName: name });
     organiser = await user('o@x', 'event_organiser', 'Aisha Rahman');
     coordinator = await user('a@x', 'event_coordinator', 'Priya Nair');
     technician = await user('t@x', 'technical_support_staff', 'Tan Tech');
     safetyOfficer = await user('so@x', 'safety_officer', 'Sam Safe');
-    hall = (await one("insert into venues (name, location, max_capacity) values ('Hall A', 'SMU', 200) returning id")).id;
+    hall = await seedVenue(db, { name: 'Hall A', location: 'SMU', setup: 0, turnaround: 0 });
   }, 60_000);
 
   afterAll(async () => {
@@ -180,7 +82,7 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
 
 
   it('SCRUM489_AC2_a_request_scrum300_arranged_by_reserving_in_full_reads_as_met', async () => {
-    // AC2-14: 053's arrange check, not a seeded status, makes the line met.
+    // AC2-14: reserve_equipment's arrange check, not a seeded status, makes the line met.
     const { id } = await readyEventArrangedBySCRUM300();
 
     expect(await requestStatus(id)).toBe('arranged');
@@ -189,7 +91,7 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
   });
 
   it('SCRUM489_AC2_a_flagged_reservation_makes_equipment_outstanding', async () => {
-    // AC2-15: 061 sends the request back to pending_review; readiness follows,
+    // AC2-15: flag_equipment_reservations sends the request back to pending_review; readiness follows,
     // and the submission is refused with the line it read.
     const { id, reservation } = await readyEventArrangedBySCRUM300();
 
@@ -261,21 +163,7 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
     await db.query("select change_event_request_status($1, 'confirmed', 'approved', $2, 'Visibility check', $2)", [id, coordinator]);
     expect(await getConfirmedArrangementsForOrganiser(id, organiser, { client })).toMatchObject({ status: 'approved', startsAt: null, endsAt: null, venues: [], equipment: [] });
   });
-  describe('SCRUM363 confirmation with dev significant changes', () => {
-    beforeAll(async () => {
-      await db.exec(`alter table bookings
-        add column if not exists review_block_id uuid,
-        add column if not exists flagged_at timestamptz,
-        add column if not exists flagged_by uuid references auth.users(id);`);
-      for (const name of ['065_booking_decision_statuses.sql', '066_venue_staff_booking_decisions.sql',
-        '076_reinstate_flagged_booking.sql', '078_list_flagged_bookings.sql',
-        '050_event_registration.sql', '091_event_registration_hardening.sql',
-        '092_event_registration_persistence.sql', '096_significant_event_change.sql',
-        '100_significant_change_confirmation_compatibility.sql']) {
-        await db.exec(migration(name));
-      }
-    });
-
+  describe('SCRUM363 confirmation through significant changes', () => {
     async function confirmedEvent(venueId = hall) {
       const { id } = await readyEventArrangedBySCRUM300(venueId);
       await db.query("update event_requests set purpose = 'Community talk', expected_attendance = 50 where id = $1", [id]);
@@ -289,8 +177,7 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
       const id = await confirmedEvent();
       await expect(db.query('update event_requests set expected_attendance = 60 where id = $1', [id]))
         .rejects.toMatchObject({ code: '55000' });
-      const attendee = (await one("insert into auth.users (email) values ('cycle-attendee@test') returning id")).id;
-      await db.query("insert into profiles(id, role) values ($1, 'attendee')", [attendee]);
+      const attendee = await seedUser(db, { email: 'cycle-attendee@test', role: 'attendee' });
       const registration = await one('insert into event_registrations(event_request_id, attendee_id) values ($1, $2) returning *', [id, attendee]);
       const changed = await one("select apply_significant_event_change($1, '{\"expectedAttendance\":60}', 'Attendance revised', $2) as result", [id, coordinator]);
       expect(changed.result.event).toMatchObject({ status: 'approved', expected_attendance: 60, registration_enabled: false });
@@ -353,14 +240,12 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
 
     // SCRUM-24 AC7 through the real lifecycle functions, not status fixtures.
     it('SCRUM24_AC7_attendee_read_follows_change_request_safety_review_and_reconfirmation', async () => {
-      const venue = await one("insert into venues (name, location, max_capacity) values ('Lifecycle hall', 'SMU Level 2', 200) returning id");
-      const id = await confirmedEvent(venue.id);
+      const venueId = await seedVenue(db, { name: 'Lifecycle hall', location: 'SMU Level 2', setup: 0, turnaround: 0 });
+      const id = await confirmedEvent(venueId);
       const booking = await one('select id from bookings where event_request_id = $1', [id]);
       const reservation = await one('select id from equipment_reservations where event_request_id = $1', [id]);
-      const attendee = (await one("insert into auth.users (email) values ('scrum24-attendee@test') returning id")).id;
-      await db.query("insert into profiles(id, role) values ($1, 'attendee')", [attendee]);
-      const venueStaff = (await one("insert into auth.users (email) values ('scrum24-venue@test') returning id")).id;
-      await db.query("insert into profiles(id, role) values ($1, 'venue_staff')", [venueStaff]);
+      const attendee = await seedUser(db, { email: 'scrum24-attendee@test', role: 'attendee' });
+      const venueStaff = await seedUser(db, { email: 'scrum24-venue@test', role: 'venue_staff' });
       await db.query('insert into event_registrations(event_request_id, attendee_id) values ($1, $2)', [id, attendee]);
       const read = () => getAttendeeEvent({
         user: { id: attendee, role: 'attendee' }, eventRequestId: id, client: createAttendeeEventSqlClient(db),
@@ -393,12 +278,11 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
     });
 
     it('SCRUM363_AC8_flagged_arrangements_require_real_resolution_and_fresh_safety_approval_before_reconfirmation', async () => {
-      const venue = await one("insert into venues (name, location, max_capacity) values ('Review hall', 'SMU', 200) returning id");
-      const id = await confirmedEvent(venue.id);
+      const venueId = await seedVenue(db, { name: 'Review hall', location: 'SMU', setup: 0, turnaround: 0 });
+      const id = await confirmedEvent(venueId);
       const booking = await one('select id from bookings where event_request_id = $1', [id]);
       const reservation = await one('select * from equipment_reservations where event_request_id = $1', [id]);
-      const venueStaff = (await one("insert into auth.users (email) values ('cycle-venue@test') returning id")).id;
-      await db.query("insert into profiles(id, role) values ($1, 'venue_staff')", [venueStaff]);
+      const venueStaff = await seedUser(db, { email: 'cycle-venue@test', role: 'venue_staff' });
 
       await db.query(`select apply_significant_event_change($1,
         '{"venueRequirements":"Review the existing hall", "equipmentChange":true}', 'Review arrangements', $2)`, [id, coordinator]);
@@ -433,14 +317,11 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
       expect(Number((await one('select count(*) from booking_resolutions where booking_id = $1', [booking.id])).count)).toBe(1);
     });
 
-    it('SCRUM363_AC8_compatibility_migration_is_rerunnable_invoker_security_and_backend_only', async () => {
-      await db.exec(migration('100_significant_change_confirmation_compatibility.sql'));
+    it('SCRUM363_AC8_significant_change_is_one_invoker_security_function_for_the_backend_only', async () => {
       const fn = await one("select count(*)::int as count, bool_or(prosecdef) as definer from pg_proc where proname = 'apply_significant_event_change'");
       expect(fn).toEqual({ count: 1, definer: false });
-      for (const role of ['anon', 'authenticated', 'service_role']) {
-        const { allowed } = await one("select has_function_privilege($1, 'apply_significant_event_change(uuid,jsonb,text,uuid,jsonb)', 'execute') as allowed", [role]);
-        expect(allowed).toBe(role === 'service_role');
-      }
+      expect(await clientsCanExecute(db, 'apply_significant_event_change(uuid,jsonb,text,uuid,jsonb)', ['anon', 'authenticated', 'service_role']))
+        .toEqual(['service_role']);
     });
 
     it('SCRUM363_AC8_a_failed_significant_change_rolls_back_the_early_transition_and_all_history', async () => {

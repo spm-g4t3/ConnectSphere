@@ -2,18 +2,12 @@
  * SCRUM-493: a venue's emergency access and known restrictions -- run
  * against a real Postgres.
  *
- * 036_venue_safety_facts.sql adds emergency_access and known_restrictions to
- * venues (nullable text, 1 to 2,000 characters, at least one non-whitespace
- * character) and redefines create_venue (023's body) and update_venue (035's
- * body) to take them. Both trim with the [[:space:]] class and store a blank
+ * venues.emergency_access and known_restrictions are nullable text, 1 to
+ * 2,000 characters, at least one non-whitespace character. create_venue and
+ * update_venue take them, trim with the [[:space:]] class and store a blank
  * as NULL, "not recorded"; on update_venue a NULL parameter keeps the
- * current value and '' clears it. These tests call the real functions; the
- * text is pinned in venueSafetyFactsMigration.test.js.
- *
- * Applied in order: the chain setupChangeRecheckDatabase.test.js applies
- * (through 035), then 036 TWICE -- the header promises it is safe to re-run,
- * and the second run must leave one signature of each function and one of
- * each CHECK.
+ * current value and '' clears it. These tests call the real functions on the
+ * final schema.
  *
  * Known, accepted limit (not tested as a failure): a direct SQL write of only
  * U+00A0 (non-breaking space) is stored, because [[:space:]] does not match
@@ -25,90 +19,28 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const SAFETY_FACTS = '036_venue_safety_facts.sql';
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '003_venue_audit.sql',
-  '004_venue_functions.sql',
-  '005_venue_retirement.sql',
-  '008_venue_audit_completion.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '034_setup_change_recheck.sql',
-  '035_setup_change_recheck_refine.sql',
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
-
-const DAY = 86_400_000;
-const sgDate = (days) => new Date(Date.now() + 8 * 3600_000 + days * DAY).toISOString().slice(0, 10);
-const D = sgDate(10);
-const at = (hhmm, date = D) => `${date}T${hhmm}:00+08:00`;
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { expectSqlError, queriesFor } from './helpers/queries.js';
+import { at } from '../fixtures/time.js';
 
 const EXITS = 'Two exits on Level 2 (east and west stairs); assemble at the SCIS lawn.';
 const RESTRICTIONS = 'No rigging from the ceiling. Amplified sound ends at 22:00.';
 const DOOR = '\u{1F6AA}';
 
-describe('SCRUM-493: emergency access and known restrictions (036)', () => {
+describe('SCRUM-493: emergency access and known restrictions', () => {
   let db;
   let organiser;
   let staff;
   let otherStaff;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
-  async function makeUser(role) {
-    counter += 1;
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [`u${counter}@x`])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (role) => seedUser(db, { email: `u${++counter}@x`, role });
 
-  /** A venue inserted directly, as one that existed before 036 would be. */
-  async function makeVenue(setup = 0, turnaround = 0) {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, $2, $3) returning id`,
-        [`Harbour Room ${counter}`, setup, turnaround],
-      )
-    ).id;
-  }
+  /** A venue inserted directly, not through create_venue. */
+  const makeVenue = (setup = 0, turnaround = 0) =>
+    seedVenue(db, { name: `Harbour Room ${++counter}`, setup, turnaround });
 
   /** create_venue with named arguments; returns the new id. */
   async function createVenue(args = {}, userId = staff) {
@@ -145,63 +77,29 @@ describe('SCRUM-493: emergency access and known restrictions (036)', () => {
     return (await history(id)).filter((h) => !before.has(h.id));
   }
 
-  async function makeEvent(coordinatorId) {
+  function makeEvent(coordinatorId) {
     counter += 1;
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, proposed_start, proposed_end,
-            expected_attendance, submitted_at, assigned_coordinator_id)
-         values ($1, $2, 'approved', $3, $4, 150, now(), $5) returning id`,
-        [organiser, `Event ${counter}`, at('10:00'), at('12:00'), coordinatorId],
-      )
-    ).id;
+    return seedEvent(db, {
+      status: 'approved',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinatorId,
+      event_name: `Event ${counter}`,
+      proposed_start: at('10:00'),
+      proposed_end: at('12:00'),
+      expected_attendance: 150,
+    });
   }
 
   async function makeBooking(venueId, startsAt, endsAt, coordinatorId) {
     const eventId = await makeEvent(coordinatorId);
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, 'approved') returning id`,
-        [venueId, eventId, startsAt, endsAt],
-      )
-    ).id;
+    return seedBooking(db, { venueId, eventId, status: 'approved', start: startsAt, end: endsAt });
   }
-
-  /** Expect a statement to be refused with this SQLSTATE (and constraint, when named). */
-  async function refused(promise, code, constraint) {
-    const error = await promise.then(
-      () => null,
-      (e) => e,
-    );
-    expect(error, 'expected the statement to be refused').not.toBeNull();
-    expect(error.code).toBe(code);
-    if (constraint) expect(error.message).toContain(constraint);
-  }
-
-  /** A venue that existed before 036 ran, read after it. */
-  let preExisting;
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      await db.exec(name === 'STAND_IN' ? DECISION_STAND_IN : migration(name));
-    }
+    db = await createSchemaDb();
     organiser = await makeUser(null);
     staff = await makeUser('venue_staff');
     otherStaff = await makeUser('venue_staff');
-    preExisting = await makeVenue(15, 30);
-
-    // 036, twice: it must be safe to re-run.
-    await db.exec(migration(SAFETY_FACTS));
-    await db.exec(migration(SAFETY_FACTS));
   }, 60_000);
 
   afterAll(async () => {
@@ -210,16 +108,6 @@ describe('SCRUM-493: emergency access and known restrictions (036)', () => {
 
 
   describe('schema', () => {
-    it('SCRUM493_AC2_an_existing_venue_reads_null_for_both_fields', async () => {
-      expect(await facts(preExisting)).toEqual({ emergency_access: null, known_restrictions: null });
-      // And 036 backfilled no history for it: nobody edited it. Its one row
-      // is its creation, written before the columns existed.
-      const rowsFor = await history(preExisting);
-      expect(rowsFor).toHaveLength(1);
-      expect(rowsFor[0].old_values).toEqual({});
-      expect(rowsFor[0].new_values).not.toHaveProperty('emergency_access');
-    });
-
     it('SCRUM493_AC1_both_columns_are_nullable_text_with_no_default', async () => {
       const columns = await rows(
         `select column_name, data_type, is_nullable, column_default
@@ -230,19 +118,6 @@ describe('SCRUM-493: emergency access and known restrictions (036)', () => {
       expect(columns).toEqual([
         { column_name: 'emergency_access', data_type: 'text', is_nullable: 'YES', column_default: null },
         { column_name: 'known_restrictions', data_type: 'text', is_nullable: 'YES', column_default: null },
-      ]);
-    });
-
-    it('SCRUM493_AC1_each_check_exists_once_after_two_runs', async () => {
-      const checks = await rows(
-        `select conname from pg_constraint
-          where conrelid = 'venues'::regclass
-            and conname in ('venues_emergency_access_length', 'venues_known_restrictions_length')
-          order by conname`,
-      );
-      expect(checks.map((c) => c.conname)).toEqual([
-        'venues_emergency_access_length',
-        'venues_known_restrictions_length',
       ]);
     });
 
@@ -333,13 +208,13 @@ describe('SCRUM-493: emergency access and known restrictions (036)', () => {
       ['CJK', '安'],
     ])('SCRUM493_AC1_2001_%s_characters_are_refused', async (_label, ch) => {
       const text = ch.repeat(2001);
-      await refused(createVenue({ emergency_access: text }), '23514', 'venues_emergency_access_length');
-      await refused(createVenue({ known_restrictions: text }), '23514', 'venues_known_restrictions_length');
+      await expectSqlError(createVenue({ emergency_access: text }), '23514', 'venues_emergency_access_length');
+      await expectSqlError(createVenue({ known_restrictions: text }), '23514', 'venues_known_restrictions_length');
 
       const id = await makeVenue();
-      await refused(updateVenue(id, { emergency_access: text }), '23514', 'venues_emergency_access_length');
-      await refused(updateVenue(id, { known_restrictions: text }), '23514', 'venues_known_restrictions_length');
-      await refused(
+      await expectSqlError(updateVenue(id, { emergency_access: text }), '23514', 'venues_emergency_access_length');
+      await expectSqlError(updateVenue(id, { known_restrictions: text }), '23514', 'venues_known_restrictions_length');
+      await expectSqlError(
         db.query('update venues set emergency_access = $2 where id = $1', [id, text]),
         '23514',
         'venues_emergency_access_length',
@@ -365,17 +240,17 @@ describe('SCRUM-493: emergency access and known restrictions (036)', () => {
       ['a mix', ' \t\r\n '],
     ])('SCRUM493_AC2_a_direct_blank_(%s)_write_is_refused', async (_label, blank) => {
       const id = await makeVenue();
-      await refused(
+      await expectSqlError(
         db.query('update venues set emergency_access = $2 where id = $1', [id, blank]),
         '23514',
         'venues_emergency_access_length',
       );
-      await refused(
+      await expectSqlError(
         db.query('update venues set known_restrictions = $2 where id = $1', [id, blank]),
         '23514',
         'venues_known_restrictions_length',
       );
-      await refused(
+      await expectSqlError(
         db.query(
           `insert into venues (name, location, max_capacity, emergency_access) values ('X', 'Y', 1, $1)`,
           [blank],
@@ -470,7 +345,7 @@ describe('SCRUM-493: emergency access and known restrictions (036)', () => {
     });
 
     it('SCRUM493_AC4_a_missing_venue_is_still_refused', async () => {
-      await refused(
+      await expectSqlError(
         updateVenue('00000000-0000-4000-8000-000000000000', { emergency_access: EXITS }),
         'P0002',
       );
@@ -558,7 +433,7 @@ describe('SCRUM-493: emergency access and known restrictions (036)', () => {
   });
 
 
-  describe('bookings (AC6) and the 035 re-check', () => {
+  describe('bookings (AC6) and the setup-change re-check', () => {
     /** A 30/45 venue whose two approved bookings already clash under 30/45. */
     async function clashingVenue() {
       const V = await makeVenue(30, 45);
@@ -611,8 +486,8 @@ describe('SCRUM-493: emergency access and known restrictions (036)', () => {
     });
 
     it('SCRUM493_AC6_a_minute_change_still_flags_new_clashes', async () => {
-      // 035's re-check survived 036: at 0/0 A and B are clear; at 30/45 they
-      // clash, so both are flagged and each coordinator is notified -- even
+      // The setup-change re-check still runs: at 0/0 A and B are clear; at
+      // 30/45 they clash, so both are flagged and each coordinator is notified -- even
       // when the same call also sets the safety text.
       const V = await makeVenue(0, 0);
       const C1 = await makeUser('event_coordinator');
@@ -635,7 +510,7 @@ describe('SCRUM-493: emergency access and known restrictions (036)', () => {
     });
 
     it('SCRUM493_AC6_a_minute_change_still_leaves_old_clashes_alone', async () => {
-      // 035's second decision survived too: bookings already clashing under
+      // The re-check's second rule holds too: bookings already clashing under
       // the old minutes are not flagged by a further change.
       const { V, A, B } = await clashingVenue();
 

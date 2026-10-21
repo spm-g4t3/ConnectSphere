@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { getEventClarificationHistory } from "../services/eventRequestService";
+import { formatMediumTimestamp } from "../services/displayFormat";
+import { isReplyOverdue } from "../services/datetimeFormat";
 
 const ENTRY_LABELS = {
   question: "Coordinator question",
@@ -18,17 +20,6 @@ const FIELD_LABELS = {
   accessibilityRequirements: "Accessibility requirements",
   equipmentRequirements: "Equipment requirements",
 };
-
-function formatTimestamp(value) {
-  if (!value) return "Date not recorded";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(date);
-}
 
 function formatReplyByDate(value) {
   const date = new Date(`${value}T00:00:00`);
@@ -87,7 +78,7 @@ export default function ClarificationHistory({
         const overdue = isOpen &&
           entry.type === "question" &&
           entry.replyByDate &&
-          entry.replyByDate < new Date().toISOString().slice(0, 10) &&
+          isReplyOverdue(entry.replyByDate) &&
           entries.at(-1)?.id === entry.id;
         return (
           <article
@@ -102,7 +93,7 @@ export default function ClarificationHistory({
                 className="clarification-history__meta"
                 dateTime={entry.createdAt || undefined}
               >
-                {formatTimestamp(entry.createdAt)}
+                {formatMediumTimestamp(entry.createdAt, "Date not recorded")}
               </time>
             </header>
             <p className="clarification-history__message">{entry.message}</p>

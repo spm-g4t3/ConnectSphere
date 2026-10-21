@@ -15,6 +15,7 @@ import {
   NotFoundError,
   ValidationError,
 } from '../../src/errors.js';
+import { ok, dbError, createRpcQueueClient } from '../fixtures/supabaseStubs.js';
 
 const BOOKING_ID = '44444444-4444-4444-8444-444444444444';
 const EVENT_ID = '22222222-2222-4222-8222-222222222222';
@@ -22,22 +23,6 @@ const VENUE_ID = '33333333-3333-4333-8333-333333333333';
 const COORDINATOR_ID = '55555555-5555-4555-8555-555555555555';
 const STAFF_ID = '99999999-9999-4999-8999-999999999999';
 const FREED_ID = '77777777-7777-4777-8777-777777777777';
-
-function createFakeClient(results = []) {
-  const queue = [...results];
-  const calls = [];
-  return {
-    calls,
-    rpc(fn, args) {
-      calls.push({ fn, args });
-      if (queue.length === 0) throw new Error(`fake client: no result queued for ${fn}`);
-      return Promise.resolve(queue.shift());
-    },
-  };
-}
-
-const ok = (data) => ({ data, error: null });
-const dbFailure = (code, message, extra = {}) => ({ data: null, error: { code, message, ...extra } });
 
 /** A bookings row as release_venue_booking's to_jsonb returns it. */
 const releasedRow = (overrides = {}) => ({
@@ -79,7 +64,7 @@ describe('SCRUM-492: releaseVenueBooking', () => {
     ['a_reason_of_1001_characters', { input: { reason: 'x'.repeat(1001) } }, 'reason'],
   ])('SCRUM492_AC1_%s_is_refused_with_400_before_any_rpc', async (_label, options, field) => {
     // AC1-13.
-    const client = createFakeClient([]);
+    const client = createRpcQueueClient([]);
 
     const err = await rejection(call(client, options));
 
@@ -89,7 +74,7 @@ describe('SCRUM-492: releaseVenueBooking', () => {
   });
 
   it.each([null, [], 'reason'])('SCRUM492_AC1_an_input_of_%j_is_refused_with_400_before_any_rpc', async (input) => {
-    const client = createFakeClient([]);
+    const client = createRpcQueueClient([]);
 
     expect(await rejection(call(client, { input }))).toBeInstanceOf(ValidationError);
     expect(client.calls).toHaveLength(0);
@@ -97,7 +82,7 @@ describe('SCRUM-492: releaseVenueBooking', () => {
 
   it('SCRUM492_AC2_a_release_is_one_rpc_with_the_caller_and_the_trimmed_reason', async () => {
     // AC2-06: 1000 characters after trimming is accepted, and sent trimmed.
-    const client = createFakeClient([released()]);
+    const client = createRpcQueueClient([released()]);
     const reason = `  ${'x'.repeat(1000)}  `;
 
     await call(client, { id: BOOKING_ID.toUpperCase(), input: { reason } });
@@ -110,7 +95,7 @@ describe('SCRUM-492: releaseVenueBooking', () => {
 
   it('SCRUM492_AC2_the_answer_is_the_released_booking_and_the_requests_returned_to_pending', async () => {
     // AC2-06, AC4-01, AC6-01.
-    const client = createFakeClient([released({}, [FREED_ID])]);
+    const client = createRpcQueueClient([released({}, [FREED_ID])]);
 
     const result = await call(client);
 
@@ -129,7 +114,7 @@ describe('SCRUM-492: releaseVenueBooking', () => {
   });
 
   it('SCRUM492_AC4_an_answer_with_no_list_returns_none_to_pending', async () => {
-    const client = createFakeClient([ok({ outcome: 'released', booking: releasedRow() })]);
+    const client = createRpcQueueClient([ok({ outcome: 'released', booking: releasedRow() })]);
 
     expect((await call(client)).returnedToPending).toEqual([]);
   });
@@ -138,7 +123,7 @@ describe('SCRUM-492: releaseVenueBooking', () => {
     'SCRUM492_AC1_the_functions_%s_arrives_as_a_409_with_that_code',
     async (hint) => {
       // AC1-14: keyed on the hint, never the message.
-      const client = createFakeClient([dbFailure('PT409', 'words the screen never reads', { hint })]);
+      const client = createRpcQueueClient([dbError('PT409', 'words the screen never reads', { hint })]);
 
       const err = await rejection(call(client));
 
@@ -156,7 +141,7 @@ describe('SCRUM-492: releaseVenueBooking', () => {
     ['40001', ConflictError, 409, 'BOOKING_CHANGED'],
   ])('SCRUM492_AC1_the_functions_%s_arrives_as_its_status', async (code, type, status, conflictCode) => {
     // AC1-14.
-    const client = createFakeClient([dbFailure(code, 'words')]);
+    const client = createRpcQueueClient([dbError(code, 'words')]);
 
     const err = await rejection(call(client));
 
@@ -169,7 +154,7 @@ describe('SCRUM-492: releaseVenueBooking', () => {
     ['an_outcome_that_is_not_released', ok({ outcome: 'cancelled', booking: releasedRow() })],
     ['a_booking_that_is_not_released', released({ status: 'approved' })],
   ])('SCRUM492_AC2_%s_is_an_error_not_a_success', async (_label, answer) => {
-    const client = createFakeClient([answer]);
+    const client = createRpcQueueClient([answer]);
 
     const err = await rejection(call(client));
 

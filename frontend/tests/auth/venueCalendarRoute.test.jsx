@@ -13,16 +13,13 @@
 // API before rendering, and the redirect is read back off window.location.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import { useEffect } from "react";
 
-import App from "../../src/App.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
+import { renderAppAt as renderApp } from "../helpers/renderApp.js";
 
-vi.mock("../../src/auth/AuthContext", () => ({
-  AuthProvider: ({ children }) => children,
-  useAuth: vi.fn(),
-}));
+vi.mock("../../src/auth/AuthContext", async () => (await import("../helpers/authMock.js")).authContextMock());
 
 // mounts counts how many times the stub has MOUNTED (not rendered), so a key
 // change is visible as a new mount; lastInitialDate keeps the prop itself, so
@@ -46,17 +43,8 @@ vi.mock("../../src/components/VenueCalendar", () => ({
 const VENUE_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const OTHER_VENUE_ID = "6ba7b810-9dad-41d1-80b4-00c04fd430c8";
 
-function renderAppAt(path, role) {
-  vi.mocked(useAuth).mockReturnValue({
-    user: role ? { name: "Test User", role } : null,
-    loading: false,
-    logout: vi.fn().mockResolvedValue({ success: true }),
-    logoutMessage: null,
-    clearLogoutMessage: vi.fn(),
-  });
-  window.history.pushState({}, "", path);
-  return render(<App />);
-}
+// These cases sign in a user without an id.
+const renderAppAt = (path, role) => renderApp(path, role, { name: "Test User" });
 
 beforeEach(() => {
   vi.mocked(useAuth).mockReset();

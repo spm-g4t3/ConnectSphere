@@ -1,6 +1,7 @@
 import {
   validateRegistrationIdentity, translateRegistrationEligibilityError,
 } from './registrationEligibilityService.js';
+import { resolveClientIfMissing } from '../config/resolveClient.js';
 
 /**
  * attendeeId must come from requireAuth's req.user.id in an Attendee-only route.
@@ -9,7 +10,7 @@ import {
  */
 export async function registerForEvent({ attendeeId, eventId, client } = {}) {
   validateRegistrationIdentity({ attendeeId, eventId });
-  const db = client ?? (await import('../config/supabaseClient.js')).supabase;
+  const db = await resolveClientIfMissing(client);
   const { data, error } = await db.rpc('register_for_event', {
     p_event_request_id: eventId,
     p_attendee_id: attendeeId,

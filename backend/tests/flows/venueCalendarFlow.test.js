@@ -50,6 +50,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { ok, scriptedQueryStub } from '../fixtures/supabaseStubs.js';
+import { actingAs, headerAuth } from '../fixtures/auth.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -170,35 +172,6 @@ const VENUE_ROW = {
 const queue = [];
 const failures = [];
 
-/** A recording query builder. Its asserts run when the chain is awaited. */
-function queryStub(step) {
-  const calls = [];
-  const stub = {
-    calls,
-    called: (method) => calls.some(([name]) => name === method),
-    args: (method) => calls.find(([name]) => name === method)?.slice(1),
-    allArgs: (method) => calls.filter(([name]) => name === method).map((c) => c.slice(1)),
-  };
-  const settle = () => {
-    try {
-      step.assert?.(stub);
-    } catch (err) {
-      failures.push(err);
-    }
-    return Promise.resolve(step.respond);
-  };
-  // lte is recorded too, so a regression to an inclusive overlap fails an
-  // assertion here instead of throwing a TypeError.
-  for (const method of [
-    'select', 'eq', 'is', 'ilike', 'gte', 'lte', 'lt', 'gt', 'not', 'in', 'order', 'limit', 'update',
-  ]) {
-    stub[method] = (...args) => { calls.push([method, ...args]); return stub; };
-  }
-  stub.maybeSingle = (...args) => { calls.push(['maybeSingle', ...args]); return settle(); };
-  stub.then = (onFulfilled, onRejected) => settle().then(onFulfilled, onRejected);
-  return stub;
-}
-
 /** Take the next step, recording a failure if it is not the call made. */
 function next(kind, name) {
   const step = queue.shift();
@@ -225,7 +198,7 @@ rpc.mockImplementation((name, args) => {
 
 from.mockImplementation((table) => {
   const step = next('from', table);
-  return queryStub(step ?? { respond: { data: null, error: { message: 'unscripted' } } });
+  return scriptedQueryStub(step ?? { respond: { data: null, error: { message: 'unscripted' } } }, failures);
 });
 
 /** Script the calls the next request(s) must make, in order. */
@@ -235,7 +208,6 @@ function script(...steps) {
 
 const rpcStep = (name, respond, assert) => ({ kind: 'rpc', name, respond, assert });
 const fromStep = (name, respond, assert) => ({ kind: 'from', name, respond, assert });
-const ok = (data) => ({ data, error: null });
 
 /**
  * Would Postgres return this row for the range filters the query recorded?
@@ -313,23 +285,14 @@ const searchUrl = (startsAt, endsAt) =>
 // ------------------------------------------------------------------ the app
 
 /** Signs in whoever the x-test-as header names; no header is no session. */
-function fakeRequireAuth(req, res, next) {
-  const user = USERS[req.get('x-test-as')];
-  if (!user) return res.status(401).json({ error: 'Authentication required' });
-  req.user = { id: user.id, email: `${req.get('x-test-as')}@example.com`, role: user.role };
-  return next();
-}
+const fakeRequireAuth = headerAuth(USERS);
 
 const app = express()
   .use(express.json())
   .use('/api/venues', createVenueRouter({ requireAuth: fakeRequireAuth }));
 
 /** A request as one user; any assertion failure inside the mock fails here first. */
-async function as(who, build) {
-  const res = await build(request(app)).set('x-test-as', who);
-  expect(failures).toEqual([]);
-  return res;
-}
+const as = actingAs(app, failures);
 
 afterEach(() => {
   const leftover = queue.splice(0).map((s) => `${s.kind}('${s.name}')`);

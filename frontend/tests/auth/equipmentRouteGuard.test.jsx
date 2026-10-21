@@ -13,15 +13,12 @@
 // requireRole's own test proves both roles are refused by it.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 
-import App from "../../src/App.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
+import { renderAppAt } from "../helpers/renderApp.js";
 
-vi.mock("../../src/auth/AuthContext", () => ({
-  AuthProvider: ({ children }) => children,
-  useAuth: vi.fn(),
-}));
+vi.mock("../../src/auth/AuthContext", async () => (await import("../helpers/authMock.js")).authContextMock());
 
 vi.mock("../../src/components/EquipmentCatalogue", () => ({
   default: () => <p data-testid="equipment-page-stub">Equipment catalogue</p>,
@@ -32,18 +29,6 @@ vi.mock("../../src/components/EquipmentReview", () => ({
 vi.mock("../../src/components/EquipmentAvailabilityCheck", () => ({
   default: () => <p data-testid="equipment-page-stub">Equipment availability</p>,
 }));
-
-function renderAppAt(path, role) {
-  vi.mocked(useAuth).mockReturnValue({
-    user: role ? { id: "u1", name: "Test User", role } : null,
-    loading: false,
-    logout: vi.fn().mockResolvedValue({ success: true }),
-    logoutMessage: null,
-    clearLogoutMessage: vi.fn(),
-  });
-  window.history.pushState({}, "", path);
-  return render(<App />);
-}
 
 beforeEach(() => {
   vi.mocked(useAuth).mockReset();

@@ -1,51 +1,25 @@
 /**
- * SCRUM-251: bookings.status defaults to pending, run against a real Postgres.
- *
- * Applies the real migrations to an in-process Postgres (PGlite): 001 and 002
- * are the tables 009 references, 009 and 011 create bookings and the
- * booking_status enum, 013 adds the approved-only overlap helper, 027 adds the
- * request statuses and 028 is the migration under test.
+ * SCRUM-251: bookings.status defaults to pending, run against the final schema
+ * in a real Postgres (PGlite).
  *
  * The inserts here are plain SQL that name no status, so no application code
  * can supply one. That is deliberate: a default set in the service layer
- * would otherwise hide a database default that is still 'approved'. (Nothing
- * in backend/src inserts a booking today; this is the path any future writer's
- * omitted status takes.)
- *
- * One approved booking is inserted BEFORE 028 runs, to prove existing rows
- * keep their status.
+ * would otherwise hide a database default that is still 'approved'.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
 import { BOOKING_STATUS } from '../../src/domain/bookingStatus.js';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const BEFORE_028 = [
-  '001_event_requests.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '027_booking_request_statuses.sql',
-];
-const MIGRATION_028 = '028_booking_status_default_pending.sql';
+import { createSchemaDb, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 describe('SCRUM-251: the booking status default in Postgres', () => {
   let db;
   let venueId;
   let eventId;
-  let existingBookingId;
+  let organiserId;
   let hour = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   /** A booking over its own one-hour slot, so none overlap; status only if given. */
   async function insertBooking(status) {
@@ -59,49 +33,26 @@ describe('SCRUM-251: the booking status default in Postgres', () => {
            values ($1, $2, ${start}, ${end}) returning id, status`,
           times,
         )
-      : one(
-          `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-           values ($1, $2, ${start}, ${end}, $4) returning id, status`,
-          [...times, status],
-        );
+      : status === BOOKING_STATUS.RELEASED
+        // A released booking records who released it, when and why.
+        ? one(
+            `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status,
+                                   released_by, released_at, release_reason)
+             values ($1, $2, ${start}, ${end}, $4, $5, now(), 'Fixture release') returning id, status`,
+            [...times, status, organiserId],
+          )
+        : one(
+            `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
+             values ($1, $2, ${start}, ${end}, $4) returning id, status`,
+            [...times, status],
+          );
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-    `);
-    for (const name of BEFORE_028) await db.exec(migration(name));
-
-    const organiser = await one(`insert into auth.users (email) values ('o@example.com') returning id`);
-    venueId = (
-      await one(
-        `insert into venues (name, location, max_capacity) values ('Hall', 'Block A', 100) returning id`,
-      )
-    ).id;
-    eventId = (
-      await one(`insert into event_requests (organiser_id, event_name) values ($1, 'Gala') returning id`, [
-        organiser.id,
-      ])
-    ).id;
-
-    // Before 028 the default is still 'approved'; this row is what 028 must not touch.
-    const before = await insertBooking();
-    expect(before.status).toBe('approved');
-    existingBookingId = before.id;
-
-    await db.exec(migration(MIGRATION_028));
-    // 065 appends conflicting and 088 (SCRUM-492) released, so every status in
-    // the JS vocabulary exists. Only 065's booking_status line: venue_hold_status
-    // is not in this stack.
-    await db.exec(
-      migration('065_booking_decision_statuses.sql')
-        .split('\n')
-        .filter((line) => line.startsWith('alter type booking_status add value'))
-        .join('\n'),
-    );
-    await db.exec(migration('088_booking_released_status.sql'));
+    db = await createSchemaDb();
+    organiserId = await seedUser(db, { email: 'o@example.com' });
+    venueId = await seedVenue(db, { name: 'Hall', capacity: 100, setup: 0, turnaround: 0 });
+    eventId = await seedEvent(db, { organiser_id: organiserId, event_name: 'Gala' });
   }, 60_000);
 
   afterAll(async () => {
@@ -122,11 +73,6 @@ describe('SCRUM-251: the booking status default in Postgres', () => {
     expect(row.is_nullable).toBe('NO');
   });
 
-  it('SCRUM251_leaves_a_booking_that_already_existed_approved', async () => {
-    const row = await one('select status from bookings where id = $1', [existingBookingId]);
-    expect(row.status).toBe('approved');
-  });
-
   it.each(Object.values(BOOKING_STATUS))(
     'SCRUM251_keeps_an_explicit_%s_status',
     async (status) => {
@@ -144,13 +90,5 @@ describe('SCRUM-251: the booking status default in Postgres', () => {
         [venueId, eventId, String(hour)],
       ),
     ).rejects.toMatchObject({ code: '23502' });
-  });
-
-  it('SCRUM251_can_be_run_again_without_error_or_change', async () => {
-    await db.exec(migration(MIGRATION_028));
-    expect((await insertBooking()).status).toBe('pending');
-    expect((await one('select status from bookings where id = $1', [existingBookingId])).status).toBe(
-      'approved',
-    );
   });
 });

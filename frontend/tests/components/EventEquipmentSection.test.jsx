@@ -30,6 +30,7 @@ import {
   getEventEquipment,
   removeEquipmentLine,
 } from "../../src/services/eventEquipmentService";
+import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventEquipmentService", () => ({
   addEquipmentLine: vi.fn(),
@@ -76,12 +77,6 @@ function state({ status = "pending_review", lines = [line()] } = {}) {
       lines,
     },
   };
-}
-
-function httpError(status, data) {
-  return Object.assign(new Error(`Request failed with status code ${status}`), {
-    response: { status, data },
-  });
 }
 
 function renderSection(props = {}) {

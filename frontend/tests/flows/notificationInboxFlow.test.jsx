@@ -35,7 +35,6 @@ import * as venueService from "../../src/services/venueService";
 import * as bookingRequestService from "../../src/services/bookingRequestService";
 import * as venueSuitabilityService from "../../src/services/venueSuitabilityService";
 import * as eventEquipmentService from "../../src/services/eventEquipmentService";
-import * as supportService from "../../src/services/supportService";
 import { formatTimestamp } from "../../src/services/displayFormat";
 
 vi.mock("../../src/auth/AuthContext", () => ({
@@ -60,7 +59,6 @@ vi.mock("../../src/services/eventRequestService", () => ({
   processCoordinatorChangeRequest: vi.fn(),
   getEventRequestById: vi.fn(),
   getMyEventRequests: vi.fn(),
-  getEventRequestStatus: vi.fn(),
   getEventRequestQueue: vi.fn(),
   getEventCancellationImpact: vi.fn(),
   cancelEventRequest: vi.fn(),
@@ -122,11 +120,6 @@ vi.mock("../../src/services/eventEquipmentService", () => ({
   amendEquipmentLine: vi.fn(),
   removeEquipmentLine: vi.fn(),
   getActiveEquipmentTypes: vi.fn(),
-}));
-
-vi.mock("../../src/services/supportService", () => ({
-  getOpenTickets: vi.fn(),
-  getEquipmentRequests: vi.fn(),
 }));
 
 const MINUTE = 60 * 1000;
@@ -223,7 +216,6 @@ const MOCKED_SERVICES = [
   bookingRequestService,
   venueSuitabilityService,
   eventEquipmentService,
-  supportService,
 ];
 
 let fake;

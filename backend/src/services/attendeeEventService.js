@@ -1,13 +1,16 @@
 import { ROLE } from '../domain/userRole.js';
 import { STATUS } from '../domain/eventRequestStatus.js';
-import { BOOKING_STATUS } from '../domain/bookingStatus.js';
+import { BOOKING_STATUS, BOOKED_STATUSES } from '../domain/bookingStatus.js';
 import { UnauthorizedError, ForbiddenError, ValidationError, NotFoundError, ServiceUnavailableError } from '../errors.js';
-import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
+import { SCHEMA_MISSING_CODES } from '../http/pgErrors.js';
+import { resolveClientIfMissing } from '../config/resolveClient.js';
+import { isPlausibleId } from '../validation/ids.js';
 
 const REGISTERED = 'registered';
-const SCHEMA_ERRORS = ['42P01', '42703', 'PGRST200', 'PGRST202', 'PGRST204', 'PGRST205'];
+// PGRST200 too: these reads embed event_requests, bookings and venues, and a
+// missing relationship between them is the schema's fault, not the caller's.
+const SCHEMA_ERRORS = [...SCHEMA_MISSING_CODES, 'PGRST200'];
 const PAGE_SIZE = 1000;
-const VISIBLE_BOOKING_STATUSES = [BOOKING_STATUS.APPROVED, BOOKING_STATUS.FLAGGED_FOR_REVIEW];
 
 function validateId(field, value) {
   if (!isPlausibleId(value)) {
@@ -35,7 +38,7 @@ export async function getAttendeeEvent({ user, eventRequestId, client } = {}) {
   const attendeeId = attendeeIdentity(user);
   validateId('eventRequestId', eventRequestId);
   const eventId = eventRequestId.trim().toLowerCase();
-  const db = client ?? (await import('../config/supabaseClient.js')).supabase;
+  const db = await resolveClientIfMissing(client);
   // Registration, event state and arrangements share one database snapshot;
   // a separate status check could disclose arrangements after a planning change.
   const { data, error } = await db.from('event_registrations')
@@ -70,7 +73,7 @@ export async function getAttendeeEvent({ user, eventRequestId, client } = {}) {
     // A flagged booking is still the event's venue until someone resolves it;
     // attendees see that it is under review, never why.
     venues: (event.bookings ?? [])
-      .filter(booking => VISIBLE_BOOKING_STATUSES.includes(booking.status))
+      .filter(booking => BOOKED_STATUSES.includes(booking.status))
       .map(booking => ({
         bookingId: booking.id,
         name: booking.venues?.name ?? null,
@@ -83,7 +86,7 @@ export async function getAttendeeEvent({ user, eventRequestId, client } = {}) {
 /** Entry points only: arrangement visibility remains the protected detail read's decision. */
 export async function listAttendeeEvents({ user, client } = {}) {
   const attendeeId = attendeeIdentity(user);
-  const db = client ?? (await import('../config/supabaseClient.js')).supabase;
+  const db = await resolveClientIfMissing(client);
   const events = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await db.from('event_registrations')

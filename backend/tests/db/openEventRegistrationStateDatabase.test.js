@@ -1,13 +1,7 @@
-/** Runs the open-event registration state against SCRUM-494's registration schema. */
+/** open_event_registration_state against the final schema. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = resolve(here, '../../db/migrations');
-const migration = (name) => readFileSync(resolve(MIGRATIONS_DIR, name), 'utf8');
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { clientsCanExecute } from './helpers/grants.js';
 
 const EVENT_A = '00000000-0000-4000-8000-00000000000a';
 const EVENT_B = '00000000-0000-4000-8000-00000000000b';
@@ -28,34 +22,7 @@ const state = async (ids, attendee) => {
 };
 
 beforeAll(async () => {
-  db = new PGlite();
-  await db.exec(`
-    create schema auth;
-    create table auth.users (id uuid primary key, email text);
-    create role anon;
-    create role authenticated;
-    create role service_role;
-    create table profiles (id uuid primary key references auth.users(id), role text not null);
-  `  );
-  await db.exec(migration('001_event_requests.sql'));
-  // 091 adds a notification type, so the table 014 creates has to exist.
-  await db.exec(`
-    create table notifications (
-      id uuid primary key default gen_random_uuid(),
-      recipient_id uuid not null,
-      type text not null,
-      event_request_id uuid,
-      payload jsonb not null default '{}',
-      constraint notifications_type_known check (type in ('booking_flagged'))
-    );
-  `);
-  await db.exec(migration('068_open_event_registration_state.sql'));
-  await db.exec(migration('050_event_registration.sql'));
-  await db.exec(migration('082_event_registration_state.sql'));
-  await db.exec(migration('091_event_registration_hardening.sql'));
-  for (const name of ['092_event_registration_persistence.sql', '093_registration_eligibility.sql', '094_register_for_event.sql', '101_registration_status_guards.sql']) {
-    await db.exec(migration(name));
-  }
+  db = await createSchemaDb();
   await db.query(
     'insert into auth.users (id, email) values ($1, $2), ($3, $4), ($5, $6), ($7, $8)',
     [ME, 'me@test', OTHER, 'other@test', COORDINATOR, 'coordinator@test', ORGANISER, 'organiser@test'],
@@ -64,9 +31,9 @@ beforeAll(async () => {
     `insert into profiles (id, role) values ($1, 'attendee'), ($2, 'attendee'), ($3, 'event_coordinator')`,
     [ME, OTHER, COORDINATOR],
   );
-  await db.query('insert into event_requests (id, organiser_id, event_name) values ($1, $4, $5), ($2, $4, $5), ($3, $4, $5)', [
-    EVENT_A, EVENT_B, EVENT_C, ORGANISER, 'Registration state test',
-  ]);
+  for (const id of [EVENT_A, EVENT_B, EVENT_C]) {
+    await seedEvent(db, { id, organiser_id: ORGANISER, event_name: 'Registration state test' });
+  }
 
   // 1,200 places taken on A: more than the 1,000 rows an API read returns.
   await db.exec('create temporary table test_attendees as select gen_random_uuid() as id from generate_series(1, 1200)');
@@ -140,12 +107,6 @@ describe('SCRUM495 open_event_registration_state', () => {
   });
 
   it('SCRUM495_AC1_is_not_executable_by_public_anon_or_authenticated', async () => {
-    for (const role of ['anon', 'authenticated']) {
-      const { rows } = await db.query(
-        `select has_function_privilege($1, 'open_event_registration_state(uuid[], uuid)', 'execute') as allowed`,
-        [role],
-      );
-      expect(rows[0].allowed).toBe(false);
-    }
+    expect(await clientsCanExecute(db, 'open_event_registration_state(uuid[], uuid)')).toEqual([]);
   });
 });

@@ -4,14 +4,13 @@
 // Every service file (AuthContext, venueService, eventRequestService, etc.)
 // imports this rather than constructing its own axios instance.
 //
-// Requires axios: npm install axios
-//
 // Base URL comes from an env var so it's different in dev vs. production
 // without editing code. Uses Vite's import.meta.env convention — if your
 // project uses Create React App instead, swap this for
 // process.env.REACT_APP_API_BASE_URL and adjust the .env key name to match.
 
 import axios from "axios";
+import { AUTH_STORAGE_KEY } from "../auth/authStorageKey";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
 
@@ -26,12 +25,12 @@ export const apiClient = axios.create({
 // when one exists — so individual service calls don't each have to remember
 // to pass an Authorization header themselves.
 //
-// Reads directly from sessionStorage (the same key AuthContext.jsx writes
-// to) rather than importing AuthContext here, which would create a circular
+// Reads directly from sessionStorage (the key AuthContext.jsx writes to)
+// rather than importing AuthContext here, which would create a circular
 // import (AuthContext -> apiClient -> AuthContext).
 apiClient.interceptors.request.use((config) => {
   try {
-    const stored = sessionStorage.getItem("connectsphere_auth");
+    const stored = sessionStorage.getItem(AUTH_STORAGE_KEY);
     if (stored) {
       const { session } = JSON.parse(stored);
       if (session?.access_token) {
@@ -44,10 +43,5 @@ apiClient.interceptors.request.use((config) => {
   }
   return config;
 });
-
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => Promise.reject(error),
-);
 
 export default apiClient;

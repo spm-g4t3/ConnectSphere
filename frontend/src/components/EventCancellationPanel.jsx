@@ -4,6 +4,7 @@ import {
   getEventCancellationImpact,
 } from "../services/eventRequestService";
 import { CANCELLABLE_STATUSES } from "../services/eventRequestStatusDisplay";
+import { formatTimestamp } from "../services/displayFormat";
 
 const CANCEL_ERROR_MESSAGES = {
   400: "Enter a cancellation reason and select who initiated it.",
@@ -49,12 +50,6 @@ function cancellationPreviewErrorMessage(error, eventRequestId) {
   return "The cancellation preview request could not reach the server. Check your connection and try again.";
 }
 
-function formatTimestamp(value) {
-  if (!value) return "Not recorded";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
-}
-
 function ImpactSection({ title, impact }) {
   const details = impact?.details ?? [];
   return (
@@ -67,9 +62,9 @@ function ImpactSection({ title, impact }) {
               {item.venueName || item.equipmentName || item.status || "Item"}
               {item.venueLocation ? ` — ${item.venueLocation}` : ""}
               {item.quantity !== undefined ? ` (quantity ${item.quantity})` : ""}
-              {item.startsAt && `, ${formatTimestamp(item.startsAt)}`}
-              {item.endsAt && `–${formatTimestamp(item.endsAt)}`}
-              {item.expiresAt && `, expires ${formatTimestamp(item.expiresAt)}`}
+              {item.startsAt && `, ${formatTimestamp(item.startsAt, "Not recorded")}`}
+              {item.endsAt && `–${formatTimestamp(item.endsAt, "Not recorded")}`}
+              {item.expiresAt && `, expires ${formatTimestamp(item.expiresAt, "Not recorded")}`}
               {item.lines?.length > 0 &&
                 ` — ${item.lines.map((line) => `${line.equipmentName || "Equipment"} (quantity ${line.quantity})`).join(", ")}`}
             </li>
@@ -124,7 +119,7 @@ export default function EventCancellationPanel({
             <dt>Reason</dt>
             <dd>{eventRequest.cancellationReason || "No reason recorded."}</dd>
             <dt>Cancelled on</dt>
-            <dd>{formatTimestamp(eventRequest.cancelledAt)}</dd>
+            <dd>{formatTimestamp(eventRequest.cancelledAt, "Not recorded")}</dd>
           </dl>
         </section>
       </main>

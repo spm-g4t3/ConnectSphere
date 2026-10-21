@@ -1,11 +1,9 @@
 // changeRequestService.js
 //
-// Same caveat as before: I don't see an Express route for this yet, only
-// the pattern to follow. Confirm with your backend teammate that something
-// like POST /event-requests/:id/change-requests exists or gets built,
-// and what shape it expects/returns.
+// An Organiser's change requests on an event, under
+// /event-requests/:id/change-requests.
 
-import { apiClient } from "./apiClient"; // <-- replace with your actual API client
+import { getData, postData } from "./apiData";
 
 /**
  * Submits a request to change something about an already-submitted event.
@@ -16,11 +14,10 @@ import { apiClient } from "./apiClient"; // <-- replace with your actual API cli
  * @param {string} payload.details  free-text description of the change
  */
 export async function submitChangeRequest(eventRequestId, payload) {
-  const response = await apiClient.post(
+  return postData(
     `/event-requests/${eventRequestId}/change-requests`,
     payload,
   );
-  return response.data;
 }
 
 /**
@@ -31,8 +28,7 @@ export async function submitChangeRequest(eventRequestId, payload) {
  * Expected shape per item: { id, fieldLabel, details, status, createdAt }
  */
 export async function getChangeRequests(eventRequestId) {
-  const response = await apiClient.get(
+  return getData(
     `/event-requests/${eventRequestId}/change-requests`,
   );
-  return response.data;
 }

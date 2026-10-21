@@ -1,19 +1,14 @@
 /**
- * SCRUM-298 for SCRUM-290: reviewing an equipment request, run against a real
- * Postgres.
+ * SCRUM-298 for SCRUM-290: reviewing an equipment request, run against the
+ * final schema in a real Postgres (PGlite).
  *
- * Applies the real migrations 022 (the equipment tables), 024 (availability),
- * 037 (the line functions) and 038 (the review functions) to an in-process
- * Postgres (PGlite), then calls the functions the way the service does and
- * checks what is left in the tables. Same approach as
- * equipmentLinesDatabase.test.js: no server, no credentials, runs in CI.
+ * Calls the functions the way the service does and checks what is left in the
+ * tables. Same approach as equipmentLinesDatabase.test.js: no server, no
+ * credentials, runs in CI.
  *
- * One stand-in: event_requests, with the columns 022, 024, 037 and 038 read (id,
- * name, status, assigned coordinator and the proposed period).
- *
- * Reservations are inserted directly, because SCRUM-300 (reserve equipment) is
- * not built. AC5 and AC6 are therefore tested at the database edge: the Arranged
- * check is a function SCRUM-300 will call, and these tests call it the same way.
+ * Reservations are inserted directly. AC5 and AC6 are tested at the database
+ * edge: the Arranged check is a function the reservation actions call, and
+ * these tests call it the same way.
  *
  * Test names are SCRUM290_AC<n>_<what_it_checks>, as SCRUM-298 asks.
  *
@@ -23,33 +18,13 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '022_equipment_schema.sql',
-  '024_equipment_availability.sql',
-  '037_equipment_request_lines.sql',
-  '038_equipment_review.sql',
-];
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { asJson } from './helpers/equipment.js';
 
 const NO_SUCH_ID = '00000000-0000-0000-0000-000000000000';
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
   let db;
@@ -60,21 +35,20 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
   let projector;
   let microphone;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
-  const asJson = (row) => JSON.parse(row.answer);
+  const { one, rows } = queriesFor(() => db);
 
-  const newUser = async (email) =>
-    (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
+  const newUser = (email) => seedUser(db, { email });
   const newType = async (name, total = 10) =>
     (await one('insert into equipment_types (name, total_quantity) values ($1, $2) returning id', [name, total])).id;
-  const newEvent = async ({ start = START, end = END } = {}) =>
-    (await one(
-      `insert into event_requests
-         (organiser_id, event_name, status, assigned_coordinator_id, proposed_start, proposed_end)
-       values ($1, $2, 'approved', $3, $4, $5) returning id`,
-      [organiser, `Event ${Math.random()}`, coordinator, start, end],
-    )).id;
+  const newEvent = ({ start = START, end = END } = {}) =>
+    seedEvent(db, {
+      status: 'approved',
+      organiser_id: organiser,
+      event_name: `Event ${Math.random()}`,
+      assigned_coordinator_id: coordinator,
+      proposed_start: start,
+      proposed_end: end,
+    });
 
   const add = async (event, type, quantity, notes = null) =>
     asJson(await one('select add_equipment_line($1, $2, $3, $4, $5)::text as answer', [event, coordinator, type, quantity, notes]));
@@ -135,34 +109,13 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
   };
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-
-      create function set_updated_at() returns trigger language plpgsql as $$
-      begin new.updated_at = now(); return new; end $$;
-
-      create type event_request_status as enum (
-        'draft', 'submitted', 'under_review', 'pending_clarification',
-        'approved', 'confirmed', 'completed', 'rejected', 'cancelled'
-      );
-      create table event_requests (
-        id                      uuid primary key default gen_random_uuid(),
-        organiser_id            uuid not null,
-        event_name              text not null,
-        status                  event_request_status not null default 'draft',
-        assigned_coordinator_id uuid,
-        proposed_start          timestamptz,
-        proposed_end            timestamptz
-      );
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
+    db = await createSchemaDb();
 
     organiser = await newUser('organiser@example.com');
     coordinator = await newUser('coordinator@example.com');
-    reviewerA = await newUser('tech-a@example.com');
-    reviewerB = await newUser('tech-b@example.com');
+    // Starting and taking over a review need the Technical Support role (011).
+    reviewerA = await seedUser(db, { email: 'tech-a@example.com', role: 'technical_support_staff' });
+    reviewerB = await seedUser(db, { email: 'tech-b@example.com', role: 'technical_support_staff' });
 
     projector = await newType('Projector');
     microphone = await newType('Microphone');
@@ -173,7 +126,7 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
   });
 
 
-  describe('the migration', () => {
+  describe('the schema', () => {
 
     it('SCRUM290_AC2_the_two_reads_are_stable_so_viewing_cannot_write', async () => {
       const found = await rows(
@@ -229,6 +182,40 @@ describe('SCRUM-290: reviewing an equipment request in Postgres', () => {
 
       expect(err.code).toBe('42501');
       expect((await requestRow(event)).status).toBe('pending_review');
+    });
+
+    it('SCRUM290_AC1_a_caller_without_the_technical_support_role_cannot_start_a_review', async () => {
+      // The route admits only Technical Support; the function now agrees, so a
+      // direct call as a coordinator cannot become the reviewer.
+      const { event, requestId } = await eventWithTwoLines();
+      const other = await seedUser(db, { email: `coord-${Math.random()}@example.com`, role: 'event_coordinator' });
+
+      const err = await refusal(start(event, other));
+
+      expect(err.code).toBe('42501');
+      expect(err.message).toBe('Only Technical Support Staff can review equipment requests');
+      expect(await requestRow(event)).toMatchObject({ status: 'pending_review', reviewer_id: null });
+      expect(await history(requestId)).toEqual([]);
+    });
+
+    it('SCRUM290_AC1_a_caller_without_the_technical_support_role_cannot_take_over_a_review', async () => {
+      const { event, requestId } = await eventWithTwoLines();
+      await start(event, reviewerA);
+      const other = await seedUser(db, { email: `coord-${Math.random()}@example.com`, role: 'event_coordinator' });
+
+      const err = await refusal(takeOver(event, other));
+
+      expect(err.code).toBe('42501');
+      expect(err.message).toBe('Only Technical Support Staff can review equipment requests');
+      expect((await requestRow(event)).reviewer_id).toBe(reviewerA);
+      expect((await history(requestId)).map((row) => row.action)).toEqual(['started']);
+    });
+
+    it('SCRUM290_AC1_a_technical_support_caller_can_start_and_take_over_a_review', async () => {
+      const { event } = await eventWithTwoLines();
+
+      expect((await start(event, reviewerA)).request.reviewer_id).toBe(reviewerA);
+      expect((await takeOver(event, reviewerB)).request.reviewer_id).toBe(reviewerB);
     });
   });
 

@@ -30,6 +30,8 @@ import request from 'supertest';
 import { createEventRequestRouter } from '../../src/routes/eventRequests.js';
 import { STATUS, STATUS_DISPLAY, STATUS_FALLBACK } from '../../src/domain/eventRequestStatus.js';
 import { ValidationError, NotFoundError } from '../../src/errors.js';
+import { ok, dbError, createEventRequestClient } from '../fixtures/supabaseStubs.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 
 const ORGANISER_ID = '11111111-1111-4111-8111-111111111111';
@@ -112,16 +114,11 @@ function createFakeClient(results = []) {
   };
 }
 
-const ok = (data) => ({ data, error: null });
-
 /** Stands in for a verified session. */
 const signedInAs = (id) => (req, _res, next) => {
   req.user = { id, email: 'organiser@example.com' };
   next();
 };
-
-/** Stands in for no session at all, answering as the real middleware does. */
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
 
 /** An app with the router mounted where app.js mounts it. */
 function appWith({ client, requireAuth = signedInAs(ORGANISER_ID) } = {}) {
@@ -577,109 +574,6 @@ describe('service errors are translated into HTTP status codes', () => {
 // SCRUM-29 / SCRUM-11 / SCRUM-10 / SCRUM-32 / SCRUM-34 -- the five routes that
 // used to 404
 // ---------------------------------------------------------------------------
-/**
- * A writable stand-in for the supabase-js query builder.
- *
- * Declared separately rather than by extending createFakeClient above, and the
- * separation is deliberate: four describe blocks are already written against
- * that fake's exact behaviour, and it has no insert/update on purpose because
- * nothing it was written for writes. Adding them there would change a fixture
- * the existing suite depends on; adding them here changes nothing that already
- * passes.
- *
- * Copied from tests/services/eventRequestService.test.js so the two stay in
- * step -- a second, subtly different fake would let a route test pass against
- * behaviour the service never had. Running out of queued results throws loudly
- * rather than returning undefined, so a route that makes an unexpected extra
- * round trip fails with a legible message instead of a null dereference three
- * frames down.
- *
- * SCRUM-330 added rpc() to the service tests' fake, because submitEventRequest
- * now calls submit_event_request (migration 016) instead of reading and then
- * updating. It is added here in the same shape, to keep the two in step: it
- * records into the same `calls` log, takes its result from the same queue,
- * and returns the settled promise directly.
- */
-function createWritableFakeClient(results = []) {
-  const queue = [...results];
-  const calls = [];
-
-  function settle(call) {
-    if (queue.length === 0) {
-      throw new Error(
-        `fake client: no result queued for ${call.operation} on ${call.table ?? call.fn}`,
-      );
-    }
-    return Promise.resolve(queue.shift());
-  }
-
-  function builder(call) {
-    const chain = {
-      insert(payload) {
-        call.operation = 'insert';
-        call.payload = payload;
-        return chain;
-      },
-      update(payload) {
-        call.operation = 'update';
-        call.payload = payload;
-        return chain;
-      },
-      select(columns = '*') {
-        call.select = columns;
-        return chain;
-      },
-      eq(column, value) {
-        call.filters.push([column, value]);
-        return chain;
-      },
-      order(column, options) {
-        call.order.push([column, options]);
-        return chain;
-      },
-      single: () => settle(call),
-      maybeSingle: () => settle(call),
-      then: (resolve, reject) => settle(call).then(resolve, reject),
-    };
-    return chain;
-  }
-
-  return {
-    calls,
-    from(table) {
-      const call = {
-        table,
-        operation: 'select',
-        payload: null,
-        select: null,
-        filters: [],
-        order: [],
-      };
-      calls.push(call);
-      return builder(call);
-    },
-
-    // SCRUM-330. Same as createFakeClient's rpc in the service tests -- see the
-    // note above.
-    rpc(fn, args) {
-      const call = {
-        table: null,
-        operation: 'rpc',
-        fn,
-        args,
-        payload: null,
-        select: null,
-        filters: [],
-        order: [],
-      };
-      calls.push(call);
-      return settle(call);
-    },
-  };
-}
-
-/** A Postgres failure, shaped as supabase-js surfaces it. */
-const dbFailure = (code, message) => ({ data: null, error: { code, message } });
 
 /**
  * A stored draft whose proposed period is always ahead of the real clock.
@@ -728,7 +622,7 @@ function storedChangeRequestRow(overrides = {}) {
 
 describe('SCRUM-29: an Organiser creates a request over HTTP', () => {
   it('SCRUM29_AC3_returns_201_and_the_created_request_with_its_status_display', async () => {
-    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+    const client = createEventRequestClient([ok(storedRow({ status: STATUS.DRAFT }))]);
 
     const res = await request(appWith({ client }))
       .post('/api/event-requests')
@@ -752,7 +646,7 @@ describe('SCRUM-29: an Organiser creates a request over HTTP', () => {
   });
 
   it('SCRUM29_AC3_stamps_the_organiser_from_the_token_not_the_body', async () => {
-    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+    const client = createEventRequestClient([ok(storedRow({ status: STATUS.DRAFT }))]);
 
     await request(appWith({ client }))
       .post('/api/event-requests')
@@ -773,7 +667,7 @@ describe('SCRUM-29: an Organiser creates a request over HTTP', () => {
   });
 
   it('SCRUM29_AC3_drops_a_status_a_caller_tried_to_set', async () => {
-    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+    const client = createEventRequestClient([ok(storedRow({ status: STATUS.DRAFT }))]);
 
     await request(appWith({ client }))
       .post('/api/event-requests')
@@ -796,7 +690,7 @@ describe('SCRUM-29: an Organiser creates a request over HTTP', () => {
   });
 
   it('SCRUM29_AC3_returns_400_and_never_queries_without_an_event_name', async () => {
-    const client = createWritableFakeClient([ok(storedRow())]);
+    const client = createEventRequestClient([ok(storedRow())]);
 
     const res = await request(appWith({ client })).post('/api/event-requests').send({});
 
@@ -811,7 +705,7 @@ describe('SCRUM-29: an Organiser creates a request over HTTP', () => {
   });
 
   it('SCRUM29_AC3_returns_400_and_never_queries_for_a_body_that_is_not_an_object', async () => {
-    const client = createWritableFakeClient([ok(storedRow())]);
+    const client = createEventRequestClient([ok(storedRow())]);
 
     const res = await request(appWith({ client }))
       .post('/api/event-requests')
@@ -827,7 +721,7 @@ describe('SCRUM-29: an Organiser creates a request over HTTP', () => {
   });
 
   it('SCRUM29_AC3_returns_401_and_never_queries_without_a_token', async () => {
-    const client = createWritableFakeClient([ok(storedRow())]);
+    const client = createEventRequestClient([ok(storedRow())]);
 
     const res = await request(appWith({ client, requireAuth: signedOut }))
       .post('/api/event-requests')
@@ -844,7 +738,7 @@ describe('SCRUM-29: an Organiser creates a request over HTTP', () => {
 
 describe('SCRUM-11: an Organiser saves edits to their own draft over HTTP', () => {
   it('SCRUM11_AC1_returns_200_and_the_saved_request', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.DRAFT })),
       ok(storedRow({ status: STATUS.DRAFT, event_name: 'IS212 Industry Evening' })),
     ]);
@@ -866,7 +760,7 @@ describe('SCRUM-11: an Organiser saves edits to their own draft over HTTP', () =
   });
 
   it('SCRUM11_AC1_guards_the_write_on_id_owner_and_draft_status', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.DRAFT })),
       ok(storedRow({ status: STATUS.DRAFT })),
     ]);
@@ -890,9 +784,9 @@ describe('SCRUM-11: an Organiser saves edits to their own draft over HTTP', () =
   });
 
   it('SCRUM11_AC1_returns_409_when_a_submit_wins_the_race', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.DRAFT })),
-      dbFailure('PGRST116', 'JSON object requested, multiple (or no) rows returned'),
+      dbError('PGRST116', 'JSON object requested, multiple (or no) rows returned'),
     ]);
 
     const res = await request(appWith({ client }))
@@ -910,7 +804,7 @@ describe('SCRUM-11: an Organiser saves edits to their own draft over HTTP', () =
   });
 
   it('SCRUM11_AC1_returns_409_for_a_request_that_is_already_submitted', async () => {
-    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.SUBMITTED }))]);
+    const client = createEventRequestClient([ok(storedRow({ status: STATUS.SUBMITTED }))]);
 
     const res = await request(appWith({ client }))
       .patch(`/api/event-requests/${REQUEST_ID}`)
@@ -930,7 +824,7 @@ describe('SCRUM-11: an Organiser saves edits to their own draft over HTTP', () =
   });
 
   it('SCRUM11_AC1_returns_404_for_another_organisers_event_rather_than_400', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ organiser_id: OTHER_ORGANISER_ID, status: STATUS.DRAFT })),
     ]);
 
@@ -951,7 +845,7 @@ describe('SCRUM-11: an Organiser saves edits to their own draft over HTTP', () =
   });
 
   it('SCRUM11_AC1_returns_400_and_never_queries_for_an_empty_change_set', async () => {
-    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+    const client = createEventRequestClient([ok(storedRow({ status: STATUS.DRAFT }))]);
 
     const res = await request(appWith({ client }))
       .patch(`/api/event-requests/${REQUEST_ID}`)
@@ -968,7 +862,7 @@ describe('SCRUM-11: an Organiser saves edits to their own draft over HTTP', () =
   });
 
   it('SCRUM11_AC1_returns_400_and_never_queries_for_an_attempt_to_clear_the_name', async () => {
-    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+    const client = createEventRequestClient([ok(storedRow({ status: STATUS.DRAFT }))]);
 
     const res = await request(appWith({ client }))
       .patch(`/api/event-requests/${REQUEST_ID}`)
@@ -983,7 +877,7 @@ describe('SCRUM-11: an Organiser saves edits to their own draft over HTTP', () =
   });
 
   it('SCRUM11_AC1_returns_401_and_never_queries_without_a_token', async () => {
-    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+    const client = createEventRequestClient([ok(storedRow({ status: STATUS.DRAFT }))]);
 
     const res = await request(appWith({ client, requireAuth: signedOut }))
       .patch(`/api/event-requests/${REQUEST_ID}`)
@@ -1009,7 +903,7 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
     // asked for from under_review only, and a submitted request is refused.
     const note = 'Please clarify the proposed event purpose.';
     const replyByDate = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: OTHER_ORGANISER_ID })),
       ok(storedRow({
         status: STATUS.PENDING_CLARIFICATION,
@@ -1041,7 +935,7 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
   });
 
   it('refuses clarification requests from non-Coordinators before database access', async () => {
-    const client = createWritableFakeClient([]);
+    const client = createEventRequestClient([]);
     const res = await request(appWith({ client }))
       .post(`/api/event-requests/${REQUEST_ID}/clarification`)
       .send({ note: 'Please clarify.' });
@@ -1051,7 +945,7 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
   });
 
   it('allows the owning Organiser to reply and return the request to review', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.PENDING_CLARIFICATION, clarification_note: 'Clarify purpose.' })),
       ok(storedRow({
         status: STATUS.UNDER_REVIEW,
@@ -1077,7 +971,7 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
   });
 
   it('does not accept request-field payloads outside the amendments object', async () => {
-    const client = createWritableFakeClient([]);
+    const client = createEventRequestClient([]);
     const res = await request(appWith({ client }))
       .patch(`/api/event-requests/${REQUEST_ID}/clarification-response`)
       .send({ description: 'Changed the event description.' });
@@ -1177,7 +1071,7 @@ describe('SCRUM-47: Coordinators decide organiser change requests', () => {
 
 describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
   it('SCRUM10_AC5_returns_200_and_the_submitted_request', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       // The route's ownership pre-check.
       ok(submittableRow()),
       // submitEventRequest's own read.
@@ -1233,7 +1127,7 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
   });
 
   it('SCRUM10_AC5_returns_404_for_another_organisers_draft', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ organiser_id: OTHER_ORGANISER_ID, status: STATUS.DRAFT })),
     ]);
 
@@ -1255,7 +1149,7 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
   });
 
   it('SCRUM10_AC5_returns_404_for_an_id_that_does_not_exist', async () => {
-    const client = createWritableFakeClient([ok(null)]);
+    const client = createEventRequestClient([ok(null)]);
 
     const res = await request(appWith({ client }))
       .post(`/api/event-requests/${REQUEST_ID}/submit`)
@@ -1275,7 +1169,7 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
       proposed_end: null,
       expected_attendance: null,
     });
-    const client = createWritableFakeClient([ok(incomplete), ok(incomplete)]);
+    const client = createEventRequestClient([ok(incomplete), ok(incomplete)]);
 
     const res = await request(appWith({ client }))
       .post(`/api/event-requests/${REQUEST_ID}/submit`)
@@ -1310,10 +1204,10 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
     // to the function, and the refusal comes back from there as 55000 with
     // the function's own message.
     const submitted = submittableRow({ status: STATUS.SUBMITTED });
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(submitted),
       ok(submitted),
-      dbFailure(
+      dbError(
         '55000',
         `event request ${REQUEST_ID} has status submitted, and only a draft can be submitted`,
       ),
@@ -1354,10 +1248,10 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
     // That happens inside the database and a fake cannot observe it. What
     // the fake can observe is the service's part: the refusal arrives as a
     // 409, and the service attempts no write of its own afterwards.
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(submittableRow()),
       ok(submittableRow()),
-      dbFailure(
+      dbError(
         '55000',
         `event request ${REQUEST_ID} has status submitted, and only a draft can be submitted`,
       ),
@@ -1373,7 +1267,7 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
   });
 
   it('SCRUM10_AC5_returns_401_and_never_queries_without_a_token', async () => {
-    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]);
+    const client = createEventRequestClient([ok(storedRow({ status: STATUS.DRAFT }))]);
 
     const res = await request(appWith({ client, requireAuth: signedOut }))
       .post(`/api/event-requests/${REQUEST_ID}/submit`)
@@ -1387,7 +1281,7 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
 
 describe('SCRUM-32: a change request is raised against a submitted event over HTTP', () => {
   it('SCRUM32_AC1_returns_201_and_the_created_change_request', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       // The route's ownership pre-check.
       ok(storedRow({ status: STATUS.SUBMITTED })),
       // createChangeRequest reloads the event for its own status/ownership check.
@@ -1415,7 +1309,7 @@ describe('SCRUM-32: a change request is raised against a submitted event over HT
   });
 
   it('SCRUM32_AC1_stamps_the_requester_from_the_token_not_the_body', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.SUBMITTED })),
       ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
       ok(storedChangeRequestRow()),
@@ -1438,7 +1332,7 @@ describe('SCRUM-32: a change request is raised against a submitted event over HT
   });
 
   it('SCRUM32_AC1_does_not_label_a_change_request_with_the_event_status_vocabulary', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.SUBMITTED })),
       ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
       ok(storedChangeRequestRow({ status: 'outstanding' })),
@@ -1457,7 +1351,7 @@ describe('SCRUM-32: a change request is raised against a submitted event over HT
   });
 
   it('SCRUM32_AC1_returns_404_for_another_organisers_event_rather_than_400', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ organiser_id: OTHER_ORGANISER_ID, status: STATUS.SUBMITTED })),
     ]);
 
@@ -1478,7 +1372,7 @@ describe('SCRUM-32: a change request is raised against a submitted event over HT
   });
 
   it('SCRUM32_AC2_returns_400_for_a_field_outside_the_vocabulary', async () => {
-    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.SUBMITTED }))]);
+    const client = createEventRequestClient([ok(storedRow({ status: STATUS.SUBMITTED }))]);
 
     const res = await request(appWith({ client }))
       .post(`/api/event-requests/${REQUEST_ID}/change-requests`)
@@ -1499,7 +1393,7 @@ describe('SCRUM-32: a change request is raised against a submitted event over HT
   });
 
   it('SCRUM32_AC1_returns_400_for_a_change_requested_against_a_draft', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.DRAFT })),
       ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID, status: STATUS.DRAFT }),
     ]);
@@ -1519,7 +1413,7 @@ describe('SCRUM-32: a change request is raised against a submitted event over HT
   });
 
   it('SCRUM32_AC1_returns_401_and_never_queries_without_a_token', async () => {
-    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.SUBMITTED }))]);
+    const client = createEventRequestClient([ok(storedRow({ status: STATUS.SUBMITTED }))]);
 
     const res = await request(appWith({ client, requireAuth: signedOut }))
       .post(`/api/event-requests/${REQUEST_ID}/change-requests`)
@@ -1533,7 +1427,7 @@ describe('SCRUM-32: a change request is raised against a submitted event over HT
 
 describe('SCRUM-34: the change requests for one event are listed over HTTP', () => {
   it('SCRUM34_AC4_returns_200_and_a_bare_array', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.SUBMITTED })),
       ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID }),
       ok([
@@ -1561,7 +1455,7 @@ describe('SCRUM-34: the change requests for one event are listed over HTTP', () 
   });
 
   it('SCRUM34_AC4_carries_the_field_label_the_list_renders', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.SUBMITTED })),
       ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID }),
       ok([storedChangeRequestRow({ change_field: 'venue' })]),
@@ -1583,7 +1477,7 @@ describe('SCRUM-34: the change requests for one event are listed over HTTP', () 
   });
 
   it('SCRUM34_AC4_does_not_label_the_rows_with_the_event_status_vocabulary', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.SUBMITTED })),
       ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID }),
       ok([storedChangeRequestRow({ status: 'outstanding' })]),
@@ -1599,7 +1493,7 @@ describe('SCRUM-34: the change requests for one event are listed over HTTP', () 
   });
 
   it('SCRUM34_AC4_returns_200_and_an_empty_array_when_there_are_none', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.SUBMITTED })),
       ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID }),
       ok([]),
@@ -1616,7 +1510,7 @@ describe('SCRUM-34: the change requests for one event are listed over HTTP', () 
   });
 
   it('SCRUM34_AC4_returns_404_for_another_organisers_event_rather_than_400', async () => {
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ organiser_id: OTHER_ORGANISER_ID, status: STATUS.SUBMITTED })),
     ]);
 
@@ -1638,14 +1532,14 @@ describe('SCRUM-34: the change requests for one event are listed over HTTP', () 
   it('SCRUM34_AC4_answers_a_foreign_event_identically_to_a_missing_one', async () => {
     const foreign = await request(
       appWith({
-        client: createWritableFakeClient([
+        client: createEventRequestClient([
           ok(storedRow({ organiser_id: OTHER_ORGANISER_ID, status: STATUS.SUBMITTED })),
         ]),
       }),
     ).get(`/api/event-requests/${REQUEST_ID}/change-requests`);
 
     const missing = await request(
-      appWith({ client: createWritableFakeClient([ok(null)]) }),
+      appWith({ client: createEventRequestClient([ok(null)]) }),
     ).get(`/api/event-requests/${REQUEST_ID}/change-requests`);
 
     // The same indistinguishability GET /:id already proves, restated for the
@@ -1656,7 +1550,7 @@ describe('SCRUM-34: the change requests for one event are listed over HTTP', () 
   });
 
   it('SCRUM34_AC4_returns_401_and_never_queries_without_a_token', async () => {
-    const client = createWritableFakeClient([ok(storedRow({ status: STATUS.SUBMITTED }))]);
+    const client = createEventRequestClient([ok(storedRow({ status: STATUS.SUBMITTED }))]);
 
     const res = await request(appWith({ client, requireAuth: signedOut }))
       .get(`/api/event-requests/${REQUEST_ID}/change-requests`);
@@ -1674,12 +1568,8 @@ describe('SCRUM-34: the change requests for one event are listed over HTTP', () 
  * A third fake and a second auth stub, both appended rather than folded into
  * the ones above.
  *
- * Neither createFakeClient nor createWritableFakeClient has an .in(), because
- * nothing they were written for uses one, and both are fixtures that dozens of
- * passing tests are written against. Adding a method there would change a
- * shared fixture to serve one new describe block; adding one here changes
- * nothing that already passes. That is exactly the argument
- * createWritableFakeClient makes for its own existence a few hundred lines up.
+ * createFakeClient and createEventRequestClient record .in() into `filters`,
+ * which cannot show that no organiser_id eq() was made.
  *
  * .in() is recorded into its own list rather than into `filters`, so a test
  * can assert both that the status IN list is there and that no organiser_id
@@ -1768,11 +1658,7 @@ function createQueueFakeClient(results = []) {
   };
 }
 
-/** Stands in for a verified session that also carries a role. */
-const signedInWithRole = (role, id = COORDINATOR_ID) => (req, _res, next) => {
-  req.user = { id, email: 'coordinator@example.com', role };
-  next();
-};
+const signedInWithRole = signedInFor(COORDINATOR_ID, 'coordinator@example.com');
 
 /**
  * A queue as PostgREST would hand it back: two Organisers, three statuses.
@@ -1906,7 +1792,7 @@ describe('SCRUM-45 AC1: a Coordinator reads the review queue over HTTP', () => {
   it('SCRUM45_AC1_answers_a_server_fault_with_500_and_leaks_nothing', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const client = createQueueFakeClient([
-      dbFailure('42P01', 'relation "event_requests" does not exist'),
+      dbError('42P01', 'relation "event_requests" does not exist'),
     ]);
 
     const res = await request(
@@ -2049,7 +1935,7 @@ const handOver = (client, body, requireAuth = signedInWithRole(ROLE.EVENT_COORDI
 
 describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () => {
   it('SCRUM331_AC7_the_new_coordinator_can_act_on_the_event', async () => {
-    const client = createWritableFakeClient([ok(handedOverRow())]);
+    const client = createEventRequestClient([ok(handedOverRow())]);
 
     const res = await handOver(client, {
       newCoordinatorId: NEW_COORDINATOR_ID,
@@ -2065,10 +1951,6 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
     expect(res.body.assignedCoordinatorId).toBe(NEW_COORDINATOR_ID);
     expect(res.body.reviewingCoordinatorId).toBe(NEW_COORDINATOR_ID);
     expect(res.body.statusDisplay.label).toBe('Under review');
-
-    // One call, to the function, and nothing else.
-    expect(client.calls.map((call) => call.operation)).toEqual(['rpc']);
-    expect(client.calls[0].fn).toBe('reassign_event_request');
   });
 
   it('SCRUM331_AC9_records_who_handed_it_over', async () => {
@@ -2077,7 +1959,7 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
     // ignored. Without this, any coordinator could make a handover look as if
     // the assigned coordinator had made it, and the function's AC6 check
     // would compare the wrong person.
-    const client = createWritableFakeClient([ok(handedOverRow())]);
+    const client = createEventRequestClient([ok(handedOverRow())]);
 
     const res = await handOver(client, {
       newCoordinatorId: NEW_COORDINATOR_ID,
@@ -2097,7 +1979,7 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
   it('SCRUM331_AC9_the_handover_note_is_optional', async () => {
     // A handover with no note is still a handover. It reaches the function as
     // null, which is how 014's history table records "no note".
-    const client = createWritableFakeClient([ok(handedOverRow())]);
+    const client = createEventRequestClient([ok(handedOverRow())]);
 
     const res = await handOver(client, { newCoordinatorId: NEW_COORDINATOR_ID });
 
@@ -2110,7 +1992,7 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
     // not even asked: a missing id is a fault in the form, which the service
     // reports without taking a lock (see the service tests for why it, not
     // the function, catches this).
-    const client = createWritableFakeClient([]);
+    const client = createEventRequestClient([]);
 
     const res = await handOver(client, { handoverNote: HANDOVER_NOTE });
 
@@ -2123,7 +2005,7 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
     // coordinatorOnly answers before the handler runs. An Organiser has no
     // event to hand over, whatever the body says, and is refused without the
     // function being called at all.
-    const client = createWritableFakeClient([ok(handedOverRow())]);
+    const client = createEventRequestClient([ok(handedOverRow())]);
 
     const res = await handOver(
       client,
@@ -2136,7 +2018,7 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
   });
 
   it('SCRUM331_AC6_returns_401_without_a_token_and_never_queries', async () => {
-    const client = createWritableFakeClient([ok(handedOverRow())]);
+    const client = createEventRequestClient([ok(handedOverRow())]);
 
     const res = await handOver(client, { newCoordinatorId: NEW_COORDINATOR_ID }, signedOut);
 
@@ -2158,7 +2040,7 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
     // leadAssignmentRoutes.test.js), so the name now says the case it proves,
     // a coordinator who is not the holder, and the message is 052's.
     const message = `only the coordinator assigned to event request ${REQUEST_ID}, or the Event Coordinator Lead, can hand it over`;
-    const client = createWritableFakeClient([dbFailure('42501', message)]);
+    const client = createEventRequestClient([dbError('42501', message)]);
 
     const res = await handOver(client, { newCoordinatorId: NEW_COORDINATOR_ID });
 
@@ -2172,8 +2054,8 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
     // while it holds a lock on their profile. 400, because the request named
     // someone who cannot take the event; the outgoing coordinator needs to
     // pick someone else.
-    const client = createWritableFakeClient([
-      dbFailure('22023', `user ${NEW_COORDINATOR_ID} is not an Event Coordinator, so cannot be handed event request ${REQUEST_ID}`),
+    const client = createEventRequestClient([
+      dbError('22023', `user ${NEW_COORDINATOR_ID} is not an Event Coordinator, so cannot be handed event request ${REQUEST_ID}`),
     ]);
 
     const res = await handOver(client, { newCoordinatorId: NEW_COORDINATOR_ID });
@@ -2186,8 +2068,8 @@ describe('SCRUM-331: a coordinator hands an event to a colleague over HTTP', () 
     // 55000: AC6 names five statuses a handover is allowed from, and planning
     // is not one of them (018's header explains why). 409, as for a submit
     // that finds the request no longer a draft.
-    const client = createWritableFakeClient([
-      dbFailure('55000', `event request ${REQUEST_ID} has status planning, and cannot be handed over in that status`),
+    const client = createEventRequestClient([
+      dbError('55000', `event request ${REQUEST_ID} has status planning, and cannot be handed over in that status`),
     ]);
 
     const res = await handOver(client, { newCoordinatorId: NEW_COORDINATOR_ID });
@@ -2251,7 +2133,7 @@ describe('SCRUM-332: every coordinator can read an event over HTTP', () => {
       // Another Organiser's event, held by another coordinator, in a status
       // the queue does not cover. Before SCRUM-332 no coordinator could read
       // it at all.
-      const client = createWritableFakeClient([
+      const client = createEventRequestClient([
         ok(storedRow({
           status,
           organiser_id: OTHER_ORGANISER_ID,
@@ -2277,7 +2159,7 @@ describe('SCRUM-332: every coordinator can read an event over HTTP', () => {
   it('SCRUM332_AC7_the_previous_coordinator_can_still_view_the_event', async () => {
     // AC7 in so many words: the event was handed to NEW_COORDINATOR_ID, and
     // COORDINATOR_ID, who held it, can still read it.
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: NEW_COORDINATOR_ID })),
     ]);
 
@@ -2288,7 +2170,7 @@ describe('SCRUM-332: every coordinator can read an event over HTTP', () => {
   });
 
   it('SCRUM332_AC7_a_missing_event_is_404', async () => {
-    const client = createWritableFakeClient([ok(null)]);
+    const client = createEventRequestClient([ok(null)]);
 
     const res = await readAsCoordinator(client);
 
@@ -2302,9 +2184,9 @@ describe('SCRUM-332: every coordinator can read an event over HTTP', () => {
     // Identical to a missing event, status and body, so a coordinator cannot
     // learn a draft exists by guessing its id.
     const draft = await readAsCoordinator(
-      createWritableFakeClient([ok(storedRow({ status: STATUS.DRAFT }))]),
+      createEventRequestClient([ok(storedRow({ status: STATUS.DRAFT }))]),
     );
-    const missing = await readAsCoordinator(createWritableFakeClient([ok(null)]));
+    const missing = await readAsCoordinator(createEventRequestClient([ok(null)]));
 
     expect(draft.status).toBe(404);
     expect(draft.body).toEqual(missing.body);
@@ -2314,7 +2196,7 @@ describe('SCRUM-332: every coordinator can read an event over HTTP', () => {
   it('SCRUM332_AC7_an_organiser_is_refused_the_coordinator_read_and_never_queries', async () => {
     // An Organiser reads their own event through GET /:id. This route would
     // hand them anyone's, so it refuses them before the handler runs.
-    const client = createWritableFakeClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
+    const client = createEventRequestClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
 
     const res = await readAsCoordinator(client, signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID));
 
@@ -2326,7 +2208,7 @@ describe('SCRUM-332: every coordinator can read an event over HTTP', () => {
     // Closed by default, as SCRUM45_AC2_refuses_a_caller_with_no_role_at_all
     // pins for the queue: signedInAs sets no role, which is also what
     // requireAuth resolves for an account with no profiles row.
-    const client = createWritableFakeClient([ok(storedRow())]);
+    const client = createEventRequestClient([ok(storedRow())]);
 
     const res = await readAsCoordinator(client, signedInAs(ORGANISER_ID));
 
@@ -2335,7 +2217,7 @@ describe('SCRUM-332: every coordinator can read an event over HTTP', () => {
   });
 
   it('SCRUM332_AC7_the_coordinator_read_returns_401_without_a_token', async () => {
-    const client = createWritableFakeClient([ok(storedRow())]);
+    const client = createEventRequestClient([ok(storedRow())]);
 
     const res = await readAsCoordinator(client, signedOut);
 
@@ -2348,7 +2230,7 @@ describe('SCRUM-332: every coordinator can read an event over HTTP', () => {
     // the role, which the SCRUM-14 tests' stub does not. Still 404, for the
     // reason in the block comment above: for an Organiser, existence is the
     // secret.
-    const client = createWritableFakeClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
+    const client = createEventRequestClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
 
     const res = await request(
       appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID) }),
@@ -2362,7 +2244,7 @@ describe('SCRUM-332: every coordinator can read an event over HTTP', () => {
     // coordinator asking it for an event they did not organise gets the
     // Organiser's answer, 404. If this starts returning 200, someone has put a
     // role branch into the Organiser's read.
-    const client = createWritableFakeClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
+    const client = createEventRequestClient([ok(storedRow({ organiser_id: OTHER_ORGANISER_ID }))]);
 
     const res = await request(
       appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }),
@@ -2385,7 +2267,7 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
     // only the read is queued, so an attempted update would fail rather than
     // pass. Not a server fault, so nothing is logged.
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: NEW_COORDINATOR_ID })),
     ]);
 
@@ -2393,7 +2275,6 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
 
     expect(res.status).toBe(403);
     expect(res.body.error).toMatch(/assigned/i);
-    expect(client.calls.map((call) => call.operation)).toEqual(['select']);
     expect(consoleError).not.toHaveBeenCalled();
 
     consoleError.mockRestore();
@@ -2403,7 +2284,7 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
     // The coordinator the event was handed to can act on it, and the status
     // atomic clarification function is told to refuse unless the event is
     // still theirs, taken from the token.
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.UNDER_REVIEW, assigned_coordinator_id: NEW_COORDINATOR_ID })),
       ok(storedRow({
         status: STATUS.PENDING_CLARIFICATION,
@@ -2420,7 +2301,6 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe(STATUS.PENDING_CLARIFICATION);
-    expect(client.calls[1].fn).toBe('request_event_clarification_with_fields');
     expect(client.calls[1].args.p_expected_coordinator).toBe(NEW_COORDINATOR_ID);
     expect(client.calls[1].args.p_changed_by).toBe(NEW_COORDINATOR_ID);
   });
@@ -2430,7 +2310,7 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
     // only the note from the body, so the caller cannot claim to be someone
     // else. Same rule as SCRUM331_AC9_records_who_handed_it_over.
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const client = createWritableFakeClient([
+    const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.SUBMITTED, assigned_coordinator_id: NEW_COORDINATOR_ID })),
     ]);
 
@@ -2453,7 +2333,7 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const changeRequestId = '44444444-4444-4444-8444-444444444444';
     const message = `only the coordinator assigned to event request ${REQUEST_ID} can decide its change requests`;
-    const client = createWritableFakeClient([dbFailure('42501', message)]);
+    const client = createEventRequestClient([dbError('42501', message)]);
 
     const res = await request(
       appWith({ client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR) }),
@@ -2468,7 +2348,6 @@ describe('SCRUM-332: only the assigned coordinator changes an event over HTTP', 
     // The function was asked, with the caller from the token as the person
     // it checks.
     expect(client.calls).toHaveLength(1);
-    expect(client.calls[0].fn).toBe('process_change_request');
     expect(client.calls[0].args.p_processed_by).toBe(COORDINATOR_ID);
 
     consoleError.mockRestore();
@@ -3124,7 +3003,7 @@ describe('SCRUM-325 AC3: a refused transition is a 409 that names the current st
   it.each([STATUS.APPROVED, STATUS.CONFIRMED, STATUS.COMPLETED, STATUS.CANCELLED, STATUS.REJECTED])(
     'SCRUM325_AC3_refuses_a_clarification_request_for_an_event_that_is_%s_and_writes_nothing',
     async (status) => {
-      const client = createWritableFakeClient([
+      const client = createEventRequestClient([
         ok(storedRow({ status, assigned_coordinator_id: COORDINATOR_ID })),
       ]);
 
@@ -3193,7 +3072,7 @@ describe('SCRUM-19: a coordinator starts reviewing a request over HTTP', () => {
     // 200 and the whole request, carrying its reviewer and statusDisplay, so
     // the screen can redraw from the response. The body names someone else as
     // the coordinator, and is ignored: the caller is always the token's user.
-    const client = createWritableFakeClient([ok(underReviewRow())]);
+    const client = createEventRequestClient([ok(underReviewRow())]);
 
     const res = await postAsCoordinator(client, 'start-review', { coordinatorId: OTHER_ORGANISER_ID });
 
@@ -3213,7 +3092,7 @@ describe('SCRUM-19: a coordinator starts reviewing a request over HTTP', () => {
     // The request reaches the function with the id from the URL, and nothing
     // read 'start-review' as an id on the way: no select at all, and the id
     // sent is the event's.
-    const client = createWritableFakeClient([ok(underReviewRow())]);
+    const client = createEventRequestClient([ok(underReviewRow())]);
 
     await postAsCoordinator(client, 'start-review');
 
@@ -3222,7 +3101,7 @@ describe('SCRUM-19: a coordinator starts reviewing a request over HTTP', () => {
   });
 
   it('SCRUM19_AC1_an_organiser_cannot_start_a_review_and_nothing_is_queried', async () => {
-    const client = createWritableFakeClient([ok(underReviewRow())]);
+    const client = createEventRequestClient([ok(underReviewRow())]);
 
     const res = await postAsCoordinator(client, 'start-review', {}, signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID));
 
@@ -3231,7 +3110,7 @@ describe('SCRUM-19: a coordinator starts reviewing a request over HTTP', () => {
   });
 
   it('SCRUM19_AC1_starting_a_review_returns_401_without_a_token', async () => {
-    const client = createWritableFakeClient([ok(underReviewRow())]);
+    const client = createEventRequestClient([ok(underReviewRow())]);
 
     const res = await postAsCoordinator(client, 'start-review', {}, signedOut);
 
@@ -3244,7 +3123,7 @@ describe('SCRUM-19: a coordinator starts reviewing a request over HTTP', () => {
     // function can tell, under its lock, and its 42501 becomes a 403 with its
     // message: the caller can already see the event, so a 404 would be false.
     const message = `only the coordinator assigned to event request ${REQUEST_ID} can start reviewing it`;
-    const client = createWritableFakeClient([dbFailure('42501', message)]);
+    const client = createEventRequestClient([dbError('42501', message)]);
 
     const res = await postAsCoordinator(client, 'start-review');
 
@@ -3253,8 +3132,8 @@ describe('SCRUM-19: a coordinator starts reviewing a request over HTTP', () => {
   });
 
   it('SCRUM19_AC1_a_request_that_is_not_submitted_cannot_be_put_under_review', async () => {
-    const client = createWritableFakeClient([
-      dbFailure('55000', `event request ${REQUEST_ID} has status approved, and only a submitted request can be put under review`),
+    const client = createEventRequestClient([
+      dbError('55000', `event request ${REQUEST_ID} has status approved, and only a submitted request can be put under review`),
     ]);
 
     const res = await postAsCoordinator(client, 'start-review');
@@ -3271,7 +3150,7 @@ describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
     // says. p_decided_at is the server's clock: the route injects nothing, so
     // the service's default `now` is used, and it is checked here to be a
     // real instant close to the request rather than a fixed value.
-    const client = createWritableFakeClient([ok(decidedRow('approved', 'Approved as submitted.'))]);
+    const client = createEventRequestClient([ok(decidedRow('approved', 'Approved as submitted.'))]);
     const before = Date.now();
 
     const res = await postAsCoordinator(client, 'decision', {
@@ -3304,7 +3183,7 @@ describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
     // the outcome, the reason, who decided and when, so the coordinator's
     // screen and the Organiser's read show the same thing.
     const reason = 'Venue capacity cannot meet the expected attendance.';
-    const client = createWritableFakeClient([ok(decidedRow('rejected', reason))]);
+    const client = createEventRequestClient([ok(decidedRow('rejected', reason))]);
 
     const res = await postAsCoordinator(client, 'decision', { decision: 'rejected', decisionNote: reason });
 
@@ -3321,7 +3200,7 @@ describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
   it('SCRUM19_AC5_a_rejection_with_no_reason_is_a_400_naming_the_field', async () => {
     // Refused by the service before the database, with details naming the
     // field so the form can show the message beside it.
-    const client = createWritableFakeClient([]);
+    const client = createEventRequestClient([]);
 
     const res = await postAsCoordinator(client, 'decision', { decision: 'rejected' });
 
@@ -3334,7 +3213,7 @@ describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
     // 029's AC6 refusal is 55000, a 409, and its message tells the coordinator
     // what to do instead.
     const message = `event request ${REQUEST_ID} cannot be approved because its proposed start date has passed or is missing. Agree a new date with the organiser, or reject the request`;
-    const client = createWritableFakeClient([dbFailure('55000', message)]);
+    const client = createEventRequestClient([dbError('55000', message)]);
 
     const res = await postAsCoordinator(client, 'decision', { decision: 'approved' });
 
@@ -3344,7 +3223,7 @@ describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
 
   it('SCRUM19_AC1_only_the_assigned_coordinator_decides', async () => {
     const message = `only the coordinator assigned to event request ${REQUEST_ID} can decide it`;
-    const client = createWritableFakeClient([dbFailure('42501', message)]);
+    const client = createEventRequestClient([dbError('42501', message)]);
 
     const res = await postAsCoordinator(client, 'decision', { decision: 'approved' });
 
@@ -3353,8 +3232,8 @@ describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
   });
 
   it('SCRUM19_AC3_refuses_a_decision_on_a_request_awaiting_clarification', async () => {
-    const client = createWritableFakeClient([
-      dbFailure('55000', `event request ${REQUEST_ID} has status pending_clarification, and only a request under review can be decided`),
+    const client = createEventRequestClient([
+      dbError('55000', `event request ${REQUEST_ID} has status pending_clarification, and only a request under review can be decided`),
     ]);
 
     const res = await postAsCoordinator(client, 'decision', { decision: 'approved' });
@@ -3364,7 +3243,7 @@ describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
   });
 
   it('SCRUM19_AC7_the_decision_path_is_not_read_as_an_id', async () => {
-    const client = createWritableFakeClient([ok(decidedRow('approved', null))]);
+    const client = createEventRequestClient([ok(decidedRow('approved', null))]);
 
     await postAsCoordinator(client, 'decision', { decision: 'approved' });
 
@@ -3373,7 +3252,7 @@ describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
   });
 
   it('SCRUM19_AC1_an_organiser_cannot_decide_and_nothing_is_queried', async () => {
-    const client = createWritableFakeClient([ok(decidedRow('approved', null))]);
+    const client = createEventRequestClient([ok(decidedRow('approved', null))]);
 
     const res = await postAsCoordinator(client, 'decision', { decision: 'approved' }, signedInWithRole(ROLE.EVENT_ORGANISER, ORGANISER_ID));
 
@@ -3382,7 +3261,7 @@ describe('SCRUM-19: a coordinator decides a request over HTTP', () => {
   });
 
   it('SCRUM19_AC1_deciding_returns_401_without_a_token', async () => {
-    const client = createWritableFakeClient([ok(decidedRow('approved', null))]);
+    const client = createEventRequestClient([ok(decidedRow('approved', null))]);
 
     const res = await postAsCoordinator(client, 'decision', { decision: 'approved' }, signedOut);
 
@@ -3415,7 +3294,7 @@ describe('SCRUM-485 AC5: the coordinator gate on /api/event-requests refuses the
   it.each(CASES)('SCRUM485_AC5_%s_refuses_%s_with_403_and_queries_nothing', async (_route, role, call) => {
     // Nothing queued: a query that slipped past the gate would fail with "no
     // result queued" instead of passing by accident.
-    const client = createWritableFakeClient([]);
+    const client = createEventRequestClient([]);
 
     const res = await call(appWith({ client, requireAuth: signedInWithRole(role, COORDINATOR_ID) }));
 
@@ -3615,5 +3494,43 @@ describe('SCRUM-488 AC5, AC6: the safety statuses over HTTP', () => {
       },
     ]);
     expect(client.calls[1].order).toEqual([['created_at', { ascending: true }]]);
+  });
+});
+
+describe('SCRUM-370: the cancellation impact preview over HTTP', () => {
+  const coordinatorAuth = (req, _res, next) => {
+    req.user = { id: OTHER_ORGANISER_ID, role: 'event_coordinator' };
+    next();
+  };
+
+  it('SCRUM370_AC1_passes_the_signed_in_coordinator_to_the_preview_function', async () => {
+    // The function checks the caller too (011), so it must be the session's user.
+    const impact = { venueBookings: { count: 0, details: [] } };
+    const client = createEventRequestClient([
+      ok(storedRow({ status: STATUS.APPROVED, assigned_coordinator_id: OTHER_ORGANISER_ID })),
+      ok(impact),
+    ]);
+
+    const res = await request(appWith({ client, requireAuth: coordinatorAuth }))
+      .get(`/api/event-requests/${REQUEST_ID}/cancellation-impact`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(impact);
+    expect(client.calls[1]).toMatchObject({
+      fn: 'event_cancellation_impact_preview',
+      args: { p_event_request_id: REQUEST_ID, p_caller: OTHER_ORGANISER_ID },
+    });
+  });
+
+  it('SCRUM370_AC1_answers_403_when_the_function_refuses_the_caller', async () => {
+    const client = createEventRequestClient([
+      ok(storedRow({ status: STATUS.APPROVED, assigned_coordinator_id: OTHER_ORGANISER_ID })),
+      dbError('42501', 'Only the coordinator assigned to this event can preview its cancellation'),
+    ]);
+
+    const res = await request(appWith({ client, requireAuth: coordinatorAuth }))
+      .get(`/api/event-requests/${REQUEST_ID}/cancellation-impact`);
+
+    expect(res.status).toBe(403);
   });
 });

@@ -19,6 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ok, dbError, queryStub } from '../fixtures/supabaseStubs.js';
 
 const { from } = vi.hoisted(() => ({ from: vi.fn() }));
 
@@ -67,32 +68,6 @@ function typeRow(overrides = {}) {
     ...overrides,
   };
 }
-
-/**
- * A stand-in for a supabase-js query builder: every method records its
- * arguments and returns the same object, and the builder is thenable because
- * supabase-js resolves the chain itself. `result` must stay a plain object.
- */
-function queryStub(result) {
-  const calls = [];
-  const stub = {
-    called: (method) => calls.some(([name]) => name === method),
-    args: (method) => calls.find(([name]) => name === method)?.slice(1),
-    /** Every call to it, in order, for a method used more than once. */
-    all: (method) => calls.filter(([name]) => name === method).map(([, ...args]) => args),
-    then: (onFulfilled, onRejected) => Promise.resolve(result).then(onFulfilled, onRejected),
-  };
-  for (const method of ['select', 'eq', 'neq', 'is', 'ilike', 'order', 'limit', 'insert', 'update']) {
-    stub[method] = (...args) => { calls.push([method, ...args]); return stub; };
-  }
-  for (const method of ['single', 'maybeSingle']) {
-    stub[method] = (...args) => { calls.push([method, ...args]); return Promise.resolve(result); };
-  }
-  return stub;
-}
-
-const ok = (data) => ({ data, error: null });
-const failed = (code, message) => ({ data: null, error: { code, message } });
 
 beforeEach(() => {
   from.mockReset();
@@ -195,7 +170,7 @@ describe('AC2: creating a type', () => {
   it('SCRUM275_AC2_answers_409_when_two_writers_race_to_the_same_name', async () => {
     from
       .mockReturnValueOnce(queryStub(ok([])))
-      .mockReturnValueOnce(queryStub(failed('23505', 'duplicate key value violates unique constraint')));
+      .mockReturnValueOnce(queryStub(dbError('23505', 'duplicate key value violates unique constraint')));
 
     const attempt = createEquipmentType({ name: 'Projector', totalQuantity: 1 });
 
@@ -206,7 +181,7 @@ describe('AC2: creating a type', () => {
   it('SCRUM275_AC2_translates_a_check_constraint_into_a_ValidationError', async () => {
     from
       .mockReturnValueOnce(queryStub(ok([])))
-      .mockReturnValueOnce(queryStub(failed('23514', 'violates check constraint')));
+      .mockReturnValueOnce(queryStub(dbError('23514', 'violates check constraint')));
 
     await expect(createEquipmentType({ name: 'Cable', totalQuantity: 1 })).rejects.toBeInstanceOf(ValidationError);
   });
@@ -348,7 +323,7 @@ describe('AC3: editing a type', () => {
   it('SCRUM300_AC3_a_deadlock_with_a_reservation_is_a_409_that_says_to_try_again', async () => {
     from
       .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(failed('40P01', 'deadlock detected')));
+      .mockReturnValueOnce(queryStub(dbError('40P01', 'deadlock detected')));
 
     const attempt = updateEquipmentType(TYPE_ID, { location: 'X' });
 
@@ -363,13 +338,13 @@ describe('AC3: editing a type', () => {
   it('SCRUM275_AC3_translates_a_database_refusal_on_write', async () => {
     from
       .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(failed('23505', 'duplicate')));
+      .mockReturnValueOnce(queryStub(dbError('23505', 'duplicate')));
 
     await expect(updateEquipmentType(TYPE_ID, { location: 'X' })).rejects.toBeInstanceOf(ConflictError);
   });
 
   it('SCRUM275_AC3_surfaces_a_failed_read_of_the_current_row', async () => {
-    from.mockReturnValueOnce(queryStub(failed('57014', 'timeout')));
+    from.mockReturnValueOnce(queryStub(dbError('57014', 'timeout')));
 
     await expect(updateEquipmentType(TYPE_ID, { location: 'X' })).rejects.toThrow('timeout');
   });
@@ -377,7 +352,7 @@ describe('AC3: editing a type', () => {
   it('SCRUM275_AC3_surfaces_a_failed_name_lookup', async () => {
     from
       .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(failed('57014', 'timeout')));
+      .mockReturnValueOnce(queryStub(dbError('57014', 'timeout')));
 
     await expect(updateEquipmentType(TYPE_ID, { name: 'Mic' })).rejects.toThrow('timeout');
   });
@@ -416,7 +391,7 @@ describe('AC5: the usable quantity', () => {
   });
 
   it('SCRUM275_AC5_surfaces_a_failed_list_read', async () => {
-    from.mockReturnValueOnce(queryStub(failed('57014', 'timeout')));
+    from.mockReturnValueOnce(queryStub(dbError('57014', 'timeout')));
 
     await expect(listEquipmentTypes()).rejects.toThrow('timeout');
   });
@@ -453,7 +428,7 @@ describe('AC1 and AC6: the picker', () => {
   });
 
   it('SCRUM275_AC1_surfaces_a_failed_read', async () => {
-    from.mockReturnValueOnce(queryStub(failed('57014', 'timeout')));
+    from.mockReturnValueOnce(queryStub(dbError('57014', 'timeout')));
 
     await expect(listActiveEquipmentTypes()).rejects.toThrow('timeout');
   });
@@ -482,7 +457,7 @@ describe('AC8: recording who changed what', () => {
   it('SCRUM275_AC8_refuses_an_acting_user_who_does_not_exist', async () => {
     from
       .mockReturnValueOnce(queryStub(ok([])))
-      .mockReturnValueOnce(queryStub(failed('23503', 'violates foreign key constraint "last_modified_by_fkey"')));
+      .mockReturnValueOnce(queryStub(dbError('23503', 'violates foreign key constraint "last_modified_by_fkey"')));
 
     const attempt = createEquipmentType({ name: 'Projector', totalQuantity: 10 }, OTHER_ID);
 
@@ -513,7 +488,7 @@ describe('AC8: reading the history', () => {
 
     expect(from).toHaveBeenCalledWith('equipment_type_history');
     expect(read.args('eq')).toEqual(['equipment_type_id', TYPE_ID]);
-    expect(read.all('order')).toEqual([
+    expect(read.allArgs('order')).toEqual([
       ['changed_at', { ascending: false }],
       ['id', { ascending: false }],
     ]);
@@ -566,7 +541,7 @@ describe('AC8: reading the history', () => {
   });
 
   it('SCRUM275_AC8_surfaces_a_failed_read', async () => {
-    from.mockReturnValueOnce(queryStub(failed('57014', 'timeout')));
+    from.mockReturnValueOnce(queryStub(dbError('57014', 'timeout')));
 
     await expect(getEquipmentTypeHistory(TYPE_ID)).rejects.toThrow('timeout');
   });
@@ -719,13 +694,13 @@ describe('AC4: recording damaged and under-maintenance quantities', () => {
   it('SCRUM275_AC4_translates_a_constraint_refusal_from_a_race_on_write', async () => {
     from
       .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(failed('23514', 'unusable_within_total')));
+      .mockReturnValueOnce(queryStub(dbError('23514', 'unusable_within_total')));
 
     await expect(recordEquipmentCondition(TYPE_ID, { damagedQuantity: 4, note: 'x' })).rejects.toBeInstanceOf(ValidationError);
   });
 
   it('SCRUM275_AC4_surfaces_a_failed_read_of_the_current_row', async () => {
-    from.mockReturnValueOnce(queryStub(failed('57014', 'timeout')));
+    from.mockReturnValueOnce(queryStub(dbError('57014', 'timeout')));
 
     await expect(recordEquipmentCondition(TYPE_ID, { damagedQuantity: 1, note: 'x' })).rejects.toThrow('timeout');
   });

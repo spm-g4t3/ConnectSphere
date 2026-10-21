@@ -13,10 +13,10 @@
 // answers that, "2 days, 3 hours and 14 minutes" only slows it down. Under an
 // hour is said as such rather than in minutes for the same reason.
 
+import { pluralise } from "./displayFormat";
+
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
-
-const plural = (count, unit) => `${count} ${unit}${count === 1 ? "" : "s"}`;
 
 /**
  * @param {string} submittedAt  an ISO timestamp from the API
@@ -35,6 +35,6 @@ export function describeWaiting(submittedAt, now = new Date()) {
   const waited = now.getTime() - submitted;
 
   if (waited < HOUR) return "waiting less than an hour";
-  if (waited < DAY) return `waiting ${plural(Math.floor(waited / HOUR), "hour")}`;
-  return `waiting ${plural(Math.floor(waited / DAY), "day")}`;
+  if (waited < DAY) return `waiting ${pluralise(Math.floor(waited / HOUR), "hour")}`;
+  return `waiting ${pluralise(Math.floor(waited / DAY), "day")}`;
 }

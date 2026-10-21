@@ -20,49 +20,14 @@ import request from 'supertest';
 import { createEventRequestRouter } from '../../src/routes/eventRequests.js';
 import { ROLE } from '../../src/domain/userRole.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
+import { ok, createReadQueueClient } from '../fixtures/supabaseStubs.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
-
-function createFakeClient(results = []) {
-  const queue = [...results];
-  const calls = [];
-
-  function settle(call) {
-    if (queue.length === 0) {
-      throw new Error(`fake client: no result queued for ${call.operation} on ${call.table}`);
-    }
-    return Promise.resolve(queue.shift());
-  }
-
-  return {
-    calls,
-    from(table) {
-      const call = { table, operation: 'select', select: null, filters: [], inFilters: [], notFilters: [], order: [] };
-      calls.push(call);
-      const chain = {
-        select(columns = '*') { call.select = columns; return chain; },
-        eq(column, value) { call.filters.push([column, value]); return chain; },
-        in(column, values) { call.inFilters.push([column, [...values]]); return chain; },
-        not(column, operator, value) { call.notFilters.push([column, operator, value]); return chain; },
-        order(column, options) { call.order.push([column, options]); return chain; },
-        maybeSingle: () => settle(call),
-        single: () => settle(call),
-        then: (resolve, reject) => settle(call).then(resolve, reject),
-      };
-      return chain;
-    },
-  };
-}
-
-const ok = (data) => ({ data, error: null });
 
 const LEAD_ID = '77777777-7777-4777-8777-777777777777';
 const COORDINATOR_A = '44444444-4444-4444-8444-444444444444';
 
-const signedInWithRole = (role, id = LEAD_ID) => (req, _res, next) => {
-  req.user = { id, email: 'someone@example.com', role };
-  next();
-};
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInWithRole = signedInFor(LEAD_ID);
 
 function appWith({ client, requireAuth = signedInWithRole(ROLE.EVENT_COORDINATOR_LEAD) } = {}) {
   return express()
@@ -92,7 +57,7 @@ describe('SCRUM-487 AC1, AC2: GET /coordinator-overview is the Lead\'s', () => {
   it('SCRUM487_AC2_a_lead_reads_every_coordinator_with_counts_per_status', async () => {
     // AC1-01. 200 and { statuses, coordinators }: each coordinator with its
     // byStatus, and each status with its label (SCRUM-546, D9).
-    const client = createFakeClient([
+    const client = createReadQueueClient([
       ok([{ id: COORDINATOR_A, full_name: 'Omar Okafor' }]),
       ok([{ assigned_coordinator_id: COORDINATOR_A, status: STATUS.APPROVED }]),
     ]);
@@ -136,7 +101,7 @@ describe('SCRUM-487 AC1, AC2: GET /coordinator-overview is the Lead\'s', () => {
     // from the Organiser's read (an eq on id, then a 404). Asserted from the
     // outside: the first read is of profiles by role, and the answer is the
     // overview's, with no coordinators.
-    const client = createFakeClient([ok([])]);
+    const client = createReadQueueClient([ok([])]);
 
     const res = await overview(client);
 
@@ -152,7 +117,7 @@ describe('SCRUM-487 AC1, AC2: GET /coordinator-overview is the Lead\'s', () => {
     async (_label, role) => {
       // AC1-02. leadOnly: every coordinator's caseload is the Lead's to see.
       // Nothing queued, so a query that slipped past the gate would fail.
-      const client = createFakeClient([]);
+      const client = createReadQueueClient([]);
 
       const res = await overview(client, signedInWithRole(role, COORDINATOR_A));
 
@@ -164,7 +129,7 @@ describe('SCRUM-487 AC1, AC2: GET /coordinator-overview is the Lead\'s', () => {
 
   it('SCRUM487_AC1_the_coordinator_overview_answers_401_without_a_token', async () => {
     // AC1-03.
-    const client = createFakeClient([]);
+    const client = createReadQueueClient([]);
 
     const res = await overview(client, signedOut);
 
@@ -189,7 +154,7 @@ describe('SCRUM-487 AC1, AC3: GET /assigned takes the Lead\'s filters', () => {
   it('SCRUM487_AC3_the_query_string_reaches_the_read', async () => {
     // AC3-14, AC3-16: every parameter arrives, and a path with a query string
     // is still the list's read, not GET /:id's (no eq on id).
-    const client = createFakeClient([ok([])]);
+    const client = createReadQueueClient([ok([])]);
 
     const res = await assigned(client, `?coordinatorId=${COORDINATOR_A}&status=completed&includeFinished=true`);
 
@@ -206,7 +171,7 @@ describe('SCRUM-487 AC1, AC3: GET /assigned takes the Lead\'s filters', () => {
     ['', ACTIVE],
   ])('SCRUM487_AC3_include_finished_%j_reads_its_statuses', async (query, statuses) => {
     // AC3-13. 'true' is true; 'false' and absent are false.
-    const client = createFakeClient([ok([])]);
+    const client = createReadQueueClient([ok([])]);
 
     const res = await assigned(client, query);
 
@@ -226,7 +191,7 @@ describe('SCRUM-487 AC1, AC3: GET /assigned takes the Lead\'s filters', () => {
     // AC3-09 to AC3-12 over HTTP. A stray value is refused, never read as
     // false or as no filter; a repeated parameter arrives as an array and is
     // refused too.
-    const client = createFakeClient([]);
+    const client = createReadQueueClient([]);
 
     const res = await assigned(client, query);
 
@@ -240,7 +205,7 @@ describe('SCRUM-487 AC1, AC3: GET /assigned takes the Lead\'s filters', () => {
     ['event_organiser', ROLE.EVENT_ORGANISER],
   ])('SCRUM487_AC1_%s_is_refused_the_filtered_list_with_403_and_queries_nothing', async (_label, role) => {
     // AC1-04. The filters do not widen the gate; refused before validation.
-    const client = createFakeClient([]);
+    const client = createReadQueueClient([]);
 
     const res = await assigned(client, `?coordinatorId=${COORDINATOR_A}&status=approved&includeFinished=true`, signedInWithRole(role, COORDINATOR_A));
 
@@ -279,7 +244,7 @@ describe('SCRUM-487 AC5: a Lead is refused every write the event page offers a c
   it.each(WRITES)('SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing', async (_route, call) => {
     // AC5-04 to AC5-09. Nothing queued: a query that slipped past the gate
     // would fail with "no result queued" instead of passing by accident.
-    const client = createFakeClient([]);
+    const client = createReadQueueClient([]);
 
     const res = await call(appWith({ client }));
 

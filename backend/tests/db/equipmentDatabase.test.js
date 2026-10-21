@@ -1,21 +1,12 @@
 /**
- * SCRUM-72: the equipment schema and the availability function, run against a
- * real Postgres.
+ * SCRUM-72: the equipment schema and the availability function, run against the
+ * final schema in a real Postgres (PGlite).
  *
- * Every other test of these tables fakes the Supabase client or reads the
- * migration as text, so none of them can see a constraint fire or a query count
- * rows. This one applies the real migrations to an in-process Postgres (PGlite)
- * and writes bad rows straight at the tables, bypassing every service, the way
- * SCRUM-72 asks. It needs no database server and no credentials, so it runs in CI.
- * It reuses the harness of eventStatusLifecycleDatabase.test.js.
- *
- * Migrations applied, in order: 001 (event_requests and set_updated_at), 022
- * (the equipment tables) and 024 (the availability function). Neither 022 nor
- * 024 reads anything later than 001. auth.users is a stand-in, as in the
- * lifecycle test.
+ * Bad rows are written straight at the tables, bypassing every service, the way
+ * SCRUM-72 asks.
  *
  * Two halves:
- *   - SCRUM66_...  each constraint of 022 refuses a direct bad write. A check
+ *   - SCRUM66_...  each equipment constraint refuses a direct bad write. A check
  *     constraint answers 23514, and the message names it. The two uniqueness
  *     rules (one line per type per request, one name per type) answer 23505,
  *     which is the code for a unique violation, not 23514.
@@ -28,34 +19,18 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = ['001_event_requests.sql', '022_equipment_schema.sql', '024_equipment_availability.sql'];
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
 
 const at = (time) => `2026-12-01T${time}:00Z`;
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
 
 describe('SCRUM-72: the equipment schema and availability function in Postgres', () => {
   let db;
   let organiser;
   let base; // a type, an event, a request and a line the bad writes hang off
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   const newType = async ({ name, total = 10, damaged = 0, maintenance = 0, retired = false } = {}) =>
     (await one(
@@ -63,8 +38,7 @@ describe('SCRUM-72: the equipment schema and availability function in Postgres',
        values ($1, $2, $3, $4, ${retired ? 'now()' : 'null'}) returning id`,
       [name ?? `type ${randomUUID()}`, total, damaged, maintenance],
     )).id;
-  const newEvent = async (name) =>
-    (await one('insert into event_requests (organiser_id, event_name) values ($1, $2) returning id', [organiser, name])).id;
+  const newEvent = (name) => seedEvent(db, { organiser_id: organiser, event_name: name });
   const newRequest = async (eventId) =>
     (await one('insert into equipment_requests (event_request_id) values ($1) returning id', [eventId])).id;
   const newLine = async (requestId, typeId, quantity = 1) =>
@@ -96,12 +70,7 @@ describe('SCRUM-72: the equipment schema and availability function in Postgres',
   });
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
+    db = await createSchemaDb();
 
     organiser = (await one("insert into auth.users (email) values ('organiser@example.com') returning id")).id;
 
@@ -114,24 +83,6 @@ describe('SCRUM-72: the equipment schema and availability function in Postgres',
 
   afterAll(async () => {
     await db?.close();
-  });
-
-
-  describe('the migrations', () => {
-    it('SCRUM66_022_and_024_apply_cleanly_and_can_be_applied_again', async () => {
-      await db.exec(migration('022_equipment_schema.sql'));
-      await db.exec(migration('024_equipment_availability.sql'));
-
-      const tables = await db.query(
-        "select table_name from information_schema.tables where table_name like 'equipment_%' order by table_name",
-      );
-      expect(tables.rows.map((row) => row.table_name)).toEqual([
-        'equipment_lines',
-        'equipment_requests',
-        'equipment_reservations',
-        'equipment_types',
-      ]);
-    });
   });
 
 

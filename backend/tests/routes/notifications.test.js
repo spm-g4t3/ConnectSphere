@@ -26,6 +26,7 @@ import {
   fail,
   counted,
 } from '../fixtures/notifications.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -43,14 +44,7 @@ const { ROLE } = await import('../../src/domain/userRole.js');
 
 const OTHER_USER_ID = '11111111-1111-4111-8111-111111111111';
 
-/** Stands in for a signed-in user of a given role. */
-const signedInAs = (role, id = COORDINATOR_ID) => (req, _res, next) => {
-  req.user = { id, email: 'someone@example.com', role };
-  next();
-};
-
-/** Stands in for no session, answering as the real middleware does. */
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInAs = signedInFor(COORDINATOR_ID);
 
 /** An app with the router mounted where app.js mounts it. */
 function appWith(requireAuth = signedInAs(ROLE.EVENT_COORDINATOR)) {

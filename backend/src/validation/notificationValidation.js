@@ -14,10 +14,7 @@
  */
 
 import { ValidationError } from '../errors.js';
-
-/** The shape gen_random_uuid() produces, which is what notifications.id holds. */
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { UUID_PATTERN } from './ids.js';
 
 /**
  * Validate a notification id before it reaches the database.

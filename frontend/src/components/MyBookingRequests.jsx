@@ -37,11 +37,13 @@ import {
 } from "../services/bookingRequestStatusDisplay";
 import { formatRange, formatTimestamp } from "../services/displayFormat";
 import { reviewReasonLabel } from "../services/flaggedBookingDisplay";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // Keyed by status, the same shape as MyAssignedEvents' table. GET /mine is gated
 // on the coordinator role, so a 403 means the account's role is wrong.
 const LIST_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Event Coordinators have a list of venue requests.",
   500: "Your venue requests could not be loaded. Please try again.",
 };
@@ -161,19 +163,7 @@ export default function MyBookingRequests() {
 
   // Refetch when the coordinator comes back to the tab, for MyAssignedEvents'
   // reason: Venue Staff decide these while the coordinator is not looking.
-  useEffect(() => {
-    function refetchIfVisible() {
-      if (document.visibilityState === "visible") fetchRequests();
-    }
-
-    window.addEventListener("focus", refetchIfVisible);
-    document.addEventListener("visibilitychange", refetchIfVisible);
-
-    return () => {
-      window.removeEventListener("focus", refetchIfVisible);
-      document.removeEventListener("visibilitychange", refetchIfVisible);
-    };
-  }, [fetchRequests]);
+  useRefetchOnReturn(fetchRequests);
 
   async function handleWithdraw(item) {
     if (sending.current) return;

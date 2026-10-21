@@ -38,13 +38,14 @@ import {
 import { calendarEntryDisplay } from "../services/calendarEntryDisplay";
 import { formatRange } from "../services/displayFormat";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // Keyed by status, the same shape as VenueDetail's BOOKINGS_ERROR_MESSAGES.
 // The server's `error` string is not surfaced: on the venue routes it is
 // database prose carrying raw uuids.
 const ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Venue Staff and Event Coordinators can see a venue's calendar.",
   404: "That venue does not exist. It may have been removed.",
   500: "The calendar could not be loaded. Please try again.",

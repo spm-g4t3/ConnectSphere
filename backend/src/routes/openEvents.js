@@ -8,11 +8,11 @@ import express from 'express';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
-import { createErrorHandler } from '../http/handleError.js';
+import { createErrorMiddleware } from '../http/handleError.js';
 import { listOpenEvents, getOpenEvent } from '../services/openEventService.js';
 import { registerForEvent } from '../services/registrationService.js';
 
-const handleError = createErrorHandler('open events route');
+const errorMiddleware = createErrorMiddleware('open events route');
 
 /**
  * @param {object} [options]
@@ -35,48 +35,37 @@ export function createOpenEventRouter({
   const attendeeOnly = requireRole(ROLE.ATTENDEE);
 
   router.post('/:id/registrations', attendeeOnly, async (req, res) => {
-    try {
-      const registration = await registerForEvent({
-        attendeeId: req.user.id,
-        eventId: req.params.id,
-        client,
-      });
-      res.set('Cache-Control', 'no-store');
-      res.status(201).json(registration);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const registration = await registerForEvent({
+      attendeeId: req.user.id,
+      eventId: req.params.id,
+      client,
+    });
+    res.set('Cache-Control', 'no-store');
+    res.status(201).json(registration);
   });
 
   // The caller is always req.user.id. No-store: eligibility changes with the
   // clock, so a stored copy would keep listing an event that has closed.
   router.get('/', attendeeOnly, async (req, res) => {
-    try {
-      const events = await listOpenEvents({ attendeeId: req.user.id, client, now: now() });
-      res.set('Cache-Control', 'no-store');
-      res.status(200).json(events);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const events = await listOpenEvents({ attendeeId: req.user.id, client, now: now() });
+    res.set('Cache-Control', 'no-store');
+    res.status(200).json(events);
   });
 
   // Same eligibility as the list, so a direct URL gets no more than the list
   // shows; every reason it is not on offer is the same 404.
   router.get('/:id', attendeeOnly, async (req, res) => {
-    try {
-      const event = await getOpenEvent({
-        attendeeId: req.user.id,
-        eventId: req.params.id,
-        client,
-        now: now(),
-      });
-      res.set('Cache-Control', 'no-store');
-      res.status(200).json(event);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const event = await getOpenEvent({
+      attendeeId: req.user.id,
+      eventId: req.params.id,
+      client,
+      now: now(),
+    });
+    res.set('Cache-Control', 'no-store');
+    res.status(200).json(event);
   });
 
+  router.use(errorMiddleware);
   return router;
 }
 

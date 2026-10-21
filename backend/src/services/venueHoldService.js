@@ -38,20 +38,22 @@
  * module never imports venueService.js, which imports the client statically.
  */
 
+import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
+import { resolveClient } from '../config/resolveClient.js';
 import {
-  ValidationError,
-  NotFoundError,
-  ConflictError,
-  ForbiddenError,
-} from '../errors.js';
+  createPgTranslator,
+  forCodes,
+  rejected,
+  missingReference,
+  notFound,
+  forbidden,
+  hintConflict,
+} from '../http/pgErrors.js';
 import { validateHoldTargetId, validatePlaceVenueHold } from '../validation/venueHoldValidation.js';
 import { VENUE_HOLD_STATUS } from '../domain/venueHoldStatus.js';
 import { STATUS } from '../domain/eventRequestStatus.js';
 import { toPeriodConflict } from './bookingRequestService.js';
-
-/** The shape gen_random_uuid() produces; what an existing hold's id looks like. */
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { one, readNames } from './rows.js';
 
 /** Postgres codes that mean "the input was wrong", whoever caught it. */
 const VALIDATION_CODES = new Set([
@@ -69,13 +71,6 @@ const HOLD_COLUMNS = `
   event_requests(event_name, proposed_start, proposed_end)
 `;
 
-async function resolveClient(client) {
-  if (client) return client;
-
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
-}
-
 /**
  * Turn a raw Postgres error into a typed one.
  *
@@ -89,50 +84,18 @@ async function resolveClient(client) {
  * lock makes it unreachable in practice; if a concurrent write did beat the
  * function's own check, it gets the same code that check uses.
  */
-function translateError(error) {
-  const code = error.code;
-  const detail = error.message ?? '';
-
-  if (VALIDATION_CODES.has(code)) {
-    return new ValidationError(`A value was rejected by the database: ${detail}`);
-  }
-
-  if (code === '23503') {
-    return new ValidationError(`A referenced record does not exist: ${detail}`);
-  }
-
-  if (code === 'P0002') {
-    return new NotFoundError(detail || 'Event request or venue not found');
-  }
-
-  // AC1: the placer is not Venue Staff. The route refuses first; this is the
-  // function's own answer, kept for any other caller.
-  if (code === '42501') {
-    return new ForbiddenError(detail);
-  }
-
-  if (code === '23505') {
-    return new ConflictError('This event already holds this venue', { code: 'HOLD_EXISTS' });
-  }
-
-  if (code === 'PT409') {
-    const hint = error.hint ?? null;
-    const holdId = typeof error.details === 'string' ? error.details.trim() : '';
-    const conflicts =
-      hint === 'HOLD_EXISTS' && UUID_PATTERN.test(holdId) ? [{ kind: 'hold', holdId }] : [];
-    return new ConflictError(detail, { code: hint, conflicts });
-  }
-
-  return new Error(detail || 'Unexpected database error');
-}
-
-/**
- * PostgREST embeds a many-to-one as an object, but an array if it were ever
- * read as one-to-many. Read defensively, as bookingRequestService does.
- */
-function one(embedded) {
-  return Array.isArray(embedded) ? embedded[0] : embedded;
-}
+const translateError = createPgTranslator({
+  codes: {
+    ...forCodes(VALIDATION_CODES, rejected),
+    '23503': missingReference,
+    P0002: notFound('Event request or venue not found'),
+    // AC1: the placer is not Venue Staff. The route refuses first; this is the
+    // function's own answer, kept for any other caller.
+    '42501': forbidden,
+    '23505': () => new ConflictError('This event already holds this venue', { code: 'HOLD_EXISTS' }),
+    PT409: hintConflict({ HOLD_EXISTS: (holdId) => ({ kind: 'hold', holdId }) }),
+  },
+});
 
 /**
  * A venue_holds row, in the camelCase every other service returns.
@@ -151,17 +114,6 @@ export function toVenueHold(row) {
     status: row.status,
     expiredAt: row.expired_at ?? null,
   };
-}
-
-/** Names for people, by id. A person with no name gets null (equipmentReviewService). */
-async function readNames(db, ids) {
-  const unique = [...new Set(ids.filter(Boolean))];
-  if (unique.length === 0) return new Map();
-
-  const { data, error } = await db.from('profiles').select('id, full_name').in('id', unique);
-  if (error) throw translateError(error);
-
-  return new Map((data ?? []).map((row) => [row.id, row.full_name ?? null]));
 }
 
 /**
@@ -260,7 +212,7 @@ export async function listActiveVenueHolds(venueId, { client, now = new Date() }
   if (error) throw translateError(error);
 
   const rows = data ?? [];
-  const names = await readNames(db, rows.map((row) => row.placed_by));
+  const names = await readNames(db, rows.map((row) => row.placed_by), translateError);
 
   return rows.map((row) => {
     const event = one(row.event_requests) ?? {};
@@ -298,7 +250,7 @@ export async function listHoldCandidates({ client } = {}) {
   if (error) throw translateError(error);
 
   const rows = data ?? [];
-  const names = await readNames(db, rows.map((row) => row.assigned_coordinator_id));
+  const names = await readNames(db, rows.map((row) => row.assigned_coordinator_id), translateError);
 
   return rows.map((row) => ({
     id: row.id,

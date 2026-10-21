@@ -9,9 +9,11 @@ import { isOpenForRegistration } from '../domain/registrationWindow.js';
 import { availability } from '../domain/registrationAvailability.js';
 import { translateRegistrationEligibilityError } from './registrationEligibilityService.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../errors.js';
+import { resolveClient } from '../config/resolveClient.js';
+import { SCHEMA_MISSING_CODES } from '../http/pgErrors.js';
 // The repository's one uuid check, a pure module, so this service stays loadable
 // without credentials.
-import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
+import { isPlausibleId } from '../validation/ids.js';
 
 const SETTINGS_COLUMNS = `
   registration_enabled, registration_opens_at, registration_closes_at,
@@ -39,16 +41,9 @@ function translateStateError(error) {
 
 /** Table failures describe database state, not attendee eligibility. */
 function translateEventReadError(error) {
-  return ['42P01', '42703', 'PGRST202', 'PGRST204', 'PGRST205'].includes(error.code)
+  return SCHEMA_MISSING_CODES.includes(error.code)
     ? translateRegistrationEligibilityError(error)
     : error;
-}
-
-async function resolveClient(client) {
-  if (client) return client;
-
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
 }
 
 /**
@@ -202,14 +197,6 @@ async function listOpenEventsWithRegistrationDetails({ attendeeId, client, now =
   const events = rows.filter((row) => isOpenForRegistration(toSettings(row), now));
 
   return withRegistrationState(db, events, attendeeId);
-}
-
-/**
- * Same eligibility and database state as Browse Open Events, with registration
- * window and active-count fields for the Attendee dashboard.
- */
-export async function listOpenEventsForRegistration(options = {}) {
-  return listOpenEventsWithRegistrationDetails(options);
 }
 
 export async function listOpenEvents(options = {}) {

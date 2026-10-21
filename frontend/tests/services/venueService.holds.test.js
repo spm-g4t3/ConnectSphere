@@ -13,6 +13,7 @@ import {
   listVenueHolds,
   placeVenueHold,
 } from "../../src/services/venueService.js";
+import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/apiClient", () => ({
   apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
@@ -31,12 +32,6 @@ const HOLD = {
   status: "active",
   expiredAt: null,
 };
-
-function httpError(status, data) {
-  return Object.assign(new Error(`Request failed with status code ${status}`), {
-    response: { status, data },
-  });
-}
 
 beforeEach(() => {
   for (const method of ["get", "post", "patch", "delete"]) {

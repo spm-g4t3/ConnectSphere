@@ -73,21 +73,8 @@ import {
   readStatusDisplay,
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
-
-/**
- * A timestamp in the reader's locale, or the raw string if it will not parse.
- *
- * Copied from VenueDetail rather than imported from services/datetimeFormat,
- * which sounds like the right home but is not: that module converts to and
- * from the `datetime-local` input format and has no read-only formatter. Two
- * copies of four lines is cheaper than a shared module nobody agreed the
- * shape of; when a third appears, lift it.
- */
-function formatTimestamp(value) {
-  if (!value) return "Not recorded";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
-}
+import { formatTimestamp, orNotSpecified } from "../services/displayFormat";
+import { isReplyOverdue, venueTomorrow } from "../services/datetimeFormat";
 
 const CLARIFICATION_FIELDS = [
   ["eventName", "Event name"],
@@ -100,19 +87,6 @@ const CLARIFICATION_FIELDS = [
   ["accessibilityRequirements", "Accessibility requirements"],
   ["equipmentRequirements", "Equipment requirements"],
 ];
-
-/**
- * A free-text requirement, or an explicit statement that there is none.
- *
- * "Not specified" and not an empty cell. Three of the fields below are
- * nullable prose, and a blank space reads as "the page failed to load this"
- * to the one person whose job is to act on what it says. Saying the Organiser
- * left it empty is information; showing nothing is an unanswered question.
- */
-function orNotSpecified(value) {
-  const text = typeof value === "string" ? value.trim() : value;
-  return text ? text : "Not specified";
-}
 
 /**
  * Is this an attendance figure worth showing as one?
@@ -215,9 +189,8 @@ export default function CoordinatorRequestDetail({
 
   const display = readStatusDisplay(current);
   const capacity = seedableCapacity(request.expectedAttendance);
-  const earliestReplyDate = new Date();
-  earliestReplyDate.setUTCDate(earliestReplyDate.getUTCDate() + 1);
-  const minReplyByDate = earliestReplyDate.toISOString().slice(0, 10);
+  // The reply-by date is a Singapore calendar day, so tomorrow is Singapore's.
+  const minReplyByDate = venueTomorrow();
   const [reviewNote, setReviewNote] = useState("");
   const [replyByDate, setReplyByDate] = useState("");
   const [requestedFields, setRequestedFields] = useState([]);
@@ -621,8 +594,8 @@ export default function CoordinatorRequestDetail({
           <li>
             <strong>Proposed period</strong>
             <span>
-              {formatTimestamp(request.proposedStart)} &ndash;{" "}
-              {formatTimestamp(request.proposedEnd)}
+              {formatTimestamp(request.proposedStart, "Not recorded")} &ndash;{" "}
+              {formatTimestamp(request.proposedEnd, "Not recorded")}
             </span>
           </li>
           <li>
@@ -683,7 +656,7 @@ export default function CoordinatorRequestDetail({
                   <p>{changeRequest.details}</p>
                   <small>
                     {changeRequest.status.replaceAll("_", " ")} | Requested{" "}
-                    {formatTimestamp(changeRequest.createdAt)}
+                    {formatTimestamp(changeRequest.createdAt, "Not recorded")}
                   </small>
                   {changeRequest.decision && (
                     <p className="coordinator-change-requests__outcome">
@@ -770,7 +743,7 @@ export default function CoordinatorRequestDetail({
         <ul>
           <li>
             <strong>Submitted</strong>
-            <span>{formatTimestamp(request.submittedAt)}</span>
+            <span>{formatTimestamp(request.submittedAt, "Not recorded")}</span>
           </li>
           <li>
             {/* The name when the row has one, the bare uuid when it does not.
@@ -852,8 +825,8 @@ export default function CoordinatorRequestDetail({
             <p>{current.clarificationNote || "No clarification question was recorded."}</p>
             {current.clarificationReplyByDate && (
               <span>
-                Reply by {formatTimestamp(current.clarificationReplyByDate)}
-                {current.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
+                Reply by {formatTimestamp(current.clarificationReplyByDate, "Not recorded")}
+                {isReplyOverdue(current.clarificationReplyByDate) && (
                   <strong className="clarification-overdue"> · Overdue</strong>
                 )}
               </span>

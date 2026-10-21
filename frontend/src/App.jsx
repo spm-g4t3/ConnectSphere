@@ -379,14 +379,6 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
-        {/* The next two are placeholders on purpose, and the nav links that point
-            at them are kept on purpose. A future sprint builds exactly these two
-            features, so deleting the links now just means re-adding them then. What
-            was wrong before was not the links — it was that they fell through to the
-            catch-all below and silently bounced the user to /dashboard with no
-            explanation. An honest "being built" page is truthful today and becomes
-            the real page later. Do not "tidy" these away. */}
-        <Route path="/tickets" element={<ProtectedRoute><PagePlaceholder title="Support tickets" description="Support tickets are still being built. Technical support staff will raise, triage and close event support tickets here in a future release. Nothing is waiting for you behind this page yet." /></ProtectedRoute>} />
         {/* Technical support staff only. The queue renders <section>s and no dashboard
             wrapper, so the wrapper is supplied here, as /review-queue does. */}
         <Route

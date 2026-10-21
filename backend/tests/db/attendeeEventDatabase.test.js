@@ -1,31 +1,13 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { getAttendeeEvent, listAttendeeEvents } from '../../src/services/attendeeEventService.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
 import { BOOKING_STATUS } from '../../src/domain/bookingStatus.js';
 import { createAttendeeEventSqlClient } from '../fixtures/attendeeEventSqlClient.js';
+import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
-const migrationsDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../db/migrations');
-const prerequisites = ['050_event_registration.sql', '082_event_registration_state.sql',
-  '091_event_registration_hardening.sql', '092_event_registration_persistence.sql'];
-const migrationPath = name => resolve(migrationsDir, name);
-const migrations = [
-  '001_event_requests.sql', '002_venues.sql', '003_venue_audit.sql',
-  '004_venue_functions.sql', '005_venue_retirement.sql', '007_user_roles.sql',
-  '008_venue_audit_completion.sql', '009_bookings.sql', '011_venue_blocks.sql',
-  '013_venue_block_booking_conflicts.sql', '014_booking_review_notifications.sql',
-  '017_venue_turnaround.sql', '023_venue_setup_time.sql',
-  '021_event_status_history.sql', '025_event_request_decisions.sql',
-  '027_booking_request_statuses.sql', '028_booking_status_default_pending.sql',
-  '032_venue_occupancy.sql', '040_venue_holds.sql', '062_safety_statuses.sql',
-  '065_booking_decision_statuses.sql', '088_booking_released_status.sql',
-  prerequisites[0], '068_open_event_registration_state.sql', ...prerequisites.slice(1),
-];
 const ATTENDEE = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ORGANISER = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const OTHER = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
@@ -34,11 +16,12 @@ const user = { id: ATTENDEE, role: 'attendee' };
 const start = '2030-05-06T09:00:00+08:00';
 const end = '2030-05-06T11:00:00+08:00';
 
-describe('SCRUM-52 SQL read using repository migrations', () => {
+// The attendee read path against the final schema.
+describe('SCRUM-52 SQL read against the final schema', () => {
   let db;
   let eventId;
   let queries;
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   const client = createAttendeeEventSqlClient({ query: (...args) => db.query(...args) }, {
     onQuery: () => { queries += 1; },
@@ -47,16 +30,24 @@ describe('SCRUM-52 SQL read using repository migrations', () => {
   const book = async (name, status = 'approved') => {
     const venue = await one(`insert into venues (name, location, max_capacity)
       values ($1, $2, 100) returning id`, [name, `${name} location`]);
-    return one(`insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-      values ($1, $2, $3, $4, $5) returning id`, [venue.id, eventId, start, end, status]);
+    // A released booking must record who released it and why.
+    const released = status === BOOKING_STATUS.RELEASED;
+    return one(`insert into bookings (venue_id, event_request_id, starts_at, ends_at, status,
+        released_by, released_at, release_reason)
+      values ($1, $2, $3, $4, $5, $6, case when $7 then now() end, $8) returning id`,
+    [venue.id, eventId, start, end, status, released ? COORDINATOR : null, released, released ? 'Fixture release' : null]);
+  };
+  // A registered attendee on an event seeded straight into `status`.
+  const registeredEvent = async (overrides = {}) => {
+    eventId = await seedEvent(db, {
+      status: 'confirmed', organiser_id: ORGANISER, event_name: 'Registered event',
+      proposed_start: start, proposed_end: end, reviewing_coordinator_id: COORDINATOR, ...overrides,
+    });
+    await db.query('insert into event_registrations (event_request_id, attendee_id) values ($1, $2)', [eventId, ATTENDEE]);
   };
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`create schema auth;
-      create table auth.users (id uuid primary key, email text);
-      create role anon; create role authenticated; create role service_role bypassrls;`);
-    for (const name of migrations) await db.exec(readFileSync(migrationPath(name), 'utf8'));
+    db = await createSchemaDb();
     await db.query('insert into auth.users (id) values ($1), ($2), ($3), ($4)', [ATTENDEE, ORGANISER, OTHER, COORDINATOR]);
     await db.query("insert into profiles (id, role) values ($1, 'attendee'), ($2, 'event_organiser'), ($3, 'attendee'), ($4, 'event_coordinator')",
       [ATTENDEE, ORGANISER, OTHER, COORDINATOR]);
@@ -65,11 +56,7 @@ describe('SCRUM-52 SQL read using repository migrations', () => {
   beforeEach(async () => {
     await db.exec('begin');
     queries = 0;
-    eventId = (await one(`insert into event_requests (organiser_id, event_name, status, proposed_start, proposed_end,
-        decision, reviewing_coordinator_id, decided_by, decided_at)
-      values ($1, 'Registered event', 'confirmed', $2, $3, 'approved', $4, $4, now()) returning id`,
-    [ORGANISER, start, end, COORDINATOR])).id;
-    await db.query('insert into event_registrations (event_request_id, attendee_id) values ($1, $2)', [eventId, ATTENDEE]);
+    await registeredEvent();
   });
   // Each fixture is rolled back, including deliberate database failures.
   afterEach(async () => { await db.exec('rollback'); });
@@ -91,14 +78,8 @@ describe('SCRUM-52 SQL read using repository migrations', () => {
 
   it.each(Object.values(STATUS).filter(status => status !== STATUS.CONFIRMED))(
     'SCRUM24_AC2_AC3_SQL_non_confirmed_event_has_no_arrangements_%s', async status => {
+      await registeredEvent({ status });
       await book('Private hall');
-      const decision = status === STATUS.REJECTED ? 'rejected'
-        : [STATUS.APPROVED, STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED, STATUS.COMPLETED].includes(status)
-          ? 'approved' : null;
-      await db.query(`update event_requests set status = $1, decision = $2,
-        decision_note = 'Fixture review', decided_by = $3,
-        decided_at = case when $3::uuid is null then null else now() end where id = $4`,
-      [status, decision, decision ? COORDINATOR : null, eventId]);
       expect(await read()).toEqual({ eventRequestId: eventId, state: 'unavailable', eventName: 'Registered event' });
       expect(queries).toBe(1);
     },
@@ -129,12 +110,12 @@ describe('SCRUM-52 SQL read using repository migrations', () => {
   });
 
   it('SCRUM24_AC1_SQL_closed_disabled_full_and_past_events_remain_readable', async () => {
+    // A confirmed event's dates are locked, so the past event is seeded past.
+    await registeredEvent({ proposed_start: '2000-02-01', proposed_end: '2000-02-02' });
     await book('Hall');
     await db.query(`update event_requests set registration_enabled = false,
       registration_opens_at = '2000-01-01', registration_closes_at = '2000-01-02',
       registration_capacity = 1 where id = $1`, [eventId]);
-    await db.query(`update event_requests set proposed_start = '2000-02-01', proposed_end = '2000-02-02'
-      where id = $1`, [eventId]);
     const result = await read();
     expect(result.state).toBe('confirmed');
     expect(result.venues).toHaveLength(1);
@@ -148,8 +129,11 @@ describe('SCRUM-52 SQL read using repository migrations', () => {
     expect(await read()).toEqual({ eventRequestId: eventId, state: 'unavailable', eventName: 'Registered event' });
     await db.query("update bookings set status = 'cancelled' where id = $1", [old.id]);
     const latest = await book('Latest hall');
-    await db.query(`update event_requests set status = 'confirmed', proposed_start = $1, proposed_end = $2
+    await db.query(`update event_requests set proposed_start = $1, proposed_end = $2
       where id = $3`, ['2031-05-06T09:00:00+08:00', '2031-05-06T11:00:00+08:00', eventId]);
+    // Reconfirming takes the safety review workflow, which this read test skips.
+    await withSafetyReviewTransitionGuardDisabled(db, () => db.query(
+      "update event_requests set status = 'confirmed' where id = $1", [eventId]));
     const result = await read();
     expect(result.venues).toEqual([{ bookingId: latest.id, name: 'Latest hall', location: 'Latest hall location', underReview: false }]);
     expect(new Date(result.startsAt).getUTCFullYear()).toBe(2031);

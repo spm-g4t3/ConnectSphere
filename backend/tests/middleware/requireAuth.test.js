@@ -341,7 +341,7 @@ describe('the middleware is loadable without credentials', () => {
     const module = await import('../../src/middleware/requireAuth.js');
 
     expect(typeof module.createRequireAuth).toBe('function');
-    expect(typeof module.default).toBe('function');
+    expect(typeof module.requireAuth).toBe('function');
   });
 });
 

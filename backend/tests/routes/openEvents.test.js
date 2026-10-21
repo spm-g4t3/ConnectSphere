@@ -12,6 +12,7 @@ import request from 'supertest';
 import { createOpenEventRouter } from '../../src/routes/openEvents.js';
 import { listOpenEvents, getOpenEvent } from '../../src/services/openEventService.js';
 import { ROLE } from '../../src/domain/userRole.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 const NOW = new Date('2026-10-12T10:00:00.000Z');
 const ATTENDEE_ID = '44444444-4444-4444-8444-444444444444';
@@ -162,11 +163,7 @@ function createFakeClient(
   };
 }
 
-const signedInWithRole = (role) => (req, _res, next) => {
-  req.user = { id: ATTENDEE_ID, email: 'a@example.com', role };
-  next();
-};
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInWithRole = signedInFor(ATTENDEE_ID, 'a@example.com');
 
 function get(client, { requireAuth = signedInWithRole(ROLE.ATTENDEE), now = () => NOW } = {}) {
   const app = express().use('/api/open-events', createOpenEventRouter({ client, requireAuth, now }));
@@ -883,7 +880,7 @@ function getOne(client, eventId, { requireAuth = signedInWithRole(ROLE.ATTENDEE)
 const NOT_OPEN = { error: 'This event is not open for registration' };
 
 describe('SCRUM495_AC1 only Attendees can open one event', () => {
-  it('SCRUM495_AC1_lets_an_attendee_in', async () => {
+  it('SCRUM495_AC1_lets_an_attendee_open_one_event', async () => {
     const row = eventRow();
 
     const res = await getOne(createFakeClient([row]), row.id);
@@ -901,7 +898,7 @@ describe('SCRUM495_AC1 only Attendees can open one event', () => {
     ROLE.SAFETY_OFFICER,
     'something_unknown',
     null,
-  ])('SCRUM495_AC1_refuses_role_%s_with_403_before_reading_anything', async (role) => {
+  ])('SCRUM495_AC1_refuses_role_%s_one_event_with_403_before_reading_anything', async (role) => {
     const row = eventRow();
     const client = createFakeClient([row]);
 
@@ -911,7 +908,7 @@ describe('SCRUM495_AC1 only Attendees can open one event', () => {
     expect(client.calls).toHaveLength(0);
   });
 
-  it('SCRUM495_AC1_refuses_an_unauthenticated_caller_with_401_before_reading_anything', async () => {
+  it('SCRUM495_AC1_refuses_an_unauthenticated_caller_one_event_with_401_before_reading_anything', async () => {
     const row = eventRow();
     const client = createFakeClient([row]);
 

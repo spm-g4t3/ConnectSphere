@@ -52,51 +52,26 @@
  * typed error, the same division venueService.js uses.
  */
 
+import { ValidationError, NotFoundError } from '../errors.js';
+import { resolveClient } from '../config/resolveClient.js';
 import {
-  ValidationError,
-  NotFoundError,
-  ForbiddenError,
-  ConflictError,
-} from '../errors.js';
+  createPgTranslator,
+  forCodes,
+  rejected,
+  forbidden,
+  conflict,
+  invalid,
+  notFound,
+} from '../http/pgErrors.js';
 import {
   validateCreateChangeRequest,
   validateProcessChangeRequest,
-  isPlausibleId,
 } from '../validation/eventChangeRequestValidation.js';
+import { isPlausibleId, requireCallerId } from '../validation/ids.js';
 import { STATUS } from '../domain/eventRequestStatus.js';
 import { CHANGE_FIELD_LABEL } from '../domain/eventChangeField.js';
 
-/**
- * Resolve the Supabase client, importing the default one only if needed.
- *
- * Deliberately character-identical to resolveClient in eventRequestService.js,
- * and here for the same reason: src/config/supabaseClient.js throws at import
- * time when SUPABASE_URL or SUPABASE_SECRET_KEY is missing -- on purpose, so a
- * misconfigured server fails at startup rather than on its first query. This
- * module used to import it statically, which meant that any module importing
- * this one inherited that throw. That was survivable while nothing did; it
- * stops being survivable the moment a router imports this service, because an
- * import-time throw fails the whole test *file* at collection rather than
- * failing one test, and takes every unrelated case in it down too.
- *
- * Deferring to a dynamic import reached only when no client was supplied keeps
- * production behaviour identical: ESM caches the module, so what comes back is
- * the same object identity the static import produced, one resolution on the
- * first call and nothing afterwards. The only observable difference is *when* a
- * missing-.env throw fires -- import time becomes first call.
- *
- * The seam is for testing, not for configuration. There is still exactly one
- * real client, and it is still created in exactly one place.
- *
- * @param {object} [client] a client supplied by the caller, usually a test
- * @returns {Promise<object>} that client, or the shared default one
- */
-async function resolveClient(client) {
-  if (client) return client;
-
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
-}
+const notFoundChangeRequest = notFound('Change request not found');
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -105,66 +80,41 @@ async function resolveClient(client) {
  * 'new row violates check constraint "event_change_requests_requested_change_check"',
  * which says nothing useful to whoever submitted the request.
  */
-function translateError(error) {
-  if (!error) return null;
-
-  const code = error.code;
-  const detail = error.message ?? '';
-
-  // check constraint: blank requested_change slipping past validation, or an
-  // approved change process_change_request could not apply (e.g. a new
-  // proposed_start that would now fall after proposed_end)
-  if (code === '23514') {
-    return new ValidationError(`A value was rejected by the database: ${detail}`);
-  }
-
-  // foreign key: event_request_id or requested_by does not exist
-  if (code === '23503') {
-    return new ValidationError(`Referenced record does not exist: ${detail}`);
-  }
-
-  // malformed uuid: a backstop for callers that bypass validateCreateChangeRequest
-  // (SCRUM-33 rejects this earlier, in words an Organiser can read, but a
-  // direct caller of the service should not get a raw driver message either)
-  if (code === '22P02') {
-    return new ValidationError(`Invalid id format: ${detail}`);
-  }
-
-  // raised by process_change_request (019) when the caller is not the
-  // assigned coordinator of the change request's event (SCRUM-332). The
-  // function's own message, written for the coordinator, passed through
-  // unchanged, as eventRequestService does for 018's 42501. A 403 rather than
-  // a 404, because a coordinator can already read the event and its change
-  // requests (errors.js gives the argument). Matched by code, before the two
-  // message patterns below; 019 words its message so it matches neither.
-  if (code === '42501') {
-    return new ForbiddenError(detail);
-  }
-
-  // 55000: a locked field; PT409 and 40001: the significant-change path (102)
-  // found its arrangements moved under it. All are retryable after a refresh.
-  if (code === '55000' || code === 'PT409' || code === '40001') {
-    return new ConflictError(detail);
-  }
-
-  // raised by the significant-change path (102) for a value it cannot apply,
-  // such as an attendance of zero
-  if (code === '22023') {
-    return new ValidationError(detail);
-  }
-
-  // raised by process_change_request when the id matches nothing
-  if (code === 'P0002' || /not found/i.test(detail)) {
-    return new NotFoundError(detail || 'Change request not found');
-  }
-
-  // raised by process_change_request when the request has already been decided
-  if (/already been processed/i.test(detail)) {
-    return new ValidationError(detail);
-  }
-
-  return new Error(detail || 'Unexpected database error');
-}
+const translateError = createPgTranslator({
+  codes: {
+    // check constraint: blank requested_change slipping past validation, or an
+    // approved change process_change_request could not apply (e.g. a new
+    // proposed_start that would now fall after proposed_end)
+    '23514': rejected,
+    // foreign key: event_request_id or requested_by does not exist
+    '23503': (detail) => new ValidationError(`Referenced record does not exist: ${detail}`),
+    // malformed uuid: a backstop for callers that bypass validateCreateChangeRequest
+    // (SCRUM-33 rejects this earlier, in words an Organiser can read, but a
+    // direct caller of the service should not get a raw driver message either)
+    '22P02': (detail) => new ValidationError(`Invalid id format: ${detail}`),
+    // raised by process_change_request (019) when the caller is not the
+    // assigned coordinator of the change request's event (SCRUM-332). The
+    // function's own message, written for the coordinator, passed through
+    // unchanged, as eventRequestService does for 018's 42501. A 403 rather than
+    // a 404, because a coordinator can already read the event and its change
+    // requests (errors.js gives the argument). Matched by code, before the two
+    // message patterns below; 019 words its message so it matches neither.
+    '42501': forbidden,
+    // 55000: a locked field; PT409 and 40001: the significant-change path (102)
+    // found its arrangements moved under it. All are retryable after a refresh.
+    ...forCodes(['55000', 'PT409', '40001'], conflict()),
+    // raised by the significant-change path (102) for a value it cannot apply,
+    // such as an attendance of zero
+    '22023': invalid,
+    // raised by process_change_request when the id matches nothing
+    P0002: notFoundChangeRequest,
+  },
+  messages: [
+    [/not found/i, notFoundChangeRequest],
+    // raised by process_change_request when the request has already been decided
+    [/already been processed/i, invalid],
+  ],
+});
 
 /** Shape returned to callers: camelCase, independent of the column names. */
 function toChangeRequest(row) {
@@ -221,11 +171,9 @@ function toOrganiserView(row) {
  * @throws {NotFoundError} the event does not exist
  */
 export async function createChangeRequest(input, organiserId, { client } = {}) {
-  if (typeof organiserId !== 'string' || organiserId.trim() === '') {
-    // Not part of the request body -- this comes from the caller's own
-    // identity, so a missing value is the caller's bug, not the Organiser's.
-    throw new ValidationError('organiserId is required');
-  }
+  // Not part of the request body -- this comes from the caller's own
+  // identity, so a missing value is the caller's bug, not the Organiser's.
+  requireCallerId(organiserId, 'organiserId');
 
   const request = validateCreateChangeRequest(input);
 
@@ -329,9 +277,7 @@ export async function createChangeRequestFromClient(
  * @throws {NotFoundError} the event does not exist
  */
 export async function getChangeRequestsForEvent(eventRequestId, organiserId, { client } = {}) {
-  if (typeof organiserId !== 'string' || organiserId.trim() === '') {
-    throw new ValidationError('organiserId is required');
-  }
+  requireCallerId(organiserId, 'organiserId');
 
   const db = await resolveClient(client);
 
@@ -396,9 +342,7 @@ export async function getChangeRequestsForCoordinator(eventRequestId, { client }
  * @throws {NotFoundError} no change request exists with that id
  */
 export async function getChangeRequestById(changeRequestId, organiserId, { client } = {}) {
-  if (typeof organiserId !== 'string' || organiserId.trim() === '') {
-    throw new ValidationError('organiserId is required');
-  }
+  requireCallerId(organiserId, 'organiserId');
 
   // Rejected before the network call for the same reason SCRUM-33 rejects a
   // malformed eventRequestId early: a value that is not id-shaped at all can
@@ -472,11 +416,9 @@ export async function processChangeRequest(
   processedBy,
   { client } = {},
 ) {
-  if (typeof processedBy !== 'string' || processedBy.trim() === '') {
-    // Not part of decisionInput -- this comes from the caller's own
-    // identity, so a missing value is the caller's bug, not the reviewer's.
-    throw new ValidationError('processedBy is required');
-  }
+  // Not part of decisionInput -- this comes from the caller's own
+  // identity, so a missing value is the caller's bug, not the reviewer's.
+  requireCallerId(processedBy, 'processedBy');
 
   const decision = validateProcessChangeRequest({
     changeRequestId,

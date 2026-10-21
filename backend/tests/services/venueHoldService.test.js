@@ -32,6 +32,7 @@ import {
   ConflictError,
   ForbiddenError,
 } from '../../src/errors.js';
+import { ok, fail, errorFrom } from '../fixtures/supabaseStubs.js';
 
 
 const VENUE_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
@@ -94,18 +95,6 @@ function fakeClient({ rpcResult, tables = {} } = {}) {
     },
     from: (table) => builder(table),
   };
-}
-
-const ok = (data) => ({ data, error: null });
-const fail = (error) => ({ data: null, error });
-
-async function errorFrom(promise) {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
 }
 
 

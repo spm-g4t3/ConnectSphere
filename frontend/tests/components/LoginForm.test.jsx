@@ -24,10 +24,7 @@ import userEvent from "@testing-library/user-event";
 import App from "../../src/App.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
 
-vi.mock("../../src/auth/AuthContext", () => ({
-  AuthProvider: ({ children }) => children,
-  useAuth: vi.fn(),
-}));
+vi.mock("../../src/auth/AuthContext", async () => (await import("../helpers/authMock.js")).authContextMock());
 
 /** An auth context with no user, whose login() signs in as `role`. */
 function signInAs(role, email) {

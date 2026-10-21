@@ -4,44 +4,21 @@
  * SCRUM-491 (Place a Tentative Venue Hold with Expiry - Venue Staff): a hold
  * is active until its expiry passes, then expired (AC7).
  *
- * Mirrors venueBlockReason.test.js: the JS list and the database enum in
- * 040_venue_holds.sql and its extensions (047, 065) must not drift apart.
+ * Mirrors venueBlockReason.test.js: the JS list and the database enum, read
+ * from the built schema, must not drift apart.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
 import { VENUE_HOLD_STATUS, isVenueHoldStatus } from '../../src/domain/venueHoldStatus.js';
+import { useSchemaDb, enumLabels } from './helpers/schemaVocabulary.js';
 
-
-/** The hold migrations with every `--` comment stripped. */
-function migrationSql() {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return ['040_venue_holds.sql', '047_add_released_venue_hold_status.sql', '065_booking_decision_statuses.sql']
-    .map((name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8'))
-    .join('\n')
-    .replace(/--[^\n]*/g, '');
-}
-
-/** Pull the enum values straight out of the migration, in declared order. */
-function statusesDeclaredInSql() {
-  const sql = migrationSql();
-  const block = sql.match(/create type venue_hold_status as enum \(([\s\S]*?)\);/i);
-  if (!block) throw new Error('could not find the enum in the migration');
-
-  const statuses = [...block[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-  const extensions = [...sql.matchAll(/alter type venue_hold_status add value if not exists '([a-z_]+)'/gi)]
-    .map((m) => m[1]);
-  if (extensions.length !== 2) throw new Error('could not find the released and converted hold statuses');
-  return [...statuses, ...extensions];
-}
+const schemaDb = useSchemaDb();
 
 
 describe('VENUE_HOLD_STATUS mirrors the database enum', () => {
-  it('SCRUM491_AC7_hold_statuses_match_the_sql_enum', () => {
-    expect(Object.values(VENUE_HOLD_STATUS)).toEqual(statusesDeclaredInSql());
+  it('SCRUM491_AC7_hold_statuses_match_the_sql_enum', async () => {
+    expect(Object.values(VENUE_HOLD_STATUS)).toEqual(await enumLabels(schemaDb(), 'venue_hold_status'));
   });
 
   it('exposes active, expired, released, and converted in order', () => {

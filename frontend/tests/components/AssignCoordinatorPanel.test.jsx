@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 
 import AssignCoordinatorPanel from "../../src/components/AssignCoordinatorPanel.jsx";
 import { assignEventRequest, listCoordinatorWorkload } from "../../src/services/eventRequestService";
+import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
   assignEventRequest: vi.fn(),
@@ -20,12 +21,6 @@ const REQUEST = { id: "22222222-2222-4222-8222-222222222222", eventName: "IS212 
 const OMAR = { id: "44444444-4444-4444-8444-444444444444", fullName: "Omar Okafor", activeEvents: 3 };
 const PRIYA = { id: "66666666-6666-4666-8666-666666666666", fullName: "Priya Nair", activeEvents: 0 };
 const NAMELESS = { id: "88888888-8888-4888-8888-888888888888", fullName: null, activeEvents: 1 };
-
-function httpError(status, data) {
-  return Object.assign(new Error(`Request failed with status code ${status}`), {
-    response: { status, data },
-  });
-}
 
 function renderPanel({ onCancel = vi.fn(), onAssigned = vi.fn() } = {}) {
   render(<AssignCoordinatorPanel request={REQUEST} onCancel={onCancel} onAssigned={onAssigned} />);

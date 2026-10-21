@@ -25,7 +25,7 @@ vi.mock('../../src/config/supabaseClient.js', () => {
   return { supabase: { from, rpc: () => Promise.resolve(answers.rpc) }, supabaseAdmin: {}, default: {} };
 });
 
-import { listOpenEvents, listOpenEventsForRegistration, getOpenEvent } from '../../src/services/openEventService.js';
+import { listOpenEvents, getOpenEvent } from '../../src/services/openEventService.js';
 import { NotFoundError } from '../../src/errors.js';
 
 const ATTENDEE_ID = '44444444-4444-4444-8444-444444444444';
@@ -92,22 +92,19 @@ describe('SCRUM495 the shared client and empty answers', () => {
     expect(event).toMatchObject({ isRegistered: false, placesLeft: null, isFull: false });
   });
 
-  it('SCRUM22_AC7_registration_listing_returns_authoritative_availability_and_registration_window', async () => {
+  it('SCRUM22_AC7_registration_listing_returns_authoritative_availability', async () => {
     answers.event_requests = { data: [{ ...openRow, registration_capacity: 3 }], error: null };
     answers.rpc = {
       data: [{ event_request_id: EVENT_ID, active_count: 2, is_registered: true }],
       error: null,
     };
 
-    const events = await listOpenEventsForRegistration({ attendeeId: ATTENDEE_ID, now: NOW });
+    const events = await listOpenEvents({ attendeeId: ATTENDEE_ID, now: NOW });
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       id: EVENT_ID,
-      registrationOpensAt: openRow.registration_opens_at,
-      registrationClosesAt: openRow.registration_closes_at,
       capacity: 3,
-      registeredCount: 2,
       placesLeft: 1,
       isFull: false,
       isRegistered: true,
@@ -116,7 +113,7 @@ describe('SCRUM495 the shared client and empty answers', () => {
   });
 
   it('SCRUM22_AC1_registration_listing_refuses_a_missing_attendee_before_reading', async () => {
-    await expect(listOpenEventsForRegistration()).rejects.toMatchObject({
+    await expect(listOpenEvents()).rejects.toMatchObject({
       name: 'ValidationError',
       details: [{ field: 'attendeeId', message: 'is required' }],
     });

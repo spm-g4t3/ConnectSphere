@@ -60,6 +60,14 @@
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
+import {
+  createPgTranslator,
+  forCodes,
+  rejected,
+  missingReference,
+  notFound,
+  hintConflict,
+} from '../http/pgErrors.js';
 import { validateVenueId } from '../validation/venueValidation.js';
 import {
   validateCreateBlock,
@@ -67,15 +75,12 @@ import {
   validateBlockId,
   validateBlockWindow,
 } from '../validation/venueBlockValidation.js';
+import { toOccupiedPeriod } from '../domain/occupancy.js';
 
 /** Every column toBlock reads, so each read selects the same shape. */
 const BLOCK_COLUMNS =
   'id, venue_id, starts_at, ends_at, reason, notes, created_by, last_modified_by, ' +
   'created_at, updated_at, removed_at, removed_by';
-
-/** The shape gen_random_uuid() produces; what a clashing block's id looks like. */
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Postgres codes that mean "the input was wrong", whoever caught it. */
 const VALIDATION_CODES = new Set([
@@ -95,57 +100,40 @@ const VALIDATION_CODES = new Set([
  * code alone decides, and a message that happens to contain the words cannot
  * turn an unrelated failure into a 404.
  */
-function translateError(error) {
-  const code = error.code;
-  const detail = error.message ?? '';
+const translateError = createPgTranslator({
+  codes: {
+    ...forCodes(VALIDATION_CODES, rejected),
 
-  if (VALIDATION_CODES.has(code)) {
-    return new ValidationError(`A value was rejected by the database: ${detail}`);
-  }
+    // Foreign key. On venue_blocks the only user-supplied references are the
+    // *_by columns; venue_id cannot fail here because the function locked the
+    // venue row before inserting.
+    '23503': (detail, error) =>
+      /_by/.test(`${detail} ${error.details ?? ''}`)
+        ? new ValidationError(`The editing user does not exist: ${detail}`)
+        : missingReference(detail),
 
-  // Foreign key. On venue_blocks the only user-supplied references are the
-  // *_by columns; venue_id cannot fail here because the function locked the
-  // venue row before inserting.
-  if (code === '23503') {
-    if (/_by/.test(`${detail} ${error.details ?? ''}`)) {
-      return new ValidationError(`The editing user does not exist: ${detail}`);
-    }
-    return new ValidationError(`A referenced record does not exist: ${detail}`);
-  }
+    // raised by create_venue_block when the venue does not exist, and by
+    // update_venue_block and remove_venue_block (015) for a missing venue or a
+    // block that is not on it
+    P0002: notFound('Venue not found'),
 
-  // raised by create_venue_block when the venue does not exist, and by
-  // update_venue_block and remove_venue_block (015) for a missing venue or a
-  // block that is not on it
-  if (code === 'P0002') {
-    return new NotFoundError(detail || 'Venue not found');
-  }
+    // raised by create_venue_block: VENUE_RETIRED or BLOCK_OVERLAPS_BLOCK, carried
+    // in the hint so a client can tell them apart without reading prose. 015
+    // adds BLOCK_REMOVED and BLOCK_ENDED, which pass through the same way.
+    //
+    // BLOCK_OVERLAPS_BLOCK carries the clashing block's id in DETAIL, which
+    // PostgREST passes through as error.details. It becomes the conflict list,
+    // so a client can point at the block rather than just say one exists.
+    PT409: hintConflict({ BLOCK_OVERLAPS_BLOCK: (blockId) => ({ blockId }) }),
 
-  // raised by create_venue_block: VENUE_RETIRED or BLOCK_OVERLAPS_BLOCK, carried
-  // in the hint so a client can tell them apart without reading prose. 015
-  // adds BLOCK_REMOVED and BLOCK_ENDED, which pass through the same way.
-  //
-  // BLOCK_OVERLAPS_BLOCK carries the clashing block's id in DETAIL, which
-  // PostgREST passes through as error.details. It becomes the conflict list,
-  // so a client can point at the block rather than just say one exists. Only
-  // a uuid is trusted there; anything else leaves the list empty.
-  if (code === 'PT409') {
-    const hint = error.hint ?? null;
-    const blockId = typeof error.details === 'string' ? error.details.trim() : '';
-    const conflicts =
-      hint === 'BLOCK_OVERLAPS_BLOCK' && UUID_PATTERN.test(blockId) ? [{ blockId }] : [];
-    return new ConflictError(detail, { code: hint, conflicts });
-  }
-
-  // venue_blocks_no_overlap in 011. Reached only if a concurrent write beat
-  // the function's own overlap check, so it gets the same code that check uses.
-  if (code === '23P01') {
-    return new ConflictError('This period overlaps another block on this venue.', {
-      code: 'BLOCK_OVERLAPS_BLOCK',
-    });
-  }
-
-  return new Error(detail || 'Unexpected database error');
-}
+    // venue_blocks_no_overlap in 011. Reached only if a concurrent write beat
+    // the function's own overlap check, so it gets the same code that check uses.
+    '23P01': () =>
+      new ConflictError('This period overlaps another block on this venue.', {
+        code: 'BLOCK_OVERLAPS_BLOCK',
+      }),
+  },
+});
 
 /**
  * A venue_blocks row, in the camelCase every other service returns.
@@ -204,10 +192,7 @@ export function toBookingConflict(row) {
     eventName: row.event_name,
     startsAt: row.starts_at,
     endsAt: row.ends_at,
-    occupiedStartsAt: row.occupied_starts_at,
-    occupiedEndsAt: row.occupied_ends_at,
-    setupMinutes: row.setup_minutes,
-    turnaroundMinutes: row.turnaround_minutes,
+    ...toOccupiedPeriod(row),
   };
 }
 

@@ -59,11 +59,11 @@ import {
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
-import { createErrorHandler } from '../http/handleError.js';
+import { createErrorMiddleware } from '../http/handleError.js';
 
 
-/** Map an error to a response; see src/http/handleError.js. */
-const handleError = createErrorHandler('equipment review route');
+/** Answers whatever a handler throws or rejects with; see src/http/handleError.js. */
+const errorMiddleware = createErrorMiddleware('equipment review route');
 
 
 /**
@@ -90,151 +90,108 @@ export function createEquipmentReviewRouter({
 
   /** AC3, AC4: the review screen's data. Reading changes nothing. */
   router.get('/', technicalSupportOnly, async (req, res) => {
-    try {
-      res.status(200).json(await getEquipmentReview(req.params.id, { client }));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await getEquipmentReview(req.params.id, { client }));
   });
 
   /** AC2: start a review. */
   router.post('/start', technicalSupportOnly, async (req, res) => {
-    try {
-      res.status(200).json(await startEquipmentReview(req.params.id, req.user.id, { client }));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await startEquipmentReview(req.params.id, req.user.id, { client }));
   });
 
   /** AC3: take over a review that is Under review. */
   router.post('/take-over', technicalSupportOnly, async (req, res) => {
-    try {
-      res.status(200).json(await takeOverEquipmentReview(req.params.id, req.user.id, { client }));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await takeOverEquipmentReview(req.params.id, req.user.id, { client }));
   });
 
   /** AC7: mark a line "Cannot be provided". The body is read for note only. */
   router.put('/lines/:lineId/outcome', technicalSupportOnly, async (req, res) => {
-    try {
-      const state = await markEquipmentLineUnavailable(
-        req.params.id,
-        req.params.lineId,
-        req.body,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(state);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const state = await markEquipmentLineUnavailable(
+      req.params.id,
+      req.params.lineId,
+      req.body,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(state);
   });
 
   /** Take the "Cannot be provided" mark off a line. */
   router.delete('/lines/:lineId/outcome', technicalSupportOnly, async (req, res) => {
-    try {
-      const state = await clearEquipmentLineOutcome(
-        req.params.id,
-        req.params.lineId,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(state);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const state = await clearEquipmentLineOutcome(
+      req.params.id,
+      req.params.lineId,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(state);
   });
 
   /** AC7: complete the review. */
   router.post('/complete', technicalSupportOnly, async (req, res) => {
-    try {
-      res.status(200).json(await completeEquipmentReview(req.params.id, req.user.id, { client }));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await completeEquipmentReview(req.params.id, req.user.id, { client }));
   });
 
   /** SCRUM-300 AC2: reserve units for a line. The body is read for quantity only. */
   router.post('/lines/:lineId/reservations', technicalSupportOnly, async (req, res) => {
-    try {
-      const state = await reserveEquipment(
-        req.params.id,
-        req.params.lineId,
-        req.body,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(state);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const state = await reserveEquipment(
+      req.params.id,
+      req.params.lineId,
+      req.body,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(state);
   });
 
   /** SCRUM-300 AC4: reduce a reservation. The body is read for quantity and reason. */
   router.patch('/reservations/:reservationId', technicalSupportOnly, async (req, res) => {
-    try {
-      const state = await reduceEquipmentReservation(
-        req.params.id,
-        req.params.reservationId,
-        req.body,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(state);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const state = await reduceEquipmentReservation(
+      req.params.id,
+      req.params.reservationId,
+      req.body,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(state);
   });
 
   /** SCRUM-300 AC4: release a reservation. The body is read for reason only. */
   router.post('/reservations/:reservationId/release', technicalSupportOnly, async (req, res) => {
-    try {
-      const state = await releaseEquipmentReservation(
-        req.params.id,
-        req.params.reservationId,
-        req.body,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(state);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const state = await releaseEquipmentReservation(
+      req.params.id,
+      req.params.reservationId,
+      req.body,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(state);
   });
 
   /** SCRUM-300 AC7: move a flagged reservation to the event's current period. */
   router.post('/reservations/:reservationId/move', technicalSupportOnly, async (req, res) => {
-    try {
-      const state = await moveEquipmentReservation(
-        req.params.id,
-        req.params.reservationId,
-        req.body,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(state);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const state = await moveEquipmentReservation(
+      req.params.id,
+      req.params.reservationId,
+      req.body,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(state);
   });
 
   /** SCRUM-300 AC7: keep a flagged reservation as it is. */
   router.post('/reservations/:reservationId/keep', technicalSupportOnly, async (req, res) => {
-    try {
-      const state = await keepEquipmentReservation(
-        req.params.id,
-        req.params.reservationId,
-        req.body,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(state);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const state = await keepEquipmentReservation(
+      req.params.id,
+      req.params.reservationId,
+      req.body,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(state);
   });
 
+  router.use(errorMiddleware);
   return router;
 }
 

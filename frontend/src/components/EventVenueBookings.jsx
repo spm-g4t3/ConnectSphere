@@ -14,9 +14,7 @@ import { formatTimestamp } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { getMyBookingRequests, releaseVenueBooking } from "../services/bookingRequestService";
 import { releaseErrorMessage } from "../services/bookingRequestErrors";
-
-// The server's limit on the reason (089), counted in code points as it counts.
-const MAX_REASON = 1000;
+import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
 
 const LIST_ERROR = "Venue bookings could not be loaded.";
 
@@ -54,9 +52,9 @@ function ReleaseForm({ id, busy, onConfirm, onKeep }) {
       }}
     >
       <label htmlFor={id}>Reason for releasing this venue (required)</label>
-      <textarea id={id} value={reason} maxLength={MAX_REASON} required onChange={(e) => setReason(e.target.value)} />
+      <textarea id={id} value={reason} maxLength={SERVER_TEXT_MAX_LENGTH} required onChange={(e) => setReason(e.target.value)} />
       <p className="event-venue-bookings__counter">
-        {length.toLocaleString("en-US")} / {MAX_REASON.toLocaleString("en-US")}
+        {length.toLocaleString("en-US")} / {SERVER_TEXT_MAX_LENGTH.toLocaleString("en-US")}
       </p>
       <div className="event-venue-bookings__actions">
         <button type="submit" disabled={busy || reason.trim() === ""}>

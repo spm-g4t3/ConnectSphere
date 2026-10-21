@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../../src/App";
 import { getRegisteredEvents, getAttendeeEvent } from "../../src/services/attendeeEventService";
 import { getOpenEvents, getOpenEvent } from "../../src/services/openEventService";
+import { deferred } from "../helpers/async.js";
 
 const auth = vi.hoisted(() => ({ user: { id: "attendee", role: "attendee", email: "attendee@example.com" } }));
 vi.mock("../../src/auth/AuthContext", () => ({
@@ -149,12 +150,6 @@ function navigate(path) {
     window.history.pushState({}, "", path);
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
-}
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
-  return { promise, resolve, reject };
 }
 const failure = status => ({ response: { status, data: { error: "PRIVATE_DATABASE_ERROR" } } });
 

@@ -19,6 +19,7 @@ import {
   listCoordinatorOverview,
   listUnassignedEventRequests,
 } from "../../src/services/eventRequestService";
+import { deferred, httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
   listAssignedEventsForLead: vi.fn(),
@@ -69,15 +70,6 @@ const row = (overrides) => ({
 const APPROVED_ROW = row({});
 const REVIEW_ROW = row({ id: "e2", eventName: "Freshers Welcome", status: "under_review", statusDisplay: { label: "Under review", group: "UNDER_REVIEW" } });
 const OMARS_ROW = row({ id: "e3", eventName: "Hack Night", assignedCoordinatorId: OMAR, assignedCoordinatorName: "Omar Okafor" });
-
-const httpError = (status) =>
-  Object.assign(new Error(`Request failed with status code ${status}`), { response: { status } });
-
-function deferred() {
-  let resolve;
-  const promise = new Promise((r) => { resolve = r; });
-  return { promise, resolve };
-}
 
 function EventPage() {
   const { eventRequestId } = useParams();

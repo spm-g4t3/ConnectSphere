@@ -14,14 +14,11 @@
 // default, because nothing enforces a gap yet. A gap longer than two hours
 // belongs in a venue block, with a reason.
 
+import { pluralise } from "./displayFormat";
+
 export const TURNAROUND_MINUTES = Object.freeze([0, 15, 30, 45, 60, 90, 120]);
 
 export const DEFAULT_TURNAROUND_MINUTES = 0;
-
-/** "1 minute" / "15 minutes", "1 hour" / "2 hours". */
-function plural(count, unit) {
-  return `${count} ${unit}${count === 1 ? "" : "s"}`;
-}
 
 /**
  * A turnaround, in words: "None", "15 minutes", "1 hour 30 minutes".
@@ -51,38 +48,52 @@ export function formatTurnaround(minutes) {
 
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  if (hours === 0) return plural(rest, "minute");
-  if (rest === 0) return plural(hours, "hour");
-  return `${plural(hours, "hour")} ${plural(rest, "minute")}`;
+  if (hours === 0) return pluralise(rest, "minute");
+  if (rest === 0) return pluralise(hours, "hour");
+  return `${pluralise(hours, "hour")} ${pluralise(rest, "minute")}`;
 }
 
-export const TURNAROUND_OPTIONS = Object.freeze(
-  TURNAROUND_MINUTES.map((minutes) =>
-    Object.freeze({ minutes, label: formatTurnaround(minutes) }),
-  ),
-);
-
 /**
- * The options, plus the venue's saved value when the list does not have it.
+ * A list of minutes as a venue form's <select> options, labelled by
+ * formatTurnaround, and `optionsWith(current)`: the options plus the venue's
+ * saved value when the list does not have it.
  *
  * The same job optionsWithUnknownCodes does for the checkbox lists. Without
  * it a controlled <select> whose value matches no option silently SHOWS the
  * first one ("None") while the state still holds the saved value -- so the
- * form would display one turnaround and keep another. The extra option makes
+ * form would display one value and keep another. The extra option makes
  * the saved value visible, and choosing a listed value is still one click.
  *
- * @param {*} current  the saved turnaroundMinutes, or null/undefined
- * @returns {ReadonlyArray<{minutes, label, unknown?: boolean}>}
+ * @param {ReadonlyArray<number>} minutesList
+ * @returns {{ options: ReadonlyArray<{minutes, label}>,
+ *   optionsWith: (current: *) => ReadonlyArray<{minutes, label, unknown?: boolean}> }}
  */
-export function turnaroundOptionsWith(current) {
-  if (current === null || current === undefined) return TURNAROUND_OPTIONS;
-  if (TURNAROUND_MINUTES.includes(current)) return TURNAROUND_OPTIONS;
-  return [
-    ...TURNAROUND_OPTIONS,
-    {
-      minutes: current,
-      label: `${formatTurnaround(current)} (not in this form's list)`,
-      unknown: true,
-    },
-  ];
+export function makeMinuteOptions(minutesList) {
+  const options = Object.freeze(
+    minutesList.map((minutes) =>
+      Object.freeze({ minutes, label: formatTurnaround(minutes) }),
+    ),
+  );
+
+  function optionsWith(current) {
+    if (current === null || current === undefined) return options;
+    if (minutesList.includes(current)) return options;
+    return [
+      ...options,
+      {
+        minutes: current,
+        label: `${formatTurnaround(current)} (not in this form's list)`,
+        unknown: true,
+      },
+    ];
+  }
+
+  return { options, optionsWith };
 }
+
+const turnaround = makeMinuteOptions(TURNAROUND_MINUTES);
+
+export const TURNAROUND_OPTIONS = turnaround.options;
+
+/** @param {*} current  the saved turnaroundMinutes, or null/undefined */
+export const turnaroundOptionsWith = turnaround.optionsWith;

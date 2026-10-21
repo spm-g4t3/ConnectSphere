@@ -43,11 +43,9 @@ import {
 import { isStaleRefusal, reviewErrorMessage } from "../services/equipmentReviewErrors";
 import { equipmentStatusClass } from "../services/equipmentRequestStatus";
 import { formatTimestamp } from "../services/displayFormat";
+import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
 import { formatEventPeriod } from "../services/eventPeriodFormat";
 import "./EquipmentReview.css";
-
-/** The backend's limit on an outcome note (equipmentReviewValidation.js). */
-const MAX_NOTE_LENGTH = 1000;
 
 const RESULT_CLASS = {
   "Fully available": "fully",
@@ -818,7 +816,7 @@ export default function EquipmentReview() {
                                     {editor.kind === "release" ? "Why is it being released?" : "Why is it being reduced?"}
                                     <textarea
                                       value={reasonInput}
-                                      maxLength={MAX_NOTE_LENGTH}
+                                      maxLength={SERVER_TEXT_MAX_LENGTH}
                                       disabled={busy}
                                       onChange={(e) => {
                                         setReasonInput(e.target.value);
@@ -939,7 +937,7 @@ export default function EquipmentReview() {
                       {`Why can ${line.name} not be provided?`}
                       <textarea
                         value={markNote}
-                        maxLength={MAX_NOTE_LENGTH}
+                        maxLength={SERVER_TEXT_MAX_LENGTH}
                         disabled={busy}
                         onChange={(e) => setMarkNote(e.target.value)}
                       />

@@ -16,6 +16,7 @@
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError } from '../errors.js';
+import { createPgTranslator } from '../http/pgErrors.js';
 import { validateAvailabilityRequest } from '../validation/equipmentAvailabilityValidation.js';
 import {
   AVAILABILITY_RESULT,
@@ -25,10 +26,9 @@ import {
 } from '../domain/equipmentAvailabilityResult.js';
 
 /** 22023 is the function refusing a period that does not end after it starts. */
-function translateError(error) {
-  if (error.code === '22023') return new ValidationError(`The period was rejected: ${error.message}`);
-  return new Error(error.message || 'Unexpected database error');
-}
+const translateError = createPgTranslator({
+  codes: { '22023': (_, error) => new ValidationError(`The period was rejected: ${error.message}`) },
+});
 
 function toReservation(row) {
   return {

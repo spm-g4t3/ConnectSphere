@@ -14,26 +14,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import FlaggedBookingFlagDetail from "./FlaggedBookingFlagDetail";
 import FlaggedBookingReasonForm from "./FlaggedBookingReasonForm";
-import { formatTimestamp } from "../services/displayFormat";
+import { asList, formatTimestamp } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { venueText } from "../services/flaggedBookingDisplay";
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../services/flaggedBookingService";
 import { coordinatorCancelErrorMessage, isStaleResolutionError } from "../services/flaggedBookingErrors";
+import { SESSION_EXPIRED, statusMessageOf } from "../services/apiErrors";
 
 const LIST_ERROR_MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only the coordinator assigned to this event can see its flagged bookings.",
   404: "This event no longer exists.",
 };
 const LIST_DEFAULT_ERROR = "Flagged bookings could not be loaded.";
-
-function listErrorMessage(err) {
-  return LIST_ERROR_MESSAGES[err?.response?.status] || LIST_DEFAULT_ERROR;
-}
-
-function asList(data) {
-  return Array.isArray(data) ? data : [];
-}
 
 function FlaggedBooking({ item, busy, cancelling, error, replacing, onCancel, onReplace }) {
   const regionId = `event-flagged-booking-${item.id}`;
@@ -109,7 +102,7 @@ export default function EventFlaggedBookings({ eventRequestId, replacingId, onRe
       setError(null);
       loadedRef.current?.(items);
     } catch (err) {
-      setError(listErrorMessage(err));
+      setError(statusMessageOf(err, LIST_ERROR_MESSAGES, LIST_DEFAULT_ERROR));
     }
   }, [eventRequestId]);
 
@@ -125,7 +118,7 @@ export default function EventFlaggedBookings({ eventRequestId, replacingId, onRe
         loadedRef.current?.(items);
       })
       .catch((err) => {
-        if (!cancelled) setError(listErrorMessage(err));
+        if (!cancelled) setError(statusMessageOf(err, LIST_ERROR_MESSAGES, LIST_DEFAULT_ERROR));
       });
     return () => {
       cancelled = true;

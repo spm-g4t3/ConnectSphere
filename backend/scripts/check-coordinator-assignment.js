@@ -11,9 +11,9 @@
  * proves now:
  *
  *   1. Was: the selection rule (015) -- fewest active events, then longest
- *      without an assignment. 052 leaves pick_event_coordinator in the
- *      database, but nothing calls it any more, so testing it would prove a
- *      rule the system no longer uses. Now: submission assigns nobody. The
+ *      without an assignment. Nothing has called pick_event_coordinator since
+ *      052, and migration 010 dropped it, so there is no rule left to test.
+ *      Now: submission assigns nobody. The
  *      request is submitted with no coordinator and no assignment-history row,
  *      every Lead is told it is waiting, it is in the Lead's queue, and it is
  *      not in the coordinators' shared queue.
@@ -56,7 +56,8 @@
  *    is the state it was in before the Lead chose; 052's constraint allows it
  *    only at submitted. Anything further along is reported as a cleanup
  *    failure naming the event, for a Lead to hand over by hand. Before
- *    SCRUM-486 this re-homed the event with pick_event_coordinator; there is no
+ *    SCRUM-486 this re-homed the event with pick_event_coordinator (since
+ *    dropped); the coordinator is assigned by the Lead, so there is no
  *    automatic choice to fall back on now, and inventing one would undo the
  *    change the customer asked for.
  *  - Delete order. event_request_assignment_history and (since SCRUM-321)
@@ -110,6 +111,7 @@ import {
   ConflictError,
   ForbiddenError,
 } from '../src/errors.js';
+import { createHarness, failureOf as failureFrom, countUsersLeft } from './lib/harness.js';
 
 const STAMP = Date.now();
 const NAME = `__check_assign_${STAMP}`;
@@ -122,29 +124,15 @@ const users = {};            // label -> id
 const createdEventIds = [];
 let countsBefore = null;
 let returnedToQueue = [];
-let failures = 0;
 
 // supabase-js returns a refused delete as { error } rather than throwing, so a
-// delete a foreign key refuses is silent unless someone keeps it.
-const cleanupErrors = [];
-
-function check(label, passed, detail = '') {
-  console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
-  if (!passed) failures += 1;
-}
+// delete a foreign key refuses is silent unless someone keeps it: remove() and
+// the direct pushes below keep them in cleanupErrors.
+const harness = createHarness();
+const { check, remove, cleanupErrors } = harness;
 
 function section(title) {
   console.log(`\n  -- ${title}`);
-}
-
-/** Await a rejection and hand back the error, or null if it resolved. */
-async function failureFrom(promise) {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
 }
 
 /** A refusal of the expected type and status, reported in one line. */
@@ -268,12 +256,6 @@ function describeCounts(c) {
     + `change requests ${c.changeRequests}, notifications ${c.notifications}, profiles ${c.profiles}`;
 }
 
-/** Run one cleanup step, keeping its error rather than dropping it. */
-async function remove(label, query) {
-  const { error } = await query;
-  if (error) cleanupErrors.push(`${label}: ${error.message}`);
-}
-
 /**
  * Events this script did not create that name one of its users: a real Lead
  * assigned or handed a real request to a test coordinator while this ran (the
@@ -387,7 +369,7 @@ async function cleanup() {
  * by count.
  */
 async function verifyCleanup() {
-  check('cleanup ran without errors', cleanupErrors.length === 0, cleanupErrors.join('; '));
+  harness.checkCleanupErrors();
 
   const ids = userIds();
   const { count: eventsLeft } = await supabase
@@ -407,11 +389,7 @@ async function verifyCleanup() {
     ? { count: 0 }
     : await supabase.from('profiles').select('id', { count: 'exact', head: true }).in('id', ids);
 
-  let usersLeft = 0;
-  for (const id of ids) {
-    const { data } = await supabase.auth.admin.getUserById(id);
-    if (data?.user) usersLeft += 1;
-  }
+  const usersLeft = await countUsersLeft(ids);
 
   check(
     'nothing of this run is left behind',
@@ -917,13 +895,13 @@ function labelOf(id) {
 main()
   .catch((err) => {
     console.error(`\nFailed: ${err.message}`);
-    failures += 1;
+    harness.failures += 1;
   })
   .finally(async () => {
     await cleanup();
     await verifyCleanup();
-    if (failures > 0) {
-      console.error(`\n${failures} check(s) failed.\n`);
+    if (harness.failures > 0) {
+      console.error(`\n${harness.failures} check(s) failed.\n`);
       process.exit(1);
     }
     console.log('\nAll checks passed. Submitted, assigned by the Lead, refused, handed over, read, cleaned up.\n');

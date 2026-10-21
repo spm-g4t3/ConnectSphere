@@ -13,22 +13,16 @@
  */
 
 import { ValidationError } from '../errors.js';
+import { UUID_PATTERN } from './ids.js';
+import { MAX_INTEGER } from './limits.js';
+import { createErrorCollector, throwIfInvalid } from './collector.js';
 import { checkTimeWindow } from './timestampValidation.js';
 
 /** The largest value an integer column holds. */
-export const MAX_QUANTITY = 2147483647;
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const MAX_QUANTITY = MAX_INTEGER;
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const isBlank = (value) => value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
-
-/** The collector timestampValidation.js reports faults to. */
-function collector() {
-  const details = [];
-  return { details, add: (field, message) => details.push({ field, message }) };
-}
 
 /**
  * @param {unknown} input  { equipmentTypeId, quantity, startAt, endAt, eventRequestId? }
@@ -42,7 +36,7 @@ export function validateAvailabilityRequest(input) {
     ]);
   }
 
-  const errors = collector();
+  const errors = createErrorCollector();
 
   let equipmentTypeId = null;
   if (isBlank(input.equipmentTypeId)) {
@@ -79,10 +73,7 @@ export function validateAvailabilityRequest(input) {
     }
   }
 
-  if (errors.details.length > 0) {
-    const summary = errors.details.map(({ field, message }) => `${field}: ${message}`).join('; ');
-    throw new ValidationError(`Invalid availability check -- ${summary}`, errors.details);
-  }
+  throwIfInvalid(errors, 'Invalid availability check');
 
   return { equipmentTypeId, quantity, startAt: window.start, endAt: window.end, eventRequestId };
 }

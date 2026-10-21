@@ -1,16 +1,11 @@
 /**
- * The Venue Staff queue of pending booking requests (066), against a real
- * Postgres.
+ * The Venue Staff queue of pending booking requests, against the final schema
+ * in a real Postgres.
  *
  * SCRUM-258 AC1: only Venue Staff see it; pending requests, oldest first, each
  * with its own period, attendance and suitability, and the other events'
  * pending requests whose occupied periods overlap it, in submission order.
  * Week 7: occupied = start - setup -> end + turnaround, half-open.
- *
- * Migrations: multiVenueBookingRequestDatabase.test.js's list through 051,
- * then 065 and 066, each in its own exec (065's enum values must commit
- * first). Nothing in 052-063 touches bookings, venues or
- * venue_occupied_period, so none is needed.
  *
  * Each test makes its own venues and events and reads only its own rows from
  * the queue, except the empty queue, which runs first.
@@ -19,53 +14,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { createSchemaDb, seedBlock, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { at } from '../fixtures/time.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '040_venue_holds.sql',
-  '051_multi_venue_booking_requests.sql',
-  '065_booking_decision_statuses.sql',
-  '066_venue_staff_booking_decisions.sql',
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
-
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
 const ms = (instant) => new Date(instant).getTime();
 
 const SUITABLE = { suitable: true, criteria: [{ criterion: 'Capacity', met: true }] };
@@ -80,61 +32,42 @@ const refusalCode = async (promise) => {
   }
 };
 
-describe('SCRUM-258 AC1: the pending booking requests Venue Staff decide on (066)', () => {
+describe('SCRUM-258 AC1: the pending booking requests Venue Staff decide on', () => {
   let db;
   let organiser;
   let coordinator;
   let staff;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
-  async function makeUser(email, role) {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (email, role) => seedUser(db, { email, role });
 
   /** A venue with 30 minutes' setup and 45 minutes' turnaround. */
-  async function makeVenue() {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, 30, 45) returning id`,
-        [`Harbour Room ${counter}`],
-      )
-    ).id;
-  }
+  const makeVenue = () => seedVenue(db, { name: `Harbour Room ${++counter}` });
 
-  async function makeEvent({ attendance = 150, start = at('14:00'), end = at('16:00') } = {}) {
+  function makeEvent({ attendance = 150, start = at('14:00'), end = at('16:00') } = {}) {
     counter += 1;
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, proposed_start, proposed_end,
-            expected_attendance, submitted_at, assigned_coordinator_id)
-         values ($1, $2, 'approved', $3, $4, $5, now(), $6) returning id`,
-        [organiser, `Event ${counter}`, start, end, attendance, coordinator],
-      )
-    ).id;
+    return seedEvent(db, {
+      status: 'approved',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: `Event ${counter}`,
+      proposed_start: start,
+      proposed_end: end,
+      expected_attendance: attendance,
+    });
   }
 
   /**
    * A booking written directly, so its period, status and submission time are
    * chosen. A flagged_for_review one carries a removed block and a flag time
-   * (014's bookings_review_flag_paired).
+   * (bookings_review_flag_paired).
    */
   async function insertBooking(eventId, venueId, { start, end, status = 'pending', createdAt = new Date() }) {
     let reviewBlockId = null;
     if (status === 'flagged_for_review') {
-      reviewBlockId = (
-        await one(
-          `insert into venue_blocks (venue_id, starts_at, ends_at, reason, removed_at)
-           values ($1, $2, $3, 'maintenance', now()) returning id`,
-          [venueId, at('22:00'), at('23:00')],
-        )
-      ).id;
+      reviewBlockId = await seedBlock(db, { venueId, start: at('22:00'), end: at('23:00'), removed: true });
     }
     const flagged = reviewBlockId !== null;
     return (
@@ -163,16 +96,7 @@ describe('SCRUM-258 AC1: the pending booking requests Venue Staff decide on (066
   const overlapIds = async (bookingId) => (await entryFor(bookingId)).overlapping.map((o) => o.id);
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      await db.exec(name === 'STAND_IN' ? DECISION_STAND_IN : migration(name));
-    }
+    db = await createSchemaDb();
     organiser = await makeUser('o@x', 'event_organiser');
     coordinator = await makeUser('c@x', 'event_coordinator');
     staff = await makeUser('s@x', 'venue_staff');

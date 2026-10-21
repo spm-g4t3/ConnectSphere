@@ -6,9 +6,7 @@ import { useAuth } from "../../src/auth/AuthContext";
 import { getOpenEvent, getOpenEvents } from "../../src/services/openEventService";
 import { registerForEvent } from "../../src/services/registrationService";
 
-vi.mock("../../src/auth/AuthContext", () => ({
-  AuthProvider: ({ children }) => children, useAuth: vi.fn(),
-}));
+vi.mock("../../src/auth/AuthContext", async () => (await import("../helpers/authMock.js")).authContextMock());
 vi.mock("../../src/services/openEventService", () => ({ getOpenEvent: vi.fn(), getOpenEvents: vi.fn() }));
 vi.mock("../../src/services/registrationService", () => ({ registerForEvent: vi.fn() }));
 

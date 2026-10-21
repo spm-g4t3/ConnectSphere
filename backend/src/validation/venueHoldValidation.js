@@ -18,27 +18,9 @@
  */
 
 import { ValidationError } from '../errors.js';
-import { isPlausibleId } from './eventChangeRequestValidation.js';
+import { isPlausibleId } from './ids.js';
+import { createErrorCollector, throwIfInvalid } from './collector.js';
 import { checkTimestamp } from './timestampValidation.js';
-
-/** Collects problems so every fault in a form is reported at once. */
-function createErrorCollector() {
-  const details = [];
-  return {
-    add: (field, message) => details.push({ field, message }),
-    details,
-    get hasErrors() {
-      return details.length > 0;
-    },
-  };
-}
-
-/** Throw one ValidationError carrying every collected problem, if there are any. */
-function throwIfInvalid(errors, label) {
-  if (!errors.hasErrors) return;
-  const summary = errors.details.map(({ field, message }) => `${field}: ${message}`).join('; ');
-  throw new ValidationError(`${label} -- ${summary}`, errors.details);
-}
 
 /** A required id, shaped like one; trimmed and lower-cased. */
 function checkId(errors, field, label, value) {

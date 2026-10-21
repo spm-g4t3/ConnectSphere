@@ -23,56 +23,15 @@
  * a block that only touches the period is clear, an active block excludes
  * the venue.
  *
- * Applied in order, as the implementer's smoke run applied them: 001, 005,
- * 007, 010, a stand-in for SCRUM-19's decision column, 014_coordinator_
- * assignment, 002, 009, 011, 012, 013, 014_booking_review_notifications, 015,
- * 017, 023, 027, 028, 030, 031, 032, 033. The bookings_review_flag_paired
- * CHECK (014) pairs review_block_id with flagged_at and does not read the
- * status, so a flagged_for_review fixture needs neither.
+ * The database is the final schema.
  *
  * Dates: fixed +08:00 instants on D = 2026-11-11 (a Wednesday). Nothing here
  * reads now(): available_venue_ids has no "future" rule.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 /** A Singapore-local instant, on D = 2026-11-11 unless another date is given. */
 const sgt = (hhmm, date = '2026-11-11') => `${date}T${hhmm}:00+08:00`;
@@ -101,61 +60,33 @@ const PLAIN_EDGES = [
 describe('SCRUM-484: venue search availability through available_venue_ids', () => {
   let db;
   let organiser;
+  let coordinator;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
-  async function makeVenue(setup = 0, turnaround = 0) {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, $2, $3) returning id`,
-        [`Search Hall ${counter}`, setup, turnaround],
-      )
-    ).id;
-  }
+  const makeVenue = (setup = 0, turnaround = 0) =>
+    seedVenue(db, { name: `Search Hall ${++counter}`, setup, turnaround });
 
-  async function makeEvent() {
+  function makeEvent() {
     counter += 1;
-    const cols = {
-      organiser_id: organiser,
-      event_name: `Event ${counter}`,
+    return seedEvent(db, {
       status: 'approved',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: `Event ${counter}`,
       proposed_start: sgt('10:00'),
       proposed_end: sgt('12:00'),
       expected_attendance: 150,
-      submitted_at: new Date().toISOString(),
-    };
-    const keys = Object.keys(cols);
-    return (
-      await one(
-        `insert into event_requests (${keys.join(',')}) values (${keys.map((_, i) => `$${i + 1}`).join(',')}) returning id`,
-        Object.values(cols),
-      )
-    ).id;
+    });
   }
 
   async function makeBooking(venueId, startsAt, endsAt, status = 'approved') {
-    const eventId = await makeEvent();
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, $5) returning id`,
-        [venueId, eventId, startsAt, endsAt, status],
-      )
-    ).id;
+    return seedBooking(db, { venueId, eventId: await makeEvent(), status, start: startsAt, end: endsAt });
   }
 
-  async function makeBlock(venueId, startsAt, endsAt, { removed = false } = {}) {
-    return (
-      await one(
-        `insert into venue_blocks (venue_id, starts_at, ends_at, reason, removed_at)
-         values ($1, $2, $3, 'maintenance', ${removed ? 'now()' : 'null'}) returning id`,
-        [venueId, startsAt, endsAt],
-      )
-    ).id;
-  }
+  const makeBlock = (venueId, startsAt, endsAt, { removed = false } = {}) =>
+    seedBlock(db, { venueId, start: startsAt, end: endsAt, removed });
 
   /** available_venue_ids' rows, raw. */
   async function availableRows(venueIds, startsAt, endsAt) {
@@ -187,17 +118,9 @@ describe('SCRUM-484: venue search availability through available_venue_ids', () 
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      await db.exec(name === 'STAND_IN' ? DECISION_STAND_IN : migration(name));
-    }
-    organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
+    db = await createSchemaDb();
+    organiser = await seedUser(db, { email: 'o@x' });
+    coordinator = await seedUser(db, { email: 'c@x' });
   }, 60_000);
 
   afterAll(async () => {

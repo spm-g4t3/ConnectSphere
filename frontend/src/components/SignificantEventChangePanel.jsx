@@ -7,6 +7,7 @@ import {
   toDatetimeLocalValue,
   toOffsetIsoString,
 } from "../services/datetimeFormat";
+import { formatTimestamp } from "../services/displayFormat";
 
 function changedFields(eventRequest, fields, equipmentChange) {
   const changes = {};
@@ -38,12 +39,6 @@ function changedFields(eventRequest, fields, equipmentChange) {
   return changes;
 }
 
-function formatTimestamp(value) {
-  if (!value) return "Not recorded";
-  const instant = new Date(value);
-  return Number.isNaN(instant.getTime()) ? String(value) : instant.toLocaleString();
-}
-
 function ImpactStat({ label, value }) {
   return (
     <div className="event-significant-change__stat" role="group" aria-label={`${label}: ${value}`}>
@@ -69,12 +64,12 @@ function ImpactList({ title, items, name }) {
             </span>
             {item.startsAt && item.endsAt && (
               <span className="event-significant-change__item-detail">
-                {formatTimestamp(item.startsAt)} – {formatTimestamp(item.endsAt)}
+                {formatTimestamp(item.startsAt, "Not recorded")} – {formatTimestamp(item.endsAt, "Not recorded")}
               </span>
             )}
             {item.occupiedStartsAt && item.occupiedEndsAt && (
               <span className="event-significant-change__item-detail">
-                Occupied {formatTimestamp(item.occupiedStartsAt)} – {formatTimestamp(item.occupiedEndsAt)}
+                Occupied {formatTimestamp(item.occupiedStartsAt, "Not recorded")} – {formatTimestamp(item.occupiedEndsAt, "Not recorded")}
               </span>
             )}
           </li>

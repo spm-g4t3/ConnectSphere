@@ -4,163 +4,50 @@
  * cancels one and requests the venue again, and a coordinator replaces one.
  *
  * Why real routes. The route tests answer every call from a fake client, and
- * the database tests call 076-078 directly; neither shows that the routers,
- * services and functions agree with each other. Here the real flagged-booking,
- * booking-request and event-request routers run over PGlite, so each status,
- * code and needsAttention value below comes from where it would in production.
+ * the database tests call the SQL functions directly; neither shows that the
+ * routers, services and functions agree with each other. Here the real
+ * flagged-booking, booking-request and event-request routers run over the
+ * final schema in PGlite, so each status, code and needsAttention value below
+ * comes from where it would in production.
  *
- * The adapter is leadReassignmentWalkthrough.test.js's, extended only as this
- * path needs: a jsonb-returning function's value is unwrapped, as supabase-js
- * does, Postgres's hint and detail are passed on, and the bookings(status)
- * embed needsAttention reads is answered with a subquery. Anything else still
- * throws by name. The suitability check is stubbed suitable, as the route
+ * The adapter is the shared pgliteSupabaseClient (a jsonb-returning
+ * function's value unwrapped, as supabase-js does, and Postgres's hint and
+ * detail passed on), extended only as this path needs: the bookings(status)
+ * embed needsAttention reads is answered with a subquery. Any other embed
+ * still throws by name. The suitability check is stubbed suitable, as the route
  * tests stub it; it is N10's, not this story's.
- *
- * Migrations: replaceFlaggedBookingDatabase.test.js's stack and stand-ins,
- * plus the event_requests columns the services' COLUMNS reads (025, 042 and
- * clarification_reply_by_date), as leadReassignmentWalkthrough adds them.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
 import { createFlaggedBookingRouter } from '../../src/routes/flaggedBookings.js';
 import { createBookingRequestRouter } from '../../src/routes/bookingRequests.js';
 import { createEventRequestRouter } from '../../src/routes/eventRequests.js';
 import { ROLE } from '../../src/domain/userRole.js';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  '025_event_request_decisions.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '034_setup_change_recheck.sql',
-  '040_venue_holds.sql',
-  'CANCELLATION_FIELDS',
-  '051_multi_venue_booking_requests.sql',
-  '065_booking_decision_statuses.sql',
-  'SAFETY_ENUM',
-  '066_venue_staff_booking_decisions.sql',
-  'SAFETY_REASON',
-  '076_reinstate_flagged_booking.sql',
-  '077_cancel_flagged_booking.sql',
-  '078_list_flagged_bookings.sql',
-];
-
-/** What 014 reads from SCRUM-19's migration, plus the column COLUMNS reads from 030's clarifications. */
-const STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-  alter table event_requests add column if not exists clarification_reply_by_date date;
-`;
-
-/**
- * 042's cancellation columns, which COLUMNS reads. Its last statement extends
- * 006's change_request_decision, which this path never creates, so it is left out.
- */
-const CANCELLATION_FIELDS = migration('042_event_cancellation_fields.sql').replace(
-  /alter type change_request_decision\s+add value if not exists 'event_cancelled';/,
-  '',
-);
-
-/** 062's `alter type ... add value` lines, read from the file, not retyped. */
-const SAFETY_ENUM = migration('062_safety_statuses.sql')
-  .split('\n')
-  .filter((line) => line.startsWith('alter type event_request_status add value'))
-  .join('\n');
-
-/** 071's review-reason list, which adds 'safety_review' to 034's. */
-const SAFETY_REASON = `
-  alter table bookings drop constraint if exists bookings_review_reason_known;
-  alter table bookings
-    add constraint bookings_review_reason_known
-    check (review_reason in ('setup_or_turnaround_changed', 'safety_review'));
-`;
-
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { decideBooking } from './helpers/bookingFlow.js';
+import { flagForReason } from './helpers/flaggedBookings.js';
+import { at } from '../fixtures/time.js';
+import { pgliteSupabaseClient } from '../fixtures/pgliteSupabaseClient.js';
 
 /** The bookings(status) embed, as PostgREST answers it along bookings.event_request_id. */
 const BOOKING_STATUS_EMBED = (table) =>
   `(select coalesce(json_agg(json_build_object('status', b.status)), '[]'::json)
       from bookings b where b.event_request_id = ${table}.id) as bookings`;
 
-/** The supabase-js shapes this path uses, over PGlite. */
+/** The shared adapter, answering the one embed this path reads. */
 function pgliteClient(db) {
-  const answer = async (run) => {
-    try {
-      return { data: await run(), error: null };
-    } catch (err) {
-      return {
-        data: null,
-        error: { code: err.code, message: err.message, hint: err.hint, details: err.detail },
-      };
-    }
-  };
-
-  return {
-    rpc(fn, args) {
-      const names = Object.keys(args);
-      const sql = `select * from ${fn}(${names.map((name, i) => `${name} => $${i + 1}`).join(', ')})`;
-      return answer(async () => {
-        const row = (await db.query(sql, names.map((name) => args[name]))).rows[0] ?? null;
-        // A function returning jsonb comes back as one column named after it;
-        // supabase-js hands over the value itself.
-        const keys = row ? Object.keys(row) : [];
-        return keys.length === 1 && keys[0] === fn ? row[fn] : row;
-      });
+  return pgliteSupabaseClient(db, {
+    columns(cols, table) {
+      if (/\w+\(/.test(cols.replace(/\bbookings\(status\)/, ''))) {
+        throw new Error(`pgliteClient: an embed in "${cols}" is not on this path`);
+      }
+      return cols.replace(/\bbookings\(status\)/, BOOKING_STATUS_EMBED(table));
     },
-    from(table) {
-      let columns = '*';
-      const where = [];
-      const chain = {
-        select(cols = '*') {
-          if (/\w+\(/.test(cols.replace(/\bbookings\(status\)/, ''))) {
-            throw new Error(`pgliteClient: an embed in "${cols}" is not on this path`);
-          }
-          columns = cols.replace(/\bbookings\(status\)/, BOOKING_STATUS_EMBED(table));
-          return chain;
-        },
-        eq(column, value) { where.push([column, value]); return chain; },
-        maybeSingle() {
-          const clause = where.map(([column], i) => `${column} = $${i + 1}`).join(' and ');
-          const sql = `select ${columns} from ${table}${clause ? ` where ${clause}` : ''}`;
-          return answer(async () => (await db.query(sql, where.map(([, value]) => value))).rows[0] ?? null);
-        },
-        then() { throw new Error(`pgliteClient: a list read on ${table} is not on this path`); },
-      };
-      return chain;
-    },
-  };
+  });
 }
 
 describe('SCRUM-266: resolving a flagged booking, over HTTP, on a real database', () => {
@@ -171,8 +58,7 @@ describe('SCRUM-266: resolving a flagged booking, over HTTP, on a real database'
   let staff;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
   const as = (role, id) => (req, _res, next) => {
     req.user = { id, email: 'someone@example.com', role };
@@ -202,81 +88,39 @@ describe('SCRUM-266: resolving a flagged booking, over HTTP, on a real database'
     return res.body.needsAttention;
   };
 
-  async function makeVenue() {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, 30, 45) returning id`,
-        [`Harbour Room ${counter}`],
-      )
-    ).id;
-  }
+  const makeVenue = () => seedVenue(db, { name: `Harbour Room ${++counter}` });
 
-  /** A confirmed 14:00-16:00 event the coordinator holds and approved (025 pairs the two). */
-  async function makeConfirmedEvent() {
+  /** A confirmed 14:00-16:00 event the coordinator holds and approved. */
+  function makeConfirmedEvent() {
     counter += 1;
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, proposed_start, proposed_end,
-            expected_attendance, submitted_at, assigned_coordinator_id,
-            reviewing_coordinator_id, decision, decided_by, decided_at)
-         values ($1, $2, 'confirmed', $3, $4, 150, now(), $5, $5, 'approved', $5, now()) returning id`,
-        [organiser, `Event ${counter}`, at('14:00'), at('16:00'), coordinator],
-      )
-    ).id;
+    return seedEvent(db, {
+      status: 'confirmed',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: `Event ${counter}`,
+      proposed_start: at('14:00'),
+      proposed_end: at('16:00'),
+      expected_attendance: 150,
+    });
   }
 
   /** A booking for the event's period, approved by Venue Staff, as a seed. */
   async function approvedBooking(eventId, venueId) {
-    const { id } = await one(
-      `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-       values ($1, $2, $3, $4, 'pending') returning id`,
-      [venueId, eventId, at('14:00'), at('16:00')],
-    );
-    const { result } = await one('select decide_booking_request($1, $2, $3, null, null) as result', [
-      id,
-      staff,
-      'approve',
-    ]);
-    expect(result.outcome).toBe('approved');
+    const id = await seedBooking(db, { venueId, eventId, start: at('14:00'), end: at('16:00') });
+    expect((await decideBooking(db, id, { caller: staff, decision: 'approve' })).outcome).toBe('approved');
     return id;
   }
 
-  /** Flagged by a venue setup change, as 034 flags it: no block stands on the venue. */
+  /** Flagged by a venue setup change, as update_venue flags it: no block stands on the venue. */
   async function flaggedBySetupChange(eventId, venueId) {
     const id = await approvedBooking(eventId, venueId);
-    await db.query(
-      `update bookings
-          set status = 'flagged_for_review', review_reason = 'setup_or_turnaround_changed',
-              flagged_at = now(), flagged_by = $2
-        where id = $1`,
-      [id, staff],
-    );
+    await flagForReason(db, id, { reason: 'setup_or_turnaround_changed', flaggedBy: staff });
     return id;
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      if (name === 'STAND_IN') await db.exec(STAND_IN);
-      else if (name === 'SAFETY_ENUM') await db.exec(SAFETY_ENUM);
-      else if (name === 'SAFETY_REASON') await db.exec(SAFETY_REASON);
-      else if (name === 'CANCELLATION_FIELDS') await db.exec(CANCELLATION_FIELDS);
-      else await db.exec(migration(name));
-    }
-    const user = async (email, role) => {
-      const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-      await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-      return id;
-    };
+    db = await createSchemaDb();
+    const user = (email, role) => seedUser(db, { email, role });
     organiser = await user('o@x', 'event_organiser');
     coordinator = await user('c@x', 'event_coordinator');
     staff = await user('s@x', 'venue_staff');

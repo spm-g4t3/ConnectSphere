@@ -47,6 +47,8 @@
  */
 
 import { ValidationError } from '../errors.js';
+import { createErrorCollector, throwIfInvalid } from './collector.js';
+import { MAX_INTEGER } from './limits.js';
 import { checkTimestamp } from './timestampValidation.js';
 
 
@@ -103,44 +105,6 @@ const UPDATE_MANDATORY = [];
 
 
 /**
- * Collects problems so every fault in a form is reported at once.
- *
- * Deliberately a copy of createErrorCollector and throwIfInvalid in
- * venueValidation.js rather than an import from it. Both modules are being
- * written on live branches this sprint, and reaching into a teammate's file to
- * export its private helpers would put a merge conflict in the middle of
- * someone else's story for no behavioural gain. Extracting a shared
- * src/validation/validationHelpers.js is the right end state and is a refactor
- * candidate once both branches are merged -- not before.
- *
- * SCRUM-525 is the one exception, and it goes the other way: checkAttendance
- * below is exported, not copied. A booking request's own attendance is the
- * same quantity as the event's -- it is compared with the same capacity -- so
- * the two must refuse exactly the same values, and a second copy of the rule
- * could drift. This module owns it, so nothing in it changes.
- */
-function createErrorCollector() {
-  const details = [];
-  return {
-    add: (field, message) => details.push({ field, message }),
-    details,
-    get hasErrors() {
-      return details.length > 0;
-    },
-  };
-}
-
-function throwIfInvalid(errors) {
-  if (!errors.hasErrors) return;
-
-  const summary = errors.details
-    .map(({ field, message }) => `${field}: ${message}`)
-    .join('; ');
-
-  throw new ValidationError(`Invalid event request details -- ${summary}`, errors.details);
-}
-
-/**
  * A non-object is refused before any collection starts.
  *
  * There is nothing to enumerate field by field, so details stays empty -- but
@@ -181,7 +145,7 @@ function checkText(errors, field, value, required) {
  * A booking's attendance is separately capped by its event's
  * (bookingRequestService.js, 051).
  */
-export const MAX_ATTENDANCE = 2147483647;
+export const MAX_ATTENDANCE = MAX_INTEGER;
 
 /**
  * AC1 of the venue story put the same rule on capacity: a positive whole number.
@@ -320,7 +284,7 @@ export function validateCreateEventRequest(input) {
   const errors = createErrorCollector();
   const { normalised } = collectEventRequest(errors, input, CREATE_MANDATORY);
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid event request details');
   return normalised;
 }
 
@@ -375,7 +339,7 @@ export function validateUpdateEventRequest(changes) {
     errors.add('eventName', 'cannot be blank -- omit it to leave the name unchanged');
   }
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid event request details');
 
   // Deliberately after the field faults, unlike validateUpdateVenue which
   // checks first. A caller sending { expectedAttendance: 'lots' } has supplied
@@ -421,7 +385,7 @@ export function validateSubmitEventRequest(input, { now = new Date() } = {}) {
     errors.add('proposedStart', 'must be in the future');
   }
 
-  throwIfInvalid(errors);
+  throwIfInvalid(errors, 'Invalid event request details');
   return normalised;
 }
 

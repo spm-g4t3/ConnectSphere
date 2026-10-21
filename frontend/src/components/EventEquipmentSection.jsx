@@ -37,10 +37,8 @@ import {
   getEventEquipment,
   removeEquipmentLine,
 } from "../services/eventEquipmentService";
+import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
 import "./EventEquipmentSection.css";
-
-/** The backend's limit on technical notes (equipmentLineValidation.js). */
-const MAX_NOTES_LENGTH = 1000;
 
 // Keyed by status code, as the panel's other tables are: the database's own
 // messages are written for developers.
@@ -360,7 +358,7 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
                     {`Technical notes for ${line.name}`}
                     <textarea
                       value={editNotes}
-                      maxLength={MAX_NOTES_LENGTH}
+                      maxLength={SERVER_TEXT_MAX_LENGTH}
                       disabled={busy}
                       onChange={(event) => setEditNotes(event.target.value)}
                     />
@@ -505,7 +503,7 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
             Technical notes (optional)
             <textarea
               value={notes}
-              maxLength={MAX_NOTES_LENGTH}
+              maxLength={SERVER_TEXT_MAX_LENGTH}
               disabled={busy}
               onChange={(event) => setNotes(event.target.value)}
             />

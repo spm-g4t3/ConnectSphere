@@ -2,66 +2,24 @@
  * SCRUM-484 (sub-task 2): the shared occupied-period functions, run against a
  * real Postgres.
  *
- * 032_venue_occupancy.sql adds venue_occupied_period(), the formula
- * [start - setup, end + turnaround), and venue_occupancy_conflicts(), which
- * returns every booking and block occupying a venue during a period. These
- * tests call both against the real migrations, so the worked example
- * (10:00-12:00 at 30/45 occupies 09:30-12:45), every touching edge (AC5), the
- * occupying statuses (AC4) and the venue's own minutes (AC3) are exercised
- * rather than read as text. The text itself is pinned in
- * venueOccupancyFunctionMigration.test.js.
+ * venue_occupied_period() is the formula [start - setup, end + turnaround),
+ * and venue_occupancy_conflicts() returns every booking and block occupying a
+ * venue during a period. These tests call both against the final schema, so
+ * the worked example (10:00-12:00 at 30/45 occupies 09:30-12:45), every
+ * touching edge (AC5), the occupying statuses (AC4) and the venue's own
+ * minutes (AC3) are exercised rather than read as text.
  *
  * Why PGlite: CI has no database, but PGlite is Postgres compiled to run
  * in-process, so tstzrange, '[)' bounds and && behave exactly as in Supabase.
  * No server or credentials are needed.
- *
- * Applied in order, as in createBookingRequestMigration.test.js: 001, 005,
- * 007, 010, a stand-in for SCRUM-19's decision column (014 reads it and it is
- * not on this branch), 014_coordinator_assignment, then 002, 009, 011, 017
- * (venues.turnaround_minutes), 023 (venues.setup_minutes), 027 (the pending,
- * rejected and withdrawn statuses) and 032. 017 and 023 apply as they are:
- * their create_venue/update_venue are plpgsql, whose bodies Postgres does not
- * resolve until they are called, so the audit functions from 003/004/008 are
- * not needed and no stand-in for the two minute columns is required.
- * 014_booking_review_notifications is deliberately not applied: its
- * bookings_review_flag_paired CHECK would make a flagged_for_review fixture
- * need a block and a flag time, which is irrelevant to occupancy.
  *
  * Dates: fixed +08:00 instants on D = 2026-11-11. Nothing here reads now().
  * Instants are compared with getTime(), never as wall-clock strings.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '032_venue_occupancy.sql',
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 /** An instant on D = 2026-11-11, written at +08:00 (Singapore). */
 const at = (hhmm) => `2026-11-11T${hhmm}:00+08:00`;
@@ -71,20 +29,13 @@ const ms = (iso) => new Date(iso).getTime();
 describe('SCRUM-484: venue_occupied_period and venue_occupancy_conflicts in Postgres', () => {
   let db;
   let organiser;
+  let coordinator;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
-  async function makeVenue(setup = 30, turnaround = 45) {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, $2, $3) returning id`,
-        [`Hall ${counter}`, setup, turnaround],
-      )
-    ).id;
-  }
+  const makeVenue = (setup = 30, turnaround = 45) =>
+    seedVenue(db, { name: `Hall ${++counter}`, setup, turnaround });
 
   async function setMinutes(venueId, setup, turnaround) {
     await db.query('update venues set setup_minutes = $2, turnaround_minutes = $3 where id = $1', [
@@ -94,46 +45,25 @@ describe('SCRUM-484: venue_occupied_period and venue_occupancy_conflicts in Post
     ]);
   }
 
-  async function makeEvent() {
+  function makeEvent() {
     counter += 1;
-    const cols = {
-      organiser_id: organiser,
-      event_name: `Event ${counter}`,
+    return seedEvent(db, {
       status: 'approved',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: `Event ${counter}`,
       proposed_start: at('10:00'),
       proposed_end: at('12:00'),
       expected_attendance: 150,
-      submitted_at: new Date().toISOString(),
-    };
-    const keys = Object.keys(cols);
-    return (
-      await one(
-        `insert into event_requests (${keys.join(',')}) values (${keys.map((_, i) => `$${i + 1}`).join(',')}) returning id`,
-        Object.values(cols),
-      )
-    ).id;
+    });
   }
 
   async function makeBooking(venueId, status, startsAt, endsAt) {
-    const eventId = await makeEvent();
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, $5) returning id`,
-        [venueId, eventId, startsAt, endsAt, status],
-      )
-    ).id;
+    return seedBooking(db, { venueId, eventId: await makeEvent(), status, start: startsAt, end: endsAt });
   }
 
-  async function makeBlock(venueId, startsAt, endsAt, removed = false) {
-    return (
-      await one(
-        `insert into venue_blocks (venue_id, starts_at, ends_at, reason, removed_at)
-         values ($1, $2, $3, 'maintenance', ${removed ? 'now()' : 'null'}) returning id`,
-        [venueId, startsAt, endsAt],
-      )
-    ).id;
-  }
+  const makeBlock = (venueId, startsAt, endsAt, removed = false) =>
+    seedBlock(db, { venueId, start: startsAt, end: endsAt, removed });
 
   /** venue_occupied_period's range, as instants and bound flags. */
   async function period(startsAt, endsAt, setup, turnaround) {
@@ -186,31 +116,13 @@ describe('SCRUM-484: venue_occupied_period and venue_occupancy_conflicts in Post
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      await db.exec(name === 'STAND_IN' ? DECISION_STAND_IN : migration(name));
-    }
-    organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
+    db = await createSchemaDb();
+    organiser = await seedUser(db, { email: 'o@x' });
+    coordinator = await seedUser(db, { email: 'c@x' });
   }, 60_000);
 
   afterAll(async () => {
     await db?.close();
-  });
-
-  describe('the migration', () => {
-    it('SCRUM484_AC3_migration_is_rerunnable', async () => {
-      await expect(db.exec(migration('032_venue_occupancy.sql'))).resolves.toBeDefined();
-      // Still answers the worked example after the second run.
-      const p = await period(at('10:00'), at('12:00'), 30, 45);
-      expect(p.lo).toBe(ms(at('09:30')));
-      expect(p.hi).toBe(ms(at('12:45')));
-    });
   });
 
   describe('AC3: the occupied period', () => {

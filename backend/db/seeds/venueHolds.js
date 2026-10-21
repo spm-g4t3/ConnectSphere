@@ -3,7 +3,8 @@
  *
  * Run with: npm run venue-holds:seed
  *
- * Run 040_venue_holds.sql first. Places two holds on existing data, so AC5-AC8
+ * Needs the full schema (backend/db/baseline/ plus backend/db/migrations/).
+ * Places two holds on existing data, so AC5-AC8
  * can be shown without clicking through the hold form:
  *
  *   - an ACTIVE hold, expiring 5 minutes from now, for the first Approved

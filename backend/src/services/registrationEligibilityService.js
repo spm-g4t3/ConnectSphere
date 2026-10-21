@@ -1,11 +1,13 @@
 import {
   ValidationError, NotFoundError, ConflictError, ForbiddenError, UnauthorizedError, ServiceUnavailableError,
 } from '../errors.js';
-import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
+import { SCHEMA_MISSING_CODES } from '../http/pgErrors.js';
+import { resolveClientIfMissing } from '../config/resolveClient.js';
+import { isPlausibleId } from '../validation/ids.js';
 
 /** Shared by the eligibility preflight and registration writer. */
 export function translateRegistrationEligibilityError(error) {
-  if (['42703', '42P01', 'PGRST202', 'PGRST204', 'PGRST205'].includes(error.code)) {
+  if (SCHEMA_MISSING_CODES.includes(error.code)) {
     return new ServiceUnavailableError('Event registration is temporarily unavailable. Please try again later.');
   }
   if (error.code === '42501') return new ForbiddenError(error.message);
@@ -38,7 +40,7 @@ export function validateRegistrationIdentity({ attendeeId, eventId } = {}) {
  */
 export async function validateRegistrationEligibility({ attendeeId, eventId, client } = {}) {
   validateRegistrationIdentity({ attendeeId, eventId });
-  const db = client ?? (await import('../config/supabaseClient.js')).supabase;
+  const db = await resolveClientIfMissing(client);
   const { error } = await db.rpc('assert_event_registration_eligible', {
     p_event_request_id: eventId,
     p_attendee_id: attendeeId,

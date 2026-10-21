@@ -54,6 +54,11 @@ app.use('/api/registration', eventRegistrationRoutes);
 // requireRole(VENUE_STAFF).
 app.use('/api/venues', venueRoutes);
 
+// SCRUM-23: the equipment availability check. Mounted before /api/equipment so a
+// GET /api/equipment/:id can never answer "availability" as an id, and so the
+// request does not run the catalogue router's requireAuth as well as its own.
+app.use('/api/equipment/availability', equipmentAvailabilityRoutes);
+
 // SCRUM-276: the equipment catalogue. Writes are Technical Support Staff only;
 // the active-types read is also open to Event Coordinators (SCRUM-21's picker).
 app.use('/api/equipment', equipmentRoutes);
@@ -61,10 +66,6 @@ app.use('/api/equipment', equipmentRoutes);
 // SCRUM-128: the signed-in user's own notifications. Behind requireAuth and
 // scoped to the caller; see the route file for why there is no role gate.
 app.use('/api/notifications', notificationRoutes);
-
-// SCRUM-23: the equipment availability check. Mounted BEFORE /api/equipment so a
-// later GET /api/equipment/:id can never answer "availability" as an id.
-app.use('/api/equipment/availability', equipmentAvailabilityRoutes);
 
 // SCRUM-285 (SCRUM-284): the Technical Support dashboard's equipment request queue.
 // Technical Support Staff only, behind requireAuth; see the route file.

@@ -11,6 +11,8 @@
 // server text the UI shows is details[].message from a 400, and that goes to
 // the form, not through here.
 
+import { codeOf, makeErrorMapper, SESSION_EXPIRED } from "./apiErrors";
+
 const CODE_MESSAGES = {
   EVENT_NOT_APPROVED:
     "Only an Approved event can hold a venue, and this event is no longer Approved. The event list has been refreshed.",
@@ -25,7 +27,7 @@ const CODE_MESSAGES = {
 
 const STATUS_MESSAGES = {
   400: "Some details were not accepted. Please check the form.",
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   // AC1: refused, with the reason.
   403: "Only Venue Staff can place a tentative hold on a venue.",
 };
@@ -49,10 +51,6 @@ const UNKNOWN_CONFLICT_MESSAGE =
 /** The kinds of thing that can be in the way of a hold (AC4). */
 const CONFLICT_KINDS = new Set(["booking", "block", "hold"]);
 
-function codeOf(err) {
-  return err?.response?.data?.code ?? null;
-}
-
 /**
  * The message for a failed hold request.
  *
@@ -60,17 +58,13 @@ function codeOf(err) {
  * @param {"list"|"candidates"|"place"} action
  * @returns {string}
  */
-export function holdErrorMessage(err, action) {
-  const code = codeOf(err);
-  if (code && Object.hasOwn(CODE_MESSAGES, code)) return CODE_MESSAGES[code];
-
-  const status = err?.response?.status;
-  if (status === 404 && Object.hasOwn(NOT_FOUND_MESSAGES, action)) return NOT_FOUND_MESSAGES[action];
-  if (status === 409) return UNKNOWN_CONFLICT_MESSAGE;
-  if (Object.hasOwn(STATUS_MESSAGES, status)) return STATUS_MESSAGES[status];
-
-  return DEFAULT_MESSAGES[action] ?? "Something went wrong. Please try again.";
-}
+export const holdErrorMessage = makeErrorMapper({
+  codeMessages: CODE_MESSAGES,
+  statusMessages: STATUS_MESSAGES,
+  notFoundMessages: NOT_FOUND_MESSAGES,
+  defaultMessages: DEFAULT_MESSAGES,
+  unknownConflictMessage: UNKNOWN_CONFLICT_MESSAGE,
+});
 
 /**
  * What is in the way of the hold, from a HOLD_PERIOD_CONFLICT answer (AC4):

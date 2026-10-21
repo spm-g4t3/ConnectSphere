@@ -7,7 +7,16 @@
 
 import { describe, it, expect } from "vitest";
 
-import { formatRange, formatTimestamp, shortId } from "../../src/services/displayFormat.js";
+import {
+  asList,
+  formatEventDate,
+  formatMediumTimestamp,
+  formatRange,
+  formatTimestamp,
+  orNotSpecified,
+  pluralise,
+  shortId,
+} from "../../src/services/displayFormat.js";
 
 const START = "2026-10-01T09:00:00+08:00";
 const END = "2026-10-01T17:30:00+08:00";
@@ -66,5 +75,66 @@ describe("formatRange", () => {
 
   it("defaults the fallback to unknown", () => {
     expect(formatRange(null, undefined)).toBe("unknown – unknown");
+  });
+});
+
+// The event lists render an unparseable value as given, not String(value);
+// an object would show as "[object Object]" through formatTimestamp.
+describe("formatEventDate", () => {
+  it("reads a missing value as Date not set, or the supplied fallback", () => {
+    expect(formatEventDate(null)).toBe("Date not set");
+    expect(formatEventDate("", "Not specified")).toBe("Not specified");
+  });
+
+  it("returns an unparseable value as given, not stringified", () => {
+    const value = { not: "a date" };
+    expect(formatEventDate(value)).toBe(value);
+  });
+
+  it("matches toLocaleString for a real timestamp", () => {
+    expect(formatEventDate(START)).toBe(new Date(START).toLocaleString());
+  });
+});
+
+describe("formatMediumTimestamp", () => {
+  it("reads a missing value as the fallback", () => {
+    expect(formatMediumTimestamp(undefined, "Date not recorded")).toBe("Date not recorded");
+  });
+
+  it("returns an unparseable value as given, not stringified", () => {
+    const value = { not: "a date" };
+    expect(formatMediumTimestamp(value, "-")).toBe(value);
+  });
+
+  it("formats a real timestamp as a medium date and short time", () => {
+    const expected = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
+      .format(new Date(START));
+    expect(formatMediumTimestamp(START, "-")).toBe(expected);
+  });
+});
+
+describe("asList", () => {
+  it("passes an array through and reads anything else as empty", () => {
+    const rows = [{ id: "1" }];
+    expect(asList(rows)).toBe(rows);
+    expect(asList({ unexpected: true })).toEqual([]);
+    expect(asList(null)).toEqual([]);
+  });
+});
+
+describe("pluralise", () => {
+  it("adds an s to every count but one", () => {
+    expect(pluralise(1, "hour")).toBe("1 hour");
+    expect(pluralise(0, "active event")).toBe("0 active events");
+    expect(pluralise(3, "day")).toBe("3 days");
+  });
+});
+
+describe("orNotSpecified", () => {
+  it("trims text and says a blank or missing value was not specified", () => {
+    expect(orNotSpecified("  Ramp access  ")).toBe("Ramp access");
+    expect(orNotSpecified("   ")).toBe("Not specified");
+    expect(orNotSpecified(null)).toBe("Not specified");
+    expect(orNotSpecified(undefined)).toBe("Not specified");
   });
 });

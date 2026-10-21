@@ -17,13 +17,13 @@
 // fetches nothing, and SCRUM-453's tests below assert its real content. The
 // four dashboards that predate both stories are stubs:
 // what is under test is Dashboard.jsx's choice of page, and the real pages
-// fetch on mount (TechnicalSupportDashboard calls supportService, the
+// fetch on mount (TechnicalSupportDashboard's equipment queue and the
 // Coordinator's sections call the API), which would make this a test of four
 // other screens. Their own tests cover them.
 //
 // Each new dashboard's reads (AC3-08, since narrowed to exactly what each
 // reads) are asserted at the one place every real service makes its HTTP
-// call, apiClient, plus supportService, the one stub that does not go through it.
+// call, apiClient.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -32,7 +32,6 @@ import { MemoryRouter } from "react-router-dom";
 import Dashboard from "../../src/components/Dashboard.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
 import { apiClient } from "../../src/services/apiClient";
-import { getOpenTickets } from "../../src/services/supportService";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -46,10 +45,6 @@ vi.mock("../../src/services/apiClient", () => ({
     patch: vi.fn(),
     delete: vi.fn(),
   },
-}));
-
-vi.mock("../../src/services/supportService", () => ({
-  getOpenTickets: vi.fn(),
 }));
 
 vi.mock("../../src/components/EventOrganiserDashboard", () => ({
@@ -147,7 +142,7 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
 
   it("SCRUM486_AC2_the_lead_dashboard_reads_only_the_unassigned_queue_and_its_notifications", () => {
     // Every call the Lead's dashboard makes on render, and nothing else: no
-    // write, no coordinator queue, no "my events", no support stub. Each read
+    // write, no coordinator queue, no "my events". Each read
     // is one that exists and that the Lead is allowed.
     renderDashboardAs("event_coordinator_lead");
 
@@ -158,7 +153,6 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     for (const method of ["post", "put", "patch", "delete"]) {
       expect(apiClient[method]).not.toHaveBeenCalled();
     }
-    expect(getOpenTickets).not.toHaveBeenCalled();
   });
 
   it("SCRUM489_AC8_the_safety_officer_dashboard_reads_its_review_queue_and_notifications", () => {
@@ -173,7 +167,6 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     for (const method of ["post", "put", "patch", "delete"]) {
       expect(apiClient[method]).not.toHaveBeenCalled();
     }
-    expect(getOpenTickets).not.toHaveBeenCalled();
   });
 
   it("SCRUM489_AC8_a_safety_officer_reads_a_submission_notice_on_the_dashboard_in_words", async () => {

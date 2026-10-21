@@ -34,12 +34,15 @@
  * dressed as a 400 telling a coordinator to fix a form they did not get wrong.
  */
 
+import { ValidationError, NotFoundError } from '../errors.js';
+import { resolveClient } from '../config/resolveClient.js';
 import {
-  ValidationError,
-  NotFoundError,
-  ConflictError,
-  ForbiddenError,
-} from '../errors.js';
+  createPgTranslator,
+  forbidden,
+  conflict,
+  rejected,
+  notFound,
+} from '../http/pgErrors.js';
 import {
   checkAddEquipmentLine,
   checkAmendEquipmentLine,
@@ -47,20 +50,9 @@ import {
   validateEventRequestId,
   validateEquipmentLineId,
 } from '../validation/equipmentLineValidation.js';
+import { requireCallerId } from '../validation/ids.js';
 import { equipmentRequestStatusLabel } from '../domain/equipmentRequestStatus.js';
 
-
-/**
- * The client to use. Importing the real one reads credentials from the
- * environment, so it is imported only when no client was supplied, and a test
- * that passes its own never touches it. Same as eventRequestService.
- */
-async function resolveClient(client) {
-  if (client) return client;
-
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
-}
 
 
 /** Which field a 22023 message is about, so the form can show it beside the field. */
@@ -75,43 +67,22 @@ function detailsFor(message) {
  * Turn a raw Postgres error into a typed one. The messages from 037 are
  * written to be read by a coordinator, so they pass through unchanged.
  */
-function translateError(error) {
-  if (!error) return null;
-
-  const code = error.code;
-  const detail = error.message ?? '';
-
-  if (code === '42501') {
-    return new ForbiddenError(detail);
-  }
-
-  // The event is not Approved: wrong status, or Confirmed (AC10).
-  if (code === '55000') {
-    return new ConflictError(detail, { code: 'EVENT_NOT_APPROVED' });
-  }
-
-  if (code === '23505') {
-    return new ValidationError(detail || 'That equipment type is already on this event', [
-      { field: 'equipmentTypeId', message: 'is already on this event' },
-    ]);
-  }
-
-  if (code === '22023') {
-    return new ValidationError(detail, detailsFor(detail));
-  }
-
-  // A check constraint backing the function up. The message is the driver's,
-  // so it is wrapped, as the other services do.
-  if (code === '23514') {
-    return new ValidationError(`A value was rejected by the database: ${detail}`);
-  }
-
-  if (code === 'P0002') {
-    return new NotFoundError(detail || 'Not found');
-  }
-
-  return new Error(detail || 'Unexpected database error');
-}
+const translateError = createPgTranslator({
+  codes: {
+    '42501': forbidden,
+    // The event is not Approved: wrong status, or Confirmed (AC10).
+    '55000': conflict('EVENT_NOT_APPROVED'),
+    '23505': (detail) =>
+      new ValidationError(detail || 'That equipment type is already on this event', [
+        { field: 'equipmentTypeId', message: 'is already on this event' },
+      ]),
+    '22023': (detail) => new ValidationError(detail, detailsFor(detail)),
+    // A check constraint backing the function up. The message is the driver's,
+    // so it is wrapped, as the other services do.
+    '23514': rejected,
+    P0002: notFound('Not found'),
+  },
+});
 
 
 /** One line, in camelCase. Built as a literal so no snake_case key leaks upward. */
@@ -157,10 +128,7 @@ function toEquipmentState(data) {
 
 /** A blank caller would never reach the function as a uuid. */
 function requireCoordinator(coordinatorId) {
-  if (typeof coordinatorId !== 'string' || coordinatorId.trim() === '') {
-    throw new ValidationError('coordinatorId is required');
-  }
-  return coordinatorId;
+  return requireCallerId(coordinatorId, 'coordinatorId');
 }
 
 /**

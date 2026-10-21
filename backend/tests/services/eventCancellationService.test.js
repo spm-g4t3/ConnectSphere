@@ -4,7 +4,7 @@ import {
   cancelEventRequest,
   getEventCancellationImpact,
 } from '../../src/services/eventRequestService.js';
-import { ValidationError } from '../../src/errors.js';
+import { ForbiddenError, ValidationError } from '../../src/errors.js';
 
 const EVENT_ID = '22222222-2222-4222-8222-222222222222';
 const COORDINATOR_ID = '44444444-4444-4444-8444-444444444444';
@@ -36,11 +36,27 @@ describe('SCRUM-375 cancellation service', () => {
     const impact = { venueBookings: { count: 1, details: [] } };
     const client = createRpcClient({ data: impact, error: null });
 
-    await expect(getEventCancellationImpact(EVENT_ID, { client })).resolves.toEqual(impact);
+    await expect(getEventCancellationImpact(EVENT_ID, COORDINATOR_ID, { client })).resolves.toEqual(impact);
     expect(client.calls).toEqual([{
       fn: 'event_cancellation_impact_preview',
-      args: { p_event_request_id: EVENT_ID },
+      args: { p_event_request_id: EVENT_ID, p_caller: COORDINATOR_ID },
     }]);
+  });
+
+  it('SCRUM370_AC1_refuses_a_preview_without_a_caller_before_the_database', async () => {
+    const client = createRpcClient({ data: {}, error: null });
+
+    await expect(getEventCancellationImpact(EVENT_ID, undefined, { client })).rejects.toBeInstanceOf(ValidationError);
+    expect(client.calls).toEqual([]);
+  });
+
+  it('SCRUM370_AC1_maps_the_functions_caller_refusal_to_forbidden', async () => {
+    const client = createRpcClient({
+      data: null,
+      error: { code: '42501', message: 'Only the coordinator assigned to this event can preview its cancellation' },
+    });
+
+    await expect(getEventCancellationImpact(EVENT_ID, COORDINATOR_ID, { client })).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it('sends coordinator identity from the route and maps the cancelled row', async () => {

@@ -4,92 +4,38 @@
  * The shared authorisation dependency SCRUM-15 needs for AC2's word
  * "authorised". Same treatment as tests/domain/eventRequestStatus.test.js:
  * the list in JavaScript and the list in Postgres must not drift, so the test
- * reads the migrations rather than trusting a second hand-written copy.
- *
- * SCRUM-485 (SCRUM-507) added two roles in a new migration, 039, rather than by
- * editing 007. Before that, this file read only 007's `create type` block and
- * asserted five roles, so 039 would have been invisible to it: the JavaScript
- * list would have gained two values that, as far as the test knew, the
- * database did not have. It now reads 007's created values plus every
- * `alter type user_role add value` in any migration, so a role added later is
- * compared too, without anyone remembering to update this file.
- *
- * What it still cannot see: the live database. It compares the JavaScript list
- * with what the repository declares, and the live enum has drifted from that
- * once already. It holds technical_support, which no migration declares, from
- * before 007 existed (007 creates the enum only `if not exists`, so it never
- * ran there). A query on 10 October found no profile using it. Only a query
- * against the live database can check the live enum.
+ * reads the enum from the built schema rather than trusting a second
+ * hand-written copy.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { PGlite } from '@electric-sql/pglite';
+import { describe, it, expect } from 'vitest';
 
 import { ROLE, ROLE_LABEL, isKnownRole, roleLabel } from '../../src/domain/userRole.js';
+import { useSchemaDb, enumLabels } from './helpers/schemaVocabulary.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS = resolve(here, '../../db/migrations');
+const schemaDb = useSchemaDb();
 
-/** A migration's text with its `--` comments removed. */
-function sqlOf(name) {
-  // Comments out first: 007's header says "To add a value later:  alter type
-  // user_role add value 'x';", and 039's header quotes its own statements.
-  // Read with the comments in, 'x' would count as a role.
-  return readFileSync(resolve(MIGRATIONS, name), 'utf8').replace(/--[^\n]*/g, '');
-}
+// Live predates the role migrations and kept this value; no profile uses it
+// and no code knows it, so it is left out of the comparison.
+const LEGACY_SQL_ROLES = ['technical_support'];
 
-/**
- * Every role the repository's migrations declare, in the order a database
- * built from them would hold: the values `create type user_role` creates, then
- * each `alter type user_role add value`, file by file in name order, which is
- * the order they are applied in.
- *
- * Also returns which files contributed, so a test can check that the parse
- * found something rather than passing on an empty match.
- */
-function rolesInMigrations() {
-  const files = readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort();
-  const created = [];
-  const added = [];
-
-  for (const file of files) {
-    const sql = sqlOf(file);
-
-    const block = sql.match(/create type user_role as enum \(([\s\S]*?)\);/i);
-    if (block) {
-      created.push({ file, values: [...block[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]) });
-    }
-
-    const values = [...sql.matchAll(/alter type user_role add value (?:if not exists )?'([a-z_]+)'/gi)]
-      .map((m) => m[1]);
-    if (values.length > 0) added.push({ file, values });
-  }
-
-  if (created.length !== 1) {
-    throw new Error(`expected one migration to create user_role, found ${created.length}`);
-  }
-
-  return {
-    created: created[0],
-    added,
-    all: [...created[0].values, ...added.flatMap((a) => a.values)],
-  };
+/** The enum's roles in Postgres order, without the legacy value. */
+async function rolesInSchema() {
+  return (await enumLabels(schemaDb(), 'user_role')).filter((role) => !LEGACY_SQL_ROLES.includes(role));
 }
 
 
 describe('ROLE mirrors the database enum', () => {
-  it('SCRUM15_AC2_the_javascript_roles_match_the_sql_enum', () => {
-    // Every migration that declares a role, not 007 alone (see the header).
-    expect([...Object.values(ROLE)].sort()).toEqual(rolesInMigrations().all.sort());
+  it('SCRUM15_AC2_the_javascript_roles_match_the_sql_enum', async () => {
+    // Compared as sets: the legacy value sits mid-enum, and no code orders or
+    // compares roles by enum position.
+    expect([...Object.values(ROLE)].sort()).toEqual((await rolesInSchema()).sort());
   });
 
   it('SCRUM485_AC1_there_are_exactly_seven_roles_and_no_duplicates', () => {
     // Was SCRUM15_AC2_there_are_exactly_five_roles_and_no_duplicates. Seven:
-    // README's five, and SCRUM-485's two. A role appearing here without a
-    // migration, or in a migration without this list, is the drift the test
+    // README's five, and SCRUM-485's two. A role appearing here without the
+    // enum, or in the enum without this list, is the drift the test
     // above catches; this one catches a value listed twice.
     const roles = Object.values(ROLE);
 
@@ -217,69 +163,16 @@ describe('SCRUM-485: the two new roles, as the code names them', () => {
 });
 
 
-describe('SCRUM-485: migration 039, read as text', () => {
-  const FILE = '039_coordinator_lead_and_safety_officer_roles.sql';
-
-  it('SCRUM485_AC5_039_adds_the_two_values_and_nothing_else', () => {
-    // AC5-01. Two statements, comments aside. Nothing that uses the new
-    // values, because Postgres refuses a new enum value in the transaction
-    // that adds it, and nothing else that could hide among them.
-    const statements = sqlOf(FILE).split(';').map((st) => st.trim()).filter(Boolean);
-
-    expect(statements).toEqual([
-      "alter type user_role add value if not exists 'event_coordinator_lead'",
-      "alter type user_role add value if not exists 'safety_officer'",
-    ]);
-  });
-
-  it('SCRUM485_AC5_the_parse_finds_039_and_reads_no_comment_as_a_role', () => {
-    // So the comparison at the top cannot pass on an empty or wrong match:
-    // 007 is the one file that creates the type, 039 is found as a file that
-    // adds to it, and the 'x' in 007's own comment is not taken for a role.
-    const { created, added, all } = rolesInMigrations();
-
-    expect(created.file).toBe('007_user_roles.sql');
-    expect(created.values).toHaveLength(5);
-    expect(added).toContainEqual({ file: FILE, values: ['event_coordinator_lead', 'safety_officer'] });
-    expect(all).not.toContain('x');
-  });
-});
-
-
-describe('SCRUM-485: a database built from the migrations', () => {
-  // PGlite, an in-process Postgres, as in tests/db/eventStatusLifecycleDatabase:
-  // the real migrations, applied for real, so these prove what the enum
-  // accepts rather than what the files say. Built from 007 and every migration
-  // that adds a role, found by the same parse as above.
-  //
-  // Not the live database. It has technical_support besides; see the header.
-  let db;
-  const migration = (name) => readFileSync(resolve(MIGRATIONS, name), 'utf8');
-  const roleFiles = () => rolesInMigrations().added.map((a) => a.file);
-
-  beforeAll(async () => {
-    db = new PGlite();
-    // 007's profiles table references auth.users, which Supabase provides.
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-    `);
-    await db.exec(migration('007_user_roles.sql'));
-    for (const file of roleFiles()) await db.exec(migration(file));
-  }, 60_000);
-
-  afterAll(async () => {
-    await db?.close();
-  });
-
-  const enumValues = async () =>
-    (await db.query('select unnest(enum_range(null::user_role))::text as role')).rows.map((r) => r.role);
+describe('SCRUM-485: the built schema', () => {
+  // PGlite, an in-process Postgres, with the schema applied for real, so these
+  // prove what the enum accepts rather than what the files say.
   const newUser = async () =>
-    (await db.query("insert into auth.users (email) values ('someone@x') returning id")).rows[0].id;
+    (await schemaDb().query("insert into auth.users (email) values ('someone@x') returning id")).rows[0].id;
 
   it('SCRUM485_AC6_the_enum_holds_the_five_then_the_two_in_that_order', async () => {
-    // AC6-01. add value appends, so the existing five are untouched and first.
-    expect(await enumValues()).toEqual([
+    // AC6-01. The two were appended, so the existing five keep their place
+    // ahead of them (the legacy value aside).
+    expect(await rolesInSchema()).toEqual([
       'event_organiser',
       'event_coordinator',
       'venue_staff',
@@ -290,30 +183,15 @@ describe('SCRUM-485: a database built from the migrations', () => {
     ]);
   });
 
-  it('SCRUM485_AC5_the_javascript_roles_are_exactly_what_the_built_enum_holds', async () => {
-    // The text comparison at the top, checked against Postgres itself.
-    expect([...Object.values(ROLE)].sort()).toEqual((await enumValues()).sort());
-  });
-
-  it('SCRUM485_AC5_running_039_again_changes_nothing', async () => {
-    // AC5-02. `if not exists` makes a second run a no-op rather than an error.
-    const before = await enumValues();
-
-    await db.exec(migration('039_coordinator_lead_and_safety_officer_roles.sql'));
-
-    expect(await enumValues()).toEqual(before);
-  });
-
   it.each([ROLE.EVENT_COORDINATOR_LEAD, ROLE.SAFETY_OFFICER])(
     'SCRUM485_AC5_a_profile_can_hold_%s',
     async (role) => {
-      // AC5-03. In its own statement, after 039 has committed: the
-      // transaction rule only forbids using a value where it was added.
+      // AC5-03.
       const id = await newUser();
 
-      await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
+      await schemaDb().query('insert into profiles (id, role) values ($1, $2)', [id, role]);
 
-      const { rows: [stored] } = await db.query('select role::text from profiles where id = $1', [id]);
+      const { rows: [stored] } = await schemaDb().query('select role::text from profiles where id = $1', [id]);
       expect(stored.role).toBe(role);
     },
   );
@@ -324,7 +202,7 @@ describe('SCRUM-485: a database built from the migrations', () => {
     // loudly instead of creating a user no gate recognises.
     const id = await newUser();
 
-    const err = await db
+    const err = await schemaDb()
       .query('insert into profiles (id, role) values ($1, $2)', [id, 'event_coordinator_leader'])
       .then(() => null, (e) => e);
 
@@ -336,14 +214,14 @@ describe('SCRUM-485: a database built from the migrations', () => {
     // primary key of profiles, so a second row for the same user is refused
     // (23505), and the first is left as it was.
     const id = await newUser();
-    await db.query('insert into profiles (id, role) values ($1, $2)', [id, ROLE.EVENT_COORDINATOR_LEAD]);
+    await schemaDb().query('insert into profiles (id, role) values ($1, $2)', [id, ROLE.EVENT_COORDINATOR_LEAD]);
 
-    const err = await db
+    const err = await schemaDb()
       .query('insert into profiles (id, role) values ($1, $2)', [id, ROLE.SAFETY_OFFICER])
       .then(() => null, (e) => e);
 
     expect(err?.code).toBe('23505');
-    const { rows } = await db.query('select role::text from profiles where id = $1', [id]);
+    const { rows } = await schemaDb().query('select role::text from profiles where id = $1', [id]);
     expect(rows).toEqual([{ role: ROLE.EVENT_COORDINATOR_LEAD }]);
   });
 });

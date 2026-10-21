@@ -1,24 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createSchemaDb, seedBooking, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '022_equipment_schema.sql',
-  '027_booking_request_statuses.sql',
-  '038_equipment_review.sql',
-  '043_release_event_arrangements.sql',
-];
-
+// release_event_arrangements against the final schema.
 describe('SCRUM-372: release_event_arrangements in Postgres', () => {
   let db;
   let organiser;
@@ -26,7 +11,7 @@ describe('SCRUM-372: release_event_arrangements in Postgres', () => {
   let equipmentType;
   let venueIds;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
   const status = async (id) => (await one('select status::text as status from bookings where id = $1', [id])).status;
   const reservation = async (id) => one(
     'select released_at, released_by, release_reason from equipment_reservations where id = $1',
@@ -42,16 +27,8 @@ describe('SCRUM-372: release_event_arrangements in Postgres', () => {
     ).id;
   }
 
-  async function makeBooking(eventId, venueId, bookingStatus) {
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, '2026-12-01T09:00:00Z', '2026-12-01T10:00:00Z', $3)
-         returning id`,
-        [venueId, eventId, bookingStatus],
-      )
-    ).id;
-  }
+  const makeBooking = (eventId, venueId, bookingStatus) =>
+    seedBooking(db, { venueId, eventId, status: bookingStatus, start: '2026-12-01T09:00:00Z', end: '2026-12-01T10:00:00Z' });
 
   async function makeEquipmentReservation(eventId, { released = false } = {}) {
     const requestId = (
@@ -87,29 +64,15 @@ describe('SCRUM-372: release_event_arrangements in Postgres', () => {
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (
-        id uuid primary key default gen_random_uuid(),
-        email text
-      );
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
+    db = await createSchemaDb();
 
-    organiser = (await one('insert into auth.users (email) values ($1) returning id', ['organiser@test'])).id;
+    organiser = await seedUser(db, { email: 'organiser@test' });
     otherEvent = await makeEvent('Unrelated event');
     equipmentType = (
       await one("insert into equipment_types (name, total_quantity) values ('Projector', 10) returning id")
     ).id;
     venueIds = await Promise.all(
-      ['Hall A', 'Hall B', 'Hall C'].map(async (name) =>
-        (await one(
-          'insert into venues (name, location, max_capacity) values ($1, $2, 100) returning id',
-          [name, 'Block A'],
-        )).id),
+      ['Hall A', 'Hall B', 'Hall C'].map((name) => seedVenue(db, { name, capacity: 100, setup: 0, turnaround: 0 })),
     );
   });
 
@@ -171,9 +134,5 @@ describe('SCRUM-372: release_event_arrangements in Postgres', () => {
     await expect(db.query("select release_event_arrangements($1, 'event cancelled')", [randomUUID()]))
       .rejects.toMatchObject({ code: 'P0002' });
     expect(await status(bookingId)).toBe('approved');
-  });
-
-  it('is safe to install twice', async () => {
-    await db.exec(migration('043_release_event_arrangements.sql'));
   });
 });

@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import EventConfirmationPanel from "../../src/components/EventConfirmationPanel";
 import { confirmEventRequest, getEventReadiness } from "../../src/services/eventRequestService";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({ confirmEventRequest: vi.fn(), getEventReadiness: vi.fn() }));
 
@@ -16,11 +17,6 @@ const CONFIRMED = { ...EVENT, status: "confirmed" };
 const ACK = { key: "no_equipment_confirmation", met: false, detail: "Confirm that this event needs no equipment", organiserRequirements: "Projectors" };
 const button = () => screen.getByRole("button", { name: /Confirm Event|Confirming/ });
 const failure = (status, data) => ({ response: { status, data } });
-function deferred() {
-  let resolve, reject;
-  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
-  return { promise, resolve, reject };
-}
 function setup(props = {}) {
   const onConfirmed = vi.fn();
   const onStale = vi.fn();

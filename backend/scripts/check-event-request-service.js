@@ -44,6 +44,7 @@ import {
   getEventRequestById,
 } from '../src/services/eventRequestService.js';
 import { ValidationError, NotFoundError, ConflictError } from '../src/errors.js';
+import { createHarness, failureOf as failureFrom } from './lib/harness.js';
 
 const NAME = `__check_request_${Date.now()}`;
 
@@ -58,39 +59,18 @@ const END = new Date(Date.now() + 30 * DAY + 8 * HOUR).toISOString();
 
 const createdIds = [];
 let rowsBefore = null;
-let failures = 0;
 
-// Errors from cleanup's own deletes. supabase-js does not throw on a refused
-// delete, it returns { error }, so a delete that a foreign key refuses is
-// silent unless someone looks. SCRUM-330 found exactly that: the history row
+// remove() keeps errors from cleanup's own deletes. supabase-js does not throw
+// on a refused delete, it returns { error }, so a delete that a foreign key
+// refuses is silent unless someone looks. SCRUM-330 found exactly that: the history row
 // a submission writes blocked the event delete, and the rows stayed behind.
-const cleanupErrors = [];
-
-function check(label, passed, detail = '') {
-  console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
-  if (!passed) failures += 1;
-}
+const harness = createHarness();
+const { check, remove } = harness;
 
 /** Remember a row so cleanup can remove it, whatever happens afterwards. */
 function track(record) {
   createdIds.push(record.id);
   return record;
-}
-
-/** Await a rejection and hand back the error, or null if it resolved. */
-async function failureFrom(promise) {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-}
-
-/** Run one cleanup delete, keeping its error rather than dropping it. */
-async function remove(label, query) {
-  const { error } = await query;
-  if (error) cleanupErrors.push(`${label}: ${error.message}`);
 }
 
 async function cleanup() {
@@ -497,7 +477,7 @@ async function main() {
 main()
   .catch((err) => {
     console.error(`\nFailed: ${err.message}`);
-    failures += 1;
+    harness.failures += 1;
   })
   .finally(async () => {
     await cleanup();
@@ -506,7 +486,7 @@ main()
     // them, rather than asserting it and hoping. Assignment history is counted
     // since SCRUM-330; notifications since SCRUM-486, because the submission in
     // step 4 now notifies every Lead.
-    check('cleanup ran without errors', cleanupErrors.length === 0, cleanupErrors.join('; '));
+    harness.checkCleanupErrors();
     if (rowsBefore !== null) {
       const rowsAfter = await countAll();
       check(
@@ -522,8 +502,8 @@ main()
       );
     }
 
-    if (failures > 0) {
-      console.error(`\n${failures} check(s) failed.\n`);
+    if (harness.failures > 0) {
+      console.error(`\n${harness.failures} check(s) failed.\n`);
       process.exit(1);
     }
     console.log('\nAll checks passed. Created, read, submitted, refused, cleaned up.\n');

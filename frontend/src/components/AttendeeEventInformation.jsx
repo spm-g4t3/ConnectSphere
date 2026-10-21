@@ -4,10 +4,11 @@ import { getAttendeeEvent } from "../services/attendeeEventService";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
 import { EVENT_TIME_NOTE, formatEventDate, formatEventStartTime, formatEventEndTime } from "../services/openEventDisplay";
 import useOpenEventRead from "./useOpenEventRead";
-import useRefreshOnReturn from "./useRefreshOnReturn";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const MESSAGES = {
-  401: "Your session has expired. Please sign in again.",
+  401: SESSION_EXPIRED,
   403: "Only Attendees can view this event information.",
 };
 const FALLBACK = "Event information could not be loaded. Please try again.";
@@ -17,7 +18,7 @@ function EventInformation({ eventId }) {
   const { data, loading, notFound, error, load } = useOpenEventRead(fetchEvent, {
     messages: MESSAGES, fallback: FALLBACK, notFoundIsAnswer: true, retainDataOnRefresh: false,
   });
-  useRefreshOnReturn(load);
+  useRefetchOnReturn(load);
   // Only a reply for this route's event may name it.
   const current = data?.eventRequestId === eventId.trim().toLowerCase() ? data : null;
   return (

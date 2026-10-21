@@ -25,12 +25,12 @@
  */
 
 import { ValidationError } from '../errors.js';
+import { UUID_PATTERN } from './ids.js';
+import { MAX_INTEGER } from './limits.js';
+import { throwIfInvalid as throwCollected } from './collector.js';
 
 /** The largest value the integer column holds; anything bigger is a 500 from Postgres. */
-export const MAX_QUANTITY = 2147483647;
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const MAX_QUANTITY = MAX_INTEGER;
 
 const OPTIONAL_TEXT_FIELDS = ['description', 'category', 'location'];
 const FIELDS = ['name', ...OPTIONAL_TEXT_FIELDS, 'totalQuantity'];
@@ -230,12 +230,9 @@ export function hasField(details, field) {
   return details.some((detail) => detail.field === field);
 }
 
-/** Raise every problem collected so far as one ValidationError. */
+/** Raise every problem collected so far as one ValidationError. Takes the bare details array. */
 export function throwIfInvalid(details) {
-  if (details.length === 0) return;
-
-  const summary = details.map(({ field, message }) => `${field}: ${message}`).join('; ');
-  throw new ValidationError(`Invalid equipment details -- ${summary}`, details);
+  throwCollected({ details }, 'Invalid equipment details');
 }
 
 /** A malformed id would reach Postgres as a 22P02 cast error and surface as a 500. */

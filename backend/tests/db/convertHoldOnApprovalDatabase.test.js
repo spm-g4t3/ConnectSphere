@@ -1,135 +1,49 @@
 /**
  * Approving a booking request converts the approving event's own hold at that
- * venue instead of releasing it (065, 066), against a real Postgres.
+ * venue instead of releasing it, against the final schema in a real Postgres.
  *
  * SCRUM-258 Week 7: holds are not released on approval; the event's own hold
  * for the same venue becomes converted (SCRUM-491). An expired hold never
  * counts as a booking, and each request is decided on its own.
  *
- * Migrations: conflictingBookingRequestDatabase.test.js's stack (065's enum
- * values must commit before 066 uses them, so each is its own exec).
- *
  * Dates: D is the Singapore date 10 days from now, never hard-coded.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { decideBooking } from './helpers/bookingFlow.js';
+import { at } from '../fixtures/time.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '040_venue_holds.sql',
-  '051_multi_venue_booking_requests.sql',
-  '065_booking_decision_statuses.sql',
-  'SAFETY_ENUM',
-  '066_venue_staff_booking_decisions.sql',
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
-
-/** 062's `alter type ... add value` lines, read from the file, not retyped. */
-const SAFETY_ENUM = migration('062_safety_statuses.sql')
-  .split('\n')
-  .filter((line) => line.startsWith('alter type event_request_status add value'))
-  .join('\n');
-
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
-
-/** The error a promise rejected with; null if it resolved. */
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
-
-describe('SCRUM-258 Week 7: approval converts the event\'s own hold (065, 066)', () => {
+describe('SCRUM-258 Week 7: approval converts the event\'s own hold', () => {
   let db;
   let organiser;
   let coordinator;
   let staff;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
-  async function makeUser(email, role) {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    if (role) await db.query('insert into profiles (id, role) values ($1, $2)', [id, role]);
-    return id;
-  }
+  const makeUser = (email, role) => seedUser(db, { email, role });
 
   /** A venue with 30 minutes' setup and 45 minutes' turnaround. */
-  async function makeVenue() {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, 30, 45) returning id`,
-        [`Harbour Room ${counter}`],
-      )
-    ).id;
-  }
+  const makeVenue = () => seedVenue(db, { name: `Harbour Room ${++counter}` });
 
-  async function makeEvent({ start = at('14:00'), end = at('16:00'), status = 'approved' } = {}) {
+  function makeEvent({ start = at('14:00'), end = at('16:00'), status = 'approved' } = {}) {
     counter += 1;
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, proposed_start, proposed_end,
-            expected_attendance, submitted_at, assigned_coordinator_id)
-         values ($1, $2, $3, $4, $5, 150, now(), $6) returning id`,
-        [organiser, `Event ${counter}`, status, start, end, coordinator],
-      )
-    ).id;
+    return seedEvent(db, {
+      status: status,
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: `Event ${counter}`,
+      proposed_start: start,
+      proposed_end: end,
+      expected_attendance: 150,
+    });
   }
 
   /** A pending booking request written directly, for the event's own period. */
-  async function insertBooking(eventId, venueId) {
-    const event = await one('select proposed_start, proposed_end from event_requests where id = $1', [eventId]);
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, 'pending') returning id`,
-        [venueId, eventId, event.proposed_start, event.proposed_end],
-      )
-    ).id;
-  }
+  const insertBooking = (eventId, venueId) => seedBooking(db, { venueId, eventId });
 
   /** An active hold, unexpired by default; a lapsed one is placed two hours ago. */
   async function insertHold(eventId, venueId, { lapsed = false } = {}) {
@@ -143,10 +57,7 @@ describe('SCRUM-258 Week 7: approval converts the event\'s own hold (065, 066)',
     ).id;
   }
 
-  const decide = async (bookingId, decision, reason = null) =>
-    (
-      await one('select decide_booking_request($1, $2, $3, $4, null) as result', [bookingId, staff, decision, reason])
-    ).result;
+  const decide = (bookingId, decision, reason = null) => decideBooking(db, bookingId, { caller: staff, decision, reason });
 
   const holdOf = (id) =>
     one(
@@ -165,18 +76,7 @@ describe('SCRUM-258 Week 7: approval converts the event\'s own hold (065, 066)',
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      if (name === 'STAND_IN') await db.exec(DECISION_STAND_IN);
-      else if (name === 'SAFETY_ENUM') await db.exec(SAFETY_ENUM);
-      else await db.exec(migration(name));
-    }
+    db = await createSchemaDb();
     organiser = await makeUser('o@x', 'event_organiser');
     coordinator = await makeUser('c@x', 'event_coordinator');
     staff = await makeUser('s@x', 'venue_staff');
@@ -271,7 +171,8 @@ describe('SCRUM-258 Week 7: approval converts the event\'s own hold (065, 066)',
 
     it('SCRUM258_Week7_an_approval_refused_for_an_unbookable_event_leaves_the_hold_active', async () => {
       const { eventId, bookingId, holdId } = await heldRequest();
-      await db.query("update event_requests set status = 'submitted' where id = $1", [eventId]);
+      // Rejected after approval: a move the lifecycle allows, which keeps the hold and request.
+      await db.query("update event_requests set status = 'rejected' where id = $1", [eventId]);
 
       const err = await refusal(decide(bookingId, 'approve'));
 

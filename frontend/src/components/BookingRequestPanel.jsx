@@ -95,7 +95,7 @@ import {
 } from "../services/bookingRequestErrors";
 import { checkVenueSuitability } from "../services/venueSuitabilityService";
 import { suitabilityErrorMessage } from "../services/venueSuitabilityErrors";
-import { shortId } from "../services/displayFormat";
+import { orNotSpecified, shortId } from "../services/displayFormat";
 import {
   formatVenuePeriod,
   formatVenueRange,
@@ -162,11 +162,6 @@ function attendanceSeed(event) {
 function layoutText(requirements) {
   const layout = requirements?.layout;
   return layout ? `${labelFor(layout, ROOM_LAYOUTS)} (from your search)` : "None requested";
-}
-
-function orNotSpecified(value) {
-  const text = typeof value === "string" ? value.trim() : value;
-  return text ? text : "Not specified";
 }
 
 function failedCriteria(suitability) {

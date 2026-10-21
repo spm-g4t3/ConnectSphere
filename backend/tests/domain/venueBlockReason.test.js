@@ -6,41 +6,20 @@
  * be explained in notes.
  *
  * Mirrors the structure of changeRequestStatus.test.js: the JS list and the
- * database enum must not drift apart.
+ * database enum, read from the built schema, must not drift apart.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
 import { BLOCK_REASON, isBlockReason } from '../../src/domain/venueBlockReason.js';
+import { useSchemaDb, enumLabels, constraintDef } from './helpers/schemaVocabulary.js';
 
-
-/** The 011 migration with every `--` comment stripped. */
-function migrationSql() {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const sql = readFileSync(
-    resolve(here, '../../db/migrations/011_venue_blocks.sql'),
-    'utf8',
-  );
-  return sql.replace(/--[^\n]*/g, '');
-}
-
-/** Pull the enum values straight out of the migration, in declared order. */
-function reasonsDeclaredInSql() {
-  const block = migrationSql().match(
-    /create type venue_block_reason as enum \(([\s\S]*?)\);/i,
-  );
-  if (!block) throw new Error('could not find the enum in the migration');
-
-  return [...block[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-}
+const schemaDb = useSchemaDb();
 
 
 describe('BLOCK_REASON mirrors the database enum', () => {
-  it('SCRUM17_AC1_block_reasons_match_the_sql_enum', () => {
-    expect(Object.values(BLOCK_REASON)).toEqual(reasonsDeclaredInSql());
+  it('SCRUM17_AC1_block_reasons_match_the_sql_enum', async () => {
+    expect(Object.values(BLOCK_REASON)).toEqual(await enumLabels(schemaDb(), 'venue_block_reason'));
   });
 
   it('exposes exactly the five reasons AC1 asks for, in order', () => {
@@ -81,18 +60,18 @@ describe('isBlockReason', () => {
 
 
 describe('venue_blocks notes constraints', () => {
-  it('SCRUM17_AC1_other_reason_requires_notes_even_when_null', () => {
+  it('SCRUM17_AC1_other_reason_requires_notes_even_when_null', async () => {
     // A check that evaluates to NULL passes in Postgres, so the expression
     // must coalesce NULL notes to '' before measuring them -- otherwise
     // reason = 'other' with notes NULL would be accepted.
-    expect(migrationSql()).toMatch(
-      /constraint\s+venue_blocks_other_needs_notes\s+check\s*\(\s*reason\s*<>\s*'other'\s+or\s+length\(\s*trim\(\s*coalesce\(\s*notes\s*,\s*''\s*\)\s*\)\s*\)\s*>\s*0\s*\)/i,
+    expect(await constraintDef(schemaDb(), 'venue_blocks_other_needs_notes')).toBe(
+      "CHECK (((reason <> 'other'::venue_block_reason) OR (length(TRIM(BOTH FROM COALESCE(notes, ''::text))) > 0)))",
     );
   });
 
-  it('limits venue_blocks.notes to 1000 characters', () => {
-    expect(migrationSql()).toMatch(
-      /constraint\s+venue_blocks_notes_length\s+check\s*\(\s*notes\s+is\s+null\s+or\s+length\(\s*notes\s*\)\s*<=\s*1000\s*\)/i,
+  it('limits venue_blocks.notes to 1000 characters', async () => {
+    expect(await constraintDef(schemaDb(), 'venue_blocks_notes_length')).toBe(
+      'CHECK (((notes IS NULL) OR (length(notes) <= 1000)))',
     );
   });
 });

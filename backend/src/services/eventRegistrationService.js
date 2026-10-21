@@ -4,29 +4,22 @@ import {
   NotFoundError,
   ValidationError,
 } from '../errors.js';
-import { isPlausibleId } from '../validation/eventChangeRequestValidation.js';
-import { getStatusDisplay } from '../domain/eventRequestStatus.js';
+import { resolveClient } from '../config/resolveClient.js';
+import { isPlausibleId } from '../validation/ids.js';
+import { getStatusDisplay, getOrganiserStatusLabel } from '../domain/eventRequestStatus.js';
+import { MAX_INTEGER } from '../validation/limits.js';
+import { checkTimestamp } from '../validation/timestampValidation.js';
 import { REGISTRATION_CONFIGURABLE_STATUSES } from '../domain/registrationStatuses.js';
 
 // registration_capacity is a Postgres integer.
-const MAX_CAPACITY = 2147483647;
-
-function displayStatus(status) {
-  return getStatusDisplay(status).label;
-}
+const MAX_CAPACITY = MAX_INTEGER;
 
 function statusConflict(status) {
-  const allowed = REGISTRATION_CONFIGURABLE_STATUSES.map(displayStatus);
+  const allowed = REGISTRATION_CONFIGURABLE_STATUSES.map(getOrganiserStatusLabel);
   const list = `${allowed.slice(0, -1).join(', ')} or ${allowed.at(-1)}`;
   return new ConflictError(
-    `Registration can only be set up while the event is ${list}. Current status: ${displayStatus(status)}.`,
+    `Registration can only be set up while the event is ${list}. Current status: ${getOrganiserStatusLabel(status)}.`,
   );
-}
-
-async function resolveClient(client) {
-  if (client) return client;
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
 }
 
 function requireId(id, field = 'eventRequestId') {
@@ -35,13 +28,17 @@ function requireId(id, field = 'eventRequestId') {
   }
 }
 
+// checkTimestamp requires an explicit offset, so an offset-less time is refused
+// instead of being read in the server's time zone. Its wording is replaced to
+// keep this service's sentence-style messages.
 function parseDate(value, field, details, { optional = false } = {}) {
   if ((value === null || value === undefined || value === '') && optional) return null;
-  if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
+  const instant = checkTimestamp({ add() {} }, field, value);
+  if (instant === null) {
     details.push({ field, message: 'Enter a valid date and time.' });
     return null;
   }
-  return new Date(value).toISOString();
+  return instant.toISOString();
 }
 
 function normalizeSettings(input) {

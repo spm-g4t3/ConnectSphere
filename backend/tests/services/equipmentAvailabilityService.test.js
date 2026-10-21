@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ok } from '../fixtures/supabaseStubs.js';
 
 const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }));
 
@@ -43,8 +44,6 @@ const answer = (overrides = {}) => ({
   reservations: [],
   ...overrides,
 });
-
-const ok = (data) => ({ data, error: null });
 
 beforeEach(() => {
   rpc.mockReset();

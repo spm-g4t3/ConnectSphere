@@ -5,17 +5,15 @@
 // Checked here as the server checks it, so a refusal shows beside the field.
 
 import { useState } from "react";
-
-// The server's limit on the reason (booking_resolutions, 076).
-const MAX_TEXT = 1000;
+import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
 
 /** The reason as sent, or the message to show beside the field instead. */
 function checkReason(reason, verb) {
   const trimmed = reason.trim();
   if (!trimmed) return { error: `Enter a reason for ${verb} this booking.` };
   // Code points, as the server counts them.
-  if (Array.from(trimmed).length > MAX_TEXT) {
-    return { error: `The reason must be ${MAX_TEXT} characters or fewer.` };
+  if (Array.from(trimmed).length > SERVER_TEXT_MAX_LENGTH) {
+    return { error: `The reason must be ${SERVER_TEXT_MAX_LENGTH} characters or fewer.` };
   }
   return { reason: trimmed };
 }
@@ -39,7 +37,7 @@ export default function FlaggedBookingReasonForm({ id, label, verb, busy, sendin
       <textarea
         id={id}
         value={reason}
-        maxLength={MAX_TEXT}
+        maxLength={SERVER_TEXT_MAX_LENGTH}
         required
         aria-invalid={reasonError ? "true" : undefined}
         aria-describedby={reasonError ? errorId : undefined}

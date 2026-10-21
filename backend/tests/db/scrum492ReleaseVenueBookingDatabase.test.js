@@ -1,131 +1,24 @@
 /**
- * SCRUM-492 (SCRUM-564 to SCRUM-566): migrations 088 and 089 on a real Postgres
- * (PGlite). The coordinator releases one approved venue booking; the event and
- * its other bookings are untouched; other events' requests the release alone
- * made Conflicting go back to Pending. Cases: docs/test-cases/SCRUM-492.md.
- *
- * Migrations: cancelFlaggedBookingDatabase.test.js's stack (077 for AC8's
- * proof that a flag is still cancelled through SCRUM-266), plus 039 for the
- * Lead's role, 052's
- * profile_display_name (read from the file, not retyped), 078 for the latest
- * create and decide functions, then 088 on its own and 089.
+ * SCRUM-492 (SCRUM-564 to SCRUM-566): releasing a venue booking, against the
+ * final schema in a real Postgres (PGlite). The coordinator releases one
+ * approved venue booking; the event and its other bookings are untouched;
+ * other events' requests the release alone made Conflicting go back to
+ * Pending. Cases: docs/test-cases/SCRUM-492.md.
  *
  * Dates: D is the Singapore date 10 days from now, because a block or hold
  * counts only while it has not ended.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const MIGRATION_088 = '088_booking_released_status.sql';
-const MIGRATION_089 = '089_release_venue_booking.sql';
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '039_coordinator_lead_and_safety_officer_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '034_setup_change_recheck.sql',
-  '040_venue_holds.sql',
-  '051_multi_venue_booking_requests.sql',
-  'DISPLAY_NAME',
-  '065_booking_decision_statuses.sql',
-  'SAFETY_ENUM',
-  '066_venue_staff_booking_decisions.sql',
-  'SAFETY_REASON',
-  '076_reinstate_flagged_booking.sql',
-  '077_cancel_flagged_booking.sql',
-  '078_list_flagged_bookings.sql',
-  'LIVE_ONLY_TYPE',
-  MIGRATION_088,
-  MIGRATION_089,
-];
-
-/** What 014 reads from SCRUM-19's migration, which this stack leaves out. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
-
-/** 052's profile_display_name, cut from the file: the rest of 052 needs the lifecycle. */
-const DISPLAY_NAME = migration('052_lead_assignment.sql').match(
-  /create or replace function profile_display_name[\s\S]*?\n\$\$;/,
-)[0];
-
-/** 062's `alter type ... add value` lines, read from the file, not retyped. */
-const SAFETY_ENUM = migration('062_safety_statuses.sql')
-  .split('\n')
-  .filter((line) => line.startsWith('alter type event_request_status add value'))
-  .join('\n');
-
-/** 071's review-reason list, which adds 'safety_review' to 034's. */
-const SAFETY_REASON = `
-  alter table bookings drop constraint if exists bookings_review_reason_known;
-  alter table bookings
-    add constraint bookings_review_reason_known
-    check (review_reason in ('setup_or_turnaround_changed', 'safety_review'));
-`;
-
-/**
- * A type the live database has and no dev migration adds (SCRUM-174's, applied
- * live from an unmerged branch), so AC6-06 can prove 089 keeps it.
- */
-const LIVE_ONLY_TYPE = `
-  do $$
-  declare v_def text;
-  begin
-    select pg_get_constraintdef(oid) into v_def from pg_constraint where conname = 'notifications_type_known';
-    alter table notifications drop constraint notifications_type_known;
-    execute 'alter table notifications add constraint notifications_type_known '
-            || replace(v_def, '''flagged_booking_resolved''', '''flagged_booking_resolved'', ''booking_request_submitted''');
-  end;
-  $$;
-`;
-
-const STAND_INS = { STAND_IN: DECISION_STAND_IN, DISPLAY_NAME, SAFETY_ENUM, SAFETY_REASON, LIVE_ONLY_TYPE };
-
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { approveBooking, decideBooking } from './helpers/bookingFlow.js';
+import { at } from '../fixtures/time.js';
 
 const NO_ONE = '00000000-0000-4000-8000-000000000000';
 const REASON = 'Moving the workshop to Hall B';
 
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
-
-describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
+describe('SCRUM-492: releasing one venue booking', () => {
   let db;
   let organiser;
   let coordinator;
@@ -135,64 +28,36 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
   let staff2;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-  const rows = async (sql, params) => (await db.query(sql, params)).rows;
+  const { one, rows } = queriesFor(() => db);
 
-  async function makeUser(email, role, fullName = null) {
-    const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-    if (role) await db.query('insert into profiles (id, role, full_name) values ($1, $2, $3)', [id, role, fullName]);
-    return id;
-  }
+  const makeUser = (email, role, fullName) => seedUser(db, { email, role, fullName });
 
   /** A venue with 30 minutes' setup and 45 minutes' turnaround. */
-  async function makeVenue() {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, 30, 45) returning id`,
-        [`Harbour Room ${counter}`],
-      )
-    ).id;
-  }
+  const makeVenue = () => seedVenue(db, { name: `Harbour Room ${++counter}` });
 
-  async function makeEvent({ status = 'approved', start = at('13:00'), end = at('14:00'), assigned } = {}) {
+  function makeEvent({ status = 'approved', start = at('13:00'), end = at('14:00'), assigned } = {}) {
     counter += 1;
-    return (
-      await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, proposed_start, proposed_end,
-            expected_attendance, submitted_at, assigned_coordinator_id)
-         values ($1, $2, $3, $4, $5, 150, now(), $6) returning id`,
-        [organiser, `Event ${counter}`, status, start, end, assigned === undefined ? coordinator : assigned],
-      )
-    ).id;
+    return seedEvent(db, {
+      status: status,
+      organiser_id: organiser,
+      assigned_coordinator_id: assigned === undefined ? coordinator : assigned,
+      event_name: `Event ${counter}`,
+      proposed_start: start,
+      proposed_end: end,
+      expected_attendance: 150,
+    });
   }
 
   /**
    * A booking for the event's own period, written directly, as a pending
    * request unless told otherwise. Approval refuses any other period (078).
    */
-  async function insertBooking(eventId, venueId, { status = 'pending' } = {}) {
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         select $1, id, proposed_start, proposed_end, $3::booking_status
-           from event_requests where id = $2 returning id`,
-        [venueId, eventId, status],
-      )
-    ).id;
-  }
+  const insertBooking = (eventId, venueId, { status = 'pending' } = {}) => seedBooking(db, { venueId, eventId, status });
 
-  const decide = async (bookingId) =>
-    (await one("select decide_booking_request($1, $2, 'approve', null, null) as result", [bookingId, staff])).result;
+  const decide = (bookingId) => decideBooking(db, bookingId, { caller: staff, decision: 'approve' });
 
   /** A request approved by Venue Staff, so its decision is recorded. */
-  async function approved(venueId, eventId) {
-    const id = await insertBooking(eventId, venueId);
-    expect((await decide(id)).outcome).toBe('approved');
-    return id;
-  }
+  const approved = (venueId, eventId) => approveBooking(db, { venueId, eventId, caller: staff });
 
   const release = async (bookingId, { caller = coordinator, reason = REASON } = {}) =>
     (await one('select release_venue_booking($1, $2, $3) as result', [bookingId, caller, reason])).result;
@@ -214,15 +79,7 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    // 088 is its own exec, as it is its own execution in Supabase.
-    for (const name of MIGRATIONS) await db.exec(STAND_INS[name] ?? migration(name));
+    db = await createSchemaDb();
 
     organiser = await makeUser('o@x', 'event_organiser', 'Olive Organiser');
     coordinator = await makeUser('c@x', 'event_coordinator', 'Priya Nair');
@@ -235,7 +92,6 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
   afterAll(async () => {
     await db?.close();
   });
-
 
   // -------------------------------------------------------------------------
   // AC1: who, which event, which booking
@@ -276,17 +132,10 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
       'draft', 'submitted', 'under_review', 'pending_clarification', 'safety_review',
       'safety_approved', 'confirmed', 'completed', 'rejected', 'cancelled',
     ])('SCRUM492_AC1_an_event_that_is_%s_is_refused_with_event_not_approved', async (status) => {
-      // AC1-03, AC1-10: the booking is approved while the event is, then the
-      // event moves on.
-      const event = await makeEvent();
-      const id = await approved(await makeVenue(), event);
-      // A draft has no submitted_at (005).
-      await db.query(
-        `update event_requests set status = $2::event_request_status,
-                submitted_at = case when $2 = 'draft' then null else submitted_at end
-          where id = $1`,
-        [event, status],
-      );
+      // AC1-03, AC1-10: the booking was approved while the event was, and the
+      // event has since moved on; it is seeded where it ended up.
+      const event = await makeEvent({ status });
+      const id = await insertBooking(event, await makeVenue(), { status: 'approved' });
       const before = await snapshot(event);
 
       const err = await refusal(release(id));
@@ -402,7 +251,6 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
     });
   });
 
-
   // -------------------------------------------------------------------------
   // AC2: only this booking changes
   // -------------------------------------------------------------------------
@@ -456,7 +304,6 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
     });
   });
 
-
   // -------------------------------------------------------------------------
   // AC3: the period is free at once
   // -------------------------------------------------------------------------
@@ -473,7 +320,6 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
     expect(await occupants()).toEqual([]);
   });
 
-
   // -------------------------------------------------------------------------
   // AC4: Conflicting requests this release alone blocked go back to Pending
   // -------------------------------------------------------------------------
@@ -483,10 +329,10 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
      * event's booking B for 13:00-14:00 at V, approved, which marks R
      * conflicting (078 step 12). With 30/45 minutes, B occupies 12:30-14:45.
      */
-    async function conflictingBehind({ assigned } = {}) {
+    async function conflictingBehind({ assigned, status } = {}) {
       const venue = await makeVenue();
       const other = await makeEvent({
-        start: at('13:00'), end: at('17:00'), assigned: assigned === undefined ? otherCoordinator : assigned,
+        start: at('13:00'), end: at('17:00'), assigned: assigned === undefined ? otherCoordinator : assigned, status,
       });
       const request = await insertBooking(other, venue);
       const releasing = await makeEvent();
@@ -614,7 +460,9 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
 
     it('SCRUM492_AC4_a_freed_request_with_no_coordinator_returns_to_pending_and_nobody_is_told', async () => {
       // AC4-08.
-      const { request, booking } = await conflictingBehind({ assigned: null });
+      // Rejected, reopened and resubmitted, the other event keeps its request
+      // while it waits in the Lead's queue with no coordinator.
+      const { request, booking } = await conflictingBehind({ assigned: null, status: 'submitted' });
 
       expect((await release(booking)).returned_to_pending).toEqual([request]);
       expect(await statusOf(request)).toBe('pending');
@@ -629,7 +477,6 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
       expect((await decide(request)).outcome).toBe('approved');
     });
   });
-
 
   // -------------------------------------------------------------------------
   // AC6: the record, kept and final; Venue Staff told
@@ -741,7 +588,7 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
     });
 
     it('SCRUM492_AC6_the_type_list_keeps_a_live_only_type_and_accepts_both_new_ones', async () => {
-      // AC6-06: booking_request_submitted was seeded before 089 ran.
+      // AC6-06: SCRUM-174's booking_request_submitted is kept beside the new types.
       const { def } = await one(
         "select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'notifications_type_known'",
       );
@@ -752,24 +599,6 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
         "insert into notifications (recipient_id, type, payload) values ($1, 'not_a_type', '{}')", [staff],
       ));
       expect(err?.code).toBe('23514');
-    });
-
-    it('SCRUM492_AC6_088_and_089_are_safe_to_run_twice', async () => {
-      // AC6-07.
-      await db.exec(migration(MIGRATION_088));
-      await db.exec(migration(MIGRATION_089));
-
-      const counts = await one(`
-        select (select count(*) from pg_proc where proname = 'release_venue_booking') as functions,
-               (select count(*) from pg_trigger where tgname = 'bookings_decision_final') as triggers,
-               (select count(*) from pg_constraint where conname = 'notifications_type_known') as type_lists,
-               (select count(*) from pg_constraint
-                 where conname in ('bookings_release_paired', 'bookings_release_matches_status',
-                                   'bookings_release_reason_length')) as release_checks,
-               (select count(*) from pg_enum e join pg_type t on t.oid = e.enumtypid
-                 where t.typname = 'booking_status' and e.enumlabel = 'released') as released_values
-      `);
-      expect(Object.values(counts).map(Number)).toEqual([1, 1, 1, 3, 1]);
     });
   });
 
@@ -876,7 +705,6 @@ describe('SCRUM-492: releasing one venue booking (088, 089)', () => {
       expect(await statusOf(id)).toBe('withdrawn');
     });
   });
-
 
   // -------------------------------------------------------------------------
   // AC7: the event's status does not change

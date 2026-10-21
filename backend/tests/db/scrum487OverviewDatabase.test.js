@@ -21,41 +21,17 @@
  * adapter, for single-row reads and rpc; it is left as it is (SCRUM-486 kept
  * it to exactly what its path needed, and its PR is under review).
  *
- * The migrations are leadReassignmentWalkthrough's, in its order.
+ * The database is the final schema.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
 import {
   listAssignedEventsForLead,
   listCoordinatorOverview,
 } from '../../src/services/eventRequestService.js';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  '025_event_request_decisions.sql',
-  '014_coordinator_assignment.sql',
-  '015_assignment_function.sql',
-  '016_submit_event_request.sql',
-  '017_require_assigned_coordinator.sql',
-  '020_event_status_lifecycle.sql',
-  '021_event_status_history.sql',
-  '022_event_status_transitions.sql',
-  '029_event_request_decisions_functions.sql',
-  '006_event_change_requests.sql',
-  '019_change_request_decision_coordinator.sql',
-  '039_coordinator_lead_and_safety_officer_roles.sql',
-];
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
 
 /** The list reads these two services make, over PGlite. */
 function pgliteListClient(db) {
@@ -102,44 +78,14 @@ describe('SCRUM-487 AC2, AC3, AC6: the overview over a real database, before and
   let lead;
   let eventId;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
   const future = (days) => new Date(Date.now() + days * 86_400_000).toISOString();
   const countsOf = (overview, id) => overview.coordinators.find((row) => row.id === id);
 
   beforeAll(async () => {
-    db = new PGlite();
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
-    // The notifications table 052 writes to, in the shape
-    // leadReassignmentWalkthrough.test.js builds it, for the same reason.
-    await db.exec(`
-      create table notifications (
-        id uuid primary key default gen_random_uuid(),
-        recipient_id uuid not null references auth.users (id) on delete cascade,
-        type text not null,
-        booking_id uuid,
-        block_id uuid,
-        venue_hold_id uuid,
-        payload jsonb not null default '{}',
-        read_at timestamptz,
-        created_at timestamptz not null default now(),
-        constraint notifications_type_known check (type in ('booking_flagged'))
-      );
-    `);
-    await db.exec('alter table event_requests add column clarification_reply_by_date date');
-    await db.exec(migration('052_lead_assignment.sql'));
-    await db.exec(migration('042_event_cancellation_fields.sql'));
-    // SCRUM-488: the safety statuses, which the overview now lists.
-    await db.exec(migration('062_safety_statuses.sql'));
+    db = await createSchemaDb();
 
-    const user = async (email, role, name) => {
-      const id = (await one('insert into auth.users (email) values ($1) returning id', [email])).id;
-      await db.query('insert into profiles (id, role, full_name) values ($1, $2, $3)', [id, role, name]);
-      return id;
-    };
+    const user = (email, role, name) => seedUser(db, { email, role, fullName: name });
     organiser = await user('o@x', 'event_organiser', 'Aisha Rahman');
     coordinatorA = await user('a@x', 'event_coordinator', 'Priya Nair');
     coordinatorB = await user('b@x', 'event_coordinator', 'Omar Okafor');
@@ -219,13 +165,10 @@ describe('SCRUM-487 AC2, AC3, AC6: the overview over a real database, before and
     // AC2-12 and AC3-18, which waited for SCRUM-488's enum values. A's two
     // events, one in each safety status, each carrying the approval a decided
     // status requires.
-    const safetyEvent = async (name, status, startDays) => (await one(
-      `insert into event_requests
-         (organiser_id, event_name, status, submitted_at, assigned_coordinator_id, reviewing_coordinator_id,
-          decision, decided_by, decided_at, proposed_start, proposed_end)
-       values ($1, $2, $3::event_request_status, now(), $4, $4, 'approved', $4, now(), $5, $6) returning id`,
-      [organiser, name, status, coordinatorA, future(startDays), future(startDays + 0.25)],
-    )).id;
+    const safetyEvent = (name, status, startDays) => seedEvent(db, {
+      status, organiser_id: organiser, event_name: name, assigned_coordinator_id: coordinatorA,
+      proposed_start: future(startDays), proposed_end: future(startDays + 0.25),
+    });
     const inReview = await safetyEvent('Safety Walkthrough', 'safety_review', 20);
     const approved = await safetyEvent('Safety Gala', 'safety_approved', 21);
 

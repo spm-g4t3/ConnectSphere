@@ -28,6 +28,7 @@ import {
   retireVenue,
   searchVenues,
 } from '../src/services/venueService.js';
+import { createHarness } from './lib/harness.js';
 
 const NAME = `__check_venue_${Date.now()}`;
 const LOCATION = 'Level 2, SCIS';
@@ -35,12 +36,8 @@ const LOCATION = 'Level 2, SCIS';
 let created = null;
 let turnaroundVenue = null;
 let setupVenue = null;
-let failures = 0;
-
-function check(label, passed, detail = '') {
-  console.log(`  ${passed ? 'ok  ' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
-  if (!passed) failures += 1;
-}
+const harness = createHarness();
+const { check } = harness;
 
 async function cleanup() {
   for (const venue of [created, turnaroundVenue, setupVenue]) {
@@ -361,12 +358,12 @@ async function countVenues() {
 main()
   .catch((err) => {
     console.error(`\nFailed: ${err.message}`);
-    failures += 1;
+    harness.failures += 1;
   })
   .finally(async () => {
     await cleanup();
-    if (failures > 0) {
-      console.error(`\n${failures} check(s) failed.\n`);
+    if (harness.failures > 0) {
+      console.error(`\n${harness.failures} check(s) failed.\n`);
       process.exit(1);
     }
     console.log('\nAll checks passed. Created, updated, audited, searched, retired, turnaround and setup checked, cleaned up.\n');

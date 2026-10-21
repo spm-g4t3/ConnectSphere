@@ -1,55 +1,22 @@
 /**
  * SCRUM-252: create_booking_request, run against a real Postgres.
  *
- * Applies the real migrations to an in-process Postgres (PGlite), so the
+ * Builds the final schema in an in-process Postgres (PGlite), so the
  * function's refusals, outcomes and rollbacks are exercised rather than read as
  * text. No server or credentials are needed, so this runs in CI.
  *
- * Applied in order: 001, 005, 007, 010, a stand-in for SCRUM-19's decision
- * column (014 reads it and it is not on this branch, as in
- * eventStatusLifecycleDatabase.test.js), 014, then 002, 009, 011, 013, 014
- * (booking review and notifications), 027, 028 and 030.
- *
  * What PGlite is not: a second connection. It runs one query at a time, so it
  * cannot show two real transactions blocking each other on the row locks. The
- * locking protocol is therefore pinned two other ways here: the function text
- * must take the event lock before the venue lock and take the venue lock
+ * locking protocol is therefore pinned two other ways here: the function's
+ * source, as Postgres holds it, must take the event lock before the venue lock and take the venue lock
  * `for share`, and the duplicate checks are shown to hold once the first
  * request has committed. Broader concurrency coverage is SCRUM-256's.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
+import { clientsCanExecute } from './helpers/grants.js';
 
 const START = '2026-12-01T09:00:00+00:00';
 const END = '2026-12-01T17:00:00+00:00';
@@ -60,15 +27,6 @@ const UNSUITABLE = {
   criteria: [{ criterion: 'capacity', met: false, detail: 'Capacity 80 < expected attendance 150' }],
 };
 
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
-
 describe('SCRUM-252: create_booking_request in Postgres', () => {
   let db;
   let organiser;
@@ -76,68 +34,41 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
   let otherCoordinator;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
   const bookingsFor = async (eventId) =>
     (await db.query('select * from bookings where event_request_id = $1 order by created_at, id', [eventId])).rows;
 
   async function makeVenue(extra = {}) {
-    counter += 1;
-    const row = await one(
-      `insert into venues (name, location, max_capacity) values ($1, 'Block A', 200) returning id`,
-      [`Hall ${counter}`],
-    );
-    if (extra.retired) await db.query('update venues set retired_at = now() where id = $1', [row.id]);
-    return row.id;
+    const id = await seedVenue(db, { name: `Hall ${++counter}`, setup: 0, turnaround: 0 });
+    if (extra.retired) await db.query('update venues set retired_at = now() where id = $1', [id]);
+    return id;
   }
 
-  async function makeEvent(extra = {}) {
+  function makeEvent(extra = {}) {
     counter += 1;
-    const cols = {
+    return seedEvent(db, {
+      status: 'approved',
       organiser_id: organiser,
       event_name: `Event ${counter}`,
-      status: 'approved',
       proposed_start: START,
       proposed_end: END,
       expected_attendance: 150,
       venue_requirements: 'Tiered seating',
       accessibility_requirements: 'Step-free entrance',
-      submitted_at: new Date().toISOString(),
       assigned_coordinator_id: coordinator,
       ...extra,
-    };
-    const keys = Object.keys(cols);
-    return (
-      await one(
-        `insert into event_requests (${keys.join(',')}) values (${keys.map((_, i) => `$${i + 1}`).join(',')}) returning id`,
-        Object.values(cols),
-      )
-    ).id;
+    });
   }
 
-  async function makeBooking(venueId, eventId, status, startsAt = START, endsAt = END) {
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, $3, $4, $5) returning id`,
-        [venueId, eventId, startsAt, endsAt, status],
-      )
-    ).id;
-  }
+  const makeBooking = (venueId, eventId, status, startsAt = START, endsAt = END) =>
+    seedBooking(db, { venueId, eventId, status, start: startsAt, end: endsAt });
+  const makeBlock = (venueId, startsAt, endsAt, removed = false) =>
+    seedBlock(db, { venueId, start: startsAt, end: endsAt, removed });
 
-  async function makeBlock(venueId, startsAt, endsAt, removed = false) {
-    return (
-      await one(
-        `insert into venue_blocks (venue_id, starts_at, ends_at, reason, removed_at)
-         values ($1, $2, $3, 'maintenance', ${removed ? 'now()' : 'null'}) returning id`,
-        [venueId, startsAt, endsAt],
-      )
-    ).id;
-  }
-
-  /** The function's answer, as the API calls it. */
+  /** The function's answer, as the API calls it: the request's attendance is the event's 150. */
   async function request(eventId, venueId, o = {}) {
     const row = await one(
-      'select create_booking_request($1, $2, $3, $4, $5, $6::jsonb, $7) as result',
+      'select create_booking_request($1, $2, $3, $4, $5, $6::jsonb, $7, $8, null) as result',
       [
         eventId,
         venueId,
@@ -146,25 +77,17 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
         o.notes ?? null,
         o.suitability === undefined ? JSON.stringify(SUITABLE) : o.suitability && JSON.stringify(o.suitability),
         o.confirm ?? false,
+        o.attendance ?? 150,
       ],
     );
     return row.result;
   }
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      await db.exec(name === 'STAND_IN' ? DECISION_STAND_IN : migration(name));
-    }
-    organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
-    coordinator = (await one("insert into auth.users (email) values ('c1@x') returning id")).id;
-    otherCoordinator = (await one("insert into auth.users (email) values ('c2@x') returning id")).id;
+    db = await createSchemaDb();
+    organiser = await seedUser(db, { email: 'o@x' });
+    coordinator = await seedUser(db, { email: 'c1@x' });
+    otherCoordinator = await seedUser(db, { email: 'c2@x' });
   }, 60_000);
 
   afterAll(async () => {
@@ -239,7 +162,7 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
       expect(err.code).toBe('42501');
     });
 
-    it.each(['draft', 'submitted', 'under_review', 'pending_clarification', 'planning', 'completed', 'rejected', 'cancelled'])(
+    it.each(['draft', 'submitted', 'under_review', 'pending_clarification', 'completed', 'rejected', 'cancelled'])(
       'SCRUM252_refuses_an_event_that_is_%s',
       async (status) => {
         const extra = status === 'draft' ? { assigned_coordinator_id: null, submitted_at: null } : {};
@@ -350,46 +273,7 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
   });
 
   // This file's migrations stop at 030; 051's per-venue rule is pinned in multiVenueBookingRequestDatabase.test.js.
-  describe('030 only (historical): one live request per event, superseded by 051\'s one per venue (SCRUM-525)', () => {
-    it('SCRUM252_refuses_a_second_request_for_the_same_event_and_names_the_first', async () => {
-      const eventId = await makeEvent();
-      const first = await request(eventId, await makeVenue());
-
-      const err = await refusal(request(eventId, await makeVenue()));
-
-      expect(err).toMatchObject({ code: 'PT409', hint: 'BOOKING_REQUEST_EXISTS', detail: first.booking.id });
-      expect(await bookingsFor(eventId)).toHaveLength(1);
-    });
-
-    it('SCRUM252_the_same_event_cannot_hold_two_requests_at_different_venues', async () => {
-      const eventId = await makeEvent();
-      await request(eventId, await makeVenue());
-      const err = await refusal(request(eventId, await makeVenue()));
-      expect(err.hint).toBe('BOOKING_REQUEST_EXISTS');
-    });
-
-    it('SCRUM252_an_existing_approved_booking_counts', async () => {
-      const eventId = await makeEvent();
-      const approved = await makeBooking(await makeVenue(), eventId, 'approved');
-      const err = await refusal(request(eventId, await makeVenue()));
-      expect(err).toMatchObject({ hint: 'BOOKING_REQUEST_EXISTS', detail: approved });
-    });
-
-    it('SCRUM252_a_booking_flagged_for_review_counts_and_is_named_as_such', async () => {
-      const eventId = await makeEvent();
-      const flagged = await makeBooking(await makeVenue(), eventId, 'flagged_for_review');
-      const err = await refusal(request(eventId, await makeVenue()));
-      expect(err).toMatchObject({ code: 'PT409', hint: 'BOOKING_FLAGGED_FOR_REVIEW', detail: flagged });
-    });
-
-    it('SCRUM252_names_the_flagged_booking_in_preference_to_another_live_one', async () => {
-      const eventId = await makeEvent();
-      await makeBooking(await makeVenue(), eventId, 'pending');
-      const flagged = await makeBooking(await makeVenue(), eventId, 'flagged_for_review');
-      const err = await refusal(request(eventId, await makeVenue()));
-      expect(err).toMatchObject({ hint: 'BOOKING_FLAGGED_FOR_REVIEW', detail: flagged });
-    });
-
+  describe('other bookings that do not stop a request', () => {
     it.each(['rejected', 'withdrawn', 'cancelled'])(
       'SCRUM252_a_%s_booking_does_not_stop_a_new_request',
       async (status) => {
@@ -541,7 +425,7 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
       return d.toISOString();
     };
 
-    it('SCRUM256_an_event_whose_booking_a_block_flagged_cannot_request_another_venue', async () => {
+    it('SCRUM256_an_event_whose_booking_a_block_flagged_cannot_request_that_venue_again', async () => {
       const eventId = await makeEvent();
       const flaggedVenue = await makeVenue();
       const bookingId = await makeBooking(flaggedVenue, eventId, 'approved', iso(20, 9), iso(20, 17));
@@ -554,7 +438,8 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
       expect(created.result.outcome).toBe('created');
       expect((await one('select status from bookings where id = $1', [bookingId])).status).toBe('flagged_for_review');
 
-      const err = await refusal(request(eventId, await makeVenue()));
+      // The flag holds this venue until it is resolved; another venue stays open (SCRUM-525).
+      const err = await refusal(request(eventId, flaggedVenue));
 
       expect(err).toMatchObject({ code: 'PT409', hint: 'BOOKING_FLAGGED_FOR_REVIEW', detail: bookingId });
       expect(await bookingsFor(eventId)).toHaveLength(1);
@@ -564,23 +449,22 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
       const eventId = await makeEvent();
       const venueId = await makeVenue();
       const bookingId = await makeBooking(venueId, eventId, 'flagged_for_review');
-      expect((await refusal(request(eventId, await makeVenue()))).hint).toBe('BOOKING_FLAGGED_FOR_REVIEW');
+      expect((await refusal(request(eventId, venueId))).hint).toBe('BOOKING_FLAGGED_FOR_REVIEW');
 
       // What SCRUM-266's cancel will do.
       await db.query(`update bookings set status = 'cancelled' where id = $1`, [bookingId]);
 
-      expect((await request(eventId, await makeVenue())).outcome).toBe('created');
+      expect((await request(eventId, venueId)).outcome).toBe('created');
     });
   });
 
   describe('the locking protocol and who may call', () => {
-    const sql = readFileSync(
-      resolve(here, '../../db/migrations/030_create_booking_request.sql'),
-      'utf8',
-    )
-      .replace(/--[^\n]*/g, '')
-      .replace(/\s+/g, ' ')
-      .toLowerCase();
+    // The function's source as Postgres holds it, comments dropped and spaces folded.
+    let sql;
+    beforeAll(async () => {
+      const { prosrc } = await one("select prosrc from pg_proc where proname = 'create_booking_request'");
+      sql = prosrc.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').toLowerCase();
+    });
 
     it('SCRUM252_locks_the_event_row_for_update_before_the_venue_row', () => {
       const event = sql.indexOf('from event_requests where id = p_event_request_id for update');
@@ -597,22 +481,14 @@ describe('SCRUM-252: create_booking_request in Postgres', () => {
 
     it('SCRUM252_does_the_duplicate_and_conflict_checks_after_both_locks', () => {
       const venueLock = sql.indexOf('for share');
-      expect(sql.indexOf("b.status in ('pending', 'approved', 'flagged_for_review')")).toBeGreaterThan(venueLock);
-      expect(sql.indexOf('from venue_blocks vb')).toBeGreaterThan(venueLock);
+      expect(sql.indexOf("b.status in ('pending', 'conflicting', 'approved', 'flagged_for_review')")).toBeGreaterThan(venueLock);
+      expect(sql.indexOf('from venue_occupancy_conflicts(')).toBeGreaterThan(venueLock);
       expect(sql.indexOf('insert into bookings')).toBeGreaterThan(venueLock);
     });
 
     it('SCRUM252_is_not_callable_by_the_publishable_roles', async () => {
-      const signature = 'create_booking_request(uuid, uuid, uuid, text, text, jsonb, boolean)';
-      for (const role of ['anon', 'authenticated']) {
-        const row = await one('select has_function_privilege($1, $2, $3) as allowed', [role, signature, 'execute']);
-        expect(row.allowed).toBe(false);
-      }
-    });
-
-    it('SCRUM252_can_be_applied_again_without_error', async () => {
-      await db.exec(migration('030_create_booking_request.sql'));
-      expect((await request(await makeEvent(), await makeVenue())).outcome).toBe('created');
+      const signature = 'create_booking_request(uuid, uuid, uuid, text, text, jsonb, boolean, integer, uuid)';
+      expect(await clientsCanExecute(db, signature)).toEqual([]);
     });
   });
 });

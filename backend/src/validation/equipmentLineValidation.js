@@ -18,15 +18,13 @@
  */
 
 import { ValidationError } from '../errors.js';
+import { UUID_PATTERN } from './ids.js';
 import { MAX_QUANTITY, throwIfInvalid } from './equipmentValidation.js';
 
 export { throwIfInvalid };
 
 /** Technical notes are free text. The customer set no limit, so this is a team decision. */
 export const MAX_NOTES_LENGTH = 1000;
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const isObject = (value) =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -70,7 +68,8 @@ function readNotes(details, value) {
     return undefined;
   }
   const notes = value.trim();
-  if (notes.length > MAX_NOTES_LENGTH) {
+  // Code points, as Postgres char_length counts them: an emoji is one character, not two.
+  if (Array.from(notes).length > MAX_NOTES_LENGTH) {
     details.push({
       field: 'technicalNotes',
       message: `must be ${MAX_NOTES_LENGTH} characters or fewer`,

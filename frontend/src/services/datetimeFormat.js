@@ -180,6 +180,29 @@ export function toVenueWallClock(isoString) {
 }
 
 /**
+ * Today's date in Singapore, "YYYY-MM-DD", whatever the device's zone.
+ *
+ * Same fixed-offset shift as toVenueWallClock, so it needs no Intl zone data.
+ *
+ * @param {Date} [now]
+ * @returns {string}
+ */
+export function venueToday(now = new Date()) {
+  return new Date(now.getTime() + VENUE_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * Tomorrow's date in Singapore, "YYYY-MM-DD". Adding 24 hours is exact
+ * because Singapore has no daylight saving.
+ *
+ * @param {Date} [now]
+ * @returns {string}
+ */
+export function venueTomorrow(now = new Date()) {
+  return venueToday(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+}
+
+/**
  * Stamp Singapore's offset onto a Singapore wall-clock value, for the wire.
  *
  * The venue-time counterpart of toOffsetIsoString, with the same rules: the
@@ -238,4 +261,32 @@ export const VENUE_TIME_NOTE = "(Singapore time)";
 export function formatVenuePeriod(startsAt, endsAt, fallback = "Not set") {
   if (!toVenueWallClock(startsAt) || !toVenueWallClock(endsAt)) return fallback;
   return `${formatVenueRange(startsAt, endsAt)} ${VENUE_TIME_NOTE}`;
+}
+
+/**
+ * One instant as Singapore wall clock plus the note, or the fallback alone
+ * when unreadable: "2026-11-01 10:00 (Singapore time)".
+ *
+ * @param {string} [isoString]  an instant from the API, with an offset
+ * @param {string} [fallback="Not set"]
+ * @returns {string}
+ */
+export function formatVenueTimestamp(isoString, fallback = "Not set") {
+  const wallClock = toVenueWallClock(isoString);
+  if (!wallClock) return fallback;
+  return `${wallClock.replace("T", " ")} ${VENUE_TIME_NOTE}`;
+}
+
+/**
+ * Whether a clarification's "YYYY-MM-DD" reply-by date has passed.
+ *
+ * Compares against today's Singapore date, the calendar the venues and the
+ * reply-by deadline are kept in, so every device agrees when it lapses.
+ *
+ * @param {string} replyByDate  "YYYY-MM-DD"
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
+export function isReplyOverdue(replyByDate, now = new Date()) {
+  return replyByDate < venueToday(now);
 }

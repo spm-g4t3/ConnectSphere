@@ -11,10 +11,14 @@ import {
   toDatetimeLocalValue,
   toOffsetIsoString,
   deviceTimeZoneLabel,
+  formatVenueTimestamp,
+  isReplyOverdue,
   toVenueOffsetIsoString,
   toVenueWallClock,
   VENUE_TIME_ZONE,
   VENUE_UTC_OFFSET,
+  venueToday,
+  venueTomorrow,
 } from "../../src/services/datetimeFormat.js";
 
 const OFFSET_SUFFIX = /[+-]\d{2}:\d{2}$|Z$/;
@@ -143,4 +147,48 @@ describe("venue time", () => {
         .toBe(new Date(iso).getTime());
     },
   );
+});
+
+describe("formatVenueTimestamp", () => {
+  // Venue time on every device, like formatVenuePeriod (see the note above "venue time").
+  it.each([
+    ["a UTC instant", "2026-11-01T02:00:00.000Z", "2026-11-01 10:00 (Singapore time)"],
+    ["a New York evening, already the next Singapore day", "2026-10-31T21:00:00-05:00", "2026-11-01 10:00 (Singapore time)"],
+  ])("SCRUM494_AC6_formatVenueTimestamp_reads_%s_in_singapore", (_label, iso, expected) => {
+    expect(formatVenueTimestamp(iso)).toBe(expected);
+  });
+
+  it.each([null, undefined, "", "not a date"])("SCRUM494_AC6_formatVenueTimestamp_falls_back_for_%s", (value) => {
+    expect(formatVenueTimestamp(value)).toBe("Not set");
+    expect(formatVenueTimestamp(value, "Unknown")).toBe("Unknown");
+  });
+});
+
+// The reply-by date is a Singapore calendar day, on every device.
+describe("isReplyOverdue", () => {
+  const now = new Date("2026-10-20T20:00:00Z"); // 04:00 on 21 Oct in Singapore
+
+  it("SCRUM162_AC12_isReplyOverdue_is_overdue_once_the_singapore_date_is_past_the_reply_by_date", () => {
+    expect(isReplyOverdue("2026-10-19", now)).toBe(true);
+    // Still 20 Oct in UTC, but 21 Oct in Singapore, so the 20th has lapsed.
+    expect(isReplyOverdue("2026-10-20", now)).toBe(true);
+    expect(isReplyOverdue("2026-10-21", now)).toBe(false);
+  });
+});
+
+describe("venueToday and venueTomorrow", () => {
+  // Singapore midnight is 16:00 UTC, so the day turns over there.
+  it("SCRUM162_AC1_venueToday_keeps_the_singapore_day_until_16_00_utc", () => {
+    expect(venueToday(new Date("2026-10-20T15:59:59Z"))).toBe("2026-10-20");
+  });
+
+  it("SCRUM162_AC1_venueToday_turns_to_the_next_singapore_day_at_16_00_utc", () => {
+    expect(venueToday(new Date("2026-10-20T16:00:00Z"))).toBe("2026-10-21");
+  });
+
+  it("SCRUM162_AC1_venueTomorrow_is_the_day_after_the_singapore_day", () => {
+    expect(venueTomorrow(new Date("2026-10-20T15:59:59Z"))).toBe("2026-10-21");
+    expect(venueTomorrow(new Date("2026-10-20T16:00:00Z"))).toBe("2026-10-22");
+    expect(venueTomorrow(new Date("2026-10-31T16:00:00Z"))).toBe("2026-11-02");
+  });
 });

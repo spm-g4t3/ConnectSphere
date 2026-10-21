@@ -4,33 +4,33 @@
  * Run with: npm run db:check
  *
  * Checks four things at once -- the client is configured, the secret key is
- * accepted, the migrations have been applied, and the seed data landed. The
+ * accepted, the schema has been applied, and the seed data landed. The
  * seeded counts are the useful signal: room_layouts returning 6 means
- * 002_venues.sql ran correctly.
+ * db/baseline/03_venues.sql ran correctly.
  *
  * Exits non-zero on any failure so it can be dropped into CI later.
  */
 
 import { supabase } from '../src/config/supabaseClient.js';
 
-/** Tables to probe, with the row count expected from the migrations. */
+/** Tables to probe, with the row count expected from the baseline file that creates them. */
 const TABLES = [
-  { name: 'event_requests', migration: '001', expected: null },
-  { name: 'venues', migration: '002', expected: null },
-  { name: 'venue_operating_hours', migration: '002', expected: null },
-  { name: 'room_layouts', migration: '002', expected: 6 },
-  { name: 'accessibility_features', migration: '002', expected: 5 },
-  { name: 'facilities', migration: '002', expected: 8 },
-  { name: 'venue_change_history', migration: '003', expected: null },
-  { name: 'event_change_requests', migration: '006', expected: null },
-  { name: 'venue_blocks', migration: '011', expected: null },
-  { name: 'notifications', migration: '014', expected: null },
-  { name: 'venue_block_history', migration: '016', expected: null },
-  { name: 'equipment_types', migration: '022', expected: null },
-  { name: 'equipment_requests', migration: '022', expected: null },
-  { name: 'equipment_lines', migration: '022', expected: null },
-  { name: 'equipment_reservations', migration: '022', expected: null },
-  { name: 'equipment_type_history', migration: '023', expected: null },
+  { name: 'event_requests', source: '02_event_requests.sql', expected: null },
+  { name: 'venues', source: '03_venues.sql', expected: null },
+  { name: 'venue_operating_hours', source: '03_venues.sql', expected: null },
+  { name: 'room_layouts', source: '03_venues.sql', expected: 6 },
+  { name: 'accessibility_features', source: '03_venues.sql', expected: 5 },
+  { name: 'facilities', source: '03_venues.sql', expected: 8 },
+  { name: 'venue_change_history', source: '03_venues.sql', expected: null },
+  { name: 'event_change_requests', source: '02_event_requests.sql', expected: null },
+  { name: 'venue_blocks', source: '04_venue_bookings.sql', expected: null },
+  { name: 'notifications', source: '05_notifications.sql', expected: null },
+  { name: 'venue_block_history', source: '04_venue_bookings.sql', expected: null },
+  { name: 'equipment_types', source: '06_equipment.sql', expected: null },
+  { name: 'equipment_requests', source: '06_equipment.sql', expected: null },
+  { name: 'equipment_lines', source: '06_equipment.sql', expected: null },
+  { name: 'equipment_reservations', source: '06_equipment.sql', expected: null },
+  { name: 'equipment_type_history', source: '06_equipment.sql', expected: null },
 ];
 
 /** Read one id while asking PostgREST for the exact count. */
@@ -50,7 +50,7 @@ async function main() {
   let failures = 0;
   let unreachable = 0;
 
-  for (const { name, migration, expected } of TABLES) {
+  for (const { name, source, expected } of TABLES) {
     let line = `  ${name.padEnd(24)}`;
 
     try {
@@ -58,10 +58,10 @@ async function main() {
       line += `${String(count).padStart(4)} rows`;
 
       if (expected !== null && count !== expected) {
-        line += `   MISMATCH - expected ${expected} from migration ${migration}`;
+        line += `   MISMATCH - expected ${expected} from ${source}`;
         failures += 1;
       } else if (expected !== null) {
-        line += `   seeded by ${migration}`;
+        line += `   seeded by ${source}`;
       }
     } catch (err) {
       line += `   UNREACHABLE - ${err.message}`;
@@ -85,8 +85,8 @@ async function main() {
       console.error('Check SUPABASE_URL and SUPABASE_SECRET_KEY in backend/.env');
       console.error('against Settings -> API in the Supabase dashboard.\n');
     } else {
-      console.error('Some tables are missing or empty. Confirm the migrations in');
-      console.error('backend/db/migrations/ have been run in the Supabase SQL Editor.\n');
+      console.error('Some tables are missing or empty. Confirm backend/db/baseline/ and any');
+      console.error('backend/db/migrations/ files have been run in the Supabase SQL Editor.\n');
     }
 
     process.exit(1);

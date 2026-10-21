@@ -34,7 +34,8 @@
  */
 
 import { ValidationError } from '../errors.js';
-import { isPlausibleId } from './eventChangeRequestValidation.js';
+import { isPlausibleId } from './ids.js';
+import { createErrorCollector, throwIfInvalid, checkOptionalText } from './collector.js';
 import { checkCodeArray } from './venueValidation.js';
 import { checkAttendance } from './eventRequestValidation.js';
 import { SUITABILITY_CHECK_CRITERIA } from '../domain/venueMatching.js';
@@ -48,17 +49,6 @@ export const SETUP_NOTES_MAX_LENGTH = 1000;
  */
 export const LAYOUT_CODE_PATTERN = /^[a-z][a-z0-9_]{0,49}$/;
 
-function createErrorCollector() {
-  const details = [];
-  return {
-    add: (field, message) => details.push({ field, message }),
-    details,
-    get hasErrors() {
-      return details.length > 0;
-    },
-  };
-}
-
 function checkId(errors, field, label, value) {
   if (value === undefined || value === null || value === '') {
     errors.add(field, 'is required');
@@ -69,22 +59,6 @@ function checkId(errors, field, label, value) {
     return null;
   }
   return value.trim().toLowerCase();
-}
-
-/** Optional text: trimmed, blank becomes null. Length counts code points, as Postgres does. */
-function checkOptionalText(errors, field, value, max) {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== 'string') {
-    errors.add(field, 'must be text');
-    return null;
-  }
-  const trimmed = value.trim();
-  if (trimmed === '') return null;
-  if (Array.from(trimmed).length > max) {
-    errors.add(field, `must be ${max} characters or fewer`);
-    return null;
-  }
-  return trimmed;
 }
 
 /**
@@ -309,10 +283,7 @@ export function validateRejectBookingRequest(input) {
     DECISION_TEXT_MAX_LENGTH,
   );
 
-  if (errors.hasErrors) {
-    const summary = errors.details.map(({ field, message }) => `${field}: ${message}`).join('; ');
-    throw new ValidationError(`Invalid rejection -- ${summary}`, errors.details);
-  }
+  throwIfInvalid(errors, 'Invalid rejection');
 
   return { reason, suggestedAlternative };
 }
@@ -342,10 +313,7 @@ export function validateReleaseBooking(input) {
     errors.add('reason', 'is required');
   }
 
-  if (errors.hasErrors) {
-    const summary = errors.details.map(({ field, message }) => `${field}: ${message}`).join('; ');
-    throw new ValidationError(`Invalid release -- ${summary}`, errors.details);
-  }
+  throwIfInvalid(errors, 'Invalid release');
 
   return { reason };
 }

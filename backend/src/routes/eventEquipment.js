@@ -45,11 +45,11 @@ import {
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
-import { createErrorHandler } from '../http/handleError.js';
+import { createErrorMiddleware } from '../http/handleError.js';
 
 
-/** Map an error to a response; see src/http/handleError.js. */
-const handleError = createErrorHandler('event equipment route');
+/** Answers whatever a handler throws or rejects with; see src/http/handleError.js. */
+const errorMiddleware = createErrorMiddleware('event equipment route');
 
 
 /**
@@ -84,11 +84,7 @@ export function createEventEquipmentRouter({
 
   /** AC11: the event's equipment. 404 for an event that does not exist. */
   router.get('/', coordinatorOrLead, async (req, res) => {
-    try {
-      res.status(200).json(await listEventEquipment(req.params.id, { client }));
-    } catch (err) {
-      handleError(err, res);
-    }
+    res.status(200).json(await listEventEquipment(req.params.id, { client }));
   });
 
   /**
@@ -96,12 +92,8 @@ export function createEventEquipmentRouter({
    * quantity and technicalNotes, and nothing else.
    */
   router.post('/lines', coordinatorOnly, async (req, res) => {
-    try {
-      const state = await addEquipmentLine(req.params.id, req.body, req.user.id, { client });
-      res.status(201).json(state);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const state = await addEquipmentLine(req.params.id, req.body, req.user.id, { client });
+    res.status(201).json(state);
   });
 
   /**
@@ -110,35 +102,28 @@ export function createEventEquipmentRouter({
    * line and adding another.
    */
   router.patch('/lines/:lineId', coordinatorOnly, async (req, res) => {
-    try {
-      const state = await amendEquipmentLine(
-        req.params.id,
-        req.params.lineId,
-        req.body,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(state);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const state = await amendEquipmentLine(
+      req.params.id,
+      req.params.lineId,
+      req.body,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(state);
   });
 
   /** AC6 to AC8: remove a line. The last line cancels the request. */
   router.delete('/lines/:lineId', coordinatorOnly, async (req, res) => {
-    try {
-      const state = await removeEquipmentLine(
-        req.params.id,
-        req.params.lineId,
-        req.user.id,
-        { client },
-      );
-      res.status(200).json(state);
-    } catch (err) {
-      handleError(err, res);
-    }
+    const state = await removeEquipmentLine(
+      req.params.id,
+      req.params.lineId,
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(state);
   });
 
+  router.use(errorMiddleware);
   return router;
 }
 

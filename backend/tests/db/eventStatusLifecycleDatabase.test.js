@@ -2,32 +2,18 @@
  * SCRUM-325 and SCRUM-19 (SCRUM-134): the event status lifecycle and the
  * decision, run against a real Postgres.
  *
- * Every other lifecycle test fakes the Supabase client or reads the migrations
+ * Every other lifecycle test fakes the Supabase client or reads the schema
  * as text, so none of them can see a transaction roll back, a constraint fire
- * or a row lock decide between two callers. This one applies the real
- * migrations to an in-process Postgres (PGlite) and calls the real functions.
- * It needs no database server and no credentials, so it runs in CI.
+ * or a row lock decide between two callers. This one builds the final schema
+ * in an in-process Postgres (PGlite) and calls the real functions. It needs no
+ * database server and no credentials, so it runs in CI.
  *
- * Migrations applied, in order: 001, 005 (event_request_details), 007, 010
- * (event_request_clarifications), 025 (event_request_decisions), 014 to 017,
- * 020, 021, 022 and 029. 018 and 019 are not needed.
- *
- * 025 comes before 014, as it did on the live database (it was applied there
- * as 010_event_request_decisions.sql, before SCRUM-327): 014's prerequisite
- * guard refuses to run unless reviewing_coordinator_id exists, and 025 creates
- * it. Until SCRUM-19's migration reached this branch, that column was added by
- * hand as a stand-in, which meant none of 025's five constraints were under
- * test here. The stand-in is gone: 025 is applied for real, its constraints
- * are live in every test below, and 020 rewrites two of them as it does in
- * production.
- *
- * That has a consequence for the fixtures. A row at approved, rejected,
- * confirmed or completed must carry a decision, because 025 refuses one
- * without (decided_status_has_decision). So request() gives every such row
- * the decision a real one would have. And the status function cannot move a
- * request to approved or rejected at all, because it writes no decision: that
- * is the bug 029's decide_event_request exists to fix, and it is tested as a
- * refusal below rather than recorded as an allowed move.
+ * The fixtures follow the schema's rules. A row at a decided status carries
+ * the decision a real one would have (seedEvent), and the status function
+ * cannot move a request to approved or rejected, because it writes no
+ * decision: decide_event_request does, and is tested below. The safety
+ * statuses are entered and left only with the safety workflow's records in
+ * place, which the fixtures below write.
  *
  * What PGlite is not: a second connection. It runs one query at a time, so the
  * concurrency test below fires two calls at once and the database lets one go
@@ -37,54 +23,11 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
 import { STATUS, canTransition } from '../../src/domain/eventRequestStatus.js';
 import { ELEVEN_STATUSES, EVERY_PAIR } from '../fixtures/expectedTransitionMatrix.js';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const BASE = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-];
-// SCRUM-19's decisions: five columns and five constraints. Before 014, whose
-// prerequisite guard needs reviewing_coordinator_id; see the header.
-const DECISIONS = '025_event_request_decisions.sql';
-const ASSIGNMENT = [
-  '014_coordinator_assignment.sql',
-  '015_assignment_function.sql',
-  '016_submit_event_request.sql',
-  '017_require_assigned_coordinator.sql',
-];
-
-/** A database with the migrations up to, but not including, `020`. */
-async function databaseBefore020() {
-  const db = new PGlite();
-  await db.exec(`
-    create schema auth;
-    create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-  `);
-  for (const name of BASE) await db.exec(migration(name));
-  await db.exec(migration(DECISIONS));
-  for (const name of ASSIGNMENT) await db.exec(migration(name));
-  return db;
-}
-
-const refusal = async (promise) => {
-  try {
-    await promise;
-    return null;
-  } catch (err) {
-    return err;
-  }
-};
+import { createSchemaDb, seedEvent, seedUser } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
 
 // Hand-written from SCRUM-318 AC2, not read from the domain module, so a
 // transition added or dropped there cannot quietly change what is tested here.
@@ -137,7 +80,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
   let lead2;
   let safety;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
   /**
    * A draft, or a row placed at `status` as a fixture.
@@ -158,27 +101,16 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     [STATUS.REJECTED]: 'rejected',
   };
 
-  async function request(status = STATUS.DRAFT, extra = {}) {
-    const cols = { organiser_id: organiser, event_name: `event ${status}`, status };
-    if (status !== STATUS.DRAFT) {
-      cols.submitted_at = new Date().toISOString();
-      cols.assigned_coordinator_id = coordinator;
-    }
-    if (DECISION_FOR[status]) {
-      Object.assign(cols, {
-        reviewing_coordinator_id: coordinator,
-        decision: DECISION_FOR[status],
-        decision_note: DECISION_FOR[status] === 'rejected' ? 'Not viable as submitted.' : null,
-        decided_by: coordinator,
-        decided_at: new Date().toISOString(),
-      });
-    }
-    Object.assign(cols, extra);
-    const keys = Object.keys(cols);
-    return (await one(
-      `insert into event_requests (${keys.join(',')}) values (${keys.map((_, i) => `$${i + 1}`).join(',')}) returning id`,
-      Object.values(cols),
-    )).id;
+  function request(status = STATUS.DRAFT, extra = {}) {
+    return seedEvent(db, {
+      status,
+      organiser_id: organiser,
+      event_name: `event ${status}`,
+      ...(status !== STATUS.DRAFT && { assigned_coordinator_id: coordinator }),
+      ...(DECISION_FOR[status] && { reviewing_coordinator_id: coordinator }),
+      ...(DECISION_FOR[status] === 'rejected' && { decision_note: 'Not viable as submitted.' }),
+      ...extra,
+    });
   }
 
   const row = (id) => one('select * from event_requests where id = $1', [id]);
@@ -198,58 +130,53 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
   const submit = (id, by = organiser) =>
     db.query('select * from submit_event_request($1, now(), $2)', [id, by]);
 
+  // The safety check's preconditions, which the status trigger enforces: to
+  // enter it, an event ready for it (future dates, an approved venue covering
+  // them) and a submission; to leave it, the Safety Officer's response.
+  async function submitForSafetyCheck(id) {
+    await db.query(
+      `update event_requests
+          set proposed_start = now() + interval '30 days', proposed_end = now() + interval '30 days 2 hours'
+        where id = $1`,
+      [id],
+    );
+    const venue = await one(
+      "insert into venues (name, location, max_capacity) values ($1, 'Block A', 100) returning id",
+      [`Hall for ${id}`],
+    );
+    await db.query(
+      `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
+       select $1, id, proposed_start, proposed_end, 'approved' from event_requests where id = $2`,
+      [venue.id, id],
+    );
+    await db.query('insert into safety_review_submissions (event_request_id, submitted_by) values ($1, $2)', [id, coordinator]);
+  }
+  const respondToSafetyCheck = (id, outcome) => db.query(
+    'insert into safety_review_responses (event_request_id, safety_officer_id, outcome, note) values ($1, $2, $3, $4)',
+    [id, safety, outcome, outcome === 'approved' ? null : 'Fixture response.'],
+  );
+  // A significant change closes the pending submission instead of waiting for a response.
+  async function closeSafetyCheck(id, reason) {
+    const submission = await one(
+      'insert into safety_review_submissions (event_request_id, submitted_by) values ($1, $2) returning id',
+      [id, coordinator],
+    );
+    await db.query(
+      `insert into safety_review_closures (event_request_id, safety_review_submission_id, closed_by, reason)
+       values ($1, $2, $3, $4)`,
+      [id, submission.id, coordinator, reason],
+    );
+  }
+
   beforeAll(async () => {
-    db = await databaseBefore020();
-    organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
-    coordinator = (await one("insert into auth.users (email) values ('c1@x') returning id")).id;
-    otherCoordinator = (await one("insert into auth.users (email) values ('c2@x') returning id")).id;
-    lead = (await one("insert into auth.users (email) values ('lead@x') returning id")).id;
-    lead2 = (await one("insert into auth.users (email) values ('lead2@x') returning id")).id;
-    safety = (await one("insert into auth.users (email) values ('safety@x') returning id")).id;
+    db = await createSchemaDb();
+    organiser = await seedUser(db, { email: 'o@x' });
+    coordinator = await seedUser(db, { email: 'c1@x' });
+    otherCoordinator = await seedUser(db, { email: 'c2@x' });
+    lead = await seedUser(db, { email: 'lead@x' });
+    lead2 = await seedUser(db, { email: 'lead2@x' });
+    safety = await seedUser(db, { email: 'safety@x' });
     await db.query("insert into profiles (id, role) values ($1, 'event_organiser')", [organiser]);
-    await db.exec(migration('020_event_status_lifecycle.sql'));
-    await db.exec(migration('021_event_status_history.sql'));
-    await db.exec(migration('022_event_status_transitions.sql'));
-    // SCRUM-19's two functions, after 022: start_event_review calls 022's
-    // event_request_status_allows.
-    await db.exec(migration('029_event_request_decisions_functions.sql'));
-    // Change requests (006, and 019's coordinator check), so SCRUM-486's AC7
-    // can show a pending change request following the event to its new
-    // coordinator. 039, the Lead's role, which 052's assign and reassign
-    // functions name.
-    await db.exec(migration('006_event_change_requests.sql'));
-    await db.exec(migration('019_change_request_decision_coordinator.sql'));
-    await db.exec(migration('039_coordinator_lead_and_safety_officer_roles.sql'));
-    // The notifications table, which 052 restates the types of and its three
-    // functions now write to (SCRUM-518). The real one comes from 014's booking
-    // review migration, which needs bookings and venue blocks this suite does
-    // not build, so it is written here in the shape those functions use:
-    // recipient, type and payload, plus the reference columns other notices
-    // carry. 052 replaces the type check with its own, so the one here only
-    // has to exist. eventClarificationDatabase.test.js does the same.
-    await db.exec(`
-      create table notifications (
-        id uuid primary key default gen_random_uuid(),
-        recipient_id uuid not null references auth.users (id) on delete cascade,
-        type text not null,
-        booking_id uuid,
-        block_id uuid,
-        venue_hold_id uuid,
-        payload jsonb not null default '{}',
-        read_at timestamptz,
-        created_at timestamptz not null default now(),
-        constraint notifications_type_known check (type in ('booking_flagged'))
-      );
-    `);
-    // SCRUM-486's migration, last, as production will have it: the relaxed
-    // assignment constraint and submission without assignment (SCRUM-515),
-    // the Lead's assignment and reassignment (SCRUM-516), the refusal of an
-    // unassigned review (SCRUM-517), and the notices (SCRUM-518).
-    await db.exec(migration('052_lead_assignment.sql'));
-    // SCRUM-488: the safety statuses and the constraints that admit them.
-    await db.exec(migration('062_safety_statuses.sql'));
-    // SCRUM-488: the transition table with the safety check in it.
-    await db.exec(migration('063_safety_transitions.sql'));
   }, 60_000);
 
   afterAll(async () => {
@@ -406,6 +333,10 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     describe('every allowed transition records exactly one history row', () => {
       it.each(RECORDED_TRANSITIONS)('SCRUM325_records_%s_to_%s_once', async (from, to) => {
         const id = await request(from);
+        if (to === STATUS.SAFETY_REVIEW) await submitForSafetyCheck(id);
+        if (from === STATUS.SAFETY_REVIEW && to !== STATUS.CANCELLED) {
+          await respondToSafetyCheck(id, to === STATUS.SAFETY_APPROVED ? 'approved' : 'changes_requested');
+        }
 
         const { rows: [moved] } = await change(id, from, to, coordinator);
 
@@ -623,9 +554,11 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     it('SCRUM488_AC2_an_approved_event_goes_through_the_safety_check_to_confirmed_one_history_row_each', async () => {
       const id = await request(STATUS.APPROVED);
       const approval = (await row(id));
+      await submitForSafetyCheck(id);
 
       await change(id, STATUS.APPROVED, STATUS.SAFETY_REVIEW, coordinator, 'Venue and equipment are arranged.');
       await pause();
+      await respondToSafetyCheck(id, 'approved');
       await change(id, STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED, safety, 'Meets the safety review.');
       await pause();
       const { rows: [confirmed] } = await change(id, STATUS.SAFETY_APPROVED, STATUS.CONFIRMED, coordinator);
@@ -645,6 +578,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
 
     it('SCRUM488_AC2_a_send_back_returns_the_event_to_approved_and_records_the_reasons', async () => {
       const id = await request(STATUS.SAFETY_REVIEW);
+      await respondToSafetyCheck(id, 'changes_requested');
 
       const { rows: [sentBack] } = await change(
         id, STATUS.SAFETY_REVIEW, STATUS.APPROVED, safety, 'The second exit is blocked by the stage.',
@@ -658,6 +592,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
 
     it.each(SAFETY)('SCRUM488_AC2_a_significant_change_returns_%s_to_approved_with_its_reason', async (from) => {
       const id = await request(from);
+      if (from === STATUS.SAFETY_REVIEW) await closeSafetyCheck(id, 'Attendance doubled.');
 
       const { rows: [replanned] } = await change(id, from, STATUS.APPROVED, coordinator, 'Attendance doubled.');
 
@@ -719,6 +654,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
 
     it('SCRUM488_AC4_the_history_time_is_the_databases_own', async () => {
       const id = await request(STATUS.APPROVED);
+      await submitForSafetyCheck(id);
       const { rows: [{ started }] } = await db.query('select clock_timestamp() as started');
 
       await change(id, STATUS.APPROVED, STATUS.SAFETY_REVIEW, coordinator);
@@ -733,6 +669,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       // A blank reason is the history table's own refusal (23514). The status
       // update ran first in the function, and must not survive it.
       const id = await request(STATUS.APPROVED);
+      await submitForSafetyCheck(id);
       const before = await row(id);
 
       const err = await refusal(change(id, STATUS.APPROVED, STATUS.SAFETY_REVIEW, coordinator, '   '));
@@ -744,6 +681,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
 
     it('SCRUM488_AC3_lets_exactly_one_of_several_identical_submissions_for_the_safety_check_succeed', async () => {
       const id = await request(STATUS.APPROVED);
+      await submitForSafetyCheck(id);
 
       const outcomes = await Promise.allSettled(
         Array.from({ length: 5 }, () => change(id, STATUS.APPROVED, STATUS.SAFETY_REVIEW, coordinator)),
@@ -860,16 +798,14 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     });
 
     it('SCRUM325_refuses_an_update_to_planning', async () => {
-      // From submitted, not approved as before SCRUM-134. An approved row now
-      // carries 025's approval, and since 020 a decision may not sit on
-      // planning, so that update breaks decision_has_decided_status as well
-      // and Postgres names whichever constraint sorts first. A row with no
-      // decision can break only status_in_lifecycle.
+      // A direct update meets the transition trigger before the table check:
+      // no status may move to planning. The insert test above covers the check.
       const id = await request(STATUS.SUBMITTED, placed);
 
       const err = await refusal(db.query("update event_requests set status = 'planning' where id = $1", [id]));
 
-      expect(err.message).toContain('event_requests_status_in_lifecycle');
+      expect(err.code).toBe('55000');
+      expect(err.message).toContain('cannot change to planning');
       expect((await row(id)).status).toBe(STATUS.SUBMITTED);
     });
 
@@ -952,7 +888,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
   // Postgres, because each is about what the database accepts or what a
   // function does with a null, which a fake client cannot show.
 
-  describe('SCRUM-486: 052 relaxes the assignment constraint for submitted only', () => {
+  describe('SCRUM-486: the assignment constraint is relaxed for submitted only', () => {
     // Each row is written straight to the table, bypassing every function, so
     // only the constraint can refuse it. `extra` overrides the fixture's
     // coordinator with null.
@@ -1686,55 +1622,6 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       expect(err).not.toBeNull();
       expect(await noticesFor(id)).toEqual(before);
     });
-
-    it('SCRUM486_AC10_052_keeps_every_type_048_allows_and_adds_three', async () => {
-      // AC10-04, read from the files. notifications_type_known is restated
-      // whole each time, so 052 must restate the latest list before it, which
-      // is 048's eight: 040's seven and SCRUM-370's event_cancelled. Leaving
-      // venue_hold_expired out would stop venue holds expiring; leaving
-      // event_cancelled out would stop cancellation (052's header).
-      //
-      // Was SCRUM486_AC10_041_keeps_every_type_040_allows_and_adds_three, and
-      // read 040. Right when written: 040 was the latest list in this
-      // repository. The merge of dev brought 048, which restates it with
-      // event_cancelled, and the file moved from 041 to 052 to apply after it.
-      // 040's seven are still checked, as the first part of 048's list.
-      //
-      // The constraint in force is checked too, so the PGlite database agrees.
-      // That database does not apply 048 (this suite builds SCRUM-486's
-      // migrations, not SCRUM-370's), which is exactly why the list is read
-      // from 048's text: no PGlite suite applies both stories' files.
-      const typesIn = (name) => {
-        const sql = migration(name).replace(/--[^\n]*/g, '');
-        const at = sql.lastIndexOf('add constraint notifications_type_known');
-        const list = sql.slice(at, sql.indexOf(');', at));
-        return [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-      };
-      const from040 = typesIn('040_venue_holds.sql');
-      const from048 = typesIn('048_complete_event_cancellation_existing_arrangements.sql');
-      const in052 = typesIn('052_lead_assignment.sql');
-
-      expect(from040).toEqual([
-        'booking_flagged',
-        'booking_request_withdrawn',
-        'clarification_requested',
-        'clarification_replied',
-        'clarification_closed',
-        'booking_flagged_setup_change',
-        'venue_hold_expired',
-      ]);
-      expect(from048).toEqual([...from040, 'event_cancelled']);
-      expect(in052).toEqual([
-        ...from048,
-        'event_request_awaiting_assignment',
-        'event_request_assigned',
-        'event_request_coordinator_assigned',
-      ]);
-      const { rows: [def] } = await db.query(
-        "select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'notifications_type_known'",
-      );
-      for (const type of in052) expect(def.def).toContain(`'${type}'`);
-    });
   });
 
   // -------------------------------------------------------------------------
@@ -1771,7 +1658,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     );
   }
 
-  describe("SCRUM-19: 025's five constraints, written to directly", () => {
+  describe('SCRUM-19: the five lifecycle constraints, written to directly', () => {
     // Each write below breaks exactly one constraint and satisfies the other
     // four, so the constraint named in the error is the only one that could
     // have fired. Written straight to the table, as check-event-request-
@@ -2069,30 +1956,21 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
 
 
 describe('SCRUM-318: a rejected request reopens on a database that has SCRUM-19\'s decision columns', () => {
-  it('SCRUM318_clears_the_decision_with_the_status_and_runs_022_again_without_error', async () => {
-    const db = await databaseBefore020();
+  it('SCRUM318_clears_the_decision_with_the_status', async () => {
+    const db = await createSchemaDb();
     try {
-      // databaseBefore020 now applies the real 025 (SCRUM-134), so the
-      // decision columns and their constraints are 025's own rather than a
-      // hand-written copy. A rejected request has a decision and a draft may
-      // not, so the reopen has to clear it in the same statement.
-      await db.exec(migration('020_event_status_lifecycle.sql'));
-      await db.exec(migration('021_event_status_history.sql'));
-      await db.exec(migration('022_event_status_transitions.sql'));
-      await db.exec(migration('022_event_status_transitions.sql'));
-
-      const one = async (sql, params) => (await db.query(sql, params)).rows[0];
-      const organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
-      const coordinator = (await one("insert into auth.users (email) values ('c@x') returning id")).id;
-      await db.query("insert into profiles (id, role) values ($1, 'event_organiser'), ($2, 'event_coordinator')", [organiser, coordinator]);
-      const { id } = await one(
-        `insert into event_requests
-           (organiser_id, event_name, status, submitted_at, assigned_coordinator_id, reviewing_coordinator_id,
-            decision, decision_note, decided_by, decided_at)
-         values ($1, 'rejected event', 'rejected', now(), $2, $2, 'rejected', 'No venue.', $2, now())
-         returning id`,
-        [organiser, coordinator],
-      );
+      // A rejected request has a decision and a draft may not, so the reopen
+      // has to clear it in the same statement.
+      const { one } = queriesFor(() => db);
+      const organiser = await seedUser(db, { email: 'o@x', role: 'event_organiser' });
+      const coordinator = await seedUser(db, { email: 'c@x', role: 'event_coordinator' });
+      const id = await seedEvent(db, {
+        status: STATUS.REJECTED,
+        organiser_id: organiser,
+        event_name: 'rejected event',
+        assigned_coordinator_id: coordinator,
+        decision_note: 'No venue.',
+      });
 
       const { rows: [reopened] } = await db.query(
         'select * from change_event_request_status($1, $2, $3, $4, $5)',
@@ -2111,38 +1989,9 @@ describe('SCRUM-318: a rejected request reopens on a database that has SCRUM-19\
       expect(history).toHaveLength(1);
       expect(history[0]).toMatchObject({ previous_status: 'rejected', new_status: 'draft', changed_by: organiser });
 
+      // Resubmitted, it waits in the Lead's queue (SCRUM486_TR02_… covers the reviewer too).
       const { rows: [again] } = await db.query('select * from submit_event_request($1, now(), $2)', [id, organiser]);
-      expect(again).toMatchObject({ status: STATUS.SUBMITTED, assigned_coordinator_id: coordinator });
-    } finally {
-      await db.close();
-    }
-  }, 60_000);
-});
-
-
-describe('SCRUM-325: migration 020 moves planning to approved', () => {
-  it('SCRUM325_moves_a_planning_row_to_approved_and_runs_again_without_error', async () => {
-    const db = await databaseBefore020();
-    try {
-      const organiser = (await db.query("insert into auth.users (email) values ('o@x') returning id")).rows[0].id;
-      const coordinator = (await db.query("insert into auth.users (email) values ('c@x') returning id")).rows[0].id;
-      const { rows: [planning] } = await db.query(
-        // 025 as first written counts planning as decided, so before 020 a
-        // planning row carries the approval that put it there.
-        `insert into event_requests
-           (organiser_id, event_name, status, submitted_at, assigned_coordinator_id, reviewing_coordinator_id,
-            decision, decided_by, decided_at)
-         values ($1, 'was planning', 'planning', now(), $2, $2, 'approved', $2, now()) returning id`,
-        [organiser, coordinator],
-      );
-
-      await db.exec(migration('020_event_status_lifecycle.sql'));
-      await db.exec(migration('020_event_status_lifecycle.sql'));
-
-      const { rows: [moved] } = await db.query('select status from event_requests where id = $1', [planning.id]);
-      expect(moved.status).toBe('approved');
-      const { rows: [left] } = await db.query("select count(*)::int as n from event_requests where status::text = 'planning'");
-      expect(left.n).toBe(0);
+      expect(again).toMatchObject({ status: STATUS.SUBMITTED, assigned_coordinator_id: null });
     } finally {
       await db.close();
     }

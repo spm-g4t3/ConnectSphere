@@ -29,6 +29,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { getBookingStatusDisplay } from '../../src/domain/bookingStatus.js';
+import { ok, fail, queryStub } from '../fixtures/supabaseStubs.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -105,32 +107,7 @@ function catalogueRow(overrides = {}) {
   };
 }
 
-/** The same thenable query stub the service tests use. */
-function queryStub(result) {
-  const calls = [];
-  const stub = {
-    called: (method) => calls.some(([name]) => name === method),
-    args: (method) => calls.find(([name]) => name === method)?.slice(1),
-    then: (onFulfilled, onRejected) => Promise.resolve(result).then(onFulfilled, onRejected),
-  };
-  // SCRUM-179: 'in' added for the calendar's bookings status filter.
-  for (const method of ['select', 'eq', 'is', 'in', 'ilike', 'gte', 'order', 'limit', 'delete', 'lt', 'gt', 'lte', 'not']) {
-    stub[method] = (...args) => { calls.push([method, ...args]); return stub; };
-  }
-  stub.maybeSingle = (...args) => { calls.push(['maybeSingle', ...args]); return Promise.resolve(result); };
-  return stub;
-}
-
-const ok = (data) => ({ data, error: null });
-
-/** Stands in for a signed-in user of a given role. */
-const signedInAs = (role, id = STAFF_ID) => (req, _res, next) => {
-  req.user = { id, email: 'someone@example.com', role };
-  next();
-};
-
-/** Stands in for no session, answering as the real middleware does. */
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInAs = signedInFor(STAFF_ID);
 
 /** An app with the router mounted where app.js mounts it. */
 function appWith(requireAuth = signedInAs(ROLE.VENUE_STAFF)) {
@@ -736,9 +713,8 @@ describe('SCRUM-17 venue block routes', () => {
   };
 
   const createBody = { startsAt: FUTURE_START, endsAt: FUTURE_END, reason: 'maintenance' };
-  const pgError = (error) => ({ data: null, error });
   const pt409 = (hint, details = null) =>
-    pgError({ code: 'PT409', message: `refused: ${hint}`, hint, details });
+    fail({ code: 'PT409', message: `refused: ${hint}`, hint, details });
 
   const ROUTES = [
     ['GET', 'get', BASE, undefined],
@@ -830,7 +806,7 @@ describe('SCRUM-17 venue block routes', () => {
       expect(JSON.stringify(params)).not.toContain(FORGED_ID);
     });
 
-    it('SCRUM17_AC3_returns_the_flagged_bookings_after_an_override', async () => {
+    it('SCRUM17_AC3_create_returns_the_flagged_bookings_after_an_override', async () => {
       rpc.mockResolvedValueOnce(
         ok({ outcome: 'created', block: blockRow(), affected_bookings: [bookingRow], flagged_bookings: [bookingRow] }),
       );
@@ -895,7 +871,7 @@ describe('SCRUM-17 venue block routes', () => {
     });
 
     it('SCRUM17_AC1_answers_404_for_a_missing_venue', async () => {
-      rpc.mockResolvedValueOnce(pgError({ code: 'P0002', message: `venue ${VENUE_ID} not found` }));
+      rpc.mockResolvedValueOnce(fail({ code: 'P0002', message: `venue ${VENUE_ID} not found` }));
 
       const res = await request(appWith()).post(BASE).send(createBody);
 
@@ -958,7 +934,7 @@ describe('SCRUM-17 venue block routes', () => {
     });
 
     it('SCRUM17_AC4_answers_404_for_a_block_not_on_the_venue', async () => {
-      rpc.mockResolvedValueOnce(pgError({ code: 'P0002', message: 'venue block not found on venue' }));
+      rpc.mockResolvedValueOnce(fail({ code: 'P0002', message: 'venue block not found on venue' }));
 
       const res = await request(appWith()).patch(ONE).send({ reason: 'safety' });
 
@@ -967,7 +943,7 @@ describe('SCRUM-17 venue block routes', () => {
     });
 
     it.each(['BLOCK_REMOVED', 'BLOCK_ENDED', 'VENUE_RETIRED'])(
-      'SCRUM17_AC4_answers_409_%s_with_the_code',
+      'SCRUM17_AC4_update_answers_409_%s_with_the_code',
       async (hint) => {
         rpc.mockResolvedValueOnce(pt409(hint));
 
@@ -991,7 +967,7 @@ describe('SCRUM-17 venue block routes', () => {
       });
     });
 
-    it('SCRUM17_AC3_returns_the_flagged_bookings_after_an_override', async () => {
+    it('SCRUM17_AC3_update_returns_the_flagged_bookings_after_an_override', async () => {
       rpc.mockResolvedValueOnce(updated({ affected_bookings: [bookingRow], flagged_bookings: [bookingRow] }));
 
       const res = await request(appWith()).patch(ONE).send({
@@ -1048,7 +1024,7 @@ describe('SCRUM-17 venue block routes', () => {
     });
 
     it('SCRUM17_AC4_answers_404_for_a_missing_block', async () => {
-      rpc.mockResolvedValueOnce(pgError({ code: 'P0002', message: 'venue block not found on venue' }));
+      rpc.mockResolvedValueOnce(fail({ code: 'P0002', message: 'venue block not found on venue' }));
 
       const res = await request(appWith()).delete(ONE);
 
@@ -1056,7 +1032,7 @@ describe('SCRUM-17 venue block routes', () => {
       expect(res.body).toEqual({ error: 'venue block not found on venue' });
     });
 
-    it.each(['BLOCK_REMOVED', 'BLOCK_ENDED'])('SCRUM17_AC4_answers_409_%s_with_the_code', async (hint) => {
+    it.each(['BLOCK_REMOVED', 'BLOCK_ENDED'])('SCRUM17_AC4_remove_answers_409_%s_with_the_code', async (hint) => {
       rpc.mockResolvedValueOnce(pt409(hint));
 
       const res = await request(appWith()).delete(ONE);
@@ -1067,7 +1043,7 @@ describe('SCRUM-17 venue block routes', () => {
 
     it('SCRUM17_AC4_answers_500_without_leaking_the_cause', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-      rpc.mockResolvedValueOnce(pgError({ code: '42883', message: 'function remove_venue_block does not exist' }));
+      rpc.mockResolvedValueOnce(fail({ code: '42883', message: 'function remove_venue_block does not exist' }));
 
       const res = await request(appWith()).delete(ONE);
 
@@ -1993,7 +1969,7 @@ describe('SCRUM178_AC6 Organisers and Attendees are refused the calendar', () =>
     ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
     ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
     ['a Safety Officer', ROLE.SAFETY_OFFICER],
-  ])('SCRUM178_AC6_%s_gets_403_with_no_query', async (_label, role) => {
+  ])('SCRUM178_AC6_%s_gets_403_on_the_calendar_with_no_query', async (_label, role) => {
     const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(`${CALENDAR}${CALENDAR_WINDOW_QS}`);
 
     expect(res.status).toBe(403);
@@ -2060,7 +2036,7 @@ describe('SCRUM178_AC6 the bookings read is refused to Organisers and Attendees,
     ['Technical Support', ROLE.TECHNICAL_SUPPORT_STAFF],
     ['an Event Coordinator Lead', ROLE.EVENT_COORDINATOR_LEAD],
     ['a Safety Officer', ROLE.SAFETY_OFFICER],
-  ])('SCRUM178_AC6_%s_gets_403_with_no_query', async (_label, role) => {
+  ])('SCRUM178_AC6_%s_gets_403_on_the_bookings_read_with_no_query', async (_label, role) => {
     const res = await request(appWith(signedInAs(role, ORGANISER_ID))).get(BOOKINGS);
 
     expect(res.status).toBe(403);

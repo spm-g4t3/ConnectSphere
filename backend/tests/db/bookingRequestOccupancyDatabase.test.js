@@ -2,9 +2,8 @@
  * SCRUM-484 (Phase 1): create_booking_request checks the period through the
  * shared occupied period, run against a real Postgres.
  *
- * 033_venue_occupancy_callers.sql replaces 030's step 7 -- an inline raw block
- * query plus venue_block_booking_conflicts() -- with one call to
- * venue_occupancy_conflicts(p_venue_id, start, end, true) from 032. So:
+ * Step 7 is one call to venue_occupancy_conflicts(p_venue_id, start, end,
+ * true), run here against the final schema. So:
  *   - the requested event is padded with the venue's setup and turnaround, as
  *     is every booking it is compared with (decision 1);
  *   - flagged_for_review bookings occupy, as well as approved ones
@@ -13,144 +12,61 @@
  *     into one is a conflict;
  *   - each conflict item gains occupied_starts_at, occupied_ends_at,
  *     setup_minutes and turnaround_minutes (AC7).
- * The text is pinned in venueOccupancyCallersMigration.test.js.
  *
  * Common fixture (the test-case doc's): venue V at 30/45, an approved booking
  * A on D 10:00-12:00, which occupies 09:30-12:45. The earliest a next event
  * may start is 13:15. Each test makes its own venue.
- *
- * Migrations: the same list as venueBlockOccupancyDatabase.test.js, through
- * 033, then 040 (SCRUM-491), whose create_booking_request is 033's with step
- * 7 also counting other events' active holds, then 051 (SCRUM-525), the
- * latest definition, which keeps 040's step 7 and adds the request's own
- * expected attendance as an 8th argument (150 here, the event's). Every case
- * above the hold one holds no venue, so each still tests 033's rule
- * unchanged.
  *
  * Dates: D is the Singapore date 10 days from when the test runs, never
  * hard-coded. Instants are compared with getTime().
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { at } from '../fixtures/time.js';
 import { toSuitabilityRecord } from '../../src/domain/suitabilityRecord.js';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '005_event_request_details.sql',
-  '007_user_roles.sql',
-  '010_event_request_clarifications.sql',
-  'STAND_IN',
-  '014_coordinator_assignment.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '012_venue_block_creation.sql',
-  '013_venue_block_booking_conflicts.sql',
-  '014_booking_review_notifications.sql',
-  '015_venue_block_amend_remove.sql',
-  '017_venue_turnaround.sql',
-  '023_venue_setup_time.sql',
-  '027_booking_request_statuses.sql',
-  '028_booking_status_default_pending.sql',
-  '030_create_booking_request.sql',
-  '031_withdraw_booking_request.sql',
-  '032_venue_occupancy.sql',
-  '033_venue_occupancy_callers.sql',
-  '040_venue_holds.sql',
-  '051_multi_venue_booking_requests.sql',
-];
-
-/** What 014 reads from SCRUM-19's migration, which is not on this branch. */
-const DECISION_STAND_IN = `
-  alter table event_requests
-    add column if not exists reviewing_coordinator_id uuid references auth.users (id);
-`;
-
-/** D: the Singapore date 10 days from now, as YYYY-MM-DD. */
-const D = new Date(Date.now() + 8 * 3600_000 + 10 * 86_400_000).toISOString().slice(0, 10);
-/** An instant on D, written at +08:00 (Singapore). */
-const at = (hhmm) => `${D}T${hhmm}:00+08:00`;
 const ms = (value) => new Date(value).getTime();
 
 const SUITABLE = { suitable: true, criteria: [{ criterion: 'capacity', met: true }] };
 const OCCUPIED_KEYS = ['occupied_starts_at', 'occupied_ends_at', 'setup_minutes', 'turnaround_minutes'];
 
-describe('SCRUM-484: create_booking_request uses the occupied period (033)', () => {
+describe('SCRUM-484: create_booking_request uses the occupied period', () => {
   let db;
   let organiser;
   let coordinator;
   let counter = 0;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
-  async function makeVenue(setup = 30, turnaround = 45) {
-    counter += 1;
-    return (
-      await one(
-        `insert into venues (name, location, max_capacity, setup_minutes, turnaround_minutes)
-         values ($1, 'Block A', 200, $2, $3) returning id`,
-        [`Harbour Room ${counter}`, setup, turnaround],
-      )
-    ).id;
-  }
+  const makeVenue = (setup = 30, turnaround = 45) => seedVenue(db, { name: `Harbour Room ${++counter}`, setup, turnaround });
 
-  async function makeEvent(startsAt, endsAt) {
+  function makeEvent(startsAt, endsAt) {
     counter += 1;
-    const cols = {
-      organiser_id: organiser,
-      event_name: `Event ${counter}`,
+    return seedEvent(db, {
       status: 'approved',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: `Event ${counter}`,
       proposed_start: startsAt,
       proposed_end: endsAt,
       expected_attendance: 150,
-      submitted_at: new Date().toISOString(),
-      assigned_coordinator_id: coordinator,
-    };
-    const keys = Object.keys(cols);
-    return (
-      await one(
-        `insert into event_requests (${keys.join(',')}) values (${keys.map((_, i) => `$${i + 1}`).join(',')}) returning id`,
-        Object.values(cols),
-      )
-    ).id;
+    });
   }
 
-  async function makeBlock(venueId, startsAt, endsAt, removed = false) {
-    return (
-      await one(
-        `insert into venue_blocks (venue_id, starts_at, ends_at, reason, removed_at)
-         values ($1, $2, $3, 'maintenance', ${removed ? 'now()' : 'null'}) returning id`,
-        [venueId, startsAt, endsAt],
-      )
-    ).id;
-  }
+  const makeBlock = (venueId, startsAt, endsAt, removed = false) =>
+    seedBlock(db, { venueId, start: startsAt, end: endsAt, removed });
 
   /**
    * A booking on its own event. A flagged_for_review one needs a block and a
-   * flag time (014's bookings_review_flag_paired); it points at a removed
+   * flag time (bookings_review_flag_paired); it points at a removed
    * block late on D, which occupies nothing.
    */
   async function makeBooking(venueId, status, startsAt, endsAt) {
     const eventId = await makeEvent(startsAt, endsAt);
-    let reviewBlockId = null;
-    if (status === 'flagged_for_review') {
-      reviewBlockId = await makeBlock(venueId, at('22:00'), at('23:00'), true);
-    }
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status, review_block_id, flagged_at)
-         values ($1, $2, $3, $4, $5, $6, ${reviewBlockId ? 'now()' : 'null'}) returning id`,
-        [venueId, eventId, startsAt, endsAt, status, reviewBlockId],
-      )
-    ).id;
+    const reviewBlockId = status === 'flagged_for_review' ? await makeBlock(venueId, at('22:00'), at('23:00'), true) : null;
+    return seedBooking(db, { venueId, eventId, status, start: startsAt, end: endsAt, reviewBlockId });
   }
 
   /** create_booking_request for a new event on startsAt-endsAt at venueId. */
@@ -172,18 +88,9 @@ describe('SCRUM-484: create_booking_request uses the occupied period (033)', () 
   const ids = (result) => (result.conflicts ?? []).map((c) => c.booking_id ?? c.block_id);
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) {
-      await db.exec(name === 'STAND_IN' ? DECISION_STAND_IN : migration(name));
-    }
-    organiser = (await one("insert into auth.users (email) values ('o@x') returning id")).id;
-    coordinator = (await one("insert into auth.users (email) values ('c1@x') returning id")).id;
+    db = await createSchemaDb();
+    organiser = await seedUser(db, { email: 'o@x' });
+    coordinator = await seedUser(db, { email: 'c1@x' });
   }, 60_000);
 
   afterAll(async () => {
@@ -376,7 +283,7 @@ describe('SCRUM-484: create_booking_request uses the occupied period (033)', () 
   // definition of create_booking_request (051, which keeps 040's storing of
   // it), which createBookingRequestMigration (stopping at 030) does not reach,
   // with a full result as the service builds it -- six criteria and `checked`.
-  describe('SCRUM-188 AC7: the suitability result is stored with the request (051)', () => {
+  describe('SCRUM-188 AC7: the suitability result is stored with the request', () => {
     const CHECKED = {
       startsAt: at('10:00'),
       endsAt: at('12:00'),

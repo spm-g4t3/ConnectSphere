@@ -34,6 +34,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { ok, scriptedQueryStub } from '../fixtures/supabaseStubs.js';
+import { headerAuth } from '../fixtures/auth.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -145,32 +147,6 @@ const AC7_FIELDS = [
 const queue = [];
 const failures = [];
 
-function queryStub(step) {
-  const calls = [];
-  const stub = {
-    calls,
-    called: (method) => calls.some(([name]) => name === method),
-    args: (method) => calls.find(([name]) => name === method)?.slice(1),
-    allArgs: (method) => calls.filter(([name]) => name === method).map((c) => c.slice(1)),
-  };
-  const settle = () => {
-    try {
-      step.assert?.(stub);
-    } catch (err) {
-      failures.push(err);
-    }
-    return Promise.resolve(step.respond);
-  };
-  for (const method of [
-    'select', 'eq', 'is', 'ilike', 'gte', 'lte', 'lt', 'gt', 'not', 'in', 'order', 'limit',
-  ]) {
-    stub[method] = (...args) => { calls.push([method, ...args]); return stub; };
-  }
-  stub.maybeSingle = (...args) => { calls.push(['maybeSingle', ...args]); return settle(); };
-  stub.then = (onFulfilled, onRejected) => settle().then(onFulfilled, onRejected);
-  return stub;
-}
-
 const describeStep = (s) => (s.kind === 'rpc' ? `rpc('${s.name}')` : `from('${s.name}')`);
 
 // SCRUM-484: rpc calls are scripted in the same queue as from() calls, so
@@ -199,12 +175,11 @@ from.mockImplementation((table) => {
   } else if (step.kind !== 'from' || step.name !== table) {
     failures.push(new Error(`expected ${describeStep(step)}, got from('${table}')`));
   }
-  return queryStub(step ?? { respond: { data: null, error: { message: 'unscripted' } } });
+  return scriptedQueryStub(step ?? { respond: { data: null, error: { message: 'unscripted' } } }, failures);
 });
 
 const fromStep = (name, respond, assert) => ({ kind: 'from', name, respond, assert });
 const rpcStep = (name, respond, assert) => ({ kind: 'rpc', name, respond, assert });
-const ok = (data) => ({ data, error: null });
 
 /** A lookup-table read answering that every requested code exists. */
 function lookupStep(table, codes) {
@@ -249,13 +224,7 @@ function script(...steps) {
 
 // ------------------------------------------------------------------ the app
 
-function fakeRequireAuth(req, res, next) {
-  if (req.get('x-test-as') !== 'coordinator') {
-    return res.status(401).json({ error: 'Authentication required' });
-  }
-  req.user = { id: COORDINATOR_ID, email: 'coordinator@example.com', role: ROLE.EVENT_COORDINATOR };
-  return next();
-}
+const fakeRequireAuth = headerAuth({ coordinator: { id: COORDINATOR_ID, role: ROLE.EVENT_COORDINATOR } });
 
 const app = express()
   .use(express.json())

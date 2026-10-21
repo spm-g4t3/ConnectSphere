@@ -17,6 +17,8 @@ import {
   readStatusDisplay,
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
+import { formatMediumTimestamp } from "../services/displayFormat";
+import { isReplyOverdue } from "../services/datetimeFormat";
 import EventRequestForm from "./EventRequestForm";
 import ChangeRequestForm from "./ChangeRequestForm";
 import ChangeRequestStatusList from "./ChangeRequestStatusList";
@@ -27,18 +29,7 @@ import ClarificationReplyForm from "./ClarificationReplyForm";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import ConfirmedArrangements from "./ConfirmedArrangements";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
-
-function formatEventDate(value) {
-  if (!value) return "Not specified";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 /**
  * SCRUM-334, for SCRUM-327 AC10: the Organiser sees who their coordinator is
@@ -202,19 +193,7 @@ export default function MyEventRequests() {
   //
   // handleSaved already refetches after an edit, so changes made in this app
   // are covered; this covers changes made anywhere else.
-  useEffect(() => {
-    function refetchIfVisible() {
-      if (document.visibilityState === "visible") fetchRequests();
-    }
-
-    window.addEventListener("focus", refetchIfVisible);
-    document.addEventListener("visibilitychange", refetchIfVisible);
-
-    return () => {
-      window.removeEventListener("focus", refetchIfVisible);
-      document.removeEventListener("visibilitychange", refetchIfVisible);
-    };
-  }, [fetchRequests]);
+  useRefetchOnReturn(fetchRequests);
 
   function handleSaved() {
     setActivePanel(null);
@@ -324,8 +303,8 @@ export default function MyEventRequests() {
               )}
               {req.status === "pending_clarification" && req.clarificationReplyByDate && (
                 <p className="my-event-requests__clarification">
-                  Please respond by {formatEventDate(req.clarificationReplyByDate)}.
-                  {req.clarificationReplyByDate < new Date().toISOString().slice(0, 10) && (
+                  Please respond by {formatMediumTimestamp(req.clarificationReplyByDate, "Not specified")}.
+                  {isReplyOverdue(req.clarificationReplyByDate) && (
                     <strong className="clarification-overdue"> Overdue</strong>
                   )}
                 </p>
@@ -359,7 +338,7 @@ export default function MyEventRequests() {
                     <dt>Reason</dt>
                     <dd>{req.cancellationReason || "No reason recorded."}</dd>
                     <dt>Cancelled on</dt>
-                    <dd>{formatEventDate(req.cancelledAt)}</dd>
+                    <dd>{formatMediumTimestamp(req.cancelledAt, "Not specified")}</dd>
                   </dl>
                 </div>
               )}
@@ -372,9 +351,9 @@ export default function MyEventRequests() {
                   <dt>Description</dt>
                   <dd>{req.description || "Not specified"}</dd>
                   <dt>Proposed start</dt>
-                  <dd>{formatEventDate(req.proposedStart)}</dd>
+                  <dd>{formatMediumTimestamp(req.proposedStart, "Not specified")}</dd>
                   <dt>Proposed end</dt>
-                  <dd>{formatEventDate(req.proposedEnd)}</dd>
+                  <dd>{formatMediumTimestamp(req.proposedEnd, "Not specified")}</dd>
                   <dt>Expected attendance</dt>
                   <dd>{req.expectedAttendance ?? "Not specified"}</dd>
                   <dt>Venue requirements</dt>

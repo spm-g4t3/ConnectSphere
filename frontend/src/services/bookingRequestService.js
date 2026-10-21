@@ -4,7 +4,7 @@
 // API, kept beside the other service files so components never build a URL
 // themselves. SCRUM-258 adds Venue Staff's queue and decisions.
 
-import { apiClient } from "./apiClient";
+import { getData, postData } from "./apiData";
 
 /**
  * Requests a venue for an event (POST /booking-requests).
@@ -55,8 +55,7 @@ import { apiClient } from "./apiClient";
  *   the expectedAttendance it was stored with
  */
 export async function createBookingRequest(input) {
-  const response = await apiClient.post("/booking-requests", input);
-  return response.data;
+  return postData("/booking-requests", input);
 }
 
 /**
@@ -76,8 +75,7 @@ export async function createBookingRequest(input) {
  * @returns {Promise<Array>} possibly empty
  */
 export async function getMyBookingRequests() {
-  const response = await apiClient.get("/booking-requests/mine");
-  return response.data;
+  return getData("/booking-requests/mine");
 }
 
 /**
@@ -92,8 +90,7 @@ export async function getMyBookingRequests() {
  * @returns {Promise<Object>} the request, now withdrawn
  */
 export async function withdrawBookingRequest(id) {
-  const response = await apiClient.post(`/booking-requests/${id}/withdraw`);
-  return response.data;
+  return postData(`/booking-requests/${id}/withdraw`);
 }
 
 /**
@@ -109,8 +106,7 @@ export async function withdrawBookingRequest(id) {
  * @returns {Promise<{booking: Object, returnedToPending: string[]}>}
  */
 export async function releaseVenueBooking(id, reason) {
-  const response = await apiClient.post(`/booking-requests/${id}/release`, { reason });
-  return response.data;
+  return postData(`/booking-requests/${id}/release`, { reason });
 }
 /**
  * Every open booking request Venue Staff decide on (GET /booking-requests/pending,
@@ -128,8 +124,7 @@ export async function releaseVenueBooking(id, reason) {
  * @returns {Promise<Array>} possibly empty
  */
 export async function getPendingBookingRequests() {
-  const response = await apiClient.get("/booking-requests/pending");
-  return response.data;
+  return getData("/booking-requests/pending");
 }
 
 /**
@@ -148,8 +143,7 @@ export async function getPendingBookingRequests() {
  *   conflicting) and convertedHoldId (the event's own hold it converted, or null)
  */
 export async function approveBookingRequest(id) {
-  const response = await apiClient.post(`/booking-requests/${id}/approve`);
-  return response.data;
+  return postData(`/booking-requests/${id}/approve`);
 }
 
 /**
@@ -167,9 +161,8 @@ export async function approveBookingRequest(id) {
  * @returns {Promise<Object>} the request, now rejected, with the decision
  */
 export async function rejectBookingRequest(id, { reason, suggestedAlternative }) {
-  const response = await apiClient.post(`/booking-requests/${id}/reject`, {
+  return postData(`/booking-requests/${id}/reject`, {
     reason,
     ...(suggestedAlternative ? { suggestedAlternative } : {}),
   });
-  return response.data;
 }

@@ -1,89 +1,36 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PGlite } from '@electric-sql/pglite';
-import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor, refusal } from './helpers/queries.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migration = (name) => readFileSync(resolve(here, '../../db/migrations', name), 'utf8');
-const MIGRATIONS = [
-  '001_event_requests.sql',
-  '002_venues.sql',
-  '009_bookings.sql',
-  '011_venue_blocks.sql',
-  '022_equipment_schema.sql',
-  '027_booking_request_statuses.sql',
-  '043_release_event_arrangements.sql',
-  '044_event_cancellation_impact_preview.sql',
-];
-
+// The cancellation impact preview against the final schema.
 describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
   let db;
   let organiser;
+  let coordinator;
   let eventId;
   let otherEventId;
   let venueIds;
   let equipmentTypeId;
 
-  const one = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const { one } = queriesFor(() => db);
 
-  async function makeEvent(name) {
-    return (
-      await one(
-        'insert into event_requests (organiser_id, event_name) values ($1, $2) returning id',
-        [organiser, name],
-      )
-    ).id;
-  }
+  // Approved and assigned: only the assigned coordinator may preview (011).
+  const makeEvent = (name) =>
+    seedEvent(db, { status: 'approved', organiser_id: organiser, event_name: name, assigned_coordinator_id: coordinator });
 
-  async function makeBooking(forEvent, venueId, status) {
-    return (
-      await one(
-        `insert into bookings (venue_id, event_request_id, starts_at, ends_at, status)
-         values ($1, $2, '2026-12-01T09:00:00Z', '2026-12-01T10:00:00Z', $3)
-         returning id`,
-        [venueId, forEvent, status],
-      )
-    ).id;
-  }
+  const makeBooking = (forEvent, venueId, status) =>
+    seedBooking(db, { venueId, eventId: forEvent, status, start: '2026-12-01T09:00:00Z', end: '2026-12-01T10:00:00Z' });
 
   beforeAll(async () => {
-    db = new PGlite({ extensions: { btree_gist } });
-    await db.exec(`
-      create schema auth;
-      create table auth.users (
-        id uuid primary key default gen_random_uuid(),
-        email text
-      );
-      create role anon;
-      create role authenticated;
-    `);
-    for (const name of MIGRATIONS) await db.exec(migration(name));
-    await db.exec('alter table equipment_lines add column removed_at timestamptz');
-    await db.exec(`
-      create type venue_hold_status as enum ('active', 'expired', 'released');
-      create table venue_holds (
-        id uuid primary key default gen_random_uuid(),
-        event_request_id uuid not null references event_requests(id),
-        venue_id uuid not null references venues(id),
-        placed_at timestamptz not null default now(),
-        expires_at timestamptz not null,
-        status venue_hold_status not null default 'active'
-      );
-    `);
-    await db.exec(migration('049_filter_cancelled_equipment_from_cancellation_preview.sql'));
+    db = await createSchemaDb();
 
-    organiser = (await one('insert into auth.users (email) values ($1) returning id', ['organiser@test'])).id;
+    organiser = await seedUser(db, { email: 'organiser@test' });
+    coordinator = await seedUser(db, { email: 'coordinator@test', role: 'event_coordinator' });
     eventId = await makeEvent('Preview event');
     otherEventId = await makeEvent('Other event');
     venueIds = await Promise.all(
-      ['Hall A', 'Hall B', 'Hall C'].map(async (name) =>
-        (await one(
-          'insert into venues (name, location, max_capacity) values ($1, $2, 100) returning id',
-          [name, 'Block A'],
-        )).id),
+      ['Hall A', 'Hall B', 'Hall C'].map((name) => seedVenue(db, { name, capacity: 100, setup: 0, turnaround: 0 })),
     );
     equipmentTypeId = (
       await one("insert into equipment_types (name, total_quantity) values ('Projector', 10) returning id")
@@ -102,8 +49,8 @@ describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
     await makeBooking(otherEventId, venueIds[0], 'approved');
 
     const { preview } = await one(
-      'select event_cancellation_impact_preview($1) as preview',
-      [eventId],
+      'select event_cancellation_impact_preview($1, $2) as preview',
+      [eventId, coordinator],
     );
 
     expect(preview.venueBookings.count).toBe(2);
@@ -150,8 +97,8 @@ describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
     );
 
     const { preview } = await one(
-      'select event_cancellation_impact_preview($1) as preview',
-      [eventId],
+      'select event_cancellation_impact_preview($1, $2) as preview',
+      [eventId, coordinator],
     );
 
     expect(preview.equipmentRequests.count).toBe(1);
@@ -184,8 +131,8 @@ describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
     ).id;
 
     const { preview } = await one(
-      'select event_cancellation_impact_preview($1) as preview',
-      [eventId],
+      'select event_cancellation_impact_preview($1, $2) as preview',
+      [eventId, coordinator],
     );
 
     expect(preview.equipmentRequests.details).not.toContainEqual(
@@ -225,8 +172,8 @@ describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
     ).id;
 
     const { preview } = await one(
-      'select event_cancellation_impact_preview($1) as preview',
-      [eventId],
+      'select event_cancellation_impact_preview($1, $2) as preview',
+      [eventId, coordinator],
     );
     const request = preview.equipmentRequests.details.find((item) => item.id === requestId);
 
@@ -242,8 +189,8 @@ describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
          coalesce((select jsonb_agg(to_jsonb(r) order by r.id) from equipment_reservations r), '[]') as reservations`,
     );
 
-    const first = await one('select event_cancellation_impact_preview($1) as preview', [eventId]);
-    const second = await one('select event_cancellation_impact_preview($1) as preview', [eventId]);
+    const first = await one('select event_cancellation_impact_preview($1, $2) as preview', [eventId, coordinator]);
+    const second = await one('select event_cancellation_impact_preview($1, $2) as preview', [eventId, coordinator]);
     const after = await one(
       `select
          coalesce((select jsonb_agg(to_jsonb(b) order by b.id) from bookings b), '[]') as bookings,
@@ -254,7 +201,37 @@ describe('SCRUM-373: event_cancellation_impact_preview in Postgres', () => {
     expect(first.preview).toEqual(second.preview);
     expect(after).toEqual(before);
     await expect(
-      db.query('select event_cancellation_impact_preview($1)', [randomUUID()]),
+      db.query('select event_cancellation_impact_preview($1, $2)', [randomUUID(), coordinator]),
     ).rejects.toMatchObject({ code: 'P0002' });
+  });
+
+  describe('AC1: only the assigned coordinator previews', () => {
+    // The route checks the caller; since 011 the function does too, so a
+    // direct call cannot read another coordinator's event.
+    it('SCRUM370_AC1_a_null_caller_is_refused_with_42501', async () => {
+      const err = await refusal(db.query('select event_cancellation_impact_preview($1, null)', [eventId]));
+
+      expect(err?.code).toBe('42501');
+    });
+
+    it('SCRUM370_AC1_a_coordinator_who_is_not_the_assigned_one_is_refused_with_42501', async () => {
+      const other = await seedUser(db, { email: 'other-coordinator@test', role: 'event_coordinator' });
+
+      const err = await refusal(db.query('select event_cancellation_impact_preview($1, $2)', [eventId, other]));
+
+      expect(err?.code).toBe('42501');
+      expect(err?.message).toBe('Only the coordinator assigned to this event can preview its cancellation');
+    });
+
+    it('SCRUM370_AC1_the_assigned_coordinator_without_the_coordinator_role_is_refused_with_42501', async () => {
+      const formerCoordinator = await seedUser(db, { email: 'former-coordinator@test', role: 'venue_staff' });
+      const assigned = await seedEvent(db, {
+        status: 'approved', organiser_id: organiser, event_name: 'Wrong role', assigned_coordinator_id: formerCoordinator,
+      });
+
+      const err = await refusal(db.query('select event_cancellation_impact_preview($1, $2)', [assigned, formerCoordinator]));
+
+      expect(err?.code).toBe('42501');
+    });
   });
 });

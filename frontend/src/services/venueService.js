@@ -30,7 +30,8 @@
 //     Venue Staff only, and GET /event-requests/hold-candidates is the hold
 //     form's event picker. See the hold section below.
 
-import { apiClient } from "./apiClient"; // <-- replace with your actual API client
+import { apiClient } from "./apiClient";
+import { getData, patchData, postData } from "./apiData";
 
 /**
  * Searches active venues. Retired venues are left out by the backend, so
@@ -62,8 +63,7 @@ export async function searchActiveVenues(filters = {}) {
   if (filters.endsAt) params.endsAt = filters.endsAt;
   if (filters.includeRetired === true) params.includeRetired = true;
 
-  const response = await apiClient.get("/venues/search", { params });
-  return response.data;
+  return getData("/venues/search", { params });
 }
 
 /**
@@ -126,8 +126,7 @@ export async function findVenuesForEvent(criteria) {
     params.eventRequestId = criteria.eventRequestId;
   }
 
-  const response = await apiClient.get("/venues/event-search", { params });
-  return response.data;
+  return getData("/venues/event-search", { params });
 }
 
 /**
@@ -142,8 +141,7 @@ export async function findVenuesForEvent(criteria) {
  * only this endpoint returns it.
  */
 export async function getVenueDetails(venueId) {
-  const response = await apiClient.get(`/venues/${venueId}`);
-  return response.data;
+  return getData(`/venues/${venueId}`);
 }
 
 /**
@@ -163,8 +161,7 @@ export async function getVenueDetails(venueId) {
  * @returns {Promise<Array<{id, name, location, maxCapacity, retiredAt}>>}
  */
 export async function getVenueCatalogue() {
-  const response = await apiClient.get("/venues");
-  return response.data;
+  return getData("/venues");
 }
 
 /**
@@ -191,8 +188,7 @@ export async function getVenueCatalogue() {
  * @returns {Promise<Object>} the venue, with retiredAt set
  */
 export async function retireVenue(venueId) {
-  const response = await apiClient.post(`/venues/${venueId}/retire`, {});
-  return response.data;
+  return postData(`/venues/${venueId}/retire`, {});
 }
 
 /**
@@ -233,8 +229,7 @@ export async function retireVenue(venueId) {
  * @returns {Promise<Object>} the created venue, fully populated
  */
 export async function createVenue(input) {
-  const response = await apiClient.post("/venues", input);
-  return response.data;
+  return postData("/venues", input);
 }
 
 /**
@@ -265,8 +260,7 @@ export async function createVenue(input) {
  * @returns {Promise<Object>} the updated venue, fully populated
  */
 export async function updateVenue(venueId, changes) {
-  const response = await apiClient.patch(`/venues/${venueId}`, changes);
-  return response.data;
+  return patchData(`/venues/${venueId}`, changes);
 }
 
 /**
@@ -299,8 +293,7 @@ export async function updateVenue(venueId, changes) {
  * @returns {Promise<Array<{id, venueId, eventRequestId, startsAt, endsAt, createdAt}>>}
  */
 export async function getVenueBookings(venueId) {
-  const response = await apiClient.get(`/venues/${venueId}/bookings`);
-  return response.data;
+  return getData(`/venues/${venueId}/bookings`);
 }
 
 /**
@@ -329,8 +322,7 @@ export async function getVenueBookings(venueId) {
  * @returns {Promise<Array<{id, venueId, changedBy, changedAt, oldValues, newValues}>>}
  */
 export async function getVenueHistory(venueId) {
-  const response = await apiClient.get(`/venues/${venueId}/history`);
-  return response.data;
+  return getData(`/venues/${venueId}/history`);
 }
 
 // --- Venue blocks (SCRUM-127, part of SCRUM-17) ---------------------------
@@ -409,10 +401,9 @@ export async function listVenueBlocks(venueId, { from, to } = {}) {
  * @returns {Promise<Array<Object>>} calendar entries, soonest first
  */
 export async function getVenueCalendar(venueId, { from, to }) {
-  const response = await apiClient.get(`/venues/${venueId}/calendar`, {
+  return getData(`/venues/${venueId}/calendar`, {
     params: { from, to },
   });
-  return response.data;
 }
 
 /**
@@ -440,8 +431,7 @@ export async function getVenueCalendar(venueId, { from, to }) {
  * @returns {Promise<{block: Object, flaggedBookings: Array<{bookingId, eventRequestId, eventName, startsAt, endsAt}>}>}
  */
 export async function createVenueBlock(venueId, input) {
-  const response = await apiClient.post(`/venues/${venueId}/blocks`, input);
-  return response.data;
+  return postData(`/venues/${venueId}/blocks`, input);
 }
 
 /**
@@ -463,8 +453,7 @@ export async function createVenueBlock(venueId, input) {
  * @returns {Promise<{block: Object, flaggedBookings: Array<Object>}>}
  */
 export async function updateVenueBlock(venueId, blockId, changes) {
-  const response = await apiClient.patch(`/venues/${venueId}/blocks/${blockId}`, changes);
-  return response.data;
+  return patchData(`/venues/${venueId}/blocks/${blockId}`, changes);
 }
 
 /**
@@ -513,8 +502,7 @@ export async function removeVenueBlock(venueId, blockId) {
  * @returns {Promise<Array<{id, blockId, action, changedBy, changedAt, oldValues, newValues}>>}
  */
 export async function getVenueBlockHistory(venueId, blockId) {
-  const response = await apiClient.get(`/venues/${venueId}/blocks/${blockId}/history`);
-  return response.data;
+  return getData(`/venues/${venueId}/blocks/${blockId}/history`);
 }
 
 // --- Tentative venue holds (SCRUM-491) ------------------------------------
@@ -539,8 +527,7 @@ export async function getVenueBlockHistory(venueId, blockId) {
  * @returns {Promise<Array<Object>>} hold rows
  */
 export async function listVenueHolds(venueId) {
-  const response = await apiClient.get(`/venues/${venueId}/holds`);
-  return response.data;
+  return getData(`/venues/${venueId}/holds`);
 }
 
 /**
@@ -563,8 +550,7 @@ export async function listVenueHolds(venueId) {
  * @returns {Promise<{hold: Object}>}
  */
 export async function placeVenueHold(venueId, input) {
-  const response = await apiClient.post(`/venues/${venueId}/holds`, input);
-  return response.data;
+  return postData(`/venues/${venueId}/holds`, input);
 }
 
 /**
@@ -577,6 +563,5 @@ export async function placeVenueHold(venueId, input) {
  * @returns {Promise<Array<Object>>}
  */
 export async function getHoldCandidates() {
-  const response = await apiClient.get("/event-requests/hold-candidates");
-  return response.data;
+  return getData("/event-requests/hold-candidates");
 }

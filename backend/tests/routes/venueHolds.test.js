@@ -23,6 +23,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { ok, fail, queryStub } from '../fixtures/supabaseStubs.js';
+import { signedOut, signedInFor } from '../fixtures/auth.js';
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
 
@@ -54,27 +56,7 @@ const holdRow = (overrides = {}) => ({
   ...overrides,
 });
 
-/** The same thenable query stub the other route tests use. */
-function queryStub(result) {
-  const stub = {
-    then: (onFulfilled, onRejected) => Promise.resolve(result).then(onFulfilled, onRejected),
-    maybeSingle: () => Promise.resolve(result),
-  };
-  for (const method of ['select', 'eq', 'in', 'gt', 'order']) {
-    stub[method] = () => stub;
-  }
-  return stub;
-}
-
-const ok = (data) => ({ data, error: null });
-const fail = (error) => ({ data: null, error });
-
-const signedInAs = (role, id = STAFF_ID) => (req, _res, next) => {
-  req.user = { id, email: 'someone@example.com', role };
-  next();
-};
-
-const signedOut = (_req, res) => res.status(401).json({ error: 'Authentication required' });
+const signedInAs = signedInFor(STAFF_ID);
 
 function appWith(requireAuth = signedInAs(ROLE.VENUE_STAFF)) {
   return express()

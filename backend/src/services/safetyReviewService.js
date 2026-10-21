@@ -1,20 +1,16 @@
+import { NotFoundError, ValidationError } from '../errors.js';
+import { resolveClient } from '../config/resolveClient.js';
 import {
-  ConflictError,
-  ForbiddenError,
-  NotFoundError,
-  ValidationError,
-} from '../errors.js';
+  createPgTranslator,
+  forCodes,
+  forbidden,
+  conflict,
+  invalid,
+} from '../http/pgErrors.js';
+import { UUID_PATTERN, requireCallerId } from '../validation/ids.js';
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OUTCOMES = new Set(['approved', 'changes_requested', 'rejected']);
 export const SAFETY_REVIEW_NOT_ALLOWED = 'SAFETY_REVIEW_NOT_ALLOWED';
-
-async function resolveClient(client) {
-  if (client) return client;
-  const { supabase } = await import('../config/supabaseClient.js');
-  return supabase;
-}
 
 function validateEventId(id) {
   if (typeof id !== 'string' || !UUID_PATTERN.test(id)) {
@@ -22,23 +18,17 @@ function validateEventId(id) {
   }
 }
 
-function translateError(error) {
-  const code = error?.code;
-  const message = error?.message ?? 'Unexpected database error';
-
-  if (code === '42501') return new ForbiddenError(message);
-  if (code === 'P0002') return new NotFoundError(message);
-  if (code === '55000') {
-    return new ConflictError(message, { code: SAFETY_REVIEW_NOT_ALLOWED });
-  }
-  if (code === '40001') {
-    return new ConflictError(message, { code: 'SAFETY_REVIEW_CHANGED' });
-  }
-  if (code === '22023' || code === '23514' || code === '22P02') {
-    return new ValidationError(message);
-  }
-  return new Error(message);
-}
+const translateError = createPgTranslator({
+  missingMessage: 'Unexpected database error',
+  codes: {
+    '42501': forbidden,
+    P0002: (message) => new NotFoundError(message),
+    '55000': conflict(SAFETY_REVIEW_NOT_ALLOWED),
+    '40001': conflict('SAFETY_REVIEW_CHANGED'),
+    ...forCodes(['22023', '23514', '22P02'], invalid),
+  },
+  fallback: (message) => new Error(message),
+});
 
 function validateResponse(input, safetyOfficerId) {
   if (typeof safetyOfficerId !== 'string' || !UUID_PATTERN.test(safetyOfficerId)) {
@@ -81,22 +71,26 @@ async function callRpc(db, name, args) {
   return data;
 }
 
-export async function listSafetyReviews({ client } = {}) {
+// The reads take the caller because the functions check it is a Safety Officer.
+export async function listSafetyReviews(callerId, { client } = {}) {
+  requireCallerId(callerId, 'callerId');
   const db = await resolveClient(client);
-  const rows = await callRpc(db, 'safety_review_queue');
+  const rows = await callRpc(db, 'safety_review_queue', { p_caller: callerId });
   return Array.isArray(rows) ? rows : [];
 }
 
-export async function listSafetyReviewHistory({ client } = {}) {
+export async function listSafetyReviewHistory(callerId, { client } = {}) {
+  requireCallerId(callerId, 'callerId');
   const db = await resolveClient(client);
-  const rows = await callRpc(db, 'safety_review_history');
+  const rows = await callRpc(db, 'safety_review_history', { p_caller: callerId });
   return Array.isArray(rows) ? rows : [];
 }
 
-export async function getSafetyReview(eventRequestId, { client } = {}) {
+export async function getSafetyReview(eventRequestId, callerId, { client } = {}) {
   validateEventId(eventRequestId);
+  requireCallerId(callerId, 'callerId');
   const db = await resolveClient(client);
-  return callRpc(db, 'safety_review_detail', { p_event_request_id: eventRequestId });
+  return callRpc(db, 'safety_review_detail', { p_event_request_id: eventRequestId, p_caller: callerId });
 }
 
 export async function respondToSafetyReview(eventRequestId, input, safetyOfficerId, { client } = {}) {

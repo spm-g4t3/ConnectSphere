@@ -310,7 +310,7 @@ describe('SCRUM20_AC3 matchesAllCriteria', () => {
     expect(matchesAllCriteria(harbourRoom(), baseRequest())).toBe(true);
   });
 
-  it('SCRUM20_AC3_result_is_a_strict_boolean', () => {
+  it('SCRUM20_AC3_matchesAllCriteria_result_is_a_strict_boolean', () => {
     // Never a truthy array or object that could carry a reason.
     expect(matchesAllCriteria(harbourRoom(), baseRequest())).toStrictEqual(true);
     expect(matchesAllCriteria(harbourRoom({ maxCapacity: 1 }), baseRequest())).toStrictEqual(false);
@@ -383,7 +383,7 @@ describe('SCRUM20_AC1 SCRUM141 location', () => {
     expect(matchesLocation(harbourRoom({ location: 'Room_A, Level 1' }), 'room_a')).toBe(true);
   });
 
-  it('SCRUM20_AC3_result_is_a_strict_boolean', () => {
+  it('SCRUM20_AC3_matchesLocation_result_is_a_strict_boolean', () => {
     expect(matchesLocation(harbourRoom(), 'level')).toStrictEqual(true);
     expect(matchesLocation(harbourRoom(), 'basement')).toStrictEqual(false);
   });
