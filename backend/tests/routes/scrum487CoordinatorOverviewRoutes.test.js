@@ -232,7 +232,10 @@ describe('SCRUM-487 AC5: a Lead is refused every write the event page offers a c
   const WRITES = [
     ['POST /:id/start-review', (app) => request(app).post(`/api/event-requests/${EVENT_ID}/start-review`).send({})],
     ['POST /:id/decision', (app) => request(app).post(`/api/event-requests/${EVENT_ID}/decision`).send({ decision: 'approved', decisionNote: 'Fine.' })],
-    ['POST /:id/cancel', (app) => request(app).post(`/api/event-requests/${EVENT_ID}/cancel`).send({ reason: 'Venue closed.' })],
+    // POST /:id/cancel moved to scrum539LeadCancelRoutes.test.js
+    // (SCRUM539_AC3_a_lead_reaches_cancel_and_the_database_refuses_a_held_event_with_403):
+    // since SCRUM-539 the Lead reaches cancel_event_request, which still refuses
+    // them a held event, so AC5 holds; the database enforces it now, not the gate.
     ['POST /:id/clarification', (app) => request(app).post(`/api/event-requests/${EVENT_ID}/clarification`).send({ note: 'Numbers?' })],
     ['POST /:id/clarification/close', (app) => request(app).post(`/api/event-requests/${EVENT_ID}/clarification/close`).send({ note: 'Closing.' })],
     [

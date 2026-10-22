@@ -127,7 +127,7 @@ import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 // Credential-free too: http/handleError.js imports only errors.js.
 import { createErrorMiddleware } from '../http/handleError.js';
-import { ForbiddenError, ValidationError } from '../errors.js';
+import { ValidationError } from '../errors.js';
 // Pure, like the two above: the repository's one uuid check (SCRUM-489's readiness read).
 import { isPlausibleId } from '../validation/ids.js';
 
@@ -614,11 +614,11 @@ export function createEventRequestRouter({
     res.status(200).json(withStatusDisplay(request));
   });
 
-  router.get('/:id/cancellation-impact', coordinatorOnly, async (req, res) => {
-    const event = await getEventRequestForCoordinator(req.params.id, { client });
-    if (event.assignedCoordinatorId !== req.user.id) {
-      throw new ForbiddenError('Only the coordinator assigned to this event can preview its cancellation.');
-    }
+  // SCRUM-539: the Lead previews a submitted request nobody holds. Who may
+  // preview which event is the function's to decide (011 gave it p_caller); the
+  // read first still answers 404 for a draft or a missing id, as /:id/review does.
+  router.get('/:id/cancellation-impact', coordinatorOrLead, async (req, res) => {
+    await getEventRequestForCoordinator(req.params.id, { client });
     const impact = await getEventCancellationImpact(req.params.id, req.user.id, { client });
     res.status(200).json(impact);
   });
@@ -982,7 +982,10 @@ export function createEventRequestRouter({
     res.status(200).json(withStatusDisplay(updated));
   });
 
-  router.post('/:id/cancel', coordinatorOnly, async (req, res) => {
+  // SCRUM-539: the Lead cancels a submitted request nobody holds. As with
+  // POST /:id/reassign, the database decides who may cancel which event: the
+  // holder theirs, the Lead only an unassigned one (cancel_event_request, 013).
+  router.post('/:id/cancel', coordinatorOrLead, async (req, res) => {
     const updated = await cancelEventRequest(
       req.params.id,
       {
