@@ -75,7 +75,7 @@ function ImpactSection({ title, impact }) {
   );
 }
 
-function CancellationImpact({ impact }) {
+export function CancellationImpact({ impact }) {
   return (
     <div className="event-cancellation__impact" aria-label="Cancellation impact preview">
       <h3>What cancellation will affect</h3>

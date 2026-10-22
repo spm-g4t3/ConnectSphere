@@ -33,6 +33,7 @@ describe('schema fingerprint', () => {
     await Promise.all(opened.splice(0).map((db) => db.close()));
   });
 
+  // Builds two PGlite databases in the test itself, so a busy full run outlasts the 5 s default.
   it('SCRUM572_fingerprint_a_changed_function_body_changes_only_the_function_row', async () => {
     const before = await build();
     const after = await build(`
@@ -45,8 +46,9 @@ describe('schema fingerprint', () => {
     expect(onlyA).toEqual([]);
     expect(onlyB).toEqual([]);
     expect(changed.map((r) => [r.kind, r.name])).toEqual([['function', 'count_bookings()']]);
-  });
+  }, 30_000);
 
+  // Builds two PGlite databases in the test itself, so a busy full run outlasts the 5 s default.
   it('SCRUM572_fingerprint_revoking_execute_from_anon_changes_only_the_function_acl_row', async () => {
     const before = await build();
     const after = await build('revoke execute on function count_bookings() from anon;');
@@ -63,7 +65,7 @@ describe('schema fingerprint', () => {
         b: 'authenticated:EXECUTE,service_role:EXECUTE',
       },
     ]);
-  });
+  }, 30_000);
 
   it('SCRUM572_fingerprint_csv_round_trips_commas_quotes_and_newlines', () => {
     // The shapes Supabase's CSV export produces for constraint and view text.

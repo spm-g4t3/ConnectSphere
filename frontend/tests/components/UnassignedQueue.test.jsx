@@ -12,6 +12,8 @@ import userEvent from "@testing-library/user-event";
 import UnassignedQueue from "../../src/components/UnassignedQueue.jsx";
 import {
   assignEventRequest,
+  cancelEventRequest,
+  getEventCancellationImpact,
   listCoordinatorWorkload,
   listUnassignedEventRequests,
 } from "../../src/services/eventRequestService";
@@ -22,6 +24,9 @@ vi.mock("../../src/services/eventRequestService", () => ({
   listUnassignedEventRequests: vi.fn(),
   listCoordinatorWorkload: vi.fn(),
   assignEventRequest: vi.fn(),
+  // SCRUM-539: the cancel panel each row opens.
+  cancelEventRequest: vi.fn(),
+  getEventCancellationImpact: vi.fn(),
 }));
 
 const NOW = new Date("2026-10-11T12:00:00.000Z");
@@ -58,6 +63,8 @@ beforeEach(() => {
   vi.mocked(listCoordinatorWorkload).mockReset();
   vi.mocked(listCoordinatorWorkload).mockResolvedValue([PRIYA]);
   vi.mocked(assignEventRequest).mockReset();
+  vi.mocked(cancelEventRequest).mockReset();
+  vi.mocked(getEventCancellationImpact).mockReset();
 });
 
 
@@ -258,6 +265,98 @@ describe("SCRUM486_AC3 assigning from the queue", () => {
 
     await user.click(screen.getByRole("button", { name: "Assign Freshers Welcome" }));
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    await screen.findByRole("heading", { name: "Unassigned queue" });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});
+
+
+describe("SCRUM539_AC2 cancelling from the queue", () => {
+  const EMPTY_IMPACT = {
+    venueBookings: { count: 0, details: [] },
+    bookingRequests: { count: 0, details: [] },
+    venueHolds: { count: 0, details: [] },
+    equipmentRequests: { count: 0, details: [] },
+    equipmentReservations: { count: 0, details: [] },
+  };
+
+  async function openCancel(user, request = OLDER) {
+    renderQueue();
+    await user.click(await screen.findByRole("button", { name: `Cancel ${request.eventName}` }));
+  }
+
+  it("SCRUM539_AC1_every_row_offers_cancel_beside_assign", async () => {
+    renderQueue();
+
+    await screen.findByText("IS212 Industry Night");
+    for (const [row, request] of [[rows()[0], OLDER], [rows()[1], NEWER]]) {
+      const buttons = within(row).getAllByRole("button");
+      expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual([
+        `Assign ${request.eventName}`,
+        `Cancel ${request.eventName}`,
+      ]);
+      expect(buttons[1]).toHaveTextContent("Cancel request");
+    }
+  });
+
+  it("SCRUM539_AC2_cancel_request_opens_the_cancel_form_for_that_row", async () => {
+    const user = userEvent.setup();
+
+    await openCancel(user, NEWER);
+
+    expect(screen.getByRole("heading", { name: "Cancel Freshers Welcome" })).toBeInTheDocument();
+    // One panel at a time: the list and the assign picker are gone.
+    expect(screen.queryByRole("heading", { name: "Unassigned queue" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Assign / })).not.toBeInTheDocument();
+    expect(listCoordinatorWorkload).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM539_AC2_a_cancel_returns_to_the_queue_says_so_and_the_row_is_gone", async () => {
+    // AC2-03.
+    vi.mocked(getEventCancellationImpact).mockResolvedValue(EMPTY_IMPACT);
+    vi.mocked(cancelEventRequest).mockResolvedValue({ ...OLDER, status: "cancelled" });
+    const user = userEvent.setup();
+    await openCancel(user);
+    vi.mocked(listUnassignedEventRequests).mockResolvedValue([NEWER]);
+
+    await user.type(screen.getByLabelText("Cancellation reason"), "Organiser no longer needs it");
+    await user.click(screen.getByLabelText("The organiser’s request"));
+    await user.click(screen.getByRole("button", { name: "Preview cancellation" }));
+    await user.click(await screen.findByLabelText("I have reviewed the impact and confirm cancelling this request."));
+    await user.click(screen.getByRole("button", { name: "Cancel request" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "IS212 Industry Night was cancelled. The organiser has been told.",
+    );
+    expect(await screen.findByText("Freshers Welcome")).toBeInTheDocument();
+    expect(screen.queryByText("IS212 Industry Night")).not.toBeInTheDocument();
+    expect(listUnassignedEventRequests).toHaveBeenCalledTimes(2);
+  });
+
+  it("SCRUM539_AC2_back_from_the_cancel_form_re_reads_the_queue_and_says_nothing", async () => {
+    const user = userEvent.setup();
+    await openCancel(user);
+
+    await user.click(screen.getByRole("button", { name: /Back to the unassigned queue/ }));
+
+    expect(await screen.findByRole("heading", { name: "Unassigned queue" })).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(listUnassignedEventRequests).toHaveBeenCalledTimes(2);
+    expect(cancelEventRequest).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM539_AC2_opening_cancel_clears_the_last_confirmation", async () => {
+    vi.mocked(assignEventRequest).mockResolvedValue({ ...OLDER });
+    const user = userEvent.setup();
+    renderQueue();
+    await user.click(await screen.findByRole("button", { name: "Assign IS212 Industry Night" }));
+    await user.click(await screen.findByRole("radio", { name: "Priya Nair, 0 active events" }));
+    await user.click(screen.getByRole("button", { name: "Confirm assignment" }));
+    await screen.findByRole("status");
+
+    await user.click(screen.getByRole("button", { name: "Cancel Freshers Welcome" }));
+    await user.click(screen.getByRole("button", { name: /Back to the unassigned queue/ }));
 
     await screen.findByRole("heading", { name: "Unassigned queue" });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();

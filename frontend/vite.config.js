@@ -209,6 +209,12 @@ const SCRUM492_FILES = [
   'src/components/EventVenueBookings.jsx',
 ]
 
+// SCRUM-539: the Lead's cancel panel, gated outright. UnassignedQueue.jsx, which
+// opens it, stays in SCRUM486_FILES, whose 100% covers the new row button.
+const SCRUM539_FILES = [
+  'src/components/UnassignedRequestCancelPanel.jsx',
+]
+
 // SCRUM-172: the shared unread count behind the nav badge and the inbox
 // heading. NotificationInbox.jsx and notificationService.js stay in
 // SCRUM17_FILES, where their 100% gate already holds.
@@ -269,6 +275,7 @@ export default defineConfig({
         ...SCRUM489_FILES.map((file) => [file, FULL]),
         ...SCRUM363_FILES.map((file) => [file, FULL]),
         ...SCRUM492_FILES.map((file) => [file, FULL]),
+        ...SCRUM539_FILES.map((file) => [file, FULL]),
         ...SCRUM172_FILES.map((file) => [file, FULL]),
       ]),
     },

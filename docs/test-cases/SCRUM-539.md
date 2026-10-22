@@ -6,6 +6,7 @@
 **Written:** 22 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; each **Implemented by** says so, and the subtask that writes its tests fills it in.
 **Marked:** 22 October 2026, SCRUM-577 and SCRUM-578: every case their tests prove names them. The cases themselves are unchanged.
 **Marked:** 22 October 2026: the migration is 013, not 012; SCRUM-575 (PR #79) took 012 first.
+**Marked:** 23 October 2026, SCRUM-579 and SCRUM-580: the screen's cases (AC2-03, AC4-06); every case is now proved.
 
 This document is the written layer between SCRUM-539's acceptance criteria and the
 Vitest files that implement them. The chain is **user story → acceptance criteria
@@ -27,7 +28,7 @@ are marked **(trap)**.
 | pglite | `backend/tests/db/scrum539LeadCancelDatabase.test.js` | What the database does, on the full schema (`createSchemaDb()`): who may cancel and preview what, what is written, released and notified, and that a refusal changes nothing |
 | route | `backend/tests/routes/scrum539LeadCancelRoutes.test.js` (fake client) | The gates on `POST /:id/cancel` and `GET /:id/cancellation-impact`, the caller from the token, the status each refusal arrives as |
 | existing | the cancel suites named in AC6-01 | That the coordinator's path is unchanged |
-| screen | `frontend/tests/…/scrum539…` | The Lead's cancel on the unassigned queue (SCRUM-579) |
+| screen | `frontend/tests/components/scrum539LeadCancelPanel.test.jsx`; the `SCRUM539_AC2` block in `UnassignedQueue.test.jsx`; one test in `EventCancellationPanel.test.jsx` | The Lead's cancel on the unassigned queue, and the coordinator's form unchanged (SCRUM-579) |
 
 Which subtask writes each: SCRUM-577 (every pglite case), SCRUM-578 (every route
 case), SCRUM-579 (every screen case), SCRUM-580 (anything still open, the teeth
@@ -85,7 +86,7 @@ From the ticket, in substance.
 |---|---|---|---|---|
 | AC2-01 | After AC1-01 | Read the Organiser's notices | Exactly one `event_cancelled`, audience organiser, with the reason | Proved (pglite): `SCRUM539_AC2_the_organiser_gets_exactly_one_notice_with_the_reason` |
 | AC2-02 | After AC1-01 | Read the unassigned queue | The request is not in it: the queue lists `submitted` with no coordinator, and it is now `cancelled` | Proved (pglite): `SCRUM539_AC2_the_cancelled_request_leaves_the_unassigned_queue` (the queue's own filter, asked of the table) |
-| AC2-03 | The unassigned queue screen | The Lead cancels from a row | The row leaves the list | **not yet implemented** (SCRUM-579) |
+| AC2-03 | The unassigned queue screen | The Lead cancels from a row | The row leaves the list | Proved (screen): `SCRUM539_AC2_a_cancel_returns_to_the_queue_says_so_and_the_row_is_gone`, `SCRUM539_AC2_cancel_request_opens_the_cancel_form_for_that_row`, `SCRUM539_AC1_every_row_offers_cancel_beside_assign` (`UnassignedQueue.test.jsx`) |
 
 ### AC3 — the Lead never cancels a held event
 
@@ -104,7 +105,7 @@ From the ticket, in substance.
 | AC4-03 | Through the API | An Organiser, Venue Staff, Technical Support, a Safety Officer, an Attendee call `POST /:id/cancel` | 403 at the route, nothing queried | Proved (route): `SCRUM539_AC4_%s_is_refused_with_403_and_queries_nothing` (both routes) |
 | AC4-04 | Submitted, no coordinator; and a held event | A null caller; a user with no profile | Null: the existing null check. No profile: 55000 on the unassigned request (not a Lead), 42501 on the held one. Nothing changes | Proved (pglite): `SCRUM539_AC4_a_null_caller_is_refused_by_the_existing_null_check`, `SCRUM539_AC4_a_user_with_no_profile_is_refused_%s` |
 | AC4-05 | A draft (no coordinator, not submitted) | A Lead cancels | 42501; nothing changes. A draft is still the Organiser's (the SCRUM-19 AC1-03 precedent `start_event_review` cites) | Proved (pglite): `SCRUM539_AC4_a_lead_is_refused_a_draft_with_42501` |
-| AC4-06 | The coordinator's event screen | — | Its cancel is unchanged | **not yet implemented** (SCRUM-579) |
+| AC4-06 | The coordinator's event screen | — | Its cancel is unchanged | Proved (screen): `SCRUM539_AC4_the_coordinators_cancel_form_keeps_its_403_text` (`EventCancellationPanel.test.jsx`, added: no earlier test pinned the 403 text); the file's other tests and `scrum487LeadReadOnly.test.jsx` pass unmodified |
 | AC4-07 | Through the API | A coordinator's cancel of an unassigned request | The function's 55000 arrives as 409 | Proved (route): `SCRUM539_AC4_a_coordinator_on_an_unassigned_request_gets_409` |
 
 ### AC5 — a cancellation and an assignment: one winner
@@ -184,7 +185,14 @@ for the Lead*: they would release bookings blind.
 
 ### D7. The Lead's form sits on the unassigned queue
 
-SCRUM-579.
+Each queue row's "Cancel request" opens `UnassignedRequestCancelPanel` in place of
+the list, as Assign opens its picker, and a cancel returns to the queue, re-read,
+with the row gone. The form is the coordinator's (reason, initiator, preview,
+confirmation) less the attendee message: a request nobody holds has no attendees
+to tell, so none is sent. Its errors are keyed on status: 403 and 409 say the
+request was assigned or cancelled since the Lead opened it (AC5). *Rejected:
+opening the coordinator's event screen*: the Lead would land on a screen built for
+the holder, whose cancel is hidden from them (SCRUM-487).
 
 ### D8. The notices are the existing ones
 
@@ -211,7 +219,8 @@ Q&A row 11), which is what the initiator "the organiser's request" records.
 27 cases, counted from the tables: 0 proved; 27 not yet implemented (two of them,
 AC2-03 and AC4-06, for SCRUM-579); 0 that cannot be written as specified. Seven are
 traps. After SCRUM-577 and SCRUM-578: **25 proved**; 2 not yet implemented (AC2-03,
-AC4-06, the screen, SCRUM-579); 0 that cannot be written.
+AC4-06, the screen, SCRUM-579); 0 that cannot be written. After SCRUM-579 and
+SCRUM-580: **27 of 27 proved**; 0 not yet implemented; 0 that cannot be written.
 
 | Section | Cases |
 |---|---|
