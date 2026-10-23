@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiClient } from "../../src/services/apiClient";
 import { getRegisteredEvents, getAttendeeEvent, withdrawRegistration } from "../../src/services/attendeeEventService";
-import { withdrawalErrorMessage } from "../../src/services/withdrawalErrors";
+import { withdrawalFailure } from "../../src/services/withdrawalErrors";
 import { httpError } from "../helpers/async.js";
 import { REGISTERED_EVENTS_PATH, ATTENDEE_EVENT_ROUTE, attendeeEventPath } from "../../src/services/attendeeEventRoutes";
 
@@ -53,12 +53,29 @@ describe("SCRUM-27 withdrawal service", () => {
   });
 
   it.each([
-    [httpError(403), "Only Attendees can withdraw a registration."],
-    [httpError(503), "Registration withdrawal is temporarily unavailable. Please try again later."],
-    [httpError(404, { error: "Registration not found" }), "Registration not found"],
-    [httpError(409, { error: "  " }), "Your registration could not be withdrawn. It has not changed; please try again."],
-    [new Error("boom"), "Your registration could not be withdrawn. It has not changed; please try again."],
-  ])("SCRUM27_AC7_explains_failure_%#", (error, message) => {
-    expect(withdrawalErrorMessage(error)).toBe(message);
+    [httpError(409, { error: "x", code: "WITHDRAWAL_DEADLINE_PASSED" }), /deadline for this event has passed/, true],
+    [httpError(409, { error: "x", code: "WITHDRAWAL_DEADLINE_NOT_SET" }), /no withdrawal deadline/, true],
+    [httpError(409, { error: "x", code: "REGISTRATION_NOT_CONFIRMED" }), /Only a confirmed registration/, true],
+    [httpError(409, { error: "x", code: "ALREADY_WITHDRAWN" }), /already been withdrawn/, true],
+    [httpError(409, { error: "A reason added later", code: "NEW_REASON" }), /^A reason added later$/, true],
+    [httpError(404, { error: "Registration not found" }), /could not be found/, true],
+    [httpError(403), /Only Attendees/, true],
+    [httpError(401), /session has expired/, true],
+    [httpError(409, { error: "x", code: "REGISTRATION_CHANGED" }), /Please try again/, false],
+    [httpError(409, { error: "  " }), /could not be withdrawn/, false],
+    [httpError(503), /temporarily unavailable/, false],
+    [httpError(500), /could not be withdrawn/, false],
+    [httpError(400, { error: "Invalid withdrawal request" }), /could not be withdrawn/, false],
+    [Object.assign(new Error("Network Error"), { code: "ERR_NETWORK" }), /Could not reach the server/, false],
+    [new Error("boom"), /could not be withdrawn/, false],
+  ])("SCRUM27_AC7_maps_failure_%#_to_a_message_and_whether_it_is_a_rejection", (error, message, rejected) => {
+    const failure = withdrawalFailure(error);
+    expect(failure.message).toMatch(message);
+    expect(failure.rejected).toBe(rejected);
+  });
+
+  it("SCRUM27_AC7_never_says_whether_a_missing_registration_belongs_to_someone_else", () => {
+    expect(withdrawalFailure(httpError(404, { error: "anything" })))
+      .toEqual(withdrawalFailure(httpError(404, { error: "Registration not found" })));
   });
 });

@@ -230,6 +230,51 @@ describe('SCRUM27 a withdrawal releases its place', () => {
     expect(await register(FOURTH)).toMatchObject({ outcome: 'capacity_reached' });
   });
 
+  describe('SCRUM27 rejection feedback through the service', () => {
+    const MISSING = '99999999-9999-4999-8999-999999999999';
+    const snapshot = async () => ({
+      registrations: await eventRegistrations(),
+      event: (await db.query('select * from event_requests where id = $1', [event])).rows[0],
+      registered: await registeredCount(),
+    });
+    const notFound = { status: 404, message: 'Registration not found' };
+
+    it.each([
+      ['an expired deadline', async () => {
+        await db.query("select set_config('test.withdrawal_time', $1, true)", [DEADLINE]);
+        return [await seedRegistration(), ME];
+      }, { status: 409, code: 'WITHDRAWAL_DEADLINE_PASSED' }],
+      ['a non-confirmed registration', async () => [await seedRegistration(ME, 'cancelled'), ME],
+        { status: 409, code: 'REGISTRATION_NOT_CONFIRMED' }],
+      ['a missing registration', async () => { await seedRegistration(); return [MISSING, ME]; }, notFound],
+      ["another attendee's registration", async () => [await seedRegistration(OTHER), ME], notFound],
+      ['a caller who is not an attendee', async () => [await seedRegistration(), ORGANISER],
+        { status: 403, message: 'This action is restricted to Attendees' }],
+    ])('SCRUM27_AC7_%s_is_explained_and_changes_nothing', async (_case, arrange, expected) => {
+      await setCapacity(2);
+      await seedRegistration(THIRD, 'waitlisted');
+      const [id, attendee] = await arrange();
+      const before = await snapshot();
+      await db.exec('savepoint refusal');
+      const error = await withdrawRegistration({ attendeeId: attendee, registrationId: id, client }).catch((e) => e);
+      await db.exec('rollback to savepoint refusal');
+      expect(error).toMatchObject(expected);
+      expect(await snapshot()).toEqual(before);
+    });
+
+    // Information disclosure: someone else's registration reads exactly like none at all.
+    it('SCRUM27_AC7_another_attendees_registration_is_indistinguishable_from_a_missing_one', async () => {
+      const others = await seedRegistration(OTHER);
+      const attempt = async (id) => {
+        await db.exec('savepoint probe');
+        const error = await withdrawRegistration({ attendeeId: ME, registrationId: id, client }).catch((e) => e);
+        await db.exec('rollback to savepoint probe');
+        return { name: error.name, status: error.status, message: error.message, code: error.code };
+      };
+      expect(await attempt(others)).toEqual(await attempt(MISSING));
+    });
+  });
+
   it('SCRUM27_AC7_a_refused_withdrawal_releases_no_place', async () => {
     await setCapacity(1);
     const id = await seedRegistration();

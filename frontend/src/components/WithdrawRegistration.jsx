@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { withdrawRegistration } from "../services/attendeeEventService";
-import { withdrawalErrorMessage } from "../services/withdrawalErrors";
+import { withdrawalFailure } from "../services/withdrawalErrors";
 
 /**
  * Asks first, inline, as the other destructive actions here do (there is no
@@ -10,7 +10,8 @@ import { withdrawalErrorMessage } from "../services/withdrawalErrors";
 export default function WithdrawRegistration({ registrationId, onWithdrawn }) {
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
+  // { message, rejected }: a rejection removes the action, other failures offer a retry.
+  const [failure, setFailure] = useState(null);
   // State updates are async, so a fast second click could pass a disabled check.
   const sending = useRef(false);
 
@@ -18,12 +19,12 @@ export default function WithdrawRegistration({ registrationId, onWithdrawn }) {
     if (sending.current) return;
     sending.current = true;
     setSubmitting(true);
-    setError(null);
+    setFailure(null);
     try {
       const result = await withdrawRegistration(registrationId);
       onWithdrawn(result);
     } catch (err) {
-      setError(withdrawalErrorMessage(err));
+      setFailure(withdrawalFailure(err));
       setConfirming(false);
     } finally {
       sending.current = false;
@@ -31,9 +32,24 @@ export default function WithdrawRegistration({ registrationId, onWithdrawn }) {
     }
   }
 
+  if (failure?.rejected) {
+    return (
+      <section className="withdraw-registration" aria-label="Withdraw registration">
+        <p className="pending-bookings__error" role="alert">{failure.message}</p>
+      </section>
+    );
+  }
+
   return (
     <section className="withdraw-registration" aria-label="Withdraw registration">
-      {error && <p className="pending-bookings__error" role="alert">{error}</p>}
+      {failure && (
+        <div className="browse-open-events__error" role="alert">
+          <p>{failure.message}</p>
+          <button type="button" disabled={submitting} onClick={handleConfirm}>
+            {submitting ? "Withdrawing..." : "Try again"}
+          </button>
+        </div>
+      )}
       {confirming ? (
         <>
           <p>Withdraw your registration? Your place will be released to other attendees.</p>
@@ -46,8 +62,8 @@ export default function WithdrawRegistration({ registrationId, onWithdrawn }) {
             </button>
           </div>
         </>
-      ) : (
-        <button type="button" onClick={() => { setError(null); setConfirming(true); }}>
+      ) : !failure && (
+        <button type="button" onClick={() => setConfirming(true)}>
           Withdraw registration
         </button>
       )}
