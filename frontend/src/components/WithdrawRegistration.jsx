@@ -22,6 +22,8 @@ export default function WithdrawRegistration({ registrationId, onWithdrawn }) {
     setFailure(null);
     try {
       const result = await withdrawRegistration(registrationId);
+      // Success is the backend saying withdrawn, not merely a 2xx.
+      if (result?.status !== "withdrawn") throw new Error("Unexpected withdrawal reply");
       onWithdrawn(result);
     } catch (err) {
       setFailure(withdrawalFailure(err));

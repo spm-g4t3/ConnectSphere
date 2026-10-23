@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -72,18 +72,73 @@ describe("SCRUM-27 attendee withdrawal action", () => {
     await act(async () => reply.reject(httpError(503, {})));
   });
 
-  it("SCRUM27_AC8_confirms_only_after_the_backend_succeeds_then_refreshes_the_event", async () => {
+  const withdrawnReply = { id: REGISTRATION, status: "withdrawn", placesLeft: 1, isFull: false };
+  const successBox = () => screen.getByText("Your registration has been withdrawn.").closest("[role='status']");
+
+  it("SCRUM27_AC8_confirms_after_the_backend_succeeds_with_the_refreshed_status_withdrawn", async () => {
     const user = userEvent.setup();
-    vi.mocked(withdrawRegistration).mockResolvedValue({ id: REGISTRATION, status: "withdrawn", placesLeft: 1, isFull: false });
+    vi.mocked(withdrawRegistration).mockResolvedValue(withdrawnReply);
     vi.mocked(getAttendeeEvent).mockResolvedValueOnce(event).mockRejectedValueOnce(notFound);
     renderPage();
     await user.click(await openConfirmation(user));
 
-    expect(await screen.findByText("Your registration has been withdrawn.")).toHaveAttribute("role", "status");
+    await screen.findByText("Your registration has been withdrawn.");
+    expect(successBox()).toHaveClass("browse-event-details__success");
+    expect(within(successBox()).getByText("Registration status").nextElementSibling).toHaveTextContent("Withdrawn");
+    expect(within(successBox()).getByRole("link", { name: "Browse open events" })).toHaveAttribute("href", "/open-events");
+    expect(screen.getByRole("link", { name: "Back to registered events" })).toHaveAttribute("href", "/registered-events");
+    // The page still names the event the attendee withdrew from.
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Open day");
+
+    // The server re-read, not this page, decides what is left: no stale Confirmed details or action.
     await waitFor(() => expect(getAttendeeEvent).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByText("Hall A")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Loading...")).not.toBeInTheDocument());
+    expect(screen.queryByRole("heading", { name: "Confirmed arrangements" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Hall A")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Withdraw/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM27_AC8_shows_one_confirmation_even_after_later_refreshes", async () => {
+    const user = userEvent.setup();
+    vi.mocked(withdrawRegistration).mockResolvedValue(withdrawnReply);
+    vi.mocked(getAttendeeEvent).mockResolvedValueOnce(event).mockRejectedValue(notFound);
+    renderPage();
+    await user.click(await openConfirmation(user));
+    await screen.findByText("Your registration has been withdrawn.");
+
+    fireEvent.focus(window);
+    await waitFor(() => expect(getAttendeeEvent).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.queryByText("Loading...")).not.toBeInTheDocument());
+    expect(screen.getAllByText("Your registration has been withdrawn.")).toHaveLength(1);
+  });
+
+  it("SCRUM27_AC8_drops_the_confirmation_when_the_server_later_shows_an_active_registration", async () => {
+    const user = userEvent.setup();
+    vi.mocked(withdrawRegistration).mockResolvedValue(withdrawnReply);
+    vi.mocked(getAttendeeEvent).mockResolvedValueOnce(event).mockRejectedValueOnce(notFound)
+      .mockResolvedValueOnce({ ...event, registrationId: "r2" });
+    renderPage();
+    await user.click(await openConfirmation(user));
+    await screen.findByText("Your registration has been withdrawn.");
+
+    // Registered again elsewhere: the server's answer replaces the stale notice.
+    fireEvent.focus(window);
+    expect(await screen.findByText("Hall A")).toBeInTheDocument();
+    expect(screen.queryByText("Your registration has been withdrawn.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Withdraw registration" })).toBeInTheDocument();
+  });
+
+  it("SCRUM27_AC8_a_reply_that_is_not_withdrawn_is_not_reported_as_success", async () => {
+    const user = userEvent.setup();
+    vi.mocked(withdrawRegistration).mockResolvedValue({ id: REGISTRATION, status: "registered" });
+    renderPage();
+    await user.click(await openConfirmation(user));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your registration could not be withdrawn.");
+    expect(screen.queryByText("Your registration has been withdrawn.")).not.toBeInTheDocument();
+    expect(screen.getByText("Hall A")).toBeInTheDocument();
+    expect(getAttendeeEvent).toHaveBeenCalledTimes(1);
   });
 
   it("SCRUM27_AC8_keeps_the_confirmation_when_the_refresh_itself_fails", async () => {

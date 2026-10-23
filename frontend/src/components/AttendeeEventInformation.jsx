@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getAttendeeEvent } from "../services/attendeeEventService";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
+import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import { EVENT_TIME_NOTE, formatEventDate, formatEventStartTime, formatEventEndTime } from "../services/openEventDisplay";
 import useOpenEventRead from "./useOpenEventRead";
 import WithdrawRegistration from "./WithdrawRegistration";
@@ -25,17 +26,29 @@ function EventInformation({ eventId }) {
   // Only a reply for this route's event may name it.
   const current = data?.eventRequestId === eventId.trim().toLowerCase() ? data : null;
   const handleWithdrawn = (result) => {
-    setWithdrawal(result);
+    // The name is kept: the re-read no longer returns this event to a withdrawn attendee.
+    setWithdrawal({ ...result, eventName: current?.eventName });
     load();
   };
+  // Only while the server shows no active registration; a later read that
+  // shows one again (registered anew) must not sit beside a withdrawn notice.
+  const withdrawn = withdrawal && !current ? withdrawal : null;
   return (
     <>
-      <h1>{current?.eventName?.trim() || "Event information"}</h1>
+      <h1>{current?.eventName?.trim() || withdrawn?.eventName?.trim() || "Event information"}</h1>
       <section aria-label="Registered event information">
         {loading && <p role="status">Loading...</p>}
-        {/* Shown from the backend's reply alone, so a failed reload cannot hide it. */}
-        {withdrawal && <p role="status">Your registration has been withdrawn.</p>}
-        {!withdrawal && notFound && <p role="alert">Event information is unavailable. An active registration is required.</p>}
+        {/* From the backend's reply alone, so a failed reload cannot hide it. */}
+        {withdrawn && (
+          <div className="browse-event-details__success" role="status">
+            <p>Your registration has been withdrawn.</p>
+            <dl className="browse-event-details__facts">
+              <div><dt>Registration status</dt><dd>Withdrawn</dd></div>
+            </dl>
+            <p><Link to={BROWSE_OPEN_EVENTS_PATH}>Browse open events</Link></p>
+          </div>
+        )}
+        {!withdrawn && notFound && <p role="alert">Event information is unavailable. An active registration is required.</p>}
         {error && (
           <div className="browse-open-events__error" role="alert">
             <p>{error}</p>
