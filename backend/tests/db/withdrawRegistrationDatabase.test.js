@@ -7,6 +7,8 @@ import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 const ME = '44444444-4444-4444-8444-444444444444';
 const OTHER = '55555555-5555-4555-8555-555555555555';
 const ORGANISER = '66666666-6666-4666-8666-666666666666';
+const THIRD = '77777777-7777-4777-8777-777777777777';
+const FOURTH = '88888888-8888-4888-8888-888888888888';
 const DEADLINE = '2026-10-18T10:00:00Z';
 let db;
 let event;
@@ -23,6 +25,17 @@ const stored = async (id) => (await db.query('select * from event_registrations 
 const eventRegistrations = async () => (await db.query(
   'select * from event_registrations where event_request_id = $1 order by id', [event],
 )).rows;
+// The total as the browse page reads it; every other reader counts the same rows.
+const registeredCount = async () => Number((await db.query(
+  'select coalesce(sum(active_count), 0) as n from open_event_registration_state(array[$1::uuid], $2::uuid)',
+  [event, FOURTH],
+)).rows[0].n);
+const register = async (attendee) => (await db.query(
+  'select register_for_event($1::uuid, $2::uuid) as result', [event, attendee],
+)).rows[0].result;
+const setCapacity = (capacity) => db.query(
+  'update event_requests set registration_capacity = $1 where id = $2', [capacity, event],
+);
 // A refusal aborts the transaction; the savepoint lets the test read afterwards.
 const refused = async (act, expected) => {
   await db.exec('savepoint refusal');
@@ -41,9 +54,9 @@ const client = {
 
 beforeAll(async () => {
   db = await createSchemaDb();
-  await db.query('insert into auth.users (id) values ($1), ($2), ($3)', [ME, OTHER, ORGANISER]);
+  await db.query('insert into auth.users (id) values ($1), ($2), ($3), ($4), ($5)', [ME, OTHER, ORGANISER, THIRD, FOURTH]);
   await db.query(`insert into profiles (id, role) values ($1, 'attendee'), ($2, 'attendee'),
-    ($3, 'event_coordinator')`, [ME, OTHER, ORGANISER]);
+    ($3, 'event_coordinator'), ($4, 'attendee'), ($5, 'attendee')`, [ME, OTHER, ORGANISER, THIRD, FOURTH]);
   event = await seedEvent(db, {
     status: 'confirmed',
     organiser_id: ORGANISER,
@@ -138,6 +151,7 @@ describe('SCRUM27 withdrawing a registration in PostgreSQL', () => {
         set_config('test.fail_registration', $1, false)`, [id]);
       await expect(withdraw(id)).rejects.toMatchObject({ message: 'Injected post-update failure' });
       expect(await stored(id)).toEqual(before);
+      expect(await registeredCount()).toBe(1);
     } finally {
       await db.query("select set_config('test.fail_registration', '', false)");
       await db.query('delete from event_registrations where id = $1', [id]);
@@ -169,5 +183,58 @@ describe('SCRUM27 withdrawing a registration in PostgreSQL', () => {
     await expect(withdrawRegistration({ attendeeId: ME, registrationId: id, client }))
       .rejects.toMatchObject({ status: 409, code: 'ALREADY_WITHDRAWN' });
     await db.exec('rollback to savepoint repeat');
+  });
+});
+
+describe('SCRUM27 a withdrawal releases its place', () => {
+  it('SCRUM27_AC4_one_withdrawal_leaves_the_registered_total_one_lower', async () => {
+    await setCapacity(3);
+    const mine = await seedRegistration();
+    await seedRegistration(OTHER);
+    expect(await registeredCount()).toBe(2);
+    const { rows: [{ result }] } = await withdraw(mine);
+    expect(result).toMatchObject({ registeredCount: 1, capacity: 3 });
+    expect(await registeredCount()).toBe(1);
+  });
+
+  it('SCRUM27_AC5_the_released_place_on_a_full_event_takes_exactly_one_new_registration', async () => {
+    await setCapacity(2);
+    const mine = await seedRegistration();
+    await seedRegistration(OTHER);
+    expect(await register(THIRD)).toMatchObject({ outcome: 'capacity_reached' });
+    await withdraw(mine);
+    expect(await register(THIRD)).toMatchObject({ outcome: 'registered', registeredCount: 2 });
+    expect(await register(FOURTH)).toMatchObject({ outcome: 'capacity_reached' });
+    expect(await registeredCount()).toBe(2);
+  });
+
+  it('SCRUM27_AC4_multiple_withdrawals_each_release_one_place_down_to_zero', async () => {
+    await setCapacity(3);
+    const totals = [];
+    for (const attendee of [ME, OTHER, THIRD]) await seedRegistration(attendee);
+    for (const { id, attendee_id: attendee } of await eventRegistrations()) {
+      totals.push((await withdraw(id, attendee)).rows[0].result.registeredCount);
+    }
+    expect(totals).toEqual([2, 1, 0]);
+    expect(await registeredCount()).toBe(0);
+  });
+
+  it('SCRUM27_AC5_a_repeated_withdrawal_releases_no_second_place', async () => {
+    await setCapacity(2);
+    const mine = await seedRegistration();
+    await seedRegistration(OTHER);
+    await withdraw(mine);
+    await refused(() => withdraw(mine), { code: '55000', hint: 'ALREADY_WITHDRAWN' });
+    expect(await registeredCount()).toBe(1);
+    expect(await register(THIRD)).toMatchObject({ outcome: 'registered' });
+    expect(await register(FOURTH)).toMatchObject({ outcome: 'capacity_reached' });
+  });
+
+  it('SCRUM27_AC7_a_refused_withdrawal_releases_no_place', async () => {
+    await setCapacity(1);
+    const id = await seedRegistration();
+    await db.query("select set_config('test.withdrawal_time', $1, true)", [DEADLINE]);
+    await refused(() => withdraw(id), { code: '55000', hint: 'WITHDRAWAL_DEADLINE_PASSED' });
+    expect(await registeredCount()).toBe(1);
   });
 });

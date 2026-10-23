@@ -17,17 +17,29 @@ afterEach(() => { vi.resetAllMocks(); });
 
 describe('SCRUM27 withdrawal service', () => {
   it('SCRUM27_AC3_sends_only_the_verified_ids_to_one_RPC_and_returns_the_withdrawn_registration', async () => {
-    rpc.mockResolvedValue({ data: { outcome: 'withdrawn', registration: { ...registration, extra: 'dropped' } }, error: null });
+    rpc.mockResolvedValue({ data: { outcome: 'withdrawn', registeredCount: 2, capacity: 3, registration: { ...registration, extra: 'dropped' } }, error: null });
     await expect(withdrawRegistration({ ...options, client: { rpc }, status: 'registered', now: '2000-01-01' }))
-      .resolves.toEqual(registration);
+      .resolves.toEqual({ ...registration, placesLeft: 1, isFull: false });
     expect(rpc).toHaveBeenCalledExactlyOnceWith('withdraw_registration', {
       p_registration_id: REGISTRATION, p_attendee_id: ME,
     });
   });
 
   it('SCRUM27_AC3_uses_the_shared_client_when_none_is_injected', async () => {
-    rpc.mockResolvedValue({ data: { outcome: 'withdrawn', registration }, error: null });
+    rpc.mockResolvedValue({ data: { outcome: 'withdrawn', registeredCount: 0, capacity: null, registration }, error: null });
     await expect(withdrawRegistration(options)).resolves.toMatchObject({ id: REGISTRATION });
+  });
+
+  it.each([
+    ['still over a capacity lowered after registration', 5, 3, { placesLeft: 0, isFull: true }],
+    ['the last registration gone', 0, 3, { placesLeft: 3, isFull: false }],
+    ['no capacity limit', 4, null, { placesLeft: null, isFull: false }],
+  ])('SCRUM27_AC5_reports_places_for_%s_within_the_event_limit', async (_case, registeredCount, capacity, expected) => {
+    rpc.mockResolvedValue({ data: { outcome: 'withdrawn', registeredCount, capacity, registration }, error: null });
+    const result = await withdrawRegistration(options);
+    expect(result).toMatchObject(expected);
+    expect(result).not.toHaveProperty('registeredCount');
+    expect(result).not.toHaveProperty('capacity');
   });
 
   it('SCRUM27_AC1_checks_identity_before_database_access', async () => {
@@ -41,7 +53,8 @@ describe('SCRUM27 withdrawal service', () => {
     await expect(withdrawRegistration(options)).rejects.toMatchObject({ status: 409, code: 'ALREADY_WITHDRAWN' });
   });
 
-  it.each([null, { outcome: 'registered', registration }, { outcome: 'withdrawn' }])
+  it.each([null, { outcome: 'registered', registeredCount: 0, registration }, { outcome: 'withdrawn', registeredCount: 0 },
+    { outcome: 'withdrawn', registration }])
     ('SCRUM27_AC3_an_unexpected_result_%#_is_an_error_not_a_success', async (data) => {
       rpc.mockResolvedValue({ data, error: null });
       await expect(withdrawRegistration(options)).rejects.toThrow('Unexpected outcome from withdraw_registration');

@@ -27,6 +27,9 @@ select id, status, updated_at from event_registrations where id = :'registration
 -- A's COMMIT replaced by ROLLBACK. B must wait, then succeed; commit B. The row
 -- must be withdrawn once, by B.
 
--- Withdrawal against registration: on a capacity-1 event, register attendee X,
--- then run A's block withdrawing X while Session B runs
--- register_for_event(event, Y). B must wait for A, then return "registered".
+-- Withdrawal against registration (SCRUM-61): on a capacity-1 event, register
+-- attendee X, then run A's block withdrawing X while Session B runs
+-- register_for_event(event, Y). B must wait for A, then return "registered"
+-- with registeredCount 1. Repeat with A's COMMIT replaced by ROLLBACK: B must
+-- wait, then return "capacity_reached". Either way the event never holds more
+-- registered rows than its capacity.

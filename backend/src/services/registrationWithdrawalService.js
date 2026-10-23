@@ -6,6 +6,7 @@ import {
 } from '../http/pgErrors.js';
 import { isPlausibleId } from '../validation/ids.js';
 import { resolveClientIfMissing } from '../config/resolveClient.js';
+import { availability } from '../domain/registrationAvailability.js';
 
 /**
  * withdraw_registration's refusals, most raised by assert_registration_withdrawable,
@@ -50,11 +51,13 @@ export async function withdrawRegistration({ attendeeId, registrationId, client 
     p_attendee_id: attendeeId,
   });
   if (error) throw translateWithdrawalError(error);
-  if (data?.outcome !== 'withdrawn' || !data.registration?.id) {
+  if (data?.outcome !== 'withdrawn' || !data.registration?.id || !Number.isInteger(data.registeredCount)) {
     throw new Error('Unexpected outcome from withdraw_registration');
   }
 
   const row = data.registration;
+  // Places as the browse page shows them; the raw count and capacity stay private.
+  const { placesLeft, isFull } = availability(data.capacity, data.registeredCount);
   return {
     id: row.id,
     eventRequestId: row.eventRequestId,
@@ -63,5 +66,7 @@ export async function withdrawRegistration({ attendeeId, registrationId, client 
     registeredAt: row.registeredAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    placesLeft,
+    isFull,
   };
 }
