@@ -103,6 +103,10 @@ const SUBMIT_MANDATORY = [
  */
 const UPDATE_MANDATORY = [];
 
+/** Every field but eventName, which a draft cannot do without. */
+const CLEARABLE_FIELDS = [...TEXT_FIELDS, ...TIMESTAMP_FIELDS, 'expectedAttendance']
+  .filter((field) => field !== 'eventName');
+
 
 /**
  * A non-object is refused before any collection starts.
@@ -311,12 +315,10 @@ export function validateCreateEventRequest(input) {
  *    client nothing, because EventRequestForm always sends eventName, so it
  *    only ever catches a caller bug.
  *
- * KNOWN LIMITATION, recorded rather than accidental: a PATCH cannot *clear*
- * an optional field. collectEventRequest treats an explicit null as "not
- * answered" and leaves the key off the copy entirely, which is the same
- * semantics the create path documents and depends on. Giving "clear this" a
- * wire representation of its own is a later decision -- the frontend sends
- * undefined for an untouched field anyway, so nothing is blocked on it today.
+ * An explicit null clears an optional field (SCRUM-355 AC3): an Organiser
+ * revising a rejected request must be able to remove what was rejected. An
+ * absent key still means "leave it", and the create path still reads null as
+ * "not answered".
  *
  * @param {object} changes  any subset of validateCreateEventRequest's fields
  * @returns {object} a normalised copy containing only the supplied fields
@@ -340,6 +342,10 @@ export function validateUpdateEventRequest(changes) {
   }
 
   throwIfInvalid(errors, 'Invalid event request details');
+
+  for (const field of CLEARABLE_FIELDS) {
+    if (changes[field] === null) normalised[field] = null;
+  }
 
   // Deliberately after the field faults, unlike validateUpdateVenue which
   // checks first. A caller sending { expectedAttendance: 'lots' } has supplied

@@ -11,7 +11,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
 
 import EventOrganiserDashboard from "../../src/components/EventOrganiserDashboard.jsx";
 import { getMyEventRequests } from "../../src/services/eventRequestService";
@@ -121,5 +122,30 @@ describe("SCRUM-266 AC4: Needs attention on the Organiser's dashboard", () => {
     const row = async (name) => (await screen.findByText(name)).closest("li");
     expect(within(await row("Flagged event")).getByText("Needs attention")).toHaveClass("status-badge", "status--action-required");
     expect(within(await row("Fine event")).queryByText("Needs attention")).not.toBeInTheDocument();
+  });
+});
+
+
+describe("Open in My Events lands on the event", () => {
+  function LocationProbe() {
+    const location = useLocation();
+    return <p data-testid="landed">{JSON.stringify(location.state)}</p>;
+  }
+
+  it("SCRUM172_AC7_open_in_my_events_sends_the_event_to_focus", async () => {
+    vi.mocked(getMyEventRequests).mockResolvedValue([event("e1", "approved", "Industry Night")]);
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route path="/" element={<EventOrganiserDashboard user={USER} />} />
+          <Route path="/events" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const row = (await screen.findByText("Industry Night")).closest("li");
+    await userEvent.click(within(row).getByText("Open in My Events"));
+
+    expect(screen.getByTestId("landed")).toHaveTextContent(JSON.stringify({ focusEventRequestId: "e1" }));
   });
 });

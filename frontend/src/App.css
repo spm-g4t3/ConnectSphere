@@ -123,9 +123,17 @@ button { cursor: pointer; }
 .my-event-requests__back, .review-queue__back, .unassigned-queue__back, .venue-search__back { background: transparent; border: 1px solid var(--line); color: var(--teal-dark); margin-bottom: 18px; }
 .my-event-requests__back:hover, .review-queue__back:hover, .unassigned-queue__back:hover, .venue-search__back:hover { background: #eef6f3; }
 .my-event-requests__list { display: grid; gap: 14px; list-style: none; margin: 0; padding: 0; }
-.my-event-requests__item { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(24, 61, 58, 0.05); display: block; padding: 20px; }
+.my-event-requests__item { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(24, 61, 58, 0.05); display: block; padding: 20px; transition: background-color 0.8s ease, border-color 0.8s ease, box-shadow 0.8s ease; }
 /* SCRUM-172 (AC7): the event a notification was opened for. */
-.my-event-requests__item--focused { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(8, 127, 123, 0.16); }
+/* A row opened from a link pulses while the page glides to it, then fades back
+   when MyEventRequests drops the class (FOCUS_HIGHLIGHT_MS). */
+.my-event-requests__item--focused { animation: focused-row-pulse 1.2s ease-in-out 0.4s 2; background-color: #eef8f7; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(8, 127, 123, 0.22); }
+@keyframes focused-row-pulse {
+  50% { box-shadow: 0 0 0 7px rgba(8, 127, 123, 0.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .my-event-requests__item, .my-event-requests__item--focused { animation: none; transition: none; }
+}
 .my-event-requests__item-main { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; }
 .my-event-requests__item-description { line-height: 1.5; margin: 10px 0; }
 /* SCRUM-486 (SCRUM-520). Where a submitted request stands with its
@@ -139,6 +147,28 @@ button { cursor: pointer; }
 .my-event-requests__registration-link:hover { background: #dff0ea; }
 .my-event-requests__error { background: #fff0ee; border-radius: 6px; color: #a43c32; padding: 10px 12px; }
 .event-request-form, .change-request-form { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 18px; margin: 0 0 24px; padding: 24px; }
+/* SCRUM-355. A revision keeps the rejection it answers beside the form on a
+   wide screen, and above it on a narrow one. A draft never rejected has no
+   aside, so the form keeps the full width. */
+.my-event-requests__revision { align-items: start; display: grid; gap: 0 20px; }
+@media (min-width: 900px) {
+  .my-event-requests__revision:has(> .decision-history) { grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); }
+  .my-event-requests__revision > .decision-history { grid-column: 2; grid-row: 1; position: sticky; top: 16px; }
+}
+/* The red of a rejection, as .my-event-requests__error; the coordinator's
+   resubmission mark is amber, a thing to note rather than a failure. */
+.decision-history { background: var(--paper); border: 1px solid var(--line); border-left: 3px solid #a43c32; border-radius: 8px; display: grid; gap: 10px; margin: 0 0 24px; min-width: 0; padding: 16px 18px; }
+.decision-history h3 { color: var(--ink); font-size: 0.95rem; margin: 4px 0 0; }
+.decision-history .decision-history__reason { background: #fff0ee; border-radius: 6px; display: grid; gap: 4px; padding: 10px 12px; }
+.decision-history .decision-history__reason strong { color: #a43c32; font-size: 0.86rem; }
+.decision-history .decision-history__reason p { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.decision-history .decision-history__resubmission { background: #fff6e5; border-radius: 6px; color: #8a5a00; font-weight: 700; margin: 0; padding: 10px 12px; }
+.decision-history:has(> .decision-history__resubmission) { border-left-color: #bb7a12; }
+.decision-history__list { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.decision-history__list li { border-left: 2px solid var(--line); color: var(--muted); font-size: 0.86rem; padding: 2px 0 2px 12px; }
+.decision-history__list li strong { color: var(--ink); }
+.decision-history .decision-history__list p { color: var(--ink); margin: 4px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.decision-history__state { color: #a43c32; font-size: 0.88rem; margin: 10px 0; }
 .event-request-form h1, .change-request-form h2 { color: var(--ink); margin: 0; }
 .event-request-form > label, .change-request-form > label { color: var(--muted); display: grid; gap: 7px; line-height: 1.4; }
 .event-request-form input, .event-request-form textarea, .change-request-form input, .change-request-form textarea, .change-request-form select { background: white; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-width: 0; padding: 10px 12px; width: 100%; }

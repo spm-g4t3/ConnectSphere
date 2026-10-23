@@ -1227,6 +1227,29 @@ export async function decideEventRequest(
   return toEventRequest(data);
 }
 
+/**
+ * SCRUM-355: the Organiser reopens their rejected request as a draft to revise.
+ * reopen_event_request (014) checks the caller and the status under the row
+ * lock and moves the rejection into the decision history, so nothing is read first.
+ *
+ * @throws {NotFoundError} no such request, or someone else's
+ * @throws {ConflictError} the request is not rejected; the message names its status
+ */
+export async function reopenEventRequest(id, organiserId, { client } = {}) {
+  requireCallerId(organiserId, 'organiserId');
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('reopen_event_request', {
+    p_event_request_id: id,
+    p_caller: organiserId,
+  });
+
+  if (error) throw translateError(error);
+
+  return toEventRequest(data);
+}
+
 const CANCELLATION_INITIATORS = Object.freeze([
   'organiser_request',
   'connectsphere_decision',
@@ -1673,6 +1696,48 @@ export async function getEventClarificationHistory(id, userId, role, { client } 
 }
 
 /**
+ * SCRUM-355 AC3, AC5: the decisions a request has had that are no longer
+ * current, oldest first. A non-empty list is what marks a request as a resubmission.
+ *
+ * Narrower than the clarification history: past rejection notes are for the
+ * Organiser, the Lead who assigns the request, and the coordinator it is
+ * assigned to now (AC5), not every coordinator.
+ */
+export async function getEventDecisionHistory(id, userId, role, { client } = {}) {
+  requireCallerId(userId, 'userId');
+  const db = await resolveClient(client);
+  const request = await getEventRequestById(id, { client: db });
+  const pastDraft = request.status !== STATUS.DRAFT;
+  const mayRead =
+    request.organiserId === userId
+    || (pastDraft && role === ROLE.EVENT_COORDINATOR_LEAD)
+    || (pastDraft && role === ROLE.EVENT_COORDINATOR && request.assignedCoordinatorId === userId);
+  if (!mayRead) {
+    throw new NotFoundError(`Event request ${id} not found`);
+  }
+
+  const { data: entries, error } = await db
+    .from('event_request_decision_history')
+    .select('id, decision, decision_note, decided_by, decided_at, superseded_reason, superseded_at')
+    .eq('event_request_id', id)
+    .order('decided_at', { ascending: true })
+    .order('id', { ascending: true });
+  if (error) throw translateError(error);
+  if (!entries?.length) return [];
+
+  const nameOf = await readNames(db, entries.map((entry) => entry.decided_by));
+  return entries.map((entry) => ({
+    id: entry.id,
+    decision: entry.decision,
+    decisionNote: entry.decision_note ?? null,
+    decidedByName: nameOf(entry.decided_by),
+    decidedAt: entry.decided_at,
+    supersededReason: entry.superseded_reason,
+    supersededAt: entry.superseded_at,
+  }));
+}
+
+/**
  * Every event request awaiting a decision, oldest waiting first.
  *
  * SCRUM-45. The Event Coordinator's review queue, and the fix for the reported
@@ -1803,9 +1868,8 @@ export async function listEventRequestsForReview({ client } = {}) {
  * assignment happens at submission (016)". That stopped being true twice:
  * SCRUM-318's 022 reopens a rejected request to a draft and leaves its
  * coordinator on it, and since SCRUM-486 (052) assignment does not happen at
- * submission at all. So a reopened draft is listed here for the coordinator
- * who held it, until it is submitted again and 052 clears the column. That is
- * a known gap, recorded in docs/SCRUM-486.md section 4, not a decision.
+ * submission at all. Since SCRUM-355's 015, reopening clears the coordinator
+ * too, so a draft reopened since then is not listed here.
  *
  * Why this list shows the organiser's name, when listEventRequestsForReview
  * calls leaving it out "the privacy floor of the shared queue": that floor is

@@ -20,8 +20,8 @@ const SCHEMA = `
 `;
 
 describe('schema fingerprint', () => {
-  // Built in beforeAll, not in the tests: each PGlite build is CPU-bound
-  // WebAssembly that can outrun the 5s test timeout on a busy CI runner.
+  // Built once in beforeAll (60s hookTimeout), not per test: each PGlite build
+  // is CPU-bound WebAssembly that can outrun the 5s test timeout on busy CI.
   let base;
   let changedFunction;
   let revokedFromAnon;
@@ -67,7 +67,10 @@ describe('schema fingerprint', () => {
       },
     ]);
   });
+});
 
+// Pure parsing, so it sits outside the block that builds databases.
+describe('schema fingerprint CSV', () => {
   it('SCRUM572_fingerprint_csv_round_trips_commas_quotes_and_newlines', () => {
     // The shapes Supabase's CSV export produces for constraint and view text.
     const rows = [
