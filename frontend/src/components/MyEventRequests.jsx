@@ -249,16 +249,18 @@ export default function MyEventRequests() {
       <div className="my-event-requests">
         <button className="my-event-requests__back" onClick={() => setActivePanel(null)}>&larr; Back to my requests</button>
         {/* Saving a draft keeps the panel open, so a revision keeps the
-            rejection beside the form (SCRUM-355 AC3); submitting closes it. */}
-        <EventRequestForm
-          existingRequest={activePanel.request}
-          onSaved={(saved) => {
-            fetchRequests();
-            if (saved.status !== "draft") setActivePanel(null);
-          }}
-        />
-        {/* SCRUM-355 AC3: the rejection being answered, beside the form. */}
-        <DecisionHistory eventRequestId={activePanel.request.id} view="organiser" />
+            rejection beside the form (SCRUM-355 AC3); submitting closes it.
+            The rejection comes first, so it is read before the form. */}
+        <div className="my-event-requests__revision">
+          <DecisionHistory eventRequestId={activePanel.request.id} view="organiser" />
+          <EventRequestForm
+            existingRequest={activePanel.request}
+            onSaved={(saved) => {
+              fetchRequests();
+              if (saved.status !== "draft") setActivePanel(null);
+            }}
+          />
+        </div>
       </div>
     );
   }
