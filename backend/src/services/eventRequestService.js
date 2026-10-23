@@ -1227,6 +1227,29 @@ export async function decideEventRequest(
   return toEventRequest(data);
 }
 
+/**
+ * SCRUM-355: the Organiser reopens their rejected request as a draft to revise.
+ * reopen_event_request (014) checks the caller and the status under the row
+ * lock and moves the rejection into the decision history, so nothing is read first.
+ *
+ * @throws {NotFoundError} no such request, or someone else's
+ * @throws {ConflictError} the request is not rejected; the message names its status
+ */
+export async function reopenEventRequest(id, organiserId, { client } = {}) {
+  requireCallerId(organiserId, 'organiserId');
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db.rpc('reopen_event_request', {
+    p_event_request_id: id,
+    p_caller: organiserId,
+  });
+
+  if (error) throw translateError(error);
+
+  return toEventRequest(data);
+}
+
 const CANCELLATION_INITIATORS = Object.freeze([
   'organiser_request',
   'connectsphere_decision',
@@ -1635,21 +1658,27 @@ export async function getEventRequestStatusHistory(id, userId, { client } = {}) 
   }));
 }
 
-export async function getEventClarificationHistory(id, userId, role, { client } = {}) {
-  requireCallerId(userId, 'userId');
-  const db = await resolveClient(client);
+/**
+ * The Organiser reads their own request's histories; any coordinator or Lead
+ * reads them once it is past draft. The routes have no role gate of their own,
+ * so this is the gate. SCRUM-486 (SCRUM-521): the Lead reads as a coordinator
+ * does, because the screen they hand an event over from shows these histories.
+ */
+async function assertCanReadHistory(id, userId, role, db) {
   const request = await getEventRequestById(id, { client: db });
   const isOwner = request.organiserId === userId;
-  // SCRUM-486 (SCRUM-521): the Lead reads it as a coordinator does. The event
-  // screen the Lead hands an event over from shows this history, and the
-  // route has no role gate of its own, so this check is the gate; with the
-  // Lead left out it answered 404 and that section of the screen failed.
   const isCoordinatorTeam =
     (role === ROLE.EVENT_COORDINATOR || role === ROLE.EVENT_COORDINATOR_LEAD)
     && request.status !== STATUS.DRAFT;
   if (!isOwner && !isCoordinatorTeam) {
     throw new NotFoundError(`Event request ${id} not found`);
   }
+}
+
+export async function getEventClarificationHistory(id, userId, role, { client } = {}) {
+  requireCallerId(userId, 'userId');
+  const db = await resolveClient(client);
+  await assertCanReadHistory(id, userId, role, db);
 
   const { data: entries, error } = await db
     .from('event_request_clarification_history')
@@ -1669,6 +1698,36 @@ export async function getEventClarificationHistory(id, userId, role, { client } 
     createdAt: entry.created_at,
     replyByDate: entry.reply_by_date ?? null,
     requestedFields: entry.requested_fields ?? [],
+  }));
+}
+
+/**
+ * SCRUM-355 AC3, AC5: the decisions a request has had that are no longer
+ * current, oldest first. A non-empty list is what marks a request as a resubmission.
+ */
+export async function getEventDecisionHistory(id, userId, role, { client } = {}) {
+  requireCallerId(userId, 'userId');
+  const db = await resolveClient(client);
+  await assertCanReadHistory(id, userId, role, db);
+
+  const { data: entries, error } = await db
+    .from('event_request_decision_history')
+    .select('id, decision, decision_note, decided_by, decided_at, superseded_reason, superseded_at')
+    .eq('event_request_id', id)
+    .order('decided_at', { ascending: true })
+    .order('id', { ascending: true });
+  if (error) throw translateError(error);
+  if (!entries?.length) return [];
+
+  const nameOf = await readNames(db, entries.map((entry) => entry.decided_by));
+  return entries.map((entry) => ({
+    id: entry.id,
+    decision: entry.decision,
+    decisionNote: entry.decision_note ?? null,
+    decidedByName: nameOf(entry.decided_by),
+    decidedAt: entry.decided_at,
+    supersededReason: entry.superseded_reason,
+    supersededAt: entry.superseded_at,
   }));
 }
 

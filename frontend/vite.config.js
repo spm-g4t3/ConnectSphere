@@ -220,6 +220,12 @@ const SCRUM172_FILES = [
   'src/services/notificationLink.js',
 ]
 
+// SCRUM-355: past decisions, a new file only this story owns. Its edits to
+// MyEventRequests.jsx and CoordinatorRequestDetail.jsx stay ungated.
+const SCRUM355_FILES = [
+  'src/components/DecisionHistory.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -270,6 +276,7 @@ export default defineConfig({
         ...SCRUM363_FILES.map((file) => [file, FULL]),
         ...SCRUM492_FILES.map((file) => [file, FULL]),
         ...SCRUM172_FILES.map((file) => [file, FULL]),
+        ...SCRUM355_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

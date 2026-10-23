@@ -70,6 +70,7 @@ vi.mock("../../src/auth/AuthContext", () => ({
 
 vi.mock("../../src/services/eventRequestService", () => ({
   closeEventClarification: vi.fn(),
+  getEventDecisionHistory: vi.fn(() => Promise.resolve([])),
   cancelEventRequest: vi.fn(),
   decideEventRequest: vi.fn(),
   getAssignmentHistory: vi.fn(),

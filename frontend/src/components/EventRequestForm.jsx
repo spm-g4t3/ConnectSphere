@@ -121,12 +121,20 @@ export default function EventRequestForm({
       setSaveError("Save the draft before submitting it.");
       return;
     }
+    if (!form.eventName.trim()) {
+      setSaveError("Event name is required, even for a draft.");
+      return;
+    }
 
     setSubmitting(true);
     setSubmitErrors([]);
+    setSaveError(null);
     setDraftSavedMessage(null);
 
     try {
+      // The server validates the stored request, so save what is on screen
+      // first; otherwise edits made since the last "Save draft" are ignored.
+      await updateEventRequest(requestId, buildPayload());
       const result = await submitEventRequest(requestId);
       setStatus(result.status);
       setConfirmation(result);

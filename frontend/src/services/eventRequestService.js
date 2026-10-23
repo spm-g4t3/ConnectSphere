@@ -115,6 +115,17 @@ export async function getEventClarificationHistory(id) {
   return getData(`/event-requests/${id}/clarification-history`);
 }
 
+// SCRUM-355: reopen a rejected request as a draft. A 409's message names the
+// request's current status, so it can be shown as it is.
+export async function reopenEventRequest(id) {
+  return postData(`/event-requests/${id}/reopen`);
+}
+
+// SCRUM-355: past decisions, oldest first; empty if it was never resubmitted.
+export async function getEventDecisionHistory(id) {
+  return getData(`/event-requests/${id}/decision-history`);
+}
+
 
 export async function getCoordinatorChangeRequests(eventRequestId) {
   return getData(

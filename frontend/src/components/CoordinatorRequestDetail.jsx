@@ -52,6 +52,7 @@ import EventFlaggedBookings from "./EventFlaggedBookings";
 import EventVenueBookings from "./EventVenueBookings";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
 import DecisionOutcome from "./DecisionOutcome";
+import DecisionHistory from "./DecisionHistory";
 import ReassignEventPanel from "./ReassignEventPanel";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import EventEquipmentSection from "./EventEquipmentSection";
@@ -958,6 +959,9 @@ export default function CoordinatorRequestDetail({
           )}
         </section>
       ) : null}
+
+      {/* SCRUM-355 AC5: a resubmission says so, with the decisions before this one. */}
+      <DecisionHistory eventRequestId={request.id} view="coordinator" />
 
       {request.status !== "pending_clarification" && (
         <section className="coordinator-clarification-history">

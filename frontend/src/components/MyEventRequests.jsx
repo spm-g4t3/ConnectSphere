@@ -11,7 +11,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { getMyEventRequests } from "../services/eventRequestService";
+import { getMyEventRequests, reopenEventRequest } from "../services/eventRequestService";
 import { isRegistrationConfigurable } from "../services/registrationStatuses";
 import {
   readStatusDisplay,
@@ -24,6 +24,7 @@ import ChangeRequestForm from "./ChangeRequestForm";
 import ChangeRequestStatusList from "./ChangeRequestStatusList";
 import AssignmentHistory from "./AssignmentHistory";
 import DecisionOutcome from "./DecisionOutcome";
+import DecisionHistory from "./DecisionHistory";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import ClarificationReplyForm from "./ClarificationReplyForm";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
@@ -115,6 +116,9 @@ function assignmentLine(request) {
   return `${who} has been assigned; your request is waiting for them to start the review.`;
 }
 
+// How long a row opened from a link stays highlighted, matching the CSS pulse.
+const FOCUS_HIGHLIGHT_MS = 4000;
+
 export default function MyEventRequests() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -135,6 +139,9 @@ export default function MyEventRequests() {
   const [focusedId, setFocusedId] = useState(null);
   const [focusMissing, setFocusMissing] = useState(false);
   const focusedRowRef = useRef(null);
+  // SCRUM-355: the row being reopened, and the refusal for the row that was refused.
+  const [reopeningId, setReopeningId] = useState(null);
+  const [reopenError, setReopenError] = useState(null);
 
   useEffect(() => {
     if (
@@ -178,9 +185,14 @@ export default function MyEventRequests() {
     fetchRequests();
   }, [fetchRequests]);
 
-  // jsdom has no scrollIntoView, hence the guard.
+  // Glide to the row, then let its highlight fade. jsdom has no scrollIntoView
+  // or matchMedia, hence the guards; reduced motion gets an instant jump.
   useEffect(() => {
-    if (focusedId) focusedRowRef.current?.scrollIntoView?.({ block: "center" });
+    if (!focusedId) return undefined;
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    focusedRowRef.current?.scrollIntoView?.({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+    const timer = setTimeout(() => setFocusedId(null), FOCUS_HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
   }, [focusedId]);
 
   // AC4: the displayed status is updated when the event request changes.
@@ -198,6 +210,24 @@ export default function MyEventRequests() {
   function handleSaved() {
     setActivePanel(null);
     fetchRequests();
+  }
+
+  // SCRUM-355 AC1, AC2: reopen as a draft and go straight to editing it.
+  async function handleReopen(req) {
+    setReopeningId(req.id);
+    setReopenError(null);
+    try {
+      const reopened = await reopenEventRequest(req.id);
+      setActivePanel({ mode: "edit", request: reopened });
+      fetchRequests();
+    } catch (err) {
+      setReopenError({
+        id: req.id,
+        message: err.response?.data?.error || "Could not reopen this request for revision.",
+      });
+    } finally {
+      setReopeningId(null);
+    }
   }
 
   if (activePanel?.mode === "create") {
@@ -219,6 +249,8 @@ export default function MyEventRequests() {
       <div className="my-event-requests">
         <button className="my-event-requests__back" onClick={() => setActivePanel(null)}>&larr; Back to my requests</button>
         <EventRequestForm existingRequest={activePanel.request} onSaved={handleSaved} />
+        {/* SCRUM-355 AC3: the rejection being answered, beside the form. */}
+        <DecisionHistory eventRequestId={activePanel.request.id} view="organiser" />
       </div>
     );
   }
@@ -396,6 +428,12 @@ export default function MyEventRequests() {
                   </button>
                 )}
 
+                {req.status === "rejected" && (
+                  <button disabled={reopeningId === req.id} onClick={() => handleReopen(req)}>
+                    {reopeningId === req.id ? "Reopening..." : "Revise and resubmit"}
+                  </button>
+                )}
+
                 {req.status === "pending_clarification" && (
                   <button
                     onClick={() =>
@@ -416,6 +454,9 @@ export default function MyEventRequests() {
                   </button>
                 )}
               </div>
+              {reopenError?.id === req.id && (
+                <p className="my-event-requests__error" role="alert">{reopenError.message}</p>
+              )}
             </li>
           );
         })}
