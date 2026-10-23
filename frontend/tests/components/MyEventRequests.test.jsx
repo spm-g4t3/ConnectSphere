@@ -14,7 +14,7 @@
 // mock, because a vi.mock factory is strict.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, within, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, within, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 
@@ -473,6 +473,35 @@ describe("SCRUM172_AC7 a notification opens the Organiser's list on its event", 
 
     expect(screen.getByTestId("router-state")).toHaveTextContent("null");
     expect(rowOf("Tech Talk")).toHaveClass("my-event-requests__item--focused");
+  });
+
+  it("SCRUM172_AC7_glides_to_the_event_and_lets_the_highlight_fade", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderWithState([FIRST, SECOND], { focusEventRequestId: SECOND.id });
+      await screen.findByText("Tech Talk");
+
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" }));
+      expect(rowOf("Tech Talk")).toHaveClass("my-event-requests__item--focused");
+
+      await act(() => vi.advanceTimersByTimeAsync(4000));
+      expect(rowOf("Tech Talk")).not.toHaveClass("my-event-requests__item--focused");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("SCRUM172_AC7_reduced_motion_jumps_instead_of_gliding", async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn(() => ({ matches: true }));
+    try {
+      renderWithState([FIRST, SECOND], { focusEventRequestId: SECOND.id });
+
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "center" }));
+      expect(window.matchMedia).toHaveBeenCalledWith("(prefers-reduced-motion: reduce)");
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
   });
 
   it("SCRUM172_AC7_focuses_without_scrollIntoView", async () => {

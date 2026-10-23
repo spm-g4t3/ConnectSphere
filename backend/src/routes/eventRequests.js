@@ -78,6 +78,7 @@ import {
   getEventRequestForCoordinator,
   getEventRequestStatusHistory,
   getEventClarificationHistory,
+  getEventDecisionHistory,
   closeEventClarification,
   listEventRequestsForReview,
   listEventRequestsForCoordinator,
@@ -96,6 +97,7 @@ import {
   assignEventRequest,
   startEventReview,
   decideEventRequest,
+  reopenEventRequest,
   getEventCancellationImpact,
   cancelEventRequest,
   getSignificantEventChangeImpact,
@@ -518,6 +520,17 @@ export function createEventRequestRouter({
     res.status(200).json(history);
   });
 
+  // SCRUM-355: past decisions, gated as the clarification history is.
+  router.get('/:id/decision-history', async (req, res) => {
+    const history = await getEventDecisionHistory(
+      req.params.id,
+      req.user.id,
+      req.user.role,
+      { client },
+    );
+    res.status(200).json(history);
+  });
+
   /**
    * SCRUM-34 AC4: which of this event's change requests are outstanding, in
    * progress or processed.
@@ -804,6 +817,13 @@ export function createEventRequestRouter({
 
     const submitted = await submitEventRequest(req.params.id, { client, changedBy: req.user.id });
     res.status(200).json(withStatusDisplay(submitted));
+  });
+
+  // SCRUM-355 AC1, AC2: the Organiser reopens their rejected request as a draft.
+  // reopen_event_request checks ownership and status under the row lock.
+  router.post('/:id/reopen', organiserOnly, async (req, res) => {
+    const reopened = await reopenEventRequest(req.params.id, req.user.id, { client });
+    res.status(200).json(withStatusDisplay(reopened));
   });
 
   /**

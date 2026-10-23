@@ -864,17 +864,18 @@ describe('SCRUM-11: an update accepts only the fields the Organiser changed', ()
     expect(err.message).toMatch(/no changes supplied/i);
   });
 
-  it('SCRUM11_AC1_treats_a_field_cleared_with_null_as_no_change_at_all', () => {
-    // The KNOWN LIMITATION, pinned so it is a recorded decision rather than a
-    // surprise: a PATCH cannot *clear* an optional field, because
-    // collectEventRequest reads an explicit null as "not answered" and leaves
-    // the key off. If someone later gives "clear this" a wire representation,
-    // this test is what tells them they are changing documented behaviour
-    // rather than fixing a bug.
-    const err = errorFrom(() => validateUpdateEventRequest({ purpose: null }));
+  it.each([
+    'purpose', 'description', 'proposedStart', 'proposedEnd', 'expectedAttendance',
+    'venueRequirements', 'accessibilityRequirements', 'equipmentRequirements',
+  ])('SCRUM355_AC3_an_explicit_null_clears_%s', (field) => {
+    // Replaces SCRUM-11's recorded limitation: a revision must be able to
+    // remove what was rejected. An absent key still leaves a field alone.
+    expect(validateUpdateEventRequest({ eventName: 'Night', [field]: null }))
+      .toEqual({ eventName: 'Night', [field]: null });
+  });
 
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toMatch(/no changes supplied/i);
+  it('SCRUM355_AC3_a_null_alone_is_a_change', () => {
+    expect(validateUpdateEventRequest({ purpose: null })).toEqual({ purpose: null });
   });
 
   it('SCRUM11_AC1_reports_what_is_wrong_with_a_change_before_saying_nothing_changed', () => {

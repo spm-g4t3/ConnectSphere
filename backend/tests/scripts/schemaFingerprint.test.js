@@ -19,7 +19,9 @@ const SCHEMA = `
   revoke execute on function count_bookings() from public;
 `;
 
-describe('schema fingerprint', () => {
+// Each test boots two fresh PGlite databases, which can take longer than the
+// 5s default on a loaded runner.
+describe('schema fingerprint', { timeout: 30_000 }, () => {
   const opened = [];
 
   async function build(extra = '') {
