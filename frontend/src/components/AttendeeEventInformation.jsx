@@ -1,9 +1,10 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getAttendeeEvent } from "../services/attendeeEventService";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
 import { EVENT_TIME_NOTE, formatEventDate, formatEventStartTime, formatEventEndTime } from "../services/openEventDisplay";
 import useOpenEventRead from "./useOpenEventRead";
+import WithdrawRegistration from "./WithdrawRegistration";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { SESSION_EXPIRED } from "../services/apiErrors";
 
@@ -19,14 +20,22 @@ function EventInformation({ eventId }) {
     messages: MESSAGES, fallback: FALLBACK, notFoundIsAnswer: true, retainDataOnRefresh: false,
   });
   useRefetchOnReturn(load);
+  // The backend's reply to a withdrawal; set only once it has succeeded.
+  const [withdrawal, setWithdrawal] = useState(null);
   // Only a reply for this route's event may name it.
   const current = data?.eventRequestId === eventId.trim().toLowerCase() ? data : null;
+  const handleWithdrawn = (result) => {
+    setWithdrawal(result);
+    load();
+  };
   return (
     <>
       <h1>{current?.eventName?.trim() || "Event information"}</h1>
       <section aria-label="Registered event information">
         {loading && <p role="status">Loading...</p>}
-        {notFound && <p role="alert">Event information is unavailable. An active registration is required.</p>}
+        {/* Shown from the backend's reply alone, so a failed reload cannot hide it. */}
+        {withdrawal && <p role="status">Your registration has been withdrawn.</p>}
+        {!withdrawal && notFound && <p role="alert">Event information is unavailable. An active registration is required.</p>}
         {error && (
           <div className="browse-open-events__error" role="alert">
             <p>{error}</p>
@@ -52,6 +61,9 @@ function EventInformation({ eventId }) {
               </li>
             ))}</ul> : <p>No confirmed venue information is available.</p>}
           </>)}
+        {!loading && !error && current?.registrationId && (
+          <WithdrawRegistration registrationId={current.registrationId} onWithdrawn={handleWithdrawn} />
+        )}
       </section>
       <p><Link to={REGISTERED_EVENTS_PATH}>Back to registered events</Link></p>
     </>
