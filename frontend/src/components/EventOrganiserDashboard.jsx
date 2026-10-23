@@ -107,7 +107,12 @@ export default function EventOrganiserDashboard({ user }) {
                       )}
                     </p>
                   )}
-                  <Link to="/events" className="dashboard--organiser__manage-event">
+                  {/* My Events scrolls to and highlights the row it is sent to. */}
+                  <Link
+                    to="/events"
+                    state={{ focusEventRequestId: event.id }}
+                    className="dashboard--organiser__manage-event"
+                  >
                     Open in My Events
                   </Link>
                 </details>

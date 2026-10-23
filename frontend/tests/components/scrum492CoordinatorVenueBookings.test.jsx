@@ -19,6 +19,7 @@ vi.mock("../../src/auth/AuthContext", () => ({ useAuth: vi.fn() }));
 
 vi.mock("../../src/services/eventRequestService", () => ({
   closeEventClarification: vi.fn(),
+  getEventDecisionHistory: vi.fn(() => Promise.resolve([])),
   decideEventRequest: vi.fn(),
   getCoordinatorChangeRequests: vi.fn(),
   processCoordinatorChangeRequest: vi.fn(),
