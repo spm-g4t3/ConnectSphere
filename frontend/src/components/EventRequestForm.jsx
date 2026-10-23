@@ -65,24 +65,25 @@ export default function EventRequestForm({
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
+  // An empty field is sent as null, which clears it on a saved draft (SCRUM-355
+  // AC3); left out, the old stored value would be kept and later submitted.
   function buildPayload() {
     return {
       eventName: form.eventName.trim(),
-      purpose: form.purpose.trim() || undefined,
-      description: form.description.trim() || undefined,
+      purpose: form.purpose.trim() || null,
+      description: form.description.trim() || null,
       // An <input type="datetime-local"> emits "2026-06-01T09:00" with no
-      // offset, and the backend's TIMESTAMP_PATTERN requires one -- so these
-      // two fields 400'd every save that had a date in it. toOffsetIsoString
-      // stamps the device's real offset for that instant and returns
-      // undefined for "", which is the `|| undefined` this replaces.
-      proposedStart: toOffsetIsoString(form.proposedStart),
-      proposedEnd: toOffsetIsoString(form.proposedEnd),
+      // offset, and the backend's TIMESTAMP_PATTERN requires one.
+      // toOffsetIsoString stamps the device's real offset for that instant and
+      // returns undefined for "".
+      proposedStart: toOffsetIsoString(form.proposedStart) ?? null,
+      proposedEnd: toOffsetIsoString(form.proposedEnd) ?? null,
       expectedAttendance: form.expectedAttendance
         ? Number(form.expectedAttendance)
-        : undefined,
-      venueRequirements: form.venueRequirements.trim() || undefined,
-      accessibilityRequirements: form.accessibilityRequirements.trim() || undefined,
-      equipmentRequirements: form.equipmentRequirements.trim() || undefined,
+        : null,
+      venueRequirements: form.venueRequirements.trim() || null,
+      accessibilityRequirements: form.accessibilityRequirements.trim() || null,
+      equipmentRequirements: form.equipmentRequirements.trim() || null,
     };
   }
 

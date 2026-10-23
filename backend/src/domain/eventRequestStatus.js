@@ -331,8 +331,8 @@ export const ACTIVE_EVENT_STATUSES = Object.freeze([
  * SCRUM-542. Named beside ACTIVE_EVENT_STATUSES, and between them the two are
  * every status an event someone holds can have, except draft: a draft is the
  * Organiser's working copy, nobody's event to supervise, so it is in neither
- * and the list never shows one (a reopened draft can keep a stale
- * coordinator, 022). Not derived as "every STATUS not active", which would
+ * and the list never shows one (since SCRUM-355's 015 a reopened draft has no
+ * coordinator either). Not derived as "every STATUS not active", which would
  * admit draft, and would silently admit any status added later; a new
  * finished status is a decision to make here.
  */

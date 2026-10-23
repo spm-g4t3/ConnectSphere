@@ -150,24 +150,27 @@ describe('SCRUM-355: GET /api/event-requests/:id/decision-history', () => {
     });
   });
 
-  it.each([ROLE.EVENT_COORDINATOR, ROLE.EVENT_COORDINATOR_LEAD])(
-    'SCRUM355_AC5_a_%s_reads_a_resubmitted_requests_past_decisions',
-    async (role) => {
-      const client = createEventRequestClient([
-        ok(storedRow({ status: 'submitted' })),
-        ok([historyRow]),
-        ok([]),
-      ]);
+  it.each([
+    ['the_lead_of_an_unassigned_resubmission', ROLE.EVENT_COORDINATOR_LEAD, null],
+    ['the_coordinator_it_is_assigned_to', ROLE.EVENT_COORDINATOR, COORDINATOR_ID],
+  ])('SCRUM355_AC5_%s_reads_its_past_decisions', async (_label, role, assigned) => {
+    const client = createEventRequestClient([
+      ok(storedRow({ status: 'submitted', assigned_coordinator_id: assigned })),
+      ok([historyRow]),
+      ok([]),
+    ]);
 
-      const res = await historyCall(client, signedInAs(role, COORDINATOR_ID));
+    const res = await historyCall(client, signedInAs(role, COORDINATOR_ID));
 
-      expect(res.status).toBe(200);
-      expect(res.body).toEqual([expect.objectContaining({ decision: 'rejected', decidedByName: null })]);
-    },
-  );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([expect.objectContaining({ decision: 'rejected', decidedByName: null })]);
+  });
 
   it('SCRUM355_AC5_a_request_never_decided_before_has_an_empty_history', async () => {
-    const client = createEventRequestClient([ok(storedRow({ status: 'submitted' })), ok([])]);
+    const client = createEventRequestClient([
+      ok(storedRow({ status: 'submitted', assigned_coordinator_id: COORDINATOR_ID })),
+      ok([]),
+    ]);
 
     const res = await historyCall(client, signedInAs(ROLE.EVENT_COORDINATOR, COORDINATOR_ID));
 
@@ -178,9 +181,12 @@ describe('SCRUM-355: GET /api/event-requests/:id/decision-history', () => {
   it.each([
     ['another_organiser', ROLE.EVENT_ORGANISER, 'rejected'],
     ['a_coordinator_on_a_draft', ROLE.EVENT_COORDINATOR, 'draft'],
+    ['a_lead_on_a_draft', ROLE.EVENT_COORDINATOR_LEAD, 'draft'],
+    ['a_coordinator_it_is_not_assigned_to', ROLE.EVENT_COORDINATOR, 'submitted'],
     ['venue_staff', ROLE.VENUE_STAFF, 'submitted'],
-  ])('SCRUM355_AC3_%s_gets_a_404', async (_label, role, status) => {
-    const client = createEventRequestClient([ok(storedRow({ status }))]);
+  ])('SCRUM355_AC5_%s_gets_a_404', async (_label, role, status) => {
+    // Held by COORDINATOR_ID; the caller is someone else.
+    const client = createEventRequestClient([ok(storedRow({ status, assigned_coordinator_id: COORDINATOR_ID }))]);
 
     const res = await historyCall(client, signedInAs(role, OTHER_ID));
 

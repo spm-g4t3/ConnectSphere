@@ -56,6 +56,22 @@ describe("Submitting from the event request form", () => {
     expect(createEventRequest).not.toHaveBeenCalled();
   });
 
+  it("SCRUM355_AC3_a_field_emptied_on_screen_is_sent_as_null_so_it_is_cleared", async () => {
+    vi.mocked(updateEventRequest).mockResolvedValue(draft());
+    vi.mocked(submitEventRequest).mockResolvedValue(draft({ status: "submitted" }));
+    render(<EventRequestForm existingRequest={draft({ venueRequirements: "A tiered hall", expectedAttendance: 80 })} />);
+
+    await userEvent.clear(screen.getByLabelText("Venue requirements"));
+    await userEvent.clear(screen.getByLabelText("Expected attendance"));
+    await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
+
+    expect(updateEventRequest).toHaveBeenCalledWith(REQUEST_ID, expect.objectContaining({
+      venueRequirements: null,
+      expectedAttendance: null,
+      proposedStart: null,
+    }));
+  });
+
   it("SCRUM10_AC4_every_missing_field_is_listed_when_submission_is_refused", async () => {
     vi.mocked(updateEventRequest).mockResolvedValue(draft());
     vi.mocked(submitEventRequest).mockRejectedValue({

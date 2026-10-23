@@ -1,6 +1,6 @@
 /**
  * SCRUM-355: a rejected request reopened, revised and resubmitted, against the
- * real schema. reopen_event_request (013) and the decision history (012).
+ * real schema. reopen_event_request (014, then 015) and the decision history (012).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -131,6 +131,21 @@ describe('SCRUM-355: reopen_event_request', () => {
       superseded_reason: 'reopened_for_revision',
       superseded_by: who.organiser,
     })]);
+  });
+
+  it('SCRUM355_AC2_reopening_clears_the_coordinator_but_the_assignment_history_keeps_them', async () => {
+    const who = await people();
+    const id = await rejected(who);
+    await getDb().query(
+      'insert into event_request_assignment_history (event_request_id, new_coordinator_id, assigned_by) values ($1, $2, $3)',
+      [id, who.coordinator, who.lead],
+    );
+
+    await reopen(id, who.organiser);
+
+    expect((await row(id)).assigned_coordinator_id).toBeNull();
+    expect(await rows('select new_coordinator_id from event_request_assignment_history where event_request_id = $1', [id]))
+      .toEqual([{ new_coordinator_id: who.coordinator }]);
   });
 
   it('SCRUM355_AC2_the_reopening_is_recorded_in_the_status_history', async () => {

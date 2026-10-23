@@ -960,8 +960,11 @@ export default function CoordinatorRequestDetail({
         </section>
       ) : null}
 
-      {/* SCRUM-355 AC5: a resubmission says so, with the decisions before this one. */}
-      <DecisionHistory eventRequestId={request.id} view="coordinator" />
+      {/* SCRUM-355 AC5: a resubmission says so, with the decisions before this
+          one. Only its coordinator and the Lead may read them, as the server rules. */}
+      {(isAssignedCoordinator || isLead) && (
+        <DecisionHistory eventRequestId={request.id} view="coordinator" />
+      )}
 
       {request.status !== "pending_clarification" && (
         <section className="coordinator-clarification-history">

@@ -20,29 +20,27 @@ const DECISION_LABEL = {
  *                                                 the request is a resubmission
  */
 export default function DecisionHistory({ eventRequestId, view = "organiser" }) {
-  const [entries, setEntries] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  // Tagged with the request it was read for, so switching requests never shows
+  // the previous one's decisions or error while the new read is in flight.
+  const [result, setResult] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     getEventDecisionHistory(eventRequestId)
-      .then((history) => {
-        if (!cancelled) setEntries(history);
+      .then((entries) => {
+        if (!cancelled) setResult({ id: eventRequestId, entries });
       })
       .catch(() => {
-        if (!cancelled) setError("Previous decisions could not be loaded.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setResult({ id: eventRequestId, error: "Previous decisions could not be loaded." });
       });
     return () => {
       cancelled = true;
     };
   }, [eventRequestId]);
 
-  if (loading) return null;
-  if (error) return <p className="decision-history__state" role="alert">{error}</p>;
+  if (result?.id !== eventRequestId) return null;
+  if (result.error) return <p className="decision-history__state" role="alert">{result.error}</p>;
+  const { entries } = result;
   if (entries.length === 0) return null;
 
   // The newest is the rejection this round of revision answers.

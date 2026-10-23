@@ -52,6 +52,7 @@ import {
   getCoordinatorChangeRequests,
   getEventCancellationImpact,
   getEventClarificationHistory,
+  getEventDecisionHistory,
   listCoordinatorWorkload,
   listCoordinators,
   reassignEventRequest,
@@ -1510,5 +1511,38 @@ describe("SCRUM395 significant event change entry point", () => {
     unmount();
     renderAs(OTHER, eventRequest({ status: "approved" }));
     expect(screen.queryByRole("button", { name: "Revise event details" })).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM-355 a resubmission's past decisions on the coordinator screen", () => {
+  const rejection = {
+    id: "d1", decision: "rejected", decisionNote: "Too few marshals.", decidedByName: "Priya Nair",
+    decidedAt: "2026-10-15T03:00:00Z", supersededReason: "reopened_for_revision", supersededAt: "2026-10-20T03:00:00Z",
+  };
+
+  it.each([
+    ["the_assigned_coordinator", { id: ASSIGNED, role: "event_coordinator" }],
+    ["a_lead", { id: OTHER, role: "event_coordinator_lead" }],
+  ])("SCRUM355_AC5_%s_is_told_it_is_a_resubmission", async (_label, user) => {
+    vi.mocked(getEventDecisionHistory).mockResolvedValue([rejection]);
+    vi.mocked(useAuth).mockReturnValue({ user });
+    render(
+      <MemoryRouter>
+        <CoordinatorRequestDetail request={eventRequest()} onChangeRequestProcessed={vi.fn()} onReviewDecisionProcessed={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/This request is a resubmission/)).toBeInTheDocument();
+    expect(screen.getByText("Too few marshals.")).toBeInTheDocument();
+    expect(getEventDecisionHistory).toHaveBeenCalledWith(REQUEST_ID);
+  });
+
+  it("SCRUM355_AC5_a_coordinator_it_is_not_assigned_to_does_not_read_them", async () => {
+    vi.mocked(getEventDecisionHistory).mockResolvedValue([rejection]);
+    renderAs(OTHER, eventRequest());
+
+    await screen.findByText("IS212 Industry Night");
+    expect(getEventDecisionHistory).not.toHaveBeenCalled();
+    expect(screen.queryByText(/This request is a resubmission/)).not.toBeInTheDocument();
   });
 });

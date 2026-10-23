@@ -16,6 +16,7 @@ import {
   getEventDecisionHistory,
   getMyEventRequests,
   reopenEventRequest,
+  updateEventRequest,
 } from "../../src/services/eventRequestService";
 
 vi.mock("../../src/auth/AuthContext", () => ({
@@ -115,6 +116,22 @@ describe("SCRUM355 revise and resubmit on the organiser's list", () => {
     expect(getMyEventRequests).toHaveBeenCalledTimes(2);
   });
 
+  it("SCRUM355_AC3_saving_partway_through_keeps_the_rejection_beside_the_form", async () => {
+    const reopened = eventRequest({ status: "draft", decision: null, decisionNote: null });
+    vi.mocked(reopenEventRequest).mockResolvedValue(reopened);
+    vi.mocked(updateEventRequest).mockResolvedValue(reopened);
+    vi.mocked(getEventDecisionHistory).mockResolvedValue([pastRejection()]);
+    renderList([eventRequest()]);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Revise and resubmit" }));
+    await screen.findByText("Why it was rejected");
+    await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
+
+    expect(await screen.findByText("Draft saved. You can submit it when you're ready.")).toBeInTheDocument();
+    expect(screen.getByText("Why it was rejected")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("IS212 Industry Night")).toBeInTheDocument();
+  });
+
   it("SCRUM355_AC1_a_refusal_shows_the_servers_message_on_the_row", async () => {
     const message = "This request is Under review, and only a Rejected request can be reopened for revision";
     vi.mocked(reopenEventRequest).mockRejectedValue({ response: { status: 409, data: { error: message } } });
@@ -189,6 +206,36 @@ describe("SCRUM355 DecisionHistory", () => {
     expect(await screen.findByText("No reason was recorded.")).toBeInTheDocument();
     expect(screen.getByRole("listitem")).toHaveTextContent("Approved on an unrecorded date by Priya Nair");
     expect(screen.getByRole("listitem")).toHaveTextContent("No note was left.");
+  });
+
+  it("SCRUM355_AC5_switching_requests_never_shows_the_previous_requests_decisions", async () => {
+    const OTHER_ID = "33333333-3333-4333-8333-333333333333";
+    let resolveOther;
+    vi.mocked(getEventDecisionHistory).mockImplementation((id) => (id === REQUEST_ID
+      ? Promise.resolve([pastRejection()])
+      : new Promise((resolve) => { resolveOther = resolve; })));
+    const { rerender } = render(<DecisionHistory eventRequestId={REQUEST_ID} view="coordinator" />);
+    expect(await screen.findByText("The venue is too small.")).toBeInTheDocument();
+
+    rerender(<DecisionHistory eventRequestId={OTHER_ID} view="coordinator" />);
+    expect(screen.queryByText("The venue is too small.")).not.toBeInTheDocument();
+
+    await act(async () => resolveOther([pastRejection({ id: "d9", decisionNote: "Other reason." })]));
+    expect(screen.getByText("Other reason.")).toBeInTheDocument();
+  });
+
+  it("SCRUM355_AC5_an_error_from_the_previous_request_does_not_stay", async () => {
+    const OTHER_ID = "33333333-3333-4333-8333-333333333333";
+    vi.mocked(getEventDecisionHistory).mockImplementation((id) => (id === REQUEST_ID
+      ? Promise.reject(new Error("boom"))
+      : Promise.resolve([pastRejection()])));
+    const { rerender } = render(<DecisionHistory eventRequestId={REQUEST_ID} view="coordinator" />);
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    rerender(<DecisionHistory eventRequestId={OTHER_ID} view="coordinator" />);
+
+    expect(await screen.findByText("The venue is too small.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("SCRUM355_AC3_a_failed_read_says_so", async () => {

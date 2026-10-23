@@ -1658,27 +1658,21 @@ export async function getEventRequestStatusHistory(id, userId, { client } = {}) 
   }));
 }
 
-/**
- * The Organiser reads their own request's histories; any coordinator or Lead
- * reads them once it is past draft. The routes have no role gate of their own,
- * so this is the gate. SCRUM-486 (SCRUM-521): the Lead reads as a coordinator
- * does, because the screen they hand an event over from shows these histories.
- */
-async function assertCanReadHistory(id, userId, role, db) {
+export async function getEventClarificationHistory(id, userId, role, { client } = {}) {
+  requireCallerId(userId, 'userId');
+  const db = await resolveClient(client);
   const request = await getEventRequestById(id, { client: db });
   const isOwner = request.organiserId === userId;
+  // SCRUM-486 (SCRUM-521): the Lead reads it as a coordinator does. The event
+  // screen the Lead hands an event over from shows this history, and the
+  // route has no role gate of its own, so this check is the gate; with the
+  // Lead left out it answered 404 and that section of the screen failed.
   const isCoordinatorTeam =
     (role === ROLE.EVENT_COORDINATOR || role === ROLE.EVENT_COORDINATOR_LEAD)
     && request.status !== STATUS.DRAFT;
   if (!isOwner && !isCoordinatorTeam) {
     throw new NotFoundError(`Event request ${id} not found`);
   }
-}
-
-export async function getEventClarificationHistory(id, userId, role, { client } = {}) {
-  requireCallerId(userId, 'userId');
-  const db = await resolveClient(client);
-  await assertCanReadHistory(id, userId, role, db);
 
   const { data: entries, error } = await db
     .from('event_request_clarification_history')
@@ -1704,11 +1698,23 @@ export async function getEventClarificationHistory(id, userId, role, { client } 
 /**
  * SCRUM-355 AC3, AC5: the decisions a request has had that are no longer
  * current, oldest first. A non-empty list is what marks a request as a resubmission.
+ *
+ * Narrower than the clarification history: past rejection notes are for the
+ * Organiser, the Lead who assigns the request, and the coordinator it is
+ * assigned to now (AC5), not every coordinator.
  */
 export async function getEventDecisionHistory(id, userId, role, { client } = {}) {
   requireCallerId(userId, 'userId');
   const db = await resolveClient(client);
-  await assertCanReadHistory(id, userId, role, db);
+  const request = await getEventRequestById(id, { client: db });
+  const pastDraft = request.status !== STATUS.DRAFT;
+  const mayRead =
+    request.organiserId === userId
+    || (pastDraft && role === ROLE.EVENT_COORDINATOR_LEAD)
+    || (pastDraft && role === ROLE.EVENT_COORDINATOR && request.assignedCoordinatorId === userId);
+  if (!mayRead) {
+    throw new NotFoundError(`Event request ${id} not found`);
+  }
 
   const { data: entries, error } = await db
     .from('event_request_decision_history')
@@ -1862,9 +1868,8 @@ export async function listEventRequestsForReview({ client } = {}) {
  * assignment happens at submission (016)". That stopped being true twice:
  * SCRUM-318's 022 reopens a rejected request to a draft and leaves its
  * coordinator on it, and since SCRUM-486 (052) assignment does not happen at
- * submission at all. So a reopened draft is listed here for the coordinator
- * who held it, until it is submitted again and 052 clears the column. That is
- * a known gap, recorded in docs/SCRUM-486.md section 4, not a decision.
+ * submission at all. Since SCRUM-355's 015, reopening clears the coordinator
+ * too, so a draft reopened since then is not listed here.
  *
  * Why this list shows the organiser's name, when listEventRequestsForReview
  * calls leaving it out "the privacy floor of the shared queue": that floor is
