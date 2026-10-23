@@ -130,6 +130,19 @@ describe('SCRUM27 withdrawal eligibility in PostgreSQL', () => {
       });
     });
 
+  // Organisers enter Singapore times; the comparison is between instants, whatever the offset.
+  it.each([
+    ['allows', '2026-10-18T09:59:59.999999Z', null],
+    ['refuses', '2026-10-18T10:00:00Z', 'WITHDRAWAL_DEADLINE_PASSED'],
+  ])('SCRUM27_AC2_%s_against_a_deadline_stored_in_Singapore_time', async (_verb, time, hint) => {
+    const singapore = await withdrawableEvent({ registration_withdrawal_deadline: '2026-10-18T18:00:00+08:00' });
+    const id = await seedRegistration(ME, 'registered', singapore);
+    await db.exec("set local timezone = 'Asia/Singapore'");
+    await at(time);
+    if (hint) await expect(check(id)).rejects.toMatchObject({ code: '55000', hint });
+    else await expect(check(id)).resolves.toBeDefined();
+  });
+
   it('SCRUM27_AC2_refuses_when_the_event_has_no_withdrawal_deadline', async () => {
     const noDeadline = await withdrawableEvent({ registration_withdrawal_deadline: null });
     const id = await seedRegistration(ME, 'registered', noDeadline);
