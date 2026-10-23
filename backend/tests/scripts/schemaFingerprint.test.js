@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
 import { SUPABASE_PREAMBLE } from '../../db/loadSchema.js';
@@ -20,38 +20,41 @@ const SCHEMA = `
 `;
 
 describe('schema fingerprint', () => {
-  const opened = [];
+  // Built in beforeAll, not in the tests: each PGlite build is CPU-bound
+  // WebAssembly that can outrun the 5s test timeout on a busy CI runner.
+  let base;
+  let changedFunction;
+  let revokedFromAnon;
 
   async function build(extra = '') {
     const db = new PGlite({ extensions: { btree_gist } });
-    opened.push(db);
-    await db.exec(SUPABASE_PREAMBLE + SCHEMA + extra);
-    return fingerprint(db);
+    try {
+      await db.exec(SUPABASE_PREAMBLE + SCHEMA + extra);
+      return await fingerprint(db);
+    } finally {
+      await db.close();
+    }
   }
 
-  afterEach(async () => {
-    await Promise.all(opened.splice(0).map((db) => db.close()));
-  });
-
-  it('SCRUM572_fingerprint_a_changed_function_body_changes_only_the_function_row', async () => {
-    const before = await build();
-    const after = await build(`
+  beforeAll(async () => {
+    base = await build();
+    changedFunction = await build(`
       create or replace function count_bookings() returns bigint language sql stable
         as $$ select count(*) from bookings where status = 'confirmed' $$;
     `);
+    revokedFromAnon = await build('revoke execute on function count_bookings() from anon;');
+  });
 
-    const { onlyA, onlyB, changed } = diffRows(before, after);
+  it('SCRUM572_fingerprint_a_changed_function_body_changes_only_the_function_row', () => {
+    const { onlyA, onlyB, changed } = diffRows(base, changedFunction);
 
     expect(onlyA).toEqual([]);
     expect(onlyB).toEqual([]);
     expect(changed.map((r) => [r.kind, r.name])).toEqual([['function', 'count_bookings()']]);
   });
 
-  it('SCRUM572_fingerprint_revoking_execute_from_anon_changes_only_the_function_acl_row', async () => {
-    const before = await build();
-    const after = await build('revoke execute on function count_bookings() from anon;');
-
-    const { onlyA, onlyB, changed } = diffRows(before, after);
+  it('SCRUM572_fingerprint_revoking_execute_from_anon_changes_only_the_function_acl_row', () => {
+    const { onlyA, onlyB, changed } = diffRows(base, revokedFromAnon);
 
     expect(onlyA).toEqual([]);
     expect(onlyB).toEqual([]);
