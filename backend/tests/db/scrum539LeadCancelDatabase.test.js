@@ -187,6 +187,53 @@ describe('SCRUM-539: the Lead cancels an unassigned request (013)', () => {
       ]);
     });
 
+    it('SCRUM539_AC1_a_request_reopened_through_reopen_event_request_keeps_its_bookings_and_the_lead_preview_and_cancel_release_them', async () => {
+      // AC1-04, AC1-05, D6, through the app's own path: SCRUM-355's reopen (015)
+      // clears the coordinator and releases nothing.
+      counter += 1;
+      const eventId = await seedEvent(db, {
+        status: 'approved',
+        organiser_id: organiser,
+        event_name: `Reopened ${counter}`,
+        assigned_coordinator_id: coordinator,
+        proposed_start: '2026-12-02T09:00:00Z',
+        proposed_end: '2026-12-02T10:00:00Z',
+      });
+      const booking = await seedBooking(db, {
+        venueId: await seedVenue(db, { name: `Reopened hall ${counter}`, setup: 0, turnaround: 0 }), eventId, status: 'approved',
+      });
+      const hold = (await one(
+        `insert into venue_holds (event_request_id, venue_id, placed_by, expires_at)
+         values ($1, $2, $3, now() + interval '1 day') returning id`,
+        [eventId, await seedVenue(db, { name: `Reopened held hall ${counter}`, setup: 0, turnaround: 0 }), coordinator],
+      )).id;
+
+      await db.query("select change_event_request_status($1, 'approved', 'rejected', $2)", [eventId, coordinator]);
+      await db.query('select reopen_event_request($1, $2)', [eventId, organiser]);
+      await db.query('select submit_event_request($1, now(), $2)', [eventId, organiser]);
+
+      expect(await one('select status::text, assigned_coordinator_id from event_requests where id = $1', [eventId]))
+        .toEqual({ status: 'submitted', assigned_coordinator_id: null });
+      expect(await preview(eventId, lead)).toMatchObject({
+        venueBookings: { count: 1, details: [expect.objectContaining({ id: booking })] },
+        venueHolds: { count: 1, details: [expect.objectContaining({ id: hold })] },
+      });
+
+      await cancel(eventId, lead);
+
+      expect((await one('select status::text from bookings where id = $1', [booking])).status).toBe('cancelled');
+      expect(await one('select status::text, released_by from venue_holds where id = $1', [hold]))
+        .toEqual({ status: 'released', released_by: lead });
+      expect(await rows(
+        `select recipient_id, payload->>'audience' as audience from notifications
+          where event_request_id = $1 and type = 'event_cancelled' order by audience`,
+        [eventId],
+      )).toEqual([
+        { recipient_id: organiser, audience: 'organiser' },
+        { recipient_id: venueStaff, audience: 'venue_staff' },
+      ]);
+    });
+
     it('SCRUM539_AC1_a_lead_previews_what_cancelling_an_unassigned_request_releases', async () => {
       // AC1-05, D6: the same preview a coordinator sees.
       const { eventId, pending, approved, hold, equipment } = await unassignedWithArrangements();

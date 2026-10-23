@@ -5,6 +5,7 @@
 **Schema:** no migration. Everything here reads tables and functions that exist after `052_lead_assignment.sql` (SCRUM-486).
 **Written:** 13 October 2026, **before the code.** Every case describes what will be built. None is implemented yet; each **Implemented by** says so, and the subtask that writes its tests fills it in.
 **Marked:** 13 October 2026. SCRUM-546: AC1-05, AC1-06, AC6-03, AC6-04, and AC2-07's renamed test; every name checked. SCRUM-541: AC1-01 to AC1-03 and AC2-01 to AC2-11 name their tests; SCRUM-542: AC1-04 and AC3-01 to AC3-16; SCRUM-543 to SCRUM-545: AC2-13, AC3-17, AC4, AC5-01 to AC5-10, AC6-01 and AC6-02. The cases themselves are unchanged.
+**Marked:** 23 October 2026. SCRUM-539: AC5-06 is now proved by `SCRUM539_AC3_a_lead_reaches_cancel_and_the_database_refuses_a_held_event_with_403`, since the Lead reaches `cancel_event_request` (013); its Expected reads "403, nothing changed".
 **Walked through:** 13 October 2026, by Calven, checks A to I of docs/SCRUM-487.md section 2, all passed.
 
 This document is the written layer between SCRUM-487's acceptance criteria and the
@@ -271,7 +272,7 @@ built, its own cases say what the Lead may cancel there.
 | AC5-03 | HELD BY A, a handover with a note | LEAD, `GET /:id/assignments/review` | The history, with the note (D6). Already SCRUM-486's `SCRUM486_AC6_the_lead_reads_the_history_with_its_notes` | Proved (route, screen): SCRUM-486's `SCRUM486_AC6_the_lead_reads_the_history_with_its_notes` (route); the note on screen in `SCRUM487_AC5_a_lead_sees_%s_read_only_with_only_the_hand_over_action`. Also seen by hand (13 October, check G). |
 | AC5-04 **(trap)** | HELD BY A | LEAD, `POST /:id/start-review` | 403, nothing queried | Proved (route): `SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` (POST /:id/start-review) |
 | AC5-05 **(trap)** | HELD BY A, under review | LEAD, `POST /:id/decision` | 403, nothing queried | Proved (route): `SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` (POST /:id/decision) |
-| AC5-06 **(trap)** | HELD BY A | LEAD, `POST /:id/cancel` | 403, nothing queried | Proved (route): `SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` (POST /:id/cancel) |
+| AC5-06 **(trap)** | HELD BY A | LEAD, `POST /:id/cancel` | 403, nothing changed | Proved (route): `SCRUM539_AC3_a_lead_reaches_cancel_and_the_database_refuses_a_held_event_with_403` (in `scrum539LeadCancelRoutes.test.js`). 403 from the database (013), not the gate, since SCRUM-539; moved by design (D8). |
 | AC5-07 **(trap)** | HELD BY A, under review | LEAD, `POST /:id/clarification` | 403, nothing queried | Proved (route): `SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` (POST /:id/clarification) |
 | AC5-08 **(trap)** | HELD BY A, pending clarification | LEAD, `POST /:id/clarification/close` | 403, nothing queried | Proved (route): `SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` (POST /:id/clarification/close) |
 | AC5-09 **(trap)** | A pending change request on an event HELD BY A | LEAD, `POST /change-requests/:id/decision` | 403, nothing queried | Proved (route): `SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` (POST /change-requests/:changeRequestId/decision) |
