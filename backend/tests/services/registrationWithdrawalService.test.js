@@ -1,10 +1,52 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
-  translateWithdrawalError, validateWithdrawalIdentity,
+  translateWithdrawalError, validateWithdrawalIdentity, withdrawRegistration,
 } from '../../src/services/registrationWithdrawalService.js';
 
+const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }));
+vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: { rpc } }));
 const ME = '44444444-4444-4444-8444-444444444444';
 const REGISTRATION = '00000000-0000-4000-8000-00000000000b';
+const EVENT = '00000000-0000-4000-8000-00000000000a';
+const options = { attendeeId: ME, registrationId: REGISTRATION };
+const registration = {
+  id: REGISTRATION, eventRequestId: EVENT, attendeeId: ME, status: 'withdrawn',
+  registeredAt: '2026-10-12T10:00:00Z', createdAt: '2026-10-12T10:00:00Z', updatedAt: '2026-10-16T10:00:00Z',
+};
+afterEach(() => { vi.resetAllMocks(); });
+
+describe('SCRUM27 withdrawal service', () => {
+  it('SCRUM27_AC3_sends_only_the_verified_ids_to_one_RPC_and_returns_the_withdrawn_registration', async () => {
+    rpc.mockResolvedValue({ data: { outcome: 'withdrawn', registration: { ...registration, extra: 'dropped' } }, error: null });
+    await expect(withdrawRegistration({ ...options, client: { rpc }, status: 'registered', now: '2000-01-01' }))
+      .resolves.toEqual(registration);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('withdraw_registration', {
+      p_registration_id: REGISTRATION, p_attendee_id: ME,
+    });
+  });
+
+  it('SCRUM27_AC3_uses_the_shared_client_when_none_is_injected', async () => {
+    rpc.mockResolvedValue({ data: { outcome: 'withdrawn', registration }, error: null });
+    await expect(withdrawRegistration(options)).resolves.toMatchObject({ id: REGISTRATION });
+  });
+
+  it('SCRUM27_AC1_checks_identity_before_database_access', async () => {
+    await expect(withdrawRegistration({ registrationId: REGISTRATION })).rejects.toMatchObject({ status: 401 });
+    await expect(withdrawRegistration({ ...options, registrationId: 'invalid' })).rejects.toMatchObject({ status: 400 });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM27_AC7_translates_a_refusal', async () => {
+    rpc.mockResolvedValue({ data: null, error: { code: '55000', hint: 'ALREADY_WITHDRAWN', message: 'This registration has already been withdrawn' } });
+    await expect(withdrawRegistration(options)).rejects.toMatchObject({ status: 409, code: 'ALREADY_WITHDRAWN' });
+  });
+
+  it.each([null, { outcome: 'registered', registration }, { outcome: 'withdrawn' }])
+    ('SCRUM27_AC3_an_unexpected_result_%#_is_an_error_not_a_success', async (data) => {
+      rpc.mockResolvedValue({ data, error: null });
+      await expect(withdrawRegistration(options)).rejects.toThrow('Unexpected outcome from withdraw_registration');
+    });
+});
 
 describe('SCRUM27 withdrawal eligibility refusals', () => {
   it.each(['REGISTRATION_NOT_FOUND', 'REGISTRATION_NOT_OWNED'])
