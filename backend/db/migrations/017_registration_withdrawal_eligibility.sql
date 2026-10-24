@@ -1,4 +1,4 @@
--- Migration 016: whether an attendee may withdraw a registration (SCRUM-57).
+-- Migration 017: whether an attendee may withdraw a registration (SCRUM-57).
 -- The withdrawal writer calls this in its own transaction and changes only the
 -- row it returns, so the check and the write see the same locked state.
 
