@@ -1,4 +1,4 @@
--- Migration 012: a weekday's hours may run past midnight.
+-- Migration 016: a weekday's hours may run past midnight.
 -- A closing time at or before the opening time now means the next day, so the
 -- only window left to refuse is an empty one (opening equals closing).
 
