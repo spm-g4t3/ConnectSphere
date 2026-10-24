@@ -79,6 +79,7 @@ import {
   getEventRequestStatusHistory,
   getEventClarificationHistory,
   getEventDecisionHistory,
+  getEventChangeHistory,
   closeEventClarification,
   listEventRequestsForReview,
   listEventRequestsForCoordinator,
@@ -102,6 +103,7 @@ import {
   cancelEventRequest,
   getSignificantEventChangeImpact,
   applySignificantEventChange,
+  editEventRequestDetails,
   getEventReadiness,
   submitForSafetyReview,
   confirmEventRequest,
@@ -523,6 +525,22 @@ export function createEventRequestRouter({
   // SCRUM-355: past decisions, gated as the clarification history is.
   router.get('/:id/decision-history', async (req, res) => {
     const history = await getEventDecisionHistory(
+      req.params.id,
+      req.user.id,
+      req.user.role,
+      { client },
+    );
+    res.status(200).json(history);
+  });
+
+  /**
+   * SCRUM-387 (AC7): the event's field-level change history, newest first,
+   * direct edits and significant changes alike. No role gate, as
+   * /:id/decision-history: the service lets the Organiser, the assigned
+   * coordinator and a Lead read it, and answers anyone else 404.
+   */
+  router.get('/:id/change-history', async (req, res) => {
+    const history = await getEventChangeHistory(
       req.params.id,
       req.user.id,
       req.user.role,
@@ -1017,6 +1035,24 @@ export function createEventRequestRouter({
       { client },
     );
     res.status(200).json(withStatusDisplay(updated));
+  });
+
+  /**
+   * SCRUM-387: the assigned coordinator edits an event's information. Body
+   * { changes, expected, reason }. 200 with the event and changedFields.
+   *
+   * A route of its own, not a branch of the Organiser's PATCH /:id, so each
+   * owner's rules sit on their own URL (D11). edit_event_request_details (022)
+   * checks the caller again under the row lock.
+   *
+   * Statuses: 400 a field, the reason or the shape; 401; 403 not this event's
+   * coordinator; 404 no such event; 409 with `code` EVENT_CONFIRMED,
+   * EVENT_STATUS_NOT_ALLOWED, SIGNIFICANT_CHANGE_REQUIRED,
+   * EVENT_HOLDS_ARRANGEMENTS or EVENT_CHANGED_SINCE_OPENED.
+   */
+  router.patch('/:id/details', coordinatorOnly, async (req, res) => {
+    const result = await editEventRequestDetails(req.params.id, req.body, req.user.id, { client });
+    res.status(200).json({ ...withStatusDisplay(result.event), changedFields: result.changedFields });
   });
 
   router.post('/:id/significant-change', coordinatorOnly, async (req, res) => {
