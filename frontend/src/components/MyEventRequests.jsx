@@ -25,6 +25,7 @@ import ChangeRequestStatusList from "./ChangeRequestStatusList";
 import AssignmentHistory from "./AssignmentHistory";
 import DecisionOutcome from "./DecisionOutcome";
 import DecisionHistory from "./DecisionHistory";
+import EventChangeHistory from "./EventChangeHistory";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import ClarificationReplyForm from "./ClarificationReplyForm";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
@@ -69,6 +70,26 @@ function CoordinatorDetails({ eventRequestId, currentCoordinatorId }) {
       {opened && (
         <AssignmentHistory eventRequestId={eventRequestId} view="organiser" currentCoordinatorId={currentCoordinatorId} />
       )}
+    </details>
+  );
+}
+
+/**
+ * SCRUM-387 AC7: what the coordinator changed, and why. Collapsed and read only
+ * once opened, as CoordinatorDetails is, so the list makes no read per row.
+ */
+function ChangeHistoryDetails({ eventRequestId }) {
+  const [opened, setOpened] = useState(false);
+
+  return (
+    <details
+      className="my-event-requests__details"
+      onToggle={(event) => {
+        if (event.currentTarget.open) setOpened(true);
+      }}
+    >
+      <summary>Change history</summary>
+      {opened && <EventChangeHistory eventRequestId={eventRequestId} />}
     </details>
   );
 }
@@ -414,6 +435,7 @@ export default function MyEventRequests() {
               {req.status !== "draft" && (
                 <CoordinatorDetails eventRequestId={req.id} currentCoordinatorId={req.assignedCoordinatorId ?? null} />
               )}
+              {req.status !== "draft" && <ChangeHistoryDetails eventRequestId={req.id} />}
               {req.status !== "draft" && (
                 <ClarificationHistoryDialog
                   eventRequestId={req.id}

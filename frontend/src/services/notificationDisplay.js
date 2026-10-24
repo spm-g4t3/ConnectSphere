@@ -64,6 +64,9 @@
 //     changedFields, statusBefore, statusAfter }
 //   event_significant_change_attendee (096): { eventRequestId, eventName,
 //     startsAt, endsAt, reason }
+//   event_details_changed (022, SCRUM-387): { eventRequestId, eventName,
+//     reason, changedFields, status }; changedFields are the camelCase names
+//     in eventDetailFields.js, and eventName is the name after the edit
 //   booking_flagged_event_change (096): { eventName, venueName, startsAt,
 //     endsAt, reason }
 //   booking_request_event_change (096): { eventRequestId, eventName,
@@ -82,6 +85,7 @@ import { formatRange, formatTimestamp } from "./displayFormat";
 import { reasonLabel } from "./venueBlockReasons";
 import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
 import { formatVenuePeriod } from "./datetimeFormat";
+import { detailFieldList } from "./eventDetailFields";
 
 const UNNAMED_EVENT = "Unnamed event";
 const UNKNOWN_VENUE = "Unknown venue";
@@ -650,6 +654,16 @@ const DESCRIBERS = {
     return {
       headline: `${eventName} has a significant change`,
       detail: `The event was updated by its Coordinator. Reason: ${payload.reason || NO_REASON}.`,
+    };
+  },
+
+  // SCRUM-387 (AC8). One per save, to the Organiser, naming every field it changed.
+  event_details_changed(payload, { eventName }) {
+    const fields = Array.isArray(payload.changedFields) ? payload.changedFields : [];
+    const changed = fields.length > 0 ? `Changed: ${detailFieldList(fields)}. ` : "";
+    return {
+      headline: `Your Coordinator updated ${eventName}`,
+      detail: `${changed}Reason: ${payload.reason || NO_REASON}.`,
     };
   },
 
