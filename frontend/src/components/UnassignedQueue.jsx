@@ -4,6 +4,9 @@
 // assigned yet, oldest submission first, for the Event Coordinator Lead to
 // assign; and the assignment panel each row opens into (AC3).
 //
+// SCRUM-539 adds the Lead's cancel: each row also opens a cancel panel, since
+// nobody else may cancel a request nobody holds.
+//
 // Since migration 052 submission no longer picks a coordinator, so this list
 // is the only place a new request is waiting. Each row says what the Lead
 // needs to choose who should take it: the event, its organiser, when it runs,
@@ -25,6 +28,7 @@ import { listUnassignedEventRequests } from "../services/eventRequestService";
 import { formatRange } from "../services/displayFormat";
 import { describeWaiting } from "../services/waitingTime";
 import AssignCoordinatorPanel from "./AssignCoordinatorPanel";
+import UnassignedRequestCancelPanel from "./UnassignedRequestCancelPanel";
 import useListRead from "./useListRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { SESSION_EXPIRED } from "../services/apiErrors";
@@ -43,8 +47,9 @@ const QUEUE_ERROR_MESSAGES = {
  *                                injected by tests, the reader's otherwise
  */
 export default function UnassignedQueue({ now = () => new Date() }) {
-  // The row being assigned, or null for the list.
-  const [assigning, setAssigning] = useState(null);
+  // The open panel, { kind: "assign" | "cancel", request }, or null for the
+  // list: one state, so only one panel can be open.
+  const [panel, setPanel] = useState(null);
   // What the last assignment did, said once back on the list.
   const [confirmation, setConfirmation] = useState(null);
 
@@ -66,25 +71,37 @@ export default function UnassignedQueue({ now = () => new Date() }) {
   // gone; after a cancel the list may still be stale, and after a lost race
   // (AC4) the row the Lead was looking at belongs to someone else now.
   function closePanel(message = null) {
-    setAssigning(null);
+    setPanel(null);
     setConfirmation(message);
     fetchQueue();
   }
 
-  if (assigning) {
+  if (panel?.kind === "assign") {
     return (
       <section>
         <button className="unassigned-queue__back" onClick={() => closePanel()}>
           &larr; Back to the unassigned queue
         </button>
         <AssignCoordinatorPanel
-          request={assigning}
+          request={panel.request}
           onCancel={() => closePanel()}
           onAssigned={(_updated, chosen) =>
             closePanel(
-              `${assigning.eventName} was assigned to ${chosen?.fullName ?? "the coordinator you chose"}.`,
+              `${panel.request.eventName} was assigned to ${chosen?.fullName ?? "the coordinator you chose"}.`,
             )
           }
+        />
+      </section>
+    );
+  }
+
+  if (panel?.kind === "cancel") {
+    return (
+      <section>
+        <UnassignedRequestCancelPanel
+          request={panel.request}
+          onCancel={() => closePanel()}
+          onCancelled={() => closePanel(`${panel.request.eventName} was cancelled. The organiser has been told.`)}
         />
       </section>
     );
@@ -118,16 +135,29 @@ export default function UnassignedQueue({ now = () => new Date() }) {
               <p>Expected attendance: {request.expectedAttendance ?? "not given"}</p>
               <p className="unassigned-queue__waiting">{describeWaiting(request.submittedAt, now())}</p>
             </div>
-            <button
-              type="button"
-              aria-label={`Assign ${request.eventName}`}
-              onClick={() => {
-                setConfirmation(null);
-                setAssigning(request);
-              }}
-            >
-              Assign
-            </button>
+            <div className="unassigned-queue__actions">
+              <button
+                type="button"
+                aria-label={`Assign ${request.eventName}`}
+                onClick={() => {
+                  setConfirmation(null);
+                  setPanel({ kind: "assign", request });
+                }}
+              >
+                Assign
+              </button>
+              <button
+                type="button"
+                className="unassigned-queue__cancel"
+                aria-label={`Cancel ${request.eventName}`}
+                onClick={() => {
+                  setConfirmation(null);
+                  setPanel({ kind: "cancel", request });
+                }}
+              >
+                Cancel request
+              </button>
+            </div>
           </li>
         ))}
       </ul>

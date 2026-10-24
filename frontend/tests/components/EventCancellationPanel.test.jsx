@@ -176,6 +176,26 @@ describe("EventCancellationPanel", () => {
     },
   );
 
+  it("SCRUM539_AC4_the_coordinators_cancel_form_keeps_its_403_text", async () => {
+    // AC4-06: the Lead's queue panel words its own 403; the coordinator's is unchanged.
+    const user = userEvent.setup();
+    vi.mocked(cancelEventRequest).mockRejectedValue({ response: { status: 403, data: {} } });
+    render(<EventCancellationPanel eventRequest={REQUEST} />);
+
+    await user.type(screen.getByLabelText("Internal cancellation reason"), "Reason");
+    await user.click(screen.getByLabelText("The organiser’s request"));
+    await user.click(screen.getByRole("button", { name: "Preview cancellation" }));
+    await screen.findByText("Auditorium");
+    await user.click(screen.getByLabelText(
+      "I have reviewed the impact and explicitly confirm cancelling this event.",
+    ));
+    await user.click(screen.getByRole("button", { name: "Confirm event cancellation" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Only the coordinator assigned to this event can cancel it.",
+    );
+  });
+
   it("does not expose cancellation controls for an unsupported status", () => {
     render(<EventCancellationPanel eventRequest={{ ...REQUEST, status: "draft" }} />);
     expect(screen.queryByRole("heading", { name: "Cancel event" })).not.toBeInTheDocument();
