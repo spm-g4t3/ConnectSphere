@@ -128,7 +128,8 @@ describe('SCRUM-493: emergency access and known restrictions', () => {
       );
       expect(procs.map((p) => [p.proname, p.pronargs])).toEqual([
         ['create_venue', 12],
-        ['update_venue', 13],
+        // SCRUM-575 added p_hours_flag_booking_ids after p_user_id.
+        ['update_venue', 14],
       ]);
       for (const p of procs) {
         expect(p.args).toContain('p_emergency_access text, p_known_restrictions text, p_user_id uuid');

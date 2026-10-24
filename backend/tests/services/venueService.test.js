@@ -1699,6 +1699,7 @@ describe('SCRUM186 turnaround is written by create and update and read by id', (
       p_emergency_access: null,
       p_known_restrictions: null,
       p_user_id: STAFF_ID,
+      p_hours_flag_booking_ids: null,
     });
   });
 
@@ -1887,6 +1888,7 @@ describe('SCRUM20_SCRUM137 setup time is written by create and update and read b
       p_emergency_access: null,
       p_known_restrictions: null,
       p_user_id: STAFF_ID,
+      p_hours_flag_booking_ids: null,
     });
   });
 
@@ -3038,7 +3040,142 @@ describe('SCRUM484_AC8 updateVenue returns the bookings the change flagged', () 
       p_emergency_access: null,
       p_known_restrictions: null,
       p_user_id: STAFF_ID,
+      // SCRUM-575: no hours in the edit, so no bookings to flag for them.
+      p_hours_flag_booking_ids: null,
     });
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-575 AC7: new hours that leave out approved bookings are refused until
+// Venue Staff confirm exactly those bookings; update_venue then flags them.
+// ---------------------------------------------------------------------------
+describe('SCRUM575_AC7 updateVenue lists the bookings shortened hours leave out', () => {
+  // 2026-11-11 is a Wednesday (3); 2026-11-13 a Friday (5).
+  const WED_9_TO_6 = [{ day_of_week: 3, opens_at: '09:00:00', closes_at: '18:00:00' }];
+  const WED_9_TO_5 = [{ day_of_week: 3, opens_at: '09:00', closes_at: '17:00' }];
+  const A = 'b0000000-0000-4000-8000-00000000000a';
+  const B = 'b0000000-0000-4000-8000-00000000000b';
+
+  /** An approved booking row as the service selects it. */
+  const bookingRow = (id, startsAt, endsAt, eventName = 'Orientation Briefing') => ({
+    id,
+    event_request_id: `e${id.slice(1)}`,
+    starts_at: startsAt,
+    ends_at: endsAt,
+    event_requests: { event_name: eventName },
+  });
+
+  const LATE_WED = bookingRow(A, '2026-11-11T16:00:00+08:00', '2026-11-11T18:00:00+08:00');
+  const EARLY_WED = bookingRow(B, '2026-11-11T10:00:00+08:00', '2026-11-11T17:30:00+08:00', 'Alumni Talk');
+
+  /** The venue's current hours and its approved, not-started bookings; one stub per table. */
+  function givenVenue({ hours = WED_9_TO_6, bookings = [] } = {}) {
+    rpc.mockResolvedValue({ data: { flagged_bookings: [] }, error: null });
+    const reads = {
+      venue_operating_hours: queryStub({ data: hours, error: null }),
+      bookings: queryStub({ data: bookings, error: null }),
+      venues: queryStub({ data: populatedVenueRow(), error: null }),
+    };
+    from.mockImplementation((table) => reads[table]);
+    return reads;
+  }
+
+  it('SCRUM575_AC7_a_shortened_day_lists_the_booking_and_saves_nothing', async () => {
+    const reads = givenVenue({ bookings: [LATE_WED] });
+
+    const err = await errorFromAsync(() => updateVenue(VENUE_ID, { hours: WED_9_TO_5 }, STAFF_ID));
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.status).toBe(409);
+    expect(err.code).toBe('VENUE_HOURS_BOOKING_CONFLICT');
+    expect(err.conflicts).toEqual([{
+      bookingId: A,
+      eventRequestId: `e${A.slice(1)}`,
+      eventName: 'Orientation Briefing',
+      startsAt: '2026-11-11T16:00:00+08:00',
+      endsAt: '2026-11-11T18:00:00+08:00',
+      occupiedStartsAt: undefined,
+      occupiedEndsAt: undefined,
+      setupMinutes: undefined,
+      turnaroundMinutes: undefined,
+    }]);
+    expect(rpc).not.toHaveBeenCalled();
+    // Only this venue's approved bookings that have not started.
+    expect(reads.bookings.allArgs('eq')).toEqual([['venue_id', VENUE_ID], ['status', 'approved']]);
+    expect(reads.bookings.args('gt')[0]).toBe('starts_at');
+    expect(reads.venue_operating_hours.args('eq')).toEqual(['venue_id', VENUE_ID]);
+  });
+
+  it('SCRUM575_AC7_an_unticked_day_lists_the_booking', async () => {
+    givenVenue({ bookings: [EARLY_WED] });
+    const mondayOnly = [{ day_of_week: 1, opens_at: '09:00', closes_at: '18:00' }];
+
+    const err = await errorFromAsync(() => updateVenue(VENUE_ID, { hours: mondayOnly }, STAFF_ID));
+
+    expect(err.code).toBe('VENUE_HOURS_BOOKING_CONFLICT');
+    expect(err.conflicts.map((c) => c.bookingId)).toEqual([B]);
+  });
+
+  it('SCRUM575_AC7_a_cut_overnight_window_lists_the_booking', async () => {
+    // Friday 22:00 to Saturday 01:30 fits Friday 18:00-02:00 but not 18:00-01:00.
+    givenVenue({
+      hours: [{ day_of_week: 5, opens_at: '18:00:00', closes_at: '02:00:00' }],
+      bookings: [bookingRow(A, '2026-11-13T22:00:00+08:00', '2026-11-14T01:30:00+08:00')],
+    });
+
+    const err = await errorFromAsync(() =>
+      updateVenue(VENUE_ID, { hours: [{ day_of_week: 5, opens_at: '18:00', closes_at: '01:00' }] }, STAFF_ID));
+
+    expect(err.code).toBe('VENUE_HOURS_BOOKING_CONFLICT');
+    expect(err.conflicts.map((c) => c.bookingId)).toEqual([A]);
+  });
+
+  it('SCRUM575_AC7_a_booking_already_outside_the_old_hours_is_not_listed', async () => {
+    // 17:00-19:00 never fitted 09:00-18:00, so this edit did not put it outside.
+    givenVenue({ bookings: [bookingRow(A, '2026-11-11T17:00:00+08:00', '2026-11-11T19:00:00+08:00')] });
+
+    await updateVenue(VENUE_ID, { hours: WED_9_TO_5 }, STAFF_ID);
+
+    expect(rpcArgs().p_hours).toEqual(WED_9_TO_5);
+    expect(rpcArgs().p_hours_flag_booking_ids).toBeNull();
+  });
+
+  it('SCRUM575_AC7_confirming_exactly_the_listed_bookings_saves_and_flags_them', async () => {
+    givenVenue({ bookings: [EARLY_WED, LATE_WED] });
+
+    // Any order: the ids are a set.
+    await updateVenue(VENUE_ID, { hours: [], confirmHoursChange: [A, B] }, STAFF_ID);
+
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpcArgs().p_hours).toEqual([]);
+    expect([...rpcArgs().p_hours_flag_booking_ids].sort()).toEqual([A, B]);
+  });
+
+  it.each([
+    ['a listed booking left out', [LATE_WED, EARLY_WED], [A], [A, B]],
+    ['a booking no longer listed', [LATE_WED], [A, B], [A]],
+  ])('SCRUM575_AC7_a_stale_confirmation_is_refused_again (%s)', async (_label, bookings, confirmed, listed) => {
+    // The bookings outside the new hours changed after the user confirmed.
+    givenVenue({ bookings });
+
+    const err = await errorFromAsync(() =>
+      updateVenue(VENUE_ID, { hours: [], confirmHoursChange: confirmed }, STAFF_ID));
+
+    expect(err.code).toBe('VENUE_HOURS_BOOKING_CONFLICT');
+    expect(err.message).toMatch(/changed since you confirmed/);
+    expect(err.conflicts.map((c) => c.bookingId).sort()).toEqual(listed);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM575_AC7_an_edit_without_hours_reads_no_bookings', async () => {
+    givenVenue({ bookings: [LATE_WED] });
+
+    await updateVenue(VENUE_ID, { name: 'Harbour Room 2', confirmHoursChange: [A] }, STAFF_ID);
+
+    expect(from.mock.calls.map(([table]) => table)).toEqual(['venues']);
+    expect(rpcArgs().p_hours_flag_booking_ids).toBeNull();
   });
 });
 
@@ -3139,6 +3276,7 @@ describe('SCRUM493 the safety facts are sent to the database and read back', () 
       p_emergency_access: EXITS,
       p_known_restrictions: null,
       p_user_id: STAFF_ID,
+      p_hours_flag_booking_ids: null,
     });
   });
 

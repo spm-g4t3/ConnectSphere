@@ -36,6 +36,7 @@ import {
   getVenueHistory,
 } from "../services/venueService";
 import { formatTimestamp, shortId } from "../services/displayFormat";
+import { formatHoursEntry } from "../services/datetimeFormat";
 import { formatTurnaround } from "../services/turnaroundOptions";
 import { safetyFactText } from "../services/venueSafetyFacts";
 import VenueSafetyFacts from "./VenueSafetyFacts";
@@ -94,8 +95,6 @@ const HISTORY_FIELD_LABELS = {
   operating_hours: "Opening hours",
 };
 
-const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
 /** The raw key when the label table has not heard of it -- never blank. */
 function fieldLabel(key) {
   return HISTORY_FIELD_LABELS[key] ?? key;
@@ -121,10 +120,10 @@ function fmt(value) {
       if (value.every((entry) => entry && typeof entry === "object")) {
         return value
           .map((entry) => {
-            const { day_of_week: day, opens_at: opens, closes_at: closes } = entry;
-            if (opens === undefined || closes === undefined) return JSON.stringify(entry);
-            const name = SHORT_DAYS[day] ?? `Day ${day}`;
-            return `${name} ${String(opens).slice(0, 5)}–${String(closes).slice(0, 5)}`;
+            if (entry.opens_at === undefined || entry.closes_at === undefined) {
+              return JSON.stringify(entry);
+            }
+            return formatHoursEntry(entry);
           })
           .join("; ");
       }

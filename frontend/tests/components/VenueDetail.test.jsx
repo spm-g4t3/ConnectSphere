@@ -567,3 +567,28 @@ describe("SCRUM-188 AC7 the suitability result on Venue Staff's booking rows", (
     expect(screen.getByText(/Event names are not shown/)).toBeInTheDocument();
   });
 });
+
+describe("SCRUM575 overnight opening hours in the change history", () => {
+  it("SCRUM575_AC4_an_overnight_day_reads_with_both_days", async () => {
+    vi.mocked(getVenueBookings).mockResolvedValue([]);
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      {
+        id: "h575",
+        changedAt: "2026-10-20T08:15:00+08:00",
+        changedBy: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+        oldValues: {
+          operating_hours: [{ day_of_week: 5, opens_at: "09:00:00", closes_at: "18:00:00" }],
+        },
+        newValues: {
+          operating_hours: [{ day_of_week: 5, opens_at: "18:00:00", closes_at: "02:00:00" }],
+        },
+      },
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    const label = await screen.findByText("Opening hours");
+    const value = label.closest("li").querySelector(".venue-history__value");
+    expect(value).toHaveTextContent("Fri 09:00–18:00 → Fri 18:00 – Sat 02:00");
+  });
+});

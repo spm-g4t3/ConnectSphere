@@ -223,6 +223,12 @@ button { cursor: pointer; }
 .dashboard--venue-staff .venue-form textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; resize: vertical; }
 .dashboard--venue-staff .venue-form__counter { white-space: nowrap; }
 .dashboard--venue-staff .venue-form__counter--over { color: #a43c32; font-weight: 700; }
+/* The next-day note under an overnight day's times, in the accent so it
+   reads as information about the entry rather than as an error. */
+.dashboard--venue-staff .venue-form__closing,
+.dashboard--coordinator .event-venue-finder__ends { color: var(--teal); font-size: 0.84rem; margin: 4px 0 0; }
+.dashboard--venue-staff .venue-form__closing:empty,
+.dashboard--coordinator .event-venue-finder__ends:empty { margin: 0; }
 /* SCRUM-493. VenueSafetyFacts: label then value, the .decision-outcome shape.
    Values keep the line breaks staff typed (a list of exits reads as a list)
    and wrap rather than overflowing the card. "Not recorded" is muted and
@@ -636,6 +642,12 @@ button { cursor: pointer; }
 /* The confirmation after an assignment, the same green notice the handover
    confirmation uses. The <p role="status"> has no class of its own. */
 .unassigned-queue > p[role="status"] { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 0 0 14px; padding: 8px 12px; }
+/* SCRUM-539. A row's Assign and Cancel request side by side; Cancel outlined
+   in the cancel button's red, so it is not mistaken for Assign. The panel's
+   error reuses .unassigned-queue__error. */
+.unassigned-queue__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.dashboard .unassigned-queue__cancel { background: transparent; border: 1px solid #a43c32; color: #a43c32; }
+.dashboard .unassigned-queue__cancel:hover { background: #fff0ee; }
 /* SCRUM-486 (SCRUM-519). The Lead's picker: the handover panel's layout and
    values (.reassign-event__*, above), which are scoped to the coordinator's
    dashboard and so do not reach the Lead's. Scoped to its own class instead,

@@ -25,7 +25,7 @@ import VenueDetail from "./VenueDetail";
 import VenueBlocksPanel from "./VenueBlocksPanel";
 import VenueHoldsPanel from "./VenueHoldsPanel";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
-import { flaggedBookingsHeading } from "../services/flaggedBookingDisplay";
+import { flaggedBookingsHeading, venueSaveFlagReasons } from "../services/flaggedBookingDisplay";
 
 // Keyed by status, the same shape as AuthContext's LOGIN_ERROR_MESSAGES.
 //
@@ -78,6 +78,8 @@ export default function VenueCatalogue({ currentUserId } = {}) {
   // Kept beside the list, not looked up from venues, so it stays the name
   // the save answered with even if the catalogue refetch has not landed.
   const [flaggedVenueName, setFlaggedVenueName] = useState(null);
+  // Why they were flagged: new hours, a new setup or turnaround, or both.
+  const [flaggedReasons, setFlaggedReasons] = useState([]);
 
   const fetchVenues = useCallback(async () => {
     setLoadingVenues(true);
@@ -108,11 +110,13 @@ export default function VenueCatalogue({ currentUserId } = {}) {
   // some replaces the notice; one that flagged none leaves the old notice as
   // it was, since it carries no news either way. Called with no argument by
   // the blocks panel's Back button, which leaves it alone as well.
-  function handleSaved(saved) {
+  // confirmedHoursChange (from VenueForm) tells hours flags from setup ones.
+  function handleSaved(saved, { confirmedHoursChange = [] } = {}) {
     setActivePanel(null);
     if (Array.isArray(saved?.flaggedBookings) && saved.flaggedBookings.length > 0) {
       setFlaggedBookings(saved.flaggedBookings);
       setFlaggedVenueName(saved.name ?? null);
+      setFlaggedReasons(venueSaveFlagReasons(saved.flaggedBookings, confirmedHoursChange));
     }
     fetchVenues();
   }
@@ -228,7 +232,7 @@ export default function VenueCatalogue({ currentUserId } = {}) {
           nothing to decide here, only something to know. */}
       {flaggedBookings.length > 0 && (
         <div className="venue-catalogue__flagged" role="status">
-          <h3>{flaggedBookingsHeading(flaggedBookings.length, flaggedVenueName)}</h3>
+          <h3>{flaggedBookingsHeading(flaggedBookings.length, flaggedVenueName, flaggedReasons)}</h3>
           <ul className="venue-catalogue__flagged-list">
             {flaggedBookings.map((booking, i) => (
               <li key={booking.bookingId ?? i}>

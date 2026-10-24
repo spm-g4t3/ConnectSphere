@@ -583,6 +583,10 @@ export function createVenueRouter({
    *
    * SCRUM-484 (AC8): 200 with the venue plus flaggedBookings -- the approved
    * bookings a setup or turnaround change flagged for review ([] when none).
+   *
+   * New hours that leave out approved, not-yet-started bookings answer 409
+   * VENUE_HOURS_BOOKING_CONFLICT listing them in conflicts; resend with
+   * confirmHoursChange set to those booking ids to save and flag them.
    */
   router.patch('/:id', venueStaffOnly, async (req, res) => {
     validateVenueId(req.params.id);

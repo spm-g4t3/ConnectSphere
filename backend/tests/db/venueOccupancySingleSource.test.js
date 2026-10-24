@@ -49,6 +49,9 @@ describe('SCRUM484_AC4 no copy of the overlap rule in the services', () => {
     // blocks LISTING read the calendar uses (listVenueBlocks): it lists what a
     // window shows, decides no availability, and touches no bookings.
     const ALLOWED = new Set(['src/services/venueBlockService.js:listVenueBlocks']);
+    // A start compared with the clock, not two periods, as schemaInvariants'
+    // NOT_STARTED allows in SQL: the bookings shortened hours may leave out.
+    const NOT_STARTED = new Set(['src/services/venueService.js:bookingsOutsideNewHours']);
     const filter = /\.(lt|gt|lte|gte)\(\s*['"](starts_at|ends_at)['"]/g;
 
     const found = [];
@@ -58,7 +61,12 @@ describe('SCRUM484_AC4 no copy of the overlap rule in the services', () => {
         const before = code.slice(0, m.index);
         const fns = [...before.matchAll(/(?:async\s+)?function\s+(\w+)\s*\(/g)];
         const fn = fns.length > 0 ? fns[fns.length - 1][1] : '(top level)';
-        found.push(`${relative(BACKEND, path)}:${fn}`.replaceAll('\\', '/'));
+        const where = `${relative(BACKEND, path)}:${fn}`.replaceAll('\\', '/');
+        if (NOT_STARTED.has(where)) {
+          expect(m[0], where).toBe(".gt('starts_at'");
+          continue;
+        }
+        found.push(where);
 
         // Never on bookings: the nearest .from(...) before it is not 'bookings'.
         const froms = [...before.matchAll(/\.from\(\s*['"](\w+)['"]/g)];

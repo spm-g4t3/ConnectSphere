@@ -204,11 +204,18 @@ SCRUM-539's first option would let the Lead cancel an *unassigned* request: the
 dead end SCRUM-486 found, where a request nobody holds could be cancelled by
 nobody. That does not contradict AC5. AC5 is about the events in this overview,
 and every one of them is held (D5): the Lead opens a held event and cannot cancel
-it, because `POST /:id/cancel` is `coordinatorOnly` and 045 admits only the
+it, because `POST /:id/cancel` is `coordinatorOnly` and 045 (now the baseline's `cancel_event_request`) admits only the
 holder (`SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing`). An
 unassigned request is in the queue, not here. If SCRUM-539 is built, the Lead's
 cancellation is of a different thing, from a different page, and its own cases
 say so.
+
+23 October 2026: SCRUM-539 built the first option. `POST /:id/cancel` is now
+`coordinatorOrLead`, so the Lead reaches `cancel_event_request` (013), which still
+refuses them a held event with 42501 (403). AC5 holds, but the database enforces it
+now, not the gate. The `POST /:id/cancel` row moved out of
+`SCRUM487_AC5_a_lead_is_refused_%s_with_403_and_queries_nothing` into
+`SCRUM539_AC3_a_lead_reaches_cancel_and_the_database_refuses_a_held_event_with_403`.
 
 ### D9. The overview response carries its status labels
 

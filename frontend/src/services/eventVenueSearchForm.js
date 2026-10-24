@@ -12,14 +12,17 @@
 //     expectedAttendance: "120", location: "", layout: "",
 //     accessibility: [], facilities: [], spansDays: false }
 //
-// spansDays is not an input. seedFromEvent sets it when the event's own start
-// and end fall on different Singapore dates, so the component can say why
-// End starts blank. It describes the event, not the search: nothing
-// validates it and toSearchCriteria never sends it.
+// spansDays is not an input. seedFromEvent sets it when the event cannot be
+// written as one date and two times (it ends two or more dates later, or
+// more than a day after it starts), so the component can say why End starts
+// blank. It describes the event, not the search: nothing validates it and
+// toSearchCriteria never sends it.
 //
-// One date and two times rather than two datetime-local inputs: an event that
-// crosses Singapore midnight can never match, because no venue's opening
-// hours do (venueMatching.coversPeriod), so the form does not offer one.
+// One date and two times rather than two datetime-local inputs, read as the
+// opening-hours grid reads them: an end time earlier than the start means
+// the next day. That covers every event a venue could take, since one day's
+// hours can run past midnight but never past a second one
+// (venueMatching.hoursVerdict).
 //
 // The date and times are Singapore wall clock -- the venues' local time --
 // whatever zone the device is set to: toVenueWallClock reads an instant on
@@ -29,11 +32,16 @@
 // (20:00-00:00, across device midnight) could not even be entered.
 //
 // The validation wording follows the backend's validateEventSearchCriteria
-// where the two overlap ("is required", "must be later than the start",
-// "must be a whole number"). The backend stays the authority; this names an
-// obvious mistake before a round trip, as venueSearchValidation.js does.
+// where the two overlap ("is required", "must be a whole number"). The
+// backend stays the authority; this names an obvious mistake before a round
+// trip, as venueSearchValidation.js does.
 
-import { toVenueOffsetIsoString, toVenueWallClock } from "./datetimeFormat";
+import {
+  endsNextDay,
+  nextVenueDate,
+  toVenueOffsetIsoString,
+  toVenueWallClock,
+} from "./datetimeFormat";
 import { parseDateTime } from "./venueBlockValidation";
 
 /** The form's empty shape, so every caller starts from the same keys. */
@@ -88,6 +96,11 @@ function codes(value) {
   return Array.isArray(value) ? value.filter((code) => typeof code === "string" && code !== "") : [];
 }
 
+/** A valid "HH:MM" or "HH:MM:SS" as "HH:MM:SS", so 10:00 and 10:00:00 compare equal. */
+function withSeconds(time) {
+  return time.length === 5 ? `${time}:00` : time;
+}
+
 /** An instant as its Singapore date and time, or two blanks. */
 function splitVenueTime(isoString) {
   const local = toVenueWallClock(isoString);
@@ -102,18 +115,26 @@ function isValidDate(date) {
 }
 
 /**
+ * Whether an end on endDate at endTime reads back the same from the form:
+ * on the start's date, or on the next date at a time before the start.
+ */
+function fitsOneDate(date, startTime, endDate, endTime) {
+  if (endDate === date) return true;
+  return endDate === nextVenueDate(date) && endsNextDay(startTime, endTime);
+}
+
+/**
  * The form's starting values, read from the event request.
  *
  * - proposedStart and proposedEnd become a date and two times in Singapore
  *   time, on any device. A missing or unreadable one leaves its fields empty
  *   for the coordinator to fill in, rather than inventing a time.
  * - The date is the start's, or the end's when there is no start.
- * - The end time is filled only when the end falls on that Singapore date. A
- *   request running past Singapore midnight cannot be searched as one period
- *   (see the header), so its end is left for the coordinator to decide rather
- *   than silently moved onto the start's date. spansDays says so: true only
- *   when both dates are known and differ, so a missing end is not mistaken
- *   for a second day.
+ * - The end time is filled when the form can hold it (see the header): on
+ *   the same Singapore date, or on the next one before the start time. A
+ *   longer event is left for the coordinator to decide rather than silently
+ *   shortened, and spansDays says so: true only when both dates are known,
+ *   so a missing end is not mistaken for a long event.
  * - expectedAttendance is filled only when it is a whole number of at least 1;
  *   the column is nullable.
  * - Location, layout, accessibility and facilities start empty. The event
@@ -130,25 +151,29 @@ export function seedFromEvent(request) {
   const date = start.date || end.date;
   const attendance = request?.expectedAttendance;
 
+  const bothKnown = start.date !== "" && end.date !== "";
+  const endFits = !bothKnown || fitsOneDate(start.date, start.time, end.date, end.time);
+
   return {
     ...EMPTY_EVENT_SEARCH_FORM,
     date,
     startTime: start.time,
-    endTime: end.date === date ? end.time : "",
+    endTime: end.date !== "" && endFits ? end.time : "",
     expectedAttendance:
       Number.isInteger(attendance) && attendance >= 1 ? String(attendance) : "",
     accessibility: [],
     facilities: [],
-    spansDays: start.date !== "" && end.date !== "" && start.date !== end.date,
+    spansDays: !endFits,
   };
 }
 
 /**
  * Check the form before searching.
  *
- * Date, start, end and attendance are required (AC1). The end must be later
- * than the start on the same date -- equal is refused too, since an event
- * with no length has nothing to look for. Attendance must be a whole number
+ * Date, start, end and attendance are required (AC1). An end before the
+ * start is the next day (see the header); an end equal to the start is
+ * refused rather than read as 24 hours, since a zero-length typo is far
+ * likelier than a day-long booking. Attendance must be a whole number
  * of at least 1. The optional criteria have no client rule: a blank one is
  * simply not sent, and an unknown code is the backend's to name.
  *
@@ -180,10 +205,8 @@ export function validateEventSearchForm(values = {}) {
   if (endTime === "") add("endTime", "is required");
   else if (!endOk) add("endTime", "must be a valid time");
 
-  if (dateOk && startOk && endOk) {
-    const start = parseDateTime(`${date}T${startTime}`);
-    const end = parseDateTime(`${date}T${endTime}`);
-    if (start && end && end <= start) add("endTime", "must be later than the start");
+  if (startOk && endOk && withSeconds(startTime) === withSeconds(endTime)) {
+    add("endTime", "must differ from the start");
   }
 
   if (attendance === "") {
@@ -202,7 +225,8 @@ export function validateEventSearchForm(values = {}) {
  * The form as findVenuesForEvent's criteria. Validate first: this does not judge.
  *
  * startsAt and endsAt carry Singapore's +08:00 (toVenueOffsetIsoString), and
- * expectedAttendance is a number. Optional criteria appear only when set --
+ * expectedAttendance is a number. An end time before the start is put on the
+ * next Singapore date. Optional criteria appear only when set --
  * location and layout non-blank, the code lists non-empty -- so a search that
  * leaves them alone sends exactly the required three.
  *
@@ -216,9 +240,13 @@ export function validateEventSearchForm(values = {}) {
  */
 export function toSearchCriteria(values = {}, { eventRequestId } = {}) {
   const date = text(values.date);
+  const startTime = text(values.startTime);
+  const endTime = text(values.endTime);
+  // The form has been validated, so the date is real and has a next day.
+  const endDate = endsNextDay(startTime, endTime) ? nextVenueDate(date) : date;
   const criteria = {
-    startsAt: toVenueOffsetIsoString(`${date}T${text(values.startTime)}`),
-    endsAt: toVenueOffsetIsoString(`${date}T${text(values.endTime)}`),
+    startsAt: toVenueOffsetIsoString(`${date}T${startTime}`),
+    endsAt: toVenueOffsetIsoString(`${endDate}T${endTime}`),
     expectedAttendance: Number(text(values.expectedAttendance)),
   };
 

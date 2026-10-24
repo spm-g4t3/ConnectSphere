@@ -13,6 +13,7 @@ import {
   reviewReasonLabel,
   flaggedBookingsHeading,
   flagReasons,
+  venueSaveFlagReasons,
 } from "../../src/services/flaggedBookingDisplay.js";
 import { formatVenuePeriod } from "../../src/services/datetimeFormat.js";
 
@@ -88,6 +89,33 @@ describe("flaggedBookingsHeading", () => {
     const heading = flaggedBookingsHeading(2, venueName);
     expect(heading).toBe("2 bookings flagged for review: Setup or turnaround time changed");
     expect(heading).not.toContain(" at ");
+  });
+});
+
+// SCRUM-575 AC7: a save can flag bookings for new hours, a new setup or
+// turnaround, or both; the heading names what actually flagged them.
+describe("SCRUM575 flagged-bookings heading reason", () => {
+  const A = { bookingId: "a" };
+  const B = { bookingId: "b" };
+
+  it("SCRUM575_AC7_confirmed_hours_conflicts_read_operating_hours_changed", () => {
+    const reasons = venueSaveFlagReasons([A, B], ["a", "b"]);
+    expect(reasons).toEqual(["Operating hours changed"]);
+    expect(flaggedBookingsHeading(2, "Harbour Room", reasons)).toBe(
+      "2 bookings at Harbour Room flagged for review: Operating hours changed",
+    );
+  });
+
+  it("SCRUM575_AC7_unconfirmed_flags_are_the_setup_or_turnaround_change", () => {
+    expect(venueSaveFlagReasons([A], [])).toEqual(["Setup or turnaround time changed"]);
+    expect(venueSaveFlagReasons([A])).toEqual(["Setup or turnaround time changed"]);
+  });
+
+  it("SCRUM575_AC7_a_save_that_flagged_for_both_names_both", () => {
+    const reasons = venueSaveFlagReasons([A, B], ["a"]);
+    expect(flaggedBookingsHeading(2, "Harbour Room", reasons)).toBe(
+      "2 bookings at Harbour Room flagged for review: Operating hours changed; Setup or turnaround time changed",
+    );
   });
 });
 

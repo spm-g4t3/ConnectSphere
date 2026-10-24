@@ -115,12 +115,27 @@ describe("SCRUM20_AC2 seedFromEvent", () => {
     })).toMatchObject({ date: "2026-11-11", startTime: "09:00", endTime: "13:00" });
   });
 
-  it("SCRUM20_AC2_event_crossing_singapore_midnight_leaves_the_end_empty", () => {
+  it("SCRUM575_AC5_event_ending_next_day_before_its_start_time_fills_the_end", () => {
     expect(seedFromEvent({
       ...EVENT,
       proposedStart: "2026-11-11T22:00:00+08:00",
-      proposedEnd: "2026-11-12T01:00:00+08:00",
-    })).toMatchObject({ date: "2026-11-11", startTime: "22:00", endTime: "" });
+      proposedEnd: "2026-11-12T02:00:00+08:00",
+    })).toMatchObject({ date: "2026-11-11", startTime: "22:00", endTime: "02:00", spansDays: false });
+  });
+
+  it.each([
+    // Its end time is after its start time, so the form would read it as same-day.
+    ["longer than a day", "2026-11-11T22:00:00+08:00", "2026-11-12T23:00:00+08:00"],
+    // Equal times are refused by the form rather than read as 24 hours.
+    ["exactly a day", "2026-11-11T22:00:00+08:00", "2026-11-12T22:00:00+08:00"],
+    ["over two midnights", "2026-11-11T22:00:00+08:00", "2026-11-13T01:00:00+08:00"],
+  ])("SCRUM575_AC5_event_%s_leaves_the_end_empty_and_spans_days", (_label, proposedStart, proposedEnd) => {
+    expect(seedFromEvent({ ...EVENT, proposedStart, proposedEnd })).toMatchObject({
+      date: "2026-11-11",
+      startTime: "22:00",
+      endTime: "",
+      spansDays: true,
+    });
   });
 
   it("SCRUM20_AC2_optional_criteria_start_empty_whatever_the_prose_says", () => {
@@ -194,7 +209,7 @@ describe("SCRUM20_AC2 seedFromEvent", () => {
 
   it.each([
     ["on a later date", "2026-11-13T12:00:00+08:00"],
-    ["across singapore midnight", "2026-11-12T01:00:00+08:00"],
+    ["the next day after the start time", "2026-11-12T11:00:00+08:00"],
   ])("SCRUM20_AC3_end_%s_spans_days", (_label, proposedEnd) => {
     expect(seedFromEvent({ ...EVENT, proposedEnd })).toMatchObject({
       date: START.date,
@@ -342,16 +357,14 @@ describe("SCRUM20_AC1 validateEventSearchForm", () => {
     expect(validateEventSearchForm(validForm({ startTime: "00:00", endTime: "23:59" }))).toEqual([]);
   });
 
-  it("SCRUM20_AC1_end_equal_to_start_is_refused", () => {
-    expect(validateEventSearchForm(validForm({ startTime: "10:00", endTime: "10:00" }))).toEqual([
-      { field: "endTime", message: "must be later than the start" },
+  it("SCRUM575_AC5_end_equal_to_start_is_refused_not_read_as_a_day", () => {
+    expect(validateEventSearchForm(validForm({ startTime: "10:00", endTime: "10:00:00" }))).toEqual([
+      { field: "endTime", message: "must differ from the start" },
     ]);
   });
 
-  it("SCRUM20_AC1_end_before_start_is_refused", () => {
-    expect(validateEventSearchForm(validForm({ startTime: "10:00", endTime: "09:00" }))).toEqual([
-      { field: "endTime", message: "must be later than the start" },
-    ]);
+  it("SCRUM575_AC5_end_before_start_is_accepted_as_the_next_day", () => {
+    expect(validateEventSearchForm(validForm({ startTime: "22:00", endTime: "01:00" }))).toEqual([]);
   });
 
   it("SCRUM20_AC1_end_one_second_after_start_is_accepted", () => {
@@ -408,8 +421,8 @@ describe("SCRUM20_AC1 validateEventSearchForm", () => {
   });
 
   it("SCRUM20_AC1_order_and_attendance_faults_are_reported_together", () => {
-    expect(validateEventSearchForm(validForm({ endTime: "08:00", expectedAttendance: "0" }))).toEqual([
-      { field: "endTime", message: "must be later than the start" },
+    expect(validateEventSearchForm(validForm({ endTime: "10:00", expectedAttendance: "0" }))).toEqual([
+      { field: "endTime", message: "must differ from the start" },
       { field: "expectedAttendance", message: "must be at least 1" },
     ]);
   });
@@ -441,6 +454,29 @@ describe("SCRUM20_AC1 toSearchCriteria", () => {
 
     expect(criteria.startsAt).toBe("2026-11-11T10:00:00+08:00");
     expect(criteria.endsAt).toBe("2026-11-11T12:00:00+08:00");
+  });
+
+  it.each([
+    ["the next date", "2026-11-13", "2026-11-14T01:00:00+08:00"],
+    ["the next month and year", "2026-12-31", "2027-01-01T01:00:00+08:00"],
+    ["1 March after a leap day", "2028-02-29", "2028-03-01T01:00:00+08:00"],
+  ])("SCRUM575_AC5_end_before_start_is_sent_on_%s", (_label, date, endsAt) => {
+    const criteria = toSearchCriteria(validForm({ date, startTime: "22:00", endTime: "01:00" }));
+
+    expect(criteria.startsAt).toBe(`${date}T22:00:00+08:00`);
+    expect(criteria.endsAt).toBe(endsAt);
+  });
+
+  it("SCRUM575_AC5_a_seeded_overnight_event_sends_its_own_instants_back", () => {
+    const overnight = {
+      ...EVENT,
+      proposedStart: "2026-11-11T22:00:00+08:00",
+      proposedEnd: "2026-11-12T02:00:00+08:00",
+    };
+    expect(toSearchCriteria(seedFromEvent(overnight))).toMatchObject({
+      startsAt: overnight.proposedStart,
+      endsAt: overnight.proposedEnd,
+    });
   });
 
   it("SCRUM20_AC1_typed_seconds_are_kept", () => {

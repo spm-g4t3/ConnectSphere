@@ -168,7 +168,7 @@ export function checkCodeArray(errors, field, value) {
 /**
  * Opening hours, one entry per day.
  *
- * The ordering and duplicate-day rules mirror constraints the database already
+ * The non-empty and duplicate-day rules mirror constraints the database already
  * has. That duplication is intentional -- the database is the guarantee, this
  * is the readable message.
  */
@@ -211,11 +211,14 @@ function checkHours(errors, value) {
       valid = false;
     }
 
-    // Compare in a single format. Zero-padded 24-hour times sort
-    // chronologically as strings, but only if both have the same shape --
-    // '09:00:00' sorts after '09:00' despite being the same instant.
-    if (valid && withSeconds(closes) <= withSeconds(opens)) {
-      errors.add('hours', `${label}.closes_at must be after opens_at`);
+    // An earlier closing time is the next day (overnight hours), so only an
+    // empty window is refused. Compared in one format: '09:00' and '09:00:00'
+    // are the same time.
+    if (valid && withSeconds(closes) === withSeconds(opens)) {
+      errors.add(
+        'hours',
+        `${label}.closes_at must differ from opens_at (an earlier closing time means the next day)`,
+      );
       valid = false;
     }
 
@@ -359,6 +362,32 @@ export function validateCreateVenue(input) {
   return normalised;
 }
 
+/** More bookings than any venue holds; caps the work one request can ask for. */
+const CONFIRM_HOURS_CHANGE_MAX = 500;
+
+/**
+ * Optional confirmHoursChange: the booking ids the user saw listed and agreed
+ * to flag. Lowercased and de-duplicated, because the service compares it with
+ * the ids Postgres prints.
+ *
+ * @returns {string[]|undefined} undefined when refused
+ */
+function checkConfirmHoursChange(errors, value) {
+  if (!Array.isArray(value)) {
+    errors.add('confirmHoursChange', 'must be a list of booking ids');
+    return undefined;
+  }
+  if (value.some((id) => typeof id !== 'string' || !UUID_PATTERN.test(id))) {
+    errors.add('confirmHoursChange', 'must contain only booking ids');
+    return undefined;
+  }
+  if (value.length > CONFIRM_HOURS_CHANGE_MAX) {
+    errors.add('confirmHoursChange', `must list ${CONFIRM_HOURS_CHANGE_MAX} bookings or fewer`);
+    return undefined;
+  }
+  return [...new Set(value.map((id) => id.toLowerCase()))];
+}
+
 /**
  * Validate input for updating a venue. Every field is optional.
  *
@@ -378,7 +407,9 @@ export function validateUpdateVenue(changes) {
     throw new ValidationError('Invalid venue details -- expected an object');
   }
 
-  const supplied = Object.keys(changes).filter((key) => changes[key] !== undefined);
+  // confirmHoursChange only confirms a change, so on its own it changes nothing.
+  const supplied = Object.keys(changes)
+    .filter((key) => key !== 'confirmHoursChange' && changes[key] !== undefined);
   if (supplied.length === 0) {
     throw new ValidationError('Invalid venue details -- no changes supplied');
   }
@@ -430,6 +461,10 @@ export function validateUpdateVenue(changes) {
     if (changes[field] !== undefined) {
       normalised[field] = checkSafetyText(errors, field, changes[field]);
     }
+  }
+
+  if (changes.confirmHoursChange !== undefined) {
+    normalised.confirmHoursChange = checkConfirmHoursChange(errors, changes.confirmHoursChange);
   }
 
   throwIfInvalid(errors, 'Invalid venue details');
