@@ -11,7 +11,8 @@
  *   - layouts, accessibility features and facilities spread so that each code
  *     is met by some venues and missing from others
  *   - operating hours of several shapes: weekdays only, every day, evenings,
- *     weekends only, and none recorded (Operating hours not met)
+ *     overnight (closing after midnight, or at it), weekends only, and none
+ *     recorded (Operating hours not met)
  *   - setup and turnaround from none to 120 minutes, so the padded period
  *     around a booking can be seen
  *   - emergency access and known restrictions recorded on some, not others
@@ -137,6 +138,19 @@ const DEMO_VENUES = [
     setupMinutes: 60,
     turnaroundMinutes: 45,
     knownRestrictions: 'Outdoor; events move indoors in heavy rain. Evenings only.',
+  },
+  {
+    name: 'Demo Late-Night Lounge',
+    location: 'Level 5, Main Building',
+    maxCapacity: 120,
+    layouts: ['banquet'],
+    accessibility: ['step_free_entrance', 'lift_access'],
+    facilities: ['pa_system', 'catering', 'air_conditioning'],
+    // Friday and Saturday run to 02:00 the next morning; Thursday closes at midnight.
+    hours: [...hours([4], '18:00', '00:00'), ...hours([5, 6], '18:00', '02:00')],
+    setupMinutes: 30,
+    turnaroundMinutes: 30,
+    knownRestrictions: 'Amplified music must end by 01:30.',
   },
   {
     name: 'Demo Weekend Studio',

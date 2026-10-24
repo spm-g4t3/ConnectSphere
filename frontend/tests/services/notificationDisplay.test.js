@@ -82,6 +82,41 @@ function setupChange(payload = SETUP_PAYLOAD) {
   return { id: "n6", type: "booking_flagged_setup_change", payload };
 }
 
+// The payload 012 writes when new opening hours leave a booking out. An
+// overnight booking, so the period must read on the Singapore wall clock.
+const HOURS_PAYLOAD = {
+  venueName: "Harbour Room",
+  eventName: "Night Market",
+  startsAt: "2026-11-06T22:00:00+08:00",
+  endsAt: "2026-11-07T01:00:00+08:00",
+  reason: "Operating hours changed",
+};
+
+describe("describeNotification: booking_flagged_hours_change (SCRUM-575 AC7)", () => {
+  it("SCRUM575_AC7_hours_change_notification_wording", () => {
+    const { headline, detail } = describeNotification({
+      id: "n575",
+      type: "booking_flagged_hours_change",
+      payload: HOURS_PAYLOAD,
+    });
+
+    expect(headline).toBe("Night Market at Harbour Room needs review");
+    expect(detail).toBe(
+      "Operating hours changed. The booking for 2026-11-06 22:00 – 2026-11-07 01:00 (Singapore time) " +
+        "is outside the new hours. Alternative arrangements are required.",
+    );
+  });
+
+  it("SCRUM575_AC7_hours_change_without_times_leaves_the_period_out", () => {
+    const { detail } = describeNotification({
+      id: "n575b",
+      type: "booking_flagged_hours_change",
+      payload: { eventName: "Night Market" },
+    });
+    expect(detail).toBe("Operating hours changed. Alternative arrangements are required.");
+  });
+});
+
 describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", () => {
   it("SCRUM484_AC8_setup_change_notification_wording", () => {
     const { headline, detail } = describeNotification(setupChange());
@@ -688,6 +723,7 @@ describe("describeNotification: flagged bookings need alternative arrangements (
     ["booking_flagged", PAYLOAD],
     ["booking_flagged_setup_change", SETUP_PAYLOAD],
     ["booking_flagged_venue_retired", RETIRED_PAYLOAD],
+    ["booking_flagged_hours_change", HOURS_PAYLOAD],
   ])("SCRUM266_W7_%s_says_alternative_arrangements_are_required", (type, payload) => {
     const { detail } = describeNotification({ id: "n1", type, payload });
     expect(detail).toMatch(/\. Alternative arrangements are required\.$/);
@@ -1098,6 +1134,7 @@ const FIXTURES = {
   clarification_replied: { eventName: "Tech Talk", message: "Confirmed." },
   clarification_closed: { eventName: "Tech Talk" },
   booking_flagged_setup_change: SETUP_PAYLOAD,
+  booking_flagged_hours_change: HOURS_PAYLOAD,
   venue_hold_expired: { eventName: "Tech Talk", venueName: "Hall A", expiresAt: PAYLOAD.startsAt },
   event_cancelled: { audience: "organiser", eventName: "Tech Talk", reason: "Venue unavailable" },
   event_request_awaiting_assignment: { eventName: "Tech Talk", submittedAt: PAYLOAD.startsAt },

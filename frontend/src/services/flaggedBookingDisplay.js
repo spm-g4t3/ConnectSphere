@@ -36,23 +36,48 @@ export function reviewReasonLabel(code) {
     : null;
 }
 
+/** Why a venue save flagged a booking it listed as an hours conflict. */
+export const HOURS_CHANGED_REASON = "Operating hours changed";
+
+/**
+ * The causes behind a venue save's flaggedBookings, for the notice heading.
+ * A flagged booking the user confirmed as an hours conflict was flagged for
+ * the hours; any other was flagged by a new setup or turnaround time.
+ *
+ * @param {Array<{bookingId: string}>} flaggedBookings  from the save
+ * @param {string[]} [confirmedHoursChange=[]]  the ids sent as confirmHoursChange
+ * @returns {string[]}  labels, hours first; empty when nothing was flagged
+ */
+export function venueSaveFlagReasons(flaggedBookings, confirmedHoursChange = []) {
+  const confirmed = new Set(confirmedHoursChange.map(String));
+  const reasons = [];
+  if (flaggedBookings.some((b) => confirmed.has(String(b.bookingId)))) reasons.push(HOURS_CHANGED_REASON);
+  if (flaggedBookings.some((b) => !confirmed.has(String(b.bookingId)))) {
+    reasons.push(REVIEW_REASON_LABELS.setup_or_turnaround_changed);
+  }
+  return reasons;
+}
+
 /**
  * The heading of the notice after a venue save flagged bookings:
  * "2 bookings at Harbour Room flagged for review: Setup or turnaround time
  * changed". The venue is named because the notice outlives the form: once it
  * closes, the catalogue lists every venue and nothing else says which one
  * was edited. Without a name (a blank or missing one) it reads
- * "1 booking flagged for review: …", as before.
+ * "1 booking flagged for review: …", as before. `reasons` comes from
+ * venueSaveFlagReasons; without any it is the setup or turnaround change.
  *
  * @param {number} count
  * @param {string} [venueName]
+ * @param {string[]} [reasons]
  * @returns {string}
  */
-export function flaggedBookingsHeading(count, venueName) {
+export function flaggedBookingsHeading(count, venueName, reasons) {
   const bookings = count === 1 ? "1 booking" : `${count} bookings`;
   const name = typeof venueName === "string" ? venueName.trim() : "";
   const where = name ? ` at ${name}` : "";
-  return `${bookings}${where} flagged for review: ${REVIEW_REASON_LABELS.setup_or_turnaround_changed}`;
+  const why = reasons?.length ? reasons : [REVIEW_REASON_LABELS.setup_or_turnaround_changed];
+  return `${bookings}${where} flagged for review: ${why.join("; ")}`;
 }
 
 /**

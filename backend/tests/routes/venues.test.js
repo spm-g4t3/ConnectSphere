@@ -2865,6 +2865,75 @@ describe('SCRUM484_AC8 PATCH returns the bookings a setup change flagged', () =>
 
 
 // ---------------------------------------------------------------------------
+// SCRUM-575: shortened operating hours list the bookings they leave out (AC7),
+// and only Venue Staff may change the hours (AC8).
+// ---------------------------------------------------------------------------
+describe('SCRUM575 PATCH with shortened operating hours', () => {
+  const BOOKING_ID = 'b0000000-0000-4000-8000-00000000000a';
+  // Wednesday 2026-11-11, 16:00-18:00 Singapore time.
+  const BOOKING = {
+    id: BOOKING_ID,
+    event_request_id: 'e0000000-0000-4000-8000-00000000000a',
+    starts_at: '2026-11-11T16:00:00+08:00',
+    ends_at: '2026-11-11T18:00:00+08:00',
+    event_requests: { event_name: 'Orientation Briefing' },
+  };
+  const SHORTER = [{ day_of_week: 3, opens_at: '09:00', closes_at: '17:00' }];
+
+  function givenVenueWithBooking() {
+    const reads = {
+      venue_operating_hours: queryStub(ok([{ day_of_week: 3, opens_at: '09:00:00', closes_at: '18:00:00' }])),
+      bookings: queryStub(ok([BOOKING])),
+      venues: queryStub(ok(venueRow())),
+    };
+    from.mockImplementation((table) => reads[table]);
+  }
+
+  it('SCRUM575_AC7_PATCH_answers_409_VENUE_HOURS_BOOKING_CONFLICT_with_the_bookings', async () => {
+    givenVenueWithBooking();
+
+    const res = await request(appWith()).patch(`/api/venues/${VENUE_ID}`).send({ hours: SHORTER });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: expect.any(String),
+      code: 'VENUE_HOURS_BOOKING_CONFLICT',
+      conflicts: [{
+        bookingId: BOOKING_ID,
+        eventRequestId: 'e0000000-0000-4000-8000-00000000000a',
+        eventName: 'Orientation Briefing',
+        startsAt: '2026-11-11T16:00:00+08:00',
+        endsAt: '2026-11-11T18:00:00+08:00',
+      }],
+    });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM575_AC7_PATCH_with_the_confirmation_saves_and_flags_the_bookings', async () => {
+    givenVenueWithBooking();
+    rpc.mockResolvedValueOnce(ok({ flagged_bookings: [] }));
+
+    const res = await request(appWith())
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ hours: SHORTER, confirmHoursChange: [BOOKING_ID] });
+
+    expect(res.status).toBe(200);
+    expect(rpc.mock.calls[0][1].p_hours_flag_booking_ids).toEqual([BOOKING_ID]);
+  });
+
+  it('SCRUM575_AC8_PATCH_hours_from_a_non_venue_staff_role_is_refused', async () => {
+    const res = await request(appWith(signedInAs(ROLE.EVENT_COORDINATOR, ORGANISER_ID)))
+      .patch(`/api/venues/${VENUE_ID}`)
+      .send({ hours: SHORTER, confirmHoursChange: [BOOKING_ID] });
+
+    expect(res.status).toBe(403);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
 // SCRUM-484 AC2: only Venue Staff may set a venue's setup or turnaround time
 // ---------------------------------------------------------------------------
 describe('SCRUM484_AC2 setup and turnaround are set by Venue Staff only', () => {
@@ -3003,6 +3072,7 @@ describe('SCRUM493 emergency access and known restrictions through the venue rou
       p_emergency_access: EXITS,
       p_known_restrictions: null,
       p_user_id: STAFF_ID,
+      p_hours_flag_booking_ids: null,
     });
     expect(res.body.emergencyAccess).toBe(EXITS);
     // AC6: a text-only change flags nothing.

@@ -965,3 +965,173 @@ describe("SCRUM493 VenueForm safety facts", () => {
     expect(emergencyBox()).not.toHaveAttribute("aria-invalid");
   });
 });
+
+describe("SCRUM575 VenueForm overnight opening hours", () => {
+  const friday = () => screen.getByRole("checkbox", { name: "Friday" });
+  const fridayOpens = () => screen.getByLabelText("Friday opens at");
+  const fridayCloses = () => screen.getByLabelText("Friday closes at");
+
+  function setTimes(opens, closes) {
+    fireEvent.change(fridayOpens(), { target: { value: opens } });
+    fireEvent.change(fridayCloses(), { target: { value: closes } });
+  }
+
+  it("SCRUM575_AC1_an_earlier_closing_time_is_described_as_the_next_day", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+    await user.click(friday());
+    setTimes("18:00", "02:00");
+
+    expect(screen.getByText("Closes Saturday 02:00 (next day)")).toBeInTheDocument();
+    // The note is the closing input's description, so it is heard with it.
+    expect(fridayCloses()).toHaveAccessibleDescription("Closes Saturday 02:00 (next day)");
+  });
+
+  it("SCRUM575_AC2_a_00_00_close_is_described_as_midnight", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+    await user.click(friday());
+    setTimes("18:00", "00:00");
+
+    expect(fridayCloses()).toHaveAccessibleDescription("Closes at midnight");
+  });
+
+  it("SCRUM575_AC1_same_day_hours_and_unticked_days_have_no_note", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+    await user.click(friday());
+    setTimes("18:00", "02:00");
+    setTimes("09:00", "18:00");
+
+    expect(screen.queryByText(/next day|midnight/, { selector: "p.venue-form__closing" })).toBeNull();
+    expect(fridayCloses()).not.toHaveAttribute("aria-describedby");
+
+    setTimes("18:00", "02:00");
+    await user.click(friday());
+    expect(screen.queryByText("Closes Saturday 02:00 (next day)")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM575_AC1_create_sends_the_overnight_hours_on_the_opening_day", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+    await user.click(friday());
+    setTimes("18:00", "02:00");
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(vi.mocked(createVenue).mock.calls[0][0].hours).toEqual([
+      { day_of_week: 5, opens_at: "18:00", closes_at: "02:00" },
+    ]);
+  });
+});
+
+describe("SCRUM575 VenueForm confirming shorter hours", () => {
+  const NIGHT_MARKET = {
+    bookingId: "b0000000-0000-4000-8000-000000000001",
+    eventRequestId: "e0000000-0000-4000-8000-000000000001",
+    eventName: "Night Market",
+    startsAt: "2026-11-02T19:00:00+08:00",
+    endsAt: "2026-11-02T22:00:00+08:00",
+  };
+  const LATE_TALK = {
+    bookingId: "b0000000-0000-4000-8000-000000000002",
+    eventRequestId: "e0000000-0000-4000-8000-000000000002",
+    eventName: "Late Talk",
+    startsAt: "2026-11-09T17:00:00+08:00",
+    endsAt: "2026-11-09T19:00:00+08:00",
+  };
+
+  function hoursConflict(conflicts) {
+    return Object.assign(new Error("conflict"), {
+      response: {
+        status: 409,
+        data: { error: "New hours leave out bookings", code: "VENUE_HOURS_BOOKING_CONFLICT", conflicts },
+      },
+    });
+  }
+
+  const mondayCloses = () => screen.getByLabelText("Monday closes at");
+
+  /** Edit the saved venue (Monday 09:00-18:00), shorten Monday to 17:00 and save. */
+  async function shortenAndSave(onSaved) {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue());
+    render(<VenueForm venueId={VENUE_ID} onSaved={onSaved} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+    fireEvent.change(mondayCloses(), { target: { value: "17:00" } });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    return user;
+  }
+
+  it("SCRUM575_AC7_conflict_lists_the_bookings_and_confirming_resends_with_their_ids", async () => {
+    const onSaved = vi.fn();
+    const saved = { ...savedVenue(), flaggedBookings: [NIGHT_MARKET] };
+    vi.mocked(updateVenue)
+      .mockRejectedValueOnce(hoursConflict([NIGHT_MARKET]))
+      .mockResolvedValueOnce(saved);
+    const user = await shortenAndSave(onSaved);
+
+    expect(
+      await screen.findByRole("heading", { name: "1 approved booking falls outside the new opening hours" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Night Market")).toBeInTheDocument();
+    expect(screen.getByText("2026-11-02 19:00 – 22:00 (Singapore time)")).toBeInTheDocument();
+    expect(screen.getByText(/They will not be cancelled\./)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Confirm new hours" }));
+    await user.click(screen.getByRole("button", { name: "Yes, save and flag" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(2);
+    const hours = [{ day_of_week: 1, opens_at: "09:00", closes_at: "17:00" }];
+    expect(vi.mocked(updateVenue).mock.calls[0][1]).toEqual({ hours });
+    expect(vi.mocked(updateVenue).mock.calls[1][1]).toEqual({
+      hours,
+      confirmHoursChange: [NIGHT_MARKET.bookingId],
+    });
+    expect(onSaved).toHaveBeenCalledWith(saved, { confirmedHoursChange: [NIGHT_MARKET.bookingId] });
+  });
+
+  it("SCRUM575_AC7_change_hours_hides_the_list_and_keeps_the_edits", async () => {
+    vi.mocked(updateVenue).mockRejectedValueOnce(hoursConflict([NIGHT_MARKET]));
+    const user = await shortenAndSave();
+    await screen.findByText("Night Market");
+
+    await user.click(screen.getByRole("button", { name: "Change hours" }));
+
+    expect(screen.queryByText("Night Market")).not.toBeInTheDocument();
+    expect(mondayCloses()).toHaveValue("17:00");
+    expect(screen.getByRole("group", { name: "Opening hours" })).toHaveFocus();
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+  });
+
+  it("SCRUM575_AC7_editing_the_hours_clears_a_listed_conflict", async () => {
+    vi.mocked(updateVenue).mockRejectedValueOnce(hoursConflict([NIGHT_MARKET]));
+    await shortenAndSave();
+    await screen.findByText("Night Market");
+
+    fireEvent.change(mondayCloses(), { target: { value: "16:00" } });
+
+    expect(screen.queryByText("Night Market")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM575_AC7_a_second_conflict_replaces_the_list_and_closes_the_confirm", async () => {
+    const onSaved = vi.fn();
+    vi.mocked(updateVenue)
+      .mockRejectedValueOnce(hoursConflict([NIGHT_MARKET]))
+      .mockRejectedValueOnce(hoursConflict([NIGHT_MARKET, LATE_TALK]));
+    const user = await shortenAndSave(onSaved);
+    await screen.findByText("Night Market");
+
+    await user.click(screen.getByRole("button", { name: "Confirm new hours" }));
+    await user.click(screen.getByRole("button", { name: "Yes, save and flag" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "2 approved bookings fall outside the new opening hours" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Late Talk")).toBeInTheDocument();
+    // The new booking has not been seen, so the confirm must be opened again.
+    expect(screen.queryByRole("button", { name: "Yes, save and flag" })).not.toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+});

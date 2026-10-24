@@ -466,6 +466,109 @@ describe('SCRUM188_AC2 hoursVerdict', () => {
 });
 
 
+// Overnight hours: Friday 2026-11-13 and Saturday 2026-11-14, Singapore.
+describe('SCRUM575 overnight operating hours', () => {
+  const FRI = '2026-11-13';
+  const SAT = '2026-11-14';
+  const SUN = '2026-11-15';
+  const fridayLate = [{ day_of_week: 5, opens_at: '18:00:00', closes_at: '02:00:00' }];
+  const fridayToMidnight = [{ day_of_week: 5, opens_at: '18:00:00', closes_at: '00:00:00' }];
+  const hoursDetail = (hours, startsAt, endsAt) =>
+    evaluateCriteria(harbourRoom({ hours }), baseRequest({ startsAt, endsAt }))
+      .find((entry) => entry.criterion === 'Operating hours');
+
+  it('SCRUM575_AC5_event_crossing_midnight_fits_the_day_it_opens', () => {
+    expect(hoursVerdict(fridayLate, sgt('22:00', FRI), sgt('02:00', SAT))).toMatchObject({
+      met: true,
+      reason: 'within_hours',
+      dayOfWeek: 5,
+      opensAt: '18:00:00',
+      closesAt: '02:00:00',
+    });
+    expect(hoursDetail(fridayLate, sgt('22:00', FRI), sgt('02:00', SAT))).toEqual({
+      criterion: 'Operating hours',
+      met: true,
+      detail: 'Event runs Fri 22:00 – Sat 02:00; venue open Fri 18:00 – Sat 02:00',
+    });
+  });
+
+  it('SCRUM575_AC5_early_hours_event_fits_under_the_previous_day', () => {
+    // Saturday has no row of its own; Friday's hours run until 02:00 Saturday.
+    expect(hoursVerdict(fridayLate, sgt('00:30', SAT), sgt('01:30', SAT))).toMatchObject({
+      met: true,
+      reason: 'within_hours',
+      dayOfWeek: 5,
+    });
+    expect(coversPeriod(fridayLate, sgt('00:30', SAT), sgt('02:01', SAT))).toBe(false);
+  });
+
+  it('SCRUM575_AC5_either_day_may_cover_an_early_hours_event', () => {
+    // Saturday's own daytime row does not shut out Friday's overnight cover.
+    const both = [...fridayLate, { day_of_week: 6, opens_at: '10:00:00', closes_at: '16:00:00' }];
+    expect(coversPeriod(both, sgt('00:30', SAT), sgt('01:30', SAT))).toBe(true);
+    expect(coversPeriod(both, sgt('10:00', SAT), sgt('16:00', SAT))).toBe(true);
+    // No single day's window holds 01:00-11:00, though both rows touch it.
+    expect(coversPeriod(both, sgt('01:00', SAT), sgt('11:00', SAT))).toBe(false);
+  });
+
+  it('SCRUM575_AC2_event_ending_exactly_at_midnight_fits_a_00_00_close', () => {
+    expect(coversPeriod(fridayToMidnight, sgt('20:00', FRI), sgt('00:00', SAT))).toBe(true);
+    expect(coversPeriod(fridayToMidnight, sgt('20:00', FRI), sgt('00:01', SAT))).toBe(false);
+    expect(hoursDetail(fridayToMidnight, sgt('20:00', FRI), sgt('00:00', SAT)).detail)
+      .toBe('Event runs Fri 20:00 – Sat 00:00; venue open Fri 18:00 – midnight');
+  });
+
+  it('SCRUM575_AC5_event_running_past_the_overnight_close_is_outside_hours', () => {
+    expect(hoursVerdict(fridayLate, sgt('22:00', FRI), sgt('03:00', SAT))).toMatchObject({
+      met: false,
+      reason: 'outside_hours',
+      dayOfWeek: 5,
+    });
+    expect(hoursDetail(fridayLate, sgt('22:00', FRI), sgt('03:00', SAT))).toEqual({
+      criterion: 'Operating hours',
+      met: false,
+      detail: 'Event runs Fri 22:00 – Sat 03:00; venue open Fri 18:00 – Sat 02:00',
+    });
+  });
+
+  it('SCRUM575_AC5_early_start_past_the_overnight_close_reports_the_previous_day', () => {
+    expect(hoursDetail(fridayLate, sgt('01:00', SAT), sgt('03:00', SAT))).toEqual({
+      criterion: 'Operating hours',
+      met: false,
+      detail: 'Event runs Sat 01:00 – Sat 03:00; venue open Fri 18:00 – Sat 02:00',
+    });
+  });
+
+  it('SCRUM575_AC6_hours_ending_before_midnight_still_refuse_a_crossing_event', () => {
+    const fridayTo2359 = [{ day_of_week: 5, opens_at: '18:00:00', closes_at: '23:59:00' }];
+    expect(hoursVerdict(fridayTo2359, sgt('22:00', FRI), sgt('01:00', SAT))).toMatchObject({
+      met: false,
+      reason: 'spans_midnight',
+      dayOfWeek: 5,
+    });
+    expect(hoursDetail(fridayTo2359, sgt('22:00', FRI), sgt('01:00', SAT)).detail)
+      .toBe('Event spans midnight (Fri 22:00 – Sat 01:00)');
+  });
+
+  it('SCRUM575_AC5_previous_day_hours_ending_before_midnight_do_not_cover_early_hours', () => {
+    const fridayTo2359 = [{ day_of_week: 5, opens_at: '00:00:00', closes_at: '23:59:00' }];
+    expect(hoursVerdict(fridayTo2359, sgt('00:30', SAT), sgt('01:30', SAT))).toMatchObject({
+      met: false,
+      reason: 'closed_that_day',
+      dayOfWeek: 6,
+    });
+  });
+
+  it('SCRUM575_AC5_event_spanning_two_midnights_never_fits', () => {
+    const everyNight = [5, 6].map((day) => ({ day_of_week: day, opens_at: '06:00:00', closes_at: '05:59:00' }));
+    expect(hoursVerdict(everyNight, sgt('22:00', FRI), sgt('01:00', SUN))).toMatchObject({
+      met: false,
+      reason: 'outside_hours',
+    });
+  });
+});
+
+
 describe('SCRUM188_AC2 evaluateCriteria shape', () => {
   it('SCRUM188_AC2_labels_are_the_five_display_labels_in_order', () => {
     expect(SUITABILITY_CRITERIA).toEqual([
@@ -593,15 +696,15 @@ describe('SCRUM188_AC2 operating hours verdict', () => {
   });
 
   it('SCRUM188_AC2_midnight_span_names_both_days', () => {
-    // Friday 2026-11-13 22:00 to Saturday 01:00, Singapore.
+    // Wednesday 22:00 to Thursday 01:00, Singapore; Wednesday closes at 18:00.
     const overnight = baseRequest({
-      startsAt: sgt('22:00', '2026-11-13'),
-      endsAt: sgt('01:00', '2026-11-14'),
+      startsAt: sgt('22:00'),
+      endsAt: sgt('01:00', '2026-11-12'),
     });
     expect(hoursOf(harbourRoom(), overnight)).toEqual({
       criterion: 'Operating hours',
       met: false,
-      detail: 'Event spans midnight (Fri 22:00 – Sat 01:00)',
+      detail: 'Event spans midnight (Wed 22:00 – Thu 01:00)',
     });
   });
 

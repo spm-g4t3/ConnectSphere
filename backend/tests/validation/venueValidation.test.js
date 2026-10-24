@@ -206,18 +206,28 @@ describe('opening hours', () => {
     expect(fieldsIn(err)).toContain('hours');
   });
 
-  it('rejects a closing time before opening', () => {
-    const err = errorFrom(() =>
-      validateCreateVenue(hours([{ day_of_week: 1, opens_at: '18:00', closes_at: '09:00' }])),
-    );
-    expect(err.details[0].message).toMatch(/after opens_at/);
+  it('SCRUM575_AC1_a_closing_time_before_opening_is_the_next_day', () => {
+    const result = validateCreateVenue(hours([{ day_of_week: 1, opens_at: '18:00', closes_at: '09:00' }]));
+    expect(result.hours).toEqual([{ day_of_week: 1, opens_at: '18:00', closes_at: '09:00' }]);
   });
 
-  it('rejects opening and closing at the same time', () => {
+  it('SCRUM575_AC3_rejects_opening_and_closing_at_the_same_time', () => {
     const err = errorFrom(() =>
       validateCreateVenue(hours([{ day_of_week: 1, opens_at: '09:00', closes_at: '09:00' }])),
     );
     expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details[0]).toEqual({
+      field: 'hours',
+      message: 'hours[0].closes_at must differ from opens_at (an earlier closing time means the next day)',
+    });
+  });
+
+  it('SCRUM575_AC3_rejects_opening_and_closing_at_the_same_time_on_update', () => {
+    const err = errorFrom(() =>
+      validateUpdateVenue({ hours: [{ day_of_week: 1, opens_at: '00:00', closes_at: '00:00' }] }),
+    );
+    expect(fieldsIn(err)).toEqual(['hours']);
+    expect(err.details[0].message).toMatch(/must differ from opens_at/);
   });
 
   it('treats 09:00 and 09:00:00 as the same instant', () => {
@@ -691,8 +701,8 @@ describe('SCRUM186 turnaround time', () => {
 
 
 // ---------------------------------------------------------------------------
-// SCRUM-186: the per-weekday hours model is verified, not changed. Its limits
-// (see the 017 header) are pinned here so nobody mistakes them for bugs.
+// The per-weekday hours model's limits are pinned here so nobody mistakes them
+// for bugs. A closing time before opening is overnight, not a limit.
 // ---------------------------------------------------------------------------
 describe('SCRUM186 operating hours model limits', () => {
   it('SCRUM186_a_day_left_out_is_closed_and_is_accepted', () => {
@@ -708,23 +718,27 @@ describe('SCRUM186 operating hours model limits', () => {
     expect(validateCreateVenue({ ...VALID, hours: [] }).hours).toEqual([]);
   });
 
-  it('SCRUM186_an_overnight_window_22_00_to_02_00_is_rejected', () => {
-    const err = errorFrom(() =>
-      validateCreateVenue({
-        ...VALID,
-        hours: [{ day_of_week: 5, opens_at: '22:00', closes_at: '02:00' }],
-      }),
-    );
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.details[0]).toMatchObject({ field: 'hours' });
-    expect(err.details[0].message).toMatch(/after opens_at/);
+  it('SCRUM575_AC1_an_overnight_window_22_00_to_02_00_is_accepted', () => {
+    const result = validateCreateVenue({
+      ...VALID,
+      hours: [{ day_of_week: 5, opens_at: '22:00', closes_at: '02:00' }],
+    });
+    expect(result.hours).toEqual([{ day_of_week: 5, opens_at: '22:00', closes_at: '02:00' }]);
   });
 
-  it('SCRUM186_an_overnight_window_is_rejected_on_update_too', () => {
-    const err = errorFrom(() =>
-      validateUpdateVenue({ hours: [{ day_of_week: 5, opens_at: '22:00', closes_at: '02:00' }] }),
-    );
-    expect(fieldsIn(err)).toEqual(['hours']);
+  it('SCRUM575_AC1_an_overnight_window_is_accepted_on_update_too', () => {
+    const result = validateUpdateVenue({
+      hours: [{ day_of_week: 5, opens_at: '22:00', closes_at: '02:00' }],
+    });
+    expect(result.hours).toEqual([{ day_of_week: 5, opens_at: '22:00', closes_at: '02:00' }]);
+  });
+
+  it('SCRUM575_AC2_a_00_00_closing_time_is_midnight_and_is_accepted', () => {
+    const result = validateCreateVenue({
+      ...VALID,
+      hours: [{ day_of_week: 6, opens_at: '18:00', closes_at: '00:00' }],
+    });
+    expect(result.hours).toEqual([{ day_of_week: 6, opens_at: '18:00', closes_at: '00:00' }]);
   });
 
   it('SCRUM186_the_latest_closing_time_is_23_59', () => {
@@ -1571,5 +1585,39 @@ describe('SCRUM493 invisible-only text and unsupported characters', () => {
         { field: 'knownRestrictions', message: UNSUPPORTED },
       ]),
     );
+  });
+});
+
+
+describe('SCRUM575_AC7 confirming the bookings shortened hours leave out', () => {
+  const HOURS = [{ day_of_week: 3, opens_at: '09:00', closes_at: '17:00' }];
+  const A = 'B0000000-0000-4000-8000-00000000000A';
+  const B = 'b0000000-0000-4000-8000-00000000000b';
+
+  it('SCRUM575_AC7_confirmHoursChange_is_kept_lowercased_and_de_duplicated', () => {
+    // The service compares it with the ids Postgres prints, in lower case.
+    expect(validateUpdateVenue({ hours: HOURS, confirmHoursChange: [A, B, A.toLowerCase()] }).confirmHoursChange)
+      .toEqual([A.toLowerCase(), B]);
+  });
+
+  it('SCRUM575_AC7_confirmHoursChange_alone_is_no_change', () => {
+    const err = errorFrom(() => validateUpdateVenue({ confirmHoursChange: [B] }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toMatch(/no changes/i);
+  });
+
+  it.each([
+    ['not a list', B],
+    ['null', null],
+    ['a non-id entry', [B, 'not-an-id']],
+    ['a number entry', [42]],
+  ])('SCRUM575_AC7_confirmHoursChange_refuses_%s', (_label, value) => {
+    const err = errorFrom(() => validateUpdateVenue({ hours: HOURS, confirmHoursChange: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(fieldsIn(err)).toEqual(['confirmHoursChange']);
+  });
+
+  it('SCRUM575_AC7_an_edit_without_it_has_no_confirmHoursChange_key', () => {
+    expect(validateUpdateVenue({ hours: HOURS })).not.toHaveProperty('confirmHoursChange');
   });
 });

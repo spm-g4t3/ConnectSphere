@@ -24,7 +24,7 @@ import { getVenueCatalogue } from "../../src/services/venueService";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay.js";
 import { formatRange } from "../../src/services/displayFormat.js";
 
-const formStub = vi.hoisted(() => ({ saved: undefined }));
+const formStub = vi.hoisted(() => ({ saved: undefined, options: undefined }));
 
 vi.mock("../../src/services/venueService", () => ({
   getVenueCatalogue: vi.fn(),
@@ -59,7 +59,7 @@ vi.mock("../../src/components/VenueHoldsPanel", () => ({
 vi.mock("../../src/components/VenueForm", () => ({
   default: ({ venueId, onSaved }) => (
     <div data-testid="venue-form" data-venue-id={venueId ?? ""}>
-      <button type="button" onClick={() => onSaved?.(formStub.saved)}>
+      <button type="button" onClick={() => onSaved?.(formStub.saved, formStub.options)}>
         Stub save
       </button>
     </div>
@@ -85,6 +85,7 @@ let confirmSpy;
 
 beforeEach(() => {
   formStub.saved = undefined;
+  formStub.options = undefined;
   vi.mocked(getVenueCatalogue).mockReset();
   vi.mocked(getVenueCatalogue).mockResolvedValue([ACTIVE, RETIRED]);
   confirmSpy = vi.spyOn(window, "confirm").mockImplementation(() => true);
@@ -303,6 +304,16 @@ describe("SCRUM484_AC8 VenueCatalogue flagged-bookings notice", () => {
       ),
     ).toBeInTheDocument();
     expect(within(region).getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+  });
+
+  it("SCRUM575_AC7_bookings_flagged_by_confirmed_new_hours_read_operating_hours_changed", async () => {
+    const { user } = await renderCatalogue();
+    formStub.options = { confirmedHoursChange: [ORIENTATION.bookingId] };
+    await editAndSave(user, { ...ACTIVE, flaggedBookings: [ORIENTATION] });
+
+    expect(within(notice()).getByRole("heading", { level: 3 })).toHaveTextContent(
+      "1 booking at Hall A flagged for review: Operating hours changed",
+    );
   });
 
   it("SCRUM484_AC8_one_flagged_booking_uses_the_singular_heading", async () => {
