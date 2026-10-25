@@ -4702,6 +4702,239 @@ describe('SCRUM-266: event reads say whether the event needs attention', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// SCRUM-315 (SCRUM-310 AC6): a confirmed event with a flagged equipment
+// reservation needs attention, and says why
+// ---------------------------------------------------------------------------
+describe('SCRUM-310 (SCRUM-315): a flagged equipment reservation puts a Confirmed event on the Needs attention list', () => {
+  const reservation = (overrides = {}) => ({
+    flagged: true,
+    released_at: null,
+    flag_reason: 'Fewer units of this equipment are usable (Dropped)',
+    flag_code: 'equipment_lost',
+    ...overrides,
+  });
+  const booking = (status) => ({ status });
+  const LOST = 'Equipment unavailable: Fewer units of this equipment are usable (Dropped)';
+
+  async function readOne(overrides) {
+    const client = createQueueFakeClient([
+      ok([myEventRow(overrides)]),
+      ok([profileRow(ORGANISER_ID, 'Aisha Rahman')]),
+    ]);
+    const [event] = await listEventRequestsForCoordinator(COORDINATOR_ID, { client });
+    return event;
+  }
+
+  it.each([
+    ['one flagged reservation', [reservation()], true],
+    ['a flagged reservation among others', [reservation({ flagged: false }), reservation()], true],
+    ['only a released reservation that was flagged', [reservation({ released_at: '2026-10-20T01:00:00Z' })], false],
+    ['reservations that are not flagged', [reservation({ flagged: false, flag_reason: null })], false],
+    ['no reservations', [], false],
+    ['a flag that is not the boolean true', [reservation({ flagged: 'true' }), reservation({ flagged: 1 })], false],
+  ])('SCRUM310_AC6_a_confirmed_event_with_%s_needs_attention_%s', async (_label, reservations, expected) => {
+    const event = await readOne({ status: STATUS.CONFIRMED, equipment_reservations: reservations });
+
+    expect(event.needsAttention).toBe(expected);
+    expect(event.attentionReasons.length > 0).toBe(expected);
+    expect(event).not.toHaveProperty('equipment_reservations');
+    expect(event).not.toHaveProperty('equipmentReservations');
+  });
+
+  it.each([
+    STATUS.DRAFT,
+    STATUS.SUBMITTED,
+    STATUS.UNDER_REVIEW,
+    STATUS.PENDING_CLARIFICATION,
+    STATUS.APPROVED,
+    STATUS.SAFETY_REVIEW,
+    STATUS.REJECTED,
+  ])('SCRUM310_AC6_an_event_that_is_%s_does_not_need_attention_for_a_flagged_reservation', async (status) => {
+    const event = await readOne({ status, equipment_reservations: [reservation()] });
+
+    expect(event.needsAttention).toBe(false);
+    expect(event.attentionReasons).toEqual([]);
+  });
+
+  it.each([
+    ['the embed is missing', undefined],
+    ['the embed is null', null],
+    ['the embed is an empty list', []],
+  ])('SCRUM310_AC6_when_%s_a_confirmed_event_does_not_need_attention', async (_label, value) => {
+    const event = await readOne({ status: STATUS.CONFIRMED, equipment_reservations: value });
+
+    expect(event.needsAttention).toBe(false);
+    expect(event.attentionReasons).toEqual([]);
+  });
+
+  it('SCRUM310_AC6_an_embed_read_as_one_object_is_still_read', async () => {
+    const event = await readOne({ status: STATUS.CONFIRMED, equipment_reservations: reservation() });
+
+    expect(event.needsAttention).toBe(true);
+    expect(event.attentionReasons).toEqual([LOST]);
+  });
+
+  it('SCRUM310_AC6_a_null_entry_in_the_embed_is_skipped', async () => {
+    const event = await readOne({ status: STATUS.CONFIRMED, equipment_reservations: [null, reservation()] });
+
+    expect(event.attentionReasons).toEqual([LOST]);
+  });
+
+  it('SCRUM310_AC6_the_reason_the_flag_was_given_is_the_reason_shown', async () => {
+    const event = await readOne({
+      status: STATUS.CONFIRMED,
+      equipment_reservations: [reservation({ flag_reason: 'The equipment type was retired' })],
+    });
+
+    expect(event.attentionReasons).toEqual(['Equipment unavailable: The equipment type was retired']);
+  });
+
+  it.each([
+    ['null', null],
+    ['empty', ''],
+    ['blank', '   '],
+    ['not text', 42],
+  ])('SCRUM310_AC6_a_lost_equipment_flag_whose_reason_is_%s_still_says_equipment_lost', async (_label, flag_reason) => {
+    const event = await readOne({ status: STATUS.CONFIRMED, equipment_reservations: [reservation({ flag_reason })] });
+
+    expect(event.attentionReasons).toEqual(['Equipment unavailable']);
+  });
+
+  it.each([
+    ['null', null],
+    ['missing', undefined],
+    ['an unknown kind', 'something_else'],
+    ['empty', ''],
+  ])('SCRUM310_AC6_a_flag_whose_kind_is_%s_is_not_called_equipment_lost', async (_label, flag_code) => {
+    const event = await readOne({
+      status: STATUS.CONFIRMED,
+      equipment_reservations: [reservation({ flag_code, flag_reason: 'The event date or time changed' })],
+    });
+
+    expect(event.needsAttention).toBe(true);
+    expect(event.attentionReasons).toEqual(['Equipment flagged for review: The event date or time changed']);
+  });
+
+  it.each([
+    ['null', null],
+    ['blank', '   '],
+  ])('SCRUM310_AC6_an_other_flag_with_a_%s_reason_says_only_that_it_is_flagged', async (_label, flag_reason) => {
+    const event = await readOne({
+      status: STATUS.CONFIRMED,
+      equipment_reservations: [reservation({ flag_code: null, flag_reason })],
+    });
+
+    expect(event.attentionReasons).toEqual(['Equipment flagged for review']);
+  });
+
+  it('SCRUM310_AC6_a_lost_flag_and_another_flag_with_the_same_reason_are_two_entries', async () => {
+    const event = await readOne({
+      status: STATUS.CONFIRMED,
+      equipment_reservations: [
+        reservation({ flag_reason: 'Same words' }),
+        reservation({ flag_code: null, flag_reason: 'Same words' }),
+      ],
+    });
+
+    expect(event.attentionReasons).toEqual(['Equipment unavailable: Same words', 'Equipment flagged for review: Same words']);
+  });
+
+  it('SCRUM310_AC6_the_reason_is_trimmed', async () => {
+    const event = await readOne({
+      status: STATUS.CONFIRMED,
+      equipment_reservations: [reservation({ flag_reason: '  Lost in transit  ' })],
+    });
+
+    expect(event.attentionReasons).toEqual(['Equipment unavailable: Lost in transit']);
+  });
+
+  it('SCRUM310_AC6_two_flags_with_the_same_reason_are_one_entry', async () => {
+    const event = await readOne({ status: STATUS.CONFIRMED, equipment_reservations: [reservation(), reservation()] });
+
+    expect(event.attentionReasons).toEqual([LOST]);
+  });
+
+  it('SCRUM310_AC6_flags_with_different_reasons_are_each_listed_in_the_order_met', async () => {
+    const event = await readOne({
+      status: STATUS.CONFIRMED,
+      equipment_reservations: [
+        reservation({ flag_reason: 'Second' }),
+        reservation({ flag_reason: 'First' }),
+        reservation({ flag_reason: 'Second' }),
+      ],
+    });
+
+    expect(event.attentionReasons).toEqual(['Equipment unavailable: Second', 'Equipment unavailable: First']);
+  });
+
+  it('SCRUM310_AC6_a_released_flag_adds_no_reason', async () => {
+    const event = await readOne({
+      status: STATUS.CONFIRMED,
+      equipment_reservations: [reservation({ released_at: '2026-10-20T01:00:00Z', flag_reason: 'Gone' }), reservation()],
+    });
+
+    expect(event.attentionReasons).toEqual([LOST]);
+  });
+
+  it('SCRUM310_AC6_a_venue_flag_and_an_equipment_flag_are_both_given_as_reasons', async () => {
+    const event = await readOne({
+      status: STATUS.CONFIRMED,
+      bookings: [booking('flagged_for_review')],
+      equipment_reservations: [reservation()],
+    });
+
+    expect(event.needsAttention).toBe(true);
+    expect(event.attentionReasons).toEqual(['Venue: a booking is flagged for review', LOST]);
+  });
+
+  it('SCRUM310_AC6_a_venue_flag_alone_still_gives_its_reason_and_an_equipment_flag_alone_gives_only_its_own', async () => {
+    const venueOnly = await readOne({ status: STATUS.CONFIRMED, bookings: [booking('flagged_for_review')] });
+    const equipmentOnly = await readOne({ status: STATUS.CONFIRMED, bookings: [booking('approved')], equipment_reservations: [reservation()] });
+
+    expect(venueOnly.attentionReasons).toEqual(['Venue: a booking is flagged for review']);
+    expect(equipmentOnly.attentionReasons).toEqual([LOST]);
+  });
+
+  it('SCRUM310_AC6_an_event_that_does_not_need_attention_has_an_empty_reasons_list_not_a_missing_one', async () => {
+    const event = await readOne({ status: STATUS.CONFIRMED });
+
+    expect(event.attentionReasons).toEqual([]);
+  });
+
+  it('SCRUM310_AC6_every_event_read_that_carries_needs_attention_embeds_the_reservation_flags', async () => {
+    const flagged = heldRow({ status: STATUS.CONFIRMED, equipment_reservations: [reservation()] });
+    const client = createQueueFakeClient([
+      ok([flagged]),
+      ok([flagged]),
+      ok([profileRow(ORGANISER_ID, 'Aisha Rahman')]),
+      ok([flagged]),
+      ok([profileRow(COORDINATOR_ID, 'Wei Ling')]),
+      ok(flagged),
+      ok(flagged),
+    ]);
+
+    const results = [
+      await listEventRequestsForReview({ client }),
+      await listEventRequestsForCoordinator(COORDINATOR_ID, { client }),
+      await listEventRequestsForOrganiser(ORGANISER_ID, { client }),
+    ];
+    const single = [
+      await getEventRequestForCoordinator(REQUEST_ID, { client }),
+      await getEventRequestForOrganiser(REQUEST_ID, ORGANISER_ID, { client }),
+    ];
+
+    expect(results.map(([event]) => event.needsAttention)).toEqual([true, true, true]);
+    expect(single.map((event) => event.attentionReasons)).toEqual([[LOST], [LOST]]);
+    const reads = client.calls.filter((call) => call.table === 'event_requests');
+    expect(reads).toHaveLength(5);
+    for (const call of reads) {
+      expect(call.select).toContain('bookings(status)');
+      expect(call.select).toContain('equipment_reservations(flagged, released_at, flag_reason, flag_code)');
+    }
+  });
+});
+
 describe('SCRUM-363: change-request approval through the significant-change path', () => {
   it.each([
     ['PT409', ConflictError],

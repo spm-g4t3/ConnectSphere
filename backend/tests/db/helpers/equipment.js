@@ -5,6 +5,33 @@ import { seedEvent } from './schemaDb.js';
 // numbers and nulls exactly as Postgres wrote them.
 export const asJson = (row) => JSON.parse(row.answer);
 
+/**
+ * A change to an equipment type the way the API makes it: apply_equipment_change
+ * is asked once with nothing confirmed, and when that is refused with the list
+ * of reservations the change affects, it is asked again confirming exactly
+ * that list. Pass `confirmed` to send a list of your own instead.
+ *
+ * Damaged and under-maintenance changes need a note, so one is supplied.
+ */
+export async function applyEquipmentChange(db, typeId, caller, change = {}) {
+  const {
+    total = null, damaged = null, underMaintenance = null, retire = false,
+    fields = {}, note = null, confirmed,
+  } = change;
+  const call = async (ids) =>
+    JSON.parse(
+      (await db.query(
+        `select apply_equipment_change($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::uuid[])::text as answer`,
+        [typeId, caller, total, damaged, underMaintenance, retire, JSON.stringify(fields),
+          note ?? (damaged !== null || underMaintenance !== null ? 'Test note' : null), ids],
+      )).rows[0].answer,
+    );
+  if (confirmed !== undefined) return call(confirmed);
+  const first = await call([]);
+  if (first.saved) return first;
+  return call(first.affected.map((row) => row.reservation_id));
+}
+
 // Both factories take a getter for the file's state ({ db, organiser,
 // coordinator, reviewerA }), because those are only assigned in beforeAll.
 // Type and event names carry Math.random() so tests in one file never collide.

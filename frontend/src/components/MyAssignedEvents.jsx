@@ -27,6 +27,7 @@ import { formatEventDate } from "../services/displayFormat";
 import { isReplyOverdue } from "../services/datetimeFormat";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
+import NeedsAttentionReasons from "./NeedsAttentionReasons";
 import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { SESSION_EXPIRED } from "../services/apiErrors";
@@ -170,6 +171,7 @@ function EventRow({ event, onOpen }) {
           </span>
         </span>
         <SafetyApprovalNotice status={event.status} />
+        <NeedsAttentionReasons event={event} />
       </div>
       <button onClick={() => onOpen(event)}>Open</button>
     </li>

@@ -7,10 +7,18 @@
 // says so itself when nothing changed rather than sending an empty body. A
 // cleared total goes as null, which the backend answers with "is required".
 // Every message the backend returns for a 400 is shown, not just the first.
+//
+// SCRUM-314: an edit that changes the total is checked first. The backend says
+// which reservations a smaller total would leave short; none means the edit
+// saves at once, some means they are listed and nothing is saved until the
+// staff member confirms (useConfirmedChange). An edit that leaves the total
+// alone cannot leave a reservation short and saves as before.
 
 import { useState } from "react";
-import { createEquipment, updateEquipment } from "../services/equipmentService";
+import { createEquipment, updateEquipment, previewEquipmentChange } from "../services/equipmentService";
 import { equipmentErrorMessages } from "../services/equipmentErrors";
+import EquipmentImpactConfirmation from "./EquipmentImpactConfirmation";
+import useConfirmedChange from "./useConfirmedChange";
 
 function buildPayload(values, type) {
   const next = {
@@ -41,8 +49,10 @@ export default function EquipmentForm({ type = null, onSaved }) {
     location: type?.location ?? "",
     totalQuantity: type ? String(type.totalQuantity) : "",
   });
+  const [note, setNote] = useState("");
   const [errors, setErrors] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const flow = useConfirmedChange();
 
   function bind(field) {
     return {
@@ -53,7 +63,7 @@ export default function EquipmentForm({ type = null, onSaved }) {
 
   async function handleSubmit(event) {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || flow.busy) return;
 
     const payload = buildPayload(values, type);
     if (editing && Object.keys(payload).length === 0) {
@@ -61,6 +71,24 @@ export default function EquipmentForm({ type = null, onSaved }) {
       return;
     }
 
+    if (editing && payload.totalQuantity !== undefined) {
+      setErrors([]);
+      const reason = note.trim();
+      flow.start({
+        preview: () => previewEquipmentChange(type.id, { totalQuantity: payload.totalQuantity }),
+        save: (confirmedReservationIds) =>
+          updateEquipment(type.id, {
+            ...payload,
+            ...(reason !== "" && { note: reason }),
+            confirmedReservationIds,
+          }),
+        onSaved,
+        action: "save",
+      });
+      return;
+    }
+
+    flow.cancel();
     setSubmitting(true);
     setErrors([]);
     try {
@@ -72,6 +100,25 @@ export default function EquipmentForm({ type = null, onSaved }) {
       setSubmitting(false);
     }
   }
+
+  if (flow.reviewing) {
+    return (
+      <EquipmentImpactConfirmation
+        typeName={type.name}
+        impact={flow.impact}
+        stale={flow.stale}
+        busy={flow.busy}
+        errors={flow.errors}
+        confirmLabel={flow.impact.affected.length === 0 ? "Save changes" : "Confirm and flag these reservations"}
+        cancelLabel="Go back"
+        onConfirm={flow.confirm}
+        onCancel={flow.cancel}
+      />
+    );
+  }
+
+  const shownErrors = errors.length > 0 ? errors : flow.errors;
+  const working = submitting || flow.busy;
 
   return (
     <form className="equipment-form" onSubmit={handleSubmit} noValidate>
@@ -98,16 +145,23 @@ export default function EquipmentForm({ type = null, onSaved }) {
         <input id="equipment-total" type="number" min="0" step="1" {...bind("totalQuantity")} />
       </div>
 
-      {errors.length > 0 && (
+      {editing && (
+        <div className="equipment-form__field">
+          <label htmlFor="equipment-reason">Reason for a change to the total (optional)</label>
+          <textarea id="equipment-reason" rows="2" value={note} onChange={(event) => setNote(event.target.value)} />
+        </div>
+      )}
+
+      {shownErrors.length > 0 && (
         <ul className="equipment-errors" role="alert">
-          {errors.map((message, index) => (
+          {shownErrors.map((message, index) => (
             <li key={index}>{message}</li>
           ))}
         </ul>
       )}
 
-      <button type="submit" disabled={submitting}>
-        {submitting ? "Saving..." : editing ? "Save changes" : "Add equipment type"}
+      <button type="submit" disabled={working}>
+        {flow.stage === "checking" ? "Checking..." : working ? "Saving..." : editing ? "Save changes" : "Add equipment type"}
       </button>
     </form>
   );

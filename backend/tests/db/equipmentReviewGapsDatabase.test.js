@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSchemaDb, seedUser } from './helpers/schemaDb.js';
 import { queriesFor, refusal } from './helpers/queries.js';
-import { singleReviewerSteps } from './helpers/equipment.js';
+import { singleReviewerSteps, applyEquipmentChange } from './helpers/equipment.js';
 
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
@@ -206,7 +206,7 @@ describe('SCRUM-300: closing the review gaps in Postgres', () => {
 
     it('SCRUM300_AC7_a_retired_type_flags_a_reservation_that_cannot_be_kept', async () => {
       const { event } = await reservedAndFlagged(({ type }) =>
-        db.query('update equipment_types set retired_at = now() where id = $1', [type]));
+        applyEquipmentChange(db, type, reviewerA, { retire: true }));
       const state = await restart(event);
 
       expect(reservationOf(state).flagged).toBe(true);

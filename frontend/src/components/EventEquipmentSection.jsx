@@ -37,6 +37,7 @@ import {
   getEventEquipment,
   removeEquipmentLine,
 } from "../services/eventEquipmentService";
+import { describeFlaggedLine } from "../services/equipmentFlagDisplay";
 import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
 import "./EventEquipmentSection.css";
 
@@ -95,6 +96,27 @@ function messageForWrite(err) {
 }
 
 const isRefusalOfTheState = (err) => [403, 404, 409].includes(err?.response?.status);
+
+/**
+ * SCRUM-315 (SCRUM-310 AC5): a line with a flagged reservation is marked, with
+ * what was flagged and why. The marker is words, not only colour. It says
+ * "Equipment unavailable" only when every flag on the line is for unavailable equipment.
+ */
+function FlaggedReservations({ line }) {
+  const flagged = describeFlaggedLine(line);
+  if (!flagged.flagged) return null;
+  return (
+    <div className="event-equipment__flagged" role="group" aria-label={`${flagged.heading} for ${line.name}`}>
+      <strong>{flagged.heading}</strong>
+      <span>{flagged.summary}</span>
+      <ul>
+        {flagged.items.map((item) => (
+          <li key={item.id}>{`${item.quantity}, ${item.period}: ${item.reason}`}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 /**
  * @param {Object}  props
@@ -389,6 +411,7 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
                       <small>This equipment type has been retired.</small>
                     )}
                   </div>
+                  <FlaggedReservations line={line} />
                   <p className="event-equipment__notes">
                     {line.technicalNotes ?? "No technical notes."}
                   </p>

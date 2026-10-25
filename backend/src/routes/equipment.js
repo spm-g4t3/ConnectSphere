@@ -33,6 +33,7 @@ import {
   retireEquipmentType,
   reinstateEquipmentType,
 } from '../services/equipmentService.js';
+import { previewEquipmentChange } from '../services/equipmentChangePreviewService.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
@@ -110,18 +111,38 @@ export function createEquipmentRouter({
   });
 
   /**
+   * SCRUM-312: which reservations a change would leave short, before it is
+   * saved. POST because the change travels in the body; it saves nothing.
+   * The body is totalQuantity, damagedQuantity and/or underMaintenanceQuantity,
+   * or retire: true.
+   *
+   * Statuses: 200 with usableBefore, usableAfter and the affected
+   * reservations in the order they were made; 400 for a
+   * malformed id or body; 401; 403 unless Technical Support Staff; 404; 409
+   * with code EQUIPMENT_ALREADY_RETIRED; 500.
+   */
+  router.post('/:id/change-preview', technicalSupportOnly, async (req, res) => {
+    res.status(200).json(await previewEquipmentChange(req.params.id, req.body, actingUser(req)));
+  });
+
+  /**
    * AC6 (SCRUM-278): retire a type, so it leaves the active list and can't be
    * chosen on new equipment lines. Existing lines and reservations keep it.
    *
    * POST rather than DELETE, as for venues: retirement is a soft delete the
    * record survives, and a DELETE would describe the opposite.
    *
-   * Statuses: 200 with the updated type; 400 for a malformed id; 401; 403;
-   * 404; 409 with code EQUIPMENT_ALREADY_RETIRED, or whatever the
-   * over-commitment check refuses with (SCRUM-310); 500.
+   * The body is optional (SCRUM-313): confirmedReservationIds, the reservations
+   * the staff member was shown, and a note. Retiring a type that has
+   * reservations needs them listed; the save and the flags are one action.
+   *
+   * Statuses: 200 with the updated type, flaggedCount and flaggedReservations;
+   * 400 for a malformed id or body; 401; 403; 404; 409 with code
+   * EQUIPMENT_ALREADY_RETIRED, or EQUIPMENT_AFFECTED_CHANGED with the current
+   * list in conflicts when it is not the confirmed one (nothing is saved); 500.
    */
   router.post('/:id/retire', technicalSupportOnly, async (req, res) => {
-    res.status(200).json(await retireEquipmentType(req.params.id, actingUser(req)));
+    res.status(200).json(await retireEquipmentType(req.params.id, req.body, actingUser(req)));
   });
 
   /**
@@ -140,10 +161,14 @@ export function createEquipmentRouter({
    * the one left out stays as it was. Reducing a number is how units are
    * marked usable again. PATCH because only what is sent changes.
    *
-   * Statuses: 200 with the updated type, usableQuantity being the new figure;
-   * 400 listing every invalid field, including a missing note or damaged plus
-   * under maintenance above the total; 401; 403; 404 when no type has that id;
-   * 500.
+   * confirmedReservationIds (SCRUM-313) lists the reservations the staff
+   * member was shown; the change saves only if that is what it affects.
+   *
+   * Statuses: 200 with the updated type, usableQuantity being the new figure,
+   * flaggedCount and flaggedReservations; 400 listing every invalid field,
+   * including a missing note or damaged plus under maintenance above the
+   * total; 401; 403; 404 when no type has that id; 409 with code
+   * EQUIPMENT_AFFECTED_CHANGED and the current list in conflicts; 500.
    */
   router.patch('/:id/condition', technicalSupportOnly, async (req, res) => {
     res.status(200).json(await recordEquipmentCondition(req.params.id, req.body, actingUser(req)));
@@ -152,8 +177,13 @@ export function createEquipmentRouter({
   /**
    * AC3: edit a type. PATCH because only the fields sent change.
    *
+   * A smaller totalQuantity can leave reservations short, so it takes
+   * confirmedReservationIds (SCRUM-313) like the condition change does.
+   *
    * Statuses: 200 with the updated type; 400 for a malformed id or any invalid
-   * field; 401; 403; 404 when no type has that id; 500.
+   * field; 401; 403; 404 when no type has that id; 409 with code
+   * EQUIPMENT_AFFECTED_CHANGED and the current list in conflicts, or
+   * EQUIPMENT_NAME_TAKEN; 500.
    */
   router.patch('/:id', technicalSupportOnly, async (req, res) => {
     res.status(200).json(await updateEquipmentType(req.params.id, req.body, actingUser(req)));

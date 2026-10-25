@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSchemaDb, seedUser } from './helpers/schemaDb.js';
 import { queriesFor, refusal } from './helpers/queries.js';
-import { asJson, reservationSteps } from './helpers/equipment.js';
+import { asJson, reservationSteps, applyEquipmentChange } from './helpers/equipment.js';
 import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
 const START = '2026-12-01T10:00:00Z';
@@ -219,19 +219,19 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
     it('SCRUM300_AC6_a_type_losing_usable_units_flags_only_over_committed_reservations', async () => {
       const a = await reviewed('Lamp', 4, 2);
       await reserve(a.event, reviewerA, a.line, 2);
-      await db.query('update equipment_types set damaged_quantity = 3 where id = $1', [a.type]);
+      await applyEquipmentChange(db, a.type, reviewerA, { damaged: 3 });
       expect((await reservation(a.event)).flagged).toBe(true);
 
       const b = await reviewed('Cable', 4, 2);
       await reserve(b.event, reviewerA, b.line, 2);
-      await db.query('update equipment_types set damaged_quantity = 1 where id = $1', [b.type]);
+      await applyEquipmentChange(db, b.type, reviewerA, { damaged: 1 });
       expect((await reservation(b.event)).flagged).toBe(false);
     });
 
     it('SCRUM300_AC6_retiring_a_type_flags_its_reservations', async () => {
       const { event, line, type } = await reviewed('Lamp', 4, 2);
       await reserve(event, reviewerA, line, 2);
-      await db.query('update equipment_types set retired_at = now() where id = $1', [type]);
+      await applyEquipmentChange(db, type, reviewerA, { retire: true });
       expect((await reservation(event)).flagged).toBe(true);
     });
 
@@ -330,7 +330,7 @@ describe('SCRUM-300: changing and flagging reservations in Postgres', () => {
       const { event, line, type } = await reviewed('Projector', 4, 2);
       await reserve(event, reviewerA, line, 2);
       await db.query('select amend_equipment_line($1, $2, $3, 2)', [event, coordinator, line]);
-      await db.query('update equipment_types set damaged_quantity = 3 where id = $1', [type]);
+      await applyEquipmentChange(db, type, reviewerA, { damaged: 3 });
       await start(event, reviewerA);
       const { id } = await reservation(event);
       const err = await refusal(keep(event, reviewerA, id));
