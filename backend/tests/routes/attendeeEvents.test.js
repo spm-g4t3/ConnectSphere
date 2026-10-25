@@ -15,11 +15,12 @@ const ATTENDEE = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const OTHER_ATTENDEE = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const EVENT = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const OTHER_EVENT = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const REGISTRATION = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const user = { id: ATTENDEE, role: ROLE.ATTENDEE };
 const notFound = { error: 'Event information not found' };
-const unavailable = { eventRequestId: EVENT, state: 'unavailable', eventName: 'Registered event' };
+const unavailable = { eventRequestId: EVENT, registrationId: REGISTRATION, state: 'unavailable', eventName: 'Registered event' };
 const confirmed = {
-  eventRequestId: EVENT, state: 'confirmed', eventName: 'Registered event',
+  eventRequestId: EVENT, registrationId: REGISTRATION, state: 'confirmed', eventName: 'Registered event',
   startsAt: '2030-01-01T01:00:00+00:00', endsAt: '2030-01-01T03:00:00+00:00',
   venues: [{ bookingId: 'booking-a', name: 'Hall A', location: 'Building A', underReview: false }],
 };
@@ -48,6 +49,7 @@ function confirmedEvent(overrides = {}) {
 
 function registration(overrides = {}) {
   return {
+    id: REGISTRATION,
     attendee_id: ATTENDEE,
     event_request_id: EVENT,
     status: 'registered',
@@ -263,7 +265,7 @@ describe('SCRUM-24 protected attendee event read', () => {
       const response = await read(application(database([row])));
       expect(response.status).toBe(200);
       expect(response.body).toEqual(unavailable);
-      expect(Object.keys(response.body).sort()).toEqual(['eventName', 'eventRequestId', 'state']);
+      expect(Object.keys(response.body).sort()).toEqual(['eventName', 'eventRequestId', 'registrationId', 'state']);
       expectPrivateValuesExcluded(response.body);
     },
   );
@@ -430,7 +432,7 @@ describe('SCRUM-24 protected attendee event read', () => {
     const response = await read(application(database([sensitiveRegistration()])));
     expect(response.status).toBe(200);
     expect(response.body).toEqual(confirmed);
-    expect(Object.keys(response.body).sort()).toEqual(['endsAt', 'eventName', 'eventRequestId', 'startsAt', 'state', 'venues']);
+    expect(Object.keys(response.body).sort()).toEqual(['endsAt', 'eventName', 'eventRequestId', 'registrationId', 'startsAt', 'state', 'venues']);
     expect(Object.keys(response.body.venues[0]).sort()).toEqual(['bookingId', 'location', 'name', 'underReview']);
     expectPrivateValuesExcluded(response.body);
   });
@@ -441,7 +443,7 @@ describe('SCRUM-24 protected attendee event read', () => {
     expect(client.calls).toHaveLength(1);
     expect(client.calls[0].table).toBe('event_registrations');
     expect(client.calls[0].columns.replace(/\s+/g, '')).toBe(
-      'event_request_id,attendee_id,status,event_requests!inner(id,event_name,status,proposed_start,proposed_end,'
+      'id,event_request_id,attendee_id,status,event_requests!inner(id,event_name,status,proposed_start,proposed_end,'
       + 'bookings(id,status,venues(name,location)))',
     );
   });
@@ -451,7 +453,7 @@ describe('SCRUM-24 protected attendee event read', () => {
       event_name: undefined, proposed_start: null, proposed_end: undefined, bookings: undefined,
     }) })]);
     expect((await read(application(client))).body).toEqual({
-      eventRequestId: EVENT, state: 'confirmed', eventName: null, startsAt: null, endsAt: null, venues: [],
+      eventRequestId: EVENT, registrationId: REGISTRATION, state: 'confirmed', eventName: null, startsAt: null, endsAt: null, venues: [],
     });
     const missingVenue = database([registration({ event_requests: confirmedEvent({
       bookings: [{ id: 'missing', status: BOOKING_STATUS.APPROVED, venues: null },
@@ -543,5 +545,71 @@ describe('SCRUM-24 registered event entry points', () => {
     defaultClient.from.mockReturnValue(query);
     await expect(listAttendeeEvents({ user })).resolves.toEqual([]);
     await expect(listAttendeeEvents()).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe('SCRUM-27 withdrawal endpoint', () => {
+  const withdrawn = {
+    id: REGISTRATION, eventRequestId: EVENT, attendeeId: ATTENDEE, status: 'withdrawn',
+    registeredAt: '2030-01-01T00:00:00Z', createdAt: '2030-01-01T00:00:00Z', updatedAt: '2030-01-02T00:00:00Z',
+  };
+  const rpcClient = (result) => ({ rpc: vi.fn().mockResolvedValue(result) });
+  const withdraw = (app, id = REGISTRATION, authorization = 'Bearer valid') => {
+    const call = request(app).post(`/api/attendee-events/registrations/${id}/withdrawal`);
+    if (authorization) call.set('Authorization', authorization);
+    return call.query({ attendeeId: OTHER_ATTENDEE }).send({ attendeeId: OTHER_ATTENDEE, status: 'registered' });
+  };
+
+  it('SCRUM27_AC3_withdraws_as_the_verified_attendee_ignoring_request_identity', async () => {
+    const client = rpcClient({ data: { outcome: 'withdrawn', registeredCount: 1, capacity: 2, registration: withdrawn }, error: null });
+    const response = await withdraw(application(client));
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ ...withdrawn, placesLeft: 1, isFull: false });
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(client.rpc).toHaveBeenCalledExactlyOnceWith('withdraw_registration', {
+      p_registration_id: REGISTRATION, p_attendee_id: ATTENDEE,
+    });
+  });
+
+  it.each([null, 'Bearer expired'])('SCRUM27_AC1_refuses_an_unauthenticated_request_%s', async (authorization) => {
+    const client = rpcClient({});
+    const response = await withdraw(application(client), REGISTRATION, authorization);
+    expect(response.status).toBe(401);
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM27_AC1_refuses_a_caller_who_is_not_an_attendee', async () => {
+    const client = rpcClient({});
+    const response = await withdraw(application(client, { role: ROLE.EVENT_ORGANISER }));
+    expect(response.status).toBe(403);
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM27_AC1_a_registration_id_with_surrounding_spaces_reaches_the_database_trimmed', async () => {
+    const client = rpcClient({ data: { outcome: 'withdrawn', registeredCount: 0, capacity: null, registration: withdrawn }, error: null });
+    const response = await withdraw(application(client), encodeURIComponent(` ${REGISTRATION} `));
+    expect(response.status).toBe(200);
+    expect(client.rpc).toHaveBeenCalledExactlyOnceWith('withdraw_registration', {
+      p_registration_id: REGISTRATION, p_attendee_id: ATTENDEE,
+    });
+  });
+
+  it('SCRUM27_AC1_validates_the_registration_id_before_the_database', async () => {
+    const client = rpcClient({});
+    const response = await withdraw(application(client), 'not-a-uuid');
+    expect(response.status).toBe(400);
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ code: '55000', hint: 'WITHDRAWAL_DEADLINE_PASSED', message: 'The withdrawal deadline for this event has passed' },
+      409, { error: 'The withdrawal deadline for this event has passed', code: 'WITHDRAWAL_DEADLINE_PASSED' }],
+    [{ code: 'P0002', hint: 'REGISTRATION_NOT_OWNED', message: 'Registration not found' },
+      404, { error: 'Registration not found' }],
+  ])('SCRUM27_AC7_returns_the_refusal_%#_uncached', async (error, status, body) => {
+    const response = await withdraw(application(rpcClient({ data: null, error })));
+    expect(response.status).toBe(status);
+    expect(response.body).toMatchObject(body);
+    expect(response.headers['cache-control']).toBe('no-store');
   });
 });

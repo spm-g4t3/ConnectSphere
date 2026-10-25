@@ -1,9 +1,11 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getAttendeeEvent } from "../services/attendeeEventService";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
+import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import { EVENT_TIME_NOTE, formatEventDate, formatEventStartTime, formatEventEndTime } from "../services/openEventDisplay";
 import useOpenEventRead from "./useOpenEventRead";
+import WithdrawRegistration from "./WithdrawRegistration";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { SESSION_EXPIRED } from "../services/apiErrors";
 
@@ -19,14 +21,37 @@ function EventInformation({ eventId }) {
     messages: MESSAGES, fallback: FALLBACK, notFoundIsAnswer: true, retainDataOnRefresh: false,
   });
   useRefetchOnReturn(load);
+  // The backend's reply to a withdrawal; set only once it has succeeded.
+  const [withdrawal, setWithdrawal] = useState(null);
+  // A final refusal, kept here because a reload remounts the action, keyed by
+  // registration so a new registration starts with the action offered again.
+  const [refusal, setRefusal] = useState(null);
   // Only a reply for this route's event may name it.
   const current = data?.eventRequestId === eventId.trim().toLowerCase() ? data : null;
+  const handleWithdrawn = (result) => {
+    // The name is kept: the re-read no longer returns this event to a withdrawn attendee.
+    setWithdrawal({ ...result, eventName: current?.eventName });
+    load();
+  };
+  // Only while the server shows no active registration; a later read that
+  // shows one again (registered anew) must not sit beside a withdrawn notice.
+  const withdrawn = withdrawal && !current ? withdrawal : null;
   return (
     <>
-      <h1>{current?.eventName?.trim() || "Event information"}</h1>
+      <h1>{current?.eventName?.trim() || withdrawn?.eventName?.trim() || "Event information"}</h1>
       <section aria-label="Registered event information">
         {loading && <p role="status">Loading...</p>}
-        {notFound && <p role="alert">Event information is unavailable. An active registration is required.</p>}
+        {/* From the backend's reply alone, so a failed reload cannot hide it. */}
+        {withdrawn && (
+          <div className="browse-event-details__success" role="status">
+            <p>Your registration has been withdrawn.</p>
+            <dl className="browse-event-details__facts">
+              <div><dt>Registration status</dt><dd>Withdrawn</dd></div>
+            </dl>
+            <p><Link to={BROWSE_OPEN_EVENTS_PATH}>Browse open events</Link></p>
+          </div>
+        )}
+        {!withdrawn && notFound && <p role="alert">Event information is unavailable. An active registration is required.</p>}
         {error && (
           <div className="browse-open-events__error" role="alert">
             <p>{error}</p>
@@ -52,6 +77,14 @@ function EventInformation({ eventId }) {
               </li>
             ))}</ul> : <p>No confirmed venue information is available.</p>}
           </>)}
+        {!loading && !error && current?.registrationId && (
+          <WithdrawRegistration
+            registrationId={current.registrationId}
+            refusal={refusal?.registrationId === current.registrationId ? refusal.message : null}
+            onWithdrawn={handleWithdrawn}
+            onRefused={(message) => setRefusal({ registrationId: current.registrationId, message })}
+          />
+        )}
       </section>
       <p><Link to={REGISTERED_EVENTS_PATH}>Back to registered events</Link></p>
     </>
