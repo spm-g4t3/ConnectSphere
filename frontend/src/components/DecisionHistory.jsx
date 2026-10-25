@@ -19,8 +19,10 @@ const DECISION_LABEL = {
  * @param {string} props.eventRequestId
  * @param {"coordinator"|"organiser"} props.view  the coordinator is also told
  *                                                 the request is a resubmission
+ * @param {boolean} [props.showReason]  false beside a current rejection, whose
+ *                                      own reason is the one to act on (SCRUM-347)
  */
-export default function DecisionHistory({ eventRequestId, view = "organiser" }) {
+export default function DecisionHistory({ eventRequestId, view = "organiser", showReason = true }) {
   // Tagged with the request it was read for, so switching requests never shows
   // the previous one's decisions or error while the new read is in flight.
   const [result, setResult] = useState(null);
@@ -56,7 +58,7 @@ export default function DecisionHistory({ eventRequestId, view = "organiser" }) 
           This request is a resubmission. It has been decided {entries.length === 1 ? "once" : `${entries.length} times`} before.
         </p>
       )}
-      {view !== "coordinator" && latestRejection && (
+      {view !== "coordinator" && showReason && latestRejection && (
         <div className="decision-history__reason">
           <strong>Why it was rejected</strong>
           <p>{latestRejection.decisionNote || "No reason was recorded."}</p>

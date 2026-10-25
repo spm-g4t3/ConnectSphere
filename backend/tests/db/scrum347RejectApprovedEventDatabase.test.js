@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 
 import { ROLE } from '../../src/domain/userRole.js';
-import { useSchemaDb, seedEvent, seedUser, seedVenue, seedBooking } from './helpers/schemaDb.js';
+import { useSchemaDb, seedEvent, seedUser, seedVenue, seedBooking, seedBlock } from './helpers/schemaDb.js';
 import { queriesFor, refusal, expectSqlError } from './helpers/queries.js';
 import { clientsCanExecute } from './helpers/grants.js';
 
@@ -222,8 +222,12 @@ describe('SCRUM-347: reject_approved_event', () => {
         payload: expect.objectContaining({ reason: 'The only suitable hall is closed.' }),
       })]);
       // One per released booking: the pending request and the approved booking.
-      expect(sent.filter((n) => n.audience === 'venue_staff').map((n) => [n.recipient_id, n.booking_id]).sort())
-        .toEqual([[venueStaff, event.bookings.pending], [venueStaff, event.bookings.approved]].sort());
+      // The request never held the venue, so it says withdrawn, not released.
+      expect(sent.filter((n) => n.audience === 'venue_staff').map((n) => [n.recipient_id, n.booking_id, n.payload.outcome]).sort())
+        .toEqual([
+          [venueStaff, event.bookings.pending, 'withdrawn'],
+          [venueStaff, event.bookings.approved, 'cancelled'],
+        ].sort());
       expect(sent.filter((n) => n.audience === 'technical_support_staff')).toEqual([expect.objectContaining({
         recipient_id: technicalSupport,
         payload: expect.objectContaining({ equipmentRequestId: event.equipmentRequest }),
@@ -324,6 +328,69 @@ describe('SCRUM-347: reject_approved_event', () => {
 
     it('SCRUM347_AC1_a_missing_event_is_refused_with_P0002', async () => {
       await expectSqlError(reject('00000000-0000-0000-0000-000000000000', await user(ROLE.EVENT_COORDINATOR)), 'P0002');
+    });
+  });
+
+  describe('other events waiting behind a released booking (027)', () => {
+    // Another event's request for the slot our approved booking held, marked
+    // Conflicting because of it.
+    async function waitingBehind(event) {
+      const coordinator = await user(ROLE.EVENT_COORDINATOR);
+      const otherEvent = await seedEvent(getDb(), {
+        status: 'approved',
+        event_name: `Waiting ${next()}`,
+        organiser_id: organiser,
+        assigned_coordinator_id: coordinator,
+        proposed_start: event.start,
+        proposed_end: event.end,
+      });
+      const request = await seedBooking(getDb(), { venueId: event.venues.approved, eventId: otherEvent, status: 'conflicting' });
+      return { coordinator, request };
+    }
+    const bookingStatus = async (id) => (await one('select status::text from bookings where id = $1', [id])).status;
+    const clearedNotices = (bookingId) => rows(
+      "select recipient_id, payload from notifications where type = 'booking_request_conflict_cleared' and booking_id = $1",
+      [bookingId],
+    );
+
+    it('SCRUM347_AC4_a_rejection_returns_their_request_to_pending_and_tells_their_coordinator', async () => {
+      const coordinator = await user(ROLE.EVENT_COORDINATOR);
+      const event = await eventWithArrangements(coordinator);
+      const waiting = await waitingBehind(event);
+
+      await reject(event.id, coordinator);
+
+      expect(await bookingStatus(waiting.request)).toBe('pending');
+      expect(await clearedNotices(waiting.request)).toEqual([{
+        recipient_id: waiting.coordinator,
+        payload: expect.objectContaining({ releasedBookingId: event.bookings.approved }),
+      }]);
+    });
+
+    it('SCRUM347_AC4_a_request_something_else_still_blocks_stays_conflicting', async () => {
+      const coordinator = await user(ROLE.EVENT_COORDINATOR);
+      const event = await eventWithArrangements(coordinator);
+      const waiting = await waitingBehind(event);
+      await seedBlock(getDb(), { venueId: event.venues.approved, start: event.start, end: event.end });
+
+      await reject(event.id, coordinator);
+
+      expect(await bookingStatus(waiting.request)).toBe('conflicting');
+      expect(await clearedNotices(waiting.request)).toEqual([]);
+    });
+
+    it('SCRUM347_AC4_cancelling_an_event_frees_them_too', async () => {
+      const coordinator = await user(ROLE.EVENT_COORDINATOR);
+      const event = await eventWithArrangements(coordinator);
+      const waiting = await waitingBehind(event);
+
+      await getDb().query(
+        "select cancel_event_request($1, $2, 'No longer needed', 'connectsphere_decision')",
+        [event.id, coordinator],
+      );
+
+      expect(await bookingStatus(waiting.request)).toBe('pending');
+      expect(await clearedNotices(waiting.request)).toHaveLength(1);
     });
   });
 

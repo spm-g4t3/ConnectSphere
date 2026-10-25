@@ -1206,6 +1206,15 @@ describe("describeNotification: event_rejected (SCRUM-347)", () => {
     expect(detail).toContain("The event was rejected");
   });
 
+  it("SCRUM347_AC7_tells_venue_staff_a_withdrawn_request_was_withdrawn_not_released", () => {
+    const { headline, detail } = d({
+      audience: "venue_staff", outcome: "withdrawn", eventName: "Tech Talk", venueName: "Hall A",
+      startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt,
+    });
+    expect(headline).toBe("The request for Hall A for Tech Talk was withdrawn");
+    expect(detail).toContain("no longer needs a decision");
+  });
+
   it("SCRUM347_AC7_tells_technical_support_the_equipment_request_was_cancelled", () => {
     expect(d({ audience: "technical_support_staff", eventName: "Tech Talk" }).headline)
       .toBe("The equipment request for Tech Talk was cancelled");

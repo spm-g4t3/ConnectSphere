@@ -11,7 +11,9 @@ import { MemoryRouter } from "react-router-dom";
 import EventRejectionPanel from "../../src/components/EventRejectionPanel.jsx";
 import DecisionHistory from "../../src/components/DecisionHistory.jsx";
 import MyEventRequests from "../../src/components/MyEventRequests.jsx";
+import ChangeRequestStatusList from "../../src/components/ChangeRequestStatusList.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
+import { getChangeRequests } from "../../src/services/changeRequestService";
 import {
   getAssignmentHistory,
   getEventDecisionHistory,
@@ -22,6 +24,11 @@ import {
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
+}));
+
+vi.mock("../../src/services/changeRequestService", () => ({
+  getChangeRequests: vi.fn(),
+  submitChangeRequest: vi.fn(),
 }));
 
 vi.mock("../../src/services/eventRequestService", () => ({
@@ -301,6 +308,22 @@ describe("SCRUM347 DecisionHistory after a rejection", () => {
   });
 });
 
+describe("SCRUM347 change requests closed with the event", () => {
+  it.each([
+    ["event_rejected", "Outcome: Closed, event rejected"],
+    ["event_cancelled", "Outcome: Closed, event cancelled"],
+  ])("SCRUM347_AC6_a_change_request_closed_by_%s_says_why", async (decision, label) => {
+    vi.mocked(getChangeRequests).mockResolvedValue([{
+      id: "c1", fieldLabel: "Venue", details: "A larger room", status: "processed", decision, decisionNotes: null,
+      createdAt: "2026-10-20T03:00:00Z",
+    }]);
+
+    render(<ChangeRequestStatusList eventRequestId={REQUEST_ID} />);
+
+    expect(await screen.findByText(label)).toBeInTheDocument();
+  });
+});
+
 describe("SCRUM347 the Organiser's rejected event", () => {
   it("SCRUM347_AC5_shows_the_outcome_reason_coordinator_and_the_approval_before_it", async () => {
     vi.mocked(useAuth).mockReturnValue({ user: { id: ORGANISER, role: "event_organiser" } });
@@ -317,6 +340,21 @@ describe("SCRUM347 the Organiser's rejected event", () => {
     const history = await within(decision).findByRole("region", { name: "Previous decisions" });
     expect(within(history).getByRole("listitem")).toHaveTextContent("Approved");
     expect(getEventDecisionHistory).toHaveBeenCalledWith(REQUEST_ID);
+  });
+
+  it("SCRUM347_AC5_a_second_rejection_never_shows_the_first_reason_as_the_current_one", async () => {
+    vi.mocked(useAuth).mockReturnValue({ user: { id: ORGANISER, role: "event_organiser" } });
+    vi.mocked(getEventDecisionHistory).mockResolvedValue([
+      { ...approvalEntry, id: "d0", decision: "rejected", decisionNote: "The first reason.", supersededReason: "reopened_for_revision" },
+    ]);
+    vi.mocked(getMyEventRequests).mockResolvedValue([rejectedEvent({ decisionNote: "The second reason." })]);
+
+    render(<MemoryRouter><MyEventRequests /></MemoryRouter>);
+
+    const history = await screen.findByRole("region", { name: "Previous decisions" });
+    expect(within(history).getByRole("listitem")).toHaveTextContent("The first reason.");
+    expect(screen.queryByText("Why it was rejected")).not.toBeInTheDocument();
+    expect(screen.getByText("The second reason.")).toBeInTheDocument();
   });
 
   it("SCRUM347_AC6_a_rejected_event_offers_revise_and_resubmit_not_a_change_request", async () => {

@@ -30,8 +30,9 @@
 //     cancelledAt }; audience is organiser, venue_staff,
 //     technical_support_staff or safety_officer
 //   event_rejected (024, SCRUM-347): { audience, eventName }, plus reason and
-//     rejectedAt for the organiser, venueId, venueName, startsAt and endsAt for
-//     venue_staff, and equipmentRequestId for technical_support_staff
+//     rejectedAt for the organiser, outcome (withdrawn or cancelled, 027),
+//     venueId, venueName, startsAt and endsAt for venue_staff, and
+//     equipmentRequestId for technical_support_staff
 //   event_submitted_for_safety_review (064, SCRUM-489): { eventRequestId,
 //     eventName, coordinatorId, coordinatorName, startsAt, submittedAt }
 //   booking_request_approved and booking_request_rejected (066, SCRUM-258):
@@ -539,6 +540,13 @@ const DESCRIBERS = {
       return {
         headline: `${eventName} was rejected`,
         detail: `Reason: ${asSentence(payload.reason || NO_REASON)}${rejectedAt} You can revise and resubmit it.`,
+      };
+    }
+    // A withdrawn request never held the venue, so it is not called a release (027).
+    if (payload.audience === "venue_staff" && payload.outcome === "withdrawn") {
+      return {
+        headline: `The request for ${venueName} for ${eventName} was withdrawn`,
+        detail: `The event was rejected, so its request for ${formatRange(payload.startsAt, payload.endsAt)} no longer needs a decision.`,
       };
     }
     if (payload.audience === "venue_staff") {
