@@ -232,6 +232,12 @@ const SCRUM355_FILES = [
   'src/components/DecisionHistory.jsx',
 ]
 
+// SCRUM-347: the rejection page, a new file only this story owns. Its edits to
+// CoordinatorRequestDetail.jsx and MyEventRequests.jsx stay ungated.
+const SCRUM347_FILES = [
+  'src/components/EventRejectionPanel.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -284,6 +290,7 @@ export default defineConfig({
         ...SCRUM539_FILES.map((file) => [file, FULL]),
         ...SCRUM172_FILES.map((file) => [file, FULL]),
         ...SCRUM355_FILES.map((file) => [file, FULL]),
+        ...SCRUM347_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

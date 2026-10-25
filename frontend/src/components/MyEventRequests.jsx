@@ -370,6 +370,8 @@ export default function MyEventRequests() {
                 <div className="my-event-requests__decision">
                   <strong>Decision</strong>
                   <DecisionOutcome request={req} view="organiser" />
+                  {/* SCRUM-347 AC5: a rejected event's earlier approval, if it had one. */}
+                  {req.status === "rejected" && <DecisionHistory eventRequestId={req.id} view="organiser" />}
                 </div>
               )}
 

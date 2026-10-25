@@ -215,6 +215,14 @@ export async function cancelEventRequest(
 }
 
 /**
+ * SCRUM-347: the assigned coordinator rejects an Approved event and releases its
+ * arrangements. A 409 with code CANCEL_INSTEAD means the event is Confirmed.
+ */
+export async function rejectApprovedEvent(id, { reason }) {
+  return postData(`/event-requests/${id}/rejection`, { reason });
+}
+
+/**
  * SCRUM-489 AC2-AC4: the safety check's readiness checklist,
  * { eventRequestId, ready, items }. The flag is sent only when true, so the
  * plain read is the path alone.
