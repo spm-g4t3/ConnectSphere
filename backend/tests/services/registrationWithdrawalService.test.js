@@ -25,6 +25,14 @@ describe('SCRUM27 withdrawal service', () => {
     });
   });
 
+  it('SCRUM27_AC1_sends_the_ids_it_validated_trimmed_and_lowercased', async () => {
+    rpc.mockResolvedValue({ data: { outcome: 'withdrawn', registeredCount: 0, capacity: null, registration }, error: null });
+    await withdrawRegistration({ attendeeId: ` ${ME.toUpperCase()} `, registrationId: ` ${REGISTRATION.toUpperCase()}\t`, client: { rpc } });
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('withdraw_registration', {
+      p_registration_id: REGISTRATION, p_attendee_id: ME,
+    });
+  });
+
   it('SCRUM27_AC3_uses_the_shared_client_when_none_is_injected', async () => {
     rpc.mockResolvedValue({ data: { outcome: 'withdrawn', registeredCount: 0, capacity: null, registration }, error: null });
     await expect(withdrawRegistration(options)).resolves.toMatchObject({ id: REGISTRATION });

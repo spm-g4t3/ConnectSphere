@@ -10,7 +10,15 @@ const REJECTION_MESSAGES = {
   WITHDRAWAL_DEADLINE_NOT_SET: "This event has no withdrawal deadline, so registrations cannot be withdrawn. You are still registered.",
   REGISTRATION_NOT_CONFIRMED: "Only a confirmed registration can be withdrawn, and this registration is not confirmed.",
   ALREADY_WITHDRAWN: "This registration has already been withdrawn.",
+  // Says nothing of why: the attendee's event read keeps the event's status private.
+  EVENT_NOT_ACTIVE: "Registrations for this event can no longer be withdrawn. You are still registered.",
+  EVENT_STARTED: "This event has already started, so your registration can no longer be withdrawn. You are still registered.",
 };
+
+export const WITHDRAWAL_REFUSED_MESSAGE = "This registration cannot be withdrawn. It has not changed.";
+
+// The only client errors that might pass on a later try.
+const TRANSIENT_CLIENT_STATUSES = [408, 429];
 
 // The backend answers a missing registration and someone else's with the same
 // 404, and so does this: the message never says which it was.
@@ -39,6 +47,10 @@ export function withdrawalFailure(error) {
   const serverMessage = response?.data?.error;
   if (status === 409 && typeof serverMessage === "string" && serverMessage.trim()) {
     return { message: serverMessage, rejected: true };
+  }
+  // Any other client error (a 400, say) would be refused again, so it is final.
+  if (status >= 400 && status < 500 && !TRANSIENT_CLIENT_STATUSES.includes(status)) {
+    return { message: WITHDRAWAL_REFUSED_MESSAGE, rejected: true };
   }
   if (status === 503) {
     return { message: "Registration withdrawal is temporarily unavailable. Please try again later.", rejected: false };

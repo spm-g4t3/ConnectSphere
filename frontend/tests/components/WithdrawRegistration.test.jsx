@@ -186,6 +186,36 @@ describe("SCRUM-27 attendee withdrawal action", () => {
     expect(screen.queryByRole("button", { name: /Withdraw|Try again|Confirm/ })).not.toBeInTheDocument();
   });
 
+  it("SCRUM27_AC7_a_final_refusal_stays_after_the_page_reloads_on_return", async () => {
+    const user = userEvent.setup();
+    vi.mocked(withdrawRegistration).mockRejectedValue(
+      httpError(409, { error: "x", code: "WITHDRAWAL_DEADLINE_PASSED" }));
+    renderPage();
+    await user.click(await openConfirmation(user));
+    await screen.findByRole("alert");
+
+    // Switching tabs and back re-reads the event and remounts the action.
+    fireEvent.focus(window);
+    await waitFor(() => expect(getAttendeeEvent).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Hall A")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/withdrawal deadline for this event has passed/);
+    expect(screen.queryByRole("button", { name: /Withdraw|Try again|Confirm/ })).not.toBeInTheDocument();
+    expect(withdrawRegistration).toHaveBeenCalledTimes(1);
+  });
+
+  it("SCRUM27_AC7_a_refusal_for_one_registration_does_not_hide_the_action_for_a_new_one", async () => {
+    const user = userEvent.setup();
+    vi.mocked(withdrawRegistration).mockRejectedValue(httpError(409, { error: "x", code: "EVENT_STARTED" }));
+    vi.mocked(getAttendeeEvent).mockResolvedValueOnce(event).mockResolvedValueOnce({ ...event, registrationId: "r2" });
+    renderPage();
+    await user.click(await openConfirmation(user));
+    await screen.findByRole("alert");
+
+    fireEvent.focus(window);
+    expect(await screen.findByRole("button", { name: "Withdraw registration" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it.each([
     ["a network failure", Object.assign(new Error("Network Error"), { code: "ERR_NETWORK" }),
       "Could not reach the server. Your registration has not changed; check your connection and try again."],

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { createSchemaDb, functionSources, seedEvent } from './helpers/schemaDb.js';
+import { STATUS, ACTIVE_EVENT_STATUSES } from '../../src/domain/eventRequestStatus.js';
 
 // assert_registration_withdrawable against the final schema, on a stubbed clock.
 const ME = '44444444-4444-4444-8444-444444444444';
@@ -26,7 +27,8 @@ const seedRegistration = async (attendee = ME, status = 'registered', eventId = 
    values ($1, $2, $3) returning id`, [eventId, attendee, status],
 )).rows[0].id;
 const check = (registration, attendee = ME) => db.query(
-  'select (assert_registration_withdrawable($1::uuid, $2::uuid)).*', [registration, attendee],
+  `select (checked.registration).*, checked.capacity
+     from assert_registration_withdrawable($1::uuid, $2::uuid) as checked`, [registration, attendee],
 );
 const at = (time) => db.query("select set_config('test.withdrawal_time', $1, true)", [time]);
 const eventState = async () => ({
@@ -60,7 +62,9 @@ afterEach(async () => { await db.exec('rollback'); });
 describe('SCRUM27 withdrawal eligibility in PostgreSQL', () => {
   it('SCRUM27_AC1_accepts_the_owner_of_a_confirmed_registration_and_returns_it', async () => {
     const id = await seedRegistration();
+    await db.query('update event_requests set registration_capacity = 40 where id = $1', [event]);
     const { rows: [row] } = await check(id);
+    expect(row.capacity).toBe(40);
     expect(row).toMatchObject({ id, attendee_id: ME, event_request_id: event, status: 'registered' });
   });
 
@@ -138,6 +142,33 @@ describe('SCRUM27 withdrawal eligibility in PostgreSQL', () => {
     const singapore = await withdrawableEvent({ registration_withdrawal_deadline: '2026-10-18T18:00:00+08:00' });
     const id = await seedRegistration(ME, 'registered', singapore);
     await db.exec("set local timezone = 'Asia/Singapore'");
+    await at(time);
+    if (hint) await expect(check(id)).rejects.toMatchObject({ code: '55000', hint });
+    else await expect(check(id)).resolves.toBeDefined();
+  });
+
+  // The repo's own split of live and finished events, so a status added later is a decision made there.
+  it.each(ACTIVE_EVENT_STATUSES)('SCRUM27_AC1_allows_withdrawal_while_the_event_is_%s', async (status) => {
+    const id = await seedRegistration(ME, 'registered', await withdrawableEvent({ status }));
+    await expect(check(id)).resolves.toBeDefined();
+  });
+
+  it.each(Object.values(STATUS).filter((status) => !ACTIVE_EVENT_STATUSES.includes(status)))
+    ('SCRUM27_AC1_refuses_withdrawal_once_the_event_is_%s_without_naming_the_status', async (status) => {
+      const id = await seedRegistration(ME, 'registered', await withdrawableEvent({ status }));
+      await expect(check(id)).rejects.toMatchObject({
+        code: '55000', hint: 'EVENT_NOT_ACTIVE', message: 'Registrations for this event can no longer be withdrawn',
+      });
+    });
+
+  // A change moved the start before a deadline set earlier: the start wins.
+  it.each([
+    ['allows', '2026-10-17T09:59:59.999999Z', null],
+    ['refuses', '2026-10-17T10:00:00Z', 'EVENT_STARTED'],
+    ['refuses', '2026-10-17T12:00:00Z', 'EVENT_STARTED'],
+  ])('SCRUM27_AC2_%s_at_%s_when_the_start_moved_before_the_deadline', async (_verb, time, hint) => {
+    const moved = await withdrawableEvent({ proposed_start: '2026-10-17T10:00:00Z' });
+    const id = await seedRegistration(ME, 'registered', moved);
     await at(time);
     if (hint) await expect(check(id)).rejects.toMatchObject({ code: '55000', hint });
     else await expect(check(id)).resolves.toBeDefined();

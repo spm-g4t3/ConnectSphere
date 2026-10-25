@@ -23,6 +23,9 @@ function EventInformation({ eventId }) {
   useRefetchOnReturn(load);
   // The backend's reply to a withdrawal; set only once it has succeeded.
   const [withdrawal, setWithdrawal] = useState(null);
+  // A final refusal, kept here because a reload remounts the action, keyed by
+  // registration so a new registration starts with the action offered again.
+  const [refusal, setRefusal] = useState(null);
   // Only a reply for this route's event may name it.
   const current = data?.eventRequestId === eventId.trim().toLowerCase() ? data : null;
   const handleWithdrawn = (result) => {
@@ -75,7 +78,12 @@ function EventInformation({ eventId }) {
             ))}</ul> : <p>No confirmed venue information is available.</p>}
           </>)}
         {!loading && !error && current?.registrationId && (
-          <WithdrawRegistration registrationId={current.registrationId} onWithdrawn={handleWithdrawn} />
+          <WithdrawRegistration
+            registrationId={current.registrationId}
+            refusal={refusal?.registrationId === current.registrationId ? refusal.message : null}
+            onWithdrawn={handleWithdrawn}
+            onRefused={(message) => setRefusal({ registrationId: current.registrationId, message })}
+          />
         )}
       </section>
       <p><Link to={REGISTERED_EVENTS_PATH}>Back to registered events</Link></p>

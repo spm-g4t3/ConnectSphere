@@ -6,11 +6,14 @@ import { withdrawalFailure } from "../services/withdrawalErrors";
  * Asks first, inline, as the other destructive actions here do (there is no
  * modal in this frontend). Nothing on screen changes until the backend has
  * withdrawn the registration; onWithdrawn then gets its reply.
+ *
+ * A final refusal goes to the page through onRefused and comes back as
+ * `refusal`: a reload remounts this component, and must not bring the action back.
  */
-export default function WithdrawRegistration({ registrationId, onWithdrawn }) {
+export default function WithdrawRegistration({ registrationId, refusal, onWithdrawn, onRefused }) {
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  // { message, rejected }: a rejection removes the action, other failures offer a retry.
+  // A failure that may pass on a later try; it offers a retry.
   const [failure, setFailure] = useState(null);
   // State updates are async, so a fast second click could pass a disabled check.
   const sending = useRef(false);
@@ -26,7 +29,9 @@ export default function WithdrawRegistration({ registrationId, onWithdrawn }) {
       if (result?.status !== "withdrawn") throw new Error("Unexpected withdrawal reply");
       onWithdrawn(result);
     } catch (err) {
-      setFailure(withdrawalFailure(err));
+      const outcome = withdrawalFailure(err);
+      if (outcome.rejected) onRefused(outcome.message);
+      else setFailure(outcome);
       setConfirming(false);
     } finally {
       sending.current = false;
@@ -34,10 +39,10 @@ export default function WithdrawRegistration({ registrationId, onWithdrawn }) {
     }
   }
 
-  if (failure?.rejected) {
+  if (refusal) {
     return (
       <section className="withdraw-registration" aria-label="Withdraw registration">
-        <p className="pending-bookings__error" role="alert">{failure.message}</p>
+        <p className="pending-bookings__error" role="alert">{refusal}</p>
       </section>
     );
   }

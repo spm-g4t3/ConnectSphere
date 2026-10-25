@@ -46,9 +46,10 @@ export function validateWithdrawalIdentity({ attendeeId, registrationId } = {}) 
 export async function withdrawRegistration({ attendeeId, registrationId, client } = {}) {
   validateWithdrawalIdentity({ attendeeId, registrationId });
   const db = await resolveClientIfMissing(client);
+  // Send what was validated: isPlausibleId trims, and a uuid cast does not.
   const { data, error } = await db.rpc('withdraw_registration', {
-    p_registration_id: registrationId,
-    p_attendee_id: attendeeId,
+    p_registration_id: registrationId.trim().toLowerCase(),
+    p_attendee_id: attendeeId.trim().toLowerCase(),
   });
   if (error) throw translateWithdrawalError(error);
   if (data?.outcome !== 'withdrawn' || !data.registration?.id || !Number.isInteger(data.registeredCount)) {

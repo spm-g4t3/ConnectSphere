@@ -585,6 +585,15 @@ describe('SCRUM-27 withdrawal endpoint', () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
+  it('SCRUM27_AC1_a_registration_id_with_surrounding_spaces_reaches_the_database_trimmed', async () => {
+    const client = rpcClient({ data: { outcome: 'withdrawn', registeredCount: 0, capacity: null, registration: withdrawn }, error: null });
+    const response = await withdraw(application(client), encodeURIComponent(` ${REGISTRATION} `));
+    expect(response.status).toBe(200);
+    expect(client.rpc).toHaveBeenCalledExactlyOnceWith('withdraw_registration', {
+      p_registration_id: REGISTRATION, p_attendee_id: ATTENDEE,
+    });
+  });
+
   it('SCRUM27_AC1_validates_the_registration_id_before_the_database', async () => {
     const client = rpcClient({});
     const response = await withdraw(application(client), 'not-a-uuid');

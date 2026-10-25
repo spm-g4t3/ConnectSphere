@@ -246,6 +246,16 @@ describe('SCRUM27 a withdrawal releases its place', () => {
       }, { status: 409, code: 'WITHDRAWAL_DEADLINE_PASSED' }],
       ['a non-confirmed registration', async () => [await seedRegistration(ME, 'cancelled'), ME],
         { status: 409, code: 'REGISTRATION_NOT_CONFIRMED' }],
+      // Cancelling leaves the registration 'registered'; the event's status must still stop it.
+      ['a cancelled event', async () => {
+        const id = await seedRegistration();
+        await db.query("update event_requests set status = 'cancelled' where id = $1", [event]);
+        return [id, ME];
+      }, { status: 409, code: 'EVENT_NOT_ACTIVE' }],
+      ['an event that has started', async () => {
+        await db.query("select set_config('test.withdrawal_time', '2026-10-20T10:00:00Z', true)");
+        return [await seedRegistration(), ME];
+      }, { status: 409, code: 'EVENT_STARTED' }],
       ['a missing registration', async () => { await seedRegistration(); return [MISSING, ME]; }, notFound],
       ["another attendee's registration", async () => [await seedRegistration(OTHER), ME], notFound],
       ['a caller who is not an attendee', async () => [await seedRegistration(), ORGANISER],
