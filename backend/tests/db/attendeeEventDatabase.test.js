@@ -21,6 +21,7 @@ describe('SCRUM-52 SQL read against the final schema', () => {
   let db;
   let eventId;
   let queries;
+  let registrationId;
   const { one } = queriesFor(() => db);
 
   const client = createAttendeeEventSqlClient({ query: (...args) => db.query(...args) }, {
@@ -43,7 +44,9 @@ describe('SCRUM-52 SQL read against the final schema', () => {
       status: 'confirmed', organiser_id: ORGANISER, event_name: 'Registered event',
       proposed_start: start, proposed_end: end, reviewing_coordinator_id: COORDINATOR, ...overrides,
     });
-    await db.query('insert into event_registrations (event_request_id, attendee_id) values ($1, $2)', [eventId, ATTENDEE]);
+    ({ rows: [{ id: registrationId }] } = await db.query(
+      'insert into event_registrations (event_request_id, attendee_id) values ($1, $2) returning id', [eventId, ATTENDEE],
+    ));
   };
 
   beforeAll(async () => {
@@ -65,7 +68,7 @@ describe('SCRUM-52 SQL read against the final schema', () => {
     const a = await book('Hall A');
     const b = await book('Hall B');
     const result = await read();
-    expect(result).toMatchObject({ eventRequestId: eventId, state: 'confirmed' });
+    expect(result).toMatchObject({ eventRequestId: eventId, registrationId, state: 'confirmed' });
     expect(new Date(result.startsAt).toISOString()).toBe('2030-05-06T01:00:00.000Z');
     expect(new Date(result.endsAt).toISOString()).toBe('2030-05-06T03:00:00.000Z');
     expect(result.venues).toHaveLength(2);
@@ -80,7 +83,7 @@ describe('SCRUM-52 SQL read against the final schema', () => {
     'SCRUM24_AC2_AC3_SQL_non_confirmed_event_has_no_arrangements_%s', async status => {
       await registeredEvent({ status });
       await book('Private hall');
-      expect(await read()).toEqual({ eventRequestId: eventId, state: 'unavailable', eventName: 'Registered event' });
+      expect(await read()).toEqual({ eventRequestId: eventId, registrationId, state: 'unavailable', eventName: 'Registered event' });
       expect(queries).toBe(1);
     },
   );
@@ -126,7 +129,7 @@ describe('SCRUM-52 SQL read against the final schema', () => {
     const old = await book('Old hall');
     expect((await read()).venues[0].bookingId).toBe(old.id);
     await db.query("update event_requests set status = 'approved' where id = $1", [eventId]);
-    expect(await read()).toEqual({ eventRequestId: eventId, state: 'unavailable', eventName: 'Registered event' });
+    expect(await read()).toEqual({ eventRequestId: eventId, registrationId, state: 'unavailable', eventName: 'Registered event' });
     await db.query("update bookings set status = 'cancelled' where id = $1", [old.id]);
     const latest = await book('Latest hall');
     await db.query(`update event_requests set proposed_start = $1, proposed_end = $2
@@ -157,7 +160,7 @@ describe('SCRUM-52 SQL read against the final schema', () => {
     await db.query("update event_requests set description = 'private planning', purpose = 'private' where id = $1", [eventId]);
     await book('Hall');
     const result = await read();
-    expect(Object.keys(result).sort()).toEqual(['endsAt', 'eventName', 'eventRequestId', 'startsAt', 'state', 'venues']);
+    expect(Object.keys(result).sort()).toEqual(['endsAt', 'eventName', 'eventRequestId', 'registrationId', 'startsAt', 'state', 'venues']);
     expect(Object.keys(result.venues[0]).sort()).toEqual(['bookingId', 'location', 'name', 'underReview']);
     expect(JSON.stringify(result)).not.toContain('private');
   });

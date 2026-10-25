@@ -5,7 +5,7 @@
 import { expect } from 'vitest';
 
 const LIST_COLUMNS = 'event_request_id, attendee_id, status, event_requests!inner(id, event_name)';
-const DETAIL_COLUMNS = 'event_request_id,attendee_id,status,'
+const DETAIL_COLUMNS = 'id,event_request_id,attendee_id,status,'
   + 'event_requests!inner(id,event_name,status,proposed_start,proposed_end,bookings(id,status,venues(name,location)))';
 
 export function createAttendeeEventSqlClient(db, { onQuery = () => {} } = {}) {
@@ -41,7 +41,7 @@ export function createAttendeeEventSqlClient(db, { onQuery = () => {} } = {}) {
           onQuery();
           try {
             const { rows: [data = null] } = await db.query(`
-              select r.attendee_id, r.event_request_id, r.status,
+              select r.id, r.attendee_id, r.event_request_id, r.status,
                 jsonb_build_object('id', e.id, 'event_name', e.event_name, 'status', e.status,
                   'proposed_start', e.proposed_start, 'proposed_end', e.proposed_end,
                   'bookings', coalesce((
