@@ -1,8 +1,10 @@
 // scrum387EventDetailFields.test.js
 //
-// SCRUM-387: the frontend's copy of the editable fields and statuses, checked
-// against backend/src/domain/eventDetailField.js read as text, not imported,
-// so the frontend bundle never pulls in backend code (as setupOptions.test.js does).
+// SCRUM-387: the frontend's copy of the editable fields, checked against
+// backend/src/domain/eventDetailField.js read as text, not imported, so the
+// frontend bundle never pulls in backend code (as setupOptions.test.js does).
+// The status lists have no backend copy since the PR #84 review; they are
+// pinned to the matrix in docs/test-cases/SCRUM-387.md (D3) as literals.
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -16,41 +18,45 @@ import {
   SIGNIFICANT_DETAIL_FIELDS,
   STATUSES_ALLOWING_ANY_EDIT,
   STATUSES_ALLOWING_ORDINARY_EDITS,
+  TIMESTAMP_FIELDS,
   detailFieldLabel,
   detailFieldList,
   editableDetailFields,
 } from "../../src/services/eventDetailFields.js";
 
-/** The backend's lists. A STATUS.X constant is its lower-cased value; a spread is the list it names. */
+/** The backend's two field lists, as quoted strings. */
 function backendDeclaration() {
   const text = readFileSync(
     resolve(dirname(fileURLToPath(import.meta.url)), "../../../backend/src/domain/eventDetailField.js"),
     "utf8",
   ).replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
   const lists = {};
-  for (const name of [
-    "ORDINARY_DETAIL_FIELDS", "SIGNIFICANT_DETAIL_FIELDS", "STATUSES_ALLOWING_ANY_EDIT", "STATUSES_ALLOWING_ORDINARY_EDITS",
-  ]) {
+  for (const name of ["ORDINARY_DETAIL_FIELDS", "SIGNIFICANT_DETAIL_FIELDS"]) {
     const match = text.match(new RegExp(`export const ${name}\\s*=\\s*Object\\.freeze\\(\\s*\\[([^\\]]*)\\]`));
     if (!match) throw new Error(`could not read ${name} from backend/src/domain/eventDetailField.js`);
-    lists[name] = match[1].split(",").map((item) => item.trim()).filter(Boolean).flatMap((item) => {
-      if (item.startsWith("...")) return lists[item.slice(3)];
-      const status = item.match(/^STATUS\.([A-Z_]+)$/);
-      return status ? [status[1].toLowerCase()] : [item.replace(/^'|'$/g, "")];
-    });
+    lists[name] = match[1].split(",").map((item) => item.trim()).filter(Boolean)
+      .map((item) => item.replace(/^'|'$/g, ""));
   }
   return lists;
 }
 
 describe("SCRUM-387 the frontend's editable fields", () => {
-  it("SCRUM387_AC3_mirrors_the_backend_field_and_status_lists", () => {
+  it("SCRUM387_AC3_mirrors_the_backend_field_lists", () => {
     const backend = backendDeclaration();
 
     expect([...ORDINARY_DETAIL_FIELDS]).toEqual(backend.ORDINARY_DETAIL_FIELDS);
     expect([...SIGNIFICANT_DETAIL_FIELDS]).toEqual(backend.SIGNIFICANT_DETAIL_FIELDS);
-    expect([...STATUSES_ALLOWING_ANY_EDIT]).toEqual(backend.STATUSES_ALLOWING_ANY_EDIT);
-    expect([...STATUSES_ALLOWING_ORDINARY_EDITS]).toEqual(backend.STATUSES_ALLOWING_ORDINARY_EDITS);
     expect(Object.keys(DETAIL_FIELD_LABELS)).toEqual([...DETAIL_FIELDS]);
+    expect([...TIMESTAMP_FIELDS]).toEqual(["proposedStart", "proposedEnd"]);
+  });
+
+  it("SCRUM387_AC3_the_status_lists_are_the_case_documents_matrix", () => {
+    // D3: any field in review; the ordinary three in planning and the safety
+    // check; nothing once Confirmed (D9) or in any other status.
+    expect([...STATUSES_ALLOWING_ANY_EDIT]).toEqual(["under_review", "pending_clarification"]);
+    expect([...STATUSES_ALLOWING_ORDINARY_EDITS]).toEqual([
+      "under_review", "pending_clarification", "approved", "safety_review", "safety_approved",
+    ]);
   });
 
   it.each([

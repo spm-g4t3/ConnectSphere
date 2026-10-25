@@ -13,11 +13,9 @@ import {
   SIGNIFICANT_DETAIL_FIELDS,
   DETAIL_FIELDS,
   DETAIL_FIELD_COLUMN,
-  STATUSES_ALLOWING_ANY_EDIT,
-  STATUSES_ALLOWING_ORDINARY_EDITS,
   isSignificantDetailField,
 } from '../../src/domain/eventDetailField.js';
-import { useSchemaDb, enumLabels, checkListValues } from './helpers/schemaVocabulary.js';
+import { useSchemaDb, checkListValues } from './helpers/schemaVocabulary.js';
 
 const schemaDb = useSchemaDb();
 
@@ -50,17 +48,5 @@ describe('SCRUM-387: the detail field lists', () => {
   it('SCRUM387_AC7_the_history_sources_are_the_three_022_declares', async () => {
     expect(await checkListValues(schemaDb(), 'event_change_history_source_known'))
       .toEqual(['significant_change', 'direct_edit', 'change_request']);
-  });
-
-  it('SCRUM387_AC3_the_status_lists_are_real_statuses_with_review_inside_planning', async () => {
-    const statuses = await enumLabels(schemaDb(), 'event_request_status');
-
-    expect(STATUSES_ALLOWING_ANY_EDIT).toEqual(['under_review', 'pending_clarification']);
-    expect(STATUSES_ALLOWING_ORDINARY_EDITS).toEqual([
-      'under_review', 'pending_clarification', 'approved', 'safety_review', 'safety_approved',
-    ]);
-    for (const status of STATUSES_ALLOWING_ORDINARY_EDITS) expect(statuses).toContain(status);
-    // D9: Confirmed refuses even an ordinary edit.
-    expect(STATUSES_ALLOWING_ORDINARY_EDITS).not.toContain('confirmed');
   });
 });

@@ -2,8 +2,9 @@
  * Event detail field vocabulary.
  *
  * SCRUM-387: which of an event's fields its assigned coordinator may edit
- * directly, and in which statuses. Not eventChangeField.js, which is SCRUM-11's
- * change-request vocabulary (snake_case, with venue and other).
+ * directly. Not eventChangeField.js, which is SCRUM-11's change-request
+ * vocabulary (snake_case, with venue and other). Which statuses allow which
+ * fields is 022's alone (D3); no code here needs a copy of that matrix.
  *
  * Mirrors the field list in edit_event_request_details (migration 022), the
  * camelCase names event_change_history records. A PGlite test sends every field
@@ -13,8 +14,6 @@
  * only describe the event. In planning only the ordinary ones are edited here;
  * the rest go through the significant change process (SCRUM-395).
  */
-
-import { STATUS } from './eventRequestStatus.js';
 
 /** Describe the event; editable in review and in planning. */
 export const ORDINARY_DETAIL_FIELDS = Object.freeze(['eventName', 'purpose', 'description']);
@@ -44,17 +43,6 @@ export const DETAIL_FIELD_COLUMN = Object.freeze({
   accessibilityRequirements: 'accessibility_requirements',
   equipmentRequirements: 'equipment_requirements',
 });
-
-/** Nothing is arranged yet, so any field may change (AC2). */
-export const STATUSES_ALLOWING_ANY_EDIT = Object.freeze([STATUS.UNDER_REVIEW, STATUS.PENDING_CLARIFICATION]);
-
-/** Any edit in review; ordinary fields only in planning and the safety check (AC3, D3). */
-export const STATUSES_ALLOWING_ORDINARY_EDITS = Object.freeze([
-  ...STATUSES_ALLOWING_ANY_EDIT,
-  STATUS.APPROVED,
-  STATUS.SAFETY_REVIEW,
-  STATUS.SAFETY_APPROVED,
-]);
 
 /**
  * @param {string} field  a camelCase field name

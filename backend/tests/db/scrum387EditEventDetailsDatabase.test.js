@@ -3,6 +3,8 @@ import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './h
 import { queriesFor, refusal } from './helpers/queries.js';
 import { clientsCanExecute } from './helpers/grants.js';
 import { DETAIL_FIELDS, ORDINARY_DETAIL_FIELDS, SIGNIFICANT_DETAIL_FIELDS } from '../../src/domain/eventDetailField.js';
+import { getEventChangeHistory } from '../../src/services/eventRequestService.js';
+import { pgliteSupabaseClient } from '../fixtures/pgliteSupabaseClient.js';
 
 // SCRUM-387: the assigned coordinator edits an event's information through
 // edit_event_request_details (022), on the full schema. Statuses are reached
@@ -423,6 +425,20 @@ describe('SCRUM-387: edit_event_request_details (022)', () => {
         ['proposedEnd', 'significant_change'],
         ['proposedStart', 'significant_change'],
       ]);
+    });
+
+    it('SCRUM387_AC7_one_saves_rows_always_come_back_in_field_name_order', async () => {
+      // AC7-14: five rows share one changed_at; by uuid alone they would come
+      // back in one of 120 orders. Read through the service, as the route does.
+      const id = await underReview();
+      const fields = ['venueRequirements', 'purpose', 'expectedAttendance', 'eventName', 'description'];
+      await edit(id, coordinator, Object.fromEntries(fields.map((f) => [f, NEW[f]])));
+
+      const entries = await getEventChangeHistory(id, organiser, 'event_organiser', { client: pgliteSupabaseClient(db) });
+
+      expect(entries.map((e) => e.field)).toEqual([...fields].sort());
+      expect(new Set(entries.map((e) => String(e.changedAt))).size).toBe(1);
+      expect(entries[0].changedByName).toBe('Priya Nair');
     });
 
     it.each([

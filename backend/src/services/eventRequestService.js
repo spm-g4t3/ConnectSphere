@@ -2785,6 +2785,10 @@ export async function submitForSafetyReview({
  */
 export async function editEventRequestDetails(id, body, coordinatorId, { client } = {}) {
   requireCallerId(coordinatorId, 'coordinatorId');
+  // A 400 here, not Postgres's 22P02 from the uuid cast, which is a 500.
+  if (!isPlausibleId(id)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
   const { changes, expected, reason } = validateEventDetailsEdit(body);
 
   const db = await resolveClient(client);
@@ -2813,15 +2817,22 @@ export async function editEventRequestDetails(id, body, coordinatorId, { client 
  */
 export async function getEventChangeHistory(id, userId, role, { client } = {}) {
   requireCallerId(userId, 'userId');
+  // As the edit: a malformed id would otherwise reach getEventRequestById's cast.
+  if (!isPlausibleId(id)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
   const db = await resolveClient(client);
   await requireHistoryReader(db, id, userId, role);
 
+  // One save's rows share changed_at, and a uuid tie-break is random, so they
+  // are ordered by field name within it; id only breaks a tie that is left.
   const { data: entries, error } = await db
     .from('event_change_history')
     .select('id, field_name, old_value, new_value, reason, source, changed_by, changed_at')
     .eq('event_request_id', id)
     .order('changed_at', { ascending: false })
-    .order('id', { ascending: false });
+    .order('field_name', { ascending: true })
+    .order('id', { ascending: true });
   if (error) throw translateError(error);
   if (!entries?.length) return [];
 

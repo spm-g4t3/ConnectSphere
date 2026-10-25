@@ -8,9 +8,7 @@
 import { useEffect, useState } from "react";
 import { getEventChangeHistory } from "../services/eventRequestService";
 import { formatMediumTimestamp, formatTimestamp } from "../services/displayFormat";
-import { detailFieldLabel } from "../services/eventDetailFields";
-
-const TIMESTAMP_FIELDS = ["proposedStart", "proposedEnd"];
+import { TIMESTAMP_FIELDS, detailFieldLabel } from "../services/eventDetailFields";
 
 const SOURCE_LABEL = {
   direct_edit: "Edited",

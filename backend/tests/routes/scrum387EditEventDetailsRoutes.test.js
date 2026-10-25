@@ -141,6 +141,16 @@ describe('SCRUM-387: PATCH /api/event-requests/:id/details', () => {
     expect((await editCall(client)).status).toBe(status);
   });
 
+  it('SCRUM387_AC6_a_malformed_id_is_refused_with_400_before_the_database', async () => {
+    const client = createEventRequestClient([]);
+
+    const res = await request(app(client)).patch('/api/event-requests/not-a-uuid/details').send(BODY);
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'id', message: 'must be a valid id' }]);
+    expect(client.calls).toHaveLength(0);
+  });
+
   it('SCRUM387_AC6_every_fault_is_listed_in_one_400_and_nothing_is_queried', async () => {
     const client = createEventRequestClient([]);
 
@@ -214,7 +224,7 @@ describe('SCRUM-387: GET /api/event-requests/:id/change-history', () => {
     expect(client.calls[1]).toMatchObject({
       table: 'event_change_history',
       filters: [['event_request_id', REQUEST_ID]],
-      order: [['changed_at', { ascending: false }], ['id', { ascending: false }]],
+      order: [['changed_at', { ascending: false }], ['field_name', { ascending: true }], ['id', { ascending: true }]],
     });
   });
 
@@ -261,6 +271,17 @@ describe('SCRUM-387: GET /api/event-requests/:id/change-history', () => {
 
     expect(res.status).toBe(404);
     expect(client.calls).toHaveLength(1);
+  });
+
+  it('SCRUM387_AC7_a_malformed_id_is_refused_with_400_before_the_database', async () => {
+    const client = createEventRequestClient([]);
+
+    const res = await request(app(client, signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID)))
+      .get('/api/event-requests/not-a-uuid/change-history');
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'id', message: 'must be a valid id' }]);
+    expect(client.calls).toHaveLength(0);
   });
 
   it('SCRUM387_AC7_a_failed_read_is_not_reported_as_an_empty_history', async () => {

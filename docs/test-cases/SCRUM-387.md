@@ -5,6 +5,7 @@
 **Schema:** `022_coordinator_edits_event_details.sql` (SCRUM-388), on top of 016's `notifications_type_known` list, 015's `reopen_event_request` and SCRUM-395's `event_change_history`.
 **Written:** 25 October 2026. The brief asked for this document before the code; it was written after the migration, the field module and the routes had been drafted in the same session, and before their tests. Every case below was then proved by the tests SCRUM-389 and SCRUM-390 wrote.
 **Marked:** 25 October 2026, SCRUM-391 and SCRUM-392: the screen's cases, each marked **(UI)**, added after the backend's in every table; every one proved. The backend cases are unchanged.
+**Marked:** 25 October 2026, after the PR #84 review: AC6-15, AC6-16, AC7-14, AC7-15 and AC9-10 added; AC3-04, AC3-07 and AC7-03 amended (the status lists left the backend module; one save's rows are ordered by field name).
 
 This document is the written layer between SCRUM-387's acceptance criteria and the
 Vitest files that implement them. The chain is **user story → acceptance criteria
@@ -116,10 +117,10 @@ changes nothing.
 | AC3-01 | Approved (through `decide_event_request`); Safety review; Safety approved | Name, purpose and description in one save | Saved; the status unchanged | Proved (pglite): `SCRUM387_AC3_an_ordinary_edit_is_allowed_while_%s` (three) |
 | AC3-02 | The same | Expected attendance | PT409 `SIGNIFICANT_CHANGE_REQUIRED` (409), the message pointing to the significant change process | Proved (pglite): `SCRUM387_AC3_a_significant_edit_is_refused_while_%s` (three); (route) `SCRUM387_%s_%s_is_a_409_with_its_code_and_message` (AC3) |
 | AC3-03 **(trap)** | Approved | A name and venue requirements in one save | Refused whole: the name is not written either | Proved (pglite): `SCRUM387_AC3_a_mixed_save_in_planning_is_refused_whole` |
-| AC3-04 | — | The lists | Three ordinary, six significant, nine in all; the five editable statuses are real statuses | Proved (domain): `SCRUM387_AC3_splits_the_nine_fields_into_three_ordinary_and_six_significant`, `SCRUM387_AC3_the_status_lists_are_real_statuses_with_review_inside_planning`; (pglite) `SCRUM387_AC7_the_field_list_is_the_one_the_domain_module_names` refuses each significant field in Approved |
+| AC3-04 | — | The lists | Three ordinary, six significant, nine in all. The status matrix is 022's alone: the backend module has no copy since the PR #84 review, and AC2 to AC5's cases prove it | Proved (domain): `SCRUM387_AC3_splits_the_nine_fields_into_three_ordinary_and_six_significant`; (pglite) `SCRUM387_AC7_the_field_list_is_the_one_the_domain_module_names` refuses each significant field in Approved |
 | AC3-05 **(UI)** | Approved; Safety review; Safety approved | Open the page | Only name, purpose and description; the significant fields left out, not shown disabled; one line saying they change through Revise event details | Proved (UI, panel): `SCRUM387_AC3_an_event_that_is_%s_shows_only_name_purpose_and_description` (three); (UI, screens) `SCRUM387_AC3_in_approved_it_shows_the_ordinary_fields_and_points_to_revise_event_details` |
 | AC3-06 **(UI)** | The page open | The save answers `SIGNIFICANT_CHANGE_REQUIRED` | The event was approved meanwhile; go back and use Revise event details | Proved (UI, panel): `SCRUM387_AC1_AC3_AC4_AC5_AC9_%s_is_said_in_the_screens_own_words` (SIGNIFICANT_CHANGE_REQUIRED) |
-| AC3-07 **(UI)** | — | `frontend/src/services/eventDetailFields.js` | Its four lists equal the backend module's, read as text | Proved (UI, fields): `SCRUM387_AC3_mirrors_the_backend_field_and_status_lists` |
+| AC3-07 **(UI)** | — | `frontend/src/services/eventDetailFields.js` | Its two field lists equal the backend module's, read as text; its two status lists equal D3's matrix, written as literals | Proved (UI, fields): `SCRUM387_AC3_mirrors_the_backend_field_lists`, `SCRUM387_AC3_the_status_lists_are_the_case_documents_matrix` |
 
 ### AC4 — Confirmed refuses everything
 
@@ -156,6 +157,8 @@ changes nothing.
 | AC6-12 **(UI)** **(trap)** | Under review | Clear the description and the attendance; clear the start | Each sent as null, which the server stores (or, for the start, refuses with its own fault) | Proved (UI, panel): `SCRUM387_AC6_a_cleared_box_is_sent_as_null`, `SCRUM387_AC6_a_cleared_start_is_sent_as_null_for_the_server_to_refuse` |
 | AC6-13 **(UI)** | A save in flight | Submit again | Save disabled, reading "Saving..."; nothing more sent | Proved (UI, panel): `SCRUM387_AC6_save_is_disabled_and_a_second_submit_sends_nothing` |
 | AC6-14 **(UI)** **(trap)** | The page | Every refusal, each carrying server text | Each message keyed on status and code, the server's text never shown; a 409 code this build does not know, a 500 and a network failure each get their own line | Proved (UI, panel): `SCRUM387_AC1_AC3_AC4_AC5_AC9_%s_is_said_in_the_screens_own_words` (twelve) |
+| AC6-15 **(UI)** | Under review, the event running 09:00 to 11:00 | Move only the start past the end; move only the end before the start; then, with a stored period out of order, edit only the name | The first two flagged beside Proposed end, its control `aria-invalid`, and nothing sent; moving the end on clears the fault and the save goes through. The unaltered side is the snapshot's. The third is sent: the check runs only when a date is altered. 022's own check stays as the backstop | Proved (UI, panel): `SCRUM387_AC6_moving_only_the_start_past_the_end_is_flagged_beside_end_and_not_sent`, `SCRUM387_AC6_moving_only_the_end_before_the_start_is_flagged_too`, `SCRUM387_AC6_a_stored_period_out_of_order_does_not_block_an_edit_that_leaves_it` |
+| AC6-16 | Through the API | `PATCH /:id/details` with a malformed id | 400 with a fault on `id`, before validation and with no query; it was a 500, Postgres's 22P02 from the uuid cast | Proved (route): `SCRUM387_AC6_a_malformed_id_is_refused_with_400_before_the_database` |
 
 ### AC7 — the change history
 
@@ -163,7 +166,7 @@ changes nothing.
 |---|---|---|---|---|
 | AC7-01 | Under review | Purpose and attendance changed, description sent unchanged | Two rows: field, typed old and new values, the coordinator, the trimmed reason, `source = 'direct_edit'`, a time. None for description | Proved (pglite): `SCRUM387_AC7_one_row_per_changed_field_with_old_new_who_why_and_source` |
 | AC7-02 **(trap)** | Approved | A significant change through `apply_significant_event_change` (SCRUM-395, unchanged) | Its rows read `source = 'significant_change'`: the column's default fills 395's insert | Proved (pglite): `SCRUM387_AC7_a_significant_changes_rows_are_still_written_as_significant_change`; (domain) `SCRUM387_AC7_the_history_sources_are_the_three_022_declares` |
-| AC7-03 | Through the API | The Organiser; the assigned coordinator; the Lead read `GET /:id/change-history` | 200, newest first (`changed_at` desc, then `id` desc), with the editor's name; a field filled in or cleared reads null on its empty side; an event never edited reads `[]`; a failed read is a 500, not `[]` | Proved (route): `SCRUM387_AC7_the_organiser_reads_the_history_newest_first_with_names`, `SCRUM387_AC7_%s_reads_the_history`, `SCRUM387_AC7_a_field_filled_in_or_cleared_reads_null_on_the_empty_side`, `SCRUM387_AC7_an_event_never_edited_has_an_empty_history`, `SCRUM387_AC7_a_failed_read_is_not_reported_as_an_empty_history` |
+| AC7-03 | Through the API | The Organiser; the assigned coordinator; the Lead read `GET /:id/change-history` | 200, newest first (`changed_at` desc, then `field_name`, then `id`; see AC7-14), with the editor's name; a field filled in or cleared reads null on its empty side; an event never edited reads `[]`; a failed read is a 500, not `[]` | Proved (route): `SCRUM387_AC7_the_organiser_reads_the_history_newest_first_with_names`, `SCRUM387_AC7_%s_reads_the_history`, `SCRUM387_AC7_a_field_filled_in_or_cleared_reads_null_on_the_empty_side`, `SCRUM387_AC7_an_event_never_edited_has_an_empty_history`, `SCRUM387_AC7_a_failed_read_is_not_reported_as_an_empty_history` |
 | AC7-04 | Through the API | Another Organiser, an unassigned coordinator, a Safety Officer, Venue Staff | 404, as a missing id | Proved (route): `SCRUM387_AC7_%s_gets_a_404` |
 | AC7-05 **(trap)** | A history row | Update it; delete it | 42501 from the trigger; the row unchanged | Proved (pglite): `SCRUM387_AC7_a_history_row_cannot_be_%s` |
 | AC7-06 | Under review | All nine fields in one save | All nine named in `changedFields`; each significant one refused in Approved; every name accepted by `event_change_history_field_known` | Proved (pglite): `SCRUM387_AC7_the_field_list_is_the_one_the_domain_module_names`; (domain) `SCRUM387_AC7_every_field_is_a_name_the_change_history_accepts` |
@@ -174,6 +177,8 @@ changes nothing.
 | AC7-11 **(UI)** **(trap)** | The detail | A direct edit; a significant change through Revise event details; a parent refetch while the detail stays open, with and without a new `updatedAt` | The history read again after each change, and not on a refetch that changes nothing: it is keyed on the event's `updatedAt` | Proved (UI, screens): `SCRUM387_AC2_a_save_returns_to_the_updated_event_names_the_fields_and_rereads_the_history`, `SCRUM387_AC7_it_is_read_again_after_a_significant_change`, `SCRUM387_AC7_a_refetch_that_moves_updatedAt_rereads_it_and_one_that_does_not_leaves_it` |
 | AC7-12 **(UI)** **(trap)** | The Organiser's list with two submitted rows and a draft | Load it; open one row's Change history; close and reopen it | A disclosure on each non-draft row; nothing read on load; one read, for that row, when opened; none on reopening | Proved (UI, screens): `SCRUM387_AC7_each_non_draft_row_has_one_and_nothing_is_read_until_it_is_opened`, `SCRUM387_AC7_closing_and_reopening_does_not_read_it_again` |
 | AC7-13 **(UI)** | — | `getEventChangeHistory(id)` | GET `/event-requests/:id/change-history` | Proved (UI, service): `SCRUM387_AC7_the_change_history_is_read_from_its_endpoint` |
+| AC7-14 **(trap)** | Under review | One save changes five fields, read back through `getEventChangeHistory` on PGlite | The five rows share one `changed_at` and come back in field-name order, not in one of the 120 orders their uuids would give | Proved (pglite): `SCRUM387_AC7_one_saves_rows_always_come_back_in_field_name_order`; (route) `SCRUM387_AC7_the_organiser_reads_the_history_newest_first_with_names` (the order asked for) |
+| AC7-15 | Through the API | `GET /:id/change-history` with a malformed id | 400 with a fault on `id`, with no query; it was a 500 from `getEventRequestById`'s read | Proved (route): `SCRUM387_AC7_a_malformed_id_is_refused_with_400_before_the_database` |
 
 ### AC8 — the Organiser is told
 
@@ -197,6 +202,7 @@ changes nothing.
 | AC9-07 **(UI)** **(trap)** | Under review | Move the end and the attendance; leave the start | The start is not sent; the end goes as `toOffsetIsoString` of the input, with `expected` the stored string | Proved (UI, panel): `SCRUM387_AC9_an_untouched_start_is_not_sent_and_a_moved_one_round_trips` |
 | AC9-08 **(UI)** **(trap)** | Under review | Nothing touched; a text cleared and typed back; spaces in an empty field; a value padded | "There is nothing to save: no field has changed."; nothing sent | Proved (UI, panel): `SCRUM387_AC9_%s_is_nothing_to_save_and_calls_nothing` (four) |
 | AC9-09 **(UI)** | The page | The save answers `EVENT_CHANGED_SINCE_OPENED` | The brief's message; what was typed, reason included, kept until Back | Proved (UI, panel): `SCRUM387_AC1_AC3_AC4_AC5_AC9_%s_is_said_in_the_screens_own_words` (EVENT_CHANGED_SINCE_OPENED), `SCRUM387_AC9_a_stale_save_keeps_what_was_typed_until_they_go_back` |
+| AC9-10 **(UI)** **(trap)** | Under review, attendance 100 | Write it as "100.0"; as "0100" | Nothing to save, nothing sent: the form compares attendance as the number it would send, as 022 does. Compared as text, each was sent as 100 and refused by 022 as "No changes" (a 400) | Proved (UI, panel): `SCRUM387_AC9_%s_is_nothing_to_save_and_calls_nothing` (attendance_written_as_100_point_0, attendance_written_with_a_leading_zero) |
 
 ---
 
@@ -300,8 +306,10 @@ A trigger refuses update and delete on `event_change_history`. A `source` column
 
 ## Tally
 
-77 cases, counted from the tables: **77 proved**; 0 not yet implemented; 0 that
-cannot be written as specified. Nineteen are traps, ten of them on the screen.
+82 cases, counted from the tables: **82 proved**; 0 not yet implemented; 0 that
+cannot be written as specified. Twenty-one are traps, eleven of them on the
+screen. After the PR #84 review: five added (AC6-15, AC6-16, AC7-14, AC7-15,
+AC9-10), three amended (AC3-04, AC3-07, AC7-03).
 
 | Section | Backend | UI | Cases |
 |---|---|---|---|
@@ -310,8 +318,8 @@ cannot be written as specified. Nineteen are traps, ten of them on the screen.
 | AC3 | 4 | 3 | 7 |
 | AC4 | 1 | 2 | 3 |
 | AC5 | 2 | 2 | 4 |
-| AC6 | 9 | 5 | 14 |
-| AC7 | 6 | 7 | 13 |
+| AC6 | 10 | 6 | 16 |
+| AC7 | 8 | 7 | 15 |
 | AC8 | 2 | 2 | 4 |
-| AC9 | 4 | 5 | 9 |
-| **Total** | **45** | **32** | **77** |
+| AC9 | 4 | 6 | 10 |
+| **Total** | **48** | **34** | **82** |

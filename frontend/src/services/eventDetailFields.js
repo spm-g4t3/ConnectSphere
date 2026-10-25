@@ -1,9 +1,11 @@
 // eventDetailFields.js
 //
 // SCRUM-387: the fields an event's assigned coordinator may edit directly, and
-// in which statuses. Mirrors backend/src/domain/eventDetailField.js, which a
-// test reads as text and compares with this copy; the labels are the
-// frontend's own, the ones EventRequestForm shows the Organiser.
+// in which statuses. The field lists mirror backend/src/domain/eventDetailField.js,
+// which a test reads as text and compares with this copy. The status lists are
+// this screen's alone, pinned by a test to the case document's matrix (D3); 022
+// decides, so they only choose what the form offers. The labels are the ones
+// EventRequestForm shows the Organiser.
 //
 // Ordinary fields describe the event. Significant ones change what is or will
 // be arranged, so once an event is in planning they go through Revise event
@@ -21,6 +23,9 @@ export const SIGNIFICANT_DETAIL_FIELDS = Object.freeze([
 ]);
 
 export const DETAIL_FIELDS = Object.freeze([...ORDINARY_DETAIL_FIELDS, ...SIGNIFICANT_DETAIL_FIELDS]);
+
+/** The two fields that are instants, shown and compared as dates. */
+export const TIMESTAMP_FIELDS = Object.freeze(["proposedStart", "proposedEnd"]);
 
 export const DETAIL_FIELD_LABELS = Object.freeze({
   eventName: "Event name",

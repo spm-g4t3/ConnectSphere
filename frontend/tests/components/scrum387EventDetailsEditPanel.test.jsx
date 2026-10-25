@@ -12,7 +12,7 @@ import userEvent from "@testing-library/user-event";
 
 import EventDetailsEditPanel from "../../src/components/EventDetailsEditPanel.jsx";
 import { updateEventRequestDetails } from "../../src/services/eventRequestService";
-import { toOffsetIsoString } from "../../src/services/datetimeFormat.js";
+import { toDatetimeLocalValue, toOffsetIsoString } from "../../src/services/datetimeFormat.js";
 import { DETAIL_FIELD_LABELS, ORDINARY_DETAIL_FIELDS, SIGNIFICANT_DETAIL_FIELDS } from "../../src/services/eventDetailFields.js";
 import { deferred, httpError } from "../helpers/async.js";
 
@@ -187,6 +187,10 @@ describe("SCRUM-387 what a save sends", () => {
     ["text_cleared_and_typed_back", async (user) => setText(user, "purpose", "Industry networking")],
     ["an_empty_field_given_only_spaces", async (user) => user.type(field("accessibilityRequirements"), "   ")],
     ["a_value_padded_with_spaces", async (user) => setText(user, "eventName", "  Tech Talk ")],
+    // The server compares attendance as a number, so the form must too. Set
+    // directly: user-event normalises what it types into a number box, a browser does not.
+    ["attendance_written_as_100_point_0", async () => fireEvent.change(field("expectedAttendance"), { target: { value: "100.0" } })],
+    ["attendance_written_with_a_leading_zero", async () => fireEvent.change(field("expectedAttendance"), { target: { value: "0100" } })],
   ])("SCRUM387_AC9_%s_is_nothing_to_save_and_calls_nothing", async (_label, act) => {
     const { user } = renderPanel();
 
@@ -196,6 +200,56 @@ describe("SCRUM-387 what a save sends", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("There is nothing to save: no field has changed.");
     expect(updateEventRequestDetails).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("SCRUM-387 the period a save would leave", () => {
+  // The stored event runs 09:00-11:00 UTC on 1 December; inputs are written in
+  // the device's zone through the app's own helper, so any TZ passes.
+  const local = (iso) => toDatetimeLocalValue(iso);
+
+  it("SCRUM387_AC6_moving_only_the_start_past_the_end_is_flagged_beside_end_and_not_sent", async () => {
+    const { user } = renderPanel();
+
+    fireEvent.change(field("proposedStart"), { target: { value: local("2026-12-01T12:00:00Z") } });
+    await giveReason(user);
+    await user.click(save());
+
+    expect(screen.getByText("Proposed end must be later than the proposed start.")).toBeInTheDocument();
+    expect(field("proposedEnd")).toHaveAttribute("aria-invalid", "true");
+    expect(field("proposedStart")).not.toHaveAttribute("aria-invalid");
+    expect(updateEventRequestDetails).not.toHaveBeenCalled();
+
+    // Moving the end on clears its fault, and the save goes through.
+    fireEvent.change(field("proposedEnd"), { target: { value: local("2026-12-01T14:00:00Z") } });
+    expect(screen.queryByText("Proposed end must be later than the proposed start.")).not.toBeInTheDocument();
+    await user.click(save());
+    expect(sent()[1].changes).toEqual({
+      proposedStart: toOffsetIsoString(local("2026-12-01T12:00:00Z")),
+      proposedEnd: toOffsetIsoString(local("2026-12-01T14:00:00Z")),
+    });
+  });
+
+  it("SCRUM387_AC6_moving_only_the_end_before_the_start_is_flagged_too", async () => {
+    const { user } = renderPanel();
+
+    fireEvent.change(field("proposedEnd"), { target: { value: local("2026-12-01T09:00:00Z") } });
+    await giveReason(user);
+    await user.click(save());
+
+    expect(field("proposedEnd")).toHaveAttribute("aria-invalid", "true");
+    expect(updateEventRequestDetails).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM387_AC6_a_stored_period_out_of_order_does_not_block_an_edit_that_leaves_it", async () => {
+    const { user } = renderPanel({ ...EVENT, proposedEnd: "2026-12-01T08:00:00.000Z" });
+
+    await setText(user, "eventName", "Tech Talk 2026");
+    await giveReason(user);
+    await user.click(save());
+
+    expect(sent()[1].changes).toEqual({ eventName: "Tech Talk 2026" });
   });
 });
 

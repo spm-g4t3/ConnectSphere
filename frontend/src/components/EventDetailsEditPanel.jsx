@@ -21,13 +21,14 @@ import {
 import {
   DETAIL_FIELD_LABELS,
   STATUSES_ALLOWING_ANY_EDIT,
+  TIMESTAMP_FIELDS,
   editableDetailFields,
 } from "../services/eventDetailFields";
 import { fieldErrorWiring } from "./fieldErrors";
 
 // The server's limit, counted as it counts: in characters, not UTF-16 units.
 const REASON_MAX_LENGTH = 4000;
-const TIMESTAMP_FIELDS = ["proposedStart", "proposedEnd"];
+const REASON_LIMIT = REASON_MAX_LENGTH.toLocaleString("en-US");
 
 // The controls EventRequestForm gives the Organiser for the same fields.
 const CONTROLS = {
@@ -73,10 +74,19 @@ function toFormValue(field, stored) {
   return String(stored);
 }
 
-/** A control's value as compared for "altered": trimmed, and blank is null. */
+/** A control's value trimmed, and blank as null, as the server normalises it. */
 function normalised(value) {
   const text = value.trim();
   return text === "" ? null : text;
+}
+
+/**
+ * A control's value as compared for "altered". Attendance as the number sent,
+ * so "100.0" over a stored 100 is no change, as the server would find. Dates as
+ * the datetime-local text, which in the device's zone is one instant per minute.
+ */
+function comparable(field, value) {
+  return field === "expectedAttendance" ? toWireValue(field, value) : normalised(value);
 }
 
 /** A control's value as sent. A cleared box is null, as the server stores it. */
@@ -117,6 +127,7 @@ export default function EventDetailsEditPanel({ eventRequest, onBack, onSaved })
 
   function update(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
+    setClientErrors((prev) => prev.filter((err) => err.field !== field));
   }
 
   async function handleSave(event) {
@@ -124,7 +135,7 @@ export default function EventDetailsEditPanel({ eventRequest, onBack, onSaved })
     if (saving) return;
 
     const altered = opened.fields.filter(
-      (field) => normalised(form[field]) !== normalised(opened.shown[field]),
+      (field) => comparable(field, form[field]) !== comparable(field, opened.shown[field]),
     );
     if (altered.length === 0) {
       setMessage("There is nothing to save: no field has changed.");
@@ -134,7 +145,17 @@ export default function EventDetailsEditPanel({ eventRequest, onBack, onSaved })
     const errors = [];
     if (!trimmedReason) errors.push({ field: "reason", message: "A reason is required." });
     if (reasonLength > REASON_MAX_LENGTH) {
-      errors.push({ field: "reason", message: "The reason must be 4,000 characters or fewer." });
+      errors.push({ field: "reason", message: `The reason must be ${REASON_LIMIT} characters or fewer.` });
+    }
+    // The period the save would leave, an unaltered end the one the form opened
+    // with: the server checks the same, but this names the field (AC6).
+    if (altered.some((field) => TIMESTAMP_FIELDS.includes(field))) {
+      const ends = Object.fromEntries(TIMESTAMP_FIELDS.map((field) => [
+        field, altered.includes(field) ? toWireValue(field, form[field]) : opened.stored[field],
+      ]));
+      if (ends.proposedStart && ends.proposedEnd && new Date(ends.proposedEnd) <= new Date(ends.proposedStart)) {
+        errors.push({ field: "proposedEnd", message: "Proposed end must be later than the proposed start." });
+      }
     }
     setClientErrors(errors);
     setServerErrors([]);
@@ -227,7 +248,7 @@ export default function EventDetailsEditPanel({ eventRequest, onBack, onSaved })
               />
             </label>
             <p className="event-details-edit__counter" aria-live="polite">
-              {reasonLength.toLocaleString("en-US")} / 4,000 characters
+              {reasonLength.toLocaleString("en-US")} / {REASON_LIMIT} characters
             </p>
             {renderFieldErrors("reason")}
           </div>
