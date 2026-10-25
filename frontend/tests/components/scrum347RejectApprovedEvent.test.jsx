@@ -319,6 +319,16 @@ describe("SCRUM347 the Organiser's rejected event", () => {
     expect(getEventDecisionHistory).toHaveBeenCalledWith(REQUEST_ID);
   });
 
+  it("SCRUM347_AC6_a_rejected_event_offers_revise_and_resubmit_not_a_change_request", async () => {
+    vi.mocked(useAuth).mockReturnValue({ user: { id: ORGANISER, role: "event_organiser" } });
+    vi.mocked(getMyEventRequests).mockResolvedValue([rejectedEvent()]);
+
+    render(<MemoryRouter><MyEventRequests /></MemoryRouter>);
+
+    expect(await screen.findByRole("button", { name: "Revise and resubmit" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request a change" })).not.toBeInTheDocument();
+  });
+
   it("SCRUM347_AC5_an_approved_event_reads_no_decision_history", async () => {
     vi.mocked(useAuth).mockReturnValue({ user: { id: ORGANISER, role: "event_organiser" } });
     vi.mocked(getMyEventRequests).mockResolvedValue([approvedEvent()]);

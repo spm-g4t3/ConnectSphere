@@ -24,9 +24,10 @@ import { useSchemaDb, enumLabels } from './helpers/schemaVocabulary.js';
 
 const schemaDb = useSchemaDb();
 
-// Written only by cancel_event_request when the whole event is cancelled; a
-// reviewer never chooses it, so the decision endpoint must not accept it.
-const SYSTEM_ONLY_SQL_DECISIONS = ['event_cancelled'];
+// Written only by cancel_event_request when the whole event is cancelled, and by
+// reject_approved_event (025) when it is rejected; a reviewer never chooses
+// either, so the decision endpoint must not accept them.
+const SYSTEM_ONLY_SQL_DECISIONS = ['event_cancelled', 'event_rejected'];
 
 
 describe('CHANGE_REQUEST_STATUS mirrors the database enum', () => {

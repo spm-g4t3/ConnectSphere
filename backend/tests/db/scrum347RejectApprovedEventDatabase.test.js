@@ -82,7 +82,17 @@ async function eventWithArrangements(coordinator, status = 'approved') {
      values ($1, $2, $3, 2, $4, $5) returning id`,
     [equipmentType, id, line, start, end],
   )).id;
-  return { id, start, end, venues, bookings, hold, equipmentRequest, reservation };
+  const changeRequest = async (status, decision = null) => (await one(
+    `insert into event_change_requests (event_request_id, requested_by, change_field, requested_change, status, decision)
+     values ($1, $2, 'venue', 'A larger room', $3, $4) returning id`,
+    [id, organiser, status, decision],
+  )).id;
+  const changeRequests = {
+    outstanding: await changeRequest('outstanding'),
+    inProgress: await changeRequest('in_progress'),
+    processed: await changeRequest('processed', 'approved'),
+  };
+  return { id, start, end, venues, bookings, hold, equipmentRequest, reservation, changeRequests };
 }
 
 // Everything a rejection writes, so a refusal can be shown to have written none of it.
@@ -96,6 +106,7 @@ async function snapshot(event) {
     decisionHistory: await decisionHistory(event.id),
     statusHistory: await rows('select * from event_request_status_history where event_request_id = $1', [event.id]),
     notifications: await rows('select * from notifications where event_request_id = $1', [event.id]),
+    changeRequests: await rows('select * from event_change_requests where event_request_id = $1 order by id', [event.id]),
   };
 }
 
@@ -188,6 +199,18 @@ describe('SCRUM-347: reject_approved_event', () => {
       );
       expect(await occupants(event.venues.approved)).toEqual([]);
       expect(await occupants(event.venues.held)).toEqual([]);
+    });
+
+    it('SCRUM347_AC6_open_change_requests_are_closed_and_processed_ones_left_alone', async () => {
+      const changeRequest = (id) => one(
+        'select status::text, decision::text, decision_notes, processed_by from event_change_requests where id = $1',
+        [id],
+      );
+      const closed = { status: 'processed', decision: 'event_rejected', decision_notes: null, processed_by: coordinator };
+
+      expect(await changeRequest(event.changeRequests.outstanding)).toEqual(closed);
+      expect(await changeRequest(event.changeRequests.inProgress)).toEqual(closed);
+      expect(await changeRequest(event.changeRequests.processed)).toMatchObject({ status: 'processed', decision: 'approved' });
     });
 
     it('SCRUM347_AC7_the_organiser_venue_staff_and_technical_support_are_notified', async () => {

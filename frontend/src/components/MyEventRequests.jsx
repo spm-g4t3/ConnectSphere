@@ -456,9 +456,11 @@ export default function MyEventRequests() {
                   </button>
                 )}
 
+                {/* SCRUM-347: a rejected event is revised and resubmitted instead. */}
                 {req.status !== "draft" &&
                   req.status !== "pending_clarification" &&
-                  req.status !== "cancelled" && (
+                  req.status !== "cancelled" &&
+                  req.status !== "rejected" && (
                   <button
                     onClick={() => setActivePanel({ mode: "change-request", request: req })}
                   >

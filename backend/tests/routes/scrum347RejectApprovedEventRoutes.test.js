@@ -113,6 +113,26 @@ describe('SCRUM-347: POST /api/event-requests/:id/rejection', () => {
     expect(res.body).toMatchObject({ error: message, code: 'CANCEL_INSTEAD' });
   });
 
+  it('SCRUM347_AC6_a_rejected_event_takes_no_new_change_requests', async () => {
+    const client = createEventRequestClient([
+      // The route's ownership pre-check, then createChangeRequest's own read.
+      ok(rejectedRow),
+      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID, status: STATUS.REJECTED }),
+    ]);
+
+    const res = await request(
+      express()
+        .use(express.json())
+        .use('/api/event-requests', createEventRequestRouter({
+          client, requireAuth: signedInAs(ROLE.EVENT_ORGANISER, ORGANISER_ID),
+        })),
+    ).post(`/api/event-requests/${REQUEST_ID}/change-requests`).send({ field: 'venue', details: 'A larger room.' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Cannot request a change to a rejected event; revise and resubmit it instead');
+    expect(client.calls.map((call) => call.operation)).not.toContain('insert');
+  });
+
   it('SCRUM347_AC1_a_missing_event_is_a_404', async () => {
     const client = createEventRequestClient([dbError('P0002', `event request ${REQUEST_ID} not found`)]);
 

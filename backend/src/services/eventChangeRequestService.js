@@ -197,6 +197,12 @@ export async function createChangeRequest(input, organiserId, { client } = {}) {
     throw new ValidationError('Cannot request a change to a draft event; submit it first');
   }
 
+  // SCRUM-347: a rejected event is revised by reopening it, not by change requests,
+  // which rejection closes and nobody could process after a reopen.
+  if (event.status === STATUS.REJECTED) {
+    throw new ValidationError('Cannot request a change to a rejected event; revise and resubmit it instead');
+  }
+
   if (event.organiser_id !== organiserId) {
     throw new ValidationError('Only the event organiser may request a change to this event');
   }
