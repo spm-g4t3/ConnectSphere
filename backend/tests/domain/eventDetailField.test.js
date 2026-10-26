@@ -45,8 +45,8 @@ describe('SCRUM-387: the detail field lists', () => {
     for (const field of DETAIL_FIELDS) expect(known).toContain(field);
   });
 
-  it('SCRUM387_AC7_the_history_sources_are_the_three_022_declares', async () => {
+  it('SCRUM387_AC7_the_history_sources_are_the_four_022_and_028_declare', async () => {
     expect(await checkListValues(schemaDb(), 'event_change_history_source_known'))
-      .toEqual(['significant_change', 'direct_edit', 'change_request']);
+      .toEqual(['significant_change', 'direct_edit', 'change_request', 'clarification_amendment']);
   });
 });

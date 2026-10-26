@@ -83,6 +83,19 @@ describe("SCRUM-387 the change history", () => {
     expect(odd).toHaveTextContent('{"rooms":2} → One hall');
   });
 
+  it("SCRUM387_AC7_an_organisers_clarification_amendment_is_tagged_clarification_reply", async () => {
+    vi.mocked(getEventChangeHistory).mockResolvedValue([entry({
+      source: "clarification_amendment", changedByName: "Olive Organiser", reason: "Here are the details",
+    })]);
+
+    render(<EventChangeHistory eventRequestId="e1" />);
+
+    const item = (await screen.findAllByRole("listitem"))[0];
+    expect(within(item).getByText("Clarification reply")).toBeInTheDocument();
+    expect(item).toHaveTextContent("Olive Organiser");
+    expect(item).toHaveTextContent("Reason: Here are the details");
+  });
+
   it.each([
     ["change_request", "Change request"],
     [null, "Recorded"],

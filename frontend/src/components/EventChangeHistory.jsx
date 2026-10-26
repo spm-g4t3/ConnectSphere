@@ -13,6 +13,8 @@ import { TIMESTAMP_FIELDS, detailFieldLabel } from "../services/eventDetailField
 const SOURCE_LABEL = {
   direct_edit: "Edited",
   significant_change: "Significant change",
+  // 028: the Organiser's amendment in a clarification reply.
+  clarification_amendment: "Clarification reply",
 };
 
 /** A source this build does not know, such as SCRUM-402's change_request. */

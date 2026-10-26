@@ -9,8 +9,8 @@ criterion is proved, why the design looks the way it does, and what is still
 missing. The examination chain is **user story → acceptance criterion → test case
 → test class → code**; section 2 walks it end to end for AC3.
 
-The case-by-case mapping is `docs/test-cases/SCRUM-387.md`: 86 cases, 48 backend
-and 38 on the screen, each naming the tests that prove it. It also holds the
+The case-by-case mapping is `docs/test-cases/SCRUM-387.md`: 91 cases, 52 backend
+and 39 on the screen, each naming the tests that prove it. It also holds the
 design decisions D1 to D13 in full, with the alternatives rejected. This document
 cites it rather than repeating it.
 
@@ -47,7 +47,8 @@ cites it rather than repeating it.
 | SCRUM-394 | This document | `c3ec269` |
 | Merge of dev | SCRUM-27 (PR #82): its migrations 017 and 018, before ours; neither touches 022's objects or restates `notifications_type_known` | `0dfbd9b` |
 | PR #84 review | The fix-ups below: the period checked on the screen, a malformed id refused with 400, one save's history rows in a stable order, three tidy-ups | `fd2b492` |
-| PR #84 second review | A status refusal names the status on screen; the Organiser's history is read again on each opening | this commit |
+| PR #84 second review | A status refusal names the status on screen; the Organiser's history is read again on each opening | `7329845` |
+| Fix-up 3 | Migration 028: the Organiser's clarification amendments recorded in the change history; the "Clarification reply" tag | this commit |
 
 Dev had not moved when the story was built (`c1c3573`, checked 25 October 2026).
 It moved before the review, and Calven merged it (`0dfbd9b`, SCRUM-27's PR #82).
@@ -106,31 +107,42 @@ the rest were answered. No backend or migration change.
   October 2026; the nine fields are the story's.
 - **AC7, "coordinators" may read the history.** It follows D7: the assigned
   coordinator and the Lead, not every coordinator, as the decision history.
-- **Clarification amendments leave no history.** Accepted as a gap and owned by a
-  backlog story, SCRUM-, to be filled in (section 4).
+- **Clarification amendments leave no history.** Closed in 028: the clarification
+  reply now writes its own history rows (D17). Only change requests remain, and
+  those belong to SCRUM-402.
 - **The duplicated checks and the generic 400s.** By design: the screen's checks
   name the field, and the server's are the backstop (D1); a 400 the screen did not
   foresee gets one general line, keyed on the status, never on the server's text.
+- **26 October 2026: the clarification-amendment gap is closed, in this PR.** At
+  Calven's request, migration 028 restates `reply_to_event_clarification_with_amendments`
+  with one history row per amended field whose value changed (`028:154–177`):
+  the Organiser as the editor, the reply as the reason, `source = 'clarification_amendment'`
+  (AC7-17 to AC7-21). The history tags it "Clarification reply". Jira's AC7 now reads
+  "Every change records the field, the old value, the new value, who made it, the
+  date and time, and the reason given. The Event Organiser, the event's assigned
+  coordinator and the Event Coordinator Lead can view this change history, newest
+  first." With 028, every path that changes an event's fields records it except
+  change requests, which SCRUM-402 closes.
 
 ### Verification as of 25 October 2026
 
 | Evidence | Result |
 |---|---|
-| Backend suite (`npm run test:coverage` in `backend`) | 7742 passing and 2 todo across 181 files, after the PR #84 fix-ups and the merge of dev (SCRUM-27), unchanged by the second review. 7640 and 2 todo across 178 at `07644a5`. At `c1c3573` before the story: 7533 passing and 2 todo across 174 files (run on 25 October 2026 from a `git archive` of that commit) |
-| Frontend suite (`npm run test:coverage` in `frontend`) | 3903 passing across 169 files, after the second review's fixes; every coverage gate met. 3899 across 169 after the first review's fix-ups and the merge. 3849 across 168 at `07644a5`. At `c1c3573`: 3765 passing across 162 files, run the same way. `npm run lint` 0 errors (23 warnings, all pre-existing: the one in `MyEventRequests.jsx` is at HEAD too); `npm run build` passes |
+| Backend suite (`npm run test:coverage` in `backend`) | 7746 passing and 2 todo across 181 files, after fix-up 3 (028). 7742 and 2 todo across 181 after the PR #84 fix-ups and the merge of dev (SCRUM-27). 7640 and 2 todo across 178 at `07644a5`. At `c1c3573` before the story: 7533 passing and 2 todo across 174 files (run on 25 October 2026 from a `git archive` of that commit) |
+| Frontend suite (`npm run test:coverage` in `frontend`) | 3904 passing across 169 files, after fix-up 3. 3903 across 169 after the second review's fixes; every coverage gate met. 3899 across 169 after the first review's fix-ups and the merge. 3849 across 168 at `07644a5`. At `c1c3573`: 3765 passing across 162 files, run the same way. `npm run lint` 0 errors (23 warnings, all pre-existing: the one in `MyEventRequests.jsx` is at HEAD too); `npm run build` passes |
 | SCRUM-387's gate | `SCRUM387_FILES` in `frontend/vite.config.js` (`:240`): `EventDetailsEditPanel.jsx`, `EventChangeHistory.jsx` and `eventDetailFields.js` at 100% statements, branches, functions and lines |
 | Gates that held | `notificationDisplay.js` stays at 100% in SCRUM-17's gate and `notificationLink.js` in SCRUM-172's. `CoordinatorRequestDetail.jsx`, `MyEventRequests.jsx` and `eventRequestService.js` stay ungated, as before |
-| SCRUM-387's own tests | 203 titles once parametrised cases are expanded, every one named `SCRUM387_ACn_…`. Backend 109: 62 in `scrum387EditEventDetailsDatabase.test.js`, 32 in `scrum387EditEventDetailsRoutes.test.js`, 4 in `eventDetailField.test.js`, 11 in `eventDetailsEditValidation.test.js`. Frontend 94: 42 in `scrum387EventDetailsEditPanel.test.jsx`, 25 in `scrum387CoordinatorEditEvent.test.jsx`, 9 in `scrum387EventChangeHistory.test.jsx`, 12 in `scrum387EventDetailFields.test.js`, 4 in `scrum387NotificationDisplay.test.js`, 2 in `scrum387EventRequestService.test.js` |
-| PGlite | `scrum387EditEventDetailsDatabase.test.js` runs 022 on the full schema (`createSchemaDb()`: the baseline, then every migration, 010 to 018 and 022), with statuses reached through the real workflow functions where they exist |
-| Live database | 022 applied by Calven to the shared Supabase project on 24 October 2026. Both checks matched: the live notification list before, and the four-part check after. No live script was run by us |
-| Test-case document | 86 cases (48 backend, 38 UI): **86 proved**, 0 not yet implemented, 0 that cannot be written as specified. 21 are traps, 11 of them on the screen. Five were added and three amended after the PR #84 review, and four added and two amended after the second |
+| SCRUM-387's own tests | 208 titles once parametrised cases are expanded, every one named `SCRUM387_ACn_…`. Backend 113: 66 in `scrum387EditEventDetailsDatabase.test.js`, 32 in `scrum387EditEventDetailsRoutes.test.js`, 4 in `eventDetailField.test.js`, 11 in `eventDetailsEditValidation.test.js`. Frontend 95: 42 in `scrum387EventDetailsEditPanel.test.jsx`, 25 in `scrum387CoordinatorEditEvent.test.jsx`, 10 in `scrum387EventChangeHistory.test.jsx`, 12 in `scrum387EventDetailFields.test.js`, 4 in `scrum387NotificationDisplay.test.js`, 2 in `scrum387EventRequestService.test.js` |
+| PGlite | `scrum387EditEventDetailsDatabase.test.js` runs 022 on the full schema (`createSchemaDb()`: the baseline, then every migration, 010 to 018, 022 and 028), with statuses reached through the real workflow functions where they exist |
+| Live database | 022 applied by Calven to the shared Supabase project on 24 October 2026. Both checks matched: the live notification list before, and the four-part check after. 028 is to be applied by Calven, with its check query and a short click-through; not yet recorded here. No live script was run by us |
+| Test-case document | 91 cases (52 backend, 39 UI): **91 proved**, 0 not yet implemented, 0 that cannot be written as specified. 22 are traps, 11 of them on the screen. Five were added and three amended after the PR #84 review, four added and two amended after the second, and five added for 028 |
 | Click-through | Passed: every step worked as expected, as reported by Calven on 25 October 2026. The final SQL check returned no rows the first time because it filtered on the event's exact name; a name-free query was given as a re-check, and its result is not yet recorded here |
 
 **Teeth checks**: each test was checked by breaking the line it proves, watching
 it fail, and restoring the file from an in-memory copy (never `git checkout`).
-51 in all: 22 for the backend (SCRUM-388 to SCRUM-390), 19 for the screen
-(SCRUM-391, SCRUM-392), 8 for the PR #84 fix-ups and 2 for the second review, the
-last ten rows. Line
+59 in all: 22 for the backend (SCRUM-388 to SCRUM-390), 19 for the screen
+(SCRUM-391, SCRUM-392), 8 for the PR #84 fix-ups, 2 for the second review and 8
+for fix-up 3 (028), the last eighteen rows. Line
 numbers are the files as they now stand.
 
 | AC | What was broken | What failed |
@@ -186,6 +198,14 @@ numbers are the files as they now stand.
 | AC6, AC9 (review 8) | `TIMESTAMP_FIELDS` loses `proposedEnd` (`eventDetailFields.js:26`) | 4 tests in the panel and fields files, both components reading the one list |
 | AC5 (second review) | The status refusal given the general line again, with no re-read (`EventDetailsEditPanel.jsx:196`) | `SCRUM387_AC5_a_status_refusal_names_the_events_current_status`. The wording test still passes, as it should: the general line is the same whatever the server says |
 | AC7 (second review) | The Organiser's history kept mounted once opened (`MyEventRequests.jsx:89`) | `SCRUM387_AC7_the_organisers_history_rereads_each_time_it_is_opened` |
+| AC7 (028) | The history insert removed (`028:157–177`) | `SCRUM387_AC7_a_clarification_amendment_is_recorded_with_the_organiser_and_the_reply_as_reason`, `SCRUM387_AC7_an_amendment_that_keeps_a_value_writes_no_row_for_it` |
+| AC7 (028) | Unchanged values not filtered out (`028:175–177`) | `SCRUM387_AC7_an_amendment_that_keeps_a_value_writes_no_row_for_it` |
+| AC7 (028) | The old value read after the update, from `v_request` (`028:161`) | `SCRUM387_AC7_a_clarification_amendment_is_recorded_with_the_organiser_and_the_reply_as_reason` |
+| AC7 (028) | Rows written as `direct_edit` (`028:163`) | `SCRUM387_AC7_a_clarification_amendment_is_recorded_with_the_organiser_and_the_reply_as_reason` |
+| AC7 (028) | The reason not trimmed (`028:163`) | `SCRUM387_AC7_a_clarification_amendment_is_recorded_with_the_organiser_and_the_reply_as_reason` and `SCRUM387_AC7_an_amendment_that_keeps_a_value_writes_no_row_for_it`: the reason check refuses the row, so the reply fails |
+| AC7 (028) | A row for every field, amended or not (`028:175–177`) | `SCRUM387_AC7_a_clarification_amendment_is_recorded_with_the_organiser_and_the_reply_as_reason`, `SCRUM387_AC7_an_amendment_that_keeps_a_value_writes_no_row_for_it`, `SCRUM387_AC7_a_reply_without_amendments_writes_no_history` |
+| AC7 (028) | The source check not widened (`028:24`) | Both amendment tests and `SCRUM387_AC9_an_organisers_amendment_after_the_form_opened_makes_the_save_stale`, whose reply now writes a row; `eventClarificationDatabase.test.js` still passes, as its replies change no stored value |
+| AC7 (028) | The "Clarification reply" tag removed (`EventChangeHistory.jsx:17`) | `SCRUM387_AC7_an_organisers_clarification_amendment_is_tagged_clarification_reply` |
 
 ---
 
@@ -205,7 +225,7 @@ numbers are the files as they now stand.
 
 **Tally:** 9 done, 0 partial, 0 deferred.
 
-**Test cases:** 86 (48 backend, 38 UI); 86 proved.
+**Test cases:** 91 (52 backend, 39 UI); 91 proved.
 
 ### Evidence for each criterion
 
@@ -377,8 +397,8 @@ an Organiser's clarification amendment.
 
 A trigger refuses UPDATE and DELETE on `event_change_history` (`022:37–52`). A
 `source` column says which path wrote each row: `significant_change` (the default,
-so 395's insert is unchanged), `direct_edit`, and `change_request`, reserved for
-SCRUM-402 (`022:27–34`). *Rejected: trusting every writer not to edit history*.
+so 395's insert is unchanged), `direct_edit`, `change_request`, reserved for
+SCRUM-402 (`022:27–34`), and, since 028, `clarification_amendment` (`028:21–24`). *Rejected: trusting every writer not to edit history*.
 
 ### D14. The migration is 022
 
@@ -406,6 +426,18 @@ counts as still held, so "still holds" means one thing across the codebase. With
 equipment counted, a review-time date change cannot set off 06's
 `equipment_notify_event_period_changed`. *Rejected: bookings and holds only*.
 
+### D17. Each path writes its own history rows
+
+`event_change_history` has one writer per path, and each inserts its own rows in
+the same transaction as its change: SCRUM-395's `apply_significant_event_change`,
+387's `edit_event_request_details` (022), and since 028 the Organiser's
+`reply_to_event_clarification_with_amendments`, restated from the baseline with
+one insert after its update and nothing else changed (`028:154–177`). Change
+requests are SCRUM-402's to add. *Rejected: a trigger on `event_requests`*: a
+trigger sees the old and new row but not who made the change or why, so it could
+not fill `changed_by` or `reason`, and it would write a second row for every
+change 395 and 387 already record.
+
 ---
 
 ## 4. Known gaps, and technical debt
@@ -416,10 +448,10 @@ equipment counted, a review-time date change cannot set off 06's
 |---|---|---|
 | D4 and the safety statuses were proved in PGlite, not by hand | Reaching a reopened request with leftover arrangements, or Safety review, by clicking takes a full reopen or safety flow; PGlite drives the real functions instead | — |
 | The Organiser cannot see a reopened draft's change history | The disclosure is limited to non-draft rows (brief 2's choice), though the server would let the Organiser read it | Optional |
-| SCRUM-402 writes ordinary fields with no history row | `process_change_request` still writes them without one. 402 should call `edit_event_request_details`, or write `source = 'change_request'` rows itself, restating `event_change_history`'s checks from 022, not the baseline | SCRUM-402 (Calven) |
+| SCRUM-402 writes ordinary fields with no history row | `process_change_request` still writes them without one. 402 should call `edit_event_request_details`, or write `source = 'change_request'` rows itself, restating `event_change_history`'s source check from 028, not 022 or the baseline | SCRUM-402 (Calven) |
 | The click-through's re-check | The name-free SQL query's result is not yet recorded (section 2) | Calven |
 | Expired holds (PR #84 review, point 1) | D4's count follows 013's "active" rule (`022:234–236`) and does not check `expires_at`, so a hold past its expiry can refuse a date edit until the expiry job, which runs every 60 seconds (`venueHoldExpiryScheduler.js`, `DEFAULT_INTERVAL_MS`), marks it expired. Left as it is: fixing it needs a new migration restating the whole of `edit_event_request_details`, and 022 is live | A later migration |
-| Other write paths (PR #84 review, point 4) | Change requests are SCRUM-402's to record, with `source = 'change_request'`. Clarification amendments (`reply_to_event_clarification_with_amendments`) are recorded nowhere yet; accepted as a gap at the PR #84 second review, and owned by the backlog story SCRUM-, to be filled in. A trigger on `event_requests` was rejected: it cannot know who made a change or why, and it would write a second row for every change 395 and 387 already record | SCRUM-402 (Calven); amendments SCRUM-, to be filled in |
+| Other write paths (PR #84 review, point 4) | Change requests are SCRUM-402's to record, with `source = 'change_request'`. The clarification-amendment gap is closed in 028 (`source = 'clarification_amendment'`, D17); only change requests remain, and those belong to SCRUM-402. A trigger on `event_requests` was rejected (D17) | SCRUM-402 (Calven) |
 
 ### Technical debt, left
 
@@ -447,6 +479,10 @@ equipment counted, a review-time date change cannot set off 06's
   and the shared `tests/fixtures/pgliteSupabaseClient.js` gained `order`, `in` and
   awaited list reads, so AC7-14 reads the history through the real service on
   PGlite. Its single-row reads, which three other suites use, are unchanged.
+- **Restate from 028:** `reply_to_event_clarification_with_amendments` is now defined
+  in 028, so anyone who changes it must restate it from 028, not the baseline: the
+  latest migration that defines a function wins. 028's copy differs from the
+  baseline's only in `v_before` and the history insert.
 - **SCRUM-484's invariant:** it reserves `&&` in SQL function bodies for the
   occupied-period rule, so 022 tests "touches a significant field" with `= any`
   (`022:214–216`).

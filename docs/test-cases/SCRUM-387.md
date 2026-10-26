@@ -7,6 +7,7 @@
 **Marked:** 25 October 2026, SCRUM-391 and SCRUM-392: the screen's cases, each marked **(UI)**, added after the backend's in every table; every one proved. The backend cases are unchanged.
 **Marked:** 25 October 2026, after the PR #84 review: AC6-15, AC6-16, AC7-14, AC7-15 and AC9-10 added; AC3-04, AC3-07 and AC7-03 amended (the status lists left the backend module; one save's rows are ordered by field name).
 **Marked:** 26 October 2026, after the PR #84 second review: AC5-05, AC5-06, AC5-07 and AC7-16 added; AC5-04 and AC7-12 amended (a status refusal names the status the event is now in; the Organiser's history is read again on each opening).
+**Marked:** 26 October 2026, fix-up 3: migration 028 records the Organiser's clarification amendments in the change history. AC7-17 to AC7-21 added.
 
 This document is the written layer between SCRUM-387's acceptance criteria and the
 Vitest files that implement them. The chain is **user story → acceptance criteria
@@ -25,7 +26,7 @@ are marked **(trap)**.
 
 | Short | File | Proves |
 |---|---|---|
-| pglite | `backend/tests/db/scrum387EditEventDetailsDatabase.test.js` | What `edit_event_request_details` does, on the full schema (`createSchemaDb()`), with statuses reached through the real workflow functions where they exist: who may edit what in which status, what is written and notified, and that a refusal changes nothing |
+| pglite | `backend/tests/db/scrum387EditEventDetailsDatabase.test.js` | What `edit_event_request_details` (022) and the clarification reply restated in 028 do, on the full schema (`createSchemaDb()`), with statuses reached through the real workflow functions where they exist: who may edit what in which status, what is written and notified, and that a refusal changes nothing |
 | route | `backend/tests/routes/scrum387EditEventDetailsRoutes.test.js` (fake client) | The gate on `PATCH /:id/details`, the caller from the token, the status and `code` each refusal arrives as, and who may read `GET /:id/change-history` |
 | domain | `backend/tests/domain/eventDetailField.test.js` | The field and status lists against the built schema |
 | validation | `backend/tests/validation/eventDetailsEditValidation.test.js` | SCRUM-10's field rules applied to an edit, every fault listed together |
@@ -184,6 +185,11 @@ changes nothing.
 | AC7-14 **(trap)** | Under review | One save changes five fields, read back through `getEventChangeHistory` on PGlite | The five rows share one `changed_at` and come back in field-name order, not in one of the 120 orders their uuids would give | Proved (pglite): `SCRUM387_AC7_one_saves_rows_always_come_back_in_field_name_order`; (route) `SCRUM387_AC7_the_organiser_reads_the_history_newest_first_with_names` (the order asked for) |
 | AC7-15 | Through the API | `GET /:id/change-history` with a malformed id | 400 with a fault on `id`, with no query; it was a 500 from `getEventRequestById`'s read | Proved (route): `SCRUM387_AC7_a_malformed_id_is_refused_with_400_before_the_database` |
 | AC7-16 **(UI)** | A row's Change history opened, then closed; a coordinator edits meanwhile | Open it again | Read again, showing the newer row; a closed disclosure holds no history. Until the PR #84 second review it stayed loaded and showed what it read the first time | Proved (UI, screens): `SCRUM387_AC7_the_organisers_history_rereads_each_time_it_is_opened` |
+| AC7-17 | Pending clarification, the coordinator having asked about purpose, description, the start and attendance | The Organiser replies "  Here are the details  " amending all four, the description cleared | One row per field, `source = 'clarification_amendment'`, `changed_by` the Organiser, the reply trimmed as the reason, old and new typed as 022 writes them (the cleared description's new side null); the event back under review; the service names the Organiser | Proved (pglite): `SCRUM387_AC7_a_clarification_amendment_is_recorded_with_the_organiser_and_the_reply_as_reason` |
+| AC7-18 **(trap)** | The same | The purpose sent padded but unchanged, attendance changed | One row, for attendance: the update trims the purpose, so its stored value does not change | Proved (pglite): `SCRUM387_AC7_an_amendment_that_keeps_a_value_writes_no_row_for_it` |
+| AC7-19 | The same | A reply with no amendments | No history; the reply still moves the event to Under review | Proved (pglite): `SCRUM387_AC7_a_reply_without_amendments_writes_no_history` |
+| AC7-20 | The same | A reply amending a field the coordinator did not ask about | 22023; no history, and nothing else changes | Proved (pglite): `SCRUM387_AC7_a_refused_reply_writes_no_history` |
+| AC7-21 **(UI)** | A history with a clarification amendment | Render it | Tagged "Clarification reply", with the Organiser's name and the reply as the reason | Proved (UI, history): `SCRUM387_AC7_an_organisers_clarification_amendment_is_tagged_clarification_reply` |
 
 ### AC8 — the Organiser is told
 
@@ -297,7 +303,8 @@ with blank as null), and refuses a stale one, naming it.
 
 A trigger refuses update and delete on `event_change_history`. A `source` column
 (`significant_change`, the default, so 395's insert is unchanged; `direct_edit`;
-`change_request`, reserved for SCRUM-402) says which path wrote each row.
+`change_request`, reserved for SCRUM-402; and, since 028, `clarification_amendment`)
+says which path wrote each row.
 
 ---
 
@@ -311,11 +318,12 @@ A trigger refuses update and delete on `event_change_history`. A `source` column
 
 ## Tally
 
-86 cases, counted from the tables: **86 proved**; 0 not yet implemented; 0 that
-cannot be written as specified. Twenty-one are traps, eleven of them on the
+91 cases, counted from the tables: **91 proved**; 0 not yet implemented; 0 that
+cannot be written as specified. Twenty-two are traps, eleven of them on the
 screen. After the PR #84 review: five added (AC6-15, AC6-16, AC7-14, AC7-15,
 AC9-10), three amended (AC3-04, AC3-07, AC7-03). After the second review: four
-added (AC5-05, AC5-06, AC5-07, AC7-16), two amended (AC5-04, AC7-12).
+added (AC5-05, AC5-06, AC5-07, AC7-16), two amended (AC5-04, AC7-12). After
+fix-up 3 (028): five added (AC7-17 to AC7-21).
 
 | Section | Backend | UI | Cases |
 |---|---|---|---|
@@ -325,7 +333,7 @@ added (AC5-05, AC5-06, AC5-07, AC7-16), two amended (AC5-04, AC7-12).
 | AC4 | 1 | 2 | 3 |
 | AC5 | 2 | 5 | 7 |
 | AC6 | 10 | 6 | 16 |
-| AC7 | 8 | 8 | 16 |
+| AC7 | 12 | 9 | 21 |
 | AC8 | 2 | 2 | 4 |
 | AC9 | 4 | 6 | 10 |
-| **Total** | **48** | **38** | **86** |
+| **Total** | **52** | **39** | **91** |

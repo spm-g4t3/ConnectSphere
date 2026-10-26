@@ -471,6 +471,82 @@ describe('SCRUM-387: edit_event_request_details (022)', () => {
   });
 
 
+  describe("AC7: the Organiser's clarification amendments (028)", () => {
+    const AMENDABLE = ['purpose', 'description', 'proposedStart', 'expectedAttendance'];
+
+    /** Pending clarification, the coordinator having asked about AMENDABLE. */
+    async function askedAbout() {
+      const id = await underReview();
+      await db.query(
+        "select request_event_clarification_with_fields($1, $2, $2, 'Please confirm these', null, $3::text[])",
+        [id, coordinator, AMENDABLE],
+      );
+      return id;
+    }
+
+    const reply = (id, updates, text = '  Here are the details  ') => db.query(
+      'select reply_to_event_clarification_with_amendments($1, $2, $3, $4::jsonb)',
+      [id, organiser, text, JSON.stringify(updates)],
+    );
+
+    it('SCRUM387_AC7_a_clarification_amendment_is_recorded_with_the_organiser_and_the_reply_as_reason', async () => {
+      // AC7-17: a text, a cleared text, an instant and a number, each typed.
+      const id = await askedAbout();
+
+      await reply(id, {
+        purpose: 'Alumni networking', description: '', proposedStart: '2026-12-01T08:00:00Z', expectedAttendance: 150,
+      });
+
+      const entries = await history(id);
+      expect(entries.map(({ changed_at, old_value, new_value, ...rest }) => rest)).toEqual(
+        ['description', 'expectedAttendance', 'proposedStart', 'purpose'].map((field_name) => ({
+          field_name, changed_by: organiser, reason: 'Here are the details', source: 'clarification_amendment',
+        })),
+      );
+      const byField = Object.fromEntries(entries.map((e) => [e.field_name, [e.old_value, e.new_value]]));
+      expect(byField.purpose).toEqual([STORED.purpose, 'Alumni networking']);
+      expect(byField.description).toEqual([STORED.description, null]);
+      expect(byField.expectedAttendance).toEqual([100, 150]);
+      expect(byField.proposedStart.map((v) => new Date(v).toISOString())).toEqual([
+        '2026-12-01T09:00:00.000Z', '2026-12-01T08:00:00.000Z',
+      ]);
+      expect((await eventRow(id)).status).toBe('under_review');
+
+      // The read the screens use names the Organiser and the new source.
+      const read = await getEventChangeHistory(id, organiser, 'event_organiser', { client: pgliteSupabaseClient(db) });
+      expect(read.map((e) => [e.field, e.source, e.changedByName])).toContainEqual(
+        ['purpose', 'clarification_amendment', 'Olive Organiser'],
+      );
+    });
+
+    it('SCRUM387_AC7_an_amendment_that_keeps_a_value_writes_no_row_for_it', async () => {
+      // AC7-18: the purpose sent padded but unchanged, as the update trims it.
+      const id = await askedAbout();
+
+      await reply(id, { purpose: `  ${STORED.purpose}  `, expectedAttendance: 150 });
+
+      expect((await history(id)).map((e) => e.field_name)).toEqual(['expectedAttendance']);
+    });
+
+    it('SCRUM387_AC7_a_reply_without_amendments_writes_no_history', async () => {
+      // AC7-19.
+      const id = await askedAbout();
+
+      await reply(id, {});
+
+      expect(await history(id)).toEqual([]);
+      expect((await eventRow(id)).status).toBe('under_review');
+    });
+
+    it('SCRUM387_AC7_a_refused_reply_writes_no_history', async () => {
+      // AC7-20: venueRequirements was not asked about, so 22023 and nothing written.
+      const id = await askedAbout();
+
+      await expectRefused(id, () => reply(id, { purpose: 'Alumni networking', venueRequirements: 'A tiered hall' }), '22023');
+    });
+  });
+
+
   describe('AC8: the Organiser is told', () => {
     it('SCRUM387_AC8_one_notice_to_the_organiser_per_save_with_the_fields_and_reason', async () => {
       // AC8-01, D8.
