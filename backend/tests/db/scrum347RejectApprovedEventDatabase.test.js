@@ -331,6 +331,46 @@ describe('SCRUM-347: reject_approved_event', () => {
     });
   });
 
+  it('SCRUM347_AC7_technical_support_hears_of_reservations_freed_from_an_already_cancelled_request', async () => {
+    const coordinator = await user(ROLE.EVENT_COORDINATOR);
+    const event = await eventWithArrangements(coordinator);
+    // Written directly: a request cancelled with its reservation still held (029).
+    const cancelledRequest = (await one(
+      "insert into equipment_requests (event_request_id, status) values ($1, 'cancelled') returning id",
+      [event.id],
+    )).id;
+    const line = (await one(
+      'insert into equipment_lines (equipment_request_id, equipment_type_id, quantity) values ($1, $2, 1) returning id',
+      [cancelledRequest, equipmentType],
+    )).id;
+    const heldReservation = (await one(
+      `insert into equipment_reservations (equipment_type_id, event_request_id, equipment_line_id, quantity, start_at, end_at)
+       values ($1, $2, $3, 1, $4, $5) returning id`,
+      [equipmentType, event.id, line, event.start, event.end],
+    )).id;
+
+    await reject(event.id, coordinator);
+
+    expect((await one('select released_at from equipment_reservations where id = $1', [heldReservation])).released_at)
+      .not.toBeNull();
+    const told = (await notifications(event.id))
+      .filter((n) => n.audience === 'technical_support_staff')
+      .map((n) => n.payload.equipmentRequestId)
+      .sort();
+    expect(told).toEqual([event.equipmentRequest, cancelledRequest].sort());
+  });
+
+  it('SCRUM347_AC7_an_already_cancelled_request_with_nothing_held_is_not_mentioned', async () => {
+    const coordinator = await user(ROLE.EVENT_COORDINATOR);
+    const event = await eventWithArrangements(coordinator);
+    await one("insert into equipment_requests (event_request_id, status) values ($1, 'cancelled') returning id", [event.id]);
+
+    await reject(event.id, coordinator);
+
+    expect((await notifications(event.id)).filter((n) => n.audience === 'technical_support_staff').map((n) => n.payload.equipmentRequestId))
+      .toEqual([event.equipmentRequest]);
+  });
+
   describe('other events waiting behind a released booking (027)', () => {
     // Another event's request for the slot our approved booking held, marked
     // Conflicting because of it.
