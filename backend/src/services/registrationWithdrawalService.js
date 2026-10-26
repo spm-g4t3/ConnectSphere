@@ -71,4 +71,3 @@ export async function withdrawRegistration({ attendeeId, registrationId, client 
     isFull,
   };
 }
-
