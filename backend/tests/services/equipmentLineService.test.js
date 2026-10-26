@@ -126,10 +126,11 @@ describe('AC2 to AC5: adding a line', () => {
       reserved: 0,
       outcome: null,
       outcomeNote: null,
+      flaggedReservations: [],
       createdAt: '2026-10-08T09:00:00+00:00',
       updatedAt: '2026-10-08T09:00:00+00:00',
     });
-    expect(JSON.stringify(state)).not.toMatch(/equipment_type_id|technical_notes|type_retired|outcome_note/);
+    expect(JSON.stringify(state)).not.toMatch(/equipment_type_id|technical_notes|type_retired|outcome_note|flagged_reservations/);
   });
 
   it('SCRUM290_AC8_carries_reserved_and_the_reviewers_outcome_to_the_coordinator', async () => {
@@ -150,6 +151,125 @@ describe('AC2 to AC5: adding a line', () => {
       reserved: 1,
       outcome: 'cannot_be_provided',
       outcomeNote: 'Only one in stock',
+    });
+  });
+
+  describe('SCRUM-310 (SCRUM-315): flagged reservations on a line', () => {
+    const flag = (overrides = {}) => ({
+      id: '66666666-6666-4666-8666-666666666666',
+      quantity: 2,
+      start_at: '2026-11-01T01:00:00+00:00',
+      end_at: '2026-11-01T03:00:00+00:00',
+      flag_reason: 'Fewer units of this equipment are usable (Dropped)',
+      flag_code: 'equipment_lost',
+      flagged_at: '2026-10-24T08:00:00+00:00',
+      ...overrides,
+    });
+    const read = async (line) => {
+      client = fakeClient({ rpc: { equipment_for_event: ok(stateRow({ lines: [line] })) } });
+      return (await listEventEquipment(EVENT_ID, { client })).request.lines[0];
+    };
+
+    it('SCRUM310_AC5_a_line_carries_each_flagged_reservation_in_camel_case', async () => {
+      const line = await read(lineRow({ flagged_reservations: [flag()] }));
+
+      expect(line.flaggedReservations).toEqual([
+        {
+          id: '66666666-6666-4666-8666-666666666666',
+          quantity: 2,
+          startAt: '2026-11-01T01:00:00+00:00',
+          endAt: '2026-11-01T03:00:00+00:00',
+          reason: 'Fewer units of this equipment are usable (Dropped)',
+          code: 'equipment_lost',
+          flaggedAt: '2026-10-24T08:00:00+00:00',
+        },
+      ]);
+      expect(JSON.stringify(line)).not.toMatch(/start_at|end_at|flag_reason|flag_code|flagged_at|flagged_reservations/);
+    });
+
+    it('SCRUM310_AC5_the_order_the_database_gave_is_kept', async () => {
+      const line = await read(
+        lineRow({ flagged_reservations: [flag({ id: 'a', quantity: 1 }), flag({ id: 'b', quantity: 2 }), flag({ id: 'c', quantity: 3 })] }),
+      );
+
+      expect(line.flaggedReservations.map((r) => r.id)).toEqual(['a', 'b', 'c']);
+    });
+
+    it.each([
+      ['null', null],
+      ['missing', undefined],
+    ])('SCRUM310_AC5_a_flag_whose_code_is_%s_gives_a_null_code', async (_label, flag_code) => {
+      const line = await read(lineRow({ flagged_reservations: [flag({ flag_code })] }));
+
+      expect(line.flaggedReservations[0].code).toBeNull();
+    });
+
+    it('SCRUM310_AC5_the_code_is_passed_on_as_it_was_given', async () => {
+      const line = await read(lineRow({ flagged_reservations: [flag({ flag_code: 'equipment_lost' })] }));
+
+      expect(line.flaggedReservations[0].code).toBe('equipment_lost');
+    });
+
+    it('SCRUM310_AC5_a_flag_without_a_reason_or_a_time_gives_nulls', async () => {
+      const line = await read(lineRow({ flagged_reservations: [flag({ flag_reason: null, flagged_at: null })] }));
+
+      expect(line.flaggedReservations[0].reason).toBeNull();
+      expect(line.flaggedReservations[0].flaggedAt).toBeNull();
+    });
+
+    it('SCRUM310_AC5_a_flag_missing_those_keys_gives_nulls_too', async () => {
+      const bare = flag();
+      delete bare.flag_reason;
+      delete bare.flagged_at;
+
+      const line = await read(lineRow({ flagged_reservations: [bare] }));
+
+      expect(line.flaggedReservations[0].reason).toBeNull();
+      expect(line.flaggedReservations[0].flaggedAt).toBeNull();
+    });
+
+    it('SCRUM310_AC5_a_line_with_none_has_an_empty_list', async () => {
+      expect((await read(lineRow({ flagged_reservations: [] }))).flaggedReservations).toEqual([]);
+    });
+
+    it.each([
+      ['missing', undefined],
+      ['null', null],
+      ['not a list', 'x'],
+      ['an object', { id: 'a' }],
+    ])('SCRUM310_AC5_when_the_answer_is_%s_the_line_has_an_empty_list', async (_label, value) => {
+      const line = await read(lineRow({ flagged_reservations: value }));
+
+      expect(line.flaggedReservations).toEqual([]);
+    });
+
+    it('SCRUM310_AC5_every_line_is_read_on_its_own', async () => {
+      client = fakeClient({
+        rpc: {
+          equipment_for_event: ok(
+            stateRow({
+              lines: [
+                lineRow({ id: 'l1', flagged_reservations: [flag()] }),
+                lineRow({ id: 'l2', flagged_reservations: [] }),
+              ],
+            }),
+          ),
+        },
+      });
+
+      const { request } = await listEventEquipment(EVENT_ID, { client });
+
+      expect(request.lines.map((l) => l.flaggedReservations.length)).toEqual([1, 0]);
+    });
+
+    it('SCRUM310_AC5_a_write_answers_with_the_flags_too', async () => {
+      client = fakeClient({
+        rpc: { add_equipment_line: ok(stateRow({ lines: [lineRow({ flagged_reservations: [flag()] })] })) },
+      });
+
+      const state = await addEquipmentLine(EVENT_ID, { equipmentTypeId: TYPE_ID, quantity: 2 }, COORDINATOR_ID, { client });
+
+      expect(state.request.lines[0].flaggedReservations).toHaveLength(1);
     });
   });
 

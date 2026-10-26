@@ -1070,3 +1070,7 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 @media (max-width: 640px) {
   .pending-bookings__detail dl { grid-template-columns: 1fr; }
 }
+
+/* SCRUM-315: why an event needs attention, under the event. */
+.needs-attention-reasons { background: #fdecea; border-left: 6px solid #c0362c; border-radius: 8px; list-style: none; margin: 8px 0; padding: 8px 12px; }
+.needs-attention-reasons li { overflow-wrap: anywhere; }

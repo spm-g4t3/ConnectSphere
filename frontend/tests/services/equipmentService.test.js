@@ -59,7 +59,7 @@ describe("equipmentService", () => {
     await retireEquipment("a");
     await reinstateEquipment("a");
 
-    expect(apiClient.post).toHaveBeenNthCalledWith(1, "/equipment/a/retire");
+    expect(apiClient.post).toHaveBeenNthCalledWith(1, "/equipment/a/retire", {});
     expect(apiClient.post).toHaveBeenNthCalledWith(2, "/equipment/a/reinstate");
   });
 

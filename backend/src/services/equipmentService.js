@@ -24,16 +24,19 @@
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
-import { createPgTranslator, rejected } from '../http/pgErrors.js';
+import {
+  createPgTranslator, rejected, invalid, forbidden, notFound, hintConflict,
+} from '../http/pgErrors.js';
 import {
   checkCreateEquipmentType,
   checkUpdateEquipmentType,
   checkConditionChange,
+  checkRetire,
   hasField,
   throwIfInvalid,
   validateEquipmentTypeId,
 } from '../validation/equipmentValidation.js';
-import { assertNoOverCommitment } from './equipmentOverCommitment.js';
+import { toAffected } from './equipmentChangePreviewService.js';
 
 const TABLE = 'equipment_types';
 
@@ -50,7 +53,7 @@ const COLUMN_FOR = {
   totalQuantity: 'total_quantity',
 };
 
-const NAME_TAKEN = 'is already used by another equipment type';
+export const NAME_TAKEN = 'is already used by another equipment type';
 
 
 /**
@@ -63,6 +66,12 @@ const NAME_TAKEN = 'is already used by another equipment type';
 const translateError = createPgTranslator({
   codes: {
     '23514': rejected,
+    // apply_equipment_change (021): not Technical Support Staff, no such type,
+    // bad input, and PT409 whose hint is the conflict's code
+    '42501': forbidden,
+    'P0002': notFound('Equipment type not found'),
+    '22023': invalid,
+    'PT409': hintConflict(),
     // last_modified_by names a user who does not exist
     '23503': (detail) => new ValidationError(`The editing user does not exist: ${detail}`),
     '23505': (detail) =>
@@ -153,12 +162,71 @@ function toColumns(value) {
   );
 }
 
+/**
+ * SCRUM-313: the one way a change to a type's quantities or retirement is saved.
+ *
+ * apply_equipment_change locks the type, recalculates which reservations the
+ * change affects, and saves only if that is exactly the list the staff member
+ * confirmed. The change and the "equipment unavailable" flags are written together or
+ * not at all. When the list has moved since the preview nothing is written and
+ * the new list comes back on the error, so the screen can show it again.
+ *
+ * @returns {Promise<{row: object, flaggedCount: number, affected: object[]}>}
+ * @throws {ConflictError} EQUIPMENT_AFFECTED_CHANGED, conflicts being the current list
+ */
+async function applyChange(id, change, userId) {
+  const { data, error } = await supabase.rpc('apply_equipment_change', {
+    p_equipment_type_id: id,
+    p_caller: userId,
+    p_total: change.total ?? null,
+    p_damaged: change.damaged ?? null,
+    p_under_maintenance: change.underMaintenance ?? null,
+    p_retire: change.retire === true,
+    p_fields: change.fields ?? {},
+    p_note: change.note ?? null,
+    p_confirmed_reservation_ids: change.confirmed ?? [],
+  });
+  if (error) throw translateError(error);
+
+  // Anything but the two documented answers means the database and this code
+  // disagree. Reading it as "saved" would tell staff a change happened that may not have.
+  if (data === null || typeof data !== 'object' || typeof data.saved !== 'boolean') {
+    throw new Error('apply_equipment_change did not return a result');
+  }
+
+  if (!data.saved) {
+    if (!Array.isArray(data.affected)) {
+      throw new Error('apply_equipment_change did not return the affected reservations');
+    }
+    throw new ConflictError(
+      'The reservations this change affects are not the ones you confirmed. Please review them again.',
+      { code: 'EQUIPMENT_AFFECTED_CHANGED', conflicts: data.affected.map(toAffected) },
+    );
+  }
+
+  if (data.equipment_type === null || typeof data.equipment_type !== 'object') {
+    throw new Error('apply_equipment_change did not return the saved type');
+  }
+
+  return {
+    row: data.equipment_type,
+    flaggedCount: data.flagged_count ?? 0,
+    affected: (data.affected ?? []).map(toAffected),
+  };
+}
+
+/** The saved type, plus what the change did to reservations. */
+function toChangeResult({ row, flaggedCount, affected }) {
+  return { ...toEquipmentType(row), flaggedCount, flaggedReservations: affected };
+}
+
+
 /** ilike treats % and _ as wildcards; escape them so a name is matched literally. */
 function escapeLike(text) {
   return text.replace(/[\\%_]/g, (character) => `\\${character}`);
 }
 
-async function isNameTaken(name, excludeId = null) {
+export async function isNameTaken(name, excludeId = null) {
   let query = supabase.from(TABLE).select('id').ilike('name', escapeLike(name)).limit(1);
   if (excludeId) query = query.neq('id', excludeId);
 
@@ -221,7 +289,8 @@ export async function createEquipmentType(input, userId = null) {
  * in a retired type's name should still be fixable.
  *
  * @param {string} id
- * @param {object} changes  any of name, description, category, location, totalQuantity
+ * @param {object} changes  any of name, description, category, location, totalQuantity;
+ *   with a totalQuantity also note and confirmedReservationIds (SCRUM-313)
  * @param {string|null} [userId]  who is editing it, recorded in the history
  * @returns {Promise<object>} the updated type
  * @throws {ValidationError} listing every invalid field, or for a malformed id
@@ -253,24 +322,29 @@ export async function updateEquipmentType(id, changes, userId = null) {
   }
   throwIfInvalid(details);
 
-  // AC7: a smaller total can leave fewer usable units than are reserved.
-  if (value.totalQuantity !== undefined) {
-    const usableBefore = usableQuantity(
-      current.total_quantity, current.damaged_quantity, current.under_maintenance_quantity,
+  const { confirmedReservationIds, note, ...edit } = value;
+
+  // A smaller total can leave fewer usable units than are reserved (SCRUM-310).
+  // The whole edit then goes through the confirmed save, so the other fields
+  // save with it or not at all.
+  if (edit.totalQuantity !== undefined) {
+    const { totalQuantity, ...fields } = edit;
+    return toChangeResult(
+      await applyChange(
+        id,
+        { total: totalQuantity, fields: toColumns(fields), note, confirmed: confirmedReservationIds },
+        userId,
+      ),
     );
-    const usableAfter = usableQuantity(
-      value.totalQuantity, current.damaged_quantity, current.under_maintenance_quantity,
-    );
-    if (usableAfter < usableBefore) {
-      await assertNoOverCommitment({ equipmentTypeId: id, usableAfter });
-    }
   }
 
+  // Name, description, category and location can not leave a reservation short.
+  // confirmedReservationIds and note mean nothing without a total and are ignored.
   const { data, error } = await supabase
     .from(TABLE)
     // last_change_note is cleared so a note from an earlier damage or
     // maintenance change can never be attached to a later one.
-    .update({ ...toColumns(value), last_modified_by: userId, last_change_note: null })
+    .update({ ...toColumns(edit), last_modified_by: userId, last_change_note: null })
     .eq('id', id)
     .select(COLUMNS)
     .maybeSingle();
@@ -278,7 +352,7 @@ export async function updateEquipmentType(id, changes, userId = null) {
   if (error) throw translateError(error);
   if (!data) throw new NotFoundError(`Equipment type ${id} not found`);
 
-  return toEquipmentType(data);
+  return { ...toEquipmentType(data), flaggedCount: 0, flaggedReservations: [] };
 }
 
 
@@ -291,18 +365,21 @@ export async function updateEquipmentType(id, changes, userId = null) {
  * handling. Sending the values a type already has is refused: there is
  * nothing to record a note against, and accepting it would lose the note.
  *
- * Damaged plus under maintenance can never exceed the total. When the change
- * would leave fewer usable units than before, the over-commitment hook runs
- * before anything is saved (AC7, SCRUM-310). The note is written with the
- * change, and the history trigger copies it onto the damaged and
- * under-maintenance rows (SCRUM-279).
+ * Damaged plus under maintenance can never exceed the total. The save goes
+ * through apply_equipment_change (SCRUM-313): when the change leaves fewer
+ * usable units, it saves only if confirmedReservationIds is exactly the list of
+ * reservations it affects, and flags those reservations in the same
+ * transaction. The note is written with the change, and the history trigger
+ * copies it onto the history rows (SCRUM-279).
  *
  * @param {string} id
- * @param {object} input  damagedQuantity and/or underMaintenanceQuantity, and note
+ * @param {object} input  damagedQuantity and/or underMaintenanceQuantity, note, and
+ *   confirmedReservationIds (left out means "affects nothing")
  * @param {string|null} [userId]  who is recording it, kept in the history
  * @returns {Promise<object>} the updated type, usableQuantity included
  * @throws {ValidationError} listing every invalid field, or for a malformed id
  * @throws {NotFoundError} when no type has that id
+ * @throws {ConflictError} EQUIPMENT_AFFECTED_CHANGED, conflicts being the current list
  */
 export async function recordEquipmentCondition(id, input, userId = null) {
   validateEquipmentTypeId(id);
@@ -342,32 +419,18 @@ export async function recordEquipmentCondition(id, input, userId = null) {
   }
   throwIfInvalid(details);
 
-  const usableBefore = usableQuantity(
-    current.total_quantity, current.damaged_quantity, current.under_maintenance_quantity,
+  return toChangeResult(
+    await applyChange(
+      id,
+      {
+        damaged: value.damagedQuantity,
+        underMaintenance: value.underMaintenanceQuantity,
+        note: value.note,
+        confirmed: value.confirmedReservationIds,
+      },
+      userId,
+    ),
   );
-  const usableAfter = usableQuantity(current.total_quantity, damaged, underMaintenance);
-  if (usableAfter < usableBefore) {
-    await assertNoOverCommitment({ equipmentTypeId: id, usableAfter });
-  }
-
-  const { data, error } = await supabase
-    .from(TABLE)
-    .update({
-      ...(value.damagedQuantity !== undefined && { damaged_quantity: value.damagedQuantity }),
-      ...(value.underMaintenanceQuantity !== undefined && {
-        under_maintenance_quantity: value.underMaintenanceQuantity,
-      }),
-      last_modified_by: userId,
-      last_change_note: value.note,
-    })
-    .eq('id', id)
-    .select(COLUMNS)
-    .maybeSingle();
-
-  if (error) throw translateError(error);
-  if (!data) throw new NotFoundError(`Equipment type ${id} not found`);
-
-  return toEquipmentType(data);
 }
 
 
@@ -380,45 +443,38 @@ export async function recordEquipmentCondition(id, input, userId = null) {
  * delete, so past events keep their equipment history. A retired type keeps
  * its quantities and can still be edited.
  *
- * Retiring takes every usable unit out of service, so when any are usable the
- * over-commitment hook runs first with usableAfter 0 (AC7, SCRUM-310). The
- * history trigger records retired_at going from empty to a time, with the user.
+ * Retiring takes every usable unit out of service, so it goes through
+ * apply_equipment_change (SCRUM-313) like a damage change: it saves only if
+ * confirmedReservationIds is the list of reservations it leaves short, and
+ * flags them in the same transaction. The history trigger records retired_at
+ * going from empty to a time, with the user.
  *
  * @param {string} id
+ * @param {object} [input]  optional: confirmedReservationIds and note
  * @param {string|null} [userId]  who is retiring it, kept in the history
  * @returns {Promise<object>} the updated type, retiredAt set
  * @throws {ValidationError} for a malformed id
  * @throws {NotFoundError} when no type has that id
- * @throws {ConflictError} EQUIPMENT_ALREADY_RETIRED when it is already retired
+ * @throws {ConflictError} EQUIPMENT_ALREADY_RETIRED when it is already retired, or
+ *   EQUIPMENT_AFFECTED_CHANGED, conflicts being the current list
  */
-export async function retireEquipmentType(id, userId = null) {
+export async function retireEquipmentType(id, input = undefined, userId = null) {
   validateEquipmentTypeId(id);
+
+  const { value, details } = checkRetire(input);
+  throwIfInvalid(details);
 
   const current = await readRow(id);
   if (!current) throw new NotFoundError(`Equipment type ${id} not found`);
   if (current.retired_at) throw alreadyRetired();
 
-  const usableBefore = usableQuantity(
-    current.total_quantity, current.damaged_quantity, current.under_maintenance_quantity,
+  return toChangeResult(
+    await applyChange(
+      id,
+      { retire: true, note: value.note, confirmed: value.confirmedReservationIds },
+      userId,
+    ),
   );
-  if (usableBefore > 0) {
-    await assertNoOverCommitment({ equipmentTypeId: id, usableAfter: 0 });
-  }
-
-  // The retired_at guard means a second writer racing this one is refused
-  // instead of overwriting the first retirement time.
-  const { data, error } = await supabase
-    .from(TABLE)
-    .update({ retired_at: new Date().toISOString(), last_modified_by: userId, last_change_note: null })
-    .eq('id', id)
-    .is('retired_at', null)
-    .select(COLUMNS)
-    .maybeSingle();
-
-  if (error) throw translateError(error);
-  if (!data) throw alreadyRetired();
-
-  return toEquipmentType(data);
 }
 
 

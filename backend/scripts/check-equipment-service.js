@@ -150,6 +150,17 @@ async function main() {
     .insert({ event_request_id: randomUUID(), status: 'bogus' });
   check('an unknown request status refused (22P02)', badStatus.error?.code === '22P02', badStatus.error?.code);
 
+  // A change to the total or a retirement goes through apply_equipment_change, which
+  // only accepts a Technical Support Staff user, so the user is looked up first.
+  const profile = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('role', 'technical_support_staff')
+    .limit(1)
+    .maybeSingle();
+  const actor = profile.data?.id ?? null;
+  check('a technical support user exists to attribute changes to', Boolean(actor));
+
   // --- usable quantity and the total floor, against real rows ----------------
   const marked = await supabase
     .from('equipment_types')
@@ -161,14 +172,14 @@ async function main() {
   const listed = catalogue.find((t) => t.id === type.id);
   check('usable is total minus damaged minus maintenance', listed?.usableQuantity === 7, `got ${listed?.usableQuantity}`);
 
-  const tooLow = await failureOf(updateEquipmentType(type.id, { totalQuantity: 2 }));
+  const tooLow = await failureOf(updateEquipmentType(type.id, { totalQuantity: 2 }, actor));
   check(
     'total below damaged plus maintenance refused with the figure',
     tooLow?.status === 400 && /\(3\)/.test(tooLow.details?.[0]?.message ?? ''),
     tooLow?.message,
   );
 
-  const exact = await updateEquipmentType(type.id, { totalQuantity: 3 });
+  const exact = await updateEquipmentType(type.id, { totalQuantity: 3 }, actor);
   check('total equal to damaged plus maintenance allowed, usable 0', exact.usableQuantity === 0, `got ${exact.usableQuantity}`);
 
   // --- edit: only the fields sent change, and updated_at moves ---------------
@@ -207,15 +218,6 @@ async function main() {
   check('a retired type can still be edited', editedRetired.category === 'Old');
 
   // --- change history (SCRUM-279) -----------------------------------------------
-  const profile = await supabase
-    .from('profiles')
-    .select('id')
-    .eq('role', 'technical_support_staff')
-    .limit(1)
-    .maybeSingle();
-  const actor = profile.data?.id ?? null;
-  check('a technical support user exists to attribute changes to', Boolean(actor));
-
   // --- recording damage and maintenance (SCRUM-277) ------------------------------
   // The type stands at total 3, damaged 2, under maintenance 1 here.
   const lowered = await recordEquipmentCondition(type.id, { damagedQuantity: 1, note: 'lens replaced' }, actor);
@@ -253,12 +255,12 @@ async function main() {
 
   // --- retire and reinstate (SCRUM-278) -----------------------------------------
   const spare = await track({ name: `${PREFIX}_spare`, totalQuantity: 4 });
-  const retiredSpare = await retireEquipmentType(spare.id, actor);
+  const retiredSpare = await retireEquipmentType(spare.id, {}, actor);
   check('retire stamps retiredAt', Boolean(retiredSpare.retiredAt));
   check('a retired type leaves the active list', !(await listActiveEquipmentTypes()).some((t) => t.id === spare.id));
   check('a retired type stays in the full catalogue', (await listEquipmentTypes()).some((t) => t.id === spare.id && t.retiredAt));
 
-  const twice = await failureOf(retireEquipmentType(spare.id, actor));
+  const twice = await failureOf(retireEquipmentType(spare.id, {}, actor));
   check('retiring twice answers 409', twice?.status === 409 && twice.code === 'EQUIPMENT_ALREADY_RETIRED', twice?.message);
 
   const back = await reinstateEquipmentType(spare.id, actor);

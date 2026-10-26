@@ -683,3 +683,146 @@ describe("SCRUM-297: what technical support decided", () => {
     expect(screen.queryByText(/could not arrange/)).not.toBeInTheDocument();
   });
 });
+
+describe("SCRUM-310 (SCRUM-315) AC5: a line with a flagged reservation is marked", () => {
+  const FLAGGED = {
+    id: "66666666-6666-4666-8666-666666666666",
+    quantity: 2,
+    startAt: "2030-12-01T02:00:00Z",
+    endAt: "2030-12-01T04:00:00Z",
+    reason: "Fewer units of this equipment are usable (Dropped)",
+    code: "equipment_lost",
+    flaggedAt: "2026-10-24T08:00:00Z",
+  };
+  const marker = (name) => screen.queryByRole("group", { name: `Equipment unavailable for ${name}` });
+  const anyMarker = () => screen.queryByRole("group", { name: /for Projector$/ });
+
+  it("SCRUM310_AC5_the_line_says_equipment_was_lost_with_the_reason_and_the_period", async () => {
+    getEventEquipment.mockResolvedValue(state({ lines: [line({ flaggedReservations: [FLAGGED] })] }));
+    renderSection({ status: "confirmed" });
+
+    const found = await screen.findByRole("group", { name: "Equipment unavailable for Projector" });
+
+    expect(within(found).getByText("Equipment unavailable")).toBeInTheDocument();
+    expect(within(found).getByText("2 units across 1 reservation flagged for review")).toBeInTheDocument();
+    expect(within(found).getByRole("listitem")).toHaveTextContent(
+      "2 units, Sun, 1 Dec 2030, 10:00 am to 12:00 pm: Fewer units of this equipment are usable (Dropped)",
+    );
+  });
+
+  it("SCRUM310_AC5_only_the_flagged_line_is_marked", async () => {
+    getEventEquipment.mockResolvedValue(
+      state({
+        lines: [
+          line({ flaggedReservations: [FLAGGED] }),
+          line({ id: MIC_LINE, equipmentTypeId: MIC_TYPE, name: "Microphone", flaggedReservations: [] }),
+        ],
+      }),
+    );
+    renderSection({ status: "confirmed" });
+
+    await screen.findByText("Microphone");
+    expect(marker("Projector")).toBeInTheDocument();
+    expect(marker("Microphone")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["an empty list", { flaggedReservations: [] }],
+    ["no key", {}],
+    ["null", { flaggedReservations: null }],
+  ])("SCRUM310_AC5_a_line_with_%s_is_not_marked", async (_label, extra) => {
+    getEventEquipment.mockResolvedValue(state({ lines: [line(extra)] }));
+    renderSection({ status: "confirmed" });
+
+    await screen.findByText("Projector");
+    expect(marker("Projector")).not.toBeInTheDocument();
+    expect(screen.queryByText("Equipment unavailable")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM310_AC5_a_flag_with_no_reason_says_it_was_flagged_for_review", async () => {
+    getEventEquipment.mockResolvedValue(state({ lines: [line({ flaggedReservations: [{ ...FLAGGED, reason: null }] })] }));
+    renderSection({ status: "confirmed" });
+
+    const found = await screen.findByRole("group", { name: "Equipment unavailable for Projector" });
+    expect(within(found).getByRole("listitem")).toHaveTextContent("Flagged for review.");
+  });
+
+  it("SCRUM310_AC5_the_marker_is_there_for_an_event_that_is_still_approved_too", async () => {
+    getEventEquipment.mockResolvedValue(state({ lines: [line({ flaggedReservations: [FLAGGED] })] }));
+    renderSection({ status: "approved" });
+
+    expect(await screen.findByRole("group", { name: "Equipment unavailable for Projector" })).toBeInTheDocument();
+  });
+
+  it("SCRUM310_AC5_every_flagged_reservation_on_the_line_is_listed", async () => {
+    getEventEquipment.mockResolvedValue(
+      state({
+        lines: [
+          line({
+            flaggedReservations: [
+              { ...FLAGGED, id: "a", quantity: 1 },
+              { ...FLAGGED, id: "b", quantity: 3, reason: "The equipment type was retired" },
+            ],
+          }),
+        ],
+      }),
+    );
+    renderSection({ status: "confirmed" });
+
+    const found = await screen.findByRole("group", { name: "Equipment unavailable for Projector" });
+
+    expect(within(found).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(found).getByText("4 units across 2 reservations flagged for review")).toBeInTheDocument();
+    expect(within(found).getByText(/The equipment type was retired/)).toBeInTheDocument();
+  });
+
+  it("SCRUM310_AC5_a_flag_that_is_not_about_lost_equipment_is_called_flagged_for_review", async () => {
+    getEventEquipment.mockResolvedValue(
+      state({
+        lines: [
+          line({ flaggedReservations: [{ ...FLAGGED, code: null, reason: "The event date or time changed" }] }),
+        ],
+      }),
+    );
+    renderSection({ status: "confirmed" });
+
+    const found = await screen.findByRole("group", { name: "Flagged for review for Projector" });
+
+    expect(within(found).getByText("Flagged for review")).toBeInTheDocument();
+    expect(within(found).queryByText("Equipment unavailable")).not.toBeInTheDocument();
+    expect(within(found).getByRole("listitem")).toHaveTextContent("The event date or time changed");
+    expect(marker("Projector")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM310_AC5_a_line_with_a_lost_flag_and_another_flag_is_called_flagged_for_review", async () => {
+    getEventEquipment.mockResolvedValue(
+      state({
+        lines: [
+          line({
+            flaggedReservations: [
+              FLAGGED,
+              { ...FLAGGED, id: "other", code: null, reason: "The event date or time changed" },
+            ],
+          }),
+        ],
+      }),
+    );
+    renderSection({ status: "confirmed" });
+
+    const found = await screen.findByRole("group", { name: "Flagged for review for Projector" });
+
+    expect(within(found).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(found).getByText(/Fewer units of this equipment are usable/)).toBeInTheDocument();
+    expect(anyMarker()).toBe(found);
+  });
+
+  it("SCRUM310_AC5_a_flag_on_one_line_does_not_stop_the_other_lines_actions", async () => {
+    getEventEquipment.mockResolvedValue(
+      state({ lines: [line({ flaggedReservations: [FLAGGED] })] }),
+    );
+    renderSection({ status: "approved" });
+
+    await screen.findByRole("group", { name: "Equipment unavailable for Projector" });
+    expect(screen.getByRole("button", { name: "Edit Projector" })).toBeEnabled();
+  });
+});

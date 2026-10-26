@@ -13,6 +13,7 @@ vi.mock("../../src/services/equipmentService", () => ({
   recordEquipmentCondition: vi.fn(),
   retireEquipment: vi.fn(),
   reinstateEquipment: vi.fn(),
+  previewEquipmentChange: vi.fn(),
   getEquipmentHistory: vi.fn(),
 }));
 
@@ -52,9 +53,15 @@ async function openCatalogue() {
   await screen.findByText("Projector (HD)");
 }
 
+// SCRUM-314: a change is previewed before it is saved. These tests are about the
+// screen's other rules, so by default nothing is affected and the save follows
+// at once (AC7). The confirmation step has its own file, scrum314ConfirmationStep.
+const nothingAffected = { usableBefore: 6, usableAfter: 5, affectedCount: 0, affectedUnits: 0, affected: [] };
+
 beforeEach(() => {
   vi.resetAllMocks();
   service.listEquipment.mockResolvedValue([projector, legacy]);
+  service.previewEquipmentChange.mockResolvedValue(nothingAffected);
 });
 
 
@@ -178,6 +185,8 @@ describe("AC3: editing a type", () => {
 
     expect(await screen.findByRole("heading", { name: "Equipment catalogue" })).toBeInTheDocument();
     expect(service.updateEquipment).toHaveBeenCalledWith("p1", { location: "Store room 2" });
+    // nothing that could leave a reservation short, so nothing to look up first
+    expect(service.previewEquipmentChange).not.toHaveBeenCalled();
   });
 
   it("SCRUM275_AC3_says_so_when_nothing_changed_and_sends_nothing", async () => {
@@ -205,6 +214,7 @@ describe("AC3: editing a type", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByText("Total quantity: can't be below damaged plus under maintenance (2)")).toBeInTheDocument();
+    expect(service.updateEquipment).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -227,7 +237,11 @@ describe("AC4 and AC5: damaged and under-maintenance quantities", () => {
     await user.click(screen.getByRole("button", { name: "Save quantities" }));
 
     expect(await screen.findByRole("heading", { name: "Equipment catalogue" })).toBeInTheDocument();
-    expect(service.recordEquipmentCondition).toHaveBeenCalledWith("p1", { damagedQuantity: 3, note: "dropped" });
+    expect(service.recordEquipmentCondition).toHaveBeenCalledWith("p1", {
+      damagedQuantity: 3,
+      note: "dropped",
+      confirmedReservationIds: [],
+    });
   });
 
   it("SCRUM275_AC4_warns_when_damaged_plus_maintenance_would_exceed_the_total", async () => {
@@ -242,9 +256,8 @@ describe("AC4 and AC5: damaged and under-maintenance quantities", () => {
     expect(screen.getByText("Damaged plus under maintenance is above the total (8).")).toBeInTheDocument();
   });
 
-  it("SCRUM275_AC4_shows_the_backends_error_for_a_missing_note", async () => {
+  it("SCRUM275_AC4_asks_for_a_note_before_looking_anything_up_or_saving", async () => {
     const user = userEvent.setup();
-    service.recordEquipmentCondition.mockRejectedValue(apiError(400, { details: [{ field: "note", message: "is required" }] }));
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Damage and maintenance for Projector (HD)" }));
@@ -254,6 +267,27 @@ describe("AC4 and AC5: damaged and under-maintenance quantities", () => {
     await user.click(screen.getByRole("button", { name: "Save quantities" }));
 
     expect(await screen.findByText("Note: is required")).toBeInTheDocument();
+    expect(service.previewEquipmentChange).not.toHaveBeenCalled();
+    expect(service.recordEquipmentCondition).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM275_AC4_shows_every_error_the_backend_returns_when_saving", async () => {
+    const user = userEvent.setup();
+    service.recordEquipmentCondition.mockRejectedValue(
+      apiError(400, { details: [{ field: "damagedQuantity", message: "must be a whole number" }, { field: "note", message: "is too long" }] }),
+    );
+    await openCatalogue();
+
+    await user.click(screen.getByRole("button", { name: "Damage and maintenance for Projector (HD)" }));
+    const damaged = screen.getByLabelText("Damaged units");
+    await user.clear(damaged);
+    await user.type(damaged, "2");
+    await user.type(screen.getByLabelText("Note"), "x");
+    await user.click(screen.getByRole("button", { name: "Save quantities" }));
+
+    expect(await screen.findByText("Damaged: must be a whole number")).toBeInTheDocument();
+    expect(screen.getByText("Note: is too long")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save quantities" })).toBeEnabled();
   });
 
   it("SCRUM275_AC4_says_so_when_no_quantity_changed_and_sends_nothing", async () => {
@@ -281,7 +315,11 @@ describe("AC4 and AC5: damaged and under-maintenance quantities", () => {
     await user.click(screen.getByRole("button", { name: "Save quantities" }));
 
     await waitFor(() =>
-      expect(service.recordEquipmentCondition).toHaveBeenCalledWith("p1", { damagedQuantity: 0, note: "repaired" }),
+      expect(service.recordEquipmentCondition).toHaveBeenCalledWith("p1", {
+        damagedQuantity: 0,
+        note: "repaired",
+        confirmedReservationIds: [],
+      }),
     );
   });
 });
@@ -297,7 +335,7 @@ describe("AC6: retiring and reinstating", () => {
     expect(service.retireEquipment).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
 
-    await waitFor(() => expect(service.retireEquipment).toHaveBeenCalledWith("p1"));
+    await waitFor(() => expect(service.retireEquipment).toHaveBeenCalledWith("p1", { confirmedReservationIds: [] }));
     await waitFor(() => expect(service.listEquipment).toHaveBeenCalledTimes(2));
   });
 

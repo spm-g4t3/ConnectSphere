@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSchemaDb, returnToLeadQueue, seedEvent, seedUser } from './helpers/schemaDb.js';
 import { queriesFor } from './helpers/queries.js';
-import { asJson } from './helpers/equipment.js';
+import { asJson, applyEquipmentChange } from './helpers/equipment.js';
 
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
@@ -427,7 +427,7 @@ describe('SCRUM-176: equipment notifications in Postgres', () => {
       await reserve(event, line, 2);
       await clear();
 
-      await db.query('update equipment_types set retired_at = now() where id = $1', [type]);
+      await applyEquipmentChange(db, type, techA, { retire: true });
 
       const flagged = await notes(event, 'equipment_flagged');
       const typeName = (await one('select name from equipment_types where id = $1', [type])).name;
@@ -452,7 +452,7 @@ describe('SCRUM-176: equipment notifications in Postgres', () => {
       }
       await clear();
 
-      await db.query('update equipment_types set damaged_quantity = 2, total_quantity = 3 where id = $1', [type]);
+      await applyEquipmentChange(db, type, techA, { total: 1 });
 
       for (const event of [first, second]) {
         const flagged = await notes(event, 'equipment_flagged');
@@ -466,7 +466,7 @@ describe('SCRUM-176: equipment notifications in Postgres', () => {
       await start(event);
       await reserve(event, line, 2);
 
-      await db.query('update equipment_types set retired_at = now() where id = $1', [type]);
+      await applyEquipmentChange(db, type, techA, { retire: true });
 
       const reservation = await one(
         'select flagged, released_at from equipment_reservations where event_request_id = $1',
@@ -479,7 +479,7 @@ describe('SCRUM-176: equipment notifications in Postgres', () => {
       const type = await newType('Spare cable', 10);
       await clear();
 
-      await db.query('update equipment_types set retired_at = now() where id = $1', [type]);
+      await applyEquipmentChange(db, type, techA, { retire: true });
 
       expect(await rows('select 1 from notifications')).toEqual([]);
     });
@@ -495,7 +495,7 @@ describe('SCRUM-176: equipment notifications in Postgres', () => {
       await amend(event, line, 3);
       await start(event);
       await reserve(event, line, 3);
-      await db.query('update equipment_types set retired_at = now() where id = $1', [type]);
+      await applyEquipmentChange(db, type, techA, { retire: true });
       await removeLine(event, line);
 
       const all = await notes(event);
