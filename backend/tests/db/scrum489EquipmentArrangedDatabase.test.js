@@ -246,12 +246,14 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
       const reservation = await one('select id from equipment_reservations where event_request_id = $1', [id]);
       const attendee = await seedUser(db, { email: 'scrum24-attendee@test', role: 'attendee' });
       const venueStaff = await seedUser(db, { email: 'scrum24-venue@test', role: 'venue_staff' });
-      await db.query('insert into event_registrations(event_request_id, attendee_id) values ($1, $2)', [id, attendee]);
+      const { id: registrationId } = await one(
+        'insert into event_registrations(event_request_id, attendee_id) values ($1, $2) returning id', [id, attendee],
+      );
       const read = () => getAttendeeEvent({
         user: { id: attendee, role: 'attendee' }, eventRequestId: id, client: createAttendeeEventSqlClient(db),
       });
       const venueSeen = [{ bookingId: booking.id, name: 'Lifecycle hall', location: 'SMU Level 2', underReview: false }];
-      const unavailable = { eventRequestId: id, state: 'unavailable', eventName: 'IS212 Industry Night' };
+      const unavailable = { eventRequestId: id, registrationId, state: 'unavailable', eventName: 'IS212 Industry Night' };
 
       const { proposed_start: start } = await one('select proposed_start from event_requests where id = $1', [id]);
       expect(await read()).toMatchObject({ state: 'confirmed', venues: venueSeen });
