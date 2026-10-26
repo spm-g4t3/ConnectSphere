@@ -261,7 +261,10 @@ describe('SCRUM460 promotion', () => {
     expect(await promotions()).toEqual([{
       recipient_id: B,
       event_request_id: event,
-      payload: { eventRequestId: event, eventName: 'Waitlist event', registrationId: (await row(B)).id },
+      payload: {
+        eventRequestId: event, eventName: 'Waitlist event', registrationId: (await row(B)).id,
+        waitlistedAt: '2026-10-16T10:01:00.000000Z',
+      },
     }]);
   });
 });

@@ -66,3 +66,28 @@ select recipient_id, count(*) from notifications
 -- leave_event_waitlist(<W1's registration>, <W1>). B waits, then fails with
 -- SQLSTATE 55000, hint ALREADY_REGISTERED: W1 kept the promoted place. Repeat
 -- with A's COMMIT replaced by ROLLBACK: B then succeeds and W1 is withdrawn.
+
+-- SCRUM-474: promotion against direct registration and capacity changes.
+
+-- Race 8, a direct registration against a withdrawal with a queue: capacity 1,
+-- X registered, W1 waiting. Session A withdraws X (sleeping before COMMIT)
+-- while Session B runs register_for_event for newcomer N. B waits for A, then
+-- answers 'capacity_reached': A's promotion gave the place to W1 before B could
+-- count it. One registered row (W1), one registration_promoted notice (W1).
+
+-- Race 9, a direct registration finds a place nobody promoted into: as Race 8,
+-- but close registration (registration_closes_at in the past) before A's
+-- withdrawal, then reopen it (null) in a third session after A commits. Session
+-- B's register_for_event for N promotes W1 first and answers 'capacity_reached'.
+
+-- Race 10, two capacity saves at once: capacity 1, X registered, W1-W3 waiting.
+-- Session A saves capacity 3 (sleeping before COMMIT) while Session B saves
+-- capacity 2. B waits for A, which promoted W1 and W2, then recounts under the
+-- lock and answers outcome 'invalid' ("Cannot be below the 3 attendees already
+-- registered"). Afterwards: capacity 3, exactly X, W1 and W2 registered, W3
+-- waiting, two notices. Reverse the order (B first) and both saves succeed:
+-- capacity 2 promotes W1, then capacity 3 promotes W2.
+
+-- Race 11, a retried promotion: after Race 8, call
+--   select promote_waitlisted_registrations(:'event_id'::uuid);
+-- in both sessions at once. Both return 0; no row or notification changes.

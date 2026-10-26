@@ -160,11 +160,25 @@ as $$
 $$;
 revoke execute on function waitlist_position(event_registrations) from public, anon, authenticated;
 
--- Fills free places from the head of the queue and notifies each promoted
--- attendee. Callers hold the event lock; it is taken again here so the count
--- and the promotion can never see different registered totals. Promotes
--- nobody while registration is closed: the place waits until it reopens.
--- A list switched off still promotes those already on it; it only stops joins.
+-- The one promotion operation. Every path that can free a place calls it:
+-- withdraw_registration (a released place), setup_event_registration (a higher
+-- or removed capacity, or registration reopened), a return to Confirmed (the
+-- trigger below), and register_for_event and join_event_waitlist, which catch
+-- the queue up before allocating so a newcomer never takes a place someone
+-- queued for.
+--
+-- Transaction and locks: it runs inside the caller's transaction (one RPC is
+-- one transaction), so the status change, the queue and the notification
+-- commit or roll back together. Lock order is the event row, then registration
+-- rows, then the notification insert, the same order every registration writer
+-- uses. The event lock is taken again here, a no-op for a caller that holds it,
+-- so a direct call cannot race either.
+--
+-- It is idempotent: free places are recounted from the registered rows each
+-- time, so processing the same release again finds no free place and promotes
+-- nobody. Promotes nobody while registration is closed; the place waits until
+-- it reopens. A list switched off still promotes those already on it; it only
+-- stops joins. Returns how many were promoted.
 
 create or replace function promote_waitlisted_registrations(p_event_request_id uuid)
 returns integer
@@ -195,6 +209,10 @@ begin
     end if;
   end if;
 
+  -- The notification is a row in the same transaction (SCRUM-177's durable
+  -- in-app channel), so a rollback leaves none. One queue entry is identified
+  -- by its registration and waitlisted_at; the unique index makes a second
+  -- notice for the same promotion impossible.
   with next_in_line as (
     select id
       from event_registrations
@@ -207,20 +225,122 @@ begin
        set status = 'registered', registered_at = clock_timestamp()
       from next_in_line n
      where r.id = n.id and r.status = 'waitlisted'
-    returning r.id, r.attendee_id
+    returning r.id, r.attendee_id, r.waitlisted_at
+  ), notified as (
+    insert into notifications (recipient_id, type, event_request_id, payload)
+    select attendee_id, 'registration_promoted', p_event_request_id,
+           jsonb_build_object('eventRequestId', p_event_request_id,
+                              'eventName', v_event.event_name,
+                              'registrationId', id,
+                              -- UTC text, so the duplicate key does not depend on the session's TimeZone.
+                              'waitlistedAt', to_char(waitlisted_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))
+      from promoted
+    on conflict ((payload->>'registrationId'), (payload->>'waitlistedAt'))
+      where type = 'registration_promoted'
+      do nothing
   )
-  insert into notifications (recipient_id, type, event_request_id, payload)
-  select attendee_id, 'registration_promoted', p_event_request_id,
-         jsonb_build_object('eventRequestId', p_event_request_id,
-                            'eventName', v_event.event_name,
-                            'registrationId', id)
-    from promoted;
+  select count(*)::integer into v_promoted from promoted;
 
-  get diagnostics v_promoted = row_count;
   return v_promoted;
 end;
 $$;
 revoke execute on function promote_waitlisted_registrations(uuid) from public, anon, authenticated;
+
+-- A return to Confirmed (after a significant change sent the event back) can
+-- reopen registration without any registration write, so it promotes too. It
+-- runs inside the status change's transaction, which already holds the event row.
+
+create or replace function promote_waitlist_on_confirmation()
+returns trigger
+language plpgsql
+as $$
+begin
+  perform promote_waitlisted_registrations(new.id);
+  return null;
+end;
+$$;
+revoke execute on function promote_waitlist_on_confirmation() from public, anon, authenticated;
+
+drop trigger if exists event_requests_promote_waitlist_on_confirmation on event_requests;
+create trigger event_requests_promote_waitlist_on_confirmation
+  after update of status on event_requests
+  for each row
+  when (new.status::text = 'confirmed' and old.status::text is distinct from 'confirmed')
+  execute function promote_waitlist_on_confirmation();
+
+-- Registering (baseline 08) catches the queue up first: queued attendees take
+-- any free place before a newcomer is counted against capacity. Otherwise as before.
+
+create or replace function register_for_event(p_event_request_id uuid, p_attendee_id uuid)
+returns jsonb
+language plpgsql
+as $$
+declare
+  v_capacity integer;
+  v_count bigint;
+  v_registration event_registrations;
+begin
+  -- This takes the event lock and reads the clock after any wait. Refusals
+  -- reveal no more about an unavailable event than the browse read does.
+  begin
+    perform assert_event_registration_eligible(p_event_request_id, p_attendee_id);
+  exception
+    when no_data_found or object_not_in_prerequisite_state then
+      return jsonb_build_object('outcome', 'not_found');
+    when insufficient_privilege then
+      return jsonb_build_object('outcome', 'forbidden');
+  end;
+
+  perform promote_waitlisted_registrations(p_event_request_id);
+
+  select * into v_registration from event_registrations
+   where event_request_id = p_event_request_id and attendee_id = p_attendee_id for update;
+  if v_registration.status = 'registered' then
+    return jsonb_build_object('outcome', 'already_registered');
+  end if;
+
+  if v_registration.status = 'waitlisted' then
+    return jsonb_build_object('outcome', 'already_waitlisted');
+  end if;
+  if v_registration.status = 'cancelled' then
+    return jsonb_build_object('outcome', 'registration_cancelled');
+  end if;
+
+  select registration_capacity into v_capacity from event_requests where id = p_event_request_id;
+  select count(*) into v_count from event_registrations
+   where event_request_id = p_event_request_id and status = 'registered';
+  if v_capacity is not null and v_count >= v_capacity then
+    return jsonb_build_object('outcome', 'capacity_reached');
+  end if;
+
+  if v_registration.id is not null then
+    update event_registrations set status = 'registered', registered_at = clock_timestamp()
+     where id = v_registration.id and status = 'withdrawn' returning * into v_registration;
+    if not found then
+      return jsonb_build_object('outcome', 'registration_cancelled');
+    end if;
+  else
+    insert into event_registrations (event_request_id, attendee_id)
+    values (p_event_request_id, p_attendee_id)
+    on conflict (event_request_id, attendee_id) do nothing
+    returning * into v_registration;
+    if not found then
+      return jsonb_build_object('outcome', 'already_registered');
+    end if;
+  end if;
+
+  return jsonb_build_object(
+    'outcome', 'registered', 'registeredCount', v_count + 1,
+    'registration', jsonb_build_object(
+      'id', v_registration.id, 'eventRequestId', v_registration.event_request_id,
+      'attendeeId', v_registration.attendee_id, 'status', v_registration.status,
+      'registeredAt', v_registration.registered_at,
+      'createdAt', v_registration.created_at, 'updatedAt', v_registration.updated_at
+    )
+  );
+end;
+$$;
+revoke execute on function register_for_event(uuid, uuid) from public, anon, authenticated;
 
 -- The attendee-facing shape of a waiting-list row, shared by join and its repeat.
 
@@ -265,6 +385,10 @@ begin
     when insufficient_privilege then
       return jsonb_build_object('outcome', 'forbidden');
   end;
+
+  -- Queued attendees take any free place first, so the capacity check below
+  -- sees only places nobody is waiting for.
+  perform promote_waitlisted_registrations(p_event_request_id);
 
   select * into v_registration from event_registrations
    where event_request_id = p_event_request_id and attendee_id = p_attendee_id for update;
@@ -767,6 +891,12 @@ alter table notifications
     'booking_flagged_hours_change',
     'registration_promoted'
   ]));
+
+-- One notice per promotion: a queue entry is its registration and the time it
+-- joined, so a retry cannot notify twice, while a later rejoin is a new entry.
+create unique index if not exists notifications_one_per_registration_promotion
+  on notifications ((payload->>'registrationId'), (payload->>'waitlistedAt'))
+  where type = 'registration_promoted';
 
 alter table notifications drop constraint if exists notifications_registration_promoted_needs_event;
 alter table notifications

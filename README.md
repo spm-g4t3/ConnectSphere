@@ -223,8 +223,22 @@ For SCRUM-473 (join and leave) and SCRUM-474 (promotion) to build on.
 - **Contracts.**
   - `join_event_waitlist(event, attendee)` returns `{ outcome: 'waitlisted', created, registration: { id, eventRequestId, attendeeId, status, waitlistedAt, waitlistPosition, createdAt, updatedAt } }` (`created` is false for a repeat join, whose entry is returned unchanged), or `register_for_event`'s `{ outcome: 'registered', ... }` when a place is free. Otherwise `outcome` is `not_found`, `forbidden`, `already_registered`, `registration_cancelled` or `waitlist_disabled`.
   - `leave_event_waitlist(registration, attendee)` returns `{ outcome: 'left_waitlist', registration }`. It raises P0002 for a missing or someone else's row, 55000/`ALREADY_REGISTERED` once promoted and 55000/`NOT_WAITLISTED` once left.
-  - `promote_waitlisted_registrations(event)` returns the number promoted. It promotes nobody while `registration_closed_reason` is non-null. Call it after any change that frees places, inside the same transaction and after taking the event row lock.
+  - `promote_waitlisted_registrations(event)` returns the number promoted. It promotes nobody while `registration_closed_reason` is non-null. Call it after any change that frees places, inside the same transaction and after taking the event row lock. See "Promotion and locking" below.
   - `event_registration_counts(event, user)` returns `{ eventRequestId, capacity, waitlistEnabled, registeredCount, waitlistCount }`, for the Organiser or assigned Coordinator only.
+
+### Promotion and locking (SCRUM-474)
+
+- **One operation.** `promote_waitlisted_registrations(event)` is the only code that turns `waitlisted` into `registered`. A test checks the function sources so a second one cannot appear unnoticed. It is called by:
+  - `withdraw_registration`, after the place is released;
+  - `setup_event_registration`, after a capacity increase or removal, or registration reopened;
+  - the `event_requests_promote_waitlist_on_confirmation` trigger, when an event returns to Confirmed;
+  - `register_for_event` and `join_event_waitlist`, before they count capacity. A place freed while promotion was blocked (registration closed, or the event briefly not Confirmed) therefore goes to the queue before any newcomer.
+- **What it does.** It recounts free places from the `registered` rows, gives them to the earliest `waitlisted` entries in queue order, and inserts one `registration_promoted` notification per promoted attendee. Each notification goes to the attendee (`recipient_id`) and names the event (`event_request_id`). The payload is `{ eventRequestId, eventName, registrationId, waitlistedAt }`. It does nothing while registration is closed.
+- **Transaction boundary.** One RPC is one transaction. The status change that frees the place, the promotion and the notification commit together or not at all: a rollback leaves no promotion and no notification.
+- **Lock order.** Every writer takes the same locks in the same order: the `event_requests` row (`FOR UPDATE`), then the `event_registrations` rows, then the `notifications` insert. Concurrent withdrawals, joins, departures, registrations, capacity saves and confirmations of one event therefore run one after another, each seeing the last one's committed result, and cannot deadlock on each other. A test checks that every function writing registrations takes the event lock before touching a registration row.
+- **Idempotent.** Free places are recomputed on every call, so processing the same release again promotes nobody. The unique index `notifications_one_per_registration_promotion` on `(payload->>'registrationId', payload->>'waitlistedAt')` refuses a second notice for the same queue entry. `waitlistedAt` is written as UTC text, so the key doesn't depend on the session's time zone. Rejoining later is a new entry and is notified again.
+- **Delivery.** Through SCRUM-177's in-app notifications: `GET /api/notifications` (any signed-in user, scoped to the caller) and the attendee dashboard's inbox, with the wording "You have a place at …", linking to the registered event page. No email channel exists; the requirements accept in-app.
+- **Evidence.** `backend/tests/db/scrum474PromotionDatabase.test.js` (PGlite) covers queue order, counts, gating, the bypass paths, an injected failure after promotion, replays, and the lock-order source checks. PGlite has one connection, so the real two-session races are scripted in `backend/tests/db/eventWaitingListConcurrency.manual.sql` (Races 1-11) for a disposable Postgres.
 
 ### Waiting-list API for the UI (SCRUM-473)
 
