@@ -113,13 +113,11 @@ describe('SCRUM460 joining the waiting list', () => {
   });
 
   it.each([
-    ['the event has places', async () => {}, 'places_available'],
     ['the waiting list is off', async () => {
       await register(A);
       await db.query('update event_requests set registration_waitlist_enabled = false where id = $1', [event]);
     }, 'waitlist_disabled'],
     ['the attendee is registered', async () => { await register(A); }, 'already_registered', A],
-    ['the attendee is already waiting', async () => { await register(A); await join(B); }, 'already_waitlisted'],
     ['registration has closed', async () => { await register(A); await at(START); }, 'not_found'],
     ['the caller is not an attendee', async () => { await register(A); }, 'forbidden', ORGANISER],
   ])('SCRUM460_AC1_refuses_when_%s', async (_case, arrange, outcome, attendee = B) => {
@@ -168,7 +166,7 @@ describe('SCRUM460 seeing and leaving the waiting list', () => {
 
   it.each([
     ["someone else's place", async () => [(await row(B)).id, C], { code: 'P0002' }],
-    ['a registered row', async () => [(await row(A)).id, A], { code: '55000', hint: 'NOT_WAITLISTED' }],
+    ['a registered row', async () => [(await row(A)).id, A], { code: '55000', hint: 'ALREADY_REGISTERED' }],
     ['a caller who is not an attendee', async () => [(await row(B)).id, ORGANISER], { code: '42501' }],
   ])('SCRUM460_AC2_leaving_refuses_%s_and_changes_nothing', async (_case, arrange, expected) => {
     await fullWithQueue();
@@ -329,17 +327,14 @@ describe('SCRUM460 through the API', () => {
   const as = (user) => ({ Authorization: `Bearer ${user}` });
 
   it('SCRUM460_AC1_POST_waitlist_queues_a_full_event_and_explains_refusals', async () => {
-    const early = await request(api).post(`/api/open-events/${event}/waitlist`).set(as(B));
-    expect(early.status).toBe(409);
-    expect(early.body.code).toBe('PLACES_AVAILABLE');
-
     await register(A);
     const joined = await request(api).post(`/api/open-events/${event}/waitlist`).set(as(B));
     expect(joined.status).toBe(201);
     expect(joined.body).toMatchObject({ attendeeId: B, status: 'waitlisted', waitlistPosition: 1 });
 
     const again = await request(api).post(`/api/open-events/${event}/waitlist`).set(as(B));
-    expect(again.body.code).toBe('ALREADY_WAITLISTED');
+    expect(again.status).toBe(200);
+    expect(again.body).toEqual(joined.body);
     const staff = await request(api).post(`/api/open-events/${event}/waitlist`).set(as(ORGANISER));
     expect(staff.status).toBe(403);
   });

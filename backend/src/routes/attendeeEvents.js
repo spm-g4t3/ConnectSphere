@@ -4,7 +4,8 @@ import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
 import { getAttendeeEvent, listAttendeeEvents, listAttendeeWaitlist } from '../services/attendeeEventService.js';
-import { withdrawRegistration, leaveWaitlist } from '../services/registrationWithdrawalService.js';
+import { withdrawRegistration } from '../services/registrationWithdrawalService.js';
+import { leaveWaitlist } from '../services/waitlistDepartureService.js';
 
 const errorMiddleware = createErrorMiddleware('attendee events route');
 
@@ -34,6 +35,7 @@ export function createAttendeeEventRouter({ client, requireAuth = defaultRequire
       attendeeId: req.user.id, registrationId: req.params.registrationId, client,
     }));
   });
+  // Separate from withdrawal: no deadline applies, and only a waitlisted entry qualifies.
   router.post('/registrations/:registrationId/leave-waitlist', createRequireRole(ROLE.ATTENDEE), async (req, res) => {
     res.status(200).json(await leaveWaitlist({
       attendeeId: req.user.id, registrationId: req.params.registrationId, client,

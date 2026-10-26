@@ -222,8 +222,29 @@ end;
 $$;
 revoke execute on function promote_waitlisted_registrations(uuid) from public, anon, authenticated;
 
+-- The attendee-facing shape of a waiting-list row, shared by join and its repeat.
+
+create or replace function waitlist_registration_json(p_registration event_registrations)
+returns jsonb
+language sql
+stable
+as $$
+  select jsonb_build_object(
+    'id', p_registration.id, 'eventRequestId', p_registration.event_request_id,
+    'attendeeId', p_registration.attendee_id, 'status', p_registration.status,
+    'waitlistedAt', p_registration.waitlisted_at,
+    'waitlistPosition', waitlist_position(p_registration),
+    'createdAt', p_registration.created_at, 'updatedAt', p_registration.updated_at
+  );
+$$;
+revoke execute on function waitlist_registration_json(event_registrations) from public, anon, authenticated;
+
 -- Joining. Explicit, never a fallback of register_for_event, so nobody who
--- asked for a place is queued without choosing to be.
+-- asked for a place is queued without choosing to be. The other way round is
+-- safe: a join that finds a free place registers, exactly as register_for_event
+-- would, rather than queueing for a place nobody holds. A repeat join answers
+-- with the entry already held and leaves its queue time alone.
+-- Outcomes: 'waitlisted' (created true or false) or 'registered', else a refusal.
 
 create or replace function join_event_waitlist(p_event_request_id uuid, p_attendee_id uuid)
 returns jsonb
@@ -234,7 +255,8 @@ declare
   v_count bigint;
   v_registration event_registrations;
 begin
-  -- The same eligibility, lock and refusals as register_for_event.
+  -- The same eligibility, event lock and refusals as register_for_event: every
+  -- join, registration, departure and promotion for this event queues here.
   begin
     perform assert_event_registration_eligible(p_event_request_id, p_attendee_id);
   exception
@@ -249,22 +271,25 @@ begin
   if v_registration.status = 'registered' then
     return jsonb_build_object('outcome', 'already_registered');
   end if;
-  if v_registration.status = 'waitlisted' then
-    return jsonb_build_object('outcome', 'already_waitlisted');
-  end if;
   if v_registration.status = 'cancelled' then
     return jsonb_build_object('outcome', 'registration_cancelled');
   end if;
-
-  select * into v_event from event_requests where id = p_event_request_id;
-  if not v_event.registration_waitlist_enabled then
-    return jsonb_build_object('outcome', 'waitlist_disabled');
+  if v_registration.status = 'waitlisted' then
+    return jsonb_build_object(
+      'outcome', 'waitlisted', 'created', false,
+      'registration', waitlist_registration_json(v_registration)
+    );
   end if;
 
+  select * into v_event from event_requests where id = p_event_request_id;
   select count(*) into v_count from event_registrations
    where event_request_id = p_event_request_id and status = 'registered';
   if v_event.registration_capacity is null or v_count < v_event.registration_capacity then
-    return jsonb_build_object('outcome', 'places_available');
+    return register_for_event(p_event_request_id, p_attendee_id);
+  end if;
+
+  if not v_event.registration_waitlist_enabled then
+    return jsonb_build_object('outcome', 'waitlist_disabled');
   end if;
 
   if v_registration.id is not null then
@@ -272,36 +297,29 @@ begin
        set status = 'waitlisted'
      where id = v_registration.id and status = 'withdrawn'
     returning * into v_registration;
-    if not found then
-      return jsonb_build_object('outcome', 'registration_cancelled');
-    end if;
   else
     insert into event_registrations (event_request_id, attendee_id, status)
     values (p_event_request_id, p_attendee_id, 'waitlisted')
     on conflict (event_request_id, attendee_id) do nothing
     returning * into v_registration;
-    if not found then
-      return jsonb_build_object('outcome', 'already_waitlisted');
-    end if;
+  end if;
+  -- Unreachable while every writer takes the event lock first; refused, not
+  -- guessed at, if one ever does not.
+  if v_registration.id is null or v_registration.status is distinct from 'waitlisted' then
+    raise exception 'Registration changed while joining the waiting list' using errcode = '40001';
   end if;
 
   return jsonb_build_object(
-    'outcome', 'waitlisted',
-    'registration', jsonb_build_object(
-      'id', v_registration.id, 'eventRequestId', v_registration.event_request_id,
-      'attendeeId', v_registration.attendee_id, 'status', v_registration.status,
-      'waitlistedAt', v_registration.waitlisted_at,
-      'waitlistPosition', waitlist_position(v_registration),
-      'createdAt', v_registration.created_at, 'updatedAt', v_registration.updated_at
-    )
+    'outcome', 'waitlisted', 'created', true,
+    'registration', waitlist_registration_json(v_registration)
   );
 end;
 $$;
 revoke execute on function join_event_waitlist(uuid, uuid) from public, anon, authenticated;
 
--- Leaving. No deadline or window applies: giving up a queue place takes no
--- place from anyone. The row becomes withdrawn, so the attendee can come back
--- later, at the back of the queue.
+-- Leaving. Not a withdrawal: no deadline, window or event status applies,
+-- because giving up a queue place takes no place from anyone. The row becomes
+-- withdrawn, so the attendee can come back later, at the back of the queue.
 
 create or replace function leave_event_waitlist(p_registration_id uuid, p_attendee_id uuid)
 returns jsonb
@@ -330,7 +348,8 @@ begin
     raise exception 'Registration not found' using errcode = 'P0002';
   end if;
 
-  -- Event before registration, the order every registration writer uses.
+  -- Event before registration, the order every registration writer uses, so a
+  -- departure waits for a promotion in flight and then sees its result.
   perform 1 from event_requests where id = v_event_id for update;
 
   select * into v_registration
@@ -341,7 +360,11 @@ begin
     raise exception 'Registration not found' using errcode = 'P0002';
   end if;
 
-  -- Promoted while this waited for the lock: withdrawing is the way out now.
+  -- Promoted while this waited: withdrawing is the way out now.
+  if v_registration.status = 'registered' then
+    raise exception 'You have been given a place, so you are no longer on the waiting list'
+      using errcode = '55000', hint = 'ALREADY_REGISTERED';
+  end if;
   if v_registration.status is distinct from 'waitlisted' then
     raise exception 'This registration is not on the waiting list'
       using errcode = '55000', hint = 'NOT_WAITLISTED';

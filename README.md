@@ -72,7 +72,7 @@ Registered attendees (SCRUM-24) reach **Registered events** from navigation or t
 
 Registered attendees withdraw (SCRUM-27) from that event page. `POST /api/attendee-events/registrations/:registrationId/withdrawal` takes the attendee from the token and calls `withdraw_registration` (migrations 017 and 018), which locks the event and then the registration, as `register_for_event` does, and sets a `registered` row to `withdrawn`. The row is kept, and the attendee can register again later. Only the attendee's own `registered` row can be withdrawn, only while the event is in one of `ACTIVE_EVENT_STATUSES` and has not started, and only strictly before its withdrawal deadline. Cancelling, rejecting or completing an event leaves its registrations as they were, so the event's status is what refuses them (`EVENT_NOT_ACTIVE`, without naming the status); a start moved before the deadline wins (`EVENT_STARTED`). An event with no deadline refuses every withdrawal (`WITHDRAWAL_DEADLINE_NOT_SET`) until that rule is decided. Someone else's registration answers the same 404 as a missing one. The registered total is derived from `registered` rows, so the status change releases the place; the reply reports `placesLeft` and `isFull`. Concurrent withdrawals and a withdrawal racing a registration are checked by hand with `backend/tests/db/registrationWithdrawalConcurrency.manual.sql`, because PGlite has one connection.
 
-Waiting lists (SCRUM-460, migration 027) are switched on by the Organiser with the other registration settings (`waitlistEnabled`). While a full event's list is on, an Attendee joins it from the event page (`POST /api/open-events/:id/waitlist`, `join_event_waitlist`); joining is never a fallback of registering. My Registrations lists the caller's places and positions (`GET /api/attendee-events/waitlist`), and `POST /api/attendee-events/registrations/:registrationId/leave-waitlist` gives one up (the row becomes `withdrawn`, so the attendee can rejoin at the back). Positions are derived from `waitlisted_at`, never stored. `promote_waitlisted_registrations` hands free places to the longest-waiting attendees and sends each a `registration_promoted` notification. It runs inside `withdraw_registration` and `setup_event_registration` (a higher or removed capacity, or reopened registration), under the event row lock every registration writer takes, so one released place gives exactly one promotion. It promotes nobody while registration is closed. Switching the list off stops new joins but keeps the queue. The Organiser and the assigned Coordinator read the totals from `GET /api/registration/events/:id/counts` (`event_registration_counts`); attendees see only their own position. The two-session races are in `backend/tests/db/eventWaitingListConcurrency.manual.sql`.
+Waiting lists (SCRUM-460, migration 027) are switched on by the Organiser with the other registration settings (`waitlistEnabled`). While a full event's list is on, an Attendee joins it from the event page (`POST /api/open-events/:id/waitlist`, `join_event_waitlist`); joining is never a fallback of registering, but a join that finds a free place registers. My Registrations lists the caller's places and positions (`GET /api/attendee-events/waitlist`), and `POST /api/attendee-events/registrations/:registrationId/leave-waitlist` gives one up (the row becomes `withdrawn`, so the attendee can rejoin at the back). Positions are derived from `waitlisted_at`, never stored. `promote_waitlisted_registrations` hands free places to the longest-waiting attendees and sends each a `registration_promoted` notification. It runs inside `withdraw_registration` and `setup_event_registration` (a higher or removed capacity, or reopened registration), under the event row lock every registration writer takes, so one released place gives exactly one promotion. It promotes nobody while registration is closed. Switching the list off stops new joins but keeps the queue. The Organiser and the assigned Coordinator read the totals from `GET /api/registration/events/:id/counts` (`event_registration_counts`); attendees see only their own position. The two-session races are in `backend/tests/db/eventWaitingListConcurrency.manual.sql`.
 
 Then, from the repository root:
 
@@ -221,10 +221,46 @@ For SCRUM-473 (join and leave) and SCRUM-474 (promotion) to build on.
 - **Indexes.** `idx_event_registrations_waitlist (event_request_id, waitlisted_at, id) where status = 'waitlisted'` serves queue order, positions and promotion. `idx_event_registrations_attendee_waitlist (attendee_id, waitlisted_at desc) where status = 'waitlisted'` serves an attendee's own list.
 - **Setting.** `event_requests.registration_waitlist_enabled`, default `false`: an event has no waiting list until its Organiser turns one on. It is changed only through `setup_event_registration`'s last argument, `p_waitlist_enabled` (null keeps the saved value), with the same Organiser-only checks and audit history as the other settings. The API field is `waitlistEnabled` on `PUT /api/registration/events/:id/settings`. Switching it off stops joins only.
 - **Contracts.**
-  - `join_event_waitlist(event, attendee)` returns `{ outcome: 'waitlisted', registration: { id, eventRequestId, attendeeId, status, waitlistedAt, waitlistPosition, createdAt, updatedAt } }`. Otherwise `outcome` is `not_found`, `forbidden`, `already_registered`, `already_waitlisted`, `registration_cancelled`, `waitlist_disabled` or `places_available`.
-  - `leave_event_waitlist(registration, attendee)` returns `{ outcome: 'left_waitlist', registration }`. It raises P0002 for a missing or someone else's row and 55000/`NOT_WAITLISTED` once promoted.
+  - `join_event_waitlist(event, attendee)` returns `{ outcome: 'waitlisted', created, registration: { id, eventRequestId, attendeeId, status, waitlistedAt, waitlistPosition, createdAt, updatedAt } }` (`created` is false for a repeat join, whose entry is returned unchanged), or `register_for_event`'s `{ outcome: 'registered', ... }` when a place is free. Otherwise `outcome` is `not_found`, `forbidden`, `already_registered`, `registration_cancelled` or `waitlist_disabled`.
+  - `leave_event_waitlist(registration, attendee)` returns `{ outcome: 'left_waitlist', registration }`. It raises P0002 for a missing or someone else's row, 55000/`ALREADY_REGISTERED` once promoted and 55000/`NOT_WAITLISTED` once left.
   - `promote_waitlisted_registrations(event)` returns the number promoted. It promotes nobody while `registration_closed_reason` is non-null. Call it after any change that frees places, inside the same transaction and after taking the event row lock.
   - `event_registration_counts(event, user)` returns `{ eventRequestId, capacity, waitlistEnabled, registeredCount, waitlistCount }`, for the Organiser or assigned Coordinator only.
+
+### Waiting-list API for the UI (SCRUM-473)
+
+All three need `Authorization: Bearer <token>` for an Attendee, take no body, and answer `Cache-Control: no-store`. The attendee is always the token's user, never a parameter. Errors are `{ error, code?, details? }`, as elsewhere in the API.
+
+**`POST /api/open-events/:eventId/waitlist`**: join.
+
+| Status | Body | When |
+|---|---|---|
+| 201 | `{ id, eventRequestId, attendeeId, status: "waitlisted", waitlistPosition, waitlistedAt, createdAt, updatedAt }` | Queued. `waitlistPosition` is 1-based and current. |
+| 201 | `{ id, eventRequestId, attendeeId, status: "registered", waitlistPosition: null, registeredAt, createdAt, updatedAt }` | A place was free, so the attendee was registered as `POST .../registrations` would. Show the status, not the button the attendee pressed. |
+| 200 | as the waitlisted 201 | A repeat join: the same entry, with its queue time and position unchanged. |
+| 400 | `details[].field` is `eventId` | Malformed event id. |
+| 401 / 403 | | No valid token / not an Attendee. |
+| 404 | `error: "This event is not open for registration"` | Missing, not Confirmed, registration off, not yet open, closed or started: the same checks and answer as registering. |
+| 409 | `code: "WAITLIST_DISABLED"`, `error: "Event is full and has no waiting list"` | Full, and the Organiser has not turned the list on. |
+| 409 | `code: "ALREADY_REGISTERED"` or `"REGISTRATION_CANCELLED"` | Already holds a place, or the registration is cancelled for good. |
+| 409 | `code: "REGISTRATION_CHANGED"` | A concurrent change; safe to retry. |
+| 503 | | Registration is temporarily unavailable. |
+
+**`POST /api/attendee-events/registrations/:registrationId/leave-waitlist`**: leave. This is not a withdrawal: no withdrawal deadline, registration window or event start applies. The entry becomes `withdrawn`, everyone behind moves up one place, and the registered count does not change.
+
+| Status | Body | When |
+|---|---|---|
+| 200 | `{ id, eventRequestId, attendeeId, status: "withdrawn", createdAt, updatedAt }` | Left. |
+| 400 | `error: "Invalid waiting-list request"` | Malformed id. |
+| 401 / 403 | | No valid token / not an Attendee. |
+| 404 | `error: "Waiting-list entry not found"` | Missing, or someone else's (the two are indistinguishable). |
+| 409 | `code: "ALREADY_REGISTERED"` | Promoted before the request arrived. The place is kept; withdrawing is the way out. |
+| 409 | `code: "NOT_WAITLISTED"` | Already left, or not a waiting-list entry. |
+| 409 | `code: "REGISTRATION_CHANGED"` | A concurrent change; safe to retry. |
+| 503 | `error: "Waiting lists are temporarily unavailable. Please try again later."` | |
+
+**`GET /api/attendee-events/waitlist`**: the caller's entries, newest first: `[{ registrationId, eventRequestId, eventName, waitlistPosition, waitlistedAt }]`.
+
+Withdrawing (`.../withdrawal`) still refuses a waitlisted entry (`REGISTRATION_NOT_CONFIRMED`), and leaving refuses a registered one, so neither endpoint acts on the other's entries. Joins, departures, registrations and promotions are serialised by the event row lock in the database, never by the client or the API process. `backend/tests/db/eventWaitingListConcurrency.manual.sql` covers the two-session races.
 
 
 ## Development workflow

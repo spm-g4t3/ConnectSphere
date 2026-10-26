@@ -2,6 +2,7 @@ import {
   validateRegistrationIdentity, translateRegistrationEligibilityError,
 } from './registrationEligibilityService.js';
 import { resolveClientIfMissing } from '../config/resolveClient.js';
+import { REGISTRATION_STATUS } from '../domain/registrationStatus.js';
 
 // The outcomes register_for_event and join_event_waitlist refuse with, as the
 // errors translateRegistrationEligibilityError turns into HTTP answers.
@@ -14,8 +15,7 @@ const REFUSALS = {
   already_registered: { code: '55000', hint: 'ALREADY_REGISTERED', message: 'Already registered' },
   already_waitlisted: { code: '55000', hint: 'ALREADY_WAITLISTED', message: 'Already on the waiting list' },
   registration_cancelled: { code: '55000', hint: 'REGISTRATION_CANCELLED', message: 'This registration was cancelled and cannot be reactivated.' },
-  waitlist_disabled: { code: '55000', hint: 'WAITLIST_DISABLED', message: 'This event has no waiting list' },
-  places_available: { code: '55000', hint: 'PLACES_AVAILABLE', message: 'Places are still available, so register instead' },
+  waitlist_disabled: { code: '55000', hint: 'WAITLIST_DISABLED', message: 'Event is full and has no waiting list' },
 };
 
 /**
@@ -48,9 +48,15 @@ export async function registerForEvent({ attendeeId, eventId, client } = {}) {
   };
 }
 
+
 /**
- * Joins the waiting list of a full event. Like registering, one RPC checks
- * eligibility, locks the event, checks it is still full and writes.
+ * Joins a full event's waiting list. One RPC checks eligibility, locks the
+ * event and decides: a free place registers the attendee as registerForEvent
+ * would, a full event with a list queues them, and a repeat join returns the
+ * entry already held. `created` is false only for that repeat.
+ *
+ * @returns {Promise<{ created: boolean, registration: object }>} registration
+ *   carries the authoritative status and waitlistPosition (null when registered)
  */
 export async function joinEventWaitlist({ attendeeId, eventId, client } = {}) {
   validateRegistrationIdentity({ attendeeId, eventId });
@@ -61,19 +67,38 @@ export async function joinEventWaitlist({ attendeeId, eventId, client } = {}) {
   });
   if (error) throw translateRegistrationEligibilityError(error);
   if (Object.hasOwn(REFUSALS, data?.outcome)) throw translateRegistrationEligibilityError(REFUSALS[data.outcome]);
-  if (data?.outcome !== 'waitlisted' || !data.registration?.id || !Number.isInteger(data.registration.waitlistPosition)) {
+
+  const row = data?.registration;
+  if (data?.outcome === 'registered' && row?.id) {
+    return {
+      created: true,
+      registration: {
+        id: row.id,
+        eventRequestId: row.eventRequestId,
+        attendeeId: row.attendeeId,
+        status: REGISTRATION_STATUS.REGISTERED,
+        waitlistPosition: null,
+        registeredAt: row.registeredAt,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      },
+    };
+  }
+  if (data?.outcome !== 'waitlisted' || !row?.id || !Number.isInteger(row.waitlistPosition)
+      || typeof data.created !== 'boolean') {
     throw new Error('Unexpected outcome from join_event_waitlist');
   }
-
-  const row = data.registration;
   return {
-    id: row.id,
-    eventRequestId: row.eventRequestId,
-    attendeeId: row.attendeeId,
-    status: row.status,
-    waitlistPosition: row.waitlistPosition,
-    waitlistedAt: row.waitlistedAt,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    created: data.created,
+    registration: {
+      id: row.id,
+      eventRequestId: row.eventRequestId,
+      attendeeId: row.attendeeId,
+      status: REGISTRATION_STATUS.WAITLISTED,
+      waitlistPosition: row.waitlistPosition,
+      waitlistedAt: row.waitlistedAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    },
   };
 }

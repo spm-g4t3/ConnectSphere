@@ -12,8 +12,8 @@ const CONFLICT_MESSAGES = {
   REGISTRATION_DISABLED: "Registration is disabled for this event.",
   EVENT_STARTED: "Registration is closed because the event has started.",
   REGISTRATION_DATES_MISSING: "Registration dates have not been configured for this event.",
-  PLACES_AVAILABLE: "A place is available, so you can register instead of joining the waiting list.",
-  WAITLIST_DISABLED: "This event does not have a waiting list.",
+  WAITLIST_DISABLED: "This event is full and does not have a waiting list.",
+  REGISTRATION_CANCELLED: "This registration was cancelled and cannot be reactivated.",
 };
 
 /** Null leaves the existing refreshed-event/generic fallback to explain the failure. */

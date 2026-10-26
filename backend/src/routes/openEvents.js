@@ -46,13 +46,14 @@ export function createOpenEventRouter({
   });
 
   router.post('/:id/waitlist', attendeeOnly, async (req, res) => {
-    const registration = await joinEventWaitlist({
+    const { created, registration } = await joinEventWaitlist({
       attendeeId: req.user.id,
       eventId: req.params.id,
       client,
     });
     res.set('Cache-Control', 'no-store');
-    res.status(201).json(registration);
+    // 200 for a repeat join: nothing new was created, the entry is unchanged.
+    res.status(created ? 201 : 200).json(registration);
   });
 
   // The caller is always req.user.id. No-store: eligibility changes with the

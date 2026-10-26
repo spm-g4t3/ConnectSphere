@@ -12,6 +12,7 @@ import useOpenEventRead from "./useOpenEventRead";
 import OpenEventAvailability, { RegisteredBadge } from "./OpenEventAvailability";
 import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
+import { REGISTRATION_STATUS } from "../services/registrationStatus";
 import {
   EVENT_TIME_NOTE,
   formatEventDate,
@@ -240,7 +241,12 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
       return;
     }
 
-    if (joined) {
+    // A place that freed up meanwhile is taken by registering, so the answer
+    // can be either status; the server's, not the button's, is reported.
+    if (joined?.status === REGISTRATION_STATUS.REGISTERED) {
+      setRegisteredEventId(startedOn);
+      setNotice(`A place was available, so you are registered for ${name}.`);
+    } else if (joined) {
       setNotice(`You are on the waiting list for ${name} at position ${joined.waitlistPosition}.`);
     } else {
       setRegisterError(registrationErrorMessage(failure) ?? GENERIC_WAITLIST_MESSAGE);

@@ -15,8 +15,11 @@ function leaveFailureMessage(error) {
   if (response?.status === 401) return SESSION_EXPIRED;
   if (response?.status === 404) return "This waiting-list place could not be found. It may already have been removed.";
   // Promoted while the request was on its way: the place is now a registration.
-  if (response?.status === 409 && response.data?.code === "NOT_WAITLISTED") {
+  if (response?.status === 409 && response.data?.code === "ALREADY_REGISTERED") {
     return "You have been given a place at this event, so you are no longer on its waiting list.";
+  }
+  if (response?.status === 409 && response.data?.code === "NOT_WAITLISTED") {
+    return "You are no longer on this waiting list.";
   }
   if (error?.code === "ERR_NETWORK") return "Could not reach the server. You are still on the waiting list.";
   return "You could not leave the waiting list. You are still on it; please try again.";
@@ -41,7 +44,7 @@ function WaitingListPlace({ place, onLeft, onPromoted }) {
       setConfirming(false);
       // Promoted: the registrations list gains the event. This list is left as
       // it is, so the explanation stays on screen until the next refresh.
-      if (err?.response?.data?.code === "NOT_WAITLISTED") onPromoted?.();
+      if (err?.response?.data?.code === "ALREADY_REGISTERED") onPromoted?.();
     } finally {
       sending.current = false;
       setSubmitting(false);

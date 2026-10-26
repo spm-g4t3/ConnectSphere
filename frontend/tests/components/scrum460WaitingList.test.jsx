@@ -88,13 +88,12 @@ describe("SCRUM460 joining from the event page", () => {
   it("SCRUM460_AC1_a_refusal_is_explained", async () => {
     vi.mocked(getOpenEvent).mockResolvedValueOnce(fullEvent())
       .mockResolvedValueOnce(fullEvent({ isFull: false, placesLeft: 1, canRegister: true, canJoinWaitlist: false }));
-    const onJoinWaitlist = vi.fn().mockRejectedValue({ response: { status: 409, data: { code: "PLACES_AVAILABLE" } } });
+    const onJoinWaitlist = vi.fn().mockRejectedValue({ response: { status: 409, data: { code: "WAITLIST_DISABLED" } } });
     renderDetails(onJoinWaitlist);
 
     fireEvent.click(await screen.findByRole("button", { name: "Join waiting list" }));
 
-    expect(await screen.findByText("A place is available, so you can register instead of joining the waiting list."))
-      .toBeInTheDocument();
+    expect(await screen.findByText("This event is full and does not have a waiting list.")).toBeInTheDocument();
   });
 });
 
@@ -147,6 +146,34 @@ describe("SCRUM460 joining: one attempt, for the event on screen", () => {
   });
 });
 
+describe("SCRUM473 the join answer decides what the page says", () => {
+  it("SCRUM473_AC4_a_place_that_freed_up_registers_the_attendee", async () => {
+    vi.mocked(getOpenEvent).mockResolvedValueOnce(fullEvent())
+      .mockResolvedValueOnce(fullEvent({ isRegistered: true, canJoinWaitlist: false }));
+    renderDetails(vi.fn().mockResolvedValue({ status: "registered", waitlistPosition: null }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Join waiting list" }));
+
+    expect(await screen.findByText("A place was available, so you are registered for Open Day.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Already registered" })).toBeDisabled();
+  });
+
+  it("SCRUM473_AC10_leaving_an_entry_already_left_says_so", async () => {
+    vi.mocked(getWaitlist).mockResolvedValue([
+      { registrationId: "r1", eventRequestId: "e1", eventName: "Open Day", waitlistPosition: 1 },
+    ]);
+    vi.mocked(leaveWaitlist).mockRejectedValue({ response: { status: 409, data: { code: "NOT_WAITLISTED" } } });
+    const onChanged = vi.fn();
+    render(<WaitingListPlaces onChanged={onChanged} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Leave waiting list" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm leaving" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("You are no longer on this waiting list.");
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+});
+
 describe("SCRUM460 waiting lists in My Registrations", () => {
   const place = { registrationId: "r1", eventRequestId: "e1", eventName: "Open Day", waitlistPosition: 3 };
 
@@ -168,7 +195,7 @@ describe("SCRUM460 waiting lists in My Registrations", () => {
 
   it("SCRUM460_AC2_a_promotion_in_flight_is_explained_and_refreshes_registrations", async () => {
     vi.mocked(getWaitlist).mockResolvedValue([place]);
-    vi.mocked(leaveWaitlist).mockRejectedValue({ response: { status: 409, data: { code: "NOT_WAITLISTED" } } });
+    vi.mocked(leaveWaitlist).mockRejectedValue({ response: { status: 409, data: { code: "ALREADY_REGISTERED" } } });
     const onChanged = vi.fn();
     render(<WaitingListPlaces onChanged={onChanged} />);
 

@@ -150,7 +150,7 @@ describe('SCRUM472 one entry per attendee and event', () => {
     await register(A);
     await join(B);
     expect(await join(A)).toEqual({ outcome: 'already_registered' });
-    expect(await join(B)).toEqual({ outcome: 'already_waitlisted' });
+    expect(await join(B)).toMatchObject({ outcome: 'waitlisted', created: false });
     expect(await register(B)).toEqual({ outcome: 'already_waitlisted' });
     expect((await one('select count(*)::int as n from event_registrations where event_request_id = $1', [event])).n).toBe(2);
   });

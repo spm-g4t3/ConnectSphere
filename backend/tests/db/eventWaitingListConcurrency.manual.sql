@@ -45,5 +45,24 @@ select recipient_id, count(*) from notifications
 
 -- Race 4, a join against a withdrawal: with the event full and nobody waiting,
 -- Session A withdraws X (sleeping before COMMIT) while Session B runs
--- join_event_waitlist for W3. B waits, then answers "places_available": the
--- place A released was not handed to anyone because the queue was empty.
+-- join_event_waitlist for W3. B waits, then answers outcome 'registered': the
+-- place A released went to nobody (the queue was empty), so W3 took it the
+-- normal way instead of queueing. Never more registered rows than the capacity.
+
+-- SCRUM-473: joins and departures. \set event_id, a full event with its list
+-- on, and attendees W3 and W4 with no entry yet (\set attendee_w3, attendee_w4).
+
+-- Race 5, the same attendee joining twice (a double click or a retry):
+-- Session A: begin; select join_event_waitlist(:'event_id'::uuid, :'attendee_w3'::uuid); select pg_sleep(15); commit;
+-- Session B: select join_event_waitlist(:'event_id'::uuid, :'attendee_w3'::uuid);
+-- B waits for A's event lock, then answers outcome 'waitlisted', created false,
+-- with A's entry and position. One row for W3; its waitlisted_at is A's.
+
+-- Race 6, two attendees joining at once: as Race 5 with W3 in A and W4 in B.
+-- Both are waitlisted; W3 is position n and W4 n + 1, never the same position.
+
+-- Race 7, leaving while a promotion runs: with W1 first in the queue, Session A
+-- withdraws a registered attendee (sleeping before COMMIT) while Session B runs
+-- leave_event_waitlist(<W1's registration>, <W1>). B waits, then fails with
+-- SQLSTATE 55000, hint ALREADY_REGISTERED: W1 kept the promoted place. Repeat
+-- with A's COMMIT replaced by ROLLBACK: B then succeeds and W1 is withdrawn.
