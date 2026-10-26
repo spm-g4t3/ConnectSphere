@@ -226,6 +226,20 @@ For SCRUM-473 (join and leave) and SCRUM-474 (promotion) to build on.
   - `promote_waitlisted_registrations(event)` returns the number promoted. It promotes nobody while `registration_closed_reason` is non-null. Call it after any change that frees places, inside the same transaction and after taking the event row lock. See "Promotion and locking" below.
   - `event_registration_counts(event, user)` returns `{ eventRequestId, capacity, waitlistEnabled, registeredCount, waitlistCount }`, for the Organiser or assigned Coordinator only.
 
+### Checking the waiting list by hand (SCRUM-475)
+
+Use a local or disposable database, never the shared Supabase project, with migration 027 applied. You need one Organiser, the event's assigned Coordinator, a second Coordinator and three Attendees (A, B, C), and one Confirmed event that the Organiser owns.
+
+1. **Switch the list on.** As the Organiser, open My Events → Registration for the event and choose Configure registration. Turn registration on, set the opening time in the past and capacity 1, tick "Waiting list is on", and save. The summary shows Waiting list: On and Waitlisted: 0.
+2. **Fill the event.** As A, open Browse Open Events, then the event, and choose Register. It shows "Already registered".
+3. **Join.** As B, open the event. It shows Full and "Join waiting list". Choose it. The button reads "Joining..." and is disabled, then the page says "You are on the waiting list for … at position 1", the button changes to a disabled "On the waiting list", and Availability shows "Waitlisted: position 1". Join as C the same way; C sees position 2.
+4. **See the position.** As C, open Registered events. Under Waiting lists, the event shows "Waitlisted: position 2". In Browse Open Events, the event's row shows the same badge.
+5. **Leave.** As B, open Registered events and choose Leave waiting list, then Confirm leaving. It shows "Leaving...", then "You have left the waiting list for …", and the entry disappears. Switch to C's tab (or refocus it): C now shows position 1.
+6. **Promotion.** Have B join again (B is now behind C). As A, open the event under Registered events and withdraw. Then return to C's tab: the event has moved from Waiting lists to the registered list, C's notifications show "You have a place at …", and its link opens the event page. B now shows position 1.
+7. **Free place.** As the Organiser, raise the capacity to 3 and save. B is promoted (Waitlisted: 0 in the summary). A new attendee who opens the event now sees Register, not Join.
+8. **Staff counts.** As the assigned Coordinator, open the event's review page: the Registrations panel shows Registered and Waitlisted. As the second Coordinator, `GET /api/registration/events/:id/counts` answers 403, and the panel does not appear.
+9. **List off.** As the Organiser, untick the waiting list and fill the event. A new attendee sees "This event is full." and no Join button. Anyone already waiting stays queued.
+
 ### Promotion and locking (SCRUM-474)
 
 - **One operation.** `promote_waitlisted_registrations(event)` is the only code that turns `waitlisted` into `registered`. A test checks the function sources so a second one cannot appear unnoticed. It is called by:

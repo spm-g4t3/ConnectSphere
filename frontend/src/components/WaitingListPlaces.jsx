@@ -3,6 +3,7 @@ import { getWaitlist, leaveWaitlist } from "../services/attendeeEventService";
 import useOpenEventRead from "./useOpenEventRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { SESSION_EXPIRED } from "../services/apiErrors";
+import { WaitlistedBadge } from "./OpenEventAvailability";
 
 const MESSAGES = {
   401: SESSION_EXPIRED,
@@ -38,7 +39,7 @@ function WaitingListPlace({ place, onLeft, onPromoted }) {
     setFailure(null);
     try {
       await leaveWaitlist(place.registrationId);
-      onLeft();
+      onLeft(place);
     } catch (err) {
       setFailure(leaveFailureMessage(err));
       setConfirming(false);
@@ -54,7 +55,7 @@ function WaitingListPlace({ place, onLeft, onPromoted }) {
   return (
     <li>
       <strong>{place.eventName || "Unnamed event"}</strong>{" "}
-      <span>Position {place.waitlistPosition} on the waiting list</span>
+      <WaitlistedBadge position={place.waitlistPosition} />
       {failure && <p className="browse-open-events__error" role="alert">{failure}</p>}
       {confirming ? (
         <div className="event-venue-bookings__actions">
@@ -75,15 +76,22 @@ function WaitingListPlace({ place, onLeft, onPromoted }) {
   );
 }
 
-/** The attendee's waiting-list places. onChanged tells the page a list may have moved. */
+/**
+ * The attendee's waiting-list places. Positions are the server's: after a
+ * departure the list is read again rather than renumbered here, and it is read
+ * again on return to the tab, which is when a promotion moves an event from
+ * here to the registered list. onChanged tells the page a list may have moved.
+ */
 export default function WaitingListPlaces({ onChanged }) {
   const { data, loading, error, refreshFailed, load } = useOpenEventRead(getWaitlist, {
     messages: MESSAGES, fallback: FALLBACK,
   });
   const places = data ?? [];
+  const [notice, setNotice] = useState(null);
   useRefetchOnReturn(load);
 
-  function handleLeft() {
+  function handleLeft(place) {
+    setNotice(`You have left the waiting list for ${place.eventName || "this event"}.`);
     load();
     onChanged?.();
   }
@@ -91,6 +99,7 @@ export default function WaitingListPlaces({ onChanged }) {
   return (
     <section aria-labelledby="waiting-lists-heading">
       <h2 id="waiting-lists-heading">Waiting lists</h2>
+      {notice && <p className="browse-event-details__success" role="status">{notice}</p>}
       {loading && <p>Loading waiting lists...</p>}
       {(error || refreshFailed) && (
         <div className="browse-open-events__error" role="alert">

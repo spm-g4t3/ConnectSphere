@@ -9,7 +9,7 @@ import { getOpenEvent } from "../services/openEventService";
 import { registrationErrorMessage, EVENT_FULL_MESSAGE, REGISTRATION_UNAVAILABLE_MESSAGE } from "../services/registrationErrors";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import useOpenEventRead from "./useOpenEventRead";
-import OpenEventAvailability, { RegisteredBadge } from "./OpenEventAvailability";
+import OpenEventAvailability, { RegisteredBadge, WaitlistedBadge } from "./OpenEventAvailability";
 import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
 import { REGISTRATION_STATUS } from "../services/registrationStatus";
@@ -327,6 +327,9 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
                     </span>
                   ) : <OpenEventAvailability event={event} />}
                   {isRegistered && <RegisteredBadge />}
+                  {!isRegistered && event.waitlistPosition != null && (
+                    <WaitlistedBadge position={event.waitlistPosition} />
+                  )}
                 </dd>
               </div>
             </dl>

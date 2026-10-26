@@ -183,12 +183,13 @@ describe("SCRUM460 waiting lists in My Registrations", () => {
     const onChanged = vi.fn();
     render(<WaitingListPlaces onChanged={onChanged} />);
 
-    expect(await screen.findByText("Position 3 on the waiting list")).toBeInTheDocument();
+    expect(await screen.findByText("Waitlisted: position 3")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Leave waiting list" }));
     expect(leaveWaitlist).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Confirm leaving" }));
 
     await waitFor(() => expect(leaveWaitlist).toHaveBeenCalledWith("r1"));
+    expect(await screen.findByRole("status")).toHaveTextContent("You have left the waiting list for Open Day.");
     expect(await screen.findByText("You are not on any waiting lists.")).toBeInTheDocument();
     expect(onChanged).toHaveBeenCalled();
   });
