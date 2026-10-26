@@ -62,6 +62,8 @@ import SignificantEventChangePanel from "./SignificantEventChangePanel";
 import SafetyCheckSubmissionPanel from "./SafetyCheckSubmissionPanel";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import EventConfirmationPanel from "./EventConfirmationPanel";
+import RegistrationCounts from "./RegistrationCounts";
+import { isRegistrationConfigurable } from "../services/registrationStatuses";
 import {
   decideEventRequest,
   getCoordinatorChangeRequests,
@@ -546,6 +548,10 @@ export default function CoordinatorRequestDetail({
             return onChangeRequestProcessed?.();
           }}
         />
+      )}
+      {/* SCRUM-460 AC6: the assigned Coordinator sees the waiting-list count. */}
+      {isAssignedCoordinator && isRegistrationConfigurable(current.status) && (
+        <RegistrationCounts eventId={current.id} />
       )}
       {isAssignedCoordinator && [
         "approved",

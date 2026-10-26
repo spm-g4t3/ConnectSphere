@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { apiClient } from "../../src/services/apiClient";
-import { registerForEvent } from "../../src/services/registrationService";
+import { joinWaitlist, registerForEvent } from "../../src/services/registrationService";
 
 vi.mock("../../src/services/apiClient", () => ({ apiClient: { post: vi.fn() } }));
 beforeEach(() => { vi.mocked(apiClient.post).mockReset(); });
@@ -23,5 +23,14 @@ describe("SCRUM36 registration API service", () => {
     const error = { response: { status: 409, data: { error: "Event is full", code: "EVENT_FULL" } } };
     vi.mocked(apiClient.post).mockRejectedValue(error);
     await expect(registerForEvent("e1")).rejects.toBe(error);
+  });
+});
+
+describe("SCRUM460 waiting-list API service", () => {
+  it("SCRUM460_AC1_posts_to_the_events_waiting_list_and_returns_the_place", async () => {
+    const place = { id: "r1", status: "waitlisted", waitlistPosition: 1 };
+    vi.mocked(apiClient.post).mockResolvedValue({ data: place });
+    await expect(joinWaitlist("a/b")).resolves.toBe(place);
+    expect(apiClient.post).toHaveBeenCalledExactlyOnceWith("/open-events/a%2Fb/waitlist");
   });
 });

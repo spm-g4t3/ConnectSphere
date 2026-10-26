@@ -1178,6 +1178,8 @@ const FIXTURES = {
   equipment_flagged: { eventName: "Tech Talk", reason: "Retired" },
   // SCRUM-494 (091).
   registration_schedule_conflict: { eventName: "Tech Talk", fields: ["registrationClosesAt"] },
+  // SCRUM-460 (027).
+  registration_promoted: { eventName: "Tech Talk" },
 };
 
 describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", () => {
@@ -1226,5 +1228,15 @@ describe("describeNotification: fallbacks for sparse payloads", () => {
     expect(detail).toContain("The request for Unknown venue");
     expect(detail).toContain("Coordinator's reason: No reason recorded.");
     expect(`${headline} ${detail}`).not.toContain("undefined");
+  });
+});
+
+describe("describeNotification: registration_promoted (SCRUM-460 AC5)", () => {
+  it("SCRUM460_AC5_tells_the_attendee_they_now_have_a_place", () => {
+    expect(describeNotification({ id: "n1", type: "registration_promoted", payload: { eventName: "Tech Talk" } }))
+      .toMatchObject({
+        headline: "You have a place at Tech Talk",
+        detail: "A place opened and you were first on the waiting list, so you are now registered.",
+      });
   });
 });

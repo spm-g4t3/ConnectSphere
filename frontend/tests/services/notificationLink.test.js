@@ -131,3 +131,11 @@ describe("SCRUM494_AC7 a start that moved before the registration dates", () => 
     });
   });
 });
+
+describe("SCRUM460 promotion notifications", () => {
+  it("SCRUM460_AC5_a_promotion_opens_the_attendees_event_page", () => {
+    expect(notificationLink({ type: "registration_promoted", eventRequestId: "e1" }, "attendee"))
+      .toEqual({ to: "/registered-events/e1" });
+    expect(notificationLink({ type: "event_significant_change_attendee", eventRequestId: "e1" }, "attendee")).toBeNull();
+  });
+});

@@ -3,8 +3,8 @@ import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js'
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
-import { getAttendeeEvent, listAttendeeEvents } from '../services/attendeeEventService.js';
-import { withdrawRegistration } from '../services/registrationWithdrawalService.js';
+import { getAttendeeEvent, listAttendeeEvents, listAttendeeWaitlist } from '../services/attendeeEventService.js';
+import { withdrawRegistration, leaveWaitlist } from '../services/registrationWithdrawalService.js';
 
 const errorMiddleware = createErrorMiddleware('attendee events route');
 
@@ -19,6 +19,10 @@ export function createAttendeeEventRouter({ client, requireAuth = defaultRequire
   router.get('/', createRequireRole(ROLE.ATTENDEE), async (req, res) => {
     res.status(200).json(await listAttendeeEvents({ user: req.user, client }));
   });
+  // Before /:id, which would otherwise read "waitlist" as an event id.
+  router.get('/waitlist', createRequireRole(ROLE.ATTENDEE), async (req, res) => {
+    res.status(200).json(await listAttendeeWaitlist({ user: req.user, client }));
+  });
   router.get('/:id', createRequireRole(ROLE.ATTENDEE), async (req, res) => {
     res.status(200).json(await getAttendeeEvent({
       user: req.user, eventRequestId: req.params.id, client,
@@ -27,6 +31,11 @@ export function createAttendeeEventRouter({ client, requireAuth = defaultRequire
   // The attendee is always req.user.id; eligibility is decided in SQL, never here.
   router.post('/registrations/:registrationId/withdrawal', createRequireRole(ROLE.ATTENDEE), async (req, res) => {
     res.status(200).json(await withdrawRegistration({
+      attendeeId: req.user.id, registrationId: req.params.registrationId, client,
+    }));
+  });
+  router.post('/registrations/:registrationId/leave-waitlist', createRequireRole(ROLE.ATTENDEE), async (req, res) => {
+    res.status(200).json(await leaveWaitlist({
       attendeeId: req.user.id, registrationId: req.params.registrationId, client,
     }));
   });

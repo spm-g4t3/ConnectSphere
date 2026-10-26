@@ -4,6 +4,7 @@ import { attendeeEventPath } from "../services/attendeeEventRoutes";
 import useOpenEventRead from "./useOpenEventRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { SESSION_EXPIRED } from "../services/apiErrors";
+import WaitingListPlaces from "./WaitingListPlaces";
 
 const MESSAGES = {
   401: SESSION_EXPIRED,
@@ -36,6 +37,7 @@ export default function RegisteredEvents() {
           ))}</ul> : <p>You have no active event registrations.</p>
         )}
       </section>
+      <WaitingListPlaces onChanged={load} />
     </>
   );
 }

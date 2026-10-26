@@ -98,7 +98,7 @@ describe('SCRUM22 one registration table', () => {
     expect(functions).toEqual({ count: 1, definer: false });
     expect(await one("select prosecdef from pg_proc where proname = 'setup_event_registration'"))
       .toEqual({ prosecdef: false });
-    expect(await clientsCanExecute(db, 'setup_event_registration(uuid,uuid,boolean,timestamptz,timestamptz,integer,timestamptz)'))
+    expect(await clientsCanExecute(db, 'setup_event_registration(uuid,uuid,boolean,timestamptz,timestamptz,integer,timestamptz,boolean)'))
       .toEqual([]);
   });
 

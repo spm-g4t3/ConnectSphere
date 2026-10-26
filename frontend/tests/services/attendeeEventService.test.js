@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiClient } from "../../src/services/apiClient";
-import { getRegisteredEvents, getAttendeeEvent, withdrawRegistration } from "../../src/services/attendeeEventService";
+import {
+  getRegisteredEvents, getAttendeeEvent, withdrawRegistration, getWaitlist, leaveWaitlist,
+} from "../../src/services/attendeeEventService";
 import { withdrawalFailure } from "../../src/services/withdrawalErrors";
 import { httpError } from "../helpers/async.js";
 import { REGISTERED_EVENTS_PATH, ATTENDEE_EVENT_ROUTE, attendeeEventPath } from "../../src/services/attendeeEventRoutes";
@@ -82,5 +84,21 @@ describe("SCRUM-27 withdrawal service", () => {
   it("SCRUM27_AC7_never_says_whether_a_missing_registration_belongs_to_someone_else", () => {
     expect(withdrawalFailure(httpError(404, { error: "anything" })))
       .toEqual(withdrawalFailure(httpError(404, { error: "Registration not found" })));
+  });
+});
+
+describe("SCRUM460 waiting-list service", () => {
+  it("SCRUM460_AC2_reads_the_attendees_own_waiting_list", async () => {
+    const rows = [{ registrationId: "r1", eventRequestId: "e1", waitlistPosition: 2 }];
+    vi.mocked(apiClient.get).mockResolvedValue({ data: rows });
+    await expect(getWaitlist()).resolves.toBe(rows);
+    expect(apiClient.get).toHaveBeenCalledExactlyOnceWith("/attendee-events/waitlist");
+  });
+
+  it("SCRUM460_AC2_leaves_by_registration_id_encoded", async () => {
+    const data = { id: "r1", status: "withdrawn" };
+    vi.mocked(apiClient.post).mockResolvedValue({ data });
+    await expect(leaveWaitlist("a/b")).resolves.toBe(data);
+    expect(apiClient.post).toHaveBeenCalledExactlyOnceWith("/attendee-events/registrations/a%2Fb/leave-waitlist");
   });
 });

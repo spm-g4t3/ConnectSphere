@@ -8,7 +8,7 @@ import { registerForEvent } from "../../src/services/registrationService";
 
 vi.mock("../../src/auth/AuthContext", async () => (await import("../helpers/authMock.js")).authContextMock());
 vi.mock("../../src/services/openEventService", () => ({ getOpenEvent: vi.fn(), getOpenEvents: vi.fn() }));
-vi.mock("../../src/services/registrationService", () => ({ registerForEvent: vi.fn() }));
+vi.mock("../../src/services/registrationService", () => ({ registerForEvent: vi.fn(), joinWaitlist: vi.fn() }));
 
 const event = (overrides = {}) => ({
   id: "e1", eventName: "Open Day", description: "Come along",

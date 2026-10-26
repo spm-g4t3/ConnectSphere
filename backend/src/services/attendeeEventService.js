@@ -5,8 +5,9 @@ import { UnauthorizedError, ForbiddenError, ValidationError, NotFoundError, Serv
 import { SCHEMA_MISSING_CODES } from '../http/pgErrors.js';
 import { resolveClientIfMissing } from '../config/resolveClient.js';
 import { isPlausibleId } from '../validation/ids.js';
+import { REGISTRATION_STATUS } from '../domain/registrationStatus.js';
 
-const REGISTERED = 'registered';
+const REGISTERED = REGISTRATION_STATUS.REGISTERED;
 // PGRST200 too: these reads embed event_requests, bookings and venues, and a
 // missing relationship between them is the schema's fault, not the caller's.
 const SCHEMA_ERRORS = [...SCHEMA_MISSING_CODES, 'PGRST200'];
@@ -109,4 +110,20 @@ export async function listAttendeeEvents({ user, client } = {}) {
     if (page.length < PAGE_SIZE) break;
   }
   return events;
+}
+
+/** The caller's own waiting-list places, newest first, each with its position. */
+export async function listAttendeeWaitlist({ user, client } = {}) {
+  const attendeeId = attendeeIdentity(user);
+  const db = await resolveClientIfMissing(client);
+  const { data, error } = await db.rpc('list_attendee_waitlist', { p_attendee_id: attendeeId });
+  if (error?.code === '42501') throw new ForbiddenError('This action is restricted to Attendees');
+  checkReadError(error);
+  return (data ?? []).map(row => ({
+    registrationId: row.registration_id,
+    eventRequestId: row.event_request_id,
+    eventName: row.event_name ?? null,
+    waitlistPosition: Number(row.waitlist_position),
+    waitlistedAt: row.waitlisted_at,
+  }));
 }

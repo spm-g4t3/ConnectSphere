@@ -12,3 +12,12 @@ export async function getAttendeeEvent(eventId) {
 export async function withdrawRegistration(registrationId) {
   return postData(`/attendee-events/registrations/${encodeURIComponent(registrationId)}/withdrawal`);
 }
+
+/** The attendee's own waiting-list places, each with its position. */
+export async function getWaitlist() {
+  return getData("/attendee-events/waitlist");
+}
+
+export async function leaveWaitlist(registrationId) {
+  return postData(`/attendee-events/registrations/${encodeURIComponent(registrationId)}/leave-waitlist`);
+}

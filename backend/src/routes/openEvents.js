@@ -1,5 +1,6 @@
 /**
- * GET / and /:id browse events; POST /:id/registrations uses the atomic RPC.
+ * GET / and /:id browse events; POST /:id/registrations and /:id/waitlist use
+ * the atomic RPCs.
  * Attendee only: the role comes from profiles via requireAuth, never the request.
  * A factory over an injected client and clock so tests need no credentials.
  */
@@ -10,7 +11,7 @@ import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
 import { listOpenEvents, getOpenEvent } from '../services/openEventService.js';
-import { registerForEvent } from '../services/registrationService.js';
+import { registerForEvent, joinEventWaitlist } from '../services/registrationService.js';
 
 const errorMiddleware = createErrorMiddleware('open events route');
 
@@ -36,6 +37,16 @@ export function createOpenEventRouter({
 
   router.post('/:id/registrations', attendeeOnly, async (req, res) => {
     const registration = await registerForEvent({
+      attendeeId: req.user.id,
+      eventId: req.params.id,
+      client,
+    });
+    res.set('Cache-Control', 'no-store');
+    res.status(201).json(registration);
+  });
+
+  router.post('/:id/waitlist', attendeeOnly, async (req, res) => {
+    const registration = await joinEventWaitlist({
       attendeeId: req.user.id,
       eventId: req.params.id,
       client,

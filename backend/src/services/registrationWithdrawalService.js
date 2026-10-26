@@ -71,3 +71,30 @@ export async function withdrawRegistration({ attendeeId, registrationId, client 
     isFull,
   };
 }
+
+/**
+ * Leaves the waiting list. The same identity rules and refusals as a withdrawal;
+ * a place promoted while the request was in flight answers NOT_WAITLISTED.
+ */
+export async function leaveWaitlist({ attendeeId, registrationId, client } = {}) {
+  validateWithdrawalIdentity({ attendeeId, registrationId });
+  const db = await resolveClientIfMissing(client);
+  const { data, error } = await db.rpc('leave_event_waitlist', {
+    p_registration_id: registrationId.trim().toLowerCase(),
+    p_attendee_id: attendeeId.trim().toLowerCase(),
+  });
+  if (error) throw translateWithdrawalError(error);
+  if (data?.outcome !== 'left_waitlist' || !data.registration?.id) {
+    throw new Error('Unexpected outcome from leave_event_waitlist');
+  }
+
+  const row = data.registration;
+  return {
+    id: row.id,
+    eventRequestId: row.eventRequestId,
+    attendeeId: row.attendeeId,
+    status: row.status,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}

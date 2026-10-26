@@ -3,6 +3,21 @@ import {
 } from './registrationEligibilityService.js';
 import { resolveClientIfMissing } from '../config/resolveClient.js';
 
+// The outcomes register_for_event and join_event_waitlist refuse with, as the
+// errors translateRegistrationEligibilityError turns into HTTP answers.
+const REFUSALS = {
+  not_found: { code: 'P0002' },
+  event_not_confirmed: { code: 'P0002' },
+  registration_closed: { code: 'P0002' },
+  forbidden: { code: '42501', message: 'This action is restricted to Attendees' },
+  capacity_reached: { code: '55000', hint: 'EVENT_FULL', message: 'Event is full' },
+  already_registered: { code: '55000', hint: 'ALREADY_REGISTERED', message: 'Already registered' },
+  already_waitlisted: { code: '55000', hint: 'ALREADY_WAITLISTED', message: 'Already on the waiting list' },
+  registration_cancelled: { code: '55000', hint: 'REGISTRATION_CANCELLED', message: 'This registration was cancelled and cannot be reactivated.' },
+  waitlist_disabled: { code: '55000', hint: 'WAITLIST_DISABLED', message: 'This event has no waiting list' },
+  places_available: { code: '55000', hint: 'PLACES_AVAILABLE', message: 'Places are still available, so register instead' },
+};
+
 /**
  * attendeeId must come from requireAuth's req.user.id in an Attendee-only route.
  * One RPC revalidates eligibility, locks the event, checks capacity and inserts;
@@ -16,17 +31,7 @@ export async function registerForEvent({ attendeeId, eventId, client } = {}) {
     p_attendee_id: attendeeId,
   });
   if (error) throw translateRegistrationEligibilityError(error);
-  const refusal = {
-    not_found: { code: 'P0002' },
-    event_not_confirmed: { code: 'P0002' },
-    registration_closed: { code: 'P0002' },
-    forbidden: { code: '42501', message: 'This action is restricted to Attendees' },
-    capacity_reached: { code: '55000', hint: 'EVENT_FULL', message: 'Event is full' },
-    already_registered: { code: '55000', hint: 'ALREADY_REGISTERED', message: 'Already registered' },
-    already_waitlisted: { code: '55000', hint: 'ALREADY_WAITLISTED', message: 'Already on the waiting list' },
-    registration_cancelled: { code: '55000', hint: 'REGISTRATION_CANCELLED', message: 'This registration was cancelled and cannot be reactivated.' },
-  };
-  if (Object.hasOwn(refusal, data?.outcome)) throw translateRegistrationEligibilityError(refusal[data.outcome]);
+  if (Object.hasOwn(REFUSALS, data?.outcome)) throw translateRegistrationEligibilityError(REFUSALS[data.outcome]);
   if (data?.outcome !== 'registered' || !data.registration?.id) {
     throw new Error('Unexpected outcome from register_for_event');
   }
@@ -40,5 +45,35 @@ export async function registerForEvent({ attendeeId, eventId, client } = {}) {
     createdAt: row.createdAt ?? row.created_at ?? row.registeredAt,
     updatedAt: row.updatedAt ?? row.updated_at ?? row.registeredAt,
     ...(row.registeredAt != null ? { registeredAt: row.registeredAt } : {}),
+  };
+}
+
+/**
+ * Joins the waiting list of a full event. Like registering, one RPC checks
+ * eligibility, locks the event, checks it is still full and writes.
+ */
+export async function joinEventWaitlist({ attendeeId, eventId, client } = {}) {
+  validateRegistrationIdentity({ attendeeId, eventId });
+  const db = await resolveClientIfMissing(client);
+  const { data, error } = await db.rpc('join_event_waitlist', {
+    p_event_request_id: eventId,
+    p_attendee_id: attendeeId,
+  });
+  if (error) throw translateRegistrationEligibilityError(error);
+  if (Object.hasOwn(REFUSALS, data?.outcome)) throw translateRegistrationEligibilityError(REFUSALS[data.outcome]);
+  if (data?.outcome !== 'waitlisted' || !data.registration?.id || !Number.isInteger(data.registration.waitlistPosition)) {
+    throw new Error('Unexpected outcome from join_event_waitlist');
+  }
+
+  const row = data.registration;
+  return {
+    id: row.id,
+    eventRequestId: row.eventRequestId,
+    attendeeId: row.attendeeId,
+    status: row.status,
+    waitlistPosition: row.waitlistPosition,
+    waitlistedAt: row.waitlistedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
