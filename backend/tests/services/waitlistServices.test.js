@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { joinEventWaitlist } from '../../src/services/registrationService.js';
 import { leaveWaitlist } from '../../src/services/waitlistDepartureService.js';
+import { getRegistrationCounts } from '../../src/services/eventRegistrationService.js';
 
 const ATTENDEE = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const EVENT = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -58,5 +59,22 @@ describe('SCRUM473 leaving: the departure errors are its own', () => {
     const db = client({ data: { outcome: 'left_waitlist', registration: { id: ENTRY, status: 'withdrawn' } }, error: null });
     await leaveWaitlist({ attendeeId: ` ${ATTENDEE.toUpperCase()} `, registrationId: ENTRY.toUpperCase(), client: db });
     expect(db.rpc).toHaveBeenCalledWith('leave_event_waitlist', { p_registration_id: ENTRY, p_attendee_id: ATTENDEE });
+  });
+});
+
+describe('SCRUM477 the staff count read', () => {
+  const counting = (error) => getRegistrationCounts(EVENT, ATTENDEE, { client: client({ data: null, error }) });
+
+  it.each([
+    [{ code: 'PGRST202' }, { status: 503 }],
+    [{ code: '42501', message: 'Only the event\'s Organiser or assigned Coordinator can view its registrations' }, { status: 403 }],
+    [{ code: 'P0002' }, { status: 404 }],
+  ])('SCRUM477_AC6_database_failure_%j_is_explained', async (error, expected) => {
+    await expect(counting(error)).rejects.toMatchObject(expected);
+  });
+
+  it('SCRUM477_AC6_an_untyped_failure_is_left_for_the_route_to_log', async () => {
+    const failure = { code: 'XX000', message: 'boom' };
+    await expect(counting(failure)).rejects.toBe(failure);
   });
 });

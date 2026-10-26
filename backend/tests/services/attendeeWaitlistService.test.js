@@ -9,12 +9,12 @@ const client = (result) => ({ rpc: vi.fn().mockResolvedValue(result) });
 describe('SCRUM460 the attendee waiting-list read', () => {
   it('SCRUM460_AC2_maps_each_place_with_its_numeric_position_for_the_token_attendee', async () => {
     const db = client({ data: [
-      { registration_id: 'r1', event_request_id: 'e1', event_name: 'Open Day', waitlist_position: '2', waitlisted_at: 't1' },
-      { registration_id: 'r2', event_request_id: 'e2', event_name: null, waitlist_position: 1, waitlisted_at: 't2' },
+      { registration_id: 'r1', event_request_id: 'e1', event_name: 'Open Day', waitlist_position: '2', waitlisted_at: 't1', places_offered: true },
+      { registration_id: 'r2', event_request_id: 'e2', event_name: null, waitlist_position: 1, waitlisted_at: 't2', places_offered: false },
     ], error: null });
     await expect(listAttendeeWaitlist({ user, client: db })).resolves.toEqual([
-      { registrationId: 'r1', eventRequestId: 'e1', eventName: 'Open Day', waitlistPosition: 2, waitlistedAt: 't1' },
-      { registrationId: 'r2', eventRequestId: 'e2', eventName: null, waitlistPosition: 1, waitlistedAt: 't2' },
+      { registrationId: 'r1', eventRequestId: 'e1', eventName: 'Open Day', waitlistPosition: 2, waitlistedAt: 't1', placesOffered: true },
+      { registrationId: 'r2', eventRequestId: 'e2', eventName: null, waitlistPosition: 1, waitlistedAt: 't2', placesOffered: false },
     ]);
     expect(db.rpc).toHaveBeenCalledWith('list_attendee_waitlist', { p_attendee_id: ATTENDEE });
   });

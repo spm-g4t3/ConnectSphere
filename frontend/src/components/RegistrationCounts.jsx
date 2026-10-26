@@ -1,21 +1,31 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getRegistrationCounts } from "../services/eventRegistrationService";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 /**
  * Registered and waitlisted totals for the event's assigned Coordinator. The
- * backend decides who may read them; a refusal simply hides the panel.
+ * backend decides who may read them; a refusal simply hides the panel. Read
+ * again on return to the tab, like the attendee's lists, so promotions and
+ * departures made meanwhile show.
  */
 export default function RegistrationCounts({ eventId }) {
   const [counts, setCounts] = useState(null);
   const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let active = true;
     getRegistrationCounts(eventId)
-      .then((data) => { if (active) setCounts(data); })
+      .then((data) => {
+        if (!active) return;
+        setCounts(data);
+        setFailed(false);
+      })
       .catch((error) => { if (active && error?.response?.status !== 403) setFailed(true); });
     return () => { active = false; };
   }, [eventId]);
+
+  useEffect(() => load(), [load]);
+  useRefetchOnReturn(load);
 
   if (failed) return <p role="alert">Registration numbers could not be loaded.</p>;
   if (!counts) return null;

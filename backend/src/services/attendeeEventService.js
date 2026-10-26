@@ -125,5 +125,6 @@ export async function listAttendeeWaitlist({ user, client } = {}) {
     eventName: row.event_name ?? null,
     waitlistPosition: Number(row.waitlist_position),
     waitlistedAt: row.waitlisted_at,
+    placesOffered: row.places_offered === true,
   }));
 }

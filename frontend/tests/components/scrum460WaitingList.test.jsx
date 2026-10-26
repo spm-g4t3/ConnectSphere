@@ -221,6 +221,32 @@ describe("SCRUM460 waiting-list count for staff", () => {
     expect(getRegistrationCounts).toHaveBeenCalledWith("e1");
   });
 
+  it("SCRUM477_AC6_the_coordinator_panel_reads_again_on_return_and_hides_on_a_refusal", async () => {
+    vi.mocked(getRegistrationCounts)
+      .mockResolvedValueOnce({ eventRequestId: "e1", capacity: 2, waitlistEnabled: true, registeredCount: 2, waitlistCount: 3 })
+      .mockResolvedValueOnce({ eventRequestId: "e1", capacity: 2, waitlistEnabled: true, registeredCount: 2, waitlistCount: 1 });
+    render(<RegistrationCounts eventId="e1" />);
+    const panel = await screen.findByRole("region", { name: "Registrations" });
+    expect(within(panel).getByText("3")).toBeInTheDocument();
+
+    window.dispatchEvent(new Event("focus"));
+
+    expect(await within(panel).findByText("1")).toBeInTheDocument();
+    expect(getRegistrationCounts).toHaveBeenCalledTimes(2);
+  });
+
+  it("SCRUM477_AC6_a_refused_count_shows_nothing_and_another_failure_says_so", async () => {
+    vi.mocked(getRegistrationCounts).mockRejectedValueOnce({ response: { status: 403 } });
+    const { container, unmount } = render(<RegistrationCounts eventId="e1" />);
+    await waitFor(() => expect(getRegistrationCounts).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+    unmount();
+
+    vi.mocked(getRegistrationCounts).mockRejectedValueOnce({ response: { status: 500 } });
+    render(<RegistrationCounts eventId="e1" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Registration numbers could not be loaded.");
+  });
+
   it("SCRUM460_AC6_the_organiser_sees_the_count_and_switches_the_list_on", async () => {
     const settings = {
       enabled: true, opensAt: "2030-01-01T09:00:00.000Z", closesAt: null, capacity: 80,

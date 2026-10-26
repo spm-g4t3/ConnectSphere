@@ -103,6 +103,20 @@ describe("SCRUM475 My Registrations", () => {
     expect(screen.getByRole("button", { name: "Leave waiting list" })).toBeEnabled();
   });
 
+  it("SCRUM477_AC2_a_place_that_cannot_move_says_why_and_keeps_the_leave_action", async () => {
+    vi.mocked(getRegisteredEvents).mockResolvedValue([]);
+    vi.mocked(getWaitlist).mockResolvedValue([
+      place({ placesOffered: false }),
+      place({ registrationId: "r2", eventName: "Gala", placesOffered: true }),
+    ]);
+    renderMyRegistrations();
+
+    const items = await screen.findAllByRole("listitem");
+    expect(items[0]).toHaveTextContent("Registration for this event is closed, so no places are being offered.");
+    expect(within(items[0]).getByRole("button", { name: "Leave waiting list" })).toBeEnabled();
+    expect(items[1]).not.toHaveTextContent("no places are being offered");
+  });
+
   it("SCRUM475_AC2_keeping_the_place_sends_nothing", async () => {
     vi.mocked(getRegisteredEvents).mockResolvedValue([]);
     vi.mocked(getWaitlist).mockResolvedValue([place()]);

@@ -2,8 +2,10 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  ServiceUnavailableError,
   ValidationError,
 } from '../errors.js';
+import { SCHEMA_MISSING_CODES } from '../http/pgErrors.js';
 import { resolveClient } from '../config/resolveClient.js';
 import { isPlausibleId } from '../validation/ids.js';
 import { getStatusDisplay, getOrganiserStatusLabel } from '../domain/eventRequestStatus.js';
@@ -195,6 +197,10 @@ export async function getRegistrationCounts(eventRequestId, userId, { client } =
   });
   if (error?.code === 'P0002') throw new NotFoundError('Event not found.');
   if (error?.code === '42501') throw new ForbiddenError(error.message);
+  // An unapplied migration is an outage, as for the attendee registration reads.
+  if (SCHEMA_MISSING_CODES.includes(error?.code)) {
+    throw new ServiceUnavailableError('Registration numbers are temporarily unavailable. Please try again later.');
+  }
   if (error) throw error;
   return {
     eventRequestId: data.eventRequestId,

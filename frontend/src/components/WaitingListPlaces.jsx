@@ -56,6 +56,10 @@ function WaitingListPlace({ place, onLeft, onPromoted }) {
     <li>
       <strong>{place.eventName || "Unnamed event"}</strong>{" "}
       <WaitlistedBadge position={place.waitlistPosition} />
+      {/* The server says whether places can be offered now; the queue is kept either way. */}
+      {place.placesOffered === false && (
+        <p>Registration for this event is closed, so no places are being offered. You keep your place in the queue.</p>
+      )}
       {failure && <p className="browse-open-events__error" role="alert">{failure}</p>}
       {confirming ? (
         <div className="event-venue-bookings__actions">

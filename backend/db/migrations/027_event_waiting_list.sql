@@ -781,11 +781,14 @@ $fn$;
 revoke execute on function open_event_registration_state(uuid[], uuid) from public, anon, authenticated;
 
 -- My Registrations: the caller's own waiting-list places, newest first.
+-- places_offered says whether promotion can happen now (the same window rule
+-- promotion uses), so a place on a closed, started or cancelled event is not
+-- shown as if it were moving; the event's status itself stays private.
 
 create or replace function list_attendee_waitlist(p_attendee_id uuid)
 returns table (
   registration_id uuid, event_request_id uuid, event_name text,
-  waitlist_position bigint, waitlisted_at timestamptz
+  waitlist_position bigint, waitlisted_at timestamptz, places_offered boolean
 )
 language plpgsql
 stable
@@ -797,7 +800,8 @@ begin
   );
 
   return query
-    select r.id, r.event_request_id, e.event_name::text, waitlist_position(r), r.waitlisted_at
+    select r.id, r.event_request_id, e.event_name::text, waitlist_position(r), r.waitlisted_at,
+           registration_closed_reason(e, clock_timestamp()) is null
       from event_registrations r
       join event_requests e on e.id = r.event_request_id
      where r.attendee_id = p_attendee_id and r.status = 'waitlisted'

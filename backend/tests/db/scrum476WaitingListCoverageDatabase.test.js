@@ -167,6 +167,26 @@ describe('SCRUM476 an empty or exhausted queue', () => {
   });
 });
 
+describe('SCRUM477 a queue that cannot move says so', () => {
+  const myWaitlist = async (user) => (await request(api).get('/api/attendee-events/waitlist').set(as(user))).body;
+
+  it.each([
+    ['registration has closed', () => db.query(
+      "update event_requests set registration_closes_at = '2026-10-16T10:30:00Z' where id = $1", [event],
+    ).then(() => at('2026-10-16T11:00:00Z'))],
+    ['the event has started', () => at('2026-10-20T10:00:00Z')],
+    ['the event is cancelled', () => db.query(
+      "update event_requests set status = 'cancelled' where id = $1", [event],
+    )],
+  ])('SCRUM477_AC2_my_registrations_keeps_the_place_but_says_no_places_are_offered_when_%s', async (_case, arrange) => {
+    await register(A);
+    await join(B);
+    expect(await myWaitlist(B)).toEqual([expect.objectContaining({ waitlistPosition: 1, placesOffered: true })]);
+    await arrange();
+    expect(await myWaitlist(B)).toEqual([expect.objectContaining({ waitlistPosition: 1, placesOffered: false })]);
+  });
+});
+
 describe('SCRUM476 waiting-list counts through each change', () => {
   it('SCRUM476_AC6_counts_follow_joins_departures_and_promotions', async () => {
     const seen = [];
