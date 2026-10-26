@@ -25,6 +25,9 @@ const clientAnswering = (...results) => {
   for (const result of results) rpc.mockResolvedValueOnce(result);
   return { rpc };
 };
+// Each tick also calls process_venue_hold_reminders, so count the expiry calls alone.
+const expiryCalls = (client) =>
+  client.rpc.mock.calls.filter(([name]) => name === 'process_venue_hold_expiry').length;
 
 
 describe('runVenueHoldExpiryOnce', () => {
@@ -105,14 +108,14 @@ describe('startVenueHoldExpiryScheduler', () => {
     const stop = startVenueHoldExpiryScheduler({ intervalMs: 1000, client, logger: fakeLogger() });
 
     await vi.advanceTimersByTimeAsync(0);
-    expect(client.rpc).toHaveBeenCalledTimes(1);
+    expect(expiryCalls(client)).toBe(1);
 
     await vi.advanceTimersByTimeAsync(3000);
-    expect(client.rpc).toHaveBeenCalledTimes(4);
+    expect(expiryCalls(client)).toBe(4);
 
     stop();
     await vi.advanceTimersByTimeAsync(5000);
-    expect(client.rpc).toHaveBeenCalledTimes(4);
+    expect(expiryCalls(client)).toBe(4);
   });
 
   it('never runs two calls at once', async () => {
@@ -130,7 +133,7 @@ describe('startVenueHoldExpiryScheduler', () => {
 
     release();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(client.rpc).toHaveBeenCalledTimes(2);
+    expect(expiryCalls(client)).toBe(2);
     stop();
   });
 
@@ -168,7 +171,9 @@ describe('startVenueHoldExpiryScheduler', () => {
       const stop = startVenueHoldExpiryScheduler();
       expect(spy).toHaveBeenCalledWith(expect.any(Function), DEFAULT_INTERVAL_MS);
       expect(unref).toHaveBeenCalled();
-      await vi.waitFor(() => expect(client.rpc).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(expiryCalls(client)).toBe(1));
+      await vi.waitFor(() =>
+        expect(client.rpc).toHaveBeenCalledWith('process_venue_hold_reminders', { p_lead_time: '24 hours' }));
       stop();
     } finally {
       spy.mockRestore();

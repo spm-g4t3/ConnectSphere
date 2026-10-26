@@ -83,8 +83,13 @@ app.use('/api/open-events', openEventRoutes);
 // SCRUM-491 (AC7, AC8): mark lapsed venue holds expired and notify their
 // coordinators, once a minute. A lapsed hold already occupies nothing without
 // this; set VENUE_HOLD_EXPIRY_JOB=off to show that. Never under test.
+// VENUE_HOLD_REMINDER_HOURS sets how long before expiry the coordinator is
+// warned; anything but a positive number falls back to the job's default.
 if (process.env.NODE_ENV !== 'test' && process.env.VENUE_HOLD_EXPIRY_JOB !== 'off') {
-  startVenueHoldExpiryScheduler();
+  const reminderLeadHours = Number(process.env.VENUE_HOLD_REMINDER_HOURS);
+  startVenueHoldExpiryScheduler(
+    Number.isFinite(reminderLeadHours) && reminderLeadHours > 0 ? { reminderLeadHours } : {},
+  );
 }
 
 const PORT = process.env.PORT || 5000;
