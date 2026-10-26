@@ -336,15 +336,24 @@ describe("SCRUM-387 the change history on the Organiser's row", () => {
     expect(getEventChangeHistory).toHaveBeenCalledWith("r2");
   });
 
-  it("SCRUM387_AC7_closing_and_reopening_does_not_read_it_again", async () => {
+  it("SCRUM387_AC7_the_organisers_history_rereads_each_time_it_is_opened", async () => {
+    // A coordinator may edit while the list is on screen: the second opening
+    // shows the newer row, and a closed disclosure holds nothing.
     renderList([eventRequest({ id: "r1", eventName: "First event" })]);
     const summary = await screen.findByText("Change history");
 
     await userEvent.click(summary);
     await screen.findByText("Reason: Organiser asked");
     await userEvent.click(summary);
+    expect(screen.queryByText("Reason: Organiser asked")).not.toBeInTheDocument();
+
+    vi.mocked(getEventChangeHistory).mockResolvedValueOnce([
+      { ...HISTORY_ROW, id: "h2", reason: "Edited while the list was open", changedAt: "2026-10-26T03:00:00Z" },
+      HISTORY_ROW,
+    ]);
     await userEvent.click(summary);
 
-    expect(getEventChangeHistory).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Reason: Edited while the list was open")).toBeInTheDocument();
+    expect(getEventChangeHistory).toHaveBeenCalledTimes(2);
   });
 });

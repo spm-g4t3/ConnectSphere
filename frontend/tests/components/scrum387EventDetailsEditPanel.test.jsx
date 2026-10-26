@@ -11,13 +11,15 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import EventDetailsEditPanel from "../../src/components/EventDetailsEditPanel.jsx";
-import { updateEventRequestDetails } from "../../src/services/eventRequestService";
+import { getEventRequestForReview, updateEventRequestDetails } from "../../src/services/eventRequestService";
 import { toDatetimeLocalValue, toOffsetIsoString } from "../../src/services/datetimeFormat.js";
 import { DETAIL_FIELD_LABELS, ORDINARY_DETAIL_FIELDS, SIGNIFICANT_DETAIL_FIELDS } from "../../src/services/eventDetailFields.js";
 import { deferred, httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
   updateEventRequestDetails: vi.fn(),
+  // AC5: re-read after a status refusal, to name the status it met.
+  getEventRequestForReview: vi.fn(),
 }));
 
 const SERVER_TEXT = "Raw database wording the screen must never show";
@@ -66,6 +68,7 @@ function sent() {
 }
 
 beforeEach(() => {
+  vi.mocked(getEventRequestForReview).mockReset();
   vi.mocked(updateEventRequestDetails).mockReset();
   vi.mocked(updateEventRequestDetails).mockImplementation(async (id, { changes }) => ({
     ...EVENT, ...changes, id, changedFields: Object.keys(changes),
@@ -345,6 +348,44 @@ describe("SCRUM-387 what each refusal says", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
     expect(screen.queryByText(SERVER_TEXT)).not.toBeInTheDocument();
+  });
+
+  const STATUS_REFUSAL = () => httpError(409, { error: SERVER_TEXT, code: "EVENT_STATUS_NOT_ALLOWED" });
+  const GENERAL_STATUS_LINE =
+    "This event's status has changed since you opened the form, and it can no longer be edited. Go back to see where it stands.";
+
+  it("SCRUM387_AC5_a_status_refusal_names_the_events_current_status", async () => {
+    vi.mocked(getEventRequestForReview).mockResolvedValueOnce({
+      ...EVENT, status: "cancelled", statusDisplay: { status: "cancelled", label: "Cancelled", group: "CANCELLED", description: "" },
+    });
+    await saveRefusedWith(STATUS_REFUSAL());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This event is now Cancelled, so its information can't be edited here.");
+    expect(getEventRequestForReview).toHaveBeenCalledExactlyOnceWith("e387");
+  });
+
+  it.each([
+    ["the_reread_fails", () => vi.mocked(getEventRequestForReview).mockRejectedValueOnce(httpError(500))],
+    ["the_reread_has_no_status", () => vi.mocked(getEventRequestForReview).mockResolvedValueOnce({ ...EVENT, statusDisplay: undefined })],
+  ])("SCRUM387_AC5_a_failed_reread_keeps_the_general_line_(%s)", async (_label, arrange) => {
+    arrange();
+    await saveRefusedWith(STATUS_REFUSAL());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(GENERAL_STATUS_LINE);
+  });
+
+  it("SCRUM387_AC5_the_servers_wording_changes_nothing_on_screen", async () => {
+    // Two refusals with different server text, the same status read back: one line.
+    const cancelled = { ...EVENT, statusDisplay: { status: "cancelled", label: "Cancelled", group: "CANCELLED", description: "" } };
+    vi.mocked(getEventRequestForReview).mockResolvedValue(cancelled);
+    const { unmount } = await saveRefusedWith(httpError(409, { error: "An event that is cancelled cannot be edited", code: "EVENT_STATUS_NOT_ALLOWED" }));
+    const first = (await screen.findByRole("alert")).textContent;
+    unmount();
+
+    await saveRefusedWith(httpError(409, { error: "Completely different words, completed", code: "EVENT_STATUS_NOT_ALLOWED" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(first);
+    expect(first).not.toMatch(/cannot be edited$|Completely different/);
   });
 
   it("SCRUM387_AC9_a_stale_save_keeps_what_was_typed_until_they_go_back", async () => {

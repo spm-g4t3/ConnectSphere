@@ -75,21 +75,21 @@ function CoordinatorDetails({ eventRequestId, currentCoordinatorId }) {
 }
 
 /**
- * SCRUM-387 AC7: what the coordinator changed, and why. Collapsed and read only
- * once opened, as CoordinatorDetails is, so the list makes no read per row.
+ * SCRUM-387 AC7: what the coordinator changed, and why. Collapsed, so the list
+ * makes no read per row. Unlike CoordinatorDetails it is mounted only while
+ * open: a coordinator may edit while the Organiser's list is on screen, so each
+ * opening reads the history fresh.
  */
 function ChangeHistoryDetails({ eventRequestId }) {
-  const [opened, setOpened] = useState(false);
+  const [open, setOpen] = useState(false);
 
   return (
     <details
       className="my-event-requests__details"
-      onToggle={(event) => {
-        if (event.currentTarget.open) setOpened(true);
-      }}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>Change history</summary>
-      {opened && <EventChangeHistory eventRequestId={eventRequestId} />}
+      {open && <EventChangeHistory eventRequestId={eventRequestId} />}
     </details>
   );
 }

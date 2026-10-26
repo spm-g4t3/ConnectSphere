@@ -9,8 +9,8 @@ criterion is proved, why the design looks the way it does, and what is still
 missing. The examination chain is **user story → acceptance criterion → test case
 → test class → code**; section 2 walks it end to end for AC3.
 
-The case-by-case mapping is `docs/test-cases/SCRUM-387.md`: 82 cases, 48 backend
-and 34 on the screen, each naming the tests that prove it. It also holds the
+The case-by-case mapping is `docs/test-cases/SCRUM-387.md`: 86 cases, 48 backend
+and 38 on the screen, each naming the tests that prove it. It also holds the
 design decisions D1 to D13 in full, with the alternatives rejected. This document
 cites it rather than repeating it.
 
@@ -46,7 +46,8 @@ cites it rather than repeating it.
 | SCRUM-393 | The case document, backend cases in `37b530c` and UI cases in `07644a5`; the sweeps: every test named `SCRUM387_ACn_…`, the teeth checks in both commits | `37b530c`, `07644a5` |
 | SCRUM-394 | This document | `c3ec269` |
 | Merge of dev | SCRUM-27 (PR #82): its migrations 017 and 018, before ours; neither touches 022's objects or restates `notifications_type_known` | `0dfbd9b` |
-| PR #84 review | The fix-ups below: the period checked on the screen, a malformed id refused with 400, one save's history rows in a stable order, three tidy-ups | this commit |
+| PR #84 review | The fix-ups below: the period checked on the screen, a malformed id refused with 400, one save's history rows in a stable order, three tidy-ups | `fd2b492` |
+| PR #84 second review | A status refusal names the status on screen; the Organiser's history is read again on each opening | this commit |
 
 Dev had not moved when the story was built (`c1c3573`, checked 25 October 2026).
 It moved before the review, and Calven merged it (`0dfbd9b`, SCRUM-27's PR #82).
@@ -61,10 +62,10 @@ A teammate's review raised eight points. Five were fixed; two are recorded as ga
 2. **The screen did not name the field when a period would end before it starts.**
    Fixed: the panel checks the period the save would leave, an unaltered side taken
    from the snapshot, and shows the fault beside Proposed end, sending nothing
-   (`EventDetailsEditPanel.jsx:150–159`, AC6-15). Looking for other ways the server
+   (`EventDetailsEditPanel.jsx:166–175`, AC6-15). Looking for other ways the server
    could answer "No changes" to a save the form thought was a change found one:
    attendance was compared as text, so "100.0" over a stored 100 was sent as 100 and
-   refused. It is now compared as the number sent (`:83–90`, AC9-10). Text already
+   refused. It is now compared as the number sent (`:100–106`, AC9-10). Text already
    agreed with the server, and dates compare as the device's datetime-local text,
    one instant per minute. 022's own checks stay as the backstop.
 3. **A malformed id was a 500.** Fixed: `editEventRequestDetails` and
@@ -81,29 +82,55 @@ A teammate's review raised eight points. Five were fixed; two are recorded as ga
    the status matrix is 022's alone. The frontend's own lists, which the screen uses,
    are now pinned as literals to D3's matrix rather than to the backend file (AC3-07).
 7. **The panel wrote "4,000" by hand.** Its counter and its error are now built from
-   `REASON_MAX_LENGTH` (`EventDetailsEditPanel.jsx:30–31`). The backend and 022 are
+   `REASON_MAX_LENGTH` (`EventDetailsEditPanel.jsx:31–32`). The backend and 022 are
    unchanged.
 8. **`TIMESTAMP_FIELDS` was declared twice.** Now exported once from
    `eventDetailFields.js` (`:26`) and imported by both components.
+
+### PR #84 second review, 26 October 2026
+
+A second review raised the points below. Two were screen issues and were fixed;
+the rest were answered. No backend or migration change.
+
+- **AC5, the refusal should name the status.** Fixed. On `EVENT_STATUS_NOT_ALLOWED`
+  the panel reads the event again through `GET /:id/review` and says "This event is
+  now {label}, so its information can't be edited here.", the label the detail's
+  badge shows (`EventDetailsEditPanel.jsx:76–84`, AC5-05). The server's message is
+  still never shown. If the re-read fails, or gives no status, today's general line
+  stays (AC5-06). `EVENT_CONFIRMED` is unchanged: its line already says Confirmed
+  and points to Revise event details, which the general sentence would drop.
+- **AC7, the Organiser's history should be current when reopened.** Fixed. The
+  disclosure now mounts the history only while open (`MyEventRequests.jsx:83–95`),
+  so each opening reads it again; it still reads nothing until the first (AC7-16).
+- **AC3, "registration needs".** Removed from the Jira acceptance criteria on 24
+  October 2026; the nine fields are the story's.
+- **AC7, "coordinators" may read the history.** It follows D7: the assigned
+  coordinator and the Lead, not every coordinator, as the decision history.
+- **Clarification amendments leave no history.** Accepted as a gap and owned by a
+  backlog story, SCRUM-, to be filled in (section 4).
+- **The duplicated checks and the generic 400s.** By design: the screen's checks
+  name the field, and the server's are the backstop (D1); a 400 the screen did not
+  foresee gets one general line, keyed on the status, never on the server's text.
 
 ### Verification as of 25 October 2026
 
 | Evidence | Result |
 |---|---|
-| Backend suite (`npm run test:coverage` in `backend`) | 7742 passing and 2 todo across 181 files, after the PR #84 fix-ups and the merge of dev (SCRUM-27). 7640 and 2 todo across 178 at `07644a5`. At `c1c3573` before the story: 7533 passing and 2 todo across 174 files (run on 25 October 2026 from a `git archive` of that commit) |
-| Frontend suite (`npm run test:coverage` in `frontend`) | 3899 passing across 169 files, after the fix-ups and the merge; every coverage gate met. 3849 across 168 at `07644a5`. At `c1c3573`: 3765 passing across 162 files, run the same way. `npm run lint` 0 errors (23 warnings, all pre-existing: the one in `MyEventRequests.jsx` is at HEAD too); `npm run build` passes |
+| Backend suite (`npm run test:coverage` in `backend`) | 7742 passing and 2 todo across 181 files, after the PR #84 fix-ups and the merge of dev (SCRUM-27), unchanged by the second review. 7640 and 2 todo across 178 at `07644a5`. At `c1c3573` before the story: 7533 passing and 2 todo across 174 files (run on 25 October 2026 from a `git archive` of that commit) |
+| Frontend suite (`npm run test:coverage` in `frontend`) | 3903 passing across 169 files, after the second review's fixes; every coverage gate met. 3899 across 169 after the first review's fix-ups and the merge. 3849 across 168 at `07644a5`. At `c1c3573`: 3765 passing across 162 files, run the same way. `npm run lint` 0 errors (23 warnings, all pre-existing: the one in `MyEventRequests.jsx` is at HEAD too); `npm run build` passes |
 | SCRUM-387's gate | `SCRUM387_FILES` in `frontend/vite.config.js` (`:240`): `EventDetailsEditPanel.jsx`, `EventChangeHistory.jsx` and `eventDetailFields.js` at 100% statements, branches, functions and lines |
 | Gates that held | `notificationDisplay.js` stays at 100% in SCRUM-17's gate and `notificationLink.js` in SCRUM-172's. `CoordinatorRequestDetail.jsx`, `MyEventRequests.jsx` and `eventRequestService.js` stay ungated, as before |
-| SCRUM-387's own tests | 199 titles once parametrised cases are expanded, every one named `SCRUM387_ACn_…`. Backend 109: 62 in `scrum387EditEventDetailsDatabase.test.js`, 32 in `scrum387EditEventDetailsRoutes.test.js`, 4 in `eventDetailField.test.js`, 11 in `eventDetailsEditValidation.test.js`. Frontend 90: 38 in `scrum387EventDetailsEditPanel.test.jsx`, 25 in `scrum387CoordinatorEditEvent.test.jsx`, 9 in `scrum387EventChangeHistory.test.jsx`, 12 in `scrum387EventDetailFields.test.js`, 4 in `scrum387NotificationDisplay.test.js`, 2 in `scrum387EventRequestService.test.js` |
+| SCRUM-387's own tests | 203 titles once parametrised cases are expanded, every one named `SCRUM387_ACn_…`. Backend 109: 62 in `scrum387EditEventDetailsDatabase.test.js`, 32 in `scrum387EditEventDetailsRoutes.test.js`, 4 in `eventDetailField.test.js`, 11 in `eventDetailsEditValidation.test.js`. Frontend 94: 42 in `scrum387EventDetailsEditPanel.test.jsx`, 25 in `scrum387CoordinatorEditEvent.test.jsx`, 9 in `scrum387EventChangeHistory.test.jsx`, 12 in `scrum387EventDetailFields.test.js`, 4 in `scrum387NotificationDisplay.test.js`, 2 in `scrum387EventRequestService.test.js` |
 | PGlite | `scrum387EditEventDetailsDatabase.test.js` runs 022 on the full schema (`createSchemaDb()`: the baseline, then every migration, 010 to 018 and 022), with statuses reached through the real workflow functions where they exist |
 | Live database | 022 applied by Calven to the shared Supabase project on 24 October 2026. Both checks matched: the live notification list before, and the four-part check after. No live script was run by us |
-| Test-case document | 82 cases (48 backend, 34 UI): **82 proved**, 0 not yet implemented, 0 that cannot be written as specified. 21 are traps, 11 of them on the screen. Five were added and three amended after the PR #84 review |
+| Test-case document | 86 cases (48 backend, 38 UI): **86 proved**, 0 not yet implemented, 0 that cannot be written as specified. 21 are traps, 11 of them on the screen. Five were added and three amended after the PR #84 review, and four added and two amended after the second |
 | Click-through | Passed: every step worked as expected, as reported by Calven on 25 October 2026. The final SQL check returned no rows the first time because it filtered on the event's exact name; a name-free query was given as a re-check, and its result is not yet recorded here |
 
 **Teeth checks**: each test was checked by breaking the line it proves, watching
 it fail, and restoring the file from an in-memory copy (never `git checkout`).
-49 in all: 22 for the backend (SCRUM-388 to SCRUM-390), 19 for the screen
-(SCRUM-391, SCRUM-392) and 8 for the PR #84 fix-ups, the last eight rows. Line
+51 in all: 22 for the backend (SCRUM-388 to SCRUM-390), 19 for the screen
+(SCRUM-391, SCRUM-392), 8 for the PR #84 fix-ups and 2 for the second review, the
+last ten rows. Line
 numbers are the files as they now stand.
 
 | AC | What was broken | What failed |
@@ -127,10 +154,10 @@ numbers are the files as they now stand.
 | AC6 | The validator never throws (`eventRequestValidation.js:560`) | 8 validation and route tests |
 | AC6 | 022's reason check removed (`022:148`) | The three PGlite reason cases |
 | AC6 | 022's no-change check removed (`022:205`) | `SCRUM387_AC6_a_save_with_no_real_change_is_refused_with_22023` |
-| AC6 | The panel's server faults not shown beside fields (`EventDetailsEditPanel.jsx:177`) | `SCRUM387_AC6_every_fault_is_shown_beside_its_field_at_once_with_a_summary` |
-| AC6 | The panel's blank-reason check removed (`EventDetailsEditPanel.jsx:146`) | `SCRUM387_AC6_a_blank_reason_is_shown_beside_the_box_and_nothing_is_sent` |
-| AC6 | A cleared box sent as `""`, not null (`EventDetailsEditPanel.jsx:95`) | Both cleared-box tests |
-| AC6/AC9 | The server's text shown instead of the panel's own (`EventDetailsEditPanel.jsx:181`) | 11 of the 12 `SCRUM387_AC1_AC3_AC4_AC5_AC9_%s_is_said_in_the_screens_own_words` cases (the network failure has no server text) |
+| AC6 | The panel's server faults not shown beside fields (`EventDetailsEditPanel.jsx:193`) | `SCRUM387_AC6_every_fault_is_shown_beside_its_field_at_once_with_a_summary` |
+| AC6 | The panel's blank-reason check removed (`EventDetailsEditPanel.jsx:162`) | `SCRUM387_AC6_a_blank_reason_is_shown_beside_the_box_and_nothing_is_sent` |
+| AC6 | A cleared box sent as `""`, not null (`EventDetailsEditPanel.jsx:111`) | Both cleared-box tests |
+| AC6/AC9 | The server's text shown instead of the panel's own (`EventDetailsEditPanel.jsx:197`) | 11 of the 12 `SCRUM387_AC1_AC3_AC4_AC5_AC9_%s_is_said_in_the_screens_own_words` cases (the network failure has no server text) |
 | AC7 | History rows written as `significant_change` (`022:283`) | `SCRUM387_AC7_one_row_per_changed_field_with_old_new_who_why_and_source` |
 | AC7 | The append-only trigger not created (`022:49–52`) | Both `SCRUM387_AC7_a_history_row_cannot_be_%s` |
 | AC7 | The history read oldest first (`eventRequestService.js:2833`) | `SCRUM387_AC7_the_organiser_reads_the_history_newest_first_with_names` |
@@ -144,19 +171,21 @@ numbers are the files as they now stand.
 | AC8 | Raw field names in the wording (`notificationDisplay.js:663`) | 2 notice tests |
 | AC9 | The stale check removed (`022:191`) | Both stale-value PGlite tests |
 | AC9 | Values compared as text, not typed (`022:186–187`) | `SCRUM387_AC9_the_same_instant_in_another_zone_is_not_stale` |
-| AC9 | `expected` read from the latest prop (`EventDetailsEditPanel.jsx:172`) | `SCRUM387_AC9_the_snapshot_is_taken_when_the_form_opens_not_from_a_later_prop` |
-| AC9 | Every shown field sent (`EventDetailsEditPanel.jsx:171`) | 2 panel tests, the only-altered test among them |
-| AC9 | A date compared with the stored string, not the form's own (`EventDetailsEditPanel.jsx:138`) | 7 panel tests: every save that left the start alone sent it |
+| AC9 | `expected` read from the latest prop (`EventDetailsEditPanel.jsx:188`) | `SCRUM387_AC9_the_snapshot_is_taken_when_the_form_opens_not_from_a_later_prop` |
+| AC9 | Every shown field sent (`EventDetailsEditPanel.jsx:187`) | 2 panel tests, the only-altered test among them |
+| AC9 | A date compared with the stored string, not the form's own (`EventDetailsEditPanel.jsx:154`) | 7 panel tests: every save that left the start alone sent it |
 | D2 | 022's field list loses `equipmentRequirements` (`022:105`) | 3 PGlite tests |
 | D2 | The domain list moves a field (`eventDetailField.js:19`) | 3 domain and PGlite tests |
-| AC6 (review 2) | The panel's period check made a no-op (`EventDetailsEditPanel.jsx:156`) | Both `SCRUM387_AC6_moving_only_the_%s` period tests |
-| AC9 (review 2) | Attendance compared as text again (`EventDetailsEditPanel.jsx:89`) | Both attendance cases of `SCRUM387_AC9_%s_is_nothing_to_save_and_calls_nothing`. It survived at first: user-event normalises what it types into a number box, so the cases set the value directly, as a browser keeps it |
+| AC6 (review 2) | The panel's period check made a no-op (`EventDetailsEditPanel.jsx:172`) | Both `SCRUM387_AC6_moving_only_the_%s` period tests |
+| AC9 (review 2) | Attendance compared as text again (`EventDetailsEditPanel.jsx:105`) | Both attendance cases of `SCRUM387_AC9_%s_is_nothing_to_save_and_calls_nothing`. It survived at first: user-event normalises what it types into a number box, so the cases set the value directly, as a browser keeps it |
 | AC6 (review 3) | The edit's id check removed (`eventRequestService.js:2789`) | `SCRUM387_AC6_a_malformed_id_is_refused_with_400_before_the_database` |
 | AC7 (review 3) | The history's id check removed (`eventRequestService.js:2821`) | `SCRUM387_AC7_a_malformed_id_is_refused_with_400_before_the_database` |
 | AC7 (review 5) | The `field_name` tie-break removed (`eventRequestService.js:2834`) | `SCRUM387_AC7_one_saves_rows_always_come_back_in_field_name_order` (PGlite, through the service) and the route's order assertion |
 | AC3 (review 6) | `safety_approved` dropped from the frontend's matrix (`eventDetailFields.js:45–50`) | `SCRUM387_AC3_the_status_lists_are_the_case_documents_matrix` |
-| AC6 (review 7) | `REASON_MAX_LENGTH` moved to 3999 (`EventDetailsEditPanel.jsx:30`) | `SCRUM387_AC6_the_counter_counts_characters_as_the_server_does_and_4000_is_the_limit`: the counter and the limit both moved with it |
+| AC6 (review 7) | `REASON_MAX_LENGTH` moved to 3999 (`EventDetailsEditPanel.jsx:31`) | `SCRUM387_AC6_the_counter_counts_characters_as_the_server_does_and_4000_is_the_limit`: the counter and the limit both moved with it |
 | AC6, AC9 (review 8) | `TIMESTAMP_FIELDS` loses `proposedEnd` (`eventDetailFields.js:26`) | 4 tests in the panel and fields files, both components reading the one list |
+| AC5 (second review) | The status refusal given the general line again, with no re-read (`EventDetailsEditPanel.jsx:196`) | `SCRUM387_AC5_a_status_refusal_names_the_events_current_status`. The wording test still passes, as it should: the general line is the same whatever the server says |
+| AC7 (second review) | The Organiser's history kept mounted once opened (`MyEventRequests.jsx:89`) | `SCRUM387_AC7_the_organisers_history_rereads_each_time_it_is_opened` |
 
 ---
 
@@ -176,7 +205,7 @@ numbers are the files as they now stand.
 
 **Tally:** 9 done, 0 partial, 0 deferred.
 
-**Test cases:** 82 (48 backend, 34 UI); 82 proved.
+**Test cases:** 86 (48 backend, 38 UI); 86 proved.
 
 ### Evidence for each criterion
 
@@ -188,13 +217,13 @@ separate result.
 |---|---|---|---|
 | AC1 | 022's caller check (`022:137–145`); `coordinatorOnly` (`eventRequests.js:1053`); `canEditDetails` (`CoordinatorRequestDetail.jsx:272`) | `SCRUM387_AC1_a_stranger_on_a_%s_event_gets_42501_not_a_status_message` (PGlite); `SCRUM387_AC1_%s_is_refused_with_403_by_the_gate_and_queries_nothing` (route); `SCRUM387_AC1_%s_never_sees_it` (screen) | The button shows for the holder only |
 | AC2 | The status matrix (`022:172–181`); D4 (`022:223–253`); `editableDetailFields` (`eventDetailFields.js:54`) | `SCRUM387_AC2_%s_is_editable_under_review`, `SCRUM387_AC2_a_reopened_request_with_%s_refuses_a_significant_edit_and_names_it` (PGlite); `SCRUM387_AC2_a_save_returns_to_the_updated_event_names_the_fields_and_rereads_the_history` (screen) | An edit under review, saved and shown |
-| AC3 | `022:218–221`; the panel's field set and pointer (`EventDetailsEditPanel.jsx:110`, `:225`) | `SCRUM387_AC3_a_significant_edit_is_refused_while_%s`, `SCRUM387_AC3_a_mixed_save_in_planning_is_refused_whole` (PGlite); `SCRUM387_AC3_an_event_that_is_%s_shows_only_name_purpose_and_description` (panel) | An Approved event shows three fields |
+| AC3 | `022:218–221`; the panel's field set and pointer (`EventDetailsEditPanel.jsx:126`, `:241`) | `SCRUM387_AC3_a_significant_edit_is_refused_while_%s`, `SCRUM387_AC3_a_mixed_save_in_planning_is_refused_whole` (PGlite); `SCRUM387_AC3_an_event_that_is_%s_shows_only_name_purpose_and_description` (panel) | An Approved event shows three fields |
 | AC4 | `022:174–177`; the button's status list (`CoordinatorRequestDetail.jsx:273`) | `SCRUM387_AC4_a_confirmed_event_refuses_even_an_ordinary_field` (PGlite); `SCRUM387_AC4_it_goes_when_a_refetch_brings_the_event_to_confirmed` (screen) | No button on a Confirmed event |
 | AC5 | `022:178–181` | `SCRUM387_AC5_an_event_that_is_%s_is_refused_naming_its_status` (PGlite); `SCRUM387_AC4_AC5_it_is_not_offered_while_%s` (screen) | — |
-| AC6 | `validateEventDetailsEdit` (`eventRequestValidation.js:514`); 022's own checks (`022:147–169`, `:204–212`, `:255–261`); the panel's field errors (`EventDetailsEditPanel.jsx:177`) | `SCRUM387_AC6_lists_every_fault_together` (validation); `SCRUM387_AC6_every_fault_is_listed_in_one_400_and_nothing_is_queried` (route); `SCRUM387_AC6_every_fault_is_shown_beside_its_field_at_once_with_a_summary` (panel) | — |
+| AC6 | `validateEventDetailsEdit` (`eventRequestValidation.js:514`); 022's own checks (`022:147–169`, `:204–212`, `:255–261`); the panel's field errors (`EventDetailsEditPanel.jsx:193`) | `SCRUM387_AC6_lists_every_fault_together` (validation); `SCRUM387_AC6_every_fault_is_listed_in_one_400_and_nothing_is_queried` (route); `SCRUM387_AC6_every_fault_is_shown_beside_its_field_at_once_with_a_summary` (panel) | — |
 | AC7 | The history insert (`022:276–284`); the trigger (`022:37–52`); `GET /:id/change-history` (`eventRequests.js:542`); `requireHistoryReader` (`eventRequestService.js:1710`); `EventChangeHistory.jsx`; its two placements (`CoordinatorRequestDetail.jsx:1008`, `MyEventRequests.jsx:81`) | `SCRUM387_AC7_one_row_per_changed_field_with_old_new_who_why_and_source`, `SCRUM387_AC7_a_history_row_cannot_be_%s` (PGlite); `SCRUM387_AC7_the_organiser_reads_the_history_newest_first_with_names` (route); `SCRUM387_AC7_each_non_draft_row_has_one_and_nothing_is_read_until_it_is_opened` (screen) | The history on both screens after a save |
 | AC8 | The notice (`022:286–300`); its wording (`notificationDisplay.js:661`) | `SCRUM387_AC8_one_notice_to_the_organiser_per_save_with_the_fields_and_reason`, `SCRUM387_AC8_an_edit_in_safety_review_tells_no_safety_officer` (PGlite); `SCRUM387_AC8_names_the_event_the_fields_by_their_labels_and_the_reason` (notice) | The Organiser's inbox shows the notice |
-| AC9 | Compare-and-set (`022:183–195`), typed by `event_detail_value` (`022:67`); the panel's snapshot (`EventDetailsEditPanel.jsx:109`) and the body it sends (`:171–172`) | `SCRUM387_AC9_an_organisers_amendment_after_the_form_opened_makes_the_save_stale` (PGlite); `SCRUM387_AC9_the_snapshot_is_taken_when_the_form_opens_not_from_a_later_prop` (panel) | The two-window stale edit is refused |
+| AC9 | Compare-and-set (`022:183–195`), typed by `event_detail_value` (`022:67`); the panel's snapshot (`EventDetailsEditPanel.jsx:125`) and the body it sends (`:187–188`) | `SCRUM387_AC9_an_organisers_amendment_after_the_form_opened_makes_the_save_stale` (PGlite); `SCRUM387_AC9_the_snapshot_is_taken_when_the_form_opens_not_from_a_later_prop` (panel) | The two-window stale edit is refused |
 
 ---
 
@@ -211,9 +240,9 @@ coordinator editing an Approved event.
 | Layer | Where | What happens | Proved by |
 |---|---|---|---|
 | Screen: the button | `CoordinatorRequestDetail.jsx:272–273` (`canEditDetails`), `:587` (the button), `:524` (the page in place of the detail) | Shown to the holder, with the coordinator role, in the five editable statuses, read from the latest event | `SCRUM387_AC1_the_assigned_coordinator_sees_it_while_%s`, `SCRUM387_AC3_in_approved_it_shows_the_ordinary_fields_and_points_to_revise_event_details` |
-| Screen: the fields | `editableDetailFields` (`eventDetailFields.js:54–57`), taken once when the panel opens (`EventDetailsEditPanel.jsx:109–117`) | Approved, Safety review and Safety approved get name, purpose and description; the significant fields are left out, not shown disabled | `SCRUM387_AC3_an_event_that_is_%s_shows_only_name_purpose_and_description` |
-| Screen: the pointer | `EventDetailsEditPanel.jsx:225–229` | "The date, time, attendance, requirements and equipment are changed through Revise event details." Revise event details stays on the detail, unchanged, for Approved, Confirmed and the safety statuses | The same test; SCRUM-395's own suites, unmodified |
-| Screen: the save | `handleSave` (`EventDetailsEditPanel.jsx:133`), the changed fields only (`:137`), the body (`:171–172`) | Only the fields the coordinator altered are sent, each with the value the form opened with | `SCRUM387_AC9_sends_only_the_altered_field_with_the_value_the_form_opened_with` |
+| Screen: the fields | `editableDetailFields` (`eventDetailFields.js:54–57`), taken once when the panel opens (`EventDetailsEditPanel.jsx:125–133`) | Approved, Safety review and Safety approved get name, purpose and description; the significant fields are left out, not shown disabled | `SCRUM387_AC3_an_event_that_is_%s_shows_only_name_purpose_and_description` |
+| Screen: the pointer | `EventDetailsEditPanel.jsx:241–245` | "The date, time, attendance, requirements and equipment are changed through Revise event details." Revise event details stays on the detail, unchanged, for Approved, Confirmed and the safety statuses | The same test; SCRUM-395's own suites, unmodified |
+| Screen: the save | `handleSave` (`EventDetailsEditPanel.jsx:149`), the changed fields only (`:153`), the body (`:187–188`) | Only the fields the coordinator altered are sent, each with the value the form opened with | `SCRUM387_AC9_sends_only_the_altered_field_with_the_value_the_form_opened_with` |
 | Frontend service | `updateEventRequestDetails` (`frontend/src/services/eventRequestService.js:131`) | `PATCH /event-requests/:id/details` with `{ changes, expected, reason }` | `SCRUM387_AC9_the_edit_patches_the_details_endpoint_with_changes_expected_and_reason` |
 | Route | `PATCH /:id/details` (`backend/src/routes/eventRequests.js:1053`), `coordinatorOnly` (`:203`) | Any role but a coordinator is 403 with no query; the caller is the token's | `SCRUM387_AC1_%s_is_refused_with_403_by_the_gate_and_queries_nothing` |
 | Service | `editEventRequestDetails` (`backend/src/services/eventRequestService.js:2786`); the 409 codes (`:164`, mapped at `:280`) | SCRUM-10's rules (`validateEventDetailsEdit`, `eventRequestValidation.js:514`), one rpc, `translateError` | `SCRUM387_%s_%s_is_a_409_with_its_code_and_message` |
@@ -222,7 +251,7 @@ coordinator editing an Approved event.
 | SQL: the write | `022:263–300` | The fields, one history row each with `source = 'direct_edit'`, one notice to the Organiser | `SCRUM387_AC3_an_ordinary_edit_is_allowed_while_%s` |
 
 **What each refusal becomes on screen**, keyed on the status and `code`, never the
-server's text (`EventDetailsEditPanel.jsx:46–67`):
+server's text (`EventDetailsEditPanel.jsx:47–68`):
 
 | Response | The panel says | Why it happens |
 |---|---|---|
@@ -232,7 +261,7 @@ server's text (`EventDetailsEditPanel.jsx:46–67`):
 | 404 | "This event can't be found. It may have been removed." | — |
 | 409 `SIGNIFICANT_CHANGE_REQUIRED` | "This event has been approved since you opened the form, so its date, time, attendance, requirements and equipment can no longer be edited here. Go back and use Revise event details." | Approved while a review-time form was open (AC3) |
 | 409 `EVENT_CONFIRMED` | "This event has been confirmed since you opened the form, so it can no longer be edited here. Go back and use Revise event details." | AC4 |
-| 409 `EVENT_STATUS_NOT_ALLOWED` | "This event's status has changed since you opened the form, and it can no longer be edited. Go back to see where it stands." | Cancelled, rejected or otherwise moved on (AC5) |
+| 409 `EVENT_STATUS_NOT_ALLOWED` | "This event is now {label}, so its information can't be edited here.", the label read again through `GET /:id/review`; if that read fails or has no status, "This event's status has changed since you opened the form, and it can no longer be edited. Go back to see where it stands." | Cancelled, rejected or otherwise moved on (AC5) |
 | 409 `EVENT_HOLDS_ARRANGEMENTS` | "This request still holds venue bookings, holds or equipment from before it was reopened. Release them, or approve the request and use Revise event details, before changing the date, time, attendance, requirements or equipment. The name, purpose and description can still be saved on their own." | D4 (AC2) |
 | 409 `EVENT_CHANGED_SINCE_OPENED` | "Someone changed this event after you opened the form. Go back to see the current details, then make your change again." What was typed stays until Back | AC9 |
 | Any other 409 | "This event has changed since you opened the form. Go back to see the current details, then try again." | A code this build does not know |
@@ -390,7 +419,7 @@ equipment counted, a review-time date change cannot set off 06's
 | SCRUM-402 writes ordinary fields with no history row | `process_change_request` still writes them without one. 402 should call `edit_event_request_details`, or write `source = 'change_request'` rows itself, restating `event_change_history`'s checks from 022, not the baseline | SCRUM-402 (Calven) |
 | The click-through's re-check | The name-free SQL query's result is not yet recorded (section 2) | Calven |
 | Expired holds (PR #84 review, point 1) | D4's count follows 013's "active" rule (`022:234–236`) and does not check `expires_at`, so a hold past its expiry can refuse a date edit until the expiry job, which runs every 60 seconds (`venueHoldExpiryScheduler.js`, `DEFAULT_INTERVAL_MS`), marks it expired. Left as it is: fixing it needs a new migration restating the whole of `edit_event_request_details`, and 022 is live | A later migration |
-| Other write paths (PR #84 review, point 4) | Change requests are SCRUM-402's to record, with `source = 'change_request'`. Clarification amendments (`reply_to_event_clarification_with_amendments`) are recorded nowhere yet. A trigger on `event_requests` was rejected: it cannot know who made a change or why, and it would write a second row for every change 395 and 387 already record | SCRUM-402 (Calven); amendments unowned |
+| Other write paths (PR #84 review, point 4) | Change requests are SCRUM-402's to record, with `source = 'change_request'`. Clarification amendments (`reply_to_event_clarification_with_amendments`) are recorded nowhere yet; accepted as a gap at the PR #84 second review, and owned by the backlog story SCRUM-, to be filled in. A trigger on `event_requests` was rejected: it cannot know who made a change or why, and it would write a second row for every change 395 and 387 already record | SCRUM-402 (Calven); amendments SCRUM-, to be filled in |
 
 ### Technical debt, left
 

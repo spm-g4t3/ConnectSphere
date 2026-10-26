@@ -11,8 +11,9 @@
 // sent, so a name edit is never a significant one.
 
 import { useId, useState } from "react";
-import { updateEventRequestDetails } from "../services/eventRequestService";
-import { SESSION_EXPIRED, fieldErrorsFrom, makeErrorMapper } from "../services/apiErrors";
+import { getEventRequestForReview, updateEventRequestDetails } from "../services/eventRequestService";
+import { SESSION_EXPIRED, codeOf, fieldErrorsFrom, makeErrorMapper } from "../services/apiErrors";
+import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
 import {
   deviceTimeZoneLabel,
   toDatetimeLocalValue,
@@ -66,6 +67,21 @@ const errorMessage = makeErrorMapper({
   unknownConflictMessage:
     "This event has changed since you opened the form. Go back to see the current details, then try again.",
 });
+
+/**
+ * AC5 on screen: the status a refused save met, as the detail's badge names it.
+ * Read again rather than taken from the server's message, which this screen
+ * never shows; GET /:id/review answers any coordinator, the event's holder or not.
+ */
+async function statusRefusalMessage(eventRequestId, err) {
+  try {
+    const { status, label } = readStatusDisplay(await getEventRequestForReview(eventRequestId));
+    if (status) return `This event is now ${label}, so its information can't be edited here.`;
+  } catch {
+    // The re-read failed; the general line below still says what to do.
+  }
+  return errorMessage(err, "save");
+}
 
 /** A stored value as its control holds it. */
 function toFormValue(field, stored) {
@@ -176,9 +192,9 @@ export default function EventDetailsEditPanel({ eventRequest, onBack, onSaved })
     } catch (err) {
       const faults = fieldErrorsFrom(err, [...opened.fields, "reason"]);
       setServerErrors(faults);
-      setMessage(faults.length > 0
-        ? "Some details need correcting. Nothing has been saved."
-        : errorMessage(err, "save"));
+      if (faults.length > 0) setMessage("Some details need correcting. Nothing has been saved.");
+      else if (codeOf(err) === "EVENT_STATUS_NOT_ALLOWED") setMessage(await statusRefusalMessage(eventRequest.id, err));
+      else setMessage(errorMessage(err, "save"));
     } finally {
       setSaving(false);
     }

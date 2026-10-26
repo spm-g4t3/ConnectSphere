@@ -6,6 +6,7 @@
 **Written:** 25 October 2026. The brief asked for this document before the code; it was written after the migration, the field module and the routes had been drafted in the same session, and before their tests. Every case below was then proved by the tests SCRUM-389 and SCRUM-390 wrote.
 **Marked:** 25 October 2026, SCRUM-391 and SCRUM-392: the screen's cases, each marked **(UI)**, added after the backend's in every table; every one proved. The backend cases are unchanged.
 **Marked:** 25 October 2026, after the PR #84 review: AC6-15, AC6-16, AC7-14, AC7-15 and AC9-10 added; AC3-04, AC3-07 and AC7-03 amended (the status lists left the backend module; one save's rows are ordered by field name).
+**Marked:** 26 October 2026, after the PR #84 second review: AC5-05, AC5-06, AC5-07 and AC7-16 added; AC5-04 and AC7-12 amended (a status refusal names the status the event is now in; the Organiser's history is read again on each opening).
 
 This document is the written layer between SCRUM-387's acceptance criteria and the
 Vitest files that implement them. The chain is **user story → acceptance criteria
@@ -137,7 +138,10 @@ changes nothing.
 | AC5-01 | Submitted (assigned, review not started); Rejected; Cancelled; Completed | The holder edits the name | PT409 `EVENT_STATUS_NOT_ALLOWED` (409), the message naming the status | Proved (pglite): `SCRUM387_AC5_an_event_that_is_%s_is_refused_naming_its_status` (four); (route) `SCRUM387_%s_%s_is_a_409_with_its_code_and_message` (AC5) |
 | AC5-02 | Draft | Anyone edits | 42501: a draft has no coordinator (015 clears it), so every caller is a stranger (AC1-06) | Proved (pglite): `SCRUM387_AC1_a_stranger_on_a_%s_event_gets_42501_not_a_status_message` (draft) |
 | AC5-03 **(UI)** | The detail | Submitted; Rejected; Cancelled; Completed | No button | Proved (UI, screens): `SCRUM387_AC4_AC5_it_is_not_offered_while_%s` (four) |
-| AC5-04 **(UI)** | The page open | The save answers `EVENT_STATUS_NOT_ALLOWED` | The status changed meanwhile; go back to see where it stands | Proved (UI, panel): `SCRUM387_AC1_AC3_AC4_AC5_AC9_%s_is_said_in_the_screens_own_words` (EVENT_STATUS_NOT_ALLOWED) |
+| AC5-04 **(UI)** | The page open | The save answers `EVENT_STATUS_NOT_ALLOWED` and the re-read gives no status | The general line: the status changed meanwhile; go back to see where it stands. AC5-05 is the usual case | Proved (UI, panel): `SCRUM387_AC1_AC3_AC4_AC5_AC9_%s_is_said_in_the_screens_own_words` (EVENT_STATUS_NOT_ALLOWED) |
+| AC5-05 **(UI)** | The page open; the event cancelled meanwhile | The save answers `EVENT_STATUS_NOT_ALLOWED` | The panel reads the event again through `GET /:id/review` and says "This event is now Cancelled, so its information can't be edited here.", the label the detail's badge shows | Proved (UI, panel): `SCRUM387_AC5_a_status_refusal_names_the_events_current_status` |
+| AC5-06 **(UI)** | The same | The re-read fails; it answers with no status display | The general line of AC5-04, not "Status Unavailable" | Proved (UI, panel): `SCRUM387_AC5_a_failed_reread_keeps_the_general_line_(%s)` (the_reread_fails, the_reread_has_no_status) |
+| AC5-07 **(UI)** | The same | Two refusals whose server text differs, the same status read back | The same line both times; neither server text is shown | Proved (UI, panel): `SCRUM387_AC5_the_servers_wording_changes_nothing_on_screen` |
 
 ### AC6 — SCRUM-10's rules, every fault together
 
@@ -175,10 +179,11 @@ changes nothing.
 | AC7-09 **(UI)** | — | Loading; an empty history; a failed read; a read landing after unmount | "Loading change history...", "No changes have been recorded.", one alert line; a late read ignored | Proved (UI, history): `SCRUM387_AC7_says_loading_then_that_nothing_has_been_recorded`, `SCRUM387_AC7_a_failed_read_is_one_alert_line`, `SCRUM387_AC7_a_read_that_lands_after_unmounting_is_ignored` |
 | AC7-10 **(UI)** | The coordinator's detail | The assigned coordinator; the Lead; another coordinator | A Change history section after the past decisions and before the clarification history for the first two; nothing, and no read, for the third | Proved (UI, screens): `SCRUM387_AC7_%s_reads_it_beside_the_past_decisions`, `SCRUM387_AC7_it_sits_after_the_past_decisions_and_before_the_clarification_history`, `SCRUM387_AC7_a_coordinator_it_is_not_assigned_to_does_not_read_it` |
 | AC7-11 **(UI)** **(trap)** | The detail | A direct edit; a significant change through Revise event details; a parent refetch while the detail stays open, with and without a new `updatedAt` | The history read again after each change, and not on a refetch that changes nothing: it is keyed on the event's `updatedAt` | Proved (UI, screens): `SCRUM387_AC2_a_save_returns_to_the_updated_event_names_the_fields_and_rereads_the_history`, `SCRUM387_AC7_it_is_read_again_after_a_significant_change`, `SCRUM387_AC7_a_refetch_that_moves_updatedAt_rereads_it_and_one_that_does_not_leaves_it` |
-| AC7-12 **(UI)** **(trap)** | The Organiser's list with two submitted rows and a draft | Load it; open one row's Change history; close and reopen it | A disclosure on each non-draft row; nothing read on load; one read, for that row, when opened; none on reopening | Proved (UI, screens): `SCRUM387_AC7_each_non_draft_row_has_one_and_nothing_is_read_until_it_is_opened`, `SCRUM387_AC7_closing_and_reopening_does_not_read_it_again` |
+| AC7-12 **(UI)** **(trap)** | The Organiser's list with two submitted rows and a draft | Load it; open one row's Change history | A disclosure on each non-draft row; nothing read on load; one read, for that row, when opened. AC7-16 says what reopening does | Proved (UI, screens): `SCRUM387_AC7_each_non_draft_row_has_one_and_nothing_is_read_until_it_is_opened` |
 | AC7-13 **(UI)** | — | `getEventChangeHistory(id)` | GET `/event-requests/:id/change-history` | Proved (UI, service): `SCRUM387_AC7_the_change_history_is_read_from_its_endpoint` |
 | AC7-14 **(trap)** | Under review | One save changes five fields, read back through `getEventChangeHistory` on PGlite | The five rows share one `changed_at` and come back in field-name order, not in one of the 120 orders their uuids would give | Proved (pglite): `SCRUM387_AC7_one_saves_rows_always_come_back_in_field_name_order`; (route) `SCRUM387_AC7_the_organiser_reads_the_history_newest_first_with_names` (the order asked for) |
 | AC7-15 | Through the API | `GET /:id/change-history` with a malformed id | 400 with a fault on `id`, with no query; it was a 500 from `getEventRequestById`'s read | Proved (route): `SCRUM387_AC7_a_malformed_id_is_refused_with_400_before_the_database` |
+| AC7-16 **(UI)** | A row's Change history opened, then closed; a coordinator edits meanwhile | Open it again | Read again, showing the newer row; a closed disclosure holds no history. Until the PR #84 second review it stayed loaded and showed what it read the first time | Proved (UI, screens): `SCRUM387_AC7_the_organisers_history_rereads_each_time_it_is_opened` |
 
 ### AC8 — the Organiser is told
 
@@ -306,10 +311,11 @@ A trigger refuses update and delete on `event_change_history`. A `source` column
 
 ## Tally
 
-82 cases, counted from the tables: **82 proved**; 0 not yet implemented; 0 that
+86 cases, counted from the tables: **86 proved**; 0 not yet implemented; 0 that
 cannot be written as specified. Twenty-one are traps, eleven of them on the
 screen. After the PR #84 review: five added (AC6-15, AC6-16, AC7-14, AC7-15,
-AC9-10), three amended (AC3-04, AC3-07, AC7-03).
+AC9-10), three amended (AC3-04, AC3-07, AC7-03). After the second review: four
+added (AC5-05, AC5-06, AC5-07, AC7-16), two amended (AC5-04, AC7-12).
 
 | Section | Backend | UI | Cases |
 |---|---|---|---|
@@ -317,9 +323,9 @@ AC9-10), three amended (AC3-04, AC3-07, AC7-03).
 | AC2 | 7 | 3 | 10 |
 | AC3 | 4 | 3 | 7 |
 | AC4 | 1 | 2 | 3 |
-| AC5 | 2 | 2 | 4 |
+| AC5 | 2 | 5 | 7 |
 | AC6 | 10 | 6 | 16 |
-| AC7 | 8 | 7 | 15 |
+| AC7 | 8 | 8 | 16 |
 | AC8 | 2 | 2 | 4 |
 | AC9 | 4 | 6 | 10 |
-| **Total** | **48** | **34** | **82** |
+| **Total** | **48** | **38** | **86** |
