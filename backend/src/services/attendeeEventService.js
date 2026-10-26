@@ -42,7 +42,7 @@ export async function getAttendeeEvent({ user, eventRequestId, client } = {}) {
   // Registration, event state and arrangements share one database snapshot;
   // a separate status check could disclose arrangements after a planning change.
   const { data, error } = await db.from('event_registrations')
-    .select(`event_request_id, attendee_id, status,
+    .select(`id, event_request_id, attendee_id, status,
       event_requests!inner(id, event_name, status, proposed_start, proposed_end,
         bookings(id, status, venues(name, location)))`)
     .eq('attendee_id', attendeeId)
@@ -60,12 +60,14 @@ export async function getAttendeeEvent({ user, eventRequestId, client } = {}) {
   // The name is already on the attendee's registered-events list in every state.
   const eventName = event.event_name ?? null;
   if (event.status !== STATUS.CONFIRMED) {
-    return { eventRequestId: data.event_request_id, state: 'unavailable', eventName };
+    return { eventRequestId: data.event_request_id, registrationId: data.id, state: 'unavailable', eventName };
   }
 
   // Explicit projections keep internal status, planning and staffing data private.
   return {
     eventRequestId: data.event_request_id,
+    // What the attendee withdraws; withdraw_registration checks it is theirs.
+    registrationId: data.id,
     state: 'confirmed',
     eventName,
     startsAt: event.proposed_start ?? null,

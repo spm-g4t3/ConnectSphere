@@ -8,10 +8,17 @@
 // backend refuses a note-less change, and refuses a request that changes
 // nothing. The usable figure shown is a preview worked out from what is typed;
 // the backend's answer is the one that counts.
+//
+// SCRUM-314: before saving, the backend is asked which reservations the change
+// would leave short. None means it saves at once; some means they are listed
+// and nothing is saved until the staff member confirms (useConfirmedChange).
+// The note is checked first, so nobody confirms a list and is then told the
+// note was missing.
 
 import { useState } from "react";
-import { recordEquipmentCondition } from "../services/equipmentService";
-import { equipmentErrorMessages } from "../services/equipmentErrors";
+import { previewEquipmentChange, recordEquipmentCondition } from "../services/equipmentService";
+import EquipmentImpactConfirmation from "./EquipmentImpactConfirmation";
+import useConfirmedChange from "./useConfirmedChange";
 
 function asQuantity(text) {
   return text === "" ? null : Number(text);
@@ -22,13 +29,13 @@ export default function EquipmentConditionForm({ type, onSaved }) {
   const [underMaintenance, setUnderMaintenance] = useState(String(type.underMaintenanceQuantity));
   const [note, setNote] = useState("");
   const [errors, setErrors] = useState([]);
-  const [submitting, setSubmitting] = useState(false);
+  const flow = useConfirmedChange();
 
   const usable = type.totalQuantity - Number(damaged || 0) - Number(underMaintenance || 0);
 
-  async function handleSubmit(event) {
+  function handleSubmit(event) {
     event.preventDefault();
-    if (submitting) return;
+    if (flow.busy) return;
 
     const payload = {};
     if (damaged !== String(type.damagedQuantity)) payload.damagedQuantity = asQuantity(damaged);
@@ -39,18 +46,38 @@ export default function EquipmentConditionForm({ type, onSaved }) {
       setErrors(["Change at least one quantity."]);
       return;
     }
-    payload.note = note;
-
-    setSubmitting(true);
-    setErrors([]);
-    try {
-      await recordEquipmentCondition(type.id, payload);
-      onSaved();
-    } catch (err) {
-      setErrors(equipmentErrorMessages(err, "condition"));
-      setSubmitting(false);
+    if (note.trim() === "") {
+      setErrors(["Note: is required"]);
+      return;
     }
+
+    setErrors([]);
+    flow.start({
+      preview: () => previewEquipmentChange(type.id, payload),
+      save: (confirmedReservationIds) =>
+        recordEquipmentCondition(type.id, { ...payload, note, confirmedReservationIds }),
+      onSaved,
+      action: "condition",
+    });
   }
+
+  if (flow.reviewing) {
+    return (
+      <EquipmentImpactConfirmation
+        typeName={type.name}
+        impact={flow.impact}
+        stale={flow.stale}
+        busy={flow.busy}
+        errors={flow.errors}
+        confirmLabel={flow.impact.affected.length === 0 ? "Save quantities" : "Confirm and flag these reservations"}
+        cancelLabel="Go back"
+        onConfirm={flow.confirm}
+        onCancel={flow.cancel}
+      />
+    );
+  }
+
+  const shownErrors = errors.length > 0 ? errors : flow.errors;
 
   return (
     <form className="equipment-form" onSubmit={handleSubmit} noValidate>
@@ -77,16 +104,16 @@ export default function EquipmentConditionForm({ type, onSaved }) {
         <textarea id="equipment-note" rows="3" value={note} onChange={(event) => setNote(event.target.value)} />
       </div>
 
-      {errors.length > 0 && (
+      {shownErrors.length > 0 && (
         <ul className="equipment-errors" role="alert">
-          {errors.map((message, index) => (
+          {shownErrors.map((message, index) => (
             <li key={index}>{message}</li>
           ))}
         </ul>
       )}
 
-      <button type="submit" disabled={submitting}>
-        {submitting ? "Saving..." : "Save quantities"}
+      <button type="submit" disabled={flow.busy}>
+        {flow.stage === "checking" ? "Checking..." : flow.busy ? "Saving..." : "Save quantities"}
       </button>
     </form>
   );

@@ -51,6 +51,7 @@ import EventVenueSuitability from "./EventVenueSuitability";
 import EventFlaggedBookings from "./EventFlaggedBookings";
 import EventVenueBookings from "./EventVenueBookings";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
+import NeedsAttentionReasons from "./NeedsAttentionReasons";
 import DecisionOutcome from "./DecisionOutcome";
 import DecisionHistory from "./DecisionHistory";
 import ReassignEventPanel from "./ReassignEventPanel";
@@ -540,6 +541,7 @@ export default function CoordinatorRequestDetail({
         <NeedsAttentionBadge event={current} />
       </h2>
       <p>{display.description}</p>
+      <NeedsAttentionReasons event={current} />
       <SafetyApprovalNotice status={current.status} />
       {/* The panel shows a refusal only for the revision it refused; once a
           refetch moves the event on, or unmounts the panel, show it here. */}

@@ -40,3 +40,18 @@
 .equipment-form__field input, .equipment-form__field textarea { font: inherit; padding: 8px; }
 .equipment-errors { color: #a12a2a; margin: 0; }
 .equipment-errors li { border-top: 0; padding: 2px 0; }
+
+/* ---- SCRUM-314: the confirmation step ----
+   Plain text and a quiet list, so the reservations are what the eye lands on.
+   The confirm button is the one solid red button, like "Confirm retire": it is
+   the action that flags other people's reservations. */
+.equipment-impact { border: 1px solid #e3c3c3; border-radius: 8px; display: grid; gap: 12px; max-width: 720px; padding: 16px 18px; }
+.equipment-impact h3 { margin: 0; }
+.equipment-impact p { margin: 0; }
+.equipment-impact__list { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.equipment-impact__item { background: #fbf6f6; border: 1px solid #efd9d9; border-radius: 6px; display: grid; gap: 2px; padding: 10px 12px; }
+.equipment-impact__item strong { color: var(--ink, #17242b); }
+.equipment-impact__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.equipment-catalogue .equipment-impact__actions button:first-child { background: #a12a2a; border-color: #a12a2a; color: #ffffff; }
+.equipment-catalogue .equipment-impact__actions button:first-child:hover { background: #7f1f1f; }
+.equipment-catalogue .equipment-impact__actions button:disabled { opacity: 0.55; }

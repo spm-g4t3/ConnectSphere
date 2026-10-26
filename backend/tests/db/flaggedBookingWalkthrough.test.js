@@ -38,14 +38,28 @@ const BOOKING_STATUS_EMBED = (table) =>
   `(select coalesce(json_agg(json_build_object('status', b.status)), '[]'::json)
       from bookings b where b.event_request_id = ${table}.id) as bookings`;
 
-/** The shared adapter, answering the one embed this path reads. */
+/**
+ * The equipment_reservations(flagged, released_at, flag_reason, flag_code) embed (SCRUM-315),
+ * as PostgREST answers it along equipment_reservations.event_request_id.
+ */
+const RESERVATION_EMBED = (table) =>
+  `(select coalesce(json_agg(json_build_object(
+      'flagged', r.flagged, 'released_at', r.released_at, 'flag_reason', r.flag_reason, 'flag_code', r.flag_code)), '[]'::json)
+      from equipment_reservations r where r.event_request_id = ${table}.id) as equipment_reservations`;
+
+const RESERVATION_EMBED_TEXT = /\bequipment_reservations\(flagged, released_at, flag_reason, flag_code\)/;
+
+/** The shared adapter, answering the two embeds this path reads. */
 function pgliteClient(db) {
   return pgliteSupabaseClient(db, {
     columns(cols, table) {
-      if (/\w+\(/.test(cols.replace(/\bbookings\(status\)/, ''))) {
+      const rest = cols.replace(/\bbookings\(status\)/, '').replace(RESERVATION_EMBED_TEXT, '');
+      if (/\w+\(/.test(rest)) {
         throw new Error(`pgliteClient: an embed in "${cols}" is not on this path`);
       }
-      return cols.replace(/\bbookings\(status\)/, BOOKING_STATUS_EMBED(table));
+      return cols
+        .replace(/\bbookings\(status\)/, BOOKING_STATUS_EMBED(table))
+        .replace(RESERVATION_EMBED_TEXT, RESERVATION_EMBED(table));
     },
   });
 }

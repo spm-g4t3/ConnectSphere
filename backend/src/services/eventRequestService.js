@@ -134,8 +134,12 @@ const COLUMNS = `
  * SCRUM-266: COLUMNS plus each event's booking statuses, embedded along
  * bookings.event_request_id (009), so the event lists and single reads can
  * say whether the event needs attention without a second round trip.
+ *
+ * SCRUM-315: and its equipment reservations' flags, embedded along
+ * equipment_reservations.event_request_id, for the same purpose. A flagged
+ * reservation that has not been released keeps a Confirmed event on the list.
  */
-const ATTENTION_COLUMNS = `${COLUMNS}, bookings(status)`;
+const ATTENTION_COLUMNS = `${COLUMNS}, bookings(status), equipment_reservations(flagged, released_at, flag_reason, flag_code)`;
 
 /**
  * The two vocabularies this module bridges: camelCase above it, the column
@@ -331,21 +335,74 @@ function toEventRequest(row) {
   };
 }
 
-/**
- * SCRUM-266: a confirmed event with a booking flagged for review needs its
- * coordinator. Only confirmed counts: before that the event is still being
- * arranged, and the flag is one item of that work. The embed is read
- * defensively, as bookingRequestService's one() reads its embeds.
- */
-function needsAttention(row) {
-  if (row.status !== STATUS.CONFIRMED) return false;
-  const bookings = Array.isArray(row.bookings) ? row.bookings : [row.bookings];
-  return bookings.some((booking) => booking?.status === BOOKING_STATUS.FLAGGED_FOR_REVIEW);
+/** An embed arrives as an array, or a single object, or not at all. */
+function embedded(value) {
+  return Array.isArray(value) ? value : [value];
 }
 
-/** toEventRequest, with needsAttention, for a row read with ATTENTION_COLUMNS. */
-function toEventRequestWithAttention(row) {
-  return { ...toEventRequest(row), needsAttention: needsAttention(row) };
+/** The booking flag that SCRUM-266 counts. */
+const VENUE_ATTENTION_REASON = 'Venue: a booking is flagged for review';
+/** flag_code of a reservation flagged because the equipment is unavailable (023). */
+// The stored code keeps its name; the screens say "unavailable" (SCRUM-310, D11).
+const EQUIPMENT_LOST_CODE = 'equipment_lost';
+
+/**
+ * One equipment flag in words. A flag for unavailable equipment says so; any other flag
+ * (the event's date or time changed, say) is named for what it is, a flag, so a
+ * coordinator is not sent after equipment that did not become unavailable.
+ */
+function equipmentFlagWording(reservation, { withReason }) {
+  const lost = reservation.flag_code === EQUIPMENT_LOST_CODE;
+  const label = lost ? 'Equipment unavailable' : 'Equipment flagged for review';
+  const reason = typeof reservation.flag_reason === 'string' ? reservation.flag_reason.trim() : '';
+  return withReason && reason !== '' ? `${label}: ${reason}` : label;
+}
+
+/**
+ * SCRUM-266, SCRUM-315 (SCRUM-310 AC6): why a confirmed event needs its
+ * coordinator. Only confirmed counts: before that the event is still being
+ * arranged, and a flag is one item of that work. The reasons are:
+ *
+ *   - a venue booking flagged for review (SCRUM-266), and
+ *   - an equipment reservation that is flagged and not released. One entry per
+ *     distinct flag, worded by its kind (unavailable equipment, or any other flag) and
+ *     the reason it was given, so a coordinator reads what happened rather than
+ *     a count.
+ *
+ * Nothing is stored. The list is worked out from the flags as they are now, so
+ * an event drops off when the last flag is cleared or released. The embeds are
+ * read defensively, as bookingRequestService's one() reads its embeds.
+ *
+ * The reason text can carry the note Technical Support wrote about the equipment, which
+ * is internal, so only coordinator reads include it (withReason). An organiser sees the
+ * kind of flag and nothing more.
+ *
+ * @returns {string[]} empty when the event does not need attention
+ */
+function attentionReasons(row, { withReason }) {
+  if (row.status !== STATUS.CONFIRMED) return [];
+
+  const reasons = [];
+  if (embedded(row.bookings).some((booking) => booking?.status === BOOKING_STATUS.FLAGGED_FOR_REVIEW)) {
+    reasons.push(VENUE_ATTENTION_REASON);
+  }
+
+  const flagged = embedded(row.equipment_reservations).filter(
+    (reservation) => reservation?.flagged === true && !reservation.released_at,
+  );
+  const wording = new Set(flagged.map((reservation) => equipmentFlagWording(reservation, { withReason })));
+  reasons.push(...wording);
+
+  return reasons;
+}
+
+/**
+ * toEventRequest, with needsAttention and its reasons, for a row read with ATTENTION_COLUMNS.
+ * forOrganiser leaves the staff's reason text out of the reasons.
+ */
+function toEventRequestWithAttention(row, { forOrganiser = false } = {}) {
+  const reasons = attentionReasons(row, { withReason: !forOrganiser });
+  return { ...toEventRequest(row), needsAttention: reasons.length > 0, attentionReasons: reasons };
 }
 
 /**
@@ -1468,7 +1525,7 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
   const nameOf = coordinatorIds.length > 0 ? await readNames(db, coordinatorIds) : () => null;
 
   return rows.map((row) => ({
-    ...toEventRequestWithAttention(row),
+    ...toEventRequestWithAttention(row, { forOrganiser: true }),
     assignedCoordinatorName: nameOf(row.assigned_coordinator_id ?? null),
   }));
 }
@@ -1502,7 +1559,10 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
 export async function getEventRequestForOrganiser(id, organiserId, { client } = {}) {
   assertOrganiser(organiserId);
 
-  const request = toEventRequestWithAttention(await readEventRequestRow(id, ATTENTION_COLUMNS, client));
+  const request = toEventRequestWithAttention(
+    await readEventRequestRow(id, ATTENTION_COLUMNS, client),
+    { forOrganiser: true },
+  );
 
   if (request.organiserId !== organiserId) {
     // Deliberately the same message getEventRequestById raises for an id that
@@ -1870,7 +1930,7 @@ export async function listEventRequestsForReview({ client } = {}) {
 
   // An empty queue is the good state, not a missing resource: it means nothing
   // is waiting on a Coordinator. 200 [] all the way up, never a NotFoundError.
-  return (data ?? []).map(toEventRequestWithAttention);
+  return (data ?? []).map((row) => toEventRequestWithAttention(row));
 }
 
 

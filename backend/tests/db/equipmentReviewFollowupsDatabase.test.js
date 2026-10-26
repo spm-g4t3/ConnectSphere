@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSchemaDb, seedUser } from './helpers/schemaDb.js';
 import { queriesFor, refusal } from './helpers/queries.js';
-import { asJson, singleReviewerSteps } from './helpers/equipment.js';
+import { asJson, singleReviewerSteps, applyEquipmentChange } from './helpers/equipment.js';
 
 const START = '2026-12-01T10:00:00Z';
 const END = '2026-12-01T12:00:00Z';
@@ -194,14 +194,14 @@ describe('SCRUM-300: review follow-ups in Postgres', () => {
 
     it('SCRUM300_AC8_fewer_usable_units_is_named_as_the_reason', async () => {
       const { event, type } = await underReview();
-      await db.query('update equipment_types set damaged_quantity = 9 where id = $1', [type]);
+      await applyEquipmentChange(db, type, reviewerA, { total: 1 });
 
       expect(await notes(event)).toEqual(['A reservation was flagged during the review. Fewer units of this equipment are usable.']);
     });
 
     it('SCRUM300_AC8_a_retired_type_is_named_as_the_reason', async () => {
       const { event, type } = await underReview();
-      await db.query('update equipment_types set retired_at = now() where id = $1', [type]);
+      await applyEquipmentChange(db, type, reviewerA, { retire: true });
 
       expect(await notes(event)).toEqual(['A reservation was flagged during the review. The equipment type was retired.']);
     });

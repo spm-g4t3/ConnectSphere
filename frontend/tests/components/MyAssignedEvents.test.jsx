@@ -156,6 +156,53 @@ describe("SCRUM-266 AC4: Needs attention on My events", () => {
   });
 });
 
+// SCRUM-315 (SCRUM-310 AC6): the reason is written under the event it belongs to.
+describe("SCRUM-310 (SCRUM-315) AC6: Needs attention says why", () => {
+  const reasonsOf = (name) =>
+    within(screen.getByText(name).closest("li")).queryByRole("list", { name: "Why this event needs attention" });
+
+  it("SCRUM310_AC6_a_row_shows_the_reason_beside_its_badge", async () => {
+    renderList([
+      {
+        ...event("e1", "confirmed", "Lost speakers gala"),
+        needsAttention: true,
+        attentionReasons: ["Equipment unavailable: Fewer units of this equipment are usable (Dropped)"],
+      },
+    ]);
+
+    await screen.findByText("Lost speakers gala");
+
+    const row = screen.getByText("Lost speakers gala").closest("li");
+    expect(within(row).getByText("Needs attention", { selector: ".status-badge" })).toBeInTheDocument();
+    expect(within(reasonsOf("Lost speakers gala")).getByRole("listitem")).toHaveTextContent(
+      "Equipment unavailable: Fewer units of this equipment are usable (Dropped)",
+    );
+  });
+
+  it("SCRUM310_AC6_only_the_rows_that_need_attention_show_reasons", async () => {
+    renderList([
+      { ...event("e1", "confirmed", "Flagged event"), needsAttention: true, attentionReasons: ["Equipment: x"] },
+      { ...event("e2", "confirmed", "Fine event"), needsAttention: false, attentionReasons: [] },
+      { ...event("e3", "confirmed", "Older payload") },
+    ]);
+
+    await screen.findByText("Flagged event");
+
+    expect(reasonsOf("Flagged event")).toBeInTheDocument();
+    expect(reasonsOf("Fine event")).not.toBeInTheDocument();
+    expect(reasonsOf("Older payload")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM310_AC6_a_badge_with_no_reasons_still_shows_the_badge_only", async () => {
+    renderList([{ ...event("e1", "confirmed", "Flagged event"), needsAttention: true }]);
+
+    await screen.findByText("Flagged event");
+
+    expect(within(screen.getByText("Flagged event").closest("li")).getByText("Needs attention")).toBeInTheDocument();
+    expect(reasonsOf("Flagged event")).not.toBeInTheDocument();
+  });
+});
+
 describe("SCRUM-334: the detail panel survives the event leaving My events", () => {
   it("SCRUM334_AC_keeps_the_panel_open_when_a_refetch_no_longer_lists_the_event", async () => {
     renderList([event("e1", "approved", "Handed over event")]);

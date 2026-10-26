@@ -89,6 +89,49 @@ function readOptionalText(details, field, value) {
 }
 
 
+/**
+ * SCRUM-313: the reservations the staff member was shown and confirmed. Optional:
+ * left out gives undefined, which the service reads as an empty list ("this change
+ * affects nothing"), not as a pass. Anything that is not a
+ * list of UUIDs is refused rather than read as empty, because an empty list is a
+ * claim that nothing is affected.
+ */
+const MAX_CONFIRMED = 1000;
+
+function readConfirmedReservationIds(details, value) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    details.push({ field: 'confirmedReservationIds', message: 'must be a list of reservation ids' });
+    return undefined;
+  }
+  if (value.length > MAX_CONFIRMED) {
+    details.push({
+      field: 'confirmedReservationIds',
+      message: `must not list more than ${MAX_CONFIRMED} reservations`,
+    });
+    return undefined;
+  }
+  if (!value.every((id) => typeof id === 'string' && UUID_PATTERN.test(id))) {
+    details.push({ field: 'confirmedReservationIds', message: 'must be a list of reservation ids' });
+    return undefined;
+  }
+  return [...new Set(value)];
+}
+
+/**
+ * An optional reason for a change that does not always need one. Blank counts as
+ * none, the same as the database reads it.
+ */
+function readOptionalNote(details, value) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') {
+    details.push({ field: 'note', message: 'must be text' });
+    return undefined;
+  }
+  const note = value.trim();
+  return note === '' ? undefined : note;
+}
+
 const CONDITION_FIELDS = ['damagedQuantity', 'underMaintenanceQuantity'];
 
 /** A quantity of damaged or under-maintenance units: a whole number of zero or more. */
@@ -177,6 +220,12 @@ export function checkUpdateEquipmentType(changes) {
     if (text !== undefined) value[field] = text;
   }
 
+  // Only read when the total changes: nothing else can leave a reservation short.
+  const confirmed = readConfirmedReservationIds(details, changes.confirmedReservationIds);
+  if (confirmed !== undefined) value.confirmedReservationIds = confirmed;
+  const note = readOptionalNote(details, changes.note);
+  if (note !== undefined) value.note = note;
+
   // Refused outright rather than sent as an update that changes nothing.
   if (!FIELDS.some((field) => changes[field] !== undefined)) {
     details.push({
@@ -215,10 +264,108 @@ export function checkConditionChange(input) {
   const note = readNote(details, input.note);
   if (note !== undefined) value.note = note;
 
+  const confirmed = readConfirmedReservationIds(details, input.confirmedReservationIds);
+  if (confirmed !== undefined) value.confirmedReservationIds = confirmed;
+
   if (!CONDITION_FIELDS.some((field) => input[field] !== undefined)) {
     details.push({
       field: 'equipment',
       message: 'provide damagedQuantity, underMaintenanceQuantity or both',
+    });
+  }
+
+  return { value, details };
+}
+
+/**
+ * SCRUM-313: the body of a retirement. There used to be none; now it may carry the
+ * reservations the staff member confirmed and an optional reason. A missing body
+ * is fine and means nothing was confirmed (the service reads that as an empty list).
+ *
+ * @param {unknown} input
+ * @returns {{value: object|null, details: Array<{field: string, message: string}>}}
+ */
+export function checkRetire(input) {
+  if (input === undefined || input === null) {
+    return { value: {}, details: [] };
+  }
+  if (!isObject(input)) {
+    return { value: null, details: [{ field: 'equipment', message: 'must be an object' }] };
+  }
+
+  const details = [];
+  const value = {};
+  const confirmed = readConfirmedReservationIds(details, input.confirmedReservationIds);
+  if (confirmed !== undefined) value.confirmedReservationIds = confirmed;
+  const note = readOptionalNote(details, input.note);
+  if (note !== undefined) value.note = note;
+
+  return { value, details };
+}
+
+const QUANTITY_FIELDS = ['totalQuantity', ...CONDITION_FIELDS];
+const PREVIEW_FIELDS = [...QUANTITY_FIELDS, 'retire'];
+const EDIT_FIELDS = ['name', ...OPTIONAL_TEXT_FIELDS];
+
+/**
+ * Check a change Technical Support Staff want to look at before saving it. The same
+ * quantities the real endpoints take, but no note: a preview saves nothing.
+ *
+ * One of totalQuantity, damagedQuantity, underMaintenanceQuantity (the last two may be
+ * sent together, and either may go with a total) or retire: true. Retiring can't be
+ * combined with quantities, and retire: false is refused instead of read as "do nothing".
+ *
+ * name, description, category and location may come along with a total, as in the edit
+ * that will be saved, so a bad one is refused now and not after the list is confirmed.
+ *
+ * @param {unknown} input
+ * @returns {{value: object|null, details: Array<{field: string, message: string}>}}
+ */
+export function checkChangePreview(input) {
+  if (!isObject(input)) {
+    return { value: null, details: [{ field: 'equipment', message: 'must be an object' }] };
+  }
+
+  const details = [];
+  const value = {};
+
+  if (input.totalQuantity !== undefined) {
+    const total = readTotal(details, input.totalQuantity);
+    if (total !== undefined) value.totalQuantity = total;
+  }
+
+  for (const field of CONDITION_FIELDS) {
+    if (input[field] === undefined) continue;
+    const quantity = readQuantity(details, field, input[field]);
+    if (quantity !== undefined) value[field] = quantity;
+  }
+
+  if (input.name !== undefined) {
+    const name = readName(details, input.name);
+    if (name !== undefined) value.name = name;
+  }
+
+  for (const field of OPTIONAL_TEXT_FIELDS) {
+    if (input[field] === undefined) continue;
+    const text = readOptionalText(details, field, input[field]);
+    if (text !== undefined) value[field] = text;
+  }
+
+  if (input.retire !== undefined) {
+    if (input.retire !== true) {
+      details.push({ field: 'retire', message: 'must be true when sent' });
+    } else {
+      value.retire = true;
+      if ([...QUANTITY_FIELDS, ...EDIT_FIELDS].some((field) => input[field] !== undefined)) {
+        details.push({ field: 'retire', message: "can't be combined with another change" });
+      }
+    }
+  }
+
+  if (!PREVIEW_FIELDS.some((field) => input[field] !== undefined)) {
+    details.push({
+      field: 'equipment',
+      message: 'provide totalQuantity, damagedQuantity, underMaintenanceQuantity or retire',
     });
   }
 

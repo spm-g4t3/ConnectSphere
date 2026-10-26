@@ -20,10 +20,10 @@ import request from 'supertest';
 import { ok, queryStub } from '../fixtures/supabaseStubs.js';
 import { signedOut, signedInFor } from '../fixtures/auth.js';
 
-const { from } = vi.hoisted(() => ({ from: vi.fn() }));
+const { from, rpc } = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn() }));
 
 vi.mock('../../src/config/supabaseClient.js', () => {
-  const client = { from };
+  const client = { from, rpc };
   return { supabase: client, default: client };
 });
 
@@ -63,8 +63,12 @@ function appWith(requireAuth = signedInAs(ROLE.TECHNICAL_SUPPORT_STAFF)) {
 
 const OTHER_ROLES = [ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.ATTENDEE, ROLE.EVENT_COORDINATOR, ROLE.EVENT_COORDINATOR_LEAD, ROLE.SAFETY_OFFICER];
 
+/** What apply_equipment_change answers when it saved (SCRUM-313). */
+const savedType = (row) => ok({ saved: true, flagged_count: 0, affected: [], equipment_type: row });
+
 beforeEach(() => {
   from.mockReset();
+  rpc.mockReset();
 });
 
 
@@ -319,9 +323,8 @@ describe('AC4 and AC5: recording damaged and under-maintenance quantities', () =
   const body = { damagedQuantity: 4, note: 'dropped in transit' };
 
   it('SCRUM275_AC4_lets_technical_support_record_damage_and_returns_the_usable_figure', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ damaged_quantity: 4 }))));
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(savedType(typeRow({ damaged_quantity: 4 })));
 
     const res = await request(appWith()).patch(url).send(body);
 
@@ -386,16 +389,16 @@ describe('AC4 and AC5: recording damaged and under-maintenance quantities', () =
   });
 
   it('SCRUM275_AC4_records_the_signed_in_user_and_the_note', async () => {
-    const write = queryStub(ok(typeRow({ damaged_quantity: 4 })));
-    const updateSpy = vi.spyOn(write, 'update');
-    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(savedType(typeRow({ damaged_quantity: 4 })));
 
-    await request(appWith()).patch(url).send({ ...body, lastModifiedBy: 'someone-else' });
+    await request(appWith()).patch(url).send({ ...body, lastModifiedBy: 'someone-else', p_caller: 'someone-else' });
 
-    expect(updateSpy.mock.calls[0][0]).toEqual({
-      damaged_quantity: 4,
-      last_modified_by: STAFF_ID,
-      last_change_note: 'dropped in transit',
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc.mock.calls[0][1]).toMatchObject({
+      p_caller: STAFF_ID,
+      p_damaged: 4,
+      p_note: 'dropped in transit',
     });
   });
 });
@@ -407,9 +410,8 @@ describe('AC6: retire and reinstate', () => {
   const reinstateUrl = `/api/equipment/${TYPE_ID}/reinstate`;
 
   it('SCRUM275_AC6_lets_technical_support_retire_a_type', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))));
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(savedType(typeRow({ retired_at: RETIRED })));
 
     const res = await request(appWith()).post(retireUrl);
 
@@ -474,12 +476,11 @@ describe('AC6: retire and reinstate', () => {
   });
 
   it('SCRUM275_AC6_records_the_signed_in_user_when_retiring', async () => {
-    const write = queryStub(ok(typeRow({ retired_at: RETIRED })));
-    const updateSpy = vi.spyOn(write, 'update');
-    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(savedType(typeRow({ retired_at: RETIRED })));
 
-    await request(appWith()).post(retireUrl).send({ lastModifiedBy: 'someone-else' });
+    await request(appWith()).post(retireUrl).send({ lastModifiedBy: 'someone-else', p_caller: 'someone-else' });
 
-    expect(updateSpy.mock.calls[0][0].last_modified_by).toBe(STAFF_ID);
+    expect(rpc.mock.calls[0][1].p_caller).toBe(STAFF_ID);
   });
 });

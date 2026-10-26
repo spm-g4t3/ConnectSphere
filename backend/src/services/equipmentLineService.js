@@ -85,6 +85,25 @@ const translateError = createPgTranslator({
 });
 
 
+/**
+ * One flagged reservation on a line (SCRUM-315), in camelCase. reason is null
+ * for a flag that was set without one, and the screen words that case itself.
+ * code says what kind of flag it is, so the screen does not call every flag
+ * "equipment unavailable".
+ */
+function toFlaggedReservation(row) {
+  return {
+    id: row.id,
+    quantity: row.quantity,
+    startAt: row.start_at,
+    endAt: row.end_at,
+    reason: row.flag_reason ?? null,
+    // 'equipment_lost' when the equipment is unavailable; null for any other flag (023).
+    code: row.flag_code ?? null,
+    flaggedAt: row.flagged_at ?? null,
+  };
+}
+
 /** One line, in camelCase. Built as a literal so no snake_case key leaks upward. */
 function toLine(row) {
   return {
@@ -100,6 +119,11 @@ function toLine(row) {
     reserved: row.reserved ?? 0,
     outcome: row.outcome ?? null,
     outcomeNote: row.outcome_note ?? null,
+    // SCRUM-315 (023): the reservations on this line that are flagged and not
+    // released, for example after equipment became unavailable. Empty when there are none.
+    flaggedReservations: Array.isArray(row.flagged_reservations)
+      ? row.flagged_reservations.map(toFlaggedReservation)
+      : [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

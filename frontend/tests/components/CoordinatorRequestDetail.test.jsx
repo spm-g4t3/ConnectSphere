@@ -1344,6 +1344,36 @@ describe("SCRUM266 flagged bookings on the event view", () => {
     await waitFor(() => expect(getEventFlaggedBookings).toHaveBeenCalled());
   });
 
+  const reasonsList = () => screen.queryByRole("list", { name: "Why this event needs attention" });
+
+  it("SCRUM310_AC6_the_header_gives_the_reasons_under_the_event", async () => {
+    renderAssigned(
+      confirmed({
+        attentionReasons: [
+          "Equipment unavailable: Fewer units of this equipment are usable (Dropped)",
+          "Venue: a booking is flagged for review",
+        ],
+      }),
+    );
+
+    expect(within(reasonsList()).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Equipment unavailable: Fewer units of this equipment are usable (Dropped)",
+      "Venue: a booking is flagged for review",
+    ]);
+    await waitFor(() => expect(getEventFlaggedBookings).toHaveBeenCalled());
+  });
+
+  it.each([
+    ["the event does not need attention", { needsAttention: false, attentionReasons: ["Equipment: x"] }],
+    ["the reasons are missing", { needsAttention: true, attentionReasons: undefined }],
+    ["the reasons are empty", { needsAttention: true, attentionReasons: [] }],
+  ])("SCRUM310_AC6_no_reasons_are_shown_when_%s", async (_label, overrides) => {
+    renderAssigned(confirmed(overrides));
+
+    expect(reasonsList()).not.toBeInTheDocument();
+    await waitFor(() => expect(getEventFlaggedBookings).toHaveBeenCalled());
+  });
+
   it("SCRUM266_AC3_cancelling_a_flagged_booking_reloads_venue_suitability_and_the_parent", async () => {
     vi.mocked(getEventFlaggedBookings).mockResolvedValueOnce([FLAGGED]).mockResolvedValueOnce([]);
     vi.mocked(cancelFlaggedBooking).mockResolvedValue({ id: "f1", status: "cancelled" });

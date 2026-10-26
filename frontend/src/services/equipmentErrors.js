@@ -25,6 +25,8 @@ const CODE_MESSAGES = {
   EQUIPMENT_NAME_TAKEN: "Another equipment type already uses that name.",
   EQUIPMENT_ALREADY_RETIRED: "This type has already been retired. The list has been refreshed.",
   EQUIPMENT_NOT_RETIRED: "This type is not retired. The list has been refreshed.",
+  EQUIPMENT_AFFECTED_CHANGED:
+    "The reservations this change affects have changed since you looked. Nothing was saved. Review the updated list and confirm again.",
 };
 
 const STATUS_MESSAGES = {
@@ -40,13 +42,14 @@ const DEFAULT_MESSAGES = {
   retire: "Could not retire this type. Please try again.",
   reinstate: "Could not reinstate this type. Please try again.",
   history: "Could not load this type's history. Please try again.",
+  preview: "Could not check which reservations this change affects. Nothing was saved. Please try again.",
 };
 
 /**
  * The messages for a failed request, one per line to show.
  *
  * @param {unknown} err  what the equipmentService call threw
- * @param {"load"|"save"|"condition"|"retire"|"reinstate"|"history"} action
+ * @param {"load"|"save"|"condition"|"retire"|"reinstate"|"history"|"preview"} action
  * @returns {string[]}
  */
 export function equipmentErrorMessages(err, action) {
@@ -80,4 +83,33 @@ export function isStaleEquipmentError(err) {
   const status = err?.response?.status;
   const code = err?.response?.data?.code;
   return status === 404 || code === "EQUIPMENT_ALREADY_RETIRED" || code === "EQUIPMENT_NOT_RETIRED";
+}
+
+
+/**
+ * Whether a save was refused because the reservations the change affects are
+ * no longer the ones the staff member confirmed (SCRUM-313). Nothing was saved,
+ * and the current list is in affectedFromError.
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isAffectedChangedError(err) {
+  return err?.response?.status === 409 && err?.response?.data?.code === "EQUIPMENT_AFFECTED_CHANGED";
+}
+
+/**
+ * The current list of affected reservations carried by that refusal, in the same
+ * shape the preview returns. Anything that is not a list of reservations reads
+ * as an empty list, so a malformed body can never show a made-up reservation.
+ *
+ * @param {unknown} err
+ * @returns {object[]}
+ */
+export function affectedFromError(err) {
+  const conflicts = err?.response?.data?.conflicts;
+  if (!Array.isArray(conflicts)) return [];
+  return conflicts.filter(
+    (item) => item !== null && typeof item === "object" && typeof item.reservationId === "string",
+  );
 }

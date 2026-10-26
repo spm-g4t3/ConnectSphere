@@ -13,10 +13,22 @@
 // Follows VenueCatalogue: one panel at a time with a Back button rather than a
 // modal, a two-step confirm for retiring, and a refetch after every change
 // rather than splicing a response into the list.
+//
+// SCRUM-314: retiring a type that has reservations shows them under its row and
+// saves nothing until they are confirmed (the same step the edit and damage
+// forms use); a type with no reservations retires at once after the existing
+// "Confirm retire".
 
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { listEquipment, retireEquipment, reinstateEquipment } from "../services/equipmentService";
+import {
+  listEquipment,
+  retireEquipment,
+  reinstateEquipment,
+  previewEquipmentChange,
+} from "../services/equipmentService";
 import { equipmentErrorMessages, isStaleEquipmentError } from "../services/equipmentErrors";
+import EquipmentImpactConfirmation from "./EquipmentImpactConfirmation";
+import useConfirmedChange from "./useConfirmedChange";
 import EquipmentForm from "./EquipmentForm";
 import EquipmentConditionForm from "./EquipmentConditionForm";
 import EquipmentHistory from "./EquipmentHistory";
@@ -24,7 +36,9 @@ import "./EquipmentCatalogue.css";
 
 const COLUMNS = 8;
 
-function EquipmentTable({ types, retired, confirmingId, busyId, rowError, onPanel, onConfirm, onChangeRetirement }) {
+function EquipmentTable({
+  types, retired, confirmingId, busyId, rowError, flow, onPanel, onConfirm, onCancelRetire, onChangeRetirement,
+}) {
   return (
     <table className="equipment-table">
       <thead>
@@ -41,8 +55,11 @@ function EquipmentTable({ types, retired, confirmingId, busyId, rowError, onPane
       </thead>
       <tbody>
         {types.map((type) => {
-          const busy = busyId === type.id;
+          const reinstating = busyId === type.id;
           const confirming = confirmingId === type.id;
+          const retiring = confirming && flow.busy;
+          const reviewing = confirming && flow.reviewing;
+          const anyBusy = Boolean(busyId) || flow.busy || flow.reviewing;
           return (
             <Fragment key={type.id}>
             <tr>
@@ -72,32 +89,55 @@ function EquipmentTable({ types, retired, confirmingId, busyId, rowError, onPane
                   {retired ? (
                     <button
                       aria-label={`Reinstate ${type.name}`}
-                      disabled={Boolean(busyId)}
+                      disabled={anyBusy}
                       onClick={() => onChangeRetirement(type, "reinstate")}
                     >
-                      {busy ? "Reinstating..." : "Reinstate"}
+                      {reinstating ? "Reinstating..." : "Reinstate"}
                     </button>
                   ) : confirming ? (
                     <>
                       <button
                         aria-label={`Confirm retire ${type.name}`}
-                        disabled={Boolean(busyId)}
+                        disabled={anyBusy}
                         onClick={() => onChangeRetirement(type, "retire")}
                       >
-                        {busy ? "Retiring..." : "Confirm retire"}
+                        {retiring ? "Checking..." : "Confirm retire"}
                       </button>
-                      <button aria-label={`Cancel retire ${type.name}`} disabled={busy} onClick={() => onConfirm(null)}>
+                      <button
+                        aria-label={`Cancel retire ${type.name}`}
+                        disabled={flow.busy}
+                        onClick={onCancelRetire}
+                      >
                         Cancel
                       </button>
                     </>
                   ) : (
-                    <button aria-label={`Retire ${type.name}`} disabled={Boolean(busyId)} onClick={() => onConfirm(type.id)}>
+                    <button aria-label={`Retire ${type.name}`} disabled={anyBusy} onClick={() => onConfirm(type.id)}>
                       Retire
                     </button>
                   )}
                 </div>
               </td>
             </tr>
+            {reviewing && (
+              <tr>
+                <td colSpan={COLUMNS}>
+                  <EquipmentImpactConfirmation
+                    typeName={type.name}
+                    impact={flow.impact}
+                    stale={flow.stale}
+                    busy={flow.busy}
+                    errors={flow.errors}
+                    confirmLabel={
+                      flow.impact.affected.length === 0 ? "Retire" : "Retire and flag these reservations"
+                    }
+                    cancelLabel="Keep this type"
+                    onConfirm={flow.confirm}
+                    onCancel={onCancelRetire}
+                  />
+                </td>
+              </tr>
+            )}
             {rowError?.id === type.id && (
               <tr>
                 <td colSpan={COLUMNS}>
@@ -130,6 +170,10 @@ export default function EquipmentCatalogue() {
   const [confirmingId, setConfirmingId] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [rowError, setRowError] = useState(null); // { id, messages }
+
+  // SCRUM-314: the retire flow, which previews the reservations a retirement
+  // would leave short and asks for a confirmation when there are any.
+  const retireFlow = useConfirmedChange();
 
   // The list stays on screen while it refreshes after a change, so this does
   // not raise `loading` again: it starts true and drops once the first load
@@ -172,21 +216,55 @@ export default function EquipmentCatalogue() {
     refreshTypes();
   }
 
-  async function changeRetirement(type, action) {
-    if (busyId) return;
+  async function reinstate(type) {
     setBusyId(type.id);
     setRowError(null);
     try {
-      await (action === "retire" ? retireEquipment(type.id) : reinstateEquipment(type.id));
+      await reinstateEquipment(type.id);
       await refreshTypes();
     } catch (err) {
-      setRowError({ id: type.id, messages: equipmentErrorMessages(err, action) });
+      setRowError({ id: type.id, messages: equipmentErrorMessages(err, "reinstate") });
       // Our copy of the row is stale, whoever made it so.
       if (isStaleEquipmentError(err)) await refreshTypes();
     } finally {
       setBusyId(null);
       setConfirmingId(null);
     }
+  }
+
+  function retire(type) {
+    setRowError(null);
+    retireFlow.start({
+      preview: () => previewEquipmentChange(type.id, { retire: true }),
+      save: (confirmedReservationIds) => retireEquipment(type.id, { confirmedReservationIds }),
+      action: "retire",
+      onSaved: async () => {
+        setConfirmingId(null);
+        await refreshTypes();
+      },
+      onFailure: async (err, messages, backTo) => {
+        // Failing before the staff member saw a list, or because our copy of the
+        // row is stale, closes the confirmation, as it always did. A failure
+        // while they are looking at the list stays in front of them.
+        const stale = isStaleEquipmentError(err);
+        if (backTo === "idle" || stale) {
+          if (stale) retireFlow.cancel();
+          setRowError({ id: type.id, messages });
+          setConfirmingId(null);
+        }
+        if (stale) await refreshTypes();
+      },
+    });
+  }
+
+  function changeRetirement(type, action) {
+    return action === "retire" ? retire(type) : reinstate(type);
+  }
+
+  function cancelRetire() {
+    retireFlow.cancel();
+    setRowError(null);
+    setConfirmingId(null);
   }
 
   if (activePanel) {
@@ -210,8 +288,10 @@ export default function EquipmentCatalogue() {
     confirmingId,
     busyId,
     rowError,
+    flow: retireFlow,
     onPanel: setActivePanel,
     onConfirm: setConfirmingId,
+    onCancelRetire: cancelRetire,
     onChangeRetirement: changeRetirement,
   };
 

@@ -21,10 +21,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ok, dbError, queryStub } from '../fixtures/supabaseStubs.js';
 
-const { from } = vi.hoisted(() => ({ from: vi.fn() }));
+const { from, rpc } = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn() }));
 
 vi.mock('../../src/config/supabaseClient.js', () => {
-  const client = { from };
+  const client = { from, rpc };
   return { supabase: client, default: client };
 });
 
@@ -38,12 +38,8 @@ const {
   retireEquipmentType,
   reinstateEquipmentType,
 } = await import('../../src/services/equipmentService.js');
-vi.mock('../../src/services/equipmentOverCommitment.js', () => ({
-  assertNoOverCommitment: vi.fn(),
-}));
 
 const { supabase } = await import('../../src/config/supabaseClient.js');
-const { assertNoOverCommitment } = await import('../../src/services/equipmentOverCommitment.js');
 const { ValidationError, NotFoundError, ConflictError } = await import('../../src/errors.js');
 
 
@@ -69,9 +65,24 @@ function typeRow(overrides = {}) {
   };
 }
 
+/**
+ * What apply_equipment_change answers when it saved (SCRUM-313). The type goes
+ * through the database function, so these tests script the rpc, not a table write.
+ */
+function saved(row, { flagged = 0, affected = [] } = {}) {
+  return ok({ saved: true, flagged_count: flagged, affected, equipment_type: row });
+}
+
+/** The arguments of the one apply_equipment_change call. */
+function appliedWith() {
+  expect(rpc).toHaveBeenCalledTimes(1);
+  expect(rpc.mock.calls[0][0]).toBe('apply_equipment_change');
+  return rpc.mock.calls[0][1];
+}
+
 beforeEach(() => {
   from.mockReset();
-  assertNoOverCommitment.mockReset();
+  rpc.mockReset();
 });
 
 
@@ -212,15 +223,25 @@ describe('AC3: editing a type', () => {
     expect(updated.location).toBe('Store room 2');
   });
 
-  it('SCRUM275_AC3_maps_the_total_to_its_column', async () => {
-    const write = queryStub(ok(typeRow({ total_quantity: 12 })));
-    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+  it('SCRUM275_AC3_sends_a_new_total_through_the_confirmed_save', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(saved(typeRow({ total_quantity: 12 })));
 
-    await updateEquipmentType(TYPE_ID, { totalQuantity: 12 });
+    const updated = await updateEquipmentType(TYPE_ID, { totalQuantity: 12 }, USER_ID);
 
-    expect(write.args('update')).toEqual([
-      { total_quantity: 12, last_modified_by: null, last_change_note: null },
-    ]);
+    expect(appliedWith()).toEqual({
+      p_equipment_type_id: TYPE_ID,
+      p_caller: USER_ID,
+      p_total: 12,
+      p_damaged: null,
+      p_under_maintenance: null,
+      p_retire: false,
+      p_fields: {},
+      p_note: null,
+      p_confirmed_reservation_ids: [],
+    });
+    expect(updated.totalQuantity).toBe(12);
+    expect(from).toHaveBeenCalledTimes(1); // the read only: no table write
   });
 
   it('SCRUM275_AC3_does_not_count_the_type_itself_when_checking_the_name', async () => {
@@ -262,9 +283,8 @@ describe('AC3: editing a type', () => {
   });
 
   it('SCRUM275_AC3_allows_a_total_equal_to_damaged_plus_under_maintenance', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ total_quantity: 3 }))));
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(saved(typeRow({ total_quantity: 3 })));
 
     const updated = await updateEquipmentType(TYPE_ID, { totalQuantity: 3 });
 
@@ -347,6 +367,19 @@ describe('AC3: editing a type', () => {
     from.mockReturnValueOnce(queryStub(dbError('57014', 'timeout')));
 
     await expect(updateEquipmentType(TYPE_ID, { location: 'X' })).rejects.toThrow('timeout');
+  });
+
+  it('SCRUM275_AC3_treats_a_name_lookup_that_returns_no_rows_at_all_as_not_taken', async () => {
+    const write = queryStub(ok(typeRow({ name: 'Mic' })));
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow())))
+      .mockReturnValueOnce(queryStub(ok(null)))
+      .mockReturnValueOnce(write);
+
+    const updated = await updateEquipmentType(TYPE_ID, { name: 'Mic' });
+
+    expect(updated.name).toBe('Mic');
+    expect(write.called('update')).toBe(true);
   });
 
   it('SCRUM275_AC3_surfaces_a_failed_name_lookup', async () => {
@@ -550,32 +583,47 @@ describe('AC8: reading the history', () => {
 
 describe('AC4: recording damaged and under-maintenance quantities', () => {
   // The default row is total 10, damaged 2, under maintenance 1, so usable 7.
+  // The save itself is apply_equipment_change (SCRUM-313); scrum313ConfirmedSaveService
+  // tests cover confirmation. These cover the checks made before it is called.
 
-  it('SCRUM275_AC4_writes_only_the_quantity_sent_with_the_note_and_the_user', async () => {
-    const write = queryStub(ok(typeRow({ damaged_quantity: 4 })));
-    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+  it('SCRUM275_AC4_sends_only_the_quantity_given_with_the_trimmed_note_and_the_user', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(saved(typeRow({ damaged_quantity: 4 })));
 
     await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 4, note: ' dropped ' }, USER_ID);
 
-    expect(write.args('update')).toEqual([
-      { damaged_quantity: 4, last_modified_by: USER_ID, last_change_note: 'dropped' },
-    ]);
-    expect(write.args('eq')).toEqual(['id', TYPE_ID]);
+    expect(appliedWith()).toMatchObject({
+      p_equipment_type_id: TYPE_ID,
+      p_caller: USER_ID,
+      p_damaged: 4,
+      p_under_maintenance: null,
+      p_total: null,
+      p_retire: false,
+      p_note: 'dropped',
+    });
   });
 
-  it('SCRUM275_AC4_writes_both_quantities_when_both_are_sent', async () => {
-    const write = queryStub(ok(typeRow()));
-    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+  it('SCRUM275_AC4_sends_both_quantities_when_both_are_given', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(saved(typeRow()));
 
     await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 3, underMaintenanceQuantity: 2, note: 'x' });
 
-    expect(write.args('update')[0]).toMatchObject({ damaged_quantity: 3, under_maintenance_quantity: 2 });
+    expect(appliedWith()).toMatchObject({ p_damaged: 3, p_under_maintenance: 2 });
+  });
+
+  it('SCRUM275_AC4_sends_a_zero_as_zero_and_not_as_left_out', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(saved(typeRow({ damaged_quantity: 0 })));
+
+    await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 0, note: 'repaired' });
+
+    expect(appliedWith()).toMatchObject({ p_damaged: 0, p_under_maintenance: null });
   });
 
   it('SCRUM275_AC5_returns_the_new_usable_figure', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ damaged_quantity: 5 }))));
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(saved(typeRow({ damaged_quantity: 5 })));
 
     const updated = await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 5, note: 'x' });
 
@@ -583,28 +631,25 @@ describe('AC4: recording damaged and under-maintenance quantities', () => {
     expect(updated).toMatchObject({ damagedQuantity: 5, underMaintenanceQuantity: 1, usableQuantity: 4 });
   });
 
-  it('SCRUM275_AC4_lets_a_reduction_mark_units_usable_again_without_the_hook', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ damaged_quantity: 0 }))));
+  it('SCRUM275_AC4_lets_a_reduction_mark_units_usable_again', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(saved(typeRow({ damaged_quantity: 0 })));
 
     const updated = await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 0, note: 'repaired' });
 
     expect(updated.usableQuantity).toBe(9);
-    expect(assertNoOverCommitment).not.toHaveBeenCalled();
   });
 
   it('SCRUM275_AC4_allows_damaged_plus_maintenance_equal_to_the_total', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ damaged_quantity: 9 }))));
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(saved(typeRow({ damaged_quantity: 9 })));
 
     const updated = await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 9, note: 'flood' });
 
     expect(updated.usableQuantity).toBe(0);
   });
 
-  it('SCRUM275_AC4_refuses_damaged_plus_maintenance_above_the_total_and_writes_nothing', async () => {
+  it('SCRUM275_AC4_refuses_damaged_plus_maintenance_above_the_total_and_saves_nothing', async () => {
     from.mockReturnValueOnce(queryStub(ok(typeRow())));
 
     const attempt = recordEquipmentCondition(TYPE_ID, { damagedQuantity: 10, note: 'x' });
@@ -615,10 +660,10 @@ describe('AC4: recording damaged and under-maintenance quantities', () => {
       details: [{ field: 'damagedQuantity', message: "damaged plus under maintenance (11) can't exceed the total (10)" }],
     });
     expect(from).toHaveBeenCalledTimes(1);
-    expect(assertNoOverCommitment).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
-  it('SCRUM275_AC4_refuses_values_the_type_already_has_and_writes_nothing', async () => {
+  it('SCRUM275_AC4_refuses_values_the_type_already_has_and_saves_nothing', async () => {
     from.mockReturnValueOnce(queryStub(ok(typeRow())));
 
     // the default row already has 2 damaged
@@ -629,7 +674,7 @@ describe('AC4: recording damaged and under-maintenance quantities', () => {
       details: [{ field: 'equipment', message: 'nothing changed: damaged and under maintenance already have these values' }],
     });
     expect(from).toHaveBeenCalledTimes(1);
-    expect(assertNoOverCommitment).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('SCRUM275_AC4_refuses_both_quantities_when_neither_differs', async () => {
@@ -638,12 +683,12 @@ describe('AC4: recording damaged and under-maintenance quantities', () => {
     const attempt = recordEquipmentCondition(TYPE_ID, { damagedQuantity: 2, underMaintenanceQuantity: 1, note: 'x' });
 
     await expect(attempt).rejects.toMatchObject({ details: [{ field: 'equipment' }] });
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('SCRUM275_AC4_accepts_a_change_to_just_one_of_two_quantities', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ under_maintenance_quantity: 0 }))));
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(saved(typeRow({ under_maintenance_quantity: 0 })));
 
     const updated = await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 2, underMaintenanceQuantity: 0, note: 'back' });
 
@@ -672,6 +717,7 @@ describe('AC4: recording damaged and under-maintenance quantities', () => {
     await expect(recordEquipmentCondition(TYPE_ID, { note: 'x' })).rejects.toBeInstanceOf(ValidationError);
     await expect(recordEquipmentCondition(TYPE_ID, null)).rejects.toBeInstanceOf(ValidationError);
     expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('SCRUM275_AC4_refuses_a_malformed_id_before_any_query', async () => {
@@ -683,18 +729,19 @@ describe('AC4: recording damaged and under-maintenance quantities', () => {
     from.mockReturnValueOnce(queryStub(ok(null)));
 
     await expect(recordEquipmentCondition(TYPE_ID, { damagedQuantity: 1, note: 'x' })).rejects.toBeInstanceOf(NotFoundError);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
-  it('SCRUM275_AC4_answers_not_found_when_the_type_disappears_before_the_write', async () => {
-    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(queryStub(ok(null)));
+  it('SCRUM275_AC4_answers_not_found_when_the_type_disappears_before_the_save', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(dbError('P0002', 'Equipment type not found'));
 
     await expect(recordEquipmentCondition(TYPE_ID, { damagedQuantity: 1, note: 'x' })).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it('SCRUM275_AC4_translates_a_constraint_refusal_from_a_race_on_write', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(dbError('23514', 'unusable_within_total')));
+  it('SCRUM275_AC4_translates_a_constraint_refusal_from_a_race_on_save', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(dbError('23514', 'unusable_within_total'));
 
     await expect(recordEquipmentCondition(TYPE_ID, { damagedQuantity: 4, note: 'x' })).rejects.toBeInstanceOf(ValidationError);
   });
@@ -707,137 +754,40 @@ describe('AC4: recording damaged and under-maintenance quantities', () => {
 });
 
 
-describe('AC7: the over-commitment hook', () => {
-  it('SCRUM275_AC7_runs_before_saving_when_damage_lowers_the_usable_figure', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ damaged_quantity: 5 }))));
-
-    await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 5, note: 'x' });
-
-    // 10 total, 5 damaged, 1 under maintenance leaves 4 usable
-    expect(assertNoOverCommitment).toHaveBeenCalledWith({ equipmentTypeId: TYPE_ID, usableAfter: 4 });
-  });
-
-  it('SCRUM275_AC7_a_refusal_from_the_hook_stops_the_write', async () => {
-    from.mockReturnValueOnce(queryStub(ok(typeRow())));
-    assertNoOverCommitment.mockRejectedValueOnce(new ConflictError('reserved for a later event'));
-
-    const attempt = recordEquipmentCondition(TYPE_ID, { damagedQuantity: 5, note: 'x' });
-
-    await expect(attempt).rejects.toBeInstanceOf(ConflictError);
-    expect(from).toHaveBeenCalledTimes(1);
-  });
-
-  it('SCRUM275_AC7_does_not_run_when_the_usable_figure_stays_the_same', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow())));
-
-    // 3 damaged and 0 under maintenance, against 2 and 1: different values, same usable figure
-    await recordEquipmentCondition(TYPE_ID, { damagedQuantity: 3, underMaintenanceQuantity: 0, note: 'moved' });
-
-    expect(assertNoOverCommitment).not.toHaveBeenCalled();
-  });
-
-  it('SCRUM275_AC7_runs_before_saving_when_the_total_is_reduced', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ total_quantity: 5 }))));
-
-    await updateEquipmentType(TYPE_ID, { totalQuantity: 5 });
-
-    // 5 total, 2 damaged, 1 under maintenance leaves 2 usable
-    expect(assertNoOverCommitment).toHaveBeenCalledWith({ equipmentTypeId: TYPE_ID, usableAfter: 2 });
-  });
-
-  it('SCRUM275_AC7_a_refusal_from_the_hook_stops_a_total_reduction', async () => {
-    from.mockReturnValueOnce(queryStub(ok(typeRow())));
-    assertNoOverCommitment.mockRejectedValueOnce(new ConflictError('reserved for a later event'));
-
-    const attempt = updateEquipmentType(TYPE_ID, { totalQuantity: 5 });
-
-    await expect(attempt).rejects.toBeInstanceOf(ConflictError);
-    expect(from).toHaveBeenCalledTimes(1);
-  });
-
-  it('SCRUM275_AC7_does_not_run_when_the_total_is_raised', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ total_quantity: 20 }))));
-
-    await updateEquipmentType(TYPE_ID, { totalQuantity: 20 });
-
-    expect(assertNoOverCommitment).not.toHaveBeenCalled();
-  });
-});
-
-
 describe('AC6: retiring and reinstating a type', () => {
   const RETIRED = '2026-10-01T09:00:00+00:00';
 
-  it('SCRUM275_AC6_retire_stamps_retired_at_and_records_the_user', async () => {
-    const write = queryStub(ok(typeRow({ retired_at: RETIRED })));
-    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
+  it('SCRUM275_AC6_retire_goes_through_the_confirmed_save_as_the_acting_user', async () => {
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(saved(typeRow({ retired_at: RETIRED })));
 
-    const retired = await retireEquipmentType(TYPE_ID, USER_ID);
+    const retired = await retireEquipmentType(TYPE_ID, undefined, USER_ID);
 
-    const [changes] = write.args('update');
-    expect(Number.isNaN(Date.parse(changes.retired_at))).toBe(false);
-    expect(changes).toMatchObject({ last_modified_by: USER_ID, last_change_note: null });
-    expect(write.args('eq')).toEqual(['id', TYPE_ID]);
+    expect(appliedWith()).toEqual({
+      p_equipment_type_id: TYPE_ID,
+      p_caller: USER_ID,
+      p_total: null,
+      p_damaged: null,
+      p_under_maintenance: null,
+      p_retire: true,
+      p_fields: {},
+      p_note: null,
+      p_confirmed_reservation_ids: [],
+    });
+    expect(from).toHaveBeenCalledTimes(1); // the read only: no table write
     expect(retired.retiredAt).toBe(RETIRED);
   });
 
-  it('SCRUM275_AC6_retire_only_writes_while_the_type_is_still_active', async () => {
-    const write = queryStub(ok(typeRow({ retired_at: RETIRED })));
-    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(write);
-
-    await retireEquipmentType(TYPE_ID);
-
-    expect(write.args('is')).toEqual(['retired_at', null]);
-  });
-
   it('SCRUM275_AC6_a_retired_type_keeps_its_quantities', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))));
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(saved(typeRow({ retired_at: RETIRED })));
 
     const retired = await retireEquipmentType(TYPE_ID);
 
     expect(retired).toMatchObject({ totalQuantity: 10, damagedQuantity: 2, underMaintenanceQuantity: 1 });
   });
 
-  it('SCRUM275_AC7_retire_runs_the_over_commitment_hook_with_nothing_usable_left', async () => {
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow())))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))));
-
-    await retireEquipmentType(TYPE_ID);
-
-    expect(assertNoOverCommitment).toHaveBeenCalledWith({ equipmentTypeId: TYPE_ID, usableAfter: 0 });
-  });
-
-  it('SCRUM275_AC7_a_refusal_from_the_hook_stops_the_retirement', async () => {
-    from.mockReturnValueOnce(queryStub(ok(typeRow())));
-    assertNoOverCommitment.mockRejectedValueOnce(new ConflictError('reserved for a later event'));
-
-    await expect(retireEquipmentType(TYPE_ID)).rejects.toBeInstanceOf(ConflictError);
-    expect(from).toHaveBeenCalledTimes(1);
-  });
-
-  it('SCRUM275_AC7_retire_skips_the_hook_when_nothing_was_usable_anyway', async () => {
-    // total 3, damaged 2, under maintenance 1: nothing usable
-    from
-      .mockReturnValueOnce(queryStub(ok(typeRow({ total_quantity: 3 }))))
-      .mockReturnValueOnce(queryStub(ok(typeRow({ total_quantity: 3, retired_at: RETIRED }))));
-
-    await retireEquipmentType(TYPE_ID);
-
-    expect(assertNoOverCommitment).not.toHaveBeenCalled();
-  });
-
-  it('SCRUM275_AC6_retiring_a_retired_type_answers_409_and_writes_nothing', async () => {
+  it('SCRUM275_AC6_retiring_a_retired_type_answers_409_and_saves_nothing', async () => {
     from.mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))));
 
     const attempt = retireEquipmentType(TYPE_ID);
@@ -845,11 +795,14 @@ describe('AC6: retiring and reinstating a type', () => {
     await expect(attempt).rejects.toBeInstanceOf(ConflictError);
     await expect(attempt).rejects.toMatchObject({ status: 409, code: 'EQUIPMENT_ALREADY_RETIRED' });
     expect(from).toHaveBeenCalledTimes(1);
-    expect(assertNoOverCommitment).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('SCRUM275_AC6_retire_answers_409_when_another_writer_retires_it_first', async () => {
-    from.mockReturnValueOnce(queryStub(ok(typeRow()))).mockReturnValueOnce(queryStub(ok(null)));
+    from.mockReturnValueOnce(queryStub(ok(typeRow())));
+    rpc.mockResolvedValueOnce(
+      dbError('PT409', 'Equipment type is already retired', { hint: 'EQUIPMENT_ALREADY_RETIRED' }),
+    );
 
     await expect(retireEquipmentType(TYPE_ID)).rejects.toMatchObject({ status: 409, code: 'EQUIPMENT_ALREADY_RETIRED' });
   });
@@ -858,6 +811,7 @@ describe('AC6: retiring and reinstating a type', () => {
     from.mockReturnValueOnce(queryStub(ok(null)));
 
     await expect(retireEquipmentType(TYPE_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('SCRUM275_AC6_retire_refuses_a_malformed_id_before_any_query', async () => {
@@ -875,14 +829,14 @@ describe('AC6: retiring and reinstating a type', () => {
     expect(reinstated.retiredAt).toBeNull();
   });
 
-  it('SCRUM275_AC7_reinstate_does_not_run_the_hook', async () => {
+  it('SCRUM275_AC7_reinstate_does_not_use_the_confirmed_save', async () => {
     from
       .mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))))
       .mockReturnValueOnce(queryStub(ok(typeRow())));
 
     await reinstateEquipmentType(TYPE_ID);
 
-    expect(assertNoOverCommitment).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('SCRUM275_AC6_reinstating_a_type_that_is_not_retired_answers_409', async () => {
@@ -892,6 +846,25 @@ describe('AC6: retiring and reinstating a type', () => {
 
     await expect(attempt).rejects.toMatchObject({ status: 409, code: 'EQUIPMENT_NOT_RETIRED' });
     expect(from).toHaveBeenCalledTimes(1);
+  });
+
+  it('SCRUM275_AC6_reinstate_translates_a_database_refusal_on_write', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))))
+      .mockReturnValueOnce(queryStub(dbError('40P01', 'deadlock detected')));
+
+    await expect(reinstateEquipmentType(TYPE_ID)).rejects.toMatchObject({
+      status: 409,
+      code: 'EQUIPMENT_CHANGED_AT_THE_SAME_TIME',
+    });
+  });
+
+  it('SCRUM275_AC6_reinstate_surfaces_an_untyped_failure_on_write', async () => {
+    from
+      .mockReturnValueOnce(queryStub(ok(typeRow({ retired_at: RETIRED }))))
+      .mockReturnValueOnce(queryStub(dbError('57014', 'timeout')));
+
+    await expect(reinstateEquipmentType(TYPE_ID)).rejects.toThrow('timeout');
   });
 
   it('SCRUM275_AC6_reinstate_answers_not_found_for_an_unknown_type', async () => {
