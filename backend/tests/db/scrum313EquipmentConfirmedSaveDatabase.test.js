@@ -1,10 +1,9 @@
 /**
- * SCRUM-310 (SCRUM-313): the confirmed save, against the final schema in a real
- * Postgres (PGlite).
+ * The confirmed save, against the final schema in a real Postgres (PGlite).
  *
  * apply_equipment_change is the one place a total change, damage, maintenance or a
  * retirement is saved. It locks the type, recalculates which reservations the
- * change affects (equipment_over_commitment, SCRUM-311), refuses if that is not
+ * change affects (equipment_change_affected), refuses if that is not
  * exactly the list the staff member confirmed, and otherwise saves the change and
  * flags the affected reservations in the same transaction.
  *
@@ -12,7 +11,7 @@
  *        Pending review; a forced failure changes nothing
  *   AC7  a change that affects nothing saves directly
  *   AC2  an unconfirmed or out-of-date confirmation writes nothing
- *   AC5  the coordinator of each affected event is told (SCRUM-176's trigger)
+ *   AC5  the coordinator of each affected event is told (the existing notice trigger)
  *   AC6  a Confirmed event stays Confirmed
  *   AC8  the change and each flag record the user, the time and the reason
  *
@@ -21,6 +20,7 @@
  * back to Pending review are made through the real functions.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSchemaDb, seedUser } from './helpers/schemaDb.js';
 import { queriesFor, refusal } from './helpers/queries.js';
@@ -60,16 +60,16 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
   const newTypeNamed = (total = 10) => newType(`Projector ${++seq} ${Math.random()}`, total);
 
   /** One held reservation, inserted directly; `order` sets how old it is. */
-  async function held(type, order, quantity, from, to, { flagged = false, event: existing } = {}) {
+  async function held(type, order, quantity, from, to, { flagged = false, flagCode = null, event: existing } = {}) {
     const event = existing ?? (await newEvent({ start: hour(from), end: hour(to) }));
     const line = (await add(event, type, quantity)).request.lines[0].id;
     const created = new Date(Date.UTC(2026, 0, 1, 0, order)).toISOString();
     const { id } = await one(
       `insert into equipment_reservations
          (equipment_type_id, event_request_id, equipment_line_id, quantity, start_at, end_at,
-          flagged, created_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
-      [type, event, line, quantity, hour(from), hour(to), flagged, created],
+          flagged, flag_code, created_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
+      [type, event, line, quantity, hour(from), hour(to), flagged, flagged ? flagCode : null, created],
     );
     return { id, event };
   }
@@ -89,6 +89,16 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
   }
 
   const typeRow = (type) => one('select * from equipment_types where id = $1', [type]);
+
+  /** Sets a scene up by plain updates without the backstop flagging as they happen. */
+  async function withBackstopOff(work) {
+    await db.exec('alter table equipment_types disable trigger equipment_types_flag_unconfirmed_loss');
+    try {
+      return await work();
+    } finally {
+      await db.exec('alter table equipment_types enable trigger equipment_types_flag_unconfirmed_loss');
+    }
+  }
   const historyOf = (type) =>
     rows(
       `select field_name, old_value, new_value, note, changed_by, changed_at
@@ -100,6 +110,7 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
       (await rows('select id, flagged from equipment_reservations where id = any($1::uuid[])', [ids]))
         .map((r) => [r.id, r.flagged]),
     );
+  const reservationRow = (id) => one('select * from equipment_reservations where id = $1', [id]);
   const flagEvents = (reservationId) =>
     rows(
       `select user_id, reason, created_at from equipment_reservation_events
@@ -348,8 +359,8 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
 
     it('SCRUM310_AC7_raising_the_usable_quantity_is_never_checked_and_flags_nothing', async () => {
       const type = await newTypeNamed(10);
-      const { id } = await held(type, 1, 3, 10, 12, { flagged: true });
-      await db.query('update equipment_types set damaged_quantity = 9 where id = $1', [type]);
+      const { id } = await held(type, 1, 3, 10, 12, { flagged: true, flagCode: 'equipment_lost' });
+      await withBackstopOff(() => db.query('update equipment_types set damaged_quantity = 9 where id = $1', [type]));
 
       // Usable goes from 1 to 2, still short of the 3 reserved.
       const answer = await raw(type, { damaged: 8, note: 'One fixed', confirmed: [] });
@@ -540,7 +551,7 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
       expect(await flaggedState([lost.id, late.id])).toEqual({ [lost.id]: false, [late.id]: false });
     });
 
-    it('SCRUM310_AC2_a_reservation_released_after_the_preview_makes_the_old_confirmation_stale', async () => {
+    it('SCRUM310_AC2_a_reservation_released_after_the_preview_is_not_flagged_and_the_save_goes_ahead', async () => {
       const type = await newTypeNamed(4);
       await held(type, 1, 3, 10, 12);
       const lost = await held(type, 2, 3, 10, 12);
@@ -550,8 +561,48 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
 
       const answer = await raw(type, { total: 3, confirmed: ids(preview.affected) });
 
-      expect(answer).toEqual({ saved: false, affected: [] });
-      expect((await typeRow(type)).total_quantity).toBe(4);
+      expect(answer).toMatchObject({ saved: true, flagged_count: 0, affected: [] });
+      expect((await typeRow(type)).total_quantity).toBe(3);
+      expect(await flaggedState([lost.id])).toEqual({ [lost.id]: false });
+    });
+
+    it('SCRUM310_AC2_a_reservation_that_ends_after_the_preview_does_not_make_the_confirmation_stale', async () => {
+      const type = await newTypeNamed(4);
+      await held(type, 1, 3, 10, 12);
+      const lost = await held(type, 2, 3, 10, 12);
+      const preview = await raw(type, { total: 3, confirmed: [] });
+      expect(ids(preview.affected)).toEqual([lost.id]);
+
+      await db.query(
+        "update equipment_reservations set start_at = now() - interval '3 days', end_at = now() - interval '2 days' where id = $1",
+        [lost.id],
+      );
+
+      const answer = await raw(type, { total: 3, confirmed: [lost.id] });
+
+      expect(answer).toMatchObject({ saved: true, flagged_count: 0, affected: [] });
+      expect(await flaggedState([lost.id])).toEqual({ [lost.id]: false });
+    });
+
+    it('SCRUM310_AC2_a_confirmed_id_that_is_still_held_and_not_affected_makes_the_confirmation_stale', async () => {
+      const type = await newTypeNamed(10);
+      const fits = await held(type, 1, 2, 10, 12);
+
+      const answer = await raw(type, { total: 9, confirmed: [fits.id] });
+
+      expect(answer.saved).toBe(false);
+      expect((await typeRow(type)).total_quantity).toBe(10);
+    });
+
+    it('SCRUM310_AC2_a_confirmed_id_from_another_type_makes_the_confirmation_stale_even_if_it_has_ended', async () => {
+      const type = await newTypeNamed(10);
+      const other = await newTypeNamed(10);
+      const elsewhere = await held(other, 1, 2, -300, -298);
+
+      const answer = await raw(type, { total: 9, confirmed: [elsewhere.id] });
+
+      expect(answer.saved).toBe(false);
+      expect((await typeRow(type)).total_quantity).toBe(10);
     });
 
     it('SCRUM310_AC2_an_older_reservation_released_after_the_preview_changes_who_is_affected', async () => {
@@ -643,10 +694,10 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
       });
     });
 
-    it('SCRUM310_AC3_an_already_flagged_reservation_takes_part_and_is_not_flagged_twice', async () => {
+    it('SCRUM310_AC3_a_reservation_already_flagged_as_unavailable_takes_part_and_is_not_flagged_twice', async () => {
       const type = await newTypeNamed(4);
       await held(type, 1, 3, 10, 12);
-      const already = await held(type, 2, 3, 10, 12, { flagged: true });
+      const already = await held(type, 2, 3, 10, 12, { flagged: true, flagCode: 'equipment_lost' });
       await db.query(
         "update equipment_reservations set flag_reason = 'Earlier reason', flagged_at = '2026-01-01T00:00:00Z' where id = $1",
         [already.id],
@@ -654,8 +705,8 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
 
       const answer = await raw(type, { total: 3, confirmed: [already.id] });
 
-      expect(answer).toMatchObject({ saved: true, flagged_count: 0 });
-      expect(ids(answer.affected)).toEqual([already.id]);
+      // The shown list had it; this save flagged nothing, and says so.
+      expect(answer).toMatchObject({ saved: true, flagged_count: 0, affected: [] });
       const row = await one('select flagged, flag_reason, flagged_at from equipment_reservations where id = $1', [already.id]);
       expect(row.flag_reason).toBe('Earlier reason');
       expect(new Date(row.flagged_at).toISOString()).toBe('2026-01-01T00:00:00.000Z');
@@ -756,8 +807,8 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
       try {
         // Replaced inside a transaction, so the rollback restores the real function.
         await db.exec(`
-          create or replace function flag_equipment_reservations_by(p_reservation_ids uuid[], p_reason text, p_user_id uuid, p_code text default 'equipment_lost')
-          returns integer language plpgsql as $$
+          create or replace function flag_equipment_reservation_ids(p_reservation_ids uuid[], p_reason text, p_user_id uuid, p_code text default 'equipment_lost')
+          returns uuid[] language plpgsql as $$
           begin
             raise exception 'forced flagging failure';
           end;
@@ -879,15 +930,31 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
       expect((await typeRow(type)).retired_at).not.toBeNull();
     });
 
-    it('SCRUM310_AC4_retiring_a_type_with_no_usable_units_is_not_checked_and_flags_nothing', async () => {
+    it('SCRUM310_AC4_retiring_a_type_with_no_usable_units_still_flags_the_reservations_it_holds', async () => {
       const type = await newTypeNamed(4);
-      await db.query('update equipment_types set damaged_quantity = 4 where id = $1', [type]);
-      const { id } = await held(type, 1, 2, 10, 12, { flagged: true });
+      await withBackstopOff(() => db.query('update equipment_types set damaged_quantity = 4 where id = $1', [type]));
+      const { id } = await held(type, 1, 2, 10, 12);
 
-      const answer = await raw(type, { retire: true, confirmed: [] });
+      const refused = await raw(type, { retire: true, confirmed: [] });
+      expect(refused.saved).toBe(false);
+      expect(ids(refused.affected)).toEqual([id]);
+
+      const answer = await raw(type, { retire: true, confirmed: [id] });
+
+      expect(answer).toMatchObject({ saved: true, flagged_count: 1 });
+      expect(await flaggedState([id])).toEqual({ [id]: true });
+      expect((await flagEvents(id))[0].reason).toBe('The equipment type was retired');
+    });
+
+    it('SCRUM310_AC4_retiring_a_type_with_no_usable_units_leaves_a_reservation_already_flagged_as_unavailable_alone', async () => {
+      const type = await newTypeNamed(4);
+      await withBackstopOff(() => db.query('update equipment_types set damaged_quantity = 4 where id = $1', [type]));
+      const { id } = await held(type, 1, 2, 10, 12, { flagged: true, flagCode: 'equipment_lost' });
+
+      const answer = await raw(type, { retire: true, confirmed: [id] });
 
       expect(answer).toMatchObject({ saved: true, flagged_count: 0, affected: [] });
-      expect(await flaggedState([id])).toEqual({ [id]: true });
+      expect(await flagEvents(id)).toEqual([]);
     });
 
     it('SCRUM310_AC4_retiring_a_type_whose_reservations_have_all_ended_saves_directly', async () => {
@@ -937,15 +1004,33 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
       expect(await flaggedNotices(lost.event)).toHaveLength(1);
     });
 
-    it('SCRUM310_AC5_an_already_flagged_reservation_is_not_announced_again', async () => {
+    it('SCRUM310_AC5_a_reservation_already_flagged_as_unavailable_is_not_announced_again', async () => {
       const type = await newTypeNamed(4);
       await held(type, 1, 3, 10, 12);
-      const already = await held(type, 2, 3, 10, 12, { flagged: true });
+      const already = await held(type, 2, 3, 10, 12, { flagged: true, flagCode: 'equipment_lost' });
       await db.query('delete from notifications');
 
       await raw(type, { total: 3, confirmed: [already.id] });
 
       expect(await flaggedNotices(already.event)).toEqual([]);
+    });
+
+    it('SCRUM310_AC5_a_reservation_flagged_for_another_reason_is_announced_when_its_equipment_becomes_unavailable', async () => {
+      const type = await newTypeNamed(4);
+      await held(type, 1, 3, 10, 12);
+      const other = await held(type, 2, 3, 10, 12, { flagged: true });
+      await db.query(
+        "update equipment_reservations set flag_reason = 'The event date or time changed' where id = $1",
+        [other.id],
+      );
+      await db.query('delete from notifications');
+
+      await raw(type, { total: 3, confirmed: [other.id] });
+
+      const notices = await flaggedNotices(other.event);
+      expect(notices).toHaveLength(1);
+      expect(notices[0].recipient_id).toBe(coordinator);
+      expect(notices[0].payload.reason).toBe('Fewer units of this equipment are usable');
     });
 
     it('SCRUM310_AC5_a_retirement_names_the_retirement_as_the_reason', async () => {
@@ -1104,7 +1189,7 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
     });
   });
 
-  describe('the silent flagging is gone', () => {
+  describe('the silent flagging is gone, and the backstop for changes made outside the save', () => {
     it('SCRUM310_AC4_the_trigger_and_its_function_no_longer_exist', async () => {
       expect(await rows(
         "select tgname from pg_trigger where tgname = 'equipment_types_flag_reservations_on_unusable'",
@@ -1114,12 +1199,28 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
       )).toEqual([]);
     });
 
-    it('SCRUM310_AC4_a_plain_update_of_the_type_flags_nothing_any_more', async () => {
+    it('SCRUM310_AC4_a_change_the_save_makes_is_flagged_once_not_again_by_the_backstop', async () => {
       const type = await newTypeNamed(4);
-      const { id } = await held(type, 1, 3, 10, 12);
-      await db.query('update equipment_types set damaged_quantity = 4 where id = $1', [type]);
-      await db.query('update equipment_types set retired_at = now() where id = $1', [type]);
-      expect(await flaggedState([id])).toEqual({ [id]: false });
+      await held(type, 1, 3, 10, 12);
+      const lost = await held(type, 2, 3, 10, 12);
+
+      await raw(type, { total: 3, confirmed: [lost.id] });
+
+      expect(await flagEvents(lost.id)).toHaveLength(1);
+    });
+
+    it('SCRUM310_AC4_the_fixes_migration_can_be_run_again_and_the_save_still_works', async () => {
+      const sql = readFileSync(new URL('../../db/migrations/026_equipment_loss_fixes.sql', import.meta.url), 'utf8');
+      await db.exec(sql);
+      await db.exec(sql);
+
+      const type = await newTypeNamed(4);
+      await held(type, 1, 3, 10, 12);
+      const lost = await held(type, 2, 3, 10, 12);
+      expect(await raw(type, { total: 3, confirmed: [lost.id] })).toMatchObject({ saved: true, flagged_count: 1 });
+      expect(await rows(
+        "select tgname from pg_trigger where tgname = 'equipment_types_flag_unconfirmed_loss'",
+      )).toHaveLength(1);
     });
 
     it('SCRUM310_AC4_the_other_flagging_triggers_still_work', async () => {
@@ -1127,6 +1228,94 @@ describe('SCRUM-310 (SCRUM-313): the confirmed save', () => {
       await reserve(event, reviewerA, line, 2);
       await db.query('select amend_equipment_line($1, $2, $3, 3)', [event, coordinator, line]);
       expect((await reservation(event)).flagged).toBe(true);
+    });
+  });
+
+  describe('a change made outside the confirmed save still flags what it leaves short', () => {
+    it('SCRUM310_AC4_a_plain_update_that_lowers_the_usable_quantity_flags_the_newest_reservations', async () => {
+      const type = await newTypeNamed(10);
+      const first = await held(type, 1, 3, 10, 12);
+      const second = await held(type, 2, 3, 10, 12);
+      await db.query(
+        'update equipment_types set damaged_quantity = 6, last_modified_by = $2, last_change_note = $3 where id = $1',
+        [type, reviewerA, 'Cracked in transit'],
+      );
+
+      expect(await flaggedState([first.id, second.id])).toEqual({ [first.id]: false, [second.id]: true });
+      const events = await flagEvents(second.id);
+      expect(events).toHaveLength(1);
+      expect(events[0].user_id).toBe(reviewerA);
+      expect(events[0].reason).toBe('Fewer units of this equipment are usable (Cracked in transit)');
+      expect((await reservationRow(second.id)).flag_code).toBe('equipment_lost');
+      expect(await requestStatus(second.event)).toBe('pending_review');
+    });
+
+    it('SCRUM310_AC4_a_plain_retirement_flags_every_held_reservation_even_with_no_usable_units', async () => {
+      const type = await newTypeNamed(4);
+      const only = await held(type, 1, 2, 10, 12);
+      await withBackstopOff(() => db.query('update equipment_types set damaged_quantity = 4 where id = $1', [type]));
+      await db.query('update equipment_types set retired_at = now() where id = $1', [type]);
+
+      expect(await flaggedState([only.id])).toEqual({ [only.id]: true });
+      expect((await flagEvents(only.id))[0].reason).toBe('The equipment type was retired');
+    });
+
+    it('SCRUM310_AC7_a_plain_update_that_leaves_room_or_changes_only_the_name_flags_nothing', async () => {
+      const type = await newTypeNamed(10);
+      const only = await held(type, 1, 3, 10, 12);
+
+      await db.query('update equipment_types set damaged_quantity = 7 where id = $1', [type]);
+      await db.query("update equipment_types set name = name || ' renamed', description = 'x' where id = $1", [type]);
+      await db.query('update equipment_types set damaged_quantity = 2 where id = $1', [type]);
+
+      expect(await flaggedState([only.id])).toEqual({ [only.id]: false });
+    });
+
+    it('SCRUM310_AC6_a_reservation_flagged_for_another_reason_is_flagged_as_unavailable_when_its_equipment_is_lost', async () => {
+      const type = await newTypeNamed(4);
+      await held(type, 1, 3, 10, 12);
+      const other = await held(type, 2, 3, 10, 12, { flagged: true });
+      await db.query(
+        "update equipment_reservations set flag_reason = 'The event date or time changed', flagged_at = '2026-01-01T00:00:00Z' where id = $1",
+        [other.id],
+      );
+
+      const answer = await raw(type, { total: 3, confirmed: [other.id] });
+
+      expect(answer).toMatchObject({ saved: true, flagged_count: 1 });
+      expect(ids(answer.affected)).toEqual([other.id]);
+      const row = await reservationRow(other.id);
+      expect(row).toMatchObject({
+        flagged: true,
+        flag_code: 'equipment_lost',
+        flag_reason: 'Fewer units of this equipment are usable',
+      });
+      expect(new Date(row.flagged_at).getTime()).toBeGreaterThan(Date.parse('2026-01-02T00:00:00Z'));
+      const events = await flagEvents(other.id);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ user_id: reviewerA, reason: 'Fewer units of this equipment are usable' });
+      expect(await requestStatus(other.event)).toBe('pending_review');
+    });
+
+    it('SCRUM310_AC6_a_flag_for_another_reason_never_replaces_a_flag_for_unavailable_equipment', async () => {
+      const type = await newTypeNamed(4);
+      const lost = await held(type, 1, 2, 10, 12, { flagged: true, flagCode: 'equipment_lost' });
+      await db.query("update equipment_reservations set flag_reason = 'Lost reason' where id = $1", [lost.id]);
+
+      await db.query('select flag_equipment_reservations($1::uuid[], $2)', [[lost.id], 'The event date or time changed']);
+
+      expect(await reservationRow(lost.id)).toMatchObject({ flag_reason: 'Lost reason', flag_code: 'equipment_lost' });
+      expect(await flagEvents(lost.id)).toEqual([]);
+    });
+
+    it('SCRUM310_AC6_a_second_flag_for_another_reason_leaves_the_first_one_alone', async () => {
+      const type = await newTypeNamed(4);
+      const other = await held(type, 1, 2, 10, 12, { flagged: true });
+      await db.query("update equipment_reservations set flag_reason = 'First reason' where id = $1", [other.id]);
+
+      await db.query('select flag_equipment_reservations($1::uuid[], $2)', [[other.id], 'Second reason']);
+
+      expect(await reservationRow(other.id)).toMatchObject({ flag_reason: 'First reason', flag_code: null });
     });
   });
 

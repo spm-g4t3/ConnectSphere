@@ -1,13 +1,12 @@
 // useConfirmedChange.js
 //
-// SCRUM-314, a subtask of SCRUM-310 "Handle Equipment Lost After Reservation".
 // The flow the three screens share (the edit form, the damage and maintenance
 // form, and the retire row) for a change that may leave reservations short:
 //
-//   start   asks the backend which reservations the change affects (SCRUM-312)
+//   start   asks the backend which reservations the change affects
 //           - none: saves at once with an empty confirmed list (AC7)
 //           - some: stops at "confirming" and shows them (AC2); nothing is saved
-//   confirm saves with exactly the reservations that were shown (SCRUM-313)
+//   confirm saves with exactly the reservations that were shown
 //   cancel  goes back; nothing was saved
 //
 // If the save is refused because the list moved since the preview, the new list

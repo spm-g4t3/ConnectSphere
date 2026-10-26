@@ -1,29 +1,17 @@
 /**
- * Preview of a catalogue change, before anything is saved.
+ * Preview of a catalogue change, before anything is saved: which reservations a change
+ * to a type's usable quantity (damage, maintenance, a smaller total, a retirement) would
+ * leave short.
  *
- * SCRUM-312, a subtask of SCRUM-310 "Handle Equipment Lost After Reservation".
- *
- * Technical Support Staff are about to lower a type's usable quantity: by
- * recording damage or maintenance, by reducing the total, or by retiring it.
- * This answers "which reservations would that leave short?" so they can see
- * the cost and decide, and so SCRUM-313's confirmed save has a list to compare
- * against.
- *
- * It only reads. Nothing here inserts, updates or deletes, and the database
- * function behind it (equipment_over_commitment, migration 020) is STABLE.
- *
- * The answer comes from the database, not from JavaScript, so the preview and
- * the confirmed save run one rule: first come, first served, oldest
- * reservations kept (SCRUM-311).
- *
- * The preview is a snapshot. A reservation made or released a moment later
- * can change the list, which is why the confirmed save recalculates and
- * refuses when the list moved.
+ * It only reads. The answer comes from equipment_change_affected, the same function
+ * apply_equipment_change uses, so the preview and the save run one rule and can't drift.
+ * The preview is a snapshot: the confirmed save recalculates and refuses when the list moved.
  */
 
 import { supabase } from '../config/supabaseClient.js';
 import { ConflictError, NotFoundError } from '../errors.js';
 import { createPgTranslator, rejected, invalid, forbidden, notFound } from '../http/pgErrors.js';
+import { isNameTaken, NAME_TAKEN } from './equipmentService.js';
 import {
   checkChangePreview,
   throwIfInvalid,
@@ -34,10 +22,9 @@ const COLUMNS =
   'id, name, total_quantity, damaged_quantity, under_maintenance_quantity, retired_at';
 
 /**
- * 42501 and P0002 and 22023 are the codes equipment_over_commitment raises for
- * a caller who is not Technical Support Staff, a type that does not exist, and
- * a usable figure that is null or negative. 22P02 is a value that slipped past
- * validation and is still the caller's input.
+ * 42501, P0002 and 22023 are what equipment_change_affected raises for a caller who is not
+ * Technical Support Staff, a type that does not exist, and a negative usable quantity.
+ * 22P02 is a value that slipped past validation and is still the caller's input.
  */
 const translateError = createPgTranslator({
   codes: {
@@ -47,8 +34,6 @@ const translateError = createPgTranslator({
     '22P02': rejected,
   },
 });
-
-const usable = (total, damaged, underMaintenance) => total - damaged - underMaintenance;
 
 export function toAffected(row) {
   return {
@@ -104,57 +89,56 @@ export async function previewEquipmentChange(id, input, userId) {
     throw new ConflictError('Equipment type is already retired', { code: 'EQUIPMENT_ALREADY_RETIRED' });
   }
 
-  const total = value.totalQuantity ?? current.total_quantity;
-  const damaged = value.damagedQuantity ?? current.damaged_quantity;
-  const underMaintenance = value.underMaintenanceQuantity ?? current.under_maintenance_quantity;
+  // Whether the stored figures fit together is the one rule judged here, so the message
+  // can name the field that broke it. The usable quantities themselves come from the database.
+  if (!value.retire) {
+    const total = value.totalQuantity ?? current.total_quantity;
+    const damaged = value.damagedQuantity ?? current.damaged_quantity;
+    const underMaintenance = value.underMaintenanceQuantity ?? current.under_maintenance_quantity;
+    if (damaged + underMaintenance > total) {
+      let field = 'underMaintenanceQuantity';
+      if (value.totalQuantity !== undefined) field = 'totalQuantity';
+      else if (value.damagedQuantity !== undefined) field = 'damagedQuantity';
+      details.push({
+        field,
+        message:
+          `damaged plus under maintenance (${damaged + underMaintenance}) ` +
+          `can't exceed the total (${total})`,
+      });
+    }
+  }
 
-  // Retiring leaves nothing to offer, whatever the quantities are.
-  if (!value.retire && damaged + underMaintenance > total) {
-    let field = 'underMaintenanceQuantity';
-    if (value.totalQuantity !== undefined) field = 'totalQuantity';
-    else if (value.damagedQuantity !== undefined) field = 'damagedQuantity';
-    details.push({
-      field,
-      message:
-        `damaged plus under maintenance (${damaged + underMaintenance}) ` +
-        `can't exceed the total (${total})`,
-    });
+  // Refused now, not after staff have confirmed the list: the save would refuse it too.
+  if (value.name !== undefined && (await isNameTaken(value.name, id))) {
+    details.push({ field: 'name', message: NAME_TAKEN });
   }
   throwIfInvalid(details);
 
-  const usableBefore = usable(
-    current.total_quantity, current.damaged_quantity, current.under_maintenance_quantity,
-  );
-  const usableAfter = value.retire ? 0 : usable(total, damaged, underMaintenance);
+  const { data, error } = await supabase.rpc('equipment_change_affected', {
+    p_equipment_type_id: id,
+    p_caller: userId,
+    p_total: value.totalQuantity ?? null,
+    p_damaged: value.damagedQuantity ?? null,
+    p_under_maintenance: value.underMaintenanceQuantity ?? null,
+    p_retire: value.retire === true,
+  });
+  if (error) throw translateError(error);
 
-  // Only a change that leaves fewer usable units can leave a reservation short.
-  // The confirmed save (apply_equipment_change) makes the same call, so a change
-  // that does not reduce usable units previews as affecting nothing, and the
-  // preview can never show a list the save would not ask to confirm.
-  let data = [];
-  if (usableAfter < usableBefore) {
-    const result = await supabase.rpc('equipment_over_commitment', {
-      p_equipment_type_id: id,
-      p_usable_after: usableAfter,
-      p_caller: userId,
-    });
-    if (result.error) throw translateError(result.error);
-    data = result.data;
+  // Anything but the documented answer means the database and this code disagree, and
+  // guessing "nothing is affected" would let a change through unchecked.
+  if (
+    data === null || typeof data !== 'object' || !Array.isArray(data.affected)
+    || !Number.isInteger(data.usable_before) || !Number.isInteger(data.usable_after)
+  ) {
+    throw new Error('equipment_change_affected did not return a list');
   }
 
-  // The function always answers with a list. Anything else means the database
-  // and this code disagree, and guessing "nothing is affected" would let a
-  // change through unchecked.
-  if (!Array.isArray(data)) {
-    throw new Error('equipment_over_commitment did not return a list');
-  }
-
-  const affected = data.map(toAffected);
+  const affected = data.affected.map(toAffected);
   return {
     equipmentTypeId: current.id,
     equipmentName: current.name,
-    usableBefore,
-    usableAfter,
+    usableBefore: data.usable_before,
+    usableAfter: data.usable_after,
     affectedCount: affected.length,
     affectedUnits: affected.reduce((sum, row) => sum + row.quantity, 0),
     affected,

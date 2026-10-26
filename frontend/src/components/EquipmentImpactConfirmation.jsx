@@ -1,6 +1,5 @@
 // EquipmentImpactConfirmation.jsx
 //
-// SCRUM-314, a subtask of SCRUM-310 "Handle Equipment Lost After Reservation".
 // The step between "Save" and the change happening, when the change would leave
 // reservations short: it lists them (event name, period, quantity, coordinator),
 // says what confirming does, and saves nothing until the staff member confirms

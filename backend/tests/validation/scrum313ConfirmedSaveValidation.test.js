@@ -1,9 +1,6 @@
 /**
  * Tests for the extra input the confirmed save reads.
  *
- * SCRUM-313, a subtask of SCRUM-310 "Handle Equipment Lost After Reservation".
- * Named SCRUM310_ACn_<what_it_checks>.
- *
  * A change that lowers a type's usable quantity is saved only with the list of
  * reservations the staff member was shown (confirmedReservationIds). Leaving it
  * out means "this change affects nothing", so anything that is present but is

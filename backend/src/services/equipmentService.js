@@ -53,7 +53,7 @@ const COLUMN_FOR = {
   totalQuantity: 'total_quantity',
 };
 
-const NAME_TAKEN = 'is already used by another equipment type';
+export const NAME_TAKEN = 'is already used by another equipment type';
 
 
 /**
@@ -66,7 +66,7 @@ const NAME_TAKEN = 'is already used by another equipment type';
 const translateError = createPgTranslator({
   codes: {
     '23514': rejected,
-    // apply_equipment_change (018): not Technical Support Staff, no such type,
+    // apply_equipment_change (021): not Technical Support Staff, no such type,
     // bad input, and PT409 whose hint is the conflict's code
     '42501': forbidden,
     'P0002': notFound('Equipment type not found'),
@@ -226,7 +226,7 @@ function escapeLike(text) {
   return text.replace(/[\\%_]/g, (character) => `\\${character}`);
 }
 
-async function isNameTaken(name, excludeId = null) {
+export async function isNameTaken(name, excludeId = null) {
   let query = supabase.from(TABLE).select('id').ilike('name', escapeLike(name)).limit(1);
   if (excludeId) query = query.neq('id', excludeId);
 

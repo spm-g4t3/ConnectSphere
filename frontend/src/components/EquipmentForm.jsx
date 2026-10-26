@@ -75,7 +75,9 @@ export default function EquipmentForm({ type = null, onSaved }) {
       setErrors([]);
       const reason = note.trim();
       flow.start({
-        preview: () => previewEquipmentChange(type.id, { totalQuantity: payload.totalQuantity }),
+        // The edited fields go with the total so a bad or taken name is refused now,
+        // not after the reservations have been confirmed.
+        preview: () => previewEquipmentChange(type.id, payload),
         save: (confirmedReservationIds) =>
           updateEquipment(type.id, {
             ...payload,

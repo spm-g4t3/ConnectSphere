@@ -1,8 +1,5 @@
 // Tests for the service, error and wording pieces behind the confirmation step.
 //
-// SCRUM-314, a subtask of SCRUM-310 "Handle Equipment Lost After Reservation".
-// Named SCRUM310_ACn_<what_it_checks>.
-//
 //   - the preview call and the bodies the save calls carry
 //   - the refusal "the list moved" is recognised, and its list read safely
 //   - how an affected reservation is worded (event, period, quantity, coordinator)

@@ -1,13 +1,8 @@
 /**
- * Tests for the change-preview input check.
- *
- * SCRUM-312, a subtask of SCRUM-310 "Handle Equipment Lost After Reservation".
- * Named SCRUM310_ACn_<what_it_checks>.
- *
- * The body is one change Technical Support Staff want to look at: a total, a
- * damaged and/or under-maintenance quantity, or a retirement. Every invalid
- * field is listed together, nothing outside the known fields is read, and the
- * returned value holds only what was sent and valid.
+ * The change-preview input check: one change to look at (a total, damaged and/or under
+ * maintenance, or a retirement), optionally with the edited name, description, category
+ * and location that will be saved with it. Every invalid field is listed together and
+ * the value holds only what was sent and valid.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -51,7 +46,7 @@ describe('SCRUM310 accepted changes', () => {
   it('SCRUM310_AC1_ignores_fields_it_does_not_know_and_does_not_return_them', () => {
     const { value, details } = checkChangePreview({
       totalQuantity: 4,
-      name: 'Hijack',
+      colour: 'red',
       note: 'not needed',
       callerId: 'someone-else',
       usableAfter: 99,
@@ -115,6 +110,41 @@ describe('SCRUM310 refused bodies', () => {
     expect(fields(details)).toEqual(['damagedQuantity']);
     expect(value).toEqual({ totalQuantity: 5 });
   });
+});
+
+describe('SCRUM310 the fields saved together with a total', () => {
+  it('SCRUM310_AC1_reads_the_name_and_the_optional_text_fields_trimmed', () => {
+    const { value, details } = checkChangePreview({
+      totalQuantity: 4, name: '  Speaker ', description: ' Loud ', category: 'Audio', location: ' Store ',
+    });
+    expect(details).toEqual([]);
+    expect(value).toEqual({
+      totalQuantity: 4, name: 'Speaker', description: 'Loud', category: 'Audio', location: 'Store',
+    });
+  });
+
+  it.each([[''], ['   '], [42], [null], [{}]])('SCRUM310_AC1_refuses_the_name_%j', (name) => {
+    const { details } = checkChangePreview({ totalQuantity: 4, name });
+    expect(fields(details)).toContain('name');
+  });
+
+  it.each(['description', 'category', 'location'])('SCRUM310_AC1_refuses_a_%s_that_is_not_text', (field) => {
+    const { details } = checkChangePreview({ totalQuantity: 4, [field]: 42 });
+    expect(fields(details)).toEqual([field]);
+  });
+
+  it('SCRUM310_AC1_a_name_alone_is_not_a_change_to_preview', () => {
+    const { details } = checkChangePreview({ name: 'Speaker' });
+    expect(fields(details)).toEqual(['equipment']);
+  });
+
+  it.each(['name', 'description', 'category', 'location'])(
+    'SCRUM310_AC1_refuses_retire_together_with_%s',
+    (field) => {
+      const { details } = checkChangePreview({ retire: true, [field]: 'x' });
+      expect(fields(details)).toEqual(['retire']);
+    },
+  );
 });
 
 describe('SCRUM310 retire', () => {

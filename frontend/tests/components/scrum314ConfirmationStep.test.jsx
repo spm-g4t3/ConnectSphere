@@ -1,8 +1,5 @@
 // Tests for the confirmation step on the equipment catalogue screen.
 //
-// SCRUM-314, a subtask of SCRUM-310 "Handle Equipment Lost After Reservation".
-// Named SCRUM310_ACn_<what_it_checks> for the criterion each one proves.
-//
 //   AC2 -- affected reservations (event, period, quantity, coordinator) are shown
 //          and nothing is saved until the staff member confirms
 //   AC3 -- the list shown is the one sent back as confirmed, in the order given
@@ -149,6 +146,38 @@ describe("AC2: the edit form checks a smaller total", () => {
 
     await screen.findByRole("region", { name: /Reservations affected/ });
     expect(service.previewEquipmentChange).toHaveBeenCalledWith("p1", { totalQuantity: 4 });
+    expect(service.updateEquipment).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM310_AC2_sends_the_edited_name_with_the_total_so_a_taken_name_is_found_before_confirming", async () => {
+    const user = userEvent.setup();
+    service.previewEquipmentChange.mockResolvedValue(preview([reservation(R1)]));
+    await openCatalogue();
+
+    await editTotal(user, "4");
+    await typeInto(user, "Name", "Projector (4K)");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await screen.findByRole("region", { name: /Reservations affected/ });
+    expect(service.previewEquipmentChange).toHaveBeenCalledWith("p1", {
+      name: "Projector (4K)",
+      totalQuantity: 4,
+    });
+  });
+
+  it("SCRUM310_AC2_a_name_the_preview_refuses_is_shown_on_the_form_and_no_list_is_offered", async () => {
+    const user = userEvent.setup();
+    service.previewEquipmentChange.mockRejectedValue(
+      apiError(400, { details: [{ field: "name", message: "is already used by another equipment type" }] }),
+    );
+    await openCatalogue();
+
+    await editTotal(user, "4");
+    await typeInto(user, "Name", "Speaker");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText(/already used by another equipment type/)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Reservations affected/ })).not.toBeInTheDocument();
     expect(service.updateEquipment).not.toHaveBeenCalled();
   });
 
@@ -363,7 +392,7 @@ describe("AC3 and AC4: confirming saves the list that was shown", () => {
     });
   });
 
-  it("SCRUM310_AC4_the_other_edited_fields_are_saved_with_the_total_but_not_previewed", async () => {
+  it("SCRUM310_AC4_the_other_edited_fields_are_previewed_with_the_total_and_saved_with_it", async () => {
     const user = userEvent.setup();
     service.previewEquipmentChange.mockResolvedValue(preview([reservation(R1)]));
     await openCatalogue();
@@ -375,7 +404,7 @@ describe("AC3 and AC4: confirming saves the list that was shown", () => {
     await user.click(screen.getByRole("button", { name: "Confirm and flag these reservations" }));
 
     await waitFor(() => expect(service.updateEquipment).toHaveBeenCalled());
-    expect(service.previewEquipmentChange).toHaveBeenCalledWith("p1", { totalQuantity: 4 });
+    expect(service.previewEquipmentChange).toHaveBeenCalledWith("p1", { totalQuantity: 4, location: "Store room 9" });
     expect(service.updateEquipment).toHaveBeenCalledWith("p1", {
       totalQuantity: 4,
       location: "Store room 9",
@@ -1390,7 +1419,7 @@ describe("a refusal that leaves nothing affected, on the other two screens", () 
 describe("reinstating and refreshing still report their failures", () => {
   const retiredSpeaker = { ...speaker, retiredAt: "2026-10-01T00:00:00+00:00" };
 
-  it("SCRUM310_a_reinstate_that_finds_the_type_not_retired_explains_it_and_refreshes", async () => {
+  it("SCRUM310_AC4_a_reinstate_that_finds_the_type_not_retired_explains_it_and_refreshes", async () => {
     const user = userEvent.setup();
     service.listEquipment.mockResolvedValue([projector, retiredSpeaker]);
     service.reinstateEquipment.mockRejectedValue(apiError(409, { code: "EQUIPMENT_NOT_RETIRED" }));
@@ -1402,7 +1431,7 @@ describe("reinstating and refreshing still report their failures", () => {
     await waitFor(() => expect(service.listEquipment).toHaveBeenCalledTimes(2));
   });
 
-  it("SCRUM310_a_reinstate_that_fails_otherwise_says_so_and_does_not_refresh", async () => {
+  it("SCRUM310_AC4_a_reinstate_that_fails_otherwise_says_so_and_does_not_refresh", async () => {
     const user = userEvent.setup();
     service.listEquipment.mockResolvedValue([projector, retiredSpeaker]);
     service.reinstateEquipment.mockRejectedValue(apiError(500, { error: "driver text" }));
@@ -1415,7 +1444,7 @@ describe("reinstating and refreshing still report their failures", () => {
     expect(document.body).not.toHaveTextContent("driver text");
   });
 
-  it("SCRUM310_the_reinstate_button_shows_it_is_working", async () => {
+  it("SCRUM310_AC4_the_reinstate_button_shows_it_is_working", async () => {
     const user = userEvent.setup();
     const working = deferred();
     service.listEquipment.mockResolvedValue([projector, retiredSpeaker]);
@@ -1431,7 +1460,7 @@ describe("reinstating and refreshing still report their failures", () => {
     await waitFor(() => expect(service.listEquipment).toHaveBeenCalledTimes(2));
   });
 
-  it("SCRUM310_a_refresh_that_fails_after_a_change_shows_the_load_message", async () => {
+  it("SCRUM310_AC4_a_refresh_that_fails_after_a_change_shows_the_load_message", async () => {
     const user = userEvent.setup();
     service.listEquipment.mockResolvedValueOnce([projector, speaker]).mockRejectedValueOnce(apiError(500, {}));
     await openCatalogue();
@@ -1445,7 +1474,7 @@ describe("reinstating and refreshing still report their failures", () => {
 
 
 describe("leaving the catalogue before it has loaded", () => {
-  it("SCRUM310_a_list_that_arrives_after_the_user_left_is_dropped", async () => {
+  it("SCRUM310_AC2_a_list_that_arrives_after_the_user_left_is_dropped", async () => {
     const loading = deferred();
     service.listEquipment.mockReturnValue(loading.promise);
     const { unmount } = render(<EquipmentCatalogue />);
@@ -1457,7 +1486,7 @@ describe("leaving the catalogue before it has loaded", () => {
     expect(service.listEquipment).toHaveBeenCalledTimes(1);
   });
 
-  it("SCRUM310_a_failure_that_arrives_after_the_user_left_is_dropped", async () => {
+  it("SCRUM310_AC2_a_failure_that_arrives_after_the_user_left_is_dropped", async () => {
     const loading = deferred();
     service.listEquipment.mockReturnValue(loading.promise);
     const { unmount } = render(<EquipmentCatalogue />);

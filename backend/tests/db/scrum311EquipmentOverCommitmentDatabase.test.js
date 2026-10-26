@@ -1,14 +1,15 @@
 /**
- * SCRUM-310 (SCRUM-311): which reservations a lower usable quantity would
- * affect, against the final schema in a real Postgres (PGlite).
+ * Which reservations a lower usable quantity would affect, against the final schema in a
+ * real Postgres (PGlite).
  *
- * equipment_over_commitment(type, usable_after, caller) goes through the type's
- * held reservations that have not ended, oldest first. Each is kept if, at every
- * moment of its period, it fits within the new usable quantity alongside the ones
- * already kept; otherwise it is affected. It never writes.
+ * equipment_over_commitment goes through the type's held reservations that have not ended,
+ * oldest first. Each is kept if, at every moment of its period, it fits within the new usable
+ * quantity alongside the ones already kept; otherwise it is affected. It never writes.
+ * equipment_change_affected adds the before and after figures and the rule for when a change
+ * can leave anything short, so the preview and the save agree.
  *
- * Reservations are inserted directly with a chosen created_at, so "oldest" is
- * set by the test and not by how fast the statements ran.
+ * Reservations are inserted directly with a chosen created_at, so "oldest" is set by the
+ * test and not by how fast the statements ran.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -397,6 +398,131 @@ describe('SCRUM-310 (SCRUM-311): the over-commitment calculation', () => {
 
     it('SCRUM310_AC1_a_missing_type_id_is_refused_with_P0002', async () => {
       expect((await refusal(check(null, 1)))?.code).toBe('P0002');
+    });
+  });
+
+  describe('equipment_change_affected: the before and after figures and when to check', () => {
+    const change = async (type, args = {}, caller = reviewerA) => {
+      const { total = null, damaged = null, underMaintenance = null, retire = false } = args;
+      return asJson(await one(
+        'select equipment_change_affected($1, $2, $3, $4, $5, $6)::text as answer',
+        [type, caller, total, damaged, underMaintenance, retire],
+      ));
+    };
+    const withCondition = (type, columns) =>
+      db.query(
+        `update equipment_types set ${Object.keys(columns).map((c, i) => `${c} = $${i + 2}`).join(', ')} where id = $1`,
+        [type, ...Object.values(columns)],
+      );
+
+    it('SCRUM310_AC1_a_null_caller_and_other_roles_are_refused_with_42501', async () => {
+      const type = await newTypeNamed(10);
+      expect((await refusal(change(type, { total: 5 }, null)))?.code).toBe('42501');
+      for (const caller of [coordinator, organiser]) {
+        expect((await refusal(change(type, { total: 5 }, caller)))?.code).toBe('42501');
+      }
+    });
+
+    it('SCRUM310_AC1_an_unknown_type_is_refused_with_P0002', async () => {
+      const error = await refusal(change('00000000-0000-4000-8000-000000000000', { total: 5 }));
+      expect(error?.code).toBe('P0002');
+    });
+
+    it('SCRUM310_AC1_a_change_that_takes_the_usable_quantity_below_zero_is_refused_with_22023', async () => {
+      const type = await newTypeNamed(10);
+      expect((await refusal(change(type, { damaged: 11 })))?.code).toBe('22023');
+    });
+
+    it.each([
+      ['a smaller total', { total: 6 }, [10, 6]],
+      ['more damaged', { damaged: 4 }, [10, 6]],
+      ['more under maintenance', { underMaintenance: 3 }, [10, 7]],
+      ['both conditions', { damaged: 4, underMaintenance: 3 }, [10, 3]],
+      ['a total with a condition', { total: 8, damaged: 4 }, [10, 4]],
+      ['everything unusable', { damaged: 10 }, [10, 0]],
+      ['a retirement', { retire: true }, [10, 0]],
+      ['a larger total', { total: 20 }, [10, 20]],
+      ['less damage', { damaged: 0 }, [10, 10]],
+    ])('SCRUM310_AC1_%s_reports_the_usable_quantity_before_and_after', async (_label, args, [before, after]) => {
+      const type = await newTypeNamed(10);
+      const answer = await change(type, args);
+      expect([answer.usable_before, answer.usable_after]).toEqual([before, after]);
+    });
+
+    it('SCRUM310_AC1_quantities_left_out_stay_as_they_are', async () => {
+      const type = await newTypeNamed(10);
+      await withCondition(type, { damaged_quantity: 2, under_maintenance_quantity: 1 });
+      const answer = await change(type, { total: 8 });
+      expect([answer.usable_before, answer.usable_after]).toEqual([7, 5]);
+    });
+
+    it('SCRUM310_AC1_a_change_that_lowers_the_usable_quantity_lists_the_same_reservations_as_the_check', async () => {
+      const type = await newTypeNamed(10);
+      await reserved(type, 1, 4, 10, 12);
+      const lost = await reserved(type, 2, 4, 10, 12);
+
+      const answer = await change(type, { total: 6 });
+
+      expect(answer.affected.map((r) => r.reservation_id)).toEqual([lost.id]);
+      expect(answer.affected).toEqual(await check(type, 6));
+    });
+
+    it.each([
+      ['a larger total', { total: 20 }],
+      ['less damage', { damaged: 0 }],
+      ['a swap that keeps the usable quantity', { total: 11, damaged: 1 }],
+    ])('SCRUM310_AC7_%s_lists_nobody_even_when_the_type_is_already_over_committed', async (_label, args) => {
+      const type = await newTypeNamed(10);
+      await reserved(type, 1, 9, 10, 12);
+      await withCondition(type, { damaged_quantity: 8 });
+
+      const answer = await change(type, args);
+
+      expect(answer.affected).toEqual([]);
+    });
+
+    it('SCRUM310_AC4_a_retirement_lists_the_reservations_even_when_no_unit_was_usable', async () => {
+      const type = await newTypeNamed(4);
+      const held = await reserved(type, 1, 2, 10, 12);
+      await withCondition(type, { damaged_quantity: 4 });
+
+      const answer = await change(type, { retire: true });
+
+      expect(answer.usable_before).toBe(0);
+      expect(answer.affected.map((r) => r.reservation_id)).toEqual([held.id]);
+    });
+
+    it('SCRUM310_AC1_it_only_reads', async () => {
+      const type = await newTypeNamed(10);
+      await reserved(type, 1, 4, 10, 12);
+      await reserved(type, 2, 4, 10, 12);
+      const before = await rows('select * from equipment_reservations order by id');
+
+      await change(type, { retire: true });
+
+      expect(await rows('select * from equipment_reservations order by id')).toEqual(before);
+      expect((await one(
+        "select provolatile from pg_proc where proname = 'equipment_change_affected'",
+      )).provolatile).toBe('s');
+    });
+
+    it('SCRUM310_AC1_the_client_roles_cannot_execute_the_new_functions_and_service_role_can', async () => {
+      for (const fn of [
+        'equipment_change_affected(uuid, uuid, integer, integer, integer, boolean)',
+        'equipment_over_commitment_unchecked(uuid, integer)',
+        'flag_equipment_reservation_ids(uuid[], text, uuid, text)',
+        'equipment_loss_reason(boolean, text)',
+      ]) {
+        expect(await clientsCanExecute(db, fn, ['anon', 'authenticated', 'service_role']), fn).toEqual(['service_role']);
+      }
+    });
+
+    it('SCRUM310_AC1_the_unchecked_calculation_refuses_a_negative_figure_and_an_unknown_type', async () => {
+      const type = await newTypeNamed(10);
+      const unchecked = (id, usable) =>
+        one('select equipment_over_commitment_unchecked($1, $2)::text as answer', [id, usable]);
+      expect((await refusal(unchecked(type, -1)))?.code).toBe('22023');
+      expect((await refusal(unchecked('00000000-0000-4000-8000-000000000000', 1)))?.code).toBe('P0002');
     });
   });
 

@@ -1,6 +1,5 @@
 // equipmentImpactDisplay.js
 //
-// SCRUM-314, a subtask of SCRUM-310 "Handle Equipment Lost After Reservation".
 // How the confirmation step words the reservations a change would leave short
 // (event name, period, quantity and coordinator, as the story asks), and the
 // plain sums its heading uses. Pure functions, so the wording is tested without

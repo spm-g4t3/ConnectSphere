@@ -1,9 +1,6 @@
 /**
  * Tests for the confirmed save in the equipment service.
  *
- * SCRUM-313, a subtask of SCRUM-310 "Handle Equipment Lost After Reservation".
- * Named SCRUM310_ACn_<what_it_checks>.
- *
  * Changing a total, recording damage or maintenance and retiring a type all
  * save through one database function, apply_equipment_change. This file covers
  * what the service sends to it, what it does with each answer, and that no

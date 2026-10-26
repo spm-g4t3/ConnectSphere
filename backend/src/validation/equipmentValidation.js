@@ -305,17 +305,18 @@ export function checkRetire(input) {
 
 const QUANTITY_FIELDS = ['totalQuantity', ...CONDITION_FIELDS];
 const PREVIEW_FIELDS = [...QUANTITY_FIELDS, 'retire'];
+const EDIT_FIELDS = ['name', ...OPTIONAL_TEXT_FIELDS];
 
 /**
- * SCRUM-312: check a change Technical Support Staff want to look at before
- * saving it. The same quantities the real endpoints take, but no note: a
- * preview saves nothing, so there is nothing to explain yet.
+ * Check a change Technical Support Staff want to look at before saving it. The same
+ * quantities the real endpoints take, but no note: a preview saves nothing.
  *
- * One of totalQuantity, damagedQuantity, underMaintenanceQuantity (the last
- * two may be sent together, and either may go with a total) or retire: true.
- * Retiring is a different kind of change, so it can't be combined with
- * quantities, and retire: false is refused instead of read as "do nothing".
- * Fields outside this list are ignored, as in every other check here.
+ * One of totalQuantity, damagedQuantity, underMaintenanceQuantity (the last two may be
+ * sent together, and either may go with a total) or retire: true. Retiring can't be
+ * combined with quantities, and retire: false is refused instead of read as "do nothing".
+ *
+ * name, description, category and location may come along with a total, as in the edit
+ * that will be saved, so a bad one is refused now and not after the list is confirmed.
  *
  * @param {unknown} input
  * @returns {{value: object|null, details: Array<{field: string, message: string}>}}
@@ -339,13 +340,24 @@ export function checkChangePreview(input) {
     if (quantity !== undefined) value[field] = quantity;
   }
 
+  if (input.name !== undefined) {
+    const name = readName(details, input.name);
+    if (name !== undefined) value.name = name;
+  }
+
+  for (const field of OPTIONAL_TEXT_FIELDS) {
+    if (input[field] === undefined) continue;
+    const text = readOptionalText(details, field, input[field]);
+    if (text !== undefined) value[field] = text;
+  }
+
   if (input.retire !== undefined) {
     if (input.retire !== true) {
       details.push({ field: 'retire', message: 'must be true when sent' });
     } else {
       value.retire = true;
-      if (QUANTITY_FIELDS.some((field) => input[field] !== undefined)) {
-        details.push({ field: 'retire', message: "can't be combined with a change to a quantity" });
+      if ([...QUANTITY_FIELDS, ...EDIT_FIELDS].some((field) => input[field] !== undefined)) {
+        details.push({ field: 'retire', message: "can't be combined with another change" });
       }
     }
   }

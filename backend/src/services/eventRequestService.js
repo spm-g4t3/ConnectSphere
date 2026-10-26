@@ -351,11 +351,11 @@ const EQUIPMENT_LOST_CODE = 'equipment_lost';
  * (the event's date or time changed, say) is named for what it is, a flag, so a
  * coordinator is not sent after equipment that did not become unavailable.
  */
-function equipmentFlagWording(reservation) {
+function equipmentFlagWording(reservation, { withReason }) {
   const lost = reservation.flag_code === EQUIPMENT_LOST_CODE;
   const label = lost ? 'Equipment unavailable' : 'Equipment flagged for review';
   const reason = typeof reservation.flag_reason === 'string' ? reservation.flag_reason.trim() : '';
-  return reason === '' ? label : `${label}: ${reason}`;
+  return withReason && reason !== '' ? `${label}: ${reason}` : label;
 }
 
 /**
@@ -373,9 +373,13 @@ function equipmentFlagWording(reservation) {
  * an event drops off when the last flag is cleared or released. The embeds are
  * read defensively, as bookingRequestService's one() reads its embeds.
  *
+ * The reason text can carry the note Technical Support wrote about the equipment, which
+ * is internal, so only coordinator reads include it (withReason). An organiser sees the
+ * kind of flag and nothing more.
+ *
  * @returns {string[]} empty when the event does not need attention
  */
-function attentionReasons(row) {
+function attentionReasons(row, { withReason }) {
   if (row.status !== STATUS.CONFIRMED) return [];
 
   const reasons = [];
@@ -386,15 +390,18 @@ function attentionReasons(row) {
   const flagged = embedded(row.equipment_reservations).filter(
     (reservation) => reservation?.flagged === true && !reservation.released_at,
   );
-  const wording = new Set(flagged.map(equipmentFlagWording));
+  const wording = new Set(flagged.map((reservation) => equipmentFlagWording(reservation, { withReason })));
   reasons.push(...wording);
 
   return reasons;
 }
 
-/** toEventRequest, with needsAttention and its reasons, for a row read with ATTENTION_COLUMNS. */
-function toEventRequestWithAttention(row) {
-  const reasons = attentionReasons(row);
+/**
+ * toEventRequest, with needsAttention and its reasons, for a row read with ATTENTION_COLUMNS.
+ * forOrganiser leaves the staff's reason text out of the reasons.
+ */
+function toEventRequestWithAttention(row, { forOrganiser = false } = {}) {
+  const reasons = attentionReasons(row, { withReason: !forOrganiser });
   return { ...toEventRequest(row), needsAttention: reasons.length > 0, attentionReasons: reasons };
 }
 
@@ -1489,7 +1496,7 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
   const nameOf = coordinatorIds.length > 0 ? await readNames(db, coordinatorIds) : () => null;
 
   return rows.map((row) => ({
-    ...toEventRequestWithAttention(row),
+    ...toEventRequestWithAttention(row, { forOrganiser: true }),
     assignedCoordinatorName: nameOf(row.assigned_coordinator_id ?? null),
   }));
 }
@@ -1523,7 +1530,10 @@ export async function listEventRequestsForOrganiser(organiserId, { client } = {}
 export async function getEventRequestForOrganiser(id, organiserId, { client } = {}) {
   assertOrganiser(organiserId);
 
-  const request = toEventRequestWithAttention(await readEventRequestRow(id, ATTENTION_COLUMNS, client));
+  const request = toEventRequestWithAttention(
+    await readEventRequestRow(id, ATTENTION_COLUMNS, client),
+    { forOrganiser: true },
+  );
 
   if (request.organiserId !== organiserId) {
     // Deliberately the same message getEventRequestById raises for an id that
@@ -1890,7 +1900,7 @@ export async function listEventRequestsForReview({ client } = {}) {
 
   // An empty queue is the good state, not a missing resource: it means nothing
   // is waiting on a Coordinator. 200 [] all the way up, never a NotFoundError.
-  return (data ?? []).map(toEventRequestWithAttention);
+  return (data ?? []).map((row) => toEventRequestWithAttention(row));
 }
 
 

@@ -1,9 +1,6 @@
 /**
- * Tests for the change-preview route.
- *
- * SCRUM-312, a subtask of SCRUM-310 "Handle Equipment Lost After Reservation".
- * Named SCRUM310_ACn_<what_it_checks>. About transport and authorisation: the
- * right role reaches it, everyone else is refused before anything is read,
+ * Tests for the change-preview route, about transport and authorisation: the right role
+ * reaches it, everyone else is refused before anything is read,
  * each failure has its status, and the acting user comes from the session.
  *
  * The Supabase client is mocked with a factory, as in equipment.test.js.
@@ -52,6 +49,10 @@ const affectedRow = {
   flagged: false,
   reserved_at: '2026-10-01T00:00:00+00:00',
 };
+
+// What equipment_change_affected answers: the usable count before and after, and the list.
+const answer = (affected, usableBefore, usableAfter) =>
+  ok({ usable_before: usableBefore, usable_after: usableAfter, affected });
 
 const signedInAs = signedInFor(STAFF_ID);
 
@@ -112,7 +113,7 @@ describe('SCRUM310 who may ask', () => {
 describe('SCRUM310 a successful preview', () => {
   it('SCRUM310_AC2_answers_200_with_the_preview', async () => {
     from.mockReturnValueOnce(queryStub(ok(typeRow())));
-    rpc.mockResolvedValueOnce(ok([affectedRow]));
+    rpc.mockResolvedValueOnce(answer([affectedRow], 7, 1));
 
     const res = await request(appWith()).post(url()).send({ totalQuantity: 4 });
 
@@ -135,7 +136,7 @@ describe('SCRUM310 a successful preview', () => {
 
   it('SCRUM310_AC7_answers_200_with_an_empty_list_when_no_one_is_affected', async () => {
     from.mockReturnValueOnce(queryStub(ok(typeRow())));
-    rpc.mockResolvedValueOnce(ok([]));
+    rpc.mockResolvedValueOnce(answer([], 7, 8));
 
     const res = await request(appWith()).post(url()).send({ totalQuantity: 9 });
 
@@ -146,13 +147,13 @@ describe('SCRUM310 a successful preview', () => {
 
   it('SCRUM310_AC1_a_retirement_is_previewed_as_zero_usable', async () => {
     from.mockReturnValueOnce(queryStub(ok(typeRow())));
-    rpc.mockResolvedValueOnce(ok([]));
+    rpc.mockResolvedValueOnce(answer([], 7, 0));
 
     const res = await request(appWith()).post(url()).send({ retire: true });
 
     expect(res.status).toBe(200);
     expect(res.body.usableAfter).toBe(0);
-    expect(rpc.mock.calls[0][1].p_usable_after).toBe(0);
+    expect(rpc.mock.calls[0][1].p_retire).toBe(true);
   });
 
   it('SCRUM310_AC1_the_acting_user_sent_to_the_database_is_the_signed_in_one', async () => {
@@ -169,12 +170,12 @@ describe('SCRUM310 a successful preview', () => {
   it('SCRUM310_AC2_a_preview_makes_only_reads', async () => {
     const select = queryStub(ok(typeRow()));
     from.mockReturnValueOnce(select);
-    rpc.mockResolvedValueOnce(ok([affectedRow]));
+    rpc.mockResolvedValueOnce(answer([affectedRow], 7, 1));
 
     await request(appWith()).post(url()).send({ totalQuantity: 4 });
 
     for (const write of ['insert', 'update', 'delete']) expect(select.called(write)).toBe(false);
-    expect(rpc.mock.calls.map(([name]) => name)).toEqual(['equipment_over_commitment']);
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual(['equipment_change_affected']);
   });
 });
 

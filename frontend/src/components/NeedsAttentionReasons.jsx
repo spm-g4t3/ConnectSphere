@@ -1,6 +1,6 @@
 // NeedsAttentionReasons.jsx
 //
-// SCRUM-315 (SCRUM-310 AC6): why a Confirmed event is on the coordinator's Needs
+// AC6: why a Confirmed event is on the coordinator's Needs
 // attention list, written under the event so the reason is read with the event.
 // The server works the reasons out from the flags as they stand, so the list
 // goes when the last flag is cleared. A missing or empty list shows nothing.

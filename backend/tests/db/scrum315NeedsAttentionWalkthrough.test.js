@@ -1,6 +1,6 @@
 /**
- * SCRUM-310 (SCRUM-315), walked through over HTTP on a real database: equipment
- * is lost after a Confirmed event reserved it, and the coordinator's side shows it.
+ * Equipment is lost after a Confirmed event reserved it, and the coordinator's side shows
+ * it, walked through over HTTP on a real database.
  *
  * Why real routes. The service tests answer from fake clients and the database
  * tests call the SQL directly; neither shows that the routers, services and

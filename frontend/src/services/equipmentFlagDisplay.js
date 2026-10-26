@@ -1,6 +1,5 @@
 // equipmentFlagDisplay.js
 //
-// SCRUM-315, a subtask of SCRUM-310 "Handle Equipment Lost After Reservation".
 // How the coordinator's equipment section words a line whose reservations are
 // flagged (equipment unavailable), and how the Needs attention list words its reasons.
 // Pure functions, so the wording is tested without rendering anything.

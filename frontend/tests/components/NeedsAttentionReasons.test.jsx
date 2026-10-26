@@ -1,5 +1,4 @@
-// SCRUM-310 (SCRUM-315) AC6: the reasons written under an event on the coordinator's
-// Needs attention list.
+// AC6: the reasons written under an event on the coordinator's Needs attention list.
 
 import { describe, it, expect } from "vitest";
 import { render, screen, within } from "@testing-library/react";

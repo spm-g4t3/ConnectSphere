@@ -4902,6 +4902,69 @@ describe('SCRUM-310 (SCRUM-315): a flagged equipment reservation puts a Confirme
     expect(event.attentionReasons).toEqual([]);
   });
 
+  describe('what an organiser is shown of a flag', () => {
+    const NOTE = 'Fewer units of this equipment are usable (Cracked in transit, bin 4)';
+    const noted = () => reservation({ flag_reason: NOTE });
+
+    async function listedForOrganiser(overrides) {
+      const client = createQueueFakeClient([
+        ok([storedRow({ status: STATUS.CONFIRMED, ...overrides })]),
+      ]);
+      const [event] = await listEventRequestsForOrganiser(ORGANISER_ID, { client });
+      return event;
+    }
+
+    async function readForOrganiser(overrides) {
+      const client = createQueueFakeClient([ok(storedRow({ status: STATUS.CONFIRMED, ...overrides }))]);
+      return getEventRequestForOrganiser(REQUEST_ID, ORGANISER_ID, { client });
+    }
+
+    it('SCRUM310_AC6_the_organiser_list_names_the_kind_of_flag_and_not_the_staff_note', async () => {
+      const event = await listedForOrganiser({ equipment_reservations: [noted()] });
+
+      expect(event.needsAttention).toBe(true);
+      expect(event.attentionReasons).toEqual(['Equipment unavailable']);
+      expect(JSON.stringify(event)).not.toContain('Cracked in transit');
+    });
+
+    it('SCRUM310_AC6_the_organiser_single_read_names_the_kind_of_flag_and_not_the_staff_note', async () => {
+      const event = await readForOrganiser({ equipment_reservations: [noted()] });
+
+      expect(event.attentionReasons).toEqual(['Equipment unavailable']);
+      expect(JSON.stringify(event)).not.toContain('Cracked in transit');
+    });
+
+    it('SCRUM310_AC6_an_organiser_sees_other_flags_by_kind_too_and_the_venue_reason_unchanged', async () => {
+      const event = await listedForOrganiser({
+        bookings: [booking('flagged_for_review')],
+        equipment_reservations: [
+          reservation({ flag_code: null, flag_reason: 'The event date or time changed' }),
+          noted(),
+        ],
+      });
+
+      expect(event.attentionReasons).toEqual([
+        'Venue: a booking is flagged for review',
+        'Equipment flagged for review',
+        'Equipment unavailable',
+      ]);
+    });
+
+    it('SCRUM310_AC6_two_flags_of_one_kind_show_the_organiser_one_line', async () => {
+      const event = await listedForOrganiser({
+        equipment_reservations: [noted(), reservation({ flag_reason: 'The equipment type was retired (End of life)' })],
+      });
+
+      expect(event.attentionReasons).toEqual(['Equipment unavailable']);
+    });
+
+    it('SCRUM310_AC6_the_coordinator_still_gets_the_reason_with_the_note', async () => {
+      const event = await readOne({ status: STATUS.CONFIRMED, equipment_reservations: [noted()] });
+
+      expect(event.attentionReasons).toEqual([`Equipment unavailable: ${NOTE}`]);
+    });
+  });
+
   it('SCRUM310_AC6_every_event_read_that_carries_needs_attention_embeds_the_reservation_flags', async () => {
     const flagged = heldRow({ status: STATUS.CONFIRMED, equipment_reservations: [reservation()] });
     const client = createQueueFakeClient([
@@ -4925,7 +4988,8 @@ describe('SCRUM-310 (SCRUM-315): a flagged equipment reservation puts a Confirme
     ];
 
     expect(results.map(([event]) => event.needsAttention)).toEqual([true, true, true]);
-    expect(single.map((event) => event.attentionReasons)).toEqual([[LOST], [LOST]]);
+    // The coordinator's read carries the reason; the organiser's carries the kind only.
+    expect(single.map((event) => event.attentionReasons)).toEqual([[LOST], ['Equipment unavailable']]);
     const reads = client.calls.filter((call) => call.table === 'event_requests');
     expect(reads).toHaveLength(5);
     for (const call of reads) {

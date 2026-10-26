@@ -9,7 +9,7 @@ criterion is proved, why the design looks the way it does, and what is still
 missing. The examination chain is **user story → acceptance criterion → test case
 → test → code**.
 
-The case-by-case mapping is `docs/test-cases/SCRUM-310.md`: 76 cases, each naming the
+The case-by-case mapping is `docs/test-cases/SCRUM-310.md`: 81 cases, each naming the
 tests that prove it. Every test ID is in `docs/test-cases/SCRUM-310-test-ids.md`.
 
 **The short version, for anyone asked "what changed?":** when Technical Support
@@ -31,24 +31,25 @@ nothing saves directly.
 
 | Subtask | Delivered | Commit |
 |---|---|---|
-| SCRUM-311 | `equipment_over_commitment` (020): which reservations a lower usable quantity cannot keep, oldest first, by a sweep over time | not yet committed |
-| SCRUM-312 | `POST /api/equipment/:id/change-preview` and its service and validation: the check, read only | not yet committed |
-| SCRUM-313 | `apply_equipment_change` (021): the confirmed save, one transaction, refused with the new list if the confirmed list is not the current one; the old silent trigger dropped; `PATCH /:id`, `PATCH /:id/condition` and `POST /:id/retire` use it | not yet committed |
-| SCRUM-314 | The confirmation step on the catalogue: the list, Confirm and Go back, the refused-save notice, the retire flow, the double-press guards (`useConfirmedChange`, `EquipmentImpactConfirmation`) | not yet committed |
-| SCRUM-315 | The coordinator's side (023): each line's flagged reservations on the event record, the flag's kind (`flag_code`), `needsAttention` reasons on the event reads, the reasons beside the badge | not yet committed |
-| SCRUM-316 | Every test named `SCRUM310_ACn_…`, and `scrum316FourChangesDatabase.test.js`: each of the four changes through the whole flow | not yet committed |
-| SCRUM-317 | This document, the test-case document and the test ID list | not yet committed |
+| SCRUM-311 | `equipment_over_commitment` (020): which reservations a lower usable quantity cannot keep, oldest first, by a sweep over time | ca947a4 |
+| SCRUM-312 | `POST /api/equipment/:id/change-preview` and its service and validation: the check, read only | ca947a4 |
+| SCRUM-313 | `apply_equipment_change` (021): the confirmed save, one transaction, refused with the new list if the confirmed list is not the current one; the old silent trigger dropped; `PATCH /:id`, `PATCH /:id/condition` and `POST /:id/retire` use it | ca947a4 |
+| SCRUM-314 | The confirmation step on the catalogue: the list, Confirm and Go back, the refused-save notice, the retire flow, the double-press guards (`useConfirmedChange`, `EquipmentImpactConfirmation`) | ca947a4 |
+| SCRUM-315 | The coordinator's side (023): each line's flagged reservations on the event record, the flag's kind (`flag_code`), `needsAttention` reasons on the event reads, the reasons beside the badge | ca947a4 |
+| SCRUM-316 | Every test named `SCRUM310_ACn_…`, and `scrum316FourChangesDatabase.test.js`: each of the four changes through the whole flow | ca947a4 |
+| SCRUM-317 | This document, the test-case document and the test ID list | ca947a4 |
+| Review fixes | `026_equipment_loss_fixes.sql`, the preview checking the edited name, organiser reads without the staff note, and the tests for each (D12 to D14) | not yet committed |
 
 ### Verification as of 25 October 2026
 
 | Evidence | Result |
 |---|---|
-| Backend suite (`npx vitest run --maxWorkers=4` in `backend`) | 8225 passing, 2 todo, across 185 files |
-| Frontend suite (`npx vitest run` in `frontend`) | 3990 passing across 167 files; `npm run lint` 0 errors (23 warnings, all the existing `react-hooks/set-state-in-effect` ones) |
-| SCRUM-310's own tests | 511 test titles named `SCRUM310_ACn_…` across 21 files (once parameterised cases are expanded there are more runs than titles) |
-| PGlite | Three database files run 020, 021 and 023 on a real Postgres over the full migration stack: the calculation, the confirmed save, the flags and the walkthrough from a real loss to the coordinator's views |
+| Backend suite (`npx vitest run --maxWorkers=4` in `backend`) | 8275 passing, 2 todo, across 185 files |
+| Frontend suite (`npx vitest run` in `frontend`) | 3992 passing across 167 files; `npm run lint` 0 errors (23 warnings, all the existing `react-hooks/set-state-in-effect` ones) |
+| SCRUM-310's own tests | 552 test titles named `SCRUM310_ACn_…` across 21 files (once parameterised cases are expanded there are more runs than titles) |
+| PGlite | Three database files run 020, 021, 023 and 026 on a real Postgres over the full migration stack: the calculation, the confirmed save, the flags and the walkthrough from a real loss to the coordinator's views |
 | Live database | 020, 021 and 023 applied to the shared Supabase project for the walkthrough (section 2). The release order for others is in section 4 |
-| Test-case document | 76 cases: **76 proved**, 0 not yet implemented |
+| Test-case document | 81 cases: **81 proved**, 0 not yet implemented |
 
 **Teeth checks.** Each new test was checked by breaking the line it proves,
 watching it fail, and restoring the file. SCRUM-316's file:
@@ -60,6 +61,21 @@ watching it fail, and restoring the file. SCRUM-316's file:
 | The flag event written with no user in 023 | 4 |
 | The request not returned to Pending review in 023 | 4 |
 | 021 flagging an empty list instead of the confirmed one | 12 |
+
+The review fixes (026 and the code around it) were checked the same way:
+
+| What was broken | What failed |
+|---|---|
+| Upgrade of a flag set for another reason removed | 2 |
+| Retirement with no usable units no longer checked | 3 |
+| Confirmation required to match the list exactly again | 2 |
+| Backstop trigger switched off | 6 |
+| Save response lists every affected reservation, not the ones flagged | 2 |
+| Extra confirmed ids accepted from any type | 1 |
+| Organiser shown the staff note | 5 |
+| Preview no longer checks the name | 1 |
+| Preview sends retire as false | 1 |
+| Blank name accepted | 6 |
 
 SCRUM-314 and SCRUM-315 were checked the same way as they were built. Three
 frontend misses in 314 (cancel not dropping a late answer, a stale error kept on a
@@ -130,16 +146,19 @@ queries showed the user, time and reason with the note (AC8).
 ### D1. One database function checks and saves
 
 `apply_equipment_change` recalculates under a row lock on the type and writes in the
-same transaction. The check (020) is a separate read-only function so the preview
-can use it.
+same transaction. The check is a separate read-only function, `equipment_change_affected` (020, with
+the rule for when a change can leave anything short in 026), so the preview and the
+save call one function and cannot drift.
 
 *Rejected: the API doing the check then the save as two calls.* A reservation made
 between them would be flagged or missed without anyone confirming it.
 
 ### D2. A confirmation is the exact list, not "yes"
 
-The save takes the ids that were shown and refuses unless they equal the current
-list. Order and repeats do not matter. A refusal hands back the new list so one more
+The save takes the ids that were shown and refuses unless every reservation the
+change leaves short is on it. Extra ids are accepted only for reservations of this
+type that have since ended or been released, so one ending between the preview and
+the Confirm does not refuse the save. Order and repeats do not matter. A refusal hands back the new list so one more
 Confirm completes it.
 
 *Rejected: confirming a count, or a version number on the type.* A count cannot say
@@ -166,9 +185,11 @@ for them and lose the quantity they need to rebuild.
 
 ### D5. The silent trigger is dropped
 
-021 drops `equipment_flag_on_type_unusable`. A plain update of a type now flags
-nothing; only `apply_equipment_change` does, so every flag has a confirmation and a
-user behind it.
+021 drops `equipment_flag_on_type_unusable`, which flagged without anyone confirming
+and in the wrong order. 026 adds a backstop trigger for a change made outside
+`apply_equipment_change` (a seed script, a fix in the SQL editor): it flags what the
+change leaves short, newest first, so lost units never leave a reservation looking
+fine. It does nothing for a change the save is making.
 
 ### D6. A flag has a kind: `flag_code`
 
@@ -221,6 +242,31 @@ reasons); the reason text says which change it was. The stored code stays
 `equipment_lost`, because it is internal and a rename would need a migration for
 no gain. Decided by SL, 25 October 2026, after the walkthrough.
 
+### D12. A flag for another reason is upgraded when the equipment is lost
+
+A reservation already flagged because the event's date changed is still affected when
+its equipment is lost, so the save flags it again as unavailable: the reason and code
+change, a new `flagged` event records the user, and that event is what notifies the
+coordinator. One already flagged as unavailable is left alone, and the date-change
+flow never replaces an unavailable flag. The save lists only the reservations it
+flagged, so its list and its count agree. The earlier reason stays in the reservation's
+event history.
+
+*Rejected: leaving a flagged reservation as it was.* The coordinator would keep the
+old reason, get no notice, and not learn the equipment is unavailable.
+
+### D13. The staff note is for staff
+
+The reason text can carry the note Technical Support wrote ("Cracked in transit").
+The coordinator's reads show it. The organiser's list and single read show the kind of
+flag ("Equipment unavailable") and no reason, because the note is internal.
+
+### D14. The preview checks what the save will check
+
+The edit form sends the edited name, description, category and location with the
+total, and the preview refuses a blank or taken name at once. Before, a taken name was
+found only after the staff member had confirmed the list.
+
 ---
 
 ## 4. Known gaps, and technical debt
@@ -239,6 +285,11 @@ no gain. Decided by SL, 25 October 2026, after the walkthrough.
 - **Three 313 database tests changed** when `flag_equipment_reservations_by` gained a
   fourth argument (`p_code`, default `equipment_lost`): the signature list and the
   forced-failure replacement. They still pin every value they pinned.
+- **Event reads carry every reservation.** The five event reads embed each event's
+  reservations (four small columns) including released ones, though only flagged,
+  unreleased ones are used. Narrowing the embed needs a filter on it in each read,
+  and every existing event request test double asserts its exact filter calls, so it
+  is left for a change that updates them together (48 tests in one file alone).
 - **The older `flag_equipment_reservations`** stays as a wrapper that passes no user
   and no code, because the date-change flow calls it.
 - **The one-off backfill** reads the two reasons the earlier code wrote. It is
@@ -246,12 +297,14 @@ no gain. Decided by SL, 25 October 2026, after the walkthrough.
 
 ### Release notes
 
-- Paste `020`, `021`, `023` into the live database **in that order**, after whatever
-  of the team's migrations (018, 019, 022) live does not have yet. They are numbered
-  above dev's highest at the time.
+- Paste `020`, `021`, `023`, `026` into the live database **in that order**, after
+  whatever of the team's migrations (018, 019, 022) live does not have yet. They are
+  numbered above dev's highest at the time. Where 020, 021 and 023 are already in, paste
+  only `026`; it replaces the functions it changes and is safe to run twice.
 - **Deploy the API in the same window.** After 021 the silent trigger is gone, so an
   old API that saves a damage change would save it with no check and flag nothing.
-  A new API before 021 would call functions that do not exist.
+  A new API before 021 would call functions that do not exist, and before 026 the
+  preview would call `equipment_change_affected`, which does not.
 - Do not paste anything until the team's release is agreed.
 
 ---

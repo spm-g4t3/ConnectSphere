@@ -1,4 +1,4 @@
-// SCRUM-314 / SCRUM-310 AC2: the shared confirmation flow, tested on its own.
+// AC2: the shared confirmation flow, tested on its own.
 // A late answer must never reach the screen or the save after the staff member went back.
 import { describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";

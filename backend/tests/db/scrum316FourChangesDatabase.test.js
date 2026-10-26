@@ -1,6 +1,5 @@
 /**
- * SCRUM-310 (SCRUM-316): each of the four changes that lower what is usable, run
- * the same way against real reservations made through the real functions, in a
+ * Each of the four changes that lower what is usable, run the same way against real reservations made through the real functions, in a
  * real Postgres (PGlite).
  *
  *   damage            a number of units marked damaged

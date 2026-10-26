@@ -1,5 +1,4 @@
-// SCRUM-310 (SCRUM-315): the wording for a line with flagged reservations and for
-// the Needs attention reasons. Named SCRUM310_ACn_<what_it_checks>.
+// The wording for a line with flagged reservations and for the Needs attention reasons.
 //
 //   AC5  a line with a flagged reservation says what is flagged and why
 //   AC6  the Needs attention reasons are shown as the server gave them

@@ -1,6 +1,6 @@
 /**
- * SCRUM-310 (SCRUM-315): the event record's equipment read shows flagged lines,
- * against the final schema in a real Postgres (PGlite).
+ * The event record's equipment read shows flagged lines, against the final schema in a
+ * real Postgres (PGlite).
  *
  * equipment_for_event is what the coordinator's equipment section reads. Each
  * line now lists the reservations on it that are flagged and not released.

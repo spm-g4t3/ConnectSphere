@@ -1,9 +1,6 @@
 /**
- * Tests for the confirmed save at the route level.
- *
- * SCRUM-313, a subtask of SCRUM-310 "Handle Equipment Lost After Reservation".
- * Named SCRUM310_ACn_<what_it_checks>. About transport and authorisation: who may
- * save, what the body may carry, each status, and what the client is told when
+ * Tests for the confirmed save at the route level, about transport and authorisation: who
+ * may save, what the body may carry, each status, and what the client is told when
  * the list it confirmed is no longer the list the change affects.
  *
  * The Supabase client is mocked with a factory, as in equipment.test.js. The

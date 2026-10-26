@@ -6,19 +6,19 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 
 | AC | Test titles | Files |
 |---|---|---|
-| AC1 | 76 | 5 |
-| AC2 | 132 | 11 |
+| AC1 | 91 | 5 |
+| AC2 | 139 | 11 |
 | AC3 | 29 | 4 |
-| AC4 | 113 | 6 |
-| AC5 | 63 | 6 |
-| AC6 | 43 | 9 |
-| AC7 | 29 | 9 |
+| AC4 | 122 | 7 |
+| AC5 | 64 | 6 |
+| AC6 | 51 | 9 |
+| AC7 | 30 | 10 |
 | AC8 | 26 | 5 |
-| **All** | **511** | |
+| **All** | **552** | |
 
 ## AC1
 
-### `backend/tests/db/scrum311EquipmentOverCommitmentDatabase.test.js` (19)
+### `backend/tests/db/scrum311EquipmentOverCommitmentDatabase.test.js` (27)
 
 - `AC1_a_null_caller_is_refused_with_42501`
 - `AC1_only_technical_support_staff_may_ask`
@@ -39,6 +39,14 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC1_a_%s_is_refused_with_42501`
 - `AC1_a_caller_with_no_profile_is_refused_with_42501`
 - `AC1_a_missing_type_id_is_refused_with_P0002`
+- `AC1_a_null_caller_and_other_roles_are_refused_with_42501`
+- `AC1_a_change_that_takes_the_usable_quantity_below_zero_is_refused_with_22023`
+- `AC1_%s_reports_the_usable_quantity_before_and_after`
+- `AC1_quantities_left_out_stay_as_they_are`
+- `AC1_a_change_that_lowers_the_usable_quantity_lists_the_same_reservations_as_the_check`
+- `AC1_it_only_reads`
+- `AC1_the_client_roles_cannot_execute_the_new_functions_and_service_role_can`
+- `AC1_the_unchecked_calculation_refuses_a_negative_figure_and_an_unknown_type`
 
 ### `backend/tests/db/scrum316FourChangesDatabase.test.js` (2)
 
@@ -68,16 +76,15 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC1_editing_a_type_still_works_and_does_not_call_the_preview_function`
 - `AC1_the_history_route_is_not_swallowed_by_the_new_one`
 
-### `backend/tests/services/scrum312ChangePreviewService.test.js` (21)
+### `backend/tests/services/scrum312ChangePreviewService.test.js` (24)
 
 - `AC1_the_supabase_client_is_mocked_and_never_the_real_one` **(supporting)**
-- `AC1_sends_%s_as_the_right_usable_figure`
-- `AC1_%s_does_not_lower_the_usable_figure_so_nothing_is_asked_or_affected` **(supporting)**
-- `AC1_a_retirement_is_previewed_as_zero_usable_whatever_the_quantities`
+- `AC1_sends_%s_as_it_was_given_and_leaves_the_rest_null`
+- `AC1_the_database_decides_whether_a_change_can_affect_anything_so_it_is_always_asked`
+- `AC1_the_usable_quantities_are_the_ones_the_database_answered`
 - `AC1_a_retired_type_can_still_have_a_quantity_change_previewed`
-- `AC1_an_unusable_current_state_does_not_break_the_arithmetic` **(supporting)**
 - `AC1_the_caller_sent_is_the_one_passed_in_and_nothing_in_the_body_can_change_it`
-- `AC1_a_usable_figure_in_the_body_is_never_trusted` **(supporting)**
+- `AC1_a_usable_figure_in_the_body_is_never_sent`
 - `AC1_a_bad_id_%j_is_a_400_with_no_query`
 - `AC1_a_bad_body_%j_is_a_400_with_no_query` **(supporting)**
 - `AC1_an_unknown_type_is_a_404_and_the_rpc_is_not_asked` **(supporting)**
@@ -85,14 +92,18 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC1_%s_is_a_400_naming_%s_with_no_rpc`
 - `AC1_damaged_plus_maintenance_exactly_equal_to_the_total_is_allowed`
 - `AC1_a_retirement_ignores_the_quantity_rule_even_on_an_oddly_stored_type` **(supporting)**
+- `AC1_a_name_that_is_already_taken_is_a_400_naming_name_and_the_rpc_is_not_asked`
+- `AC1_a_bad_name_%j_is_a_400_with_no_query`
+- `AC1_a_free_name_goes_through_and_is_never_sent_to_the_database_function`
+- `AC1_a_retirement_with_an_edited_field_is_refused`
 - `AC1_rpc_error_%s_becomes_%s` **(supporting)**
 - `AC1_an_unlisted_rpc_error_stays_an_untyped_failure`
 - `AC1_a_failed_read_of_the_type_is_not_swallowed_and_the_rpc_is_not_asked`
 - `AC1_an_rpc_answer_that_is_not_a_list_(%j)_is_an_error_not_an_empty_result` **(supporting)**
-- `AC1_the_argument_names_sent_are_the_parameter_names_of_the_real_function` **(supporting)**
+- `AC1_the_argument_names_sent_are_the_parameter_names_of_the_real_function`
 - `AC1_every_field_read_from_a_row_is_a_key_the_function_builds` **(supporting)**
 
-### `backend/tests/validation/scrum312ChangePreviewValidation.test.js` (14)
+### `backend/tests/validation/scrum312ChangePreviewValidation.test.js` (18)
 
 - `AC1_accepts_%s` **(supporting)**
 - `AC1_accepts_the_boundary_%s` **(supporting)**
@@ -104,9 +115,13 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC1_refuses_a_bad_%s`
 - `AC1_lists_every_invalid_field_together`
 - `AC1_keeps_a_valid_field_even_when_another_is_invalid`
+- `AC1_reads_the_name_and_the_optional_text_fields_trimmed`
+- `AC1_refuses_the_name_%j`
+- `AC1_refuses_a_%s_that_is_not_text`
+- `AC1_a_name_alone_is_not_a_change_to_preview`
+- `AC1_refuses_retire_together_with_%s`
 - `AC1_refuses_retire_set_to_%j` **(supporting)**
 - `AC1_refuses_retire_false_instead_of_reading_it_as_nothing` **(supporting)**
-- `AC1_refuses_retire_together_with_%s` **(supporting)**
 - `AC1_a_retire_with_a_bad_quantity_lists_both_problems` **(supporting)**
 
 ## AC2
@@ -116,7 +131,7 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC2_each_affected_reservation_names_the_event_period_quantity_and_coordinator`
 - `AC2_the_list_is_in_the_order_the_reservations_were_made`
 
-### `backend/tests/db/scrum313EquipmentConfirmedSaveDatabase.test.js` (13)
+### `backend/tests/db/scrum313EquipmentConfirmedSaveDatabase.test.js` (16)
 
 - `AC2_an_affecting_change_with_nothing_confirmed_writes_nothing_and_returns_the_list`
 - `AC2_the_list_returned_is_the_one_the_preview_function_gives`
@@ -127,7 +142,10 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC2_the_confirmed_order_and_repeats_do_not_matter`
 - `AC2_after_a_refusal_the_returned_list_confirms_and_saves`
 - `AC2_a_reservation_made_after_the_preview_makes_the_old_confirmation_stale`
-- `AC2_a_reservation_released_after_the_preview_makes_the_old_confirmation_stale`
+- `AC2_a_reservation_released_after_the_preview_is_not_flagged_and_the_save_goes_ahead`
+- `AC2_a_reservation_that_ends_after_the_preview_does_not_make_the_confirmation_stale`
+- `AC2_a_confirmed_id_that_is_still_held_and_not_affected_makes_the_confirmation_stale`
+- `AC2_a_confirmed_id_from_another_type_makes_the_confirmation_stale_even_if_it_has_ended`
 - `AC2_an_older_reservation_released_after_the_preview_changes_who_is_affected`
 - `AC2_a_change_to_the_type_after_the_preview_that_changes_the_list_is_caught`
 - `AC2_the_function_takes_the_row_lock_before_it_decides`
@@ -186,9 +204,11 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC2_lists_a_bad_note_and_a_bad_list_together` **(supporting)**
 - `AC2_does_not_count_the_list_alone_as_a_change` **(supporting)**
 
-### `frontend/tests/components/scrum314ConfirmationStep.test.jsx` (43)
+### `frontend/tests/components/scrum314ConfirmationStep.test.jsx` (47)
 
 - `AC2_asks_which_reservations_the_new_total_affects_before_saving`
+- `AC2_sends_the_edited_name_with_the_total_so_a_taken_name_is_found_before_confirming`
+- `AC2_a_name_the_preview_refuses_is_shown_on_the_form_and_no_list_is_offered`
 - `AC2_shows_event_period_quantity_and_coordinator_for_each_affected_reservation`
 - `AC2_keeps_the_order_the_backend_gave`
 - `AC2_says_how_many_reservations_and_units_and_how_usable_changes`
@@ -230,6 +250,8 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC2_leaving_the_form_while_a_failed_check_is_on_its_way_shows_nothing_and_saves_nothing` **(supporting)**
 - `AC2_the_damage_form_offers_a_plain_save_when_the_new_list_is_empty` **(supporting)**
 - `AC2_a_retirement_offers_a_plain_retire_when_the_new_list_is_empty` **(supporting)**
+- `AC2_a_list_that_arrives_after_the_user_left_is_dropped` **(supporting)**
+- `AC2_a_failure_that_arrives_after_the_user_left_is_dropped` **(supporting)**
 - `AC2_the_old_check_error_is_gone_once_a_change_that_needs_no_check_is_saved` **(supporting)**
 
 ### `frontend/tests/components/useConfirmedChange.test.jsx` (3)
@@ -305,7 +327,7 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC3_the_newest_overlapping_reservation_loses_and_the_oldest_keep_their_equipment`
 - `AC3_non_overlapping_reservations_are_all_kept`
 - `AC3_only_the_reservations_that_do_not_fit_are_flagged_in_a_chain_of_partial_overlaps`
-- `AC3_an_already_flagged_reservation_takes_part_and_is_not_flagged_twice`
+- `AC3_a_reservation_already_flagged_as_unavailable_takes_part_and_is_not_flagged_twice`
 - `AC3_a_reservation_larger_than_everything_usable_is_affected_and_the_rest_stay`
 - `AC3_retiring_affects_every_held_reservation_that_has_not_ended`
 - `AC3_seed_%i_flags_exactly_the_reservations_the_plain_rule_picks_and_nothing_else`
@@ -321,7 +343,11 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 
 ## AC4
 
-### `backend/tests/db/scrum313EquipmentConfirmedSaveDatabase.test.js` (36)
+### `backend/tests/db/scrum311EquipmentOverCommitmentDatabase.test.js` (1)
+
+- `AC4_a_retirement_lists_the_reservations_even_when_no_unit_was_usable`
+
+### `backend/tests/db/scrum313EquipmentConfirmedSaveDatabase.test.js` (40)
 
 - `AC4_a_null_caller_is_refused_with_42501_and_nothing_changes`
 - `AC4_a_%s_is_refused_with_42501_and_nothing_changes`
@@ -354,11 +380,15 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC4_a_retirement_sets_retired_at_and_leaves_the_quantities`
 - `AC4_retiring_a_retired_type_is_a_PT409_with_its_hint_and_changes_nothing`
 - `AC4_a_retired_type_can_still_have_its_quantities_changed`
-- `AC4_retiring_a_type_with_no_usable_units_is_not_checked_and_flags_nothing`
+- `AC4_retiring_a_type_with_no_usable_units_still_flags_the_reservations_it_holds`
+- `AC4_retiring_a_type_with_no_usable_units_leaves_a_reservation_already_flagged_as_unavailable_alone`
 - `AC4_retiring_a_type_whose_reservations_have_all_ended_saves_directly`
 - `AC4_the_trigger_and_its_function_no_longer_exist`
-- `AC4_a_plain_update_of_the_type_flags_nothing_any_more`
+- `AC4_a_change_the_save_makes_is_flagged_once_not_again_by_the_backstop`
+- `AC4_the_fixes_migration_can_be_run_again_and_the_save_still_works`
 - `AC4_the_other_flagging_triggers_still_work`
+- `AC4_a_plain_update_that_lowers_the_usable_quantity_flags_the_newest_reservations`
+- `AC4_a_plain_retirement_flags_every_held_reservation_even_with_no_usable_units`
 
 ### `backend/tests/db/scrum316FourChangesDatabase.test.js` (2)
 
@@ -426,12 +456,12 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC4_refuses_%s_as_a_body` **(supporting)**
 - `AC4_does_not_change_the_input_it_was_given` **(supporting)**
 
-### `frontend/tests/components/scrum314ConfirmationStep.test.jsx` (23)
+### `frontend/tests/components/scrum314ConfirmationStep.test.jsx` (27)
 
 - `AC4_confirming_saves_the_total_with_exactly_the_reservations_shown`
 - `AC4_returns_to_a_refreshed_list_after_the_save`
 - `AC4_sends_the_reason_with_the_confirmed_total_change`
-- `AC4_the_other_edited_fields_are_saved_with_the_total_but_not_previewed` **(supporting)**
+- `AC4_the_other_edited_fields_are_previewed_with_the_total_and_saved_with_it` **(supporting)**
 - `AC4_confirming_a_damage_change_saves_it_with_the_note_and_the_list`
 - `AC4_a_maintenance_change_is_previewed_and_saved_the_same_way`
 - `AC4_both_quantities_are_previewed_and_saved_together`
@@ -451,14 +481,19 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC4_a_direct_save_after_an_empty_preview_shows_saving_on_the_form_button` **(supporting)**
 - `AC4_a_save_already_on_its_way_still_refreshes_the_list_when_the_user_has_left`
 - `AC4_a_save_that_fails_after_the_user_left_shows_nothing_and_does_not_crash`
+- `AC4_a_reinstate_that_finds_the_type_not_retired_explains_it_and_refreshes` **(supporting)**
+- `AC4_a_reinstate_that_fails_otherwise_says_so_and_does_not_refresh` **(supporting)**
+- `AC4_the_reinstate_button_shows_it_is_working` **(supporting)**
+- `AC4_a_refresh_that_fails_after_a_change_shows_the_load_message` **(supporting)**
 
 ## AC5
 
-### `backend/tests/db/scrum313EquipmentConfirmedSaveDatabase.test.js` (4)
+### `backend/tests/db/scrum313EquipmentConfirmedSaveDatabase.test.js` (5)
 
 - `AC5_the_coordinator_of_each_affected_event_gets_one_notice_with_the_reason`
 - `AC5_an_unaffected_event_and_a_refused_save_notify_nobody`
-- `AC5_an_already_flagged_reservation_is_not_announced_again`
+- `AC5_a_reservation_already_flagged_as_unavailable_is_not_announced_again`
+- `AC5_a_reservation_flagged_for_another_reason_is_announced_when_its_equipment_becomes_unavailable`
 - `AC5_a_retirement_names_the_retirement_as_the_reason`
 
 ### `backend/tests/db/scrum315EquipmentForEventFlagsDatabase.test.js` (21)
@@ -537,9 +572,12 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 
 ## AC6
 
-### `backend/tests/db/scrum313EquipmentConfirmedSaveDatabase.test.js` (1)
+### `backend/tests/db/scrum313EquipmentConfirmedSaveDatabase.test.js` (4)
 
 - `AC6_an_event_that_is_%s_keeps_that_status_when_its_equipment_is_flagged`
+- `AC6_a_reservation_flagged_for_another_reason_is_flagged_as_unavailable_when_its_equipment_is_lost`
+- `AC6_a_flag_for_another_reason_never_replaces_a_flag_for_unavailable_equipment`
+- `AC6_a_second_flag_for_another_reason_leaves_the_first_one_alone`
 
 ### `backend/tests/db/scrum315EquipmentForEventFlagsDatabase.test.js` (5)
 
@@ -562,7 +600,7 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 
 - `AC6_a_confirmed_event_stays_confirmed_and_keeps_a_flagged_reservation_to_show`
 
-### `backend/tests/services/eventRequestService.test.js` (18)
+### `backend/tests/services/eventRequestService.test.js` (23)
 
 - `AC6_a_confirmed_event_with_%s_needs_attention_%s`
 - `AC6_an_event_that_is_%s_does_not_need_attention_for_a_flagged_reservation`
@@ -581,6 +619,11 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC6_a_venue_flag_and_an_equipment_flag_are_both_given_as_reasons`
 - `AC6_a_venue_flag_alone_still_gives_its_reason_and_an_equipment_flag_alone_gives_only_its_own`
 - `AC6_an_event_that_does_not_need_attention_has_an_empty_reasons_list_not_a_missing_one`
+- `AC6_the_organiser_list_names_the_kind_of_flag_and_not_the_staff_note`
+- `AC6_the_organiser_single_read_names_the_kind_of_flag_and_not_the_staff_note`
+- `AC6_an_organiser_sees_other_flags_by_kind_too_and_the_venue_reason_unchanged`
+- `AC6_two_flags_of_one_kind_show_the_organiser_one_line`
+- `AC6_the_coordinator_still_gets_the_reason_with_the_note`
 - `AC6_every_event_read_that_carries_needs_attention_embeds_the_reservation_flags`
 
 ### `frontend/tests/components/CoordinatorRequestDetail.test.jsx` (2)
@@ -609,7 +652,11 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 
 ## AC7
 
-### `backend/tests/db/scrum313EquipmentConfirmedSaveDatabase.test.js` (10)
+### `backend/tests/db/scrum311EquipmentOverCommitmentDatabase.test.js` (1)
+
+- `AC7_%s_lists_nobody_even_when_the_type_is_already_over_committed`
+
+### `backend/tests/db/scrum313EquipmentConfirmedSaveDatabase.test.js` (11)
 
 - `AC7_a_type_with_no_reservations_saves_a_smaller_total_with_nothing_flagged`
 - `AC7_damage_that_still_leaves_enough_units_saves_with_nothing_flagged`
@@ -621,6 +668,7 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 - `AC7_a_change_that_keeps_the_usable_quantity_the_same_saves_directly`
 - `AC7_a_name_only_edit_saves_with_no_check_at_all`
 - `AC7_a_direct_save_still_refuses_a_confirmed_id_that_is_not_affected`
+- `AC7_a_plain_update_that_leaves_room_or_changes_only_the_name_flags_nothing`
 
 ### `backend/tests/db/scrum316FourChangesDatabase.test.js` (1)
 
@@ -634,9 +682,8 @@ A name below is the full test name once `SCRUM310_` is put in front of it. A nam
 
 - `AC7_a_retirement_needs_no_body_when_nothing_is_affected`
 
-### `backend/tests/services/scrum312ChangePreviewService.test.js` (2)
+### `backend/tests/services/scrum312ChangePreviewService.test.js` (1)
 
-- `AC7_a_retirement_of_a_type_with_nothing_usable_affects_nothing_and_asks_nothing`
 - `AC7_names_the_type_and_reports_no_one_affected_for_an_empty_list`
 
 ### `backend/tests/services/scrum313ConfirmedSaveService.test.js` (2)
