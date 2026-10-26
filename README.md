@@ -252,7 +252,15 @@ Use a local or disposable database, never the shared Supabase project, with migr
 - **Lock order.** Every writer takes the same locks in the same order: the `event_requests` row (`FOR UPDATE`), then the `event_registrations` rows, then the `notifications` insert. Concurrent withdrawals, joins, departures, registrations, capacity saves and confirmations of one event therefore run one after another, each seeing the last one's committed result, and cannot deadlock on each other. A test checks that every function writing registrations takes the event lock before touching a registration row.
 - **Idempotent.** Free places are recomputed on every call, so processing the same release again promotes nobody. The unique index `notifications_one_per_registration_promotion` on `(payload->>'registrationId', payload->>'waitlistedAt')` refuses a second notice for the same queue entry. `waitlistedAt` is written as UTC text, so the key doesn't depend on the session's time zone. Rejoining later is a new entry and is notified again.
 - **Delivery.** Through SCRUM-177's in-app notifications: `GET /api/notifications` (any signed-in user, scoped to the caller) and the attendee dashboard's inbox, with the wording "You have a place at …", linking to the registered event page. No email channel exists; the requirements accept in-app.
-- **Evidence.** `backend/tests/db/scrum474PromotionDatabase.test.js` (PGlite) covers queue order, counts, gating, the bypass paths, an injected failure after promotion, replays, and the lock-order source checks. PGlite has one connection, so the real two-session races are scripted in `backend/tests/db/eventWaitingListConcurrency.manual.sql` (Races 1-11) for a disposable Postgres.
+- **Evidence.** `backend/tests/db/scrum474PromotionDatabase.test.js` (PGlite) covers queue order, counts, gating, the bypass paths, an injected failure after promotion, replays, and the lock-order source checks. PGlite has one connection, so the races also run on a real server (SCRUM-476): `backend/tests/db/waitingListConcurrency.realdb.test.js` opens independent connections, waits until PostgreSQL reports the second one blocked on the first's lock, and then commits or rolls back the first. It is skipped unless `CONCURRENCY_DATABASE_URL` names a disposable server, so CI is unaffected. To run it (inside `backend/`):
+
+  ```bash
+  docker run -d --rm --name connectsphere-race-pg -e POSTGRES_PASSWORD=race -p 127.0.0.1:55432:5432 postgres:17-alpine
+  CONCURRENCY_DATABASE_URL=postgres://postgres:race@127.0.0.1:55432/postgres npm run test:concurrency
+  docker stop connectsphere-race-pg
+  ```
+
+  It builds the schema in its own database (`connectsphere_concurrency`, dropped and recreated each run) and refuses Supabase hosts. `eventWaitingListConcurrency.manual.sql` keeps the same races as psql steps.
 
 ### Waiting-list API for the UI (SCRUM-473)
 
