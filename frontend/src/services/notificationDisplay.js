@@ -26,6 +26,10 @@
 //     startsAt, endsAt, reason }
 //   venue_hold_expired (040, SCRUM-491): { eventRequestId, eventName,
 //     venueId, venueName, expiresAt }
+//   venue_hold_placed (032, SCRUM-173): { eventRequestId, eventName, venueId,
+//     venueName, expiresAt, placedById, placedByName }
+//   venue_hold_expiring (032, SCRUM-173): { eventRequestId, eventName,
+//     venueId, venueName, expiresAt }
 //   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
 //     cancelledAt }; audience is organiser, venue_staff,
 //     technical_support_staff or safety_officer
@@ -48,6 +52,9 @@
 //   event_request_coordinator_assigned (052): { eventRequestId, eventName,
 //     coordinatorId, coordinatorName, previousCoordinatorId,
 //     previousCoordinatorName }
+//   event_request_approved and event_request_rejected (032, SCRUM-173):
+//     { eventRequestId, eventName, decidedAt, decidedById, decidedByName,
+//     reason }; reason is optional on approval, always set on rejection
 //   safety_review_response (058 on SCRUM-490's branch, SCRUM-490):
 //     { eventName, outcome, note, responseId, respondedAt }
 //   safety_booking_flagged (058): { eventName, venueName, startsAt, endsAt,
@@ -90,7 +97,7 @@
 import { formatRange, formatTimestamp } from "./displayFormat";
 import { reasonLabel } from "./venueBlockReasons";
 import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
-import { formatVenuePeriod } from "./datetimeFormat";
+import { formatVenuePeriod, formatVenueTimestamp } from "./datetimeFormat";
 import { detailFieldList } from "./eventDetailFields";
 
 const UNNAMED_EVENT = "Unnamed event";
@@ -371,6 +378,34 @@ const DESCRIBERS = {
     };
   },
 
+  // SCRUM-173. Sent to the assigned coordinator when a hold is placed, so the
+  // expiry is known up front; a hold still has to become a booking.
+  venue_hold_placed(payload, { eventName, venueName }) {
+    const placedBy = payload.placedByName ? `Placed by ${payload.placedByName}. ` : "";
+    const expires = isInstant(payload.expiresAt)
+      ? `The hold expires ${formatVenueTimestamp(payload.expiresAt)}. `
+      : "";
+
+    return {
+      headline: `${venueName} is held for ${eventName}`,
+      detail: `${placedBy}${expires}A hold is not a booking.`,
+    };
+  },
+
+  // SCRUM-173. Sent once, ahead of expiry; the coordinator must book or lose
+  // the venue, so the inbox marks it as needing action.
+  venue_hold_expiring(payload, { eventName, venueName }) {
+    const expires = isInstant(payload.expiresAt)
+      ? `It expires ${formatVenueTimestamp(payload.expiresAt)}.`
+      : "It expires soon.";
+
+    return {
+      headline: `The hold on ${venueName} for ${eventName} expires soon`,
+      detail: `${expires} Complete the booking before then, or the venue is released.`,
+      needsAction: true,
+    };
+  },
+
   // 031. Sent to Venue Staff when a coordinator withdraws a pending request.
   booking_request_withdrawn(payload, { eventName, venueName }) {
     return {
@@ -594,6 +629,28 @@ const DESCRIBERS = {
     return {
       headline: `${eventName} is waiting for a coordinator`,
       detail: `${submittedAt}Assign it from the unassigned queue.`,
+    };
+  },
+
+  // SCRUM-173. Sent to the Organiser when a coordinator approves; the
+  // decision note is optional here.
+  event_request_approved(payload, { eventName }) {
+    const note = payload.reason ? ` Coordinator's note: ${payload.reason}` : "";
+
+    return {
+      headline: `${eventName} was approved`,
+      detail: `Planning can go ahead.${note}`,
+    };
+  },
+
+  // SCRUM-173. A rejection is not final, so the Organiser is told the
+  // request can be changed and resubmitted.
+  event_request_rejected(payload, { eventName }) {
+    return {
+      headline: `${eventName} was rejected`,
+      detail:
+        `Reason: ${asSentence(payload.reason || NO_REASON)} ` +
+        "You can change the request and resubmit it.",
     };
   },
 

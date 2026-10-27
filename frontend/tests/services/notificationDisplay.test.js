@@ -1181,6 +1181,11 @@ const FIXTURES = {
   equipment_flagged: { eventName: "Tech Talk", reason: "Retired" },
   // SCRUM-494 (091).
   registration_schedule_conflict: { eventName: "Tech Talk", fields: ["registrationClosesAt"] },
+  // SCRUM-173 (032).
+  event_request_approved: { eventName: "Tech Talk" },
+  event_request_rejected: { eventName: "Tech Talk", reason: "Too large" },
+  venue_hold_placed: { eventName: "Tech Talk", venueName: "Hall A", expiresAt: PAYLOAD.startsAt },
+  venue_hold_expiring: { eventName: "Tech Talk", venueName: "Hall A", expiresAt: PAYLOAD.startsAt },
   // SCRUM-460 (037).
   registration_promoted: { eventName: "Tech Talk" },
 };
