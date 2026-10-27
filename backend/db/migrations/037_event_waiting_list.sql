@@ -853,7 +853,7 @@ end;
 $$;
 revoke execute on function event_registration_counts(uuid, uuid) from public, anon, authenticated;
 
--- The whole list, restated from 022_coordinator_edits_event_details.sql with the new type.
+-- The whole list, restated from 024_reject_approved_event.sql with the new type.
 alter table notifications drop constraint if exists notifications_type_known;
 alter table notifications
   add constraint notifications_type_known check (type = any (array[
@@ -866,6 +866,7 @@ alter table notifications
     'venue_hold_expired',
     'event_cancelled',
     'event_details_changed',
+    'event_rejected',
     'event_request_awaiting_assignment',
     'event_request_assigned',
     'event_request_coordinator_assigned',
