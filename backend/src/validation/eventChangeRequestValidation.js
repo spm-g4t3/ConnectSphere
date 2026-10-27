@@ -144,15 +144,54 @@ function checkRequestedChange(errors, changeField, value) {
   return trimmed;
 }
 
+/** SCRUM-402 (D2): one submission names at most this many fields, each once. */
+export const MAX_CHANGES_PER_REQUEST = 9;
+
+/** The same collector, every field it is given named under one row. */
+function scopedTo(errors, prefix) {
+  return { add: (field, message) => errors.add(`${prefix}.${field}`, message) };
+}
+
+/**
+ * SCRUM-402: a group of changes, each checked as a single request is. A
+ * cancellation stands alone (D8). create_change_request_group (036) checks
+ * all of it again under the event lock.
+ */
+function checkChanges(errors, value) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_CHANGES_PER_REQUEST) {
+    errors.add('changes', `must list 1 to ${MAX_CHANGES_PER_REQUEST} changes`);
+    return null;
+  }
+  const seen = new Set();
+  const changes = value.map((item, i) => {
+    const row = scopedTo(errors, `changes[${i}]`);
+    const entry = typeof item === 'object' && item !== null ? item : {};
+    const changeField = checkChangeField(row, entry.changeField);
+    if (changeField !== null && seen.has(changeField)) row.add('changeField', 'is already in this request');
+    if (changeField !== null) seen.add(changeField);
+    return { changeField, requestedChange: checkRequestedChange(row, changeField, entry.requestedChange) };
+  });
+  if (seen.has(CHANGE_FIELD.CANCELLATION) && value.length > 1) {
+    errors.add('changes', 'a cancellation cannot be combined with other changes');
+  }
+  return changes;
+}
+
 /**
  * Validate input for requesting a change to an event.
  *
+ * Two shapes. The single one SCRUM-11's form sends, { eventRequestId,
+ * changeField, requestedChange }, comes back as it always has. SCRUM-402's
+ * group, { eventRequestId, changes: [{ changeField, requestedChange }] }, comes
+ * back as { eventRequestId, changes }.
+ *
  * @param {object} input
  * @param {string} input.eventRequestId  which event the change is about
- * @param {string} input.changeField     which field/arrangement (AC2)
- * @param {string} input.requestedChange the new value, or -- for 'other' --
- *                                       a description of the arrangement change
- * @returns {object} a normalised copy: { eventRequestId, changeField, requestedChange }
+ * @param {string} [input.changeField]     which field/arrangement (AC2)
+ * @param {string} [input.requestedChange] the new value, or -- for 'other' --
+ *                                         a description of the arrangement change
+ * @param {object[]} [input.changes]       the group shape instead
+ * @returns {object} a normalised copy of whichever shape was given
  * @throws {ValidationError} listing every problem found, not just the first
  */
 export function validateCreateChangeRequest(input) {
@@ -164,8 +203,12 @@ export function validateCreateChangeRequest(input) {
   const normalised = {};
 
   normalised.eventRequestId = checkEventRequestId(errors, input.eventRequestId);
-  normalised.changeField = checkChangeField(errors, input.changeField);
-  normalised.requestedChange = checkRequestedChange(errors, normalised.changeField, input.requestedChange);
+  if (Object.hasOwn(input, 'changes')) {
+    normalised.changes = checkChanges(errors, input.changes);
+  } else {
+    normalised.changeField = checkChangeField(errors, input.changeField);
+    normalised.requestedChange = checkRequestedChange(errors, normalised.changeField, input.requestedChange);
+  }
 
   throwIfInvalid(errors, 'Invalid change request');
   return normalised;
@@ -227,8 +270,17 @@ function checkDecisionNotes(errors, decision, value) {
     return null;
   }
 
-  return value.trim();
+  // SCRUM-402: process_change_request (036) keeps a note to 2,000 characters.
+  const trimmed = value.trim();
+  if (Array.from(trimmed).length > DECISION_NOTES_MAX_LENGTH) {
+    errors.add('decisionNotes', `must be ${DECISION_NOTES_MAX_LENGTH.toLocaleString('en-US')} characters or fewer`);
+    return null;
+  }
+  return trimmed;
 }
+
+/** SCRUM-402: the limit process_change_request (036) applies to a note. */
+export const DECISION_NOTES_MAX_LENGTH = 2000;
 
 /**
  * Validate input for deciding a change request -- approving or rejecting it.
@@ -252,6 +304,15 @@ export function validateProcessChangeRequest(input) {
   normalised.changeRequestId = checkChangeRequestId(errors, input.changeRequestId);
   normalised.decision = checkDecision(errors, input.decision);
   normalised.decisionNotes = checkDecisionNotes(errors, normalised.decision, input.decisionNotes);
+  // SCRUM-402 AC4: the impact the coordinator previewed, for 395 to compare.
+  // Only passed on when given, so a decision without one is sent as before.
+  if (input.expectedImpact !== undefined && input.expectedImpact !== null) {
+    if (typeof input.expectedImpact !== 'object' || Array.isArray(input.expectedImpact)) {
+      errors.add('expectedImpact', 'must be the impact object the preview returned');
+    } else {
+      normalised.expectedImpact = input.expectedImpact;
+    }
+  }
 
   throwIfInvalid(errors, 'Invalid change request');
   return normalised;

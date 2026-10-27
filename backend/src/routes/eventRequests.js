@@ -113,6 +113,7 @@ import {
   createChangeRequestFromClient,
   getChangeRequestsForCoordinator,
   getChangeRequestsForEvent,
+  previewChangeRequest,
   processChangeRequest,
 } from '../services/eventChangeRequestService.js';
 // SCRUM-491. Credential-free like the two services above: it resolves the
@@ -1107,6 +1108,23 @@ export function createEventRequestRouter({
     res.status(201).json(created);
   });
 
+  /**
+   * SCRUM-402 AC4: what accepting this change request, and the rest of its
+   * group, would do. Read before deciding; preview_change_request (036)
+   * refuses whoever the decision would refuse, the same way, and changes nothing.
+   */
+  router.get('/change-requests/:changeRequestId/preview', coordinatorOnly, async (req, res) => {
+    res.status(200).json(await previewChangeRequest(req.params.changeRequestId, req.user.id, { client }));
+  });
+
+  /**
+   * SCRUM-402: accept or decline a change request and its group, as a whole.
+   * Body { decision, decisionNotes, expectedImpact }: a reason is required to
+   * decline; expectedImpact is the preview's, for 395 to compare. 409 with
+   * `code`: REVIEW_NOT_STARTED, EVENT_STATUS_NOT_ALLOWED,
+   * CHANGE_REQUEST_ALREADY_PROCESSED, or a code from 395 or 387, which the
+   * decision passes through (SIGNIFICANT_CHANGE_IMPACT_CHANGED, EVENT_HOLDS_ARRANGEMENTS).
+   */
   router.post('/change-requests/:changeRequestId/decision', coordinatorOnly, async (req, res) => {
     const processed = await processChangeRequest(
       req.params.changeRequestId,

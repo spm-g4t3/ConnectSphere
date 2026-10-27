@@ -1280,13 +1280,15 @@ describe('SCRUM-10: a draft is submitted for review over HTTP', () => {
 
 
 describe('SCRUM-32: a change request is raised against a submitted event over HTTP', () => {
-  it('SCRUM32_AC1_returns_201_and_the_created_change_request', async () => {
+  // SCRUM-402 renamed these four from SCRUM32_AC1_…: the service no longer reads
+  // the event and inserts the row itself, it calls create_change_request_group
+  // (036), which checks the owner and the status under the event lock. The
+  // route's pre-check and what each test is about are unchanged.
+  it('SCRUM402_AC1_returns_201_and_the_change_request_the_group_function_created', async () => {
     const client = createEventRequestClient([
       // The route's ownership pre-check.
       ok(storedRow({ status: STATUS.SUBMITTED })),
-      // createChangeRequest reloads the event for its own status/ownership check.
-      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
-      ok(storedChangeRequestRow()),
+      ok([storedChangeRequestRow()]),
     ]);
 
     const res = await request(appWith({ client }))
@@ -1298,21 +1300,22 @@ describe('SCRUM-32: a change request is raised against a submitted event over HT
     // The wire shape the form sends ({ field, details }) is translated into
     // the service's own names on the way in -- neither the route nor the
     // frontend has to learn the other's vocabulary.
-    expect(client.calls[2].operation).toBe('insert');
-    expect(client.calls[2].payload).toMatchObject({
-      event_request_id: REQUEST_ID,
-      requested_by: ORGANISER_ID,
-      change_field: 'venue',
-      requested_change: 'A larger room, the RSVPs have doubled.',
+    expect(client.calls[1]).toMatchObject({
+      operation: 'rpc',
+      fn: 'create_change_request_group',
+      args: {
+        p_event_request_id: REQUEST_ID,
+        p_organiser_id: ORGANISER_ID,
+        p_changes: [{ changeField: 'venue', requestedChange: 'A larger room, the RSVPs have doubled.' }],
+      },
     });
-    expect(res.body.changeField).toBe('venue');
+    expect(res.body).toMatchObject({ changeField: 'venue', requestGroupId: '44444444-4444-4444-8444-444444444444' });
   });
 
-  it('SCRUM32_AC1_stamps_the_requester_from_the_token_not_the_body', async () => {
+  it('SCRUM402_AC1_stamps_the_requester_from_the_token_not_the_body', async () => {
     const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.SUBMITTED })),
-      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
-      ok(storedChangeRequestRow()),
+      ok([storedChangeRequestRow()]),
     ]);
 
     await request(appWith({ client }))
@@ -1327,15 +1330,14 @@ describe('SCRUM-32: a change request is raised against a submitted event over HT
     // Two mass-assignment holes closed at once: who asked, and which event it
     // is against. The id comes from the path and the requester from the token,
     // so a body naming either is ignored.
-    expect(client.calls[2].payload.requested_by).toBe(ORGANISER_ID);
-    expect(client.calls[2].payload.event_request_id).toBe(REQUEST_ID);
+    expect(client.calls[1].args.p_organiser_id).toBe(ORGANISER_ID);
+    expect(client.calls[1].args.p_event_request_id).toBe(REQUEST_ID);
   });
 
-  it('SCRUM32_AC1_does_not_label_a_change_request_with_the_event_status_vocabulary', async () => {
+  it('SCRUM402_AC1_does_not_label_a_change_request_with_the_event_status_vocabulary', async () => {
     const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.SUBMITTED })),
-      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID, status: STATUS.SUBMITTED }),
-      ok(storedChangeRequestRow({ status: 'outstanding' })),
+      ok([storedChangeRequestRow({ status: 'outstanding' })]),
     ]);
 
     const res = await request(appWith({ client }))
@@ -1392,10 +1394,10 @@ describe('SCRUM-32: a change request is raised against a submitted event over HT
     expect(client.calls.every((call) => call.operation === 'select')).toBe(true);
   });
 
-  it('SCRUM32_AC1_returns_400_for_a_change_requested_against_a_draft', async () => {
+  it('SCRUM402_AC1_returns_400_for_a_change_requested_against_a_draft', async () => {
     const client = createEventRequestClient([
       ok(storedRow({ status: STATUS.DRAFT })),
-      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID, status: STATUS.DRAFT }),
+      dbError('22023', 'Cannot request a change to a draft event; submit it first'),
     ]);
 
     const res = await request(appWith({ client }))
@@ -1408,8 +1410,7 @@ describe('SCRUM-32: a change request is raised against a submitted event over HT
     // nobody needed to make.
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/draft/i);
-    expect(client.calls).toHaveLength(2);
-    expect(client.calls.every((call) => call.operation === 'select')).toBe(true);
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
   });
 
   it('SCRUM32_AC1_returns_401_and_never_queries_without_a_token', async () => {

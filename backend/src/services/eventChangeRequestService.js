@@ -60,6 +60,7 @@ import {
   rejected,
   forbidden,
   conflict,
+  hintConflict,
   invalid,
   notFound,
 } from '../http/pgErrors.js';
@@ -68,10 +69,17 @@ import {
   validateProcessChangeRequest,
 } from '../validation/eventChangeRequestValidation.js';
 import { isPlausibleId, requireCallerId } from '../validation/ids.js';
-import { STATUS } from '../domain/eventRequestStatus.js';
-import { CHANGE_FIELD_LABEL } from '../domain/eventChangeField.js';
+import { CHANGE_FIELD_LABEL, DETAIL_FIELD_BY_CHANGE_FIELD } from '../domain/eventChangeField.js';
+import { DETAIL_FIELD_COLUMN } from '../domain/eventDetailField.js';
 
 const notFoundChangeRequest = notFound('Change request not found');
+
+/** A 400 before any query, not Postgres's 22P02 from the uuid cast. */
+function requirePlausibleId(value, field) {
+  if (!isPlausibleId(value)) {
+    throw new ValidationError(`${field} must be a valid id`, [{ field, message: 'must be a valid id' }]);
+  }
+}
 
 /**
  * Turn a raw Postgres error into a typed one.
@@ -100,9 +108,13 @@ const translateError = createPgTranslator({
     // requests (errors.js gives the argument). Matched by code, before the two
     // message patterns below; 019 words its message so it matches neither.
     '42501': forbidden,
-    // 55000: a locked field; PT409 and 40001: the significant-change path (102)
-    // found its arrangements moved under it. All are retryable after a refresh.
-    ...forCodes(['55000', 'PT409', '40001'], conflict()),
+    // 55000: a locked field; 40001: the significant-change path (102) found its
+    // arrangements moved under it. Both are retryable after a refresh.
+    ...forCodes(['55000', '40001'], conflict()),
+    // PT409: the hint is the code the screen keys on (SCRUM-402: REVIEW_NOT_STARTED,
+    // EVENT_STATUS_NOT_ALLOWED, CHANGE_REQUEST_ALREADY_PROCESSED, and 395's and
+    // 387's own, which propagate).
+    PT409: hintConflict(),
     // raised by the significant-change path (102) for a value it cannot apply,
     // such as an attendance of zero
     '22023': invalid,
@@ -121,6 +133,9 @@ function toChangeRequest(row) {
   return {
     id: row.id,
     eventRequestId: row.event_request_id,
+    // SCRUM-402 (D2): the rows of one submission share it; a row from before
+    // 036 is its own group.
+    requestGroupId: row.request_group_id ?? row.id,
     requestedBy: row.requested_by,
     changeField: row.change_field,
     requestedChange: row.requested_change,
@@ -176,45 +191,28 @@ export async function createChangeRequest(input, organiserId, { client } = {}) {
   requireCallerId(organiserId, 'organiserId');
 
   const request = validateCreateChangeRequest(input);
+  const changes = request.changes
+    ?? [{ changeField: request.changeField, requestedChange: request.requestedChange }];
 
   // Resolved after the cheap local guards, not before, so a bad body still
   // costs no client resolution and no round trip.
   const db = await resolveClient(client);
 
-  // Loaded fresh rather than trusted from the caller: status and ownership
-  // are exactly what is being checked, so they have to come from what is
-  // actually stored.
-  const { data: event, error: fetchError } = await db
-    .from('event_requests')
-    .select('id, organiser_id, status')
-    .eq('id', request.eventRequestId)
-    .maybeSingle();
-
-  if (fetchError) throw translateError(fetchError);
-  if (!event) throw new NotFoundError(`Event request ${request.eventRequestId} not found`);
-
-  if (event.status === STATUS.DRAFT) {
-    throw new ValidationError('Cannot request a change to a draft event; submit it first');
-  }
-
-  if (event.organiser_id !== organiserId) {
-    throw new ValidationError('Only the event organiser may request a change to this event');
-  }
-
-  const { data, error } = await db
-    .from('event_change_requests')
-    .insert({
-      event_request_id: request.eventRequestId,
-      requested_by: organiserId,
-      change_field: request.changeField,
-      requested_change: request.requestedChange,
-    })
-    .select()
-    .single();
+  // SCRUM-402: create_change_request_group (036) checks the owner and SCRUM-11's
+  // status rule under the event lock, writes the group, and tells the holder of
+  // a significant change (AC12), in one transaction. Its refusals keep the
+  // words and the 400 this function used to raise itself.
+  const { data, error } = await db.rpc('create_change_request_group', {
+    p_event_request_id: request.eventRequestId,
+    p_organiser_id: organiserId,
+    p_changes: changes,
+  });
 
   if (error) throw translateError(error);
 
-  return toChangeRequest(data);
+  const rows = (data ?? []).map(toChangeRequest);
+  // The single shape answers one row, as it always has; a group answers them all.
+  return request.changes ? rows : rows[0];
 }
 
 /**
@@ -246,17 +244,23 @@ export async function createChangeRequestFromClient(
   organiserId,
   { client } = {},
 ) {
-  const { field, details } = payload && typeof payload === 'object' ? payload : {};
+  const body = payload && typeof payload === 'object' ? payload : {};
+  const { field, details } = body;
+  // SCRUM-402: several fields in one submission, { changes: [{ field, details }] }.
+  const input = Object.hasOwn(body, 'changes')
+    ? {
+      eventRequestId,
+      changes: Array.isArray(body.changes)
+        ? body.changes.map((change) => ({ changeField: change?.field, requestedChange: change?.details }))
+        : body.changes,
+    }
+    : { eventRequestId, changeField: field, requestedChange: details };
 
   // Forwarded rather than resolved here. This function makes no query of its
   // own, so resolving would mean resolving twice -- and, worse, a caller that
   // supplied a client would find it silently ignored by the one function most
   // likely to be reached from a route.
-  return createChangeRequest(
-    { eventRequestId, changeField: field, requestedChange: details },
-    organiserId,
-    { client },
-  );
+  return createChangeRequest(input, organiserId, { client });
 }
 
 /**
@@ -278,6 +282,7 @@ export async function createChangeRequestFromClient(
  */
 export async function getChangeRequestsForEvent(eventRequestId, organiserId, { client } = {}) {
   requireCallerId(organiserId, 'organiserId');
+  requirePlausibleId(eventRequestId, 'eventRequestId');
 
   const db = await resolveClient(client);
 
@@ -307,17 +312,64 @@ export async function getChangeRequestsForEvent(eventRequestId, organiserId, { c
   return data.map(toOrganiserView);
 }
 
-/** List one event's organiser-submitted change requests for Coordinator review. */
+/** The event columns a change request's current value is read from (036's targets). */
+const CURRENT_VALUE_COLUMNS = Object.values(DETAIL_FIELD_BY_CHANGE_FIELD).map((field) => DETAIL_FIELD_COLUMN[field]);
+
+/**
+ * List one event's organiser-submitted change requests for Coordinator review,
+ * oldest first (SCRUM-402 AC1).
+ *
+ * Rows, not groups: each carries its requestGroupId, so the screen can show a
+ * submission's rows together, and the screen that reads this today still maps
+ * a flat list. Each row also carries currentValue, the stored value of the
+ * field it would change (null for other and cancellation), read in the same
+ * query through the event_request_id foreign key.
+ */
 export async function getChangeRequestsForCoordinator(eventRequestId, { client } = {}) {
+  requirePlausibleId(eventRequestId, 'eventRequestId');
   const db = await resolveClient(client);
   const { data, error } = await db
     .from('event_change_requests')
-    .select('*')
+    .select(`*, event_requests ( ${CURRENT_VALUE_COLUMNS.join(', ')} )`)
     .eq('event_request_id', eventRequestId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: true })
+    .order('change_field', { ascending: true });
 
   if (error) throw translateError(error);
-  return (data ?? []).map(toOrganiserView);
+  return (data ?? []).map((row) => {
+    const field = DETAIL_FIELD_BY_CHANGE_FIELD[row.change_field];
+    const column = field ? DETAIL_FIELD_COLUMN[field] : null;
+    return { ...toOrganiserView(row), currentValue: column ? row.event_requests?.[column] ?? null : null };
+  });
+}
+
+/**
+ * What accepting a change request would do (SCRUM-402 AC4): each row of its
+ * group, classed ordinary, significant, equipment, cancellation or other, with
+ * its current and requested values; the faults SCRUM-10's rules find; whether
+ * the event would return to Approved; and 395's impact for a significant part.
+ *
+ * preview_change_request (036) refuses whoever accepting would refuse, the
+ * same way, and changes nothing.
+ *
+ * @param {string} changeRequestId  any row of the group
+ * @param {string} coordinatorId  from the token
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @returns {Promise<object>}
+ */
+export async function previewChangeRequest(changeRequestId, coordinatorId, { client } = {}) {
+  requireCallerId(coordinatorId, 'coordinatorId');
+  requirePlausibleId(changeRequestId, 'changeRequestId');
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('preview_change_request', {
+    p_change_request_id: changeRequestId,
+    p_user_id: coordinatorId,
+  });
+
+  if (error) throw translateError(error);
+  return data;
 }
 
 /**
@@ -427,11 +479,14 @@ export async function processChangeRequest(
 
   const db = await resolveClient(client);
 
+  // SCRUM-402 AC4: the previewed impact goes to 395 to compare; without one the
+  // call is the four arguments it always was.
   const { data, error } = await db.rpc('process_change_request', {
     p_change_request_id: decision.changeRequestId,
     p_decision: decision.decision,
     p_decision_notes: decision.decisionNotes,
     p_processed_by: processedBy,
+    ...(decision.expectedImpact && { p_expected_impact: decision.expectedImpact }),
   });
 
   if (error) throw translateError(error);
