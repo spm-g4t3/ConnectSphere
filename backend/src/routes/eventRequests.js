@@ -101,6 +101,7 @@ import {
   reopenEventRequest,
   getEventCancellationImpact,
   cancelEventRequest,
+  rejectApprovedEvent,
   getSignificantEventChangeImpact,
   applySignificantEventChange,
   editEventRequestDetails,
@@ -1053,6 +1054,18 @@ export function createEventRequestRouter({
   router.patch('/:id/details', coordinatorOnly, async (req, res) => {
     const result = await editEventRequestDetails(req.params.id, req.body, req.user.id, { client });
     res.status(200).json({ ...withStatusDisplay(result.event), changedFields: result.changedFields });
+  });
+
+  // SCRUM-347: the assigned coordinator rejects an Approved event. Body: { reason }.
+  // 409 with code CANCEL_INSTEAD for a Confirmed event.
+  router.post('/:id/rejection', coordinatorOnly, async (req, res) => {
+    const updated = await rejectApprovedEvent(
+      req.params.id,
+      { reason: req.body?.reason },
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(withStatusDisplay(updated));
   });
 
   router.post('/:id/significant-change', coordinatorOnly, async (req, res) => {
