@@ -163,7 +163,8 @@ revoke execute on function waitlist_position(event_registrations) from public, a
 -- The one promotion operation. Every path that can free a place calls it:
 -- withdraw_registration (a released place), setup_event_registration (a higher
 -- or removed capacity, or registration reopened), a return to Confirmed (the
--- trigger below), and register_for_event and join_event_waitlist, which catch
+-- trigger below), process_waitlist_promotions (registration reopening when its
+-- opening time passes), and register_for_event and join_event_waitlist, which catch
 -- the queue up before allocating so a newcomer never takes a place someone
 -- queued for.
 --
@@ -268,8 +269,65 @@ create trigger event_requests_promote_waitlist_on_confirmation
   when (new.status::text = 'confirmed' and old.status::text is distinct from 'confirmed')
   execute function promote_waitlist_on_confirmation();
 
+-- Registration can reopen with no write at all: its opening time simply
+-- passes. A place freed while it was closed would then wait for the next
+-- registration write, so the waitlist promotion job (backend/src/jobs) calls
+-- this every minute. It visits each event that has a queue and is open now;
+-- promote_waitlisted_registrations takes the lock, recounts and promotes
+-- nobody where no place is free, so a repeat run, or two at once, do no harm.
+-- Returns how many were promoted in all.
+
+create or replace function process_waitlist_promotions()
+returns integer
+language plpgsql
+as $$
+declare
+  v_event_id uuid;
+  v_promoted integer := 0;
+begin
+  for v_event_id in
+    select e.id
+      from event_requests e
+     where registration_closed_reason(e, clock_timestamp()) is null
+       and exists (select 1 from event_registrations r
+                    where r.event_request_id = e.id and r.status = 'waitlisted')
+     -- Event locks are held to the end of the run; a fixed order keeps two
+     -- concurrent runs from deadlocking on each other.
+     order by e.id
+  loop
+    v_promoted := v_promoted + promote_waitlisted_registrations(v_event_id);
+  end loop;
+  return v_promoted;
+end;
+$$;
+revoke execute on function process_waitlist_promotions() from public, anon, authenticated;
+
+-- The 'registered' answer register_for_event and join_event_waitlist share.
+
+create or replace function registered_outcome_json(p_registration event_registrations)
+returns jsonb
+language sql
+stable
+as $$
+  select jsonb_build_object(
+    'outcome', 'registered',
+    'registeredCount', (select count(*) from event_registrations
+                         where event_request_id = p_registration.event_request_id
+                           and status = 'registered'),
+    'registration', jsonb_build_object(
+      'id', p_registration.id, 'eventRequestId', p_registration.event_request_id,
+      'attendeeId', p_registration.attendee_id, 'status', p_registration.status,
+      'registeredAt', p_registration.registered_at,
+      'createdAt', p_registration.created_at, 'updatedAt', p_registration.updated_at
+    )
+  );
+$$;
+revoke execute on function registered_outcome_json(event_registrations) from public, anon, authenticated;
+
 -- Registering (baseline 08) catches the queue up first: queued attendees take
--- any free place before a newcomer is counted against capacity. Otherwise as before.
+-- any free place before a newcomer is counted against capacity. A caller that
+-- catch-up promotes got the place, so they are answered 'registered', not
+-- refused as already registered. Otherwise as before.
 
 create or replace function register_for_event(p_event_request_id uuid, p_attendee_id uuid)
 returns jsonb
@@ -279,6 +337,7 @@ declare
   v_capacity integer;
   v_count bigint;
   v_registration event_registrations;
+  v_status_before text;
 begin
   -- This takes the event lock and reads the clock after any wait. Refusals
   -- reveal no more about an unavailable event than the browse read does.
@@ -291,11 +350,18 @@ begin
       return jsonb_build_object('outcome', 'forbidden');
   end;
 
+  -- Stable under the event lock just taken: every registration writer takes it first.
+  select status::text into v_status_before from event_registrations
+   where event_request_id = p_event_request_id and attendee_id = p_attendee_id;
+
   perform promote_waitlisted_registrations(p_event_request_id);
 
   select * into v_registration from event_registrations
    where event_request_id = p_event_request_id and attendee_id = p_attendee_id for update;
   if v_registration.status = 'registered' then
+    if v_status_before = 'waitlisted' then
+      return registered_outcome_json(v_registration);
+    end if;
     return jsonb_build_object('outcome', 'already_registered');
   end if;
 
@@ -329,15 +395,7 @@ begin
     end if;
   end if;
 
-  return jsonb_build_object(
-    'outcome', 'registered', 'registeredCount', v_count + 1,
-    'registration', jsonb_build_object(
-      'id', v_registration.id, 'eventRequestId', v_registration.event_request_id,
-      'attendeeId', v_registration.attendee_id, 'status', v_registration.status,
-      'registeredAt', v_registration.registered_at,
-      'createdAt', v_registration.created_at, 'updatedAt', v_registration.updated_at
-    )
-  );
+  return registered_outcome_json(v_registration);
 end;
 $$;
 revoke execute on function register_for_event(uuid, uuid) from public, anon, authenticated;
@@ -374,6 +432,7 @@ declare
   v_event event_requests;
   v_count bigint;
   v_registration event_registrations;
+  v_status_before text;
 begin
   -- The same eligibility, event lock and refusals as register_for_event: every
   -- join, registration, departure and promotion for this event queues here.
@@ -386,6 +445,9 @@ begin
       return jsonb_build_object('outcome', 'forbidden');
   end;
 
+  select status::text into v_status_before from event_registrations
+   where event_request_id = p_event_request_id and attendee_id = p_attendee_id;
+
   -- Queued attendees take any free place first, so the capacity check below
   -- sees only places nobody is waiting for.
   perform promote_waitlisted_registrations(p_event_request_id);
@@ -393,6 +455,10 @@ begin
   select * into v_registration from event_registrations
    where event_request_id = p_event_request_id and attendee_id = p_attendee_id for update;
   if v_registration.status = 'registered' then
+    -- The catch-up gave the caller their place: that is this join succeeding.
+    if v_status_before = 'waitlisted' then
+      return registered_outcome_json(v_registration);
+    end if;
     return jsonb_build_object('outcome', 'already_registered');
   end if;
   if v_registration.status = 'cancelled' then

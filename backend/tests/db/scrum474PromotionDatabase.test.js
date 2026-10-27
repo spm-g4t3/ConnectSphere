@@ -106,8 +106,8 @@ describe('SCRUM474 one shared promotion operation', () => {
     const sources = await functionSources(db);
     const callers = Object.keys(sources).filter((name) => sources[name].includes('promote_waitlisted_registrations('));
     expect(callers.sort()).toEqual([
-      'join_event_waitlist', 'promote_waitlist_on_confirmation', 'register_for_event',
-      'setup_event_registration', 'withdraw_registration',
+      'join_event_waitlist', 'process_waitlist_promotions', 'promote_waitlist_on_confirmation',
+      'register_for_event', 'setup_event_registration', 'withdraw_registration',
     ]);
     // Only the shared operation turns a waitlisted row into a registered one.
     const promoters = Object.keys(sources)
@@ -227,8 +227,9 @@ describe('SCRUM474 lock order, the basis of the concurrency guarantees', () => {
 
   it('SCRUM474_AC6_AC8_every_registration_writer_is_known_and_locks_the_event_first', async () => {
     const sources = await functionSources(db);
+    // These two only call promote_waitlisted_registrations, which locks the event itself.
     const writers = Object.keys(sources).filter((name) => REGISTRATION_TOUCH.test(sources[name])
-      && name !== 'promote_waitlist_on_confirmation');
+      && name !== 'promote_waitlist_on_confirmation' && name !== 'process_waitlist_promotions');
     expect(writers.sort()).toEqual(Object.keys(EVENT_LOCK).sort());
     for (const [name, marker] of Object.entries(EVENT_LOCK)) {
       const lock = indexOf(sources[name], marker);
@@ -303,5 +304,82 @@ describe('SCRUM474 the promoted attendee is notified', () => {
     await withdraw(D);
     // One transaction here, so created_at ties; compare the set of notices.
     expect((await notices()).map((n) => n.recipient_id).sort()).toEqual([B, B, C, D]);
+  });
+});
+
+// Registration paused by a later opening time, a place freed while paused,
+// then registration reopening on its own: no write happens at the reopening.
+const REOPENS = '2026-10-17T09:00:00Z';
+const sweep = async () => (await db.query('select process_waitlist_promotions() as n')).rows[0].n;
+async function placeFreedWhilePaused() {
+  await fullWithQueue();
+  await setEvent({ registration_opens_at: REOPENS });
+  await withdraw(A);
+  expect((await statuses())[B]).toBe('waitlisted');
+  await at('2026-10-17T09:00:30Z');
+}
+
+describe('SCRUM460 registration reopening on its own', () => {
+  it('SCRUM460_AC3_AC5_the_job_promotes_into_a_place_freed_while_registration_was_paused', async () => {
+    await placeFreedWhilePaused();
+    expect(await sweep()).toBe(1);
+    expect(await statuses()).toMatchObject({ [B]: 'registered', [C]: 'waitlisted', [D]: 'waitlisted' });
+    expect((await notices()).map((n) => n.recipient_id)).toEqual([B]);
+    // A repeat run finds no free place and promotes nobody.
+    expect(await sweep()).toBe(0);
+    expect(await notices()).toHaveLength(1);
+  });
+
+  it('SCRUM460_AC3_the_job_promotes_nobody_while_registration_is_still_closed', async () => {
+    await fullWithQueue();
+    await setEvent({ registration_opens_at: REOPENS });
+    await withdraw(A);
+    expect(await sweep()).toBe(0);
+    expect(await statuses()).toMatchObject({ [B]: 'waitlisted' });
+  });
+
+  it('SCRUM460_AC3_the_job_leaves_a_full_event_alone', async () => {
+    await fullWithQueue();
+    expect(await sweep()).toBe(0);
+    expect(await registeredCount()).toBe(1);
+    expect(await notices()).toEqual([]);
+  });
+
+  it('SCRUM460_AC3_the_job_serves_every_event_with_a_queue_and_a_free_place', async () => {
+    await placeFreedWhilePaused();
+    await setup(3);
+    // setup promoted B and C at once; the job then has nothing left to do.
+    expect(await statuses()).toMatchObject({ [B]: 'registered', [C]: 'registered', [D]: 'registered' });
+    expect(await sweep()).toBe(0);
+  });
+});
+
+describe('SCRUM460 the promoted caller is answered as registered', () => {
+  it('SCRUM460_AC3_registering_after_reopening_promotes_the_caller_and_answers_registered', async () => {
+    await placeFreedWhilePaused();
+    expect(await register(B)).toMatchObject({
+      outcome: 'registered', registeredCount: 1,
+      registration: { attendeeId: B, status: 'registered' },
+    });
+    expect((await notices()).map((n) => n.recipient_id)).toEqual([B]);
+  });
+
+  it('SCRUM460_AC1_joining_after_reopening_promotes_the_caller_and_answers_registered', async () => {
+    await placeFreedWhilePaused();
+    expect(await join(B)).toMatchObject({
+      outcome: 'registered', registration: { attendeeId: B, status: 'registered' },
+    });
+  });
+
+  it('SCRUM460_AC3_someone_else_who_triggers_the_catch_up_is_still_refused', async () => {
+    await placeFreedWhilePaused();
+    expect(await register(E)).toEqual({ outcome: 'capacity_reached' });
+    expect(await statuses()).toMatchObject({ [B]: 'registered' });
+  });
+
+  it('SCRUM460_AC1_an_attendee_already_registered_before_the_call_is_still_told_so', async () => {
+    await fullWithQueue();
+    expect(await register(A)).toEqual({ outcome: 'already_registered' });
+    expect(await join(A)).toEqual({ outcome: 'already_registered' });
   });
 });

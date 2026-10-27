@@ -91,7 +91,10 @@ describe('SCRUM22 one registration table', () => {
     expect((await register()).registration).toMatchObject({ id: previous.id });
     expect(await one('select id, created_at from event_registrations where attendee_id = $1', [ME])).toEqual(previous);
     await db.query("update event_registrations set status = 'waitlisted' where attendee_id = $1", [THIRD]);
-    expect(await register(THIRD)).toEqual({ outcome: 'already_registered' });
+    // The catch-up gave THIRD the place, so this attempt succeeded (SCRUM-460 issue 2).
+    expect(await register(THIRD)).toMatchObject({
+      outcome: 'registered', registration: { attendeeId: THIRD, status: 'registered' },
+    });
     expect(await state(THIRD)).toEqual({ active_count: 2, is_registered: true });
   });
 

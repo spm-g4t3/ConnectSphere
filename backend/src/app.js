@@ -27,6 +27,7 @@ import safetyReviewRoutes from './routes/safetyReviews.js';
 import openEventRoutes from './routes/openEvents.js';
 import attendeeEventRoutes from './routes/attendeeEvents.js';
 import { startVenueHoldExpiryScheduler } from './jobs/venueHoldExpiryScheduler.js';
+import { startWaitlistPromotionScheduler } from './jobs/waitlistPromotionScheduler.js';
 
 const app = express();
 
@@ -90,6 +91,13 @@ if (process.env.NODE_ENV !== 'test' && process.env.VENUE_HOLD_EXPIRY_JOB !== 'of
   startVenueHoldExpiryScheduler(
     Number.isFinite(reminderLeadHours) && reminderLeadHours > 0 ? { reminderLeadHours } : {},
   );
+}
+
+// SCRUM-460 (AC3): registration can reopen when its opening time passes, with
+// no write to promote anyone, so hand out freed places once a minute. Never
+// under test; WAITLIST_PROMOTION_JOB=off turns it off.
+if (process.env.NODE_ENV !== 'test' && process.env.WAITLIST_PROMOTION_JOB !== 'off') {
+  startWaitlistPromotionScheduler();
 }
 
 const PORT = process.env.PORT || 5000;
