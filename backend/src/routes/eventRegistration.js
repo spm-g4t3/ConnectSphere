@@ -8,6 +8,7 @@ import {
   getRegistrationSettings,
   updateRegistrationSettings,
 } from '../services/eventRegistrationService.js';
+import { listEventRegistrations } from '../services/registrationListService.js';
 
 const errorMiddleware = createErrorMiddleware('event registration route');
 
@@ -18,6 +19,8 @@ export function createEventRegistrationRouter({
 } = {}) {
   const router = express.Router();
   const organiserOnly = requireRole(ROLE.EVENT_ORGANISER);
+  // list_event_registrations narrows this to the event's own organiser and coordinator.
+  const organiserOrCoordinator = requireRole(ROLE.EVENT_ORGANISER, ROLE.EVENT_COORDINATOR);
 
   router.use(requireAuth);
 
@@ -29,6 +32,16 @@ export function createEventRegistrationRouter({
     res.status(200).json(
       await updateRegistrationSettings(req.params.id, req.body, req.user.id, { client }),
     );
+  });
+
+  // Read only: the list has no write routes, so other methods fall through to 404.
+  router.get('/events/:id/registrations', organiserOrCoordinator, async (req, res) => {
+    res.status(200).json(await listEventRegistrations({
+      eventRequestId: req.params.id,
+      userId: req.user.id,
+      hideWithdrawn: req.query.hideWithdrawn,
+      client,
+    }));
   });
 
   router.use(errorMiddleware);

@@ -1576,3 +1576,23 @@ describe("SCRUM-355 a resubmission's past decisions on the coordinator screen", 
     expect(screen.queryByText(/This request is a resubmission/)).not.toBeInTheDocument();
   });
 });
+
+describe("SCRUM-478 link to the registration list", () => {
+  const decided = { status: "completed", decision: "approved", decidedBy: ASSIGNED, decidedAt: past() };
+
+  it("SCRUM478_AC1_shows_the_assigned_coordinator_a_link_to_the_registration_list", () => {
+    renderAs(ASSIGNED, eventRequest(decided));
+    expect(screen.getByRole("link", { name: "View registrations" }))
+      .toHaveAttribute("href", `/events/${REQUEST_ID}/registrations`);
+  });
+
+  it("SCRUM478_AC1_offers_no_link_to_another_coordinator", () => {
+    renderAs(OTHER, eventRequest(decided));
+    expect(screen.queryByRole("link", { name: "View registrations" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM478_AC6_offers_no_link_while_the_event_is_under_review", () => {
+    renderAs(ASSIGNED, eventRequest({ status: "under_review" }));
+    expect(screen.queryByRole("link", { name: "View registrations" })).not.toBeInTheDocument();
+  });
+});

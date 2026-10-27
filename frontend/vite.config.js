@@ -232,6 +232,12 @@ const SCRUM355_FILES = [
   'src/components/DecisionHistory.jsx',
 ]
 
+// SCRUM-478: the registration list page is new and owned outright. Its links in
+// MyEventRequests.jsx and CoordinatorRequestDetail.jsx stay ungated.
+const SCRUM478_FILES = [
+  'src/components/EventRegistrationList.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -284,6 +290,7 @@ export default defineConfig({
         ...SCRUM539_FILES.map((file) => [file, FULL]),
         ...SCRUM172_FILES.map((file) => [file, FULL]),
         ...SCRUM355_FILES.map((file) => [file, FULL]),
+        ...SCRUM478_FILES.map((file) => [file, FULL]),
       ]),
     },
   },
