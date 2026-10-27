@@ -6,6 +6,7 @@
 import express from 'express';
 
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
@@ -25,16 +26,20 @@ const errorMiddleware = createErrorMiddleware('open events route');
 export function createOpenEventRouter({
   client,
   requireAuth = defaultRequireAuth,
+  finalEventGuard = noopFinalEventGuard,
   requireRole = createRequireRole,
   now = () => new Date(),
 } = {}) {
   const router = express.Router();
 
+  // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
+  const guardEvent = finalEventGuard(eventIdFromParam('id'));
+
   router.use(requireAuth);
 
   const attendeeOnly = requireRole(ROLE.ATTENDEE);
 
-  router.post('/:id/registrations', attendeeOnly, async (req, res) => {
+  router.post('/:id/registrations', attendeeOnly, guardEvent, async (req, res) => {
     const registration = await registerForEvent({
       attendeeId: req.user.id,
       eventId: req.params.id,
@@ -69,4 +74,4 @@ export function createOpenEventRouter({
   return router;
 }
 
-export default createOpenEventRouter();
+export default createOpenEventRouter({ finalEventGuard: createFinalEventGuard() });

@@ -57,6 +57,7 @@ import {
   keepEquipmentReservation,
 } from '../services/equipmentReviewService.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
@@ -79,11 +80,15 @@ const errorMiddleware = createErrorMiddleware('equipment review route');
  */
 export function createEquipmentReviewRouter({
   requireAuth = defaultRequireAuth,
+  finalEventGuard = noopFinalEventGuard,
   requireRole = createRequireRole,
   client,
 } = {}) {
   // mergeParams: this router is mounted under /:id, and that id is the event's.
   const router = express.Router({ mergeParams: true });
+
+  // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
+  const guardEvent = finalEventGuard(eventIdFromParam('id'));
   const technicalSupportOnly = requireRole(ROLE.TECHNICAL_SUPPORT_STAFF);
 
   router.use(requireAuth);
@@ -94,17 +99,17 @@ export function createEquipmentReviewRouter({
   });
 
   /** AC2: start a review. */
-  router.post('/start', technicalSupportOnly, async (req, res) => {
+  router.post('/start', technicalSupportOnly, guardEvent, async (req, res) => {
     res.status(200).json(await startEquipmentReview(req.params.id, req.user.id, { client }));
   });
 
   /** AC3: take over a review that is Under review. */
-  router.post('/take-over', technicalSupportOnly, async (req, res) => {
+  router.post('/take-over', technicalSupportOnly, guardEvent, async (req, res) => {
     res.status(200).json(await takeOverEquipmentReview(req.params.id, req.user.id, { client }));
   });
 
   /** AC7: mark a line "Cannot be provided". The body is read for note only. */
-  router.put('/lines/:lineId/outcome', technicalSupportOnly, async (req, res) => {
+  router.put('/lines/:lineId/outcome', technicalSupportOnly, guardEvent, async (req, res) => {
     const state = await markEquipmentLineUnavailable(
       req.params.id,
       req.params.lineId,
@@ -116,7 +121,7 @@ export function createEquipmentReviewRouter({
   });
 
   /** Take the "Cannot be provided" mark off a line. */
-  router.delete('/lines/:lineId/outcome', technicalSupportOnly, async (req, res) => {
+  router.delete('/lines/:lineId/outcome', technicalSupportOnly, guardEvent, async (req, res) => {
     const state = await clearEquipmentLineOutcome(
       req.params.id,
       req.params.lineId,
@@ -127,12 +132,12 @@ export function createEquipmentReviewRouter({
   });
 
   /** AC7: complete the review. */
-  router.post('/complete', technicalSupportOnly, async (req, res) => {
+  router.post('/complete', technicalSupportOnly, guardEvent, async (req, res) => {
     res.status(200).json(await completeEquipmentReview(req.params.id, req.user.id, { client }));
   });
 
   /** SCRUM-300 AC2: reserve units for a line. The body is read for quantity only. */
-  router.post('/lines/:lineId/reservations', technicalSupportOnly, async (req, res) => {
+  router.post('/lines/:lineId/reservations', technicalSupportOnly, guardEvent, async (req, res) => {
     const state = await reserveEquipment(
       req.params.id,
       req.params.lineId,
@@ -144,7 +149,7 @@ export function createEquipmentReviewRouter({
   });
 
   /** SCRUM-300 AC4: reduce a reservation. The body is read for quantity and reason. */
-  router.patch('/reservations/:reservationId', technicalSupportOnly, async (req, res) => {
+  router.patch('/reservations/:reservationId', technicalSupportOnly, guardEvent, async (req, res) => {
     const state = await reduceEquipmentReservation(
       req.params.id,
       req.params.reservationId,
@@ -156,7 +161,7 @@ export function createEquipmentReviewRouter({
   });
 
   /** SCRUM-300 AC4: release a reservation. The body is read for reason only. */
-  router.post('/reservations/:reservationId/release', technicalSupportOnly, async (req, res) => {
+  router.post('/reservations/:reservationId/release', technicalSupportOnly, guardEvent, async (req, res) => {
     const state = await releaseEquipmentReservation(
       req.params.id,
       req.params.reservationId,
@@ -168,7 +173,7 @@ export function createEquipmentReviewRouter({
   });
 
   /** SCRUM-300 AC7: move a flagged reservation to the event's current period. */
-  router.post('/reservations/:reservationId/move', technicalSupportOnly, async (req, res) => {
+  router.post('/reservations/:reservationId/move', technicalSupportOnly, guardEvent, async (req, res) => {
     const state = await moveEquipmentReservation(
       req.params.id,
       req.params.reservationId,
@@ -180,7 +185,7 @@ export function createEquipmentReviewRouter({
   });
 
   /** SCRUM-300 AC7: keep a flagged reservation as it is. */
-  router.post('/reservations/:reservationId/keep', technicalSupportOnly, async (req, res) => {
+  router.post('/reservations/:reservationId/keep', technicalSupportOnly, guardEvent, async (req, res) => {
     const state = await keepEquipmentReservation(
       req.params.id,
       req.params.reservationId,
@@ -197,4 +202,4 @@ export function createEquipmentReviewRouter({
 
 
 /** The instance src/app.js mounts. */
-export default createEquipmentReviewRouter();
+export default createEquipmentReviewRouter({ finalEventGuard: createFinalEventGuard() });
