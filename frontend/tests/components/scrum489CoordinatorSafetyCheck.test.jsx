@@ -54,6 +54,7 @@ vi.mock("../../src/components/ReassignEventPanel", () => stub("reassign"));
 vi.mock("../../src/components/ClarificationHistoryDialog", () => stub("clarification-history"));
 vi.mock("../../src/components/EventEquipmentSection", () => stub("equipment"));
 vi.mock("../../src/components/EventCancellationPanel", () => stub("cancellation"));
+vi.mock("../../src/components/RegistrationCounts", () => stub("registration-counts"));
 
 const EVENT_ID = "22222222-2222-4222-8222-222222222222";
 const ASSIGNED = "44444444-4444-4444-8444-444444444444";

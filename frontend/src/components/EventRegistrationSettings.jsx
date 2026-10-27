@@ -19,6 +19,7 @@ const FIELD_LABELS = {
   registrationClosesAt: "Closing time",
   registrationWithdrawalDeadline: "Withdrawal deadline",
   registrationCapacity: "Capacity",
+  registrationWaitlistEnabled: "Waiting list",
   proposedStart: "Event start",
 };
 
@@ -69,6 +70,7 @@ export default function EventRegistrationSettings({ eventId }) {
       closesAt: toDatetimeLocalValue(data.settings.closesAt),
       capacity: data.settings.capacity ?? "",
       withdrawalDeadline: toDatetimeLocalValue(data.settings.withdrawalDeadline),
+      waitlistEnabled: data.settings.waitlistEnabled === true,
     });
     setLoaded(true);
   }
@@ -115,6 +117,7 @@ export default function EventRegistrationSettings({ eventId }) {
         closesAt: toIso(form.closesAt),
         capacity: form.capacity === "" ? null : Number(form.capacity),
         withdrawalDeadline: toIso(form.withdrawalDeadline),
+        waitlistEnabled: form.waitlistEnabled,
       });
       setSettings(updated);
       setEvent((current) => ({ ...current, settings: updated }));
@@ -173,6 +176,8 @@ export default function EventRegistrationSettings({ eventId }) {
                   <dd>{settings.registeredCount}{settings.capacity ? ` / ${settings.capacity}` : ""}</dd>
                 </div>
                 <div><dt>Withdrawal deadline</dt><dd>{formatVenueTimestamp(settings.withdrawalDeadline)}</dd></div>
+                <div><dt>Waiting list</dt><dd>{settings.waitlistEnabled ? "On" : "Off"}</dd></div>
+                <div><dt>Waitlisted</dt><dd>{settings.waitlistCount ?? 0}</dd></div>
               </dl>
               {saved && <p role="status">Registration settings saved.</p>}
               {canEdit && loaded && form && (
@@ -207,6 +212,19 @@ export default function EventRegistrationSettings({ eventId }) {
                 />
                 <span>Registration is on</span>
               </label>
+              <label className="event-registration-page__toggle">
+                <input
+                  type="checkbox"
+                  checked={form.waitlistEnabled}
+                  onChange={(inputEvent) => setForm({ ...form, waitlistEnabled: inputEvent.target.checked })}
+                />
+                <span>Waiting list is on</span>
+              </label>
+              <p className="event-registration-page__hint">
+                When the event is full, attendees can join a waiting list. A released place goes to the
+                first person waiting while registration is open. Switching it off stops new joins; people
+                already waiting keep their place.
+              </p>
               <div className="event-registration-page__fields">
                 <label>
                   Opens at

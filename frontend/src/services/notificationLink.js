@@ -4,6 +4,7 @@
 // lands on a page it already has and is authorised for; no new pages.
 
 import { normaliseRole } from "../auth/normaliseRole";
+import { attendeeEventPath } from "./attendeeEventRoutes";
 
 const eventRequestPage = (id) => ({ to: `/event-requests/${id}` });
 
@@ -51,8 +52,8 @@ const LINKS_BY_ROLE = {
   VENUE_STAFF: (type) => VENUE_STAFF_PAGES[type] ?? null,
   // No safety review page yet (SCRUM-490).
   SAFETY_OFFICER: () => null,
-  // No attendee event page yet (SCRUM-495).
-  ATTENDEE: () => null,
+  // A promotion opens the event's registered-attendee page.
+  ATTENDEE: (type, id) => (type === "registration_promoted" ? { to: attendeeEventPath(id) } : null),
 };
 
 /**

@@ -2,7 +2,9 @@
  * Places left and fullness, pure so SCRUM-22 can share one definition of a
  * current registration. Only 'registered' holds a place; the list is advisory.
  */
-export const ACTIVE_REGISTRATION_STATUS = 'registered';
+import { REGISTRATION_STATUS } from './registrationStatus.js';
+
+export const ACTIVE_REGISTRATION_STATUS = REGISTRATION_STATUS.REGISTERED;
 
 /** @param {{status?: string}} registration */
 export function holdsAPlace(registration) {
