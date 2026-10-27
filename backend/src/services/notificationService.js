@@ -82,8 +82,8 @@ export function toNotification(row) {
     type: row.type,
     bookingId: row.booking_id,
     blockId: row.block_id,
-    // SCRUM-491: the hold a 'venue_hold_expired' notice is about (040); null
-    // for every other type.
+    // SCRUM-491: the hold a venue_hold_* notice (expired, placed, expiring) is
+    // about; null for every other type.
     venueHoldId: row.venue_hold_id,
     // SCRUM-172: older types store the event only in the payload, or only via
     // their booking, so fall back in that order. The embedded booking itself
