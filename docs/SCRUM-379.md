@@ -1,12 +1,13 @@
 # SCRUM-379: Mark an Event Completed
 
-Status: SCRUM-380, SCRUM-381 and SCRUM-382 built. SCRUM-383 to 386 not started.
+Status: SCRUM-380, SCRUM-381, SCRUM-382 and SCRUM-383 built. SCRUM-384 to 386 not started.
 
 ## What exists now
 
 - **Migration 033** (SCRUM-380): `event_requests.closing_notes`, with two checks: only a Completed row may hold notes, and notes are non-blank and at most 2000 characters.
 - **Migration 034** (SCRUM-381): `complete_event_request(event, coordinator, closing_notes)`, one transaction, API role only. Adds the change-request outcome `event_completed`.
 - **Final-event guard** (SCRUM-382, see `docs/SCRUM-382.md`): a Completed or Cancelled event is refused by every endpoint that changes an event or something attached to it. This is what makes AC3's read-only rule hold.
+- **Needs attention list** (SCRUM-383, see `docs/SCRUM-383.md`): `GET /api/event-requests/needs-attention`, one item per reason (AC7).
 - `POST /api/event-requests/:id/complete` (coordinator role). Body: `{ closingNotes? }`. Returns the event with `closingNotes` for the calling coordinator.
 
 ## What the function does, in order
@@ -34,7 +35,6 @@ Each refusal changes nothing. A forced failure in step 7 rolls back steps 5 and 
 
 ## Not done yet
 
-- SCRUM-383: Needs attention endpoint. `attentionReasons` in `eventRequestService.js` already covers some reasons for events; extend it rather than add a second list.
 - SCRUM-384: coordinator screens. AC2 also needs the coordinator's own read of an event to return `closingNotes`; today only the response to the complete call does.
 - SCRUM-385, 386: remaining tests, and the acceptance-criteria-to-test list. AC5 (every record of a Completed event stays viewable by the organiser and coordinators) still needs its own test.
 - Organiser display of a change request closed as `event_completed`: check where decisions are labelled before the screens ship.

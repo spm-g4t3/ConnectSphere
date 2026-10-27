@@ -66,7 +66,7 @@ import {
   venueReadinessReason,
   equipmentReadinessReason,
   compareNeedsAttentionItems,
-} from '../domain/needsAttention.js';
+} from '../domain/coordinatorAttentionList.js';
 import {
   ValidationError,
   NotFoundError,
@@ -2139,7 +2139,7 @@ const NEEDS_ATTENTION_STATUSES = Object.freeze([STATUS.CONFIRMED, STATUS.APPROVE
  * resolved (the event is completed, confirmed or cancelled, the clarification is answered,
  * a failing readiness item is fixed).
  *
- * The reasons (rules and wording in domain/needsAttention.js):
+ * The reasons (rules and wording in domain/coordinatorAttentionList.js):
  *   - Confirmed and ended: "Mark as completed"
  *   - Approved and ended: "Not confirmed; cancel"
  *   - a clarification past its reply-by date
