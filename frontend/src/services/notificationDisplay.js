@@ -74,7 +74,7 @@
 //     and endsAt are the pending request's own (old) times
 //   registration_schedule_conflict (091, SCRUM-494): { eventName, newStart,
 //     fields }; fields lists the registration dates the new start now precedes
-//   registration_promoted (027, SCRUM-460): { eventRequestId, eventName,
+//   registration_promoted (037, SCRUM-460): { eventRequestId, eventName,
 //     registrationId }
 //   equipment_* (097, SCRUM-176): { audience, eventRequestId, eventName,
 //     lines: [{ equipmentType, quantity, reserved, outcome }], ... }; see

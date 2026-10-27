@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { createSchemaDb, seedEvent, functionSources } from './helpers/schemaDb.js';
 import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
-// Promotion from the waiting list (027) on a stubbed clock: the one shared
+// Promotion from the waiting list (037) on a stubbed clock: the one shared
 // operation, its triggers, its atomicity and its notification. PGlite has one
 // connection, so true two-session races are in eventWaitingListConcurrency.manual.sql;
 // the lock-order checks below are what makes those races safe.

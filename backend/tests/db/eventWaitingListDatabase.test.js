@@ -8,7 +8,7 @@ import { createOpenEventRouter } from '../../src/routes/openEvents.js';
 import { createAttendeeEventRouter } from '../../src/routes/attendeeEvents.js';
 import { createEventRegistrationRouter } from '../../src/routes/eventRegistration.js';
 
-// The waiting list (027) against the final schema, on a stubbed clock. PGlite has
+// The waiting list (037) against the final schema, on a stubbed clock. PGlite has
 // one connection, so the two-session races are in eventWaitingListConcurrency.manual.sql.
 const ORGANISER = '11111111-1111-4111-8111-111111111111';
 const COORDINATOR = '22222222-2222-4222-8222-222222222222';

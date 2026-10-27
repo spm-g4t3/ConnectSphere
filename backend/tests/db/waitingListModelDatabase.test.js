@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
-// The waiting-list data model (027): status, queue order, derived positions,
+// The waiting-list data model (037): status, queue order, derived positions,
 // one row per attendee and event, and the Organiser's switch. Behaviour through
 // the join, leave and promote functions is in eventWaitingListDatabase.test.js.
 const ORGANISER = '11111111-1111-4111-8111-111111111111';

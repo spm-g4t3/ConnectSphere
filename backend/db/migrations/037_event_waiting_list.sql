@@ -1,4 +1,4 @@
--- Migration 027: event waiting lists.
+-- Migration 037: event waiting lists.
 -- The Organiser switches a waiting list on with the other registration settings.
 -- While the event is full, an attendee can join it; a released place (a
 -- withdrawal, a higher capacity) goes to the longest-waiting attendee, who is
@@ -853,7 +853,7 @@ end;
 $$;
 revoke execute on function event_registration_counts(uuid, uuid) from public, anon, authenticated;
 
--- The whole list, restated from 016_overnight_operating_hours.sql with the new type.
+-- The whole list, restated from 022_coordinator_edits_event_details.sql with the new type.
 alter table notifications drop constraint if exists notifications_type_known;
 alter table notifications
   add constraint notifications_type_known check (type = any (array[
@@ -865,6 +865,7 @@ alter table notifications
     'booking_flagged_setup_change',
     'venue_hold_expired',
     'event_cancelled',
+    'event_details_changed',
     'event_request_awaiting_assignment',
     'event_request_assigned',
     'event_request_coordinator_assigned',
