@@ -192,6 +192,9 @@ const SIGNIFICANT_CHANGE_CONFLICTS = new Set([
  * every legitimate empty read. It is handled at the update site instead, where
  * the surrounding code knows which of the two it is looking at.
  */
+// Mirrors event_requests_closing_notes_nonblank (033).
+const CLOSING_NOTES_MAX_LENGTH = 2000;
+
 const notFoundEventRequest = notFound('Event request not found');
 
 const translateError = createPgTranslator({
@@ -1372,6 +1375,38 @@ export async function cancelEventRequest(
 
   if (error) throw translateError(error);
   return toEventRequest(data);
+}
+
+/**
+ * Mark a Confirmed event as completed (SCRUM-379) through the transactional
+ * complete_event_request function. The closing notes are for coordinators, so
+ * they are added to this response only; toEventRequest never carries them.
+ *
+ * @param {string} id event request id
+ * @param {{closingNotes?: string|null}} input
+ * @param {string} coordinatorId caller from the authenticated session
+ * @param {{client?: object}} options
+ */
+export async function completeEventRequest(id, { closingNotes } = {}, coordinatorId, { client } = {}) {
+  requireCallerId(coordinatorId, 'coordinatorId');
+  if (closingNotes !== undefined && closingNotes !== null && typeof closingNotes !== 'string') {
+    throw new ValidationError('Closing notes must be text');
+  }
+  const notes = typeof closingNotes === 'string' ? closingNotes.trim() || null : null;
+  // Characters, as Postgres length() counts them; an emoji is one, though two UTF-16 units.
+  if (notes !== null && [...notes].length > CLOSING_NOTES_MAX_LENGTH) {
+    throw new ValidationError(`Closing notes can be at most ${CLOSING_NOTES_MAX_LENGTH} characters`);
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('complete_event_request', {
+    p_event_request_id: id,
+    p_coordinator_id: coordinatorId,
+    p_closing_notes: notes,
+  });
+
+  if (error) throw translateError(error);
+  return { ...toEventRequest(data), closingNotes: data.closing_notes ?? null };
 }
 
 /**
