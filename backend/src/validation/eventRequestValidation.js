@@ -50,6 +50,7 @@ import { ValidationError } from '../errors.js';
 import { createErrorCollector, throwIfInvalid } from './collector.js';
 import { MAX_INTEGER } from './limits.js';
 import { checkTimestamp } from './timestampValidation.js';
+import { DETAIL_FIELDS } from '../domain/eventDetailField.js';
 
 
 /** Fields carrying prose, in the order the story lists them. */
@@ -472,4 +473,90 @@ export function validateSignificantEventChange(changes, current, { now = new Dat
   validateSubmitEventRequest(merged, { now });
 
   return normalised;
+}
+
+
+/** SCRUM-387 (D5): the reason a coordinator's edit is saved with, as event_change_history allows. */
+export const EDIT_REASON_MAX_LENGTH = 4000;
+
+/** A value the form showed for a field, typed as that field is. */
+function checkExpectedValue(errors, field, value) {
+  if (value === null) return null;
+  const key = `expected.${field}`;
+  if (TIMESTAMP_FIELDS.includes(field)) return checkTimestamp(errors, key, value) === null ? null : value.trim();
+  if (field === 'expectedAttendance') {
+    if (!Number.isInteger(value)) errors.add(key, 'must be a whole number or null');
+    return value;
+  }
+  if (typeof value !== 'string') errors.add(key, 'must be text or null');
+  return value;
+}
+
+/**
+ * Validate a coordinator's edit of an event's information (SCRUM-387, AC6).
+ *
+ * The changed fields are held to SCRUM-10's submission rules, so the messages
+ * match the submit form: a field submission requires cannot be cleared, a new
+ * start must be in the future, and the end must follow the start when both are
+ * sent. Every fault is listed at once. Whether the end follows the stored start
+ * is the database function's to answer, after it has checked the caller: reading
+ * the event here first would tell a stranger its dates.
+ *
+ * @param {object} body
+ * @param {object} body.changes   camelCase fields and their new values; null clears an optional field
+ * @param {object} body.expected  the value the form showed for each changed field (D12)
+ * @param {string} body.reason    why, 1 to 4,000 characters (D5)
+ * @param {object} [options]
+ * @param {Date} [options.now]
+ * @returns {{changes: object, expected: object, reason: string}} normalised
+ * @throws {ValidationError} listing every problem found
+ */
+export function validateEventDetailsEdit(body, { now = new Date() } = {}) {
+  assertObject(body);
+  const errors = createErrorCollector();
+  const { changes, expected, reason } = body;
+
+  const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+  if (trimmedReason === '') errors.add('reason', 'is required');
+  else if (Array.from(trimmedReason).length > EDIT_REASON_MAX_LENGTH) {
+    errors.add('reason', `must be ${EDIT_REASON_MAX_LENGTH.toLocaleString('en-US')} characters or fewer`);
+  }
+
+  const changesIsObject = typeof changes === 'object' && changes !== null && !Array.isArray(changes);
+  const expectedIsObject = typeof expected === 'object' && expected !== null && !Array.isArray(expected);
+  if (!changesIsObject) errors.add('changes', 'must be an object of fields to change');
+  if (!expectedIsObject) errors.add('expected', 'must be an object of the values the form showed');
+
+  const supplied = changesIsObject ? Object.keys(changes) : [];
+  const known = supplied.filter((field) => DETAIL_FIELDS.includes(field));
+  for (const field of supplied) {
+    if (!DETAIL_FIELDS.includes(field)) errors.add(field, 'cannot be edited here');
+  }
+  if (changesIsObject && supplied.length === 0) errors.add('changes', 'name at least one field to change');
+
+  // SCRUM-10's collection pass over just the fields sent; those submission
+  // requires may not be cleared.
+  const fields = Object.fromEntries(known.map((field) => [field, changes[field]]));
+  const mandatory = SUBMIT_MANDATORY.filter((field) => known.includes(field));
+  const { normalised, instants } = collectEventRequest(errors, fields, mandatory);
+  for (const field of known) {
+    if (fields[field] === null && !mandatory.includes(field)) normalised[field] = null;
+  }
+  if (instants.proposedStart !== undefined && instants.proposedStart <= now) {
+    errors.add('proposedStart', 'must be in the future');
+  }
+
+  const expectedValues = {};
+  if (expectedIsObject) {
+    for (const field of known) {
+      if (!Object.prototype.hasOwnProperty.call(expected, field)) {
+        errors.add(`expected.${field}`, 'is required for every field being changed');
+      } else {
+        expectedValues[field] = checkExpectedValue(errors, field, expected[field]);
+      }
+    }
+  }
+
+  throwIfInvalid(errors, 'Invalid event details');
+  return { changes: normalised, expected: expectedValues, reason: trimmedReason };
 }
