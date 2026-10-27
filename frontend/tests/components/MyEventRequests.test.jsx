@@ -38,6 +38,8 @@ vi.mock("../../src/services/eventRequestService", () => ({
   getMyEventRequests: vi.fn(),
   getConfirmedArrangements: vi.fn(),
   getEventClarificationHistory: vi.fn(),
+  // SCRUM-347: a rejected row reads its earlier decisions.
+  getEventDecisionHistory: vi.fn(() => Promise.resolve([])),
   getEventCancellationImpact: vi.fn(),
   cancelEventRequest: vi.fn(),
   respondToEventClarification: vi.fn(),
