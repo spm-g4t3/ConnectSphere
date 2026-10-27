@@ -115,9 +115,9 @@ describe('SCRUM-402: change requests (035, 036)', () => {
 
   // ---- the functions under test ----
 
-  const group = async (eventId, changes, by = organiser) => (await db.query(
-    'select * from create_change_request_group($1, $2, $3::jsonb)',
-    [eventId, by, JSON.stringify(changes.map(([changeField, requestedChange]) => ({ changeField, requestedChange })))],
+  const group = async (eventId, changes, by = organiser, note = null) => (await db.query(
+    'select * from create_change_request_group($1, $2, $3::jsonb, $4)',
+    [eventId, by, JSON.stringify(changes.map(([changeField, requestedChange]) => ({ changeField, requestedChange }))), note],
   )).rows;
   const groupId = async (eventId, changes) => (await group(eventId, changes))[0].id;
 
@@ -217,6 +217,46 @@ describe('SCRUM-402: change requests (035, 036)', () => {
       await expectRefused(id, () => group(id, [['purpose', 'New']], otherOrganiser), '22023');
       await expectRefused(draft, () => group(draft, [['purpose', 'New']]), '22023');
       expect((await refusal(group('00000000-0000-4000-8000-000000000000', [['purpose', 'New']])))?.code).toBe('P0002');
+    });
+
+    it('SCRUM402_AC1_a_groups_note_is_stored_on_every_row_and_previewed', async () => {
+      // AC1-08: one note for the submission, on each row, trimmed.
+      const id = await approved();
+
+      const created = await group(id, [['purpose', 'Alumni networking'], ['expected_attendance', '150']], organiser, '  Our sponsor asked for both  ');
+
+      expect(created.map((r) => r.organiser_note)).toEqual(['Our sponsor asked for both', 'Our sponsor asked for both']);
+      expect(created.map((r) => r.requested_change)).toEqual(['Alumni networking', '150']);
+      expect((await preview(created[1].id)).organiserNote).toBe('Our sponsor asked for both');
+    });
+
+    it.each([
+      ['no_note', null],
+      ['a_blank_note', '   '],
+    ])('SCRUM402_AC1_a_group_with_%s_stores_null', async (_label, note) => {
+      // AC1-09.
+      const id = await approved();
+
+      const created = await group(id, [['purpose', 'New']], organiser, note);
+
+      expect(created[0].organiser_note).toBeNull();
+      expect((await preview(created[0].id)).organiserNote).toBeNull();
+    });
+
+    it('SCRUM402_AC1_a_note_over_2000_characters_is_refused_by_the_function_and_by_the_table', async () => {
+      // AC1-10: the function says so in words; a direct insert meets the check.
+      const id = await approved();
+
+      await expectRefused(id, () => group(id, [['purpose', 'New']], organiser, 'x'.repeat(2001)), '22023');
+      expect((await refusal(db.query(
+        "insert into event_change_requests (event_request_id, requested_by, change_field, requested_change, organiser_note) values ($1, $2, 'purpose', 'New', $3)",
+        [id, organiser, 'x'.repeat(2001)],
+      )))?.code).toBe('23514');
+      expect((await refusal(db.query(
+        "insert into event_change_requests (event_request_id, requested_by, change_field, requested_change, organiser_note) values ($1, $2, 'purpose', 'New', '   ')",
+        [id, organiser],
+      )))?.code).toBe('23514');
+      expect(await group(id, [['purpose', 'New']], organiser, 'y'.repeat(2000))).toHaveLength(1);
     });
 
     it('SCRUM402_AC1_a_row_written_as_before_036_is_its_own_group', async () => {
@@ -594,7 +634,18 @@ describe('SCRUM-402: change requests (035, 036)', () => {
       expect(byId).toEqual({ [cr]: 'approved', [other]: 'event_cancelled' });
     });
 
-    it('SCRUM402_AC7_with_no_reason_the_organisers_note_is_the_cancellation_reason', async () => {
+    it('SCRUM402_AC7_a_cancellations_reason_is_prefilled_from_the_organisers_note', async () => {
+      // AC7-04: the note, not the request's own text, when the Organiser gave one.
+      const id = await approved();
+      const [{ id: cr }] = await group(id, [['cancellation', 'Cancel the event']], organiser, 'We lost our speaker');
+
+      expect((await preview(cr)).cancellationReason).toBe('We lost our speaker');
+      await accept(cr);
+
+      expect((await event(id)).cancellation_reason).toBe('We lost our speaker');
+    });
+
+    it('SCRUM402_AC7_with_no_note_and_no_reason_the_requests_own_text_is_the_cancellation_reason', async () => {
       // AC7-03.
       const id = await approved();
       const cr = await groupId(id, [['cancellation', 'We lost our speaker']]);
@@ -718,7 +769,7 @@ describe('SCRUM-402: change requests (035, 036)', () => {
     it('SCRUM402_AC11_the_new_functions_stay_closed_to_the_client_roles', async () => {
       // SC-02.
       for (const fn of [
-        'create_change_request_group(uuid, uuid, jsonb)',
+        'create_change_request_group(uuid, uuid, jsonb, text)',
         'preview_change_request(uuid, uuid)',
         'process_change_request(uuid, change_request_decision, text, uuid, jsonb)',
         'change_request_group_plan(uuid, event_requests)',

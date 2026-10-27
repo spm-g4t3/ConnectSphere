@@ -136,6 +136,8 @@ function toChangeRequest(row) {
     // SCRUM-402 (D2): the rows of one submission share it; a row from before
     // 036 is its own group.
     requestGroupId: row.request_group_id ?? row.id,
+    // SCRUM-402 AC1: the Organiser's note for the whole submission.
+    organiserNote: row.organiser_note ?? null,
     requestedBy: row.requested_by,
     changeField: row.change_field,
     requestedChange: row.requested_change,
@@ -206,6 +208,7 @@ export async function createChangeRequest(input, organiserId, { client } = {}) {
     p_event_request_id: request.eventRequestId,
     p_organiser_id: organiserId,
     p_changes: changes,
+    ...(request.note && { p_note: request.note }),
   });
 
   if (error) throw translateError(error);
@@ -246,13 +249,14 @@ export async function createChangeRequestFromClient(
 ) {
   const body = payload && typeof payload === 'object' ? payload : {};
   const { field, details } = body;
-  // SCRUM-402: several fields in one submission, { changes: [{ field, details }] }.
+  // SCRUM-402: several fields in one submission, { changes: [{ field, details }], note }.
   const input = Object.hasOwn(body, 'changes')
     ? {
       eventRequestId,
       changes: Array.isArray(body.changes)
         ? body.changes.map((change) => ({ changeField: change?.field, requestedChange: change?.details }))
         : body.changes,
+      note: body.note,
     }
     : { eventRequestId, changeField: field, requestedChange: details };
 

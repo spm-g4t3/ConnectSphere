@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DECISION_NOTES_MAX_LENGTH,
   MAX_CHANGES_PER_REQUEST,
+  ORGANISER_NOTE_MAX_LENGTH,
   validateCreateChangeRequest,
   validateProcessChangeRequest,
 } from '../../src/validation/eventChangeRequestValidation.js';
@@ -46,6 +47,19 @@ describe('SCRUM-402 change request validation', () => {
       eventRequestId: EVENT_ID,
       changes: [{ changeField: 'cancellation', requestedChange: 'Called off' }, { changeField: 'other', requestedChange: 'And this' }],
     }))).toEqual(['changes']);
+  });
+
+  it('SCRUM402_AC1_a_groups_note_is_trimmed_optional_and_at_most_2000_characters', () => {
+    const changes = [{ changeField: 'purpose', requestedChange: 'New' }];
+    expect(validateCreateChangeRequest({ eventRequestId: EVENT_ID, changes, note: '  Sponsor asked  ' }).note).toBe('Sponsor asked');
+    expect(validateCreateChangeRequest({ eventRequestId: EVENT_ID, changes, note: '   ' })).not.toHaveProperty('note');
+    expect(validateCreateChangeRequest({ eventRequestId: EVENT_ID, changes, note: '😀'.repeat(ORGANISER_NOTE_MAX_LENGTH) }).note)
+      .toHaveLength(ORGANISER_NOTE_MAX_LENGTH * 2);
+    expect(faultsOf(() => validateCreateChangeRequest({ eventRequestId: EVENT_ID, changes, note: 'x'.repeat(2001) }))).toEqual(['note']);
+    expect(faultsOf(() => validateCreateChangeRequest({ eventRequestId: EVENT_ID, changes, note: 42 }))).toEqual(['note']);
+    // The single shape is unchanged: it carries no note.
+    expect(validateCreateChangeRequest({ eventRequestId: EVENT_ID, changeField: 'purpose', requestedChange: 'New', note: 'Ignored' }))
+      .toEqual({ eventRequestId: EVENT_ID, changeField: 'purpose', requestedChange: 'New' });
   });
 
   it('SCRUM402_AC3_a_note_is_at_most_2000_characters_counted_as_the_database_counts', () => {

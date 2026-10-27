@@ -5,6 +5,7 @@
 **Schema:** `035_change_request_cancellation_type.sql` and `036_process_change_requests.sql` (SCRUM-403), on top of 022's `edit_event_request_details`, 028's change-history source check, 013's `cancel_event_request` and the baseline's `apply_significant_event_change`.
 **Written:** 27 October 2026, before the tests and the code.
 **Marked:** 27 October 2026, SCRUM-403 to SCRUM-407 (backend): every case proved. AC5-04 moved from Safety approved to Confirmed, where the order it tests matters (387 allows a name in Safety approved, so the old case could not fail).
+**Marked:** 27 October 2026, the brief 1 fix-up: the Organiser's note (`organiser_note`, in 036 before it ran anywhere). AC1-08 to AC1-10 and AC7-04 added; AC7-03 reworded as the fallback it now is.
 
 This document is the written layer between SCRUM-402's acceptance criteria and the
 Vitest files that implement them. The chain is **user story → acceptance criteria
@@ -87,6 +88,9 @@ after: a refusal changes nothing (the rollback cases).
 | AC1-05 **(trap)** | A row inserted directly, as before 036 | Read it back | Its `request_group_id` is its own id (the trigger) | Proved (pglite): `SCRUM402_AC1_a_row_written_as_before_036_is_its_own_group` |
 | AC1-06 | Through the API | The coordinator's list | Oldest first, each row with `requestGroupId` and its current value | Proved (route): `SCRUM402_AC1_oldest_first_with_each_rows_group_and_current_value_in_one_query`, `SCRUM402_AC1_a_failed_read_is_a_500_not_an_empty_list`, `SCRUM402_AC1_a_malformed_event_id_is_a_400_before_the_database`; the existing SCRUM-46 read, unmodified |
 | AC1-07 | Through the API | The organiser's old single shape; the new `{ changes: [...] }` | Both reach `create_change_request_group`; the old shape still answers one row | Proved (route): `SCRUM402_AC1_several_fields_go_to_the_group_function_in_one_call`, `SCRUM402_AC1_a_submission_the_function_answers_with_no_rows_is_still_a_201`; (route, renamed from SCRUM32_AC1_…) `SCRUM402_AC1_returns_201_and_the_change_request_the_group_function_created`, `SCRUM402_AC1_stamps_the_requester_from_the_token_not_the_body`, `SCRUM402_AC1_does_not_label_a_change_request_with_the_event_status_vocabulary`; (validation) `SCRUM402_AC1_a_group_comes_back_normalised_and_the_single_shape_as_it_always_did` |
+| AC1-08 | Approved | Submit two fields with the note "  Our sponsor asked for both  " | The trimmed note on both rows, each row's value unchanged; the preview and the coordinator's list return `organiserNote`; the service sends `p_note` | Proved (pglite): `SCRUM402_AC1_a_groups_note_is_stored_on_every_row_and_previewed`; (route) `SCRUM402_AC1_the_organisers_note_goes_with_the_group_and_comes_back_on_each_row`, `SCRUM402_AC1_the_coordinators_list_carries_the_organisers_note`; (validation) `SCRUM402_AC1_a_groups_note_is_trimmed_optional_and_at_most_2000_characters` |
+| AC1-09 | Approved | Submit with no note; with a blank one | `organiser_note` null; no `p_note` sent | Proved (pglite): `SCRUM402_AC1_a_group_with_%s_stores_null` (two); (route) `SCRUM402_AC1_a_group_with_%s_sends_no_p_note` (two) |
+| AC1-10 **(trap)** | Approved | A note of 2,001 characters, through the function; through a direct insert; a blank note inserted directly | 22023 from the function; 23514 from the table's check for both inserts; 2,000 characters accepted | Proved (pglite): `SCRUM402_AC1_a_note_over_2000_characters_is_refused_by_the_function_and_by_the_table`; (validation) `SCRUM402_AC1_a_groups_note_is_trimmed_optional_and_at_most_2000_characters` |
 
 ### AC2 — who may process, and in which status
 
@@ -145,7 +149,8 @@ after: a refusal changes nothing (the rollback cases).
 |---|---|---|---|---|
 | AC7-01 | Approved, a cancellation request "We lost our speaker" and another open request | Accept with the reason "  Speaker withdrew  " | The event cancelled, initiator `organiser_request`, the coordinator's reason | Proved (pglite): `SCRUM402_AC7_accepting_cancels_with_the_organisers_request_and_the_coordinators_reason` |
 | AC7-02 **(trap)** | The same | — | This request ends `approved`; the other closed `event_cancelled` by the cancel (mark first, then cancel) | Proved (pglite): the same test |
-| AC7-03 | The same | Accept with no reason | The organiser's note is the cancellation reason | Proved (pglite): `SCRUM402_AC7_with_no_reason_the_organisers_note_is_the_cancellation_reason` |
+| AC7-03 | The same, with no note | Accept with no reason | The request's own text is the cancellation reason (the fallback) | Proved (pglite): `SCRUM402_AC7_with_no_note_and_no_reason_the_requests_own_text_is_the_cancellation_reason` |
+| AC7-04 | Approved, a cancellation with the note "We lost our speaker" | Preview; accept with no reason | The preview's `cancellationReason` and the event's `cancellation_reason` are the note, not the request's own text | Proved (pglite): `SCRUM402_AC7_a_cancellations_reason_is_prefilled_from_the_organisers_note` |
 
 ### AC8 — equipment
 
@@ -182,19 +187,19 @@ after: a refusal changes nothing (the rollback cases).
 
 ## Tally
 
-47 cases, counted from the tables: **47 proved**; 0 not yet implemented; 0 that
-cannot be written as specified. Thirteen are traps. The screens' cases (SCRUM-404's
+51 cases, counted from the tables: **51 proved**; 0 not yet implemented; 0 that
+cannot be written as specified. Fourteen are traps. The screens' cases (SCRUM-404's
 list, SCRUM-408) come with brief 2.
 
 | Section | Cases |
 |---|---|
-| AC1 | 7 |
+| AC1 | 10 |
 | AC2 | 6 |
 | AC3 | 2 |
 | AC4 | 4 |
 | AC5 | 10 |
 | AC6 | 4 |
-| AC7 | 3 |
+| AC7 | 4 |
 | AC8 | 3 |
 | AC9, AC10 | 3 |
 | AC11, AC12 | 3 |

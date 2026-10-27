@@ -177,13 +177,35 @@ function checkChanges(errors, value) {
   return changes;
 }
 
+/** SCRUM-402 AC1: the limit 036 sets on the Organiser's note. */
+export const ORGANISER_NOTE_MAX_LENGTH = 2000;
+
+/**
+ * SCRUM-402 AC1: the Organiser's note for a group, optional. A blank one is no
+ * note; 036 checks the same limit.
+ */
+function checkOrganiserNote(errors, value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') {
+    errors.add('note', 'must be text');
+    return null;
+  }
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  if (Array.from(trimmed).length > ORGANISER_NOTE_MAX_LENGTH) {
+    errors.add('note', `must be ${ORGANISER_NOTE_MAX_LENGTH.toLocaleString('en-US')} characters or fewer`);
+    return null;
+  }
+  return trimmed;
+}
+
 /**
  * Validate input for requesting a change to an event.
  *
  * Two shapes. The single one SCRUM-11's form sends, { eventRequestId,
  * changeField, requestedChange }, comes back as it always has. SCRUM-402's
  * group, { eventRequestId, changes: [{ changeField, requestedChange }] }, comes
- * back as { eventRequestId, changes }.
+ * back as { eventRequestId, changes }, with note when one was given.
  *
  * @param {object} input
  * @param {string} input.eventRequestId  which event the change is about
@@ -205,6 +227,8 @@ export function validateCreateChangeRequest(input) {
   normalised.eventRequestId = checkEventRequestId(errors, input.eventRequestId);
   if (Object.hasOwn(input, 'changes')) {
     normalised.changes = checkChanges(errors, input.changes);
+    const note = checkOrganiserNote(errors, input.note);
+    if (note !== null) normalised.note = note;
   } else {
     normalised.changeField = checkChangeField(errors, input.changeField);
     normalised.requestedChange = checkRequestedChange(errors, normalised.changeField, input.requestedChange);

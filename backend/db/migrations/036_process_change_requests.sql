@@ -56,6 +56,14 @@ create trigger event_change_requests_set_group
 
 create index if not exists idx_event_change_requests_group on event_change_requests (request_group_id);
 
+-- AC1: the Organiser's note for the whole submission, on every row of its group
+-- so a row read alone carries it. requested_change stays the value asked for.
+alter table event_change_requests add column if not exists organiser_note text;
+alter table event_change_requests drop constraint if exists event_change_requests_organiser_note_check;
+alter table event_change_requests
+  add constraint event_change_requests_organiser_note_check
+  check (organiser_note is null or length(btrim(organiser_note)) between 1 and 2000);
+
 
 -- ---------------------------------------------------------------------
 -- 2. event_change_history.change_request_id, and the defaults (D3)
@@ -355,12 +363,16 @@ revoke execute on function change_request_field_class(text) from public, anon, a
 -- ---------------------------------------------------------------------
 -- 5. create_change_request_group
 -- ---------------------------------------------------------------------
--- p_changes: [{ changeField, requestedChange }, ...]. SCRUM-11's status rule is
--- kept as it was: any event but a draft.
+-- p_changes: [{ changeField, requestedChange }, ...]; p_note, the Organiser's note
+-- for the whole submission. SCRUM-11's status rule is kept as it was: any event
+-- but a draft.
+-- A database that ran 036 before the note was added keeps the 3-argument overload otherwise.
+drop function if exists create_change_request_group(uuid, uuid, jsonb);
 create or replace function create_change_request_group(
   p_event_request_id uuid,
   p_organiser_id     uuid,
-  p_changes          jsonb
+  p_changes          jsonb,
+  p_note             text default null
 )
 returns setof event_change_requests
 language plpgsql
@@ -374,6 +386,7 @@ declare
   v_row event_change_requests;
   v_fields text[] := '{}';
   v_significant text[] := '{}';
+  v_note text := nullif(btrim(p_note), '');
 begin
   select * into v_event
     from event_requests
@@ -395,6 +408,10 @@ begin
   if p_changes is null or jsonb_typeof(p_changes) <> 'array'
      or jsonb_array_length(p_changes) not between 1 and 9 then
     raise exception 'A change request names 1 to 9 changes'
+      using errcode = '22023';
+  end if;
+  if length(v_note) > 2000 then
+    raise exception 'The note must be 2,000 characters or fewer'
       using errcode = '22023';
   end if;
   for v_item in select value from jsonb_array_elements(p_changes) loop
@@ -421,12 +438,13 @@ begin
 
   for v_item in select value from jsonb_array_elements(p_changes) loop
     insert into event_change_requests
-      (event_request_id, requested_by, change_field, requested_change, request_group_id)
+      (event_request_id, requested_by, change_field, requested_change, request_group_id, organiser_note)
     values (
       p_event_request_id, p_organiser_id,
       (v_item ->> 'changeField')::event_change_field,
       btrim(v_item ->> 'requestedChange'),
-      v_group
+      v_group,
+      v_note
     )
     returning * into v_row;
     v_group := coalesce(v_group, v_row.request_group_id);
@@ -455,7 +473,7 @@ begin
   return;
 end;
 $$;
-revoke execute on function create_change_request_group(uuid, uuid, jsonb) from public, anon, authenticated;
+revoke execute on function create_change_request_group(uuid, uuid, jsonb, text) from public, anon, authenticated;
 
 
 -- ---------------------------------------------------------------------
@@ -536,7 +554,8 @@ begin
       v_equipment := true;
       v_changed := true;
     elsif v_class = 'cancellation' then
-      v_cancellation := v_text;
+      -- AC7: the reason is pre-filled from the Organiser's note, else what they wrote.
+      v_cancellation := coalesce(v_row.organiser_note, v_text);
     end if;
 
     v_rows := v_rows || jsonb_build_object(
@@ -665,6 +684,8 @@ begin
     'eventRequestId', v_event.id,
     'status', v_event.status,
     'rows', v_plan -> 'rows',
+    'organiserNote', (select organiser_note from event_change_requests where id = v_gate.group_id),
+    'cancellationReason', v_plan ->> 'cancellation',
     'invalid', v_plan -> 'faults',
     'revertsEvent', v_reverts,
     'impact', v_impact

@@ -218,6 +218,30 @@ describe('SCRUM-402: the organiser submits a group', () => {
     });
   });
 
+  it('SCRUM402_AC1_the_organisers_note_goes_with_the_group_and_comes_back_on_each_row', async () => {
+    const noted = (o) => changeRow({ organiser_note: 'Our sponsor asked', ...o });
+    const client = createEventRequestClient([ok(eventRow({ status: 'submitted' })), ok([noted(), noted({ id: OTHER_ID, change_field: 'description' })])]);
+
+    const res = await submit(client, {
+      changes: [{ field: 'purpose', details: 'Alumni networking' }, { field: 'description', details: 'Talks' }],
+      note: '  Our sponsor asked  ',
+    });
+
+    expect(client.calls[1].args.p_note).toBe('Our sponsor asked');
+    expect(res.body.map((r) => r.organiserNote)).toEqual(['Our sponsor asked', 'Our sponsor asked']);
+  });
+
+  it.each([
+    ['no_note', {}],
+    ['a_blank_note', { note: '   ' }],
+  ])('SCRUM402_AC1_a_group_with_%s_sends_no_p_note', async (_label, extra) => {
+    const client = createEventRequestClient([ok(eventRow({ status: 'submitted' })), ok([changeRow()])]);
+
+    await submit(client, { changes: [{ field: 'purpose', details: 'New' }], ...extra });
+
+    expect(client.calls[1].args).not.toHaveProperty('p_note');
+  });
+
   it.each([
     ['no_changes', [], 'changes'],
     ['a_field_twice', [{ field: 'purpose', details: 'A' }, { field: 'purpose', details: 'B' }], 'changes[1].changeField'],
@@ -270,6 +294,7 @@ describe('SCRUM-402: the coordinator reads the change requests', () => {
       ['venue', CHANGE_ID, 'A large hall'],
       ['other', 'c0000000-0000-4000-8000-000000000003', null],
     ]);
+    expect(res.body.map((r) => r.organiserNote)).toEqual([null, null, null]);
     expect(client.calls).toHaveLength(1);
     expect(client.calls[0]).toMatchObject({
       table: 'event_change_requests',
@@ -283,6 +308,14 @@ describe('SCRUM-402: the coordinator reads the change requests', () => {
     const client = createEventRequestClient([dbError('XX000', 'boom')]);
 
     expect((await request(app(client)).get(`/api/event-requests/${REQUEST_ID}/change-requests/review`)).status).toBe(500);
+  });
+
+  it('SCRUM402_AC1_the_coordinators_list_carries_the_organisers_note', async () => {
+    const client = createEventRequestClient([ok([changeRow({ organiser_note: 'Our sponsor asked', event_requests: { purpose: 'Industry networking' } })])]);
+
+    const res = await request(app(client)).get(`/api/event-requests/${REQUEST_ID}/change-requests/review`);
+
+    expect(res.body[0]).toMatchObject({ organiserNote: 'Our sponsor asked', details: 'Alumni networking' });
   });
 
   it('SCRUM402_AC1_a_malformed_event_id_is_a_400_before_the_database', async () => {
