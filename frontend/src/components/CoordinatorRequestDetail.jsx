@@ -59,6 +59,8 @@ import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import EventEquipmentSection from "./EventEquipmentSection";
 import EventCancellationPanel from "./EventCancellationPanel";
 import SignificantEventChangePanel from "./SignificantEventChangePanel";
+import EventDetailsEditPanel from "./EventDetailsEditPanel";
+import EventChangeHistory from "./EventChangeHistory";
 import SafetyCheckSubmissionPanel from "./SafetyCheckSubmissionPanel";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import EventConfirmationPanel from "./EventConfirmationPanel";
@@ -78,6 +80,7 @@ import {
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
 import { formatTimestamp, orNotSpecified } from "../services/displayFormat";
+import { STATUSES_ALLOWING_ORDINARY_EDITS, detailFieldList } from "../services/eventDetailFields";
 import { isReplyOverdue, venueTomorrow } from "../services/datetimeFormat";
 
 const CLARIFICATION_FIELDS = [
@@ -192,7 +195,7 @@ export default function CoordinatorRequestDetail({
   }
 
   const display = readStatusDisplay(current);
-  const capacity = seedableCapacity(request.expectedAttendance);
+  const capacity = seedableCapacity(current.expectedAttendance);
   // The reply-by date is a Singapore calendar day, so tomorrow is Singapore's.
   const minReplyByDate = venueTomorrow();
   const [reviewNote, setReviewNote] = useState("");
@@ -220,6 +223,9 @@ export default function CoordinatorRequestDetail({
   const [reassigning, setReassigning] = useState(false);
   const [cancellationPage, setCancellationPage] = useState(false);
   const [significantChangePage, setSignificantChangePage] = useState(false);
+  // SCRUM-387. The success line belongs to the event it was saved on.
+  const [detailsEditPage, setDetailsEditPage] = useState(false);
+  const [detailsSaved, setDetailsSaved] = useState(null);
   const [handedOverTo, setHandedOverTo] = useState(null);
   const [historyVersion, setHistoryVersion] = useState(0);
   // SCRUM-192. Bumped when a booking request is sent from "Find a venue", so
@@ -264,6 +270,10 @@ export default function CoordinatorRequestDetail({
   const canReassign = assignedCoordinatorId != null
     && current.status !== "cancelled"
     && (isAssignedCoordinator || isLead);
+  // SCRUM-387 AC1-AC5: the holder, in the five statuses that allow an edit,
+  // read from the latest event. A convenience; 022 checks both under the lock.
+  const canEditDetails = normaliseRole(user?.role) === "EVENT_COORDINATOR"
+    && isAssignedCoordinator && STATUSES_ALLOWING_ORDINARY_EDITS.includes(current.status);
 
   // SCRUM-19. isAssignedCoordinator also decides who sees the review and
   // decision actions, and for the same reason: a convenience, not the gate.
@@ -514,10 +524,25 @@ export default function CoordinatorRequestDetail({
     );
   }
 
+  if (detailsEditPage) {
+    return (
+      <EventDetailsEditPanel
+        eventRequest={current}
+        onBack={() => setDetailsEditPage(false)}
+        onSaved={({ changedFields, ...updated }) => {
+          setUpdatedRequest(updated);
+          setDetailsEditPage(false);
+          setDetailsSaved({ eventId: updated.id, message: `Saved. Changed: ${detailFieldList(changedFields)}.` });
+          onChangeRequestProcessed?.();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="coordinator-request-detail">
       <h2>
-        {request.eventName}
+        {current.eventName}
         <span className={`status-badge ${statusClassName(display.group)}`}>
           {display.label}
         </span>
@@ -567,6 +592,18 @@ export default function CoordinatorRequestDetail({
           Revise event details
         </button>
       )}
+      {canEditDetails && (
+        <button
+          className="coordinator-request-detail__edit-details"
+          type="button"
+          onClick={() => setDetailsEditPage(true)}
+        >
+          Edit event information
+        </button>
+      )}
+      {detailsSaved?.eventId === current.id && (
+        <p className="coordinator-request-detail__edit-saved" role="status">{detailsSaved.message}</p>
+      )}
       {isAssignedCoordinator && CANCELLABLE_STATUSES.has(current.status) && (
         <button
           className="coordinator-request-detail__cancel"
@@ -594,17 +631,17 @@ export default function CoordinatorRequestDetail({
         <ul>
           <li>
             <strong>Purpose</strong>
-            <span>{orNotSpecified(request.purpose)}</span>
+            <span>{orNotSpecified(current.purpose)}</span>
           </li>
           <li>
             <strong>Description</strong>
-            <span>{orNotSpecified(request.description)}</span>
+            <span>{orNotSpecified(current.description)}</span>
           </li>
           <li>
             <strong>Proposed period</strong>
             <span>
-              {formatTimestamp(request.proposedStart, "Not recorded")} &ndash;{" "}
-              {formatTimestamp(request.proposedEnd, "Not recorded")}
+              {formatTimestamp(current.proposedStart, "Not recorded")} &ndash;{" "}
+              {formatTimestamp(current.proposedEnd, "Not recorded")}
             </span>
           </li>
           <li>
@@ -623,15 +660,15 @@ export default function CoordinatorRequestDetail({
         <ul>
           <li>
             <strong>Venue</strong>
-            <span>{orNotSpecified(request.venueRequirements)}</span>
+            <span>{orNotSpecified(current.venueRequirements)}</span>
           </li>
           <li>
             <strong>Accessibility</strong>
-            <span>{orNotSpecified(request.accessibilityRequirements)}</span>
+            <span>{orNotSpecified(current.accessibilityRequirements)}</span>
           </li>
           <li>
             <strong>Equipment</strong>
-            <span>{orNotSpecified(request.equipmentRequirements)}</span>
+            <span>{orNotSpecified(current.equipmentRequirements)}</span>
           </li>
         </ul>
       </section>
@@ -972,6 +1009,15 @@ export default function CoordinatorRequestDetail({
           one. Only its coordinator and the Lead may read them, as the server rules. */}
       {(isAssignedCoordinator || isLead) && (
         <DecisionHistory eventRequestId={request.id} view="coordinator" />
+      )}
+
+      {/* SCRUM-387 AC7: who may read it, as the server rules. Keyed on the
+          event's updatedAt, so an edit or a significant change re-reads it. */}
+      {(isAssignedCoordinator || isLead) && (
+        <section className="event-change-history" aria-label="Change history">
+          <h3>Change history</h3>
+          <EventChangeHistory key={current.updatedAt ?? ""} eventRequestId={current.id} />
+        </section>
       )}
 
       {request.status !== "pending_clarification" && (

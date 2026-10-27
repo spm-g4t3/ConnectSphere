@@ -572,6 +572,36 @@ button { cursor: pointer; }
 .event-significant-change__item-detail { color: var(--muted); font-size: 0.88rem; }
 .event-significant-change__tag { background: #eef2f1; border-radius: 999px; color: var(--muted); font-size: 0.75rem; font-style: normal; font-weight: 500; margin-left: 8px; padding: 2px 8px; }
 .event-significant-change__footnote { color: var(--muted); font-size: 0.88rem; margin: 0; }
+
+/* SCRUM-387: the coordinator's direct edit, laid out as the significant change page. */
+.event-details-edit-page { display: grid; gap: 18px; }
+.event-details-edit-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.event-details-edit { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
+.event-details-edit form { display: grid; gap: 16px; }
+.event-details-edit__field { display: grid; gap: 6px; }
+.event-details-edit__field > label { color: var(--muted); display: grid; gap: 7px; }
+.event-details-edit input, .event-details-edit textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
+.event-details-edit textarea { resize: vertical; }
+.event-details-edit [aria-invalid="true"] { border-color: #a43c32; }
+.event-details-edit__field-error { color: #a43c32; font-size: 0.86rem; margin: 0; padding-left: 18px; }
+.event-details-edit__notice { background: #fff7e6; border: 1px solid #f0d9a8; border-radius: 8px; color: var(--ink); margin: 0; padding: 10px 14px; }
+.event-details-edit__hint, .event-details-edit__counter { color: var(--muted); font-size: 0.85rem; margin: 0; }
+.event-details-edit__counter { justify-self: end; }
+.event-details-edit__message { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 10px 12px; }
+.coordinator-request-detail__edit-saved { background: #eef7f3; border-radius: 6px; color: var(--teal-dark); margin: 8px 0; padding: 10px 12px; }
+
+/* SCRUM-387: the change history, on the coordinator's detail and the Organiser's row. */
+.event-change-history { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 10px; margin: 0 0 24px; min-width: 0; padding: 16px 18px; }
+.event-change-history h3 { color: var(--ink); font-size: 0.95rem; margin: 0; }
+.event-change-history__list { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.event-change-history__entry { border-left: 2px solid var(--line); display: grid; gap: 3px; padding: 2px 0 2px 12px; }
+.event-change-history__heading { align-items: baseline; display: flex; flex-wrap: wrap; gap: 8px; }
+.event-change-history__heading strong { color: var(--ink); }
+.event-change-history__source { background: #eef2f1; border-radius: 999px; color: var(--muted); font-size: 0.75rem; padding: 2px 8px; }
+.event-change-history__values, .event-change-history__reason { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.event-change-history__meta { color: var(--muted); font-size: 0.85rem; margin: 0; }
+.event-change-history__state { color: var(--muted); font-size: 0.88rem; margin: 0; }
+.event-change-history__state[role="alert"] { color: #a43c32; }
 .event-significant-change__confirmation label { align-items: flex-start; color: var(--ink); display: flex; gap: 9px; }
 .event-significant-change__confirmation input { flex: 0 0 auto; margin-top: 4px; }
 .dashboard--coordinator .coordinator-request-detail__significant-change { margin: 0 0 8px; }

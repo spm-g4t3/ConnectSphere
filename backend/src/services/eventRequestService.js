@@ -77,6 +77,7 @@ import {
   validateUpdateEventRequest,
   validateSubmitEventRequest,
   validateSignificantEventChange,
+  validateEventDetailsEdit,
 } from '../validation/eventRequestValidation.js';
 // The repository's one uuid check, exported from there precisely so it is not
 // copied (see its docstring). A pure module, so importing it keeps this
@@ -167,6 +168,12 @@ const CLARIFICATION_AMENDABLE_FIELDS = Object.freeze(Object.keys(COLUMN_BY_FIELD
 const SIGNIFICANT_CHANGE_CONFLICTS = new Set([
   'EVENT_STATUS_NOT_ALLOWED',
   'SIGNIFICANT_CHANGE_IMPACT_CHANGED',
+  // SCRUM-387: edit_event_request_details (022) refuses with these, each a 409
+  // whose code the edit form keys on.
+  'EVENT_CONFIRMED',
+  'SIGNIFICANT_CHANGE_REQUIRED',
+  'EVENT_HOLDS_ARRANGEMENTS',
+  'EVENT_CHANGED_SINCE_OPENED',
 ]);
 
 /**
@@ -1756,6 +1763,23 @@ export async function getEventClarificationHistory(id, userId, role, { client } 
 }
 
 /**
+ * Who may read a request's decision and change histories: the Organiser, and
+ * once it is past draft a Lead or the coordinator assigned to it now. Anyone
+ * else gets the same NotFoundError a missing id gets.
+ */
+async function requireHistoryReader(db, id, userId, role) {
+  const request = await getEventRequestById(id, { client: db });
+  const pastDraft = request.status !== STATUS.DRAFT;
+  const mayRead =
+    request.organiserId === userId
+    || (pastDraft && role === ROLE.EVENT_COORDINATOR_LEAD)
+    || (pastDraft && role === ROLE.EVENT_COORDINATOR && request.assignedCoordinatorId === userId);
+  if (!mayRead) {
+    throw new NotFoundError(`Event request ${id} not found`);
+  }
+}
+
+/**
  * SCRUM-355 AC3, AC5: the decisions a request has had that are no longer
  * current, oldest first. A non-empty list is what marks a request as a resubmission.
  *
@@ -1766,15 +1790,7 @@ export async function getEventClarificationHistory(id, userId, role, { client } 
 export async function getEventDecisionHistory(id, userId, role, { client } = {}) {
   requireCallerId(userId, 'userId');
   const db = await resolveClient(client);
-  const request = await getEventRequestById(id, { client: db });
-  const pastDraft = request.status !== STATUS.DRAFT;
-  const mayRead =
-    request.organiserId === userId
-    || (pastDraft && role === ROLE.EVENT_COORDINATOR_LEAD)
-    || (pastDraft && role === ROLE.EVENT_COORDINATOR && request.assignedCoordinatorId === userId);
-  if (!mayRead) {
-    throw new NotFoundError(`Event request ${id} not found`);
-  }
+  await requireHistoryReader(db, id, userId, role);
 
   const { data: entries, error } = await db
     .from('event_request_decision_history')
@@ -2809,4 +2825,86 @@ export async function submitForSafetyReview({
   });
   if (error) throw translateError(error);
   return toEventRequest(data);
+}
+
+
+/**
+ * The assigned coordinator edits an event's information (SCRUM-387).
+ *
+ * The body is validated with SCRUM-10's rules (AC6); everything else, who may
+ * edit, in which status, whether a value changed since the form opened, the
+ * history and the Organiser's notice, is edit_event_request_details's (022),
+ * under the row lock. There is no coordinator pre-check here: the route's gate
+ * and the function decide, as SCRUM-539 settled.
+ *
+ * @param {string} id
+ * @param {{changes: object, expected: object, reason: string}} body
+ * @param {string} coordinatorId  from the token
+ * @param {{client?: object}} [options]
+ * @returns {Promise<{event: object, changedFields: string[]}>}
+ */
+export async function editEventRequestDetails(id, body, coordinatorId, { client } = {}) {
+  requireCallerId(coordinatorId, 'coordinatorId');
+  // A 400 here, not Postgres's 22P02 from the uuid cast, which is a 500.
+  if (!isPlausibleId(id)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+  const { changes, expected, reason } = validateEventDetailsEdit(body);
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('edit_event_request_details', {
+    p_event_request_id: id,
+    p_user_id: coordinatorId,
+    p_changes: changes,
+    p_expected: expected,
+    p_reason: reason,
+  });
+
+  if (error) throw translateError(error);
+  return { event: toEventRequest(data.event), changedFields: data.changedFields };
+}
+
+/**
+ * An event's field-level change history, newest first (SCRUM-387 AC7): direct
+ * edits and significant changes alike, each row with its source.
+ *
+ * The read rule is getEventDecisionHistory's (D7), shared through requireHistoryReader.
+ *
+ * @param {string} id
+ * @param {string} userId  from the token
+ * @param {string} role
+ * @param {{client?: object}} [options]
+ */
+export async function getEventChangeHistory(id, userId, role, { client } = {}) {
+  requireCallerId(userId, 'userId');
+  // As the edit: a malformed id would otherwise reach getEventRequestById's cast.
+  if (!isPlausibleId(id)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+  const db = await resolveClient(client);
+  await requireHistoryReader(db, id, userId, role);
+
+  // One save's rows share changed_at, and a uuid tie-break is random, so they
+  // are ordered by field name within it; id only breaks a tie that is left.
+  const { data: entries, error } = await db
+    .from('event_change_history')
+    .select('id, field_name, old_value, new_value, reason, source, changed_by, changed_at')
+    .eq('event_request_id', id)
+    .order('changed_at', { ascending: false })
+    .order('field_name', { ascending: true })
+    .order('id', { ascending: true });
+  if (error) throw translateError(error);
+  if (!entries?.length) return [];
+
+  const nameOf = await readNames(db, entries.map((entry) => entry.changed_by));
+  return entries.map((entry) => ({
+    id: entry.id,
+    field: entry.field_name,
+    oldValue: entry.old_value ?? null,
+    newValue: entry.new_value ?? null,
+    reason: entry.reason,
+    source: entry.source,
+    changedByName: nameOf(entry.changed_by),
+    changedAt: entry.changed_at,
+  }));
 }

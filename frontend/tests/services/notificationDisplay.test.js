@@ -1153,6 +1153,7 @@ const FIXTURES = {
     reason: "Updated schedule",
   },
   event_significant_change: { eventName: "Tech Talk", reason: "Updated schedule" },
+  event_details_changed: { eventName: "Tech Talk", reason: "Typo in the name", changedFields: ["eventName"] },
   event_significant_change_attendee: {
     eventName: "Tech Talk",
     startsAt: PAYLOAD.startsAt,
