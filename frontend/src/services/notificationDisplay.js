@@ -62,7 +62,7 @@
 //     replacement* fields are null unless replaced
 //   booking_released (089, SCRUM-492): { eventRequestId, eventName, venueId,
 //     venueName, startsAt, endsAt, releasedBy, releasedByName, reason }
-//   booking_request_conflict_cleared (089): { eventRequestId, eventName,
+//   booking_request_conflict_cleared (089, 038): { eventRequestId, eventName,
 //     venueId, venueName, startsAt, endsAt, releasedBookingId, releasedEventName }
 //   event_significant_change (096): { eventRequestId, eventName, reason,
 //     changedFields, statusBefore, statusAfter }
@@ -440,15 +440,16 @@ const DESCRIBERS = {
     };
   },
 
-  // SCRUM-492 (AC4). The reverse of booking_request_conflicting: the booking
-  // this request clashed with was released, and nothing else blocks it.
+  // SCRUM-492 (AC4), SCRUM-571. The reverse of booking_request_conflicting: the
+  // booking this request clashed with stopped occupying the venue (released,
+  // cancelled or replaced), and nothing else blocks it.
   booking_request_conflict_cleared(payload, { eventName, venueName }) {
     const releasedEventName = payload.releasedEventName || "Another event";
 
     return {
       headline: `Your request for ${venueName} for ${eventName} no longer clashes`,
       detail:
-        `${releasedEventName} released the venue, so your request for ` +
+        `${releasedEventName} no longer holds the venue, so your request for ` +
         `${formatRange(payload.startsAt, payload.endsAt)} is pending again and waits for Venue Staff.`,
     };
   },
