@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import {
   runVenueHoldExpiryOnce,
+  runVenueHoldRemindersOnce,
   startVenueHoldExpiryScheduler,
   DEFAULT_INTERVAL_MS,
 } from '../../src/jobs/venueHoldExpiryScheduler.js';
@@ -25,6 +26,9 @@ const clientAnswering = (...results) => {
   for (const result of results) rpc.mockResolvedValueOnce(result);
   return { rpc };
 };
+// Each tick also calls process_venue_hold_reminders, so count the expiry calls alone.
+const expiryCalls = (client) =>
+  client.rpc.mock.calls.filter(([name]) => name === 'process_venue_hold_expiry').length;
 
 
 describe('runVenueHoldExpiryOnce', () => {
@@ -87,6 +91,62 @@ describe('runVenueHoldExpiryOnce', () => {
 });
 
 
+describe('runVenueHoldRemindersOnce', () => {
+  it('SCRUM173_AC11_asks_for_reminders_a_day_ahead_by_default_and_logs_what_it_wrote', async () => {
+    const client = clientAnswering({ data: 3, error: null });
+    const logger = fakeLogger();
+
+    expect(await runVenueHoldRemindersOnce({ client, logger })).toBe(3);
+    expect(client.rpc).toHaveBeenCalledWith('process_venue_hold_reminders', { p_lead_time: '24 hours' });
+    expect(logger.info).toHaveBeenCalledWith('Venue hold reminders: 3 hold(s) expiring soon');
+  });
+
+  it('SCRUM173_AC11_passes_a_configured_lead_time', async () => {
+    const client = clientAnswering({ data: 0, error: null });
+
+    await runVenueHoldRemindersOnce({ leadHours: 6, client, logger: fakeLogger() });
+    expect(client.rpc).toHaveBeenCalledWith('process_venue_hold_reminders', { p_lead_time: '6 hours' });
+  });
+
+  it('stays quiet when nothing was reminded', async () => {
+    const logger = fakeLogger();
+    expect(await runVenueHoldRemindersOnce({ client: clientAnswering({ data: 0, error: null }), logger })).toBe(0);
+    expect(logger.info).not.toHaveBeenCalled();
+  });
+
+  it('reads a non-number answer as nothing reminded', async () => {
+    const logger = fakeLogger();
+    expect(await runVenueHoldRemindersOnce({ client: clientAnswering({ data: null, error: null }), logger })).toBe(0);
+  });
+
+  it('logs a database error and returns null, never throwing', async () => {
+    const logger = fakeLogger();
+    const client = clientAnswering({ data: null, error: { message: 'down' } });
+
+    expect(await runVenueHoldRemindersOnce({ client, logger })).toBeNull();
+    expect(logger.error).toHaveBeenCalledWith('Venue hold reminders failed:', 'down');
+  });
+
+  it('logs a thrown error without a message as itself', async () => {
+    const logger = fakeLogger();
+    const client = { rpc: vi.fn().mockRejectedValue('plain') };
+
+    expect(await runVenueHoldRemindersOnce({ client, logger })).toBeNull();
+    expect(logger.error).toHaveBeenCalledWith('Venue hold reminders failed:', 'plain');
+  });
+
+  it('defaults to the console logger', async () => {
+    const spy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      await runVenueHoldRemindersOnce({ client: clientAnswering({ data: 1, error: null }) });
+      expect(spy).toHaveBeenCalledWith('Venue hold reminders: 1 hold(s) expiring soon');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+
 describe('startVenueHoldExpiryScheduler', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -105,14 +165,14 @@ describe('startVenueHoldExpiryScheduler', () => {
     const stop = startVenueHoldExpiryScheduler({ intervalMs: 1000, client, logger: fakeLogger() });
 
     await vi.advanceTimersByTimeAsync(0);
-    expect(client.rpc).toHaveBeenCalledTimes(1);
+    expect(expiryCalls(client)).toBe(1);
 
     await vi.advanceTimersByTimeAsync(3000);
-    expect(client.rpc).toHaveBeenCalledTimes(4);
+    expect(expiryCalls(client)).toBe(4);
 
     stop();
     await vi.advanceTimersByTimeAsync(5000);
-    expect(client.rpc).toHaveBeenCalledTimes(4);
+    expect(expiryCalls(client)).toBe(4);
   });
 
   it('never runs two calls at once', async () => {
@@ -130,7 +190,7 @@ describe('startVenueHoldExpiryScheduler', () => {
 
     release();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(client.rpc).toHaveBeenCalledTimes(2);
+    expect(expiryCalls(client)).toBe(2);
     stop();
   });
 
@@ -147,6 +207,29 @@ describe('startVenueHoldExpiryScheduler', () => {
 
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(logger.info).toHaveBeenCalledWith('Venue hold expiry: 1 hold(s) expired');
+    stop();
+  });
+
+  it('SCRUM173_AC11_passes_the_configured_reminder_lead_time', async () => {
+    const client = { rpc: vi.fn().mockResolvedValue({ data: 0, error: null }) };
+    const stop = startVenueHoldExpiryScheduler({ reminderLeadHours: 2, client, logger: fakeLogger() });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.rpc).toHaveBeenCalledWith('process_venue_hold_reminders', { p_lead_time: '2 hours' });
+    stop();
+  });
+
+  it('SCRUM173_AC11_each_tick_expires_lapsed_holds_then_sends_reminders', async () => {
+    const client = { rpc: vi.fn().mockResolvedValue({ data: 0, error: null }) };
+    const stop = startVenueHoldExpiryScheduler({ intervalMs: 1000, client, logger: fakeLogger() });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(client.rpc.mock.calls.map(([name]) => name)).toEqual([
+      'process_venue_hold_expiry',
+      'process_venue_hold_reminders',
+      'process_venue_hold_expiry',
+      'process_venue_hold_reminders',
+    ]);
     stop();
   });
 
@@ -168,7 +251,9 @@ describe('startVenueHoldExpiryScheduler', () => {
       const stop = startVenueHoldExpiryScheduler();
       expect(spy).toHaveBeenCalledWith(expect.any(Function), DEFAULT_INTERVAL_MS);
       expect(unref).toHaveBeenCalled();
-      await vi.waitFor(() => expect(client.rpc).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(expiryCalls(client)).toBe(1));
+      await vi.waitFor(() =>
+        expect(client.rpc).toHaveBeenCalledWith('process_venue_hold_reminders', { p_lead_time: '24 hours' }));
       stop();
     } finally {
       spy.mockRestore();

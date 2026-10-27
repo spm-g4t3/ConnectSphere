@@ -21,7 +21,8 @@
  *  - The interval is unref'd, so it never keeps Node alive on its own.
  *
  * app.js starts it unless NODE_ENV is 'test' or VENUE_HOLD_EXPIRY_JOB is
- * 'off' (useful for demonstrating AC7 without the job).
+ * 'off' (useful for demonstrating AC7 without the job), and sets the reminder
+ * lead time from VENUE_HOLD_REMINDER_HOURS.
  *
  * Takes an optional client, resolved lazily, so tests never need credentials.
  */
@@ -30,6 +31,9 @@ import { resolveClient } from '../config/resolveClient.js';
 
 /** Once a minute: the job is cheap, and the notice is not urgent to the second. */
 export const DEFAULT_INTERVAL_MS = 60_000;
+
+/** Warn a coordinator a day before a hold lapses unless configured otherwise. */
+export const DEFAULT_REMINDER_LEAD_HOURS = 24;
 
 /**
  * Run process_venue_hold_expiry() once.
@@ -58,17 +62,52 @@ export async function runVenueHoldExpiryOnce({ client, logger = console } = {}) 
 }
 
 /**
+ * Run process_venue_hold_reminders() once.
+ *
+ * @param {object} [options]
+ * @param {number} [options.leadHours]  defaults to DEFAULT_REMINDER_LEAD_HOURS
+ * @param {object} [options.client]
+ * @param {object} [options.logger]  console by default
+ * @returns {Promise<number|null>} how many reminders were written, or null when
+ *          the call failed (it is logged, never thrown)
+ */
+export async function runVenueHoldRemindersOnce({
+  leadHours = DEFAULT_REMINDER_LEAD_HOURS,
+  client,
+  logger = console,
+} = {}) {
+  try {
+    const db = await resolveClient(client);
+    const { data, error } = await db.rpc('process_venue_hold_reminders', {
+      p_lead_time: `${leadHours} hours`,
+    });
+    if (error) throw error;
+
+    const reminded = typeof data === 'number' ? data : 0;
+    if (reminded > 0) {
+      logger.info(`Venue hold reminders: ${reminded} hold(s) expiring soon`);
+    }
+    return reminded;
+  } catch (err) {
+    logger.error('Venue hold reminders failed:', err?.message ?? err);
+    return null;
+  }
+}
+
+/**
  * Start the timer. Runs once straight away, so holds that lapsed while the
  * API was down are recorded on start-up, then every intervalMs.
  *
  * @param {object} [options]
  * @param {number} [options.intervalMs]  defaults to DEFAULT_INTERVAL_MS
+ * @param {number} [options.reminderLeadHours]  defaults to DEFAULT_REMINDER_LEAD_HOURS
  * @param {object} [options.client]
  * @param {object} [options.logger]
  * @returns {() => void} stop: clears the timer
  */
 export function startVenueHoldExpiryScheduler({
   intervalMs = DEFAULT_INTERVAL_MS,
+  reminderLeadHours = DEFAULT_REMINDER_LEAD_HOURS,
   client,
   logger = console,
 } = {}) {
@@ -79,6 +118,7 @@ export function startVenueHoldExpiryScheduler({
     running = true;
     try {
       await runVenueHoldExpiryOnce({ client, logger });
+      await runVenueHoldRemindersOnce({ leadHours: reminderLeadHours, client, logger });
     } finally {
       running = false;
     }
