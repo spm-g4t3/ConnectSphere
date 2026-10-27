@@ -25,6 +25,7 @@ import ChangeRequestStatusList from "./ChangeRequestStatusList";
 import AssignmentHistory from "./AssignmentHistory";
 import DecisionOutcome from "./DecisionOutcome";
 import DecisionHistory from "./DecisionHistory";
+import EventChangeHistory from "./EventChangeHistory";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import ClarificationReplyForm from "./ClarificationReplyForm";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
@@ -69,6 +70,26 @@ function CoordinatorDetails({ eventRequestId, currentCoordinatorId }) {
       {opened && (
         <AssignmentHistory eventRequestId={eventRequestId} view="organiser" currentCoordinatorId={currentCoordinatorId} />
       )}
+    </details>
+  );
+}
+
+/**
+ * SCRUM-387 AC7: what the coordinator changed, and why. Collapsed, so the list
+ * makes no read per row. Unlike CoordinatorDetails it is mounted only while
+ * open: a coordinator may edit while the Organiser's list is on screen, so each
+ * opening reads the history fresh.
+ */
+function ChangeHistoryDetails({ eventRequestId }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <details
+      className="my-event-requests__details"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>Change history</summary>
+      {open && <EventChangeHistory eventRequestId={eventRequestId} />}
     </details>
   );
 }
@@ -370,6 +391,11 @@ export default function MyEventRequests() {
                 <div className="my-event-requests__decision">
                   <strong>Decision</strong>
                   <DecisionOutcome request={req} view="organiser" />
+                  {/* SCRUM-347 AC5: a rejected event's earlier decisions. Not their
+                      reason: an older rejection's would read as the current one. */}
+                  {req.status === "rejected" && (
+                    <DecisionHistory eventRequestId={req.id} view="organiser" showReason={false} />
+                  )}
                 </div>
               )}
 
@@ -414,6 +440,7 @@ export default function MyEventRequests() {
               {req.status !== "draft" && (
                 <CoordinatorDetails eventRequestId={req.id} currentCoordinatorId={req.assignedCoordinatorId ?? null} />
               )}
+              {req.status !== "draft" && <ChangeHistoryDetails eventRequestId={req.id} />}
               {req.status !== "draft" && (
                 <ClarificationHistoryDialog
                   eventRequestId={req.id}
@@ -454,9 +481,11 @@ export default function MyEventRequests() {
                   </button>
                 )}
 
+                {/* SCRUM-347: a rejected event is revised and resubmitted instead. */}
                 {req.status !== "draft" &&
                   req.status !== "pending_clarification" &&
-                  req.status !== "cancelled" && (
+                  req.status !== "cancelled" &&
+                  req.status !== "rejected" && (
                   <button
                     onClick={() => setActivePanel({ mode: "change-request", request: req })}
                   >

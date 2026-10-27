@@ -33,6 +33,10 @@
 //   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
 //     cancelledAt }; audience is organiser, venue_staff,
 //     technical_support_staff or safety_officer
+//   event_rejected (024, SCRUM-347): { audience, eventName }, plus reason and
+//     rejectedAt for the organiser, outcome (withdrawn or cancelled, 027),
+//     venueId, venueName, startsAt and endsAt for venue_staff, and
+//     equipmentRequestId for technical_support_staff
 //   event_submitted_for_safety_review (064, SCRUM-489): { eventRequestId,
 //     eventName, coordinatorId, coordinatorName, startsAt, submittedAt }
 //   booking_request_approved and booking_request_rejected (066, SCRUM-258):
@@ -71,6 +75,9 @@
 //     changedFields, statusBefore, statusAfter }
 //   event_significant_change_attendee (096): { eventRequestId, eventName,
 //     startsAt, endsAt, reason }
+//   event_details_changed (022, SCRUM-387): { eventRequestId, eventName,
+//     reason, changedFields, status }; changedFields are the camelCase names
+//     in eventDetailFields.js, and eventName is the name after the edit
 //   booking_flagged_event_change (096): { eventName, venueName, startsAt,
 //     endsAt, reason }
 //   booking_request_event_change (096): { eventRequestId, eventName,
@@ -89,6 +96,7 @@ import { formatRange, formatTimestamp } from "./displayFormat";
 import { reasonLabel } from "./venueBlockReasons";
 import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
 import { formatVenuePeriod, formatVenueTimestamp } from "./datetimeFormat";
+import { detailFieldList } from "./eventDetailFields";
 
 const UNNAMED_EVENT = "Unnamed event";
 const UNKNOWN_VENUE = "Unknown venue";
@@ -560,6 +568,37 @@ const DESCRIBERS = {
     return undefined;
   },
 
+  // SCRUM-347. Venue Staff get one per released booking, so theirs names the venue.
+  event_rejected(payload, { eventName, venueName }) {
+    if (payload.audience === "organiser") {
+      const rejectedAt = payload.rejectedAt ? ` Rejected ${formatTimestamp(payload.rejectedAt)}.` : "";
+      return {
+        headline: `${eventName} was rejected`,
+        detail: `Reason: ${asSentence(payload.reason || NO_REASON)}${rejectedAt} You can revise and resubmit it.`,
+      };
+    }
+    // A withdrawn request never held the venue, so it is not called a release (027).
+    if (payload.audience === "venue_staff" && payload.outcome === "withdrawn") {
+      return {
+        headline: `The request for ${venueName} for ${eventName} was withdrawn`,
+        detail: `The event was rejected, so its request for ${formatRange(payload.startsAt, payload.endsAt)} no longer needs a decision.`,
+      };
+    }
+    if (payload.audience === "venue_staff") {
+      return {
+        headline: `${venueName} was released for ${eventName}`,
+        detail: `The event was rejected, so its booking for ${formatRange(payload.startsAt, payload.endsAt)} no longer holds the venue.`,
+      };
+    }
+    if (payload.audience === "technical_support_staff") {
+      return {
+        headline: `The equipment request for ${eventName} was cancelled`,
+        detail: "The event was rejected, so its equipment request was cancelled and its reservations released.",
+      };
+    }
+    return undefined;
+  },
+
   // SCRUM-489 (AC8). Sent to every Safety Officer when a coordinator submits
   // an Approved event; the start date says how soon the check is needed.
   event_submitted_for_safety_review(payload, { eventName }) {
@@ -707,6 +746,16 @@ const DESCRIBERS = {
     return {
       headline: `${eventName} has a significant change`,
       detail: `The event was updated by its Coordinator. Reason: ${payload.reason || NO_REASON}.`,
+    };
+  },
+
+  // SCRUM-387 (AC8). One per save, to the Organiser, naming every field it changed.
+  event_details_changed(payload, { eventName }) {
+    const fields = Array.isArray(payload.changedFields) ? payload.changedFields : [];
+    const changed = fields.length > 0 ? `Changed: ${detailFieldList(fields)}. ` : "";
+    return {
+      headline: `Your Coordinator updated ${eventName}`,
+      detail: `${changed}Reason: ${payload.reason || NO_REASON}.`,
     };
   },
 

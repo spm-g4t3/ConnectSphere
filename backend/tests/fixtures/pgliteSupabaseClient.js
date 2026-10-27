@@ -35,15 +35,30 @@ export function pgliteSupabaseClient(db, { columns = (cols) => cols } = {}) {
     from(table) {
       let selected = '*';
       const where = [];
+      const orderBy = [];
+      // `= $n` for eq, `= any($n)` for in, so a list is one parameter.
+      const query = () => {
+        const clause = where.map(([column, , op], i) => `${column} ${op === 'in' ? `= any($${i + 1})` : `= $${i + 1}`}`).join(' and ');
+        const order = orderBy.map(([column, ascending]) => `${column} ${ascending ? 'asc' : 'desc'}`).join(', ');
+        return {
+          sql: `select ${selected} from ${table}${clause ? ` where ${clause}` : ''}${order ? ` order by ${order}` : ''}`,
+          params: where.map(([, value]) => value),
+        };
+      };
       const chain = {
         select(cols = '*') { selected = columns(cols, table); return chain; },
-        eq(column, value) { where.push([column, value]); return chain; },
+        eq(column, value) { where.push([column, value, 'eq']); return chain; },
+        in(column, values) { where.push([column, values, 'in']); return chain; },
+        order(column, { ascending = true } = {}) { orderBy.push([column, ascending]); return chain; },
         maybeSingle() {
-          const clause = where.map(([column], i) => `${column} = $${i + 1}`).join(' and ');
-          const sql = `select ${selected} from ${table}${clause ? ` where ${clause}` : ''}`;
-          return answer(async () => (await db.query(sql, where.map(([, value]) => value))).rows[0] ?? null);
+          const { sql, params } = query();
+          return answer(async () => (await db.query(sql, params)).rows[0] ?? null);
         },
-        then() { throw new Error(`pgliteSupabaseClient: a list read on ${table} is not supported`); },
+        // A list read, as supabase-js resolves an awaited query.
+        then(resolve, reject) {
+          const { sql, params } = query();
+          return answer(async () => (await db.query(sql, params)).rows).then(resolve, reject);
+        },
       };
       return chain;
     },

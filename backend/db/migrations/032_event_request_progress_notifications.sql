@@ -18,7 +18,7 @@
 --
 -- Re-runnable.
 
--- The whole list, restated from 016_overnight_operating_hours.sql with the new types.
+-- The whole list, restated from 024_reject_approved_event.sql with the new types.
 alter table notifications drop constraint if exists notifications_type_known;
 alter table notifications
   add constraint notifications_type_known check (type = any (array[
@@ -58,6 +58,8 @@ alter table notifications
     'booking_flagged_event_change',
     'booking_request_event_change',
     'booking_flagged_hours_change',
+    'event_details_changed',
+    'event_rejected',
     'event_request_approved',
     'event_request_rejected',
     'venue_hold_placed',
