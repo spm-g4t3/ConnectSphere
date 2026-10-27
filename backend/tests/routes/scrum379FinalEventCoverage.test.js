@@ -62,6 +62,7 @@ const GUARDED = [
   'eventRequests POST /:id/cancel',
   'eventRequests PATCH /:id/details',
   'eventRequests POST /:id/complete',
+  'eventRequests POST /:id/rejection',
   'eventRequests POST /:id/significant-change',
   'eventRequests PATCH /:id/clarification-response',
   'eventRequests POST /:id/change-requests',
@@ -118,24 +119,24 @@ const routes = await collectRoutes();
 const writes = routes.filter((r) => !READ_METHODS.has(r.method));
 
 describe('SCRUM-382: every route that changes an event carries the guard', () => {
-  it('SCRUM382_AC3_the_walk_finds_the_routers_and_their_routes', () => {
+  it('SCRUM379_AC3_the_walk_finds_the_routers_and_their_routes', () => {
     expect(new Set(routes.map((r) => r.file)).size).toBeGreaterThanOrEqual(16);
     expect(writes.length).toBeGreaterThanOrEqual(60);
     expect(routes.some((r) => r.key === 'eventRequests POST /:id/complete')).toBe(true);
   });
 
-  it('SCRUM382_AC3_no_mutating_route_is_neither_guarded_nor_exempt', () => {
+  it('SCRUM379_AC3_no_mutating_route_is_neither_guarded_nor_exempt', () => {
     const undecided = writes.filter((r) => !r.guarded && !(r.key in EXEMPT)).map((r) => r.key);
     expect(undecided, `Guard these in the router or add them to EXEMPT with a reason: ${undecided.join(', ')}`).toEqual([]);
   });
 
-  it('SCRUM382_AC3_the_guarded_routes_are_exactly_the_documented_list', () => {
+  it('SCRUM379_AC3_the_guarded_routes_are_exactly_the_documented_list', () => {
     const guarded = writes.filter((r) => r.guarded).map((r) => r.key);
     expect([...guarded].sort()).toEqual([...GUARDED].sort());
-    expect(guarded).toHaveLength(43);
+    expect(guarded).toHaveLength(44);
   });
 
-  it('SCRUM382_AC3_an_exempt_route_still_exists_and_is_not_also_guarded', () => {
+  it('SCRUM379_AC3_an_exempt_route_still_exists_and_is_not_also_guarded', () => {
     const byKey = new Map(writes.map((r) => [r.key, r]));
     const stale = Object.keys(EXEMPT).filter((key) => !byKey.has(key));
     expect(stale, `EXEMPT lists routes that no longer exist: ${stale.join(', ')}`).toEqual([]);
@@ -143,23 +144,23 @@ describe('SCRUM-382: every route that changes an event carries the guard', () =>
     expect(both, `Remove from EXEMPT, these are guarded: ${both.join(', ')}`).toEqual([]);
   });
 
-  it('SCRUM382_AC3_every_exemption_has_a_reason', () => {
+  it('SCRUM379_AC3_every_exemption_has_a_reason', () => {
     for (const [key, reason] of Object.entries(EXEMPT)) {
       expect(reason.trim().length, key).toBeGreaterThan(10);
     }
   });
 
-  it('SCRUM382_AC5_reads_are_never_guarded_so_a_final_event_stays_viewable', () => {
+  it('SCRUM379_AC5_reads_are_never_guarded_so_a_final_event_stays_viewable', () => {
     const guardedReads = routes.filter((r) => READ_METHODS.has(r.method) && r.guarded).map((r) => r.key);
     expect(guardedReads).toEqual([]);
   });
 
-  it('SCRUM382_AC3_the_routes_are_unique_so_no_key_hides_another', () => {
+  it('SCRUM379_AC3_the_routes_are_unique_so_no_key_hides_another', () => {
     const keys = routes.map((r) => r.key);
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it('SCRUM382_AC3_nothing_changes_an_event_without_being_listed_in_one_of_the_two_places', () => {
+  it('SCRUM379_AC3_nothing_changes_an_event_without_being_listed_in_one_of_the_two_places', () => {
     const accounted = new Set([...GUARDED, ...Object.keys(EXEMPT)]);
     const unlisted = writes.map((r) => r.key).filter((key) => !accounted.has(key));
     expect(unlisted).toEqual([]);

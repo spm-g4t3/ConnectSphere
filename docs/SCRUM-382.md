@@ -26,9 +26,9 @@ router.post('/:id/clarification', coordinatorOnly, guardEvent, async (req, res) 
 
 The guard reads the status and then the handler acts, so an event completed in the gap between the two is not caught by the guard. What catches it is each service and database function behind the route, which still apply their own status rules under a row lock. I did not audit every one of those functions for what it does with a Completed or Cancelled event; the guard is the first line, not a proof that none of them can be reached.
 
-## The 43 endpoints that carry the guard
+## The 44 endpoints that carry the guard
 
-Event requests (`/api/event-requests`), 18:
+Event requests (`/api/event-requests`), 19:
 
 - `PATCH /:id` (organiser edits a draft)
 - `POST /:id/submit`
@@ -45,6 +45,7 @@ Event requests (`/api/event-requests`), 18:
 - `POST /:id/cancel`
 - `PATCH /:id/details`
 - `POST /:id/complete`
+- `POST /:id/rejection` (added when SCRUM-347 landed)
 - `POST /:id/significant-change`
 - `POST /:id/change-requests`
 - `POST /change-requests/:changeRequestId/decision` (event found through the change request)
@@ -98,7 +99,7 @@ Safety review, 1:
 
 ## Mutating endpoints that are deliberately not guarded
 
-Each is listed with its reason in `tests/routes/scrum382FinalEventCoverage.test.js`:
+Each is listed with its reason in `tests/routes/scrum379FinalEventCoverage.test.js`:
 
 - sign in and sign out;
 - `POST /api/event-requests` (creates a new request, so there is no event to be final);
@@ -109,16 +110,16 @@ Each is listed with its reason in `tests/routes/scrum382FinalEventCoverage.test.
 
 ## On-site assignments
 
-AC3 lists on-site assignment changes. No on-site assignment endpoint exists on `dev` yet. When it is built, its mutating routes will fail `scrum382FinalEventCoverage.test.js` until they carry the guard (or are exempted with a reason), so the rule cannot be missed.
+AC3 lists on-site assignment changes. No on-site assignment endpoint exists on `dev` yet. When it is built, its mutating routes will fail `scrum379FinalEventCoverage.test.js` until they carry the guard (or are exempted with a reason), so the rule cannot be missed.
 
 ## For anyone adding a mutating route
 
-`tests/routes/scrum382FinalEventCoverage.test.js` walks every router in `src/routes`. A new `POST`, `PUT`, `PATCH` or `DELETE` fails it until it either carries the guard or is added to the exempt list with a reason. To guard a route:
+`tests/routes/scrum379FinalEventCoverage.test.js` walks every router in `src/routes`. A new `POST`, `PUT`, `PATCH` or `DELETE` fails it until it either carries the guard or is added to the exempt list with a reason. To guard a route:
 
 1. Take `finalEventGuard = noopFinalEventGuard` in the router factory (every router already does).
 2. Build the guard once: `const guardEvent = finalEventGuard(eventIdFromParam('id'));`. Use `eventIdFromBody('eventRequestId')` when the event is in the body, or `eventIdFromRecord('bookings', 'id')` when the route names a record that carries `event_request_id`.
 3. Put it after the role check on the route.
-4. Add the route to the list in the coverage test and to `ROUTES` in `tests/routes/scrum382FinalEventRoutes.test.js`.
+4. Add the route to the list in the coverage test and to `ROUTES` in `tests/routes/scrum379FinalEventRoutes.test.js`.
 
 ## What the screens (SCRUM-384) need
 
@@ -126,7 +127,7 @@ The refusal reaches the browser as `409` with `code: "EVENT_FINAL"` and the sent
 
 ## Tests
 
-- `tests/domain/scrum382FinalEvent.test.js`: the shared check, over every status and over non-status values.
-- `tests/middleware/scrum382FinalEventGuard.test.js`: the guard on the real schema, all 11 statuses, and a booking, a registration and a change request attached to completed, cancelled and live events; unusable ids; failed reads; nothing cached.
-- `tests/routes/scrum382FinalEventRoutes.test.js`: each of the 43 routes with a completed, a cancelled and a live event; the wrong role (403); signed out (401); an event that does not exist; a router with no guard.
-- `tests/routes/scrum382FinalEventCoverage.test.js`: every mutating route is guarded or exempt, and the guarded list matches the one above.
+- `tests/domain/scrum379FinalEvent.test.js`: the shared check, over every status and over non-status values.
+- `tests/middleware/scrum379FinalEventGuard.test.js`: the guard on the real schema, all 11 statuses, and a booking, a registration and a change request attached to completed, cancelled and live events; unusable ids; failed reads; nothing cached.
+- `tests/routes/scrum379FinalEventRoutes.test.js`: each of the 44 routes with a completed, a cancelled and a live event; the wrong role (403); signed out (401); an event that does not exist; a router with no guard.
+- `tests/routes/scrum379FinalEventCoverage.test.js`: every mutating route is guarded or exempt, and the guarded list matches the one above.

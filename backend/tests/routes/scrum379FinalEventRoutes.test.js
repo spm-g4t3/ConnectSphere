@@ -132,6 +132,7 @@ const ROUTES = [
   ['eventRequests', 'post', '/:id/cancel', C, true, 'event'],
   ['eventRequests', 'patch', '/:id/details', C, true, 'event'],
   ['eventRequests', 'post', '/:id/complete', C, true, 'event'],
+  ['eventRequests', 'post', '/:id/rejection', C, true, 'event'],
   ['eventRequests', 'post', '/:id/significant-change', C, true, 'event'],
   ['eventRequests', 'patch', '/:id/clarification-response', O, false, 'event'],
   ['eventRequests', 'post', '/:id/change-requests', O, false, 'event'],
@@ -196,14 +197,14 @@ const send = (routerKey, method, url, body, options) => {
 };
 
 describe('SCRUM-382: every listed endpoint refuses a final event', () => {
-  it('SCRUM382_AC3_the_table_below_lists_43_endpoints', () => {
-    expect(ROUTES).toHaveLength(43);
-    expect(new Set(ROUTES.map(([r, m, p]) => `${r} ${m} ${p}`)).size).toBe(43);
+  it('SCRUM379_AC3_the_table_below_lists_44_endpoints', () => {
+    expect(ROUTES).toHaveLength(44);
+    expect(new Set(ROUTES.map(([r, m, p]) => `${r} ${m} ${p}`)).size).toBe(44);
   });
 
   describe.each(['completed', 'cancelled'])('a %s event', (status) => {
     it.each(ROUTES.map((route) => [`${route[0]} ${route[1].toUpperCase()} ${route[2]}`, route]))(
-      'SCRUM382_AC3_%s_is_refused_with_409_and_never_reaches_the_service',
+      'SCRUM379_AC3_%s_is_refused_with_409_and_never_reaches_the_service',
       async (_name, route) => {
         const [routerKey, method, , role] = route;
         const client = worldClient();
@@ -225,7 +226,7 @@ describe('SCRUM-382: every listed endpoint refuses a final event', () => {
 
   describe('a live (approved) event', () => {
     it.each(ROUTES.map((route) => [`${route[0]} ${route[1].toUpperCase()} ${route[2]}`, route]))(
-      'SCRUM382_AC3_%s_is_not_stopped_by_the_guard',
+      'SCRUM379_AC3_%s_is_not_stopped_by_the_guard',
       async (_name, route) => {
         const [routerKey, method, , role] = route;
         const client = worldClient();
@@ -242,13 +243,13 @@ describe('SCRUM-382: every listed endpoint refuses a final event', () => {
   describe('the role check still comes first', () => {
     const gated = ROUTES.filter((route) => route[4]);
 
-    it('SCRUM382_AC3_the_table_has_gated_and_ungated_routes', () => {
+    it('SCRUM379_AC3_the_table_has_gated_and_ungated_routes', () => {
       expect(gated.length).toBeGreaterThan(30);
       expect(ROUTES.length - gated.length).toBe(4);
     });
 
     it.each(gated.map((route) => [`${route[0]} ${route[1].toUpperCase()} ${route[2]}`, route]))(
-      'SCRUM382_AC3_%s_answers_403_to_the_wrong_role_and_learns_nothing_about_the_event',
+      'SCRUM379_AC3_%s_answers_403_to_the_wrong_role_and_learns_nothing_about_the_event',
       async (_name, route) => {
         const [routerKey, method, , role] = route;
         const client = worldClient();
@@ -265,7 +266,7 @@ describe('SCRUM-382: every listed endpoint refuses a final event', () => {
 
   describe('a caller who is not signed in', () => {
     it.each(ROUTES.map((route) => [`${route[0]} ${route[1].toUpperCase()} ${route[2]}`, route]))(
-      'SCRUM382_AC3_%s_answers_401_before_anything_is_read',
+      'SCRUM379_AC3_%s_answers_401_before_anything_is_read',
       async (_name, route) => {
         const [routerKey, method] = route;
         const client = worldClient();
@@ -285,7 +286,7 @@ describe('SCRUM-382: every listed endpoint refuses a final event', () => {
       ['eventEquipment', 'post', '/lines', C, 'event'],
       ['bookingRequests', 'post', '/:id/approve', V, 'booking'],
       ['attendeeEvents', 'post', '/registrations/:registrationId/withdrawal', A, 'registration'],
-    ])('SCRUM382_AC3_%s_%s_%s_is_left_to_the_handler_to_answer', async (routerKey, method, path, role, kind) => {
+    ])('SCRUM379_AC3_%s_%s_%s_is_left_to_the_handler_to_answer', async (routerKey, method, path, role, kind) => {
       const client = worldClient();
       const route = [routerKey, method, path, role, true, kind];
       const unknown = {
@@ -304,7 +305,7 @@ describe('SCRUM-382: every listed endpoint refuses a final event', () => {
   });
 
   describe('a router built without a guard', () => {
-    it('SCRUM382_AC3_checks_nothing_so_the_tests_that_stub_the_client_see_no_extra_call', async () => {
+    it('SCRUM379_AC3_checks_nothing_so_the_tests_that_stub_the_client_see_no_extra_call', async () => {
       const client = worldClient();
       const route = ROUTES.find((r) => r[1] === 'post' && r[2] === '/:id/clarification');
       const { url, body } = target(route, 'completed');
@@ -322,7 +323,7 @@ describe('SCRUM-382: every listed endpoint refuses a final event', () => {
     it.each([
       ['eventRequests', '/api/event-requests/:id', C],
       ['eventEquipment', '/api/event-requests/:id/equipment', C],
-    ])('SCRUM382_AC5_a_GET_on_a_completed_event_through_%s_is_not_refused', async (routerKey, mount, role) => {
+    ])('SCRUM379_AC5_a_GET_on_a_completed_event_through_%s_is_not_refused', async (routerKey, mount, role) => {
       const client = worldClient();
       const url = mount.replace(':id', WORLD.completed.event);
       const app = express().use(express.json()).use(

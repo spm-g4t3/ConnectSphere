@@ -92,7 +92,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
   }, 120_000);
 
   describe('by status, from a route parameter', () => {
-    it.each(['completed', 'cancelled'])('SCRUM382_AC3_a_%s_event_is_refused_with_409_EVENT_FINAL', async (status) => {
+    it.each(['completed', 'cancelled'])('SCRUM379_AC3_a_%s_event_is_refused_with_409_EVENT_FINAL', async (status) => {
       const { nexted, error } = await run(guard(eventIdFromParam('id')), { params: { id: eventByStatus[status] } });
 
       expect(nexted).toBe(0);
@@ -103,7 +103,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
     });
 
     it.each(Object.values(STATUS).filter((s) => s !== 'completed' && s !== 'cancelled'))(
-      'SCRUM382_AC3_a_%s_event_is_let_through',
+      'SCRUM379_AC3_a_%s_event_is_let_through',
       async (status) => {
         const { nexted, error } = await run(guard(eventIdFromParam('id')), { params: { id: eventByStatus[status] } });
 
@@ -112,11 +112,11 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       },
     );
 
-    it('SCRUM382_AC3_every_status_is_covered_by_a_seeded_event', () => {
+    it('SCRUM379_AC3_every_status_is_covered_by_a_seeded_event', () => {
       expect(Object.keys(eventByStatus).sort()).toEqual(Object.values(STATUS).sort());
     });
 
-    it('SCRUM382_AC3_an_event_becoming_final_is_refused_on_the_next_call_because_nothing_is_cached', async () => {
+    it('SCRUM379_AC3_an_event_becoming_final_is_refused_on_the_next_call_because_nothing_is_cached', async () => {
       const id = await seedEvent(db, {
         status: 'approved', organiser_id: organiser, event_name: 'Turns final',
         assigned_coordinator_id: coordinator, reviewing_coordinator_id: coordinator,
@@ -132,13 +132,13 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       expect(after.error.code).toBe('EVENT_FINAL');
     });
 
-    it('SCRUM382_AC3_a_padded_upper_case_id_still_finds_the_event', async () => {
+    it('SCRUM379_AC3_a_padded_upper_case_id_still_finds_the_event', async () => {
       const id = ` ${eventByStatus.completed.toUpperCase()} `;
       const { error } = await run(guard(eventIdFromParam('id')), { params: { id } });
       expect(error?.code).toBe('EVENT_FINAL');
     });
 
-    it('SCRUM382_AC3_a_different_parameter_name_can_be_used', async () => {
+    it('SCRUM379_AC3_a_different_parameter_name_can_be_used', async () => {
       const { error } = await run(guard(eventIdFromParam('eventRequestId')), {
         params: { eventRequestId: eventByStatus.cancelled },
       });
@@ -147,7 +147,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
   });
 
   describe('from the body', () => {
-    it.each(['completed', 'cancelled'])('SCRUM382_AC3_a_%s_event_named_in_the_body_is_refused', async (status) => {
+    it.each(['completed', 'cancelled'])('SCRUM379_AC3_a_%s_event_named_in_the_body_is_refused', async (status) => {
       const { nexted, error } = await run(guard(eventIdFromBody('eventRequestId')), {
         body: { eventRequestId: eventByStatus[status] },
       });
@@ -155,7 +155,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       expect(error?.code).toBe('EVENT_FINAL');
     });
 
-    it('SCRUM382_AC3_a_live_event_named_in_the_body_is_let_through', async () => {
+    it('SCRUM379_AC3_a_live_event_named_in_the_body_is_let_through', async () => {
       const { nexted, error } = await run(guard(eventIdFromBody()), {
         body: { eventRequestId: eventByStatus.approved },
       });
@@ -163,7 +163,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       expect(nexted).toBe(1);
     });
 
-    it('SCRUM382_AC3_the_body_field_name_is_exact', async () => {
+    it('SCRUM379_AC3_the_body_field_name_is_exact', async () => {
       const { nexted } = await run(guard(eventIdFromBody('eventRequestId')), {
         body: { eventrequestid: eventByStatus.completed, event_request_id: eventByStatus.completed },
       });
@@ -181,7 +181,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
     it.each(cases.flatMap(([table, key, param]) => [
       [table, 'completed', key, param],
       [table, 'cancelled', key, param],
-    ]))('SCRUM382_AC3_a_%s_row_of_a_%s_event_is_refused', async (table, status, key, param) => {
+    ]))('SCRUM379_AC3_a_%s_row_of_a_%s_event_is_refused', async (table, status, key, param) => {
       const recordId = attached[status][key];
       const { nexted, error } = await run(guard(eventIdFromRecord(table, param)), { params: { [param]: recordId } });
 
@@ -190,7 +190,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       expect(error.message).toBe(`This event is ${status} and can no longer be changed`);
     });
 
-    it.each(cases)('SCRUM382_AC3_a_%s_row_of_a_live_event_is_let_through', async (table, key, param) => {
+    it.each(cases)('SCRUM379_AC3_a_%s_row_of_a_live_event_is_let_through', async (table, key, param) => {
       const { nexted, error } = await run(guard(eventIdFromRecord(table, param)), {
         params: { [param]: attached.approved[key] },
       });
@@ -198,19 +198,19 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       expect(nexted).toBe(1);
     });
 
-    it('SCRUM382_AC3_a_record_that_does_not_exist_is_let_through_for_the_handler_to_404', async () => {
+    it('SCRUM379_AC3_a_record_that_does_not_exist_is_let_through_for_the_handler_to_404', async () => {
       const { nexted, error } = await run(guard(eventIdFromRecord('bookings', 'id')), { params: { id: UNKNOWN_ID } });
       expect(error).toBeNull();
       expect(nexted).toBe(1);
     });
 
-    it('SCRUM382_AC3_a_padded_upper_case_record_id_still_finds_the_record', async () => {
+    it('SCRUM379_AC3_a_padded_upper_case_record_id_still_finds_the_record', async () => {
       const id = ` ${attached.completed.booking.toUpperCase()} `;
       const { error } = await run(guard(eventIdFromRecord('bookings', 'id')), { params: { id } });
       expect(error?.code).toBe('EVENT_FINAL');
     });
 
-    it('SCRUM382_AC3_a_booking_id_is_never_mistaken_for_an_event_id', async () => {
+    it('SCRUM379_AC3_a_booking_id_is_never_mistaken_for_an_event_id', async () => {
       // The completed event's own id sent as a booking id names no booking.
       const { nexted } = await run(guard(eventIdFromRecord('bookings', 'id')), {
         params: { id: eventByStatus.completed },
@@ -220,7 +220,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
   });
 
   describe('when the event cannot be found or the id is unusable', () => {
-    it('SCRUM382_AC3_an_unknown_event_is_let_through_so_the_handler_answers_404_not_the_guard', async () => {
+    it('SCRUM379_AC3_an_unknown_event_is_let_through_so_the_handler_answers_404_not_the_guard', async () => {
       const { nexted, error } = await run(guard(eventIdFromParam('id')), { params: { id: UNKNOWN_ID } });
       expect(error).toBeNull();
       expect(nexted).toBe(1);
@@ -235,7 +235,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       ['a number', { params: { id: 12345 } }],
       ['an array holding a real id', { params: { id: [eventByStatus.completed] } }],
       ['an object', { params: { id: { toString: () => eventByStatus.completed } } }],
-    ])('SCRUM382_AC3_%s_is_let_through_without_touching_the_database', async (_label, req) => {
+    ])('SCRUM379_AC3_%s_is_let_through_without_touching_the_database', async (_label, req) => {
       const calls = [];
       const spy = { from: (table) => { calls.push(table); return client.from(table); } };
       const { nexted, error } = await run(createFinalEventGuard({ client: spy })(eventIdFromParam('id')), req);
@@ -250,13 +250,13 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       ['a body without the field', { body: {} }],
       ['a null field', { body: { eventRequestId: null } }],
       ['a numeric field', { body: { eventRequestId: 7 } }],
-    ])('SCRUM382_AC3_%s_is_let_through_for_a_body_route', async (_label, req) => {
+    ])('SCRUM379_AC3_%s_is_let_through_for_a_body_route', async (_label, req) => {
       const { nexted, error } = await run(guard(eventIdFromBody()), { ...req, body: req.body });
       expect(error).toBeNull();
       expect(nexted).toBe(1);
     });
 
-    it('SCRUM382_AC3_a_record_route_with_no_id_is_let_through', async () => {
+    it('SCRUM379_AC3_a_record_route_with_no_id_is_let_through', async () => {
       const { nexted } = await run(guard(eventIdFromRecord('bookings', 'id')), { params: {} });
       expect(nexted).toBe(1);
     });
@@ -272,7 +272,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       },
     });
 
-    it('SCRUM382_AC3_an_unreadable_status_fails_closed_with_an_error_that_is_not_a_conflict', async () => {
+    it('SCRUM379_AC3_an_unreadable_status_fails_closed_with_an_error_that_is_not_a_conflict', async () => {
       const { nexted, error } = await run(
         createFinalEventGuard({ client: failing('event_requests') })(eventIdFromParam('id')),
         { params: { id: eventByStatus.approved } },
@@ -284,7 +284,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       expect(error.message).toContain('connection lost');
     });
 
-    it('SCRUM382_AC3_an_unreadable_record_fails_closed_too', async () => {
+    it('SCRUM379_AC3_an_unreadable_record_fails_closed_too', async () => {
       const { nexted, error } = await run(
         createFinalEventGuard({ client: failing('bookings') })(eventIdFromRecord('bookings', 'id')),
         { params: { id: attached.approved.booking } },
@@ -294,7 +294,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       expect(error.message).toContain('connection lost');
     });
 
-    it('SCRUM382_AC3_a_thrown_driver_error_is_not_swallowed', async () => {
+    it('SCRUM379_AC3_a_thrown_driver_error_is_not_swallowed', async () => {
       const throwing = { from: () => { throw new Error('socket closed'); } };
       const { nexted, error } = await run(
         createFinalEventGuard({ client: throwing })(eventIdFromParam('id')),
@@ -306,11 +306,11 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
   });
 
   describe('the middleware itself', () => {
-    it('SCRUM382_AC3_a_real_guard_is_tagged_so_the_completeness_test_can_find_it', () => {
+    it('SCRUM379_AC3_a_real_guard_is_tagged_so_the_completeness_test_can_find_it', () => {
       expect(guard(eventIdFromParam('id'))[FINAL_EVENT_GUARD_TAG]).toBe(true);
     });
 
-    it('SCRUM382_AC3_the_default_for_a_router_built_without_a_guard_checks_nothing', async () => {
+    it('SCRUM379_AC3_the_default_for_a_router_built_without_a_guard_checks_nothing', async () => {
       const middleware = noopFinalEventGuard(eventIdFromParam('id'));
       expect(middleware[FINAL_EVENT_GUARD_TAG]).toBeUndefined();
 
@@ -320,7 +320,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       expect(nexted).toBe(1);
     });
 
-    it('SCRUM382_AC3_a_guard_for_one_route_does_not_affect_another', async () => {
+    it('SCRUM379_AC3_a_guard_for_one_route_does_not_affect_another', async () => {
       const first = guard(eventIdFromParam('id'));
       const second = guard(eventIdFromBody('eventRequestId'));
 
@@ -329,7 +329,7 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       expect((await run(first, { params: { id: eventByStatus.approved } })).nexted).toBe(1);
     });
 
-    it('SCRUM382_AC3_the_guard_reads_exactly_one_status_per_request', async () => {
+    it('SCRUM379_AC3_the_guard_reads_exactly_one_status_per_request', async () => {
       const reads = [];
       const spy = {
         from: (table) => {

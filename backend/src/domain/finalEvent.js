@@ -7,7 +7,7 @@
  * change is accepted. Every endpoint that changes an event, or anything
  * attached to it, asks this module. The routes do it through
  * middleware/finalEventGuard.js; the list of those routes is in
- * docs/SCRUM-382.md and is held in place by tests/routes/scrum382FinalEventRoutes.test.js.
+ * docs/SCRUM-382.md and is held in place by tests/routes/scrum379FinalEventRoutes.test.js.
  *
  * Pure and credential-free, like the rest of src/domain: nothing here reads the
  * database, so it can be imported anywhere.
