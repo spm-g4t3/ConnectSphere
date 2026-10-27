@@ -15,6 +15,9 @@ const migration = (name) => new URL(`../../db/migrations/${name}`, import.meta.u
 // 17:00 UTC is 01:00 on the next day in Singapore, so the UTC and SGT dates differ.
 const FIXED_NOW = '2030-06-15T17:00:00Z';
 const SGT = 480;
+// A test that builds its own schema (about 3 seconds alone, several times that on a busy machine)
+// needs more than Vitest's 5-second default; the suite's shared hooks already get 60 seconds.
+const SCHEMA_BUILD_TIMEOUT = 60_000;
 const pad = (n) => String(n).padStart(2, '0');
 
 // FIXED_NOW plus `seconds`, written with a UTC offset, e.g. 2030-06-16T00:59:00+08:00.
@@ -506,7 +509,7 @@ describe('SCRUM-379: complete_event_request in Postgres', () => {
       } finally {
         await scratch.close();
       }
-    });
+    }, SCHEMA_BUILD_TIMEOUT);
 
     it('SCRUM379_AC4_the_complete_function_migration_runs_twice_without_error', async () => {
       const scratch = await createSchemaDb();
@@ -525,7 +528,7 @@ describe('SCRUM-379: complete_event_request in Postgres', () => {
       } finally {
         await scratch.close();
       }
-    });
+    }, SCHEMA_BUILD_TIMEOUT);
 
     it('SCRUM379_AC1_client_roles_cannot_call_the_function_but_the_api_role_can', async () => {
       const { rows: grants } = await db.query(
@@ -636,7 +639,7 @@ describe('SCRUM-379: complete_event_request in Postgres', () => {
       } finally {
         await scratch.close();
       }
-    });
+    }, SCHEMA_BUILD_TIMEOUT);
 
     it('SCRUM379_AC1_client_roles_cannot_call_event_clock', async () => {
       const { rows: grants } = await db.query(
