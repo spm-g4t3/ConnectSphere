@@ -87,7 +87,7 @@ export async function listEventRegistrations({ eventRequestId, userId, hideWithd
     hideWithdrawn: hide,
     entries: result.entries.map((entry) => ({
       id: entry.id,
-      attendeeName: entry.attendeeName ?? null,
+      attendeeName: entry.attendeeName,
       attendeeEmail: emails.get(entry.attendeeId) ?? null,
       registeredAt: entry.registeredAt,
       status: entry.status,

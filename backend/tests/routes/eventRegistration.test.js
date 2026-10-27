@@ -306,6 +306,12 @@ describe('SCRUM478 registration list endpoint', () => {
     expect(res.body.entries[0].attendeeEmail).toBeNull();
   });
 
+  it('SCRUM478_AC2_leaves_the_email_empty_for_a_user_without_one', async () => {
+    const res = await get(listing(listed, null, [{ id: ATTENDEE }]), ROLE.EVENT_ORGANISER);
+    expect(res.status).toBe(200);
+    expect(res.body.entries[0].attendeeEmail).toBeNull();
+  });
+
   it('SCRUM478_AC2_skips_the_user_lookup_for_an_empty_list', async () => {
     const db = listing({ ...listed, entries: [] });
     expect((await get(db, ROLE.EVENT_ORGANISER)).status).toBe(200);

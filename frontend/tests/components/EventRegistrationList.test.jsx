@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -46,7 +46,8 @@ describe("SCRUM478 EventRegistrationList", () => {
     expect(within(rows[2]).getByText("Email not set")).toBeInTheDocument();
     expect(within(rows[1]).getByText("Withdrawn")).toBeInTheDocument();
     expect(within(rows[2]).getByText("Event cancelled")).toBeInTheDocument();
-    expect(within(rows[0]).getAllByRole("cell")[2].textContent).not.toBe("");
+    // Singapore time on every device: 09:00Z is 17:00 there.
+    expect(within(rows[0]).getAllByRole("cell")[2]).toHaveTextContent("2030-01-01 17:00 (Singapore time)");
   });
 
   it("SCRUM478_AC3_shows_registered_against_capacity_or_alone", async () => {
@@ -73,6 +74,30 @@ describe("SCRUM478 EventRegistrationList", () => {
     expect(await screen.findByText("Cy")).toBeInTheDocument();
     expect(screen.queryByText("Withdrawn")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Registered count")).toHaveTextContent("1 / 50");
+  });
+
+  it.each([
+    ["answers", (late) => late.resolve(listing({ entries: [{ ...entries[0], attendeeName: "Stale" }] }))],
+    ["fails", (late) => late.reject(new Error("late failure"))],
+  ])("SCRUM478_AC4_ignores_a_slower_answer_for_the_previous_filter_when_it_%s", async (_, settle) => {
+    let late;
+    vi.mocked(getEventRegistrations)
+      .mockResolvedValueOnce(listing())
+      .mockReturnValueOnce(new Promise((resolve, reject) => { late = { resolve, reject }; }))
+      .mockResolvedValueOnce(listing());
+    renderList();
+
+    // On, then straight off again: the "on" answer arrives after the "off" one.
+    const toggle = await screen.findByRole("checkbox", { name: "Hide withdrawn" });
+    await userEvent.click(toggle);
+    await userEvent.click(toggle);
+    await waitFor(() => expect(getEventRegistrations).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText("Withdrawn")).toBeInTheDocument();
+    settle(late);
+
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+    expect(screen.queryByText("Stale")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("SCRUM478_AC5_offers_no_actions_on_the_list", async () => {

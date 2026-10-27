@@ -3,29 +3,30 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { normaliseRole } from "../auth/normaliseRole";
 import { getEventRegistrations } from "../services/eventRegistrationService";
-import { formatMediumTimestamp } from "../services/displayFormat";
+import { formatVenueTimestamp } from "../services/datetimeFormat";
 
 // Read only by design: no register, withdraw, edit or export actions here.
 export default function EventRegistrationList({ eventId }) {
   const { user } = useAuth();
   const [hideWithdrawn, setHideWithdrawn] = useState(false);
   const [list, setList] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  // Which filter the last answer was for: loading is derived from it, so the
+  // effect sets no state before the request settles.
+  const [result, setResult] = useState({ hideWithdrawn: null, error: null });
+  const loading = result.hideWithdrawn !== hideWithdrawn;
+  const { error } = result;
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError(null);
     getEventRegistrations(eventId, { hideWithdrawn })
       .then((data) => {
-        if (active) setList(data);
+        if (!active) return;
+        setList(data);
+        setResult({ hideWithdrawn, error: null });
       })
       .catch((err) => {
-        if (active) setError(err?.response?.data?.error || "Could not load the registrations.");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
+        if (!active) return;
+        setResult({ hideWithdrawn, error: err?.response?.data?.error || "Could not load the registrations." });
       });
     return () => {
       active = false;
@@ -86,7 +87,7 @@ export default function EventRegistrationList({ eventId }) {
                   <tr key={entry.id}>
                     <td>{entry.attendeeName || "Name not set"}</td>
                     <td>{entry.attendeeEmail || "Email not set"}</td>
-                    <td>{formatMediumTimestamp(entry.registeredAt, "Unknown")}</td>
+                    <td>{formatVenueTimestamp(entry.registeredAt, "Unknown")}</td>
                     <td>{entry.statusLabel}</td>
                   </tr>
                 ))}
