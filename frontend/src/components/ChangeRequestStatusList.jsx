@@ -19,6 +19,9 @@ const STATUS_CONFIG = {
 const DECISION_CONFIG = {
   approved: { label: "Approved", className: "change-request-outcome--approved" },
   rejected: { label: "Rejected", className: "change-request-outcome--rejected" },
+  // Closed by the system when the whole event was, not decided on their own.
+  event_rejected: { label: "Closed, event rejected", className: "change-request-outcome--rejected" },
+  event_cancelled: { label: "Closed, event cancelled", className: "change-request-outcome--rejected" },
 };
 
 function useChangeRequests(eventRequestId) {

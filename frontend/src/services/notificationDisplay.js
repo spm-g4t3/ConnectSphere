@@ -29,6 +29,10 @@
 //   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
 //     cancelledAt }; audience is organiser, venue_staff,
 //     technical_support_staff or safety_officer
+//   event_rejected (024, SCRUM-347): { audience, eventName }, plus reason and
+//     rejectedAt for the organiser, outcome (withdrawn or cancelled, 027),
+//     venueId, venueName, startsAt and endsAt for venue_staff, and
+//     equipmentRequestId for technical_support_staff
 //   event_submitted_for_safety_review (064, SCRUM-489): { eventRequestId,
 //     eventName, coordinatorId, coordinatorName, startsAt, submittedAt }
 //   booking_request_approved and booking_request_rejected (066, SCRUM-258):
@@ -526,6 +530,37 @@ const DESCRIBERS = {
       return {
         headline: `Equipment arrangements for ${eventName} were cancelled`,
         detail: "The equipment request was cancelled and its active reservations were released.",
+      };
+    }
+    return undefined;
+  },
+
+  // SCRUM-347. Venue Staff get one per released booking, so theirs names the venue.
+  event_rejected(payload, { eventName, venueName }) {
+    if (payload.audience === "organiser") {
+      const rejectedAt = payload.rejectedAt ? ` Rejected ${formatTimestamp(payload.rejectedAt)}.` : "";
+      return {
+        headline: `${eventName} was rejected`,
+        detail: `Reason: ${asSentence(payload.reason || NO_REASON)}${rejectedAt} You can revise and resubmit it.`,
+      };
+    }
+    // A withdrawn request never held the venue, so it is not called a release (027).
+    if (payload.audience === "venue_staff" && payload.outcome === "withdrawn") {
+      return {
+        headline: `The request for ${venueName} for ${eventName} was withdrawn`,
+        detail: `The event was rejected, so its request for ${formatRange(payload.startsAt, payload.endsAt)} no longer needs a decision.`,
+      };
+    }
+    if (payload.audience === "venue_staff") {
+      return {
+        headline: `${venueName} was released for ${eventName}`,
+        detail: `The event was rejected, so its booking for ${formatRange(payload.startsAt, payload.endsAt)} no longer holds the venue.`,
+      };
+    }
+    if (payload.audience === "technical_support_staff") {
+      return {
+        headline: `The equipment request for ${eventName} was cancelled`,
+        detail: "The event was rejected, so its equipment request was cancelled and its reservations released.",
       };
     }
     return undefined;
