@@ -126,6 +126,17 @@ export async function getEventDecisionHistory(id) {
   return getData(`/event-requests/${id}/decision-history`);
 }
 
+// SCRUM-387: the assigned coordinator edits an event's information. `expected`
+// is what the form showed for each changed field; a stale one is a 409.
+export async function updateEventRequestDetails(id, { changes, expected, reason }) {
+  return patchData(`/event-requests/${id}/details`, { changes, expected, reason });
+}
+
+// SCRUM-387: each field change recorded for the event, newest first.
+export async function getEventChangeHistory(id) {
+  return getData(`/event-requests/${id}/change-history`);
+}
+
 
 export async function getCoordinatorChangeRequests(eventRequestId) {
   return getData(
