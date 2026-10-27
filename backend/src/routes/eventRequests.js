@@ -83,6 +83,7 @@ import {
   closeEventClarification,
   listEventRequestsForReview,
   listEventRequestsForCoordinator,
+  listNeedsAttention,
   listCoordinators,
   listUnassignedEventRequests,
   listCoordinatorWorkload,
@@ -102,6 +103,7 @@ import {
   getEventCancellationImpact,
   cancelEventRequest,
   completeEventRequest,
+  rejectApprovedEvent,
   getSignificantEventChangeImpact,
   applySignificantEventChange,
   editEventRequestDetails,
@@ -310,6 +312,23 @@ export function createEventRequestRouter({
   router.get('/mine', coordinatorOnly, async (req, res) => {
     const requests = await listEventRequestsForCoordinator(req.user.id, { client });
     res.status(200).json(requests.map(withStatusDisplay));
+  });
+
+  /**
+   * SCRUM-383 (SCRUM-379 AC7): the caller's Needs attention list, for the events assigned
+   * to them. One item per reason, earliest event first:
+   * { id, code, reason, eventRequestId, eventName, status, proposedStart, proposedEnd,
+   *   organiserName, link }. `link` is the screen that opens the event.
+   *
+   * DECLARATION ORDER IS LOAD-BEARING, as for /mine: declared after GET /:id,
+   * 'needs-attention' would be read as an id. Do not move it below /:id.
+   *
+   * Narrowed to req.user.id as the assigned coordinator, never to anything in the query
+   * string. A bare array, [] when nothing needs attention. Statuses: 200, 401, 403 for
+   * the wrong role, 500 for anything untyped. Read only, so the final-event guard does not apply.
+   */
+  router.get('/needs-attention', coordinatorOnly, async (req, res) => {
+    res.status(200).json(await listNeedsAttention(req.user.id, { client }));
   });
 
   /**
@@ -1070,6 +1089,18 @@ export function createEventRequestRouter({
     const updated = await completeEventRequest(
       req.params.id,
       { closingNotes: req.body?.closingNotes },
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(withStatusDisplay(updated));
+  });
+
+  // SCRUM-347: the assigned coordinator rejects an Approved event. Body: { reason }.
+  // 409 with code CANCEL_INSTEAD for a Confirmed event.
+  router.post('/:id/rejection', coordinatorOnly, guardEvent, async (req, res) => {
+    const updated = await rejectApprovedEvent(
+      req.params.id,
+      { reason: req.body?.reason },
       req.user.id,
       { client },
     );

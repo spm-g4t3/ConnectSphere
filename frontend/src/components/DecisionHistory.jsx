@@ -1,8 +1,9 @@
 // DecisionHistory.jsx
 //
 // SCRUM-355: the decisions a request has had that are no longer current, such
-// as the rejection it was reopened from. Renders nothing for a request that has
-// never been resubmitted, so it can sit on any draft or review screen.
+// as the rejection it was reopened from, or the approval a rejection replaced
+// (SCRUM-347). Renders nothing for a request with no past decisions, so it can
+// sit on any draft or review screen.
 
 import { useEffect, useState } from "react";
 import { getEventDecisionHistory } from "../services/eventRequestService";
@@ -18,8 +19,10 @@ const DECISION_LABEL = {
  * @param {string} props.eventRequestId
  * @param {"coordinator"|"organiser"} props.view  the coordinator is also told
  *                                                 the request is a resubmission
+ * @param {boolean} [props.showReason]  false beside a current rejection, whose
+ *                                      own reason is the one to act on (SCRUM-347)
  */
-export default function DecisionHistory({ eventRequestId, view = "organiser" }) {
+export default function DecisionHistory({ eventRequestId, view = "organiser", showReason = true }) {
   // Tagged with the request it was read for, so switching requests never shows
   // the previous one's decisions or error while the new read is in flight.
   const [result, setResult] = useState(null);
@@ -43,19 +46,22 @@ export default function DecisionHistory({ eventRequestId, view = "organiser" }) 
   const { entries } = result;
   if (entries.length === 0) return null;
 
-  // The newest is the rejection this round of revision answers.
-  const latest = entries[entries.length - 1];
+  // Only a reopen makes a resubmission: an approval superseded by a rejection
+  // (SCRUM-347) is history too. The newest rejection is the one being answered.
+  const resubmitted = entries.some((entry) => entry.supersededReason === "reopened_for_revision");
+  const latestRejection = [...entries].reverse().find((entry) => entry.decision === "rejected");
 
   return (
     <section className="decision-history" aria-label="Previous decisions">
-      {view === "coordinator" ? (
+      {view === "coordinator" && resubmitted && (
         <p className="decision-history__resubmission" role="status">
           This request is a resubmission. It has been decided {entries.length === 1 ? "once" : `${entries.length} times`} before.
         </p>
-      ) : (
+      )}
+      {view !== "coordinator" && showReason && latestRejection && (
         <div className="decision-history__reason">
           <strong>Why it was rejected</strong>
-          <p>{latest.decisionNote || "No reason was recorded."}</p>
+          <p>{latestRejection.decisionNote || "No reason was recorded."}</p>
         </div>
       )}
       <h3>Previous decisions</h3>

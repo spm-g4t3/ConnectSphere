@@ -58,6 +58,7 @@ import ReassignEventPanel from "./ReassignEventPanel";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import EventEquipmentSection from "./EventEquipmentSection";
 import EventCancellationPanel from "./EventCancellationPanel";
+import EventRejectionPanel from "./EventRejectionPanel";
 import SignificantEventChangePanel from "./SignificantEventChangePanel";
 import EventDetailsEditPanel from "./EventDetailsEditPanel";
 import EventChangeHistory from "./EventChangeHistory";
@@ -220,6 +221,7 @@ export default function CoordinatorRequestDetail({
   const { user } = useAuth();
   const [reassigning, setReassigning] = useState(false);
   const [cancellationPage, setCancellationPage] = useState(false);
+  const [rejectionPage, setRejectionPage] = useState(false);
   const [significantChangePage, setSignificantChangePage] = useState(false);
   // SCRUM-387. The success line belongs to the event it was saved on.
   const [detailsEditPage, setDetailsEditPage] = useState(false);
@@ -506,6 +508,23 @@ export default function CoordinatorRequestDetail({
     );
   }
 
+  if (rejectionPage) {
+    return (
+      <EventRejectionPanel
+        eventRequest={current}
+        onBack={() => setRejectionPage(false)}
+        onRejected={(updated) => {
+          setUpdatedRequest(updated);
+          onChangeRequestProcessed?.();
+        }}
+        onCancelInstead={() => {
+          setRejectionPage(false);
+          setCancellationPage(true);
+        }}
+      />
+    );
+  }
+
   if (significantChangePage) {
     return (
       <SignificantEventChangePanel
@@ -605,6 +624,16 @@ export default function CoordinatorRequestDetail({
           onClick={() => setCancellationPage(true)}
         >
           Cancel event
+        </button>
+      )}
+      {/* SCRUM-347: only an Approved event is rejected; Confirmed ones are cancelled. */}
+      {isAssignedCoordinator && current.status === "approved" && (
+        <button
+          className="coordinator-request-detail__reject"
+          type="button"
+          onClick={() => setRejectionPage(true)}
+        >
+          Reject event
         </button>
       )}
       {/* SCRUM-489 AC1: the holder, while Approved. The server checks both again. */}

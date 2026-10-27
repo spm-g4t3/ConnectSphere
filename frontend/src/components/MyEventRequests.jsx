@@ -391,6 +391,11 @@ export default function MyEventRequests() {
                 <div className="my-event-requests__decision">
                   <strong>Decision</strong>
                   <DecisionOutcome request={req} view="organiser" />
+                  {/* SCRUM-347 AC5: a rejected event's earlier decisions. Not their
+                      reason: an older rejection's would read as the current one. */}
+                  {req.status === "rejected" && (
+                    <DecisionHistory eventRequestId={req.id} view="organiser" showReason={false} />
+                  )}
                 </div>
               )}
 
@@ -476,9 +481,11 @@ export default function MyEventRequests() {
                   </button>
                 )}
 
+                {/* SCRUM-347: a rejected event is revised and resubmitted instead. */}
                 {req.status !== "draft" &&
                   req.status !== "pending_clarification" &&
-                  req.status !== "cancelled" && (
+                  req.status !== "cancelled" &&
+                  req.status !== "rejected" && (
                   <button
                     onClick={() => setActivePanel({ mode: "change-request", request: req })}
                   >

@@ -301,6 +301,29 @@ describe("SCRUM-561 cancel an event in a safety status", () => {
   });
 });
 
+describe("SCRUM-347 reject an approved event", () => {
+  it("SCRUM347_AC1_the_assigned_coordinator_sees_Reject_event_while_approved", () => {
+    renderAs(ASSIGNED, eventRequest({ status: "approved", decision: "approved" }));
+
+    expect(screen.getByRole("button", { name: "Reject event" })).toBeInTheDocument();
+  });
+
+  it("SCRUM347_AC1_another_coordinator_does_not_see_Reject_event", () => {
+    renderAs(OTHER, eventRequest({ status: "approved", decision: "approved" }));
+
+    expect(screen.queryByRole("button", { name: "Reject event" })).not.toBeInTheDocument();
+  });
+
+  it.each(["safety_review", "safety_approved", "confirmed"])(
+    "SCRUM347_AC1_a_%s_event_offers_no_Reject_event",
+    (status) => {
+      renderAs(ASSIGNED, eventRequest({ status, decision: "approved" }));
+
+      expect(screen.queryByRole("button", { name: "Reject event" })).not.toBeInTheDocument();
+    },
+  );
+});
+
 describe("SCRUM20_AC2 the event view holds the venue search", () => {
   it("SCRUM20_AC2_find_a_venue_renders_the_form_prefilled_from_the_event", async () => {
     renderDetail();
