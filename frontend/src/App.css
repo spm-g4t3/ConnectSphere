@@ -421,6 +421,7 @@ button { cursor: pointer; }
 .browse-open-events__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
 .browse-open-events__badge { border-radius: 999px; display: inline-block; flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; line-height: 1.3; padding: 4px 10px; text-transform: uppercase; }
 .browse-open-events__badge--registered { background: #e8f7f1; color: #17684f; }
+.browse-open-events__badge--waitlisted { background: #fff5e0; color: #7a4f00; }
 .browse-open-events__availability { color: var(--teal-dark); flex: 0 0 auto; font-size: 0.9rem; font-weight: 700; }
 .browse-open-events__availability--full { color: #a43c32; }
 .browse-open-events__error { align-items: center; background: #fff0ee; border-radius: 6px; color: #a43c32; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; padding: 8px 12px; }

@@ -33,7 +33,7 @@ import BrowseEventDetails from "./components/BrowseEventDetails";
 import RegisteredEvents from "./components/RegisteredEvents";
 import AttendeeEventInformation from "./components/AttendeeEventInformation";
 import { REGISTERED_EVENTS_PATH, ATTENDEE_EVENT_ROUTE } from "./services/attendeeEventRoutes";
-import { registerForEvent } from "./services/registrationService";
+import { joinWaitlist, registerForEvent } from "./services/registrationService";
 import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE } from "./services/openEventRoutes";
 import "./App.css";
 
@@ -315,7 +315,7 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["attendee"]}>
               <div className="dashboard dashboard--attendee">
-                <BrowseEventDetails onRegister={registerForEvent} />
+                <BrowseEventDetails onRegister={registerForEvent} onJoinWaitlist={joinWaitlist} />
               </div>
             </ProtectedRoute>
           }

@@ -5,7 +5,7 @@ import { getOpenEvents } from "../services/openEventService";
 import { REGISTRATION_UNAVAILABLE_MESSAGE } from "../services/registrationErrors";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import useOpenEventRead from "./useOpenEventRead";
-import OpenEventAvailability, { RegisteredBadge } from "./OpenEventAvailability";
+import OpenEventAvailability, { RegisteredBadge, WaitlistedBadge } from "./OpenEventAvailability";
 import { openEventDetailsPath } from "../services/openEventRoutes";
 import {
   EVENT_TIME_NOTE,
@@ -31,6 +31,7 @@ function EventRow({ event }) {
             <strong>{event.eventName || "Unnamed event"}</strong>
           </Link>
           {event.isRegistered && <RegisteredBadge />}
+          {event.waitlistPosition != null && <WaitlistedBadge position={event.waitlistPosition} />}
         </span>
         <span className="browse-open-events__meta">
           <span>{formatEventDate(event.startsAt)}</span>

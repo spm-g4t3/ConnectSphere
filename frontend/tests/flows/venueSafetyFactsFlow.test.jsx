@@ -223,10 +223,10 @@ describe("SCRUM493 venue safety facts flow", () => {
     await user.type(screen.getByLabelText("Name"), "Hall A");
     await user.type(screen.getByLabelText("Location"), "Level 2");
     await user.type(screen.getByLabelText("Maximum capacity"), "200");
-    await user.type(
-      screen.getByRole("textbox", { name: "Emergency access" }),
-      `  ${EMERGENCY_ACCESS} `,
-    );
+    // Pasted, not typed: a keystroke per character re-renders the whole form,
+    // which pushed this flow past the timeout under a loaded full-suite run.
+    await user.click(screen.getByRole("textbox", { name: "Emergency access" }));
+    await user.paste(`  ${EMERGENCY_ACCESS} `);
     await user.click(screen.getByRole("button", { name: "Create venue" }));
 
     await waitFor(() => expect(venueService.createVenue).toHaveBeenCalledTimes(1));
@@ -251,7 +251,8 @@ describe("SCRUM493 venue safety facts flow", () => {
     );
     const restrictions = screen.getByRole("textbox", { name: "Known restrictions" });
     expect(restrictions).toHaveValue("");
-    await user.type(restrictions, KNOWN_RESTRICTIONS);
+    await user.click(restrictions);
+    await user.paste(KNOWN_RESTRICTIONS);
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(venueService.updateVenue).toHaveBeenCalledTimes(1));

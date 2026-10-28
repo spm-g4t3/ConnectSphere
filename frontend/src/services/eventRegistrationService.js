@@ -13,3 +13,8 @@ export async function getEventRegistrations(eventId, { hideWithdrawn = false } =
     params: hideWithdrawn ? { hideWithdrawn: true } : undefined,
   });
 }
+
+/** Registered and waiting-list totals, for the Organiser or the assigned Coordinator. */
+export async function getRegistrationCounts(eventId) {
+  return getData(`/registration/events/${eventId}/counts`);
+}

@@ -5,6 +5,7 @@ import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
 import {
+  getRegistrationCounts,
   getRegistrationSettings,
   updateRegistrationSettings,
 } from '../services/eventRegistrationService.js';
@@ -42,6 +43,12 @@ export function createEventRegistrationRouter({
       hideWithdrawn: req.query.hideWithdrawn,
       client,
     }));
+  });
+
+  // The SQL function checks which event is the caller's.
+  router.get('/events/:id/counts', organiserOrCoordinator, async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.status(200).json(await getRegistrationCounts(req.params.id, req.user.id, { client }));
   });
 
   router.use(errorMiddleware);

@@ -85,6 +85,8 @@
 //     and endsAt are the pending request's own (old) times
 //   registration_schedule_conflict (091, SCRUM-494): { eventName, newStart,
 //     fields }; fields lists the registration dates the new start now precedes
+//   registration_promoted (037, SCRUM-460): { eventRequestId, eventName,
+//     registrationId }
 //   equipment_* (097, SCRUM-176): { audience, eventRequestId, eventName,
 //     lines: [{ equipmentType, quantity, reserved, outcome }], ... }; see
 //     describeEquipmentNotification for what each type adds.
@@ -731,6 +733,14 @@ const DESCRIBERS = {
     return {
       headline: `Registration dates for ${eventName} need updating`,
       detail: `The new start${newStart} ${clash}.`,
+    };
+  },
+
+  // SCRUM-460 (AC5). Sent to the attendee a released place went to.
+  registration_promoted(_payload, { eventName }) {
+    return {
+      headline: `You have a place at ${eventName}`,
+      detail: "A place opened and you were first on the waiting list, so you are now registered.",
     };
   },
 
