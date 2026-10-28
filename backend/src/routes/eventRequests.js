@@ -788,7 +788,7 @@ export function createEventRequestRouter({
    * organiserId, status or id matches nothing and is dropped on the floor.
    * The organiser is stamped from the token, never from the body.
    */
-  router.post('/', async (req, res) => {
+  router.post('/', organiserOnly, async (req, res) => {
     const created = await createEventRequest(req.body, req.user.id, { client });
     res.status(201).json(withStatusDisplay(created));
   });
@@ -806,7 +806,7 @@ export function createEventRequestRouter({
    * draft, either because it was submitted earlier or because a submit landed
    * between the service's read and its write.
    */
-  router.patch('/:id', async (req, res) => {
+  router.patch('/:id', organiserOnly, async (req, res) => {
     const saved = await updateEventRequest(
       req.params.id,
       req.body,
@@ -831,7 +831,7 @@ export function createEventRequestRouter({
    * A 400 from here carries details[] listing every gap at once, which is the
    * whole of AC4; the form renders them as a list.
    */
-  router.post('/:id/submit', async (req, res) => {
+  router.post('/:id/submit', organiserOnly, async (req, res) => {
     await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
     const submitted = await submitEventRequest(req.params.id, { client, changedBy: req.user.id });
@@ -1083,7 +1083,7 @@ export function createEventRequestRouter({
     });
   });
 
-  router.patch('/:id/clarification-response', async (req, res) => {
+  router.patch('/:id/clarification-response', organiserOnly, async (req, res) => {
     const updated = await respondToEventClarification(
       req.params.id,
       req.body?.message,
@@ -1107,7 +1107,7 @@ export function createEventRequestRouter({
    * toChangeRequest, which carries no fieldLabel, so the frontend refetches
    * the list rather than splicing this into it.
    */
-  router.post('/:id/change-requests', async (req, res) => {
+  router.post('/:id/change-requests', organiserOnly, async (req, res) => {
     await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
     const created = await createChangeRequestFromClient(

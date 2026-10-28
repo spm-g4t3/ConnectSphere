@@ -58,7 +58,19 @@ function EventInformation({ eventId }) {
             <button type="button" onClick={load}>Try again</button>
           </div>
         )}
-        {!loading && !error && data && (!current || current.state !== "confirmed"
+        {/* SCRUM-434 AC5: the coordinator's optional message only; the internal reason never reaches this screen. */}
+        {!loading && !error && current?.state === "cancelled" && (
+          <div role="status" className="attendee-event-information__cancelled">
+            <p>This event has been cancelled.</p>
+            {current.message && (
+              <>
+                <h2>Message from the coordinator</h2>
+                <p className="attendee-event-information__message">{current.message}</p>
+              </>
+            )}
+          </div>
+        )}
+        {!loading && !error && data && current?.state !== "cancelled" && (!current || current.state !== "confirmed"
           ? <p role="status">Event details are not currently confirmed.</p>
           : <>
             <h2>Confirmed arrangements</h2>

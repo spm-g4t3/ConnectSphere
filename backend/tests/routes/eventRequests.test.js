@@ -120,8 +120,19 @@ const signedInAs = (id) => (req, _res, next) => {
   next();
 };
 
+/**
+ * A verified Event Organiser. SCRUM-434: the routes that create, edit, submit,
+ * answer a clarification on, or raise a change against an event are Organiser
+ * only, so a test of one signs in with the role. signedInAs above sets none,
+ * which is what the role-gate tests below rely on.
+ */
+const signedInAsOrganiser = (id) => (req, _res, next) => {
+  req.user = { id, email: 'organiser@example.com', role: ROLE.EVENT_ORGANISER };
+  next();
+};
+
 /** An app with the router mounted where app.js mounts it. */
-function appWith({ client, requireAuth = signedInAs(ORGANISER_ID) } = {}) {
+function appWith({ client, requireAuth = signedInAsOrganiser(ORGANISER_ID) } = {}) {
   return express()
     .use(express.json())
     .use('/api/event-requests', createEventRequestRouter({ client, requireAuth }));
