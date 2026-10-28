@@ -75,3 +75,5 @@ No criterion is blocked. Each source below is built and tested against what exis
 3. "Visible to coordinators only" is built as each coordinator seeing the events assigned to them.
 4. The status history read is open to the organiser and the assigned coordinator only (SCRUM-322, unchanged), while the clarification history is open to every coordinator. AC5 says "organiser and coordinators", so say if another coordinator or the Lead should read the status history too.
 5. Resolved in manual testing: a change request closed as `event_completed` read "Rejected" on the coordinator's page. Both screens now share `changeRequestOutcomeLabel` and say "Closed, event completed" (tests in `services/scrum379ChangeRequestOutcome.test.js`, `scrum379CoordinatorCompletion.test.jsx`, `scrum347RejectApprovedEvent.test.jsx`).
+
+The manual test record is in `docs/SCRUM-379-manual-test.md`.
