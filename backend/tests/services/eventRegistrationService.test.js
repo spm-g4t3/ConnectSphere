@@ -86,6 +86,7 @@ describe('SCRUM-494 registration settings and attendee listings', () => {
       p_closes_at: validSettings.closesAt,
       p_capacity: 10,
       p_withdrawal_deadline: validSettings.withdrawalDeadline,
+      p_waitlist_enabled: null,
     });
   });
 
@@ -123,7 +124,7 @@ describe('SCRUM-494 registration settings and attendee listings', () => {
       count: 'exact',
       head: true,
     });
-    expect(client.countFilters).toHaveBeenLastCalledWith('status', 'registered');
+    expect(client.countFilters).toHaveBeenCalledWith('status', 'registered');
   });
 
   it('SCRUM494_AC2_rejects_malformed_settings_before_the_database_call', async () => {

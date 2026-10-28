@@ -399,8 +399,17 @@ describe('SCRUM39 atomic event registration', () => {
         expect(preview.body).not.toHaveProperty('registration_status');
         const response = await request(app).post(`/api/open-events/${event}/registrations`)
           .set('Authorization', 'Bearer attendee-token');
+        if (status === 'waitlisted') {
+          // SCRUM-474: a free place goes to the queue before any registration is
+          // counted, so the queued caller's own request promotes them first, and
+          // that is this request succeeding (SCRUM-460 issue 2).
+          expect(response.status).toBe(201);
+          expect(response.body).toMatchObject({ attendeeId: ME, eventRequestId: event, status: 'registered' });
+          expect((await records()).map((r) => [r.attendee_id, r.status])).toEqual([[ME, 'registered']]);
+          return;
+        }
         expect(response.status).toBe(409);
-        expect(response.body.code).toBe(status === 'waitlisted' ? 'ALREADY_WAITLISTED' : 'REGISTRATION_CANCELLED');
+        expect(response.body.code).toBe('REGISTRATION_CANCELLED');
         expect(await records()).toEqual(before);
         return;
       }

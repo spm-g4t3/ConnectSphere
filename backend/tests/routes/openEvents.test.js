@@ -172,7 +172,7 @@ function get(client, { requireAuth = signedInWithRole(ROLE.ATTENDEE), now = () =
 
 const ALLOWED_KEYS = [
   'canJoinWaitlist', 'canRegister', 'capacity', 'description', 'endsAt', 'eventName', 'id',
-  'isFull', 'isRegistered', 'placesLeft', 'startsAt', 'waitlistCount',
+  'isFull', 'isRegistered', 'placesLeft', 'startsAt', 'waitlistCount', 'waitlistPosition',
 ];
 
 describe('SCRUM495 waiting-list placeholders', () => {
@@ -274,6 +274,7 @@ describe('SCRUM495_AC2 only open Confirmed events are listed', () => {
         isRegistered: false,
         canRegister: true,
         canJoinWaitlist: false,
+        waitlistPosition: null,
         waitlistCount: null,
       },
     ]);
@@ -1100,7 +1101,8 @@ describe('SCRUM495_AC8 one event carries no internal planning information', () =
       expect(reads).toHaveLength(2);
       for (const call of reads) {
         expect(call.selected.replace(/\s+/g, '')).toBe('id,event_name,description,proposed_start,proposed_end,status,'
-          + 'registration_enabled,registration_opens_at,registration_closes_at,registration_capacity');
+          + 'registration_enabled,registration_opens_at,registration_closes_at,registration_capacity,'
+          + 'registration_waitlist_enabled');
       }
       expect(client.calls.every(call => ['event_requests', 'rpc:open_event_registration_state'].includes(call.table)))
         .toBe(true);

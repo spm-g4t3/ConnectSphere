@@ -1,10 +1,20 @@
-// How an open event's places and "Registered" mark look, shared by the list and the details.
+// How an open event's places and "Registered" / "Waitlisted" marks look, shared
+// by the list, the details and My Registrations.
 import { availabilityLabel } from "../services/openEventDisplay";
 
 export function RegisteredBadge() {
   return (
     <span className="browse-open-events__badge browse-open-events__badge--registered">
       Registered
+    </span>
+  );
+}
+
+/** position is the server's, never worked out here. */
+export function WaitlistedBadge({ position }) {
+  return (
+    <span className="browse-open-events__badge browse-open-events__badge--waitlisted">
+      Waitlisted: position {position}
     </span>
   );
 }
