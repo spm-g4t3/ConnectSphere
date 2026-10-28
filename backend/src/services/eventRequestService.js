@@ -154,6 +154,18 @@ const COLUMNS = `
 const ATTENTION_COLUMNS = `${COLUMNS}, bookings(status), equipment_reservations(flagged, released_at, flag_reason, flag_code)`;
 
 /**
+ * SCRUM-384 (SCRUM-379 AC2): ATTENTION_COLUMNS plus the closing notes, for the two
+ * coordinator reads that show them. Nothing an Organiser reads selects this, so
+ * the notes never leave the database for an Organiser's request.
+ */
+const COORDINATOR_COLUMNS = `${ATTENTION_COLUMNS}, closing_notes`;
+
+/** toEventRequestWithAttention, plus closingNotes (null when the event has none). */
+function withClosingNotes(row) {
+  return { ...toEventRequestWithAttention(row), closingNotes: row.closing_notes ?? null };
+}
+
+/**
  * The two vocabularies this module bridges: camelCase above it, the column
  * names from 001 and 005 below. Held in one place because getting a single
  * entry wrong is silent -- PostgREST ignores a key no column matches, so a
@@ -1650,7 +1662,9 @@ export async function getConfirmedArrangementsForOrganiser(id, organiserId, { cl
   if (error) throw translateError(error);
   if (!data || data.organiser_id !== organiserId) throw new NotFoundError(`Event request ${id} not found`);
 
-  const confirmed = data.status === STATUS.CONFIRMED;
+  // A completed event keeps its venue booking and arranged equipment as a record (SCRUM-379 AC4,
+  // AC5), so it shows the same arrangements a confirmed one does. Every other status shows none.
+  const confirmed = data.status === STATUS.CONFIRMED || data.status === STATUS.COMPLETED;
   return {
     eventRequestId: data.id,
     status: data.status,
@@ -1703,11 +1717,15 @@ export async function getConfirmedArrangementsForOrganiser(id, organiserId, { cl
  * @param {string} id
  * @param {object} [options]
  * @param {object} [options.client]
+ * @param {boolean} [options.withClosingNotes] SCRUM-384: also read the closing notes, as
+ *   `closingNotes`. Off by default: only the route a coordinator reads an event
+ *   through asks for them, so no other caller of this function can pass them on.
  * @returns {Promise<object>} the stored request, in camelCase
  * @throws {NotFoundError} when no such request exists, or it is a draft
  */
-export async function getEventRequestForCoordinator(id, { client } = {}) {
-  const request = toEventRequestWithAttention(await readEventRequestRow(id, ATTENTION_COLUMNS, client));
+export async function getEventRequestForCoordinator(id, { client, withClosingNotes: includeNotes = false } = {}) {
+  const row = await readEventRequestRow(id, includeNotes ? COORDINATOR_COLUMNS : ATTENTION_COLUMNS, client);
+  const request = includeNotes ? withClosingNotes(row) : toEventRequestWithAttention(row);
 
   if (request.status === STATUS.DRAFT) {
     // The same message getEventRequestById raises for an id that does not
@@ -2100,7 +2118,7 @@ export async function listEventRequestsForCoordinator(coordinatorId, { client } 
 
   const { data, error } = await db
     .from('event_requests')
-    .select(ATTENTION_COLUMNS)
+    .select(COORDINATOR_COLUMNS)
     .eq('assigned_coordinator_id', coordinatorId)
     .order('proposed_start', { ascending: true, nullsFirst: false })
     .order('id', { ascending: true });
@@ -2115,7 +2133,7 @@ export async function listEventRequestsForCoordinator(coordinatorId, { client } 
   const nameOf = await readNames(db, rows.map((row) => row.organiser_id));
 
   return rows.map((row) => ({
-    ...toEventRequestWithAttention(row),
+    ...withClosingNotes(row),
     organiserName: nameOf(row.organiser_id),
   }));
 }

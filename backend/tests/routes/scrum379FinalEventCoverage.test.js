@@ -88,7 +88,9 @@ const GUARDED = [
   'flaggedBookings POST /:id/reinstate',
   'flaggedBookings POST /:id/cancel',
   'openEvents POST /:id/registrations',
+  'openEvents POST /:id/waitlist',
   'attendeeEvents POST /registrations/:registrationId/withdrawal',
+  'attendeeEvents POST /registrations/:registrationId/leave-waitlist',
   'eventRegistration PUT /events/:id/settings',
   'safetyReviews POST /:eventRequestId/responses',
   'venues POST /:id/holds',
@@ -133,7 +135,7 @@ describe('SCRUM-382: every route that changes an event carries the guard', () =>
   it('SCRUM379_AC3_the_guarded_routes_are_exactly_the_documented_list', () => {
     const guarded = writes.filter((r) => r.guarded).map((r) => r.key);
     expect([...guarded].sort()).toEqual([...GUARDED].sort());
-    expect(guarded).toHaveLength(44);
+    expect(guarded).toHaveLength(46);
   });
 
   it('SCRUM379_AC3_an_exempt_route_still_exists_and_is_not_also_guarded', () => {

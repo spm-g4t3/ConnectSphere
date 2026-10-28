@@ -1,6 +1,6 @@
 # SCRUM-379: Mark an Event Completed
 
-Status: SCRUM-380, SCRUM-381, SCRUM-382 and SCRUM-383 built. SCRUM-384 to 386 not started.
+Status: SCRUM-380 to SCRUM-386 built. The acceptance criteria to test list is in `docs/SCRUM-386.md`.
 
 ## What exists now
 
@@ -9,6 +9,8 @@ Status: SCRUM-380, SCRUM-381, SCRUM-382 and SCRUM-383 built. SCRUM-384 to 386 no
 - **Final-event guard** (SCRUM-382, see `docs/SCRUM-382.md`): a Completed or Cancelled event is refused by every endpoint that changes an event or something attached to it. This is what makes AC3's read-only rule hold.
 - **Needs attention list** (SCRUM-383, see `docs/SCRUM-383.md`): `GET /api/event-requests/needs-attention`, one item per reason (AC7).
 - `POST /api/event-requests/:id/complete` (coordinator role). Body: `{ closingNotes? }`. Returns the event with `closingNotes` for the calling coordinator.
+- **Completed events stay readable** (SCRUM-385, AC5): the organiser's arrangements read and screen now show the kept venue and arranged equipment for a Completed event as well as a Confirmed one. Every history read was already open past Completed.
+- **Coordinator screens** (SCRUM-384, see `docs/SCRUM-384.md`): Needs attention beside My events, Mark as completed with a confirmation step, and closing notes on a completed event. The coordinator's own reads of an event (`GET /mine`, `GET /:id/review`) now return `closingNotes`.
 
 ## What the function does, in order
 
@@ -35,9 +37,9 @@ Each refusal changes nothing. A forced failure in step 7 rolls back steps 5 and 
 
 ## Not done yet
 
-- SCRUM-384: coordinator screens. AC2 also needs the coordinator's own read of an event to return `closingNotes`; today only the response to the complete call does.
-- SCRUM-385, 386: remaining tests, and the acceptance-criteria-to-test list. AC5 (every record of a Completed event stays viewable by the organiser and coordinators) still needs its own test.
-- Organiser display of a change request closed as `event_completed`: check where decisions are labelled before the screens ship.
+- Nothing left to build. Migrations 033 and 034 need applying to Supabase and a manual run (see `docs/SCRUM-384.md`).
+- Who sees the closing notes: built as every coordinator and the Lead (the same people who can open an event through `GET /:id/review`), never an Organiser. Calven to confirm; see `docs/SCRUM-384.md`.
+- Change request outcome wording: `frontend/src/services/changeRequestOutcome.js` labels `event_completed` as "Closed, event completed" for both the Organiser's list and the coordinator's panel. It no longer reads as Rejected.
 
 ## Migration numbers
 

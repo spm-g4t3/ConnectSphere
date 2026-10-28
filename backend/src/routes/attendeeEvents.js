@@ -40,7 +40,7 @@ export function createAttendeeEventRouter({ client, requireAuth = defaultRequire
     }));
   });
   // Separate from withdrawal: no deadline applies, and only a waitlisted entry qualifies.
-  router.post('/registrations/:registrationId/leave-waitlist', createRequireRole(ROLE.ATTENDEE), async (req, res) => {
+  router.post('/registrations/:registrationId/leave-waitlist', createRequireRole(ROLE.ATTENDEE), guardRegistration, async (req, res) => {
     res.status(200).json(await leaveWaitlist({
       attendeeId: req.user.id, registrationId: req.params.registrationId, client,
     }));

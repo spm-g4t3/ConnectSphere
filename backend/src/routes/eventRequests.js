@@ -306,6 +306,9 @@ export function createEventRequestRouter({
    * grouping is presentation. An empty list is 200 [], never 404: nothing
    * assigned is not a missing resource.
    *
+   * SCRUM-384: each row also carries `closingNotes` (null unless the event is Completed and
+   * has notes), for the screen that shows them. Only coordinators reach this route.
+   *
    * Statuses: 200, 401 from requireAuth, 403 for the wrong role or no role,
    * 500 for anything untyped.
    */
@@ -665,9 +668,12 @@ export function createEventRequestRouter({
    * already been opened for: the reassign gate's fault, one layer up. A read
    * only; every write beside it keeps its own gate, and the database still
    * decides who may act.
+   *
+   * SCRUM-384: carries `closingNotes` (null unless the event is Completed and has notes).
+   * Both roles that pass the gate are coordinator-side; an Organiser never reaches this route.
    */
   router.get('/:id/review', coordinatorOrLead, async (req, res) => {
-    const request = await getEventRequestForCoordinator(req.params.id, { client });
+    const request = await getEventRequestForCoordinator(req.params.id, { client, withClosingNotes: true });
     res.status(200).json(withStatusDisplay(request));
   });
 

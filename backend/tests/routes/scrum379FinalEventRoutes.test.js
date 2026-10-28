@@ -158,7 +158,9 @@ const ROUTES = [
   ['flaggedBookings', 'post', '/:id/reinstate', V, true, 'booking'],
   ['flaggedBookings', 'post', '/:id/cancel', C, true, 'booking'],
   ['openEvents', 'post', '/:id/registrations', A, true, 'event'],
+  ['openEvents', 'post', '/:id/waitlist', A, true, 'event'],
   ['attendeeEvents', 'post', '/registrations/:registrationId/withdrawal', A, true, 'registration'],
+  ['attendeeEvents', 'post', '/registrations/:registrationId/leave-waitlist', A, true, 'registration'],
   ['eventRegistration', 'put', '/events/:id/settings', O, true, 'event'],
   ['safetyReviews', 'post', '/:eventRequestId/responses', S, true, 'event'],
   ['venues', 'post', '/:id/holds', V, true, 'eventInBody'],
@@ -197,9 +199,9 @@ const send = (routerKey, method, url, body, options) => {
 };
 
 describe('SCRUM-382: every listed endpoint refuses a final event', () => {
-  it('SCRUM379_AC3_the_table_below_lists_44_endpoints', () => {
-    expect(ROUTES).toHaveLength(44);
-    expect(new Set(ROUTES.map(([r, m, p]) => `${r} ${m} ${p}`)).size).toBe(44);
+  it('SCRUM379_AC3_the_table_below_lists_46_endpoints', () => {
+    expect(ROUTES).toHaveLength(46);
+    expect(new Set(ROUTES.map(([r, m, p]) => `${r} ${m} ${p}`)).size).toBe(46);
   });
 
   describe.each(['completed', 'cancelled'])('a %s event', (status) => {

@@ -26,7 +26,7 @@ router.post('/:id/clarification', coordinatorOnly, guardEvent, async (req, res) 
 
 The guard reads the status and then the handler acts, so an event completed in the gap between the two is not caught by the guard. What catches it is each service and database function behind the route, which still apply their own status rules under a row lock. I did not audit every one of those functions for what it does with a Completed or Cancelled event; the guard is the first line, not a proof that none of them can be reached.
 
-## The 44 endpoints that carry the guard
+## The 46 endpoints that carry the guard
 
 Event requests (`/api/event-requests`), 19:
 
@@ -90,7 +90,9 @@ Venue holds (`/api/venues`), 1:
 Registrations, 3:
 
 - `POST /api/open-events/:id/registrations`
+- `POST /api/open-events/:id/waitlist`
 - `POST /api/attendee-events/registrations/:registrationId/withdrawal` (event found through the registration)
+- `POST /api/attendee-events/registrations/:registrationId/leave-waitlist` (event found through the registration)
 - `PUT /api/registration/events/:id/settings`
 
 Safety review, 1:
@@ -129,5 +131,5 @@ The refusal reaches the browser as `409` with `code: "EVENT_FINAL"` and the sent
 
 - `tests/domain/scrum379FinalEvent.test.js`: the shared check, over every status and over non-status values.
 - `tests/middleware/scrum379FinalEventGuard.test.js`: the guard on the real schema, all 11 statuses, and a booking, a registration and a change request attached to completed, cancelled and live events; unusable ids; failed reads; nothing cached.
-- `tests/routes/scrum379FinalEventRoutes.test.js`: each of the 44 routes with a completed, a cancelled and a live event; the wrong role (403); signed out (401); an event that does not exist; a router with no guard.
+- `tests/routes/scrum379FinalEventRoutes.test.js`: each of the 46 routes with a completed, a cancelled and a live event; the wrong role (403); signed out (401); an event that does not exist; a router with no guard.
 - `tests/routes/scrum379FinalEventCoverage.test.js`: every mutating route is guarded or exempt, and the guarded list matches the one above.

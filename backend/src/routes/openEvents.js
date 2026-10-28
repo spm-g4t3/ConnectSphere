@@ -50,7 +50,7 @@ export function createOpenEventRouter({
     res.status(201).json(registration);
   });
 
-  router.post('/:id/waitlist', attendeeOnly, async (req, res) => {
+  router.post('/:id/waitlist', attendeeOnly, guardEvent, async (req, res) => {
     const { created, registration } = await joinEventWaitlist({
       attendeeId: req.user.id,
       eventId: req.params.id,
