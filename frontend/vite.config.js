@@ -237,6 +237,16 @@ const SCRUM355_FILES = [
 // CoordinatorRequestDetail.jsx, MyEventRequests.jsx and eventRequestService.js
 // stay ungated; notificationDisplay.js and notificationLink.js keep the 100%
 // of SCRUM17_FILES and SCRUM172_FILES.
+// SCRUM-402: the coordinator's review panel and the display helper it shares
+// with the Organiser's list and the notices, new files only this story owns.
+// Its edits to ChangeRequestForm.jsx, ChangeRequestStatusList.jsx,
+// CoordinatorRequestDetail.jsx and MyAssignedEvents.jsx stay ungated, and
+// notificationDisplay.js keeps SCRUM17_FILES' 100%.
+const SCRUM402_FILES = [
+  'src/components/ChangeRequestReviewPanel.jsx',
+  'src/services/changeRequestDisplay.js',
+]
+
 const SCRUM387_FILES = [
   'src/components/EventDetailsEditPanel.jsx',
   'src/components/EventChangeHistory.jsx',
@@ -296,6 +306,7 @@ export default defineConfig({
         ...SCRUM172_FILES.map((file) => [file, FULL]),
         ...SCRUM355_FILES.map((file) => [file, FULL]),
         ...SCRUM387_FILES.map((file) => [file, FULL]),
+        ...SCRUM402_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

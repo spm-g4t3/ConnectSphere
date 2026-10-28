@@ -1100,23 +1100,30 @@ describe("describeNotification: missing names and payloads", () => {
   });
 });
 
-// Every change to notifications_type_known restates the whole list, so the
-// latest file that sets it (the baseline, or a migration from 010 on) is what
-// the backend can send; a type there with no wording here would show as "New notification".
+// What the backend can send: the latest whole restate of notifications_type_known
+// (the baseline, or a migration from 010 on), plus every type a later migration
+// appends to the live list instead of restating it, as SCRUM-402's 036 does
+// with `unnest(array[...]) as t`. A type with no wording here would show as
+// "New notification".
 const DB = resolve(dirname(fileURLToPath(import.meta.url)), "../../../backend/db");
 const TYPE_LIST =
   /notifications_type_known\s+check\s*\(\s*type\s*(?:=\s*any\s*\(\s*array\s*\[([^\]]*)\]|in\s*\(([^)]*)\))/;
+const APPENDED_TYPES = /unnest\(\s*array\s*\[([^\]]*)\]\s*\)\s+as\s+t\b/g;
+const typesIn = (list) => [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 
 function knownNotificationTypes() {
   const later = readdirSync(join(DB, "migrations"))
     .filter((name) => /^\d+_.*\.sql$/.test(name))
     .sort()
     .map((name) => join(DB, "migrations", name));
-  const lists = [join(DB, "baseline", "05_notifications.sql"), ...later]
-    .map((file) => readFileSync(file, "utf8").match(TYPE_LIST))
-    .filter(Boolean);
-  const [, array, plain] = lists.at(-1);
-  return [...(array ?? plain).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  const files = [join(DB, "baseline", "05_notifications.sql"), ...later].map((file) => readFileSync(file, "utf8"));
+  const restatedAt = files.findLastIndex((sql) => TYPE_LIST.test(sql));
+  const [, array, plain] = files[restatedAt].match(TYPE_LIST);
+  const appended = files
+    .slice(restatedAt + 1)
+    .filter((sql) => sql.includes("notifications_type_known"))
+    .flatMap((sql) => [...sql.matchAll(APPENDED_TYPES)].flatMap((m) => typesIn(m[1])));
+  return [...new Set([...typesIn(array ?? plain), ...appended])];
 }
 
 const FIXTURES = {
@@ -1154,6 +1161,8 @@ const FIXTURES = {
   },
   event_significant_change: { eventName: "Tech Talk", reason: "Updated schedule" },
   event_details_changed: { eventName: "Tech Talk", reason: "Typo in the name", changedFields: ["eventName"] },
+  change_request_decided: { eventName: "Tech Talk", decision: "approved", notes: "Done", changeFields: ["purpose"] },
+  change_request_significant_submitted: { eventName: "Tech Talk", changeFields: ["proposed_start"] },
   event_significant_change_attendee: {
     eventName: "Tech Talk",
     startsAt: PAYLOAD.startsAt,
@@ -1182,6 +1191,13 @@ const FIXTURES = {
 };
 
 describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", () => {
+  it("SCRUM402_AC11_the_known_types_include_what_036_appends_to_the_live_list", () => {
+    const known = knownNotificationTypes();
+    expect(known).toEqual(expect.arrayContaining(["change_request_decided", "change_request_significant_submitted"]));
+    // And everything 022's whole list named, which 036 extends rather than replaces.
+    expect(known).toEqual(expect.arrayContaining(["event_details_changed", "booking_flagged"]));
+  });
+
   it("SCRUM172_AC6_every_known_type_has_wording", () => {
     const known = knownNotificationTypes();
     expect(known.length).toBeGreaterThanOrEqual(18);

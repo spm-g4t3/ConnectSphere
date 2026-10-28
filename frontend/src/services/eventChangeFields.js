@@ -11,8 +11,8 @@
 //
 //   CHANGE_FIELD_BY_OPTION is the wire mapping, applied once at submit. It is
 //   many-to-one: the enum event_change_field (006_event_change_requests.sql,
-//   mirrored in backend/src/domain/eventChangeField.js) has nine members and
-//   the dropdown offers ten choices.
+//   035 for cancellation, mirrored in backend/src/domain/eventChangeField.js)
+//   has ten members and the dropdown offers eleven choices.
 //
 // Before this existed the form sent its own option value straight to the API
 // -- "eventName", "venueRequirements" -- and the backend validator refused
@@ -53,6 +53,10 @@ const CHANGE_FIELD_BY_OPTION = Object.freeze({
   accessibilityRequirements: "other",
 
   other: "other",
+
+  // SCRUM-402 AC7 (035): asking for the event to be cancelled. It stands alone
+  // in a request, and its text is the Organiser's reason.
+  cancelEvent: "cancellation",
 });
 
 /**
@@ -70,6 +74,7 @@ export const CHANGE_FIELD_OPTIONS = Object.freeze([
   { value: "accessibilityRequirements", label: "Accessibility requirements" },
   { value: "equipmentRequirements", label: "Equipment requirements" },
   { value: "other", label: "Something else" },
+  { value: "cancelEvent", label: "Cancel the event" },
 ]);
 
 /**

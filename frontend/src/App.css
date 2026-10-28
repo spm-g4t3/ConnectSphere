@@ -877,6 +877,33 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .change-request-outcome--rejected { background: #fff0ee; color: #a43c32; }
 .change-request-status-list__decision-notes { background: #f3f6f4; color: var(--ink); margin: 0; padding: 9px 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .change-request-status-list__date { color: var(--muted); font-size: 0.82rem; }
+
+/* SCRUM-402: a submission's fields together, on the Organiser's form and list. */
+.change-request-form__row { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 10px; margin: 0; padding: 14px; }
+.change-request-form__row label { color: var(--muted); display: grid; gap: 7px; }
+.change-request-form__row > button, .change-request-form > button[type="button"] { background: transparent; border: 1px solid var(--line); color: var(--ink); justify-self: start; }
+.change-request-status-list__fields { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.change-request-status-list__note { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.change-request-outcome--closed { background: #eef2f1; color: var(--muted); }
+
+/* SCRUM-402: the coordinator reviews a submission as a whole. */
+.change-request-review { display: grid; gap: 10px; }
+.change-request-review__rows { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.change-request-review__row { display: grid; gap: 2px; }
+.change-request-review__tag { background: #eef2f1; border-radius: 999px; color: var(--muted); font-size: 0.75rem; justify-self: start; padding: 2px 8px; }
+.change-request-review__current { color: var(--muted); }
+.change-request-review__requested { color: var(--ink); font-weight: 600; }
+.change-request-review__note { color: var(--ink); margin: 6px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.change-request-review__preview { display: grid; gap: 12px; }
+.change-request-review__invalid { background: #fff0ee; border-radius: 6px; color: #a43c32; padding: 10px 12px; }
+.change-request-review__invalid ul, .change-request-review__impact-list { margin: 6px 0 0; padding-left: 18px; }
+.change-request-review__accept, .change-request-review__decline, .change-request-review__cancel { display: grid; gap: 8px; }
+.change-request-review__accept label, .change-request-review__decline label, .change-request-review__cancel label { color: var(--muted); display: grid; gap: 6px; }
+.change-request-review textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
+.change-request-review__hint, .change-request-review__notice { background: #eef6f3; border-radius: 6px; color: var(--ink); margin: 0; padding: 10px 12px; }
+.change-request-review__close { justify-self: start; }
+.change-request-review__equipment:focus { outline: 2px solid rgba(8, 127, 123, 0.3); outline-offset: 4px; }
+.my-assigned-events__change-requests { background: #fff6e5; border-radius: 4px; color: #8a5a00; font-size: 0.78rem; font-weight: 700; margin-left: 8px; padding: 3px 8px; }
 /* SCRUM-180: the venue calendar. Unscoped, unlike the dashboard panels above,
    because it has its own route (/venues/:venueId/calendar) and is not rendered
    inside a .dashboard wrapper -- so it brings its own page width, button and

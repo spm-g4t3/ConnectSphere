@@ -327,18 +327,45 @@ describe('SCRUM-402: the coordinator reads the change requests', () => {
     expect(client.calls).toHaveLength(0);
   });
 
-  it('SCRUM402_AC10_the_organisers_list_carries_each_rows_group', async () => {
+  it('SCRUM402_AC10_the_organisers_list_carries_each_rows_group_and_note', async () => {
     const client = createEventRequestClient([
       ok(eventRow()),
       ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID }),
-      ok([changeRow({ status: 'processed', decision: 'approved', decision_notes: 'Done', processed_by: COORDINATOR_ID })]),
+      ok([changeRow({
+        status: 'processed', decision: 'approved', decision_notes: 'Done', processed_by: COORDINATOR_ID, organiser_note: 'Sponsor asked',
+      })]),
     ]);
 
     const res = await request(app(client, organiserAuth)).get(`/api/event-requests/${REQUEST_ID}/change-requests`);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([expect.objectContaining({
-      requestGroupId: CHANGE_ID, decision: 'approved', decisionNotes: 'Done', processedBy: COORDINATOR_ID,
+      requestGroupId: CHANGE_ID, organiserNote: 'Sponsor asked', decision: 'approved', decisionNotes: 'Done', processedBy: COORDINATOR_ID,
     })]);
+  });
+});
+
+
+describe('SCRUM-402: GET /mine counts the open change requests', () => {
+  it('SCRUM402_AC1_each_event_carries_how_many_submissions_wait_counted_by_group', async () => {
+    const client = createEventRequestClient([
+      ok([
+        eventRow({ assigned_coordinator_id: COORDINATOR_ID, event_change_requests: [
+          { request_group_id: 'g1', status: 'outstanding' },
+          { request_group_id: 'g1', status: 'outstanding' },
+          { request_group_id: 'g2', status: 'processed' },
+          { request_group_id: 'g3', status: 'in_progress' },
+        ] }),
+        eventRow({ id: OTHER_ID, assigned_coordinator_id: COORDINATOR_ID, event_change_requests: [] }),
+      ]),
+      ok([{ id: ORGANISER_ID, full_name: 'Olive Organiser' }]),
+    ]);
+
+    const res = await request(app(client)).get('/api/event-requests/mine');
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((e) => e.openChangeRequestCount)).toEqual([2, 0]);
+    expect(res.body[0]).not.toHaveProperty('eventChangeRequests');
+    expect(client.calls[0].select).toContain('event_change_requests(request_group_id, status)');
   });
 });
