@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
 export default function LoginForm() {
-  const { login } = useAuth();
+  const { login, sessionExpiredMessage } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -42,6 +42,11 @@ export default function LoginForm() {
   return (
     <form onSubmit={handleSubmit} className="login-form" noValidate>
       <h1>Log in</h1>
+
+      {/* Why the user is here, when an expired session sent them. */}
+      {sessionExpiredMessage && (
+        <p className="login-form__notice" role="status">{sessionExpiredMessage}</p>
+      )}
 
       <label>
         Email

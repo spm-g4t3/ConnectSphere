@@ -30,6 +30,14 @@ const MY_BOOKING_REQUESTS = { lines: 100, branches: 98.07, functions: 100, state
 // only starts the check. The guard is cheap defence behind the button.
 const BOOKING_REQUEST_PANEL = { lines: 100, branches: 99.4, functions: 100, statements: 99.3 }
 
+// SCRUM-583: the expiry and idle files are new or rewritten and owned outright.
+const SCRUM583_FILES = [
+  'src/auth/AuthContext.jsx',
+  'src/auth/SessionTimeout.jsx',
+  'src/auth/sessionExpiry.js',
+  'src/services/apiClient.js',
+]
+
 const SCRUM17_FILES = [
   'src/components/VenueBlocksPanel.jsx',
   'src/components/VenueBlockForm.jsx',
@@ -274,6 +282,7 @@ export default defineConfig({
           file === 'src/components/VenueBlocksPanel.jsx' ? PANEL : FULL,
         ]),
         ...SCRUM186_FILES.map((file) => [file, FULL]),
+        ...SCRUM583_FILES.map((file) => [file, FULL]),
         ...SCRUM178_FILES.map((file) => [file, FULL]),
         ...SCRUM137_FILES.map((file) => [file, FULL]),
         ...SCRUM141_FILES.map((file) => [file, FULL]),
