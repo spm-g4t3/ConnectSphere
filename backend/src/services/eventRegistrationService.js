@@ -2,14 +2,17 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  ServiceUnavailableError,
   ValidationError,
 } from '../errors.js';
+import { SCHEMA_MISSING_CODES } from '../http/pgErrors.js';
 import { resolveClient } from '../config/resolveClient.js';
 import { isPlausibleId } from '../validation/ids.js';
 import { getStatusDisplay, getOrganiserStatusLabel } from '../domain/eventRequestStatus.js';
 import { MAX_INTEGER } from '../validation/limits.js';
 import { checkTimestamp } from '../validation/timestampValidation.js';
 import { REGISTRATION_CONFIGURABLE_STATUSES } from '../domain/registrationStatuses.js';
+import { REGISTRATION_STATUS } from '../domain/registrationStatus.js';
 
 // registration_capacity is a Postgres integer.
 const MAX_CAPACITY = MAX_INTEGER;
@@ -46,6 +49,11 @@ function normalizeSettings(input) {
   if (input.enabled !== null && input.enabled !== undefined && typeof input.enabled !== 'boolean') {
     details.push({ field: 'registrationEnabled', message: 'Must be true or false.' });
   }
+  // Left out, the saved value stays (setup_event_registration reads null so).
+  if (input.waitlistEnabled !== null && input.waitlistEnabled !== undefined
+      && typeof input.waitlistEnabled !== 'boolean') {
+    details.push({ field: 'registrationWaitlistEnabled', message: 'Must be true or false.' });
+  }
   const opensAt = parseDate(input.opensAt, 'registrationOpensAt', details, { optional: true });
   const closesAt = parseDate(input.closesAt, 'registrationClosesAt', details, { optional: true });
   const withdrawalDeadline = parseDate(
@@ -75,17 +83,22 @@ function normalizeSettings(input) {
     throw new ValidationError('Registration settings are invalid.', details);
   }
 
-  return { enabled: input.enabled ?? null, opensAt, closesAt, capacity, withdrawalDeadline };
+  return {
+    enabled: input.enabled ?? null, opensAt, closesAt, capacity, withdrawalDeadline,
+    waitlistEnabled: input.waitlistEnabled ?? null,
+  };
 }
 
-function toSettings(result, registeredCount) {
+function toSettings(result, registeredCount, waitlistCount) {
   return {
     enabled: result.enabled,
     opensAt: result.opensAt,
     closesAt: result.closesAt,
     capacity: result.capacity,
     withdrawalDeadline: result.withdrawalDeadline,
+    waitlistEnabled: result.waitlistEnabled,
     registeredCount,
+    waitlistCount,
   };
 }
 
@@ -103,7 +116,7 @@ function mapSetupOutcome(result) {
   if (result.outcome !== 'saved') {
     throw new Error(`Unexpected setup_event_registration outcome: ${result.outcome}`);
   }
-  return toSettings(result.settings, result.registeredCount);
+  return toSettings(result.settings, result.registeredCount, result.waitlistCount);
 }
 
 export async function getRegistrationSettings(eventRequestId, userId, { client } = {}) {
@@ -111,7 +124,7 @@ export async function getRegistrationSettings(eventRequestId, userId, { client }
   const db = await resolveClient(client);
   const { data: event, error } = await db
     .from('event_requests')
-    .select('id, organiser_id, event_name, status, proposed_start, registration_enabled, registration_opens_at, registration_closes_at, registration_capacity, registration_withdrawal_deadline')
+    .select('id, organiser_id, event_name, status, proposed_start, registration_enabled, registration_opens_at, registration_closes_at, registration_capacity, registration_withdrawal_deadline, registration_waitlist_enabled')
     .eq('id', eventRequestId)
     .maybeSingle();
   if (error) throw error;
@@ -119,12 +132,17 @@ export async function getRegistrationSettings(eventRequestId, userId, { client }
   if (event.organiser_id !== userId) {
     throw new ForbiddenError('Only the Event Organiser who created this event can view its registration settings.');
   }
-  const { count, error: countError } = await db
-    .from('event_registrations')
-    .select('id', { count: 'exact', head: true })
-    .eq('event_request_id', eventRequestId)
-    .eq('status', 'registered');
-  if (countError) throw countError;
+  const countStatus = async (status) => {
+    const { count, error: countError } = await db
+      .from('event_registrations')
+      .select('id', { count: 'exact', head: true })
+      .eq('event_request_id', eventRequestId)
+      .eq('status', status);
+    if (countError) throw countError;
+    return count ?? 0;
+  };
+  const registeredCount = await countStatus(REGISTRATION_STATUS.REGISTERED);
+  const waitlistCount = await countStatus(REGISTRATION_STATUS.WAITLISTED);
   return {
     id: event.id,
     eventName: event.event_name,
@@ -137,7 +155,9 @@ export async function getRegistrationSettings(eventRequestId, userId, { client }
       closesAt: event.registration_closes_at,
       capacity: event.registration_capacity,
       withdrawalDeadline: event.registration_withdrawal_deadline,
-      registeredCount: count ?? 0,
+      waitlistEnabled: event.registration_waitlist_enabled ?? false,
+      registeredCount,
+      waitlistCount,
     },
   };
 }
@@ -158,7 +178,35 @@ export async function updateRegistrationSettings(eventRequestId, input, userId, 
     p_closes_at: settings.closesAt,
     p_capacity: settings.capacity,
     p_withdrawal_deadline: settings.withdrawalDeadline,
+    p_waitlist_enabled: settings.waitlistEnabled,
   });
   if (rpcError) throw rpcError;
   return mapSetupOutcome(data);
+}
+
+/**
+ * Registered and waiting-list totals for the event's Organiser or assigned
+ * Coordinator; event_registration_counts checks which one the caller is.
+ */
+export async function getRegistrationCounts(eventRequestId, userId, { client } = {}) {
+  requireId(eventRequestId);
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('event_registration_counts', {
+    p_event_request_id: eventRequestId,
+    p_user_id: userId,
+  });
+  if (error?.code === 'P0002') throw new NotFoundError('Event not found.');
+  if (error?.code === '42501') throw new ForbiddenError(error.message);
+  // An unapplied migration is an outage, as for the attendee registration reads.
+  if (SCHEMA_MISSING_CODES.includes(error?.code)) {
+    throw new ServiceUnavailableError('Registration numbers are temporarily unavailable. Please try again later.');
+  }
+  if (error) throw error;
+  return {
+    eventRequestId: data.eventRequestId,
+    capacity: data.capacity,
+    waitlistEnabled: data.waitlistEnabled,
+    registeredCount: Number(data.registeredCount),
+    waitlistCount: Number(data.waitlistCount),
+  };
 }

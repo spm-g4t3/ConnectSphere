@@ -16,7 +16,9 @@ vi.mock("../../src/notifications/UnreadCountContext", () => ({
   useUnreadCount: () => ({ unreadCount: 0 }),
 }));
 vi.mock("../../src/components/NotificationInbox", () => ({ default: () => <section id="notifications">Notifications</section> }));
-vi.mock("../../src/services/attendeeEventService", () => ({ getRegisteredEvents: vi.fn(), getAttendeeEvent: vi.fn() }));
+vi.mock("../../src/services/attendeeEventService", () => ({
+  getRegisteredEvents: vi.fn(), getAttendeeEvent: vi.fn(), getWaitlist: vi.fn(async () => []),
+}));
 vi.mock("../../src/services/openEventService", () => ({ getOpenEvents: vi.fn(), getOpenEvent: vi.fn() }));
 
 const confirmed = (id = "e1", overrides = {}) => ({

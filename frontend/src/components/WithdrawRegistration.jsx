@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { withdrawRegistration } from "../services/attendeeEventService";
 import { withdrawalFailure } from "../services/withdrawalErrors";
+import { REGISTRATION_STATUS } from "../services/registrationStatus";
 
 /**
  * Asks first, inline, as the other destructive actions here do (there is no
@@ -26,7 +27,7 @@ export default function WithdrawRegistration({ registrationId, refusal, onWithdr
     try {
       const result = await withdrawRegistration(registrationId);
       // Success is the backend saying withdrawn, not merely a 2xx.
-      if (result?.status !== "withdrawn") throw new Error("Unexpected withdrawal reply");
+      if (result?.status !== REGISTRATION_STATUS.WITHDRAWN) throw new Error("Unexpected withdrawal reply");
       onWithdrawn(result);
     } catch (err) {
       const outcome = withdrawalFailure(err);

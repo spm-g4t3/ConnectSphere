@@ -1144,6 +1144,8 @@ const FIXTURES = {
   booking_flagged_hours_change: HOURS_PAYLOAD,
   venue_hold_expired: { eventName: "Tech Talk", venueName: "Hall A", expiresAt: PAYLOAD.startsAt },
   event_cancelled: { audience: "organiser", eventName: "Tech Talk", reason: "Venue unavailable" },
+  // SCRUM-347 (024).
+  event_rejected: { audience: "organiser", eventName: "Tech Talk", reason: "No hall is free" },
   event_request_awaiting_assignment: { eventName: "Tech Talk", submittedAt: PAYLOAD.startsAt },
   event_request_assigned: { eventName: "Tech Talk", assignedByName: "Lena Lead" },
   event_request_coordinator_assigned: { eventName: "Tech Talk", coordinatorName: "Nia New" },
@@ -1188,7 +1190,56 @@ const FIXTURES = {
   equipment_flagged: { eventName: "Tech Talk", reason: "Retired" },
   // SCRUM-494 (091).
   registration_schedule_conflict: { eventName: "Tech Talk", fields: ["registrationClosesAt"] },
+  // SCRUM-173 (032).
+  event_request_approved: { eventName: "Tech Talk" },
+  event_request_rejected: { eventName: "Tech Talk", reason: "Too large" },
+  venue_hold_placed: { eventName: "Tech Talk", venueName: "Hall A", expiresAt: PAYLOAD.startsAt },
+  venue_hold_expiring: { eventName: "Tech Talk", venueName: "Hall A", expiresAt: PAYLOAD.startsAt },
+  // SCRUM-460 (037).
+  registration_promoted: { eventName: "Tech Talk" },
 };
+
+describe("describeNotification: event_rejected (SCRUM-347)", () => {
+  const d = (payload) => describeNotification({ id: "n30", type: "event_rejected", payload });
+
+  it("SCRUM347_AC7_tells_the_organiser_the_reason_and_that_they_can_resubmit", () => {
+    expect(d({ audience: "organiser", eventName: "Tech Talk", reason: "No hall is free", rejectedAt: null })).toEqual({
+      headline: "Tech Talk was rejected",
+      detail: "Reason: No hall is free. You can revise and resubmit it.",
+    });
+  });
+
+  it("SCRUM347_AC7_dates_the_rejection_and_falls_back_when_no_reason_is_given", () => {
+    const { detail } = d({ audience: "organiser", eventName: "Tech Talk", rejectedAt: PAYLOAD.startsAt });
+    expect(detail).toMatch(/^Reason: No reason recorded\. Rejected .+\. You can revise and resubmit it\.$/);
+  });
+
+  it("SCRUM347_AC7_tells_venue_staff_which_venue_was_released", () => {
+    const { headline, detail } = d({
+      audience: "venue_staff", eventName: "Tech Talk", venueName: "Hall A", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt,
+    });
+    expect(headline).toBe("Hall A was released for Tech Talk");
+    expect(detail).toContain("The event was rejected");
+  });
+
+  it("SCRUM347_AC7_tells_venue_staff_a_withdrawn_request_was_withdrawn_not_released", () => {
+    const { headline, detail } = d({
+      audience: "venue_staff", outcome: "withdrawn", eventName: "Tech Talk", venueName: "Hall A",
+      startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt,
+    });
+    expect(headline).toBe("The request for Hall A for Tech Talk was withdrawn");
+    expect(detail).toContain("no longer needs a decision");
+  });
+
+  it("SCRUM347_AC7_tells_technical_support_the_equipment_request_was_cancelled", () => {
+    expect(d({ audience: "technical_support_staff", eventName: "Tech Talk" }).headline)
+      .toBe("The equipment request for Tech Talk was cancelled");
+  });
+
+  it("SCRUM347_AC7_an_unknown_audience_reads_as_the_generic_notification", () => {
+    expect(d({ audience: "unknown" }).headline).toBe("New notification");
+  });
+});
 
 describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", () => {
   it("SCRUM402_AC11_the_known_types_include_what_036_appends_to_the_live_list", () => {
@@ -1243,5 +1294,15 @@ describe("describeNotification: fallbacks for sparse payloads", () => {
     expect(detail).toContain("The request for Unknown venue");
     expect(detail).toContain("Coordinator's reason: No reason recorded.");
     expect(`${headline} ${detail}`).not.toContain("undefined");
+  });
+});
+
+describe("describeNotification: registration_promoted (SCRUM-460 AC5)", () => {
+  it("SCRUM460_AC5_tells_the_attendee_they_now_have_a_place", () => {
+    expect(describeNotification({ id: "n1", type: "registration_promoted", payload: { eventName: "Tech Talk" } }))
+      .toMatchObject({
+        headline: "You have a place at Tech Talk",
+        detail: "A place opened and you were first on the waiting list, so you are now registered.",
+      });
   });
 });

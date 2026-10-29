@@ -26,9 +26,17 @@
 //     startsAt, endsAt, reason }
 //   venue_hold_expired (040, SCRUM-491): { eventRequestId, eventName,
 //     venueId, venueName, expiresAt }
+//   venue_hold_placed (032, SCRUM-173): { eventRequestId, eventName, venueId,
+//     venueName, expiresAt, placedById, placedByName }
+//   venue_hold_expiring (032, SCRUM-173): { eventRequestId, eventName,
+//     venueId, venueName, expiresAt }
 //   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
 //     cancelledAt }; audience is organiser, venue_staff,
 //     technical_support_staff or safety_officer
+//   event_rejected (024, SCRUM-347): { audience, eventName }, plus reason and
+//     rejectedAt for the organiser, outcome (withdrawn or cancelled, 027),
+//     venueId, venueName, startsAt and endsAt for venue_staff, and
+//     equipmentRequestId for technical_support_staff
 //   event_submitted_for_safety_review (064, SCRUM-489): { eventRequestId,
 //     eventName, coordinatorId, coordinatorName, startsAt, submittedAt }
 //   booking_request_approved and booking_request_rejected (066, SCRUM-258):
@@ -44,6 +52,9 @@
 //   event_request_coordinator_assigned (052): { eventRequestId, eventName,
 //     coordinatorId, coordinatorName, previousCoordinatorId,
 //     previousCoordinatorName }
+//   event_request_approved and event_request_rejected (032, SCRUM-173):
+//     { eventRequestId, eventName, decidedAt, decidedById, decidedByName,
+//     reason }; reason is optional on approval, always set on rejection
 //   safety_review_response (058 on SCRUM-490's branch, SCRUM-490):
 //     { eventName, outcome, note, responseId, respondedAt }
 //   safety_booking_flagged (058): { eventName, venueName, startsAt, endsAt,
@@ -79,6 +90,8 @@
 //     and endsAt are the pending request's own (old) times
 //   registration_schedule_conflict (091, SCRUM-494): { eventName, newStart,
 //     fields }; fields lists the registration dates the new start now precedes
+//   registration_promoted (037, SCRUM-460): { eventRequestId, eventName,
+//     registrationId }
 //   equipment_* (097, SCRUM-176): { audience, eventRequestId, eventName,
 //     lines: [{ equipmentType, quantity, reserved, outcome }], ... }; see
 //     describeEquipmentNotification for what each type adds.
@@ -89,7 +102,7 @@
 import { formatRange, formatTimestamp } from "./displayFormat";
 import { reasonLabel } from "./venueBlockReasons";
 import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
-import { formatVenuePeriod } from "./datetimeFormat";
+import { formatVenuePeriod, formatVenueTimestamp } from "./datetimeFormat";
 import { detailFieldList } from "./eventDetailFields";
 import { changeFieldList } from "./changeRequestDisplay";
 
@@ -371,6 +384,34 @@ const DESCRIBERS = {
     };
   },
 
+  // SCRUM-173. Sent to the assigned coordinator when a hold is placed, so the
+  // expiry is known up front; a hold still has to become a booking.
+  venue_hold_placed(payload, { eventName, venueName }) {
+    const placedBy = payload.placedByName ? `Placed by ${payload.placedByName}. ` : "";
+    const expires = isInstant(payload.expiresAt)
+      ? `The hold expires ${formatVenueTimestamp(payload.expiresAt)}. `
+      : "";
+
+    return {
+      headline: `${venueName} is held for ${eventName}`,
+      detail: `${placedBy}${expires}A hold is not a booking.`,
+    };
+  },
+
+  // SCRUM-173. Sent once, ahead of expiry; the coordinator must book or lose
+  // the venue, so the inbox marks it as needing action.
+  venue_hold_expiring(payload, { eventName, venueName }) {
+    const expires = isInstant(payload.expiresAt)
+      ? `It expires ${formatVenueTimestamp(payload.expiresAt)}.`
+      : "It expires soon.";
+
+    return {
+      headline: `The hold on ${venueName} for ${eventName} expires soon`,
+      detail: `${expires} Complete the booking before then, or the venue is released.`,
+      needsAction: true,
+    };
+  },
+
   // 031. Sent to Venue Staff when a coordinator withdraws a pending request.
   booking_request_withdrawn(payload, { eventName, venueName }) {
     return {
@@ -535,6 +576,37 @@ const DESCRIBERS = {
     return undefined;
   },
 
+  // SCRUM-347. Venue Staff get one per released booking, so theirs names the venue.
+  event_rejected(payload, { eventName, venueName }) {
+    if (payload.audience === "organiser") {
+      const rejectedAt = payload.rejectedAt ? ` Rejected ${formatTimestamp(payload.rejectedAt)}.` : "";
+      return {
+        headline: `${eventName} was rejected`,
+        detail: `Reason: ${asSentence(payload.reason || NO_REASON)}${rejectedAt} You can revise and resubmit it.`,
+      };
+    }
+    // A withdrawn request never held the venue, so it is not called a release (027).
+    if (payload.audience === "venue_staff" && payload.outcome === "withdrawn") {
+      return {
+        headline: `The request for ${venueName} for ${eventName} was withdrawn`,
+        detail: `The event was rejected, so its request for ${formatRange(payload.startsAt, payload.endsAt)} no longer needs a decision.`,
+      };
+    }
+    if (payload.audience === "venue_staff") {
+      return {
+        headline: `${venueName} was released for ${eventName}`,
+        detail: `The event was rejected, so its booking for ${formatRange(payload.startsAt, payload.endsAt)} no longer holds the venue.`,
+      };
+    }
+    if (payload.audience === "technical_support_staff") {
+      return {
+        headline: `The equipment request for ${eventName} was cancelled`,
+        detail: "The event was rejected, so its equipment request was cancelled and its reservations released.",
+      };
+    }
+    return undefined;
+  },
+
   // SCRUM-489 (AC8). Sent to every Safety Officer when a coordinator submits
   // an Approved event; the start date says how soon the check is needed.
   event_submitted_for_safety_review(payload, { eventName }) {
@@ -563,6 +635,28 @@ const DESCRIBERS = {
     return {
       headline: `${eventName} is waiting for a coordinator`,
       detail: `${submittedAt}Assign it from the unassigned queue.`,
+    };
+  },
+
+  // SCRUM-173. Sent to the Organiser when a coordinator approves; the
+  // decision note is optional here.
+  event_request_approved(payload, { eventName }) {
+    const note = payload.reason ? ` Coordinator's note: ${payload.reason}` : "";
+
+    return {
+      headline: `${eventName} was approved`,
+      detail: `Planning can go ahead.${note}`,
+    };
+  },
+
+  // SCRUM-173. A rejection is not final, so the Organiser is told the
+  // request can be changed and resubmitted.
+  event_request_rejected(payload, { eventName }) {
+    return {
+      headline: `${eventName} was rejected`,
+      detail:
+        `Reason: ${asSentence(payload.reason || NO_REASON)} ` +
+        "You can change the request and resubmit it.",
     };
   },
 
@@ -645,6 +739,14 @@ const DESCRIBERS = {
     return {
       headline: `Registration dates for ${eventName} need updating`,
       detail: `The new start${newStart} ${clash}.`,
+    };
+  },
+
+  // SCRUM-460 (AC5). Sent to the attendee a released place went to.
+  registration_promoted(_payload, { eventName }) {
+    return {
+      headline: `You have a place at ${eventName}`,
+      detail: "A place opened and you were first on the waiting list, so you are now registered.",
     };
   },
 

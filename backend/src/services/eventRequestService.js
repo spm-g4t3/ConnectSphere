@@ -1375,6 +1375,35 @@ export async function cancelEventRequest(
 }
 
 /**
+ * SCRUM-347: the assigned coordinator rejects an Approved event and releases its
+ * arrangements. reject_approved_event (024) checks the caller and the status
+ * under the row lock; the reason is checked here too so the form can name the field.
+ *
+ * @throws {ValidationError} a blank reason, before any call
+ * @throws {ForbiddenError}  not the assigned coordinator
+ * @throws {ConflictError}   not Approved; code CANCEL_INSTEAD when it is Confirmed
+ * @throws {NotFoundError}   no such event
+ */
+export async function rejectApprovedEvent(id, { reason } = {}, coordinatorId, { client } = {}) {
+  requireCallerId(coordinatorId, 'coordinatorId');
+  if (typeof reason !== 'string' || reason.trim() === '') {
+    const message = 'is required to reject an event';
+    throw new ValidationError(`Invalid rejection -- reason: ${message}`, [{ field: 'reason', message }]);
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('reject_approved_event', {
+    p_event_request_id: id,
+    p_coordinator_id: coordinatorId,
+    p_reason: reason.trim(),
+  });
+
+  if (error?.hint === 'CANCEL_INSTEAD') throw new ConflictError(error.message, { code: 'CANCEL_INSTEAD' });
+  if (error) throw translateError(error);
+  return toEventRequest(data);
+}
+
+/**
  * Preview a significant change. The database repeats ownership and lifecycle
  * checks, while this service applies SCRUM-10 validation before the RPC.
  */
@@ -1781,7 +1810,8 @@ async function requireHistoryReader(db, id, userId, role) {
 
 /**
  * SCRUM-355 AC3, AC5: the decisions a request has had that are no longer
- * current, oldest first. A non-empty list is what marks a request as a resubmission.
+ * current, oldest first. An entry superseded by a reopen is what marks a request
+ * as a resubmission; an approval superseded by a rejection (SCRUM-347) does not.
  *
  * Narrower than the clarification history: past rejection notes are for the
  * Organiser, the Lead who assigns the request, and the coordinator it is

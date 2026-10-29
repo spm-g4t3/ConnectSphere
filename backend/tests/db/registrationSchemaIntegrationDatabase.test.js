@@ -82,15 +82,20 @@ describe('SCRUM22 one registration table', () => {
     expect(await one('select count(*)::int as count from event_registrations')).toEqual({ count: 3 });
   });
 
-  it('SCRUM22_AC4_reuses_a_withdrawn_row_and_does_not_promote_waitlisted_attendees', async () => {
+  // SCRUM-474 replaced "registering never promotes": a queued attendee now takes
+  // a free place before anyone registers, so registration cannot jump the queue.
+  it('SCRUM22_AC4_reuses_a_withdrawn_row_and_SCRUM474_AC9_serves_the_queue_first', async () => {
     await setup();
     await db.query("update event_registrations set status = 'withdrawn' where attendee_id = $1", [ME]);
     const previous = await one('select id, created_at from event_registrations where attendee_id = $1', [ME]);
     expect((await register()).registration).toMatchObject({ id: previous.id });
     expect(await one('select id, created_at from event_registrations where attendee_id = $1', [ME])).toEqual(previous);
     await db.query("update event_registrations set status = 'waitlisted' where attendee_id = $1", [THIRD]);
-    expect(await register(THIRD)).toEqual({ outcome: 'already_waitlisted' });
-    expect(await state(THIRD)).toEqual({ active_count: 1, is_registered: false });
+    // The catch-up gave THIRD the place, so this attempt succeeded (SCRUM-460 issue 2).
+    expect(await register(THIRD)).toMatchObject({
+      outcome: 'registered', registration: { attendeeId: THIRD, status: 'registered' },
+    });
+    expect(await state(THIRD)).toEqual({ active_count: 2, is_registered: true });
   });
 
   it('SCRUM22_AC6_registration_writers_are_defined_once_invoker_security_and_backend_only', async () => {
@@ -98,7 +103,7 @@ describe('SCRUM22 one registration table', () => {
     expect(functions).toEqual({ count: 1, definer: false });
     expect(await one("select prosecdef from pg_proc where proname = 'setup_event_registration'"))
       .toEqual({ prosecdef: false });
-    expect(await clientsCanExecute(db, 'setup_event_registration(uuid,uuid,boolean,timestamptz,timestamptz,integer,timestamptz)'))
+    expect(await clientsCanExecute(db, 'setup_event_registration(uuid,uuid,boolean,timestamptz,timestamptz,integer,timestamptz,boolean)'))
       .toEqual([]);
   });
 

@@ -21,6 +21,8 @@ const STATUS_CONFIG = {
   processed: { label: "Processed", className: "status--processed" },
 };
 
+// The words come from outcomeLabel. SCRUM-347's event_rejected and 036's
+// event_cancelled were closed with the event, not decided, so they take the closed style.
 const OUTCOME_CLASS = {
   approved: "change-request-outcome--approved",
   rejected: "change-request-outcome--rejected",

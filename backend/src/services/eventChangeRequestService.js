@@ -200,10 +200,11 @@ export async function createChangeRequest(input, organiserId, { client } = {}) {
   // costs no client resolution and no round trip.
   const db = await resolveClient(client);
 
-  // SCRUM-402: create_change_request_group (036) checks the owner and SCRUM-11's
-  // status rule under the event lock, writes the group, and tells the holder of
-  // a significant change (AC12), in one transaction. Its refusals keep the
-  // words and the 400 this function used to raise itself.
+  // SCRUM-402: create_change_request_group (039) checks the owner, SCRUM-11's
+  // draft rule and SCRUM-347's rejected rule under the event lock, writes the
+  // group, and tells the holder of a significant change (AC12), in one
+  // transaction. Its refusals keep the words and the 400 this function used to
+  // raise itself.
   const { data, error } = await db.rpc('create_change_request_group', {
     p_event_request_id: request.eventRequestId,
     p_organiser_id: organiserId,

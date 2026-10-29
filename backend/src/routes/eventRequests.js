@@ -101,6 +101,7 @@ import {
   reopenEventRequest,
   getEventCancellationImpact,
   cancelEventRequest,
+  rejectApprovedEvent,
   getSignificantEventChangeImpact,
   applySignificantEventChange,
   editEventRequestDetails,
@@ -119,7 +120,7 @@ import {
 // SCRUM-491. Credential-free like the two services above: it resolves the
 // client lazily and never imports venueService.js.
 import { listHoldCandidates } from '../services/venueHoldService.js';
-import { getStatusDisplay } from '../domain/eventRequestStatus.js';
+import { STATUS, getStatusDisplay } from '../domain/eventRequestStatus.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 // Both of these are credential-free on purpose, and that is worth knowing
 // before adding a third: this router's tests do not mock config/
@@ -1056,6 +1057,18 @@ export function createEventRequestRouter({
     res.status(200).json({ ...withStatusDisplay(result.event), changedFields: result.changedFields });
   });
 
+  // SCRUM-347: the assigned coordinator rejects an Approved event. Body: { reason }.
+  // 409 with code CANCEL_INSTEAD for a Confirmed event.
+  router.post('/:id/rejection', coordinatorOnly, async (req, res) => {
+    const updated = await rejectApprovedEvent(
+      req.params.id,
+      { reason: req.body?.reason },
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(withStatusDisplay(updated));
+  });
+
   router.post('/:id/significant-change', coordinatorOnly, async (req, res) => {
     const result = await applySignificantEventChange(
       req.params.id,
@@ -1096,7 +1109,14 @@ export function createEventRequestRouter({
    * the list rather than splicing this into it.
    */
   router.post('/:id/change-requests', async (req, res) => {
-    await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+    const event = await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+
+    // SCRUM-347: a rejected event is revised by reopening it, not by change requests,
+    // which rejection closes and nobody could process after a reopen. 039 refuses it
+    // under the event lock; this early answer costs no query and gives the same 400.
+    if (event.status === STATUS.REJECTED) {
+      throw new ValidationError('Cannot request a change to a rejected event; revise and resubmit it instead');
+    }
 
     const created = await createChangeRequestFromClient(
       req.params.id,

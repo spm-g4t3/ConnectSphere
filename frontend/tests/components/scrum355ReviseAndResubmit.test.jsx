@@ -197,15 +197,18 @@ describe("SCRUM355 DecisionHistory", () => {
   });
 
   it("SCRUM355_AC3_entries_with_no_note_or_date_still_read_sensibly", async () => {
+    // SCRUM-347: an approval a rejection replaced, then that rejection.
     vi.mocked(getEventDecisionHistory).mockResolvedValue([
-      pastRejection({ decision: "approved", decisionNote: null, decidedAt: null }),
+      pastRejection({ id: "d0", decision: "approved", decisionNote: null, decidedAt: null, supersededReason: "rejected_after_approval" }),
+      pastRejection({ decisionNote: null }),
     ]);
 
     render(<DecisionHistory eventRequestId={REQUEST_ID} />);
 
     expect(await screen.findByText("No reason was recorded.")).toBeInTheDocument();
-    expect(screen.getByRole("listitem")).toHaveTextContent("Approved on an unrecorded date by Priya Nair");
-    expect(screen.getByRole("listitem")).toHaveTextContent("No note was left.");
+    const [approval] = screen.getAllByRole("listitem");
+    expect(approval).toHaveTextContent("Approved on an unrecorded date by Priya Nair");
+    expect(approval).toHaveTextContent("No note was left.");
   });
 
   it("SCRUM355_AC5_switching_requests_never_shows_the_previous_requests_decisions", async () => {

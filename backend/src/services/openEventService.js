@@ -7,6 +7,7 @@
 import { STATUS } from '../domain/eventRequestStatus.js';
 import { isOpenForRegistration } from '../domain/registrationWindow.js';
 import { availability } from '../domain/registrationAvailability.js';
+import { REGISTRATION_STATUS } from '../domain/registrationStatus.js';
 import { translateRegistrationEligibilityError } from './registrationEligibilityService.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../errors.js';
 import { resolveClient } from '../config/resolveClient.js';
@@ -17,7 +18,7 @@ import { isPlausibleId } from '../validation/ids.js';
 
 const SETTINGS_COLUMNS = `
   registration_enabled, registration_opens_at, registration_closes_at,
-  registration_capacity
+  registration_capacity, registration_waitlist_enabled
 `;
 
 // status is read only to re-check it; it is not part of the response.
@@ -53,11 +54,12 @@ function translateEventReadError(error) {
  * placesLeft is null for no limit and never negative. isFull and isRegistered
  * are what the page labels "Full" and "Registered"; canRegister is whether the
  * Register action should be offered (advisory, see the file header).
- * canJoinWaitlist and waitlistCount are placeholders so SCRUM-22 can add the
- * waiting list without changing this shape: there is none yet, so never
- * joinable and no count.
+ * canJoinWaitlist offers the waiting list on a full event the caller could
+ * otherwise register for; waitlistPosition is the caller's own place in it.
+ * waitlistCount stays null here: the queue's length is for the event's staff.
  */
-function toOpenEvent(row, activeCount, isRegistered, registrationStatus) {
+function toOpenEvent(row, activeCount, isRegistered, registrationStatus, waitlistPosition) {
+  const couldRegister = !isRegistered && (registrationStatus == null || registrationStatus === REGISTRATION_STATUS.WITHDRAWN);
   const { placesLeft, isFull } = availability(row.registration_capacity, activeCount);
 
   return {
@@ -73,8 +75,9 @@ function toOpenEvent(row, activeCount, isRegistered, registrationStatus) {
     placesLeft,
     isFull,
     isRegistered,
-    canRegister: !isFull && !isRegistered && (registrationStatus == null || registrationStatus === 'withdrawn'),
-    canJoinWaitlist: false,
+    canRegister: !isFull && couldRegister,
+    canJoinWaitlist: isFull && couldRegister && row.registration_waitlist_enabled === true,
+    waitlistPosition: registrationStatus === REGISTRATION_STATUS.WAITLISTED && waitlistPosition != null ? Number(waitlistPosition) : null,
     waitlistCount: null,
   };
 }
@@ -92,6 +95,7 @@ function toBrowseEvent(event) {
     isRegistered: event.isRegistered,
     canRegister: event.canRegister,
     canJoinWaitlist: event.canJoinWaitlist,
+    waitlistPosition: event.waitlistPosition,
     waitlistCount: event.waitlistCount,
   };
 }
@@ -152,7 +156,10 @@ async function withRegistrationState(db, rows, attendeeId) {
 
   return rows.map((row) => {
     const state = states.get(row.id);
-    return toOpenEvent(row, Number(state?.active_count ?? 0), state?.is_registered === true, state?.registration_status);
+    return toOpenEvent(
+      row, Number(state?.active_count ?? 0), state?.is_registered === true,
+      state?.registration_status, state?.waitlist_position,
+    );
   });
 }
 
@@ -166,7 +173,7 @@ async function withRegistrationState(db, rows, attendeeId) {
  * @returns {Promise<object[]>} possibly empty, each with only id, eventName,
  *   description, startsAt, endsAt, registrationOpensAt, registrationClosesAt,
  *   capacity, registeredCount, placesLeft, isFull, isRegistered, canRegister,
- *   canJoinWaitlist and waitlistCount
+ *   canJoinWaitlist, waitlistPosition and waitlistCount
  * @throws {ValidationError} when no attendee was supplied, before any read
  */
 async function listOpenEventsWithRegistrationDetails({ attendeeId, client, now = new Date() } = {}) {
