@@ -89,7 +89,8 @@ function EventInformation({ eventId }) {
               </li>
             ))}</ul> : <p>No confirmed venue information is available.</p>}
           </>)}
-        {!loading && !error && current?.registrationId && (
+        {/* SCRUM-434 AC5: a cancelled event shows the cancellation and the message only, so no withdrawal is offered. */}
+        {!loading && !error && current?.registrationId && current.state !== "cancelled" && (
           <WithdrawRegistration
             registrationId={current.registrationId}
             refusal={refusal?.registrationId === current.registrationId ? refusal.message : null}

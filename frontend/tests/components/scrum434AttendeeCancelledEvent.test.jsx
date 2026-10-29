@@ -115,4 +115,25 @@ describe("SCRUM-434 AC5: a cancelled event for an attendee", () => {
     expect(await screen.findByRole("heading", { name: "Confirmed arrangements" })).toBeInTheDocument();
     expect(screen.queryByText("This event has been cancelled.")).not.toBeInTheDocument();
   });
+  it("SCRUM434_AC5_a_cancelled_event_offers_no_withdrawal_and_no_withdrawal_refusal", async () => {
+    // Withdrawing from an event that no longer happens is meaningless, and its refusal text
+    // ("You are still registered") would contradict the cancellation.
+    vi.mocked(getAttendeeEvent).mockResolvedValue(cancelled());
+    renderPage();
+
+    await screen.findByText("This event has been cancelled.");
+    expect(screen.queryByRole("region", { name: "Withdraw registration" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Withdraw your registration/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/still registered/)).not.toBeInTheDocument();
+  });
+
+  it.each(["unavailable", "confirmed"])("SCRUM434_AC5_a_%s_event_still_offers_the_withdrawal", async (state) => {
+    vi.mocked(getAttendeeEvent).mockResolvedValue({
+      eventRequestId: "e1", registrationId: "r1", state, eventName: "Open day",
+      startsAt: "2030-05-06T01:00:00Z", endsAt: "2030-05-06T03:00:00Z", venues: [],
+    });
+    renderPage();
+
+    expect(await screen.findByRole("region", { name: "Withdraw registration" })).toBeInTheDocument();
+  });
 });
