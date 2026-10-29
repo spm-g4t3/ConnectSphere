@@ -138,7 +138,6 @@ describe("SCRUM17_AC3 loading and empty states", () => {
 
 describe("SCRUM17_AC3 list errors", () => {
   it.each([
-    ["a 401", httpError(401), "Your session has expired. Please sign in again."],
     ["a 500", httpError(500), "Notifications could not be loaded. Please try again."],
     ["a 403", httpError(403), "Notifications could not be loaded. Please try again."],
     ["a 503", httpError(503), "Notifications could not be loaded. Please try again."],
@@ -368,7 +367,6 @@ describe("SCRUM17_AC3 marking a notification read", () => {
   // Only a 404 refetches; it has its own test below.
   it.each([
     ["a_500", httpError(500), "This notification could not be marked as read. Please try again."],
-    ["a_401", httpError(401), "Your session has expired. Please sign in again."],
     ["a_network_error", new Error("Network Error"), "This notification could not be marked as read. Please try again."],
   ])("SCRUM17_AC3_%s_shows_its_row_message_re_enables_the_button_and_does_not_refetch", async (_label, error, message) => {
     const user = userEvent.setup();

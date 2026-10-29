@@ -849,7 +849,6 @@ describe("SCRUM178_AC1 VenueCalendar empty state", () => {
 describe("SCRUM178_AC1 VenueCalendar errors", () => {
   it.each([
     [400, "That venue id was not recognised. Please go back and refresh."],
-    [401, "Your session has expired. Please sign in again."],
     [404, "That venue does not exist. It may have been removed."],
     [500, "The calendar could not be loaded. Please try again."],
     [418, "Could not load this venue's calendar. Please try again."],

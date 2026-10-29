@@ -107,6 +107,9 @@ export default defineConfig({
         'src/routes/flaggedBookings.js': FULL,
         'src/services/flaggedBookingService.js': FULL,
         'src/validation/flaggedBookingValidation.js': FULL,
+        // SCRUM-583: login, logout and the new refresh route, all covered by
+        // auth.test.js and scrum583RefreshRoute.test.js.
+        'src/routes/auth.js': FULL,
       },
     },
   },

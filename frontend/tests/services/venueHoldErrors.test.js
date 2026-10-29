@@ -56,7 +56,6 @@ describe("holdErrorMessage by status", () => {
 
   it.each([
     [400, "Some details were not accepted. Please check the form."],
-    [401, "Your session has expired. Please sign in again."],
   ])("SCRUM491_a_%s_has_its_status_message", (status, message) => {
     expect(holdErrorMessage(http(status), "place")).toBe(message);
   });

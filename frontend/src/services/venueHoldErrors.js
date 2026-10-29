@@ -11,7 +11,7 @@
 // server text the UI shows is details[].message from a 400, and that goes to
 // the form, not through here.
 
-import { codeOf, makeErrorMapper, SESSION_EXPIRED } from "./apiErrors";
+import { codeOf, makeErrorMapper } from "./apiErrors";
 
 const CODE_MESSAGES = {
   EVENT_NOT_APPROVED:
@@ -27,7 +27,6 @@ const CODE_MESSAGES = {
 
 const STATUS_MESSAGES = {
   400: "Some details were not accepted. Please check the form.",
-  401: SESSION_EXPIRED,
   // AC1: refused, with the reason.
   403: "Only Venue Staff can place a tentative hold on a venue.",
 };

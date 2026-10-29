@@ -68,7 +68,7 @@ describe("SCRUM363 organiser confirmed arrangements", () => {
   });
 
   it.each([
-    [401, /session has expired/], [403, /event's organiser/], [404, /no longer available/], [500, /could not be loaded/],
+    [403, /event's organiser/], [404, /no longer available/], [500, /could not be loaded/],
   ])("SCRUM363_AC7_HTTP_%s_has_an_accessible_retryable_error", async (status, message) => {
     vi.mocked(getConfirmedArrangements).mockRejectedValueOnce({ response: { status } });
     await open();

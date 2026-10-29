@@ -45,6 +45,12 @@ button { cursor: pointer; }
 .login-form input { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); padding: 12px; }
 .login-form input:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .login-form button { width: 100%; }
+.login-form__notice { background: #fff8e6; border: 1px solid #f0d99a; border-radius: 6px; color: #6b4e00; padding: 10px 12px; }
+.session-timeout__backdrop { align-items: center; background: rgba(20, 24, 33, 0.55); display: flex; inset: 0; justify-content: center; padding: 16px; position: fixed; z-index: 1000; }
+.session-timeout { background: #fff; border-radius: 10px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3); max-width: 440px; padding: 24px; width: 100%; }
+.session-timeout h2 { margin: 0 0 8px; }
+.session-timeout__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.session-timeout__error { background: #fff0ee; border-radius: 6px; color: #a43c32; padding: 8px 10px; }
 .login-form__error { background: #fff0ee; border-radius: 6px; color: #a43c32; padding: 10px 12px; }
 .eyebrow { color: var(--teal); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
 .placeholder-page p, .loading-screen { color: var(--muted); }

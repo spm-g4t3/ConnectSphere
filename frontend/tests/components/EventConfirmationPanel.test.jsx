@@ -206,7 +206,6 @@ describe("SCRUM-363: confirmation panel", () => {
   });
 
   it.each([
-    [failure(401), /session has expired/],
     [failure(403), /assigned Event Coordinator/],
     [failure(404), /no longer available/],
     [failure(409, { error: "Its current status is confirmed." }), /current status is confirmed/],

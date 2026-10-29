@@ -84,7 +84,6 @@ describe("SCRUM-51 mocked API response sequences (not lifecycle RPC integration)
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Attendees can view this event information."],
     [404, "Event information is unavailable. An active registration is required."],
     [500, "Event information could not be loaded. Please try again."],

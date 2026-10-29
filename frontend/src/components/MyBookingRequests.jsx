@@ -38,12 +38,10 @@ import {
 import { formatRange, formatTimestamp } from "../services/displayFormat";
 import { reviewReasonLabel } from "../services/flaggedBookingDisplay";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // Keyed by status, the same shape as MyAssignedEvents' table. GET /mine is gated
 // on the coordinator role, so a 403 means the account's role is wrong.
 const LIST_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Event Coordinators have a list of venue requests.",
   500: "Your venue requests could not be loaded. Please try again.",
 };

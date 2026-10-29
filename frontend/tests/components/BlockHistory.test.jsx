@@ -83,7 +83,6 @@ const MSG = {
   loading: "Loading history...",
   empty: "No changes have been recorded for this block.",
   help: "Other staff are shown by a short user id — the API records ids, not names.",
-  401: "Your session has expired. Please sign in again.",
   403: "Only Venue Staff can see a block's history.",
   404: "That block no longer exists.",
   default: "Could not load this block's history. Please try again.",
@@ -175,7 +174,6 @@ describe("BlockHistory states", () => {
   });
 
   for (const [label, err, message] of [
-    ["401", () => httpError(401), MSG[401]],
     ["403", () => httpError(403), MSG[403]],
     ["404", () => httpError(404), MSG[404]],
     ["500", () => httpError(500), MSG.default],

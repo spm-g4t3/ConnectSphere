@@ -106,7 +106,6 @@ describe("loading, empty and error states", () => {
   });
 
   it.each([
-    [401, /session has expired/],
     [403, /Only Event Coordinators/],
     [500, /could not be loaded/],
     [418, /could not be loaded/],

@@ -1,6 +1,7 @@
-import { BrowserRouter, Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useEffect } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
+import SessionTimeout from "./auth/SessionTimeout";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import Navigation from "./components/Navigation";
 import { UnreadCountProvider } from "./notifications/UnreadCountContext";
@@ -80,7 +81,14 @@ function EventRegistrationSettingsRoute() {
 }
 
 function AppRoutes() {
-  const { user, loading, logoutMessage, clearLogoutMessage } = useAuth();
+  const { user, loading, logoutMessage, clearLogoutMessage, sessionExpiredMessage } = useAuth();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+
+  // ProtectedRoute already sends a signed-out user to login; this covers the unprotected screens.
+  useEffect(() => {
+    if (sessionExpiredMessage && pathname !== "/login") navigate("/login", { replace: true });
+  }, [sessionExpiredMessage, pathname, navigate]);
 
   useEffect(() => {
     if (!logoutMessage) return undefined;
@@ -408,6 +416,7 @@ function App() {
           <div className="app-shell">
             <AppRoutes />
           </div>
+          <SessionTimeout />
         </UnreadCountProvider>
       </AuthProvider>
     </BrowserRouter>

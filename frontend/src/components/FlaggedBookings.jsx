@@ -21,11 +21,10 @@ import {
   resolutionConflicts,
   resolutionErrorMessage,
 } from "../services/flaggedBookingErrors";
-import { SESSION_EXPIRED, statusMessageOf } from "../services/apiErrors";
+import { statusMessageOf } from "../services/apiErrors";
 import { asList } from "../services/displayFormat";
 
 const LIST_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Venue Staff can see flagged bookings.",
 };
 const LIST_DEFAULT_ERROR = "Flagged bookings could not be loaded. Please try again.";

@@ -44,7 +44,6 @@ describe("SCRUM492 releaseVenueBooking", () => {
 describe("SCRUM492 releaseErrorMessage", () => {
   it.each([
     ["a_400", http(400, { error: "server words" }), "Give a reason of up to 1,000 characters."],
-    ["a_401", http(401), "Your session has expired. Please sign in again."],
     ["a_403", http(403), "Only the coordinator assigned to this event can release its venues."],
     ["a_404", http(404), "This booking no longer exists."],
     ["a_409_EVENT_NOT_APPROVED", http(409, { code: "EVENT_NOT_APPROVED" }), "Venues can be released only while the event is Approved."],

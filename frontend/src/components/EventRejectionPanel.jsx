@@ -7,11 +7,9 @@
 import { useEffect, useState } from "react";
 import { getEventReadiness, rejectApprovedEvent } from "../services/eventRequestService";
 import ReadinessChecklist from "./ReadinessChecklist";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import { formatTimestamp } from "../services/displayFormat";
 
 const ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only the coordinator assigned to this event can reject it.",
   404: "This event is no longer available.",
 };

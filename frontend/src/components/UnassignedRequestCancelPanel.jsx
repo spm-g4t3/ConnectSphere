@@ -8,14 +8,13 @@
 
 import { useState } from "react";
 import { cancelEventRequest, getEventCancellationImpact } from "../services/eventRequestService";
-import { SESSION_EXPIRED, statusMessageOf } from "../services/apiErrors";
+import { statusMessageOf } from "../services/apiErrors";
 import { CancellationImpact } from "./EventCancellationPanel";
 
 // Keyed by status for both calls, never by the server's text. 403 and 409 are
 // the two ways the race with an assignment, or another Lead, is lost (AC5).
 const ERROR_MESSAGES = {
   400: "Enter a cancellation reason and select who initiated it.",
-  401: SESSION_EXPIRED,
   403: "A coordinator has been assigned to this request since you opened it, so only they can cancel it now. Go back to the queue to see where it stands.",
   404: "This event request no longer exists.",
   409: "This request is no longer waiting in the queue. It may already have been cancelled or assigned. Go back to the queue to see where it stands.",

@@ -3,8 +3,9 @@
 // The pieces every *Errors.js module and list screen read a failed API call
 // with. Each caller keeps its own message tables; only the reading is shared.
 
-/** What a 401 says everywhere: apiClient has already cleared the session. */
-export const SESSION_EXPIRED = "Your session has expired. Please sign in again.";
+// An expired session (a 401) has no wording here or on any screen: apiClient
+// reports it, AuthContext clears the session, and the login page says so once
+// (SCRUM-583). A screen's message table starts at 403.
 
 /** The machine-readable `code` of a refusal, or null when there is none. */
 export function codeOf(err) {

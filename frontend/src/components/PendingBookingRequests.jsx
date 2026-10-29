@@ -22,11 +22,10 @@ import {
   rejectBookingRequest,
 } from "../services/bookingRequestService";
 import { decisionErrorMessage, isStaleDecisionError } from "../services/bookingRequestErrors";
-import { SESSION_EXPIRED, statusMessageOf } from "../services/apiErrors";
+import { statusMessageOf } from "../services/apiErrors";
 import { asList } from "../services/displayFormat";
 
 const LIST_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Venue Staff can see pending booking requests.",
 };
 const LIST_DEFAULT_ERROR = "Pending booking requests could not be loaded. Please try again.";

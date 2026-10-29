@@ -47,7 +47,6 @@ import {
   codePointLength,
   isRecordedText,
 } from "../services/venueSafetyFacts";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 
 /**
  * SCRUM-493. CRLF and lone CR as LF. A textarea reports its line breaks as LF
@@ -91,7 +90,6 @@ function detailFieldName(field) {
 // would be a step backwards. The one 400 without details (a non-object body)
 // falls through to the data.error passthrough.
 const VENUE_SAVE_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Venue Staff can add or change a venue.",
   404: "That venue no longer exists. Go back and refresh the catalogue.",
   500: "The server could not save this venue. Please try again.",

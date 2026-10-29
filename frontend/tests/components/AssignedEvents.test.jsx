@@ -118,7 +118,6 @@ describe("SCRUM486_AC6 the Lead's list of assigned events", () => {
 
   it.each([
     [403, "Only the Event Coordinator Lead can see the assigned events."],
-    [401, "Your session has expired. Please sign in again."],
     [502, "The assigned events could not be loaded. Please try again."],
   ])("SCRUM486_AC6_a_%s_is_said_and_shows_no_empty_state", async (status, message) => {
     vi.mocked(listAssignedEventsForLead).mockRejectedValue(httpError(status));

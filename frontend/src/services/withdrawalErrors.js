@@ -1,4 +1,3 @@
-import { SESSION_EXPIRED } from "./apiErrors";
 
 export const WITHDRAWAL_FALLBACK_MESSAGE = "Your registration could not be withdrawn. It has not changed; please try again.";
 export const WITHDRAWAL_NETWORK_MESSAGE = "Could not reach the server. Your registration has not changed; check your connection and try again.";
@@ -34,7 +33,6 @@ export function withdrawalFailure(error) {
   const response = error?.response;
   const status = response?.status;
   const code = response?.data?.code;
-  if (status === 401) return { message: SESSION_EXPIRED, rejected: true };
   if (status === 403) return { message: "Only Attendees can withdraw a registration.", rejected: true };
   if (status === 404) return { message: NOT_FOUND_MESSAGE, rejected: true };
   if (status === 409 && Object.hasOwn(REJECTION_MESSAGES, code)) {

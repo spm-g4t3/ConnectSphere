@@ -32,9 +32,6 @@ function cancellationPreviewErrorMessage(error, eventRequestId) {
   const status = error.response?.status;
   const serverMessage = error.response?.data?.error;
 
-  if (status === 401) {
-    return "Your session has expired. Sign in again to preview the cancellation.";
-  }
   if (status === 403) {
     return serverMessage || "Only the coordinator currently assigned to this event can preview its cancellation.";
   }

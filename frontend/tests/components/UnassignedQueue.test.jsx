@@ -117,7 +117,6 @@ describe("SCRUM486_AC2 the unassigned queue", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only the Event Coordinator Lead can see the unassigned queue."],
     [500, "The unassigned queue could not be loaded. Please try again."],
     [undefined, "The unassigned queue could not be loaded. Please try again."],

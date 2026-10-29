@@ -33,7 +33,6 @@ import {
 import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
 import useListRead from "./useListRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // Keyed by status, the same shape as VenueCatalogue's RETIRE_ERROR_MESSAGES
 // and AuthContext's LOGIN_ERROR_MESSAGES.
@@ -43,7 +42,6 @@ import { SESSION_EXPIRED } from "../services/apiErrors";
 // role is not event_coordinator — an administration problem, not a breakage.
 // "Could not load the queue" would send the wrong person looking.
 const QUEUE_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Event Coordinators can see the review queue.",
   500: "The review queue could not be loaded. Please try again.",
 };
