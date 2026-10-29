@@ -58,3 +58,47 @@ describe('SCRUM-434: event columns read for Venue Staff and Technical Support', 
     expect(select).not.toMatch(/organiser|purpose|description|requirements/);
   });
 });
+
+// SCRUM-434 AC5 / SCRUM-439. What the attendee-facing services may select of an event, as the words in
+// their select strings (columns and the relations they embed). A column outside this list fails here.
+const ATTENDEE_ALLOWED = new Set([
+  'id', 'event_name', 'status', 'proposed_start', 'proposed_end', 'description',
+  'event_request_id', 'attendee_id', 'attendee_message', 'location', 'name',
+  'event_requests', 'inner', 'bookings', 'venues',
+  'registration_enabled', 'registration_opens_at', 'registration_closes_at',
+  'registration_capacity', 'registration_waitlist_enabled',
+]);
+const words = (text) => text.match(/[a-z_]+/g) ?? [];
+
+describe('SCRUM-434: event columns read for Attendees', () => {
+  it('SCRUM434_AC5_attendeeEventService_selects_only_attendee_facing_columns', () => {
+    const source = read('attendeeEventService.js');
+    const selects = [...source.matchAll(/\.select\(\s*(?:`([^`]*)`|'([^']*)')\s*\)/g)].map((m) => m[1] ?? m[2]);
+
+    expect(selects.length).toBeGreaterThanOrEqual(3);
+    for (const select of selects) {
+      for (const word of words(select)) {
+        expect(ATTENDEE_ALLOWED, `attendeeEventService selects "${word}"`).toContain(word);
+      }
+    }
+  });
+
+  it('SCRUM434_AC5_openEventService_selects_only_attendee_facing_columns', () => {
+    const source = read('openEventService.js');
+    const settings = source.match(/const SETTINGS_COLUMNS = `([^`]*)`/)[1];
+    const columns = source.match(/const COLUMNS = `([^`]*)`/)[1].replace('${SETTINGS_COLUMNS}', settings);
+
+    expect(words(columns)).toContain('event_name');
+    for (const word of words(columns)) {
+      expect(ATTENDEE_ALLOWED, `openEventService selects "${word}"`).toContain(word);
+    }
+  });
+
+  it('SCRUM434_AC5_the_scan_fails_when_a_private_column_is_added', () => {
+    // The scan itself is what is under test: a purpose column would not pass it.
+    expect(ATTENDEE_ALLOWED.has('purpose')).toBe(false);
+    expect(ATTENDEE_ALLOWED.has('organiser_id')).toBe(false);
+    expect(ATTENDEE_ALLOWED.has('cancellation_reason')).toBe(false);
+    expect(ATTENDEE_ALLOWED.has('assigned_coordinator_id')).toBe(false);
+  });
+});
