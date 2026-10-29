@@ -16,6 +16,7 @@ router.post('/:id/clarification', coordinatorOnly, guardEvent, async (req, res) 
 ## How the guard behaves
 
 - **After the role check.** A caller who may not use the route gets 403 and learns nothing about the event. Only a permitted caller is told the event is final. (The Safety Officer router checks the role for the whole router, so it is ahead of the guard too.)
+- **Only a caller who owns the record is told.** Ten routes answer a caller who does not own the record with a 404 that matches a missing one: the Organiser's `PATCH /:id`, `/:id/submit`, `/:id/reopen`, `/:id/clarification-response` and `/:id/change-requests`, the registration settings `PUT`, the attendee's `withdrawal` and `leave-waitlist`, and `registrations` and `waitlist` on open events. If the guard answered 409 first, any signed-in caller could tell that an event exists and is final. These routes give the guard an `entitled` check (`organisesEvent`, `ownsRegistration`, `isRegisteredFor`). It runs only when the event is final, so a live event still costs the one status read. A caller who fails it goes on to the handler and gets the handler's 404. Routes on shared queues (coordinators, Technical Support, Venue Staff, Safety Officers) are not private to one person, so they tell every permitted caller.
 - **One read.** It reads the event's status. For a route that names a booking, a registration or a change request instead of the event, it first reads that record's event id (two small reads).
 - **Event not found, or the id is not a usable uuid.** The guard lets the request through, and the handler gives its own 400 or 404. The guard never answers differently about a missing event.
 - **A failed read refuses with a 500.** A guard that cannot tell must not let a change through.
@@ -120,7 +121,7 @@ AC3 lists on-site assignment changes. No on-site assignment endpoint exists on `
 
 1. Take `finalEventGuard = noopFinalEventGuard` in the router factory (every router already does).
 2. Build the guard once: `const guardEvent = finalEventGuard(eventIdFromParam('id'));`. Use `eventIdFromBody('eventRequestId')` when the event is in the body, or `eventIdFromRecord('bookings', 'id')` when the route names a record that carries `event_request_id`.
-3. Put it after the role check on the route.
+3. Put it after the role check on the route. If the handler answers 404 to a caller who does not own the record, pass `{ entitled }` as the second argument (see above) so the guard does not answer first.
 4. Add the route to the list in the coverage test and to `ROUTES` in `tests/routes/scrum379FinalEventRoutes.test.js`.
 
 ## What the screens (SCRUM-384) need
@@ -131,5 +132,5 @@ The refusal reaches the browser as `409` with `code: "EVENT_FINAL"` and the sent
 
 - `tests/domain/scrum379FinalEvent.test.js`: the shared check, over every status and over non-status values.
 - `tests/middleware/scrum379FinalEventGuard.test.js`: the guard on the real schema, all 11 statuses, and a booking, a registration and a change request attached to completed, cancelled and live events; unusable ids; failed reads; nothing cached.
-- `tests/routes/scrum379FinalEventRoutes.test.js`: each of the 46 routes with a completed, a cancelled and a live event; the wrong role (403); signed out (401); an event that does not exist; a router with no guard.
+- `tests/routes/scrum379FinalEventRoutes.test.js`: each of the 46 routes with a completed, a cancelled and a live event; the wrong role (403); signed out (401); an event that does not exist; the ten routes above with a caller who has no part in the event (no 409, same answer as a missing event); a router with no guard.
 - `tests/routes/scrum379FinalEventCoverage.test.js`: every mutating route is guarded or exempt, and the guarded list matches the one above.

@@ -18,10 +18,21 @@
  * own row lock. The guard is the first line, not the only one, because the
  * event can be completed between the guard's read and the handler's write.
  *
- * Three outcomes besides "final":
+ * A route whose handler hides other people's records behind a 404 (an
+ * Organiser's own event, an attendee's own registration) gives the guard an
+ * `entitled` check as a second argument. The guard then says "final" only to a
+ * caller who passes it; anyone else goes on to the handler, which gives the
+ * same 404 it gives for an event that does not exist. Without it the guard
+ * would answer first and tell a stranger that the event exists and is final.
+ * The check runs only for an event that is final, so a live event costs the
+ * one status read, as before.
+ *
+ * Four outcomes besides "final":
  *  - the event cannot be found, or the id is not a usable uuid: the guard lets
  *    the request through, and the handler gives its own 400 or 404, so the
  *    guard never answers differently about a missing event;
+ *  - the caller is not entitled to know the event is final: the guard lets the
+ *    request through, and the handler gives its own 404;
  *  - the read fails: the request is refused with a 500. A guard that cannot
  *    tell must not let a change through;
  *  - the router was built without a guard (the default, used by the route tests
@@ -34,7 +45,7 @@
 
 import { resolveClient } from '../config/resolveClient.js';
 import { isPlausibleId } from '../validation/ids.js';
-import { assertEventNotFinal } from '../domain/finalEvent.js';
+import { assertEventNotFinal, isFinalEventStatus } from '../domain/finalEvent.js';
 
 /** Tag on the middleware, so a test can tell a guarded route from an unguarded one. */
 export const FINAL_EVENT_GUARD_TAG = 'isFinalEventGuard';
@@ -75,6 +86,52 @@ export function eventIdFromRecord(table, paramName = 'id') {
   };
 }
 
+/**
+ * Entitled: the signed-in user organises the event.
+ * For routes whose handler answers 404 to anyone else.
+ */
+export async function organisesEvent(req, db, eventId) {
+  const { data, error } = await db
+    .from('event_requests')
+    .select('organiser_id')
+    .eq('id', eventId.trim().toLowerCase())
+    .maybeSingle();
+  if (error) throw guardReadError(error);
+  return Boolean(data?.organiser_id) && data.organiser_id === req.user?.id;
+}
+
+/**
+ * Entitled: the registration named by the route belongs to the signed-in user.
+ *
+ * @param {string} paramName  route parameter holding the registration's id
+ */
+export function ownsRegistration(paramName = 'registrationId') {
+  return async (req, db) => {
+    const registrationId = req.params?.[paramName];
+    if (!isUsableId(registrationId)) return false;
+    const { data, error } = await db
+      .from('event_registrations')
+      .select('attendee_id')
+      .eq('id', registrationId.trim().toLowerCase())
+      .maybeSingle();
+    if (error) throw guardReadError(error);
+    return Boolean(data?.attendee_id) && data.attendee_id === req.user?.id;
+  };
+}
+
+/** Entitled: the signed-in user has a registration, or a waiting-list entry, for the event. */
+export async function isRegisteredFor(req, db, eventId) {
+  if (!req.user?.id) return false;
+  const { data, error } = await db
+    .from('event_registrations')
+    .select('id')
+    .eq('event_request_id', eventId.trim().toLowerCase())
+    .eq('attendee_id', req.user.id)
+    .maybeSingle();
+  if (error) throw guardReadError(error);
+  return Boolean(data);
+}
+
 function isUsableId(value) {
   return typeof value === 'string' && isPlausibleId(value);
 }
@@ -90,12 +147,14 @@ function guardReadError(error) {
  *
  * @param {object} [options]
  * @param {object} [options.client]  a supabase-js client; the shared one when omitted
- * @returns {function(function): import('express').RequestHandler}
- *          call it with a resolver (eventIdFromParam and friends) to get the
- *          middleware for one route
+ * @returns {function(function, object=): import('express').RequestHandler}
+ *          call it with a resolver (eventIdFromParam and friends), and
+ *          optionally `{ entitled }`, an async (req, db, eventId) => boolean
+ *          saying who may be told the event is final, to get the middleware
+ *          for one route
  */
 export function createFinalEventGuard({ client } = {}) {
-  return function finalEventGuard(resolveEventId) {
+  return function finalEventGuard(resolveEventId, { entitled } = {}) {
     const middleware = async (req, res, next) => {
       const db = await resolveClient(client);
 
@@ -108,6 +167,10 @@ export function createFinalEventGuard({ client } = {}) {
         .eq('id', eventId.trim().toLowerCase())
         .maybeSingle();
       if (error) throw guardReadError(error);
+
+      if (entitled && isFinalEventStatus(data?.status) && !(await entitled(req, db, eventId))) {
+        return next();
+      }
 
       assertEventNotFinal(data?.status);
       return next();

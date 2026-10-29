@@ -14,6 +14,9 @@ import {
   eventIdFromParam,
   eventIdFromBody,
   eventIdFromRecord,
+  organisesEvent,
+  ownsRegistration,
+  isRegisteredFor,
   FINAL_EVENT_GUARD_TAG,
 } from '../../src/middleware/finalEventGuard.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
@@ -349,4 +352,189 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       expect(reads).toEqual(['bookings:event_request_id', 'event_requests:status']);
     });
   });
+
+  // A route that answers 404 for a record that is not the caller's must not be
+  // pre-empted by the guard's 409, so the guard tells only an entitled caller.
+  describe('who is told the event is final', () => {
+    let otherOrganiser;
+    let otherAttendee;
+
+    beforeAll(async () => {
+      otherOrganiser = await seedUser(db, { email: 'other-organiser382@example.com', role: 'event_organiser' });
+      otherAttendee = await seedUser(db, { email: 'other-attendee382@example.com', role: 'attendee' });
+    });
+
+    const asUser = (id, extra = {}) => ({ user: { id }, params: {}, ...extra });
+
+    describe('organisesEvent', () => {
+      const own = () => guard(eventIdFromParam('id'), { entitled: organisesEvent });
+
+      it.each(['completed', 'cancelled'])('SCRUM379_AC3_the_organiser_of_a_%s_event_is_told_it_is_final', async (status) => {
+        const { nexted, error } = await run(own(), asUser(organiser, { params: { id: eventByStatus[status] } }));
+
+        expect(nexted).toBe(0);
+        expect(error.code).toBe('EVENT_FINAL');
+      });
+
+      it.each(['completed', 'cancelled'])('SCRUM379_AC3_another_organiser_is_not_told_a_%s_event_is_final', async (status) => {
+        const { nexted, error } = await run(own(), asUser(otherOrganiser, { params: { id: eventByStatus[status] } }));
+
+        expect(error).toBeNull();
+        expect(nexted).toBe(1);
+      });
+
+      it('SCRUM379_AC3_an_attendee_is_not_told_a_final_event_is_final', async () => {
+        const { nexted, error } = await run(own(), asUser(attendee, { params: { id: eventByStatus.completed } }));
+
+        expect(error).toBeNull();
+        expect(nexted).toBe(1);
+      });
+
+      it('SCRUM379_AC3_a_caller_with_no_user_is_not_told_either', async () => {
+        const { nexted, error } = await run(own(), { params: { id: eventByStatus.completed } });
+
+        expect(error).toBeNull();
+        expect(nexted).toBe(1);
+      });
+
+      it('SCRUM379_AC3_a_live_event_is_let_through_for_everyone_and_costs_only_the_status_read', async () => {
+        const reads = [];
+        const spy = {
+          from: (table) => {
+            const chain = client.from(table);
+            return { select: (cols) => { reads.push(`${table}:${cols}`); return chain.select(cols); } };
+          },
+        };
+        const spied = createFinalEventGuard({ client: spy })(eventIdFromParam('id'), { entitled: organisesEvent });
+
+        expect((await run(spied, asUser(organiser, { params: { id: eventByStatus.approved } }))).nexted).toBe(1);
+        expect((await run(spied, asUser(otherOrganiser, { params: { id: eventByStatus.approved } }))).nexted).toBe(1);
+        expect(reads).toEqual(['event_requests:status', 'event_requests:status']);
+      });
+
+      it('SCRUM379_AC3_an_event_that_cannot_be_found_is_left_to_the_handler', async () => {
+        const { nexted, error } = await run(own(), asUser(organiser, { params: { id: UNKNOWN_ID } }));
+
+        expect(error).toBeNull();
+        expect(nexted).toBe(1);
+      });
+    });
+
+    describe('ownsRegistration', () => {
+      const mine = () => guard(eventIdFromRecord('event_registrations', 'registrationId'), {
+        entitled: ownsRegistration('registrationId'),
+      });
+      const params = (status) => ({ registrationId: attached[status].registration });
+
+      it.each(['completed', 'cancelled'])('SCRUM379_AC3_the_attendee_of_a_registration_on_a_%s_event_is_told_it_is_final', async (status) => {
+        const { error } = await run(mine(), asUser(attendee, { params: params(status) }));
+
+        expect(error.code).toBe('EVENT_FINAL');
+      });
+
+      it('SCRUM379_AC3_another_attendee_is_not_told_the_registrations_event_is_final', async () => {
+        const { nexted, error } = await run(mine(), asUser(otherAttendee, { params: params('completed') }));
+
+        expect(error).toBeNull();
+        expect(nexted).toBe(1);
+      });
+
+      it('SCRUM379_AC3_a_registration_id_that_is_not_an_id_is_left_to_the_handler', async () => {
+        const { nexted, error } = await run(mine(), asUser(attendee, { params: { registrationId: 'not-an-id' } }));
+
+        expect(error).toBeNull();
+        expect(nexted).toBe(1);
+      });
+    });
+
+    describe('isRegisteredFor', () => {
+      const registered = () => guard(eventIdFromParam('id'), { entitled: isRegisteredFor });
+
+      it.each(['completed', 'cancelled'])('SCRUM379_AC3_an_attendee_registered_for_a_%s_event_is_told_it_is_final', async (status) => {
+        const { error } = await run(registered(), asUser(attendee, { params: { id: eventByStatus[status] } }));
+
+        expect(error.code).toBe('EVENT_FINAL');
+      });
+
+      it('SCRUM379_AC3_an_attendee_who_is_not_registered_is_not_told', async () => {
+        const { nexted, error } = await run(registered(), asUser(otherAttendee, { params: { id: eventByStatus.completed } }));
+
+        expect(error).toBeNull();
+        expect(nexted).toBe(1);
+      });
+
+      it('SCRUM379_AC3_a_waitlisted_or_withdrawn_entry_still_counts_as_registered', async () => {
+        const id = await seedEvent(db, {
+          status: 'completed', organiser_id: organiser, event_name: 'Waitlisted',
+          assigned_coordinator_id: coordinator, reviewing_coordinator_id: coordinator,
+        });
+        await db.query(
+          "insert into event_registrations (event_request_id, attendee_id, status) values ($1, $2, 'waitlisted')",
+          [id, otherAttendee],
+        );
+
+        const { error } = await run(registered(), asUser(otherAttendee, { params: { id } }));
+
+        expect(error.code).toBe('EVENT_FINAL');
+      });
+
+      it('SCRUM379_AC3_a_caller_with_no_user_is_not_told', async () => {
+        const { nexted, error } = await run(registered(), { params: { id: eventByStatus.completed } });
+
+        expect(error).toBeNull();
+        expect(nexted).toBe(1);
+      });
+    });
+
+    describe('when the entitlement read fails', () => {
+      // The one select that asks table.cols answers with an error; everything else is real.
+      const failingOn = (table, cols) => {
+        const broken = new Proxy({}, {
+          get: (_t, prop) => (prop === 'maybeSingle'
+            ? async () => ({ data: null, error: { code: 'XX000', message: 'boom' } })
+            : () => broken),
+        });
+        return {
+          from: (t) => {
+            const real = client.from(t);
+            return { select: (c) => (t === table && c === cols ? broken : real.select(c)) };
+          },
+        };
+      };
+
+      it('SCRUM379_AC3_a_failed_organiser_read_refuses_with_an_error_and_does_not_call_next', async () => {
+        const guarded = createFinalEventGuard({ client: failingOn('event_requests', 'organiser_id') })(
+          eventIdFromParam('id'), { entitled: organisesEvent },
+        );
+
+        const { nexted, error } = await run(guarded, asUser(organiser, { params: { id: eventByStatus.completed } }));
+
+        expect(nexted).toBe(0);
+        expect(error.message).toMatch(/could not read the event/);
+      });
+
+      it('SCRUM379_AC3_a_failed_registration_read_refuses_with_an_error_and_does_not_call_next', async () => {
+        const guarded = createFinalEventGuard({ client: failingOn('event_registrations', 'attendee_id') })(
+          eventIdFromRecord('event_registrations', 'registrationId'), { entitled: ownsRegistration('registrationId') },
+        );
+
+        const { nexted, error } = await run(guarded, asUser(attendee, { params: { registrationId: attached.completed.registration } }));
+
+        expect(nexted).toBe(0);
+        expect(error.message).toMatch(/could not read the event/);
+      });
+
+      it('SCRUM379_AC3_a_failed_registered_for_read_refuses_with_an_error_and_does_not_call_next', async () => {
+        const guarded = createFinalEventGuard({ client: failingOn('event_registrations', 'id') })(
+          eventIdFromParam('id'), { entitled: isRegisteredFor },
+        );
+
+        const { nexted, error } = await run(guarded, asUser(attendee, { params: { id: eventByStatus.completed } }));
+
+        expect(nexted).toBe(0);
+        expect(error.message).toMatch(/could not read the event/);
+      });
+    });
+  });
+
 });

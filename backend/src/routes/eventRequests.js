@@ -123,7 +123,7 @@ import {
 import { listHoldCandidates } from '../services/venueHoldService.js';
 import { getStatusDisplay } from '../domain/eventRequestStatus.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
-import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam, eventIdFromRecord } from '../middleware/finalEventGuard.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam, eventIdFromRecord, organisesEvent } from '../middleware/finalEventGuard.js';
 // Both of these are credential-free on purpose, and that is worth knowing
 // before adding a third: this router's tests do not mock config/
 // supabaseClient.js -- they rely on config/resolveClient.js being lazy -- so any
@@ -203,6 +203,9 @@ export function createEventRequestRouter({
 
   // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
   const guardEvent = finalEventGuard(eventIdFromParam('id'));
+  // For the Organiser's own routes: their handlers answer 404 for an event that
+  // is not the caller's, so only its Organiser is told it is final.
+  const guardOwnEvent = finalEventGuard(eventIdFromParam('id'), { entitled: organisesEvent });
   const guardChangeRequest = finalEventGuard(eventIdFromRecord('event_change_requests', 'changeRequestId'));
 
   // Built once here, and passed per route to every coordinator path below,
@@ -837,7 +840,7 @@ export function createEventRequestRouter({
    * draft, either because it was submitted earlier or because a submit landed
    * between the service's read and its write.
    */
-  router.patch('/:id', guardEvent, async (req, res) => {
+  router.patch('/:id', guardOwnEvent, async (req, res) => {
     const saved = await updateEventRequest(
       req.params.id,
       req.body,
@@ -862,7 +865,7 @@ export function createEventRequestRouter({
    * A 400 from here carries details[] listing every gap at once, which is the
    * whole of AC4; the form renders them as a list.
    */
-  router.post('/:id/submit', guardEvent, async (req, res) => {
+  router.post('/:id/submit', guardOwnEvent, async (req, res) => {
     await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
     const submitted = await submitEventRequest(req.params.id, { client, changedBy: req.user.id });
@@ -871,7 +874,7 @@ export function createEventRequestRouter({
 
   // SCRUM-355 AC1, AC2: the Organiser reopens their rejected request as a draft.
   // reopen_event_request checks ownership and status under the row lock.
-  router.post('/:id/reopen', organiserOnly, guardEvent, async (req, res) => {
+  router.post('/:id/reopen', organiserOnly, guardOwnEvent, async (req, res) => {
     const reopened = await reopenEventRequest(req.params.id, req.user.id, { client });
     res.status(200).json(withStatusDisplay(reopened));
   });
@@ -1128,7 +1131,7 @@ export function createEventRequestRouter({
     });
   });
 
-  router.patch('/:id/clarification-response', guardEvent, async (req, res) => {
+  router.patch('/:id/clarification-response', guardOwnEvent, async (req, res) => {
     const updated = await respondToEventClarification(
       req.params.id,
       req.body?.message,
@@ -1152,7 +1155,7 @@ export function createEventRequestRouter({
    * toChangeRequest, which carries no fieldLabel, so the frontend refetches
    * the list rather than splicing this into it.
    */
-  router.post('/:id/change-requests', guardEvent, async (req, res) => {
+  router.post('/:id/change-requests', guardOwnEvent, async (req, res) => {
     await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
     const created = await createChangeRequestFromClient(

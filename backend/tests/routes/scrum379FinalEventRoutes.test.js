@@ -47,8 +47,15 @@ const WORLD = {
 
 const signedInAs = signedInFor(USER_ID);
 
+// What the guard reads: the status, the record's event, and who is entitled to hear it is final.
+const isGuardCall = (c) =>
+  c.cols === 'status' ||
+  c.cols === 'event_request_id' ||
+  c.cols === 'organiser_id' ||
+  (c.table === 'event_registrations' && (c.cols === 'attendee_id' || c.cols === 'id'));
+
 // A client that answers only the guard's lookups and records every call.
-function worldClient() {
+function worldClient({ ownerId = USER_ID } = {}) {
   const statusOfEvent = Object.fromEntries(Object.entries(WORLD).map(([status, s]) => [s.event, status]));
   const eventOfRecord = { bookings: {}, event_registrations: {}, event_change_requests: {} };
   for (const s of Object.values(WORLD)) {
@@ -64,6 +71,17 @@ function worldClient() {
       const status = statusOfEvent[query.id];
       return { data: status ? { status } : null, error: null };
     }
+    // The entitlement checks, asked only about a final event. ownerId is who
+    // organises every event and owns every registration.
+    if (query.table === 'event_requests' && query.cols === 'organiser_id') {
+      return { data: statusOfEvent[query.id] ? { organiser_id: ownerId } : null, error: null };
+    }
+    if (query.table === 'event_registrations' && query.cols === 'attendee_id') {
+      return { data: eventOfRecord.event_registrations[query.id] ? { attendee_id: ownerId } : null, error: null };
+    }
+    if (query.table === 'event_registrations' && query.cols === 'id') {
+      return { data: statusOfEvent[query.eventId] && query.attendeeId === ownerId ? { id: 'registration' } : null, error: null };
+    }
     if (query.cols === 'event_request_id' && eventOfRecord[query.table]) {
       const eventId = eventOfRecord[query.table][query.id];
       return { data: eventId ? { event_request_id: eventId } : null, error: null };
@@ -74,11 +92,18 @@ function worldClient() {
   return {
     calls,
     from(table) {
-      const query = { table, cols: null, id: null };
+      const query = { table, cols: null, id: null, eventId: null, attendeeId: null };
       const chain = new Proxy({}, {
         get(_target, prop) {
           if (prop === 'select') return (cols) => { query.cols = cols; return chain; };
-          if (prop === 'eq') return (column, value) => { if (column === 'id') query.id = String(value); return chain; };
+          if (prop === 'eq') {
+            return (column, value) => {
+              if (column === 'id') query.id = String(value);
+              if (column === 'event_request_id') query.eventId = String(value);
+              if (column === 'attendee_id') query.attendeeId = String(value);
+              return chain;
+            };
+          }
           if (prop === 'maybeSingle' || prop === 'single') return async () => settle(query);
           if (prop === 'then') return (resolve, reject) => Promise.resolve(settle(query)).then(resolve, reject);
           return () => chain;
@@ -90,8 +115,8 @@ function worldClient() {
       calls.push({ rpc: fn });
       return Promise.resolve({ data: null, error: { code: 'XX000', message: 'stub: the handler reached the database' } });
     },
-    guardLookups: () => calls.filter((c) => c.cols === 'status' || c.cols === 'event_request_id'),
-    reached: () => calls.filter((c) => c.rpc || (c.cols !== 'status' && c.cols !== 'event_request_id')),
+    guardLookups: () => calls.filter(isGuardCall),
+    reached: () => calls.filter((c) => c.rpc || !isGuardCall(c)),
   };
 }
 
@@ -338,6 +363,91 @@ describe('SCRUM-382: every listed endpoint refuses a final event', () => {
       expect(res.body.code).not.toBe('EVENT_FINAL');
       expect(client.guardLookups()).toEqual([]);
     });
+  });
+
+
+  // A handler that answers 404 for a record that is not the caller's must not be
+  // pre-empted by a 409: that would tell a stranger the event exists and is final.
+  describe('a final event the caller has no part in', () => {
+    const ENTITLED_ROUTES = ROUTES.filter(([r, m, p]) => [
+      'eventRequests patch /:id',
+      'eventRequests post /:id/submit',
+      'eventRequests post /:id/reopen',
+      'eventRequests patch /:id/clarification-response',
+      'eventRequests post /:id/change-requests',
+      'eventRegistration put /events/:id/settings',
+      'openEvents post /:id/registrations',
+      'openEvents post /:id/waitlist',
+      'attendeeEvents post /registrations/:registrationId/withdrawal',
+      'attendeeEvents post /registrations/:registrationId/leave-waitlist',
+    ].includes(`${r} ${m} ${p}`));
+    const STRANGER = '55555555-5555-4555-8555-555555555555';
+
+    it('SCRUM379_AC3_the_table_names_ten_routes_that_hide_other_peoples_records', () => {
+      expect(ENTITLED_ROUTES).toHaveLength(10);
+    });
+
+    describe.each(['completed', 'cancelled'])('a %s event', (status) => {
+      it.each(ENTITLED_ROUTES.map((route) => [`${route[0]} ${route[1].toUpperCase()} ${route[2]}`, route]))(
+        'SCRUM379_AC3_%s_is_left_to_the_handler_so_a_stranger_gets_no_409',
+        async (_name, route) => {
+          const [routerKey, method, , role] = route;
+          const client = worldClient({ ownerId: STRANGER });
+          const { url, body } = target(route, status);
+
+          const { res } = await send(routerKey, method, url, body, { client, requireAuth: signedInAs(role) });
+
+          expect(res.status).not.toBe(409);
+          expect(res.body.code).not.toBe('EVENT_FINAL');
+          expect(JSON.stringify(res.body)).not.toMatch(/completed|cancelled/);
+        },
+      );
+    });
+
+    it('SCRUM379_AC3_a_stranger_gets_the_same_answer_for_a_final_event_as_for_one_that_does_not_exist', async () => {
+      const route = ROUTES.find((r) => r[1] === 'patch' && r[2] === '/:id');
+      const unknown = {
+        event: 'eeeeeeee-eeee-4eee-8eee-000000000009',
+        booking: 'bbbbbbbb-bbbb-4bbb-8bbb-000000000009',
+        registration: 'cccccccc-cccc-4ccc-8ccc-000000000009',
+        changeRequest: 'dddddddd-dddd-4ddd-8ddd-000000000009',
+      };
+      const ofFinal = target(route, 'completed');
+      const ofMissing = target(route, unknown);
+
+      const a = await send('eventRequests', 'patch', ofFinal.url, ofFinal.body, { client: worldClient({ ownerId: STRANGER }), requireAuth: signedInAs(O) });
+      const b = await send('eventRequests', 'patch', ofMissing.url, ofMissing.body, { client: worldClient({ ownerId: STRANGER }), requireAuth: signedInAs(O) });
+
+      expect(a.res.status).toBe(b.res.status);
+      expect(a.res.body).toEqual(b.res.body);
+    });
+
+    it('SCRUM379_AC3_a_route_with_no_private_record_still_says_final_to_every_permitted_caller', async () => {
+      // Coordinators share one queue, so any of them may be told an event is final.
+      const client = worldClient({ ownerId: STRANGER });
+      const route = ROUTES.find((r) => r[1] === 'post' && r[2] === '/:id/clarification');
+      const { url, body } = target(route, 'completed');
+
+      const { res } = await send('eventRequests', 'post', url, body, { client, requireAuth: signedInAs(C) });
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('EVENT_FINAL');
+    });
+
+    it.each(['completed', 'cancelled'])(
+      'SCRUM379_AC3_the_owner_of_a_%s_event_is_still_told_it_is_final',
+      async (status) => {
+        const route = ROUTES.find((r) => r[1] === 'patch' && r[2] === '/:id');
+        const client = worldClient({ ownerId: USER_ID });
+        const { url, body } = target(route, status);
+
+        const { res } = await send('eventRequests', 'patch', url, body, { client, requireAuth: signedInAs(O) });
+
+        expect(res.status).toBe(409);
+        expect(res.body.code).toBe('EVENT_FINAL');
+        expect(client.reached()).toEqual([]);
+      },
+    );
   });
 
 });

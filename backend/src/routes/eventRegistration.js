@@ -1,7 +1,7 @@
 import express from 'express';
 
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
-import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam } from '../middleware/finalEventGuard.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam, organisesEvent } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
@@ -22,7 +22,8 @@ export function createEventRegistrationRouter({
   const router = express.Router();
 
   // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
-  const guardEvent = finalEventGuard(eventIdFromParam('id'));
+  // Only the event's Organiser is told so; the handler answers anyone else with its 404.
+  const guardEvent = finalEventGuard(eventIdFromParam('id'), { entitled: organisesEvent });
   const organiserOnly = requireRole(ROLE.EVENT_ORGANISER);
 
   router.use(requireAuth);

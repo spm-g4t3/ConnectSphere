@@ -1,6 +1,6 @@
 import express from 'express';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
-import { noopFinalEventGuard, createFinalEventGuard, eventIdFromRecord } from '../middleware/finalEventGuard.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromRecord, ownsRegistration } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
@@ -14,7 +14,8 @@ export function createAttendeeEventRouter({ client, requireAuth = defaultRequire
   const router = express.Router();
 
   // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
-  const guardRegistration = finalEventGuard(eventIdFromRecord('event_registrations', 'registrationId'));
+  // Only the registration's own attendee is told so; the handler answers anyone else with its 404.
+  const guardRegistration = finalEventGuard(eventIdFromRecord('event_registrations', 'registrationId'), { entitled: ownsRegistration('registrationId') });
   // Withdrawals can revoke access; neither successes nor refusals may be cached.
   router.use((_req, res, next) => {
     res.set('Cache-Control', 'no-store');
