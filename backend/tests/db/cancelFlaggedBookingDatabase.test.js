@@ -266,19 +266,22 @@ describe('SCRUM-266 AC3 and AC5: cancelling a flagged booking', () => {
       },
     );
 
-    it('SCRUM266_AC3_cancelling_locks_the_event_then_the_booking_and_never_the_venue', async () => {
+    // Cancelling now frees other events' Conflicting requests (SCRUM-571), so it
+    // takes the venue lock an approval takes, in the same order.
+    it('SCRUM266_AC3_cancelling_locks_the_event_then_the_venue_then_the_booking', async () => {
       const { body, definer } = await one(
         `select prosrc as body, prosecdef as definer from pg_proc where proname = 'cancel_flagged_booking'`,
       );
 
       const eventLock = body.search(/from\s+event_requests\s+where\s+id\s*=\s*v_event_id\s+for update/);
+      const venueLock = body.search(/from\s+venues\s+where\s+id\s*=\s*v_venue_id\s+for no key update/);
       const bookingLock = body.search(/from\s+bookings\s+where\s+id\s*=\s*p_booking_id\s+for update/);
       const record = body.indexOf('insert into booking_resolutions');
 
       expect(eventLock).toBeGreaterThan(-1);
-      expect(bookingLock).toBeGreaterThan(eventLock);
+      expect(venueLock).toBeGreaterThan(eventLock);
+      expect(bookingLock).toBeGreaterThan(venueLock);
       expect(record).toBeGreaterThan(bookingLock);
-      expect(body).not.toMatch(/from\s+venues/);
       expect(definer).toBe(false);
     });
   });
