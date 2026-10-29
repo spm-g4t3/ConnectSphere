@@ -166,6 +166,19 @@ describe('SCRUM-571: freed venues return other events\' Conflicting requests to 
       await expectFreed({ venue: v2, other: o2, request: r2, releasing, booking: b2 });
     });
 
+    it('SCRUM571_AC1_a_request_two_of_the_events_bookings_block_at_one_venue_is_told_once', async () => {
+      // create_booking_request allows one occupying booking per event and
+      // venue, so the second is written directly. Both are cancelled before
+      // the loop, so the first frees R and the second finds it Pending.
+      const setup = await conflictingBehind();
+      const second = await seedBooking(db, { venueId: setup.venue, eventId: setup.releasing, status: 'approved' });
+
+      await cancelEvent(setup.releasing);
+
+      expect([await statusOf(setup.booking), await statusOf(second)]).toEqual(['cancelled', 'cancelled']);
+      await expectFreed({ ...setup, booking: [setup.booking, second].sort()[0] });
+    });
+
     it('SCRUM571_AC1_the_cancelled_events_own_pending_and_conflicting_requests_are_withdrawn', async () => {
       // Its own conflicting request at V2 is behind a third event's booking.
       const releasing = await makeEvent();
@@ -218,6 +231,21 @@ describe('SCRUM-571: freed venues return other events\' Conflicting requests to 
       expect(result.replaced_booking_id).toBe(setup.booking);
       expect(await statusOf(setup.booking)).toBe('cancelled');
       await expectFreed(setup);
+    });
+
+    it('SCRUM571_AC2_a_replacement_at_the_same_venue_is_refused_and_moves_nothing', async () => {
+      // Step 6 refuses any request at a venue the event has a flagged booking
+      // at, whatever the period, so a replacement is always at another venue.
+      const setup = await conflictingBehind({ flagged: true });
+
+      const refused = await refusal(one(
+        `select create_booking_request($1, $2, $3, null, null, '{"suitable": true}'::jsonb, false, 100, $4)`,
+        [setup.releasing, setup.venue, coordinator, setup.booking],
+      ));
+
+      expect(refused).toMatchObject({ code: 'PT409', hint: 'BOOKING_FLAGGED_FOR_REVIEW', detail: setup.booking });
+      expect(await statusOf(setup.booking)).toBe('flagged_for_review');
+      await expectStillConflicting(setup.request);
     });
 
     it.each([
