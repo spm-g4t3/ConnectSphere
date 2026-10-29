@@ -449,7 +449,6 @@ describe("errors the coordinator can act on", () => {
   it.each([
     [403, /assigned to this event/],
     [404, /no longer exists/],
-    [401, /sign in again/],
     [503, /suitability checking is not available/],
   ])("SCRUM254_explains_a_%i", async (status, pattern) => {
     vi.mocked(createBookingRequest).mockRejectedValue(httpError(status));

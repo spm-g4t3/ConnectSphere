@@ -60,7 +60,6 @@ import {
   readStatusDisplay,
   statusClassName,
 } from "../services/eventRequestStatusDisplay";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // 403 has its own words, as in UnassignedQueue: it means the account is not a
 // Lead, an administration problem, not a breakage.
@@ -69,7 +68,6 @@ import { SESSION_EXPIRED } from "../services/apiErrors";
 // this page's own, never the server's text.
 const LIST_ERROR_MESSAGES = {
   400: "Those filters could not be applied.",
-  401: SESSION_EXPIRED,
   403: "Only the Event Coordinator Lead can see the assigned events.",
   500: "The assigned events could not be loaded. Please try again.",
 };

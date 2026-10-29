@@ -30,14 +30,12 @@ import NeedsAttentionBadge from "./NeedsAttentionBadge";
 import NeedsAttentionReasons from "./NeedsAttentionReasons";
 import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES.
 // GET /mine is gated on the coordinator role, so a 403 means the account's
 // role is wrong, an administration problem rather than a breakage, and the
 // message says so instead of "could not load".
 const MY_EVENTS_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Event Coordinators have a My events list.",
   500: "Your events could not be loaded. Please try again.",
 };

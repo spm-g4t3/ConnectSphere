@@ -104,7 +104,6 @@ describe("when the section shows (AC1)", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only the coordinator assigned to this event can see its flagged bookings."],
     [404, "This event no longer exists."],
     [500, "Flagged bookings could not be loaded."],

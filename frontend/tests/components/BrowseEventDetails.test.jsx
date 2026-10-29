@@ -263,7 +263,6 @@ describe("SCRUM495_AC2 an event that is not open, and errors", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Attendees can browse open events."],
     [500, "This event could not be loaded. Please try again."],
     [503, "Event registration is temporarily unavailable. Please try again later."],
@@ -628,7 +627,6 @@ describe("SCRUM495 loading and error behaviour during a refresh", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Attendees can browse open events."],
   ])("SCRUM495_AC5_replaces_the_details_with_the_error_when_a_refresh_is_refused_with_%i", async (status, message) => {
     vi.mocked(getOpenEvent)

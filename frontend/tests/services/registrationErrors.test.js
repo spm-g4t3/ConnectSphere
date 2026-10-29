@@ -16,7 +16,6 @@ describe("SCRUM43 registration failure messages", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Attendees can register for events."],
     [503, "Event registration is temporarily unavailable. Please try again later."],
   ])("SCRUM43_AC4_explains_authorisation_failure_%s", (status, message) => {

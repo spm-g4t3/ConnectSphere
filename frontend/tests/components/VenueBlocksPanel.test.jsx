@@ -319,7 +319,6 @@ describe("VenueBlocksPanel list", () => {
   });
 
   for (const [status, message] of [
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Venue Staff can manage venue blocks."],
     [500, "Could not load this venue's blocks. Please try again."],
   ]) {

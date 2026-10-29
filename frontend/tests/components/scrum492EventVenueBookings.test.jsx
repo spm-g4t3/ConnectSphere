@@ -291,7 +291,6 @@ describe("SCRUM492 refusals, keyed on the status and the code", () => {
 
   it.each([
     [400, "Give a reason of up to 1,000 characters."],
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only the coordinator assigned to this event can release its venues."],
     [404, "This booking no longer exists."],
     [500, "The venue could not be released. Please try again."],

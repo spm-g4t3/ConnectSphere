@@ -7,7 +7,6 @@
 // backend"). Anything else gets a fixed message: outside a 400 the server's own
 // text is database prose and never reaches the screen.
 
-import { SESSION_EXPIRED } from "./apiErrors";
 
 const FIELD_LABELS = {
   equipmentTypeId: "Equipment type",
@@ -18,7 +17,6 @@ const FIELD_LABELS = {
 };
 
 const STATUS_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Technical Support Staff can check equipment availability.",
 };
 

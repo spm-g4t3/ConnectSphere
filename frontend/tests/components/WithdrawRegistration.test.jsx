@@ -173,7 +173,6 @@ describe("SCRUM-27 attendee withdrawal action", () => {
       "This registration could not be found. It may already have been withdrawn or cancelled."],
     ["a caller who is not an attendee", httpError(403, { error: "This action is restricted to Attendees" }),
       "Only Attendees can withdraw a registration."],
-    ["an expired session", httpError(401, {}), "Your session has expired. Please sign in again."],
   ])("SCRUM27_AC7_a_rejection_for_%s_is_explained_and_offers_no_retry", async (_case, error, message) => {
     const user = userEvent.setup();
     vi.mocked(withdrawRegistration).mockRejectedValue(error);
