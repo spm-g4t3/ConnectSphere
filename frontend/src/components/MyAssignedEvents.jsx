@@ -178,7 +178,7 @@ function EventRow({ event, onOpen }) {
   );
 }
 
-export default function MyAssignedEvents() {
+export default function MyAssignedEvents({ onEventChanged } = {}) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -238,8 +238,12 @@ export default function MyAssignedEvents() {
           onReviewDecisionProcessed={() => {
             setActivePanel(null);
             fetchEvents();
+            onEventChanged?.();
           }}
-          onChangeRequestProcessed={fetchEvents}
+          onChangeRequestProcessed={() => {
+            onEventChanged?.();
+            return fetchEvents();
+          }}
         />
       </section>
     );

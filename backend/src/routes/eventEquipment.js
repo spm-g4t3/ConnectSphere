@@ -43,6 +43,7 @@ import {
   removeEquipmentLine,
 } from '../services/equipmentLineService.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
@@ -68,11 +69,15 @@ const errorMiddleware = createErrorMiddleware('event equipment route');
  */
 export function createEventEquipmentRouter({
   requireAuth = defaultRequireAuth,
+  finalEventGuard = noopFinalEventGuard,
   requireRole = createRequireRole,
   client,
 } = {}) {
   // mergeParams: this router is mounted under /:id, and that id is the event's.
   const router = express.Router({ mergeParams: true });
+
+  // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
+  const guardEvent = finalEventGuard(eventIdFromParam('id'));
   const coordinatorOnly = requireRole(ROLE.EVENT_COORDINATOR);
   // SCRUM-486 (SCRUM-521): the read only. The Event Coordinator Lead opens the
   // event screen to hand an event over, and that screen reads this list on
@@ -91,7 +96,7 @@ export function createEventEquipmentRouter({
    * AC2 to AC5, AC7, AC9: add a line. The body is read for equipmentTypeId,
    * quantity and technicalNotes, and nothing else.
    */
-  router.post('/lines', coordinatorOnly, async (req, res) => {
+  router.post('/lines', coordinatorOnly, guardEvent, async (req, res) => {
     const state = await addEquipmentLine(req.params.id, req.body, req.user.id, { client });
     res.status(201).json(state);
   });
@@ -101,7 +106,7 @@ export function createEventEquipmentRouter({
    * An equipmentTypeId in it is refused with 400: change a type by removing the
    * line and adding another.
    */
-  router.patch('/lines/:lineId', coordinatorOnly, async (req, res) => {
+  router.patch('/lines/:lineId', coordinatorOnly, guardEvent, async (req, res) => {
     const state = await amendEquipmentLine(
       req.params.id,
       req.params.lineId,
@@ -113,7 +118,7 @@ export function createEventEquipmentRouter({
   });
 
   /** AC6 to AC8: remove a line. The last line cancels the request. */
-  router.delete('/lines/:lineId', coordinatorOnly, async (req, res) => {
+  router.delete('/lines/:lineId', coordinatorOnly, guardEvent, async (req, res) => {
     const state = await removeEquipmentLine(
       req.params.id,
       req.params.lineId,
@@ -129,4 +134,4 @@ export function createEventEquipmentRouter({
 
 
 /** The instance src/app.js mounts. */
-export default createEventEquipmentRouter();
+export default createEventEquipmentRouter({ finalEventGuard: createFinalEventGuard() });

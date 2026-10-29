@@ -57,6 +57,17 @@
 
 import { checkTimestamp, DATE_ONLY_PATTERN, singaporeToday } from '../validation/timestampValidation.js';
 import {
+  NEEDS_ATTENTION_CODE,
+  MARK_COMPLETED_REASON,
+  NOT_CONFIRMED_REASON,
+  eventHasEnded,
+  clarificationIsOverdue,
+  clarificationOverdueReason,
+  venueReadinessReason,
+  equipmentReadinessReason,
+  compareNeedsAttentionItems,
+} from '../domain/coordinatorAttentionList.js';
+import {
   ValidationError,
   NotFoundError,
   ConflictError,
@@ -143,6 +154,18 @@ const COLUMNS = `
 const ATTENTION_COLUMNS = `${COLUMNS}, bookings(status), equipment_reservations(flagged, released_at, flag_reason, flag_code)`;
 
 /**
+ * SCRUM-384 (SCRUM-379 AC2): ATTENTION_COLUMNS plus the closing notes, for the two
+ * coordinator reads that show them. Nothing an Organiser reads selects this, so
+ * the notes never leave the database for an Organiser's request.
+ */
+const COORDINATOR_COLUMNS = `${ATTENTION_COLUMNS}, closing_notes`;
+
+/** toEventRequestWithAttention, plus closingNotes (null when the event has none). */
+function withClosingNotes(row) {
+  return { ...toEventRequestWithAttention(row), closingNotes: row.closing_notes ?? null };
+}
+
+/**
  * The two vocabularies this module bridges: camelCase above it, the column
  * names from 001 and 005 below. Held in one place because getting a single
  * entry wrong is silent -- PostgREST ignores a key no column matches, so a
@@ -192,6 +215,9 @@ const SIGNIFICANT_CHANGE_CONFLICTS = new Set([
  * every legitimate empty read. It is handled at the update site instead, where
  * the surrounding code knows which of the two it is looking at.
  */
+// Mirrors event_requests_closing_notes_nonblank (033).
+const CLOSING_NOTES_MAX_LENGTH = 2000;
+
 const notFoundEventRequest = notFound('Event request not found');
 
 const translateError = createPgTranslator({
@@ -394,13 +420,21 @@ function attentionReasons(row, { withReason }) {
     reasons.push(VENUE_ATTENTION_REASON);
   }
 
+  reasons.push(...equipmentFlagReasons(row, { withReason }));
+
+  return reasons;
+}
+
+/**
+ * One entry per distinct flag on the event's flagged, unreleased equipment reservations.
+ * Shared by attentionReasons and the Needs attention list (SCRUM-383), so the wording of
+ * an equipment flag is defined once.
+ */
+function equipmentFlagReasons(row, { withReason }) {
   const flagged = embedded(row.equipment_reservations).filter(
     (reservation) => reservation?.flagged === true && !reservation.released_at,
   );
-  const wording = new Set(flagged.map((reservation) => equipmentFlagWording(reservation, { withReason })));
-  reasons.push(...wording);
-
-  return reasons;
+  return [...new Set(flagged.map((reservation) => equipmentFlagWording(reservation, { withReason })))];
 }
 
 /**
@@ -1375,6 +1409,38 @@ export async function cancelEventRequest(
 }
 
 /**
+ * Mark a Confirmed event as completed (SCRUM-379) through the transactional
+ * complete_event_request function. The closing notes are for coordinators, so
+ * they are added to this response only; toEventRequest never carries them.
+ *
+ * @param {string} id event request id
+ * @param {{closingNotes?: string|null}} input
+ * @param {string} coordinatorId caller from the authenticated session
+ * @param {{client?: object}} options
+ */
+export async function completeEventRequest(id, { closingNotes } = {}, coordinatorId, { client } = {}) {
+  requireCallerId(coordinatorId, 'coordinatorId');
+  if (closingNotes !== undefined && closingNotes !== null && typeof closingNotes !== 'string') {
+    throw new ValidationError('Closing notes must be text');
+  }
+  const notes = typeof closingNotes === 'string' ? closingNotes.trim() || null : null;
+  // Characters, as Postgres length() counts them; an emoji is one, though two UTF-16 units.
+  if (notes !== null && [...notes].length > CLOSING_NOTES_MAX_LENGTH) {
+    throw new ValidationError(`Closing notes can be at most ${CLOSING_NOTES_MAX_LENGTH} characters`);
+  }
+
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('complete_event_request', {
+    p_event_request_id: id,
+    p_coordinator_id: coordinatorId,
+    p_closing_notes: notes,
+  });
+
+  if (error) throw translateError(error);
+  return { ...toEventRequest(data), closingNotes: data.closing_notes ?? null };
+}
+
+/**
  * SCRUM-347: the assigned coordinator rejects an Approved event and releases its
  * arrangements. reject_approved_event (024) checks the caller and the status
  * under the row lock; the reason is checked here too so the form can name the field.
@@ -1596,7 +1662,9 @@ export async function getConfirmedArrangementsForOrganiser(id, organiserId, { cl
   if (error) throw translateError(error);
   if (!data || data.organiser_id !== organiserId) throw new NotFoundError(`Event request ${id} not found`);
 
-  const confirmed = data.status === STATUS.CONFIRMED;
+  // A completed event keeps its venue booking and arranged equipment as a record (SCRUM-379 AC4,
+  // AC5), so it shows the same arrangements a confirmed one does. Every other status shows none.
+  const confirmed = data.status === STATUS.CONFIRMED || data.status === STATUS.COMPLETED;
   return {
     eventRequestId: data.id,
     status: data.status,
@@ -1649,11 +1717,15 @@ export async function getConfirmedArrangementsForOrganiser(id, organiserId, { cl
  * @param {string} id
  * @param {object} [options]
  * @param {object} [options.client]
+ * @param {boolean} [options.withClosingNotes] SCRUM-384: also read the closing notes, as
+ *   `closingNotes`. Off by default: only the route a coordinator reads an event
+ *   through asks for them, so no other caller of this function can pass them on.
  * @returns {Promise<object>} the stored request, in camelCase
  * @throws {NotFoundError} when no such request exists, or it is a draft
  */
-export async function getEventRequestForCoordinator(id, { client } = {}) {
-  const request = toEventRequestWithAttention(await readEventRequestRow(id, ATTENTION_COLUMNS, client));
+export async function getEventRequestForCoordinator(id, { client, withClosingNotes: includeNotes = false } = {}) {
+  const row = await readEventRequestRow(id, includeNotes ? COORDINATOR_COLUMNS : ATTENTION_COLUMNS, client);
+  const request = includeNotes ? withClosingNotes(row) : toEventRequestWithAttention(row);
 
   if (request.status === STATUS.DRAFT) {
     // The same message getEventRequestById raises for an id that does not
@@ -2046,7 +2118,7 @@ export async function listEventRequestsForCoordinator(coordinatorId, { client } 
 
   const { data, error } = await db
     .from('event_requests')
-    .select(ATTENTION_COLUMNS)
+    .select(COORDINATOR_COLUMNS)
     .eq('assigned_coordinator_id', coordinatorId)
     .order('proposed_start', { ascending: true, nullsFirst: false })
     .order('id', { ascending: true });
@@ -2061,9 +2133,149 @@ export async function listEventRequestsForCoordinator(coordinatorId, { client } 
   const nameOf = await readNames(db, rows.map((row) => row.organiser_id));
 
   return rows.map((row) => ({
-    ...toEventRequestWithAttention(row),
+    ...withClosingNotes(row),
     organiserName: nameOf(row.organiser_id),
   }));
+}
+
+
+/**
+ * SCRUM-383 (SCRUM-379 AC7): the events columns the Needs attention list reads. The booking
+ * embed of ATTENTION_COLUMNS is left out: venue problems come from the readiness check.
+ */
+const NEEDS_ATTENTION_COLUMNS = `${COLUMNS}, equipment_reservations(flagged, released_at, flag_reason, flag_code)`;
+
+/** The statuses an event can be on the list in; any other status never is. */
+const NEEDS_ATTENTION_STATUSES = Object.freeze([STATUS.CONFIRMED, STATUS.APPROVED, STATUS.PENDING_CLARIFICATION]);
+
+/**
+ * SCRUM-383 (SCRUM-379 AC7): the caller's Needs attention list, for the events assigned to them.
+ *
+ * One item per reason, so an event with two reasons appears twice, each time with the
+ * reason it is there for. Earliest event first. Nothing is stored: the list is worked out
+ * from the events as they are now, so an item disappears the moment its reason is
+ * resolved (the event is completed, confirmed or cancelled, the clarification is answered,
+ * a failing readiness item is fixed).
+ *
+ * The reasons (rules and wording in domain/coordinatorAttentionList.js):
+ *   - Confirmed and ended: "Mark as completed"
+ *   - Approved and ended: "Not confirmed; cancel"
+ *   - a clarification past its reply-by date
+ *   - a Confirmed event failing SCRUM-363's readiness check: one reason per failing venue or
+ *     equipment item (the date item is ignored: a Confirmed event has always started or is about to)
+ *   - a Confirmed event with a flagged equipment reservation (SCRUM-315)
+ *
+ * Time comes in as `now`, so a test can fix it. Production passes nothing.
+ *
+ * Readiness is read once per Confirmed event, through the same event_readiness function
+ * the submission and SCRUM-363's confirm run. If any of those reads fails the whole call
+ * fails: a list that silently left a reason out would look like an event in good order.
+ *
+ * @param {string} coordinatorId  from the token, never from the request
+ * @param {object} [options]
+ * @param {object} [options.client]
+ * @param {Date} [options.now]
+ * @returns {Promise<object[]>}
+ */
+export async function listNeedsAttention(coordinatorId, { client, now = new Date() } = {}) {
+  if (!isPlausibleId(coordinatorId)) {
+    throw new ValidationError(
+      'Invalid coordinator -- coordinatorId: is required',
+      [{ field: 'coordinatorId', message: 'is required' }],
+    );
+  }
+  if (!(now instanceof Date) || Number.isNaN(now.getTime())) {
+    throw new ValidationError('Invalid time -- now must be a valid date', [{ field: 'now', message: 'must be a valid date' }]);
+  }
+
+  const db = await resolveClient(client);
+
+  const { data, error } = await db
+    .from('event_requests')
+    .select(NEEDS_ATTENTION_COLUMNS)
+    .eq('assigned_coordinator_id', coordinatorId.trim().toLowerCase())
+    .in('status', NEEDS_ATTENTION_STATUSES)
+    .order('proposed_start', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true });
+  if (error) throw translateError(error);
+
+  const rows = data ?? [];
+  if (rows.length === 0) return [];
+
+  // The date and "no equipment confirmed" items are not conditions a Confirmed event can
+  // lose: it has been confirmed, and the coordinator already confirmed any equipment gap.
+  const readinessOf = new Map();
+  await Promise.all(
+    rows.filter((row) => row.status === STATUS.CONFIRMED).map(async (row) => {
+      const { data: readiness, error: readinessError } = await db.rpc('event_readiness', {
+        p_event_request_id: row.id,
+        p_no_equipment_confirmed: true,
+      });
+      if (readinessError) throw translateError(readinessError);
+      readinessOf.set(row.id, readiness);
+    }),
+  );
+
+  const nameOf = await readNames(db, rows.map((row) => row.organiser_id));
+
+  const items = [];
+  for (const row of rows) {
+    const reasons = needsAttentionReasons(row, readinessOf.get(row.id), now);
+    const seen = new Map();
+    for (const { code, reason } of reasons) {
+      // A stable key for the screen: the event, the kind of reason, and which of that kind.
+      const nth = seen.get(code) ?? 0;
+      seen.set(code, nth + 1);
+      items.push({
+        id: `${row.id}:${code}:${nth}`,
+        code,
+        reason,
+        eventRequestId: row.id,
+        eventName: row.event_name,
+        status: row.status,
+        proposedStart: row.proposed_start ?? null,
+        proposedEnd: row.proposed_end ?? null,
+        organiserName: nameOf(row.organiser_id),
+        link: `/event-requests/${row.id}`,
+      });
+    }
+  }
+
+  return items.sort(compareNeedsAttentionItems);
+}
+
+/** The reasons one event is on the list for, [{ code, reason }], possibly none. */
+function needsAttentionReasons(row, readiness, now) {
+  const reasons = [];
+  const ended = eventHasEnded(row.proposed_end, now);
+
+  if (row.status === STATUS.CONFIRMED) {
+    if (ended) reasons.push({ code: NEEDS_ATTENTION_CODE.MARK_COMPLETED, reason: MARK_COMPLETED_REASON });
+
+    const failing = (readiness?.items ?? []).filter((item) => item?.met === false);
+    for (const item of failing.filter((i) => i.key === 'venue')) {
+      reasons.push({ code: NEEDS_ATTENTION_CODE.VENUE_NOT_READY, reason: venueReadinessReason(item.detail) });
+    }
+    for (const item of failing.filter((i) => i.key === 'equipment')) {
+      reasons.push({ code: NEEDS_ATTENTION_CODE.EQUIPMENT_NOT_READY, reason: equipmentReadinessReason(item.detail) });
+    }
+    for (const reason of equipmentFlagReasons(row, { withReason: true })) {
+      reasons.push({ code: NEEDS_ATTENTION_CODE.EQUIPMENT_FLAGGED, reason });
+    }
+  }
+
+  if (row.status === STATUS.APPROVED && ended) {
+    reasons.push({ code: NEEDS_ATTENTION_CODE.NOT_CONFIRMED, reason: NOT_CONFIRMED_REASON });
+  }
+
+  if (row.status === STATUS.PENDING_CLARIFICATION && clarificationIsOverdue(row.clarification_reply_by_date, now)) {
+    reasons.push({
+      code: NEEDS_ATTENTION_CODE.CLARIFICATION_OVERDUE,
+      reason: clarificationOverdueReason(row.clarification_reply_by_date),
+    });
+  }
+
+  return reasons;
 }
 
 

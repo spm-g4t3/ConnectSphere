@@ -83,6 +83,7 @@ import {
   closeEventClarification,
   listEventRequestsForReview,
   listEventRequestsForCoordinator,
+  listNeedsAttention,
   listCoordinators,
   listUnassignedEventRequests,
   listCoordinatorWorkload,
@@ -101,6 +102,7 @@ import {
   reopenEventRequest,
   getEventCancellationImpact,
   cancelEventRequest,
+  completeEventRequest,
   rejectApprovedEvent,
   getSignificantEventChangeImpact,
   applySignificantEventChange,
@@ -121,6 +123,7 @@ import {
 import { listHoldCandidates } from '../services/venueHoldService.js';
 import { getStatusDisplay } from '../domain/eventRequestStatus.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam, eventIdFromRecord, organisesEvent } from '../middleware/finalEventGuard.js';
 // Both of these are credential-free on purpose, and that is worth knowing
 // before adding a third: this router's tests do not mock config/
 // supabaseClient.js -- they rely on config/resolveClient.js being lazy -- so any
@@ -193,9 +196,17 @@ function withStatusDisplay(request) {
 export function createEventRequestRouter({
   client,
   requireAuth = defaultRequireAuth,
+  finalEventGuard = noopFinalEventGuard,
   requireRole = createRequireRole,
 } = {}) {
   const router = express.Router();
+
+  // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
+  const guardEvent = finalEventGuard(eventIdFromParam('id'));
+  // For the Organiser's own routes: their handlers answer 404 for an event that
+  // is not the caller's, so only its Organiser is told it is final.
+  const guardOwnEvent = finalEventGuard(eventIdFromParam('id'), { entitled: organisesEvent });
+  const guardChangeRequest = finalEventGuard(eventIdFromRecord('event_change_requests', 'changeRequestId'));
 
   // Built once here, and passed per route to every coordinator path below,
   // never mounted with router.use (see GET /queue). Calling the factory at
@@ -298,12 +309,32 @@ export function createEventRequestRouter({
    * grouping is presentation. An empty list is 200 [], never 404: nothing
    * assigned is not a missing resource.
    *
+   * SCRUM-384: each row also carries `closingNotes` (null unless the event is Completed and
+   * has notes), for the screen that shows them. Only coordinators reach this route.
+   *
    * Statuses: 200, 401 from requireAuth, 403 for the wrong role or no role,
    * 500 for anything untyped.
    */
   router.get('/mine', coordinatorOnly, async (req, res) => {
     const requests = await listEventRequestsForCoordinator(req.user.id, { client });
     res.status(200).json(requests.map(withStatusDisplay));
+  });
+
+  /**
+   * SCRUM-383 (SCRUM-379 AC7): the caller's Needs attention list, for the events assigned
+   * to them. One item per reason, earliest event first:
+   * { id, code, reason, eventRequestId, eventName, status, proposedStart, proposedEnd,
+   *   organiserName, link }. `link` is the screen that opens the event.
+   *
+   * DECLARATION ORDER IS LOAD-BEARING, as for /mine: declared after GET /:id,
+   * 'needs-attention' would be read as an id. Do not move it below /:id.
+   *
+   * Narrowed to req.user.id as the assigned coordinator, never to anything in the query
+   * string. A bare array, [] when nothing needs attention. Statuses: 200, 401, 403 for
+   * the wrong role, 500 for anything untyped. Read only, so the final-event guard does not apply.
+   */
+  router.get('/needs-attention', coordinatorOnly, async (req, res) => {
+    res.status(200).json(await listNeedsAttention(req.user.id, { client }));
   });
 
   /**
@@ -640,9 +671,12 @@ export function createEventRequestRouter({
    * already been opened for: the reassign gate's fault, one layer up. A read
    * only; every write beside it keeps its own gate, and the database still
    * decides who may act.
+   *
+   * SCRUM-384: carries `closingNotes` (null unless the event is Completed and has notes).
+   * Both roles that pass the gate are coordinator-side; an Organiser never reaches this route.
    */
   router.get('/:id/review', coordinatorOrLead, async (req, res) => {
-    const request = await getEventRequestForCoordinator(req.params.id, { client });
+    const request = await getEventRequestForCoordinator(req.params.id, { client, withClosingNotes: true });
     res.status(200).json(withStatusDisplay(request));
   });
 
@@ -806,7 +840,7 @@ export function createEventRequestRouter({
    * draft, either because it was submitted earlier or because a submit landed
    * between the service's read and its write.
    */
-  router.patch('/:id', async (req, res) => {
+  router.patch('/:id', guardOwnEvent, async (req, res) => {
     const saved = await updateEventRequest(
       req.params.id,
       req.body,
@@ -831,7 +865,7 @@ export function createEventRequestRouter({
    * A 400 from here carries details[] listing every gap at once, which is the
    * whole of AC4; the form renders them as a list.
    */
-  router.post('/:id/submit', async (req, res) => {
+  router.post('/:id/submit', guardOwnEvent, async (req, res) => {
     await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
     const submitted = await submitEventRequest(req.params.id, { client, changedBy: req.user.id });
@@ -840,7 +874,7 @@ export function createEventRequestRouter({
 
   // SCRUM-355 AC1, AC2: the Organiser reopens their rejected request as a draft.
   // reopen_event_request checks ownership and status under the row lock.
-  router.post('/:id/reopen', organiserOnly, async (req, res) => {
+  router.post('/:id/reopen', organiserOnly, guardOwnEvent, async (req, res) => {
     const reopened = await reopenEventRequest(req.params.id, req.user.id, { client });
     res.status(200).json(withStatusDisplay(reopened));
   });
@@ -849,7 +883,7 @@ export function createEventRequestRouter({
    * SCRUM-489 AC1, AC4 to AC6, AC8: the assigned coordinator sends the event to
    * the Safety Officers. The caller is the token's user, never the body's.
    */
-  router.post('/:id/safety-review', coordinatorOnly, async (req, res) => {
+  router.post('/:id/safety-review', coordinatorOnly, guardEvent, async (req, res) => {
     const updated = await submitForSafetyReview({
       client,
       eventRequestId: req.params.id,
@@ -860,7 +894,7 @@ export function createEventRequestRouter({
     res.status(200).json(withStatusDisplay(updated));
   });
 
-  router.post('/:id/confirm', coordinatorOnly, async (req, res) => {
+  router.post('/:id/confirm', coordinatorOnly, guardEvent, async (req, res) => {
     const updated = await confirmEventRequest({
       client,
       eventRequestId: req.params.id,
@@ -871,7 +905,7 @@ export function createEventRequestRouter({
     res.status(200).json(withStatusDisplay(updated));
   });
 
-  router.post('/:id/clarification', coordinatorOnly, async (req, res) => {
+  router.post('/:id/clarification', coordinatorOnly, guardEvent, async (req, res) => {
     const updated = await requestEventClarification(
       req.params.id,
       req.body?.note,
@@ -885,7 +919,7 @@ export function createEventRequestRouter({
     res.status(200).json(withStatusDisplay(updated));
   });
 
-  router.post('/:id/clarification/close', coordinatorOnly, async (req, res) => {
+  router.post('/:id/clarification/close', coordinatorOnly, guardEvent, async (req, res) => {
     const updated = await closeEventClarification(
       req.params.id,
       req.body?.note,
@@ -933,7 +967,7 @@ export function createEventRequestRouter({
    * whether this caller may hand over this event, and a coordinator who does
    * not hold it is still its 403.
    */
-  router.post('/:id/reassign', coordinatorOrLead, async (req, res) => {
+  router.post('/:id/reassign', coordinatorOrLead, guardEvent, async (req, res) => {
     const updated = await reassignEventRequest(
       req.params.id,
       req.body,
@@ -958,7 +992,7 @@ export function createEventRequestRouter({
    * request), 409 (already assigned, with code ALREADY_ASSIGNED and the holder
    * in `conflicts`, so the screen can name them; or no longer submitted).
    */
-  router.post('/:id/assign', leadOnly, async (req, res) => {
+  router.post('/:id/assign', leadOnly, guardEvent, async (req, res) => {
     const updated = await assignEventRequest(
       req.params.id,
       { coordinatorId: req.body?.coordinatorId, note: req.body?.note },
@@ -988,7 +1022,7 @@ export function createEventRequestRouter({
    * 200 and the whole request. Refusals through translateError: 403 (not the
    * assigned coordinator), 409 (not submitted), 404 (no such event).
    */
-  router.post('/:id/start-review', coordinatorOnly, async (req, res) => {
+  router.post('/:id/start-review', coordinatorOnly, guardEvent, async (req, res) => {
     const updated = await startEventReview(req.params.id, req.user.id, { client });
     res.status(200).json(withStatusDisplay(updated));
   });
@@ -1011,7 +1045,7 @@ export function createEventRequestRouter({
    * field), 403 (not the assigned coordinator or reviewer), 409 (not under
    * review, or an approval whose start date has passed), 404 (no such event).
    */
-  router.post('/:id/decision', coordinatorOnly, async (req, res) => {
+  router.post('/:id/decision', coordinatorOnly, guardEvent, async (req, res) => {
     const updated = await decideEventRequest(
       req.params.id,
       { decision: req.body?.decision, decisionNote: req.body?.decisionNote },
@@ -1024,7 +1058,7 @@ export function createEventRequestRouter({
   // SCRUM-539: the Lead cancels a submitted request nobody holds. As with
   // POST /:id/reassign, the database decides who may cancel which event: the
   // holder theirs, the Lead only an unassigned one (cancel_event_request, 013).
-  router.post('/:id/cancel', coordinatorOrLead, async (req, res) => {
+  router.post('/:id/cancel', coordinatorOrLead, guardEvent, async (req, res) => {
     const updated = await cancelEventRequest(
       req.params.id,
       {
@@ -1051,14 +1085,28 @@ export function createEventRequestRouter({
    * EVENT_STATUS_NOT_ALLOWED, SIGNIFICANT_CHANGE_REQUIRED,
    * EVENT_HOLDS_ARRANGEMENTS or EVENT_CHANGED_SINCE_OPENED.
    */
-  router.patch('/:id/details', coordinatorOnly, async (req, res) => {
+  router.patch('/:id/details', coordinatorOnly, guardEvent, async (req, res) => {
     const result = await editEventRequestDetails(req.params.id, req.body, req.user.id, { client });
     res.status(200).json({ ...withStatusDisplay(result.event), changedFields: result.changedFields });
   });
 
+  // SCRUM-379: the assigned coordinator marks a Confirmed, ended event as
+  // completed. The database decides who, which status and when
+  // (complete_event_request, 034); the closing notes are returned to this
+  // coordinator only.
+  router.post('/:id/complete', coordinatorOnly, guardEvent, async (req, res) => {
+    const updated = await completeEventRequest(
+      req.params.id,
+      { closingNotes: req.body?.closingNotes },
+      req.user.id,
+      { client },
+    );
+    res.status(200).json(withStatusDisplay(updated));
+  });
+
   // SCRUM-347: the assigned coordinator rejects an Approved event. Body: { reason }.
   // 409 with code CANCEL_INSTEAD for a Confirmed event.
-  router.post('/:id/rejection', coordinatorOnly, async (req, res) => {
+  router.post('/:id/rejection', coordinatorOnly, guardEvent, async (req, res) => {
     const updated = await rejectApprovedEvent(
       req.params.id,
       { reason: req.body?.reason },
@@ -1068,7 +1116,7 @@ export function createEventRequestRouter({
     res.status(200).json(withStatusDisplay(updated));
   });
 
-  router.post('/:id/significant-change', coordinatorOnly, async (req, res) => {
+  router.post('/:id/significant-change', coordinatorOnly, guardEvent, async (req, res) => {
     const result = await applySignificantEventChange(
       req.params.id,
       req.body,
@@ -1083,7 +1131,7 @@ export function createEventRequestRouter({
     });
   });
 
-  router.patch('/:id/clarification-response', async (req, res) => {
+  router.patch('/:id/clarification-response', guardOwnEvent, async (req, res) => {
     const updated = await respondToEventClarification(
       req.params.id,
       req.body?.message,
@@ -1107,7 +1155,7 @@ export function createEventRequestRouter({
    * toChangeRequest, which carries no fieldLabel, so the frontend refetches
    * the list rather than splicing this into it.
    */
-  router.post('/:id/change-requests', async (req, res) => {
+  router.post('/:id/change-requests', guardOwnEvent, async (req, res) => {
     await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
     const created = await createChangeRequestFromClient(
@@ -1120,7 +1168,7 @@ export function createEventRequestRouter({
     res.status(201).json(created);
   });
 
-  router.post('/change-requests/:changeRequestId/decision', coordinatorOnly, async (req, res) => {
+  router.post('/change-requests/:changeRequestId/decision', coordinatorOnly, guardChangeRequest, async (req, res) => {
     const processed = await processChangeRequest(
       req.params.changeRequestId,
       req.body,
@@ -1136,4 +1184,4 @@ export function createEventRequestRouter({
 
 
 /** The instance src/app.js mounts. */
-export default createEventRequestRouter();
+export default createEventRequestRouter({ finalEventGuard: createFinalEventGuard() });

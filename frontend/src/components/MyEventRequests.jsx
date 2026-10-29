@@ -353,7 +353,7 @@ export default function MyEventRequests() {
                 {display.description}
               </p>
               <SafetyApprovalNotice status={req.status} />
-              {req.status === "confirmed" && <ConfirmedArrangements eventRequestId={req.id} />}
+              {(req.status === "confirmed" || req.status === "completed") && <ConfirmedArrangements eventRequestId={req.id} />}
               {assignment && (
                 <p className="my-event-requests__assignment">{assignment}</p>
               )}
@@ -481,10 +481,12 @@ export default function MyEventRequests() {
                   </button>
                 )}
 
-                {/* SCRUM-347: a rejected event is revised and resubmitted instead. */}
+                {/* SCRUM-347: a rejected event is revised and resubmitted instead.
+                    SCRUM-379 AC3: a completed event is final, so it takes no change request. */}
                 {req.status !== "draft" &&
                   req.status !== "pending_clarification" &&
                   req.status !== "cancelled" &&
+                  req.status !== "completed" &&
                   req.status !== "rejected" && (
                   <button
                     onClick={() => setActivePanel({ mode: "change-request", request: req })}
