@@ -37,6 +37,7 @@ export function createEventRegistrationRouter({
 
   // Read only: the list has no write routes, so other methods fall through to 404.
   router.get('/events/:id/registrations', organiserOrCoordinator, async (req, res) => {
+    res.set('Cache-Control', 'no-store');
     res.status(200).json(await listEventRegistrations({
       eventRequestId: req.params.id,
       userId: req.user.id,

@@ -16,7 +16,7 @@ const entries = [
 ];
 const listing = (overrides = {}) => ({
   event: { id: "e1", eventName: "Gala", status: "confirmed", capacity: 50 },
-  counts: { registered: 1, capacity: 50 },
+  counts: { registered: 1, waitlisted: 0, capacity: 50 },
   hideWithdrawn: false,
   entries,
   ...overrides,
@@ -56,10 +56,26 @@ describe("SCRUM478 EventRegistrationList", () => {
     expect(await screen.findByLabelText("Registered count")).toHaveTextContent("1 / 50");
     unmount();
 
-    vi.mocked(getEventRegistrations).mockResolvedValueOnce(listing({ counts: { registered: 4, capacity: null } }));
+    vi.mocked(getEventRegistrations).mockResolvedValueOnce(listing({ counts: { registered: 4, waitlisted: 0, capacity: null } }));
     renderList();
     expect(await screen.findByLabelText("Registered count")).toHaveTextContent(/^4$/);
-    expect(screen.queryByText(/waitlist/i)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM478_AC3_shows_the_waitlisted_count", async () => {
+    vi.mocked(getEventRegistrations).mockResolvedValue(listing({ counts: { registered: 50, waitlisted: 3, capacity: 50 } }));
+    renderList();
+    expect(await screen.findByLabelText("Waitlisted count")).toHaveTextContent(/^3$/);
+  });
+
+  it("SCRUM478_AC2_dates_a_waitlisted_entry_by_when_it_joined_the_queue", async () => {
+    const waitlisted = {
+      ...entries[0], id: "4", registeredAt: "2029-12-01T09:00:00Z", waitlistedAt: "2030-01-02T01:00:00Z",
+      status: "waitlisted", statusLabel: "Waitlisted",
+    };
+    vi.mocked(getEventRegistrations).mockResolvedValue(listing({ entries: [waitlisted] }));
+    renderList();
+    const [row] = (await screen.findAllByRole("row")).slice(1);
+    expect(within(row).getAllByRole("cell")[2]).toHaveTextContent("2030-01-02 09:00 (Singapore time)");
   });
 
   it("SCRUM478_AC4_asks_the_server_to_hide_withdrawn_when_toggled", async () => {

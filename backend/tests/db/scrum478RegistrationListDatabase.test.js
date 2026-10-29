@@ -59,10 +59,10 @@ describe('SCRUM-478: registration list in Postgres', () => {
     ...(status === 'cancelled' && { assigned_coordinator_id: coordinator }),
     ...overrides,
   });
-  const register = (event, attendee, status, registeredAt, id = null) => db.query(
-    `insert into event_registrations (id, event_request_id, attendee_id, status, registered_at)
-     values (coalesce($1::uuid, gen_random_uuid()), $2, $3, $4, $5)`,
-    [id, event, attendee, status, registeredAt],
+  const register = (event, attendee, status, registeredAt, id = null, waitlistedAt = null) => db.query(
+    `insert into event_registrations (id, event_request_id, attendee_id, status, registered_at, waitlisted_at)
+     values (coalesce($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6)`,
+    [id, event, attendee, status, registeredAt, waitlistedAt],
   );
 
   beforeAll(async () => {
@@ -117,6 +117,7 @@ describe('SCRUM-478: registration list in Postgres', () => {
       attendeeName: 'Ada',
       attendeeEmail: 'a0@test',
       registeredAt: expect.any(String),
+      waitlistedAt: null,
       status: 'withdrawn',
       statusLabel: 'Withdrawn',
     });
@@ -124,7 +125,7 @@ describe('SCRUM-478: registration list in Postgres', () => {
     expect(new Date(ada.registeredAt).toISOString()).toBe('2029-12-01T09:00:00.000Z');
     for (const entry of entries) {
       expect(Object.keys(entry).sort()).toEqual(
-        ['attendeeEmail', 'attendeeName', 'id', 'registeredAt', 'status', 'statusLabel'],
+        ['attendeeEmail', 'attendeeName', 'id', 'registeredAt', 'status', 'statusLabel', 'waitlistedAt'],
       );
     }
   });
@@ -154,15 +155,52 @@ describe('SCRUM-478: registration list in Postgres', () => {
 
   it('SCRUM478_AC3_counts_registered_against_capacity_or_alone', async () => {
     const withCapacity = await list(organiser);
-    expect(withCapacity.counts).toEqual({ registered: 3, capacity: 10 });
+    expect(withCapacity.counts).toEqual({ registered: 3, waitlisted: 0, capacity: 10 });
 
     const noCapacity = await event('confirmed');
     await register(noCapacity, attendees[0], 'registered', '2029-12-01T09:00:00Z');
-    expect((await list(organiser, { event: noCapacity })).counts).toEqual({ registered: 1, capacity: null });
+    expect((await list(organiser, { event: noCapacity })).counts).toEqual({ registered: 1, waitlisted: 0, capacity: null });
   });
 
-  it('SCRUM478_AC3_reports_no_waitlisted_count_while_there_is_no_waiting_list', async () => {
-    expect(await list(organiser)).not.toHaveProperty('counts.waitlisted');
+  // Ada registered long before she joined the queue; Ben joined it first.
+  const waitlistedEvent = async (status, overrides) => {
+    const id = await event(status, { registration_capacity: 1, registration_waitlist_enabled: true, ...overrides });
+    await register(id, attendees[3], 'registered', '2029-12-01T08:00:00Z');
+    await register(id, attendees[0], 'waitlisted', '2029-11-01T08:00:00Z', null, '2029-12-01T11:00:00Z');
+    await register(id, attendees[1], 'waitlisted', '2029-12-01T10:00:00Z', null, '2029-12-01T10:00:00Z');
+    await register(id, attendees[2], 'withdrawn', '2029-12-01T09:00:00Z');
+    return id;
+  };
+
+  it('SCRUM478_AC3_counts_waitlisted_entries_apart_from_registered_ones', async () => {
+    const { counts } = await list(organiser, { event: await waitlistedEvent('confirmed') });
+    expect(counts).toEqual({ registered: 1, waitlisted: 2, capacity: 1 });
+  });
+
+  it('SCRUM478_AC2_dates_and_orders_a_waitlisted_entry_by_when_it_joined_the_queue', async () => {
+    const { entries } = await list(organiser, { event: await waitlistedEvent('confirmed') });
+    expect(entries.map((entry) => [entry.attendeeName, entry.statusLabel])).toEqual([
+      ['Di', 'Registered'], ['Cy', 'Withdrawn'], ['Ben', 'Waitlisted'], ['Ada', 'Waitlisted'],
+    ]);
+    const ada = entries.find((entry) => entry.attendeeName === 'Ada');
+    expect(new Date(ada.waitlistedAt).toISOString()).toBe('2029-12-01T11:00:00.000Z');
+    expect(entries.find((entry) => entry.attendeeName === 'Di').waitlistedAt).toBeNull();
+  });
+
+  it('SCRUM478_AC2_shows_waitlisted_entries_on_a_cancelled_event_as_event_cancelled', async () => {
+    const id = await waitlistedEvent('cancelled', {
+      cancellation_reason: 'Called off', cancellation_initiator: 'organiser_request', cancelled_by: coordinator,
+      cancelled_at: new Date(),
+    });
+    const result = await list(organiser, { event: id });
+    expect(result.entries.map((entry) => [entry.attendeeName, entry.statusLabel])).toEqual([
+      ['Di', 'Event cancelled'], ['Cy', 'Withdrawn'], ['Ben', 'Event cancelled'], ['Ada', 'Event cancelled'],
+    ]);
+    expect(result.counts).toEqual({ registered: 0, waitlisted: 0, capacity: 1 });
+    const { rows } = await db.query(
+      "select count(*)::int as n from event_registrations where event_request_id = $1 and status = 'waitlisted'", [id],
+    );
+    expect(rows[0].n).toBe(2);
   });
 
   it('SCRUM478_AC4_hides_withdrawn_entries_without_changing_the_counts', async () => {

@@ -79,17 +79,20 @@ export async function listEventRegistrations({ eventRequestId, userId, hideWithd
     ? await emailsFor(db, result.entries.map((entry) => entry.attendeeId))
     : new Map();
 
-  // No waiting list exists yet (a full event refuses with capacity_reached), so
-  // there is no waitlisted count to show.
   return {
     event: result.event,
-    counts: { registered: Number(result.registeredCount), capacity: result.event.capacity ?? null },
+    counts: {
+      registered: Number(result.registeredCount),
+      waitlisted: Number(result.waitlistedCount),
+      capacity: result.event.capacity ?? null,
+    },
     hideWithdrawn: hide,
     entries: result.entries.map((entry) => ({
       id: entry.id,
       attendeeName: entry.attendeeName,
       attendeeEmail: emails.get(entry.attendeeId) ?? null,
       registeredAt: entry.registeredAt,
+      waitlistedAt: entry.waitlistedAt ?? null,
       status: entry.status,
       statusLabel: registrationEntryLabel(entry.status),
     })),

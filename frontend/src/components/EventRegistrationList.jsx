@@ -59,6 +59,8 @@ export default function EventRegistrationList({ eventId }) {
             <p className="registration-list__count" aria-label="Registered count">
               {counts.capacity == null ? counts.registered : `${counts.registered} / ${counts.capacity}`}
             </p>
+            <h2>Waitlisted</h2>
+            <p className="registration-list__count" aria-label="Waitlisted count">{counts.waitlisted}</p>
           </section>
 
           <label className="event-registration-page__toggle registration-list__filter">
@@ -78,7 +80,7 @@ export default function EventRegistrationList({ eventId }) {
                 <tr>
                   <th scope="col">Attendee</th>
                   <th scope="col">Email</th>
-                  <th scope="col">Registered</th>
+                  <th scope="col">Joined</th>
                   <th scope="col">Status</th>
                 </tr>
               </thead>
@@ -87,7 +89,8 @@ export default function EventRegistrationList({ eventId }) {
                   <tr key={entry.id}>
                     <td>{entry.attendeeName || "Name not set"}</td>
                     <td>{entry.attendeeEmail || "Email not set"}</td>
-                    <td>{formatVenueTimestamp(entry.registeredAt, "Unknown")}</td>
+                    {/* A waitlisted entry is dated, and ordered, by when it joined the queue. */}
+                    <td>{formatVenueTimestamp(entry.waitlistedAt ?? entry.registeredAt, "Unknown")}</td>
                     <td>{entry.statusLabel}</td>
                   </tr>
                 ))}

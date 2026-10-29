@@ -178,6 +178,7 @@ describe('SCRUM478 registration list endpoint', () => {
     outcome: 'listed',
     event: { id: EVENT, eventName: 'Gala', status: 'confirmed', capacity: 50 },
     registeredCount: 1,
+    waitlistedCount: 2,
     entries: [{
       id: saved.id, attendeeId: ATTENDEE, attendeeName: 'Ada',
       registeredAt: '2026-10-16T10:00:00Z', status: 'registered',
@@ -185,7 +186,7 @@ describe('SCRUM478 registration list endpoint', () => {
   };
   // The list's view of an entry: the email from the admin API, no attendee id.
   const shown = { id: saved.id, attendeeName: 'Ada', attendeeEmail: 'ada@example.com',
-    registeredAt: '2026-10-16T10:00:00Z', status: 'registered', statusLabel: 'Registered' };
+    registeredAt: '2026-10-16T10:00:00Z', waitlistedAt: null, status: 'registered', statusLabel: 'Registered' };
   const listing = (data = listed, error = null, users = [{ id: ATTENDEE, email: 'ada@example.com' }]) => ({
     rpc: vi.fn().mockResolvedValue({ data, error }),
     auth: { admin: { listUsers: vi.fn().mockResolvedValue({ data: { users }, error: null }) } },
@@ -199,12 +200,13 @@ describe('SCRUM478 registration list endpoint', () => {
       const db = listing();
       const res = await get(db, role, '?hideWithdrawn=true');
       expect(res.status).toBe(200);
+      expect(res.headers['cache-control']).toBe('no-store');
       expect(db.rpc).toHaveBeenCalledWith('list_event_registrations', {
         p_event_request_id: EVENT, p_user_id: ME, p_hide_withdrawn: true,
       });
       expect(res.body).toEqual({
         event: listed.event,
-        counts: { registered: 1, capacity: 50 },
+        counts: { registered: 1, waitlisted: 2, capacity: 50 },
         hideWithdrawn: true,
         entries: [shown],
       });
@@ -255,7 +257,7 @@ describe('SCRUM478 registration list endpoint', () => {
 
   it('SCRUM478_AC3_reports_a_count_without_capacity_when_none_is_set', async () => {
     const res = await get(listing({ ...listed, event: { ...listed.event, capacity: null } }), ROLE.EVENT_ORGANISER);
-    expect(res.body.counts).toEqual({ registered: 1, capacity: null });
+    expect(res.body.counts).toEqual({ registered: 1, waitlisted: 2, capacity: null });
   });
 
   it('SCRUM478_AC4_defaults_to_showing_withdrawn_and_refuses_other_filter_values', async () => {
