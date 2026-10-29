@@ -43,12 +43,12 @@ describe("SCRUM492_AC4 describeNotification: booking_request_conflict_cleared", 
       eventName: "Tech Talk", venueName: "Hall A", startsAt: STARTS, endsAt: ENDS, releasedEventName: "Gala Dinner",
     }))).toEqual({
       headline: "Your request for Hall A for Tech Talk no longer clashes",
-      detail: `Gala Dinner released the venue, so your request for ${RANGE} is pending again and waits for Venue Staff.`,
+      detail: `Gala Dinner no longer holds the venue, so your request for ${RANGE} is pending again and waits for Venue Staff.`,
     });
   });
 
   it("SCRUM492_AC4_with_no_released_event_name_it_says_another_event_instead", () => {
     expect(describeNotification(cleared({ eventName: "Tech Talk", venueName: "Hall A" })).detail)
-      .toMatch(/^Another event released the venue/);
+      .toMatch(/^Another event no longer holds the venue/);
   });
 });
