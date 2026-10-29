@@ -25,6 +25,7 @@ import EquipmentReview from "./components/EquipmentReview";
 import EventRegistrationSettings from "./components/EventRegistrationSettings";
 import RegistrationEventsList from "./components/RegistrationEventsList";
 import EquipmentRequestQueue from "./components/EquipmentRequestQueue";
+import EquipmentReviewedByMe from "./components/EquipmentReviewedByMe";
 import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
 import SafetyReviewHistory from "./components/SafetyReviewHistory";
 import BrowseOpenEvents from "./components/BrowseOpenEvents";
@@ -388,6 +389,7 @@ function AppRoutes() {
               <div className="dashboard dashboard--tech-support">
                 <h1>Equipment request queue</h1>
                 <EquipmentRequestQueue />
+                <EquipmentReviewedByMe />
               </div>
             </ProtectedRoute>
           }
