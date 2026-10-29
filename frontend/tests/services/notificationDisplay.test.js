@@ -1102,7 +1102,7 @@ describe("describeNotification: missing names and payloads", () => {
 
 // What the backend can send: the latest whole restate of notifications_type_known
 // (the baseline, or a migration from 010 on), plus every type a later migration
-// appends to the live list instead of restating it, as SCRUM-402's 036 does
+// appends to the live list instead of restating it, as SCRUM-402's 036 and 039 do
 // with `unnest(array[...]) as t`. A type with no wording here would show as
 // "New notification".
 const DB = resolve(dirname(fileURLToPath(import.meta.url)), "../../../backend/db");
@@ -1245,8 +1245,9 @@ describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", (
   it("SCRUM402_AC11_the_known_types_include_what_036_appends_to_the_live_list", () => {
     const known = knownNotificationTypes();
     expect(known).toEqual(expect.arrayContaining(["change_request_decided", "change_request_significant_submitted"]));
-    // And everything 022's whole list named, which 036 extends rather than replaces.
-    expect(known).toEqual(expect.arrayContaining(["event_details_changed", "booking_flagged"]));
+    // 037 restates the list whole after 036, so they now come from 039's append, and
+    // everything 037's list named stays.
+    expect(known).toEqual(expect.arrayContaining(["registration_promoted", "event_details_changed", "booking_flagged"]));
   });
 
   it("SCRUM172_AC6_every_known_type_has_wording", () => {

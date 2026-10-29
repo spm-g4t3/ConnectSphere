@@ -2,10 +2,11 @@
 
 **Story:** Process an Event Change Request (E3) — Event Coordinator
 **Subtask:** SCRUM-409 (this document); the backend halves of SCRUM-403 to SCRUM-407
-**Schema:** `035_change_request_cancellation_type.sql` and `036_process_change_requests.sql` (SCRUM-403), on top of 022's `edit_event_request_details`, 028's change-history source check, 013's `cancel_event_request` and the baseline's `apply_significant_event_change`.
+**Schema:** `035_change_request_cancellation_type.sql` and `036_process_change_requests.sql` (SCRUM-403), with `039_change_request_notice_types_restored.sql` putting back 036's notice types after later restates, on top of 022's `edit_event_request_details`, 028's change-history source check, 013's `cancel_event_request` and the baseline's `apply_significant_event_change`.
 **Written:** 27 October 2026, before the tests and the code.
 **Marked:** 27 October 2026, SCRUM-403 to SCRUM-407 (backend): every case proved. AC5-04 moved from Safety approved to Confirmed, where the order it tests matters (387 allows a name in Safety approved, so the old case could not fail).
 **Marked:** 28 October 2026, SCRUM-404's screen half and SCRUM-408 (brief 2): the screens' cases, each marked **(UI)**, after the backend's in every table, and AC1-11 for My events' count. Every one proved.
+**Marked:** 29 October 2026, migration 039: SC-03 to SC-06 (SC-06 is SCRUM-347's rejected-event rule, moved under the lock), after 024, 032 and 037 restated the notification list whole and dropped 036's two types on live; AC10-05 for 039's rejection trigger, which also re-states AC2-03's rejected case and AC2-04 as groups the rejection closed. Every one proved.
 **Marked:** 27 October 2026, the brief 1 fix-up: the Organiser's note (`organiser_note`, in 036 before it ran anywhere). AC1-08 to AC1-10 and AC7-04 added; AC7-03 reworded as the fallback it now is.
 
 This document is the written layer between SCRUM-402's acceptance criteria and the
@@ -111,8 +112,8 @@ after: a refusal changes nothing (the rollback cases).
 |---|---|---|---|---|
 | AC2-01 | Approved, held | Another coordinator; the Lead; the organiser; a null caller accept | 42501; nothing changes | Proved (pglite): `SCRUM402_AC2_%s_is_refused_with_42501` (four; accept and preview) |
 | AC2-02 **(trap)** | Submitted and assigned, review not started | The holder accepts | PT409 `REVIEW_NOT_STARTED`; nothing changes | Proved (pglite): `SCRUM402_AC2_a_submitted_event_asks_for_its_review_to_be_started_first` (accept, decline, preview); (route) `SCRUM402_AC2_the_previews_%s_is_a_409_with_its_code`, `SCRUM402_%s_the_decisions_%s_is_a_409_with_its_code` |
-| AC2-03 | Rejected; Cancelled; Completed, held | The holder accepts | PT409 `EVENT_STATUS_NOT_ALLOWED`, naming the status | Proved (pglite): `SCRUM402_AC2_an_event_that_is_%s_is_refused_naming_its_status` (three; accept and preview) |
-| AC2-04 | A draft (no coordinator) | Anyone accepts | 42501: the caller is checked first, as 387's D15 | Proved (pglite): `SCRUM402_AC2_a_draft_is_refused_as_a_strangers_call` |
+| AC2-03 | Cancelled; Completed, held. Rejected: since 039 no group can be open on a rejected event (creation refused, the rejection closes it), so the case is the group the rejection closed | The holder accepts | PT409 `EVENT_STATUS_NOT_ALLOWED`, naming the status; on Rejected the group is already processed as `event_rejected` | Proved (pglite): `SCRUM402_AC2_an_event_that_is_%s_is_refused_naming_its_status` (two; accept and preview), `SCRUM402_AC2_a_rejected_events_group_is_closed_by_the_rejection` |
+| AC2-04 | A draft (no coordinator), reopened after a rejection; its group was closed by the rejection, as no group can be open on a draft | Anyone accepts | The group is processed as `event_rejected`; 42501: the caller is checked first, as 387's D15 | Proved (pglite): `SCRUM402_AC2_a_reopened_drafts_group_is_closed_by_the_rejection` |
 | AC2-05 | As AC2-01 to AC2-03 | Preview | The same refusals | Proved (pglite): the AC2-01 to AC2-03 tests above, each of which previews too |
 | AC2-06 | Through the API | Any role but a coordinator; no token; a malformed id | 403, 401, 400; nothing queried | Proved (route): `SCRUM402_AC2_%s_is_refused_the_preview_with_403_and_queries_nothing`, `SCRUM402_AC2_%s_is_refused_the_decision_with_403_and_queries_nothing`, `SCRUM402_AC2_the_preview_answers_401_without_a_token_and_400_for_a_malformed_id`, `SCRUM402_AC2_the_functions_%s_is_a_%s`, `SCRUM402_AC3_%s_is_a_400_before_the_database` (a_malformed_id) |
 | AC2-07 **(UI)** | The panel | The Lead or another coordinator; the holder on a Submitted, Cancelled, Rejected or Completed event | No buttons; no Review; on Submitted, "Start the review to process change requests." | Proved (UI, panel): `SCRUM402_AC2_the_lead_and_other_coordinators_read_it_with_no_buttons`, `SCRUM402_AC2_an_event_that_is_%s_offers_no_review` (four) |
@@ -190,6 +191,7 @@ after: a refusal changes nothing (the rollback cases).
 | AC9-01 | Approved | Accept an "other" request with a note | Processed `approved` with the note; no field and no history changes | Proved (pglite): `SCRUM402_AC9_something_else_records_the_note_and_changes_no_field` |
 | AC10-01 **(trap)** | A group accepted | Accept again; decline it | PT409 `CHANGE_REQUEST_ALREADY_PROCESSED` | Proved (pglite): `SCRUM402_AC10_a_group_is_processed_once_only`; (route) `SCRUM402_%s_the_decisions_%s_is_a_409_with_its_code` (CHANGE_REQUEST_ALREADY_PROCESSED); (route) `SCRUM402_AC10_the_organisers_list_carries_each_rows_group` |
 | AC10-02 | A legacy close with another outcome (`event_cancelled`) | Process with that decision | Recorded as given, nothing applied (the existing behaviour) | Proved (existing, unmodified): `eventCancellationFieldsMigration.test.js` "allows change requests to be closed with the event-cancelled outcome" |
+| AC10-05 **(trap)** | Under review: an outstanding group, an in-progress group, a declined group; another event's open group | Reject through `decide_event_request` | 039's trigger closes the two open groups as `event_rejected`, by the reviewing coordinator; the declined group and the other event's are untouched | Proved (pglite): `SCRUM402_AC10_rejecting_from_under_review_closes_open_change_requests` |
 | AC9-02 **(UI)** | The panel | Accept a "Something else" request | Accept disabled until a note is given | Proved (UI, panel): `SCRUM402_AC9_something_else_needs_a_note_to_accept` |
 | AC10-03 **(UI)** | The Organiser's list | Rows of two submissions; each outcome | One card per submission with its fields and note; Accepted, Declined, "Closed: the event was cancelled", "Closed: the event was rejected", and "Closed" for a value a later story adds; the coordinator's reason or note and the processed date | Proved (UI, organiser): `SCRUM402_AC10_one_card_per_submission_with_its_fields_and_note`, `SCRUM402_AC10_the_outcome_%s_reads_as_%s_with_the_coordinators_words_and_date` (five), `SCRUM402_AC10_an_unknown_status_and_a_row_from_before_the_groups_still_read`, `SCRUM402_AC10_says_when_there_are_none_and_when_the_read_fails`; (UI, display) `SCRUM402_AC10_the_outcome_%s_reads_as_%s` |
 | AC10-04 **(UI)** | The panel | Accept a group someone processed meanwhile | "Already processed"; the review closes and the list is read again | Proved (UI, panel): `SCRUM402_AC10_an_already_processed_group_closes_the_review_and_rereads_the_list` |
@@ -211,13 +213,17 @@ after: a refusal changes nothing (the rollback cases).
 |---|---|---|---|---|
 | SC-01 **(trap)** | A notification type added to the live list after 022 | Run 036 again | The added type survives, both new types are present, and a second run changes nothing | Proved (pglite): `SCRUM402_AC11_a_notification_type_added_elsewhere_survives_036_and_a_second_run_changes_nothing` |
 | SC-02 | — | The grants | The new functions are closed to anon and authenticated | Proved (pglite): `SCRUM402_AC11_the_new_functions_stay_closed_to_the_client_roles` |
+| SC-03 **(trap)** | The whole chain, where 024, 032 and 037 restate the list whole after 036 | Read the check | Both new types are present, beside 037's `registration_promoted` | Proved (pglite): `SCRUM402_AC11_the_outcome_notice_type_survives_every_later_restate` |
+| SC-04 | The whole chain | Insert a notification of each new type | Both inserts succeed | Proved (pglite): `SCRUM402_AC11_each_restored_type_can_be_inserted` |
+| SC-05 | The list restated whole without the two types, as live stood after 037 | Run 039, then run it again | Both types are back, every other type stays, and the second run changes nothing | Proved (pglite): `SCRUM402_AC11_039_restores_what_a_whole_restate_dropped_and_a_second_run_changes_nothing` |
+| SC-06 | An event rejected through `reject_approved_event` (SCRUM-347) | The Organiser submits a group | Refused with 22023 and 347's words, under the event lock; nothing is written | Proved (pglite): `SCRUM347_AC6_create_change_request_group_refuses_a_rejected_event` |
 
 ---
 
 ## Tally
 
-74 cases, counted from the tables: **74 proved**; 0 not yet implemented; 0 that
-cannot be written as specified. Eighteen are traps, four of them on the screen.
+79 cases, counted from the tables: **79 proved**; 0 not yet implemented; 0 that
+cannot be written as specified. Twenty are traps, four of them on the screen.
 
 | Section | Backend | UI | Cases |
 |---|---|---|---|
@@ -229,7 +235,7 @@ cannot be written as specified. Eighteen are traps, four of them on the screen.
 | AC6 | 4 | 0 | 4 |
 | AC7 | 4 | 2 | 6 |
 | AC8 | 3 | 1 | 4 |
-| AC9, AC10 | 3 | 3 | 6 |
+| AC9, AC10 | 4 | 3 | 7 |
 | AC11, AC12 | 3 | 3 | 6 |
-| Schema | 2 | 0 | 2 |
-| **Total** | **52** | **22** | **74** |
+| Schema | 6 | 0 | 6 |
+| **Total** | **57** | **22** | **79** |

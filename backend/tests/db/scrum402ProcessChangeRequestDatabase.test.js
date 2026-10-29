@@ -91,10 +91,15 @@ describe('SCRUM-402: change requests (035, 036)', () => {
     await db.query('select confirm_event_request($1, $2, false, $3::timestamptz)', [id, coordinator, revision]);
     return id;
   }
-  async function rejected() {
+  /**
+   * Rejected from Under review, with a group opened first: 039 refuses a new one
+   * on a rejected event (SCRUM-347), and closes this one with the rejection.
+   */
+  async function rejectedWithGroup() {
     const id = await underReview();
+    const cr = await groupId(id, [['purpose', 'New']]);
     await db.query("select decide_event_request($1, 'rejected', 'Not this term', $2, now())", [id, coordinator]);
-    return id;
+    return { id, cr };
   }
   async function cancelled() {
     const id = await approved();
@@ -297,26 +302,42 @@ describe('SCRUM-402: change requests (035, 036)', () => {
       await expectRefused(id, () => preview(cr), 'PT409', 'REVIEW_NOT_STARTED');
     });
 
+    const thenGroup = (reach) => async () => {
+      const id = await reach();
+      return { id, cr: await groupId(id, [['purpose', 'New']]) };
+    };
+
     it.each([
-      ['rejected', rejected],
-      ['cancelled', cancelled],
-      ['completed', completed],
+      ['cancelled', thenGroup(cancelled)],
+      ['completed', thenGroup(completed)],
     ])('SCRUM402_AC2_an_event_that_is_%s_is_refused_naming_its_status', async (status, reach) => {
       // AC2-03.
-      const id = await reach();
-      const cr = await groupId(id, [['purpose', 'New']]);
+      const { id, cr } = await reach();
 
       const err = await expectRefused(id, () => accept(cr), 'PT409', 'EVENT_STATUS_NOT_ALLOWED');
       expect(err.message).toContain(status);
       await expectRefused(id, () => preview(cr), 'PT409', 'EVENT_STATUS_NOT_ALLOWED');
     });
 
-    it('SCRUM402_AC2_a_draft_is_refused_as_a_strangers_call', async () => {
-      // AC2-04: reopened to a draft, it has no coordinator (015).
-      const id = await rejected();
-      const cr = await groupId(id, [['purpose', 'New']]);
+    // 039: no group can be open on a rejected event or on a draft reopened from
+    // one, so both cases are what the rejection leaves.
+    const CLOSED_BY_REJECTION = { status: 'processed', decision: 'event_rejected' };
+
+    it('SCRUM402_AC2_a_rejected_events_group_is_closed_by_the_rejection', async () => {
+      // AC2-03, rejected.
+      const { id, cr } = await rejectedWithGroup();
+
+      expect(await one('select status, decision from event_change_requests where id = $1', [cr])).toEqual(CLOSED_BY_REJECTION);
+      const err = await expectRefused(id, () => accept(cr), 'PT409', 'EVENT_STATUS_NOT_ALLOWED');
+      expect(err.message).toContain('rejected');
+    });
+
+    it('SCRUM402_AC2_a_reopened_drafts_group_is_closed_by_the_rejection', async () => {
+      // AC2-04: reopened to a draft, it has no coordinator (015), and the reopen leaves the group closed.
+      const { id, cr } = await rejectedWithGroup();
       await db.query('select reopen_event_request($1, $2)', [id, organiser]);
 
+      expect(await one('select status, decision from event_change_requests where id = $1', [cr])).toEqual(CLOSED_BY_REJECTION);
       await expectRefused(id, () => accept(cr), '42501');
     });
   });
@@ -719,6 +740,33 @@ describe('SCRUM-402: change requests (035, 036)', () => {
       expect((await requests(id)).every((r) => r.processed_by === coordinator)).toBe(true);
       expect((await one('select count(*)::int as n from event_change_requests where request_group_id = $1 and processed_at is not null', [cr])).n).toBe(2);
     });
+
+    it('SCRUM402_AC10_rejecting_from_under_review_closes_open_change_requests', async () => {
+      // 039's trigger: decide_event_request (032) does not close them itself.
+      const id = await underReview();
+      const open = await groupId(id, [['purpose', 'New'], ['description', 'Shorter']]);
+      const started = await groupId(id, [['venue', 'A larger room']]);
+      const declined = await groupId(id, [['event_name', 'Tech Night']]);
+      await decline(declined, 'Not needed');
+      // No function moves a row to in_progress here; it is the other open status.
+      await db.query("update event_change_requests set status = 'in_progress' where request_group_id = $1", [started]);
+      const elsewhere = await underReview();
+      const untouched = await groupId(elsewhere, [['purpose', 'New']]);
+
+      await db.query("select decide_event_request($1, 'rejected', 'Not this term', $2, now())", [id, coordinator]);
+
+      const byGroup = (group) => rows(
+        `select status, decision, decision_notes, processed_by, processed_at is not null as stamped
+           from event_change_requests where request_group_id = $1 order by id`, [group],
+      );
+      const closed = { status: 'processed', decision: 'event_rejected', decision_notes: null, processed_by: coordinator, stamped: true };
+      expect(await byGroup(open)).toEqual([closed, closed]);
+      expect(await byGroup(started)).toEqual([closed]);
+      expect(await byGroup(declined)).toEqual([
+        { status: 'processed', decision: 'rejected', decision_notes: 'Not needed', processed_by: coordinator, stamped: true },
+      ]);
+      expect((await byGroup(untouched)).map((r) => r.status)).toEqual(['outstanding']);
+    });
   });
 
 
@@ -806,5 +854,66 @@ describe('SCRUM-402: change requests (035, 036)', () => {
       expect(await def()).toBe(once);
       await fresh.close();
     }, 120_000);
+  });
+
+  // 024, 032 and 037 restate the list whole after 036 and drop its two types; 039 puts
+  // them back, and restates create_change_request_group with SCRUM-347's rule.
+  describe('039: the notice types after every later restate, and a rejected event', () => {
+    it('SCRUM347_AC6_create_change_request_group_refuses_a_rejected_event', async () => {
+      const id = await approved();
+      await db.query('select * from reject_approved_event($1, $2, $3)', [id, coordinator, 'The hall is closed.']);
+
+      const err = await expectRefused(id, () => group(id, [['purpose', 'New']]), '22023');
+
+      expect(err.message).toBe('Cannot request a change to a rejected event; revise and resubmit it instead');
+    });
+
+    const NOTICE_TYPES = ['change_request_decided', 'change_request_significant_submitted'];
+    const typeCheck = async () => (await one(
+      "select pg_get_constraintdef(oid) as d from pg_constraint where conname = 'notifications_type_known'",
+    )).d;
+    const typesOf = (d) => [...d.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+
+    it('SCRUM402_AC11_the_outcome_notice_type_survives_every_later_restate', async () => {
+      // registration_promoted is 037's, so the chain ran past the last whole restate.
+      expect(typesOf(await typeCheck())).toEqual(expect.arrayContaining([...NOTICE_TYPES, 'registration_promoted']));
+    });
+
+    it('SCRUM402_AC11_each_restored_type_can_be_inserted', async () => {
+      const id = await submitted();
+
+      for (const type of NOTICE_TYPES) {
+        await db.query('insert into notifications (recipient_id, type, event_request_id) values ($1, $2, $3)', [organiser, type, id]);
+      }
+
+      expect((await rows('select type from notifications where event_request_id = $1 order by type', [id])).map((n) => n.type))
+        .toEqual(NOTICE_TYPES);
+    });
+
+    it('SCRUM402_AC11_039_restores_what_a_whole_restate_dropped_and_a_second_run_changes_nothing', async () => {
+      // As live stood after 037: the list restated whole without the two types,
+      // and no notice of either, since every insert was refused. Rolled back,
+      // so the shared database keeps its list and the earlier tests' notices.
+      const sql039 = readFileSync(
+        resolve(dirname(fileURLToPath(import.meta.url)), '../../db/migrations/039_change_request_notice_types_restored.sql'), 'utf8',
+      );
+      await db.exec('begin');
+      try {
+        const live = typesOf(await typeCheck()).filter((t) => !NOTICE_TYPES.includes(t));
+        await db.query('delete from notifications where type = any ($1)', [NOTICE_TYPES]);
+        await db.exec('alter table notifications drop constraint notifications_type_known');
+        await db.exec(`alter table notifications add constraint notifications_type_known check (type = any (array[${
+          live.map((t) => `'${t}'`).join(', ')}]))`);
+
+        await db.exec(sql039);
+        const once = await typeCheck();
+        await db.exec(sql039);
+
+        expect(typesOf(once)).toEqual([...live, ...NOTICE_TYPES]);
+        expect(await typeCheck()).toBe(once);
+      } finally {
+        await db.exec('rollback');
+      }
+    });
   });
 });
