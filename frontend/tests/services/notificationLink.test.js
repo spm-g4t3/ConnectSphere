@@ -139,3 +139,34 @@ describe("SCRUM460 promotion notifications", () => {
     expect(notificationLink({ type: "event_significant_change_attendee", eventRequestId: "e1" }, "attendee")).toBeNull();
   });
 });
+
+describe("SCRUM177 registration notifications", () => {
+  const STAFF_TYPES = [
+    "registration_opened",
+    "registration_closed",
+    "registration_capacity_reached",
+    "registration_place_released",
+  ];
+
+  it.each(STAFF_TYPES)("SCRUM177_AC5_%s_opens_the_organisers_registration_page", (type) => {
+    expect(notificationLink(note(type), "event_organiser")).toEqual({ to: `/events/${EVENT}/registration` });
+  });
+
+  it.each(STAFF_TYPES)("SCRUM177_AC5_%s_opens_the_coordinators_event_review_page", (type) => {
+    expect(notificationLink(note(type), "event_coordinator")).toEqual({ to: `/event-requests/${EVENT}` });
+  });
+
+  it.each(["registration_opened", "registration_closed"])(
+    "SCRUM177_AC6_%s_opens_a_waiting_attendees_own_places_not_the_registered_only_event_page",
+    (type) => {
+      expect(notificationLink(note(type), "attendee")).toEqual({ to: "/registered-events" });
+    },
+  );
+
+  it.each(["registration_capacity_reached", "registration_place_released"])(
+    "SCRUM177_AC6_%s_gives_an_attendee_no_link",
+    (type) => {
+      expect(notificationLink(note(type), "attendee")).toBeNull();
+    },
+  );
+});
