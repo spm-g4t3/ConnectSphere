@@ -1326,6 +1326,16 @@ describe("describeNotification: registration changes (SCRUM-177)", () => {
     );
   });
 
+  it.each([
+    ["closing_time", "The closing time passed."],
+    ["settings_changed", "The registration dates were changed."],
+    ["event_started", "The event has started."],
+    ["event_not_confirmed", "The event is no longer confirmed."],
+  ])("SCRUM177_AC1_a_close_by_%s_says_why", (cause, sentence) => {
+    expect(d("registration_closed", { audience: "coordinator", cause }).detail)
+      .toBe(`${sentence} No new attendees can register.`);
+  });
+
   it("SCRUM177_AC1_an_unknown_cause_is_left_out", () => {
     expect(d("registration_closed", { audience: "organiser", cause: "toString" }).detail).toBe("No new attendees can register.");
   });

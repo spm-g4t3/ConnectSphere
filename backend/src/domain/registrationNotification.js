@@ -38,6 +38,11 @@ export const AUDIENCES_BY_TYPE = Object.freeze({
 
 export const CAUSES_BY_TYPE = Object.freeze({
   [T.OPENED]: Object.freeze(['opening_time', 'settings_changed', 'event_confirmed']),
-  [T.CLOSED]: Object.freeze(['closing_time', 'switched_off', 'event_started', 'event_not_confirmed']),
+  [T.CLOSED]: Object.freeze(['closing_time', 'switched_off', 'settings_changed', 'event_started', 'event_not_confirmed']),
   [T.PLACE_RELEASED]: Object.freeze(['withdrawal']),
 });
+
+// What a caller of the handlers (040) says it changed. Null for the window
+// means only time passed, which is how the opening/closing job calls it.
+export const WINDOW_CHANGE_CAUSES = Object.freeze(['settings_changed', 'event_confirmed']);
+export const CAPACITY_CHANGE_CAUSES = Object.freeze(['registration', 'promotion', 'withdrawal', 'settings_changed']);

@@ -117,6 +117,7 @@ const VENUE_RETIRED = "The venue has been retired.";
 const REGISTRATION_CLOSED_CAUSES = Object.freeze({
   closing_time: "The closing time passed.",
   switched_off: "Registration was switched off.",
+  settings_changed: "The registration dates were changed.",
   event_started: "The event has started.",
   event_not_confirmed: "The event is no longer confirmed.",
 });

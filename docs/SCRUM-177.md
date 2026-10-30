@@ -1,8 +1,8 @@
 # SCRUM-177 — Notify Users of Registration Changes
 
 **Story:** Notify Users of Registration Changes
-**This section:** SCRUM-235, the notification contract (types, payloads, recipients, destinations)
-**Status as of 30 October 2026:** contract built and tested (migration 039). No registration flow or job sends these yet; later subtasks wire them.
+**Subtasks so far:** SCRUM-235, the notification contract (migration 039). SCRUM-236, the handlers and transition rules (migration 040).
+**Status as of 30 October 2026:** contract and handlers built and tested. No registration flow or job calls the handlers yet. The job is SCRUM-237 and the flows are SCRUM-239.
 
 The contract is in three places, and they must agree:
 
@@ -44,7 +44,7 @@ The fields specific to each type, passed in `details`:
 | Type | Fields | `cause` values (enforced by the writer) |
 |---|---|---|
 | `registration_opened` | `opensAt`, `closesAt` (null = no closing time), `cause` | `opening_time`, `settings_changed`, `event_confirmed` |
-| `registration_closed` | `closedAt`, `cause` | `closing_time`, `switched_off`, `event_started`, `event_not_confirmed` |
+| `registration_closed` | `closedAt`, `cause` | `closing_time`, `switched_off`, `settings_changed` (040: the opening time was moved later), `event_started`, `event_not_confirmed` |
 | `registration_capacity_reached` | `capacity`, `registeredCount` | none |
 | `registration_place_released` | `capacity`, `registeredCount`, `cause` | `withdrawal` |
 
@@ -91,17 +91,75 @@ select notify_registration_change(
 - Dedupe: unique on `(recipient_id, event_request_id, type, occurrenceKey)`. Repeating an occurrence inserts nothing, and a new occurrence notifies again.
 - The row is also checked by `notifications_registration_change_shape`: the event must be set, the key must be present, and the audience must be allowed for the type.
 
-**Occurrence keys.** These are recommendations. Writers must derive keys from data, so a retry or a second job run produces the same key. UTC text is formatted as in 037: `to_char(t at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.
+**Occurrence keys.** The handlers in section 5 make every key `opened:`, `closed:`, `full:` or `released:` followed by the UTC instant of the transition (formatted by `registration_notice_instant`, as in 037). That handles retries. The recorded state already stops a repeat, so the key is a second guard.
 
-| Type | Key |
+## 5. Handlers and transition rules (SCRUM-236, migration 040)
+
+The scheduler and the flows use the same handlers. A flow should never call `notify_registration_change` directly.
+
+```sql
+select announce_registration_window(p_event_request_id, p_cause);   -- p_cause: null | 'settings_changed' | 'event_confirmed'
+select announce_registration_capacity(p_event_request_id, p_cause); -- p_cause: 'registration' | 'promotion' | 'withdrawal' | 'settings_changed'
+-- each returns how many notices it sent
+```
+
+Each handler locks the event row, then compares the live state with the state last announced in `registration_notice_state`. Anything is sent only when the two differ, and the new state is recorded in the same transaction. This is why:
+- **a refused operation sends nothing.** It rolls back or changes no state.
+- **an unchanged save sends nothing.** The state is the same.
+- **a repeated call, or the job running again, sends nothing.** The state was already recorded.
+- **a rolled-back flow loses its notice and its recorded state together**, so the next call announces the change correctly.
+
+When the table is created, every existing event's current state is recorded, so deploying sends no burst of old transitions. A re-run never overwrites it.
+
+**Window.** "Open" means `registration_closed_reason(event, now)` is null, the same rule registration and promotion use.
+
+| Live vs announced | Sends | Cause | Audiences |
+|---|---|---|---|
+| unchanged | nothing | none | none |
+| closed → open | `registration_opened` | `p_cause`, or `opening_time` if null | organiser, coordinator, waitlisted |
+| open → closed | `registration_closed` | taken from the closing reason: `closing_time`, `switched_off`, `event_started`, `event_not_confirmed`, else `settings_changed` | organiser, coordinator, waitlisted; **no waitlisted for `event_started`**, since the queue will never move again |
+| open → closed, event `cancelled` | nothing; the state is recorded | none | none (decision 2 in section 6) |
+
+**Capacity.** "Full" means a capacity is set and the registered count is at least that capacity.
+
+| Live vs announced | Sends | Audiences |
+|---|---|---|
+| unchanged | nothing | none |
+| not full → full | `registration_capacity_reached` `{capacity, registeredCount}` | organiser, coordinator |
+| full → not full, cause `withdrawal` | `registration_place_released` `{cause, capacity, registeredCount}` | organiser, coordinator |
+| full → not full, any other cause (capacity raised or removed) | nothing; the state is recorded | none |
+
+**For both handlers:** with `settings_changed`, the Organiser made the change, so the organiser audience is dropped (proposed: nobody is told about their own action).
+
+**Waiting-list status.** waitlisted → registered is the only status change the system makes, and `promote_waitlisted_registrations` notifies it as `registration_promoted`. That's unchanged. Joining and leaving are the attendee's own actions and send nothing.
+
+**Call order for SCRUM-239.** Inside the flow's transaction, after its writes:
+1. Run the promotion.
+2. Call `announce_registration_capacity`.
+3. Call `announce_registration_window`.
+
+Doing this after promotion means a queued attendee who just got a place is told about their place, not about a moving queue. It also means a withdrawal whose place the queue filled straight away doesn't report a free place.
+
+| Flow | Calls |
 |---|---|
-| `registration_opened` | `opened:<instant it opened>`: `registration_opens_at` for `opening_time`, the transition's clock time otherwise |
-| `registration_closed` | `closed:<instant it closed>`: `registration_closes_at` for `closing_time`, `proposed_start` for `event_started`, the transition's clock time otherwise |
-| `registration_capacity_reached` | `full:<registered_at of the registration that took the last place>` |
-| `registration_place_released` | `released:<instant of the withdrawal>` |
+| `register_for_event`, `join_event_waitlist` (when it registers) | capacity `registration` |
+| `withdraw_registration` | capacity `withdrawal` |
+| `setup_event_registration` | capacity `settings_changed`, window `settings_changed` |
+| `promote_waitlisted_registrations` callers that aren't covered above (the confirmation trigger, the job) | capacity `promotion` |
+| return to Confirmed (trigger) | window `event_confirmed` |
+| opening/closing job (SCRUM-237) | window with null, for each event whose live state differs from the announced state |
 
-## 5. Open questions
+**Recipient resolution (the interface for SCRUM-238).** `registration_notification_recipients(p_event_request_id, p_audiences text[])` returns `(recipient_id, audience)`.
 
-1. Someone in the product role should sign off on every **proposed** row in section 3.
-2. When an event is **cancelled**, it leaves Confirmed. Should waiting attendees get `registration_closed` with `event_not_confirmed`, or should cancellation get its own attendee notice? `event_cancelled` currently reaches staff only. Until someone decides, writers should skip `registration_closed` for a cancelled event.
-3. The opening/closing job (a later subtask) needs to know that a window *was* open before it reports it closed. That's the job's decision, not the contract's.
+| Audience | Resolves to |
+|---|---|
+| `organiser` | the event's organiser |
+| `coordinator` | the assigned coordinator, unless they are also the organiser |
+| `waitlisted` | the event's attendees whose status is `waitlisted` right now |
+
+An unknown or null audience is refused (22023), not ignored. An audience with nobody behind it resolves to no rows. There's no broadcast and no fallback. `notify_registration_change` gets its recipients only from this function, so SCRUM-238 can tighten the rules in one place.
+
+## 6. Open questions
+
+1. Someone in the product role should sign off on every **proposed** row in section 3, and on dropping the actor's own notice.
+2. When an event is **cancelled**, it leaves Confirmed. Should waiting attendees be told? `event_cancelled` reaches staff only. Until someone decides, the window handler sends nothing for a cancelled event.
