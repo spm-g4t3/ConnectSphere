@@ -32,6 +32,14 @@ const PROCESSABLE_STATUSES = new Set([
 const REVIEW_STATUSES = new Set(["under_review", "pending_clarification"]);
 const NOTE_MAX_LENGTH = 2000;
 const IMPACT_CHANGED = "SIGNIFICANT_CHANGE_IMPACT_CHANGED";
+const NOT_REVIEWABLE = "This change request could not be reviewed. Please try again.";
+
+/** The fields the review reads. Without them it would render an empty card. */
+function isReviewable(preview) {
+  return Array.isArray(preview?.rows) && preview.rows.length > 0
+    && preview.rows.every((row) => typeof row?.id === "string" && typeof row.class === "string")
+    && (preview.invalid === undefined || Array.isArray(preview.invalid));
+}
 
 const errorMessage = makeErrorMapper({
   codeMessages: {
@@ -128,6 +136,8 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
   const [note, setNote] = useState("");
   const [cancelImpact, setCancelImpact] = useState(null);
   const [busy, setBusy] = useState(false);
+  // { groupId, text }: shown in that group's card beside its buttons, since a
+  // line at the top of the panel can sit off-screen (click-through step 23).
   const [message, setMessage] = useState(null);
   const [notice, setNotice] = useState(null);
 
@@ -160,11 +170,15 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
     setNotice(null);
     try {
       const preview = await previewCoordinatorChangeRequest(group.id);
+      if (!isReviewable(preview)) {
+        setMessage({ groupId: group.id, text: NOT_REVIEWABLE });
+        return;
+      }
       setReview({ group, preview });
       setMode(null);
       setNote("");
     } catch (err) {
-      setMessage(errorMessage(err, "preview"));
+      setMessage({ groupId: group.id, text: errorMessage(err, "preview") });
     } finally {
       setBusy(false);
     }
@@ -182,14 +196,18 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
       });
       const equipment = group.rows.find((row) => row.changeField === "equipment");
       closeReview();
-      setNotice(decision === "rejected"
+      const told = decision === "rejected"
         ? "Change request declined. The organiser has been told."
         : preview.rows.some((row) => row.class === "cancellation")
           ? "Change request accepted: the event has been cancelled. The organiser has been told."
-          : "Change request accepted. The organiser has been told.");
+          : "Change request accepted. The organiser has been told.";
+      setNotice({ groupId: group.id, text: told });
       if (decision === "approved" && equipment) {
         if (REVIEW_STATUSES.has(eventRequest.status)) {
-          setNotice("Change request accepted. The equipment requirements now read as the organiser asked; the equipment lines can be edited once the event is approved.");
+          setNotice({
+            groupId: group.id,
+            text: "Change request accepted. The equipment requirements now read as the organiser asked; the equipment lines can be edited once the event is approved.",
+          });
         } else {
           onEquipmentAccepted?.(equipment.requestedChange ?? equipment.details);
         }
@@ -197,13 +215,19 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
       setVersion((v) => v + 1);
       onProcessed?.();
     } catch (err) {
-      setMessage(errorMessage(err, "process"));
+      setMessage({ groupId: group.id, text: errorMessage(err, "process") });
       if (codeOf(err) === IMPACT_CHANGED) {
         // 395 refused: the arrangements moved since the preview. Re-read it, never retry blindly.
         try {
-          setReview({ group, preview: await previewCoordinatorChangeRequest(group.id) });
+          const fresh = await previewCoordinatorChangeRequest(group.id);
+          if (isReviewable(fresh)) {
+            setReview({ group, preview: fresh });
+          } else {
+            closeReview();
+            setMessage({ groupId: group.id, text: NOT_REVIEWABLE });
+          }
         } catch (previewErr) {
-          setMessage(errorMessage(previewErr, "preview"));
+          setMessage({ groupId: group.id, text: errorMessage(previewErr, "preview") });
         }
       }
       if (codeOf(err) === "CHANGE_REQUEST_ALREADY_PROCESSED") {
@@ -216,22 +240,39 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
   }
 
   async function openCancellation() {
+    const groupId = review.group.id;
     setBusy(true);
     setMessage(null);
     try {
-      setCancelImpact(await getEventCancellationImpact(eventRequest.id));
+      const impact = await getEventCancellationImpact(eventRequest.id);
+      // CancellationImpact reads its sections off an object; anything else would throw.
+      if (impact === null || typeof impact !== "object") {
+        setMessage({ groupId, text: "The cancellation's impact could not be loaded. Please try again." });
+        return;
+      }
+      setCancelImpact(impact);
       setNote(review.preview.cancellationReason ?? "");
       setMode("cancel");
     } catch (err) {
-      setMessage(errorMessage(err, "preview"));
+      setMessage({ groupId, text: errorMessage(err, "preview") });
     } finally {
       setBusy(false);
     }
   }
 
+  /** A card's own outcome and failure lines, beside its buttons. */
+  function cardLines(groupId) {
+    return (
+      <>
+        {notice?.groupId === groupId && <p className="change-request-review__notice" role="status">{notice.text}</p>}
+        {message?.groupId === groupId && <p className="coordinator-clarification__error" role="alert">{message.text}</p>}
+      </>
+    );
+  }
+
   function renderReview() {
     const { preview } = review;
-    const rows = preview.rows ?? [];
+    const { rows } = preview;
     const classOf = Object.fromEntries(rows.map((row) => [row.id, row.class]));
     const invalid = preview.invalid ?? [];
     const isCancellation = rows.some((row) => row.class === "cancellation");
@@ -301,6 +342,7 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
             </button>
           </div>
         )}
+        {cardLines(review.group.id)}
         <button type="button" className="change-request-review__close" onClick={closeReview}>
           Close review
         </button>
@@ -321,8 +363,6 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
       {canProcess && eventRequest.status === "submitted" && listed?.groups?.some((g) => g.open) && (
         <p className="change-request-review__hint">Start the review to process change requests.</p>
       )}
-      {notice && <p className="change-request-review__notice" role="status">{notice}</p>}
-      {message && <p className="coordinator-clarification__error" role="alert">{message}</p>}
       {listed?.id === eventRequest.id && listed.groups?.length > 0 && (
         <ul className="coordinator-change-requests">
           {listed.groups.map((group) => (
@@ -343,6 +383,7 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
                   {group.processedAt && <span> | {formatTimestamp(group.processedAt, "Not recorded")}</span>}
                 </p>
               )}
+              {review?.group.id !== group.id && cardLines(group.id)}
               {group.open && processable && review?.group.id !== group.id && (
                 <div className="coordinator-change-requests__actions">
                   <button type="button" disabled={busy} onClick={() => loadPreview(group)}>Review</button>

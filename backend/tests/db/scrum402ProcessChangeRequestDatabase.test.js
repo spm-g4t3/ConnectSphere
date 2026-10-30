@@ -655,6 +655,19 @@ describe('SCRUM-402: change requests (035, 036)', () => {
       expect(byId).toEqual({ [cr]: 'approved', [other]: 'event_cancelled' });
     });
 
+    it('SCRUM402_AC7_an_under_review_event_is_cancelled_with_the_reason_the_panel_sends', async () => {
+      // Click-through step 23: Under review, no note, the reason prefilled from the request's own text.
+      const id = await underReview();
+      const cr = await groupId(id, [['cancellation', 'We lost our speaker']]);
+
+      await accept(cr, { notes: 'We lost our speaker' });
+
+      expect(await event(id)).toMatchObject({
+        status: 'cancelled', cancellation_initiator: 'organiser_request', cancellation_reason: 'We lost our speaker', cancelled_by: coordinator,
+      });
+      expect((await requests(id)).map((r) => r.decision)).toEqual(['approved']);
+    });
+
     it('SCRUM402_AC7_a_cancellations_reason_is_prefilled_from_the_organisers_note', async () => {
       // AC7-04: the note, not the request's own text, when the Organiser gave one.
       const id = await approved();

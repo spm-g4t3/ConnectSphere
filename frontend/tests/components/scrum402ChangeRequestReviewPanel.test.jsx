@@ -205,10 +205,10 @@ describe("SCRUM-402 the review", () => {
     expect(within(review).queryByText(/flagged for review/)).not.toBeInTheDocument();
   });
 
-  it("SCRUM402_AC4_a_preview_with_no_rows_or_impact_still_opens", async () => {
+  it("SCRUM402_AC4_a_preview_with_no_invalid_list_or_impact_still_opens", async () => {
     const { user } = renderPanel();
 
-    const review = await openReview(user, preview({ rows: undefined, invalid: undefined, impact: null }));
+    const review = await openReview(user, preview({ invalid: undefined, impact: null }));
 
     expect(within(review).queryByLabelText("Significant change impact preview")).not.toBeInTheDocument();
     expect(within(review).getByRole("button", { name: "Accept" })).toBeEnabled();
@@ -493,5 +493,169 @@ describe("SCRUM-402 cancellation and equipment", () => {
     await user.click(screen.getByRole("button", { name: "Accept" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("Change request accepted.");
+  });
+});
+
+
+// Click-through step 23 (30 Oct), with the JSON the live reads returned for it:
+// an Under review event and its cancellation request, no note.
+describe("SCRUM-402 the cancellation from the click-through", () => {
+  const EVENT_ID = "ffd31848-a9bb-4133-b84c-299e77c632b3";
+  const GROUP_ID = "35deff01-f16d-47d0-b69d-aab03685104f";
+  const LIVE_EVENT = Object.freeze({ id: EVENT_ID, status: "under_review", eventName: "Smoke Test Scrum 402 C" });
+  const LIVE_LIST = [{
+    id: GROUP_ID, eventRequestId: EVENT_ID, requestGroupId: GROUP_ID, organiserNote: null,
+    requestedBy: "34ca2c88-213a-44db-a48d-128f56f75a12", changeField: "cancellation", requestedChange: "We lost our speaker",
+    status: "outstanding", decision: null, decisionNotes: null, processedBy: null, processedAt: null,
+    createdAt: "2026-10-30T09:09:55.103121+00:00", updatedAt: "2026-10-30T09:09:55.103121+00:00",
+    fieldLabel: "Cancel the event", details: "We lost our speaker", currentValue: null,
+  }];
+  const LIVE_PREVIEW = {
+    rows: [{
+      id: GROUP_ID, class: "cancellation", field: null, changed: false, changeField: "cancellation",
+      currentValue: null, requestedValue: "We lost our speaker",
+    }],
+    impact: null, status: "under_review", invalid: [], revertsEvent: false, organiserNote: null,
+    eventRequestId: EVENT_ID, changeRequestId: GROUP_ID, cancellationReason: "We lost our speaker",
+  };
+  const LIVE_IMPACT = {
+    venueHolds: { count: 0, details: [] }, venueBookings: { count: 0, details: [] }, eventRequestId: EVENT_ID,
+    bookingRequests: { count: 0, details: [] }, equipmentRequests: { count: 0, details: [] },
+    equipmentReservations: { count: 0, details: [] },
+  };
+
+  async function reachConfirmation() {
+    vi.mocked(getEventCancellationImpact).mockResolvedValueOnce(LIVE_IMPACT);
+    const utils = renderPanel({ eventRequest: LIVE_EVENT }, LIVE_LIST);
+    await openReview(utils.user, LIVE_PREVIEW);
+    await utils.user.click(screen.getByRole("button", { name: "Accept" }));
+    return { ...utils, confirmation: await screen.findByLabelText("Cancellation impact preview") };
+  }
+
+  it("SCRUM402_AC7_an_under_review_cancellation_opens_the_confirmation_and_sends_the_prefilled_reason", async () => {
+    const { user, onProcessed, confirmation } = await reachConfirmation();
+
+    expect(getEventCancellationImpact).toHaveBeenCalledWith(EVENT_ID);
+    expect(confirmation).toHaveTextContent("Venue bookings to cancel: 0");
+    expect(screen.getByLabelText("Cancellation reason")).toHaveValue("We lost our speaker");
+    await user.click(screen.getByRole("button", { name: "Confirm cancellation" }));
+
+    // No impact in the preview, so none is sent back.
+    expect(processCoordinatorChangeRequest).toHaveBeenCalledWith(GROUP_ID, { decision: "approved", decisionNotes: "We lost our speaker" });
+    const card = (await screen.findByRole("status")).closest(".change-request-review__group");
+    expect(card).toHaveTextContent("the event has been cancelled");
+    expect(onProcessed).toHaveBeenCalled();
+  });
+
+  it("SCRUM402_AC7_a_refused_cancellation_says_so_beside_confirm_and_keeps_the_confirmation_open", async () => {
+    vi.mocked(processCoordinatorChangeRequest).mockRejectedValueOnce(httpError(409, { error: SERVER_TEXT }));
+    const { user } = await reachConfirmation();
+
+    await user.click(screen.getByRole("button", { name: "Confirm cancellation" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This event or change request has changed. Go back to see where it stands.");
+    expect(alert).not.toHaveTextContent(SERVER_TEXT);
+    expect(alert.closest("[aria-label='Change request review']")).toContainElement(screen.getByRole("button", { name: "Confirm cancellation" }));
+  });
+
+  it.each([
+    ["an_empty_body", ""],
+    ["no_body", null],
+  ])("SCRUM402_AC7_a_cancellation_impact_with_%s_says_so_in_the_card", async (_label, body) => {
+    vi.mocked(getEventCancellationImpact).mockResolvedValueOnce(body);
+    const { user } = renderPanel({ eventRequest: LIVE_EVENT }, LIVE_LIST);
+    const review = await openReview(user, LIVE_PREVIEW);
+
+    await user.click(screen.getByRole("button", { name: "Accept" }));
+
+    expect(await within(review).findByRole("alert")).toHaveTextContent("The cancellation's impact could not be loaded. Please try again.");
+    expect(screen.queryByLabelText("Cancellation reason")).not.toBeInTheDocument();
+  });
+});
+
+
+describe("SCRUM-402 every failure is shown in its card", () => {
+  const TWO_GROUPS = [
+    row({ organiserNote: "First" }),
+    row({ id: "r9", requestGroupId: "g2", changeField: "description", requestedChange: "Shorter", details: "Shorter", organiserNote: "Second" }),
+  ];
+  const cardOf = (text) => screen.getByText(text, { exact: false }).closest(".change-request-review__group");
+
+  it("SCRUM402_AC4_a_failed_preview_says_so_in_its_own_card_beside_review", async () => {
+    vi.mocked(previewCoordinatorChangeRequest).mockRejectedValueOnce(httpError(500, { error: SERVER_TEXT }));
+    const { user } = renderPanel({}, TWO_GROUPS);
+    await screen.findByText("Second", { exact: false });
+
+    await user.click(within(cardOf("Second")).getByRole("button", { name: "Review" }));
+
+    const alert = await within(cardOf("Second")).findByRole("alert");
+    expect(alert).toHaveTextContent("The change request could not be reviewed. Please try again.");
+    expect(within(cardOf("Second")).getByRole("button", { name: "Review" })).toBeInTheDocument();
+    expect(within(cardOf("First")).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["no_rows", { rows: undefined }],
+    ["an_empty_list_of_rows", { rows: [] }],
+    ["a_row_with_no_class", { rows: [{ id: "r1" }, { id: "r2", class: "significant" }] }],
+    ["an_invalid_list_that_is_not_a_list", { invalid: "none" }],
+  ])("SCRUM402_AC4_a_preview_with_%s_says_it_could_not_be_reviewed", async (_label, overrides) => {
+    const { user } = renderPanel();
+    vi.mocked(previewCoordinatorChangeRequest).mockResolvedValueOnce(preview(overrides));
+
+    await user.click(await screen.findByRole("button", { name: "Review" }));
+
+    expect(await within(cardOf("Our sponsor asked")).findByRole("alert"))
+      .toHaveTextContent("This change request could not be reviewed. Please try again.");
+    expect(screen.queryByLabelText("Change request review")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM402_AC4_no_preview_at_all_says_it_could_not_be_reviewed", async () => {
+    const { user } = renderPanel();
+    vi.mocked(previewCoordinatorChangeRequest).mockResolvedValueOnce(null);
+
+    await user.click(await screen.findByRole("button", { name: "Review" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This change request could not be reviewed. Please try again.");
+  });
+
+  it("SCRUM402_AC4_a_failed_decision_says_so_in_the_review_beside_its_buttons", async () => {
+    vi.mocked(processCoordinatorChangeRequest).mockRejectedValueOnce(httpError(500, { error: SERVER_TEXT }));
+    const { user } = renderPanel();
+    const review = await openReview(user);
+
+    await user.click(within(review).getByRole("button", { name: "Accept" }));
+
+    expect(await within(review).findByRole("alert")).toHaveTextContent("The change request could not be processed. Please try again.");
+  });
+
+  it("SCRUM402_AC4_a_re_read_preview_without_its_fields_closes_the_review_and_says_so", async () => {
+    vi.mocked(processCoordinatorChangeRequest).mockRejectedValueOnce(
+      httpError(409, { error: SERVER_TEXT, code: "SIGNIFICANT_CHANGE_IMPACT_CHANGED" }),
+    );
+    const { user } = renderPanel();
+    const review = await openReview(user);
+    vi.mocked(previewCoordinatorChangeRequest).mockResolvedValueOnce(preview({ rows: [] }));
+
+    await user.click(within(review).getByRole("button", { name: "Accept" }));
+
+    expect(await within(cardOf("Our sponsor asked")).findByRole("alert"))
+      .toHaveTextContent("This change request could not be reviewed. Please try again.");
+    expect(screen.queryByLabelText("Change request review")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM402_AC4_an_outcome_is_told_in_the_card_it_belongs_to", async () => {
+    const { user } = renderPanel({}, TWO_GROUPS);
+    await screen.findByText("Second", { exact: false });
+    vi.mocked(previewCoordinatorChangeRequest).mockResolvedValueOnce(
+      preview({ changeRequestId: "g2", rows: [{ id: "r9", class: "ordinary" }], impact: null }),
+    );
+    await user.click(within(cardOf("Second")).getByRole("button", { name: "Review" }));
+
+    await user.click(await screen.findByRole("button", { name: "Accept" }));
+
+    expect(await within(cardOf("Second")).findByRole("status")).toHaveTextContent("Change request accepted.");
+    expect(within(cardOf("First")).queryByRole("status")).not.toBeInTheDocument();
   });
 });

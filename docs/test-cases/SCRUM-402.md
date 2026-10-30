@@ -8,6 +8,7 @@
 **Marked:** 28 October 2026, SCRUM-404's screen half and SCRUM-408 (brief 2): the screens' cases, each marked **(UI)**, after the backend's in every table, and AC1-11 for My events' count. Every one proved.
 **Marked:** 29 October 2026, migration 039: SC-03 to SC-06 (SC-06 is SCRUM-347's rejected-event rule, moved under the lock), after 024, 032 and 037 restated the notification list whole and dropped 036's two types on live; AC10-05 for 039's rejection trigger, which also re-states AC2-03's rejected case and AC2-04 as groups the rejection closed. Every one proved.
 **Marked:** 27 October 2026, the brief 1 fix-up: the Organiser's note (`organiser_note`, in 036 before it ran anywhere). AC1-08 to AC1-10 and AC7-04 added; AC7-03 reworded as the fallback it now is.
+**Marked:** 30 October 2026, click-through step 23 (a cancellation on an Under review event did nothing visible): AC4-08 to AC4-12 for every review failure shown in its card, AC7-07 to AC7-10 for the cancellation with the live data. AC4-05's `…_with_no_rows_or_impact_still_opens` renamed `…_with_no_invalid_list_or_impact_still_opens`, since a preview with no rows now says it could not be reviewed (AC4-09). Every one proved.
 
 This document is the written layer between SCRUM-402's acceptance criteria and the
 Vitest files that implement them. The chain is **user story → acceptance criteria
@@ -135,9 +136,14 @@ after: a refusal changes nothing (the rollback cases).
 | AC4-02 | Confirmed; a start change | Preview | 395's impact and `revertsEvent` true | Proved (pglite): `SCRUM402_AC4_a_confirmed_events_preview_says_it_reverts_with_395s_impact` |
 | AC4-03 | Approved; an end before the start, a past start, attendance 0 | Preview | `invalid` lists each fault by field; no impact | Proved (pglite): `SCRUM402_AC4_the_preview_lists_each_invalid_value_by_field_and_shows_no_impact` |
 | AC4-04 **(trap)** | Approved; the preview taken, then a booking appears | Accept with the preview's impact | PT409 `SIGNIFICANT_CHANGE_IMPACT_CHANGED` from 395; the group stays open, the event unchanged | Proved (pglite): `SCRUM402_AC4_an_impact_that_changed_since_the_preview_refuses_the_accept`; (route) `SCRUM402_AC4_the_previewed_impact_is_passed_to_the_function`, `SCRUM402_AC4_a_decision_without_an_impact_sends_the_four_arguments_it_always_did`; (validation) `SCRUM402_AC4_the_expected_impact_is_passed_only_when_it_is_an_object` |
-| AC4-05 **(UI)** | The panel, an Approved event | Review a group of a name and a date | Each field tagged "Applied directly" or "Re-checks bookings"; the impact's counts and lists in 395's style; a returning event warned of; Close review returns to the card | Proved (UI, panel): `SCRUM402_AC4_tags_each_field_and_shows_the_impact_in_395s_style`, `SCRUM402_AC4_an_impact_with_nothing_listed_shows_only_its_counts_and_bookings_without_a_name_read`, `SCRUM402_AC4_an_impact_with_no_lists_shows_zero_counts`, `SCRUM402_AC4_a_preview_with_no_rows_or_impact_still_opens`, `SCRUM402_AC4_a_returning_event_is_warned_of`, `SCRUM402_AC4_close_review_returns_to_the_card`; (UI, display) `SCRUM402_AC4_the_class_%s_reads_as_%s` |
+| AC4-05 **(UI)** | The panel, an Approved event | Review a group of a name and a date | Each field tagged "Applied directly" or "Re-checks bookings"; the impact's counts and lists in 395's style; a returning event warned of; Close review returns to the card | Proved (UI, panel): `SCRUM402_AC4_tags_each_field_and_shows_the_impact_in_395s_style`, `SCRUM402_AC4_an_impact_with_nothing_listed_shows_only_its_counts_and_bookings_without_a_name_read`, `SCRUM402_AC4_an_impact_with_no_lists_shows_zero_counts`, `SCRUM402_AC4_a_preview_with_no_invalid_list_or_impact_still_opens`, `SCRUM402_AC4_a_returning_event_is_warned_of`, `SCRUM402_AC4_close_review_returns_to_the_card`; (UI, display) `SCRUM402_AC4_the_class_%s_reads_as_%s` |
 | AC4-06 **(UI)** **(trap)** | The same | Accept, refused `SIGNIFICANT_CHANGE_IMPACT_CHANGED` | The preview read again and shown, with a line saying so; no second accept sent. If that read fails, it says so | Proved (UI, panel): `SCRUM402_AC4_a_changed_impact_reloads_the_preview_and_says_so_rather_than_retrying`, `SCRUM402_AC4_a_reload_that_fails_after_a_changed_impact_says_so` |
 | AC4-07 **(UI)** | The same | Accept with a note; accept an ordinary-only group | The preview's impact sent as `expectedImpact`, the note trimmed; none sent when there is no impact; the list and the event read again | Proved (UI, panel): `SCRUM402_AC4_accept_sends_the_previews_impact_then_rereads_the_list_and_the_event`, `SCRUM402_AC5_an_ordinary_only_accept_sends_no_impact_and_no_empty_note` |
+| AC4-08 **(UI)** **(trap)** | The panel, two submissions | Review the second; its preview fails (500) | The panel's line in the second card, beside its Review button; none in the first, none above the list (click-through step 23's line sat at the top, off-screen) | Proved (UI, panel): `SCRUM402_AC4_a_failed_preview_says_so_in_its_own_card_beside_review` |
+| AC4-09 **(UI)** | The panel | Review; the preview has no rows, an empty list, a row with no class, an `invalid` that is not a list, or no body at all | "This change request could not be reviewed. Please try again." in the card; no empty review opens | Proved (UI, panel): `SCRUM402_AC4_a_preview_with_%s_says_it_could_not_be_reviewed` (four), `SCRUM402_AC4_no_preview_at_all_says_it_could_not_be_reviewed` |
+| AC4-10 **(UI)** | The panel, a review open | Accept; the decision fails (500) | The panel's line inside the review, beside its buttons | Proved (UI, panel): `SCRUM402_AC4_a_failed_decision_says_so_in_the_review_beside_its_buttons` |
+| AC4-11 **(UI)** | The panel, a review open | Accept, refused `SIGNIFICANT_CHANGE_IMPACT_CHANGED`; the re-read preview has no rows | The review closes; "could not be reviewed" in the card | Proved (UI, panel): `SCRUM402_AC4_a_re_read_preview_without_its_fields_closes_the_review_and_says_so` |
+| AC4-12 **(UI)** | The panel, two submissions | Accept the second | "Change request accepted." in the second card only | Proved (UI, panel): `SCRUM402_AC4_an_outcome_is_told_in_the_card_it_belongs_to` |
 
 ### AC5 — accept applies by status
 
@@ -172,8 +178,12 @@ after: a refusal changes nothing (the rollback cases).
 | AC7-02 **(trap)** | The same | — | This request ends `approved`; the other closed `event_cancelled` by the cancel (mark first, then cancel) | Proved (pglite): the same test |
 | AC7-03 | The same, with no note | Accept with no reason | The request's own text is the cancellation reason (the fallback) | Proved (pglite): `SCRUM402_AC7_with_no_note_and_no_reason_the_requests_own_text_is_the_cancellation_reason` |
 | AC7-04 | Approved, a cancellation with the note "We lost our speaker" | Preview; accept with no reason | The preview's `cancellationReason` and the event's `cancellation_reason` are the note, not the request's own text | Proved (pglite): `SCRUM402_AC7_a_cancellations_reason_is_prefilled_from_the_organisers_note` |
+| AC7-07 **(trap)** | Under review, a cancellation request "We lost our speaker" with no note (click-through step 23) | Accept with the reason the panel pre-fills, "We lost our speaker" | The event cancelled, initiator `organiser_request`, that reason, by the coordinator; the request ends `approved`. Every other AC7 case is Approved | Proved (pglite): `SCRUM402_AC7_an_under_review_event_is_cancelled_with_the_reason_the_panel_sends` |
 | AC7-05 **(UI)** | The Organiser's form | Choose "Cancel the event" with another row | The other rows go; "Why do you want to cancel?", required; sent as `cancellation` alone | Proved (UI, organiser): `SCRUM402_AC7_cancel_the_event_stands_alone_and_asks_why` |
 | AC7-06 **(UI)** | The panel | Accept a cancellation | A confirmation with N08's impact (`getEventCancellationImpact`) and the reason pre-filled from `cancellationReason`, editable; Confirm sends it as the note; a blank reason cannot confirm; an impact that fails to load says so | Proved (UI, panel): `SCRUM402_AC7_accept_opens_a_confirmation_with_the_impact_and_the_prefilled_reason`, `SCRUM402_AC7_a_blank_reason_cannot_confirm_and_a_missing_prefill_starts_empty`, `SCRUM402_AC7_a_cancellation_impact_that_fails_to_load_says_so` |
+| AC7-08 **(UI)** | The panel, the click-through's Under review event, with the JSON the live reads returned on 30 October | Review, Accept, Confirm cancellation | The confirmation with every count 0 and the reason "We lost our speaker"; sent as the note with no `expectedImpact` (the preview has none); the outcome told in the card | Proved (UI, panel): `SCRUM402_AC7_an_under_review_cancellation_opens_the_confirmation_and_sends_the_prefilled_reason` |
+| AC7-09 **(UI)** | The same, at the confirmation | Confirm; refused with a 409 and no code | The panel's own line beside Confirm, never the server's text; the confirmation stays open | Proved (UI, panel): `SCRUM402_AC7_a_refused_cancellation_says_so_beside_confirm_and_keeps_the_confirmation_open` |
+| AC7-10 **(UI)** | The same, in review | Accept; the cancellation impact comes back empty, or with no body | "The cancellation's impact could not be loaded. Please try again." in the card; no confirmation | Proved (UI, panel): `SCRUM402_AC7_a_cancellation_impact_with_%s_says_so_in_the_card` (two) |
 
 ### AC8 — equipment
 
@@ -222,20 +232,20 @@ after: a refusal changes nothing (the rollback cases).
 
 ## Tally
 
-79 cases, counted from the tables: **79 proved**; 0 not yet implemented; 0 that
-cannot be written as specified. Twenty are traps, four of them on the screen.
+88 cases, counted from the tables: **88 proved**; 0 not yet implemented; 0 that
+cannot be written as specified. Twenty-two are traps, five of them on the screen.
 
 | Section | Backend | UI | Cases |
 |---|---|---|---|
 | AC1 | 11 | 6 | 17 |
 | AC2 | 6 | 2 | 8 |
 | AC3 | 2 | 1 | 3 |
-| AC4 | 4 | 3 | 7 |
+| AC4 | 4 | 8 | 12 |
 | AC5 | 10 | 1 | 11 |
 | AC6 | 4 | 0 | 4 |
-| AC7 | 4 | 2 | 6 |
+| AC7 | 5 | 5 | 10 |
 | AC8 | 3 | 1 | 4 |
 | AC9, AC10 | 4 | 3 | 7 |
 | AC11, AC12 | 3 | 3 | 6 |
 | Schema | 6 | 0 | 6 |
-| **Total** | **57** | **22** | **79** |
+| **Total** | **58** | **30** | **88** |
