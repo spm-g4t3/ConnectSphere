@@ -413,14 +413,14 @@ went unseen.
 
 | Gap | Detail | Owner |
 |---|---|---|
-| The cancellation incident's cause | Not reproduced: every read the flow makes succeeded on live with complete data, the screen replayed with that data worked, and the decision worked on PGlite. It worked after both servers were restarted, so a stale server is the likely explanation. `ea6d510` makes any such failure visible | — |
-| The trigger's `processed_by` | 039's trigger records the reviewing coordinator, falling back to the assigned one, not whoever rejected (`039:141`). The two are the same in every current flow | — |
+| The cancellation incident's cause | Not reproduced: every read the flow makes succeeded on live with complete data, the screen replayed with that data worked, and the decision worked on PGlite. It worked after both servers were restarted, so a stale server is the likely explanation. `ea6d510` makes any such failure visible | Accepted (reason above) |
+| The trigger's `processed_by` | 039's trigger records the reviewing coordinator, falling back to the assigned one, not whoever rejected (`039:141`). The two are the same in every current flow | Accepted (reason above) |
 | Server text on two screens outside 402 | Closing a clarification (`CoordinatorRequestDetail.jsx:436`) and SCRUM-355's reopen (`MyEventRequests.jsx:247`) still show the server's text | Their stories |
 | `getChangeRequestById` | Called by no route and no real test (one test checks only that it is exported); the live check script `check-event-change-request-service.js` uses it. It is most of `eventChangeRequestService.js`'s uncovered 21% | Optional |
 | `changeRequestOutcome.js` | SCRUM-379's outcome helper is now used only by its own unit test; the screens use `changeRequestDisplay.js` (the merge of 30 October). Delete it, or point it at `outcomeLabel` | SCRUM-379 |
 | `migrations/AGENTS.md` | Still tells authors to restate `notifications_type_known` whole, the hazard that broke 402 on live (D11) | The team's call |
-| The safety statuses and Confirmed | Proved in PGlite, not clicked: reaching Safety review or Confirmed by hand takes a full safety flow | — |
-| SCRUM-489's case document | `docs/test-cases/SCRUM-489.md:318` still marks AC7-02 "cannot be tested as written"; 402's `SCRUM402_AC5_while_%s_a_significant_field_goes_through_395_and_the_event_is_approved` now proves it | SCRUM-489 |
+| The safety statuses and Confirmed | Proved in PGlite, not clicked: reaching Safety review or Confirmed by hand takes a full safety flow | Accepted (reason above) |
+| SCRUM-489's case document | `docs/test-cases/SCRUM-489.md:318` still marks AC7-02 "cannot be tested as written"; 402's `SCRUM402_AC5_while_%s_a_significant_field_goes_through_395_and_the_event_is_approved` now proves it | Done in this PR |
 
 ### Technical debt, left
 
