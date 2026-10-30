@@ -223,7 +223,7 @@ Occupancy, search, the calendar, `create_booking_request`, `event_readiness` and
 `cancel_event_request` all use allow-lists that leave `released` out, so a
 released booking stops counting everywhere at once. None was restated.
 
-### D11. Cancellation does not free Conflicting requests — **open**
+### D11. Cancellation does not free Conflicting requests — **resolved by SCRUM-571 (migration 038)**
 
 Cancelling an event or a flagged booking also frees a venue, but leaves other
 events' requests Conflicting. Only a release clears them. Recorded, not fixed here;
@@ -237,7 +237,7 @@ now tracked as SCRUM-571 (backlog story, created 18 October 2026).
 
 | Gap | Detail | Owner |
 |---|---|---|
-| D11 | Cancelling an event (370, `cancel_event_request`) or a flagged booking (077, `cancel_flagged_booking`) frees the venue but leaves other events' Conflicting requests as they were; only a release returns them to Pending. Now tracked as SCRUM-571 (backlog story, created 18 October 2026) | SCRUM-571 (open question 3) |
+| D11 | Cancelling an event (370, `cancel_event_request`) or a flagged booking (077, `cancel_flagged_booking`) frees the venue but leaves other events' Conflicting requests as they were; only a release returns them to Pending. Now tracked as SCRUM-571 (backlog story, created 18 October 2026) | Resolved by SCRUM-571 (migration 038) |
 | No releaser name on the card | `/mine` carries `releasedAt` and `releaseReason` but not who released it, so a released booking reads "Released on {date}: {reason}". The name is stored (`released_by`) and shown to Venue Staff in the notice (`releasedByName`) | A later change to `/mine`, if wanted |
 | Whitespace-only reasons | SQL `btrim` trims spaces only, so the database alone would accept a reason of only tabs or newlines; the service refuses any whitespace-only reason before the rpc. The same as 077 | — |
 | The approve-versus-release race | An approval and a release at the same venue take turns on the venue lock (`089:264`, the lock `decide_booking_request` takes), so an approval cannot slip in between the release and AC4's check. PGlite is one connection, so two transactions never overlap and this is untested | — |
@@ -292,8 +292,7 @@ now tracked as SCRUM-571 (backlog story, created 18 October 2026).
   unknown's. Deferred: the textarea's `maxLength` counts the untrimmed text in UTF-16
   units while the counter counts trimmed code points, which can only be stricter than
   the server (FlaggedBookingReasonForm does the same); cancellation leaving requests
-  Conflicting is D11, now tracked as SCRUM-571 (backlog story, created 18 October
-  2026); `/mine` erroring before 089 runs is a deploy order note, and 089 is already
+  Conflicting is D11, resolved by SCRUM-571 (migration 038); `/mine` erroring before 089 runs is a deploy order note, and 089 is already
   live.
 - **Briefs corrected by the code:** the enum test did not read every migration;
   the calendar has no status filter of its own; the search suite stops at 033, so
@@ -309,7 +308,7 @@ now tracked as SCRUM-571 (backlog story, created 18 October 2026).
 2. **AC4's rule (D8).** Is "nothing else occupies its period now" the right reading
    of "only because of this booking"? **Open**; the ticket says "To confirm".
 3. **Cancellation and Conflicting requests (D11).** Should cancelling an event or a
-   flagged booking also return the requests it frees to Pending? **Open**; tracked as SCRUM-571 (backlog story, created 18 October 2026).
+   flagged booking also return the requests it frees to Pending? **Resolved** by SCRUM-571 (migration 038).
 4. **Venue Staff cannot release (D1).** **Decided** by requirements §7 [C4 14 Sep].
 
 ---

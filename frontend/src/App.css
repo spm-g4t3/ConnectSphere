@@ -507,6 +507,36 @@ button { cursor: pointer; }
 .coordinator-clarification__fields label { align-items: center; display: flex; gap: 8px; }
 .dashboard--coordinator .coordinator-request-detail__cancel { background: #a43c32; margin: 0 0 8px; }
 .dashboard--coordinator .coordinator-request-detail__cancel:hover { background: #842e27; }
+.dashboard--coordinator .coordinator-request-detail__complete { margin: 0 0 8px; }
+.coordinator-request-detail__complete-hint { color: var(--muted); font-size: 0.88rem; margin: 0 0 8px; }
+.coordinator-request-detail__completed-notice { color: #17684f; font-weight: 700; margin: 0 0 8px; }
+.coordinator-request-detail__closing-notes p { margin: 0 0 6px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.coordinator-request-detail__closing-notes .coordinator-request-detail__closing-notes-audience { color: var(--muted); font-size: 0.84rem; white-space: normal; }
+/* SCRUM-384: Needs attention, beside My events. Rows inherit `.dashboard li`, as My events' do. */
+.coordinator-attention__count { color: var(--muted); font-weight: 400; }
+.coordinator-attention__summary { display: grid; gap: 4px; min-width: 0; }
+.coordinator-attention__summary a { color: var(--ink); font-weight: 700; text-decoration: none; }
+.coordinator-attention__summary a:hover { color: var(--teal-dark); text-decoration: underline; }
+.coordinator-attention__reason { background: #fff6e5; border-radius: 6px; color: #8a5a00; font-size: 0.84rem; justify-self: start; padding: 3px 9px; }
+.coordinator-attention__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
+/* SCRUM-384: the Mark as completed panel, laid out as the cancellation panel is. */
+.event-completion-page { display: grid; gap: 18px; }
+.event-completion-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.event-completion-page__back { background: transparent !important; color: var(--teal-dark) !important; justify-self: start; padding: 6px 0 !important; text-decoration: underline; }
+.event-completion-page__intro { margin: 0; }
+.event-completion { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
+.event-completion form { display: grid; gap: 12px; }
+.event-completion form > label { color: var(--muted); display: grid; gap: 7px; }
+.event-completion textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 110px; padding: 10px 12px; resize: vertical; }
+.event-completion textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
+.event-completion__help { color: var(--muted); font-size: 0.86rem; margin: 0; }
+.event-completion__confirmation { display: grid; gap: 12px; }
+.event-completion__confirmation h2 { color: var(--teal-dark); margin: 0; }
+.event-completion__confirmation dl { margin: 0; }
+.event-completion__confirmation dt { color: var(--muted); font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; }
+.event-completion__notes-preview { background: #f7faf9; border-left: 3px solid var(--teal); margin: 0; overflow-wrap: anywhere; padding: 10px 12px; white-space: pre-wrap; }
+.event-completion__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.event-completion__secondary { background: transparent !important; color: var(--teal-dark) !important; text-decoration: underline; }
 /* SCRUM-489: the safety check submission panel. A table, not a list, so
    .dashboard li's spread-out flex row never reaches it. The badge's word carries
    the meaning; the colours are the approved and action-required pairs above. */
@@ -877,6 +907,7 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .status--unknown { background: #eef2f1; color: var(--muted); }
 .change-request-outcome--approved { background: #e8f7f1; color: #17684f; }
 .change-request-outcome--rejected { background: #fff0ee; color: #a43c32; }
+.change-request-outcome--closed { background: #eef2f1; color: var(--muted); }
 .change-request-status-list__decision-notes { background: #f3f6f4; color: var(--ink); margin: 0; padding: 9px 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .change-request-status-list__date { color: var(--muted); font-size: 0.82rem; }
 /* SCRUM-180: the venue calendar. Unscoped, unlike the dashboard panels above,

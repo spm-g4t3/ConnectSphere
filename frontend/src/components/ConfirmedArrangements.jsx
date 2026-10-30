@@ -45,10 +45,11 @@ function ArrangementDetails({ eventRequestId }) {
   );
   const data = state.data;
   const display = readStatusDisplay(data);
-  if (data.status !== "confirmed") return <p role="status">The event is now {display.label}. Its arrangements are not currently confirmed.</p>;
+  const completed = data.status === "completed";
+  if (data.status !== "confirmed" && !completed) return <p role="status">The event is now {display.label}. Its arrangements are not currently confirmed.</p>;
 
   return (
-    <section aria-label="Current confirmed arrangements">
+    <section aria-label={completed ? "Arrangements of the completed event" : "Current confirmed arrangements"}>
       <dl>
         <dt>Date and time</dt>
         <dd>{formatVenuePeriod(data.startsAt, data.endsAt, "Date and time unavailable")}</dd>

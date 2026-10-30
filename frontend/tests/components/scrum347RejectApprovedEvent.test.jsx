@@ -312,6 +312,8 @@ describe("SCRUM347 change requests closed with the event", () => {
   it.each([
     ["event_rejected", "Outcome: Closed, event rejected"],
     ["event_cancelled", "Outcome: Closed, event cancelled"],
+    // SCRUM-379 AC4: the same list for a change request closed when the event was completed.
+    ["event_completed", "Outcome: Closed, event completed"],
   ])("SCRUM347_AC6_a_change_request_closed_by_%s_says_why", async (decision, label) => {
     vi.mocked(getChangeRequests).mockResolvedValue([{
       id: "c1", fieldLabel: "Venue", details: "A larger room", status: "processed", decision, decisionNotes: null,
@@ -321,6 +323,37 @@ describe("SCRUM347 change requests closed with the event", () => {
     render(<ChangeRequestStatusList eventRequestId={REQUEST_ID} />);
 
     expect(await screen.findByText(label)).toBeInTheDocument();
+  });
+});
+
+describe("SCRUM379 AC4 change request outcome styling", () => {
+  it.each([
+    ["event_completed", "change-request-outcome--closed"],
+    ["approved", "change-request-outcome--approved"],
+    ["rejected", "change-request-outcome--rejected"],
+    ["event_cancelled", "change-request-outcome--rejected"],
+  ])("SCRUM379_AC4_%s_is_styled_%s", async (decision, cls) => {
+    vi.mocked(getChangeRequests).mockResolvedValue([{
+      id: "c1", fieldLabel: "Venue", details: "A larger room", status: "processed", decision, decisionNotes: null,
+      createdAt: "2026-10-20T03:00:00Z",
+    }]);
+
+    render(<ChangeRequestStatusList eventRequestId={REQUEST_ID} />);
+
+    const outcome = await screen.findByText(/^Outcome:/);
+    expect(outcome).toHaveClass(cls);
+  });
+
+  it("SCRUM379_AC4_a_completed_events_change_request_is_never_called_rejected", async () => {
+    vi.mocked(getChangeRequests).mockResolvedValue([{
+      id: "c1", fieldLabel: "Venue", details: "A larger room", status: "processed", decision: "event_completed", decisionNotes: null,
+      createdAt: "2026-10-20T03:00:00Z",
+    }]);
+
+    render(<ChangeRequestStatusList eventRequestId={REQUEST_ID} />);
+
+    await screen.findByText("Outcome: Closed, event completed");
+    expect(screen.queryByText(/Rejected/)).not.toBeInTheDocument();
   });
 });
 
