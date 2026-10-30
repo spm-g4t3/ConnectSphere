@@ -26,8 +26,7 @@ import equipmentQueueRoutes from './routes/equipmentQueue.js';
 import safetyReviewRoutes from './routes/safetyReviews.js';
 import openEventRoutes from './routes/openEvents.js';
 import attendeeEventRoutes from './routes/attendeeEvents.js';
-import { startVenueHoldExpiryScheduler } from './jobs/venueHoldExpiryScheduler.js';
-import { startWaitlistPromotionScheduler } from './jobs/waitlistPromotionScheduler.js';
+import { startBackgroundJobs } from './jobs/backgroundJobs.js';
 
 const app = express();
 
@@ -81,24 +80,9 @@ app.use('/api/flagged-bookings', flaggedBookingRoutes);
 // SCRUM-495: the events an authenticated Attendee can register for.
 app.use('/api/open-events', openEventRoutes);
 
-// SCRUM-491 (AC7, AC8): mark lapsed venue holds expired and notify their
-// coordinators, once a minute. A lapsed hold already occupies nothing without
-// this; set VENUE_HOLD_EXPIRY_JOB=off to show that. Never under test.
-// VENUE_HOLD_REMINDER_HOURS sets how long before expiry the coordinator is
-// warned; anything but a positive number falls back to the job's default.
-if (process.env.NODE_ENV !== 'test' && process.env.VENUE_HOLD_EXPIRY_JOB !== 'off') {
-  const reminderLeadHours = Number(process.env.VENUE_HOLD_REMINDER_HOURS);
-  startVenueHoldExpiryScheduler(
-    Number.isFinite(reminderLeadHours) && reminderLeadHours > 0 ? { reminderLeadHours } : {},
-  );
-}
-
-// SCRUM-460 (AC3): registration can reopen when its opening time passes, with
-// no write to promote anyone, so hand out freed places once a minute. Never
-// under test; WAITLIST_PROMOTION_JOB=off turns it off.
-if (process.env.NODE_ENV !== 'test' && process.env.WAITLIST_PROMOTION_JOB !== 'off') {
-  startWaitlistPromotionScheduler();
-}
+// The venue hold expiry, waiting-list promotion and registration window jobs.
+// Never under test; each has a *_JOB=off switch (jobs/backgroundJobs.js).
+startBackgroundJobs();
 
 const PORT = process.env.PORT || 5000;
 

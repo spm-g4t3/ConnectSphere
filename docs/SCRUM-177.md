@@ -1,7 +1,7 @@
 # SCRUM-177 — Notify Users of Registration Changes
 
 **Story:** Notify Users of Registration Changes
-**Subtasks so far:** SCRUM-235, the notification contract (migration 039). SCRUM-236, the handlers and transition rules (migration 040). SCRUM-238, recipient resolution (migration 041).
+**Subtasks so far:** SCRUM-235, the notification contract (migration 039). SCRUM-236, the handlers and transition rules (migration 040). SCRUM-238, recipient resolution (migration 041). SCRUM-237, the opening/closing job (migration 042).
 **Status as of 30 October 2026:** contract and handlers built and tested. No registration flow or job calls the handlers yet. The job is SCRUM-237 and the flows are SCRUM-239.
 
 The contract is in three places, and they must agree:
@@ -92,7 +92,7 @@ select notify_registration_change(
 - Dedupe: unique on `(recipient_id, event_request_id, type, occurrenceKey)`. Repeating an occurrence inserts nothing, and a new occurrence notifies again.
 - The row is also checked by `notifications_registration_change_shape`: the event must be set, the key must be present, and the audience must be allowed for the type.
 
-**Occurrence keys.** The handlers in section 5 make every key `opened:`, `closed:`, `full:` or `released:` followed by the UTC instant of the transition (formatted by `registration_notice_instant`, as in 037). That handles retries. The recorded state already stops a repeat, so the key is a second guard.
+**Occurrence keys.** Since 042, window notices use `opened:<n>` / `closed:<n>`, where `n` is the event's `registration_notice_state.window_generation` after the transition. That makes the key stable: a retry of a rolled-back transition reuses it, and a reopening always gets a new one, whatever the dates. Capacity notices still use `full:` / `released:` plus the UTC instant of the transition. The recorded state already stops a repeat, so the key is a second guard.
 
 ## 5. Handlers and transition rules (SCRUM-236, migration 040)
 
@@ -185,6 +185,38 @@ Recipients come only from the event row and its registrations at the time of the
 | any of the above with `settings_changed` | as above, without the Organiser | **proposed**: the actor isn't told about their own change |
 
 Registered attendees aren't told when the window opens or closes (proposed). Nobody outside the event is ever resolved, and there's no broadcast and no fallback: an unknown audience is refused, and an empty audience resolves to nobody.
+
+## 5a. Opening/closing job (SCRUM-237, migration 042)
+
+**What runs.** The job is `backend/src/jobs/registrationWindowScheduler.js`, started from `backend/src/jobs/backgroundJobs.js`, which `app.js` calls. It runs once on API start-up and then once a minute. It's off under test, and `REGISTRATION_WINDOW_JOB=off` turns it off. It calls `process_registration_window_notices()`, which hands each event to `announce_registration_window(event, null)`, the same handler the flows use.
+
+**Rule and clock.** "Open" is `registration_closed_reason`, the function registering uses, evaluated with the database clock after the event lock. The job decides with that clock, not the API's, so a notice never disagrees with whether Register works. Tests inject the clock by replacing `clock_timestamp()`, as the promotion tests do.
+
+| Setting | Effect |
+|---|---|
+| status ≠ `confirmed` | closed |
+| `registration_enabled` false | closed |
+| `registration_opens_at` | opens **at** that instant (inclusive). Can't be null while enabled: `event_requests_enabled_registration_has_window` |
+| `registration_closes_at` | closes **at** that instant (the window is `[opens, closes)`). Null means open until switched off or the start |
+| `proposed_start` | closes at the start. Null means closed |
+
+All the columns are `timestamptz` and are compared as instants, so time zones never matter; payload times are UTC text. Nothing compares times for equality. Each run asks "is the window open now?" and compares the answer with what was last announced, so a late run still catches a boundary it missed.
+
+**Recovery after downtime.** The first run after start-up announces every event whose window differs from what was announced. That covers an opening or closing missed while the API was down; the notice is sent late, and `opensAt` and `closedAt` give the real boundary. A window that opened and closed again entirely during downtime is announced not at all, because both notices would be stale.
+
+**Obsolete schedules.** No delivery is queued in advance. Each run re-reads the event's current dates under its lock. A closing time moved later, an opening time moved later, or registration switched off before the boundary therefore produces nothing at the old time.
+
+**Flows and the job don't overlap.** A flow that changes the window (a settings save, a return to Confirmed, from SCRUM-239) announces it in its own transaction and records the state. The job then finds that event already settled. Until SCRUM-239 is wired, the job also notices those changes, reporting a closure with its real reason and an opening as `opening_time`.
+
+**Reopening and reconfirmation (policy).**
+- Every closed → open transition is a new occurrence with a new key, and is announced again. Wait-listed attendees see "has reopened".
+- An Organiser's settings save is announced by the save itself, with cause `settings_changed` and without telling the Organiser. A return to Confirmed is announced by the confirmation, with cause `event_confirmed`.
+- Leaving Confirmed closes with `event_not_confirmed`.
+- A cancelled event settles silently.
+
+**Order.** Before announcing, the job hands any free places to the waiting list and announces any capacity that filled. A queued attendee who gets a place is told about that place, not about the opening.
+
+**Failures.** Each event runs in its own subtransaction. If one fails, its work is rolled back and it's reported in `failures` and logged by the job, and it stays due for the next run; the other events still go. A failed RPC is logged and retried on the next tick. Two API processes running the job at once are safe, because events are visited in a fixed order under their locks and the second run finds them settled.
 
 ## 6. Open questions
 

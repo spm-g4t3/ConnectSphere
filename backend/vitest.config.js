@@ -91,6 +91,9 @@ export default defineConfig({
         'src/jobs/venueHoldExpiryScheduler.js': FULL,
         // SCRUM-460: hands out places freed while registration was closed.
         'src/jobs/waitlistPromotionScheduler.js': FULL,
+        // SCRUM-237: announces registration opening and closing; and which jobs start.
+        'src/jobs/registrationWindowScheduler.js': FULL,
+        'src/jobs/backgroundJobs.js': FULL,
         // SCRUM-284 (SCRUM-285): the queue route, validation and service are new and owned outright.
         'src/routes/equipmentQueue.js': FULL,
         'src/validation/equipmentQueueValidation.js': FULL,
