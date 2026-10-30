@@ -40,6 +40,10 @@
 //
 // SCRUM-266 added "Flagged bookings" above it: the event's flagged bookings,
 // each cancelled there or replaced through Find a venue.
+//
+// SCRUM-384 (SCRUM-379 AC1, AC2) added "Mark as completed" for the assigned coordinator of a
+// Confirmed event that has ended (EventCompletionPanel), and "Closing notes" on a completed
+// event, shown to coordinators only.
 
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -66,6 +70,7 @@ import EventChangeHistory from "./EventChangeHistory";
 import SafetyCheckSubmissionPanel from "./SafetyCheckSubmissionPanel";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import EventConfirmationPanel from "./EventConfirmationPanel";
+import EventCompletionPanel from "./EventCompletionPanel";
 import RegistrationCounts from "./RegistrationCounts";
 import { isRegistrationConfigurable } from "../services/registrationStatuses";
 import {
@@ -81,7 +86,8 @@ import {
 } from "../services/eventRequestStatusDisplay";
 import { formatTimestamp, orNotSpecified } from "../services/displayFormat";
 import { STATUSES_ALLOWING_ORDINARY_EDITS, detailFieldList } from "../services/eventDetailFields";
-import { isReplyOverdue, venueTomorrow } from "../services/datetimeFormat";
+import { formatVenueTimestamp, isReplyOverdue, venueTomorrow } from "../services/datetimeFormat";
+import { canMarkCompleted, closingNotesOf, eventHasEnded } from "../services/eventCompletion";
 
 const CLARIFICATION_FIELDS = [
   ["eventName", "Event name"],
@@ -224,6 +230,10 @@ export default function CoordinatorRequestDetail({
   // SCRUM-387. The success line belongs to the event it was saved on.
   const [detailsEditPage, setDetailsEditPage] = useState(false);
   const [detailsSaved, setDetailsSaved] = useState(null);
+  // SCRUM-384. The completion panel, and the line saying the event was completed, which belongs
+  // to the event it was done on.
+  const [completionPage, setCompletionPage] = useState(false);
+  const [completedNotice, setCompletedNotice] = useState(null);
   const [handedOverTo, setHandedOverTo] = useState(null);
   const [historyVersion, setHistoryVersion] = useState(0);
   // SCRUM-192. Bumped when a booking request is sent from "Find a venue", so
@@ -268,6 +278,16 @@ export default function CoordinatorRequestDetail({
   const canReassign = assignedCoordinatorId != null
     && current.status !== "cancelled"
     && (isAssignedCoordinator || isLead);
+  // SCRUM-384 AC1: the holder, on a Confirmed event whose end has passed. A convenience;
+  // complete_event_request (034) checks the caller, the status and the end time under the lock.
+  const isCoordinatorRole = normaliseRole(user?.role) === "EVENT_COORDINATOR";
+  const canComplete = isCoordinatorRole && canMarkCompleted(current, { isAssignedCoordinator });
+  const awaitingEnd = isCoordinatorRole && isAssignedCoordinator
+    && current.status === "confirmed" && !eventHasEnded(current.proposedEnd);
+  // SCRUM-384 AC2: closing notes are for coordinators (and the Lead); never an Organiser.
+  const closingNotes = (isCoordinatorRole || isLead) && current.status === "completed"
+    ? closingNotesOf(current)
+    : null;
   // SCRUM-387 AC1-AC5: the holder, in the five statuses that allow an edit,
   // read from the latest event. A convenience; 022 checks both under the lock.
   const canEditDetails = normaliseRole(user?.role) === "EVENT_COORDINATOR"
@@ -488,6 +508,21 @@ export default function CoordinatorRequestDetail({
     );
   }
 
+  if (completionPage) {
+    return (
+      <EventCompletionPanel
+        eventRequest={current}
+        onBack={() => setCompletionPage(false)}
+        onCompleted={(updated) => {
+          setUpdatedRequest(updated);
+          setCompletionPage(false);
+          setCompletedNotice({ eventId: updated.id });
+          onChangeRequestProcessed?.();
+        }}
+      />
+    );
+  }
+
   if (significantChangePage) {
     return (
       <SignificantEventChangePanel
@@ -584,6 +619,26 @@ export default function CoordinatorRequestDetail({
       {detailsSaved?.eventId === current.id && (
         <p className="coordinator-request-detail__edit-saved" role="status">{detailsSaved.message}</p>
       )}
+      {canComplete && (
+        <button
+          className="coordinator-request-detail__complete"
+          type="button"
+          onClick={() => setCompletionPage(true)}
+        >
+          Mark as completed
+        </button>
+      )}
+      {awaitingEnd && (
+        <p className="coordinator-request-detail__complete-hint">
+          You can mark this event as completed once it has ended
+          {current.proposedEnd ? ` (${formatVenueTimestamp(current.proposedEnd)})` : ""}.
+        </p>
+      )}
+      {completedNotice?.eventId === current.id && current.status === "completed" && (
+        <p className="coordinator-request-detail__completed-notice" role="status">
+          Marked as completed.
+        </p>
+      )}
       {isAssignedCoordinator && CANCELLABLE_STATUSES.has(current.status) && (
         <button
           className="coordinator-request-detail__cancel"
@@ -614,6 +669,16 @@ export default function CoordinatorRequestDetail({
           }}
           onStale={() => onChangeRequestProcessed?.()}
         />
+      )}
+
+      {closingNotes && (
+        <section className="coordinator-request-detail__closing-notes">
+          <h3>Closing notes</h3>
+          <p>{closingNotes.recorded ? closingNotes.text : "No closing notes were recorded."}</p>
+          <p className="coordinator-request-detail__closing-notes-audience">
+            Only coordinators can see these notes. The organiser cannot.
+          </p>
+        </section>
       )}
 
       <section>

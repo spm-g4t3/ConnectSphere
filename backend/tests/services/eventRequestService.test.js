@@ -2709,9 +2709,10 @@ describe('SCRUM-327 AC11: a coordinator lists the events assigned to them', () =
 
     // The same COLUMNS, compared rather than copied, as the queue's own test
     // does. A row here is the same shape GET /:id/review returns, so the
-    // frontend can open a detail panel from a row it already holds.
+    // frontend can open a detail panel from a row it already holds. SCRUM-384:
+    // plus the closing notes, which only the coordinator's reads select.
     const [mine, , organisers] = client.calls;
-    expect(mine.select).toBe(`${organisers.select}, event_change_requests(request_group_id, status)`);
+    expect(mine.select).toBe(`${organisers.select}, closing_notes, event_change_requests(request_group_id, status)`);
   });
 
   it('SCRUM333_AC11_returns_events_from_more_than_one_organiser', async () => {

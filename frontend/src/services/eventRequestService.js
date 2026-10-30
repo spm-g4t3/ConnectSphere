@@ -241,6 +241,29 @@ export async function rejectApprovedEvent(id, { reason }) {
 }
 
 /**
+ * SCRUM-384 (SCRUM-379 AC1, AC2): the assigned coordinator marks a Confirmed event that has ended
+ * as completed. `closingNotes` is optional; blank is sent as no notes. The reply is the event with
+ * `closingNotes`, which only a coordinator is ever given. A 409 with code EVENT_FINAL means the
+ * event is already Completed or Cancelled; its message is the server's.
+ */
+export async function completeEventRequest(id, { closingNotes } = {}) {
+  const notes = typeof closingNotes === "string" ? closingNotes.trim() : "";
+  return postData(`/event-requests/${id}/complete`, notes ? { closingNotes: notes } : {});
+}
+
+/**
+ * SCRUM-384 (SCRUM-379 AC7): the signed-in coordinator's Needs attention list, one item per
+ * reason, earliest event first: { id, code, reason, eventRequestId, eventName, status,
+ * proposedStart, proposedEnd, organiserName, link }. `link` is the screen that opens the event.
+ * The list is the caller's from the token; a 403 means "not a coordinator". [] is the good state.
+ *
+ * @returns {Promise<Array>}
+ */
+export async function getNeedsAttention() {
+  return getData("/event-requests/needs-attention");
+}
+
+/**
  * SCRUM-489 AC2-AC4: the safety check's readiness checklist,
  * { eventRequestId, ready, items }. The flag is sent only when true, so the
  * plain read is the path alone.

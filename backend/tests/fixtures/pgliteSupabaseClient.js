@@ -36,9 +36,9 @@ export function pgliteSupabaseClient(db, { columns = (cols) => cols } = {}) {
       let selected = '*';
       const where = [];
       const orderBy = [];
-      // `= $n` for eq, `= any($n)` for in, so a list is one parameter.
+      // `= $n` for eq, `::text = any($n::text[])` for in, so a list is one parameter and an enum or uuid column compares as text.
       const query = () => {
-        const clause = where.map(([column, , op], i) => `${column} ${op === 'in' ? `= any($${i + 1})` : `= $${i + 1}`}`).join(' and ');
+        const clause = where.map(([column, , op], i) => op === 'in' ? `${column}::text = any($${i + 1}::text[])` : `${column} = $${i + 1}`).join(' and ');
         const order = orderBy.map(([column, ascending]) => `${column} ${ascending ? 'asc' : 'desc'}`).join(', ');
         return {
           sql: `select ${selected} from ${table}${clause ? ` where ${clause}` : ''}${order ? ` order by ${order}` : ''}`,

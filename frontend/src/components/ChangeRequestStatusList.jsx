@@ -21,11 +21,15 @@ const STATUS_CONFIG = {
   processed: { label: "Processed", className: "status--processed" },
 };
 
-// The words come from outcomeLabel. SCRUM-347's event_rejected and 036's
-// event_cancelled were closed with the event, not decided, so they take the closed style.
-const OUTCOME_CLASS = {
+// The label comes from outcomeLabel, shared with the coordinator's panel; only the
+// look is chosen here. An outcome not listed is styled as a plain closure.
+const DECISION_CLASSES = {
   approved: "change-request-outcome--approved",
   rejected: "change-request-outcome--rejected",
+  // Closed by the system when the whole event was, not decided on their own.
+  event_rejected: "change-request-outcome--rejected",
+  event_cancelled: "change-request-outcome--rejected",
+  event_completed: "change-request-outcome--closed",
 };
 
 function useChangeRequests(eventRequestId) {
@@ -94,7 +98,7 @@ export default function ChangeRequestStatusList({ eventRequestId }) {
                 {config.label}
               </span>
               {outcome && (
-                <span className={`change-request-status-list__badge ${OUTCOME_CLASS[group.decision] ?? "change-request-outcome--closed"}`}>
+                <span className={`change-request-status-list__badge ${DECISION_CLASSES[group.decision] ?? "change-request-outcome--closed"}`}>
                   Outcome: {outcome}
                 </span>
               )}

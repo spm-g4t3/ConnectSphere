@@ -133,3 +133,53 @@ describe("SCRUM363 organiser confirmed arrangements", () => {
     expect(await screen.findByRole("region")).toBeInTheDocument();
   });
 });
+
+describe("SCRUM379 AC5: arrangements of a completed event", () => {
+  const completed = (changes = {}) => arrangements({
+    status: "completed", statusDisplay: { label: "Completed", group: "COMPLETED", description: "Finished." }, ...changes,
+  });
+
+  it("SCRUM379_AC5_a_completed_event_still_lists_its_venue_equipment_and_dates", async () => {
+    vi.mocked(getConfirmedArrangements).mockResolvedValue(completed());
+    await open();
+    expect(await screen.findByRole("region", { name: "Arrangements of the completed event" })).toBeInTheDocument();
+    expect(screen.getByText("Hall A — Level 1")).toBeInTheDocument();
+    expect(screen.getByText("Room 2 — Level 2")).toBeInTheDocument();
+    expect(screen.getByText("Microphone: 3")).toBeInTheDocument();
+    expect(screen.getByText("Projector: 2")).toBeInTheDocument();
+    expect(screen.getByText("2026-11-02 00:00 – 02:00 (Singapore time)")).toBeInTheDocument();
+  });
+
+  it("SCRUM379_AC5_a_completed_event_is_not_described_as_currently_confirmed", async () => {
+    vi.mocked(getConfirmedArrangements).mockResolvedValue(completed());
+    await open();
+    await screen.findByText("Hall A — Level 1");
+    expect(screen.queryByRole("region", { name: "Current confirmed arrangements" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/not currently confirmed/)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM379_AC5_a_completed_event_with_nothing_arranged_says_so_instead_of_showing_a_blank", async () => {
+    vi.mocked(getConfirmedArrangements).mockResolvedValue(completed({ venues: [], equipment: [], startsAt: null, endsAt: null }));
+    await open();
+    expect(await screen.findByText("No equipment is arranged for this event.")).toBeInTheDocument();
+    expect(screen.getByText("No confirmed venue booking is available.")).toBeInTheDocument();
+    expect(screen.getByText("Date and time unavailable")).toBeInTheDocument();
+  });
+
+  it.each(["cancelled", "approved", "safety_review", "safety_approved"])(
+    "SCRUM379_AC5_status_%s_still_shows_no_arrangements", async (status) => {
+      vi.mocked(getConfirmedArrangements).mockResolvedValue(arrangements({
+        status, statusDisplay: { label: "Other", group: "OTHER", description: "x" }, venues: [], equipment: [],
+      }));
+      await open();
+      expect(await screen.findByRole("status")).toHaveTextContent("Its arrangements are not currently confirmed.");
+      expect(screen.queryByRole("region")).not.toBeInTheDocument();
+    },
+  );
+
+  it("SCRUM379_AC5_a_confirmed_event_still_uses_the_confirmed_heading", async () => {
+    await open();
+    expect(await screen.findByRole("region", { name: "Current confirmed arrangements" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Arrangements of the completed event" })).not.toBeInTheDocument();
+  });
+});

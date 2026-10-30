@@ -1,6 +1,7 @@
 import express from 'express';
 
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam, organisesEvent } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
@@ -15,9 +16,14 @@ const errorMiddleware = createErrorMiddleware('event registration route');
 export function createEventRegistrationRouter({
   client,
   requireAuth = defaultRequireAuth,
+  finalEventGuard = noopFinalEventGuard,
   requireRole = createRequireRole,
 } = {}) {
   const router = express.Router();
+
+  // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
+  // Only the event's Organiser is told so; the handler answers anyone else with its 404.
+  const guardEvent = finalEventGuard(eventIdFromParam('id'), { entitled: organisesEvent });
   const organiserOnly = requireRole(ROLE.EVENT_ORGANISER);
 
   router.use(requireAuth);
@@ -26,7 +32,7 @@ export function createEventRegistrationRouter({
     res.status(200).json(await getRegistrationSettings(req.params.id, req.user.id, { client }));
   });
 
-  router.put('/events/:id/settings', organiserOnly, async (req, res) => {
+  router.put('/events/:id/settings', organiserOnly, guardEvent, async (req, res) => {
     res.status(200).json(
       await updateRegistrationSettings(req.params.id, req.body, req.user.id, { client }),
     );
@@ -47,4 +53,4 @@ export function createEventRegistrationRouter({
   return router;
 }
 
-export default createEventRegistrationRouter();
+export default createEventRegistrationRouter({ finalEventGuard: createFinalEventGuard() });
