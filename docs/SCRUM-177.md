@@ -1,7 +1,7 @@
 # SCRUM-177 — Notify Users of Registration Changes
 
 **Story:** Notify Users of Registration Changes
-**Subtasks so far:** SCRUM-235, the notification contract (migration 039). SCRUM-236, the handlers and transition rules (migration 040).
+**Subtasks so far:** SCRUM-235, the notification contract (migration 039). SCRUM-236, the handlers and transition rules (migration 040). SCRUM-238, recipient resolution (migration 041).
 **Status as of 30 October 2026:** contract and handlers built and tested. No registration flow or job calls the handlers yet. The job is SCRUM-237 and the flows are SCRUM-239.
 
 The contract is in three places, and they must agree:
@@ -81,7 +81,8 @@ select notify_registration_change(
   p_type,              -- one of the four new types
   p_audiences,         -- text[] subset of the type's allowed audiences
   p_occurrence_key,    -- non-empty text
-  p_details            -- jsonb, the type's own fields
+  p_details,           -- jsonb, the type's own fields
+  p_exclude_recipient_id  -- uuid or null (041): the actor, never told
 );  -- returns how many rows were inserted
 ```
 
@@ -129,9 +130,9 @@ When the table is created, every existing event's current state is recorded, so 
 | full → not full, cause `withdrawal` | `registration_place_released` `{cause, capacity, registeredCount}` | organiser, coordinator |
 | full → not full, any other cause (capacity raised or removed) | nothing; the state is recorded | none |
 
-**For both handlers:** with `settings_changed`, the Organiser made the change, so the organiser audience is dropped (proposed: nobody is told about their own action).
+**For both handlers:** with `settings_changed`, the Organiser made the change, so the Organiser is left out as a person, in every audience they belong to (proposed: nobody is told about their own action). Since 041 this also covers an Organiser who is on their own event's queue.
 
-**Waiting-list status.** waitlisted → registered is the only status change the system makes, and `promote_waitlisted_registrations` notifies it as `registration_promoted`. That's unchanged. Joining and leaving are the attendee's own actions and send nothing.
+**Waiting-list status.** waitlisted → registered is the only status change the system makes, and `promote_waitlisted_registrations` notifies it as `registration_promoted`. Since 041 its recipient is the `registrant` the resolver finds for the promoted registration: the attendee whose status changed, and no one else. Joining and leaving are the attendee's own actions and send nothing.
 
 **Call order for SCRUM-239.** Inside the flow's transaction, after its writes:
 1. Run the promotion.
@@ -149,15 +150,41 @@ Doing this after promotion means a queued attendee who just got a place is told 
 | return to Confirmed (trigger) | window `event_confirmed` |
 | opening/closing job (SCRUM-237) | window with null, for each event whose live state differs from the announced state |
 
-**Recipient resolution (the interface for SCRUM-238).** `registration_notification_recipients(p_event_request_id, p_audiences text[])` returns `(recipient_id, audience)`.
+**Recipient resolution (SCRUM-238, migration 041).** Every registration notice, promotion included, gets its recipients from one function:
 
-| Audience | Resolves to |
-|---|---|
-| `organiser` | the event's organiser |
-| `coordinator` | the assigned coordinator, unless they are also the organiser |
-| `waitlisted` | the event's attendees whose status is `waitlisted` right now |
+```sql
+registration_notification_recipients(
+  p_event_request_id uuid,
+  p_audiences text[],                 -- organiser | coordinator | waitlisted | registrant
+  p_registration_ids uuid[] = null,   -- required for registrant
+  p_exclude_recipient_id uuid = null  -- the actor, left out in every audience
+) returns table (recipient_id uuid, audience text)
+```
 
-An unknown or null audience is refused (22023), not ignored. An audience with nobody behind it resolves to no rows. There's no broadcast and no fallback. `notify_registration_change` gets its recipients only from this function, so SCRUM-238 can tighten the rules in one place.
+Recipients come only from the event row and its registrations at the time of the call. No caller supplies a user id; the only ids it accepts are registrations, which must belong to the event, and an actor to *leave out*. The handlers, the writer and the resolver can't be executed by `anon` or `authenticated`.
+
+| Audience | Resolves to | Excludes |
+|---|---|---|
+| `organiser` | `event_requests.organiser_id` | none |
+| `coordinator` | `assigned_coordinator_id` now | a coordinator who was reassigned away; nobody when the event is unassigned |
+| `waitlisted` | this event's registrations whose status is `waitlisted` now | registered, withdrawn and cancelled attendees, and other events' queues |
+| `registrant` | the attendee of each named registration of this event, **whatever its status now** | registrations of another event (refused, 22023) |
+
+`registrant` keeps the directly affected attendee. A promotion takes them off the queue in the same statement that notifies them, so `waitlisted` would miss them.
+
+**One notice per person.** Someone in several audiences (requirements §1 allows several roles) is told once, under the first of organiser, coordinator, registrant, waitlisted. The per-recipient unique index makes a second notice for the same occurrence impossible anyway.
+
+**Who receives each notice**
+
+| Notice | Recipients | Basis |
+|---|---|---|
+| `registration_capacity_reached` | organiser, assigned coordinator, deduplicated | AC2 |
+| `registration_promoted` | the promoted attendee only | AC3 and requirements §10. No rule asks for managers to be told |
+| `registration_opened` / `registration_closed` | organiser, assigned coordinator, wait-listed attendees (none for `event_started`) | **proposed**; no product rule names the audience |
+| `registration_place_released` | organiser, assigned coordinator | **proposed** |
+| any of the above with `settings_changed` | as above, without the Organiser | **proposed**: the actor isn't told about their own change |
+
+Registered attendees aren't told when the window opens or closes (proposed). Nobody outside the event is ever resolved, and there's no broadcast and no fallback: an unknown audience is refused, and an empty audience resolves to nobody.
 
 ## 6. Open questions
 

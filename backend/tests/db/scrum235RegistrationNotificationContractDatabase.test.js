@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedEvent, rerunMigrationsFrom } from './helpers/schemaDb.js';
 import { checkListValues } from '../domain/helpers/schemaVocabulary.js';
 import {
   REGISTRATION_NOTIFICATION_TYPE,
@@ -104,7 +104,7 @@ describe('notification types (039)', () => {
     const count = async () => Number((await db.query('select count(*) as n from notifications')).rows[0].n);
     const before = await count();
 
-    await db.exec(readFileSync(join(MIGRATIONS, '039_registration_notification_contract.sql'), 'utf8'));
+    await rerunMigrationsFrom(db, '039_registration_notification_contract.sql');
 
     expect(await count()).toBe(before);
   });

@@ -1,4 +1,6 @@
 import { beforeAll, afterAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { basename } from 'node:path';
 
 import { baselineFiles, createDatabase } from '../../../db/loadSchema.js';
 import { withSafetyReviewTransitionGuardDisabled } from '../../fixtures/safetyReviewTestHelpers.js';
@@ -8,6 +10,15 @@ import { withSafetyReviewTransitionGuardDisabled } from '../../fixtures/safetyRe
 // call returns a fresh in-memory database, so suites never share rows.
 export function createSchemaDb() {
   return createDatabase(baselineFiles());
+}
+
+// Pastes a migration into an already built schema again, then every later one,
+// as live would get them: re-running one file alone would put back the older
+// definitions its successors replaced.
+export async function rerunMigrationsFrom(db, fileName) {
+  for (const file of baselineFiles().filter((path) => basename(path) >= fileName && /migrations/.test(path))) {
+    await db.exec(readFileSync(file, 'utf8'));
+  }
 }
 
 // One built schema per test file, opened before its tests and closed after.

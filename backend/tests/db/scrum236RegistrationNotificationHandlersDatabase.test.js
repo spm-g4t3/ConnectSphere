@@ -1,13 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { createSchemaDb, seedEvent, rerunMigrationsFrom } from './helpers/schemaDb.js';
 import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
 // The transition rules (040): announce_registration_window and
 // announce_registration_capacity, and the recipient resolution under them.
 // Times are relative to the real clock: a handler reads clock_timestamp().
-const MIGRATIONS = join(import.meta.dirname, '../../db/migrations');
 const ORGANISER = '11111111-1111-4111-8111-111111111111';
 const COORDINATOR = '22222222-2222-4222-8222-222222222222';
 const A = '44444444-4444-4444-8444-444444444444';
@@ -324,7 +321,7 @@ describe('registration_notification_recipients (the SCRUM-238 interface)', () =>
 describe('migration 040', () => {
   it('SCRUM177_AC1_a_rerun_keeps_what_was_already_announced', async () => {
     await window_();
-    await db.exec(readFileSync(join(MIGRATIONS, '040_registration_notification_handlers.sql'), 'utf8'));
+    await rerunMigrationsFrom(db, '040_registration_notification_handlers.sql');
 
     expect(await window_()).toBe(0);
   });
