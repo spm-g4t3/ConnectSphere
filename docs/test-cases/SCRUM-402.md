@@ -9,6 +9,7 @@
 **Marked:** 29 October 2026, migration 039: SC-03 to SC-06 (SC-06 is SCRUM-347's rejected-event rule, moved under the lock), after 024, 032 and 037 restated the notification list whole and dropped 036's two types on live; AC10-05 for 039's rejection trigger, which also re-states AC2-03's rejected case and AC2-04 as groups the rejection closed. Every one proved.
 **Marked:** 27 October 2026, the brief 1 fix-up: the Organiser's note (`organiser_note`, in 036 before it ran anywhere). AC1-08 to AC1-10 and AC7-04 added; AC7-03 reworded as the fallback it now is.
 **Marked:** 30 October 2026, click-through step 23 (a cancellation on an Under review event did nothing visible): AC4-08 to AC4-12 for every review failure shown in its card, AC7-07 to AC7-10 for the cancellation with the live data. AC4-05's `…_with_no_rows_or_impact_still_opens` renamed `…_with_no_invalid_list_or_impact_still_opens`, since a preview with no rows now says it could not be reviewed (AC4-09). Every one proved.
+**Marked:** 30 October 2026, the merge of dev with SCRUM-379 (033, 034) and SCRUM-571 (038): AC10-06 and AC10-07 for 034's `event_completed` on both screens, in 402's words. Three SCRUM-379 tests on those screens (six cases) renamed `SCRUM402_AC10_…`, since the screens are 402's. AC10-01's route test cited by its current name. Every one proved.
 
 This document is the written layer between SCRUM-402's acceptance criteria and the
 Vitest files that implement them. The chain is **user story → acceptance criteria
@@ -199,12 +200,14 @@ after: a refusal changes nothing (the rollback cases).
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
 | AC9-01 | Approved | Accept an "other" request with a note | Processed `approved` with the note; no field and no history changes | Proved (pglite): `SCRUM402_AC9_something_else_records_the_note_and_changes_no_field` |
-| AC10-01 **(trap)** | A group accepted | Accept again; decline it | PT409 `CHANGE_REQUEST_ALREADY_PROCESSED` | Proved (pglite): `SCRUM402_AC10_a_group_is_processed_once_only`; (route) `SCRUM402_%s_the_decisions_%s_is_a_409_with_its_code` (CHANGE_REQUEST_ALREADY_PROCESSED); (route) `SCRUM402_AC10_the_organisers_list_carries_each_rows_group` |
+| AC10-01 **(trap)** | A group accepted | Accept again; decline it | PT409 `CHANGE_REQUEST_ALREADY_PROCESSED` | Proved (pglite): `SCRUM402_AC10_a_group_is_processed_once_only`; (route) `SCRUM402_%s_the_decisions_%s_is_a_409_with_its_code` (CHANGE_REQUEST_ALREADY_PROCESSED); (route) `SCRUM402_AC10_the_organisers_list_carries_each_rows_group_and_note` |
 | AC10-02 | A legacy close with another outcome (`event_cancelled`) | Process with that decision | Recorded as given, nothing applied (the existing behaviour) | Proved (existing, unmodified): `eventCancellationFieldsMigration.test.js` "allows change requests to be closed with the event-cancelled outcome" |
 | AC10-05 **(trap)** | Under review: an outstanding group, an in-progress group, a declined group; another event's open group | Reject through `decide_event_request` | 039's trigger closes the two open groups as `event_rejected`, by the reviewing coordinator; the declined group and the other event's are untouched | Proved (pglite): `SCRUM402_AC10_rejecting_from_under_review_closes_open_change_requests` |
 | AC9-02 **(UI)** | The panel | Accept a "Something else" request | Accept disabled until a note is given | Proved (UI, panel): `SCRUM402_AC9_something_else_needs_a_note_to_accept` |
 | AC10-03 **(UI)** | The Organiser's list | Rows of two submissions; each outcome | One card per submission with its fields and note; Accepted, Declined, "Closed: the event was cancelled", "Closed: the event was rejected", and "Closed" for a value a later story adds; the coordinator's reason or note and the processed date | Proved (UI, organiser): `SCRUM402_AC10_one_card_per_submission_with_its_fields_and_note`, `SCRUM402_AC10_the_outcome_%s_reads_as_%s_with_the_coordinators_words_and_date` (five), `SCRUM402_AC10_an_unknown_status_and_a_row_from_before_the_groups_still_read`, `SCRUM402_AC10_says_when_there_are_none_and_when_the_read_fails`; (UI, display) `SCRUM402_AC10_the_outcome_%s_reads_as_%s` |
 | AC10-04 **(UI)** | The panel | Accept a group someone processed meanwhile | "Already processed"; the review closes and the list is read again | Proved (UI, panel): `SCRUM402_AC10_an_already_processed_group_closes_the_review_and_rereads_the_list` |
+| AC10-06 **(UI)** | The Organiser's list; requests closed with the event: rejected (SCRUM-347), cancelled, completed (SCRUM-379, 034's `event_completed`) | Read the list | "Outcome: Closed: the event was rejected / cancelled / completed"; a completed event's request never reads as Rejected or Declined | Proved (UI, display): `SCRUM402_AC10_a_change_request_closed_by_completing_the_event_says_so`; (UI, list, in `scrum347RejectApprovedEvent.test.jsx`) `SCRUM402_AC10_a_change_request_closed_by_%s_says_why` (three), `SCRUM402_AC10_a_completed_events_change_request_is_never_called_rejected_or_declined` |
+| AC10-07 **(UI)** | The coordinator's panel on a completed event (SCRUM-379) | Read its change requests | "Closed: the event was completed", never "Declined"; Accepted, Declined and the other two closures in the same words as the Organiser's list | Proved (UI, screen, in `scrum379CoordinatorCompletion.test.jsx`): `SCRUM402_AC10_the_coordinators_panel_says_closed_the_event_was_completed_not_declined`, `SCRUM402_AC10_the_coordinators_panel_still_words_%s_correctly` (four) |
 
 ### AC11, AC12 — notices
 
@@ -232,7 +235,7 @@ after: a refusal changes nothing (the rollback cases).
 
 ## Tally
 
-88 cases, counted from the tables: **88 proved**; 0 not yet implemented; 0 that
+90 cases, counted from the tables: **90 proved**; 0 not yet implemented; 0 that
 cannot be written as specified. Twenty-two are traps, five of them on the screen.
 
 | Section | Backend | UI | Cases |
@@ -245,7 +248,7 @@ cannot be written as specified. Twenty-two are traps, five of them on the screen
 | AC6 | 4 | 0 | 4 |
 | AC7 | 5 | 5 | 10 |
 | AC8 | 3 | 1 | 4 |
-| AC9, AC10 | 4 | 3 | 7 |
+| AC9, AC10 | 4 | 5 | 9 |
 | AC11, AC12 | 3 | 3 | 6 |
 | Schema | 6 | 0 | 6 |
-| **Total** | **58** | **30** | **88** |
+| **Total** | **58** | **32** | **90** |

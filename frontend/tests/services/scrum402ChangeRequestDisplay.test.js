@@ -36,6 +36,11 @@ describe("SCRUM-402 change request display", () => {
     expect(outcomeLabel(decision)).toBe(label);
   });
 
+  it("SCRUM402_AC10_a_change_request_closed_by_completing_the_event_says_so", () => {
+    // 034 (SCRUM-379) closes a completed event's open requests with event_completed.
+    expect(outcomeLabel("event_completed")).toBe("Closed: the event was completed");
+  });
+
   it.each([
     ["ordinary", "Applied directly"],
     ["significant", "Re-checks bookings"],

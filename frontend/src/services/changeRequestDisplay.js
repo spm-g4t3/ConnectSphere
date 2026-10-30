@@ -32,12 +32,14 @@ export function changeFieldList(fields) {
 }
 
 // Every decision a row can carry. event_rejected is SCRUM-347's (Rae's #85),
-// which closes open requests when an approved event is rejected.
+// which closes open requests when an approved event is rejected; event_completed
+// is SCRUM-379's (034), which closes them when the event is completed.
 const OUTCOME_LABELS = Object.freeze({
   approved: "Accepted",
   rejected: "Declined",
   event_cancelled: "Closed: the event was cancelled",
   event_rejected: "Closed: the event was rejected",
+  event_completed: "Closed: the event was completed",
 });
 
 /** The outcome's words, or null while the request is open; an unknown value is "Closed". */
