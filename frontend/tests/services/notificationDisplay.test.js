@@ -1188,6 +1188,10 @@ const FIXTURES = {
   venue_hold_expiring: { eventName: "Tech Talk", venueName: "Hall A", expiresAt: PAYLOAD.startsAt },
   // SCRUM-460 (037).
   registration_promoted: { eventName: "Tech Talk" },
+  // SCRUM-175 (042).
+  event_confirmed: { audience: "organiser", eventName: "Tech Talk", reconfirmed: false, venues: [] },
+  change_request_decided: { eventName: "Tech Talk", changeField: "venue", decision: "approved" },
+  event_venue_changed: { audience: "attendee", eventName: "Tech Talk", previousVenueName: "Hall A", venueName: "Hall B" },
 };
 
 describe("describeNotification: event_rejected (SCRUM-347)", () => {
